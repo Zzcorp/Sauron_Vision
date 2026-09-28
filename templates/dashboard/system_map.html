@@ -140,12 +140,25 @@ which is how it catches a task that reports success and writes nothing.
 <div class="card tm-orphans">
     <div class="card-header"><span class="card-title">Producing nothing anything reads</span></div>
     <p class="tm-orphan-note">
-        These components run and write, and no node on this map consumes what they write.
-        That is either a missing edge in the wiring table or a part of the platform that is
-        doing work nobody uses — both worth knowing.
+        These components run and write, and no node on this map consumes what they write,
+        and no page renders it. That is either a missing edge in the wiring table or a part
+        of the platform that is doing work nobody uses — both worth knowing.
     </p>
     <div class="tm-orphan-list">
         {% for o in orphans %}<code>{{ o }}</code>{% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% if human_read %}
+<div class="card tm-orphans">
+    <div class="card-header"><span class="card-title">Read by people, not by machines</span></div>
+    <p class="tm-orphan-note">
+        These components write for the operator: their output is rendered on a page and
+        consumed by no other node. That is their job, not a missing edge.
+    </p>
+    <div class="tm-orphan-list">
+        {% for h in human_read %}<code>{{ h.key }}</code>{% for p in h.pages %} <a href="{{ p }}" style="font-family:var(--font-mono);font-size:11px;">{{ p }}</a>{% endfor %}<br>{% endfor %}
     </div>
 </div>
 {% endif %}

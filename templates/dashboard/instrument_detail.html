@@ -70,7 +70,7 @@
     path everywhere.
     {% endcomment %}
     <div class="dtl-actions">
-        {% include "_partials/deal_ticket.html" with symbol=instrument.symbol quote=quote asset_class=instrument.asset_class decimals=quote_decimals %}
+        {% include "_partials/deal_ticket.html" with symbol=instrument.symbol quote=quote asset_class=instrument.asset_class decimals=quote_decimals lane_mode=lane_mode %}
         {% comment %}And the rest as one segmented group rather than two
         loose buttons drifting beside a ticket.{% endcomment %}
         <span class="dtl-aux">

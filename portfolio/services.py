@@ -161,7 +161,12 @@ class UnifiedPosition:
                  # slotted class refuses an attribute it never declared, so
                  # a template reading trade.metadata directly would silently
                  # get nothing. Position rows have no brokered stop at all.
-                 "protected")
+                 "protected",
+                 # The row's VENUE STAMP (2026-09-26): the carrier and the
+                 # multiplier execute_entry recorded, so the book's
+                 # ALLOCATED (services._capital_at_work) charges an eToro
+                 # row what the gates charge it. Position rows have neither.
+                 "carrier", "stamped_leverage")
 
 
 def is_option_row(trade) -> bool:
@@ -211,8 +216,16 @@ def value_per_unit(trade) -> float:
     return vpu
 
 
-def pnl_on_capital_pct(pnl, asset_class, notional):
+def pnl_on_capital_pct(pnl, asset_class, notional, *, leverage=None,
+                       carrier: str = ""):
     """P&L as a percentage of the CAPITAL the position actually ties up.
+
+    `leverage` and `carrier` are the row's stamp, forwarded to
+    risk_gate.capital_at_work (2026-09-26): an eToro row's capital is
+    notional / L of its OWN multiplier, the full notional at 1 (measured
+    2026-09-23) — so a forex row sent at 1 on eToro has NO second
+    percentage (capital == notional), and the class table stays for every
+    other carrier and for a legacy row that passes nothing.
 
     The headline percentage on every row is pnl/notional — true, and for a
     margined class also the smaller number by exactly the leverage. A forex
@@ -236,7 +249,8 @@ def pnl_on_capital_pct(pnl, asset_class, notional):
     if pnl is None:
         return None
     notional = abs(float(notional or 0))
-    cap = capital_at_work(asset_class or "", notional)
+    cap = capital_at_work(asset_class or "", notional, leverage=leverage,
+                          carrier=carrier)
     if not cap or cap == notional:
         return None
     return round(float(pnl) / cap * 100, 2)
@@ -263,6 +277,7 @@ def capital_summary(user):
     from collections import defaultdict
 
     from bot_program.models import AssetBotConfig, AssetBotTrade
+    from dashboard.position_summary import venue_of
     from portfolio.risk_gate import capital_at_work
 
     # Keyed by (asset_class, mode): a paper pool and a live pool are not
@@ -274,13 +289,29 @@ def capital_summary(user):
         pools[(cfg.asset_class, cfg.mode)] += float(cfg.capital or 0)
 
     used = defaultdict(float)
+    # ENGAGED, keyed by the ROW's world (2026-09-28). `used` charges the
+    # POOL the row sits in; `engaged` says whose money is at work, and a
+    # live config routinely holds simulated rows: its paper-stage rules
+    # fill on the paper venue (`paper = mode == "paper" or
+    # stage["force_paper"]`), a PaperTrader-carried row is stamped broker
+    # "paper", an eToro demo fill is paper=False with broker_env "paper".
+    # The world is read by `venue_of` — the rule the positions page reads
+    # a row by — never by `config.mode`, which called all of those live.
+    engaged = defaultdict(float)
     for trade in AssetBotTrade.objects.filter(
             config__user=user, status__in=("OPEN", "CLOSE_PENDING")
             ).select_related("config"):
         notional = abs(float(trade.entry_price or 0)
                        * float(trade.qty or 0) * value_per_unit(trade))
-        used[(trade.asset_class, trade.config.mode)] += capital_at_work(
-            trade.asset_class, notional)
+        # the ROW's stamp (2026-09-26): an eToro forex row sent at 1 is
+        # USED in full — the gate counts it so; a "free" printed at 1/30
+        # would be a free the next entry cannot draw
+        at_work = capital_at_work(
+            trade.asset_class, notional,
+            leverage=(trade.metadata or {}).get("leverage"),
+            carrier=str((trade.metadata or {}).get("broker") or ""))
+        used[(trade.asset_class, trade.config.mode)] += at_work
+        engaged["live" if venue_of(trade)[1] else "paper"] += at_work
 
     classes = []
     for ac, mode in sorted(set(pools) | set(used)):
@@ -317,6 +348,21 @@ def capital_summary(user):
         # real pools — one number that no live entry could deploy in full.
         "pool_live": _mode_total(pools, "live"),
         "pool_paper": _mode_total(pools, "paper"),
+        # COMMITTED per venue, added 2026-09-13 to complete the set. The
+        # split had pool and free but not used, so a caller wanting "how
+        # much real money is engaged right now" had to re-derive it from
+        # `classes` — and the bottom strip, which is where that question is
+        # actually asked, took the POOLED `used_total` instead and showed
+        # simulated capital as though it were engaged.
+        #
+        # ENGAGED is the row's world; FREE stays the pool's arithmetic
+        # (2026-09-28). A live config's paper-stage rows are not money at
+        # work, yet the TAKE TRADE lane's pool check charges them against
+        # the pool's capital (manual_trade's committed sum has no venue
+        # filter), so LIVE FREE is still the room the next live entry can
+        # draw. Two questions; they need not sum to the pool.
+        "used_live": round(engaged.get("live", 0.0), 2),
+        "used_paper": round(engaged.get("paper", 0.0), 2),
         "free_live": round(_mode_total(pools, "live")
                            - _mode_total(used, "live"), 2),
         "free_paper": round(_mode_total(pools, "paper")
@@ -351,6 +397,8 @@ def _trade_to_position(trade, instruments, quotes):
     up.trade_id = trade.id
     up.status = trade.status
     up.protected = bool((trade.metadata or {}).get("protected"))
+    up.carrier = str((trade.metadata or {}).get("broker") or "")
+    up.stamped_leverage = (trade.metadata or {}).get("leverage")
 
     entry = float(trade.entry_price or 0)
     qty = float(trade.qty or 0)
@@ -371,8 +419,10 @@ def _trade_to_position(trade, instruments, quotes):
         up.unrealized_pnl = pnl
         notional = abs(entry * qty * vpu)
         up.unrealized_pnl_pct = round(pnl / notional * 100, 2) if notional else None
-        up.pnl_on_capital_pct = pnl_on_capital_pct(pnl, trade.asset_class,
-                                                   notional)
+        up.pnl_on_capital_pct = pnl_on_capital_pct(
+            pnl, trade.asset_class, notional,
+            leverage=(trade.metadata or {}).get("leverage"),
+            carrier=str((trade.metadata or {}).get("broker") or ""))
         return up
 
     if is_option:
@@ -393,7 +443,9 @@ def _trade_to_position(trade, instruments, quotes):
         up.unrealized_pnl = round((last - entry) * qty * vpu * sign, 2)
         up.unrealized_pnl_pct = round((last - entry) / entry * 100 * sign, 2)
         up.pnl_on_capital_pct = pnl_on_capital_pct(
-            up.unrealized_pnl, trade.asset_class, abs(entry * qty * vpu))
+            up.unrealized_pnl, trade.asset_class, abs(entry * qty * vpu),
+            leverage=(trade.metadata or {}).get("leverage"),
+            carrier=str((trade.metadata or {}).get("broker") or ""))
     else:
         up.unrealized_pnl = None
         up.unrealized_pnl_pct = None
@@ -589,14 +641,29 @@ def _capital_at_work(row, notional: float) -> float:
     record of how much of its notional a class actually locks — the same
     table the risk gates size against, so the allocation an operator reads
     cannot drift from the number that refuses their next trade.
+
+    Through the GATE's own number since 2026-09-26
+    (risk_gate.capital_at_work). `_open_book`'s rows are BOTH halves: a
+    bot row (a UnifiedPosition over an AssetBotTrade) carries its stamp
+    — `carrier` and `stamped_leverage`, set by _trade_to_position — so an
+    eToro forex row sent at 1 is ALLOCATED in full (the venue pledges the
+    full notional at 1, MEASURED 2026-09-23), not at 1/30: a "free" at
+    1/30 is a free the next entry cannot draw. Legacy rows
+    (portfolio.Position: the setup form's and the eToro sync's) carry no
+    venue stamp: the class table, in full. Forex legacy rows stay at the
+    OANDA fraction until the row model records one.
     """
     try:
-        from bot_program.manual_trade import CAPITAL_USE_FRACTION
+        from portfolio.risk_gate import capital_at_work
     except Exception:  # noqa: BLE001
         return float(notional or 0.0)
     cls = (getattr(row, "asset_class", "")
            or getattr(getattr(row, "instrument", None), "asset_class", "") or "")
-    return float(notional or 0.0) * CAPITAL_USE_FRACTION.get(cls, 1.0)
+    # the ROW's stamp when it carries one (a bot row); a legacy Position
+    # has neither attribute and keeps the class table
+    return capital_at_work(cls, float(notional or 0.0),
+                           leverage=getattr(row, "stamped_leverage", None),
+                           carrier=str(getattr(row, "carrier", "") or ""))
 
 
 def _simulated_realized_pnl(user) -> float:

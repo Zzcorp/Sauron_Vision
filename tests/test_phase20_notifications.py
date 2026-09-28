@@ -145,7 +145,9 @@ class HelperShapeTests(TestCase):
         self.assertTrue(ok)
         n = Notification.objects.filter(user=u).first()
         self.assertIn("NVDA", n.title)
-        self.assertIn("equity theme cap", n.body)
+        # the gate's reason in words since 2026-09-27
+        self.assertIn("stock market exposure to +3.0, past its cap of 2.0",
+                      n.body)
 
     def test_bot_fill_open_helper(self):
         from bot_program.notifications import notify_bot_fill_open
@@ -157,8 +159,11 @@ class HelperShapeTests(TestCase):
                               rule_name="rule_x")
         n = Notification.objects.filter(user=u).first()
         self.assertIn("AAPL", n.title)
-        self.assertIn("BUY", n.title)
-        self.assertIn("rule_x", n.body)
+        # the message's title and summary since 2026-09-27; the rule in
+        # words among the bell's lines
+        self.assertEqual(n.title, "◉ Bought AAPL")
+        self.assertEqual(n.body, "10 shares at 180.50.")
+        self.assertIn("Why: Rule x", n.data["items"])
 
     def test_bot_fill_close_helper_includes_pnl(self):
         from bot_program.notifications import notify_bot_fill_close
@@ -171,7 +176,8 @@ class HelperShapeTests(TestCase):
         n = Notification.objects.filter(user=u).first()
         self.assertIn("AAPL", n.title)
         self.assertIn("+", n.title)  # positive PnL → +
-        self.assertIn("hit_target", n.body)
+        self.assertEqual(n.title, "⊕ Closed AAPL · +195.00")
+        self.assertIn("How it ended: target reached", n.data["items"])
 
 
 # ── Hook integration ─────────────────────────────────────────────────────
@@ -200,7 +206,7 @@ class HookIntegrationTests(TestCase):
         self.assertFalse(ok)
         n = Notification.objects.filter(user=u, notification_type="bot").first()
         self.assertIsNotNone(n)
-        self.assertIn("Orchestrator blocked", n.title)
+        self.assertEqual(n.title, "✕ Buying C was blocked")
 
     def test_bot_open_fires_notification(self):
         """AssetBot.scan_symbol → opens trade → fires notification."""
@@ -227,7 +233,7 @@ class HookIntegrationTests(TestCase):
         n = Notification.objects.filter(user=u, notification_type="bot").first()
         self.assertIsNotNone(n)
         self.assertIn("AAPL", n.title)
-        self.assertIn("opened", n.title)
+        self.assertIn("Bought AAPL", n.title)
 
     def test_drawdown_warning_dedupes_within_hour(self):
         from bot_program.notifications import notify_drawdown_warning
@@ -269,4 +275,130 @@ class HookIntegrationTests(TestCase):
         n = Notification.objects.filter(user=u, notification_type="bot").first()
         self.assertIsNotNone(n)
         self.assertIn("AAPL", n.title)
-        self.assertIn("closed", n.title)
+        self.assertIn("Closed AAPL", n.title)
+
+
+# ── the Telegram text: HTML, escaped, one fact per line (2026-09-26) ───
+
+class TelegramTextTests(TestCase):
+    """Until 2026-09-26 the sender used Telegram's legacy Markdown mode with
+    nothing escaped: a body carrying `golden_cross`, `stopped_out` or
+    `hit_target` — every bot open and close — was refused 400 and dropped
+    without a log line, while a hand-taken fill went through."""
+
+    def test_html_bold_title_and_one_fact_per_line_with_underscores_kept(self):
+        from bot_program.notifications import _telegram_text
+        text = _telegram_text("◉ AAPL BUY opened", "ignored when lines exist",
+                              lines=["STOCK · qty 1 @ 84.61",
+                                     "Rule golden_cross", "Trade #7"],
+                              mark="\U0001F7E2")
+        self.assertEqual(text.split("\n")[0], "<b>\U0001F7E2 AAPL BUY opened</b>")
+        self.assertIn("Rule golden_cross", text)
+        self.assertNotIn("*", text)
+        self.assertNotIn("ignored", text)
+
+    def test_html_special_characters_are_escaped(self):
+        from bot_program.notifications import _telegram_text
+        text = _telegram_text("t <b>", "a & b < c")
+        self.assertIn("<b>t &lt;b&gt;</b>", text)
+        self.assertIn("a &amp; b &lt; c", text)
+
+    def test_the_sender_posts_html_and_logs_a_refusal(self):
+        from bot_program.notifications import _send_telegram
+        u = _user("tg_html")
+        _prefs(u, telegram_chat_id="123")
+        resp = MagicMock(ok=False, status_code=400,
+                         text="Bad Request: can't parse entities")
+        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "tok"}), \
+                patch("requests.post", return_value=resp) as post, \
+                self.assertLogs("bot_program.notifications",
+                                level="WARNING") as cm:
+            ok = _send_telegram(u, "◉ AAPL BUY closed · -2.5",
+                                "STOCK · stopped_out",
+                                lines=["P&L -2.5", "Stopped out"],
+                                mark="\U0001F6D1")
+        self.assertFalse(ok)
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["parse_mode"], "HTML")
+        self.assertEqual(payload["chat_id"], "123")
+        self.assertTrue(payload["text"].startswith(
+            "<b>\U0001F6D1 AAPL BUY closed"), payload["text"])
+        self.assertIn("Stopped out", payload["text"])
+        self.assertTrue(any("telegram refused (400)" in ln
+                            and "parse entities" in ln
+                            for ln in cm.output), cm.output)
+        resp.ok = True
+        with patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "tok"}), \
+                patch("requests.post", return_value=resp):
+            self.assertTrue(_send_telegram(u, "t", "b"))
+
+    def test_the_notifiers_hand_items_and_a_mark_to_the_sender(self):
+        from bot_program.notifications import (notify_bot_fill_close,
+                                               notify_bot_fill_open)
+        u = _user("tg_items")
+        _profile(u, notify_channel="telegram")
+        _prefs(u, telegram_chat_id="123")
+        with patch("bot_program.notifications._send_telegram",
+                   return_value=True) as tg:
+            notify_bot_fill_open(u, asset_class="stock", symbol="AAPL",
+                                 side="BUY", qty=1, entry_price="84.61",
+                                 rule_name="golden_cross", trade_id=7)
+            notify_bot_fill_close(u, asset_class="stock", symbol="AAPL",
+                                  side="BUY", qty=1, exit_price="82.09",
+                                  pnl=Decimal("-2.52"), outcome="stopped_out",
+                                  trade_id=7)
+            notify_bot_fill_close(u, asset_class="stock", symbol="AAPL",
+                                  side="BUY", qty=1, exit_price=None,
+                                  pnl=None, outcome="", trade_id=8)
+        self.assertEqual(tg.call_count, 3)
+        # The message written for people (2026-09-27): its own title in
+        # words, a sentence, the facts, the rule's key folded as code.
+        minus = "\U00002212"
+        opened = tg.call_args_list[0]
+        self.assertEqual(opened.args[1], "Bought AAPL")
+        self.assertEqual(opened.kwargs["mark"], "\U0001F7E2")
+        self.assertEqual(opened.kwargs["summary"], "1 share at 84.61.")
+        self.assertIn("Why: Golden cross", opened.kwargs["lines"])
+        self.assertIn(("Rule key", "golden_cross"), opened.kwargs["details"])
+        closed = tg.call_args_list[1]
+        self.assertEqual(closed.args[1], "Closed AAPL · " + minus + "2.52")
+        self.assertEqual(closed.kwargs["mark"], "\U0001F53B")
+        self.assertIn("Result: " + minus + "2.52", closed.kwargs["lines"])
+        self.assertIn("How it ended: stop loss hit", closed.kwargs["lines"])
+        self.assertEqual(tg.call_args_list[2].args[1],
+                         "Closed AAPL · result unknown")
+        self.assertEqual(tg.call_args_list[2].kwargs["mark"], "\U000026AA")
+
+    def test_a_plain_call_keeps_the_three_argument_shape(self):
+        from bot_program.notifications import dispatch_notification
+        u = _user("tg_plain")
+        _profile(u, notify_channel="telegram")
+        _prefs(u, telegram_chat_id="123")
+        with patch("bot_program.notifications._send_telegram",
+                   return_value=True) as tg:
+            dispatch_notification(u, "drawdown_warning", title="t", body="b")
+        tg.assert_called_once_with(u, "t", "b")
+
+
+class NotifyProbeCommandTests(TestCase):
+    def test_the_probe_prints_the_routing_and_sends_only_on_request(self):
+        from io import StringIO
+        from django.core.management import call_command
+        u = _user("probe_u")
+        _profile(u, notify_channel="telegram")
+        _prefs(u, telegram_chat_id="123", receive_bot_alerts=True)
+        out = StringIO()
+        with patch("bot_program.notifications._send_telegram") as tg:
+            call_command("notify_probe", "--user", u.username, stdout=out)
+        text = out.getvalue()
+        self.assertIn("channel            telegram", text)
+        self.assertIn("bot alerts         ON", text)
+        self.assertIn("telegram chat id   present", text)
+        tg.assert_not_called()
+        out = StringIO()
+        with patch("bot_program.notifications._send_telegram",
+                   return_value=True) as tg:
+            call_command("notify_probe", "--user", u.username, "--send",
+                         stdout=out)
+        tg.assert_called_once()
+        self.assertIn("telegram           answered OK", out.getvalue())

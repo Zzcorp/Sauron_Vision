@@ -139,8 +139,11 @@ class IBKRAccount(models.Model):
         help_text="BASE API client ID — must be UNIQUE per account and below "
                   "100. Sauron opens several sockets at once (trading, data "
                   "feed, connection test) and derives a distinct id for each "
-                  "from this number; IBKR evicts the earlier holder when two "
-                  "connections share one.")
+                  "from this number. When two connections ask for the SAME "
+                  "id, IBKR REFUSES the second (error 326) — it does not "
+                  "evict the first. So a collision looks like a broker that "
+                  "will not answer, never like a session that was stolen, "
+                  "and the trading id is held exclusively for that reason.")
     account_id_enc = models.TextField(blank=True)
 
     paper = models.BooleanField(default=True,
@@ -153,7 +156,7 @@ class IBKRAccount(models.Model):
     is_primary_for_options = models.BooleanField(default=True,
         help_text="IBKR is the default for options since Alpaca/OANDA don't trade them at scale.")
     is_primary_for_commodity = models.BooleanField(default=False,
-        help_text="IBKR routes futures via FUT contracts; commodity bot still defers to PaperTrader unless this is on.")
+        help_text="Route commodity orders to IBKR (futures via FUT contracts); Saxo's and eToro's commodity flags win over this one. Since 2026-09-26 a live commodity entry routed here is refused before any order is sent: only eToro carries live commodities.")
     is_primary_for_cfd = models.BooleanField(default=False,
         help_text="IBKR CFD trading — indices, commodities, shares. NOT available to US residents (IBKR LLC blocks CFDs); UK/EU/SG/HK accounts only.")
 
@@ -354,6 +357,306 @@ class AlpacaAccount(models.Model):
         return f"{self.user.username} · Alpaca ({'paper' if self.paper else 'live'})"
 
 
+class EtoroAccount(models.Model):
+    """Encrypted eToro API credentials (2026-09-17).
+
+    eToro authenticates with two LONG-LIVED keys sent as headers on every
+    request — `x-api-key` and `x-user-key` — not with OAuth. So unlike Saxo
+    below there is no token to refresh and no daily human: a server holds
+    the two strings and is done. That is the property IBKR refuses retail
+    clients, and the reason this row exists.
+
+    `demo` mirrors `paper` / `practice` / `testnet` on the other rows in
+    shape only. Measured 2026-09-23: ONE eToro pair opens both worlds, so
+    this flag does not describe the keys — it IS the switch, the `demo/`
+    URL segment the adapter writes (etoro_client._seg). The /brokers/ save
+    is the only page that writes it, and its demo -> live flip is guarded
+    (dashboard/views_brokers.demo_untick_refusals).
+    """
+    user = models.OneToOneField(User, on_delete=models.CASCADE,
+                                related_name="etoro_account")
+    label = models.CharField(max_length=60, default="Main")
+    api_key_enc = models.TextField(blank=True)
+    user_key_enc = models.TextField(blank=True)
+    demo = models.BooleanField(
+        default=True, help_text="Keys for eToro's demo (virtual) portfolio.")
+    # Routing opt-ins, one per asset class, all OFF on arrival — the same
+    # shape as IBKRAccount.is_primary_for_*. broker_router consults these
+    # BEFORE IBKR's, so a flag here wins when both are set: retiring IBKR
+    # is the stated direction, and the newer broker taking precedence is
+    # what "retiring" means in routing terms. No options / cfd flag: those
+    # two classes are forced to IBKR in the router today, and lifting that
+    # is a separate, named change.
+    is_primary_for_stocks = models.BooleanField(
+        default=False, help_text="Route stocks, ETFs and indices here. Measured 2026-09-23: stocks settle real at 1x; every ETF and index position is a CFD (overnight fee, even at 1x); indices carry a 1,000 USD minimum exposure.")
+    is_primary_for_forex = models.BooleanField(default=False)
+    is_primary_for_commodity = models.BooleanField(default=False)
+    is_primary_for_crypto = models.BooleanField(default=False)
+    connected = models.BooleanField(default=False)
+    last_sync = models.DateTimeField(null=True, blank=True)
+    # The reading cells, in IBKRAccount's exact shape (2026-09-17): the nine
+    # broker_backed() call sites read these five names and nothing that is
+    # IBKR-specific, so an eToro row wearing them is a book the pages, the
+    # preflight and the drawdown governor can read without change. Written
+    # only by sync_etoro_accounts, from one broker call, with its age.
+    last_equity = models.DecimalField(max_digits=18, decimal_places=2,
+                                      null=True, blank=True)
+    last_equity_currency = models.CharField(max_length=8, blank=True,
+                                            default="")
+    last_equity_at = models.DateTimeField(null=True, blank=True)
+    broker_positions = models.JSONField(default=list, blank=True)
+    broker_positions_at = models.DateTimeField(null=True, blank=True)
+    # THE MARGIN CELLS (2026-09-23), from the same aggregate read as the
+    # equity, written only by sync_etoro_accounts (EtoroTrader.margin_cells).
+    # `last_available_cash` is what the venue will lend against next;
+    # `last_used_margin` is what it already holds. None = never read (three
+    # states; 0 is a measurement). Read by asset_engine/base.py
+    # ::_leverage_headroom before every eToro order the asset bots and the
+    # TAKE TRADE lane send (2026-09-26; at 1x the venue locks the FULL
+    # notional — MEASURED 2026-09-23, used margin 84.8 on 84.8 of
+    # exposure; the legacy BotConfig tick cannot read them and refuses
+    # every eToro order instead), by preflight §3 and §4. In the account's
+    # currency (last_equity_currency). `last_margin_world` is the world the
+    # cells were read in ("demo"/"live", stamped by sync_etoro_accounts from
+    # the client it built; "" = never stamped): the same key pair answers
+    # both worlds and `demo` alone picks the segment, so cells read in one
+    # world must not gate an order in the other.
+    last_available_cash = models.DecimalField(max_digits=18, decimal_places=2,
+                                              null=True, blank=True)
+    last_used_margin = models.DecimalField(max_digits=18, decimal_places=2,
+                                           null=True, blank=True)
+    last_margin_at = models.DateTimeField(null=True, blank=True)
+    last_margin_world = models.CharField(max_length=8, default="", blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def env_label(self) -> str:
+        """What to print beside this connection, for humans.
+
+        Every row that can be the book needs it: capital_truth.broker_view()
+        reads it with NO guard, and this row has been bookable since
+        2026-09-17 without it — which would have raised AttributeError on
+        /portfolio/, /positions/, /setup/, /command/ and in preflight_live
+        the moment an operator ticked one primary-for box.
+        """
+        return "DEMO" if self.demo else "LIVE"
+
+    def is_primary_for(self, asset_class: str) -> bool:
+        return bool({
+            "stock": self.is_primary_for_stocks,
+            "etf": self.is_primary_for_stocks,
+            "index": self.is_primary_for_stocks,
+            "forex": self.is_primary_for_forex,
+            "commodity": self.is_primary_for_commodity,
+            "crypto": self.is_primary_for_crypto,
+        }.get(asset_class, False))
+
+    def set_credentials(self, api_key: str, user_key: str):
+        f = _fernet()
+        self.api_key_enc = f.encrypt(api_key.encode()).decode()
+        self.user_key_enc = f.encrypt(user_key.encode()).decode()
+
+    def get_credentials(self) -> "tuple[str, str] | tuple[None, None]":
+        if not self.api_key_enc:
+            return (None, None)
+        key = _decrypt(self.api_key_enc)
+        user_key = _decrypt(self.user_key_enc)
+        return (key, user_key) if key and user_key else (None, None)
+
+    def __str__(self):
+        return f"{self.user.username} · eToro ({'demo' if self.demo else 'live'})"
+
+
+class SaxoAccount(models.Model):
+    """Encrypted Saxo OpenAPI application + OAuth session (2026-09-17).
+
+    Two layers, and they must not be confused:
+
+      * The APPLICATION — `app_key` / `app_secret` / `redirect_uri` — is
+        what the operator registers once on Saxo's developer portal. It
+        identifies Sauron to Saxo. It never expires.
+      * The SESSION — `access_token` / `refresh_token` — is what the OAuth
+        authorization-code flow produces after the operator signs in once
+        through a browser. The access token lives ~20 minutes; the refresh
+        token renews it without a human. This is the whole reason Saxo was
+        chosen over IBKR, whose retail API has no such thing.
+
+    The session fields are blank until the operator has signed in once
+    through /brokers/saxo/connect/. A blank refresh token means "registered,
+    never connected" — or "lost", when session_lost_at says the keeper gave
+    the session up — and the page says which, rather than reporting a
+    broker that has never answered as connected.
+
+    `sim` mirrors the other rows' environment flag. Saxo issues DIFFERENT
+    app keys for SIM and LIVE; the operator registers twice.
+    """
+    user = models.OneToOneField(User, on_delete=models.CASCADE,
+                                related_name="saxo_account")
+    label = models.CharField(max_length=60, default="Main")
+    app_key_enc = models.TextField(blank=True)
+    app_secret_enc = models.TextField(blank=True)
+    # Not a secret: it is printed in the browser's address bar during the
+    # OAuth redirect. Stored plain so a mismatch can be read off the row.
+    redirect_uri = models.CharField(max_length=300, blank=True)
+    sim = models.BooleanField(
+        default=True, help_text="Keys registered on Saxo's SIM environment.")
+    # WHICH ASSET CLASSES THIS ACCOUNT HOLDS. Default OFF, every one: a
+    # keyed and connected Saxo row that no operator has claimed anything
+    # for is READ (its equity is a fact worth storing) and TRADED ON BY
+    # NOTHING. The router consults is_primary_for(); the page shows which
+    # classes are claimed; two rows claiming the same class is reported as
+    # the configuration mistake it is, and Saxo wins — see
+    # bot_program/engine/broker_router.py.
+    is_primary_for_stocks = models.BooleanField(
+        default=False,
+        # The label has to say what the box DOES. Indices ride on this one
+        # boolean, and Saxo prices an index as a leveraged CFD — so a box
+        # promising stocks and ETFs would have moved 13 index symbols to a
+        # CFD without saying so. eToro's identical flag already names
+        # indices and Saxo's own commodity box already says CFD.
+        help_text="Route stock, ETF and index orders to Saxo. An index "
+                  "reaches Saxo as a CFD (CfdOnIndex), the way commodities "
+                  "do.")
+    is_primary_for_forex = models.BooleanField(default=False)
+    is_primary_for_commodity = models.BooleanField(default=False)
+    is_primary_for_crypto = models.BooleanField(default=False)
+    access_token_enc = models.TextField(blank=True)
+    refresh_token_enc = models.TextField(blank=True)
+    token_expires_at = models.DateTimeField(null=True, blank=True)
+    # When the REFRESH token itself dies (2 400 s after it was issued, and
+    # it rotates on every refresh). The refresh task reads this to tell a
+    # transient failure — retry next cycle — from a lost session, which
+    # needs one browser sign-in again. Documented on Saxo's code-grant page;
+    # tests/test_saxo_oauth.py pins the numbers.
+    refresh_expires_at = models.DateTimeField(null=True, blank=True)
+    # Set by the keeper when it gives a session up (refresh token past its
+    # life, or Saxo refused the rotation); cleared by the next sign-in. The
+    # page reads them so "lost — sign in again" and "never signed in" are
+    # two different lines, not one. Reason is capped at 120 for Postgres.
+    session_lost_at = models.DateTimeField(null=True, blank=True)
+    session_lost_reason = models.CharField(max_length=120, blank=True)
+    connected = models.BooleanField(default=False)
+    last_sync = models.DateTimeField(null=True, blank=True)
+    # THE READING CELLS, in IBKRAccount's exact shape. The sync task is
+    # the only writer; every reader — capital_truth, the share allocator's
+    # drawdown governor, the preflight, /brokers/, /treasury/ — reads these
+    # cached columns and never the broker, because a broker round trip
+    # does not belong on a render path. NULL means "never measured", which
+    # is not zero: the pages render an em dash.
+    last_equity = models.DecimalField(max_digits=18, decimal_places=2,
+                                      null=True, blank=True)
+    last_equity_currency = models.CharField(max_length=8, blank=True,
+                                            default="")
+    last_equity_at = models.DateTimeField(null=True, blank=True)
+    broker_positions = models.JSONField(default=list, blank=True)
+    broker_positions_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def env_label(self) -> str:
+        """What to print beside this connection, for humans.
+
+        IBKRAccount has had this since the beginning and
+        capital_truth.broker_view() reads it with NO guard — so every row
+        that can be the book must have it, or /portfolio/, /positions/,
+        /setup/, /command/ and `preflight_live` raise AttributeError the
+        moment that row becomes the book. Saxo's environment is the app
+        key's, not a port's.
+        """
+        return "SIM" if self.sim else "LIVE"
+
+    def is_primary_for(self, asset_class: str) -> bool:
+        """Does this account hold `asset_class`? The router's question, and
+        the one the page renders. Unknown classes are never claimed."""
+        return bool({
+            "stock": self.is_primary_for_stocks,
+            "etf": self.is_primary_for_stocks,
+            # IBKR and eToro have always mapped index onto the stocks
+            # boolean; Saxo was the only one of the three that could not
+            # carry an index symbol at all — at the venue whose own adapter
+            # says "indices are CFDs on Saxo's retail side" and whose
+            # ASSET_TYPE_FOR_CLASS maps index to CfdOnIndex. The divergence
+            # that closes: broker_vision attributes a row by the CONFIG's
+            # class while the router asks the INSTRUMENT's, so a Saxo row
+            # flagged for stocks would have had /treasury/ print "saxo" for
+            # a row holding SPX500 while the close went to IBKR.
+            "index": self.is_primary_for_stocks,
+            "forex": self.is_primary_for_forex,
+            "commodity": self.is_primary_for_commodity,
+            "crypto": self.is_primary_for_crypto,
+        }.get(asset_class, False))
+
+    def set_credentials(self, app_key: str, app_secret: str):
+        f = _fernet()
+        self.app_key_enc = f.encrypt(app_key.encode()).decode()
+        self.app_secret_enc = f.encrypt(app_secret.encode()).decode()
+
+    def get_credentials(self) -> "tuple[str, str] | tuple[None, None]":
+        if not self.app_key_enc:
+            return (None, None)
+        key = _decrypt(self.app_key_enc)
+        secret = _decrypt(self.app_secret_enc)
+        return (key, secret) if key and secret else (None, None)
+
+    def set_tokens(self, access_token: str, refresh_token: str, expires_at,
+                   refresh_expires_at=None):
+        f = _fernet()
+        self.access_token_enc = f.encrypt(access_token.encode()).decode()
+        self.refresh_token_enc = f.encrypt(refresh_token.encode()).decode()
+        self.token_expires_at = expires_at
+        self.refresh_expires_at = refresh_expires_at
+
+    def get_access_token(self) -> "str | None":
+        return _decrypt(self.access_token_enc) if self.access_token_enc else None
+
+    def clear_session(self):
+        """The session is gone — the refresh token died or Saxo refused it.
+        Clearing the tokens is what makes the page say "sign in again"
+        instead of showing a session that will never answer."""
+        self.access_token_enc = ""
+        self.refresh_token_enc = ""
+        self.token_expires_at = None
+        self.refresh_expires_at = None
+        self.connected = False
+
+    def get_refresh_token(self) -> "str | None":
+        return _decrypt(self.refresh_token_enc) if self.refresh_token_enc else None
+
+    @property
+    def has_session(self) -> bool:
+        """Registered is not connected. Only a refresh token means the OAuth
+        flow completed once and the server can renew on its own."""
+        return bool(self.refresh_token_enc)
+
+    def session_alive(self, now=None) -> bool:
+        """has_session AND the refresh token is not past its life. A row
+        whose deadline is unknown counts as alive until the keeper's next
+        attempt says otherwise — it cannot be proven dead from here."""
+        if not self.has_session:
+            return False
+        if self.refresh_expires_at is None:
+            return True
+        return (now or timezone.now()) < self.refresh_expires_at
+
+    def access_token_valid(self, now=None, margin_s: int = 60) -> bool:
+        """The bearer can be presented right now with `margin_s` to spare.
+        Written for the adapter: a token that dies mid-request is a 401
+        nobody can explain, so the margin errs on refreshing early."""
+        from datetime import timedelta
+        if not self.access_token_enc or self.token_expires_at is None:
+            return False
+        return (now or timezone.now()) + timedelta(seconds=margin_s) < self.token_expires_at
+
+    def mark_session_lost(self, reason: str, now=None):
+        """The keeper gave the session up: clear it and say when and why."""
+        self.clear_session()
+        self.session_lost_at = now or timezone.now()
+        self.session_lost_reason = (reason or "")[:120]
+
+    def __str__(self):
+        return f"{self.user.username} · Saxo ({'sim' if self.sim else 'live'})"
+
+
 class BotConfig(models.Model):
     """One bot configuration per user. Defines strategy weights & risk."""
     MODE_CHOICES = [
@@ -479,3 +782,7 @@ from .backtest_models import BotBacktestRun  # noqa: F401
 from .track_record_models import RuleTrackRecordAlert  # noqa: F401
 from .audit_models import AuditLogEntry  # noqa: F401
 from .tax_lot_models import TaxLot, TaxLotConsumption  # noqa: F401
+from .equity_models import BrokerEquityReading  # noqa: F401
+from .share_models import SharePlan  # noqa: F401
+from .desk_models import DeskPlan, DeskDecision  # noqa: F401
+from .withdrawal_models import WithdrawalRequest  # noqa: F401

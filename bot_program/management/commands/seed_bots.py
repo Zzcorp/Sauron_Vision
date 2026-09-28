@@ -207,6 +207,7 @@ class Command(BaseCommand):
         self.stdout.write(
             "  Bars arrive automatically within ~10 min of enabling: the "
             "bot-bar refresh reads each asset class's keyless public feed. "
-            "Do NOT use backfill_bars for these — it is Binance-only, and "
-            "asking it for EURUSD would write EUR/Tether candles into the "
-            "forex instrument.")
+            "That keeps them current; for the history the long-window rules "
+            "need, run backfill_bars --from-configs --intervals 1d,4h "
+            "--bars 300 — it serves every class keylessly, Binance for "
+            "crypto and the public Yahoo feed for the rest.")

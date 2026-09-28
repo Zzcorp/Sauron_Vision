@@ -261,7 +261,8 @@ def instruments_list(request):
         if _ex_status is not None:
             try:
                 market = market_status_for(inst.asset_class, inst.exchange,
-                                           _status=_ex_status)
+                                           _status=_ex_status,
+                                           symbol=inst.symbol)
             except Exception:
                 market = None
         items.append({
@@ -484,23 +485,140 @@ def economic_calendar(request):
     return render(request, "dashboard/economic_calendar.html", ctx)
 
 
+def _signal_rows(signals, configs=None, user=None):
+    """One page of Signals, each carrying its six answers (2026-09-12).
+
+    `configs` is the viewing user's enabled bot configs — the only thing that
+    makes block (d) answerable, fetched ONCE for the page rather than per row,
+    because the cost of a trade belongs to the pool that would take it and a
+    signal on its own does not know one.
+
+    `user` is the reader, and block (e) is answered from THEIR trades: a
+    trade is per-user, and another login's is never fetched — the rule every
+    other trade surface here keeps.
+
+    A FIXED query budget, whatever the page size: one query for the linked
+    flags, one for the evidence ledger, one for the trade join, and one
+    `stage_policy` call per DISTINCT rule name — never per row. The
+    alternative (calling the per-signal helpers inside the loop) is a page
+    that costs four queries a card and gets slower the more the platform
+    produces, which is the wrong direction for a page whose whole point is
+    that the platform is about to produce more.
+    """
+    from dashboard import signal_surface
+    from signals.models import OpportunityFlag
+
+    signals = list(signals)
+    if not signals:
+        return []
+
+    flags = {}
+    try:
+        for f in (OpportunityFlag.objects
+                  .filter(signal_id__in=[s.pk for s in signals])
+                  .select_related("setup").order_by("-scanned_at")):
+            # Newest first, so `setdefault` keeps the most recent flag on a
+            # signal that matched on several passes.
+            flags.setdefault(f.signal_id, f)
+    except Exception as e:  # noqa: BLE001 — the list renders regardless
+        logger.warning("[signals] flags unreadable: %s", e)
+
+    names = [s.rule_name or "" for s in signals]
+    badges = signal_surface.badges_for(names)
+    records = signal_surface.rule_records(names)
+    acted = signal_surface.acted_index(signals, user=user)
+
+    rows = []
+    for s in signals:
+        flag = flags.get(s.pk)
+        graded = bool(s.outcome) and s.realized_r is not None
+        rows.append({
+            "s": s,
+            "badge": badges.get(s.rule_name or "", {}),
+            "record": records.get(s.rule_name or ""),
+            "why": signal_surface.why_block(s, flag),
+            # (d) WHAT WOULD IT COST — `passes_cost_filter`, the gate every
+            # bot entry goes through, asked of this signal's own levels; or
+            # its honest refusal where no config context answers it.
+            "cost": signal_surface.cost_block(s, configs),
+            "flag": flag,
+            "trades": acted.get(s.pk) or [],
+            "graded": graded,
+            # A closed signal with no realized_r is not a zero-R signal: it is
+            # a signal the ladder and every evidence lane cannot see at all.
+            "ungraded_closed": (not s.is_active) and not graded,
+            "hours_to_outcome": (round(s.time_to_outcome_seconds / 3600.0, 1)
+                                 if s.time_to_outcome_seconds else None),
+        })
+    return rows
+
+
 @login_required
 def signals_list(request):
-    """Phase 63 — enriched signals dashboard.
+    """Phase 63 — enriched signals dashboard, plus the six questions (2026-09-12).
 
-    Adds: 24h fresh count · direction donut · score-distribution histogram ·
+    Aggregates (unchanged, and all computed over the UNFILTERED active set so
+    a filter narrows the list without silently redefining the platform):
+    24h fresh count · direction donut · score-distribution histogram ·
     asset-class breakdown · win-rate by signal_type (Phase 1 grading) ·
     urgency mix.
+
+    What 2026-09-12 added, and why. This page had exactly ONE filter
+    (`?active=1`) and its rows carried no stage, no rule record, no conditions
+    and no outcome — so a 0.85 signal from a RESEARCH-stage rule that no bot
+    will ever act on looked exactly like one a bot is about to trade at full
+    size on a live venue. Twenty-six of the platform's twenty-eight rules are
+    at research, so that was almost every row. Every row now answers six
+    questions, the first of which did not exist anywhere before:
+
+        (a) CAN ANYTHING ACT ON IT — `signal_surface.stage_badge`, derived
+            from `rule_actuator.stage_policy` + `is_rule_active`, the SAME
+            two functions the entry path calls
+        (b) WHAT IS THE RULE WORTH — `bot_program.evidence.rule_rows` held to
+            that module's own MIN_EVIDENCE_N floor; below it, 'unmeasured'
+        (c) WHY DID IT FIRE — the linked OpportunityFlag's
+            conditions_evaluated, or Signal.sub_scores, NAMED
+        (d) WHAT WOULD IT COST — the levels on the row; the cost verdict only
+            where a config context makes it answerable
+        (e) DID ANYONE ACT — the rule_name + symbol + time join over the
+            reader's own trades, captioned as the inference it is
+        (f) ITS OWN GRADE — outcome, realized R, time to outcome
+
+    Twelve filters, every one a real queryset narrowing (never a Python pass
+    over an unbounded queryset), all combinable as AND, each a removable chip,
+    with an 'N of M' header so a filter matching nothing is visibly a filter
+    and not an empty platform. The list is paginated; it is never unbounded.
     """
     from collections import defaultdict
     from datetime import timedelta
+
+    from django.core.paginator import Paginator
     from django.utils import timezone as _tz
+
+    from dashboard import signal_surface
     from signals.models import Signal
 
     active_only = request.GET.get("active") == "1"
-    qs = Signal.objects.select_related("instrument").order_by("-created_at")
-    if active_only:
-        qs = qs.filter(is_active=True)
+    base_qs = Signal.objects.select_related("instrument").order_by("-created_at")
+    # M — the denominator of the header. Taken before any filter, so "3 of
+    # 412" says both how narrow the view is and how big the platform is.
+    n_total = base_qs.count()
+    qs, filter_chips, active_filters = signal_surface.apply_filters(
+        base_qs, request.GET, user=request.user)
+    n_shown = qs.count()
+
+    paginator = Paginator(qs, 50)
+    page_obj = paginator.get_page(request.GET.get("page") or 1)
+    page_signals = list(page_obj.object_list)
+    # One query for the viewing user's enabled pools, not one per card: (d) is
+    # answerable only against a config, and which config answers is a property
+    # of the reader, not of the signal.
+    rows = _signal_rows(page_signals, signal_surface.configs_for(request.user),
+                        user=request.user)
+    # The chips' own querystring, minus `page`: changing a filter must land on
+    # page 1 of the new result, not on page 7 of a list that no longer has one.
+    page_params = request.GET.copy()
+    page_params.pop("page", None)
     active_qs = Signal.objects.filter(is_active=True)
 
     n_active = active_qs.count()
@@ -581,8 +699,36 @@ def signals_list(request):
         })
     perf_by_type.sort(key=lambda r: r["avg_r"], reverse=True)
 
+    from signals.models import RuleControl
+
     return render(request, "dashboard/signals_list.html", {
-        "page_id": "signals", "signals": qs[:100], "active_only": active_only,
+        "page_id": "signals", "signals": rows, "active_only": active_only,
+        # The six-question surface.
+        "page_obj": page_obj,
+        "paginator": paginator,
+        "n_shown": n_shown,
+        "n_total": n_total,
+        "filter_chips": filter_chips,
+        "active_filters": active_filters,
+        "page_params": page_params.urlencode(),
+        "acted_caption": signal_surface.ACTED_CAPTION,
+        "cost_no_context": signal_surface.COST_NO_CONTEXT,
+        "cost_symbol_caveat": signal_surface.COST_SYMBOL_CAVEAT,
+        "filter_stages": signal_surface.STAGES,
+        "filter_states": signal_surface.STATES,
+        "filter_rules": sorted(
+            n for n in set(RuleControl.objects.values_list("rule_name",
+                                                           flat=True))
+            | set(Signal.objects.order_by().values_list("rule_name", flat=True)
+                  .distinct()[:200]) if n),
+        "filter_classes": sorted(
+            c for c in set(active_qs.order_by()
+                           .values_list("instrument__asset_class", flat=True)
+                           .distinct()) if c),
+        "filter_types": [t for t, _ in Signal.SIGNAL_TYPES],
+        "filter_urgencies": sorted(
+            u for u in set(Signal.objects.order_by()
+                           .values_list("urgency", flat=True).distinct()) if u),
         "active_count": n_active,
         "bullish_count": n_bull,
         "bearish_count": n_bear,
@@ -1871,6 +2017,17 @@ def _render_portfolio(request, live_only):
         key=lambda r: r["value"], reverse=True,
     )
 
+    # ORDER, FILTER, GROUP (2026-09-26, the operator's ask: the book in
+    # purchase order, narrowed to one asset or one type, grouped). The GET
+    # params ride /portfolio/live/ like every refresh, so the second
+    # render is this same call. Eight rows at most, cut AFTER the filters
+    # and the sort, and the table says "showing N of M" whenever it holds
+    # less than the book; the strip and the donut above stay on the
+    # unfiltered rows (dashboard/position_views.py).
+    from .position_views import build_view
+    pf_view = build_view(request.GET, [(row, None) for row in open_rows],
+                         limit=8, base_url=reverse("portfolio_overview"))
+
     context = {
         "page_id": "portfolio", "portfolio": portfolio,
         # Pools / used / free / cash — the money question, answered by ONE
@@ -1880,7 +2037,10 @@ def _render_portfolio(request, live_only):
         "capital": _capital_or_none(request.user),
         "strip": strip,
         "open_positions_count": n_open,
-        "open_positions": open_rows[:8],
+        # The rows the table shows, in the view's order; the cap moved
+        # into build_view (2026-09-26) so it applies after the sort.
+        "open_positions": [row for row, _detail in pf_view["pairs"]],
+        "open_view": pf_view,
         "n_priced": n_priced,
         # What the strip's TOTAL VALUE actually covered. The number itself is
         # in strip.value; these two say whether it is the whole book, so the
@@ -2068,8 +2228,22 @@ def _pos_exit_cost(trade, mark, qty_abs, vpu):
 
 
 
-def _pos_modelled_margin(asset_class: str, notional):
-    """Capital a levered position ties up, per the platform's own table.
+def _pos_stamp_multiplier(meta) -> int:
+    """The multiplier an eToro-stamped row recorded (>= 1); 1 when none
+    or unreadable — the reading AssetBot._leverage_hint_of makes."""
+    try:
+        return max(int((meta or {}).get("leverage") or 1), 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _pos_modelled_margin(asset_class: str, notional, meta=None):
+    """Capital a levered position ties up, per the platform's own table —
+    or, on an eToro-stamped row, the ROW'S OWN multiplier through the
+    gate's own capital_at_work (GAP 3, 2026-09-26): notional / L, the
+    full notional at 1 (measured 2026-09-23), floored at the class table's
+    forex 1/30. Importing the gate is what keeps the card from drifting
+    from the number that refuses the next entry.
 
     None when there is no notional to scale — an unpriced row has no
     margin to state, and inventing one would put a number under a
@@ -2077,6 +2251,15 @@ def _pos_modelled_margin(asset_class: str, notional):
     """
     if notional is None:
         return None
+    meta = meta or {}
+    if str(meta.get("broker") or "") == "etoro":
+        try:
+            from portfolio.risk_gate import capital_at_work
+            return capital_at_work(asset_class, notional,
+                                   leverage=meta.get("leverage"),
+                                   carrier="etoro")
+        except Exception:  # noqa: BLE001
+            return None
     try:
         from bot_program.manual_trade import CAPITAL_USE_FRACTION
     except Exception:  # noqa: BLE001
@@ -2085,8 +2268,45 @@ def _pos_modelled_margin(asset_class: str, notional):
     return None if not frac else float(notional) * frac
 
 
-def _pos_leverage(asset_class: str) -> str:
-    """How many times its own capital a position of this class carries.
+def _pos_committed(asset_class: str, notional, meta=None):
+    """(committed, levered) — what one position ties up, and which KIND of
+    money that is.
+
+    An eToro row above 1x carries margin, not cash, whatever its class:
+    the multiplier is the ROW's (GAP 3, 2026-09-26). On a levered row the
+    figure is the MODELLED margin, not a dash.
+
+    That margin used to be None on the grounds that it is the broker's
+    number and nothing records it. The platform does model it —
+    `manual_trade.CAPITAL_USE_FRACTION` is what the risk gates and the
+    book's own ALLOCATED figure size against — so dashing it left the one
+    class where capital and exposure differ by 30x as the one class whose
+    capital the card would not name. `levered` is what labels it
+    "margin", so it is never read as cash spent, and it is the same number
+    the gate used.
+
+    One function because two surfaces ask: the positions hover card, and
+    the close adviser's "capital freed" (brain/close_advice.py). Two
+    copies of the levered test would drift the way the value-per-unit
+    copies once did, and the adviser would then promise to free a
+    different sum from the one the card says the position holds.
+    """
+    meta = meta or {}
+    levered = asset_class in _POS_LEVERED_CLASSES or (
+        str(meta.get("broker") or "") == "etoro"
+        and _pos_stamp_multiplier(meta) > 1)
+    committed = (_pos_modelled_margin(asset_class, notional, meta=meta)
+                 if levered else notional)
+    return committed, levered
+
+
+def _pos_leverage(asset_class: str, meta=None, notional=None) -> str:
+    """How many times its own capital a position of this class carries —
+    or, on an eToro-stamped row, THIS ROW (GAP 3, 2026-09-26): notional
+    over the gate's own margin, so the printed figure IS what the gate
+    counted: forex at 1 prints "1", a stock at 5 prints "5", forex at 50
+    prints "30" (floored at the class table's 1/30). Without a notional
+    to divide, the recorded multiplier itself.
 
     Read off `manual_trade.CAPITAL_USE_FRACTION`, the platform's single
     record of margin — the same table the risk gates size against — so the
@@ -2099,6 +2319,12 @@ def _pos_leverage(asset_class: str) -> str:
     """
     if not asset_class:
         return ""
+    meta = meta or {}
+    if str(meta.get("broker") or "") == "etoro":
+        margin = _pos_modelled_margin(asset_class, notional, meta=meta)
+        if notional and margin:
+            return _pos_fmt(float(notional) / float(margin), 0)
+        return str(_pos_stamp_multiplier(meta))
     try:
         from bot_program.manual_trade import CAPITAL_USE_FRACTION
     except Exception:  # noqa: BLE001
@@ -2303,19 +2529,10 @@ def _position_card_details(user, positions):
         # — see _POS_LEVERED_CLASSES. The margin is the broker's number and
         # nothing here records it, so the card dashes it and names the
         # notional separately rather than passing one off as the other.
-        levered = asset_class in _POS_LEVERED_CLASSES
-        # The MODELLED margin on a levered row, not a dash.
-        #
-        # This used to be None on the grounds that the margin is the
-        # broker's number and nothing records it. The platform does model
-        # it — `manual_trade.CAPITAL_USE_FRACTION` is what the risk gates
-        # and the book's own ALLOCATED figure size against — so dashing it
-        # here left the one class where capital and exposure differ by 30x
-        # as the one class whose capital the card would not name. It is
-        # labelled `committed_kind = "margin"` so it is never read as cash
-        # spent, and it is the same number the gate used.
-        committed = (_pos_modelled_margin(asset_class, notional) if levered
-                     else notional)
+        # `trade` is None on a legacy portfolio.Position row: no stamp.
+        _meta = (getattr(trade, "metadata", None) if trade is not None
+                 else None) or {}
+        committed, levered = _pos_committed(asset_class, notional, _meta)
         exit_cost = _pos_exit_cost(trade, mark, qty_abs, vpu)
         if pnl is None:
             net_now = None
@@ -2360,7 +2577,8 @@ def _position_card_details(user, positions):
             # risk gates size against exactly that. An operator reading a
             # 4,800 exposure on a 160 margin is owed the number that
             # explains the gap.
-            "leverage": _pos_leverage(asset_class),
+            "leverage": _pos_leverage(asset_class, meta=_meta,
+                                      notional=notional),
             # What this one position ties up, as a share of the book it is
             # tying it up FROM. 4,800 means nothing without the pool it came
             # out of; "48% of the pool" is the sentence an operator sizes by.
@@ -2545,6 +2763,27 @@ def _render_positions(request, live_only):
          for k, v in by_class.items()],
         key=lambda r: -r["exposure"])
 
+    # ORDER, FILTER, GROUP (2026-09-26, the operator's ask: the book in
+    # purchase order, narrowed to one asset or one type, grouped). The GET
+    # params ride /positions/live/ for free — live_region.html fetches
+    # LIVE_URL + window.location.search — so a refresh renders the same
+    # table as the first paint through this same call. The PAIRS move,
+    # never two lists apart, so a row cannot carry another row's card.
+    # The strip, the donut and the class breakdown above stay on the
+    # unfiltered book, and so does Close all (its own endpoint).
+    from .position_views import build_view
+    positions_url = reverse("positions_list")
+    open_view = build_view(
+        request.GET if tab == "open" else {},
+        list(zip(open_rows,
+                 _position_card_details(request.user, open_objects))),
+        keep={"tab": "open"}, base_url=positions_url)
+    closed_view = build_view(
+        request.GET if tab == "history" else {},
+        list(zip(closed_positions,
+                 _position_card_details(request.user, closed_positions))),
+        history=True, keep={"tab": "history"}, base_url=positions_url)
+
     context = {
         "page_id": "positions",
         # Pools / used / free / cash — the money question, answered by ONE
@@ -2560,17 +2799,19 @@ def _render_positions(request, live_only):
         # them — while the row's own cells read the live dict, so the two
         # halves of a row cannot quote different marks. Zipped rather than
         # keyed because a portfolio.Position row has no id to join on.
-        "positions_detailed": list(zip(
-            open_rows, _position_card_details(request.user, open_objects))),
+        # Since 2026-09-26 the zip happens once, above, and build_view
+        # filters, sorts and groups the pairs; this is the rendered order
+        # (open_view["groups"] flattened).
+        "positions_detailed": open_view["pairs"],
+        "open_view": open_view,
         # CLOSED rows get the same treatment. They used to carry eight
         # cells and nothing else — no capital, no leverage, no venue, no
         # rule, not even the R the trade was graded on — so a trade the
         # operator wanted to LEARN from was the thinnest row on the page,
         # which is exactly backwards: an open position can be watched, a
         # closed one is only ever what was written down about it.
-        "closed_detailed": list(zip(
-            closed_positions,
-            _position_card_details(request.user, closed_positions))),
+        "closed_detailed": closed_view["pairs"],
+        "closed_view": closed_view,
         "n_priced": n_priced,
         "direction_donut": direction_donut,
         "asset_breakdown": asset_breakdown,
@@ -3614,6 +3855,23 @@ def admin_dashboard(request):
         .order_by("-applied_at")[:5]
     )
 
+    # The share allocator's LIVE switch — the ACTING user's pending plans,
+    # because a plan re-sizes that user's pools and nobody else's.
+    context["share_allocator_live_component"] = PlatformComponent.objects.filter(
+        key="share_allocator_mode_live"
+    ).first()
+    # The third switch: a pure de-risk SHOCK plan applies itself in LIVE
+    # mode. Its own row, so the card can show OFF/ON beside the live toggle.
+    context["share_allocator_auto_derisk_component"] = \
+        PlatformComponent.objects.filter(
+            key="share_allocator_auto_derisk").first()
+    try:
+        from bot_program.share_models import SharePlan
+        context["share_plans_pending"] = SharePlan.objects.filter(
+            user=request.user, state=SharePlan.STATE_PROPOSED).count()
+    except Exception:  # noqa: BLE001 — the panel must render regardless
+        context["share_plans_pending"] = 0
+
     # Strategy Evolution — the constant view: pending queue inline, so the
     # operator decides from Control without leaving for /evolution/.
     from signals.models_control import RuleControl, RuleMutation
@@ -3646,11 +3904,29 @@ def admin_dashboard(request):
     # live. The ACTING user's own lanes: arming moves their money and
     # nobody else's, which is why this is not keyed on a target user the
     # way the broker credential forms are.
+    from bot_program.capital_truth import (allocate_shares, followers_of,
+                                           share_label, tracks_broker)
     from bot_program.manual_trade import EXECUTABLE_CLASS, manual_config_for
+    try:
+        _plan = allocate_shares(followers_of(request.user))["plan"]
+    except Exception:  # noqa: BLE001 — the card must render regardless
+        _plan = {}
     context["manual_lanes"] = [
         {"asset_class": cls, "mode": lane.mode,
          "capital": float(lane.capital),
-         "tracks": bool((lane.extras or {}).get("capital_tracks_broker"))}
+         # THE CURRENCY TRAVELS WITH THE NUMBER. The card printed a hard
+         # "$" in front of every pool and in the input's own placeholder,
+         # on a platform whose book defaults to EUR and which converts
+         # nothing anywhere by design. An operator arming a EUR account
+         # read "$500.00" and asked, correctly, which currency they were
+         # about to trade in. Same lie IBKRAccount.last_equity_currency
+         # exists to prevent: "an unlabelled equity becomes a number
+         # behind the wrong symbol somewhere downstream."
+         "currency": lane.base_currency or "",
+         "tracks": bool((lane.extras or {}).get("capital_tracks_broker")),
+         # The SHARE of the account this lane takes when it follows —
+         # explicit, or the automatic split it currently gets.
+         "share": share_label(lane, _plan) if tracks_broker(lane) else ""}
         for cls in sorted(set(EXECUTABLE_CLASS.values()))
         for lane in [manual_config_for(request.user, cls)]
     ]
@@ -3676,6 +3952,11 @@ def admin_toggle_component(request):
         except PlatformComponent.DoesNotExist:
             messages.error(request, f"Component '{key}' not found.")
     from django.shortcuts import redirect
+    # The cockpit (/ops/) posts the same form with next=ops; without
+    # this the toggle bounced the operator to the admin dashboard and
+    # the page they were reading lost its place (2026-09-12).
+    if request.method == "POST" and request.POST.get("next") == "ops":
+        return redirect("ops_dashboard")
     return redirect("admin_dashboard")
 
 
@@ -3691,10 +3972,22 @@ def admin_bulk_toggle(request):
         category = request.POST.get("category", "")
         action = request.POST.get("action", "")
         enable = action == "enable"
-        count = PlatformComponent.objects.filter(category=category).update(is_enabled=enable)
+        rows = PlatformComponent.objects.filter(category=category)
+        if enable:
+            # The separate decisions (the Morgul brake, every live-money
+            # switch) are never switched on in bulk:
+            # core.platform_control.BULK_ENABLE_EXEMPT. "All off" is bulk.
+            from core.platform_control import BULK_ENABLE_EXEMPT
+            rows = rows.exclude(key__in=BULK_ENABLE_EXEMPT)
+        count = rows.update(is_enabled=enable)
         verb = "started" if enable else "stopped"
         messages.success(request, f"{count} {category} components {verb}.")
     from django.shortcuts import redirect
+    # The cockpit (/ops/) posts the same form with next=ops; without
+    # this the toggle bounced the operator to the admin dashboard and
+    # the page they were reading lost its place (2026-09-12).
+    if request.method == "POST" and request.POST.get("next") == "ops":
+        return redirect("ops_dashboard")
     return redirect("admin_dashboard")
 
 
@@ -3803,19 +4096,118 @@ def _chart_positions(user, instrument):
     return out
 
 
-def _chart_signal_marks(signals):
-    """The signals' suggested entries as chart marks — only the ones that
-    actually name a price; a signal without suggested_entry has nothing
-    to pin to the tape and is left out rather than plotted at zero."""
+def _chart_decimals(instrument):
+    """The ONE decimal count the instrument page prints a price at: the
+    chart's axis and crosshair (quote_decimals) and the signal cards'
+    entry, stop and target (2026-09-27). core.price_format decides, from
+    the live quote and the asset class — forex is five (three on a JPY
+    cross) with or without a quote. One helper, so the card under the
+    pointer and the axis beside it can never print one number two ways."""
+    lq = getattr(instrument, "live_quote", None)
+    return price_decimals(getattr(lq, "last", None),
+                          instrument.asset_class, instrument.symbol)
+
+
+def _chart_signal_marks(signals, decimals=None):
+    """The signals as the chart's dots, with what each dot's card says.
+
+    Only the ones that actually name a price; a signal without
+    suggested_entry has nothing to pin to the tape and is left out rather
+    than plotted at zero. id / price / at / direction / label keep their
+    shape — every caller already reads them.
+
+    The card's fields (2026-09-27, the operator: "maybe add a dot with
+    some hover details on it, different colors depending on strength"):
+    the rule in words, the type and urgency in the model's own words, the
+    score (the widget turns it into the dot's size and intensity), the
+    time, the price at the signal, entry / stop / target as numbers (the
+    dashed lines a click draws) and as text at `decimals` — the page's one
+    count, see _chart_decimals — reward to risk (stored, else derived from
+    the three levels), whether it is still active, and how it was graded,
+    in the words the position page uses (position_summary.ENDINGS).
+
+    Built from the rows the caller already fetched: nothing here touches a
+    relation, so the card costs no query per signal.
+    """
+    import math
+    from decimal import Decimal, InvalidOperation
+
+    from dashboard.position_summary import DASH, ENDINGS, rule_words, utc_clock
+
+    def _price(value):
+        """(float at the page's decimals, the same as text) or (None, dash).
+
+        The text is core.price_format's own rendering (Decimal, half to
+        even) and the number is parsed back FROM that text: rounding the
+        float separately put a tie like 1.087345 one pip apart — the line
+        a click draws at 1.08735 under a card that printed 1.08734."""
+        if value is None:
+            return None, DASH
+        try:
+            d = Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            return None, DASH
+        if not d.is_finite():
+            return None, DASH
+        places = decimals if decimals is not None else price_decimals(d)
+        text = f"{d:.{places}f}"
+        return float(text), text
+
+    def _finite(value):
+        try:
+            out = float(value)
+        except (TypeError, ValueError):
+            return None
+        return out if math.isfinite(out) else None
+
     marks = []
     for sig in signals:
         if sig.suggested_entry is None:
             continue
+        entry, entry_text = _price(sig.suggested_entry)
+        stop, stop_text = _price(sig.suggested_stop)
+        target, target_text = _price(sig.suggested_target)
+        price_at, price_at_text = _price(sig.price_at_signal)
+
+        rr = _finite(sig.risk_reward_ratio)
+        if rr is None and None not in (sig.suggested_stop,
+                                       sig.suggested_target):
+            risk = abs(sig.suggested_entry - sig.suggested_stop)
+            if risk > 0:
+                rr = _finite(abs(sig.suggested_target
+                                 - sig.suggested_entry) / risk)
+        rr = round(rr, 2) if rr is not None else None
+
+        outcome = str(sig.outcome or "")
+        realized = _finite(sig.realized_r)
+        outcome_text = ""
+        if outcome:
+            outcome_text = (ENDINGS.get(outcome)
+                            or sig.get_outcome_display() or "Closed")
+            if realized is not None:
+                outcome_text += " · %+.2fR" % realized
+
+        type_words = sig.get_signal_type_display() if sig.signal_type else ""
+        score = _finite(sig.score)
         marks.append({
             "id": sig.pk, "price": float(sig.suggested_entry),
             "at": int(sig.created_at.timestamp()) if sig.created_at else None,
             "direction": str(sig.direction or "").lower(),
             "label": sig.rule_name or sig.signal_type,
+            "rule": (rule_words(sig.rule_name)
+                     or str(sig.title or "").strip() or type_words),
+            "type": type_words,
+            "urgency": sig.get_urgency_display() if sig.urgency else "",
+            "score": round(score, 4) if score is not None else None,
+            "at_text": utc_clock(sig.created_at, with_date=True),
+            "price_at": price_at, "price_at_text": price_at_text,
+            "entry": entry, "entry_text": entry_text,
+            "stop": stop, "stop_text": stop_text,
+            "target": target, "target_text": target_text,
+            "rr": rr, "rr_text": ("%.2f : 1" % rr) if rr is not None else DASH,
+            "active": bool(sig.is_active),
+            "outcome": outcome, "outcome_text": outcome_text,
+            "realized_r": round(realized, 2) if realized is not None else None,
         })
     return marks
 
@@ -3854,7 +4246,10 @@ def instrument_detail(request, symbol):
 
     # The operator's open bets and the signals' entries, for the chart.
     chart_positions = _chart_positions(request.user, instrument)
-    chart_signals = _chart_signal_marks(signals)
+    # ONE decimal count for the page's prices: the chart's axis and the
+    # signal cards' entry, stop and target (2026-09-27).
+    chart_decimals = _chart_decimals(instrument)
+    chart_signals = _chart_signal_marks(signals, chart_decimals)
 
     # Get related news
     news = instrument.news_articles.order_by("-published_at")[:5]
@@ -3864,14 +4259,41 @@ def instrument_detail(request, symbol):
     # paint, kept true by sv-market-status.js polling the same computation.
     from core.exchange_status import market_status_for
     try:
-        market = market_status_for(instrument.asset_class, instrument.exchange)
+        market = market_status_for(instrument.asset_class, instrument.exchange,
+                                   symbol=instrument.symbol)
     except Exception:
         market = None
+
+    # WHICH VENUE THIS TICKET TRADES AT, before the operator commits.
+    #
+    # The manual lane is armed PER ASSET CLASS, so on one deployment a LONG
+    # on GLDM moves real money while the identical button on GBPJPY is a
+    # simulation — and the ticket said nothing either way. The venue only
+    # appeared in the preview payload, i.e. after the click, and the operator
+    # took a forex position believing it was live. That is the same argument
+    # the ticket already makes about prices, in its own comment: pairing a
+    # button with the fact that governs it "was work the operator was doing
+    # that the markup should have been doing."
+    #
+    # A READ, never manual_config_for (2026-09-28): that is a get_or_create,
+    # and a page view was inserting a lane the viewer never armed. No row
+    # yet reads paper — the venue the POST would create it in.
+    lane_mode = "paper"
+    try:
+        from bot_program.manual_trade import (EXECUTABLE_CLASS,
+                                              manual_config_if_any)
+        cls = EXECUTABLE_CLASS.get(instrument.asset_class)
+        if cls and request.user.is_authenticated:
+            lane_mode = getattr(manual_config_if_any(request.user, cls),
+                                "mode", "paper")
+    except Exception:  # noqa: BLE001 — a badge must never 500 the page
+        lane_mode = "paper"
 
     return render(request, "dashboard/instrument_detail.html", {
         "page_id": "instruments",
         "instrument": instrument,
         "quote": quote,
+        "lane_mode": lane_mode,
         "technicals": technicals,
         "signals": signals,
         "news": news,
@@ -3882,9 +4304,7 @@ def instrument_detail(request, symbol):
         # and numbers. Deciding here, where the asset class is known, is
         # what stops a crosshair marker disagreeing with the hero price
         # one card above it.
-        "quote_decimals": price_decimals(
-            getattr(getattr(instrument, "live_quote", None), "last", None),
-            instrument.asset_class, instrument.symbol),
+        "quote_decimals": chart_decimals,
         # The SAME list the chart draws from, handed to the template as
         # rows. Not a second queryset: a table and the price lines above
         # it built from separate reads drift the moment one of them gains
@@ -4262,10 +4682,16 @@ def exchange_status_json(request):
     and the instrument page's market badge.
     """
     from django.http import JsonResponse
-    from core.exchange_status import get_exchange_status
+    from core.exchange_status import (get_exchange_status,
+                                      product_sessions_status)
 
     try:
-        return JsonResponse(get_exchange_status())
+        payload = get_exchange_status()
+        # Product sessions ride beside the strip's rows, never in them:
+        # total/open_count stay the world-exchange count, and a livestock
+        # badge still repaints across 13:05 CT.
+        payload["products"] = product_sessions_status()
+        return JsonResponse(payload)
     except Exception as e:  # noqa: BLE001 — a clock bug must not 500
         logger.debug(f"exchange status unavailable: {e}")
         return JsonResponse({"open_count": 0, "total": 0, "exchanges": [],
@@ -4351,7 +4777,8 @@ def take_trade_arm(request):
         mode=str(body.get("mode", "") or ""),
         capital=body.get("capital"),
         pin_ok=_trading_pin_ok(request, body),
-        track=(bool(track) if track is not None else None)))
+        track=(bool(track) if track is not None else None),
+        share=body.get("share")))
 
 
 @login_required
@@ -5058,7 +5485,10 @@ Be concise, data-driven, and professional. Use markdown formatting."""
 def ai_chat_stream(request):
     """SSE streaming AI chat endpoint."""
     import json, os
-    from django.http import StreamingHttpResponse
+    # 2026-09-23: JsonResponse was never imported here, so both refusals
+    # below raised NameError and answered 500 — found by probe_routes on
+    # its first run; no test had ever visited this page.
+    from django.http import JsonResponse, StreamingHttpResponse
 
     message = request.GET.get("message", "")
     if not message:
@@ -5352,7 +5782,8 @@ def chart_data_api(request):
             sigs = list(Signal.objects.filter(instrument=instrument)
                         .order_by("-created_at")[:10])
             extra = {"positions": _chart_positions(request.user, instrument),
-                     "signals": _chart_signal_marks(sigs)}
+                     "signals": _chart_signal_marks(
+                         sigs, _chart_decimals(instrument))}
         except Exception as e:  # noqa: BLE001 — the BARS are the payload;
             # an overlay that cannot be built must not cost the operator
             # their chart.

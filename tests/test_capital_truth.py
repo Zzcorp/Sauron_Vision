@@ -19,7 +19,7 @@ Run with:  python manage.py test tests.test_capital_truth
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
 
 def _user(name="cap_u"):
@@ -250,3 +250,81 @@ class SurfacesTests(TestCase):
             resp = self.client.get(url)
             self.assertContains(resp, 'data-sv-live="cap-card"')
             self.assertContains(resp, 'data-sv-live-key="cap.used"')
+
+
+# ── foreign_venue: every venue the router can name ──────────────────────
+
+ROUTER_NAME = "bot_program.engine.broker_router.broker_name_for_symbol"
+
+
+class ForeignVenueTests(SimpleTestCase):
+    """capital_truth.foreign_venue judges by the ROUTER'S answer, and the
+    router can name eight venues (broker_router.broker_name_for_symbol,
+    through _broker_for_asset_class): ibkr, etoro, saxo, binance,
+    binance_futures, oanda, alpaca and paper. Until 2026-09-28 the test
+    knew three names and called every other answer "cannot tell", so a live
+    follower whose orders the router sends to Binance, OANDA or Alpaca —
+    venues it builds REAL clients for the moment the keys are saved — was
+    still sized from the book on the Follow button and on every sync beat:
+    the exact defect 662937a set out to close, open through the three
+    legacy venues. Any venue other than the book's kind is foreign. Paper
+    is not a venue. "" and a router that raises are cannot-tell, and
+    cannot-tell follows, as it always has."""
+
+    def _judge(self, venue, book_kind="saxo"):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from bot_program.capital_truth import foreign_venue
+        cfg = SimpleNamespace(name="pool", symbols=["SYM"])
+        with patch(ROUTER_NAME, return_value=venue):
+            return foreign_venue(None, cfg, book_kind)
+
+    def test_ibkr_is_foreign_under_a_saxo_book(self):
+        self.assertEqual(self._judge("ibkr", "saxo"), "ibkr")
+
+    def test_etoro_is_foreign_under_a_saxo_book(self):
+        self.assertEqual(self._judge("etoro", "saxo"), "etoro")
+
+    def test_saxo_is_foreign_under_an_ibkr_book(self):
+        self.assertEqual(self._judge("saxo", "ibkr"), "saxo")
+
+    def test_binance_is_foreign(self):
+        self.assertEqual(self._judge("binance", "saxo"), "binance")
+
+    def test_binance_futures_is_foreign(self):
+        self.assertEqual(self._judge("binance_futures", "saxo"),
+                         "binance_futures")
+
+    def test_oanda_is_foreign(self):
+        self.assertEqual(self._judge("oanda", "saxo"), "oanda")
+
+    def test_alpaca_is_foreign(self):
+        self.assertEqual(self._judge("alpaca", "saxo"), "alpaca")
+
+    def test_paper_is_not_a_venue(self):
+        """A paper answer means the router found nothing to send to — a
+        live config refuses a PaperTrader on its own — so it cannot say
+        the pool trades somewhere else."""
+        self.assertEqual(self._judge("paper", "saxo"), "")
+
+    def test_the_book_itself_is_never_foreign(self):
+        for venue in ("ibkr", "etoro", "saxo", "binance", "binance_futures",
+                      "oanda", "alpaca"):
+            with self.subTest(venue=venue):
+                self.assertEqual(self._judge(venue, book_kind=venue), "")
+
+    def test_an_empty_answer_is_cannot_tell(self):
+        self.assertEqual(self._judge("", "saxo"), "")
+
+    def test_a_router_that_raises_is_cannot_tell(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from bot_program.capital_truth import foreign_venue
+        cfg = SimpleNamespace(name="pool", symbols=["SYM"])
+        with patch(ROUTER_NAME, side_effect=RuntimeError("no route")):
+            self.assertEqual(foreign_venue(None, cfg, "saxo"), "")
+
+    def test_no_book_means_nothing_is_foreign(self):
+        self.assertEqual(self._judge("binance", ""), "")

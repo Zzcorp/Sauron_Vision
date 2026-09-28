@@ -79,7 +79,7 @@ def can_spend(*, tier: str = "balanced", estimated_usd: float = 0.05) -> tuple:
 
     # Deep-tier work is the expensive kind; hold back a slice of the budget
     # so the cheap operational agents still run late in the day.
-    if tier == "deep" and spent > budget * DEEP_TIER_SHARE:
+    if tier in ("deep", "frontier") and spent > budget * DEEP_TIER_SHARE:
         return False, (f"deep-tier reserve reached (${spent:.2f} of "
                        f"${budget:.2f}; deep tier capped at "
                        f"{DEEP_TIER_SHARE:.0%})")

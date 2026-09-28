@@ -192,6 +192,48 @@ class TheLiveTicketCeremonyTests(TestCase):
         fake.market_order.assert_not_called()
 
 
+class TheLeverageKeyIsRefusedOnThisLaneTests(TestCase):
+    """A config carrying extras['leverage'] above 1 never gets a hand-taken
+    order sent at the adapter's 1 under it: the lane refuses on the key's
+    presence with the bots' own rule (judge_order_leverage) and sends
+    nothing. A typed 1 is the default and passes."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_user("lv_lev", password="x")
+
+    def setUp(self):
+        cache.clear()
+        self.inst = _quote("BTCUSD", 60000)
+        _components_on()
+        self.cfg = _arm_live(self.user)
+
+    def _with_key(self, value):
+        self.cfg.extras = dict(self.cfg.extras or {}, leverage=value)
+        self.cfg.save(update_fields=["extras"])
+
+    def test_a_key_above_one_refuses_and_sends_nothing(self):
+        from bot_program.manual_trade import execute_take_trade
+        from bot_program.models import AssetBotTrade
+        self._with_key(2)
+        fake = _fake_live_client()
+        with patch(ROUTER, return_value=fake):
+            out = execute_take_trade(self.user, _signal(self.inst), pin_ok=True)
+        self.assertIn("error", out, out)
+        self.assertIn("sends no leverage", out["error"])
+        fake.market_order.assert_not_called()
+        self.assertFalse(AssetBotTrade.objects.filter(config=self.cfg).exists())
+
+    def test_a_typed_one_is_the_default_and_the_order_goes(self):
+        from bot_program.manual_trade import execute_take_trade
+        self._with_key(1)
+        fake = _fake_live_client()
+        with patch(ROUTER, return_value=fake):
+            out = execute_take_trade(self.user, _signal(self.inst), pin_ok=True)
+        self.assertTrue(out.get("ok"), out)
+        self.assertNotIn("leverage", fake.market_order.call_args.kwargs)
+
+
 class TheLiveFillIsTheBrokersTests(TestCase):
     """What gets booked is what the broker said happened."""
 
@@ -212,6 +254,34 @@ class TheLiveFillIsTheBrokersTests(TestCase):
             out = execute_take_trade(
                 self.user, signal or _signal(self.inst), pin_ok=True)
         return out, fake
+
+    def test_a_working_ticket_keeps_the_promise_when_the_adapter_can_poll(self):
+        held = {"orderId": "7", "symbol": "BTCUSD", "side": "BUY",
+                "executedQty": "0.0", "avgPrice": "0.0",
+                "status": "PENDING", "working": True, "raw": {}}
+        out, _ = self._execute(held)          # a MagicMock has order_status and cancel_order
+        self.assertTrue(out.get("working"), out)
+        self.assertIn("5-minute tick watches it", out["protection_note"])
+
+    def test_a_working_ticket_tells_the_truth_when_the_adapter_cannot(self):
+        """An adapter with neither order_status nor cancel_order (the legacy
+        crypto tick's shape; eToro had it until D3b): the order is accepted,
+        the adapter has neither
+        order_status nor cancel_order. The confirmation must not promise a
+        poll nothing here can make."""
+        from bot_program.manual_trade import execute_take_trade
+        held = {"orderId": "7", "symbol": "BTCUSD", "side": "BUY",
+                "executedQty": "0.0", "avgPrice": "0.0",
+                "status": "PENDING", "working": True, "raw": {}}
+        mute = MagicMock(spec=["ticker", "market_order"])
+        mute.ticker.return_value = {"lastPrice": "60000"}
+        mute.market_order.return_value = held
+        with patch(ROUTER, return_value=mute):
+            out = execute_take_trade(self.user, _signal(self.inst), pin_ok=True)
+        self.assertTrue(out.get("working"), out)
+        self.assertIn("cannot read an order's state or withdraw it",
+                      out["protection_note"])
+        self.assertNotIn("5-minute tick", out["protection_note"])
 
     def test_a_live_fill_is_booked_from_the_brokers_own_numbers(self):
         from bot_program.manual_trade import MANUAL_RULE
@@ -278,6 +348,269 @@ class TheLiveFillIsTheBrokersTests(TestCase):
         trade = AssetBotTrade.objects.get(pk=out["trade_id"])
         self.assertEqual(float(trade.qty), 0.0002)
         self.assertEqual(float(trade.entry_price), 60010.0)
+
+
+class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
+    """The TAKE TRADE lane enters the bots' own eToro gate
+    (AssetBot._etoro_entry_refusal, C0 2026-09-24) on the REAL EtoroTrader
+    over a fake wire (tests.test_etoro_client._client). The MagicMock
+    carrier every other class here uses answers adapter_key "" and never
+    meets it — those tests are untouched by the gate."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_user("lv_et", password="x")
+
+    def setUp(self):
+        cache.clear()
+        self.inst = _quote("BTCUSD", 60000)
+        _components_on()
+        self.cfg = _arm_live(self.user)
+        from tests.test_etoro_client import _clear_eligibility
+        _clear_eligibility()
+        self.addCleanup(_clear_eligibility)
+
+    def _etoro(self):
+        """The real adapter, demo world, over a fake wire that answers
+        /search and the eligibility row; the mark the preview reads is
+        patched on the instance. C1 (2026-09-25): step 2 of the gate
+        reads the row, so the MEASURED BTC row (id 100000, maxUnitsPerOrder
+        41, allowOpenPosition true) rides the wire and a proven class
+        passes on a READ row, not on an error; /search answers BTC to
+        BTCUSD as eToro did (BTCUSD itself is not found there, doc §10)."""
+        from tests.test_etoro_client import ELIG_BTC, SEARCH_BTC, _client
+        t, fake = _client([SEARCH_BTC, ELIG_BTC])
+        p = patch.object(t, "ticker", return_value={"lastPrice": "60000"})
+        p.start()
+        self.addCleanup(p.stop)
+        return t, fake
+
+    def _proven(self, *tokens):
+        p = patch("bot_program.asset_engine.base.ETORO_PROVEN",
+                  frozenset(tokens))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def _cells(self, **kw):
+        """The sync's cells (2026-09-26): the lane's eToro order meets the
+        bots' own headroom (AssetBot._leverage_headroom) — at 1x eToro
+        locks the FULL notional (MEASURED 2026-09-23) — so a test that
+        sends needs them: stored, fresh, demo-stamped for this demo row,
+        in USD, the account far under its pledged ceiling."""
+        from tests.test_etoro_leverage import _account
+        kw.setdefault("cash", 100000)
+        return _account(self.user, **kw)
+
+    def test_an_unproven_class_is_refused_and_nothing_is_sent(self):
+        """ETORO_PROVEN stated without "crypto" (the tree carries it since
+        2026-09-26, off the real BTC round trip): a hand-taken BUY on the
+        crypto manual config is refused naming "crypto" — no market_order,
+        no POST on the wire, no row."""
+        from bot_program.manual_trade import execute_take_trade
+        from bot_program.models import AssetBotTrade
+        self._proven()
+        t, fake = self._etoro()
+        with patch.object(t, "market_order", wraps=t.market_order) as spy, \
+                patch(ROUTER, return_value=t):
+            out = execute_take_trade(self.user, _signal(self.inst),
+                                     pin_ok=True)
+        self.assertIn("error", out, out)
+        self.assertIn("eToro refusal (gate_blocked)", out["error"])
+        self.assertIn("BTCUSD (crypto, BUY)", out["error"])
+        self.assertIn("['crypto']", out["error"])
+        self.assertTrue(out["error"].endswith("nothing was sent"),
+                        out["error"])
+        spy.assert_not_called()
+        self.assertEqual([c for c in fake.calls if c[0] == "POST"], [])
+        self.assertFalse(AssetBotTrade.objects.filter(config=self.cfg).exists())
+
+    def test_a_short_needs_its_own_token(self):
+        """"crypto" stated proven, a bearish signal (SELL): the gate still
+        refuses, naming "short" alone."""
+        from bot_program.manual_trade import execute_take_trade
+        self._proven("crypto")
+        t, fake = self._etoro()
+        with patch.object(t, "market_order", wraps=t.market_order) as spy, \
+                patch(ROUTER, return_value=t):
+            out = execute_take_trade(
+                self.user, _signal(self.inst, direction="bearish",
+                                   entry=60000, stop=60900, target=58200),
+                pin_ok=True)
+        self.assertIn("error", out, out)
+        self.assertIn("eToro refusal (gate_blocked)", out["error"])
+        self.assertIn("BTCUSD (crypto, SELL)", out["error"])
+        self.assertIn("['short']", out["error"])
+        spy.assert_not_called()
+        self.assertEqual([c for c in fake.calls if c[0] == "POST"], [])
+
+    def test_the_venues_own_row_refuses_the_lane_too(self):
+        """"crypto" stated proven and the eligibility row answering
+        allowOpenPosition false: the lane is refused by step 2 of the
+        same gate (eligibility_refused, C1 2026-09-25) — no market_order,
+        no order POST; the one POST on the wire is the eligibility read."""
+        from bot_program.manual_trade import execute_take_trade
+        from tests.test_etoro_client import (ROW_BTC_LIVE, SEARCH_BTC,
+                                             _client, _elig_route)
+        self._proven("crypto")
+        t, fake = _client([SEARCH_BTC, _elig_route([
+            dict(ROW_BTC_LIVE, allowOpenPosition=False)])])
+        p = patch.object(t, "ticker", return_value={"lastPrice": "60000"})
+        p.start()
+        self.addCleanup(p.stop)
+        with patch.object(t, "market_order", wraps=t.market_order) as spy, \
+                patch(ROUTER, return_value=t):
+            out = execute_take_trade(self.user, _signal(self.inst),
+                                     pin_ok=True)
+        self.assertIn("error", out, out)
+        self.assertIn("eToro refusal (eligibility_refused)", out["error"])
+        self.assertIn("allowOpenPosition false", out["error"])
+        self.assertTrue(out["error"].endswith("nothing was sent"),
+                        out["error"])
+        spy.assert_not_called()
+        posts = [c for c in fake.calls if c[0] == "POST"]
+        self.assertEqual([c[1] for c in posts if "orders" in c[1]], [])
+        self.assertEqual(len(posts), 1, [p[1] for p in posts])
+
+    def test_a_proven_class_passes_step_two_on_a_read_row_not_an_error(self):
+        """The MEASURED BTC row (maxUnitsPerOrder 41, allowOpenPosition
+        true) is READ before the order: one eligibility POST keyed on the
+        id /search answered, and the state is "read" — the lane passed on
+        the venue's answer, not on a failed read."""
+        from bot_program.manual_trade import execute_take_trade
+        self._proven("crypto")
+        self._cells()       # the lane's eToro order needs them (2026-09-26)
+        t, fake = self._etoro()
+        with patch.object(t, "market_order", return_value=_filled_response(
+                positionId="3603281458")) as mo, \
+                patch(ROUTER, return_value=t):
+            out = execute_take_trade(self.user, _signal(self.inst),
+                                     pin_ok=True)
+        self.assertTrue(out.get("ok"), out)
+        mo.assert_called_once()
+        self.assertEqual(t.eligibility_state("BTCUSD"), "read")
+        posts = [c for c in fake.calls if c[0] == "POST"]
+        self.assertEqual(len(posts), 1, [p[1] for p in posts])
+        self.assertTrue(posts[0][1].endswith("/info/demo/eligibility"))
+        self.assertEqual(posts[0][2]["json"], {"instrumentIds": [100000]})
+
+    def test_a_proven_class_passes_and_the_row_carries_the_venue_stamps(self):
+        """"crypto" stated proven: the order goes, and the row records the
+        carrier, its world and the close handle off the client that placed
+        it and the fill it answered — the same three execute_entry writes
+        (AssetBot.venue_stamps, one rule for both lanes since 2026-09-24).
+        positionId 3603281458 is the demo fill D2 measured on 2026-09-23;
+        "paper" is VENUE_WORLDS' word for the adapter's demo world."""
+        from bot_program.manual_trade import execute_take_trade
+        from bot_program.models import AssetBotTrade
+        self._proven("crypto")
+        self._cells()       # the lane's eToro order needs them (2026-09-26)
+        t, _fake = self._etoro()
+        with patch.object(t, "market_order", return_value=_filled_response(
+                positionId="3603281458")) as mo, \
+                patch(ROUTER, return_value=t):
+            out = execute_take_trade(self.user, _signal(self.inst),
+                                     pin_ok=True)
+        self.assertTrue(out.get("ok"), out)
+        mo.assert_called_once()
+        self.assertEqual(mo.call_args.args[:2], ("BTCUSD", "BUY"))
+        trade = AssetBotTrade.objects.get(pk=out["trade_id"])
+        self.assertEqual(trade.metadata["broker"], "etoro")
+        self.assertEqual(trade.metadata["broker_env"], "paper")
+        self.assertEqual(trade.metadata["broker_position_id"], "3603281458")
+        self.assertEqual(trade.metadata["fill_source"], "broker")
+
+    def test_a_magicmock_carrier_records_no_venue_stamps(self):
+        """The existing behaviour, pinned: a carrier the adapter map does
+        not know answers "" and the row records no broker, no world and no
+        handle — absent, never invented — and the gate never fired."""
+        from bot_program.manual_trade import execute_take_trade
+        from bot_program.models import AssetBotTrade
+        fake = _fake_live_client()
+        with patch(ROUTER, return_value=fake):
+            out = execute_take_trade(self.user, _signal(self.inst),
+                                     pin_ok=True)
+        self.assertTrue(out.get("ok"), out)
+        trade = AssetBotTrade.objects.get(pk=out["trade_id"])
+        for absent in ("broker", "broker_env", "broker_position_id"):
+            self.assertNotIn(absent, trade.metadata, absent)
+
+    def test_a_refusal_shows_the_adapters_whole_words(self):
+        """A REJECTED answered by the real adapter carries its words under
+        `refusal` (raw.reason is IBKR's key, which this lane used to read
+        alone): the operator sees the measured 720 message whole, with
+        the amount and the minimum at its end (2026-09-24); no row."""
+        from bot_program.manual_trade import execute_take_trade
+        from bot_program.models import AssetBotTrade
+        from tests.test_etoro_client import REJECTED_720
+        self._proven("crypto")
+        self._cells()       # the lane's eToro order needs them (2026-09-26)
+        t, _fake = self._etoro()
+        words = "errorCode 720: " + REJECTED_720["status"]["errorMessage"]
+        refused = {"orderId": "383455967", "symbol": "BTCUSD", "side": "BUY",
+                   "executedQty": "0.0", "avgPrice": "0.0",
+                   "status": "REJECTED", "raw": {"statusName": "Rejected"},
+                   "refusal": words}
+        with patch.object(t, "market_order", return_value=refused), \
+                patch(ROUTER, return_value=t):
+            out = execute_take_trade(self.user, _signal(self.inst),
+                                     pin_ok=True)
+        self.assertIn("error", out, out)
+        self.assertTrue(out["error"].startswith(
+            "The broker refused the order (errorCode 720: Error opening "
+            "position"), out["error"])
+        self.assertIn("InitialPositionAmount: 8.44 MinimumPositionAmount: 10 "
+                      "(Dollars)) ", out["error"])
+        self.assertTrue(out["error"].endswith("nothing opened"))
+        self.assertFalse(AssetBotTrade.objects.filter(config=self.cfg).exists())
+
+    def test_a_proven_class_with_no_cells_is_refused_and_nothing_is_sent(self):
+        """[the lens-1 finding, 2026-09-26] The lane sends at 1, and at 1x
+        eToro locks the FULL notional (MEASURED 2026-09-23: used margin
+        84.8 on 84.8 of exposure): the bots' own headroom runs before this
+        lane's eToro order too. "crypto" stated proven, the eligibility row
+        read, NO cells stored: refused as leverage_refused naming the
+        missing cells — no market_order, no order POST, no row."""
+        from bot_program.manual_trade import execute_take_trade
+        from bot_program.models import AssetBotTrade
+        self._proven("crypto")
+        t, fake = self._etoro()
+        with patch.object(t, "market_order", wraps=t.market_order) as spy, \
+                patch(ROUTER, return_value=t):
+            out = execute_take_trade(self.user, _signal(self.inst),
+                                     pin_ok=True)
+        self.assertIn("error", out, out)
+        self.assertTrue(out["error"].startswith(
+            "eToro refusal (leverage_refused): at 1x: "), out["error"])
+        self.assertIn("never been stored", out["error"])
+        self.assertTrue(out["error"].endswith("nothing was sent"),
+                        out["error"])
+        spy.assert_not_called()
+        posts = [c for c in fake.calls if c[0] == "POST"]
+        self.assertEqual([c[1] for c in posts if "orders" in c[1]], [])
+        self.assertFalse(AssetBotTrade.objects.filter(config=self.cfg).exists())
+
+    def test_cells_read_in_the_other_world_refuse_the_lane_too(self):
+        """The same world gate as the bots': cells the sync stamped "demo"
+        on a row now flagged live are refused naming both worlds, and
+        nothing is sent."""
+        from bot_program.manual_trade import execute_take_trade
+        self._proven("crypto")
+        acct = self._cells()
+        acct.demo = False
+        acct.save(update_fields=["demo"])
+        t, fake = self._etoro()
+        with patch.object(t, "market_order", wraps=t.market_order) as spy, \
+                patch(ROUTER, return_value=t):
+            out = execute_take_trade(self.user, _signal(self.inst),
+                                     pin_ok=True)
+        self.assertIn("error", out, out)
+        self.assertIn("cash read in the demo world; this row now trades live",
+                      out["error"])
+        self.assertTrue(out["error"].endswith("nothing was sent"),
+                        out["error"])
+        spy.assert_not_called()
+        self.assertEqual([c[1] for c in fake.calls
+                          if c[0] == "POST" and "orders" in c[1]], [])
 
 
 class ThePaperPathIsUntouchedTests(TestCase):
@@ -391,8 +724,11 @@ class ArmingTheManualLaneTests(TestCase):
         from bot_program.manual_trade import manual_config_for
         self.assertEqual(manual_config_for(self.user, "crypto").mode, "live")
         from alerts.models import Notification
+        # the record in words since 2026-09-27 ("Manual lane ARMED LIVE —
+        # crypto" before)
         self.assertTrue(Notification.objects.filter(
-            user=self.user, title__contains="ARMED LIVE").exists(),
+            user=self.user,
+            title="◆ Hand-taken trades in crypto now use real money").exists(),
             "arming live left no durable record")
 
     def test_disarming_needs_no_pin(self):
@@ -513,16 +849,50 @@ class FundsTrackingTests(TestCase):
         self.assertIn("error", out)
         self.assertIn("route", out["error"])
 
-    def test_only_one_pool_may_follow_the_account(self):
-        """Two followers would each claim the same money in full."""
+    def test_two_followers_share_the_account(self):
+        """Two followers without a number split the account equally —
+        each takes a SHARE, so neither claims the same money in full."""
         _instrument("EURUSD", "forex")
         self._ibkr_backed(equity="500.00")
         with patch(ROUTER, return_value=self._ibkr_client()):
             first = self._arm_tracking()
             self.assertTrue(first.get("ok"), first)
             second = self._arm_tracking(asset_class="forex")
+        self.assertTrue(second.get("ok"), second)
+        self.assertEqual(second["capital"], 250.0)
+        from bot_program.tasks import _follow_the_account
+        _follow_the_account(self.user, 500.0, "EUR")
+        from bot_program.manual_trade import manual_config_for
+        self.assertEqual(
+            float(manual_config_for(self.user, "crypto").capital), 250.0)
+
+    def test_an_explicit_share_is_taken_and_the_rest_is_split(self):
+        _instrument("EURUSD", "forex")
+        self._ibkr_backed(equity="500.00")
+        with patch(ROUTER, return_value=self._ibkr_client()):
+            first = self._arm_tracking(share=30)
+            self.assertTrue(first.get("ok"), first)
+            self.assertEqual(first["capital"], 150.0)
+            self.assertEqual(first["share_pct"], 30.0)
+            second = self._arm_tracking(asset_class="forex")
+        self.assertEqual(second["capital"], 350.0)
+
+    def test_shares_that_do_not_fit_are_refused(self):
+        _instrument("EURUSD", "forex")
+        self._ibkr_backed(equity="500.00")
+        with patch(ROUTER, return_value=self._ibkr_client()):
+            self._arm_tracking(share=80)
+            second = self._arm_tracking(asset_class="forex", share=30)
         self.assertIn("error", second)
-        self.assertIn("already follows", second["error"])
+        self.assertIn("over-allocate", second["error"])
+        self.assertIn("110%", second["error"])
+
+    def test_a_share_outside_the_percentage_band_is_refused(self):
+        self._ibkr_backed(equity="500.00")
+        with patch(ROUTER, return_value=self._ibkr_client()):
+            out = self._arm_tracking(share=150)
+        self.assertIn("error", out)
+        self.assertIn("between 0 and 100", out["error"])
 
     def test_disarming_clears_the_tracking_flag(self):
         self._ibkr_backed(equity="500.00")
@@ -600,3 +970,90 @@ class FundsTrackingTests(TestCase):
         ok, why = make_bot(cfg).can_open_new()
         self.assertFalse(ok)
         self.assertIn("reading", why)
+
+
+class ArmingMustNotRaceTheBotForTheTradeSessionTests(TestCase):
+    """Arming asks a READINESS question, not an order question.
+
+    The trade purpose is exclusive across the whole deployment on the
+    operator's base clientId — IBKR refuses a second connection on one id
+    (error 326) and an order is visible only to the id that placed it. So an
+    arming probe that asked for `purpose="trade"` competed with the bot tick
+    for the one session that can place orders: `acquire_trader` waits
+    TRADE_LEASE_WAIT_S, gives up, the router substitutes PaperTrader, and the
+    operator is told
+
+        LIVE route unavailable — credentials missing, broker library absent,
+        or the account disconnected
+
+    while all three are fine and the real answer is "a worker is holding the
+    socket for eight more seconds". It reproduced intermittently and looked
+    exactly like a broken brokerage account — the operator had already moved
+    the IBKR row between users hunting it.
+
+    `capital_truth` reached the same conclusion for its equity read: "this
+    runs on the entry path and must never hold the one clientId that can
+    place or cancel an order."
+    """
+
+    def test_the_arming_probe_does_not_ask_for_the_trade_session(self):
+        import inspect
+
+        from bot_program import manual_trade
+        src = inspect.getsource(manual_trade.arm_manual_lane)
+        self.assertIn('purpose="probe"', src)
+
+    def test_the_real_order_path_still_uses_the_trade_session(self):
+        """The guard must not have loosened the path where money moves: an
+        order MUST go through the exclusive id, or the fill it produces is
+        invisible to every later cancel and reconcile."""
+        import inspect
+
+        from bot_program import manual_trade
+        src = inspect.getsource(manual_trade)
+        marker = "before money moves"
+        self.assertIn(marker, src)
+        after = src.split(marker, 1)[1][:600]
+        self.assertIn("client_for_symbol(user, inst.symbol, cfg)", after)
+        self.assertNotIn('purpose="probe"', after)
+
+
+class EveryPoolNumberCarriesItsCurrencyTests(TestCase):
+    """The card printed a hard "$" on every pool and in the input's own
+    placeholder, on a platform whose book defaults to EUR and which converts
+    nothing anywhere by design. An operator arming a EUR account read
+    "$500.00" and asked, correctly, which currency they were about to trade
+    in — the same lie `IBKRAccount.last_equity_currency` exists to prevent:
+    "an unlabelled equity becomes a number behind the wrong symbol somewhere
+    downstream."
+    """
+
+    def test_the_lane_context_carries_the_currency(self):
+        import inspect
+
+        from dashboard import views
+        src = inspect.getsource(views)
+        block = src.split('context["manual_lanes"]', 1)[1][:900]
+        self.assertIn('"currency"', block)
+        self.assertIn("base_currency", block)
+
+    def test_the_template_prints_no_hardcoded_dollar_on_the_pool(self):
+        from pathlib import Path
+
+        from django.conf import settings
+        html = (Path(settings.BASE_DIR) / "templates" / "dashboard"
+                / "admin_dashboard.html").read_text(encoding="utf-8")
+        self.assertNotIn("${{ lane.capital", html)
+        self.assertNotIn("pool $ (optional)", html)
+        self.assertIn("lane.currency", html)
+
+    def test_the_mismatch_error_labels_both_sides(self):
+        """It is the one message whose whole job is to make a currency
+        mismatch visible."""
+        import inspect
+
+        from bot_program import manual_trade
+        src = inspect.getsource(manual_trade.arm_manual_lane)
+        block = src.split("manual pool is", 1)[1][:400]
+        self.assertIn("cfg.base_currency", block)
+        self.assertIn("last_equity_currency", block)

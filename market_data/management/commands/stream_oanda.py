@@ -122,12 +122,49 @@ async def broadcast(symbol, last, change_pct, bid, ask):
         from channels.layers import get_channel_layer
         layer = get_channel_layer()
         if layer:
+            # ts and source: the data headband's card says when and from
+            # where its quote came (base.html, dhSync) and never invents
+            # either — a tick without them reads "—" there.
             await layer.group_send("dashboard_live", {
                 "type": "quote_stream",
                 "data": {"symbol": symbol, "last": last,
-                         "change_pct": change_pct, "bid": bid, "ask": ask}})
+                         "change_pct": change_pct, "bid": bid, "ask": ask,
+                         "source": "oanda_stream",
+                         "ts": timezone.now().isoformat()}})
     except Exception as e:
         log.debug("broadcast: %s", e)
+
+def price_to_write(msg, not_tradeable):
+    """(instrument, bid, ask) for a PRICE message worth writing, or None.
+
+    OANDA v20 sends a PRICE snapshot for every subscribed instrument on each
+    (re)connect — INCLUDING while the market is shut, flagged "tradeable":
+    false. Written through update_live_quote, that snapshot re-stamped
+    Friday's last price with a weekend timestamp: on Saturday 2026-09-26
+    13:53 UTC two paper forex rows were closed at it, because it read under
+    a minute old (again Sunday 2026-09-27 01:45:46 UTC: EURCAD 1.610515,
+    GBPCAD 1.87284, Friday's prices). A price OANDA itself calls not
+    tradeable is not a market price: it is neither written nor broadcast,
+    and the pair is named once per connection at INFO — `not_tradeable` is
+    that connection's set. Explicit false only: a message with no flag
+    behaves as it always did.
+    """
+    if msg.get("type") != "PRICE":
+        return None
+    sym = msg.get("instrument", "")
+    flag = msg.get("tradeable")
+    if flag is False or (isinstance(flag, str)
+                         and flag.strip().lower() == "false"):
+        if sym not in not_tradeable:
+            not_tradeable.add(sym)
+            log.info("%s not tradeable — price not written", sym)
+        return None
+    bids = msg.get("bids") or []
+    asks = msg.get("asks") or []
+    if not bids or not asks:
+        return None
+    return sym, float(bids[0]["price"]), float(asks[0]["price"])
+
 
 #: OANDA rejects the WHOLE subscription if any one instrument is not
 #: available to the account, and it does so with a bare 400 that names no
@@ -237,18 +274,17 @@ async def run(api_key, account_id, env, override):
                         allowed = None   # re-ask on the next attempt
                     r.raise_for_status()
                     backoff = 1
+                    # Named once per pair per CONNECTION: a reconnect is
+                    # exactly when OANDA re-sends a shut market's snapshot.
+                    not_tradeable = set()
                     async for line in r.content:
                         line = line.strip()
                         if not line: continue
                         try:
                             msg = json.loads(line)
-                            if msg.get("type") != "PRICE": continue
-                            sym = msg.get("instrument","")
-                            bids = msg.get("bids") or []
-                            asks = msg.get("asks") or []
-                            if not bids or not asks: continue
-                            bid = float(bids[0]["price"])
-                            ask = float(asks[0]["price"])
+                            got = price_to_write(msg, not_tradeable)
+                            if got is None: continue
+                            sym, bid, ask = got
                             mid = (bid + ask) / 2
                             asyncio.create_task(update_live_quote(sym, bid, ask))
                             # None, not 0: a hardcoded zero painted

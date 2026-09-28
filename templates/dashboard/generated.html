@@ -153,7 +153,7 @@
         <div class="card-header"><span class="card-title">History</span></div>
         <div class="table-wrapper">
         <table class="sv-perf-table">
-            <thead><tr><th>created</th><th>name</th><th>direction</th><th>status</th><th>reviewed</th><th>by</th></tr></thead>
+            <thead><tr><th>created</th><th>name</th><th>direction</th><th>status</th><th>reviewed</th><th>by</th><th>why</th></tr></thead>
             <tbody>
             {% for h in history %}
                 <tr>
@@ -167,9 +167,10 @@
                     </td>
                     <td>{% if h.reviewed_at %}{{ h.reviewed_at|date:"m-d H:i" }}{% endif %}</td>
                     <td>{{ h.reviewed_by }}</td>
+                    <td style="color:var(--text-secondary);font-size:12px;">{{ h.review_notes|truncatechars:120 }}</td>
                 </tr>
             {% empty %}
-                <tr><td colspan="6" style="color:var(--text-muted);">No proposals yet.</td></tr>
+                <tr><td colspan="7" style="color:var(--text-muted);">No proposals yet.</td></tr>
             {% endfor %}
             </tbody>
         </table>

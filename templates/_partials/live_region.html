@@ -154,8 +154,35 @@ Why it is shaped this way
         });
     }
 
+    /* Tell whoever keeps client-side state INSIDE a region that the
+       region was just rebuilt. innerHTML is a new subtree: a ticked
+       checkbox, an open disclosure, anything the server never rendered, is
+       gone — and the swap happens every sweep a mark moved. The close-
+       selection script (static/js/sv-close-advice.js) re-ticks its rows
+       from this; anything else with state in a region should listen too
+       rather than poll the DOM for it. */
+    function announce(name, node) {
+        var ev;
+        try {
+            ev = new CustomEvent('sv:live-swapped',
+                                 {detail: {region: name, node: node}});
+        } catch (e) {                       /* older engines */
+            ev = document.createEvent('CustomEvent');
+            ev.initCustomEvent('sv:live-swapped', false, false,
+                               {region: name, node: node});
+        }
+        document.dispatchEvent(ev);
+    }
+
     function apply(html) {
         var doc = new DOMParser().parseFromString(html, 'text/html');
+        /* The shell's data headband rides every render of the shell and is
+           not a region: its fresh quotes take the socket's own path
+           (base.html, svDhIngest), never a swap from under an open card.
+           A failure there must not cost the regions their sweep. */
+        try {
+            if (window.svDhIngest) window.svDhIngest(doc);
+        } catch (e) { /* the regions below still swap */ }
         var before = snapshot();
         var swapped = false, carried = [];
         Array.prototype.forEach.call(
@@ -188,6 +215,7 @@ Why it is shaped this way
                neither executes scripts nor fires htmx:afterSwap — without
                this the allocation ring comes back as an empty track. */
             if (window.svRenderDonuts) window.svRenderDonuts(node);
+            announce(name, node);
         });
         stampSweep(carried);
         if (!swapped) return;
@@ -209,6 +237,7 @@ Why it is shaped this way
             node.innerHTML = pending[name];
             any = true;
             if (window.svRenderDonuts) window.svRenderDonuts(node);
+            announce(name, node);
         });
         if (any) finishSwap(before);
     }

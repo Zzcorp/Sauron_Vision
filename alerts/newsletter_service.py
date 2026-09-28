@@ -117,14 +117,20 @@ def send_newsletter(newsletter):
     recipients = User.objects.filter(is_active=True)
     sent_count = 0
 
-    # Telegram
+    # Telegram: the platform chat, in the house style (the markdown as
+    # lines, cut to fit by the sender). send_telegram answers True or
+    # False and never raises; Telegram's own words are logged there.
     if newsletter.send_telegram:
-        try:
-            send_telegram(f"SAURON VISION {newsletter.get_frequency_display()} Report",
-                         newsletter.content_markdown[:4000])
+        from alerts.channels.telegram_alert import MARKS, markdown_lines
+        name = (newsletter.title
+                or f"{newsletter.get_frequency_display()} report")
+        if send_telegram(f"Sauron Vision · {name}",
+                         lines=markdown_lines(newsletter.content_markdown),
+                         mark=MARKS["newsletter"]):
             sent_count += 1
-        except Exception as e:
-            logger.error(f"Telegram newsletter send failed: {e}")
+        else:
+            logger.error("Telegram newsletter send failed "
+                         "(the telegram line above has the reason)")
 
     # Email
     if newsletter.send_email:

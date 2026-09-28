@@ -11,9 +11,16 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task(name="brain.tasks.run_sauron_mind")
-@spend_guard(tier="balanced", estimated_usd=0.15)
+# tier="deep", because that is what it SPENDS. SauronMindAgent's
+# default_tier is "deep" (Opus), and this guard's tier string is what
+# spend.can_spend keys DEEP_TIER_SHARE off — so declaring "balanced" here
+# exempted the single largest deep-tier spender in the platform from the
+# reserve that exists to contain deep-tier spend, and let it eat the budget
+# the critic and the strategist were being held back for.
+@spend_guard(tier="deep", estimated_usd=0.15)
 def run_sauron_mind() -> dict:
-    """Beat task — every 30min. Runs one synthesis cycle."""
+    """Beat task — hourly. Runs one synthesis cycle, unless the bars behind
+    its regime probes are stale (see synthesizer.MIN_FRESH_PROBES)."""
     from .synthesizer import synthesize_now
     return synthesize_now()
 
@@ -53,13 +60,30 @@ def run_strategist() -> dict:
 
 
 @shared_task(name="brain.tasks.run_strategy_generator")
-@spend_guard(tier="deep", estimated_usd=0.3)
+@spend_guard(tier="frontier", estimated_usd=1.0)
 def run_strategy_generator(*, max_proposals: int = 3) -> dict:
     """Beat task — weekly Sun 04:00 UTC. Proposes 1-3 new OpportunitySetups
     by composing existing evaluators in novel ways. Land at is_active=False
     pending admin approval."""
     from .strategy_generator import generate_strategies_now
     return generate_strategies_now(max_proposals=max_proposals)
+
+
+@shared_task(name="brain.tasks.run_horizon")
+@guarded_task("agent_horizon")
+@spend_guard(tier="frontier", estimated_usd=1.5)
+def run_horizon() -> dict:
+    """Beat task — monthly, the 1st at 04:45 UTC. The 5-10 year sector
+    synthesis on the frontier tier: sector tilts with graded 6/12-month
+    calls, asset-class tilts the share allocator reads as a ±10% prior.
+
+    The body is model-only, so @spend_guard sits INSIDE the component
+    gate: a day whose budget is gone skips the call cleanly and writes
+    nothing, and there is no free deterministic half to protect (the
+    grading of its calls is the calibration beat's). ~1.5 USD a run
+    (2026-09-12)."""
+    from .horizon import run_horizon_now
+    return run_horizon_now()
 
 
 @shared_task(name="brain.tasks.run_auto_demoter")
@@ -72,7 +96,10 @@ def run_auto_demoter() -> dict:
 
 
 @shared_task(name="brain.tasks.run_earnings_reviewer")
-@spend_guard(tier="balanced", estimated_usd=0.2)
+# tier="deep" for the same reason as run_sauron_mind above: EarningsReviewer
+# declares default_tier "deep", so a "balanced" guard here spent Opus money
+# outside the deep reserve.
+@spend_guard(tier="deep", estimated_usd=0.2)
 def run_earnings_reviewer() -> dict:
     """Beat task — every 4h. Walks recent earnings events for held symbols
     and dispatches the EarningsReviewerAgent (Opus 4.7) to produce a deep

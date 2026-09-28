@@ -62,17 +62,18 @@ six scrapers could sit green with zero rows between them.
         <tr>
             <td style="padding:4px 8px;">{{ lane.asset_class|upper }}</td>
             <td style="padding:4px 8px;">
-                {% if lane.mode == 'live' %}<span style="color:var(--accent-red);font-weight:700;">● LIVE</span>{% if lane.tracks %} <span style="color:var(--accent-gold-ink, var(--accent-gold));font-size:10px;">FOLLOWS ACCOUNT</span>{% endif %}
+                {% if lane.mode == 'live' %}<span style="color:var(--accent-red);font-weight:700;">● LIVE</span>{% if lane.tracks %} <span style="color:var(--accent-gold-ink, var(--accent-gold));font-size:10px;">FOLLOWS ACCOUNT{% if lane.share %} · {{ lane.share }}{% endif %}</span>{% endif %}
                 {% else %}<span style="color:var(--text-muted);">◌ paper</span>{% endif %}
             </td>
-            <td style="padding:4px 8px;">${{ lane.capital|floatformat:2 }}</td>
+            <td style="padding:4px 8px;">{{ lane.capital|floatformat:2 }} {{ lane.currency|default:"?" }}</td>
             <td style="padding:4px 8px;white-space:nowrap;">
                 {% if lane.mode == 'live' %}
                 <button type="button" class="btn" data-lane-disarm="{{ lane.asset_class }}" style="font-size:11px;padding:4px 10px;">BACK TO PAPER</button>
                 {% else %}
                 <input type="password" placeholder="PIN" data-lane-pin="{{ lane.asset_class }}" style="width:70px;font-size:11px;padding:4px 6px;" autocomplete="off">
-                <input type="number" placeholder="pool $ (optional)" data-lane-capital="{{ lane.asset_class }}" style="width:130px;font-size:11px;padding:4px 6px;" step="any" min="0">
+                <input type="number" placeholder="pool {{ lane.currency|default:'' }} (optional)" data-lane-capital="{{ lane.asset_class }}" style="width:130px;font-size:11px;padding:4px 6px;" step="any" min="0">
                 <label style="font-size:10px;color:var(--text-muted);white-space:nowrap;"><input type="checkbox" data-lane-track="{{ lane.asset_class }}" style="vertical-align:middle;"> follow account</label>
+                <input type="number" placeholder="% of account (auto)" title="The share of the IBKR account this pool takes when it follows — blank splits what the explicit shares leave, equally" data-lane-share="{{ lane.asset_class }}" style="width:120px;font-size:11px;padding:4px 6px;" step="any" min="0" max="100">
                 <button type="button" class="btn btn-danger" data-lane-arm="{{ lane.asset_class }}" style="font-size:11px;padding:4px 10px;">ARM LIVE</button>
                 {% endif %}
             </td>
@@ -106,6 +107,8 @@ six scrapers could sit green with zero rows between them.
       var body = {asset_class: cls, mode: 'live', pin: pinEl ? pinEl.value : ''};
       if (capEl && capEl.value) body.capital = Number(capEl.value);
       if (trkEl) body.track = !!trkEl.checked;
+      var shEl = document.querySelector('[data-lane-share="' + cls + '"]');
+      if (shEl && shEl.value) body.share = Number(shEl.value);
       post(body);
     });
   });
@@ -650,7 +653,7 @@ button.
                 <label><input type="checkbox" name="primary_for_options" checked> Options</label>
                 <label><input type="checkbox" name="primary_for_stocks"> Stocks / ETFs / Indices</label>
                 <label><input type="checkbox" name="primary_for_forex"> Forex</label>
-                <label><input type="checkbox" name="primary_for_commodity"> Commodities <span class="ib-hint">(gold and futures stay on the paper venue unless this is on)</span></label>
+                <label><input type="checkbox" name="primary_for_commodity"> Commodities <span class="ib-hint">(since 2026-09-26 a live commodity entry routed here is refused: only eToro carries live commodities)</span></label>
                 <label><input type="checkbox" name="primary_for_cfd"> CFDs <span class="ib-hint">(not available to US residents)</span></label>
             </div>
 
@@ -824,7 +827,7 @@ button.
             <select name="asset_class" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
                 <option value="stock">Stocks (Alpaca)</option>
                 <option value="forex">Forex (OANDA)</option>
-                <option value="commodity">Commodities (paper-only)</option>
+                <option value="commodity">Commodities (live only through eToro's commodities box)</option>
             </select>
             <input type="text" name="name" placeholder="Bot name" required style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <select name="mode" id="assetBotMode" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
@@ -905,11 +908,13 @@ button.
                 ["Universe", val("symbols")],
                 ["Per position", val("position_size_pct") + "% · max " +
                                  val("max_concurrent_positions") + " open"],
-                /* Named, because "live" does not say WHERE — and for
-                   commodities the answer is that it stays simulated unless
-                   an IBKR account is routed for that class. */
+                /* Named, because "live" does not say WHERE. For
+                   commodities (2026-09-26) the answer is eToro's
+                   commodities box: routed to IBKR or Saxo, or to no
+                   venue, every entry is refused. */
                 ["Routes to", cls === "stock" ? "Alpaca, or IBKR if routed"
                             : cls === "forex" ? "OANDA, or IBKR if routed"
+                            : cls === "commodity" ? "eToro, through its commodities box; any other route refuses every entry"
                             : "paper venue unless IBKR is primary for " + cls],
                 ["Still required", "correct trading PIN"]
             ],
@@ -1155,6 +1160,46 @@ button.
         </tbody>
     </table></div>
     {% endif %}
+</div>
+
+<!-- ═══ SHARE ALLOCATOR — Share of the Broker Account per Live Pool ═══ -->
+<div class="section-label fade-in-up">Share Allocator (Account Shares)</div>
+<div class="card fade-in-up" style="margin-bottom:24px;border-color:{% if share_allocator_live_component.is_enabled %}var(--accent-gold){% else %}var(--text-muted){% endif %};">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);">
+        <div>
+            <div style="font-family:var(--font-display);font-weight:700;font-size:14px;letter-spacing:1px;color:{% if share_allocator_live_component.is_enabled %}var(--accent-gold){% else %}var(--text-muted){% endif %};">
+                {% if share_allocator_live_component.is_enabled %}LIVE MODE — admin can apply (PIN){% else %}SHADOW MODE — proposals only{% endif %}
+                · auto de-risk {% if share_allocator_auto_derisk_component.is_enabled %}ON{% else %}OFF{% endif %}
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);margin-top:4px;line-height:1.4;">
+                evidence × regime × opportunity × news · drawdown governor · floor 2% / ceiling 60% · 10 pt/day (20 up in EXPANSION, down uncapped in SHOCK) · 3 applies/day · every 4h + at once on a shock.
+                {{ share_plans_pending }} pending plan{{ share_plans_pending|pluralize }} for you.
+                <a href="{% url 'shares_dashboard' %}" style="color:var(--accent);">Full view →</a>
+            </div>
+        </div>
+        <div style="display:flex;gap:8px;">
+            <form method="post" action="{% url 'hq_propose_share_plan' %}" data-run-job="Share-allocator proposal">
+                {% csrf_token %}<button type="submit" class="btn btn-sm">▶ Propose Now</button>
+            </form>
+            <form method="post" action="{% url 'admin_toggle_component' %}">
+                {% csrf_token %}<input type="hidden" name="key" value="share_allocator_mode_live">
+                {% if share_allocator_live_component.is_enabled %}
+                <button type="submit" class="btn btn-danger btn-sm">DISABLE LIVE</button>
+                {% else %}
+                <button type="submit" class="btn btn-primary btn-sm">PROMOTE TO LIVE</button>
+                {% endif %}
+            </form>
+            {# The third switch, mirroring the live toggle: a pure de-risk SHOCK plan applies itself in LIVE mode. Re-risking never does. #}
+            <form method="post" action="{% url 'admin_toggle_component' %}">
+                {% csrf_token %}<input type="hidden" name="key" value="share_allocator_auto_derisk">
+                {% if share_allocator_auto_derisk_component.is_enabled %}
+                <button type="submit" class="btn btn-danger btn-sm" title="A SHOCK plan that only lowers shares is applied automatically in LIVE mode">AUTO DE-RISK OFF</button>
+                {% else %}
+                <button type="submit" class="btn btn-primary btn-sm" title="A SHOCK plan that only lowers shares is applied automatically in LIVE mode">AUTO DE-RISK ON</button>
+                {% endif %}
+            </form>
+        </div>
+    </div>
 </div>
 
 <!-- Component Controls -->

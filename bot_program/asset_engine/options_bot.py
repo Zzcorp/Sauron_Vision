@@ -157,6 +157,28 @@ class OptionsBot(AssetBot):
 
     asset_class = "options"
 
+    # NOT DESKED. `scan_symbol` below overrides the base entry path wholesale
+    # and in a different order (contract selection before the gate, the
+    # duplicate check before the client, the cost filter after sizing on the
+    # contract's own spread). Splitting that faithfully into propose/execute
+    # was judged riskier than leaving it whole (2026-09-12): the capital desk
+    # must run this lane through `scan_symbol` as today and file its entries
+    # 'not_desked' — never displaced, never resized. The two methods below
+    # exist so a desk that forgets to check this flag fails loudly on the
+    # first options config rather than sizing an option like a share.
+    DESKED = False
+
+    def propose_entry(self, symbol: str, *, pricing: str = "trade",
+                      signal_stats: dict | None = None):
+        raise NotImplementedError(
+            "OptionsBot is not desked (DESKED = False): the options lane "
+            "trades through scan_symbol only — the desk files it 'not_desked'")
+
+    def execute_entry(self, cand, *, size_mult: float = 1.0):
+        raise NotImplementedError(
+            "OptionsBot is not desked (DESKED = False): the options lane "
+            "trades through scan_symbol only — the desk files it 'not_desked'")
+
     # ── extras helpers ───────────────────────────────────────────────────
 
     def _extras(self) -> dict:
@@ -211,7 +233,8 @@ class OptionsBot(AssetBot):
 
     # ── decide(): defer to base, then translate direction → call/put ────
 
-    def decide(self, underlying: str) -> BotDecision:
+    def decide(self, underlying: str, *,
+               signal_stats: dict | None = None) -> BotDecision:
         """Use the default signal-vote logic on the underlying.
 
         BUY  → long call
@@ -219,7 +242,7 @@ class OptionsBot(AssetBot):
                since we always *buy* premium; put-vs-call is recorded in
                metadata.right).
         """
-        return super().decide(underlying)
+        return super().decide(underlying, signal_stats=signal_stats)
 
     # ── contract selection ──────────────────────────────────────────────
 
@@ -586,7 +609,16 @@ class OptionsBot(AssetBot):
 
         # A paper-STAGE rule trades on the paper venue even in a live config.
         paper = (self.cfg.mode == "paper") or bool(stage["force_paper"])
+        if paper:
+            # No paper contract while the underlying's market is shut
+            # (2026-09-26): the premium is a shut market's last quote.
+            from bot_program.engine.paper_trader import paper_market_shut
+            _shut = paper_market_shut(symbol, self._instrument_class(symbol))
+            if _shut:
+                return self._skip(symbol, skips.MARKET_SHUT,
+                                  f"{_shut} — no paper fill")
         order_id = ""
+        working_meta: dict = {}
         if not paper:
             if not self._still_armed():
                 return self._skip(symbol, skips.GATE_BLOCKED,
@@ -614,13 +646,78 @@ class OptionsBot(AssetBot):
                 # whose later SL/TP close would SELL real contracts the
                 # account does not hold.
                 status = (res.get("status") or "").upper()
-                if status in ("REJECTED", "DUPLICATE", "CANCELLED",
-                              "CANCELED", "INACTIVE", "EXPIRED"):
+                try:
+                    filled_contracts = float(res.get("executedQty") or 0)
+                except (TypeError, ValueError):
+                    filled_contracts = 0.0
+                # Refusal only when NOTHING printed — the rule the equity
+                # and manual paths already carry. A part-filled order that
+                # TWS then cancels has put REAL contracts in the account:
+                # returning None there left them with no row at all, so no
+                # stop, no expiry close and no reconciliation (which walks
+                # rows) could ever see them.
+                dead = status in ("REJECTED", "DUPLICATE", "CANCELLED",
+                                  "CANCELED", "INACTIVE", "EXPIRED")
+                if dead and filled_contracts <= 0:
                     logger.warning(
                         "[options_bot] live order refused for %s "
                         "(status=%s, reason=%s)", symbol, status,
                         (res.get("raw") or {}).get("reason", ""))
                     return None
+                # And the row records what actually printed, at the price it
+                # printed at — not the chain's mid for the size we asked for.
+                # WHAT WE ASKED FOR is kept apart from what printed: a
+                # partial that is still working needs both numbers, exactly
+                # as base.scan_symbol keeps `requested_qty`.
+                requested_contracts = n_contracts
+                partial_working = (0 < filled_contracts < requested_contracts
+                                   and not dead)
+                if filled_contracts > 0:
+                    if filled_contracts < n_contracts:
+                        logger.warning(
+                            "[options_bot] %s partially filled: %s of %s "
+                            "contracts — %s", symbol, filled_contracts,
+                            n_contracts,
+                            "the rest is still WORKING; booked for the poll "
+                            "to withdraw the remainder"
+                            if partial_working else "booking the real size")
+                        n_contracts = int(filled_contracts)
+                    try:
+                        fill_px = float(res.get("avgPrice") or 0)
+                    except (TypeError, ValueError):
+                        fill_px = 0.0
+                    if fill_px > 0:
+                        premium = fill_px
+                        working_meta["fill_source"] = "broker"
+                # WORKING: the broker took the order and has not finished
+                # it. Two shapes. Nothing printed — a thin option book is
+                # where that is likeliest of all, and booking it as a
+                # full-size position at the chain's mid is the phantom row
+                # reconciliation then closes as an orphan, leaving real
+                # contracts nothing claims. Or PART printed and the order
+                # is not dead: the adapter reports the print and sets
+                # `working` only when nothing filled, and booking the print
+                # as a finished position left the remainder working as a
+                # DAY order that filled later into contracts no row claimed
+                # — no stop, no expiry close, invisible to a reconciliation
+                # that walks rows. The rule since 662937a (the equity path)
+                # is that a partial hands the row to the poll. Either way
+                # the row is marked WORKING and the tick polls it
+                # (AssetBot._poll_working_entry), which withdraws a
+                # remainder, proves the withdrawal and books what printed.
+                if (res.get("working") and filled_contracts <= 0) \
+                        or partial_working:
+                    working_meta.update({
+                        "entry_working": True,
+                        "entry_working_since": timezone.now().isoformat(),
+                        "qty_requested": float(requested_contracts),
+                        "protected": False,
+                    })
+                    if partial_working:
+                        working_meta["entry_working_partial"] = float(
+                            filled_contracts)
+                    else:
+                        working_meta["fill_source"] = "pending"
             except Exception as e:
                 logger.error("[options_bot] live order failed for %s: %s", symbol, e)
                 return None
@@ -652,6 +749,7 @@ class OptionsBot(AssetBot):
                 # the scale grade_bot_trade works in for options.
                 "initial_stop_loss": round(float(sl), 8),
                 "cost_check": cost_reason,
+                **working_meta,
             },
         )
         return {"trade_id": trade.id, "symbol": symbol,
@@ -702,6 +800,15 @@ class OptionsBot(AssetBot):
         for trade in AssetBotTrade.objects.filter(config=self.cfg, status__in=("OPEN", "CLOSE_PENDING")):
             try:
                 meta = trade.metadata or {}
+                # A WORKING row is a queued ORDER: nothing filled and the
+                # account holds no contracts. Force-closing it would send a
+                # SELL for contracts that were never bought — a naked short
+                # option, with assignment risk, booked as an exit. The base
+                # tick owns these rows (AssetBot._poll_working_entry) and
+                # withdraws the order when it is right to.
+                from bot_program.asset_engine.base import is_entry_working
+                if is_entry_working(trade):
+                    continue
                 exp_str = meta.get("expiry")
                 if not exp_str:
                     continue

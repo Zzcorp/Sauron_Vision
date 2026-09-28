@@ -293,9 +293,12 @@ class RiskCeilingTests(TestCase):
         self.assertEqual(DEFAULT_RISK_FRACTION, 0.0025)
         self.assertEqual(risk_fraction(self._cfg_with()), 0.0025)
 
-    def test_the_ceiling_is_five_percent(self):
+    def test_the_ceiling_is_seven_percent(self):
+        """7 % — the operator's decision in writing, 2026-09-26 (25 % and
+        40 % were refused with the streak arithmetic: at 7 % five losses
+        cost 30 % of the book, ten 52 %, twenty 77 %)."""
         from bot_program.asset_engine.sizing import MAX_RISK_FRACTION
-        self.assertEqual(MAX_RISK_FRACTION, 0.05)
+        self.assertEqual(MAX_RISK_FRACTION, 0.07)
 
     def test_a_value_under_the_ceiling_is_honoured_exactly(self):
         from bot_program.asset_engine.sizing import risk_fraction
@@ -305,8 +308,8 @@ class RiskCeilingTests(TestCase):
     def test_asking_for_more_than_the_ceiling_is_clamped_not_honoured(self):
         """The cap is why this is a ceiling and not a free field."""
         from bot_program.asset_engine.sizing import risk_fraction
-        self.assertAlmostEqual(risk_fraction(self._cfg_with(25.0)), 0.05)
-        self.assertAlmostEqual(risk_fraction(self._cfg_with(100.0)), 0.05)
+        self.assertAlmostEqual(risk_fraction(self._cfg_with(25.0)), 0.07)
+        self.assertAlmostEqual(risk_fraction(self._cfg_with(100.0)), 0.07)
 
     def test_a_small_book_can_now_risk_enough_to_clear_its_costs(self):
         """The reason for the raise, in money: $200 at the old 1% ceiling
@@ -320,10 +323,17 @@ class RiskCeilingTests(TestCase):
         """The number that changes a mind is not the per-trade percentage,
         which always sounds small — it is what a normal bad run does."""
         from bot_program.manual_trade import _risk_appetite
+        # the cap is 7 % since 2026-09-26: 5 % is flagged but no longer AT
+        # the cap; ten losses at 7 % cost 51.6 % of the pool (at 5 %: 40.1)
         out = _risk_appetite(self._cfg_with(5.0))
         self.assertTrue(out["flagged"])
-        self.assertTrue(out["at_cap"])
+        self.assertFalse(out["at_cap"])
         self.assertAlmostEqual(out["ten_loss_drawdown_pct"], 40.1, places=1)
+        out = _risk_appetite(self._cfg_with(7.0))
+        self.assertTrue(out["flagged"])
+        self.assertTrue(out["at_cap"])
+        self.assertEqual(out["cap_pct"], 7.0)
+        self.assertAlmostEqual(out["ten_loss_drawdown_pct"], 51.6, places=1)
         self.assertIn("ten losses in a row", out["reason"])
 
     def test_ordinary_sizing_is_not_flagged(self):

@@ -26,4 +26,21 @@ if [ ! -f "$root/.env" ]; then
     exit 1
 fi
 
+# THE BUILD STAMP (2026-09-13). Read here, from the checkout, because the
+# image cannot read it for itself: .dockerignore excludes .git, so a
+# container has no way to know which commit it is. That blindness cost a
+# day — the box served the previous commit, two pages answered 404, and
+# the only way to find out was probing the public site from outside.
+#
+# Exported unconditionally, not just on `build`: compose reads the
+# environment when it interpolates, and a stamp that appeared on some
+# subcommands and not others would be worse than none. `|| true` because
+# a checkout without git, or a tarball deploy, must still be able to
+# start the platform — it simply ships "unknown", which the page renders
+# as an em dash rather than a sha nobody can check.
+GIT_SHA=$(cd "$root" && git rev-parse --short HEAD 2>/dev/null) || true
+BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || true
+export GIT_SHA="${GIT_SHA:-unknown}"
+export BUILT_AT="${BUILT_AT:-unknown}"
+
 exec docker compose --env-file "$root/.env" -f "$here/docker-compose.yml" "$@"

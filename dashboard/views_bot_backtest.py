@@ -34,7 +34,12 @@ def bot_backtest_list(request):
 
     # Aggregate stats from completed runs (stats is JSONField)
     completed_runs = [r for r in all_runs if r.status == "complete"]
-    avg_trades = (sum(r.stats.get("n_trades", 0) for r in completed_runs)
+    # The trade count key is "n", not "n_trades" (bot_program/backtest_asset.py
+    # compute_stats and _empty_stats both write "n"; nothing anywhere writes
+    # "n_trades"). Read with the wrong key and .get's default made this a
+    # hard 0.0 on every run ever displayed — a page-wide average that was not
+    # measured but looked exactly like one that was. Fixed 2026-09-13.
+    avg_trades = (sum(r.stats.get("n", 0) for r in completed_runs)
                    / max(len(completed_runs), 1))
     avg_win_rate = (sum(r.stats.get("win_rate", 0) for r in completed_runs)
                      / max(len(completed_runs), 1))
@@ -135,6 +140,11 @@ def bot_backtest_run(request):
                 "train": result.train_stats,
                 "test": result.test_stats,
             }
+        # Signals that qualified and could not be simulated, because no bar
+        # exists after them. They used to be priced at 0.0 and booked as
+        # -50 R expiries; they are now dropped, and a dropped signal has to
+        # be visible or the run overstates how much it measured.
+        run.stats["unmeasured"] = result.unmeasured or {}
         run.trades_json = serialise_trades(result.trades)
         run.status = "complete"
         run.completed_at = timezone.now()

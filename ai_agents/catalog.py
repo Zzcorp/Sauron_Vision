@@ -26,6 +26,20 @@ EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 # `thinking` marks models where adaptive thinking is on by default, so
 # max_tokens must leave room for reasoning as well as the answer.
 MODELS = {
+    "claude-fable-5-1": {
+        "label": "Claude Fable 5.1",
+        "tier_hint": "frontier",
+        "pricing": {"input": 10.0, "output": 50.0},
+        "context": 1_000_000,
+        "thinking": True,
+        "effort": True,
+        "notes": "Anthropic's most capable widely released model. Thinking "
+                 "is always on (the provider never sends a thinking "
+                 "parameter), effort low..max, twice the Opus price — the "
+                 "weekly imagination pass, never the five-minute loop. A "
+                 "safety refusal comes back as stop_reason=refusal and the "
+                 "provider re-runs the call on Opus.",
+    },
     "claude-opus-5": {
         "label": "Claude Opus 5",
         "tier_hint": "deep",
@@ -47,7 +61,15 @@ MODELS = {
     "claude-sonnet-5": {
         "label": "Claude Sonnet 5",
         "tier_hint": "balanced",
-        "pricing": {"input": 3.0, "output": 15.0},
+        # $2/$10, NOT $3/$15 — that is Sonnet 4.6's rate, twenty lines down,
+        # and it was copied up here when this entry was added. Every balanced
+        # tier call is the workhorse of this platform, so the error was not
+        # academic: cost_usd on each of those AgentTask rows read 50% high,
+        # spend.spent_today() inherited it, and AI_DAILY_BUDGET_USD therefore
+        # stopped work at roughly two thirds of the money the operator had
+        # actually authorised. The ledger exists to be believed; a price is
+        # the one number in it that cannot be derived from anything else.
+        "pricing": {"input": 2.0, "output": 10.0},
         "context": 1_000_000,
         "thinking": True,
         "effort": True,
@@ -117,9 +139,13 @@ TIER_DEFAULTS = {
     "fast": "claude-haiku-4-5",
     "balanced": "claude-sonnet-5",
     "deep": "claude-opus-5",
+    # The frontier tier exists for the few calls where imagination is the
+    # product — the weekly strategy generator — and nowhere the platform
+    # calls every five minutes. It shares the deep tier's budget reserve.
+    "frontier": "claude-fable-5-1",
 }
 
-TIERS = ("fast", "balanced", "deep")
+TIERS = ("fast", "balanced", "deep", "frontier")
 
 # Default effort per tier for models that support it. Cheap tiers stay
 # cheap; the deep tier is where thoroughness is worth paying for.
@@ -127,6 +153,7 @@ TIER_EFFORT_DEFAULTS = {
     "fast": "low",
     "balanced": "medium",
     "deep": "high",
+    "frontier": "high",
 }
 
 

@@ -149,12 +149,17 @@ class TheFormExistsTests(SimpleTestCase):
             self.assertIn(f'name="{field}"', self.html, field)
 
     def test_commodity_routing_says_what_it_changes(self):
-        """Gold is what this operator trades, and it stays on the paper
-        venue unless this box is ticked — the field's own help text says so
-        and the form has to say it too."""
+        """The field's own help text says what ticking it changes, and the
+        form says it too. Since 2026-09-26 that is a refusal: a live
+        commodity entry routed to IBKR is refused at the entry gate (step 0
+        of AssetBot._etoro_entry_refusal), because only eToro carries live
+        commodities."""
         self.assertIn("primary_for_commodity", self.html)
         idx = self.html.find('name="primary_for_commodity"')
-        self.assertIn("paper venue", self.html[idx:idx + 400])
+        hint = self.html[idx:idx + 400]
+        self.assertIn("a live commodity entry routed here is refused", hint)
+        self.assertIn("only eToro carries live commodities", hint)
+        self.assertNotIn("paper venue", hint)
 
     def test_the_form_says_tws_must_be_running(self):
         """IBKR is a socket, not an API key. Saving credentials connects to
@@ -379,11 +384,14 @@ class ArmingABotLiveIsConfirmedTests(SimpleTestCase):
         self.assertIn('mode.value !== "live"', script)
 
     def test_the_dialog_names_where_the_orders_would_go(self):
-        """"Live" does not say WHERE — and a commodity bot stays simulated
-        unless an IBKR account is primary for that class."""
+        """"Live" does not say WHERE. A commodity bot goes to eToro through
+        its commodities box (2026-09-26); routed anywhere else, every entry
+        is refused. The other classes keep their words."""
         script = self.html.split('id="assetBotForm"', 1)[1]
         dialog = script[script.find("SV.overlay.confirm"):][:1800]
         self.assertIn("Routes to", dialog)
+        self.assertIn("eToro, through its commodities box; any other route "
+                      "refuses every entry", dialog)
         self.assertIn("paper venue unless IBKR", dialog)
 
     def test_the_dialog_does_not_claim_the_bot_starts_trading_immediately(self):

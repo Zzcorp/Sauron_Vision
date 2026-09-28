@@ -103,6 +103,18 @@ class TheOperatorIsToldWhatToSetTests(SimpleTestCase):
         self.assertIn("4002", text)
         self.assertIn("4001", text)
 
+    def test_both_env_examples_pair_each_mode_with_the_relay_port(self):
+        """The image keeps the Gateway's own 4001/4002 on the container's
+        loopback and relays them out as 4003 (live) and 4004 (paper), so
+        from the web container 4001/4002 are refused for ever. The
+        runbook, the model and the renderer all say so; the file the
+        runbook has the operator copy said `paper -> 4002  live -> 4001`."""
+        for name in (".env.example", ".env.production.example"):
+            text = (REPO / name).read_text(encoding="utf-8")
+            self.assertIn("paper -> 4004", text, name)
+            self.assertIn("live -> 4003", text, name)
+            self.assertNotIn("paper -> 4002", text, name)
+
 
 class OneSlotPerLoginTests(SimpleTestCase):
     """IBKR permits one session per USERNAME, so separate logins need
@@ -134,6 +146,18 @@ class OneSlotPerLoginTests(SimpleTestCase):
                     "IBKR4_USERNAME", "IBKR5_USERNAME"):
             self.assertIn("${%s:-" % var, raw)
 
+    def test_every_slot_answers_the_existing_session_dialog_itself(self):
+        """2026-09-11: the Gateway logged in, passed 2FA, reached
+        'Existing session detected' and sat on it for good — IBC's
+        default for that dialog is manual. An unattended Gateway must
+        take the session (primary) or it is not unattended."""
+        services = _compose()["services"]
+        for name in ("ibgateway", "ibgateway-2", "ibgateway-3",
+                     "ibgateway-4", "ibgateway-5"):
+            env = services[name]["environment"]
+            self.assertEqual(env.get("EXISTING_SESSION_DETECTED_ACTION"),
+                             "primary", name)
+
     def test_no_slot_publishes_a_port(self):
         services = _compose()["services"]
         for name in self.SLOTS:
@@ -147,10 +171,11 @@ class OneSlotPerLoginTests(SimpleTestCase):
 
 
 class ConcurrentSocketsDoNotEvictEachOtherTests(SimpleTestCase):
-    """IBKR evicts the earlier holder when two connections share a
+    """IBKR refuses the newcomer (error 326) when two connections share a
     clientId. Sauron opens sockets from the trading router, the data
     feed and the admin probe at once, and all three passed the
-    configured id verbatim — so a bar refresh could drop the trader.
+    configured id verbatim — so a bar refresh could hold the id the
+    trader needed, or fail against it.
     """
 
     def test_each_purpose_gets_a_distinct_id(self):

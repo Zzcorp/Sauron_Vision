@@ -179,10 +179,13 @@ class ThePageIsHonestAboutItsScopeTests(TestCase):
         root = Path(settings.BASE_DIR)
         hits = []
         for path in root.rglob("*.py"):
-            parts = set(path.parts)
+            parts = set(path.relative_to(root).parts)
             if "tests" in parts or "migrations" in parts:
                 continue
-            if ".venv" in parts or "SV_V" in parts:
+            # A dev checkout carries copies of the tree that are not the
+            # tree: a virtualenv, and the worktrees Claude Code keeps under
+            # .claude/ (each one a whole second sauron_vision, 2026-09-28).
+            if parts & {".venv", "venv", "SV_V", ".claude", "node_modules"}:
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="ignore")

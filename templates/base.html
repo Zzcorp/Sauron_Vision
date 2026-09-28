@@ -4,7 +4,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>{% block title %}Sauron Vision{% endblock %}</title>
 
     {% comment %}
@@ -96,6 +96,8 @@
     <script src="{% static 'js/sv-news-dwell.js' %}" defer></script>
     <script src="{% static 'js/sv-gollum.js' %}" defer></script>
     <script src="{% static 'js/sv-gate.js' %}" defer></script>
+    {# The phone tier (2026-09-28): the last shell sheet, so at 768px and below it overrides the three above; a page's own extra_css still loads after it. #}
+    <link rel="stylesheet" href="{% static 'css/sv-responsive.css' %}">
 {% block extra_css %}{% endblock %}
 </head>
 <body class="{% get_theme as t %}{% if t == "light" %}light-mode{% endif %}{% block body_class %}{% endblock %}">
@@ -422,64 +424,134 @@
         </div>
         <nav class="sidebar-nav" data-nav-page-id="{{ page_id }}">
             {# Nav marks are drawn only from the geometric/operator sets — no pictographs — so the rail reads as one engraved vocabulary and page titles can mirror it exactly. #}
-            <div class="nav-section">Command Center</div>
+            {% comment %}THE RAIL IS GROUPED BY THE QUESTION, NOT BY THE SUBSYSTEM (2026-09-13).
+
+               It used to carry seven sections over ~52 rows, and two had become dumping grounds: "Intelligence" held
+               sixteen links and "AI Agents" fifteen, each mixing what may ACT with where MONEY goes with what is
+               MEASURED with what is being INVENTED. A rail like that is browsed, not navigated — the operator has to
+               already know which drawer a page lives in, which is precisely the "too many pages, not enough global eye"
+               this regrouping answers. Amon Hen (the Oculus) is the entry; everything below it is a drill-down.
+
+               NOTHING WAS REMOVED. Every route, every permission guard and all seven data-nav-id probes are preserved —
+               tests/test_nothing_unseen.py asserts that set exactly, and a link dropped here is a page that stops
+               existing. ONE label changed: two different rows both read "Bot Performance", so /bot-charts/ now says what
+               it is. Two pages under one name is one page nobody finds.
+
+               Glyph duplication is deliberately NOT fixed here: several marks appear on two or three rows, against the
+               "one mark, one row" convention other comments claim. Renaming marks and regrouping rows in the same
+               change would make both unreviewable.{% endcomment %}
+            <div class="nav-section">Amon Hen</div>
+            {% comment %}The Oculus sits ABOVE every other row on purpose: it is the only page that answers "is the machine
+               turning, and which wheels are engaged" rather than one subsystem's own question. Its mark U+29BF is used nowhere
+               else (U+25CE was taken by Trade Forensics). It owns no data and caches nothing (2026-09-13).{% endcomment %}
+            <a href="{% url 'oculus_dashboard' %}" class="nav-link {% if page_id == 'oculus' %}active{% endif %}"><span class="icon">⦿</span> <span class="label-text">Oculus</span></a>
             <a href="{% url 'command_center' %}" class="nav-link {% if page_id == 'command' or page_id == 'dashboard' or page_id == 'eye' %}active{% endif %}"><span class="icon">◉</span> <span class="label-text">Operations Center</span></a>
-            <a href="{% url 'bot_performance_dashboard' %}" class="nav-link {% if page_id == 'bot_performance' %}active{% endif %}"><span class="icon">▲</span> <span class="label-text">Bot Performance</span></a>
-            <a href="{% url 'bot_backtest_list' %}" class="nav-link {% if page_id == 'bot_backtest' %}active{% endif %}"><span class="icon">⊟</span> <span class="label-text">Bot Backtest</span></a>
-            <a href="{% url 'bot_charts' %}" class="nav-link {% if page_id == 'bot_charts' %}active{% endif %}"><span class="icon">▥</span> <span class="label-text">Bot Performance</span></a>
-            <a href="{% url 'forensics_list' %}" class="nav-link {% if page_id == 'forensics' %}active{% endif %}"><span class="icon">◎</span> <span class="label-text">Trade Forensics</span></a>
-            <a href="{% url 'system_health' %}" class="nav-link {% if page_id == 'system_health' %}active{% endif %}"><span class="icon">✚</span> <span class="label-text">System Health</span></a>
-            <div class="nav-section">Markets</div>
-            <a href="{% url 'instruments_list' %}" class="nav-link {% if page_id == 'instruments' or page_id == 'quotes' %}active{% endif %}"><span class="icon">◈</span> <span class="label-text">Instruments & Quotes</span></a>
-            <a href="{% url 'economic_calendar' %}" class="nav-link {% if page_id == 'calendar' %}active{% endif %}"><span class="icon">◇</span> <span class="label-text">Economic Calendar</span></a>
-            <div class="nav-section">Intelligence</div>
-            <a href="{% url 'signals_list' %}" data-nav-id="signals" class="nav-link {% if page_id == 'signals' %}active{% endif %}"><span class="icon">◈</span> <span class="label-text">Signals</span></a>
-            <a href="{% url 'strategies_list' %}" class="nav-link {% if page_id == 'strategies' %}active{% endif %}"><span class="icon">⬡</span> <span class="label-text">Strategies</span></a>
-            {% comment %} The four pages that explain a rule's life — where it sits on the
-               ladder, what the admin lane has done to it, what risk budget it was
-               given, and what the miner wants to add — were in no menu at all and
-               reachable only from the admin dashboard. A page nobody can find is a
-               page that does not exist, and the cards on /strategies/ deep-link into
-               these four, so they belong beside the page they explain. {% endcomment %}
-            <a href="{% url 'promotions_dashboard' %}" class="nav-link {% if page_id == 'promotions' %}active{% endif %}"><span class="icon">⇧</span> <span class="label-text">Promotion Ladder</span></a>
-            <a href="{% url 'rule_control_dashboard' %}" class="nav-link {% if page_id == 'rule_control' %}active{% endif %}"><span class="icon">⊙</span> <span class="label-text">Rule Controls</span></a>
-            <a href="{% url 'allocator_dashboard' %}" class="nav-link {% if page_id == 'allocator' %}active{% endif %}"><span class="icon">⚖</span> <span class="label-text">Risk Allocator</span></a>
-            <a href="{% url 'discoveries_dashboard' %}" class="nav-link {% if page_id == 'discoveries' %}active{% endif %}"><span class="icon">⊛</span> <span class="label-text">Discoveries</span></a>
-            <a href="{% url 'opportunities_dashboard' %}" data-nav-id="opportunities" class="nav-link {% if page_id == 'opportunities' %}active{% endif %}"><span class="icon">◍</span> <span class="label-text">Opportunities</span></a>
-            <a href="{% url 'evolution_dashboard' %}" class="nav-link {% if page_id == 'evolution' %}active{% endif %}"><span class="icon">⬡</span> <span class="label-text">Strategy Evolution</span></a>
-            <a href="{% url 'news_feed' %}" data-nav-id="news" class="nav-link {% if page_id == 'news' %}active{% endif %}"><span class="icon">▤</span> <span class="label-text">News & Sentiment</span></a>
-            <a href="{% url 'backtest_list' %}" class="nav-link {% if page_id == 'backtest' %}active{% endif %}"><span class="icon">&#x25A1;</span> <span class="label-text">Backtesting</span></a>
-            <a href="{% url 'performance_dashboard' %}" class="nav-link {% if page_id == 'performance' %}active{% endif %}"><span class="icon">◮</span> <span class="label-text">Signal Performance</span></a>
-            <a href="{% url 'risk_dashboard' %}" class="nav-link {% if page_id == 'risk' %}active{% endif %}"><span class="icon">⚠</span> <span class="label-text">Risk Depth</span></a>
-            <div class="nav-section">Automation</div>
-            <a href="{% url 'bot_home' %}" class="nav-link {% if page_id == 'bot_program' %}active{% endif %}"><span class="icon">⟳</span> <span class="label-text">Bot Program</span></a>
-            <div class="nav-section">Portfolio</div>
+
+            {% comment %}THE BOOK — where the money is and what it is exposed to. The four sizing pages sit together because
+               they answer one question at four zooms: each pool's share of the ACCOUNT, one TICK's entries against one budget,
+               per-RULE multipliers, and the correlation depth behind all three. One row named "allocator" once hid the
+               second (2026-09-12), which is why all four are named for what they size.{% endcomment %}
+            <div class="nav-section">The book &middot; the money</div>
             <a href="{% url 'portfolio_overview' %}" class="nav-link {% if page_id == 'portfolio' %}active{% endif %}"><span class="icon">◎</span> <span class="label-text">Portfolio</span></a>
+            <a href="{% url 'brokers_page' %}" class="nav-link {% if page_id == 'brokers' %}active{% endif %}"><span class="icon">⌁</span> <span class="label-text">Brokers</span></a>
+            <a href="{% url 'treasury_page' %}" class="nav-link {% if page_id == 'treasury' %}active{% endif %}"><span class="icon">⛁</span> <span class="label-text">Treasury</span></a>
+            {% comment %}Withdrawals asked for in advance (2026-09-28): the reserve held back from new sizing, then marked
+               withdrawn when the money leaves. Mark U+21E9, the down arrow beside the Promotion Ladder's U+21E7, used nowhere else.{% endcomment %}
+            <a href="{% url 'withdrawals' %}" class="nav-link {% if page_id == 'withdrawals' %}active{% endif %}"><span class="icon">⇩</span> <span class="label-text">Withdrawals</span></a>
             <a href="{% url 'positions_list' %}" data-nav-id="positions" class="nav-link {% if page_id == 'positions' %}active{% endif %}"><span class="icon">▣</span> <span class="label-text">Positions</span></a>
             <a href="{% url 'tax_lots_dashboard' %}" class="nav-link {% if page_id == 'tax_lots' %}active{% endif %}"><span class="icon">▦</span> <span class="label-text">Tax Lots</span></a>
-            <div class="nav-section">AI Agents</div>
-            <a href="{% url 'ai_insights' %}" class="nav-link {% if page_id == 'ai' %}active{% endif %}"><span class="icon">◬</span> <span class="label-text">AI Insights</span></a>
-            <a href="{% url 'ai_tasks_list' %}" class="nav-link {% if page_id == 'ai_tasks' %}active{% endif %}"><span class="icon">▸</span> <span class="label-text">Agent Tasks</span></a>
-            <a href="{% url 'ai_journal_dashboard' %}" class="nav-link {% if page_id == 'ai_insights' %}active{% endif %}"><span class="icon">✎</span> <span class="label-text">AI Journal</span></a>
+            <a href="{% url 'bot_home' %}" class="nav-link {% if page_id == 'bot_program' %}active{% endif %}"><span class="icon">⟳</span> <span class="label-text">Bot Program</span></a>
+            {% comment %}ROUTED AND IN NO MENU until 2026-09-13, so unreachable by anything but a typed URL — the defect the
+               comment beside the ladder pages already names: "a page nobody can find is a page that does not exist". One row per
+               bot config with its open count, 24h fills and 24h P&L, and the hand-taken book counted separately. Mark U+25F0,
+               used nowhere else.{% endcomment %}
+            <a href="{% url 'asset_bots_dashboard' %}" class="nav-link {% if page_id == 'asset_bots' %}active{% endif %}"><span class="icon">◰</span> <span class="label-text">Asset Bots</span></a>
+            <a href="{% url 'shares_dashboard' %}" class="nav-link {% if page_id == 'shares' %}active{% endif %}"><span class="icon">◫</span> <span class="label-text">Share Allocator</span></a>
+            {% comment %}The Share Allocator sizes each POOL; the Capital Desk ranks ONE TICK's entries against one risk budget
+               and says what it refused and why. Its mark U+25A9 is used nowhere else (2026-09-12).{% endcomment %}
+            <a href="{% url 'desk_dashboard' %}" class="nav-link {% if page_id == 'desk' %}active{% endif %}"><span class="icon">▩</span> <span class="label-text">Capital Desk</span></a>
+            <a href="{% url 'allocator_dashboard' %}" class="nav-link {% if page_id == 'allocator' %}active{% endif %}"><span class="icon">⚖</span> <span class="label-text">Risk Allocator</span></a>
+            <a href="{% url 'risk_dashboard' %}" class="nav-link {% if page_id == 'risk' %}active{% endif %}"><span class="icon">⚠</span> <span class="label-text">Risk Depth</span></a>
+            {% comment %}Read "Bot Performance" until 2026-09-13, indistinguishable in the rail from the per-rule expectancy
+               table two sections down. This one is the equity curve and the R-distribution.{% endcomment %}
+            <a href="{% url 'bot_charts' %}" class="nav-link {% if page_id == 'bot_charts' %}active{% endif %}"><span class="icon">▥</span> <span class="label-text">Bot Equity Curve</span></a>
+
+            {% comment %}WHAT MAY ACT. A rule's whole life in one section: what it proposes, what stage that puts it on, what the
+               admin lane has done to it, and what kind of trader carries it. These pages deep-link into each other and were
+               scattered across two sections; four of them were in no menu at all until recently, reachable only from the admin
+               dashboard — and a page nobody can find is a page that does not exist.{% endcomment %}
+            <div class="nav-section">What can act</div>
+            <a href="{% url 'signals_list' %}" data-nav-id="signals" class="nav-link {% if page_id == 'signals' %}active{% endif %}"><span class="icon">◈</span> <span class="label-text">Signals</span></a>
+            <a href="{% url 'strategies_list' %}" class="nav-link {% if page_id == 'strategies' %}active{% endif %}"><span class="icon">⬡</span> <span class="label-text">Strategies</span></a>
+            {# ◧ — the half-filled square: /opportunities/ shows the matches a setup MADE, /setups/ answers for the ones it never made. No data-nav-id: the dot probe's table is the seven sections in tests/test_nothing_unseen.py, and a diagnosis has no "new since your last visit". #}
+            <a href="{% url 'setups_dashboard' %}" class="nav-link {% if page_id == 'setups' %}active{% endif %}"><span class="icon">◧</span> <span class="label-text">Setups</span></a>
+            <a href="{% url 'opportunities_dashboard' %}" data-nav-id="opportunities" class="nav-link {% if page_id == 'opportunities' %}active{% endif %}"><span class="icon">◍</span> <span class="label-text">Opportunities</span></a>
+            <a href="{% url 'rule_control_dashboard' %}" class="nav-link {% if page_id == 'rule_control' %}active{% endif %}"><span class="icon">⊙</span> <span class="label-text">Rule Controls</span></a>
+            <a href="{% url 'promotions_dashboard' %}" class="nav-link {% if page_id == 'promotions' %}active{% endif %}"><span class="icon">⇧</span> <span class="label-text">Promotion Ladder</span></a>
+            {% comment %}WHAT KIND OF TRADER the pool is — the coherent preset of knobs, its own grading window, its share band and
+               its weight on the 5-10 year view. Its mark U+25E8 is used nowhere else, and the leverage correction lives on the
+               page: no personality borrows to fund a position, and forex is the exception where the platform does lever, at the
+               broker (2026-09-12).{% endcomment %}
+            <a href="{% url 'personas_dashboard' %}" class="nav-link {% if page_id == 'personas' %}active{% endif %}"><span class="icon">◨</span> <span class="label-text">Personalities</span></a>
+            {% comment %}Also routed and in no menu until 2026-09-13. The real-time fast-rule engine: what fired, how often, how
+               fast. It belongs beside the rules it fires, not in a drawer nobody opens. Mark U+25F1, used nowhere else.{% endcomment %}
+            <a href="{% url 'events_dashboard' %}" class="nav-link {% if page_id == 'events' %}active{% endif %}"><span class="icon">◱</span> <span class="label-text">Event Engine</span></a>
+
+            {% comment %}WHAT IS MEASURED. Everything that grades something, together — because this platform's recurring failure
+               is a count that reads as strength while meaning the opposite, and these are the pages that settle it: the ledger,
+               the two levels of self-grading (signal and fill), the one-fill autopsy, the two simulators, and how reliable each
+               agent has actually been.{% endcomment %}
+            <div class="nav-section">What is measured</div>
+            <a href="{% url 'evidence_ledger' %}" class="nav-link {% if page_id == 'evidence' %}active{% endif %}"><span class="icon">⊨</span> <span class="label-text">Evidence Ledger</span></a>
+            <a href="{% url 'performance_dashboard' %}" class="nav-link {% if page_id == 'performance' %}active{% endif %}"><span class="icon">◮</span> <span class="label-text">Signal Performance</span></a>
+            <a href="{% url 'bot_performance_dashboard' %}" class="nav-link {% if page_id == 'bot_performance' %}active{% endif %}"><span class="icon">▲</span> <span class="label-text">Bot Performance</span></a>
+            <a href="{% url 'forensics_list' %}" class="nav-link {% if page_id == 'forensics' %}active{% endif %}"><span class="icon">⌖</span> <span class="label-text">Trade Forensics</span></a>
+            <a href="{% url 'backtest_list' %}" class="nav-link {% if page_id == 'backtest' %}active{% endif %}"><span class="icon">&#x25A1;</span> <span class="label-text">Backtesting</span></a>
+            <a href="{% url 'bot_backtest_list' %}" class="nav-link {% if page_id == 'bot_backtest' %}active{% endif %}"><span class="icon">⊟</span> <span class="label-text">Bot Backtest</span></a>
             <a href="{% url 'calibration_dashboard' %}" class="nav-link {% if page_id == 'calibration' %}active{% endif %}"><span class="icon">◔</span> <span class="label-text">Agent Calibration</span></a>
-            {% if request.user.is_staff %}<a href="{% url 'ai_models_dashboard' %}" class="nav-link {% if page_id == 'ai_models' %}active{% endif %}"><span class="icon">⊚</span> <span class="label-text">Model Selection</span></a>{% endif %}
-            {# Phase 64.5: standalone "AI Chat" merged into /research/ — link removed. #}
+
+            {% comment %}WHAT IS BEING INVENTED. The research half: what the miner proposes, what the generator writes, what the
+               brain believes and how long it has believed it. NOTHING in this section can place an order — every path out of it
+               runs through the ladder in "What can act" first, which is the whole reason the two are separate sections and
+               not one.{% endcomment %}
+            <div class="nav-section">What is invented</div>
+            <a href="{% url 'evolution_dashboard' %}" class="nav-link {% if page_id == 'evolution' %}active{% endif %}"><span class="icon">⟲</span> <span class="label-text">Strategy Evolution</span></a>
+            <a href="{% url 'discoveries_dashboard' %}" class="nav-link {% if page_id == 'discoveries' %}active{% endif %}"><span class="icon">⊛</span> <span class="label-text">Discoveries</span></a>
+            <a href="{% url 'generated_dashboard' %}" data-nav-id="generated" class="nav-link {% if page_id == 'generated' %}active{% endif %}"><span class="icon">⊞</span> <span class="label-text">Generated Strategies</span></a>
+            <a href="{% url 'hypotheses_dashboard' %}" data-nav-id="hypotheses" class="nav-link {% if page_id == 'hypotheses' %}active{% endif %}"><span class="icon">⊕</span> <span class="label-text">Hypothesis Market</span></a>
+            <a href="{% url 'brain_dashboard' %}" class="nav-link {% if page_id == 'brain' %}active{% endif %}"><span class="icon">⌬</span> <span class="label-text">Sauron&#39;s Mind</span></a>
+            <a href="{% url 'knowledge_dashboard' %}" class="nav-link {% if page_id == 'knowledge' %}active{% endif %}"><span class="icon">❖</span> <span class="label-text">Knowledge Graph</span></a>
+            <a href="{% url 'consolidation_dashboard' %}" class="nav-link {% if page_id == 'consolidation' %}active{% endif %}"><span class="icon">⊜</span> <span class="label-text">Consolidation</span></a>
+            {% comment %}The 5-10 year sector view the share allocator reads as a ±10% prior, with its own graded calls (2026-09-12).{% endcomment %}
+            <a href="{% url 'horizon_dashboard' %}" class="nav-link {% if page_id == 'horizon' %}active{% endif %}"><span class="icon">◕</span> <span class="label-text">Horizon</span></a>
             <a href="{% url 'intelligence_hub' %}" class="nav-link {% if page_id == 'intelligence' %}active{% endif %}"><span class="icon">◯</span> <span class="label-text">Intelligence Hub</span></a>
             <a href="{% url 'briefing_dashboard' %}" data-nav-id="briefing" class="nav-link {% if page_id == 'briefing' %}active{% endif %}"><span class="icon">✦</span> <span class="label-text">Strategist Briefing</span></a>
             <a href="{% url 'earnings_reviews_dashboard' %}" class="nav-link {% if page_id == 'earnings_reviews' %}active{% endif %}"><span class="icon">$</span> <span class="label-text">Earnings Reviews</span></a>
+            {# Phase 64.5: standalone "AI Chat" merged into /research/ — link removed. #}
             <a href="{% url 'research_view' %}" class="nav-link {% if page_id == 'research' %}active{% endif %}"><span class="icon">?</span> <span class="label-text">Ask Sauron</span></a>
-            <a href="{% url 'brain_dashboard' %}" class="nav-link {% if page_id == 'brain' %}active{% endif %}"><span class="icon">◉</span> <span class="label-text">Sauron's Mind</span></a>
-            <a href="{% url 'knowledge_dashboard' %}" class="nav-link {% if page_id == 'knowledge' %}active{% endif %}"><span class="icon">⬡</span> <span class="label-text">Knowledge Graph</span></a>
-            <a href="{% url 'hypotheses_dashboard' %}" data-nav-id="hypotheses" class="nav-link {% if page_id == 'hypotheses' %}active{% endif %}"><span class="icon">⊕</span> <span class="label-text">Hypothesis Market</span></a>
-            <a href="{% url 'consolidation_dashboard' %}" class="nav-link {% if page_id == 'consolidation' %}active{% endif %}"><span class="icon">⊜</span> <span class="label-text">Consolidation</span></a>
-            <a href="{% url 'generated_dashboard' %}" data-nav-id="generated" class="nav-link {% if page_id == 'generated' %}active{% endif %}"><span class="icon">⊞</span> <span class="label-text">Generated Strategies</span></a>
-            {% if request.user.is_superuser %}<div class="nav-section">Admin</div>
+            <a href="{% url 'ai_journal_dashboard' %}" class="nav-link {% if page_id == 'ai_insights' %}active{% endif %}"><span class="icon">✎</span> <span class="label-text">AI Journal</span></a>
+            <a href="{% url 'ai_insights' %}" class="nav-link {% if page_id == 'ai' %}active{% endif %}"><span class="icon">◬</span> <span class="label-text">AI Insights</span></a>
+
+            <div class="nav-section">The markets</div>
+            <a href="{% url 'instruments_list' %}" class="nav-link {% if page_id == 'instruments' or page_id == 'quotes' %}active{% endif %}"><span class="icon">⌗</span> <span class="label-text">Instruments & Quotes</span></a>
+            <a href="{% url 'economic_calendar' %}" class="nav-link {% if page_id == 'calendar' %}active{% endif %}"><span class="icon">◇</span> <span class="label-text">Economic Calendar</span></a>
+            <a href="{% url 'news_feed' %}" data-nav-id="news" class="nav-link {% if page_id == 'news' %}active{% endif %}"><span class="icon">▤</span> <span class="label-text">News & Sentiment</span></a>
+
+            {% comment %}IS IT RUNNING — not "is it switched on". /health/ and the system map exist because six scraper components
+               once sat at last_status='success' with zero rows between them. These pages answer whether data is actually
+               MOVING.{% endcomment %}
+            <div class="nav-section">The machine</div>
+            <a href="{% url 'system_health' %}" class="nav-link {% if page_id == 'system_health' %}active{% endif %}"><span class="icon">✚</span> <span class="label-text">System Health</span></a>
+            <a href="{% url 'ai_tasks_list' %}" class="nav-link {% if page_id == 'ai_tasks' %}active{% endif %}"><span class="icon">▸</span> <span class="label-text">Agent Tasks</span></a>
+            {% if request.user.is_staff %}<a href="{% url 'ai_models_dashboard' %}" class="nav-link {% if page_id == 'ai_models' %}active{% endif %}"><span class="icon">⊚</span> <span class="label-text">Model Selection</span></a>{% endif %}
+            {% if request.user.is_superuser %}<a href="{% url 'ops_dashboard' %}" class="nav-link {% if page_id == 'ops' %}active{% endif %}"><span class="icon">⌘</span> <span class="label-text">Ops</span></a>
             <a href="{% url 'admin_dashboard' %}" class="nav-link {% if page_id == 'admin_dashboard' %}active{% endif %}"><span class="icon">⬢</span> <span class="label-text">Admin Panel</span></a>
             {% if user.is_staff %}<a href="{% url 'audit_dashboard' %}" class="nav-link {% if page_id == 'audit' %}active{% endif %}"><span class="icon">⊠</span> <span class="label-text">Audit Log</span></a>{% endif %}
-            <a href="{% url 'admin_newsletters' %}" class="nav-link {% if page_id == 'admin_newsletters' %}active{% endif %}"><span class="icon">&#x25A3;</span> <span class="label-text">Newsletters</span></a>
-            {% endif %}<div class="nav-section">System</div>
-            <a href="{% url 'profile' %}" class="nav-link {% if page_id == 'profile' %}active{% endif %}"><span class="icon">◉</span> <span class="label-text">Profile</span></a>
-            <a href="{% url 'notifications_inbox' %}" class="nav-link {% if page_id == 'notifications_inbox' or page_id == 'notifications' %}active{% endif %}"><span class="icon">&#x25C9;</span> <span class="label-text">Notifications</span></a>
+            <a href="{% url 'admin_newsletters' %}" class="nav-link {% if page_id == 'admin_newsletters' %}active{% endif %}"><span class="icon">▭</span> <span class="label-text">Newsletters</span></a>
+            {% endif %}<div class="nav-section">You</div>
+
+            <a href="{% url 'profile' %}" class="nav-link {% if page_id == 'profile' %}active{% endif %}"><span class="icon">◐</span> <span class="label-text">Profile</span></a>
+            <a href="{% url 'notifications_inbox' %}" class="nav-link {% if page_id == 'notifications_inbox' or page_id == 'notifications' %}active{% endif %}"><span class="icon">◌</span> <span class="label-text">Notifications</span></a>
             <a href="{% url 'setup' %}" class="nav-link {% if page_id == 'setup' %}active{% endif %}"><span class="icon">⊡</span> <span class="label-text">Setup</span></a>
             <a href="{% url 'getting_started' %}" class="nav-link {% if page_id == 'getting_started' %}active{% endif %}"><span class="icon">★</span> <span class="label-text">Getting Started</span></a>
         </nav>
@@ -635,6 +707,16 @@
                             <a class="um-link" href="{% url 'profile' %}?modal=pin" role="menuitem">
                                 <span class="um-icon">⌗</span> Change PIN
                             </a>
+                            {# A phone's topbar has no room for the lock and the theme switch (2026-09-28): they are here, shown at 768px and below only. #}
+                            {# Lock now clicks the real #lockNowBtn, the proxy sv-gollum.js already uses: idle-lock.js binds that button, and click() works on a hidden one. #}
+                            <button type="button" class="um-link sv-phone-only" role="menuitem"
+                                    style="width:100%;text-align:left;background:none;border:0;cursor:pointer;"
+                                    onclick="var b=document.getElementById('lockNowBtn');if(b)b.click();">
+                                <span class="um-icon">&#128274;</span> Lock now
+                            </button>
+                            <a class="um-link sv-phone-only" href="{% url 'toggle_theme' %}" role="menuitem">
+                                <span class="um-icon">&#9680;</span> Light / dark mode
+                            </a>
                         </div>
                         <div class="um-section">
                             <a class="um-link" href="{% url 'notifications_inbox' %}" role="menuitem">
@@ -768,6 +850,16 @@
                             <div class="ip-dd-cell"><span class="dk">POOLS</span><span class="dv">{% if panel_pool %}{{ panel_pool }}{% else %}<span class="sv-unknown" title="Capital pools could not be read">&mdash;</span>{% endif %}</span></div>
                             <div class="ip-dd-cell"><span class="dk">POOL USED</span><span class="dv">{% if panel_pool_used %}{{ panel_pool_used }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
                             <div class="ip-dd-cell"><span class="dk">POOL FREE</span><span class="dv {% if panel_pool_free_neg %}red{% endif %}">{% if panel_pool_free %}{{ panel_pool_free }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
+                            {% comment %}THE SAME THREE NUMBERS, SPLIT BY VENUE (2026-09-13). The three cells above are the POOLED ones — the head
+                            says BOTH BOOKS and means it. But "how much money is actually engaged" is a live question, and a simulated pool inflates
+                            the pooled figure while no live entry can draw on the pooled free. capital_summary has kept the split since it was written
+                            and nothing rendered it. NEVER SUMMED: portfolio.services.capital_summary states why at the dict that produces these, and
+                            persona_mix._venue_ok raises rather than accept a pooled venue. Red is live, per the convention sauron.css:450 already
+                            states — "an account whose connected broker routes to real money gets the only coloured edge".{% endcomment %}
+                            <div class="ip-dd-cell"><span class="dk"><span class="sv-venue sv-venue--live">LIVE</span> ENGAGED</span><span class="dv">{% if panel_used_live %}{{ panel_used_live }}{% else %}<span class="sv-unknown" title="Live capital-at-work could not be read">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk"><span class="sv-venue sv-venue--paper">PAPER</span> ENGAGED</span><span class="dv">{% if panel_used_paper %}{{ panel_used_paper }}{% else %}<span class="sv-unknown" title="Paper capital-at-work could not be read">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk"><span class="sv-venue sv-venue--live">LIVE</span> FREE</span><span class="dv {% if panel_free_live_neg %}red{% endif %}">{% if panel_free_live %}{{ panel_free_live }}{% else %}<span class="sv-unknown" title="Live free pool could not be read">&mdash;</span>{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk"><span class="sv-venue sv-venue--paper">PAPER</span> FREE</span><span class="dv {% if panel_free_paper_neg %}red{% endif %}">{% if panel_free_paper %}{{ panel_free_paper }}{% else %}<span class="sv-unknown" title="Paper free pool could not be read">&mdash;</span>{% endif %}</span></div>
                             <div class="ip-dd-cell"><span class="dk">EXPOSURE</span><span class="dv">{% if panel_exposure is not None %}{{ panel_exposure }}%{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</span></div>
                             <div class="ip-dd-cell"><span class="dk">OPEN P&amp;L</span><span class="dv {% if panel_open_pnl > 0 %}up{% elif panel_open_pnl < 0 %}down{% endif %}">{% if panel_open_pnl_display %}{{ panel_open_pnl_display }}{% else %}<span class="sv-unknown" title="No open position could be marked to a live quote">&mdash;</span>{% endif %}</span></div>
                             {% comment %}
@@ -1292,6 +1384,17 @@
   </svg>
 </button>
 
+{# THE PHONE'S BOTTOM NAV (2026-09-28). The four pages the father opens every day and the whole menu, one tap each. #}
+{# Shown at 768px and below only (static/css/sv-responsive.css), and not on the position page, whose close bar owns the bottom edge. #}
+{# aria-current comes from the same page_id tests the sidebar's active row uses; the bell stays in the topbar for alerts. #}
+<nav class="sv-phone-nav" id="svPhoneNav" aria-label="Main">
+    <a class="sv-pn-item" href="{% url 'command_center' %}"{% if page_id == 'command' or page_id == 'dashboard' or page_id == 'eye' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true">◉</span><span class="sv-pn-label">Home</span></a>
+    <a class="sv-pn-item" href="{% url 'positions_list' %}"{% if page_id == 'positions' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true">▣</span><span class="sv-pn-label">Positions</span></a>
+    <a class="sv-pn-item" href="{% url 'portfolio_overview' %}"{% if page_id == 'portfolio' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true">◎</span><span class="sv-pn-label">Portfolio</span></a>
+    <a class="sv-pn-item" href="{% url 'briefing_dashboard' %}"{% if page_id == 'briefing' %} aria-current="page"{% endif %}><span class="sv-pn-icon" aria-hidden="true">✦</span><span class="sv-pn-label">Briefing</span></a>
+    <button type="button" class="sv-pn-item" onclick="toggleMobileSidebar()" aria-controls="mainSidebar"><span class="sv-pn-icon" aria-hidden="true">&#9776;</span><span class="sv-pn-label">Menu</span></button>
+</nav>
+
 <!-- Signals Rail (right sidebar) — split: Signals + Watchlist -->
 <div class="signals-rail" id="signalsRail">
     <div class="rail-section sig-section" id="railSignals">
@@ -1436,6 +1539,9 @@
       path.setAttribute('d', cmds.join(' '));
     });
   }
+  /* The data headband's sweep (svDhIngest, the WebSocket block) redraws a
+     card's spark when fresh closes arrive. */
+  window.svRenderSparks = renderSparks;
   /* Initial pass + observe DOM changes (HTMX swaps replace tab bodies but
      not the rail; still cheap to re-run on document mutations). */
   if (document.readyState === 'loading') {
@@ -3373,8 +3479,9 @@ window.svWheelMarquee = function (frame, track) {
 <script>
 /* UPGRADE-3: WebSocket live ticks.
    Opens a persistent socket to /ws/dashboard/ and updates the headband
-   + watchlist DOM in-place. Gracefully degrades to the 15s poller if
-   the socket can't connect or drops permanently. */
+   + watchlist DOM in-place. There is no 15s poller behind it: while the
+   socket is down, the data headband's quotes arrive with the shell's
+   live-region sweep instead (svDhIngest, below), every 20s. */
 (function(){
   if (window.__sauronWS) return;
   window.__sauronWS = true;
@@ -3398,10 +3505,11 @@ window.svWheelMarquee = function (frame, track) {
     const hasPct = d.change_pct !== null && d.change_pct !== undefined
                    && d.change_pct !== "" && isFinite(+d.change_pct);
     const pct = hasPct ? +d.change_pct : null;
-    const last = +d.last || 0;
+    const last = +(d.last != null ? d.last : d.price) || 0;   // see dhSync
+    if (!(last > 0)) return;
 
     // 1. Dashboard headband
-    document.querySelectorAll(`.dh-item[data-symbol="${sym}"]`).forEach(el => {
+    document.querySelectorAll(`.dh-item[data-symbol="${sym}"],.dh-item[data-symbol="${dhSym(sym)}"]`).forEach(el => {
       const val = el.querySelector('.dh-val');
       const chg = el.querySelector('.dh-chg');
       const dot = el.querySelector('.dh-dot');
@@ -3412,6 +3520,7 @@ window.svWheelMarquee = function (frame, track) {
         chg.className = 'dh-chg ' + (pct >= 0 ? 'up' : 'down');
       }
       if (dot && hasPct) dot.className = 'dh-dot ' + (pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat');
+      dhSync(el, d, last, pct);   // and its card
     });
 
     // 2. Watchlist rail
@@ -3467,6 +3576,174 @@ window.svWheelMarquee = function (frame, track) {
     el.style.textShadow = '0 0 8px currentColor';
     setTimeout(() => { el.style.textShadow = ''; }, 250);
   }
+
+  /* ── The data headband's cards say the current quote (2026-09-27) ──────
+     The operator: "also the data feed popup on hover, please put them up
+     to date". Every value in a data-headband card (.dh-pop) was server
+     text rendered once at page load, and nothing ever wrote to it again:
+     a tick repainted the cell beside it and left the card on the page
+     load's price, day change, spread, source and "4 seconds ago" for as
+     long as the page stayed open — in both halves of the loop, open or
+     closed, first open or tenth.
+
+     Each .dh-item now carries its quote as ONE record — data-last,
+     data-pct, data-bid, data-ask, data-vol, data-src and data-at, when
+     Sauron received it (ISO, UTC) — rendered by the server
+     (_partials/dh_item.html), replaced by dhSync for every item a tick
+     reaches, and its card is repainted from that record (dhPaint). The
+     card is reached where it is: inside its item, or on <body> while it
+     is open — the portal moves it there and item._portalPop still names
+     it — so an open card changes under the reader's eyes. Precision is
+     the item's own data-decimals: a card on <body> has no
+     [data-decimals] ancestor. Text is written only where it differs, and
+     nothing is rebuilt or bound: the spark and the LONG / SHORT / ASK
+     buttons are left as they are.
+
+     A tick REPLACES the record. What it does not carry is unknown for its
+     price, not the last record's: its spread, source and time read "—"
+     rather than another quote's. The exceptions are the 24h volume, an
+     aggregate rather than a print, which stands until a record brings a
+     new one, and a day change the source did not measure, which applyTick
+     already leaves alone. Never the browser's clock as a quote's time: a
+     tick without `ts` says "—".
+
+     applyTick itself: a 'quote' message (push_quote_update) says `price`,
+     not `last`, and `+d.last || 0` painted it as 0 — a tick with no
+     positive price now paints nothing; and it matches the venue's
+     spelling as well as ours (dhSym). */
+  function dhNum(v) {
+    return v === null || v === undefined || v === '' || !isFinite(+v) ? null : +v;
+  }
+  /* The streamers broadcast the venue's spelling (Binance BTCUSDT, OANDA
+     EUR_USD) and the headband carries the catalogue's (BTCUSD, EURUSD), so
+     no live tick ever reached a crypto or forex item. The server's own
+     rule: market_data/quotes.py, instrument_symbol_candidates. */
+  function dhSym(s) {
+    return s.replace(/[-\/:_]/g, '').replace(/(USDT|BUSD|USDC)$/, 'USD');
+  }
+  /* SV.ages' own words (static/js/sv-overlay.js, humanAge), so an age
+     reads the same the moment a tick lands as when that engine re-ages
+     it fifteen seconds later. */
+  function dhAgo(s) {
+    return s < 45 ? 'just now' : s < 3600 ? Math.round(s / 60) + 'm ago'
+      : s < 86400 ? Math.round(s / 3600) + 'h ago' : Math.round(s / 86400) + 'd ago';
+  }
+  function dhClock(t) {
+    const d = new Date(t), p = n => (n < 10 ? '0' : '') + n;
+    return p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) + ':' + p(d.getUTCSeconds());
+  }
+  function dhSync(el, d, last, pct) {
+    const put = (k, v) => el.setAttribute('data-' + k,
+      v === null || v === undefined ? '' : String(v));
+    const bid = dhNum(d.bid), ask = dhNum(d.ask), spread = bid > 0 && ask > 0;
+    put('last', last);
+    if (pct !== null && pct !== undefined) put('pct', pct);
+    put('bid', spread ? bid : '');
+    put('ask', spread ? ask : '');
+    if (dhNum(d.volume) !== null) put('vol', d.volume);
+    put('src', d.source || '');
+    put('at', d.ts || '');
+    dhPaint(el);
+  }
+  function dhPaint(el) {
+    const pop = el.querySelector('.dh-pop') || el._portalPop;
+    if (!pop) return;
+    const f = {};
+    pop.querySelectorAll('[data-dh-f]').forEach(n => { f[n.getAttribute('data-dh-f')] = n; });
+    const say = (n, t) => { if (n && n.textContent !== t) n.textContent = t; };
+    const rec = k => el.getAttribute('data-' + k);
+    const px = v => v.toFixed(svDecimals(el, v));
+    const last = dhNum(rec('last')), pct = dhNum(rec('pct'));
+    const bid = dhNum(rec('bid')), ask = dhNum(rec('ask')), vol = dhNum(rec('vol'));
+    say(f.price, last > 0 ? px(last) : '—');
+    if (pct !== null) {
+      const up = pct >= 0, tone = up ? 'var(--accent)' : 'var(--accent-red)';
+      say(f.pct, (up ? '+' : '') + pct.toFixed(2) + '%');
+      if (f.pct) { f.pct.className = 'dh-pop-pct ' + (up ? 'up' : 'down'); f.pct.style.color = tone; }
+      say(f.badge, up ? '▲' : '▼');
+      if (f.badge) f.badge.className = 'dh-pop-badge ' + (pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat');
+      /* The template's widthratio: a tenth of the bar per percent up. */
+      if (f.bar) { f.bar.style.width = (up ? Math.round(pct * 10) : 0) + '%'; f.bar.style.background = tone; }
+      const spark = pop.querySelector('.pop-spark');
+      if (spark) spark.setAttribute('data-up', up ? '1' : '0');
+    }
+    say(f.bidask, bid > 0 && ask > 0 ? px(bid) + ' / ' + px(ask) : '—');
+    say(f.vol, vol ? String(Math.round(vol)) : '—');
+    say(f.src, rec('src') || '—');
+    const at = rec('at') || '', t = Date.parse(at);
+    say(f.asof, isNaN(t) ? '—' : dhClock(t) + ' UTC ·');
+    if (!f.age) return;
+    if (isNaN(t)) { f.age.removeAttribute('data-sv-at'); say(f.age, ''); return; }
+    if (f.age.getAttribute('data-sv-at') === at) return;
+    const s = Math.max(0, (Date.now() - t) / 1000);
+    f.age.setAttribute('data-sv-at', at);
+    say(f.age, dhAgo(s));
+    f.age.classList.toggle('sv-age--stale', s >= 900 && s < 3600);
+    f.age.classList.toggle('sv-age--dead', s >= 3600);
+  }
+  /* The periodic refresh. The shell's live-region sweep
+     (_partials/live_region.html) fetches /getting-started/ every minute,
+     every 20s while the socket is down: a whole render of this shell,
+     fresh #dataHeadband included, which it used to throw away. The band
+     is not a live region and must not become one — an innerHTML swap
+     would take the items, and an open card's anchor, from under the
+     reader — so the sweep hands its parsed answer here. A fresh record
+     NEWER than the one the page's item carries takes the socket's own
+     path: applyTick when the price or the day change moved (the cells
+     repaint and flash, as on a tick), dhSync alone when only the time,
+     source or spread did (nothing flashes that did not change). An older
+     record is dropped: a tick that landed after the server rendered keeps
+     its place. Fresh spark closes (twelve bars, not a quote) replace a
+     card's when they differ.
+
+     Two more things a record brings. Its precision: the server decides
+     it afresh on every render, and an item with no quote at load was
+     rendered at the no-quote default (2), so a forex pair's first record
+     would otherwise read 1.33 / 1.33 until a reload. And its order
+     against a tick WITHOUT a time — a streamer still running the code
+     from before its broadcast carried `ts`: that price has no time to
+     compare (`t <= NaN` is false), so a record could be the older of the
+     two. Only a record at that same price may give it its time, source
+     and spread; a record at another price waits until a tick with a
+     time gives the item one. */
+  window.svDhIngest = function (doc) {
+    const seen = {};
+    let redraw = false;
+    doc.querySelectorAll('.dh-item[data-symbol]').forEach(fresh => {
+      const sym = fresh.getAttribute('data-symbol');
+      if (!sym || seen[sym]) return;
+      seen[sym] = true;
+      const mine = Array.prototype.slice.call(
+        document.querySelectorAll(`.dh-item[data-symbol="${sym}"]`));
+      if (!mine.length) return;
+      const pts = fresh.querySelector('.pop-spark');
+      if (pts) mine.forEach(el => {
+        const pop = el.querySelector('.dh-pop') || el._portalPop;
+        const sp = pop && pop.querySelector('.pop-spark');
+        if (!sp || sp.getAttribute('data-points') === pts.getAttribute('data-points')) return;
+        ['points', 'min', 'max'].forEach(k =>
+          sp.setAttribute('data-' + k, pts.getAttribute('data-' + k) || ''));
+        redraw = true;
+      });
+      const rec = k => fresh.getAttribute('data-' + k) || '';
+      if (!(dhNum(rec('last')) > 0)) return;
+      const dec = rec('decimals');
+      if (dec) mine.forEach(el => {
+        if (el.getAttribute('data-decimals') !== dec) el.setAttribute('data-decimals', dec);
+      });
+      const t = Date.parse(rec('at')), held = Date.parse(mine[0].getAttribute('data-at') || '');
+      if (isNaN(t) || t <= held) return;
+      const d = { symbol: sym, last: rec('last'), change_pct: rec('pct'), bid: rec('bid'),
+                  ask: rec('ask'), volume: rec('vol'), source: rec('src'), ts: rec('at') };
+      const n = svDecimals(mine[0], +d.last), had = mine[0].getAttribute('data-last');
+      const shown = (v, k) => (dhNum(v) === null ? '' : dhNum(v).toFixed(k));
+      const moved = shown(had, n) !== shown(d.last, n);
+      if (moved && isNaN(held) && dhNum(had) > 0) return;   // an untimed tick's price
+      if (moved || shown(mine[0].getAttribute('data-pct'), 2) !== shown(d.change_pct, 2)) applyTick(d);
+      else mine.forEach(el => dhSync(el, d, +d.last, dhNum(d.change_pct)));
+    });
+    if (redraw && window.svRenderSparks) window.svRenderSparks();
+  };
 
   /* New signal announced over the socket: refetch the rail's cards and
      let the fresh ones slide in. The swap re-dispatches htmx:afterSwap so
@@ -3597,25 +3874,100 @@ window.svWheelMarquee = function (frame, track) {
      scrapers store articles in bursts and one swap covers the batch. The
      track element itself is never replaced, so the scroll animation keeps
      its phase; items whose id was not present before glow briefly as they
-     ride past. */
-  let tickerTimer = null;
+     ride past.
+
+     Every ITEM is replaced, so nothing may hang on one (2026-09-27). The
+     hover listeners bound per item at load died with the first swap —
+     five minutes into a visible page, or on the first return to the tab —
+     and the band scrolled on, deaf to hover until a reload. Hover is
+     delegated to #tickerBar by the popup engine (UPGRADE-9) now, and every
+     swap names its region, so that engine closes a card whose item the
+     swap took instead of leaving it on <body> pointing at nothing. */
+  let tickerTimer = null, tickerSeq = 0, tickerLast = null;
+  let tickerHeld = null, tickerCheck = null;
+  /* What the band SAYS: each item's link, id, kind and words, its card's
+     included. Read off the DOM, never compared as raw markup: the page's
+     first render and the partial's answer carry the same items in
+     different whitespace. Taken from the first render too, so the first
+     sweep of a page whose headlines have not moved rewrites nothing. */
+  function tickerKey(root) {
+    return JSON.stringify(Array.from(root.querySelectorAll('.ticker-item')).map(el => [
+      el.getAttribute('href'), el.getAttribute('data-news-id'),
+      el.getAttribute('data-type'), el.textContent.replace(/\s+/g, ' ').trim()]));
+  }
+  try {
+    const firstTrack = document.getElementById('tickerTrack');
+    if (firstTrack) tickerLast = tickerKey(firstTrack);
+  } catch (e) { tickerLast = null; }
+  /* The hand is on the band, or on one of its cards. An open card is a
+     body child (the popup engine portals it), so the track's own :hover
+     cannot see it. The rule live_region.html already keeps: never swap a
+     region out from under the cursor or under a card being read. */
+  function readingTicker(track) {
+    return track.matches(':hover') || !!document.querySelector('.ticker-popup:hover');
+  }
+  function swapTicker(track, html, force) {
+    /* A 200 that is a whole page — a session that expired between two
+       sweeps follows the redirect to the login wall — is not a marquee. */
+    if (/<html[\s>]|<!doctype/i.test(html)) return;
+    const box = document.createElement('div');
+    box.innerHTML = html;
+    const key = tickerKey(box);
+    /* An answer that says what the band says changes nothing: the items
+       under the pointer are left where they are. */
+    if (key === tickerLast) { tickerHeld = null; return; }
+    /* Fresh headlines wait while the hand is on the band or reading one of
+       its cards, and land once it has left (releaseTicker). The fetching
+       never waits, and a newer answer replaces the one waiting. */
+    if (!force && readingTicker(track)) { tickerHeld = html; return; }
+    tickerHeld = null;
+    const before = new Set(
+      Array.from(track.querySelectorAll('.ticker-item[data-news-id]'))
+        .map(el => el.dataset.newsId));
+    try {
+      track.innerHTML = html;
+      tickerLast = key;
+      track.querySelectorAll('.ticker-item[data-news-id]').forEach(el => {
+        if (!before.has(el.dataset.newsId)) el.classList.add('t-new');
+      });
+    } finally {
+      document.dispatchEvent(new CustomEvent('htmx:afterSwap',
+                                             { detail: { svRegion: track } }));
+    }
+  }
+  /* The answer that waited lands once the hand has left the band and its
+     card: checked a moment after the pointer crosses any edge, by when a
+     card the hand did not reach has closed on its own grace. And at once
+     when the tab hides: nobody reads a hidden tab. */
+  function releaseTicker(force) {
+    const track = document.getElementById('tickerTrack');
+    if (!tickerHeld || !track) return;
+    if (!force && readingTicker(track)) return;
+    swapTicker(track, tickerHeld, true);
+  }
+  document.addEventListener('mouseout', function () {
+    if (!tickerHeld) return;
+    if (tickerCheck) clearTimeout(tickerCheck);
+    tickerCheck = setTimeout(function () {
+      tickerCheck = null;
+      releaseTicker(false);
+    }, 400);
+  });
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) releaseTicker(true);
+  });
   function refreshTicker() {
     if (tickerTimer) clearTimeout(tickerTimer);
     tickerTimer = setTimeout(() => {
       tickerTimer = null;
       const track = document.getElementById('tickerTrack');
       if (!track) return;
-      const before = new Set(
-        Array.from(track.querySelectorAll('.ticker-item[data-news-id]'))
-          .map(el => el.dataset.newsId));
+      /* Only the latest answer lands: a slow one overtaken by a newer
+         sweep would put older headlines back. */
+      const seq = ++tickerSeq;
       fetch('/partials/ticker/', { credentials: 'same-origin' })
-        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
-        .then(html => {
-          track.innerHTML = html;
-          track.querySelectorAll('.ticker-item[data-news-id]').forEach(el => {
-            if (!before.has(el.dataset.newsId)) el.classList.add('t-new');
-          });
-        })
+        .then(r => { if (!r.ok || r.redirected) throw new Error('HTTP ' + r.status); return r.text(); })
+        .then(html => { if (seq === tickerSeq) swapTicker(track, html); })
         .catch(() => {});
     }, 800);
   }
@@ -3857,6 +4209,15 @@ window.svWheelMarquee = function (frame, track) {
   // Moves a popup from inside a transform-animated track to <body>,
   // positions it fixed, and returns it on mouseleave.
   var activePopup = null;
+  /* Every card this engine has on <body> right now, and the one item whose
+     hover beat is running — so a swap, a tab switch or a page restored
+     from the back/forward cache can find what it must close (2026-09-27). */
+  var portalOpen = [];
+  var beatItem = null;
+  /* Set when resetPortals closes everything: the hand may still rest on
+     the item whose card it closed, and a move inside that item crosses no
+     edge, so no mouseover comes. The first move over a band item arms it. */
+  var portalRewake = false;
   /* placement: 'below' (default — headband cells hang their popup under
      the band) or 'left' (rail items float theirs beside the rail, exactly
      like the signal cards' popups). */
@@ -3877,6 +4238,10 @@ window.svWheelMarquee = function (frame, track) {
     (open ? SV.popup.opened : SV.popup.closed)(pop);
   }
   function showPortalPopup(item, popSelector, maxW, placement) {
+    /* An item a live swap has taken is anchored nowhere: its rect is all
+       zeros, and its card would open in the corner pointing at nothing. */
+    if (!item || !item.isConnected) return;
+    dropOrphans();
     var pop = item.querySelector(popSelector) || item._portalPop;
     if (!pop) return;
     /* Cancel any pending hide for this item — we're moving back in. */
@@ -3914,6 +4279,7 @@ window.svWheelMarquee = function (frame, track) {
     pop.style.left = left + 'px';
     pop.style.animation = 'dhPop .18s ease';
     activePopup = pop;
+    if (portalOpen.indexOf(pop) < 0) portalOpen.push(pop);
     popRegister(pop, true);
     /* Bind mouseenter/leave on the popup itself so it stays open
        while the cursor is on it. Bind once. */
@@ -3971,6 +4337,28 @@ window.svWheelMarquee = function (frame, track) {
       pop._origParent = null;
     }
     if (activePopup === pop) activePopup = null;
+    var at = portalOpen.indexOf(pop);
+    if (at >= 0) portalOpen.splice(at, 1);
+  }
+  /* A card whose item has left the page — a live swap replaced the band
+     under it — goes back INTO that item and out of the page with it. Left
+     on <body> it would hang there pointing at nothing: a removed node
+     never fires the mouseleave that would have closed it. A beat still
+     running for a removed item is dropped for the same reason. */
+  function dropOrphans() {
+    if (beatItem && !beatItem.isConnected) disarmPortal(beatItem);
+    portalOpen.slice().forEach(function(p) {
+      if (!(p._origParent && p._origParent.isConnected)) hidePortalPopup(p);
+    });
+  }
+  /* A hand that left while the page was not looking — a tab switch, a
+     minimised window, a sleep, a page put into or taken out of the
+     back/forward cache — sends no mouseleave either: nothing stays armed
+     or open across it. */
+  function resetPortals() {
+    if (beatItem) disarmPortal(beatItem);
+    portalOpen.slice().forEach(function(p) { hidePortalPopup(p); });
+    portalRewake = true;
   }
 
   /* The two exits that are not the pointer. Escape is the universal way out
@@ -3984,6 +4372,7 @@ window.svWheelMarquee = function (frame, track) {
     }
   });
   document.addEventListener('htmx:afterSwap', function(e) {
+    dropOrphans();
     if (!activePopup) return;
     /* ...but only a swap that could have taken THIS popup's cell with it.
        A live refresher that names its region (detail.svRegion) is saying
@@ -3995,9 +4384,18 @@ window.svWheelMarquee = function (frame, track) {
        A swap that names no region keeps the old blanket behaviour. */
     var region = e && e.detail && e.detail.svRegion;
     var anchor = activePopup._origParent;
-    if (region && region.contains && anchor
+    if (region && region.contains && anchor && anchor.isConnected
         && region !== anchor && !region.contains(anchor)) return;
     hidePortalPopup(activePopup);
+  });
+  document.addEventListener('visibilitychange', function() {
+    if (document.hidden) resetPortals();
+  });
+  window.addEventListener('pagehide', resetPortals);
+  /* Only a page coming back from the cache: the first pageshow comes after
+     load, and a card opened before it is the operator's, not stale. */
+  window.addEventListener('pageshow', function(e) {
+    if (e && e.persisted) resetPortals();
   });
 
   // Portal popups arm on the one hover beat, and a mouseleave before the
@@ -4005,33 +4403,82 @@ window.svWheelMarquee = function (frame, track) {
   // STOPPED on, not for every item it crossed on the way there. Showing
   // on mouseenter directly is what made the ticker strobe under a
   // travelling pointer while the feed rows two bands away took 2s.
+  // One beat at a time: arming an item disarms the last one, whose leave
+  // may never have come (a swap removed it from under the pointer).
   function armPortal(item, sel, width, side){
-    item.addEventListener('mouseenter', function(){
-      if (item._svBeat) clearTimeout(item._svBeat);
-      item._svBeat = setTimeout(function(){
-        item._svBeat = null;
-        showPortalPopup(item, sel, width, side);
-      }, window.SV_HOVER_BEAT_MS || 450);
+    if (beatItem && beatItem !== item) disarmPortal(beatItem);
+    if (item._svBeat) clearTimeout(item._svBeat);
+    beatItem = item;
+    item._svBeat = setTimeout(function(){
+      item._svBeat = null;
+      if (beatItem === item) beatItem = null;
+      showPortalPopup(item, sel, width, side);
+    }, window.SV_HOVER_BEAT_MS || 450);
+  }
+  function disarmPortal(item){
+    if (item._svBeat) { clearTimeout(item._svBeat); item._svBeat = null; }
+    if (beatItem === item) beatItem = null;
+  }
+
+  /* Hover is DELEGATED to each band's own frame, which no refresh replaces
+     (2026-09-27). The ticker's live refresh rewrites every item — every
+     five minutes, on each return to the tab, on each news push — and the
+     listeners that used to be bound per item at load died with the first
+     rewrite: the band went on scrolling, deaf to hover, until the next
+     page load. mouseover and mouseout bubble to the frame, and
+     relatedTarget says whether the pointer crossed an item's edge, so this
+     is the old per-item mouseenter / mouseleave pair for whatever items
+     the frame holds NOW. Nothing is bound to an item. */
+  function portalItemAt(host, sel, node){
+    var item = node && node.nodeType === 1 && node.closest ? node.closest(sel) : null;
+    return item && host.contains(item) ? item : null;
+  }
+  function delegatePortal(host, sel, arm){
+    if (!host || host._svPortalHost) return;
+    host._svPortalHost = true;
+    host.addEventListener('mouseover', function(e){
+      var item = portalItemAt(host, sel, e.target);
+      var from = e.relatedTarget;
+      if (!item || (from && from.nodeType === 1 && item.contains(from))) return;
+      dropOrphans();
+      arm(item);
     });
-    item.addEventListener('mouseleave', function(){
-      if (item._svBeat) { clearTimeout(item._svBeat); item._svBeat = null; }
+    host.addEventListener('mouseout', function(e){
+      var item = portalItemAt(host, sel, e.target);
+      var to = e.relatedTarget;
+      if (!item || (to && to.nodeType === 1 && item.contains(to))) return;
+      disarmPortal(item);
+      maybeHidePortalPopup(item, item._portalPop, to);
+    });
+    /* Back from a tab switch, a sleep or the back/forward cache, the hand
+       may be resting on the item whose card the reset closed: its first
+       move there arms that item, as an entry would have. */
+    host.addEventListener('mousemove', function(e){
+      if (!portalRewake) return;
+      var item = portalItemAt(host, sel, e.target);
+      if (!item) return;
+      portalRewake = false;
+      if (beatItem === item || portalOpen.indexOf(item._portalPop) >= 0) return;
+      arm(item);
     });
   }
 
   // Data headband popups (portal to body) — hover-friendly
-  document.querySelectorAll('.data-headband .dh-item').forEach(function(item){
-    var pop = item.querySelector('.dh-pop');
+  delegatePortal(document.getElementById('dataHeadband'), '.dh-item', function(item){
     armPortal(item, '.dh-pop', 380);
-    item.addEventListener('mouseleave', function(e){ maybeHidePortalPopup(item, item._portalPop || pop, e.relatedTarget); });
   });
 
   // Watchlist rail popups — same portal, same lifecycle, but placed to the
   // SIDE of the rail like the signal cards' popups, not under the item.
-  document.querySelectorAll('.wl-item').forEach(function(item){
-    var pop = item.querySelector('.wl-pop');
-    if (!pop) return;
+  delegatePortal(document.getElementById('railWatchBody'), '.wl-item', function(item){
     armPortal(item, '.wl-pop', 380, 'left');
-    item.addEventListener('mouseleave', function(e){ maybeHidePortalPopup(item, item._portalPop || pop, e.relatedTarget); });
+  });
+
+  // News ticker popups (portal to body), delegated to #tickerBar — bound
+  // here, before the strips' arrows and wheels, so nothing that throws
+  // below can leave the news band without hover.
+  delegatePortal(document.getElementById('tickerBar'), '.ticker-item', function(item){
+    armPortal(item, '.ticker-popup', 420);
   });
 
   // Data headband hover arrows
@@ -4076,12 +4523,7 @@ window.svWheelMarquee = function (frame, track) {
     if (dhFrame && window.svWheelMarquee) window.svWheelMarquee(dhFrame, dhTrack);
   }
 
-  // Ticker popups (portal to body) — hover-friendly
-  document.querySelectorAll('.ticker-bar .ticker-item').forEach(function(item){
-    var pop = item.querySelector('.ticker-popup');
-    armPortal(item, '.ticker-popup', 420);
-    item.addEventListener('mouseleave', function(e){ maybeHidePortalPopup(item, item._portalPop || pop, e.relatedTarget); });
-  });
+  // (The ticker's popups are delegated above, with the other two bands.)
 
   // Ticker bar hover arrows
   var tTrack = document.getElementById('tickerTrack');
@@ -4251,6 +4693,26 @@ window.svWheelMarquee = function (frame, track) {
     if(localStorage.getItem('ipMinimized') === '1'){
       wrap.classList.add('minimized');
       pill.classList.add('visible');
+    }
+    /* A phone (768px and below, 2026-09-28): sv-responsive.css hides the
+       panel, and marking it minimized makes every rule that lifts for an
+       open one (:not(.minimized): the floating buttons, the position
+       page's close bar, which floated 60px above the bottom at 360x780)
+       read "no panel", which is true there. Nothing is saved: on a wider
+       window the operator's own choice (ipMinimized) comes back. */
+    var phoneMq = window.matchMedia && window.matchMedia('(max-width: 768px)');
+    function fitPhone(){
+      var phone = !!(phoneMq && phoneMq.matches);
+      var kept = false;
+      try { kept = localStorage.getItem('ipMinimized') === '1'; } catch (e) {}
+      if (phone) wrap.classList.add('minimized');
+      else if (!kept) wrap.classList.remove('minimized');
+      pill.classList.toggle('visible', !phone && wrap.classList.contains('minimized'));
+    }
+    fitPhone();
+    if (phoneMq) {
+      if (phoneMq.addEventListener) phoneMq.addEventListener('change', fitPhone);
+      else if (phoneMq.addListener) phoneMq.addListener(fitPhone);
     }
     function toggle(){
       var min = wrap.classList.toggle('minimized');
@@ -4782,6 +5244,20 @@ never nags. He never acts.{% endcomment %}
     </svg>
     <span class="se-fab-label">ASK</span>
     {% comment %}
+    The unread sign: a hairline ring just outside the rim and a pip sitting on
+    it at half past one. Its own element, on purpose — the button's ::before
+    and ::after are already the ASK SAURON tooltip and its arrow, and the old
+    mark borrowed the arrow, inherited its borders and its opacity 0, and so
+    drew a blinking ellipse that vanished outright under reduced motion.
+    Shown by the 'answered' class (plus 'answered-failed' when Sauron could
+    not answer); the words live on the button's aria-label and title, so this
+    stays out of the accessibility tree.
+    {% endcomment %}
+    <span class="se-fab-unread" aria-hidden="true">
+        <i class="se-fab-unread-ring"></i>
+        <i class="se-fab-unread-pip"></i>
+    </span>
+    {% comment %}
     Corner marks. They appear on hover to say the orb is a control rather than
     an ornament — the eye is decorative enough that people were not sure it
     could be clicked. When the panel is open the same corners give way to a
@@ -4895,6 +5371,12 @@ never nags. He never acts.{% endcomment %}
 
     function openPanel() {
         panel.classList.add('open'); fab.classList.add('open');
+        /* Every way in comes through here — the orb, the ? key, Ctrl+K,
+           askSauronAbout, [data-ask-sauron], the banner's Open — so this is
+           the one place the unread mark is read. Clearing it on the orb's
+           click alone let it survive every other path and come back the
+           moment the panel closed over an answer already read. */
+        clearUnread();
         /* Opening it anywhere shows the live thread, not just what this
            page happened to type. */
         loadThread();
@@ -5726,7 +6208,8 @@ never nags. He never acts.{% endcomment %}
             if (!j.pending && !panel.classList.contains('open')) {
                 /* No server push follows the fallback path, so this page
                    raises the banner itself — as it always did. */
-                notifyAnswer(j.assistant_text || j.error || 'Answer ready.');
+                notifyAnswer(j.assistant_text || j.error || 'Answer ready.',
+                             j.ok !== false);
             }
         })
         .catch(function(e) {
@@ -5741,6 +6224,62 @@ never nags. He never acts.{% endcomment %}
         });
     }
 
+    /* ── The unread mark ───────────────────────────────────────────────
+       An answer that lands on a shut panel marks the orb until the panel is
+       next opened (openPanel clears it, whichever path opened it). The mark
+       is drawn by .se-fab-unread; what it MEANS is said here, on the
+       button's aria-label and title, because a ring and a pip say nothing
+       to a screen reader and not much more to a new operator.
+
+       It lives in sessionStorage because the socket only speaks once: the
+       answer is pushed to the page you were on when it landed, and a click
+       to the next page used to wipe the mark before you had read anything.
+       Per tab, not per browser — each open tab receives its own push — and
+       every access is guarded, because a private window or blocked site
+       data throws on the accessor itself and must never cost the orb.
+
+       And per user: nothing clears the tab's storage at logout, so an
+       unkeyed mark left by one operator would light the orb for the next
+       one to sign in on the same tab — "new answer" on a thread that holds
+       no such answer. A key carrying the user's id is simply not found by
+       anyone else; the stale one dies with the tab. */
+    var UNREAD_KEY = 'sauron-eye-unread:{{ request.user.pk }}';
+    var FAB_LABEL = fab.getAttribute('aria-label') || 'Ask Sauron';
+    var FAB_TITLE = fab.getAttribute('title') || FAB_LABEL;
+
+    function markUnread(ok, settled) {
+        var words = ok ? 'Ask Sauron — new answer'
+                       : 'Ask Sauron — the last question failed';
+        /* A second answer on top of an unread one is news too: take the
+           sign down for a frame so it arrives, once, again. */
+        if (!settled && fab.classList.contains('answered')) {
+            fab.classList.remove('answered');
+            void fab.offsetWidth;
+        }
+        fab.classList.add('answered');
+        fab.classList.toggle('answered-failed', !ok);
+        /* settled: restored on a new page, so the sign is already there
+           rather than arriving a second time. */
+        fab.classList.toggle('answered-settled', !!settled);
+        fab.setAttribute('aria-label', words);
+        fab.setAttribute('title', words);
+        try { sessionStorage.setItem(UNREAD_KEY, ok ? 'answer' : 'failed'); }
+        catch (e) { /* storage unavailable — the mark holds for this page */ }
+    }
+    function clearUnread() {
+        fab.classList.remove('answered', 'answered-failed', 'answered-settled');
+        fab.setAttribute('aria-label', FAB_LABEL);
+        fab.setAttribute('title', FAB_TITLE);
+        try { sessionStorage.removeItem(UNREAD_KEY); }
+        catch (e) { /* nothing was kept, so nothing to forget */ }
+    }
+    (function restoreUnread() {
+        var kept = null;
+        try { kept = sessionStorage.getItem(UNREAD_KEY); }
+        catch (e) { kept = null; }
+        if (kept === 'answer' || kept === 'failed') markUnread(kept === 'answer', true);
+    })();
+
     /* ── The answer announces itself ───────────────────────────────────
        Pushed by the server on the operator's own socket when the worker
        settles the row, so it arrives on whatever page they are on by then.
@@ -5750,7 +6289,10 @@ never nags. He never acts.{% endcomment %}
         var msg = (ev && ev.detail) || {};
         if (msg.kind !== 'sauron_answer') return;
         if (!panel.classList.contains('open')) {
-            fab.classList.add('answered');
+            /* The worker announces a failure on this same event with
+               ok:false; only an explicit false is a failure, so an older
+               payload without the flag still reads as an answer. */
+            markUnread(!(msg.data && msg.data.ok === false));
         } else {
             /* The answer just resolved in front of the operator; a banner
                announcing it as well is noise. The live listener appends its
@@ -5780,9 +6322,9 @@ never nags. He never acts.{% endcomment %}
        server raises the banner, so it reaches pages this script never ran
        on. Takes plain text: the body is model output and must not be
        parsed as markup just to read a preview out of it. */
-    function notifyAnswer(answerText) {
+    function notifyAnswer(answerText, ok) {
         var text = String(answerText || '').trim().replace(/\s+/g, ' ');
-        fab.classList.add('answered');
+        markUnread(ok !== false);
         if (window.svBanner) {
             window.svBanner('sauron_answer', {
                 preview: text.slice(0, 180) + (text.length > 180 ? '…' : ''),
@@ -5790,8 +6332,6 @@ never nags. He never acts.{% endcomment %}
             });
         }
     }
-    /* The unread mark clears the moment the panel is opened. */
-    fab.addEventListener('click', function () { fab.classList.remove('answered'); });
 
     function greetingBubble() {
         return '<div class="se-bubble assistant se-bubble-greeting">' +

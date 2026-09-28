@@ -56,6 +56,9 @@ def execute_kill_switch(user=None, reason="manual"):
         "positions_closed": 0,
         "asset_positions_closed": 0,
         "portfolio_positions_closed": 0,
+        # PAPER rows NOT booked because their market is shut (2026-09-26):
+        # they stay OPEN; see _paper_booking_waits.
+        "paper_waiting": [],
         "errors": [],
     }
     now = timezone.now()
@@ -87,6 +90,10 @@ def execute_kill_switch(user=None, reason="manual"):
     if user:
         open_legacy = open_legacy.filter(config__user=user)
     for trade in open_legacy:
+        waits = _paper_booking_waits(trade)
+        if waits:
+            results["paper_waiting"].append(waits)
+            continue
         try:
             _close_legacy_trade(trade, now)
             results["positions_closed"] += 1
@@ -101,6 +108,10 @@ def execute_kill_switch(user=None, reason="manual"):
     if user:
         open_asset = open_asset.filter(config__user=user)
     for trade in open_asset:
+        waits = _paper_booking_waits(trade)
+        if waits:
+            results["paper_waiting"].append(waits)
+            continue
         try:
             _close_asset_trade(trade, now)
             results["asset_positions_closed"] += 1
@@ -152,6 +163,15 @@ def execute_kill_switch(user=None, reason="manual"):
             f" ▲ {len(results['errors'])} broker-close error(s) — these symbols "
             f"may still be OPEN at the broker and need manual reconciliation."
         )
+    if results["paper_waiting"]:
+        body += (
+            f" {len(results['paper_waiting'])} paper position(s) were NOT "
+            f"booked because their market is shut or has not priced them "
+            f"since it reopened: "
+            f"{'; '.join(results['paper_waiting'])}. Every bot is disabled "
+            f"all the same; the rows stay OPEN — close them from the "
+            f"positions page once their market has a price again."
+        )
     try:
         if user:
             Notification.create_for_user(user, "system", title, body)
@@ -162,6 +182,50 @@ def execute_kill_switch(user=None, reason="manual"):
 
     logger.critical("[KILL SWITCH] Executed: %s", results)
     return results
+
+
+def _paper_booking_waits(trade) -> str:
+    """"" — or "EURCAD #108: the forex market is shut (reopens Sunday 21:00
+    UTC)" for a PAPER row whose market is shut (2026-09-26), or settling
+    after its open, or open for less than REOPEN_PRICE_GRACE_SECONDS with
+    nothing that prices the row since.
+
+    The switch still disables every bot (step 1 ran before any close) and
+    still flattens every LIVE row: a venue decides whether its own close
+    fills. Only the paper BOOKING waits, because the only price a shut
+    market offers is the last one before it shut, and a flatten booked at
+    Friday's price on a Saturday is an exit nobody could have had. The
+    same holds in the first hours after a reopen when the paper venue has
+    no price of the new session yet: _market_exit_price would fall back to
+    a raw LiveQuote or to the ENTRY price. The row stays OPEN, and the
+    notification and the results name it. (An options row is marked at
+    its premium, which the paper ticker does not price: only the clock is
+    asked for it.)"""
+    if not getattr(trade, "paper", False):
+        return ""
+    from bot_program.engine.paper_trader import (
+        PaperTrader, paper_awaits_first_price, paper_market_shut)
+    cls = getattr(trade, "asset_class", "") or ""
+    shut = paper_market_shut(trade.symbol, cls)
+    if not shut and cls != "options":
+        # The clock first (no price read at all outside the hours after an
+        # open, or with the gate off), then whether the paper venue prices
+        # the row yet.
+        young = paper_awaits_first_price(trade.symbol, cls)
+        if young:
+            try:
+                priced = float((PaperTrader(None).ticker(trade.symbol) or {})
+                               .get("lastPrice") or 0) > 0
+            except Exception:  # noqa: BLE001 — unreadable is unpriced
+                priced = False
+            if not priced:
+                shut = young
+    if not shut:
+        return ""
+    logger.warning("[KILL SWITCH] paper trade %s (%s) NOT booked: %s — the "
+                   "row stays OPEN until its market reopens",
+                   trade.id, trade.symbol, shut)
+    return f"{trade.symbol} #{trade.id}: {shut}"
 
 
 def _market_exit_price(symbol, fallback, client=None):
@@ -211,7 +275,8 @@ def _kill_order_id(trade) -> str:
         return ""
 
 
-def _try_broker_close(client, symbol, side, qty, client_order_id=""):
+def _try_broker_close(client, symbol, side, qty, client_order_id="",
+                      trade=None):
     """Submit a closing market order if the client supports it. Best-effort:
     raises on broker error so the caller can record it.
 
@@ -224,6 +289,19 @@ def _try_broker_close(client, symbol, side, qty, client_order_id=""):
     if not hasattr(client, "market_order"):
         return None
     close_side = "SELL" if side == "BUY" else "BUY"
+    # THE VENUE DECIDES WHAT A CLOSE IS. On eToro market_order only ever
+    # OPENS — a SELL is `sellShort` — and under Saxo's FifoEndOfDay an
+    # opposite order leaves both lots live. This is the worst place in the
+    # platform to get that wrong: the switch fires because something is
+    # already wrong, and the "flatten" would have doubled the exposure it was
+    # pressed to remove. `trade` is threaded in for the position id; without
+    # one venue_close raises and the caller records the failure, exactly as
+    # it already does for a broker refusal.
+    if trade is not None:
+        from bot_program.engine.venue_close import close_or_refuse
+        return close_or_refuse(trade, client, float(qty),
+                               close_side=close_side,
+                               client_order_id=client_order_id)
     # The kill switch is the WORST place to send an anonymous order.
     # It fires when something is already wrong, it can be triggered
     # twice by two operators or by a retry, and it flattens at
@@ -262,7 +340,7 @@ def _close_legacy_trade(trade, now):
                                         client=client)
         result = _try_broker_close(
             client, trade.symbol, trade.side, trade.qty,
-            client_order_id=_kill_order_id(trade))
+            client_order_id=_kill_order_id(trade), trade=trade)
     except Exception as e:  # noqa: BLE001
         logger.warning("[KILL SWITCH] broker close failed for %s: %s", trade.symbol, e)
         raise
@@ -342,12 +420,42 @@ def _close_asset_trade(trade, now):
     # to catch this. Nothing was sent and nothing can be: refuse, so the
     # symbol lands in the sweep's `errors` channel, which is where the
     # operator reads "may still be OPEN at the broker".
+    from bot_program.engine.broker_router import session_busy
     from bot_program.pending_closes import is_paper_client
     if not trade.paper and is_paper_client(client):
+        if session_busy(client):
+            # BUSY, not broken. The IBKR trading session is exclusive (one
+            # clientId, because an order is visible only to the session
+            # that placed it) and another process is holding it. Telling
+            # the operator the broker is unavailable would point them at
+            # the HQ disconnect, which really would put every live path on
+            # paper. Say what is true, and name the retry.
+            raise RuntimeError(
+                f"live trade {trade.id} ({trade.symbol}) could not be "
+                f"flattened: the exclusive IBKR trading session is held by "
+                f"another process (a bot tick or a close in flight). NOTHING "
+                f"was sent and the broker is fine — press EMERGENCY FLATTEN "
+                f"again in a few seconds, or close it at the broker")
         raise RuntimeError(
             f"live trade {trade.id} ({trade.symbol}) routed to PaperTrader "
             f"(broker unavailable) — no close was sent and the position is "
             f"still open at the broker; close it manually")
+
+    # A WORKING entry is a queued ORDER, not a position. Flattening it would
+    # send a market order against a position that does not exist yet — and
+    # leave the queued parent to fill afterwards, opening a position DURING
+    # an emergency stop. Withdraw it instead; that is what "flatten" means
+    # for an order.
+    from bot_program.asset_engine.base import (cancel_working_entry,
+                                               is_entry_working)
+    if is_entry_working(trade):
+        if cancel_working_entry(trade, client,
+                                reason="EMERGENCY FLATTEN"):
+            return
+        raise RuntimeError(
+            f"trade {trade.id} ({trade.symbol}) is an unfilled entry that "
+            f"could not be withdrawn — it may still fill; cancel the order "
+            f"at the broker by hand")
 
     if is_options:
         # Premium-denominated trade: LiveQuote holds the UNDERLYING's price,
@@ -424,13 +532,43 @@ def _close_asset_trade(trade, now):
             # Cancel resting broker-side SL/TP first: a stop left behind after
             # we flatten would fire against a flat book and open a reverse
             # position — the opposite of what a kill switch is for.
+            # AND READ THE ANSWER. SaxoTrader.cancel_order returns a bool
+            # for exactly this reason — a dict is always truthy, and a stop
+            # still resting that reads as cancelled is the failure the return
+            # type exists to prevent. Throwing the answer away made the
+            # switch book the row CLOSED over a stop that was never cancelled.
+            left_resting = []
             for oid in (trade.metadata or {}).get("protective_order_ids") or []:
                 cancel = getattr(client, "cancel_order", None)
                 if callable(cancel):
                     try:
-                        cancel(oid)
+                        answer = cancel(oid)
                     except Exception as e:  # noqa: BLE001
                         logger.warning("[KILL SWITCH] cancel %s failed: %s", oid, e)
+                        left_resting.append(str(oid))
+                        continue
+                    # False is a REFUSAL, not a cancel. None is an adapter
+                    # that does not say, which is the old behaviour and stays
+                    # trusted: only an explicit no counts as a no.
+                    if answer is False:
+                        logger.error("[KILL SWITCH] %s refused the cancel of "
+                                     "%s — the leg is still resting",
+                                     trade.symbol, oid)
+                        left_resting.append(str(oid))
+            if left_resting:
+                # The flatten still goes ahead: a live position during a kill
+                # is the larger risk. But an unflagged resting stop fires
+                # against a flat book and OPENS a reverse position, so the
+                # row carries it and the log names it.
+                meta = trade.metadata or {}
+                meta["kill_left_resting_orders"] = left_resting
+                trade.metadata = meta
+                logger.error("[KILL SWITCH] %s: flattening with %d protective "
+                             "order(s) still resting (%s) — they fire against "
+                             "a flat book and OPEN a reverse position. Cancel "
+                             "them at the broker NOW",
+                             trade.symbol, len(left_resting),
+                             ", ".join(left_resting))
             if is_options:
                 # A plain market_order here would trade the underlying's STOCK,
                 # opening a new position instead of closing the option.
@@ -446,7 +584,7 @@ def _close_asset_trade(trade, now):
             else:
                 result = _try_broker_close(
                     client, trade.symbol, trade.side, outstanding,
-                    client_order_id=_kill_order_id(trade))
+                    client_order_id=_kill_order_id(trade), trade=trade)
     except Exception as e:  # noqa: BLE001
         logger.warning("[KILL SWITCH] broker close failed for %s: %s", trade.symbol, e)
         raise

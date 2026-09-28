@@ -18,9 +18,12 @@
 #   * only the marker-delimited span of the render output is spliced —
 #     the command's human trailer once rode into .env and broke every
 #     later compose invocation on the box;
-#   * it REFUSES credential lines that are not single-quoted — compose
-#     expands $ in unquoted values at READ time, so an unquoted splice
-#     reintroduces the exact bug this file exists to end;
+#   * it REFUSES credential lines that are not quoted — compose expands
+#     $ in unquoted values at READ time, so an unquoted splice
+#     reintroduces the exact bug this file exists to end. Quoted means
+#     either form the renderer writes: single quotes, or the
+#     double-quoted, $$-escaped fallback for a value that itself holds a
+#     single quote (compose reads $$ as one $ there);
 #   * the rewrite is atomic (write-aside + rename), the credential temp
 #     file lives in RAM and dies on HUP/INT/TERM too, the backup is
 #     chmod 600, and no failure path ever prints a password.
@@ -78,7 +81,7 @@ trap 'cleanup; trap - EXIT; exit 1' HUP INT TERM
 # Render inside the container (-T: no TTY). Captured to a RAM-backed file:
 # never an argument (arguments show in ps), never through a shell
 # expansion. stderr passes through so the command's own warnings are seen.
-if ! "$here/dc" exec -T web python manage.py render_ibkr_env > "$tmp"; then
+if ! "$here/dc" exec -T web python manage.py render_ibkr_env --quiet > "$tmp"; then
     echo "render_ibkr_env failed — is the web container up?" >&2
     exit 1
 fi
@@ -87,9 +90,13 @@ fi
 # touched. Empty output, "no logins stored", a slot conflict, or an old
 # renderer that still emits unquoted values must all refuse here — an
 # unguarded splice once replaced working credentials with an empty block.
-# Values are never printed; shape only.
-if ! grep -Eq "^${prefix}_USERNAME='.+'" "$tmp" \
-   || ! grep -Eq "^${prefix}_PASSWORD='.+'" "$tmp"; then
+# Values are never printed; shape only. Both of the renderer's quotings
+# pass: 'value', and the "value" fallback render_ibkr_env._env_quote
+# writes for a value holding a single quote — asking for single quotes
+# alone refused a password like O'Neil$7x as UNQUOTED and sent the
+# operator to "update the platform", a fix that did not exist.
+if ! grep -Eq "^${prefix}_USERNAME='.+'|^${prefix}_USERNAME=\".+\"" "$tmp" \
+   || ! grep -Eq "^${prefix}_PASSWORD='.+'|^${prefix}_PASSWORD=\".+\"" "$tmp"; then
     if ! grep -Eq "^${prefix}_USERNAME=" "$tmp"; then
         echo "no stored login rendered for slot $slot (${prefix}_*)." >&2
         echo "Store the Gateway username+password in the UI first, or" >&2
@@ -99,7 +106,7 @@ if ! grep -Eq "^${prefix}_USERNAME='.+'" "$tmp" \
     else
         echo "slot $slot rendered UNQUOTED credential lines. That is the" >&2
         echo "\$\$-eating bug this script refuses to reintroduce — update" >&2
-        echo "the platform (render_ibkr_env must single-quote values) and" >&2
+        echo "the platform (render_ibkr_env must quote every value) and" >&2
         echo "re-run." >&2
     fi
     exit 1

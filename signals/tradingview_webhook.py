@@ -24,10 +24,11 @@ who finds the URL:
     named. Creating instruments from an unauthenticated POST would let
     anyone fill the catalogue with junk.
   * The body is size-capped before parsing.
-  * A duplicate alert (same symbol, direction and bar) within the dedupe
-    window is accepted and ignored rather than written twice —
-    TradingView retries, and `once per bar close` still fires on every
-    reconnection.
+  * A repeat of a bet whose Signal is still active (same symbol,
+    strategy and direction) is accepted and ignored rather than written
+    twice — the vote counts rows, and `once per bar close` fires again
+    on every bar and on every reconnection. A retry inside the dedupe
+    window is ignored even once that row has been closed.
 
 Set TRADINGVIEW_WEBHOOK_SECRET in .env, then point a TradingView alert
 at  https://<your-domain>/api/webhook/tradingview/  with a message body:
@@ -54,9 +55,10 @@ logger = logging.getLogger(__name__)
 # needed us to do.
 MAX_BODY = 8192
 
-# Two alerts for the same bet inside this window are one alert.
-# TradingView retries on its side and "once per bar close" fires again on
-# every reconnection, so without this a flaky link doubles the vote.
+# Two alerts for the same bet inside this window are one alert, even once
+# the first one's row has been closed. TradingView retries on its side and
+# "once per bar close" fires again on every reconnection; past the window
+# it is the active-row check in the view that holds the vote to one row.
 DEDUPE_SECONDS = 90
 
 _BUY = {"buy", "long", "bullish", "b", "up"}
@@ -142,7 +144,28 @@ def tradingview_webhook(request):
                    or "tradingview").strip()[:80]
     rule_name = f"tradingview:{strategy}" if strategy else "tradingview"
 
-    # A repeat inside the window is the same bet, not a second one.
+    # ONE active Signal per (instrument, rule, direction) — the dedupe the
+    # rule engine (signals/tasks.py) and the opportunity scanner keep, for
+    # the reason the scanner states: the bot's consensus sums evidence PER
+    # ROW (`aggregation.side_weight`) while it counts rules as a set, so a
+    # second active row for one rule votes twice. The window below only
+    # caught a retry inside 90 s; "once per bar close" on any longer bar,
+    # or a hand replay, wrote a second active row and announced it again.
+    # The standing row is named and left as it is — its price and levels
+    # are the basis grading measures against — and nothing is announced.
+    standing = (Signal.objects
+                .filter(instrument=instrument, direction=direction,
+                        rule_name=rule_name[:100], is_active=True)
+                .order_by("-created_at").first())
+    if standing is not None:
+        logger.info("[tradingview] %s %s from %s already has active signal "
+                    "#%s — not written again", direction, symbol, strategy,
+                    standing.pk)
+        return JsonResponse({"ok": True, "duplicate": True,
+                             "signal_id": standing.pk})
+
+    # A repeat inside the window is the same bet, not a second one — even
+    # once the lifecycle has closed the row it wrote.
     since = timezone.now() - timezone.timedelta(seconds=DEDUPE_SECONDS)
     if Signal.objects.filter(instrument=instrument, direction=direction,
                              rule_name=rule_name[:100],
@@ -191,6 +214,12 @@ def tradingview_webhook(request):
     )
     logger.info("[tradingview] %s %s from %s -> signal #%s",
                 direction, symbol, strategy, signal.pk)
+    # Announced like every new signal (signals.announce), never while
+    # TradingView waits: queued for the default worker once the row is
+    # committed. A caller left waiting on Telegram retries, and a retry
+    # is a duplicate alert.
+    from signals.announce import announce_after_commit
+    announce_after_commit(signal)
     return JsonResponse({"ok": True, "signal_id": signal.pk,
                          "symbol": instrument.symbol,
                          "direction": direction})

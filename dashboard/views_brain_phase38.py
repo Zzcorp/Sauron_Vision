@@ -363,6 +363,13 @@ def briefing_dashboard(request):
     # Latest model used (from the most recent successful briefing).
     latest_ok = next((b for b in history if not b.error), None)
 
+    # THE MONDAY GAME PLAN, WHOLE (2026-09-27) — the section #monday-plan:
+    # the latest plan and the four before it, read from the agent's own
+    # AgentTask rows (ai_agents/monday_plan.py). Never raises: a plan that
+    # cannot be read leaves the section saying there is none yet.
+    from ai_agents.monday_plan import plans_for_page
+    plans = plans_for_page()
+
     return render(request, "dashboard/briefing.html", {
         "page_id": "briefing",
         "latest": latest,
@@ -381,6 +388,8 @@ def briefing_dashboard(request):
         "avg_ideas": avg_ideas,
         "avg_watchlist": avg_watchlist,
         "latest_ok": latest_ok,
+        "monday_plan": plans["latest"],
+        "older_plans": plans["older"],
     })
 
 

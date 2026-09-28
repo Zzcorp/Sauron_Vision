@@ -49,26 +49,34 @@ logger = logging.getLogger(__name__)
 # Fraction of equity risked per trade, and the ceiling nothing may exceed.
 DEFAULT_RISK_FRACTION = 0.0025   # 0.25%
 
-# 5%, raised from 1% at the operator's request so a SMALL account can put
-# enough at risk for a win to clear its own costs. On $200 the old ceiling
-# allowed $2 a trade, which the IB commission and the spread eat most of;
-# the arithmetic of a small book is what this ceiling has to admit.
+# 7%, raised from 5% on 2026-09-26 — the operator's decision, in writing
+# ("7%", after 25% and 40% were refused with the arithmetic below). No
+# measurement forced it: eToro floors forex, index and commodity exposure
+# at 1,000 USD (minPositionExposure, measured 2026-09-23), and an ordinary
+# 0.5-1% stop on that floor is 5-10 USD lost — 1-2% of a 500 pool, 2-4% of
+# a 250 forex pool, both inside the old 5%. 7% is room the operator chose.
+# 5% was itself raised from 1% at the operator's request so a SMALL account
+# can put enough at risk for a win to clear its own costs: on $200 the 1%
+# ceiling allowed $2 a trade, which the commission and the spread eat most
+# of; the arithmetic of a small book is what this ceiling has to admit.
 #
 # It is a CEILING and not a target, and the default above is unchanged: an
 # operator who never touches extras['risk_per_trade_pct'] still risks 0.25%.
 # Reaching this number is an explicit act.
 #
-# What 5% means, stated so nobody has to derive it after a bad week. A
+# What 7% means, stated so nobody has to derive it after a bad week. A
 # losing streak of n costs 1 - (1 - f)^n of the book:
 #
-#       5 losses  -> -23%      10 losses -> -40%      20 losses -> -64%
+#       5 losses  -> -30%      10 losses -> -52%      20 losses -> -77%
 #
-# Ten losses in a row is an ordinary run for a 45%-win-rate strategy — it
-# happens roughly once in every 500 trades — so 5% is the boundary where a
-# normal bad streak is survivable and a slightly worse one is not. Above it
-# the risk of ruin stops being linear in f, which is why the cap exists at
-# all rather than the field simply being free.
-MAX_RISK_FRACTION = 0.050        # 5.0% — a hard cap, not a target
+# (at the old 5%: -23%, -40%, -64%). Ten losses in a row is an ordinary run
+# for a 45%-win-rate strategy — it happens roughly once in every 500 trades
+# — and at 7% it leaves 48% of the book (0.93^10; at 5% it left 60%): a
+# normal bad streak now costs MORE than half: the price of the written 7%.
+# Above it the risk of ruin stops being linear in f, which is why the cap
+# exists at all rather than the field simply being free. 25% (5 losses ->
+# -76%) and 40% (5 losses -> -92%) were refused on that arithmetic.
+MAX_RISK_FRACTION = 0.070        # 7.0% — a hard cap, not a target
 
 #: Past this, the preview says out loud that the size is aggressive. Not a
 #: refusal and not a clamp — the operator asked for the room and has it. It
@@ -93,8 +101,17 @@ AGGRESSIVE_RISK_FRACTION = 0.02  # 2%
 MAX_NOTIONAL_FRACTION = {
     "stock": 0.20,
     "etf": 0.20,
-    "index": 0.20,
-    "commodity": 0.20,
+    # eToro margins index and commodity CFDs and floors them at 1,000 USD
+    # of exposure (minPositionExposure, measured 2026-09-23); under 0.20
+    # that floor is unreachable on any pool below 5,000, and
+    # apply_stop_floor widens the stop (shrinking notional) rather than
+    # raising it. 2.0 reaches the floor from a 500 pool and gives a 2:1
+    # stop window from 1,000; extras['max_notional_fraction'] narrows or
+    # widens it per config. Applied to the INSTRUMENT's class
+    # (size_position cap_class): SPX500 in a stock config sizes under 2.0
+    # while AAPL keeps 0.20 (E2.5, 2026-09-26).
+    "index": 2.0,
+    "commodity": 2.0,
     "crypto": 0.20,
     "options": 0.20,
     # 20% notional on an FX major is an economically meaningless constraint —
@@ -222,8 +239,24 @@ def qty_for_risk(equity: float, f: float, entry: float, stop: float,
     return risk_budget / per_unit
 
 
+def _unit_scale(scale) -> float:
+    """A risk scale as a number in (0, 1]: above 1 is 1 (a scale never
+    raises risk past risk_fraction), and anything that is not a positive
+    finite number is 1 — never a larger risk, never a crash."""
+    try:
+        val = float(scale)
+    except (TypeError, ValueError):
+        return 1.0
+    if val != val or val <= 0 or val == float("inf"):
+        logger.warning("[sizing] risk scale %r is not a number in (0, 1] "
+                       "— unscaled", scale)
+        return 1.0
+    return min(val, 1.0)
+
+
 def size_position(cfg, *, asset_class: str, entry: float, stop: float,
-                  direction: str, value_per_unit: float = 1.0) -> dict:
+                  direction: str, value_per_unit: float = 1.0,
+                  cap_class: str = None, risk_scale=None) -> dict:
     """The whole calculation, in one place.
 
     Returns {qty, stop, stop_widened, risk_fraction, risk_dollars,
@@ -232,11 +265,26 @@ def size_position(cfg, *, asset_class: str, entry: float, stop: float,
             the returned value for both the broker order and
             `initial_stop_loss`, or realized_r is denominated against a stop
             that was never live. qty is 0 when the setup was skipped.
+
+    `cap_class` (2026-09-26) is the INSTRUMENT's class, read ONLY by the
+    notional cap and the stop floor (max_notional_fraction, min_stop_fraction
+    through apply_stop_floor): an index symbol in a stock config sizes under
+    the index cap. None means `asset_class`. The risk fraction stays
+    config-keyed — it is the pool's rule.
+
+    `risk_scale` (2026-09-26) is the attack mode's conviction tier
+    (asset_engine/base.AssetBot._attack_tier): a number in (0, 1] that
+    scales the config's fraction BEFORE the stop floor and the size are
+    computed, so both read the tiered fraction. Clamped to (0, 1] here too
+    (_unit_scale): it can shrink risk, never raise it past
+    risk_fraction(cfg). None is the call as it always was.
     """
     f = risk_fraction(cfg)
+    if risk_scale is not None:
+        f = f * _unit_scale(risk_scale)
     equity = float(getattr(cfg, "capital", 0) or 0)
-    stop_used, widened, skip = apply_stop_floor(cfg, asset_class, entry, stop,
-                                                direction, f)
+    stop_used, widened, skip = apply_stop_floor(cfg, cap_class or asset_class,
+                                                entry, stop, direction, f)
     qty = 0.0 if skip else qty_for_risk(equity, f, entry, stop_used,
                                         value_per_unit=value_per_unit)
     notional = qty * float(entry) * float(value_per_unit)

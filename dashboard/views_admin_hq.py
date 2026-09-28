@@ -65,6 +65,11 @@ def _broker_ping(build_client, label: str) -> bool:
     client = None
     try:
         client = build_client()
+        if client is None:
+            # ibkr_sessions found no free clientId slot: nothing answered
+            # because nothing was asked, and that is a failed check.
+            logger.warning("[hq] %s credential verification: no client", label)
+            return False
         return bool(client.ping())
     except Exception as e:  # noqa: BLE001
         logger.warning("[hq] %s credential verification errored: %s", label, e)
@@ -132,12 +137,22 @@ def flatten_all_positions(request):
     errs = results.get("errors") or []
 
     msg = f"Kill switch: {disabled} bot(s) disabled, {closed} position(s) closed."
+    waiting = results.get("paper_waiting") or []
+    if waiting:
+        # A paper row on a shut market is not booked (2026-09-26); without
+        # this line "closed" reads as the whole book.
+        msg += (f" {len(waiting)} paper position(s) NOT booked — their "
+                f"market is shut or has not priced them since it reopened; "
+                f"the rows stay OPEN: "
+                f"{'; '.join(str(w)[:120] for w in waiting[:3])}.")
     if errs:
         # Never report a clean sweep when some closes failed — the operator
         # would stop looking, and a position they believe is flat is the most
         # expensive kind of wrong.
         messages.error(request, msg + f" {len(errs)} FAILED — these may still "
                                       f"be open at the broker: {'; '.join(str(e)[:120] for e in errs[:3])}")
+    elif waiting:
+        messages.warning(request, msg)
     else:
         messages.success(request, msg)
     return redirect("admin_dashboard")
@@ -481,13 +496,14 @@ def test_ibkr_connection(request):
             f"Re-save the credentials to reconnect.")
         return redirect("admin_dashboard")
 
-    from bot_program.engine.ibkr_client import IBKRTrader, purpose_client_id
-    # A probe from the web container must not evict a running trader.
+    from bot_program.engine.ibkr_sessions import acquire_trader
+    # The probe session on this request's own clientId slot: a probe from
+    # the web container must neither collide with a worker's socket nor
+    # hold one against it (ibkr_sessions closes it when the request ends).
     reachable = _broker_ping(
-        lambda: IBKRTrader(host=acct.host, port=acct.port,
-                           client_id=purpose_client_id(acct.client_id, "probe"),
-                           account_id=account_id,
-                           paper=acct.paper), "IBKR")
+        lambda: acquire_trader(acct.host, acct.port, acct.client_id, "probe",
+                               account_id=account_id, paper=acct.paper),
+        "IBKR")
 
     acct.connected = reachable
     fields = ["connected"]
@@ -607,11 +623,10 @@ def save_ibkr_credentials(request):
     # IBKR's ping() proves the TWS/Gateway socket answers — NOT that the
     # account id is valid (that is all ib_insync exposes cheaply). The
     # message says which of the two was checked.
-    from bot_program.engine.ibkr_client import IBKRTrader, purpose_client_id
+    from bot_program.engine.ibkr_sessions import acquire_trader
     acct.connected = _broker_ping(
-        lambda: IBKRTrader(host=host, port=port,
-                           client_id=purpose_client_id(client_id, "probe"),
-                           account_id=account_id, paper=paper), "IBKR")
+        lambda: acquire_trader(host, port, client_id, "probe",
+                               account_id=account_id, paper=paper), "IBKR")
     if acct.connected:
         from django.utils import timezone
         acct.last_sync = timezone.now()
@@ -877,6 +892,205 @@ def hq_toggle_asset_bot(request):
         f"{'ENABLED' if cfg.enabled else 'DISABLED'}."
     )
     return redirect("admin_dashboard")
+
+
+@_admin_only
+def hq_follow_asset_bot(request):
+    """Make a live bot's pool a SHARE of the account, or stop it following.
+
+    Form fields: config_id; follow ("1" to start, "0" to stop); share, a
+    percentage or blank for automatic; pin, required to START — following
+    re-sizes a live pool on the spot. Stopping needs nothing and leaves
+    the pool at its last value. The share must fit beside every other
+    follower's (capital_truth.allocate_shares), or nothing changes.
+    """
+    import math
+    from decimal import Decimal
+
+    from bot_program.capital_truth import (account_equity, allocate_shares,
+                                           followers_of)
+    from bot_program.models import AssetBotConfig
+
+    cfg = AssetBotConfig.objects.filter(
+        id=request.POST.get("config_id"), user=request.user).first()
+    if not cfg:
+        messages.error(request, "AssetBotConfig not found")
+        return redirect("asset_bots_dashboard")
+    follow = str(request.POST.get("follow", "")).lower() in ("1", "on",
+                                                              "true", "yes")
+    ex = dict(cfg.extras or {})
+    if not follow:
+        ex.pop("capital_tracks_broker", None)
+        ex.pop("account_share_pct", None)
+        cfg.extras = ex
+        cfg.save(update_fields=["extras", "updated_at"])
+        messages.success(request, f"'{cfg.name}' no longer follows the "
+                                  f"account — its pool stays at "
+                                  f"{cfg.capital} {cfg.base_currency}.")
+        return redirect("asset_bots_dashboard")
+    if cfg.mode != "live":
+        messages.error(request, "Only a LIVE bot can follow the account — "
+                                "a paper pool follows nothing.")
+        return redirect("asset_bots_dashboard")
+    if not _pin_ok(request):
+        messages.error(request, "PIN required — following the account "
+                                "re-sizes a live pool.")
+        return redirect("asset_bots_dashboard")
+    raw = str(request.POST.get("share", "") or "").strip()
+    share = None
+    if raw:
+        try:
+            share = float(raw)
+        except ValueError:
+            share = float("nan")
+        if not math.isfinite(share) or share <= 0 or share > 100:
+            messages.error(request, "share must be a percentage between "
+                                    "0 and 100")
+            return redirect("asset_bots_dashboard")
+    reading = account_equity(request.user)
+    if reading is None:
+        messages.error(request, "No broker reading has landed — enable "
+                                "broker_account_sync and let it store one "
+                                "first.")
+        return redirect("asset_bots_dashboard")
+    # THE SAME REFUSAL THE ARMING PATH ALREADY MAKES. manual_trade.py:2051
+    # will not arm a following pool whose orders route to a venue other than
+    # the book — "the pool would be sized from one account and traded on
+    # another" — and this handler, which is where the operator actually ticks
+    # Follow, had no venue test anywhere in it. It wrote cfg.capital from the
+    # book's reading below, and the sync then correctly refused to retune
+    # that row for ever (tasks.py), so the pool sat on a number derived from
+    # an account it does not trade and nothing said so again.
+    #
+    # EVERY symbol, not the first, and EVERY venue the router can name, not
+    # three — the one test the sync, `manage.py follow` and the withdrawals
+    # page share (capital_truth.foreign_venue). This handler kept its own
+    # copy with the three flagged names, so a crypto pool the router sends
+    # to Binance took its share of the book here, and the sync then refused
+    # to retune it for ever (review, 2026-09-28).
+    from bot_program.capital_truth import (broker_backed, broker_kind,
+                                           foreign_venue)
+    _book = broker_backed(request.user)
+    _book_kind = broker_kind(_book) if _book is not None else ""
+    _foreign = foreign_venue(request.user, cfg, _book_kind)
+    if _foreign:
+        messages.error(
+            request,
+            f"'{cfg.name}' cannot follow the account: its {cfg.asset_class} "
+            f"orders route to {_foreign} while the book is {_book_kind}, so "
+            f"the pool would be sized from one account and traded on "
+            f"another. Make {_foreign} the book on /brokers/, or leave this "
+            f"pool at the capital you typed.")
+        return redirect("asset_bots_dashboard")
+    alloc = allocate_shares(followers_of(request.user, include=cfg),
+                            shares={cfg.pk: share})
+    if not alloc["ok"]:
+        messages.error(request, f"Following the account would "
+                                f"over-allocate it: {alloc['reason']}")
+        return redirect("asset_bots_dashboard")
+    fraction = float(alloc["plan"][cfg.pk])
+    # THE SHARE IS OF THE READING LESS WHAT IS HELD BACK FOR WITHDRAWALS
+    # (review, 2026-09-28) — the base the sync sizes from
+    # (withdrawals.deployable). Writing reading × share here gave the pool
+    # the full share for as long as the follow below failed or skipped it,
+    # and the success line quoted that number while the database held the
+    # smaller one. A reserve nobody can read follows nothing: sizing from
+    # the whole reading would deploy money somebody asked to take out.
+    try:
+        from bot_program.withdrawals import deployable
+        base, held = deployable(request.user, float(reading["value"]),
+                                reading_at=reading["at"])
+    except Exception as e:  # noqa: BLE001
+        logger.warning("hq_follow: withdrawal reserve unreadable: %s", e)
+        messages.error(request, "The withdrawal reserve could not be read, "
+                                "so the pool's share of the account is "
+                                "unknown. Nothing changed.")
+        return redirect("asset_bots_dashboard")
+    ex["capital_tracks_broker"] = True
+    if share is not None:
+        ex["account_share_pct"] = share
+    else:
+        ex.pop("account_share_pct", None)
+    cfg.extras = ex
+    cfg.capital = Decimal(str(round(float(base) * fraction, 2)))
+    cfg.save(update_fields=["extras", "capital", "updated_at"])
+    # The automatic shares are what the explicit ones leave, so the other
+    # followers changed too: re-split every one from the same reading now
+    # rather than leaving the pools over-allocated until the next sync.
+    from bot_program.tasks import _follow_the_account
+    _follow_the_account(request.user, float(reading["value"]),
+                        reading["currency"])
+    # The follow reloads its own rows: quote what the database holds now.
+    cfg.refresh_from_db(fields=["capital"])
+    ccy = reading["currency"] or ""
+    kept = (f" (the account less {held:,.2f} {ccy} held back for "
+            f"withdrawals)" if held > 0 else "")
+    messages.success(request, f"'{cfg.name}' follows the account at "
+                              f"{fraction * 100:.0f}% — pool {cfg.capital} "
+                              f"{ccy}{kept}; every follower re-split from "
+                              f"the same reading, and the sync keeps them "
+                              f"there.")
+    return redirect("asset_bots_dashboard")
+
+
+@_admin_only
+def hq_apply_persona(request):
+    """Give one config a trader personality — the /personas/ Apply form.
+
+    Form fields: config_id; persona (one of scalp / swing / position);
+    pin, required ONLY when the config is LIVE. A personality is a
+    coherent preset of knobs that already exist — it writes NO capital,
+    NO account_share_pct, and never enables or disables the bot — but on
+    a live config those knobs re-size REAL risk on the next entry
+    (risk_per_trade_pct, the ATR stop distance and the notional cap all
+    feed sizing.size_position), which is exactly the class of write the
+    trading PIN exists to gate. `force=True` is passed only once the PIN
+    has been checked here, so a live config can never be re-styled by a
+    click alone (2026-09-12).
+
+    Every warning `plan_for` raised is flashed, one message each: an open
+    position whose exit moves under it, or a timeframe with no bars, is
+    the thing the operator most needs to read AFTER the write, not a
+    sentence folded into a success line nobody re-reads.
+    """
+    from bot_program.models import AssetBotConfig
+    from bot_program.personas import PERSONA_KEYS, apply_persona
+
+    cfg = AssetBotConfig.objects.filter(
+        id=request.POST.get("config_id")).first()
+    if cfg is None:
+        messages.error(request, "No such bot config — nothing was changed.")
+        return redirect("personas_dashboard")
+    key = str(request.POST.get("persona", "") or "").strip().lower()
+    if key not in PERSONA_KEYS:
+        messages.error(request, f"{key or '(blank)'} is not a personality — "
+                                f"the three are {', '.join(PERSONA_KEYS)}.")
+        return redirect("personas_dashboard")
+    live = (cfg.mode == "live")
+    if live and not _pin_ok(request):
+        messages.error(request, f"PIN required — '{cfg.name}' is LIVE, and a "
+                                f"personality re-sizes real risk on its next "
+                                f"entry.")
+        return redirect("personas_dashboard")
+
+    result = apply_persona(cfg, key, user=request.user, force=live)
+    if not result["ok"]:
+        messages.error(request, f"Personality refused: {result['reason']}")
+        return redirect("personas_dashboard")
+    for warning in result["warnings"]:
+        messages.warning(request, f"'{cfg.name}': {warning}")
+    dropped = result.get("drops") or {}
+    messages.success(
+        request,
+        f"'{cfg.name}' now trades as {result['key']} — "
+        f"{len(result['changes'])} field(s) and {len(result['extras'])} "
+        f"extra(s) written"
+        + (f", {len(dropped)} extra(s) removed "
+           f"({', '.join(sorted(dropped))}) so nothing from the previous "
+           f"style outranks this one" if dropped else "")
+        + f". Its capital and its share of the account are "
+          f"unchanged, and it was neither enabled nor disabled.")
+    return redirect("personas_dashboard")
 
 
 @_admin_only
@@ -1407,6 +1621,156 @@ def hq_reject_allocation(request):
     except AllocatorError as e:
         messages.error(request, f"Allocator: {e}")
     return redirect("admin_dashboard")
+
+
+# ── Share allocator (/shares/) ──────────────────────────────────────────
+#
+# The plan is the ACTING user's: every view filters by user=request.user,
+# so an admin cannot apply another account's plan by editing plan_id —
+# a share plan re-sizes that user's live pools (2026-09-12).
+
+def _own_share_plan(request):
+    """The SharePlan named by plan_id, owned by the acting user, or None
+    with the flash already written."""
+    from bot_program.share_models import SharePlan
+    try:
+        plan_id = int(request.POST.get("plan_id", "0"))
+    except (TypeError, ValueError):
+        messages.error(request, "Invalid plan_id")
+        return None
+    plan = SharePlan.objects.filter(pk=plan_id, user=request.user).first()
+    if plan is None:
+        messages.error(request, f"Share plan #{plan_id} not found.")
+    return plan
+
+
+@_admin_only
+def hq_propose_share_plan(request):
+    """Admin trigger for an immediate share-plan proposal (shadow)."""
+    from bot_program.share_allocator import propose_share_plan_with_reason
+    from bot_program.tasks import propose_share_plans as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, _twin, "Share-allocator proposal",
+                                "/shares/")
+    if resp is not None:
+        return resp
+    try:
+        plan, reason = propose_share_plan_with_reason(request.user)
+        if plan is None:
+            messages.warning(request,
+                             f"Share allocator: nothing proposed — {reason}")
+        else:
+            messages.success(
+                request,
+                f"Share allocator: proposed plan #{plan.pk} for "
+                f"{plan.configs_considered} follower(s) — a shadow until "
+                f"it is applied.")
+    except Exception as e:  # noqa: BLE001
+        messages.error(request, f"Share-allocator proposal failed: {e}")
+    return redirect("shares_dashboard")
+
+
+@_admin_only
+def hq_apply_share_plan(request):
+    """Admin applies a PROPOSED share plan — PIN required in LIVE mode,
+    because applying writes every follower's share and re-sizes the live
+    pools on the spot. In shadow mode the service refuses by itself."""
+    from bot_program.share_allocator import (ShareAllocatorError,
+                                             apply_share_plan, is_live_mode)
+    plan = _own_share_plan(request)
+    if plan is None:
+        return redirect("shares_dashboard")
+    if is_live_mode() and not _pin_ok(request):
+        messages.error(request, "PIN required — applying a share plan "
+                                "re-sizes live pools.")
+        return redirect("shares_dashboard")
+    try:
+        plan = apply_share_plan(plan.pk, request.user)
+        n = len(plan.targets or {}) - int(plan.configs_skipped or 0)
+        messages.success(
+            request,
+            f"Applied share plan #{plan.pk} — {n} pool(s) re-sized from "
+            f"the account reading; every follower's share is now explicit.")
+    except ShareAllocatorError as e:
+        messages.error(request, f"Share allocator: {e}")
+    return redirect("shares_dashboard")
+
+
+@_admin_only
+def hq_rollback_share_plan(request):
+    """Admin restores the shares an applied plan replaced — PIN required,
+    a rollback re-sizes live pools exactly as an apply does."""
+    from bot_program.share_allocator import (ShareAllocatorError,
+                                             rollback_share_plan)
+    plan = _own_share_plan(request)
+    if plan is None:
+        return redirect("shares_dashboard")
+    if not _pin_ok(request):
+        messages.error(request, "PIN required — rolling back a share plan "
+                                "re-sizes live pools.")
+        return redirect("shares_dashboard")
+    try:
+        plan = rollback_share_plan(plan.pk, request.user)
+        messages.success(request, f"Rolled back share plan #{plan.pk} — "
+                                  f"previous shares restored exactly.")
+    except ShareAllocatorError as e:
+        messages.error(request, f"Share allocator: {e}")
+    return redirect("shares_dashboard")
+
+
+@_admin_only
+def hq_run_horizon(request):
+    """Admin trigger for the 5-10 year sector synthesis (~1.5 USD on the
+    frontier model). XHR clicks enqueue the real beat task (budgeted by
+    its @spend_guard, announced live); a plain form POST runs it here
+    synchronously and flashes the cost, so the operator sees what the
+    click spent (2026-09-12)."""
+    from brain.horizon import run_horizon_now
+    from brain.tasks import run_horizon as _twin
+    from dashboard.run_async import maybe_dispatch_async
+    resp = maybe_dispatch_async(request, _twin, "Horizon synthesis",
+                                "/horizon/")
+    if resp is not None:
+        return resp
+    try:
+        out = run_horizon_now()
+        cost = float(out.get("cost_usd") or 0.0)
+        if out.get("ok"):
+            messages.success(
+                request,
+                f"Horizon: view #{out['view_id']} written — "
+                f"{out['calls_registered']} call(s) registered, "
+                f"{out['calls_dropped']} dropped"
+                + (f" ({out['calls_dropped_standing']} held by a standing call)"
+                   if out.get("calls_dropped_standing") else "")
+                + f"; {cost:.2f} USD on "
+                f"{out.get('model') or 'the frontier model'}.")
+        else:
+            messages.error(
+                request,
+                f"Horizon: {out.get('outcome', 'error')} — "
+                f"{out.get('error', '')} (view #{out.get('view_id', '?')}, "
+                f"{cost:.2f} USD).")
+    except Exception as e:  # noqa: BLE001
+        messages.error(request, f"Horizon synthesis failed: {e}")
+    return redirect("horizon_dashboard")
+
+
+@_admin_only
+def hq_reject_share_plan(request):
+    """Admin rejects a PROPOSED plan. No PIN: nothing is written to any
+    config, and declining must stay frictionless."""
+    from bot_program.share_allocator import (ShareAllocatorError,
+                                             reject_share_plan)
+    plan = _own_share_plan(request)
+    if plan is None:
+        return redirect("shares_dashboard")
+    try:
+        plan = reject_share_plan(plan.pk, request.user)
+        messages.success(request, f"Rejected share plan #{plan.pk}.")
+    except ShareAllocatorError as e:
+        messages.error(request, f"Share allocator: {e}")
+    return redirect("shares_dashboard")
 
 
 @_admin_only

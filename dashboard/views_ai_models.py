@@ -29,6 +29,9 @@ AGENT_GROUPS = [
         ("pretrade_sanity", "Pre-Trade Sanity Gate", "fast"),
         ("signal_journal", "Signal Journal", "fast"),
         ("trade_journal", "Trade Journal", "fast"),
+        # "Is it a good idea to close?" on the positions pages — one call
+        # per question, only when the operator asks for the AI's reasoning.
+        ("close_advisor", "Close Advisor", "balanced"),
         ("decay_investigator", "Decay Investigator", "balanced"),
         ("strategy_advisor", "Strategy Advisor", "balanced"),
         ("strategy_mutator", "Strategy Mutator", "balanced"),
@@ -44,6 +47,7 @@ AGENT_GROUPS = [
         ("strategy_generator", "Strategy Generator", "deep"),
         ("earnings_reviewer", "Earnings Reviewer", "balanced"),
         ("research", "Research Chat", "balanced"),
+        ("horizon", "Horizon (5-10y sectors)", "frontier"),
     ]),
 ]
 

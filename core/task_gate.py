@@ -82,6 +82,28 @@ def guarded_task(component_key):
     1. The master switch is ON
     2. The specific component is ON
     If either is off, the task returns early with a skip message.
+
+    AN IDLE PASS WRITES NOTHING (2026-09-26). A result carrying a truthy
+    `idle` — the reason in words: "no IBKR account to read", "no live Saxo
+    session" — says this pass had nothing to do, and the gate does not
+    call mark_run for it: the row keeps whatever the last real run wrote.
+    One row can be written by several tasks. broker_account_sync is the
+    switch of three walks (IBKR, Saxo, eToro), each every fifteen minutes,
+    and the two with nothing to read returned attempted 0 / stored 0,
+    which judge_result rightly calls "ran and produced nothing". On the
+    shared row that verdict overwrote eToro's success — the daily digest
+    reported a healthy sync as a warning — and, worse, it overwrote an
+    eToro ERROR minutes after it landed, hiding a real fault behind a walk
+    that had nothing to read. `idle` is for a pass that is not a run of
+    the component at all. A task that is the only writer of its row must
+    not return it: a pass that does no work there is exactly the "ran and
+    produced nothing" this gate exists to report.
+
+    The component key is stamped on the wrapper (`component_key`) — the
+    function celery's task.run and task.__wrapped__ are — so the digest
+    reads which component each beat entry writes, and so how often that
+    row should move, off the schedule itself, with no second table to keep
+    in step (core.component_digest.beat_periods).
     """
     def decorator(func):
         @wraps(func)
@@ -100,7 +122,13 @@ def guarded_task(component_key):
             comp = get_component(component_key)
             try:
                 result = func(*args, **kwargs)
-                if comp:
+                if comp and isinstance(result, dict) and result.get("idle"):
+                    # Not a run of this component (see the docstring): the
+                    # row keeps the verdict of the last pass that was one.
+                    logger.debug("[GATE] %s idle (%s): the row keeps its "
+                                 "last verdict", component_key,
+                                 result.get("idle"))
+                elif comp:
                     status, msg = judge_result(result)
                     comp.mark_run(success=status == "success", message=msg,
                                   status=status)
@@ -110,5 +138,7 @@ def guarded_task(component_key):
                     comp.mark_run(success=False, message=str(e)[:500])
                 raise
 
+        # Read by core.component_digest.beat_periods (see the docstring).
+        wrapper.component_key = component_key
         return wrapper
     return decorator

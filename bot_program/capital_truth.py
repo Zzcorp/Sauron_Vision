@@ -26,6 +26,7 @@ of every order, and an operator who can SEE the mismatch can fix it in one
 edit. The value is in the seeing.
 """
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,10 @@ def broker_equity(user, cfg):
 
     try:
         from bot_program.engine.broker_router import client_for_symbol
-        client = client_for_symbol(user, symbols[0], cfg)
+        # An equity read is account-scoped, so it takes a DATA session:
+        # this runs on the entry path and must never hold the one
+        # clientId that can place or cancel an order.
+        client = client_for_symbol(user, symbols[0], cfg, purpose="data")
     except Exception as e:  # noqa: BLE001 — an unknown must not raise
         logger.debug("capital_truth: no client for %s: %s",
                      getattr(cfg, "name", "?"), e)
@@ -93,11 +97,34 @@ def broker_equity(user, cfg):
         # answering badly, and this module cannot tell which. Unmeasured.
         return None
 
+    # Re-read-and-merge, NOT a whole-object save of the runner's copy.
+    # This runs on the entry path from a `cfg` the tick loaded once and
+    # holds for tens of seconds; writing that copy's whole extras back
+    # reverted anything written to the row in between — and the share
+    # allocator writes extras["account_share_pct"] from a beat that can
+    # land mid-tick. A cache stamp must never undo a share decision an
+    # admin just confirmed with a PIN (2026-09-12; same pattern as
+    # asset_engine.safety._save_extras, inlined to keep this module free
+    # of the engine).
+    updates = {"broker_equity": equity,
+               "broker_equity_at": timezone.now().isoformat()}
     try:
-        extras["broker_equity"] = equity
-        extras["broker_equity_at"] = timezone.now().isoformat()
-        cfg.extras = extras
-        cfg.save(update_fields=["extras"])
+        from django.db import transaction
+        pk = getattr(cfg, "pk", None)
+        merged = None
+        if pk is not None:
+            with transaction.atomic():
+                row = (cfg.__class__._default_manager
+                       .select_for_update().filter(pk=pk).first())
+                if row is not None:
+                    merged = dict(getattr(row, "extras", None) or {})
+                    merged.update(updates)
+                    row.extras = merged
+                    row.save(update_fields=["extras", "updated_at"])
+        if merged is None:
+            merged = dict(extras)
+            merged.update(updates)
+        cfg.extras = merged
     except Exception as e:  # noqa: BLE001 — caching is a convenience
         logger.debug("capital_truth: could not cache equity: %s", e)
     return equity
@@ -150,7 +177,8 @@ def capital_mismatches(user) -> list:
 
 
 def broker_backed(user):
-    """The IBKRAccount that makes this user's book broker-backed, or None.
+    """The account row that makes this user's book broker-backed, or None —
+    a SaxoAccount, an EtoroAccount or an IBKRAccount, in that order.
 
     INTERFACED is a durable configuration fact: an IBKRAccount row whose
     account id decrypts to something non-empty. Deliberately NOT
@@ -159,6 +187,40 @@ def broker_backed(user):
     True forever. Reachability is a different question and it is answered
     by the AGE of the last reading, never by a stored flag.
     """
+    # Saxo first, since 2026-09-19, then eToro, then IBKR — the router's
+    # VENUE_PRECEDENCE, and the same test of carriage: keyed AND flagged
+    # primary for at least one asset class. A registered Saxo row that has
+    # never connected can therefore be the book and show an em dash for
+    # equity, which is the honest reading: nothing has been measured, and
+    # the preflight refuses to arm money against an unmeasured book.
+    saxo = getattr(user, "saxo_account", None)
+    if saxo is not None:
+        try:
+            keyed = bool(saxo.get_credentials()[0])
+            carries = any(saxo.is_primary_for(c)
+                          for c in ("stock", "forex", "commodity", "crypto"))
+        except Exception:  # noqa: BLE001 — an unreadable row is not backed
+            keyed, carries = False, False
+        if keyed and carries:
+            return saxo
+
+    # eToro next, since 2026-09-17, by the router's own rule: the row is
+    # the book when it is keyed AND flagged primary for at least one asset
+    # class. A keyed row with no flag carries nothing and is therefore not
+    # the book, and a user who has flipped no flag sees IBKR exactly as
+    # before. Precedence over IBKR is deliberate — retiring it is the
+    # stated direction — and it is the same ordering broker_router uses.
+    etoro = getattr(user, "etoro_account", None)
+    if etoro is not None:
+        try:
+            keyed = bool(etoro.get_credentials()[0])
+            carries = any(etoro.is_primary_for(c)
+                          for c in ("stock", "forex", "commodity", "crypto"))
+        except Exception:  # noqa: BLE001 — an unreadable row is not backed
+            keyed, carries = False, False
+        if keyed and carries:
+            return etoro
+
     acct = getattr(user, "ibkr_account", None)
     if acct is None:
         return None
@@ -167,6 +229,30 @@ def broker_backed(user):
     except Exception:  # noqa: BLE001 — an undecryptable id is not backed
         return None
     return acct if account_id else None
+
+
+def broker_env(acct) -> str:
+    """"live", "paper", or "" when the row cannot say.
+
+    The environment a reading belongs to. Saxo and eToro carry two worlds
+    on ONE row (an app key / a key pair per environment), so without this a
+    simulated balance and a real one are the same number in the same
+    account's history — and the drawdown governor de-risks against that
+    history.
+    """
+    kind = broker_kind(acct)
+    if kind == "saxo":
+        return "paper" if getattr(acct, "sim", False) else "live"
+    if kind == "etoro":
+        return "paper" if getattr(acct, "demo", False) else "live"
+    return getattr(acct, "env", "") or ""
+
+
+def broker_kind(acct) -> str:
+    """The `broker` value a reading for this account row is stored under.
+    One place, so the writer and both readers cannot spell it differently."""
+    return {"EtoroAccount": "etoro",
+            "SaxoAccount": "saxo"}.get(type(acct).__name__, "ibkr")
 
 
 def account_equity(user):
@@ -248,7 +334,8 @@ def pool_oversubscription(user):
             continue
         try:
             from bot_program.engine.broker_router import client_for_symbol
-            client = client_for_symbol(user, symbols[0], cfg)
+            client = client_for_symbol(user, symbols[0], cfg,
+                                       purpose="data")
         except Exception:  # noqa: BLE001
             continue
         venue = type(client).__name__
@@ -335,7 +422,281 @@ def broker_view(user):
         return None
     return {
         "label": acct.label,
-        "env": acct.env_label,
+        # WHICH broker. Three pages printed the literal "IBKR" over
+        # whatever book they were handed, because this builder never said.
+        "kind": broker_kind(acct),
+        "name": {"saxo": "Saxo Bank", "etoro": "eToro",
+                 "ibkr": "IBKR"}.get(broker_kind(acct), "broker"),
+        # getattr, because a row that cannot say is not a page that breaks.
+        "env": getattr(acct, "env_label", "") or "",
         "equity": account_equity(user),
         "positions": broker_positions(user),
+    }
+
+
+# ── Shares of the account ────────────────────────────────────────────────
+#
+# A pool that follows the account takes a SHARE of it, and the sync writes
+# capital = share × reading on every beat, down as well as up. The share is
+# explicit — extras["account_share_pct"], 0 < pct ≤ 100 — or automatic:
+# followers without a number split what the explicit ones leave, equally.
+# One follower with no number is the whole account, which is the original
+# contract, unchanged. The shares of one account can never sum past 100%:
+# an over-allocated fleet gets NOTHING retuned and the operator an alert,
+# because three pools sized against the same 500 are sized against 1,500
+# that does not exist — the state this deployment was in on 2026-09-10,
+# with 1,000 of hand-typed pools over a 500 account.
+SHARE_SLACK = 1e-6
+
+
+def account_share_pct(cfg):
+    """The explicit share of the account this pool takes, or None.
+
+    None means automatic when the pool follows the account, and nothing
+    when it does not — `tracks_broker` answers that question.
+    """
+    raw = (getattr(cfg, "extras", None) or {}).get("account_share_pct")
+    if raw in (None, ""):
+        return None
+    try:
+        pct = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(pct) or pct <= 0 or pct > 100:
+        return None
+    return pct
+
+
+def followers_of(user, *, include=None):
+    """Enabled, non-paper pools that follow the account — plus `include`,
+    a pool about to join them, whether or not it is saved as one yet."""
+    from bot_program.models import AssetBotConfig
+    qs = (AssetBotConfig.objects.filter(user=user, enabled=True)
+          .exclude(mode="paper"))
+    out = [c for c in qs if tracks_broker(c)]
+    if include is not None and all(c.pk != include.pk for c in out):
+        out.append(include)
+    return out
+
+
+def allocate_shares(followers, *, shares=None) -> dict:
+    """{"ok", "reason", "plan": {pk: fraction}} for one account's followers.
+
+    `shares` overrides a pool's share for the question "what if": a number
+    is an explicit percentage, None means automatic. Pure arithmetic — no
+    reads, no writes — so the arming path, the sync and the preflight all
+    answer from the same rule.
+    """
+    shares = dict(shares or {})
+    explicit, auto = {}, []
+    for cfg in followers:
+        pct = shares[cfg.pk] if cfg.pk in shares else account_share_pct(cfg)
+        if pct is None:
+            auto.append(cfg)
+        else:
+            explicit[cfg.pk] = float(pct)
+    names = {cfg.pk: f"{cfg.name} ({cfg.asset_class})" for cfg in followers}
+    total = sum(explicit.values())
+    if total > 100.0 + SHARE_SLACK:
+        listed = ", ".join(f"{names[pk]} {pct:.0f}%"
+                           for pk, pct in explicit.items())
+        return {"ok": False, "plan": {},
+                "reason": f"explicit shares sum to {total:.0f}% of the "
+                          f"account: {listed}"}
+    rest = 100.0 - total
+    if auto and rest <= SHARE_SLACK:
+        listed = ", ".join(names[c.pk] for c in auto)
+        return {"ok": False, "plan": {},
+                "reason": f"explicit shares take the whole account "
+                          f"({total:.0f}%) and {len(auto)} follower(s) "
+                          f"without a share would get nothing: {listed}"}
+    plan = {pk: pct / 100.0 for pk, pct in explicit.items()}
+    for cfg in auto:
+        plan[cfg.pk] = rest / 100.0 / len(auto)
+    return {"ok": True, "plan": plan, "reason": ""}
+
+
+def foreign_venue(user, cfg, book_kind: str, venue_of=None) -> str:
+    """The broker a following pool trades at when that is NOT the book —
+    any name the router answers: "saxo" / "etoro" / "ibkr" / "binance" /
+    "oanda" / "alpaca" ... — or "" when it trades at the book or nobody
+    can tell.
+
+    ONE test, shared by the sync that retunes the followers
+    (tasks._follow_the_account) and the withdrawals page that shows what
+    a reserve will shrink (withdrawals.readiness) — moved here from the
+    sync on 2026-09-28, because the page listed every follower as
+    shrinking while the sync skipped the ones routed elsewhere, and a
+    money page must show the number the sync will actually write.
+
+    EVERY SYMBOL, NOT THE FIRST. The router routes per symbol (runner.py
+    asks client_for_symbol inside the symbol loop), so a pool holding one
+    Saxo symbol and one eToro symbol reaches two venues. Reading
+    symbols[0] made the answer depend on which one the operator typed
+    first — cfg.symbols is a list in typing order — so the same pool was
+    retuned or skipped by an accident of data entry. The first FOREIGN
+    venue decides: that only ever refuses more, and it can never size a
+    pool from an account it does not trade.
+
+    EVERY VENUE THE ROUTER CAN NAME, NOT THREE (2026-09-28). This knew
+    saxo, etoro and ibkr and called every other answer "cannot tell" —
+    but broker_name_for_symbol answers "binance", "oanda" or "alpaca" for
+    any class no flag claims, and client_for_symbol builds a REAL client
+    for each the moment the keys are saved (BinanceClient testnet=False,
+    OANDATrader env="live", AlpacaTrader live). Those are known and
+    different venues: a live crypto follower under a Saxo book was sized
+    from Saxo's reading on the Follow button and on every sync beat while
+    its orders went to Binance — the defect 662937a closed for the three
+    flagged venues, open through the three legacy ones. Any venue other
+    than the book's kind is foreign. "paper" is not a venue (the router
+    found nothing to send to, and a live config refuses a PaperTrader on
+    its own), so it, "" and the symbol-less manual pools mean "cannot
+    tell", and cannot-tell keeps the behaviour it has always had: the
+    pool follows. A router that raises is cannot-tell too.
+
+    `venue_of` is an optional {symbol: venue} dict shared across pools, so
+    one sync asks the router once per symbol — every follower is
+    non-paper, so the routing of a symbol does not differ between them.
+    """
+    if not book_kind:
+        return ""
+    if venue_of is None:
+        venue_of = {}
+    try:
+        from bot_program.engine.broker_router import broker_name_for_symbol
+        for sym in list(cfg.symbols or []):
+            if sym not in venue_of:
+                venue_of[sym] = broker_name_for_symbol(user, sym, cfg)
+            venue = venue_of[sym]
+            if venue and venue != "paper" and venue != book_kind:
+                return venue
+    except Exception as e:  # noqa: BLE001 — unknown is not a mismatch
+        logger.debug("capital_truth: cannot tell %s's venue (%s)",
+                     cfg.name, e)
+    return ""
+
+
+def share_label(cfg, plan=None) -> str:
+    """'30%' / 'auto 35%' / 'auto' — for the pages that show a follower."""
+    pct = account_share_pct(cfg)
+    if pct is not None:
+        return f"{pct:g}%"
+    if plan and cfg.pk in plan:
+        return f"auto {plan[cfg.pk] * 100:.0f}%"
+    return "auto"
+
+
+# ── The road the account took: high-water mark and drawdown ──────────────
+#
+# Over BrokerEquityReading rows — the sync's history, one row per stored
+# reading, written nowhere else. Only rows in the CURRENT reading's
+# currency count: a GBP ISA whose history is in EUR would otherwise show
+# a drawdown that is an exchange rate. The current reading is always part
+# of the max, so a fresh account with no history has a high-water mark
+# equal to itself, a drawdown of 0 and n == 0 — "hwm from 1 reading",
+# never "no hwm". Pure DB reads, safe on any render path.
+#
+# NET OF WITHDRAWALS (2026-09-28). A withdrawal marked paid on /withdrawals/
+# is money that left on purpose, and a history that did not know it would
+# read the first real withdrawal as a drawdown — the governor cutting the
+# desk budget and capping every share, a shock plan de-risking the account,
+# for 90 days, over money nobody lost. So every reading, the current one
+# included, is compared as it would read had every LATER paid withdrawal
+# already left (withdrawals.flow_adjusted_value): readings before a
+# withdrawal lose its amount, readings after it are unchanged. The
+# high-water mark is therefore in today's money. Paid withdrawals only, in
+# the reading's currency only; a reserve has not left the account. If the
+# flows cannot be read, the raw history is used — the old behaviour, which
+# errs toward de-risking, never toward trusting money that may be gone.
+def paid_flows_for(user, currency):
+    """[(paid_at, amount)] of paid withdrawals in `currency`, or [] when
+    they cannot be read (logged). Shared with share_allocator.drop_24h."""
+    try:
+        from bot_program.withdrawals import paid_flows
+        return paid_flows(user, currency=currency or "")
+    except Exception as e:  # noqa: BLE001 — raw history is the safe side
+        logger.warning("capital_truth: withdrawals unreadable, equity "
+                       "history read raw: %s", e)
+        return []
+
+
+def equity_high_water(user, *, window_days=90, flows=None):
+    """{hwm, hwm_at, currency, n, withdrawn} over the last `window_days`,
+    or None when no reading has landed. `n` is the number of HISTORY rows
+    that took part (the current reading is counted separately). `hwm` is
+    net of every withdrawal paid after the reading it came from;
+    `withdrawn` is what was paid inside the window (0.0 when nothing)."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from bot_program.equity_models import BrokerEquityReading
+
+    acct = broker_backed(user)
+    reading = account_equity(user)
+    if acct is None or reading is None:
+        return None
+    currency = reading["currency"] or ""
+    since = timezone.now() - timedelta(days=window_days)
+    rows = (BrokerEquityReading.objects
+            .filter(broker=broker_kind(acct), account_pk=acct.pk,
+                    currency=currency, at__gte=since)
+            .order_by("-value", "-at"))
+    # NOT a reading from the OTHER environment. A row that never recorded
+    # one is kept: excluding it would drop every reading written before
+    # `env` was stored, and "unknown provenance" is not "the wrong world".
+    env_now = broker_env(acct)
+    if env_now:
+        from django.db.models import Q
+        rows = rows.filter(Q(env="") | Q(env=env_now))
+    from bot_program.withdrawals import flow_adjusted_value
+    if flows is None:
+        flows = paid_flows_for(user, currency)
+    hwm = flow_adjusted_value(float(reading["value"]), reading["at"], flows)
+    hwm_at = reading["at"]
+    n = 0
+    for r in rows:
+        n += 1
+        v = flow_adjusted_value(float(r.value), r.at, flows)
+        if v > hwm:
+            hwm, hwm_at = v, r.at
+    withdrawn = sum(float(amount) for paid_at, amount in flows
+                    if paid_at >= since)
+    return {"hwm": hwm, "hwm_at": hwm_at, "currency": currency, "n": n,
+            "withdrawn": withdrawn}
+
+
+def equity_drawdown(user, *, window_days=90):
+    """The current reading against its high-water mark, or None.
+
+    {value, currency, at, age_seconds, hwm, hwm_at, drawdown_pct (>= 0),
+     stale, n, withdrawn}. drawdown_pct is a FRACTION of the high-water
+    mark (0.12 is 12% under), never negative: a reading above every row
+    in the window IS the new high-water mark. Both sides are net of paid
+    withdrawals (see above), so a withdrawal is not a drawdown; `value`
+    stays the reading as the broker gave it.
+    """
+    reading = account_equity(user)
+    if reading is None:
+        return None
+    flows = paid_flows_for(user, reading["currency"] or "")
+    hw = equity_high_water(user, window_days=window_days, flows=flows)
+    if hw is None:
+        return None
+    from bot_program.withdrawals import flow_adjusted_value
+    value = float(reading["value"])
+    net = flow_adjusted_value(value, reading["at"], flows)
+    hwm = float(hw["hwm"])
+    dd = max(0.0, (hwm - net) / hwm) if hwm > 0 else 0.0
+    return {
+        "value": value,
+        "currency": reading["currency"],
+        "at": reading["at"],
+        "age_seconds": reading["age_seconds"],
+        "hwm": hwm,
+        "hwm_at": hw["hwm_at"],
+        "drawdown_pct": dd,
+        "stale": reading["age_seconds"] > TRACKING_FRESH_SECONDS,
+        "n": hw["n"],
+        "withdrawn": hw["withdrawn"],
     }

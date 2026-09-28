@@ -39,6 +39,9 @@ app.conf.task_routes = {
     # Tier 1-2: Fast queue (price fetching, news, signals)
     "market_data.tasks.*": {"queue": "fast"},
     "scraping.tasks.fetch_breaking_news": {"queue": "fast"},
+    # Network-bound: one live HTTP request per article, so it
+    # goes to slow rather than sitting in front of price ticks.
+    "scraping.tasks.fetch_news_bodies": {"queue": "slow"},
     "scraping.tasks.fetch_social_sentiment": {"queue": "fast"},
     "signals.tasks.run_signal_scan": {"queue": "fast"},
     "indicators.tasks.recalculate_watchlist_indicators": {"queue": "fast"},
@@ -52,6 +55,14 @@ app.conf.task_routes = {
     "portfolio.tasks.*": {"queue": "slow"},
     "scraping.tasks.fetch_cot_reports": {"queue": "slow"},
     "scraping.tasks.fetch_sec_filings": {"queue": "slow"},
+    # 2026-09-26 — the Telegram eye. The 15-second poll sits beside the
+    # quote poller: an idle poll is one HTTP round trip. The question it
+    # queues goes to the ai worker, where a slow LLM turn blocks nothing.
+    "bot_program.tasks.poll_telegram_eye": {"queue": "fast"},
+    # 2026-09-26 -- the Morgul guards: database reads every 5 min, beside
+    # the quote poller like the eye's poll; no LLM, no broker call.
+    "bot_program.tasks.run_morgul_guards": {"queue": "fast"},
+    "bot_program.tasks.answer_telegram_question": {"queue": "ai"},
 }
 
 # ============================================================
@@ -105,6 +116,15 @@ app.conf.beat_schedule = {
     "sauron-auto-demoter-daily": {
         "task": "brain.tasks.run_auto_demoter",
         "schedule": crontab(hour=4, minute=30),  # 04:30 UTC daily
+    },
+    # ── HORIZON: the 5-10 year sector synthesis ────────────────
+    # Monthly on the 1st at 04:45 UTC — after the demoter's 04:30 and
+    # never in the Sunday generator's 04:00 hour, so the two frontier
+    # calls of the month cannot land in the same deep-tier reserve
+    # window. ~1.5 USD a run, gated by agent_horizon (off by default).
+    "sauron-horizon-monthly": {
+        "task": "brain.tasks.run_horizon",
+        "schedule": crontab(day_of_month=1, hour=4, minute=45),
     },
     "sauron-earnings-reviewer": {
         "task": "brain.tasks.run_earnings_reviewer",
@@ -174,6 +194,14 @@ app.conf.beat_schedule = {
     "fetch-breaking-news": {
         "task": "scraping.tasks.fetch_breaking_news",
         "schedule": 900.0,
+    },
+    # Bodies AFTER the feed pass and BEFORE the AI pass, at a cadence between
+    # the two, so an article usually has its text by the time sentiment is
+    # computed from it. Nothing enforces that ordering and nothing needs to:
+    # a body that lands late simply improves the next reading.
+    "fetch-news-bodies": {
+        "task": "scraping.tasks.fetch_news_bodies",
+        "schedule": 600.0,
     },
     "ai-process-new-news": {
         "task": "ai_agents.tasks.process_unanalyzed_news",
@@ -313,6 +341,20 @@ app.conf.beat_schedule = {
 
     # ── Phase 10 — opportunity scanner: match registered setups against
     #              every instrument; resolve flags after their horizon.
+    # CADENCE, MEASURED AND LEFT ALONE (2026-09-12). Raising this to every
+    # four hours would multiply the flag rate — and so the evidence the
+    # promotion ladder is starved of — by four. It was not raised, because a
+    # cadence nobody has timed is a cadence nobody should raise: a full
+    # `diagnose_setups` pass (the same one-`scan_setup`-per-pair loop
+    # `scan_all_setups` runs) took 4.0-7.1 s over 6 setups × 179 instruments —
+    # 566 pairs — on a development database holding 5,600 bars, where nearly
+    # every evaluator returned early for want of data. That is a FLOOR. The
+    # live population is 20 active setups over the same 179 instruments with
+    # full history: 13-24 s of loop before one real window is measured, with
+    # an unknown multiplier above it. Not comfortably under 60 s, so this
+    # stays daily.
+    # `deploy/RUNBOOK.md` § "Why a setup never fires" carries the arithmetic
+    # and the one command that re-measures it on the box.
     "scan-opportunities": {
         "task": "signals.tasks.scan_opportunities",
         "schedule": crontab(hour=9, minute=0),  # daily 09:00 UTC
@@ -395,6 +437,59 @@ app.conf.beat_schedule = {
         "task": "bot_program.tasks.sync_broker_account",
         "schedule": 900.0,
     },
+    # 2026-09-17 — the eToro twin: same cadence, same component switch
+    # (broker_account_sync), a separate task so the IBKR loop's session
+    # leasing and 2FA guards are never touched. Both are plain intervals,
+    # so they may coincide; each is one HTTP round trip per account and
+    # the fast queue has two workers, which is contention nobody will see.
+    "sync-etoro-accounts": {
+        "task": "bot_program.tasks.sync_etoro_accounts",
+        "schedule": 900.0,
+    },
+    # 2026-09-17 — Saxo's OAuth session keeper. UNGATED: the refresh token
+    # lives forty minutes and rotates, so a session that died because a
+    # sync switch was off for an afternoon would cost a browser sign-in.
+    # Ten minutes gives four refreshes per token lifetime; one missed cycle
+    # costs nothing. Cadence pinned against the lifetime by
+    # tests/test_saxo_oauth.py.
+    # 2026-09-19 — the third broker the book can be. Same cadence and
+    # same switch as the eToro walk; offset by nothing, because each loop
+    # reads a different broker and they do not contend.
+    "sync-saxo-accounts": {
+        "task": "bot_program.tasks.sync_saxo_accounts",
+        "schedule": 900.0,
+    },
+    "refresh-saxo-sessions": {
+        "task": "bot_program.tasks.refresh_saxo_sessions",
+        "schedule": 600.0,
+        # A backlog must never drain two rotations at once: the refresh
+        # token rotates, so a second run racing the first can only lose.
+        "options": {"expires": 540},
+    },
+
+    # ── Share allocator: a TARGET share of the account per live follower
+    #              pool, every 4 h at :05 — five minutes AFTER the :00 sync
+    #              above has stored a reading, because a proposal needs one
+    #              under an hour old and a stale one proposes nothing. Shadow:
+    #              it writes a SharePlan and re-sizes no pool; an admin
+    #              applies (PIN / --yes) in LIVE mode only. Gated by its own
+    #              component (pipeline_share_allocator).
+    "propose-share-plans": {
+        "task": "bot_program.tasks.propose_share_plans",
+        "schedule": crontab(minute=5, hour="*/4"),
+    },
+
+    # ── The capital desk: price what the desk refused, then score the
+    #              plan against the fleet it overruled. 03:45 UTC, after
+    #              the bar refresh has had the night and before the 04:30
+    #              promotion pass reads the same closes. Gated by
+    #              pipeline_capital_desk: with the desk off there are no
+    #              plans, and the task returns without touching a row.
+    #              This is the reading `capital_desk_mode_live` waits on.
+    "grade-capital-desk": {
+        "task": "bot_program.tasks.grade_capital_desk",
+        "schedule": crontab(hour=3, minute=45),
+    },
 
     # NB: there is deliberately no in-app "daily-postgres-backup" entry.
     # core.backups.run_postgres_backup shells out to pg_dump, which is not in
@@ -408,6 +503,30 @@ app.conf.beat_schedule = {
 
     # ── Phase 8 — promotion pipeline: walk every rule, auto-promote
     #              the eligible and auto-demote the degrading.
+    # 2026-09-15 — the evidence chain, watched rather than checked.
+    # Daily at 06:40 UTC: after the nightly passes have run and before the
+    # operator's morning, so a cold link is in the first thing they read
+    # rather than discovered on day ninety. Read-only; it turns nothing on.
+    # Gated by its own component (pipeline_campaign_watch) because a
+    # watchdog nobody asked for is noise, and this platform's rule is that
+    # a task an operator did not enable does not run.
+    "watch-evidence-chain": {
+        "task": "bot_program.tasks.watch_evidence_chain",
+        "schedule": crontab(hour=6, minute=40),
+    },
+
+    # 2026-09-26 -- the Morgul guards (bot_program/morgul.py): ten
+    # read-only guards over the book, every 5 min, their findings to the
+    # staff Telegram group once per 3 h. Gated by morgul_guards, OFF on
+    # arrival; the brake has its own switch (morgul_brake), OFF too.
+    "run-morgul-guards": {
+        "task": "bot_program.tasks.run_morgul_guards",
+        "schedule": 300.0,
+        # A backlog never drains a queue of stale runs (the module also
+        # holds a lock: one run at a time).
+        "options": {"expires": 240},
+    },
+
     "auto-evaluate-promotions": {
         "task": "signals.tasks.auto_evaluate_promotions",
         "schedule": crontab(hour=4, minute=30),
@@ -451,5 +570,18 @@ app.conf.beat_schedule = {
     "check-price-alerts": {
         "task": "alerts.tasks.check_all_price_alerts",
         "schedule": 60.0,  # Every minute
+    },
+
+    # ── 2026-09-26 — the Telegram eye: the group's commands answered
+    #    within a quarter minute (bot_program/telegram_eye.py). Gated by
+    #    the telegram_eye component, OFF on arrival. No `expires`: the
+    #    database scheduler drops that key, and a backlog of polls is
+    #    harmless (the batch lock takes one at a time, the others skip
+    #    at once; after the first, each finds nothing).
+    #    alerts.tasks.check_telegram_commands is NOT scheduled and must
+    #    never be: it would steal these updates.
+    "poll-telegram-eye": {
+        "task": "bot_program.tasks.poll_telegram_eye",
+        "schedule": 15.0,
     },
 }

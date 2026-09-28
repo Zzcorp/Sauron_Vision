@@ -95,6 +95,26 @@ def _manual_configs_outside_commodities(user):
     ).exclude(asset_class="commodity").order_by("asset_class"))
 
 
+def _disable_cost_note(cfgs) -> str:
+    """Said BEFORE the press: a disabled config is not ticked, so what it
+    holds open goes unmanaged — counted per config, as of this page load."""
+    from django.db.models import Count
+    from bot_program.models import AssetBotTrade
+
+    open_by_cfg = {
+        row["config_id"]: row["n"]
+        for row in AssetBotTrade.objects.filter(config__in=cfgs, status="OPEN")
+        .values("config_id").annotate(n=Count("id"))
+    }
+    counts = ", ".join(f"{cfg.asset_class} {open_by_cfg.get(cfg.id, 0)}"
+                       for cfg in cfgs)
+    return ("Disabling stops the platform managing that config's open "
+            "positions: no time stop, no trailing stop, and a paper position "
+            f"has no stop at all. Open now: {counts}. A manual config opens "
+            "nothing on its own, so to stop manual entries without stranding "
+            "a position, close its positions first, then disable.")
+
+
 def build_concern_actions(report, user):
     """The latest synthesis, concern by concern, each with its levers.
 
@@ -137,6 +157,9 @@ def build_concern_actions(report, user):
                 row["note"] = "No enabled manual config outside commodities on this account."
             elif is_super:
                 row["manual_configs"] = cfgs
+                row["note"] = _disable_cost_note(cfgs)
+                row["links"].append({"label": "Open positions",
+                                     "url": reverse("positions_list")})
             else:
                 row["note"] = ("Manual configs outside commodities: "
                                + ", ".join(cfg.asset_class for cfg in cfgs)
@@ -281,7 +304,15 @@ def brain_disable_manual(request):
     This says what it means: already disabled is a no-op that reports
     itself. Superuser only, and only a MANUAL config the presser owns —
     the brain's advice is not a lever onto other people's bots.
+
+    It used to answer "it manages what is open and opens nothing new". The
+    second half was already true of the ENABLED config (no symbols, so it
+    never opens on its own); the first was false of the disabled one — the
+    runner skips a disabled config whole, so its open positions lose their
+    time stop, trailing and every platform-checked stop. The answer now
+    counts what is left unmanaged (runner.unmanaged_on_disable, 2026-09-26).
     """
+    from bot_program.asset_engine.runner import unmanaged_on_disable
     from bot_program.manual_trade import MANUAL_CONFIG_NAME
     from bot_program.models import AssetBotConfig
 
@@ -303,12 +334,13 @@ def brain_disable_manual(request):
     if cfg.enabled:
         cfg.enabled = False
         cfg.save(update_fields=["enabled", "updated_at"])
-        _brain_result(request, True,
-                      f"Manual {cfg.asset_class} is DISABLED — it manages "
-                      f"what is open and opens nothing new.")
+        head = (f"Manual {cfg.asset_class} is DISABLED — TAKE TRADE refuses "
+                f"this class until it is re-enabled.")
     else:
-        _brain_result(request, True,
-                      f"Manual {cfg.asset_class} was already disabled.")
+        head = f"Manual {cfg.asset_class} was already disabled."
+    tail = (unmanaged_on_disable(cfg)
+            or "It holds no open position, so nothing is left unmanaged.")
+    _brain_result(request, True, f"{head} {tail}")
     return HttpResponseRedirect(back)
 
 

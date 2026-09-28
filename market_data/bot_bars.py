@@ -21,14 +21,56 @@ Design notes:
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone as dt_tz
 from decimal import Decimal, InvalidOperation
 
+from django.core.cache import cache
+
 logger = logging.getLogger(__name__)
 
-# The timeframes the rule layer actually reads.
-DEFAULT_INTERVALS = ("1h", "4h")
+# The timeframes the rule layer actually reads. The LARGER one first: the
+# keyless feed builds 4h from a single hourly download and remembers that
+# frame for a few minutes, so the 1h request that follows is served from
+# it — one download per symbol per pass instead of two.
+DEFAULT_INTERVALS = ("4h", "1h")
 DEFAULT_LIMIT = 200
+
+# A breath between symbols on the keyless feed. Yahoo tolerates a steady
+# trickle and cuts off a burst; a research fleet of 150 symbols is a burst
+# without this, and 30 seconds of a ten-minute pass with it.
+PUBLIC_FEED_PACE_S = 0.2
+
+
+def _pace() -> None:
+    time.sleep(PUBLIC_FEED_PACE_S)
+
+# A venue that gave no bars for a symbol is not asked again for a while.
+# One IBKR historical request the Gateway never answers costs the whole
+# request timeout, and seven forex CFDs times two intervals is most of a
+# ten-minute refresh spent waiting on a venue that has already said no —
+# which is how the 2026-09-10 bar writer spent its afternoon. The memo
+# is written only when the venue was actually asked and stayed mute, so
+# it expires on its own and the venue gets one fresh chance per window.
+MUTE_VENUE_MEMO_S = 6 * 3600
+
+
+def _mute_key(source: str, symbol: str, interval: str) -> str:
+    return f"bars:mute:{source}:{symbol}:{interval}"
+
+
+def _venue_is_mute(source: str, symbol: str, interval: str) -> bool:
+    try:
+        return bool(cache.get(_mute_key(source, symbol, interval)))
+    except Exception:  # noqa: BLE001 — a dead cache costs one request
+        return False
+
+
+def _remember_mute(source: str, symbol: str, interval: str) -> None:
+    try:
+        cache.set(_mute_key(source, symbol, interval), 1, MUTE_VENUE_MEMO_S)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _client_for(user, symbol, cfg):
@@ -40,12 +82,14 @@ def _client_for(user, symbol, cfg):
     from bot_program.engine.broker_router import client_for_symbol
     from bot_program.engine.paper_trader import PaperTrader
 
-    client = client_for_symbol(user, symbol, cfg)
+    # purpose="data": this writer only reads bars, and on IBKR it must not
+    # share the trader's clientId — see bot_program/engine/ibkr_sessions.
+    client = client_for_symbol(user, symbol, cfg, purpose="data")
     if isinstance(client, PaperTrader):
         # Paper configs short-circuit the router; retry with mode ignored so
         # market data still comes from the real venue when creds exist.
         if getattr(cfg, "mode", "paper") == "paper":
-            client = client_for_symbol(user, symbol, None)
+            client = client_for_symbol(user, symbol, None, purpose="data")
         if isinstance(client, PaperTrader):
             return _public_market_data_client(cfg)
     return client
@@ -100,6 +144,24 @@ def _venue_symbol(client, symbol: str) -> str:
     return venue_symbol(symbol)
 
 
+def _source_tag(client) -> str:
+    """The provenance a client's bars are written under.
+
+    One feed, one spelling. The scheduled path stripped "Trader" and
+    "Client" from the class name but not "Feed", so the same Yahoo feed
+    wrote `yfinancefeed_public` for a config with no broker and
+    `yfinance_public` from the fallback and from backfill_bars — and an
+    audit of the keyless rows by either spelling missed the other half.
+    """
+    name = type(client).__name__
+    for word in ("Trader", "Client", "Feed"):
+        name = name.replace(word, "")
+    tag = name.lower() or "broker"
+    if getattr(client, "_sv_public_feed", False):
+        tag += "_public"
+    return tag
+
+
 def _upsert_rows(inst, interval, rows, source) -> tuple[int, int]:
     """Persist Binance-style kline rows. Returns (written, skipped)."""
     from market_data.models import PriceData
@@ -138,7 +200,8 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
     """Fetch and persist bars for every symbol on one bot config."""
     from instruments.models import Instrument
 
-    out = {"symbols": 0, "bars": 0, "skipped": 0, "errors": 0, "no_client": 0}
+    out = {"symbols": 0, "bars": 0, "skipped": 0, "errors": 0, "no_client": 0,
+           "fallback": 0}
     for symbol in (cfg.symbols or []):
         inst = Instrument.objects.filter(symbol=symbol).first()
         if inst is None:
@@ -159,42 +222,158 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
             out["no_client"] += 1
             continue
 
-        source = type(client).__name__.replace("Trader", "").replace(
-            "Client", "").lower() or "broker"
-        if getattr(client, "_sv_public_feed", False):
-            source += "_public"
+        source = _source_tag(client)
         out["symbols"] += 1
         fetch_symbol = _venue_symbol(client, symbol)
         for interval in intervals:
-            try:
-                rows = client.klines(fetch_symbol, interval=interval,
-                                     limit=limit)
-            except Exception as e:
-                logger.warning("[bars] klines(%s, %s) failed: %s",
-                               symbol, interval, e)
-                out["errors"] += 1
-                continue
-            written, skipped = _upsert_rows(inst, interval, rows, source)
+            row_source = source
+            rows = []
+            asked = False
+            if _venue_is_mute(source, symbol, interval):
+                logger.info("[bars] %s %s: %s gave no bars within the last "
+                            "%dh — public feed directly", symbol, interval,
+                            source, MUTE_VENUE_MEMO_S // 3600)
+            else:
+                asked = True
+                try:
+                    rows = client.klines(fetch_symbol, interval=interval,
+                                         limit=limit)
+                except Exception as e:
+                    logger.warning("[bars] klines(%s, %s) failed: %s",
+                                   symbol, interval, e)
+                    out["errors"] += 1
+                    rows = []
+            if not rows and not getattr(client, "_sv_public_feed", False):
+                # THE VENUE IS MUTE, NOT THE MARKET. An execution venue
+                # that answers a bar request with nothing — a historical
+                # farm that never replies (the IBKR forex case that aged
+                # every pair's bars 36 hours), a pacing refusal, a symbol
+                # it will not serve history for — must not leave the bot
+                # blind when the same candles are one keyless request
+                # away. The rows are tagged as the public feed's, so a
+                # bar's provenance still says where it came from.
+                rows, row_source = _fallback_rows(cfg, symbol, interval,
+                                                  limit)
+                if rows:
+                    out["fallback"] += 1
+                    if asked:
+                        _remember_mute(source, symbol, interval)
+                        logger.warning("[bars] %s %s: %s returned no bars "
+                                       "— written from the public feed "
+                                       "instead, and not asked again for "
+                                       "%dh", symbol, interval, source,
+                                       MUTE_VENUE_MEMO_S // 3600)
+                    # THE STAND-IN FILLS THE GAP, NOT THE HISTORY. Yahoo's
+                    # 4h grid is anchored at exchange midnight and a
+                    # venue's at its own session close (OANDA: 17:00 New
+                    # York), so the two never share a timestamp, and a
+                    # stand-in written across the venue's window sat
+                    # BESIDE its bars: one series at twice the density,
+                    # read by every ATR stop and IPDA range on the pair.
+                    # Only the bars after the venue's newest are written.
+                    rows = _after_the_venues_last_bar(inst, interval, rows)
+            elif rows and not getattr(client, "_sv_public_feed", False):
+                # THE VENUE ANSWERED: ITS WINDOW IS ITS OWN. The stand-in
+                # rows from the venue's oldest returned bar onward go, so
+                # the window it covers holds one grid — the venue's.
+                # History behind that window (a backfilled year) stays.
+                evicted = _evict_stand_in_rows(inst, interval, rows)
+                if evicted:
+                    logger.info("[bars] %s %s: %s answered — %d public-feed "
+                                "stand-in bars in its window gave way to "
+                                "the venue's", symbol, interval, source,
+                                evicted)
+            written, skipped = _upsert_rows(inst, interval, rows, row_source)
             out["bars"] += written
             out["skipped"] += skipped
+        if getattr(client, "_sv_public_feed", False) is True:
+            _pace()
     return out
 
 
+def _fallback_rows(cfg, symbol, interval, limit) -> "tuple[list, str]":
+    """Bars from the keyless feed when the venue gave none, or ([], '')."""
+    feed = _public_market_data_client(cfg)
+    if feed is None:
+        return [], ""
+    try:
+        rows = feed.klines(symbol, interval=interval, limit=limit) or []
+    except Exception as e:  # noqa: BLE001 — the fallback must not raise
+        logger.warning("[bars] public feed klines(%s, %s) failed: %s",
+                       symbol, interval, e)
+        return [], ""
+    return rows, _source_tag(feed)
+
+
+def _after_the_venues_last_bar(inst, interval, rows) -> list:
+    """The stand-in's rows newer than the venue's newest bar — all of them
+    when no venue has ever written this frame."""
+    from market_data.models import PriceData
+
+    last = (PriceData.objects
+            .filter(instrument=inst, timeframe=interval)
+            .exclude(source__endswith="_public")
+            .order_by("-timestamp")
+            .values_list("timestamp", flat=True).first())
+    if last is None:
+        return rows
+    last_ms = int(last.timestamp() * 1000)
+    kept = []
+    for row in rows:
+        try:
+            if int(row[0]) > last_ms:
+                kept.append(row)
+        except (TypeError, ValueError, IndexError):
+            kept.append(row)        # _upsert_rows counts it as skipped
+    return kept
+
+
+def _evict_stand_in_rows(inst, interval, rows) -> int:
+    """Delete the public feed's rows from the venue's oldest returned bar
+    onward. Returns how many went."""
+    from market_data.models import PriceData
+
+    stamps = []
+    for row in rows:
+        try:
+            stamps.append(int(row[0]))
+        except (TypeError, ValueError, IndexError):
+            continue
+    if not stamps:
+        return 0
+    since = datetime.fromtimestamp(min(stamps) / 1000, tz=dt_tz.utc)
+    deleted, _ = (PriceData.objects
+                  .filter(instrument=inst, timeframe=interval,
+                          timestamp__gte=since, source__endswith="_public")
+                  .delete())
+    return deleted
+
+
 # Starred instruments beyond the fleet get bars too, capped per pass —
-# keyless requests are cheap, not free.
+# keyless requests are cheap, not free. Held symbols are never capped.
 WATCHLIST_BAR_CAP = 30
 
 
 def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
                            limit=DEFAULT_LIMIT, covered=None) -> dict:
-    """Bars for STARRED instruments no enabled bot already covers.
+    """Bars for HELD and STARRED instruments no enabled bot already covers.
 
     The star used to bring quotes and signal scans but not bars — so a
     starred instrument's chart stayed blank and its rules could never
     fire, which quietly contradicted what the star promises. The keyless
     public feeds close the gap; symbols with no free source are skipped
     by name.
+
+    HELD symbols come first and outside the cap. The manual TAKE TRADE
+    config carries `symbols=[]` by design, so a pair held only through the
+    manual lane is covered by no config — and the cap used to be taken
+    BEFORE covered symbols were skipped, so fleet symbols spent the thirty
+    slots and a held pair starred past them got no 4h/1h bars at all. The
+    held set is the one the brain's regime probe reads
+    (`brain.synthesizer._held_symbols`), so every probe on the book has a
+    frame to read. The cap now counts only symbols this pass will fetch.
     """
+    from brain.synthesizer import _held_symbols
     from instruments.models import Instrument
     from market_data.public_feed import (SUPPORTED_ASSET_CLASSES,
                                          YF_UNAVAILABLE, public_feed_for)
@@ -202,21 +381,25 @@ def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
     out = {"symbols": 0, "bars": 0, "skipped": 0, "errors": 0, "no_client": 0}
     covered = covered or set()
     classes = sorted(SUPPORTED_ASSET_CLASSES | {"crypto"})
-    qs = (Instrument.objects.filter(is_watchlist=True, is_active=True,
-                                    asset_class__in=classes)
-          .order_by("symbol"))
-    for inst in qs[:WATCHLIST_BAR_CAP]:
-        if inst.symbol in covered or inst.symbol in YF_UNAVAILABLE:
-            continue
+    skip = set(covered) | set(YF_UNAVAILABLE)
+    held = [i for i in (Instrument.objects
+                        .filter(symbol__in=_held_symbols(),
+                                asset_class__in=classes)
+                        .order_by("symbol"))
+            if i.symbol not in skip]
+    skip.update(i.symbol for i in held)
+    starred = [i for i in (Instrument.objects
+                           .filter(is_watchlist=True, is_active=True,
+                                   asset_class__in=classes)
+                           .order_by("symbol"))
+               if i.symbol not in skip][:WATCHLIST_BAR_CAP]
+    for inst in held + starred:
         client = public_feed_for(inst.asset_class)
         if client is None:
             out["no_client"] += 1
             continue
         fetch_symbol = _venue_symbol(client, inst.symbol)
-        source = type(client).__name__.replace("Trader", "").replace(
-            "Client", "").lower() or "broker"
-        if getattr(client, "_sv_public_feed", False):
-            source += "_public"
+        source = _source_tag(client)
         out["symbols"] += 1
         for interval in intervals:
             try:
@@ -230,16 +413,20 @@ def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
             written, skipped = _upsert_rows(inst, interval, rows, source)
             out["bars"] += written
             out["skipped"] += skipped
+        # The same breath as the config pass: this pass runs straight
+        # after it, on the same keyless feed, for up to thirty more.
+        if getattr(client, "_sv_public_feed", False) is True:
+            _pace()
     return out
 
 
 def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dict:
-    """Refresh bars for every enabled AssetBotConfig, then for starred
-    instruments the fleet does not already cover."""
+    """Refresh bars for every enabled AssetBotConfig, then for held and
+    starred instruments the fleet does not already cover."""
     from bot_program.models import AssetBotConfig
 
     totals = {"configs": 0, "symbols": 0, "bars": 0, "skipped": 0, "errors": 0,
-              "no_client": 0}
+              "no_client": 0, "fallback": 0}
     covered: set = set()
     for cfg in (AssetBotConfig.objects.filter(enabled=True)
                 .select_related("user")):
@@ -251,13 +438,15 @@ def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dic
             logger.exception("[bars] config %s failed: %s", cfg.id, e)
             totals["errors"] += 1
             continue
-        for k in ("symbols", "bars", "skipped", "errors", "no_client"):
+        for k in ("symbols", "bars", "skipped", "errors", "no_client",
+                  "fallback"):
             totals[k] += res.get(k, 0)
 
     try:
         wl = refresh_watchlist_bars(intervals=intervals, limit=limit,
                                     covered=covered)
-        for k in ("symbols", "bars", "skipped", "errors", "no_client"):
+        for k in ("symbols", "bars", "skipped", "errors", "no_client",
+                  "fallback"):
             totals[k] += wl.get(k, 0)
     except Exception as e:
         logger.exception("[bars] watchlist pass failed: %s", e)

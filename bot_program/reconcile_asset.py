@@ -25,8 +25,127 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+#: How long a row that just CLOSED keeps claiming its symbol for the sweep
+#: (reconcile_unknown_positions). eToro lists a closed position for up to
+#: ~60 s after the close (measured 2026-09-23); the sweep only REPORTS, so
+#: claiming for twice that, at every venue, costs nothing and stops a page
+#: saying "UNCLAIMED" about a position that is closing.
+SWEEP_CLOSED_GRACE_S = 120
 
-def _broker_open_symbols(client, *, asset_class: str) -> dict:
+
+def keyed_venue_count(user) -> int:
+    """How many of this user's broker rows exist AND carry credentials.
+
+    The discriminator for an unattributable row. With one keyed venue a miss
+    there means the position is gone; with two it could equally mean the
+    position lives at the other one, and nothing on a pre-2026-09-19 row says
+    which. Counted rather than assumed, and an unreadable row counts as not
+    keyed — the same reading `broker_vision._keyed` takes.
+    """
+    from bot_program.broker_vision import BROKER_ROWS, _keyed
+    n = 0
+    for kind, attr, _name in BROKER_ROWS:
+        acct = getattr(user, attr, None)
+        if acct is not None and _keyed(kind, acct):
+            n += 1
+    return n
+
+
+def unattributable(trade, client, *, keyed: int) -> str:
+    """Why a MISS at `client` proves nothing about `trade`, or "".
+
+    Two reasons, and they are the same sentence about two different gaps.
+
+      * THE ROW NAMES A DIFFERENT VENUE. `execute_entry` stamps
+        metadata["broker"] with the adapter that carried the entry, and every
+        path that can book a close rebuilds the client from TODAY's
+        primary-for flag instead. One moved checkbox and this asks the wrong
+        venue about a live position.
+      * THE ROW NAMES NOTHING AND MORE THAN ONE VENUE IS KEYED. The stamp
+        only began today, so older rows carry nothing; with two keyed venues
+        a miss cannot tell "gone" from "held at the other one".
+
+    Empty string means the miss IS attributable and the caller may act on it:
+    the venues agree, or only one venue exists to disagree with.
+    """
+    from bot_program.engine.capabilities import adapter_key
+    carried = str((getattr(trade, "metadata", None) or {}).get("broker") or "")
+    now_at = adapter_key(client)
+    if carried and now_at and carried != now_at:
+        return (f"it was carried by {carried} and the router now answers "
+                f"{now_at}, so a miss at the wrong venue is not an absence")
+    if not carried and keyed > 1:
+        return (f"it records no carrier and {keyed} venues are keyed, so a "
+                f"miss here cannot tell a closed position from one held at "
+                f"another venue")
+    # THE ROW NAMES A WORLD AND THE CLIENT ANSWERS FROM THE OTHER ONE.
+    # execute_entry — and the TAKE TRADE lane, through AssetBot.venue_stamps
+    # — stamp metadata["broker_env"] from the client that placed the order;
+    # broker_router builds the eToro and Saxo clients from the account
+    # row's Demo/SIM flag AT CALL TIME (broker_router._etoro_client_for).
+    # Tick Demo on /brokers/ with live rows open and this function would
+    # compare them against the demo book, whose honest "I hold nothing" is
+    # not an absence. Three states: a row with no world, or a client that
+    # does not say, refuses nothing — an unknown world is not a different
+    # one. Reconcile and the drain inherit this through the one function.
+    from .asset_engine.base import AssetBot
+    filled_in = str((getattr(trade, "metadata", None) or {})
+                    .get("broker_env") or "")
+    answers_from = AssetBot.VENUE_WORLDS.get(
+        str(getattr(client, "env", "") or "").lower(), "")
+    if filled_in and answers_from and filled_in != answers_from:
+        return (f"it was filled in the {filled_in} world and the router now "
+                f"answers the {answers_from} world, so a miss here is not an "
+                f"absence")
+    return ""
+
+
+def venue_lag_window(trade, client) -> str:
+    """Why ONE read of this venue's position list cannot yet speak for
+    `trade`, or "".
+
+    The venue says how long its list lags, on the client, as
+    PORTFOLIO_LAG_S (EtoroTrader: 60 — MEASURED 2026-09-23: a filled
+    position absent ~2 s after the fill, a closed one still listed 3 s after
+    the close, both settled by ~60 s). Only a NUMBER declares a window: a
+    client with none, 0, or a MagicMock's attribute lags for nobody and the
+    reader acts as before. Inside the window the row's own stamps say what
+    just happened: opened_at (the bot lane creates the row right after the
+    fill), entry_filled_at (a WORKING row that filled later), close_sent_at
+    (a close sent and answered) and close_retry_last_at (a resend). A naive
+    stamp is refused, not localised. Three states: the reason, or "" —
+    never a guess about which way the list is wrong. Read by reconcile_user
+    and by pending_closes.retry_trade_close.
+    """
+    from datetime import datetime as _dt
+    lag = getattr(client, "PORTFOLIO_LAG_S", 0)
+    if isinstance(lag, bool) or not isinstance(lag, (int, float)) or lag <= 0:
+        return ""
+    meta = (trade.metadata
+            if isinstance(getattr(trade, "metadata", None), dict) else {})
+    now = timezone.now()
+    stamps = (("opened", getattr(trade, "opened_at", None)),
+              ("filled", meta.get("entry_filled_at")),
+              ("sent a close", meta.get("close_sent_at")),
+              ("retried a close", meta.get("close_retry_last_at")))
+    for what, raw in stamps:
+        if not raw:
+            continue
+        try:
+            at = raw if isinstance(raw, _dt) else _dt.fromisoformat(str(raw))
+        except (TypeError, ValueError):
+            continue
+        if timezone.is_naive(at):
+            continue
+        age = (now - at).total_seconds()
+        if 0 <= age < float(lag):
+            return (f"{what} {int(age)} s ago, and {type(client).__name__}'s "
+                    f"position list lags up to {int(lag)} s "
+                    f"(measured 2026-09-23)")
+    return ""
+
+
+def _broker_open_symbols(client, *, asset_class: str, warm=()) -> dict:
     """Best-effort broker open-position state.
 
     Returns None if the broker doesn't expose enough state (we won't
@@ -38,10 +157,34 @@ def _broker_open_symbols(client, *, asset_class: str) -> dict:
                          (IBKR provides sec_type per position).
       has_sec_types    — True when the client annotates security types,
                          i.e. opt_underlyings is a meaningful signal.
+      unnamed          — how many open positions this client could not put
+                         a platform symbol on. NOT in `symbols`, because
+                         matching on `ETORO:1001` is matching on nothing —
+                         and counted, because every caller reads a miss in
+                         `symbols` as "the broker is flat" and closes the
+                         row on it.
+
+    `warm` is the symbols this reader is about to ask about. eToro names a
+    position only from the reverse map the client itself filled and the
+    router hands out a fresh client per call, so without the warm a reader
+    that placed no order can never confirm a position IS open either — it
+    would answer "unreadable" for ever, which is its own kind of blind.
     """
     # Alpaca exposes /v2/positions; OANDA via /v3/accounts/.../openPositions;
     # IBKR via positions(); Binance via positionRisk. The exact API varies —
     # we use a duck-typed `get_positions()` if present, else None.
+    # WARM THE VENUE'S NAME FIRST, through the adapter's own method — the
+    # same one an order uses. Failures are not fatal and are not silent
+    # either: whatever the warm missed is counted as `unnamed` below.
+    name_it = getattr(client, "instrument_id", None)
+    if callable(name_it):
+        for sym in (warm or ()):
+            try:
+                name_it(sym)
+            except Exception as e:  # noqa: BLE001 — the count is the net
+                logger.debug("reconcile: %s cannot name %s (%s)",
+                             type(client).__name__, sym, e)
+
     fn = getattr(client, "get_positions", None)
     if not callable(fn):
         return None
@@ -52,12 +195,19 @@ def _broker_open_symbols(client, *, asset_class: str) -> dict:
                        type(client).__name__, e)
         return None
     symbols, opt_underlyings, has_sec_types = set(), set(), False
+    unnamed = 0
     for p in positions:
         if isinstance(p, dict):
             sym, sec = p.get("symbol"), p.get("sec_type")
+            unresolved = p.get("symbol_unresolved") is True
         else:
             sym, sec = getattr(p, "symbol", None), getattr(p, "sec_type", None)
-        if not sym:
+            unresolved = getattr(p, "symbol_unresolved", None) is True
+        # `is True` and not a truth test: a MagicMock answers any attribute
+        # with a truthy object, and a reader that believed it would report
+        # every position in every test as unnameable.
+        if not sym or unresolved:
+            unnamed += 1
             continue
         sym = str(sym).upper()
         symbols.add(sym)
@@ -66,7 +216,7 @@ def _broker_open_symbols(client, *, asset_class: str) -> dict:
             if str(sec).upper() == "OPT":
                 opt_underlyings.add(sym)
     return {"symbols": symbols, "opt_underlyings": opt_underlyings,
-            "has_sec_types": has_sec_types}
+            "has_sec_types": has_sec_types, "unnamed": unnamed}
 
 
 def _options_row_open_at_broker(trade, state: dict):
@@ -97,6 +247,7 @@ def reconcile_user(user) -> dict:
     """
     from .models import AssetBotTrade
     from .engine.broker_router import client_for_symbol
+    from .engine.capabilities import adapter_key as _adapter_key
 
     qs = (AssetBotTrade.objects
           .filter(config__user=user, status__in=("OPEN", "CLOSE_PENDING"), paper=False)
@@ -108,14 +259,36 @@ def reconcile_user(user) -> dict:
     # trades share the same broker, no need to query per row.
     cache: dict = {}
 
+    # WHAT TO WARM BEFORE ASKING, per class, because the read below is
+    # cached across rows and only the first row would otherwise warm
+    # anything. The queryset is already evaluated by this second walk.
+    by_class: dict = {}
+    for _row in qs:
+        if _row.symbol:
+            by_class.setdefault(_row.asset_class, set()).add(_row.symbol)
+
+    # Counted ONCE per walk, not per row: it cannot change mid-pass and the
+    # credential read decrypts.
+    _keyed_venues = keyed_venue_count(user)
+
     for trade in qs:
+        # A WORKING entry is an ORDER, not a position: the broker correctly
+        # reports no position for it, and closing it as an orphan would
+        # cancel the protective legs of a parent that is still queued —
+        # which then fills naked, into a row this function just closed. The
+        # bot tick owns these rows (AssetBot._poll_working_entry).
+        from .asset_engine.base import is_entry_working
+        if is_entry_working(trade):
+            out["entry_working"] = out.get("entry_working", 0) + 1
+            continue
         out["checked"] += 1
         try:
             client = client_for_symbol(user, trade.symbol, trade.config)
             cache_key = (trade.asset_class, type(client).__name__)
             if cache_key not in cache:
                 cache[cache_key] = _broker_open_symbols(
-                    client, asset_class=trade.asset_class)
+                    client, asset_class=trade.asset_class,
+                    warm=by_class.get(trade.asset_class, ()))
             state = cache[cache_key]
             if state is None:
                 # Broker doesn't expose state — can't reconcile this row.
@@ -129,6 +302,63 @@ def reconcile_user(user) -> dict:
                     continue
             else:
                 open_at_broker = trade.symbol.upper() in state["symbols"]
+
+            # THE VENUE THAT CARRIED THIS ROW IS NOT ALWAYS THE VENUE
+            # THE ROUTER ANSWERS TODAY. `execute_entry` stamps
+            # metadata["broker"] with the adapter that actually carried the
+            # entry, and until now the only reader of that field was the
+            # /treasury/ display — while every path that can BOOK a close
+            # rebuilds the client from today's primary-for flag. So moving
+            # one checkbox makes this loop ask the wrong venue about a live
+            # position, get an honest "I do not hold that", and orphan-close
+            # a row whose leg is still open somewhere else.
+            #
+            # The `unnamed` valve below cannot catch it: the wrong venue can
+            # name everything IT holds, so `unnamed` is 0 and the miss looks
+            # like an absence.
+            #
+            # Three states. No recorded carrier (any row opened before
+            # 2026-09-19) is cannot-tell and keeps today's behaviour; a
+            # client the adapter map does not know answers "" and is also
+            # cannot-tell. Only two KNOWN and DIFFERENT names refuse.
+            _why = unattributable(trade, client, keyed=_keyed_venues)
+            if not open_at_broker and _why:
+                out["broker_unavailable"] += 1
+                logger.error(
+                    "reconcile: #%s (%s) NOT orphan-closed — %s",
+                    trade.id, trade.symbol, _why)
+                continue
+
+            if not open_at_broker and state.get("unnamed"):
+                # A MISS AGAINST A BOOK WE COULD NOT READ IS NOT AN ABSENCE.
+                # The venue listed positions this client could not name, so
+                # one of them may be this row. Orphan-closing here books a
+                # live position CLOSED, labelled manual_close, at a mark
+                # nobody filled at — and the label then means nothing on
+                # this venue for ever after.
+                out["broker_unavailable"] += 1
+                logger.warning(
+                    "reconcile: #%s (%s/%s) NOT orphan-closed — %s listed %d "
+                    "position(s) it could not name, so a miss proves nothing",
+                    trade.id, trade.asset_class, trade.symbol,
+                    type(client).__name__, state["unnamed"])
+                continue
+
+            _lag_why = (venue_lag_window(trade, client)
+                        if not open_at_broker else "")
+            if _lag_why:
+                # A MISS INSIDE THE VENUE'S OWN LAG WINDOW IS NOT AN ABSENCE.
+                # eToro lists a filled position ~2 s late (measured
+                # 2026-09-23); a */15 reconcile landing in that gap would
+                # book a live, stop-protected position CLOSED with
+                # exit_price_inferred and leave the venue holding it. Counted
+                # unavailable, read again next pass. (The entry_working skip
+                # above shielded every eToro row by accident under DEFECT 1;
+                # this is the real shield.)
+                out["broker_unavailable"] += 1
+                logger.warning("reconcile: #%s (%s) NOT orphan-closed — %s",
+                               trade.id, trade.symbol, _lag_why)
+                continue
 
             if not open_at_broker:
                 # DB says OPEN but broker says no position — orphan close.
@@ -297,6 +527,24 @@ def _close_as_orphan(trade) -> None:
         if not trade.outcome:
             trade.outcome = "manual_close"
             trade.save(update_fields=["outcome"])
+
+    # THE VENUE CLOSED IT — a stop or a target struck, or a hand on the
+    # broker's own app — and until 2026-09-26 this path, the one every
+    # bracket-protected exit takes, told nobody: the bell and Telegram
+    # heard first-attempt closes and retried closes only. Same notifier,
+    # same preference, same quiet hours; after grading, so the words are
+    # the graded outcome's.
+    try:
+        from bot_program.notifications import notify_bot_fill_close
+        notify_bot_fill_close(
+            trade.config.user, asset_class=trade.asset_class,
+            symbol=trade.symbol, side=trade.side, qty=trade.qty,
+            exit_price=trade.exit_price, pnl=trade.pnl,
+            outcome=trade.outcome or "", trade_id=trade.id, trade=trade,
+        )
+    except Exception as e:  # noqa: BLE001 — a bell never blocks a close
+        logger.warning("reconcile: close notification failed for #%s: %s",
+                       trade.id, e)
     # A row reconciled as an orphan may still have its OTHER leg resting:
     # a stop that filled leaves the target behind (and vice versa) unless
     # the broker's OCA pair cancelled it. A resting exit against a flat
@@ -363,12 +611,27 @@ def reconcile_unknown_positions(user) -> dict:
     # Every symbol this user's rows currently claim, in one query. Options
     # are claimed under their OCC symbol, which is what the broker reports.
     claimed = set()
-    for sym in (AssetBotTrade.objects
+    from .asset_engine.base import is_entry_working
+    for row in (AssetBotTrade.objects
                 .filter(config__user=user,
                         status__in=("OPEN", "CLOSE_PENDING"), paper=False)
-                .values_list("symbol", flat=True)):
-        if sym:
-            claimed.add(str(sym).upper())
+                .only("symbol", "metadata")):
+        # A WORKING row claims a symbol it holds NOTHING of: its order is
+        # still queued. Counting it here would mask the very position that
+        # order creates when it fills — the sweep exists to find units no
+        # row accounts for, and an unfilled order accounts for none.
+        if row.symbol and not is_entry_working(row):
+            claimed.add(str(row.symbol).upper())
+    # A ROW CLOSED SECONDS AGO STILL CLAIMS ITS SYMBOL HERE (the lag; see
+    # SWEEP_CLOSED_GRACE_S). Report-only, every venue.
+    from datetime import timedelta as _td
+    for row in (AssetBotTrade.objects
+                .filter(config__user=user, status="CLOSED", paper=False,
+                        closed_at__gte=timezone.now()
+                        - _td(seconds=SWEEP_CLOSED_GRACE_S))
+                .only("symbol")):
+        if row.symbol:
+            claimed.add(str(row.symbol).upper())
 
     configs = (AssetBotConfig.objects
                .filter(user=user, enabled=True)
@@ -395,7 +658,8 @@ def reconcile_unknown_positions(user) -> dict:
         seen_clients.add(key)
         out["checked"] += 1
 
-        state = _broker_open_symbols(client, asset_class=cfg.asset_class)
+        state = _broker_open_symbols(client, asset_class=cfg.asset_class,
+                                     warm=symbols)
         if state is None:
             # UNREADABLE is not EMPTY. Treating an unreachable broker as
             # "no positions" would report a clean sweep of a book nobody
@@ -405,6 +669,18 @@ def reconcile_unknown_positions(user) -> dict:
                            "not reporting a clean sweep of a book nobody "
                            "could read", venue)
             continue
+
+        if state.get("unnamed"):
+            # UNNAMED IS NOT UNCLAIMED. A position this client could not name
+            # cannot be compared to any row, and reporting it as
+            # "ETORO:1001 is unclaimed" hands a human a name they cannot look
+            # up — which is how the one true alarm stops being believed. The
+            # named part of the book is still compared below: part measured,
+            # part not, which is the honest shape.
+            out["broker_unavailable"] += 1
+            logger.error("unknown-position sweep: %s holds %d position(s) it "
+                         "could not name — that part of the book is "
+                         "unreadable, not clean", venue, state["unnamed"])
 
         held = {str(x).upper() for x in (state.get("symbols") or set())}
         unclaimed = sorted(held - claimed)
@@ -432,67 +708,121 @@ def reconcile_unknown_positions(user) -> dict:
     # {unclaimed: 0} from a book nobody read — the signature failure,
     # in the sweep that exists to catch it. An interfaced IBKR account
     # is swept whether or not any config routes there.
-    if "IBKRTrader" not in {v for (_cls, v) in seen_clients}:
-        from .capital_truth import broker_backed
-        acct = broker_backed(user)
-        if acct is not None:
-            from .engine.ibkr_client import (IBKRTrader, is_ibkr_available,
-                                             purpose_client_id)
-            if is_ibkr_available():
-                client = None
-                try:
-                    # The probe id, never the trade id — a sweep that
-                    # connected with the trading clientId would evict the
-                    # live trader — and always disconnect: a held slot
-                    # fails every later connection with error 326.
-                    client = IBKRTrader(
-                        host=acct.host, port=acct.port,
-                        client_id=purpose_client_id(acct.client_id,
-                                                    "probe"),
-                        account_id=acct.get_account_id() or "",
-                        paper=bool(acct.paper))
-                    out["checked"] += 1
-                    state = _broker_open_symbols(client,
-                                                 asset_class="stock")
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("unknown-position sweep: account-entry "
-                                   "IBKR read failed: %s", e)
-                    state = None
-                    out["errors"] += 1
-                finally:
-                    disconnect = getattr(client, "disconnect", None)
-                    if callable(disconnect):
-                        try:
-                            disconnect()
-                        except Exception:  # noqa: BLE001
-                            pass
-                if state is None:
-                    out["broker_unavailable"] += 1
-                    logger.warning("unknown-position sweep: IBKR account "
-                                   "%s unreadable — not reporting a clean "
-                                   "sweep of a book nobody could read",
-                                   acct.label)
-                else:
-                    held = {str(x).upper()
-                            for x in (state.get("symbols") or set())}
-                    unclaimed = sorted(held - claimed)
-                    if unclaimed:
-                        out["unclaimed"] += len(unclaimed)
-                        out["symbols"].extend(unclaimed)
-                        logger.error(
-                            "unknown-position sweep: IBKR %s holds %d "
-                            "position(s) no row claims: %s", acct.label,
-                            len(unclaimed), ", ".join(unclaimed[:8]))
-                        try:
-                            from bot_program.notifications import (
-                                notify_unclaimed_position)
-                            notify_unclaimed_position(
-                                user, symbols=unclaimed,
-                                venue=f"IBKR {acct.label}")
-                        except Exception as e:  # noqa: BLE001
-                            logger.warning("unknown-position sweep: alert "
-                                           "failed: %s", e)
-                            out["errors"] += 1
+    from .capital_truth import broker_backed, broker_kind
+    # EVERY KEYED ROW, not only the book. Keyed is tested on the column the
+    # way tasks._users_with_a_broker_row tests it — no decryption, and an
+    # unkeyed row carries nothing to ask.
+    _book = broker_backed(user)
+    _rows = [r for r in (getattr(user, "saxo_account", None),
+                         getattr(user, "etoro_account", None),
+                         getattr(user, "ibkr_account", None))
+             if r is not None and (getattr(r, "app_key_enc", "")
+                                   or getattr(r, "api_key_enc", "")
+                                   or getattr(r, "account_id_enc", ""))]
+    # The book first: an error later in the walk must not cost it its pass.
+    _rows.sort(key=lambda r: 0 if (_book is not None
+                                   and type(r) is type(_book)
+                                   and r.pk == _book.pk) else 1)
+
+    for acct in _rows:
+        _kind = None if acct is None else broker_kind(acct)
+        _CLASS = {"saxo": "SaxoTrader", "etoro": "EtoroTrader",
+                  "ibkr": "IBKRTrader"}
+        venue_name = {"saxo": "Saxo", "etoro": "eToro",
+                      "ibkr": "IBKR"}.get(_kind, "broker")
+        # IBKR keeps its old skip: without the library there is nothing to
+        # ask, and counting that as an error would change what every existing
+        # caller and test sees.
+        _skip = False
+        if _kind == "ibkr":
+            from .engine.ibkr_client import is_ibkr_available
+            _skip = not is_ibkr_available()
+
+        # A row that cannot be asked is skipped, not counted clean.
+        if not _skip:
+            # Not swept already by the config loop above, whichever adapter
+            # this book speaks through.
+            if _CLASS.get(_kind, "IBKRTrader") not in {v for (_cls, v)
+                                                       in seen_clients}:
+                    client = None
+                    try:
+                        if _kind == "saxo":
+                            # Read from the ROW: no session slot, no clientId,
+                            # no host or port. The IBKR branch below could only
+                            # ever raise AttributeError on a Saxo book and
+                            # count the broker unavailable — so this sweep was
+                            # blind on the two newest venues.
+                            from .engine.saxo_client import SaxoTrader
+                            if not acct.session_alive():
+                                raise RuntimeError(
+                                    "no live Saxo session — sign in again at "
+                                    "/brokers/")
+                            client = SaxoTrader(acct)
+                        elif _kind == "etoro":
+                            from .engine.etoro_client import EtoroTrader
+                            k, u = acct.get_credentials()
+                            if not (k and u):
+                                raise RuntimeError("no eToro keys on the book")
+                            client = EtoroTrader(
+                                k, u, env="demo" if acct.demo else "live")
+                        else:
+                            # The probe id, never the trade id — IBKR refuses a
+                            # second connection on a held clientId (error 326),
+                            # so a sweep on the trading id would fail against
+                            # the trader or hold the id against it. The session
+                            # comes from ibkr_sessions on this process's own
+                            # slot; disconnecting below closes the socket and
+                            # keeps the slot for the next pass.
+                            from .engine.ibkr_sessions import acquire_trader
+                            client = acquire_trader(
+                                acct.host, acct.port, acct.client_id, "probe",
+                                account_id=acct.get_account_id() or "",
+                                paper=bool(acct.paper))
+                            if client is None:
+                                raise RuntimeError("no free IBKR clientId slot")
+                        out["checked"] += 1
+                        state = _broker_open_symbols(client,
+                                                     asset_class="stock")
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("unknown-position sweep: account-entry "
+                                       "%s read failed: %s", venue_name, e)
+                        state = None
+                        out["errors"] += 1
+                    finally:
+                        disconnect = getattr(client, "disconnect", None)
+                        if callable(disconnect):
+                            try:
+                                disconnect()
+                            except Exception:  # noqa: BLE001
+                                pass
+                    if state is None:
+                        out["broker_unavailable"] += 1
+                        logger.warning("unknown-position sweep: %s account "
+                                       "%s unreadable — not reporting a clean "
+                                       "sweep of a book nobody could read",
+                                       venue_name, acct.label)
+                    else:
+                        held = {str(x).upper()
+                                for x in (state.get("symbols") or set())}
+                        unclaimed = sorted(held - claimed)
+                        if unclaimed:
+                            out["unclaimed"] += len(unclaimed)
+                            out["symbols"].extend(unclaimed)
+                            logger.error(
+                                "unknown-position sweep: %s %s holds %d "
+                                "position(s) no row claims: %s", venue_name,
+                                acct.label, len(unclaimed),
+                                ", ".join(unclaimed[:8]))
+                            try:
+                                from bot_program.notifications import (
+                                    notify_unclaimed_position)
+                                notify_unclaimed_position(
+                                    user, symbols=unclaimed,
+                                    venue=f"{venue_name} {acct.label}")
+                            except Exception as e:  # noqa: BLE001
+                                logger.warning("unknown-position sweep: alert "
+                                               "failed: %s", e)
+                                out["errors"] += 1
 
     return out
 
@@ -521,10 +851,11 @@ def reconcile_all_users() -> dict:
     # an operator whose ISA holds hand-bought stock but who has armed no
     # bot was never selected at all — the same blind spot the account
     # entry inside reconcile_unknown_positions closes, one level up.
-    from .models import IBKRAccount
-    user_ids |= set(IBKRAccount.objects
-                    .exclude(account_id_enc="")
-                    .values_list("user_id", flat=True))
+    # Every keyed broker, not only IBKR: a Saxo-only operator with no
+    # armed config was not selected at all, which is the same blind spot
+    # this union was added to close.
+    from .tasks import _users_with_a_broker_row
+    user_ids |= set(_users_with_a_broker_row().values_list("id", flat=True))
     user_ids = sorted(uid for uid in user_ids if uid)
     totals = {"users": 0, "checked": 0, "closed_as_orphan": 0,
                "broker_unavailable": 0, "errors": 0,

@@ -442,6 +442,7 @@ AI_CONFIG = {
         # designated drop-in. opus-5 is the current Opus at the same price as 4.8.
         "balanced": os.getenv("AI_MODEL_BALANCED", "claude-sonnet-5"),
         "deep": os.getenv("AI_MODEL_DEEP", "claude-opus-5"),
+        "frontier": os.getenv("AI_MODEL_FRONTIER", "claude-fable-5-1"),
     },
     "providers": {
         "claude": {

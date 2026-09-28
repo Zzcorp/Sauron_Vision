@@ -1,0 +1,1940 @@
+{% load static %}
+{% load sauron_tags %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>The Book of Sauron — Sauron Vision</title>
+    <meta name="description" content="The story of Sauron Vision: where it comes from, what it is made of, how a trade is born inside it, the rules that keep it honest, and the road so far.">
+    {# The same icons as the Wall, in the same order: this page can be landed on and shared too. #}
+    <link rel="icon" href="{% static 'logo/favicon.ico' %}" sizes="any">
+    <link rel="icon" type="image/svg+xml" href="{% static 'logo/sauron_eye.svg' %}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{% static 'logo/favicon-32.png' %}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{% static 'logo/favicon-16.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'logo/apple-touch-icon.png' %}">
+    <meta property="og:title" content="The Book of Sauron">
+    <meta property="og:description" content="Where Sauron Vision comes from, what it is made of, the rules that keep it honest, and the road so far.">
+    <meta property="og:image" content="{% static_abs 'logo/og-card.png' %}">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:type" content="article">
+    <meta property="og:site_name" content="Sauron Vision">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="The Book of Sauron">
+    <meta name="twitter:image" content="{% static_abs 'logo/og-card.png' %}">
+    <meta name="theme-color" content="#030806">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+    /* THE MOTION SWITCH, before the first paint. The book is complete in
+       the HTML: nothing is hidden unless this line runs. It sets
+       html.book-js only when motion is welcome (no reduced-motion request)
+       and the browser can reveal on scroll; every entrance rule in the
+       stylesheet is scoped under that class. If the page's script has not
+       said it is awake within three seconds (it failed, or never loaded),
+       the class comes off and everything simply shows. */
+    (function () {
+        var root = document.documentElement;
+        var still = !!(window.matchMedia &&
+            window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+        if (still || !("IntersectionObserver" in window) ||
+                !("requestAnimationFrame" in window)) {
+            return;
+        }
+        root.classList.add("book-js");
+        window.setTimeout(function () {
+            if (!window.bookAwake) {
+                root.classList.remove("book-js");
+            }
+        }, 3000);
+    })();
+    </script>
+    <style>
+        /* ══════════════════════════════════════════════════════════════ */
+        /* THE WALL'S OWN COLOURS AND TYPE, VERBATIM                      */
+        /* One world: the book is the Wall's language, read slowly.       */
+        /* ══════════════════════════════════════════════════════════════ */
+        :root {
+            --bg: #030806; --bg2: #060e0a; --bg3: #0a1a14;
+            --accent: #00e868; --accent-dim: #0a5028; --accent-glow: rgba(0,232,104,0.12);
+            --accent-bright: #40ff90; --accent-red: #e83030;
+            --gold: #d8b020; --blue: #30a0e8; --purple: #8840d0;
+            --text: #daf0e6; --text2: #7aaa8a; --text3: #3a6850;
+            --border: #133020; --border-glow: #1a4030;
+            --font-d: 'Orbitron', sans-serif;
+            --font-h: 'Rajdhani', sans-serif;
+            --font-m: 'Share Tech Mono', monospace;
+        }
+        /* The book's own, built on them. */
+        :root {
+            --glass: rgba(8, 22, 16, 0.62);
+            --glass-hi: rgba(12, 32, 23, 0.82);
+            --prose: rgba(218, 240, 230, 0.88);
+            --gold-soft: rgba(216, 176, 32, 0.10);
+            --gold-line: rgba(216, 176, 32, 0.40);
+            --nav-h: 60px;
+            --gutter: 16px;
+            --measure: 68ch;
+            --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+            --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+            color-scheme: dark;
+        }
+        @media (min-width: 720px) { :root { --gutter: 32px; } }
+        @media (min-width: 1180px) { :root { --gutter: 48px; } }
+
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        html {
+            scroll-behavior: smooth;
+            scroll-padding-top: calc(var(--nav-h) + 16px);
+            -webkit-text-size-adjust: 100%;
+            text-size-adjust: 100%;
+        }
+        body {
+            background: var(--bg); color: var(--text);
+            font-family: var(--font-h); font-size: 18px; font-weight: 500;
+            line-height: 1.65; min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+        }
+        ::selection { background: var(--accent); color: var(--bg); }
+        a { color: var(--accent); text-underline-offset: 3px; }
+        :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+        h1, h2, h3, h4 { font-weight: 700; }
+        /* Clip, not hidden: `overflow-x: hidden` would turn this into a
+           scroll container and unstick every sticky era header below. */
+        .page { position: relative; z-index: 2; overflow-x: hidden; overflow-x: clip; }
+        .wrap { width: 100%; max-width: 1140px; margin: 0 auto; padding: 0 var(--gutter); }
+        .skip {
+            position: fixed; left: 12px; top: 12px; z-index: 90;
+            padding: 10px 16px; border-radius: 8px;
+            background: var(--accent); color: var(--bg);
+            font-family: var(--font-m); font-size: 13px; text-decoration: none;
+            transform: translateY(-160%);
+        }
+        .skip:focus { transform: none; }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* THE SKY — fixed layers behind everything                       */
+        /* ══════════════════════════════════════════════════════════════ */
+        .sky {
+            position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+            background:
+                radial-gradient(120% 70% at 50% -12%, rgba(0,232,104,0.10), transparent 62%),
+                radial-gradient(80% 60% at 110% 110%, rgba(48,160,232,0.06), transparent 60%),
+                radial-gradient(70% 50% at -10% 80%, rgba(136,64,208,0.05), transparent 60%),
+                var(--bg);
+        }
+        .sky canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+        .sky-grid {
+            position: absolute; inset: -80px;
+            background-image:
+                linear-gradient(rgba(0,232,104,0.035) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,232,104,0.035) 1px, transparent 1px);
+            background-size: 80px 80px;
+            -webkit-mask-image: radial-gradient(ellipse at 50% 35%, #000 15%, transparent 72%);
+            mask-image: radial-gradient(ellipse at 50% 35%, #000 15%, transparent 72%);
+            animation: gridDrift 40s linear infinite;
+        }
+        @keyframes gridDrift { to { transform: translate3d(80px, 80px, 0); } }
+        .sky-glow {
+            position: absolute; left: 50%; top: 38%;
+            width: 110vmin; height: 110vmin; margin: -55vmin 0 0 -55vmin;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(0,232,104,0.11) 0%, rgba(0,232,104,0.035) 34%, transparent 62%);
+            animation: breathe 8s ease-in-out infinite;
+        }
+        @keyframes breathe {
+            0%, 100% { transform: scale(1); opacity: 0.7; }
+            50% { transform: scale(1.12); opacity: 1; }
+        }
+        .sky-scan {
+            position: absolute; left: 0; right: 0; top: 0; height: 2px;
+            background: linear-gradient(90deg, transparent, rgba(0,232,104,0.22), transparent);
+            box-shadow: 0 0 18px rgba(0,232,104,0.18);
+            animation: scanDown 13s linear infinite;
+        }
+        @keyframes scanDown {
+            from { transform: translate3d(0, -4vh, 0); }
+            to { transform: translate3d(0, 104vh, 0); }
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* READING PROGRESS + NAVIGATION                                  */
+        /* ══════════════════════════════════════════════════════════════ */
+        .progress {
+            position: fixed; left: 0; right: 0; top: 0; z-index: 70; height: 3px;
+            transform-origin: 0 50%; transform: scaleX(0);
+            background: linear-gradient(90deg, var(--accent-dim), var(--accent), var(--accent-bright));
+            box-shadow: 0 0 12px rgba(0,232,104,0.65);
+            will-change: transform;
+        }
+        .bnav {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 60;
+            height: var(--nav-h); padding: 0 var(--gutter);
+            display: flex; align-items: center; gap: 12px;
+            background: linear-gradient(180deg, rgba(3,8,6,0.9), rgba(3,8,6,0.55));
+            -webkit-backdrop-filter: blur(14px) saturate(140%);
+            backdrop-filter: blur(14px) saturate(140%);
+            border-bottom: 1px solid rgba(19,48,32,0.55);
+        }
+        .bnav::after {
+            content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(0,232,104,0.55), transparent);
+            opacity: 0.35; transition: opacity 0.5s;
+        }
+        .bnav.is-scrolled::after { opacity: 1; }
+        .bnav-brand { display: flex; align-items: center; gap: 10px; flex: none; text-decoration: none; }
+        .bnav-brand svg { width: 36px; height: 24px; overflow: visible; }
+        .bnav-word {
+            font-family: var(--font-d); font-size: 13px; font-weight: 700;
+            letter-spacing: 4px; color: var(--accent); white-space: nowrap;
+            text-shadow: 0 0 20px rgba(0,232,104,0.25);
+        }
+        .bnav-now { flex: 1 1 auto; min-width: 0; display: flex; justify-content: center; }
+        .bnav-now a {
+            display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: 36px;
+            padding: 6px 14px; border-radius: 30px; text-decoration: none;
+            border: 1px solid var(--border); background: rgba(6,14,10,0.72);
+            font-family: var(--font-m); font-size: 11px; letter-spacing: 1.6px;
+            text-transform: uppercase; color: var(--text2);
+            transition: border-color 0.3s, color 0.3s, transform 0.3s var(--ease-out);
+        }
+        .bnav-now a:hover { border-color: var(--accent-dim); color: var(--text); transform: translateY(-1px); }
+        .bnav-num { color: var(--accent); flex: none; }
+        .bnav-num:empty { display: none; }
+        .bnav-label { display: block; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .bnav-label.swap { animation: labelIn 0.5s var(--ease-out); }
+        @keyframes labelIn {
+            from { opacity: 0; transform: translate3d(0, 8px, 0); }
+            to { opacity: 1; transform: none; }
+        }
+        .bnav-back {
+            flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 36px;
+            padding: 7px 14px; border-radius: 8px; text-decoration: none;
+            border: 1px solid var(--border-glow); color: var(--accent);
+            font-family: var(--font-d); font-size: 10px; font-weight: 700;
+            letter-spacing: 2px; text-transform: uppercase;
+            transition: transform 0.3s var(--ease-out), border-color 0.3s, background 0.3s;
+        }
+        .bnav-back:hover { transform: translateY(-2px); border-color: var(--accent); background: rgba(0,232,104,0.06); }
+        .bnav-back-arrow { display: inline-block; transition: transform 0.3s var(--ease-out); }
+        .bnav-back:hover .bnav-back-arrow { transform: translateX(-3px); }
+        @media (max-width: 560px) { .bnav-word { display: none; } }
+        /* A phone's bar: the way back keeps its arrow and says its words
+           to a screen reader only, so the chapter pill has the room to
+           name the chapter in full. */
+        @media (max-width: 420px) {
+            .bnav { gap: 8px; }
+            .bnav-back { padding: 7px 13px; }
+            .bnav-back-word {
+                position: absolute; width: 1px; height: 1px; overflow: hidden;
+                clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+            }
+            .bnav-now a { padding: 6px 12px; letter-spacing: 1px; }
+        }
+
+        /* The chapter rail: wide screens, and only with the script (the
+           contents block serves everyone else). */
+        .chrail { display: none; }
+        @media (min-width: 1180px) {
+            .book-js .chrail {
+                display: block; position: fixed; right: 22px; top: 50%; z-index: 40;
+                transform: translateY(-50%);
+            }
+        }
+        .chrail ol { list-style: none; display: grid; gap: 4px; }
+        .chrail a {
+            position: relative; display: flex; align-items: center; justify-content: flex-end;
+            width: 28px; height: 26px; text-decoration: none;
+        }
+        .chrail-dot {
+            position: relative; width: 8px; height: 8px; border-radius: 50%;
+            background: var(--border-glow); box-shadow: 0 0 0 1px var(--border-glow);
+            transition: transform 0.4s var(--ease-spring);
+        }
+        /* the lit dot is painted once and faded in: only opacity moves */
+        .chrail-dot::after {
+            content: ""; position: absolute; inset: 0; border-radius: 50%;
+            background: var(--accent);
+            box-shadow: 0 0 0 3px rgba(0,232,104,0.18), 0 0 14px rgba(0,232,104,0.8);
+            opacity: 0; transition: opacity 0.3s;
+        }
+        .chrail a:hover .chrail-dot { transform: scale(1.4); }
+        .chrail a:hover .chrail-dot::after { opacity: 0.45; }
+        .chrail a.is-active .chrail-dot { transform: scale(1.5); }
+        .chrail a.is-active .chrail-dot::after { opacity: 1; }
+        .chrail-lbl {
+            position: absolute; right: 30px; top: 50%; white-space: nowrap;
+            padding: 5px 10px; border-radius: 6px;
+            background: var(--glass-hi); border: 1px solid var(--border);
+            font-family: var(--font-m); font-size: 11px; letter-spacing: 1px; color: var(--text2);
+            transform: translate3d(6px, -50%, 0);
+            transition: opacity 0.3s, transform 0.3s var(--ease-out);
+        }
+        .chrail-lbl b { color: var(--accent); font-weight: 400; margin-right: 4px; }
+        /* A label shows on hover or keyboard focus only, never for the
+           chapter being read: the pill in the bar already names it, and a
+           standing label would sit over the page on a laptop's width. */
+        .book-js .chrail-lbl { opacity: 0; pointer-events: none; }
+        .book-js .chrail a:hover .chrail-lbl,
+        .book-js .chrail a:focus-visible .chrail-lbl { opacity: 1; transform: translate3d(0, -50%, 0); }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* THE HERO — the living eye                                      */
+        /* ══════════════════════════════════════════════════════════════ */
+        .hero {
+            position: relative; min-height: 100vh; min-height: 100svh;
+            display: grid; place-items: center; text-align: center;
+            padding: calc(var(--nav-h) + 24px) var(--gutter) 96px;
+        }
+        .hero-inner { width: 100%; max-width: 960px; }
+        .hero-eye { position: relative; width: min(470px, 90vw); margin: 0 auto 8px; aspect-ratio: 3 / 2; will-change: transform, opacity; }
+        .eye { position: absolute; inset: 0; }
+        .eye > * { position: absolute; }
+        .eye svg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; }
+        .eye-rays {
+            inset: -34% -12%; border-radius: 50%;
+            background: conic-gradient(from 0deg,
+                transparent 0 6%, rgba(0,232,104,0.085) 9%, transparent 13% 27%,
+                rgba(0,232,104,0.06) 31%, transparent 35% 52%, rgba(64,255,144,0.08) 56%,
+                transparent 60% 77%, rgba(0,232,104,0.06) 81%, transparent 85%);
+            -webkit-mask-image: radial-gradient(closest-side, #000 22%, transparent 100%);
+            mask-image: radial-gradient(closest-side, #000 22%, transparent 100%);
+            animation: spin 70s linear infinite;
+        }
+        .eye-halo {
+            inset: 4% 16%; border-radius: 50%;
+            background: radial-gradient(circle, rgba(0,232,104,0.26) 0%, rgba(0,232,104,0.07) 42%, transparent 70%);
+            animation: breathe 5.5s ease-in-out infinite;
+        }
+        .eye-orbits { inset: -6% -8%; }
+        .eye-orbits svg { animation: sway 16s ease-in-out infinite alternate; }
+        .eye-orbits .o2 { animation-duration: 23s; animation-direction: alternate-reverse; }
+        @keyframes sway {
+            from { transform: rotate(-9deg); }
+            to { transform: rotate(9deg); }
+        }
+        .eye-body { inset: 0; transform-origin: 50% 50%; animation: blink 9s ease-in-out 3.2s infinite; }
+        @keyframes blink {
+            0%, 93%, 100% { transform: scaleY(1); }
+            95.5% { transform: scaleY(0.06); }
+        }
+        .eye-body > * { position: absolute; inset: 0; }
+        /* The iris lives inside the almond: this layer stays put and masks,
+           the one inside it looks around. */
+        .eye-iris-clip {
+            -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 400' preserveAspectRatio='none'%3E%3Cpath d='M40 200 Q300 22 560 200 Q300 378 40 200 Z'/%3E%3C/svg%3E");
+            mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 600 400' preserveAspectRatio='none'%3E%3Cpath d='M40 200 Q300 22 560 200 Q300 378 40 200 Z'/%3E%3C/svg%3E");
+            -webkit-mask-size: 100% 100%; mask-size: 100% 100%;
+            -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+        }
+        .eye-look { position: absolute; inset: 0; will-change: transform; }
+        .eye-look > * { position: absolute; inset: 0; }
+        .iris-glow {
+            inset: 12% 28%; border-radius: 50%;
+            background: radial-gradient(circle, rgba(64,255,144,0.5) 0%, rgba(0,232,104,0.18) 40%, transparent 68%);
+            animation: breathe 4.5s ease-in-out infinite;
+        }
+        .iris-fibres { animation: spin 90s linear infinite; }
+        .iris-ticks { animation: spin 48s linear infinite reverse; }
+        .pupil { animation: dilate 7s ease-in-out infinite; }
+        @keyframes dilate {
+            0%, 100% { transform: scaleX(1); }
+            45% { transform: scaleX(0.62); }
+            60% { transform: scaleX(0.7); }
+        }
+        /* Every moving part of the iris is its own layer (its own SVG
+           or box, never a shape inside one), so the compositor moves it
+           and nothing is repainted frame by frame. */
+        .iris-mer { animation: turn 10s ease-in-out infinite; }
+        .iris-mer.b { animation-delay: -5s; }
+        @keyframes turn {
+            0%, 100% { transform: scaleX(1); }
+            50% { transform: scaleX(0.16); }
+        }
+        /* the scan line crosses the iris's circle, clipped by it */
+        .eye-look > .iris-scan {
+            inset: auto; left: 34.3333%; top: 26.5%; width: 31.3333%; height: 47%;
+            border-radius: 50%; overflow: hidden;
+        }
+        .iris-scan i { position: absolute; inset: 0; animation: irisScan 6.5s linear infinite; }
+        .iris-scan i::before {
+            content: ""; position: absolute; left: 0; right: 0; top: 50%;
+            height: 1.5px; margin-top: -0.75px; background: #40ff90;
+        }
+        @keyframes irisScan {
+            0% { transform: translate3d(0, -49%, 0); opacity: 0; }
+            15%, 85% { opacity: 0.55; }
+            100% { transform: translate3d(0, 49%, 0); opacity: 0; }
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .hero-copy { will-change: transform; }
+        .hero-badge {
+            display: inline-flex; align-items: center; gap: 10px;
+            font-family: var(--font-m); font-size: 11px; letter-spacing: 4px; text-transform: uppercase;
+            color: var(--gold); padding: 7px 18px; border-radius: 30px;
+            border: 1px solid var(--gold-line); background: var(--gold-soft);
+            margin: 6px 0 22px;
+        }
+        .hero-badge i {
+            width: 6px; height: 6px; border-radius: 50%; background: var(--gold);
+            box-shadow: 0 0 10px var(--gold); animation: pulseDot 2.4s ease-in-out infinite;
+        }
+        @keyframes pulseDot {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(0.55); opacity: 0.5; }
+        }
+        .hero-title { font-family: var(--font-d); font-weight: 900; line-height: 1; margin-bottom: 18px; }
+        .hero-title .lead {
+            display: block; font-size: clamp(13px, 2.4vw, 20px); font-weight: 600;
+            letter-spacing: 0.55em; text-transform: uppercase; color: var(--text2);
+            margin: 0 0 14px 0.55em;
+        }
+        .hero-title .accent {
+            position: relative; display: inline-block;
+            font-size: clamp(40px, 12.4vw, 122px); letter-spacing: 0.1em; margin-left: 0.1em;
+            text-transform: uppercase; color: var(--accent);
+            text-shadow: 0 0 40px rgba(0,232,104,0.25), 0 0 90px rgba(0,232,104,0.1);
+        }
+        .hero-title .accent::after {
+            /* a glowing twin of the word, for the eye only: the empty
+               alternative keeps screen readers from saying it twice */
+            content: attr(data-text); content: attr(data-text) / "";
+            position: absolute; inset: 0;
+            color: var(--accent-bright);
+            text-shadow: 0 0 22px rgba(64,255,144,0.9), 0 0 60px rgba(0,232,104,0.55);
+            opacity: 0; animation: glowPulse 5s ease-in-out 1.8s infinite;
+            pointer-events: none;
+        }
+        @keyframes glowPulse {
+            0%, 100% { opacity: 0; }
+            50% { opacity: 0.55; }
+        }
+        .hero-sub {
+            font-family: var(--font-m); font-size: clamp(11px, 1.5vw, 13px);
+            letter-spacing: 0.34em; text-transform: uppercase; color: var(--text2);
+            margin-bottom: 22px;
+        }
+        .hero-lede {
+            font-size: clamp(17px, 2.2vw, 21px); color: var(--text2);
+            max-width: 40ch; margin: 0 auto 34px; line-height: 1.6;
+        }
+        .stats {
+            display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px;
+            max-width: 880px; margin: 0 auto;
+            background: linear-gradient(135deg, rgba(0,232,104,0.35), var(--border) 40%, rgba(48,160,232,0.25));
+            border-radius: 14px; overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.45), 0 0 50px rgba(0,232,104,0.06);
+        }
+        @media (min-width: 760px) { .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+        .stat {
+            position: relative; overflow: hidden;
+            background: rgba(6,14,10,0.9); padding: 22px 12px 18px;
+            display: flex; flex-direction: column; align-items: center; gap: 6px;
+        }
+        .stat::after {
+            content: ""; position: absolute; left: 18%; right: 18%; bottom: 0; height: 1px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            opacity: 0.6;
+        }
+        .stat-n {
+            display: inline-block;
+            font-family: var(--font-d); font-weight: 800; font-size: clamp(22px, 4.2vw, 34px);
+            color: var(--accent); font-variant-numeric: tabular-nums; line-height: 1.1;
+            text-shadow: 0 0 20px rgba(0,232,104,0.22);
+        }
+        .stat-l {
+            font-family: var(--font-m); font-size: 10px; letter-spacing: 2.2px;
+            text-transform: uppercase; color: var(--text2); line-height: 1.4;
+        }
+        .cue {
+            position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%);
+            display: flex; flex-direction: column; align-items: center; gap: 8px;
+            font-family: var(--font-m); font-size: 9px; letter-spacing: 3px;
+            text-transform: uppercase; color: var(--text2); text-decoration: none;
+        }
+        .cue-mouse {
+            width: 20px; height: 32px; border-radius: 12px; border: 1px solid var(--text3);
+            position: relative;
+        }
+        .cue-mouse::after {
+            content: ""; position: absolute; left: 50%; top: 6px; width: 3px; height: 6px;
+            margin-left: -1.5px; border-radius: 2px; background: var(--accent);
+            animation: wheel 1.8s ease-in-out infinite;
+        }
+        @keyframes wheel {
+            0% { transform: translateY(0); opacity: 1; }
+            70% { transform: translateY(10px); opacity: 0; }
+            100% { transform: translateY(0); opacity: 0; }
+        }
+        /* The opening, played once. Scoped to the script: without it the
+           hero is simply there. */
+        .book-js .hero-in {
+            animation: rise 1.1s var(--ease-out) both;
+            animation-delay: calc(0.25s + var(--d, 0) * 0.13s);
+        }
+        /* The counts arrive as one panel (its hairlines never show as a
+           bare slab), then each number and label rises into its cell. */
+        .book-js .stats { animation: rise 0.9s var(--ease-out) 0.95s both; }
+        .book-js .stats .stat > * {
+            animation: rise 0.8s var(--ease-out) both;
+            animation-delay: calc(1.15s + var(--i, 0) * 0.1s);
+        }
+        @keyframes rise {
+            from { opacity: 0; transform: translate3d(0, 26px, 0); }
+            to { opacity: 1; transform: none; }
+        }
+        .book-js .hero-eye .eye { animation: eyeIn 1.6s var(--ease-out) both; }
+        @keyframes eyeIn {
+            from { opacity: 0; transform: scale(0.82); }
+            to { opacity: 1; transform: none; }
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* REVEAL ON SCROLL — only ever under html.book-js                */
+        /* ══════════════════════════════════════════════════════════════ */
+        .book-js [data-reveal] {
+            opacity: 0; transform: translate3d(0, 34px, 0);
+            transition: opacity 0.9s var(--ease-out), transform 0.9s var(--ease-out);
+            transition-delay: calc(var(--i, 0) * 85ms);
+        }
+        .book-js [data-reveal="side"] { transform: translate3d(38px, 0, 0); }
+        .book-js [data-reveal="pop"] { transform: translate3d(30px, 0, 0); }
+        .book-js [data-reveal="zoom"] { transform: scale(0.94); }
+        .book-js [data-reveal].is-in { opacity: 1; transform: none; }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* CONTENTS                                                       */
+        /* ══════════════════════════════════════════════════════════════ */
+        .eyebrow {
+            font-family: var(--font-m); font-size: 11px; letter-spacing: 5px;
+            text-transform: uppercase; color: var(--accent); margin-bottom: 12px;
+        }
+        .toc { position: relative; padding: 40px 0 24px; }
+        .toc-title {
+            font-family: var(--font-d); font-size: clamp(24px, 4vw, 36px);
+            letter-spacing: 3px; margin-bottom: 26px;
+        }
+        .toc-grid {
+            list-style: none; display: grid; gap: 12px;
+            grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
+        }
+        .toc-card {
+            position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+            grid-template-rows: auto auto; column-gap: 14px; row-gap: 2px; align-items: center;
+            height: 100%; padding: 16px 16px 16px 14px; border-radius: 12px; text-decoration: none;
+            background: var(--glass-hi); border: 1px solid var(--border);
+            transition: transform 0.45s var(--ease-out), border-color 0.35s;
+            overflow: hidden;
+        }
+        .toc-card::before {
+            content: ""; position: absolute; inset: 0; opacity: 0;
+            background: radial-gradient(120% 90% at 0% 0%, rgba(0,232,104,0.12), transparent 60%);
+            transition: opacity 0.4s;
+        }
+        .toc-card:hover { transform: translateY(-4px); border-color: var(--accent-dim); }
+        .toc-card:hover::before { opacity: 1; }
+        .toc-num {
+            grid-row: 1 / span 2; min-width: 2.4ch; text-align: center;
+            font-family: var(--font-d); font-weight: 800; font-size: 22px; color: var(--accent);
+            text-shadow: 0 0 16px rgba(0,232,104,0.35);
+        }
+        .toc-name {
+            font-family: var(--font-d); font-weight: 700; font-size: 12px;
+            letter-spacing: 1.6px; text-transform: uppercase; color: var(--text);
+        }
+        .toc-sub { grid-column: 2; font-size: 15px; color: var(--text2); line-height: 1.35; }
+        .toc-go {
+            grid-column: 3; grid-row: 1 / span 2; color: var(--accent); font-size: 18px;
+            transition: transform 0.35s var(--ease-out);
+        }
+        .toc-card:hover .toc-go { transform: translateX(4px); }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* CHAPTERS                                                       */
+        /* ══════════════════════════════════════════════════════════════ */
+        .chapter { position: relative; padding: clamp(72px, 11vw, 136px) 0; }
+        .chapter + .chapter::before {
+            content: ""; position: absolute; left: 50%; top: 0; width: min(420px, 70vw); height: 1px;
+            transform: translateX(-50%);
+            background: linear-gradient(90deg, transparent, var(--border-glow), transparent);
+        }
+        .ch-ghost {
+            position: absolute; right: -0.04em; top: 0.1em; z-index: 0;
+            font-family: var(--font-d); font-weight: 900; line-height: 1;
+            font-size: clamp(120px, 30vw, 360px); letter-spacing: -0.02em;
+            color: transparent; -webkit-text-stroke: 1px rgba(0,232,104,0.10);
+            pointer-events: none; user-select: none; will-change: transform;
+        }
+        /* generated, so the numeral is never read or copied as text */
+        .ch-ghost::before { content: attr(data-numeral); content: attr(data-numeral) / ""; }
+        .chapter .wrap { position: relative; z-index: 1; }
+        .ch-head { max-width: 860px; margin-bottom: 30px; }
+        .ch-mark {
+            display: flex; align-items: center; gap: 14px; margin-bottom: 14px;
+            font-family: var(--font-m); font-size: 11px; letter-spacing: 5px;
+            text-transform: uppercase; color: var(--accent);
+        }
+        .ch-line {
+            display: block; flex: 0 1 140px; height: 1px;
+            background: linear-gradient(90deg, var(--accent), transparent);
+            transform-origin: 0 50%;
+        }
+        .book-js .ch-head .ch-line { transform: scaleX(0); transition: transform 1.2s var(--ease-out) 0.35s; }
+        .book-js .ch-head.is-in .ch-line { transform: scaleX(1); }
+        .ch-head h2 {
+            font-family: var(--font-d); font-size: clamp(26px, 5vw, 46px);
+            letter-spacing: 0.06em; line-height: 1.15; margin-bottom: 14px;
+            text-wrap: balance;
+        }
+        .ch-kicker { font-size: clamp(18px, 2.3vw, 22px); color: var(--text2); max-width: 46ch; line-height: 1.5; }
+        .prose { max-width: var(--measure); }
+        .prose p { color: var(--prose); margin-bottom: 1.05em; }
+        .prose p:last-child { margin-bottom: 0; }
+        .prose + * { margin-top: 38px; }
+        .chapter > .wrap > .prose:first-of-type p:first-child::first-letter {
+            float: left; font-family: var(--font-d); font-weight: 800;
+            font-size: 3.05em; line-height: 0.95; padding: 6px 10px 0 0;
+            color: var(--accent); text-shadow: 0 0 18px rgba(0,232,104,0.45);
+        }
+        .ch-note {
+            margin-top: 26px; max-width: var(--measure);
+            font-family: var(--font-m); font-size: 12px; letter-spacing: 0.5px; color: var(--text2);
+        }
+
+        /* ── I. the facts ── */
+        .facts {
+            display: grid; gap: 12px; margin-top: 38px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        @media (min-width: 900px) { .facts { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+        .fact {
+            position: relative; overflow: hidden; padding: 20px 16px 18px; border-radius: 14px;
+            background: var(--glass); border: 1px solid var(--border);
+            transition: transform 0.45s var(--ease-out), border-color 0.35s;
+        }
+        .fact::after {
+            content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+            background: linear-gradient(180deg, var(--accent), transparent);
+        }
+        .fact:hover { transform: translateY(-4px); border-color: var(--accent-dim); }
+        .fact-v {
+            display: inline-block; font-family: var(--font-d); font-weight: 800;
+            font-size: clamp(20px, 3.6vw, 30px); color: var(--accent);
+            font-variant-numeric: tabular-nums; line-height: 1.15; margin-bottom: 8px;
+            text-shadow: 0 0 18px rgba(0,232,104,0.25);
+        }
+        .fact-t { display: block; font-size: 15px; color: var(--text2); line-height: 1.45; }
+
+        /* ── II. six pictures ── */
+        .facets {
+            display: grid; gap: 14px;
+            grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+        }
+        .facet {
+            --tone: var(--accent);
+            position: relative; overflow: hidden; padding: 24px 22px 22px; border-radius: 14px;
+            background: var(--glass-hi); border: 1px solid var(--border);
+            transition: transform 0.5s var(--ease-out), border-color 0.4s;
+        }
+        .facet::before {
+            content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px;
+            background: linear-gradient(90deg, transparent, var(--tone), transparent); opacity: 0.6;
+        }
+        .facet::after {
+            content: ""; position: absolute; top: -40%; bottom: -40%; left: -60%; width: 40%;
+            background: linear-gradient(100deg, transparent, rgba(255,255,255,0.05), transparent);
+            transform: translate3d(0, 0, 0) skewX(-12deg); opacity: 0;
+        }
+        .facet:hover { transform: translateY(-5px); border-color: var(--border-glow); }
+        .facet:hover::after { opacity: 1; animation: sheen 1.1s var(--ease-out); }
+        @keyframes sheen { to { transform: translate3d(420%, 0, 0) skewX(-12deg); } }
+        .facet h3 {
+            font-family: var(--font-d); font-size: 14px; letter-spacing: 2px;
+            text-transform: uppercase; margin: 16px 0 8px; color: var(--text);
+        }
+        .facet p { font-size: 16px; color: var(--text2); line-height: 1.6; }
+        .facet.t-eye { --tone: var(--accent); }
+        .facet.t-bots { --tone: var(--blue); }
+        .facet.t-gates { --tone: var(--accent-red); }
+        .facet.t-brain { --tone: var(--purple); }
+        .facet.t-pages { --tone: var(--gold); }
+        .facet.t-messages { --tone: var(--accent-bright); }
+        .glyph {
+            display: grid; place-items: center; width: 52px; height: 52px; border-radius: 12px;
+            border: 1px solid var(--border); background: rgba(3,8,6,0.6);
+            box-shadow: inset 0 0 18px rgba(0,0,0,0.5), 0 0 22px rgba(0,232,104,0.06);
+        }
+        .glyph svg { width: 34px; height: 34px; overflow: visible; }
+        /* a glyph is a stack of SVG layers in one cell: the still drawing,
+           then each moving part as its own layer the compositor can move */
+        .glyph > svg { grid-area: 1 / 1; }
+        .glyph svg * { fill: none; stroke: var(--tone); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+        .glyph svg .solid { fill: var(--tone); stroke: none; }
+        .glyph svg .faint { opacity: 0.45; }
+        .gl-look { animation: lookAround 6s ease-in-out infinite; }
+        @keyframes lookAround {
+            0%, 20%, 100% { transform: translate3d(0, 0, 0); }
+            35%, 50% { transform: translate3d(-3px, 0, 0); }
+            65%, 80% { transform: translate3d(3px, 0, 0); }
+        }
+        .gl-gear { transform-origin: 50% 54.1667%; animation: spin 9s linear infinite; }
+        .gl-lamp { animation: lamp 1.6s ease-in-out infinite; }
+        @keyframes lamp { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
+        .gl-node { animation: lamp 2.4s ease-in-out infinite; }
+        .gl-node.n2 { animation-delay: 0.4s; } .gl-node.n3 { animation-delay: 0.8s; }
+        .gl-node.n4 { animation-delay: 1.2s; } .gl-node.n5 { animation-delay: 1.6s; }
+        .gl-sheet { animation: sheet 3.2s ease-in-out infinite; }
+        @keyframes sheet { 0%, 100% { transform: translate3d(0, 0, 0); } 50% { transform: translate3d(0, -2px, 0); } }
+        .gl-dotb { animation: typing 1.3s ease-in-out infinite; }
+        .gl-dotb.d2 { animation-delay: 0.18s; } .gl-dotb.d3 { animation-delay: 0.36s; }
+        @keyframes typing { 0%, 60%, 100% { transform: translate3d(0, 0, 0); } 30% { transform: translate3d(0, -2px, 0); } }
+        /* Whatever is off screen rests: the eye, the glyphs, the working
+           bars, the pulses. The page script marks what is in view. */
+        .book-js [data-hero]:not(.in-view) *,
+        .book-js [data-hero]:not(.in-view) *::before,
+        .book-js [data-hero]:not(.in-view) *::after,
+        .book-js .chapter:not(.in-view) *,
+        .book-js .chapter:not(.in-view) *::before,
+        .book-js .chapter:not(.in-view) *::after { animation-play-state: paused; }
+
+        .counted { margin-top: 30px; padding: 22px 18px; border-radius: 14px; background: rgba(6,14,10,0.7); border: 1px dashed var(--border-glow); }
+        .counted .eyebrow { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+        .counted .eyebrow::before {
+            content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+            box-shadow: 0 0 10px var(--accent); animation: pulseDot 2s ease-in-out infinite;
+        }
+        .counted-grid { display: grid; gap: 16px 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        @media (min-width: 720px) { .counted-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        @media (min-width: 1100px) { .counted-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+        .counted-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+        .counted-n {
+            display: inline-block; font-family: var(--font-d); font-weight: 800; font-size: clamp(20px, 3vw, 26px);
+            color: var(--text); font-variant-numeric: tabular-nums;
+        }
+        .counted-l { font-family: var(--font-m); font-size: 10px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--text2); }
+
+        /* ── III. the circuit ── */
+        .circuit { position: relative; max-width: 860px; padding-left: 4px; }
+        .circuit-track {
+            position: absolute; left: 25px; top: 24px; bottom: 40px; width: 2px;
+            background: var(--border);
+        }
+        .circuit-fill {
+            position: absolute; inset: 0; transform-origin: 50% 0;
+            background: linear-gradient(180deg, var(--accent-dim), var(--accent));
+            box-shadow: 0 0 10px rgba(0,232,104,0.6);
+        }
+        .book-js .circuit-fill { transform: scaleY(0); transition: transform 1s var(--ease-out); }
+        .book-js .circuit-pulse {
+            position: absolute; left: -7px; top: -8px; width: 16px; height: 16px; border-radius: 50%;
+            background: var(--accent-bright);
+            box-shadow: 0 0 0 4px rgba(64,255,144,0.18), 0 0 18px var(--accent), 0 0 42px var(--accent);
+            opacity: 0; transition: transform 1s var(--ease-out), opacity 0.5s;
+        }
+        .steps { list-style: none; counter-reset: step; display: grid; gap: 14px; }
+        .step {
+            counter-increment: step; position: relative;
+            display: grid; grid-template-columns: 44px minmax(0, 1fr); column-gap: 16px; align-items: start;
+        }
+        .step-dot {
+            position: relative; z-index: 1; width: 44px; height: 44px; border-radius: 50%;
+            display: grid; place-items: center; margin-top: 2px;
+            background: var(--bg2); border: 1px solid var(--accent-dim);
+            box-shadow: 0 0 0 5px var(--bg);
+            transition: transform 0.5s var(--ease-spring);
+        }
+        .step-dot::before {
+            content: counter(step, decimal-leading-zero);
+            font-family: var(--font-d); font-weight: 700; font-size: 12px; color: var(--accent);
+            /* one switch halfway through the fade, not a colour animated
+               frame by frame */
+            transition: color 0s linear 0.2s;
+        }
+        /* the lit dot is painted once, under the number, and faded in:
+           as the impulse travels, only opacity and transform move */
+        .step-dot::after {
+            content: ""; position: absolute; inset: -1px; z-index: -1; border-radius: 50%;
+            background: var(--accent);
+            box-shadow: 0 0 0 5px var(--bg), 0 0 24px rgba(0,232,104,0.65);
+            opacity: 0; transition: opacity 0.45s;
+        }
+        .step-card {
+            position: relative; padding: 14px 18px 16px; border-radius: 12px;
+            background: var(--glass); border: 1px solid var(--border);
+            transition: transform 0.5s var(--ease-out);
+        }
+        /* the lit card's edge, painted once and faded in */
+        .step-card::before {
+            content: ""; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none;
+            border: 1px solid var(--accent-dim); opacity: 0; transition: opacity 0.45s;
+        }
+        .step-card h3 {
+            font-family: var(--font-d); font-size: 13px; letter-spacing: 1.8px;
+            text-transform: uppercase; margin-bottom: 6px; color: var(--text);
+        }
+        .step-card p { font-size: 16px; color: var(--text2); line-height: 1.6; }
+        .step.lit .step-dot { transform: scale(1.08); }
+        .step.lit .step-dot::after { opacity: 1; }
+        .step.lit .step-dot::before { color: var(--bg); }
+        .step.lit .step-card { transform: translate3d(4px, 0, 0); }
+        .step.lit .step-card::before { opacity: 1; }
+        .circuit-loop {
+            display: flex; align-items: center; gap: 14px; margin-top: 18px; padding-left: 4px;
+            font-family: var(--font-m); font-size: 12px; letter-spacing: 2.5px;
+            text-transform: uppercase; color: var(--accent);
+        }
+        .circuit-loop svg { width: 44px; height: 44px; flex: none; }
+        .circuit-loop svg * { fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; }
+        .loop-spin { transform-origin: 50% 50%; }
+        .circuit.is-looping .loop-spin { animation: spin 1.2s var(--ease-out); }
+
+        /* ── IV. the principles ── */
+        .principles {
+            display: grid; gap: 16px; counter-reset: pr;
+            grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+        }
+        .pcard { counter-increment: pr; position: relative; cursor: default; }
+        .pcard-in {
+            position: relative; height: 100%; padding: 24px 22px 22px; border-radius: 16px;
+            border: 1px solid transparent;
+            background:
+                linear-gradient(var(--bg2), var(--bg2)) padding-box,
+                linear-gradient(140deg, rgba(0,232,104,0.5), rgba(19,48,32,0.9) 38%, rgba(19,48,32,0.9) 62%, rgba(48,160,232,0.4)) border-box;
+            transform: perspective(1100px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+            transform-style: preserve-3d;
+            transition: transform 0.6s var(--ease-out);
+            overflow: hidden;
+        }
+        .pcard-in::after {
+            content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+            box-shadow: 0 24px 60px rgba(0,0,0,0.55), 0 0 40px rgba(0,232,104,0.10);
+            opacity: 0; transition: opacity 0.5s;
+        }
+        .pcard:hover .pcard-in::after, .pcard.is-lifted .pcard-in::after { opacity: 1; }
+        .pcard.is-tilting .pcard-in { transition: transform 0.12s linear; }
+        .pcard.is-lifted .pcard-in {
+            transform: perspective(1100px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translate3d(0, -6px, 0) scale(1.015);
+        }
+        .book-js .pcard-shine {
+            position: absolute; left: -130px; top: -130px; width: 260px; height: 260px; border-radius: 50%;
+            background: radial-gradient(circle, rgba(64,255,144,0.16), transparent 65%);
+            transform: translate3d(var(--sx, -300px), var(--sy, -300px), 0);
+            opacity: 0; transition: opacity 0.4s; pointer-events: none;
+        }
+        .book-js .pcard.is-tilting .pcard-shine { opacity: 1; }
+        .pcard-idx {
+            display: block; font-family: var(--font-m); font-size: 11px; letter-spacing: 3px; color: var(--text3);
+        }
+        .pcard-idx::before { content: counter(pr, decimal-leading-zero); }
+        .pcard h3 {
+            font-family: var(--font-d); font-size: 16px; letter-spacing: 0.06em; line-height: 1.35;
+            color: var(--accent); margin: 10px 0 10px;
+        }
+        .pcard p { font-size: 16px; color: var(--text2); line-height: 1.62; }
+
+        /* ── V. the road so far ── */
+        .tl { position: relative; max-width: 900px; padding-left: 44px; margin-top: 44px; }
+        .tl-rail { position: absolute; left: 14px; top: 8px; bottom: 8px; width: 2px; background: var(--border); border-radius: 2px; }
+        .tl-rail-fill {
+            position: absolute; inset: 0; transform-origin: 50% 0; border-radius: 2px;
+            background: linear-gradient(180deg, var(--accent-dim), var(--accent) 40%, var(--accent-bright));
+            box-shadow: 0 0 12px rgba(0,232,104,0.55);
+        }
+        .book-js .tl-rail-fill { transform: scaleY(0); }
+        .book-js .tl-rail-head {
+            position: absolute; left: -6px; top: -7px; width: 14px; height: 14px; border-radius: 50%;
+            background: var(--accent-bright);
+            box-shadow: 0 0 0 4px rgba(64,255,144,0.15), 0 0 18px var(--accent), 0 0 38px var(--accent);
+        }
+        .tl-era { position: relative; padding-bottom: 26px; }
+        .tl-era-head {
+            position: -webkit-sticky; position: sticky; top: calc(var(--nav-h) + 3px); z-index: 3;
+            margin-left: -44px; padding: 12px 0 14px 44px;
+            background: linear-gradient(180deg, rgba(3,8,6,0.97) 72%, rgba(3,8,6,0));
+        }
+        .tl-era-head::before {
+            content: ""; position: absolute; left: 7px; top: 17px; width: 16px; height: 16px;
+            border-radius: 4px; transform: rotate(45deg);
+            background: var(--bg); border: 2px solid var(--gold);
+            box-shadow: 0 0 12px rgba(216,176,32,0.45);
+        }
+        .tl-era-span {
+            display: block; font-family: var(--font-m); font-size: 11px; letter-spacing: 3px;
+            text-transform: uppercase; color: var(--gold);
+        }
+        .tl-era-head h3 {
+            font-family: var(--font-d); font-size: clamp(16px, 2.6vw, 21px); letter-spacing: 0.08em;
+            color: var(--text); line-height: 1.3;
+        }
+        .tl-era-sum { max-width: var(--measure); color: var(--text2); font-size: 16px; margin: 4px 0 18px; }
+        .tl-list { list-style: none; display: grid; gap: 14px; }
+        .tl-item {
+            position: relative; padding: 14px 16px 15px; border-radius: 12px;
+            background: rgba(6,14,10,0.66); border: 1px solid var(--border);
+            transition: border-color 0.35s, transform 0.45s var(--ease-out);
+        }
+        .tl-item:hover { border-color: var(--accent-dim); transform: translateX(4px); }
+        .tl-dot {
+            position: absolute; left: -35px; top: 19px; width: 12px; height: 12px; border-radius: 50%;
+            background: var(--bg); border: 2px solid var(--accent);
+            box-shadow: 0 0 10px rgba(0,232,104,0.5);
+        }
+        .tl-dot::after {
+            content: ""; position: absolute; inset: -7px; border-radius: 50%;
+            border: 1px solid var(--accent); opacity: 0;
+        }
+        .book-js .tl-item .tl-dot { transform: scale(0); transition: transform 0.7s var(--ease-spring) 0.15s; }
+        .book-js .tl-item.is-in .tl-dot { transform: scale(1); }
+        .book-js .tl-item.is-in .tl-dot::after { animation: ripple 1.4s var(--ease-out) 0.3s; }
+        @keyframes ripple {
+            from { transform: scale(0.4); opacity: 0.9; }
+            to { transform: scale(2.2); opacity: 0; }
+        }
+        .tl-item time {
+            display: block; font-family: var(--font-m); font-size: 12px; letter-spacing: 1.5px;
+            color: var(--accent); margin-bottom: 2px;
+        }
+        .tl-item h4 { font-family: var(--font-h); font-size: 19px; font-weight: 700; color: var(--text); line-height: 1.3; }
+        .tl-item p { font-size: 16px; color: var(--text2); line-height: 1.55; margin-top: 3px; }
+        .tl-now {
+            position: relative; display: flex; align-items: center; gap: 12px; margin-top: 6px;
+            font-family: var(--font-m); font-size: 12px; letter-spacing: 3px; text-transform: uppercase; color: var(--accent);
+        }
+        .tl-now i {
+            position: absolute; left: -36px; width: 14px; height: 14px; border-radius: 50%;
+            background: var(--accent); box-shadow: 0 0 16px var(--accent);
+            animation: pulseDot 1.8s ease-in-out infinite;
+        }
+
+        /* ── VI. in progress ── */
+        .bench { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
+        .bench-card {
+            position: relative; overflow: hidden; padding: 22px 20px 26px; border-radius: 14px;
+            background: linear-gradient(180deg, rgba(216,176,32,0.06), var(--glass) 55%);
+            border: 1px solid rgba(216,176,32,0.28);
+            transition: transform 0.45s var(--ease-out), border-color 0.35s;
+        }
+        .bench-card:hover { transform: translateY(-4px); border-color: var(--gold-line); }
+        .bench-state {
+            display: inline-flex; align-items: center; gap: 8px;
+            font-family: var(--font-m); font-size: 11px; letter-spacing: 2.5px;
+            text-transform: uppercase; color: var(--gold);
+        }
+        .spin {
+            width: 14px; height: 14px; border-radius: 50%;
+            border: 2px solid rgba(216,176,32,0.25); border-top-color: var(--gold);
+            animation: spin 1.1s linear infinite;
+        }
+        .bench-card h3 { font-family: var(--font-d); font-size: 15px; letter-spacing: 1.2px; margin: 12px 0 8px; color: var(--text); line-height: 1.35; }
+        .bench-card p { font-size: 16px; color: var(--text2); line-height: 1.6; }
+        .bench-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; overflow: hidden; background: rgba(216,176,32,0.10); }
+        .bench-bar i {
+            position: absolute; top: 0; bottom: 0; left: 0; width: 40%;
+            background: linear-gradient(90deg, transparent, var(--gold), transparent);
+            animation: working 2.2s ease-in-out infinite;
+        }
+        @keyframes working {
+            from { transform: translate3d(-100%, 0, 0); }
+            to { transform: translate3d(260%, 0, 0); }
+        }
+        .road-title {
+            font-family: var(--font-d); font-size: clamp(18px, 3vw, 24px); letter-spacing: 2px;
+            margin: 52px 0 20px; color: var(--text);
+        }
+        .golive { list-style: none; counter-reset: go; display: grid; gap: 14px; position: relative; }
+        @media (min-width: 900px) {
+            .golive { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; }
+            .golive::before {
+                content: ""; position: absolute; left: 8%; right: 8%; top: 28px; height: 2px;
+                background: repeating-linear-gradient(90deg, var(--accent-dim) 0 10px, transparent 10px 20px);
+            }
+        }
+        .golive-step {
+            counter-increment: go; position: relative; padding: 20px 18px 20px; border-radius: 14px;
+            background: var(--glass); border: 1px solid var(--border);
+        }
+        .golive-n {
+            display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%;
+            background: var(--bg); border: 1px solid var(--accent); color: var(--accent);
+            box-shadow: 0 0 0 5px var(--bg), 0 0 18px rgba(0,232,104,0.3);
+            font-family: var(--font-d); font-weight: 700; font-size: 14px; margin-bottom: 12px;
+            position: relative; z-index: 1;
+        }
+        .golive-n::before { content: counter(go); }
+        .golive-step h4 { font-family: var(--font-d); font-size: 14px; letter-spacing: 1.2px; color: var(--text); margin-bottom: 6px; line-height: 1.4; }
+        .golive-step p { font-size: 16px; color: var(--text2); line-height: 1.6; }
+        .golive-step:nth-child(2) .golive-n { animation: pulseRing 2.6s ease-in-out 0.4s infinite; }
+        .golive-step:nth-child(1) .golive-n { animation: pulseRing 2.6s ease-in-out infinite; }
+        .golive-step:nth-child(3) .golive-n { animation: pulseRing 2.6s ease-in-out 0.8s infinite; }
+        @keyframes pulseRing {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.08); }
+        }
+
+        /* ── VII. the closing ── */
+        .ch-closing { text-align: center; }
+        .ch-closing .ch-head, .ch-closing .prose { margin-left: auto; margin-right: auto; }
+        .ch-closing .ch-mark { justify-content: center; }
+        .ch-closing .ch-kicker { margin: 0 auto; }
+        .ch-closing .prose p { font-size: clamp(19px, 2.4vw, 22px); color: var(--text); }
+        .chapter.ch-closing > .wrap > .prose:first-of-type p:first-child::first-letter { float: none; font-size: inherit; padding: 0; line-height: inherit; font-family: inherit; font-weight: inherit; color: inherit; text-shadow: none; }
+        .closing-eye { width: 120px; margin: 0 auto 26px; }
+        .closing-eye svg { width: 100%; height: auto; overflow: visible; animation: blink 7s ease-in-out 1s infinite; }
+        .closing-eye svg * { fill: none; stroke: var(--accent); stroke-width: 2; }
+        .closing-eye .solid { fill: var(--accent); stroke: none; }
+        .closing-sign {
+            margin-top: 30px; font-family: var(--font-m); font-size: 12px; letter-spacing: 4px;
+            text-transform: uppercase; color: var(--text2);
+        }
+        .closing-cta { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-top: 30px; }
+        .btn {
+            position: relative; overflow: hidden; display: inline-flex; align-items: center; justify-content: center;
+            min-height: 48px; padding: 14px 30px; border-radius: 10px; text-decoration: none;
+            font-family: var(--font-d); font-size: 12px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
+            transition: transform 0.35s var(--ease-out), border-color 0.3s, background 0.3s;
+        }
+        .btn::after {
+            content: ""; position: absolute; top: 0; bottom: 0; left: -60%; width: 40%;
+            background: linear-gradient(100deg, transparent, rgba(255,255,255,0.35), transparent);
+            transform: translate3d(0, 0, 0) skewX(-18deg); opacity: 0;
+        }
+        .btn:hover { transform: translateY(-3px); }
+        .btn:hover::after { opacity: 1; animation: sheen 0.9s var(--ease-out); }
+        .btn:active { transform: translateY(0) scale(0.98); }
+        .btn-primary { color: #020804; background: linear-gradient(135deg, var(--accent-dim), var(--accent)); }
+        .btn-outline { color: var(--accent); border: 1px solid var(--border-glow); background: rgba(3,8,6,0.4); }
+        .btn-outline:hover { border-color: var(--accent); background: rgba(0,232,104,0.05); }
+
+        /* ── Appendix: the words ── */
+        .lexicon { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); }
+        .lex {
+            padding: 16px 18px; border-radius: 12px; background: var(--glass); border: 1px solid var(--border);
+            transition: border-color 0.35s, transform 0.45s var(--ease-out);
+        }
+        .lex:hover { border-color: var(--accent-dim); transform: translateY(-3px); }
+        .lex dt { font-family: var(--font-m); font-size: 14px; letter-spacing: 0.5px; color: var(--accent); margin-bottom: 4px; }
+        .lex dd { font-size: 16px; color: var(--text2); line-height: 1.55; }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* FOOTER + BACK TO THE TOP                                       */
+        /* ══════════════════════════════════════════════════════════════ */
+        .bfoot { position: relative; z-index: 2; border-top: 1px solid var(--border); padding: 38px 0 46px; text-align: center; }
+        .bfoot-in { display: grid; gap: 14px; justify-items: center; }
+        .bfoot-wall {
+            font-family: var(--font-d); font-size: 11px; font-weight: 700; letter-spacing: 3px;
+            text-transform: uppercase; text-decoration: none; color: var(--accent);
+        }
+        .bfoot-wall span { display: inline-block; transition: transform 0.3s var(--ease-out); }
+        .bfoot-wall:hover span { transform: translateX(-4px); }
+        .bfoot-text { font-family: var(--font-m); font-size: 10px; letter-spacing: 3px; color: var(--text2); }
+        .bfoot-text .accent { color: var(--accent); }
+        .bfoot-note { max-width: 56ch; font-size: 14px; color: var(--text2); }
+        .totop {
+            position: fixed; right: 14px; bottom: 14px; z-index: 55;
+            width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
+            background: var(--glass-hi); border: 1px solid var(--border-glow); color: var(--accent);
+            text-decoration: none; font-size: 18px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+            transition: opacity 0.4s, transform 0.4s var(--ease-out), border-color 0.3s;
+        }
+        .totop:hover { border-color: var(--accent); }
+        .book-js .totop { opacity: 0; transform: translate3d(0, 14px, 0) scale(0.9); pointer-events: none; }
+        .book-js .totop.is-shown { opacity: 1; transform: none; pointer-events: auto; }
+
+        @media (min-width: 720px) {
+            body { font-size: 19px; }
+            .toc { padding-top: 56px; }
+            .step { grid-template-columns: 52px minmax(0, 1fr); column-gap: 22px; }
+            .step-dot { width: 52px; height: 52px; }
+            .circuit-track { left: 29px; top: 28px; }
+            .tl { padding-left: 64px; }
+            .tl-era-head { margin-left: -64px; padding-left: 64px; }
+            .tl-rail { left: 22px; }
+            .tl-era-head::before { left: 15px; }
+            .tl-dot { left: -47px; }
+            .tl-now i { left: -48px; }
+            /* the sticky era header fades out sideways instead of ending in
+               a hard edge over the sky */
+            .tl-era-head {
+                -webkit-mask-image: linear-gradient(90deg, #000 72%, transparent);
+                mask-image: linear-gradient(90deg, #000 72%, transparent);
+            }
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* ON PAPER: the whole book, dark ink on white, nothing waiting   */
+        /* for a scroll that a printer never makes.                       */
+        /* ══════════════════════════════════════════════════════════════ */
+        @media print {
+            :root {
+                --text: #111; --text2: #333; --text3: #555; --prose: #222;
+                --accent: #0b6b38; --accent-bright: #0b6b38; --accent-dim: #0b6b38;
+                --gold: #6f5500; --border: #bbb; --border-glow: #bbb;
+            }
+            *, *::before, *::after {
+                animation: none !important; transition: none !important;
+                background: transparent !important; box-shadow: none !important; text-shadow: none !important;
+            }
+            html { scroll-behavior: auto; }
+            body { background: #fff !important; color: #111; font-size: 12pt; }
+            [data-reveal], .book-js [data-reveal] { opacity: 1 !important; transform: none !important; }
+            .hero-copy, .pcard-in, .ch-ghost { transform: none !important; }
+            .tl-rail-fill, .circuit-fill, .ch-line, .tl-dot { transform: none !important; }
+            .sky, .progress, .bnav, .chrail, .totop, .cue, .skip, .hero-eye, .ch-ghost,
+            .circuit-track, .bench-bar, .closing-eye, .closing-cta { display: none !important; }
+            .hero { min-height: 0; padding: 0 0 18pt; }
+            .chapter { padding: 20pt 0; }
+            .chapter + .chapter::before { display: none; }
+            .stats, .stat, .fact, .facet, .counted, .step-card, .pcard-in, .tl-item,
+            .bench-card, .golive-step, .lex, .toc-card { border: 1px solid #bbb !important; }
+            .tl-era-head { position: static; -webkit-mask-image: none; mask-image: none; }
+            .fact, .facet, .step, .pcard, .tl-item, .bench-card, .golive-step, .lex, .toc-card { break-inside: avoid; }
+            h2, h3, h4 { break-after: avoid; }
+            a { color: inherit; text-decoration: none; }
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* LESS MOTION, ASKED FOR: every animation and transition stops,  */
+        /* and every revealed state is simply shown.                      */
+        /* ══════════════════════════════════════════════════════════════ */
+        @media (prefers-reduced-motion: reduce) {
+            html { scroll-behavior: auto; }
+            *, *::before, *::after { animation: none !important; transition: none !important; }
+            [data-reveal], .book-js [data-reveal] { opacity: 1 !important; transform: none !important; }
+            .hero-eye, .hero-copy, .ch-ghost { transform: none !important; opacity: 1 !important; }
+            .tl-rail-fill, .circuit-fill, .ch-line, .tl-dot { transform: none !important; }
+            .sky-scan { opacity: 0; }
+        }
+    </style>
+    {% if staff_chapter %}{# The staff-only chapter's look travels with it, to signed-in staff alone. #}
+    <style>
+        .toc-card.is-staff { border-color: var(--gold-line); }
+        .toc-card.is-staff .toc-num, .toc-card.is-staff .toc-go { color: var(--gold); text-shadow: none; }
+        .staff-panel {
+            position: relative; max-width: 940px; padding: 30px 22px 26px; border-radius: 16px;
+            background: linear-gradient(180deg, rgba(216,176,32,0.08), rgba(8,22,16,0.72));
+            border: 1px solid var(--gold-line); box-shadow: inset 0 0 60px rgba(216,176,32,0.05);
+        }
+        @media (min-width: 720px) { .staff-panel { padding: 38px 38px 32px; } }
+        .staff-panel .ch-mark { color: var(--gold); }
+        .staff-panel .ch-line { background: linear-gradient(90deg, var(--gold), transparent); }
+        .staff-panel h2 { font-family: var(--font-d); font-size: clamp(24px, 4vw, 36px); color: #f1e3b0; margin-bottom: 10px; }
+        .staff-panel .ch-kicker { color: #cdbd86; margin-bottom: 22px; }
+        .staff-items { list-style: none; margin-top: 26px; display: grid; gap: 14px; }
+        .staff-items li { display: grid; gap: 4px 20px; padding-top: 14px; border-top: 1px solid rgba(216,176,32,0.18); }
+        @media (min-width: 720px) { .staff-items li { grid-template-columns: minmax(0, 13rem) minmax(0, 1fr); } }
+        .staff-item-l { font-family: var(--font-d); font-size: 12px; font-weight: 700; letter-spacing: 1px; color: var(--gold); line-height: 1.5; }
+        .staff-item-t { color: var(--prose); font-size: 16px; line-height: 1.6; }
+        @media print {
+            .staff-panel { border: 1px solid #bbb !important; }
+            .staff-panel h2, .staff-panel .ch-kicker { color: #111; }
+        }
+    </style>{% endif %}
+</head>
+<body id="top">
+<a class="skip" href="#contents">Skip to the chapters</a>
+
+<div class="sky" aria-hidden="true">
+    <canvas id="bookSky"></canvas>
+    <div class="sky-grid"></div>
+    <div class="sky-glow"></div>
+    <div class="sky-scan"></div>
+</div>
+<div class="progress" aria-hidden="true"></div>
+
+<nav class="bnav" aria-label="The book">
+    <a class="bnav-brand" href="#top" aria-label="The Book of Sauron, back to the top">
+        <svg viewBox="0 0 48 30" aria-hidden="true" focusable="false">
+            <path d="M2 15 Q24 -1 46 15 Q24 31 2 15 Z" fill="rgba(0,232,104,0.08)" stroke="#00e868" stroke-width="2.4" stroke-linejoin="round"/>
+            <circle cx="24" cy="15" r="6.5" fill="none" stroke="#00e868" stroke-width="1.6"/>
+            <ellipse cx="24" cy="15" rx="1.8" ry="5" fill="#00e868"/>
+        </svg>
+        <span class="bnav-word">SAURON VISION</span>
+    </a>
+    <div class="bnav-now">
+        <a href="#contents"><span class="bnav-num" data-now-num></span><span class="bnav-label" data-now-label data-default="The Book of Sauron">The Book of Sauron</span></a>
+    </div>
+    <a class="bnav-back" href="{% url 'the_wall' %}"><span class="bnav-back-arrow" aria-hidden="true">&larr;</span> <span class="bnav-back-word">The Wall</span></a>
+</nav>
+
+<nav class="chrail" aria-label="Chapters">
+    <ol>
+        {% for ch in book.chapters %}<li><a href="#{{ ch.id }}"><span class="chrail-lbl"><b>{{ ch.numeral }}</b>{{ ch.nav }}</span><i class="chrail-dot" aria-hidden="true"></i></a></li>
+        {% endfor %}<li><a href="#words"><span class="chrail-lbl"><b>&sect;</b>Words</span><i class="chrail-dot" aria-hidden="true"></i></a></li>
+        {% if staff_chapter %}<li><a href="#staff-chapter"><span class="chrail-lbl"><b>&sect;</b>{{ staff_chapter.label }}</span><i class="chrail-dot" aria-hidden="true"></i></a></li>{% endif %}
+    </ol>
+</nav>
+
+<main class="page">
+
+<!-- ═════════════════════════════ THE OPENING ═════════════════════════════ -->
+<header class="hero" id="opening" data-hero>
+    <div class="hero-inner">
+        <div class="hero-eye" aria-hidden="true">
+            <div class="eye">
+                <div class="eye-rays"></div>
+                <div class="eye-halo"></div>
+                <div class="eye-orbits">
+                    <svg viewBox="0 0 600 400" focusable="false">
+                        <ellipse cx="300" cy="200" rx="296" ry="74" fill="none" stroke="#00e868" stroke-width="1" opacity="0.28"/>
+                        <circle cx="596" cy="200" r="3.5" fill="#40ff90"/>
+                    </svg>
+                    <svg class="o2" viewBox="0 0 600 400" focusable="false">
+                        <ellipse cx="300" cy="200" rx="268" ry="118" fill="none" stroke="#30a0e8" stroke-width="0.8" opacity="0.22" stroke-dasharray="3 7"/>
+                        <circle cx="32" cy="200" r="2.6" fill="#30a0e8"/>
+                    </svg>
+                </div>
+                <div class="eye-body">
+                    <svg viewBox="0 0 600 400" focusable="false">
+                        <defs>
+                            <radialGradient id="bookSclera" cx="50%" cy="50%" r="55%">
+                                <stop offset="0%" stop-color="#0a1a14" stop-opacity="0.95"/>
+                                <stop offset="100%" stop-color="#030806" stop-opacity="0.35"/>
+                            </radialGradient>
+                        </defs>
+                        <path d="M40 200 Q300 22 560 200 Q300 378 40 200 Z" fill="url(#bookSclera)"/>
+                    </svg>
+                    <div class="eye-iris-clip">
+                        <div class="eye-look" id="bookEyeLook">
+                            <div class="iris-glow"></div>
+                            <svg class="iris-fibres" viewBox="0 0 600 400" focusable="false">
+                                <circle cx="300" cy="200" r="64" fill="none" stroke="#00e868" stroke-width="50" stroke-dasharray="1.1 5.6" opacity="0.30"/>
+                            </svg>
+                            <svg class="iris-ticks" viewBox="0 0 600 400" focusable="false">
+                                <circle cx="300" cy="200" r="108" fill="none" stroke="#40ff90" stroke-width="2" stroke-dasharray="2 10" opacity="0.55"/>
+                            </svg>
+                            <svg class="iris-core" viewBox="0 0 600 400" focusable="false">
+                                <defs>
+                                    <clipPath id="bookIrisClip"><circle cx="300" cy="200" r="94"/></clipPath>
+                                </defs>
+                                <circle cx="300" cy="200" r="94" fill="none" stroke="#00e868" stroke-width="3"/>
+                                <circle cx="300" cy="200" r="36" fill="none" stroke="#00e868" stroke-width="1" opacity="0.35"/>
+                                <g clip-path="url(#bookIrisClip)" fill="none" stroke="#00e868">
+                                    <line x1="206" y1="166" x2="394" y2="166" stroke-width="0.8" opacity="0.22"/>
+                                    <line x1="206" y1="234" x2="394" y2="234" stroke-width="0.8" opacity="0.22"/>
+                                </g>
+                            </svg>
+                            <svg class="iris-mer" viewBox="0 0 600 400" focusable="false">
+                                <ellipse cx="300" cy="200" rx="44" ry="94" fill="none" stroke="#00e868" stroke-width="1.3" opacity="0.5"/>
+                            </svg>
+                            <svg class="iris-mer b" viewBox="0 0 600 400" focusable="false">
+                                <ellipse cx="300" cy="200" rx="76" ry="94" fill="none" stroke="#00e868" stroke-width="1" opacity="0.3"/>
+                            </svg>
+                            <div class="iris-scan"><i></i></div>
+                            <svg class="iris-glint" viewBox="0 0 600 400" focusable="false">
+                                <circle cx="326" cy="166" r="5" fill="#daf0e6" opacity="0.55"/>
+                            </svg>
+                            <svg class="pupil" viewBox="0 0 600 400" focusable="false">
+                                <ellipse cx="300" cy="200" rx="15" ry="68" fill="#00e868"/>
+                                <ellipse cx="300" cy="200" rx="6" ry="52" fill="#40ff90" opacity="0.8"/>
+                            </svg>
+                        </div>
+                    </div>
+                    <svg viewBox="0 0 600 400" focusable="false">
+                        <path class="eye-lid" d="M40 200 Q300 22 560 200 Q300 378 40 200 Z" fill="none" stroke="#00e868" stroke-width="4" stroke-linejoin="round"/>
+                        <path d="M84 200 Q300 60 516 200" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.45"/>
+                        <path d="M84 200 Q300 340 516 200" fill="none" stroke="#00e868" stroke-width="1.2" opacity="0.45"/>
+                        <path d="M8 200 H40 M560 200 H592" stroke="#00e868" stroke-width="1.4" opacity="0.5"/>
+                    </svg>
+                </div>
+            </div>
+        </div>
+        <div class="hero-copy">
+            <p class="hero-badge hero-in" style="--d: 0"><i aria-hidden="true"></i>{{ book.hero.badge }}</p>
+            <h1 class="hero-title hero-in" style="--d: 1"><span class="lead">{{ book.hero.title_lead }}</span><span class="accent" data-text="{{ book.hero.title_accent }}">{{ book.hero.title_accent }}</span></h1>
+            <p class="hero-sub hero-in" style="--d: 2">{{ book.hero.subtitle }}</p>
+            <p class="hero-lede hero-in" style="--d: 3">{{ book.hero.lede }}</p>
+            <div class="stats" role="list" aria-label="Counted by the platform">
+                {% for s in book.hero_stats %}<div class="stat" role="listitem" style="--i: {{ forloop.counter0 }}">
+                    <span class="stat-n"{% if s.count or s.count == 0 %} data-count="{{ s.count }}"{% endif %}>{{ s.shown }}</span>
+                    <span class="stat-l">{{ s.label }}</span>
+                </div>{% endfor %}
+            </div>
+        </div>
+    </div>
+    <a class="cue" href="#contents"><span class="cue-mouse" aria-hidden="true"></span>Begin</a>
+</header>
+
+<!-- ═════════════════════════════ CONTENTS ═════════════════════════════ -->
+<section class="toc" id="contents" aria-labelledby="contents-title">
+    <div class="wrap">
+        <p class="eyebrow" data-reveal>The chapters</p>
+        <h2 class="toc-title" id="contents-title" data-reveal>In this book</h2>
+        <ol class="toc-grid" data-stagger>
+            {% for ch in book.chapters %}<li data-reveal><a class="toc-card" href="#{{ ch.id }}"><span class="toc-num">{{ ch.numeral }}</span><span class="toc-name">{{ ch.nav }}</span><span class="toc-sub">{{ ch.title }}</span><span class="toc-go" aria-hidden="true">&rarr;</span></a></li>
+            {% endfor %}<li data-reveal><a class="toc-card" href="#words"><span class="toc-num">&sect;</span><span class="toc-name">Words</span><span class="toc-sub">The terms of this book, in plain words</span><span class="toc-go" aria-hidden="true">&rarr;</span></a></li>
+            {% if staff_chapter %}<li data-reveal><a class="toc-card is-staff" href="#staff-chapter"><span class="toc-num">&sect;</span><span class="toc-name">{{ staff_chapter.label }}</span><span class="toc-sub">Signed-in staff only</span><span class="toc-go" aria-hidden="true">&rarr;</span></a></li>{% endif %}
+        </ol>
+    </div>
+</section>
+
+<!-- ═════════════════════════════ THE CHAPTERS ═════════════════════════════ -->
+{% for ch in book.chapters %}
+<section class="chapter ch-{{ ch.kind }}" id="{{ ch.id }}" data-chapter data-numeral="{{ ch.numeral }}" data-title="{{ ch.nav }}" aria-labelledby="{{ ch.id }}-title">
+    <span class="ch-ghost" aria-hidden="true" data-numeral="{{ ch.numeral }}"></span>
+    <div class="wrap">
+        {% if ch.kind == "closing" %}<div class="closing-eye" aria-hidden="true">
+            <svg viewBox="0 0 120 80" focusable="false">
+                <path d="M6 40 Q60 2 114 40 Q60 78 6 40 Z" stroke-linejoin="round"/>
+                <circle cx="60" cy="40" r="17"/>
+                <ellipse class="solid" cx="60" cy="40" rx="4" ry="13"/>
+            </svg>
+        </div>{% endif %}
+        <header class="ch-head" data-reveal>
+            <p class="ch-mark"><span>Chapter {{ ch.numeral }}</span><i class="ch-line" aria-hidden="true"></i></p>
+            <h2 id="{{ ch.id }}-title">{{ ch.title }}</h2>
+            <p class="ch-kicker">{{ ch.kicker }}</p>
+        </header>
+        <div class="prose" data-stagger>
+            {% for p in ch.paragraphs %}<p data-reveal>{{ p }}</p>
+            {% endfor %}
+        </div>
+
+        {% if ch.kind == "facts" %}
+        <div class="facts" data-stagger>
+            {% for f in ch.items %}<div class="fact" data-reveal>
+                <span class="fact-v"{% if f.count or f.count == 0 %} data-count="{{ f.count }}"{% endif %}>{{ f.value }}</span>
+                <span class="fact-t">{{ f.text }}</span>
+            </div>{% endfor %}
+        </div>
+
+        {% elif ch.kind == "facets" %}
+        <div class="facets" data-stagger>
+            {% for f in ch.items %}<article class="facet t-{{ f.glyph }}" data-reveal>
+                <span class="glyph" aria-hidden="true">
+                    {% if f.glyph == "eye" %}<svg viewBox="0 0 48 48" focusable="false"><path d="M4 24 Q24 8 44 24 Q24 40 4 24 Z"/></svg><svg class="gl-look" viewBox="0 0 48 48" focusable="false"><circle cx="24" cy="24" r="7"/><ellipse class="solid" cx="24" cy="24" rx="2" ry="5.5"/></svg>
+                    {% elif f.glyph == "bots" %}<svg viewBox="0 0 48 48" focusable="false"><path d="M24 4 L41 14 V34 L24 44 L7 34 V14 Z"/><path class="faint" d="M24 4 V12"/></svg><svg class="gl-gear" viewBox="0 0 48 48" focusable="false"><circle cx="24" cy="26" r="7" stroke-dasharray="3 2.5"/><circle class="solid" cx="24" cy="26" r="2.4"/></svg>
+                    {% elif f.glyph == "gates" %}<svg viewBox="0 0 48 48" focusable="false"><path d="M8 42 V10 M40 42 V10"/><path d="M8 20 H40 M8 28 H40"/><path class="faint" d="M14 20 L20 28 M22 20 L28 28 M30 20 L36 28"/></svg><svg class="gl-lamp" viewBox="0 0 48 48" focusable="false"><circle class="solid" cx="24" cy="10" r="3"/></svg>
+                    {% elif f.glyph == "brain" %}<svg viewBox="0 0 48 48" focusable="false"><path class="faint" d="M12 16 L24 10 L36 16 M12 16 L18 32 L30 32 L36 16 M24 10 L24 22 L18 32 M24 22 L30 32 M18 32 L24 40 L30 32"/><circle cx="24" cy="22" r="3.2"/></svg><svg class="gl-node" viewBox="0 0 48 48" focusable="false"><circle class="solid" cx="24" cy="10" r="2.6"/></svg><svg class="gl-node n2" viewBox="0 0 48 48" focusable="false"><circle class="solid" cx="36" cy="16" r="2.6"/></svg><svg class="gl-node n3" viewBox="0 0 48 48" focusable="false"><circle class="solid" cx="30" cy="32" r="2.6"/></svg><svg class="gl-node n4" viewBox="0 0 48 48" focusable="false"><circle class="solid" cx="18" cy="32" r="2.6"/></svg><svg class="gl-node n5" viewBox="0 0 48 48" focusable="false"><circle class="solid" cx="12" cy="16" r="2.6"/></svg>
+                    {% elif f.glyph == "pages" %}<svg viewBox="0 0 48 48" focusable="false"><rect class="faint" x="14" y="6" width="24" height="30" rx="3"/><rect class="faint" x="11" y="9" width="24" height="30" rx="3"/></svg><svg class="gl-sheet" viewBox="0 0 48 48" focusable="false"><rect x="8" y="12" width="24" height="30" rx="3"/><path d="M13 20 H27 M13 26 H27 M13 32 H22"/></svg>
+                    {% else %}<svg viewBox="0 0 48 48" focusable="false"><path d="M8 10 H40 A4 4 0 0 1 44 14 V30 A4 4 0 0 1 40 34 H20 L11 41 V34 H8 A4 4 0 0 1 4 30 V14 A4 4 0 0 1 8 10 Z"/></svg><svg class="gl-dotb" viewBox="0 0 48 48" focusable="false"><circle class="solid" cx="16" cy="22" r="2.4"/></svg><svg class="gl-dotb d2" viewBox="0 0 48 48" focusable="false"><circle class="solid" cx="24" cy="22" r="2.4"/></svg><svg class="gl-dotb d3" viewBox="0 0 48 48" focusable="false"><circle class="solid" cx="32" cy="22" r="2.4"/></svg>{% endif %}
+                </span>
+                <h3>{{ f.title }}</h3>
+                <p>{{ f.text }}</p>
+            </article>{% endfor %}
+        </div>
+        <div class="counted" data-reveal>
+            <p class="eyebrow">Counted by the platform</p>
+            <div class="counted-grid">
+                {% for c in book.counted %}<div class="counted-cell">
+                    <span class="counted-n"{% if c.count or c.count == 0 %} data-count="{{ c.count }}"{% endif %}>{{ c.shown }}</span>
+                    <span class="counted-l">{{ c.label }}</span>
+                </div>{% endfor %}
+            </div>
+        </div>
+
+        {% elif ch.kind == "circuit" %}
+        <div class="circuit" data-circuit>
+            <div class="circuit-track" aria-hidden="true"><i class="circuit-fill"></i></div>
+            <ol class="steps">
+                {% for s in ch.items %}<li class="step" data-reveal="side">
+                    <span class="step-dot" aria-hidden="true"></span>
+                    <div class="step-card"><h3>{{ s.title }}</h3><p>{{ s.text }}</p></div>
+                </li>{% endfor %}
+            </ol>
+            <p class="circuit-loop" data-reveal>
+                <svg class="loop-spin" viewBox="0 0 44 44" aria-hidden="true" focusable="false"><path d="M34 14 A14 14 0 1 0 36 26"/><path d="M34 6 V14 H26"/></svg>
+                <span>{{ ch.loop }}</span>
+            </p>
+        </div>
+        <div class="prose">
+            {% for p in ch.after %}<p data-reveal>{{ p }}</p>{% endfor %}
+        </div>
+        <p class="ch-note" data-reveal>{{ ch.note }}</p>
+
+        {% elif ch.kind == "principles" %}
+        <div class="principles" data-stagger>
+            {% for p in ch.items %}<article class="pcard" data-reveal data-tilt>
+                <div class="pcard-in">
+                    <span class="pcard-idx" aria-hidden="true"></span>
+                    <h3>{{ p.title }}</h3>
+                    <p>{{ p.text }}</p>
+                </div>
+            </article>{% endfor %}
+        </div>
+
+        {% elif ch.kind == "timeline" %}
+        <div class="tl" data-timeline>
+            <div class="tl-rail" aria-hidden="true"><i class="tl-rail-fill"></i></div>
+            {% for era in book.eras %}<section class="tl-era" aria-labelledby="era-{{ era.id }}">
+                <header class="tl-era-head">
+                    <span class="tl-era-span">{{ era.span }}</span>
+                    <h3 id="era-{{ era.id }}">{{ era.title }}</h3>
+                </header>
+                <p class="tl-era-sum" data-reveal>{{ era.summary }}</p>
+                <ol class="tl-list">
+                    {% for m in era.milestones %}<li class="tl-item" data-reveal="pop">
+                        <span class="tl-dot" aria-hidden="true"></span>
+                        <time datetime="{{ m.date }}">{{ m.day }}</time>
+                        <h4>{{ m.title }}</h4>
+                        <p>{{ m.text }}</p>
+                    </li>{% endfor %}
+                </ol>
+            </section>{% endfor %}
+            <p class="tl-now"><i aria-hidden="true"></i>Written here &middot; {{ book.written }}</p>
+        </div>
+
+        {% elif ch.kind == "progress" %}
+        <div class="bench" data-stagger>
+            {% for w in ch.items %}<article class="bench-card" data-reveal>
+                <p class="bench-state"><i class="spin" aria-hidden="true"></i>In progress</p>
+                <h3>{{ w.title }}</h3>
+                <p>{{ w.text }}</p>
+                <span class="bench-bar" aria-hidden="true"><i></i></span>
+            </article>{% endfor %}
+        </div>
+        <h3 class="road-title" data-reveal>{{ ch.road_title }}</h3>
+        <ol class="golive" data-stagger>
+            {% for s in ch.road %}<li class="golive-step" data-reveal>
+                <span class="golive-n" aria-hidden="true"></span>
+                <h4>{{ s.title }}</h4>
+                <p>{{ s.text }}</p>
+            </li>{% endfor %}
+        </ol>
+        <div class="prose">
+            {% for p in ch.after %}<p data-reveal>{{ p }}</p>{% endfor %}
+        </div>
+
+        {% elif ch.kind == "closing" %}
+        <p class="closing-sign" data-reveal>The Book of Sauron &middot; {{ book.written }}</p>
+        <div class="closing-cta" data-reveal>
+            <a class="btn btn-primary" href="{% url 'the_wall' %}">Back to the Wall</a>
+            <a class="btn btn-outline" href="#top">Back to the top</a>
+        </div>
+        {% endif %}
+    </div>
+</section>
+{% endfor %}
+
+<!-- ═════════════════════════════ APPENDIX: THE WORDS ═════════════════════════════ -->
+<section class="chapter ch-words" id="words" data-chapter data-numeral="&sect;" data-title="Words" aria-labelledby="words-title">
+    <div class="wrap">
+        <header class="ch-head" data-reveal>
+            <p class="ch-mark"><span>Appendix</span><i class="ch-line" aria-hidden="true"></i></p>
+            <h2 id="words-title">Words used in this book</h2>
+            <p class="ch-kicker">The few terms a first reading meets, in plain words.</p>
+        </header>
+        <dl class="lexicon" data-stagger>
+            {% for w in book.lexicon %}<div class="lex" data-reveal><dt>{{ w.term }}</dt><dd>{{ w.plain }}</dd></div>
+            {% endfor %}
+        </dl>
+    </div>
+</section>
+
+{% if staff_chapter %}{# THE STAFF-ONLY CHAPTER: its words come from a private file outside git (core/views_book.py), rendered for a signed-in staff user and never sent to anyone else. #}
+<section class="chapter ch-staff" id="staff-chapter" lang="{{ staff_chapter.lang }}" data-chapter data-numeral="&sect;" data-title="{{ staff_chapter.label }}" aria-labelledby="staff-chapter-title">
+    <div class="wrap">
+        <div class="staff-panel" data-reveal="zoom">
+            <p class="ch-mark" lang="en"><span>{{ staff_chapter.label }} &middot; signed-in staff only{% if staff_chapter.note %} &middot; <span lang="{{ staff_chapter.lang }}">{{ staff_chapter.note }}</span>{% endif %}</span><i class="ch-line" aria-hidden="true"></i></p>
+            <h2 id="staff-chapter-title">{{ staff_chapter.title }}</h2>
+            <p class="ch-kicker">{{ staff_chapter.kicker }}</p>
+            <div class="prose">
+                {% for p in staff_chapter.paragraphs %}<p>{{ p }}</p>
+                {% endfor %}
+            </div>
+            <ul class="staff-items">
+                {% for it in staff_chapter.items %}<li><span class="staff-item-l">{{ it.label }}</span><span class="staff-item-t">{{ it.text }}</span></li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</section>
+{% endif %}
+
+</main>
+
+<footer class="bfoot">
+    <div class="wrap bfoot-in">
+        <a class="bfoot-wall" href="{% url 'the_wall' %}"><span aria-hidden="true">&larr;</span> Back to the Wall</a>
+        <p class="bfoot-text"><span class="accent">SAURON VISION</span> &mdash; THE BOOK OF SAURON &mdash; WRITTEN {{ book.written|upper }}</p>
+        <p class="bfoot-note">Every count on this page comes from the platform's own counters, the same ones the Wall prints (the test count is the last full run); every other figure carries its date.</p>
+    </div>
+</footer>
+<a class="totop" href="#top" aria-label="Back to the top"><span aria-hidden="true">&uarr;</span></a>
+
+<script>
+/* THE BOOK'S MOTION. Everything here decorates a page that is already
+   complete: the text is in the HTML, the numbers are printed at their
+   counted value, and html.book-js (set in <head>, only when motion is
+   welcome) is the one switch the entrance rules hang on. Transform and
+   opacity only; every observer rests when it has nothing to do, and the
+   sky slows to a quiet twinkle when the page is still. */
+(function () {
+    "use strict";
+    var doc = document;
+    var root = doc.documentElement;
+    var moving = root.classList.contains("book-js");
+    var hasIO = "IntersectionObserver" in window;
+    var raf = window.requestAnimationFrame
+        ? function (fn) { return window.requestAnimationFrame(fn); }
+        : function (fn) { return window.setTimeout(function () { fn(Date.now()); }, 16); };
+
+    function all(selector, scope) {
+        return Array.prototype.slice.call((scope || doc).querySelectorAll(selector));
+    }
+    function grouped(n) {
+        return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    }
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+    /* 1. Stagger: the n-th revealed child of a group waits n beats. */
+    all("[data-stagger]").forEach(function (group) {
+        all("[data-reveal]", group).forEach(function (el, i) {
+            el.style.setProperty("--i", String(i % 8));
+        });
+    });
+
+    /* 2. Reveal on scroll: once in, it stays in. When the entrance has
+          played, the element drops its reveal hook, so its own hover
+          transitions answer at once instead of waiting on the stagger. */
+    function settle(el) {
+        var done = false;
+        function finish(ev) {
+            if (done || (ev && (ev.target !== el || ev.propertyName !== "opacity"))) { return; }
+            done = true;
+            el.removeEventListener("transitionend", finish);
+            el.removeAttribute("data-reveal");
+        }
+        el.addEventListener("transitionend", finish);
+        window.setTimeout(finish, 2200);
+    }
+    if (moving) {
+        var revealer = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add("is-in");
+                    revealer.unobserve(entry.target);
+                    settle(entry.target);
+                }
+            });
+        }, { rootMargin: "0px 0px -7% 0px", threshold: 0 });
+        all("[data-reveal]").forEach(function (el) { revealer.observe(el); });
+    }
+    /* The reveal is armed: tell the failsafe in <head> the page is awake. */
+    window.bookAwake = true;
+
+    /* 3. The counted numbers climb from zero when they come into view.
+          The server printed the real value; the box keeps that width. */
+    function climb(el) {
+        var target = parseInt(el.getAttribute("data-count"), 10);
+        if (!(target >= 0)) { return; }
+        var final = grouped(target);
+        var start = null;
+        var span = Math.min(2400, 900 + String(target).length * 200);
+        function step(now) {
+            if (start === null) { start = now; }
+            var k = clamp((now - start) / span, 0, 1);
+            var eased = 1 - Math.pow(1 - k, 3);
+            el.textContent = k < 1 ? grouped(Math.round(target * eased)) : final;
+            if (k < 1) { raf(step); }
+        }
+        raf(step);
+    }
+    /* A number that is still rising into its cell (the opening's counts)
+       waits for its entrance to end: counted while it is invisible, it
+       would finish its climb before anyone saw it. */
+    function afterEntrance(el, go) {
+        var fired = false;
+        function once() { if (!fired) { fired = true; go(); } }
+        var anims = el.getAnimations ? el.getAnimations() : [];
+        var pending = anims.filter(function (a) { return a.playState !== "finished"; });
+        if (!pending.length || !window.Promise) { once(); return; }
+        Promise.all(pending.map(function (a) { return a.finished; })).then(once, once);
+        window.setTimeout(once, 4000);
+    }
+    if (moving) {
+        var counter = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+                var el = entry.target;
+                if (!entry.isIntersecting) { return; }
+                if (!el.getAttribute("data-armed")) {
+                    var w = el.getBoundingClientRect().width;
+                    if (w) { el.style.minWidth = Math.ceil(w) + "px"; }
+                    el.setAttribute("data-armed", "1");
+                    el.textContent = "0";
+                }
+                if (entry.intersectionRatio >= 0.35) {
+                    counter.unobserve(el);
+                    afterEntrance(el, function () { climb(el); });
+                }
+            });
+        }, { threshold: [0, 0.35] });
+        all("[data-count]").forEach(function (el) { counter.observe(el); });
+    }
+
+    /* 4. Which chapter is being read: the pill in the bar and the rail. */
+    var nowNum = doc.querySelector("[data-now-num]");
+    var nowLabel = doc.querySelector("[data-now-label]");
+    var railLinks = all(".chrail a");
+    var chapters = all("[data-chapter]");
+    var current = null;
+    function setCurrent(section) {
+        if (section === current) { return; }
+        current = section;
+        var id = section ? section.id : "";
+        railLinks.forEach(function (a) {
+            var on = a.getAttribute("href") === "#" + id;
+            a.classList.toggle("is-active", on);
+            if (on) { a.setAttribute("aria-current", "true"); } else { a.removeAttribute("aria-current"); }
+        });
+        if (!nowLabel) { return; }
+        nowLabel.textContent = section ? section.getAttribute("data-title") : nowLabel.getAttribute("data-default");
+        if (nowNum) { nowNum.textContent = section ? section.getAttribute("data-numeral") : ""; }
+        if (moving) {
+            nowLabel.classList.remove("swap");
+            void nowLabel.offsetWidth;
+            nowLabel.classList.add("swap");
+        }
+    }
+    if (hasIO && chapters.length) {
+        var reading = {};
+        var reader = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) { reading[entry.target.id] = entry.isIntersecting; });
+            var found = null;
+            chapters.forEach(function (c) { if (!found && reading[c.id]) { found = c; } });
+            setCurrent(found);
+        }, { rootMargin: "-42% 0px -52% 0px" });
+        chapters.forEach(function (c) { reader.observe(c); });
+    }
+
+    /* 5. What is on screen plays; what is not, rests. */
+    var ghosts = [];
+    if (hasIO) {
+        var stage = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+                entry.target.classList.toggle("in-view", entry.isIntersecting);
+            });
+            schedule();
+        }, { rootMargin: "12% 0px 12% 0px" });
+        all("[data-chapter], [data-hero]").forEach(function (el) { stage.observe(el); });
+        all(".ch-ghost").forEach(function (g) { ghosts.push({ el: g, host: g.parentNode, top: 0 }); });
+    }
+
+    /* 6. Everything tied to the scroll, read then written, once a frame. */
+    var bar = doc.querySelector(".progress");
+    var nav = doc.querySelector(".bnav");
+    var toTop = doc.querySelector(".totop");
+    var heroEye = doc.querySelector(".hero-eye");
+    var heroCopy = doc.querySelector(".hero-copy");
+    var line = doc.querySelector("[data-timeline]");
+    var lineFill = line ? line.querySelector(".tl-rail-fill") : null;
+    var lineHead = null;
+    if (line && moving) {
+        lineHead = doc.createElement("i");
+        lineHead.className = "tl-rail-head";
+        lineHead.setAttribute("aria-hidden", "true");
+        line.querySelector(".tl-rail").appendChild(lineHead);
+    }
+    var queued = false;
+    function schedule() {
+        if (!queued) { queued = true; raf(frame); }
+    }
+    function frame() {
+        queued = false;
+        var y = window.pageYOffset || root.scrollTop || 0;
+        var vh = window.innerHeight || 1;
+        var total = Math.max(1, root.scrollHeight - vh);
+        var lineBox = line && moving ? line.getBoundingClientRect() : null;
+        var railBox = lineBox ? line.querySelector(".tl-rail").getBoundingClientRect() : null;
+        if (moving) {
+            ghosts.forEach(function (g) {
+                g.live = g.host.classList.contains("in-view");
+                if (g.live) { g.top = g.host.getBoundingClientRect().top; }
+            });
+        }
+        if (bar) { bar.style.transform = "scaleX(" + clamp(y / total, 0, 1).toFixed(4) + ")"; }
+        if (nav) { nav.classList.toggle("is-scrolled", y > 24); }
+        if (toTop) { toTop.classList.toggle("is-shown", y > vh * 1.1); }
+        if (!moving) { return; }
+        if (heroEye && y < vh * 1.4) {
+            var p = y / vh;
+            heroEye.style.transform = "translate3d(0," + (y * 0.34).toFixed(1) + "px,0) scale(" + (1 - p * 0.14).toFixed(3) + ")";
+            heroEye.style.opacity = clamp(1 - p * 0.95, 0, 1).toFixed(3);
+            if (heroCopy) { heroCopy.style.transform = "translate3d(0," + (y * 0.12).toFixed(1) + "px,0)"; }
+        }
+        if (railBox && lineFill) {
+            var k = clamp((vh * 0.62 - railBox.top) / Math.max(1, railBox.height), 0, 1);
+            lineFill.style.transform = "scaleY(" + k.toFixed(4) + ")";
+            if (lineHead) { lineHead.style.transform = "translate3d(0," + (k * railBox.height).toFixed(1) + "px,0)"; }
+        }
+        ghosts.forEach(function (g) {
+            if (g.live) { g.el.style.transform = "translate3d(0," + (-g.top * 0.16).toFixed(1) + "px,0)"; }
+        });
+    }
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule, { passive: true });
+    schedule();
+
+    /* 7. Smooth passage between chapters, and the focus follows. */
+    all('a[href^="#"]').forEach(function (a) {
+        a.addEventListener("click", function (ev) {
+            var id = a.getAttribute("href").slice(1);
+            var target = id ? doc.getElementById(id) : null;
+            if (!target) { return; }
+            ev.preventDefault();
+            target.scrollIntoView({ behavior: moving ? "smooth" : "auto", block: "start" });
+            if (window.history && window.history.replaceState) {
+                window.history.replaceState(null, "", id === "top" ? window.location.pathname : "#" + id);
+            }
+            if (!target.hasAttribute("tabindex")) { target.setAttribute("tabindex", "-1"); }
+            try { target.focus({ preventScroll: true }); } catch (e) { /* an old browser keeps its focus */ }
+        });
+    });
+
+    /* 8. The eye follows the pointer, and wanders when left alone. */
+    var look = doc.getElementById("bookEyeLook");
+    if (look && heroEye && moving) {
+        var aimX = 0, aimY = 0, atX = 0, atY = 0, eyeQueued = false, lastPointer = 0;
+        function eyeFrame() {
+            eyeQueued = false;
+            atX += (aimX - atX) * 0.12;
+            atY += (aimY - atY) * 0.12;
+            look.style.transform = "translate3d(" + atX.toFixed(2) + "px," + atY.toFixed(2) + "px,0)";
+            if (Math.abs(aimX - atX) > 0.05 || Math.abs(aimY - atY) > 0.05) { eyeQueued = true; raf(eyeFrame); }
+        }
+        function aim(x, y) {
+            aimX = x; aimY = y;
+            if (!eyeQueued) { eyeQueued = true; raf(eyeFrame); }
+        }
+        doc.addEventListener("pointermove", function (ev) {
+            if (ev.pointerType === "touch") { return; }
+            lastPointer = Date.now();
+            var box = heroEye.getBoundingClientRect();
+            if (box.bottom < 0) { return; }
+            var dx = clamp((ev.clientX - (box.left + box.width / 2)) / (window.innerWidth / 2), -1, 1);
+            var dy = clamp((ev.clientY - (box.top + box.height / 2)) / (window.innerHeight / 2), -1, 1);
+            aim(dx * box.width * 0.06, dy * box.height * 0.07);
+        }, { passive: true });
+        var born = Date.now();
+        window.setInterval(function () {
+            if (doc.hidden || Date.now() - lastPointer < 2600) { return; }
+            var hero = doc.querySelector("[data-hero]");
+            if (hero && !hero.classList.contains("in-view")) { return; }
+            var box = heroEye.getBoundingClientRect();
+            var t = (Date.now() - born) / 1000;
+            aim(Math.sin(t * 0.42) * box.width * 0.045, Math.cos(t * 0.31) * box.height * 0.05);
+        }, 140);
+    }
+
+    /* 9. A trade's circuit: an impulse travels the ten steps, lighting
+          each, then loops back to the first. Only while it is in view. */
+    var circuit = doc.querySelector("[data-circuit]");
+    if (circuit && moving && hasIO) {
+        var steps = all(".step", circuit);
+        var track = circuit.querySelector(".circuit-track");
+        var fill = circuit.querySelector(".circuit-fill");
+        var pulse = doc.createElement("i");
+        pulse.className = "circuit-pulse";
+        pulse.setAttribute("aria-hidden", "true");
+        track.appendChild(pulse);
+        var at = -1, timer = null, running = false;
+        function dotCentre(i) {
+            var dot = steps[i].querySelector(".step-dot").getBoundingClientRect();
+            var box = track.getBoundingClientRect();
+            return { y: dot.top + dot.height / 2 - box.top, h: box.height || 1 };
+        }
+        function advance() {
+            at += 1;
+            if (at >= steps.length) {
+                at = -1;
+                circuit.classList.add("is-looping");
+                pulse.style.opacity = "0";
+                fill.style.transform = "scaleY(0)";
+                steps.forEach(function (s) { s.classList.remove("lit"); });
+                timer = window.setTimeout(function () {
+                    circuit.classList.remove("is-looping");
+                    pulse.style.transform = "translate3d(0,0,0)";
+                    if (running) { timer = window.setTimeout(advance, 400); }
+                }, 1300);
+                return;
+            }
+            var c = dotCentre(at);
+            pulse.style.opacity = "1";
+            pulse.style.transform = "translate3d(0," + c.y.toFixed(1) + "px,0)";
+            fill.style.transform = "scaleY(" + clamp(c.y / c.h, 0, 1).toFixed(4) + ")";
+            if (at > 0) { steps[at - 1].classList.remove("lit"); }
+            steps[at].classList.add("lit");
+            timer = window.setTimeout(advance, 1250);
+        }
+        new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+                if (entry.isIntersecting && !running) { running = true; advance(); }
+                else if (!entry.isIntersecting && running) { running = false; window.clearTimeout(timer); }
+            });
+        }, { threshold: 0.12 }).observe(circuit);
+    }
+
+    /* 10. The principles have depth: they tilt toward the pointer, a light
+           follows it, and a tap lifts a card off the page. */
+    if (moving) {
+        all("[data-tilt]").forEach(function (card) {
+            var inner = card.querySelector(".pcard-in");
+            var shine = doc.createElement("i");
+            shine.className = "pcard-shine";
+            shine.setAttribute("aria-hidden", "true");
+            inner.appendChild(shine);
+            var px = 0, py = 0, sx = -300, sy = -300, tiltQueued = false;
+            function paint() {
+                tiltQueued = false;
+                inner.style.setProperty("--rx", (-py * 6).toFixed(2) + "deg");
+                inner.style.setProperty("--ry", (px * 8).toFixed(2) + "deg");
+                shine.style.setProperty("--sx", sx.toFixed(0) + "px");
+                shine.style.setProperty("--sy", sy.toFixed(0) + "px");
+            }
+            function queue() { if (!tiltQueued) { tiltQueued = true; raf(paint); } }
+            card.addEventListener("pointermove", function (ev) {
+                if (ev.pointerType === "touch") { return; }
+                var box = card.getBoundingClientRect();
+                px = clamp((ev.clientX - box.left) / box.width * 2 - 1, -1, 1);
+                py = clamp((ev.clientY - box.top) / box.height * 2 - 1, -1, 1);
+                sx = ev.clientX - box.left;
+                sy = ev.clientY - box.top;
+                card.classList.add("is-tilting");
+                queue();
+            });
+            card.addEventListener("pointerleave", function () {
+                px = 0; py = 0;
+                card.classList.remove("is-tilting");
+                queue();
+            });
+            card.addEventListener("click", function () { card.classList.toggle("is-lifted"); });
+        });
+    }
+
+    /* 11. The sky: three depths of stars that drift, twinkle, part for
+           the pointer and slide with the scroll, and now and then a
+           falling star. Drawn once and left still when motion is off. */
+    var sky = doc.getElementById("bookSky");
+    var pen = sky && sky.getContext ? sky.getContext("2d") : null;
+    if (pen) {
+        var styles = window.getComputedStyle(root);
+        var tone = (styles.getPropertyValue("--accent") || "").trim() || "rgb(0,232,104)";
+        var pale = (styles.getPropertyValue("--text") || "").trim() || "rgb(218,240,230)";
+        var W = 0, H = 0, stars = [], streak = null, nextStreak = 0, skyQueued = false;
+        var ptrX = 0, ptrY = 0, driftX = 0, driftY = 0, lastPaint = -1000, stirred = Date.now();
+        /* a scroll or a pointer asks for every frame; at rest, every other
+           one is enough for a twinkle; after a few still seconds, about ten
+           a second (the loop itself sleeps between them) */
+        var RESTING_AFTER = 4000, RESTING_GAP = 96;
+        function stir() { stirred = Date.now(); }
+        window.addEventListener("scroll", stir, { passive: true });
+        function seed() {
+            var ratio = Math.min(window.devicePixelRatio || 1, W < 700 ? 1.5 : 2);
+            sky.width = Math.round(W * ratio);
+            sky.height = Math.round(H * ratio);
+            pen.setTransform(ratio, 0, 0, ratio, 0, 0);
+            var n = Math.round(clamp(W * H / 8200, 60, 180));
+            stars = [];
+            for (var i = 0; i < n; i++) {
+                var z = Math.random();
+                stars.push({
+                    x: Math.random() * W, y: Math.random() * H, z: z,
+                    r: 0.35 + z * 1.4, a: 0.22 + z * 0.62,
+                    ph: Math.random() * 6.283, sp: 0.5 + Math.random() * 1.7,
+                    pale: Math.random() < 0.2
+                });
+            }
+        }
+        function fit() {
+            var w = window.innerWidth, h = window.innerHeight;
+            /* a phone's address bar coming and going is not a new sky */
+            if (stars.length && Math.abs(w - W) < 2 && Math.abs(h - H) < 160) { return; }
+            W = w; H = h;
+            seed();
+            if (!moving) { paint(0); }
+        }
+        function paint(t) {
+            pen.clearRect(0, 0, W, H);
+            var scrolled = window.pageYOffset || 0;
+            driftX += (ptrX - driftX) * 0.04;
+            driftY += (ptrY - driftY) * 0.04;
+            for (var i = 0; i < stars.length; i++) {
+                var s = stars[i];
+                var depth = 0.1 + s.z * 0.6;
+                var y = s.y - scrolled * depth * 0.3 - t * 0.0035 * (0.3 + s.z) + driftY * depth * 22;
+                var x = s.x + driftX * depth * 26;
+                y = ((y % H) + H) % H;
+                x = ((x % W) + W) % W;
+                var twinkle = moving ? 0.62 + 0.38 * Math.sin(t * 0.001 * s.sp + s.ph) : 1;
+                pen.globalAlpha = s.a * twinkle;
+                pen.fillStyle = s.pale ? pale : tone;
+                if (s.r < 1.1) {
+                    pen.fillRect(x, y, s.r * 1.5, s.r * 1.5);
+                } else {
+                    pen.beginPath();
+                    pen.arc(x, y, s.r, 0, 6.2832);
+                    pen.fill();
+                }
+            }
+            if (streak) {
+                var life = (t - streak.born) / streak.span;
+                if (life >= 1) {
+                    streak = null;
+                } else {
+                    var hx = streak.x + streak.vx * life, hy = streak.y + streak.vy * life;
+                    var grad = pen.createLinearGradient(hx, hy, hx - streak.vx * 0.22, hy - streak.vy * 0.22);
+                    grad.addColorStop(0, pale);
+                    grad.addColorStop(1, "rgba(0,0,0,0)");
+                    pen.globalAlpha = Math.sin(life * Math.PI) * 0.9;
+                    pen.strokeStyle = grad;
+                    pen.lineWidth = 1.4;
+                    pen.beginPath();
+                    pen.moveTo(hx, hy);
+                    pen.lineTo(hx - streak.vx * 0.22, hy - streak.vy * 0.22);
+                    pen.stroke();
+                }
+            }
+            pen.globalAlpha = 1;
+        }
+        function skyFrame(t) {
+            skyQueued = false;
+            if (doc.hidden) { return; }
+            if (!streak && t > nextStreak) {
+                var fromLeft = Math.random() < 0.5;
+                streak = {
+                    x: fromLeft ? Math.random() * W * 0.5 : W * 0.5 + Math.random() * W * 0.5,
+                    y: Math.random() * H * 0.45,
+                    vx: (fromLeft ? 1 : -1) * (W * 0.35 + Math.random() * W * 0.2),
+                    vy: H * 0.22 + Math.random() * H * 0.12,
+                    born: t, span: 900 + Math.random() * 500
+                };
+                nextStreak = t + 7000 + Math.random() * 9000;
+            }
+            var still = Date.now() - stirred;
+            if (streak || still < 700 || t - lastPaint > 30) {
+                lastPaint = t;
+                paint(t);
+            }
+            skyQueued = true;
+            if (!streak && still > RESTING_AFTER) {
+                window.setTimeout(function () { raf(skyFrame); }, RESTING_GAP);
+            } else {
+                raf(skyFrame);
+            }
+        }
+        fit();
+        if (moving) {
+            nextStreak = 3500;
+            skyQueued = true;
+            raf(skyFrame);
+            doc.addEventListener("visibilitychange", function () {
+                if (!doc.hidden && !skyQueued) { skyQueued = true; raf(skyFrame); }
+            });
+            doc.addEventListener("pointermove", function (ev) {
+                ptrX = ev.clientX / (W || 1) - 0.5;
+                ptrY = ev.clientY / (H || 1) - 0.5;
+                stir();
+            }, { passive: true });
+        }
+        var resizing = null;
+        window.addEventListener("resize", function () {
+            window.clearTimeout(resizing);
+            resizing = window.setTimeout(fit, 160);
+        }, { passive: true });
+    }
+})();
+</script>
+</body>
+</html>

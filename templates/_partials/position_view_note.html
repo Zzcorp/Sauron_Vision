@@ -1,0 +1,26 @@
+{% comment %}
+"Showing N of M" over a position table (2026-09-26): printed whenever the
+table holds less than the book (a filter, or /portfolio/'s eight-row cap)
+and whenever a filter is on, even one that matches the whole book — so a
+narrowed table is never read as the whole of it. Inside the live region,
+so a fill that changes M changes the sentence on the next sweep; this is
+where M lives, not on the Close all button, which no sweep re-renders.
+
+And the other direction: a type or an asset the book does not hold (the
+last BTCUSD closed under ?symbol=BTCUSD) turns that filter OFF, and the
+sentence says so — the select above still shows the old pick until the
+page reloads, and a whole book under it would read as the filtered one.
+The value is repeated only when it looks like a ticker (view.dropped
+carries "" otherwise): a crafted link must not print its own sentence here.
+
+Parameters
+  view    the dict dashboard.position_views.build_view returned
+  noun    what the table holds ("open positions", "closed trades")
+  closes  1 where a Close all button sits over the table
+{% endcomment %}
+{% if view.dropped %}
+<p class="pos-view-note" role="status">{% for name, value in view.dropped %}{% if value %}No {{ noun }} match {{ name }} <b>{{ value }}</b>, so that filter is off.{% else %}The {{ name }} asked for is not among the {{ noun }}, so that filter is off.{% endif %}{% if not forloop.last %} {% endif %}{% endfor %}</p>
+{% endif %}
+{% if view.partial or view.filtered %}
+<p class="pos-view-note" role="status">Showing <b>{{ view.n_shown }}</b> of <b>{{ view.n_total }}</b> {{ noun }}{% if view.filtered %} · {% for name, value in view.filters %}{{ name }} <b>{{ value }}</b>{% if not forloop.last %} · {% endif %}{% endfor %}{% if view.n_matched > view.n_shown %} · the first {{ view.n_shown }} of the {{ view.n_matched }} that match{% endif %}{% endif %}. The totals above count all {{ view.n_total }}{% if closes %}; Close all acts on the whole book{% endif %}.</p>
+{% endif %}

@@ -799,6 +799,66 @@ class FundingCarryTests(TestCase):
         self.assertGreater(res["details"]["annualized_pct"],
                            self._PARAMS["min_annualized_pct"])
 
+    # ── the boundary every test above steps over ───────────────────────
+    #
+    # Each of them builds its instrument as "BTCUSDT" / "DENSEUSDT" — the
+    # VENUE spelling — and seeds rows under the same string, so the read and
+    # the write agreed by construction and the catalogue was never involved.
+    # Production does not look like that. The catalogue says AAVEUSD;
+    # stream_binance_futures writes AAVEUSDT, because that is what Binance
+    # lists. On 2026-09-13 `setups diagnose` measured the consequence: "0
+    # funding snapshots for 'AAVEUSD', need 30" on 15 of 15 crypto
+    # instruments, while the streamer had been filling that table the whole
+    # time. The leg had never evaluated once since it shipped.
+    #
+    # The evaluator's own comment had named the trap in advance and declined
+    # to act on it "rather than guessed at". `venue_symbol` is not a guess —
+    # it is the translation backfill_bars already uses to fetch these bars,
+    # it carries the MATIC -> POL rename, and tests/test_catalogue_spellings
+    # asserts it.
+
+    def test_the_catalogue_spelling_reads_the_venue_spelling(self):
+        from signals.evaluators_advanced import _eval_funding_carry
+        inst = _instrument("AAVEUSD", asset_class="crypto")
+        now = _seed_funding("AAVEUSDT", lambda d, i: 0.0008, days=20)
+        res = _eval_funding_carry(dict(self._PARAMS), inst, now)
+        self.assertTrue(res["matched"], res["details"])
+        self.assertEqual(res["details"]["n_snapshots"], 14 * 8)
+        # And it says what it asked, so the next mis-map is visible rather
+        # than indistinguishable from a market with no funding skew.
+        self.assertEqual(res["details"]["queried"], ["AAVEUSD", "AAVEUSDT"])
+
+    def test_a_row_under_the_platform_spelling_still_counts(self):
+        """Broadening a read must not narrow it. A row already in the table
+        under the catalogue's own spelling is still that symbol's funding."""
+        from signals.evaluators_advanced import _eval_funding_carry
+        inst = _instrument("AAVEUSD", asset_class="crypto")
+        now = _seed_funding("AAVEUSD", lambda d, i: 0.0008, days=20)
+        res = _eval_funding_carry(dict(self._PARAMS), inst, now)
+        self.assertTrue(res["matched"], res["details"])
+
+    def test_it_does_not_borrow_another_symbols_carry(self):
+        """The read widens by one known spelling, not by a prefix. ETHUSDT's
+        carry is not AAVEUSD's, and a leg that collected it would size a real
+        short on another market's payment stream."""
+        from signals.evaluators_advanced import _eval_funding_carry
+        inst = _instrument("AAVEUSD", asset_class="crypto")
+        now = _seed_funding("ETHUSDT", lambda d, i: 0.0008, days=20)
+        res = _eval_funding_carry(dict(self._PARAMS), inst, now)
+        self.assertFalse(res["matched"])
+        self.assertEqual(res["details"]["n_snapshots"], 0)
+
+    def test_a_symbol_the_translation_leaves_alone_queries_one_spelling(self):
+        """venue_symbol returns USDT-suffixed names unchanged, so the set
+        collapses to one and the query must not double-count the same rows."""
+        from signals.evaluators_advanced import _eval_funding_carry
+        inst = _instrument("BTCUSDT", asset_class="crypto")
+        now = _seed_funding("BTCUSDT", lambda d, i: 0.0008, days=20)
+        res = _eval_funding_carry(dict(self._PARAMS), inst, now)
+        self.assertTrue(res["matched"], res["details"])
+        self.assertEqual(res["details"]["queried"], ["BTCUSDT"])
+        self.assertEqual(res["details"]["n_snapshots"], 14 * 8)
+
     def test_an_afternoon_of_snapshots_is_not_a_fortnights_carry(self):
         from signals.evaluators_advanced import _eval_funding_carry
         inst = _instrument("SOLUSDT", asset_class="crypto")
@@ -811,16 +871,34 @@ class FundingCarryTests(TestCase):
         self.assertEqual(res["details"]["days_covered"], 2)
 
     def test_a_symbol_the_funding_feed_does_not_carry_says_so(self):
-        """FundingRate is keyed by the EXCHANGE's perp symbol and has no FK to
-        Instrument, so an install storing 'BTCUSD' finds nothing under Binance's
-        'BTCUSDT'. A zero-row read must not look like a market with no skew."""
+        """A zero-row read must not look like a market with no skew.
+
+        That intent is this test's own, and it was right. Its ASSERTION was
+        not: until 2026-09-13 it seeded rows under "BTCUSDT", asked about an
+        instrument called "BTCUSD", and asserted the leg found nothing —
+        pinning the venue/catalogue mismatch in place as though it were the
+        contract. It is the defect, and `setups diagnose` measured its cost
+        on the live box: "0 funding snapshots for 'AAVEUSD', need 30" on 15
+        of 15 crypto instruments, against a table the streamer had been
+        filling all along.
+
+        The stated intent is now served properly: the refusal carries the
+        spellings that were TRIED, so a genuinely uncovered symbol and a
+        mis-mapped one can be told apart on the page. This case is the
+        genuinely uncovered one — nothing was seeded for it at all."""
         from signals.evaluators_advanced import _eval_funding_carry
         inst = _instrument("BTCUSD", asset_class="crypto")
-        now = _seed_funding("BTCUSDT", lambda d, i: 0.0008, days=20)
+        # A busy feed for a DIFFERENT symbol, so "no rows" is about coverage
+        # and not about an empty table.
+        now = _seed_funding("SOLUSDT", lambda d, i: 0.0008, days=20)
         res = _eval_funding_carry(dict(self._PARAMS), inst, now)
         self.assertFalse(res["matched"])
         self.assertEqual(res["details"]["n_snapshots"], 0)
         self.assertEqual(res["details"]["symbol"], "BTCUSD")
+        self.assertFalse(res["details"]["measured"])
+        # The half that was missing: what it asked before giving up.
+        self.assertEqual(res["details"]["queried"], ["BTCUSD", "BTCUSDT"])
+        self.assertIn("need 30", res["details"]["reason"])
 
     def test_the_carry_window_is_bounded_by_now(self):
         from signals.evaluators_advanced import _eval_funding_carry

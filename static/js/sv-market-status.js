@@ -46,7 +46,10 @@
     var badges = document.querySelectorAll('[data-market-session]');
     if (!badges.length) return;
     var byCode = {};
-    (d.exchanges || []).forEach(function (e) { byCode[e.code] = e; });
+    /* Product sessions (CME_LIVESTOCK, CBOT_GRAINS, ICE_COTTON…) ride
+       beside the exchange rows in the payload; a badge keyed on one must
+       repaint like any other, or it freezes at first paint. */
+    (d.exchanges || []).concat(d.products || []).forEach(function (e) { byCode[e.code] = e; });
 
     badges.forEach(function (badge) {
       var code = badge.getAttribute('data-market-session');

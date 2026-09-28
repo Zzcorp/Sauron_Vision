@@ -53,6 +53,8 @@ BYPASS_SITES = {
     "brain/earnings_reviewer.py": "agent.agent_name",
     "brain/position_review_agent.py": "agent.agent_name",
     "brain/research_agent.py": "agent.agent_name",
+    "brain/horizon.py": "agent.agent_name",
+    "brain/close_advice.py": "agent.agent_name",
     "ai_agents/consensus.py": '"consensus"',
 }
 

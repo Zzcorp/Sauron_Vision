@@ -1,6 +1,10 @@
 """Platform control — start/stop scrapers, agents, and pipeline components."""
+import logging
+
 from django.db import models
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 
 class PlatformComponent(models.Model):
@@ -81,6 +85,35 @@ def get_component(key: str):
         return None
 
 
+#: The live-money switches (2026-09-28). Each description below calls its
+#: switch a separate decision — apply behind the PIN, "flip after weeks of
+#: positive edge", "flip only after D2c pins", a typed leverage REFUSED
+#: while off — and one tap of the System group's "all on" on a phone armed
+#: all seven at once, with no PIN and no per-key confirmation; only the
+#: brake was held back. Named here by hand, not derived from a
+#: description: a switch that arms real money is exempt because somebody
+#: wrote it down. tests/test_ops_cockpit.py fails when a System key ending
+#: in _live is missing from this tuple.
+LIVE_MONEY_SWITCHES = (
+    "actuator_mode_live",           # the admin can apply rule actions
+    "meta_allocator_mode_live",     # the admin can apply capital weights
+    "share_allocator_mode_live",    # a share plan can be applied (PIN / --yes)
+    "share_allocator_auto_derisk",  # a SHOCK plan applies itself, PIN-less
+    "capital_desk_mode_live",       # the fleet OBEYS the desk plan
+    "fractional_units_live",        # the stock bot sends fractions to eToro
+    "etoro_leverage_live",          # a typed leverage goes to eToro
+)
+
+#: Switches a category's "all on" button never turns on (2026-09-26,
+#: dashboard.views.admin_bulk_toggle): each is a separate decision, made by
+#: `manage.py component on <key>` or its own toggle. "All off" still turns
+#: them off. The Morgul brake stops bots on a critical guard finding; it
+#: must not arrive with the System group's other switches — and neither
+#: must anything that moves real money (LIVE_MONEY_SWITCHES, above). /ops/
+#: says beside the group what the button leaves OFF.
+BULK_ENABLE_EXEMPT = frozenset({"morgul_brake", *LIVE_MONEY_SWITCHES})
+
+
 # ── Default components to register ───────────────────────
 DEFAULT_COMPONENTS = [
     # System
@@ -121,7 +154,7 @@ DEFAULT_COMPONENTS = [
 
     # ── Phase 3 — AI operational ──────────────────────────────
     {"key": "feature_ai_pretrade_gate", "name": "AI Pre-Trade Sanity Gate",
-     "description": "Claude reviews each proposed trade before opening (regime/news/decay). Slow & costs tokens — leave OFF unless you want it.",
+     "description": "Claude reviews each proposed trade before opening (regime/news/decay) — for the LEGACY crypto bot only, which is not scheduled; the multi-asset bots never consult it. Slow & costs tokens. Leave OFF.",
      "category": "agent"},
     {"key": "pipeline_ai_journal", "name": "AI Signal Journal",
      "description": "Auto-generate journal entry when a signal closes with |R| ≥ 0.5",
@@ -139,6 +172,9 @@ DEFAULT_COMPONENTS = [
      "category": "system"},
 
     # ── Phase 6 — calibration loop ────────────────────────────
+    {"key": "generator_auto_research", "name": "Generator Auto-Research",
+     "description": "The weekly Strategy Generator arms its own proposals in RESEARCH stage: the scanner produces graded signals for them, no bot trades them (the stage gate), and the admin can still reject. Off (default) = proposals wait for a click on the brain page.",
+     "category": "agent"},
     {"key": "pipeline_calibration", "name": "Calibration Auto-Resolver",
      "description": "Nightly task that resolves AgentPredictions whose ground truth is available. Powers the agent trust scores consumed by the risk gate.",
      "category": "pipeline"},
@@ -183,23 +219,164 @@ DEFAULT_COMPONENTS = [
      "description": "Watches OPEN positions between entry and exit. A free pass every 30 min scores R at risk, excursion, distance to stop/target, age, regime flip, vol expansion, events and concentration; only flagged positions reach a budgeted model pass answering hold / tighten / trim / exit. PROPOSES ONLY.",
      "category": "agent"},
 
+    # ── HORIZON — the 5-10 year sector synthesis (2026-09-12) ─
+    # Without this row the @guarded_task on brain.tasks.run_horizon
+    # short-circuits on every beat. Description counted under 300 chars
+    # (the Postgres column; see the share allocator rows above).
+    {"key": "agent_horizon", "name": "Horizon (5-10y sector synthesis)",
+     "description": "Monthly (1st, 04:45 UTC) on the frontier model, ~1.5 USD a run: sector tilts -2..+2 with graded 6/12-month calls, and asset-class tilts the share allocator reads as a ±10% prior at most. Off by default; /horizon/ shows the view and its grade record.",
+     "category": "agent"},
+
     # ── Phase 13 — multi-asset bot framework ──────────────────
     {"key": "pipeline_asset_bots", "name": "Multi-Asset Bots (stocks/forex/commodities)",
-     "description": "Phase-13 framework: per-(user, asset_class) bot configs that consume Phase-1 Signals and route trades through Phase-4 broker_router (Alpaca for stocks, OANDA for forex, paper-only for commodities). Crypto bot is unchanged.",
+     "description": "Phase-13 framework: per-(user, asset_class) bot configs that consume Phase-1 Signals and route trades through Phase-4 broker_router (Alpaca for stocks, OANDA for forex, commodities live through eToro's box only). Crypto bot is unchanged.",
      "category": "pipeline"},
 
     # ── Broker account sync ───────────────────────────────────
-    {"key": "broker_account_sync", "name": "Broker Account Sync (IBKR)",
-     "description": "Caches each interfaced IBKR account's NetLiquidation and holdings every 15 min — the source for every 'as the broker sees it' cell. Independent of pipeline_asset_bots (knowing what the account holds is not a bot function). Read-only; touches no gate denominator.",
+    # ONE KEY, THREE WALKS: sync_broker_account (IBKR), sync_saxo_accounts
+    # and sync_etoro_accounts all carry @guarded_task("broker_account_sync")
+    # (tasks.py:300, :605, :801). This row said "(IBKR)" for months after the
+    # other two arrived, so unticking it to stop IBKR stopped Saxo and eToro
+    # with no warning anywhere. The old description also called it read-only
+    # and said it touches no gate denominator: since pools can follow the
+    # account, every follower's capital IS this reading times its share, and
+    # the entry path freezes a follower whose reading has gone stale.
+    {"key": "broker_account_sync", "name": "Broker Account Sync (Saxo · eToro · IBKR)",
+     "description": "Caches equity and holdings for every keyed Saxo, eToro and IBKR account every 15 min — the source of every 'as the broker sees it' cell. ONE switch for all THREE walks: unticking it stops Saxo and eToro too. Every following pool's capital is this reading times its share.",
      "category": "pipeline"},
+
+    # ── Share allocator ───────────────────────────────────────
+    # Without these rows the @guarded_task on propose_share_plans skips on
+    # every beat and /shares/ shows no plan without saying why.
+    {"key": "pipeline_share_allocator", "name": "Share Allocator (proposer)",
+     # Descriptions are a 300-char column, enforced on the VPS Postgres and
+     # not on the SQLite suite: the first cut of these two was 600 chars,
+     # seed_components failed on deploy and the stack stayed down (2026-09-12).
+     "description": "Every 4h after the sync: a TARGET share of the account per live follower pool from graded evidence, regime, opportunity density and news risk, under floor/ceiling, a 10-pt/day cap and a drawdown governor. SHADOW by default: apply needs LIVE mode and the trading PIN. See /shares/.",
+     "category": "pipeline"},
+    {"key": "share_allocator_mode_live", "name": "Share Allocator Live Mode",
+     "description": "Off (default) = shadow: plans are proposed and graded, apply is refused. On = an admin can apply a plan (PIN on /shares/, --yes on the shell), writing each follower's account_share_pct and re-sizing pools via the sync. Rollback restores exactly. Caps and the governor hold in both modes.",
+     "category": "system"},
+    # De-risk fast, re-risk slow (2026-09-12): the third switch. Off by
+    # default; needs LIVE mode too. Description counted under 300 chars.
+    {"key": "share_allocator_auto_derisk", "name": "Share Allocator Auto De-risk",
+     "description": "Off (default). On + LIVE mode: a SHOCK plan that only LOWERS shares (every target <= current) is applied automatically, within the daily apply cap, with snapshot and rollback, and staff are notified. Re-risking is never automatic: a plan with any upward target waits for the PIN.",
+     "category": "system"},
+
+    # ── The capital desk (2026-09-12) ─────────────────────────
+    # Without the first row `is_component_enabled` answers False,
+    # run_all_asset_bots is the legacy config-after-config loop and the
+    # desk never sees a candidate — which is the correct default, and the
+    # reason the switch must exist before anything can be graded.
+    # Descriptions counted under the 300-char Postgres column, like the
+    # share allocator rows above.
+    {"key": "pipeline_capital_desk", "name": "Capital Desk (fleet pass)",
+     "description": "The fleet pass runs TWO-PHASE: every bot proposes first, the desk ranks the tick's entries on graded expected R per unit of marginal (correlation-aware) risk against one budget per venue, then they execute. SHADOW: nothing the bots do changes — the plan on /desk/ is the counterfactual being graded.",
+     "category": "pipeline"},
+    {"key": "capital_desk_mode_live", "name": "Capital Desk Live Mode",
+     "description": "Off (default) = shadow: the plan is recorded and graded, the fleet is unchanged. On = the plan is OBEYED — displaced entries are skipped and chosen sizes multiplied, never above 1. The budget, the caps and every per-order refusal hold in both modes. Flip after weeks of positive edge, not before.",
+     "category": "system"},
+
+    # ── eToro fractional units (2026-09-23) ──────────────────────
+    # Without this row _venue_fractional_units answers None and the stock
+    # bot rounds to whole shares on eToro — the correct default. Description
+    # under the 300-char Postgres column (the registry test measures it).
+    {"key": "fractional_units_live", "name": "Fractional Units Live Mode (eToro)",
+     "description": "Off (default) = the STOCK bot rounds to WHOLE shares on eToro. On = the sized fraction is sent. Crypto (8 dp) and commodity (4 dp) send fractions whatever this says; forex snaps to 100 units, to 1 only when ON and measured fractional. Flip only after D2c pins (deploy/ETORO_DEPARTURE.md section 4).",
+     "category": "system"},
+
+    # ── The Telegram eye (2026-09-26) ───────────────────────────
+    # bot_program/telegram_eye.py answers the group every 15 s, in
+    # English, to the configured staff chat only; its one write turns
+    # bots OFF. OFF on arrival like every row here: after the deploy,
+    # `manage.py component on telegram_eye`. One poll at a time holds a
+    # batch, under a Postgres advisory lock, NOT this row: the gate's
+    # mark_run writes it after every run and would wait behind it.
+    # Description measured at 276 chars (< 300).
+    {"key": "telegram_eye", "name": "Telegram Eye (group commands)",
+     "description": "Answers the Sauron Vision Telegram group every 15 s, in English: /status, /positions, /why, /help and questions. Its only write to trading state is the brake: /stop and /stopall turn bots OFF, never on. Replies to the configured staff chat only. OFF on arrival: turning it on starts answering.",
+     "category": "system"},
+
+    # ── The Morgul guards (2026-09-26) ──────────────────────────
+    # bot_program/morgul.py: ten read-only guards over the book every
+    # 5 min, their findings to the staff Telegram group once per 3 h,
+    # and a brake behind a switch of its own. Both OFF on arrival: after
+    # the deploy, `manage.py component on morgul_guards`; the brake is a
+    # second, separate decision, which a group's "all on" button never
+    # makes (BULK_ENABLE_EXEMPT, above). Descriptions measured at 270 and
+    # 273 chars (< 300).
+    {"key": "morgul_guards", "name": "Morgul Guards (book watchdog)",
+     "description": "Every 5 min, ten read-only guards check the book: bookings while a market was shut, live positions without a stop, stuck closes, far prices, proofs and ceilings, margin, daily loss, duplicates, drift and the tick. Findings go to the staff Telegram group. OFF on arrival.",
+     "category": "system"},
+    {"key": "morgul_brake", "name": "Morgul Brake (bots off on a critical finding)",
+     "description": "Off (default): a critical guard finding says which bots the brake WOULD stop. On: those bots are turned OFF (enabled = False), once per finding: never on, never a close. Acts only while morgul_guards is on. The group's all on button never turns it on. Re-arm on the server.",
+     "category": "system"},
+
+    # ── The three that were never registered (found live 2026-09-13) ────
+    # These keys have guarded tasks and beat entries in this codebase, and
+    # had NO row in DEFAULT_COMPONENTS. `is_component_enabled` returns
+    # False for a key with no row, so the gate skipped all three on every
+    # single run since the day they were written — silently, at INFO, one
+    # line buried among thousands of bar lines. On the live box the
+    # registry held 51 components and none of these.
+    #
+    # The old comment on RETIRED_COMPONENT_KEYS called them "admin-created
+    # by hand". That is not a design, it is a dependency on somebody
+    # remembering, and nobody did: price alerts were never checked and the
+    # 07:00 and 17:00 digests were never sent. Seeding them here costs
+    # nothing — is_enabled defaults to False, so each arrives OFF and the
+    # operator turns on what they want. tests/test_component_registry.py
+    # now fails if any guarded_task key is missing from this list.
+    {"key": "pipeline_alerts", "name": "Price Alerts",
+     "description": "Checks every active price alert against the current quote. OFF on arrival: turning it on starts evaluating alerts the operator may have set months ago.",
+     "category": "pipeline"},
+    {"key": "pipeline_digest", "name": "Morning and EOD Digests",
+     "description": "The 07:00 and 17:00 UTC digests. OFF on arrival — turning it on SENDS messages outward on a schedule, so it is the operator's decision, not a deploy's.",
+     "category": "pipeline"},
+    {"key": "agent_commentator", "name": "Market Commentator",
+     "description": "Daily market commentary from the commentator agent. OFF on arrival: it costs model spend on every run.",
+     "category": "agent"},
+    # 2026-09-15 — the watchdog for a paper campaign. `paper_readiness`
+    # answers the question the moment it is asked; a campaign that starts
+    # green and goes cold on day twelve spends seventy-eight days producing
+    # nothing, and the only thing that would notice is somebody choosing to
+    # run the command again. Nothing on this platform chose to.
+    {"key": "pipeline_campaign_watch", "name": "Evidence Chain Watchdog",
+     "description": "Daily read-only check that the paper-campaign evidence chain (bars -> indicators -> signals -> fills -> outcomes -> ladder) is still complete, and one notification when a link goes cold. Writes nothing and makes no broker call.",
+     "category": "pipeline"},
+
+    # ── eToro leverage (2026-09-23; the words 2026-09-26) ──────
+    # A per-config extras["leverage"] is handed to EtoroTrader.market_order
+    # as a body field. It changes the margin eToro locks, never the units
+    # or the loss at the stop. OFF until the class's proof is in the
+    # engine's proven set (asset_engine/base.py — NOT named here: a switch
+    # must not be able to name the proof set, tests/test_etoro_proofs.py)
+    # and a levered fill has printed its band (ETORO_DEPARTURE §7-0); the
+    # engine also judges the multiplier against the instrument's LIVE
+    # leverageValues (eligibility, measured 2026-09-23); a missing row
+    # reads OFF. Read by asset_engine/base.judge_order_leverage on the
+    # tick and by preflight_live §4. 2026-09-26: the platform cap is 20x
+    # (forex and index 20, commodity 10, stock 5, crypto 2), and the
+    # attack mode ("auto") sends 1x while this is OFF. The proven
+    # multipliers bind "auto" only; a typed multiplier needs its class
+    # proven, the class ceiling and the instrument's LIVE list.
+    # Description measured at 299 chars (< 300).
+    {"key": "etoro_leverage_live", "name": "eToro Leverage (per config)",
+     "description": "Off (default): a typed extras['leverage'] above 1 is REFUSED at the tick and by preflight_live; 'auto' goes at 1x. On: up to 20x (forex, index; commodity 10x, stock 5x, crypto 2x) if in the instrument's LIVE leverageValues and its class is in the proven set; 'auto' is held to its proven multiplier.",
+     "category": "system"},
 ]
 
 
 # Components that once existed and were deliberately removed. Named
 # explicitly rather than pruning everything outside DEFAULT_COMPONENTS,
-# because some live keys (pipeline_alerts, pipeline_digest,
-# agent_commentator) are admin-created by hand and a blanket prune would
-# silently disable them.
+# because an admin can create a row by hand and a blanket prune would
+# silently disable it.
+#
+# This comment used to name pipeline_alerts, pipeline_digest and
+# agent_commentator as the hand-made keys it was protecting. They are in
+# DEFAULT_COMPONENTS now: "admin-created by hand" turned out to mean
+# "never created at all" on the live box, and the gate had been skipping
+# all three since they were written. Seeding beats remembering.
 RETIRED_COMPONENT_KEYS = ["scraper_finviz"]
 
 
@@ -214,10 +391,34 @@ def seed_components():
     PlatformComponent.objects.filter(key__in=RETIRED_COMPONENT_KEYS).delete()
     created = 0
     for comp in DEFAULT_COMPONENTS:
-        _, was_created = PlatformComponent.objects.get_or_create(
+        row, was_created = PlatformComponent.objects.get_or_create(
             key=comp["key"],
             defaults=comp,
         )
         if was_created:
             created += 1
+            continue
+        # THE LABELS ARE THE CODE'S; THE SWITCH IS THE OPERATOR'S.
+        #
+        # `defaults` applies only on CREATION, so on every deployed database
+        # the name, description and category froze the day the row was first
+        # seeded — and a correction to any of them was inert in the one place
+        # it was needed. `broker_account_sync` went on reading
+        # "Broker Account Sync (IBKR)" for months after it began gating the
+        # Saxo and eToro walks as well, and no edit to the table above could
+        # have changed that.
+        #
+        # `is_enabled` is NEVER touched here, nor any counter or last-run
+        # field. That is the operator's own state: a deploy that silently
+        # flipped a component back ON would be a far worse bug than a stale
+        # label, and a missing row already reads OFF by design.
+        stale = [f for f in ("name", "description", "category")
+                 if f in comp and getattr(row, f) != comp[f]]
+        if stale:
+            for field in stale:
+                setattr(row, field, comp[field])
+            row.save(update_fields=stale + ["updated_at"])
+            logger.info("[components] %s: refreshed %s (the switch was left "
+                        "as the operator set it)", comp["key"],
+                        ", ".join(stale))
     return created

@@ -149,3 +149,4 @@ from .demoter_models import RuleDemotion  # noqa: E402, F401
 from .earnings_models import EarningsReview  # noqa: E402, F401
 from .research_models import ResearchConversation, ResearchMessage  # noqa: E402, F401
 from .position_review_models import PositionReview  # noqa: E402, F401
+from .horizon_models import HorizonView  # noqa: E402, F401

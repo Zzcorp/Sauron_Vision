@@ -218,11 +218,12 @@ class ForexBot(AssetBot):
 
     # ── decide(): session-aware override ─────────────────────────────────
 
-    def decide(self, symbol: str) -> BotDecision:
+    def decide(self, symbol: str, *,
+               signal_stats: dict | None = None) -> BotDecision:
         """Skip entry outside the pair's preferred sessions; otherwise delegate."""
         extras = self.cfg.extras or {}
         if extras.get("session_filter_disabled"):
-            return super().decide(symbol)
+            return super().decide(symbol, signal_stats=signal_stats)
 
         now = timezone.now()
         if not forex_market_open(now):
@@ -253,7 +254,7 @@ class ForexBot(AssetBot):
             ])
 
         # Inside a preferred session — fall through to default Signal-consuming decide().
-        return super().decide(symbol)
+        return super().decide(symbol, signal_stats=signal_stats)
 
     # ── sizing ───────────────────────────────────────────────────────────
 
@@ -285,10 +286,22 @@ class ForexBot(AssetBot):
         so realized_r stays exactly price-based whatever the rate does."""
         return super()._trade_pnl(trade, price) * forex_usd_multiplier(trade)
 
-    def _round_qty(self, qty: float, price: float) -> float:
+    def _round_qty(self, qty: float, price: float, *,
+                   fractional=None) -> float:
         """Round to a tidy unit boundary; a fraction below half a boundary
-        sizes to zero (recorded as SIZED_TO_ZERO upstream)."""
-        units = round(float(qty) / UNIT_ROUNDING) * UNIT_ROUNDING
+        sizes to zero (recorded as SIZED_TO_ZERO upstream).
+
+        `fractional` is the venue's unit-granularity answer in three
+        states (base._venue_fractional_units: True only while the
+        fractional_units_live switch is ON and the client MEASURED the
+        instrument fractional — eToro's eligibility row, 2026-09-25).
+        True snaps to ONE unit instead of UNIT_ROUNDING: 1,000 USD / 1.08
+        = 926 units against eToro's measured 1,000 USD floor
+        (minPositionExposure) would snap to 900 and be refused under a
+        926-unit floor on every tick. None and False keep the 100-unit
+        step: with the switch OFF nothing changes."""
+        step = 1 if fractional is True else UNIT_ROUNDING
+        units = round(float(qty) / step) * step
         return float(max(units, 0.0))
 
     def position_size(self, price: float) -> float:

@@ -37,7 +37,9 @@ from .views_brain_phase38 import (
 
 from .views_close import (close_position_preview, close_position_execute,
                           position_levels,
-                          close_all_preview, close_all_execute)
+                          close_all_preview, close_all_execute,
+                          close_advice, close_selected_preview,
+                          close_selected_execute)
 from .views_signals_htmx import signal_cards_htmx, signal_performance_htmx
 from .views_performance import performance_dashboard
 from .views_risk import risk_dashboard, risk_dashboard_live
@@ -57,6 +59,9 @@ from .views_admin_hq import (
     hq_apply_rule_action, hq_reject_rule_action, hq_rollback_rule_action,
     hq_propose_allocation, hq_apply_allocation, hq_rollback_allocation,
     hq_reject_allocation,
+    hq_propose_share_plan, hq_apply_share_plan, hq_reject_share_plan,
+    hq_rollback_share_plan,
+    hq_run_horizon,
     hq_run_promotions, hq_promote_rule, hq_demote_rule,
     hq_run_evolution, hq_apply_evolution, hq_reject_evolution,
     hq_run_opportunity_scan, hq_resolve_opportunities,
@@ -64,6 +69,8 @@ from .views_admin_hq import (
     hq_run_pattern_miner, hq_activate_discovery, hq_reject_discovery,
     hq_fire_test_event,
     hq_create_asset_bot, hq_toggle_asset_bot, hq_run_asset_bot, hq_run_all_asset_bots,
+    hq_follow_asset_bot,
+    hq_apply_persona,
 )
 from .views_promotions import promotions_dashboard
 from .views_evolution import evolution_dashboard
@@ -73,12 +80,20 @@ from .views_events import events_dashboard
 from .views_asset_bots import asset_bots_dashboard
 from .views_rule_control import rule_control_dashboard
 from .views_calibration import calibration_dashboard
+from .views_evidence import evidence_ledger
 from .views_ai_models import ai_models_dashboard
 from .views_system_health import system_health
 from .views_topology import system_map, system_map_state, system_map_toggle
-from .views_forensics import forensics_list, forensics_detail
+from .views_forensics import forensics_list, forensics_detail, forensics_live
 from .views_bot_charts import bot_charts
 from .views_allocator import allocator_dashboard
+from .views_shares import shares_dashboard
+from .views_personas import personas_dashboard
+from .views_desk import desk_dashboard
+from .views_horizon import horizon_dashboard
+from .views_ops import ops_dashboard, ops_run_command
+from .views_setups import setups_arm, setups_dashboard
+from .views_oculus import oculus_dashboard
 from .views_eye import eye_dashboard, eye_partial
 from signals.tradingview_webhook import tradingview_webhook
 from .views_eye_drilldown import eye_gate_events, eye_fills, eye_exposure
@@ -94,6 +109,14 @@ from .views_audit import audit_dashboard, audit_export
 from .views_tax_lots import tax_lots_dashboard, tax_lots_export
 from .api import market_views, signal_views, strategy_views, portfolio_views, ai_views
 from core.views import rate_limiter_stats, system_status
+
+from .views_brokers import (  # noqa: E402 — 2026-09-17, the brokers page
+    brokers_page, disconnect_etoro, disconnect_saxo, save_etoro_credentials,
+    save_saxo_credentials, saxo_callback, saxo_connect)
+from .views_treasury import treasury_page  # noqa: E402 — 2026-09-19
+from .views_withdrawals import (  # noqa: E402 — 2026-09-28
+    withdrawal_cancel, withdrawal_correct, withdrawal_create,
+    withdrawal_mark_paid, withdrawals_page)
 
 urlpatterns = [
     # ── Command Center (unified Dashboard + Eye merge) ───────
@@ -151,6 +174,13 @@ urlpatterns = [
     # server-side loop that cannot be half-abandoned by a closed tab.
     path("positions/close-all/preview/", close_all_preview, name="close_all_preview"),
     path("positions/close-all/", close_all_execute, name="close_all_execute"),
+    # Between one row and the whole book: the rows the operator TICKED.
+    # First the question — is closing them a good idea? (advice only; it
+    # closes nothing) — then the same preview/confirm/execute pair as
+    # close-all, over exactly those ids, with one PIN for the whole batch.
+    path("positions/close-advice/", close_advice, name="close_advice"),
+    path("positions/close-selected/preview/", close_selected_preview, name="close_selected_preview"),
+    path("positions/close-selected/", close_selected_execute, name="close_selected_execute"),
     path("api/instrument-preview/<str:symbol>/", views.instrument_preview_api, name="instrument_preview_api"),
     path("quotes/", views.market_quotes, name="market_quotes"),
     path("calendar/", views.economic_calendar, name="economic_calendar"),
@@ -214,6 +244,26 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     path("admin-dashboard/bots/seed/", hq_seed_bots, name="hq_seed_bots"),
     path("admin-dashboard/brokers/oanda/save/", save_oanda_credentials, name="hq_save_oanda"),
     path("admin-dashboard/brokers/alpaca/save/", save_alpaca_credentials, name="hq_save_alpaca"),
+    # ── The brokers page (2026-09-17): one page, every broker, what each can
+    #    hold; plus the eToro and Saxo forms, added before their adapters so
+    #    keys obtained today have somewhere encrypted to go.
+    path("brokers/", brokers_page, name="brokers_page"),
+    path("treasury/", treasury_page, name="treasury_page"),
+    # Withdrawals asked for in advance (2026-09-28): the reserve is held back
+    #    from new sizing, nothing is sold; every act takes the trading PIN.
+    path("withdrawals/", withdrawals_page, name="withdrawals"),
+    path("withdrawals/request/", withdrawal_create, name="withdrawal_create"),
+    path("withdrawals/<int:pk>/paid/", withdrawal_mark_paid, name="withdrawal_mark_paid"),
+    path("withdrawals/<int:pk>/cancel/", withdrawal_cancel, name="withdrawal_cancel"),
+    path("withdrawals/<int:pk>/correct/", withdrawal_correct, name="withdrawal_correct"),
+    path("admin-dashboard/brokers/etoro/save/", save_etoro_credentials, name="hq_save_etoro"),
+    path("admin-dashboard/brokers/saxo/save/", save_saxo_credentials, name="hq_save_saxo"),
+    path("admin-dashboard/brokers/saxo/disconnect/", disconnect_saxo, name="hq_disconnect_saxo"),
+    path("admin-dashboard/brokers/etoro/disconnect/", disconnect_etoro, name="hq_disconnect_etoro"),
+    # The one browser sign-in. The callback PATH is fixed here; the HOST is
+    # whatever the operator registered on Saxo's portal and saved on the row.
+    path("brokers/saxo/connect/", saxo_connect, name="saxo_connect"),
+    path("brokers/saxo/callback/", saxo_callback, name="saxo_callback"),
     # TradingView alerts arrive as SIGNALS, never as orders — they join
     # the same queue every internal rule writes into and are gated by the
     # same book. Unauthenticated by design (TradingView cannot send
@@ -234,6 +284,7 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     path("admin-dashboard/actuator/rollback/", hq_rollback_rule_action, name="hq_rollback_rule_action"),
     path("rule-control/", rule_control_dashboard, name="rule_control_dashboard"),
     path("calibration/", calibration_dashboard, name="calibration_dashboard"),
+    path("evidence/", evidence_ledger, name="evidence_ledger"),
     path("ai-models/", ai_models_dashboard, name="ai_models_dashboard"),
     path("health/", system_health, name="system_health"),
     # The admin panel's second division: not "is it switched on?" but "is data
@@ -244,6 +295,9 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     path("bot-charts/", bot_charts, name="bot_charts"),
     path("forensics/", forensics_list, name="forensics_list"),
     path("forensics/<int:trade_id>/", forensics_detail, name="forensics_detail"),
+    # The position page's summary, re-rendered alone for its 15-second
+    # refresh (2026-09-26). GET only; reads marks, never a broker.
+    path("forensics/<int:trade_id>/live/", forensics_live, name="forensics_live"),
     path("allocator/", allocator_dashboard, name="allocator_dashboard"),
 
     # ── Phase 7: Meta-Allocator ──────────────────────────────
@@ -251,6 +305,53 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     path("admin-dashboard/allocator/apply/", hq_apply_allocation, name="hq_apply_allocation"),
     path("admin-dashboard/allocator/rollback/", hq_rollback_allocation, name="hq_rollback_allocation"),
     path("admin-dashboard/allocator/reject/", hq_reject_allocation, name="hq_reject_allocation"),
+
+    # ── Share Allocator ──────────────────────────────────────
+    # /allocator/ is the rule meta-allocator's; the share of the ACCOUNT
+    # each live pool takes lives at /shares/ (2026-09-12).
+    path("shares/", shares_dashboard, name="shares_dashboard"),
+
+    # ── The three trader personalities (2026-09-12) ───────
+    # /shares/ says how much of the account a pool gets; this one says
+    # WHAT KIND OF TRADER that pool is — the preset of knobs, the grading
+    # window, the share band and the horizon weight that go together.
+    path("personas/", personas_dashboard, name="personas_dashboard"),
+    path("admin-dashboard/personas/apply/", hq_apply_persona, name="hq_apply_persona"),
+
+    # ── The Oculus (2026-09-13) ──────────────────────────────
+    # The page ABOVE the other thirty: every cycle side by side, each
+    # count beside the switch that writes it and the qualifier that says
+    # what it means. Read-only, owns no data, caches nothing.
+    path("oculus/", oculus_dashboard, name="oculus_dashboard"),
+
+    # ── The capital desk (2026-09-12) ────────────────────────
+    # /shares/ sizes each POOL's share of the account; this one ranks a
+    # single tick's entries against one risk budget and says, in words,
+    # what it took and what it refused.
+    path("desk/", desk_dashboard, name="desk_dashboard"),
+
+    # ── Why a setup never fires (2026-09-12) ─────────────────
+    # /opportunities/ shows the matches a setup MADE; this one answers the
+    # question a setup that never matched leaves behind — too strict, blind
+    # on its data, or short of its threshold by two hundredths — and arms
+    # the setups the generator wrote that nobody ever clicked.
+    path("setups/", setups_dashboard, name="setups_dashboard"),
+    path("setups/arm/", setups_arm, name="setups_arm"),
+
+    # ── The ops cockpit ──────────────────────────────────────
+    # Everything, now: switches, decision queues, the broker, and the
+    # command catalogue (core.ops_commands) with a Run lane restricted
+    # to registered read-only commands (2026-09-12).
+    path("ops/", ops_dashboard, name="ops_dashboard"),
+    path("ops/run/", ops_run_command, name="ops_run_command"),
+    path("admin-dashboard/shares/propose/", hq_propose_share_plan, name="hq_propose_share_plan"),
+    path("admin-dashboard/shares/apply/", hq_apply_share_plan, name="hq_apply_share_plan"),
+    path("admin-dashboard/shares/reject/", hq_reject_share_plan, name="hq_reject_share_plan"),
+    path("admin-dashboard/shares/rollback/", hq_rollback_share_plan, name="hq_rollback_share_plan"),
+
+    # ── Horizon: the 5-10 year sector synthesis (2026-09-12) ──
+    path("horizon/", horizon_dashboard, name="horizon_dashboard"),
+    path("admin-dashboard/horizon/run/", hq_run_horizon, name="hq_run_horizon"),
 
     # ── Phase 8: Promotion Pipeline ──────────────────────────
     path("admin-dashboard/promotions/run/", hq_run_promotions, name="hq_run_promotions"),
@@ -284,6 +385,7 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     # ── Phase 13: Multi-Asset Bots ───────────────────────────
     path("admin-dashboard/asset-bots/create/", hq_create_asset_bot, name="hq_create_asset_bot"),
     path("admin-dashboard/asset-bots/toggle/", hq_toggle_asset_bot, name="hq_toggle_asset_bot"),
+    path("admin-dashboard/asset-bots/follow/", hq_follow_asset_bot, name="hq_follow_asset_bot"),
     path("admin-dashboard/asset-bots/tick/", hq_run_asset_bot, name="hq_run_asset_bot"),
     path("admin-dashboard/asset-bots/tick-all/", hq_run_all_asset_bots, name="hq_run_all_asset_bots"),
     path("asset-bots/", asset_bots_dashboard, name="asset_bots_dashboard"),

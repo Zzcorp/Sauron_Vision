@@ -190,6 +190,20 @@ class DeploymentStackTests(TestCase):
                     "DEFAULT_FROM_EMAIL", "BACKUP_REMOTE"):
             self.assertIn(f"{key}=", raw, key)
 
+    def test_both_env_examples_document_every_ai_tier(self):
+        """config/settings.py reads one AI_MODEL_<TIER> per tier. The
+        example the runbook has the operator copy listed three of the four
+        and omitted the dearest — the frontier tier the Strategy Generator
+        and Horizon run on — so an operator pinning models from it never
+        saw that knob outside a runbook paragraph."""
+        tiers = settings.AI_CONFIG["models"]
+        self.assertIn("frontier", tiers)
+        for name in (".env.example", ".env.production.example"):
+            raw = (BASE / name).read_text(encoding="utf-8")
+            for tier in tiers:
+                self.assertIn(f"AI_MODEL_{tier.upper()}=", raw,
+                              f"{name} omits the {tier} tier")
+
     def test_runbook_exists(self):
         self.assertTrue((BASE / "deploy" / "RUNBOOK.md").exists())
         self.assertTrue((BASE / "deploy" / "Caddyfile").exists())

@@ -61,6 +61,10 @@ class Command(BaseCommand):
                             help="Write .env instead of printing the block.")
         parser.add_argument("--env", default="",
                             help="Path to .env (default: repo root).")
+        parser.add_argument("--quiet", action="store_true",
+                            help="Suppress the human trailer. For callers "
+                                 "that consume stdout and do their own "
+                                 "writing, i.e. deploy/ibkr-apply.")
 
     def handle(self, *args, **opts):
         from bot_program.models import IBKRAccount
@@ -68,9 +72,22 @@ class Command(BaseCommand):
         block = self._render(IBKRAccount)
         if not opts["write"]:
             self.stdout.write(block)
-            self.stderr.write(self.style.WARNING(
-                "\nNothing written. Re-run with --write, then restart the "
-                "slots you changed."))
+            # SUPPRESSIBLE, because this advice is a lie in the one context
+            # that matters most. `deploy/ibkr-apply` captures our stdout and
+            # splices .env itself; our stderr goes straight to the operator's
+            # terminal, so a successful apply printed
+            #
+            #   Nothing written. Re-run with --write, ...
+            #   applied to /home/sauron/Sauron_Vision/.env (previous ...)
+            #
+            # two contradictory lines, the alarming one first. An operator
+            # reading that during a live cutover — 2FA push in hand, Gateway
+            # recreating — concludes the credential did not land and re-runs
+            # or reaches for --write on a script that has no such flag.
+            if not opts["quiet"]:
+                self.stderr.write(self.style.WARNING(
+                    "\nNothing written. Re-run with --write, then restart the "
+                    "slots you changed."))
             return
 
         path = Path(opts["env"]) if opts["env"] else (

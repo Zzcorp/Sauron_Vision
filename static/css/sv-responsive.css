@@ -1,0 +1,282 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   THE PHONE TIER (2026-09-28)
+   ───────────────────────────────────────────────────────────────────────
+   The operator, 2026-09-27: "Sauron needs a lifting on the responsive
+   side, please... it's not adaptive at all now". The father runs Sauron
+   from his phone from Monday 2026-09-28.
+
+   WHAT WAS MEASURED (3994ffc, a phone-emulating headless Chrome,
+   2026-09-27). At 360x780 the topbar's right cluster ran from x=156 to
+   x=685: the bell and the account menu were off the screen. The news
+   ticker and the info panel were 56px stubs between the sidebar's 260px
+   offset and the rail. A saved open signals rail could not be closed.
+   Pinch-zoom was off. The Gollum dialog was 64px wide. The page's first
+   line sat at y=178 (a 122px top padding under the 56px topbar). On
+   /positions/ the stacked rows were
+   labelled by position on a table that had grown: the target price read
+   "P&L", and Strategy, Opened and Action had no label. At 768x1024 the
+   fourteen-column positions table was 1314px wide in a 710px wrapper.
+
+   THE CONTRACT. At 768px and below this file owns the shell's phone
+   layout, in this order:
+     (a) the shell's variables: no ticker, no left chrome, the floating
+         buttons 48px, 12px from the edge, above the bottom nav;
+     (b) the signals rail and its toggles are off (signals stay at
+         /signals/);
+     (c) the news ticker and the info panel are off (news stay at
+         /news/); the price headband stays, full width;
+     (d) the topbar fits: menu, title, live dot, bell and account menu,
+         each at least 44px; the lock and the theme switch move into the
+         account menu;
+     (e) the sidebar opens under the topbar;
+     (f) the bottom nav: Home, Positions, Portfolio, Briefing, Menu;
+     (g) Gollum is off; the Eye stays;
+     (h) the page runs between the bars;
+     (i) 44px tap targets, 48px for CLOSE, 16px inputs;
+     (j) a table carrying .sv-stack is a stack of labelled cards,
+         .sv-stack--pairs two fields a line;
+     (k) page-scoped refinements.
+   The 640px tier in sv-overlay.css (bottom-sheet dialogs, hover cards
+   off) is unchanged. Above 768px nothing here applies: outside the
+   media query this file holds three rules, and each touches only markup
+   that exists for the phone (the bottom nav, the phone-only menu rows)
+   or a helper class.
+
+   LOAD ORDER. base.html links this file after sauron.css, sv-overlay.css
+   and sv-tour.css, and before a page's extra_css block: it is the last
+   shell sheet, and the first thing a page's own style can override.
+
+   SPECIFICITY. Media queries add none.
+     - A page-scoped rule starts with .page-content, so it beats the
+       page's own single-class rule although the page's style loads
+       later.
+     - A stacked-table rule starts with the stack block's exact prefix,
+       :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)),
+       .positions-metrics table). The stack block in sauron.css weighs
+       0,3,x through that list's weight argument (the .table-wrapper
+       table.sv-stack:has(...) one, since the 2026-09-28 merge; it was
+       .pos-tabs ~ .card table:has(th:nth-child(11)) before, the same
+       0,3,2), which is also what
+       lifts it over the 34rem runway (.table-wrapper
+       .sv-perf-table:has(thead th:nth-child(6)), 0,3,2, declared
+       earlier). A shorter prefix here loses to the rule it refines.
+
+   TOKENS. No hex colour, only the theme's tokens. A z-index is a rung of
+   the sv-overlay ladder. No width, min-width or max-width in px above
+   320.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+:root { --sv-bottom-chrome: 0px; }
+
+/* Phone-only markup (the bottom nav, the Lock and Theme rows of the
+   account menu) is in every page and shown at 768px and below only. */
+.sv-phone-nav, .sv-phone-only { display: none !important; }
+
+/* A cell's controls side by side, wrapping rather than widening the cell:
+   what an inline display:flex on a <td> used to fake, at the price of
+   dropping that cell out of the table's column model. */
+.sv-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+@media (max-width: 768px) {
+
+    /* (a) The shell's variables. !important because sauron.css restates
+       each of them under body:has(...) for the rail, the mini sidebar and
+       the info panel, none of which a phone shows. --se-left-chrome read
+       the 260px sidebar a phone never shows, which is how the Gollum
+       dialog came out 64px wide. */
+    body {
+        --hb-ticker-h: 0px !important;
+        --se-left-chrome: 0px !important;
+        --se-right-edge: 12px !important;
+        --se-fab-size: 48px !important;
+    }
+    body:has(.sv-phone-nav) { --sv-bottom-chrome: calc(56px + env(safe-area-inset-bottom, 0px)); }
+    body:has(#pdCloseBtn) { --sv-bottom-chrome: 0px; }
+    /* The floating buttons stand 12px above the bottom nav. The weight is
+       the point: 0,2,2 beats sauron.css's
+       body:has(.info-panel-wrap):not(.page-dashboard) and
+       body:has(.info-panel-wrap.minimized) (both 0,2,1) whatever the
+       order, and loses, as intended, to the position page's
+       html.pd-js body:has(#pdCloseBtn) (1,1,2), which lifts them over its
+       own close bar instead. */
+    html body:has(.sv-phone-nav .sv-pn-item) { --se-bottom-edge: calc(var(--sv-bottom-chrome) + 12px); }
+
+    /* (b) The signals rail, its two edge toggles and the legacy floating
+       hamburger. sauron.css forces the rail to display:flex !important;
+       loaded later, this wins at the same weight. A saved
+       sauron_signals_rail=open used to keep the page's 280px right
+       margin, an 80px column at 360, with nothing on screen to close the
+       rail: the margin goes whatever localStorage says. */
+    .signals-rail, .rail-toggle-btn, .sidebar-toggle-btn, .mobile-toggle { display: none !important; }
+    .main-content { margin-right: 0 !important; }
+
+    /* (c) The news ticker and the info panel: 56px stubs at 360, nothing
+       readable and something to tap by mistake. base.html also marks the
+       panel minimized on a phone, without saving it, so every rule that
+       lifts for an open panel reads "no panel". The price headband stays,
+       full width (sauron.css); its collapse tab gets a thumb's width. */
+    .ticker-bar, .hb-restore-tab.ticker, .info-panel-wrap, #ipRestorePill { display: none !important; }
+    .data-headband .hb-collapse-btn { width: 44px; }
+
+    /* (d) The topbar. The clock, the exchange count, the theme switch and
+       the lock go (the last two into the account menu); the name and the
+       caret of the account button go; what stays is 44px square. */
+    .topbar {
+        padding: 0 max(8px, env(safe-area-inset-right, 0px)) 0 max(8px, env(safe-area-inset-left, 0px));
+        gap: 8px;
+    }
+    .topbar > :first-child { flex: 1 1 auto; min-width: 0; }
+    .topbar-title {
+        display: block; min-width: 0;
+        font-size: 15px; letter-spacing: .5px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .topbar-right { flex: 0 0 auto; gap: 2px; }
+    #clock, .topbar .exchange-indicator, .topbar .theme-toggle-btn, .topbar .lock-now,
+    .um-name-text, .um-caret, .lsp-label, .sv-title-long { display: none !important; }
+    .mobile-menu-btn, .notif-bell, .user-menu-trigger { min-width: 44px; min-height: 44px; justify-content: center; }
+    .notif-bell { width: 44px; height: 44px; }
+    .live-status-pill { min-height: 44px; padding: 0 10px; }
+    .lsp-dropdown {
+        position: fixed !important;
+        top: calc(var(--topbar-height) + 4px) !important;
+        left: 8px !important; right: 8px !important;
+        width: auto !important; min-width: 0 !important;
+    }
+    .user-menu-dropdown, .notif-dropdown {
+        max-width: calc(100vw - 16px);
+        max-height: calc(100vh - var(--topbar-height) - var(--sv-bottom-chrome) - 16px);
+        max-height: calc(100dvh - var(--topbar-height) - var(--sv-bottom-chrome) - 16px);
+        overflow-y: auto;
+    }
+    .sv-phone-only { display: flex !important; }
+    .um-link { min-height: 44px; }
+
+    /* (e) The sidebar opens under the topbar, so the menu button that
+       opened it stays on screen to close it; its brand block repeats the
+       topbar and goes. */
+    .sidebar { top: var(--topbar-height) !important; bottom: 0 !important; height: auto !important; }
+    .sidebar .sidebar-brand { display: none; }
+    .sidebar-overlay { top: var(--topbar-height); }
+    .sidebar .nav-link { display: flex; align-items: center; min-height: 44px; font-size: 14px; }
+    .sidebar .nav-section { font-size: 11px; }
+
+    /* (f) The bottom nav: the four pages the father opens every day and
+       the whole menu, one tap each, under the thumb. Not on the position
+       page, whose own close bar owns the bottom edge. */
+    .sv-phone-nav {
+        display: grid !important;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        position: fixed; left: 0; right: 0; bottom: 0;
+        height: calc(56px + env(safe-area-inset-bottom, 0px));
+        padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+        box-sizing: border-box;
+        z-index: var(--z-chrome);
+        background: var(--bg-primary);
+        border-top: 1px solid var(--border);
+    }
+    body:has(#pdCloseBtn) .sv-phone-nav { display: none !important; }
+    .sv-pn-item {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 3px; min-height: 56px; min-width: 0; padding: 0 2px;
+        background: none; border: 0;
+        color: var(--text-secondary);
+        font-family: var(--font-mono); font-size: 11px; letter-spacing: .5px;
+        text-decoration: none; cursor: pointer;
+    }
+    .sv-pn-item[aria-current="page"] { color: var(--accent); }
+    .sv-pn-item:focus-visible { outline: 1px solid var(--accent); outline-offset: -4px; }
+    .sv-pn-icon { font-size: 20px; line-height: 1; }
+    .sv-pn-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* (g) The floating buttons. Gollum is off on a phone: his whisper
+       covered the home tabs, his stone painted over the open sidebar and
+       his dialog was 64px wide. The Eye stays, 48px, 12px from the edge,
+       above the bottom nav through (a). */
+    .gollum-fab, .gollum-bubble, .gollum-dialog { display: none !important; }
+    .se-chat-panel { min-width: 0; min-height: 0; }
+
+    /* (h) The page runs between the bars. .main-content already pads the
+       topbar's height, so the page starts 12px under the price headband
+       and ends clear of the bottom nav and the Eye. The dashboard page
+       sets its own bottom padding at 0,2,1 and is named so the nav does
+       not cover its last line. */
+    .page-content, body.page-dashboard .page-content {
+        padding-top: calc(var(--hb-ticker-h) + var(--hb-data-h) + 12px) !important;
+        padding-bottom: calc(var(--sv-bottom-chrome) + var(--se-fab-size) + 28px) !important;
+        padding-left: max(12px, env(safe-area-inset-left, 0px));
+        padding-right: max(12px, env(safe-area-inset-right, 0px));
+    }
+
+    /* (i) The tap and type floor. 44px is the smallest target a thumb
+       hits reliably; CLOSE and Close all get 48px, where a miss costs
+       most. Inputs at 16px, or iOS zooms the page on focus. */
+    .btn, .btn-sm { min-height: 44px; }
+    .btn-sm { padding: 10px 14px; font-size: 13px; }
+    [data-sv-close-trade], #svCloseAll { min-height: 48px; font-size: 14px; }
+    .sv-dialog-x, .modal-close { min-width: 44px; min-height: 44px; }
+    /* Zero weight: an input a page sizes on purpose keeps its size. The
+       text, password, email, number and search inputs, textareas and
+       selects that sauron.css's global form rule sizes at 13px are
+       lifted next to that rule, at its weight (see sauron.css). */
+    :where(input:not([type="checkbox"], [type="radio"], [type="hidden"], [type="range"], [type="file"]), select, textarea) { font-size: 16px; min-height: 44px; }
+    .form-input, .pos-filter-field select, .pos-filter-field input { font-size: 16px; min-height: 44px; }
+    input[type="checkbox"], input[type="radio"] { width: 22px; height: 22px; }
+    /* sauron.css draws the tick for an 18px box; centred again for 22px.
+       A switch and a profile toggle draw their own and are left alone. */
+    input[type="checkbox"]:not(.sv-switch input, .toggle-label input):checked::after { left: 7px; top: 3px; }
+    th { font-size: 11px; }
+    .sv-perf-table td, .bkp-table td { font-size: 14px; }
+    .badge { font-size: 11px; }
+    .stat-label, .form-label { font-size: 11px !important; }
+    .notif-item .ni-kind { font-size: 11px; }
+    .notif-item .ni-title { font-size: 15px; }
+    .notif-item .ni-body { font-size: 14px; }
+    .notif-item .ni-time { font-size: 12px; }
+
+    /* (j) Stacked tables. Each rule starts with the stack block's exact
+       prefix (see SPECIFICITY). An action cell holds a button that names
+       itself: no label, the whole line, the button full width. A pairs
+       table puts two fields on a line, the label above the value; the
+       wide cell, the action cell and a spanning cell (a group header, a
+       th in the positions table) take the whole line. */
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table) tbody td { font-size: 14px; }
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table) tbody td::before { font-size: 11px; }
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table) tbody td.sv-cell-action { grid-template-columns: minmax(0, 1fr); }
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table) tbody td.sv-cell-action::before { content: none; }
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table) tbody td.sv-cell-action :is(.btn, button) { width: 100%; justify-content: center; }
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table).sv-stack--pairs tbody tr {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        column-gap: 14px;
+    }
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table).sv-stack--pairs tbody td { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table).sv-stack--pairs tbody td:is(.sv-cell-wide, .sv-cell-action, [colspan]),
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table).sv-stack--pairs tbody th[colspan] { grid-column: 1 / -1; }
+
+    /* (k) Page-scoped. /positions/: the detail link was 9px and muted
+       until hovered, which a finger never does; the price sub-lines were
+       9px; the stop and target of an open row, edited where they are read
+       through a .lvl-edit button (sauron.css) sized to its text, were a
+       24px target for the one control on the page that moves a stop — a
+       thumb that missed landed on the cell, which is a tap on the row and
+       opened the trade page. The button gets the (i) floor, as a column so
+       the price and its distance keep their two lines, and its text
+       follows the stacked cell, which the stack sets left where the
+       button's own rule says right. The filter's selects are sized by the
+       partial's own rule at 0,2,1 (11px), hence the longer prefix; the
+       stop and target dialog lives on <body> and sets 12px at 0,1,1,
+       which this later sheet beats at the same weight. */
+    .page-content .pos-row-detail {
+        font-size: 13px; color: var(--accent);
+        min-height: 44px; display: inline-flex; align-items: center;
+        padding: 0 6px;
+    }
+    .page-content .pos-price-pct { font-size: 11px; }
+    .page-content .lvl-edit {
+        min-height: 44px; display: flex; flex-direction: column;
+        justify-content: center; text-align: inherit;
+    }
+    .page-content .pos-filter .pos-filter-field select { font-size: 16px; }
+    .lvl-dlg input { font-size: 16px; min-height: 44px; }
+}

@@ -1,0 +1,46 @@
+{% comment %}
+The plain summary at the top of a position's page (2026-09-26).
+
+ONE template for the first paint and for the refresh: /forensics/<id>/
+includes it, and /forensics/<id>/live/ renders it alone every 15 seconds
+while the position is open — so a refreshed number can only ever say what
+the first render said. Every value arrives formatted from
+dashboard/position_summary.py; this file prints words, never keys.
+
+data-pd-state is "open" or "closed": the page's script refreshes an open
+summary only, and reloads the page when a refresh finds it closed or
+finds its kind changed (data-pd-kind: a waiting order that filled).
+The refresh sentence shows only where the script runs (html.pd-js).
+{% endcomment %}<section class="pd-sum pd-kind-{{ summary.status_kind }}" data-pd-live="summary" data-pd-state="{{ summary.state }}" data-pd-kind="{{ summary.status_kind }}" data-pd-live-url="{% url 'forensics_live' trade.id %}" aria-labelledby="pdHeadline">
+    <header class="pd-head">
+        <h2 class="pd-headline" id="pdHeadline">{{ summary.headline }}</h2>
+        <div class="pd-chips">
+            <span class="pd-chip pd-chip-{{ summary.status_kind }}">{{ summary.status_text }}</span>
+            <span class="pd-chip {% if summary.real %}pd-chip-real{% else %}pd-chip-sim{% endif %}">{{ summary.money_text }}</span>
+            <span class="pd-chip pd-chip-broker">{{ summary.broker_text }}</span>
+        </div>
+    </header>
+    <div class="pd-big{% if summary.big_tone %} pd-{{ summary.big_tone }}{% endif %}">
+        <span class="pd-big-label">{{ summary.big_label }}</span>
+        <span class="pd-big-value">{{ summary.big_value }}</span>
+        {% if summary.big_sub %}<span class="pd-big-sub">{{ summary.big_sub }}</span>{% endif %}
+    </div>
+    <p class="pd-sentence">{{ summary.sentence }}</p>
+    <dl class="pd-facts">
+        {% for f in summary.facts %}
+        <div class="pd-fact">
+            <dt>{{ f.label }}</dt>
+            <dd>{{ f.value }}{% if f.sub %}<span class="pd-fact-sub">{{ f.sub }}</span>{% endif %}</dd>
+        </div>
+        {% endfor %}
+    </dl>
+    {% for n in summary.notes %}
+    <p class="pd-note pd-note-{{ n.tone }}">{{ n.text }}</p>
+    {% endfor %}
+    <div class="pd-why">
+        <h3 class="pd-why-title">Why Sauron took it</h3>
+        <p>{{ summary.why }}</p>
+        <p class="pd-why-risk">{{ summary.risk_words }}</p>
+    </div>
+    <p class="pd-checked">{% if summary.state == "open" %}<span class="pd-refresh-note">Refreshes by itself every {{ summary.refresh_seconds }} seconds. </span>{% endif %}Checked at {{ summary.checked_at }}.</p>
+</section>

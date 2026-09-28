@@ -29,6 +29,8 @@ knowing which venue produced it.
 from __future__ import annotations
 
 import logging
+import math
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,12 @@ logger = logging.getLogger(__name__)
 # (2026-08-15): a wrong mapping returns an empty frame rather than an error,
 # so an unverified guess here is a symbol that silently never has bars.
 YF_SYMBOL_MAP = {
+    # Equities whose catalogue spelling is not Yahoo's. Found by the first
+    # fleet-wide backfill (2026-09-10): BRK.B is "BRK-B" on Yahoo, and Block
+    # renamed its ticker from SQ to XYZ on 2025-01-21 — both answered "no
+    # data found, symbol may be delisted", which is what a wrong spelling
+    # looks like from here.
+    "BRK.B": "BRK-B", "SQ": "XYZ",
     # Metals and energy: Yahoo quotes the front-month future.
     "XAUUSD": "GC=F", "XAGUSD": "SI=F", "XPTUSD": "PL=F", "XPDUSD": "PA=F",
     "WTIUSD": "CL=F", "BRNUSD": "BZ=F", "NGUSD": "NG=F", "HGUSD": "HG=F",
@@ -72,11 +80,103 @@ YF_UNAVAILABLE = {
     "XAUGBP", "XAUEUR", "XAGEUR",
 }
 
-# Yahoo only serves intraday history for a limited window.
-YF_PERIOD_FOR = {
-    "1m": "7d", "5m": "60d", "15m": "60d", "30m": "60d",
-    "1h": "730d", "4h": "730d", "1d": "10y", "1wk": "10y",
+# Catalogue symbols whose HOURLY series is healthy and whose DAILY series is
+# not. This is a different condition from YF_UNAVAILABLE — the symbol is
+# mapped correctly and serves data; only one interval is broken at the
+# source — and it must stay different, because a symbol listed above is
+# skipped ENTIRELY, which would also throw away a working 4h frame.
+#
+# Measured against the live feed on 2026-09-12, both spellings:
+#     USDCNH=X  1d  rows=1     2026-09-11 -> 2026-09-11
+#     USDCNH=X  1h  rows=1416  2026-06-22 -> 2026-09-11
+#     CNH=X     1d  rows=1     2026-09-11 -> 2026-09-11
+#     CNH=X     1h  rows=1416  2026-06-22 -> 2026-09-11
+#     USDCNH    1d/1h  404 "Quote not found" (so the =X suffix is right)
+# The 4h frame built from those hourly rows wrote 400 bars in the same pass
+# that wrote 1 daily bar. The mapping was checked and is correct.
+#
+# 1d is NOT resampled from 1h here on purpose: an FX trading day closes at
+# 17:00 New York, not at midnight, so a midnight-boundary bar built from
+# hourly closes is a DIFFERENT OBJECT from a daily bar, and storing it
+# beside native daily bars would make the two indistinguishable. A symbol
+# that needs a real daily series needs a broker feed; IBKR serves CNH.
+YF_NO_DAILY = {
+    "USDCNH",
 }
+
+# ── How much history one call asks for ────────────────────────────────
+#
+# Yahoo has no 4h bar, so 4h is resampled from 1h — and the first version
+# asked for the full 730-day hourly window, twice per symbol per pass (once
+# for each interval), to keep 200 rows of it. A research fleet of 150
+# symbols would have made that 300 two-year downloads every ten minutes.
+# The window is now sized from what the caller keeps, on the worst case
+# the platform trades (US equities: 6.5 hours a day, five days in seven —
+# forex and crypto over-fetch a little, which costs rows, not rules), and
+# the fetched frame is remembered for a few minutes so the 1h request that
+# follows the 4h one reuses the same download.
+BAR_HOURS = {"1m": 1 / 60, "5m": 5 / 60, "15m": 0.25, "30m": 0.5,
+             "1h": 1.0, "2h": 2.0, "4h": 4.0, "6h": 6.0, "8h": 8.0,
+             "12h": 12.0}
+TRADING_HOURS_PER_DAY = 6.5
+CALENDAR_PER_TRADING_DAY = 7.0 / 5.0
+WINDOW_SLACK = 1.15
+# Yahoo only serves intraday history for a limited window.
+YF_MAX_DAYS = {"1m": 7, "5m": 60, "15m": 60, "30m": 60, "1h": 730,
+               "1d": 3650, "1wk": 3650}
+FRAME_MEMO_S = 300.0
+_FRAME_MEMO: dict = {}
+_FRAME_MEMO_MAX = 600
+
+
+def days_for(interval: str, limit: int) -> int:
+    """Calendar days of history that keep `limit` bars of `interval`."""
+    fetch_interval = RESAMPLE_FROM.get(interval, interval)
+    cap = YF_MAX_DAYS.get(fetch_interval, 60)
+    try:
+        limit = int(limit or 0)
+    except (TypeError, ValueError):
+        limit = 0
+    if limit <= 0:
+        return cap
+    if fetch_interval == "1d":
+        days = limit * CALENDAR_PER_TRADING_DAY * WINDOW_SLACK + 5
+    elif fetch_interval == "1wk":
+        days = limit * 7 * WINDOW_SLACK + 7
+    else:
+        hours = limit * BAR_HOURS.get(interval, 1.0)
+        days = (hours / TRADING_HOURS_PER_DAY * CALENDAR_PER_TRADING_DAY
+                * WINDOW_SLACK + 3)
+    return int(min(cap, max(2, math.ceil(days))))
+
+
+def period_for(days: int) -> str:
+    """Yahoo's period spelling for a day count."""
+    if days > 730:
+        return f"{min(10, math.ceil(days / 365))}y"
+    return f"{int(days)}d"
+
+
+def clear_frame_memo() -> None:
+    _FRAME_MEMO.clear()
+
+
+def _remember_frame(key, days: int, df) -> None:
+    if len(_FRAME_MEMO) >= _FRAME_MEMO_MAX:
+        cutoff = time.monotonic() - FRAME_MEMO_S
+        for k in [k for k, v in _FRAME_MEMO.items() if v[0] < cutoff]:
+            _FRAME_MEMO.pop(k, None)
+    _FRAME_MEMO[key] = (time.monotonic(), days, df)
+
+
+def _recall_frame(key, days: int):
+    hit = _FRAME_MEMO.get(key)
+    if not hit:
+        return None
+    fetched_at, had_days, df = hit
+    if time.monotonic() - fetched_at > FRAME_MEMO_S or had_days < days:
+        return None
+    return df
 
 # Intervals Yahoo serves natively. Anything else is resampled from these.
 YF_NATIVE = {"1m", "5m", "15m", "30m", "1h", "1d", "1wk"}
@@ -124,25 +224,46 @@ class YFinanceFeed:
 
         ysym = yf_symbol(symbol, self.asset_class)
         fetch_interval = RESAMPLE_FROM.get(interval, interval)
+        if fetch_interval == "1d" and (symbol or "").upper() in YF_NO_DAILY:
+            # Not a mapping fault and not a missing symbol: this one's daily
+            # series is broken at the source while its hourly series is
+            # fine. Say so, so nobody audits a correct mapping again.
+            logger.info("[public_feed] %s: Yahoo's DAILY series is empty for "
+                        "this symbol on every known spelling, while its "
+                        "hourly series serves normally — see YF_NO_DAILY. "
+                        "The mapping (%r) is correct; the daily series is "
+                        "not. Intraday frames are unaffected.", symbol, ysym)
+            return []
         if fetch_interval not in YF_NATIVE:
             logger.warning("[public_feed] %s: interval %r is not available "
                            "from Yahoo and cannot be resampled", symbol, interval)
             return []
 
-        period = YF_PERIOD_FOR.get(fetch_interval, "60d")
-        try:
-            df = yf.Ticker(ysym).history(period=period, interval=fetch_interval)
-        except Exception as e:
-            logger.warning("[public_feed] %s (%s) history failed: %s",
-                           symbol, ysym, e)
-            return []
+        days = days_for(interval, limit)
+        memo_key = (ysym, fetch_interval)
+        df = _recall_frame(memo_key, days)
+        if df is None:
+            try:
+                df = yf.Ticker(ysym).history(period=period_for(days),
+                                             interval=fetch_interval)
+            except Exception as e:
+                logger.warning("[public_feed] %s (%s) history failed: %s",
+                               symbol, ysym, e)
+                return []
+            if df is not None and not df.empty:
+                _remember_frame(memo_key, days, df)
 
         if df is None or df.empty:
             # An unmapped symbol returns an empty frame rather than raising,
             # which otherwise reads as "this instrument has no history".
             logger.warning("[public_feed] %s resolved to Yahoo symbol %r and "
-                           "returned no rows — check the symbol mapping",
-                           symbol, ysym)
+                           "returned no rows at %s. Check the symbol mapping "
+                           "FIRST, but if another interval serves this same "
+                           "symbol normally the mapping is not the fault — "
+                           "record it in YF_NO_DAILY (or its per-interval "
+                           "equivalent) with the measurement, rather than "
+                           "leaving a silent hole.",
+                           symbol, ysym, fetch_interval)
             return []
 
         if interval in RESAMPLE_FROM:

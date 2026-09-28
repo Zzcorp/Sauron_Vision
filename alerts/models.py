@@ -350,6 +350,37 @@ def _cross_triggered(alert, price) -> bool:
     return (Decimal(str(baseline)) >= target) != now_above
 
 
+#: The condition as the Telegram title says it.
+_CONDITION_WORDS = {"above": "above", "below": "below", "cross": "crossed"}
+
+
+def price_alert_telegram(alert, current_price) -> tuple:
+    """(title, lines, mark): a fired price alert as the house message.
+
+        🔔 Price alert · MSFT above 420.00
+        Price now: 421.37
+        Note: breakout watch
+        Page: https://<DOMAIN>/instruments/MSFT/
+
+    Prices at the instrument's own decimals (core.price_format).
+    """
+    from alerts.channels.telegram_alert import MARKS, page_line
+    from alerts.links import page_url
+    from core.price_format import format_price
+    inst = alert.instrument
+    ac = getattr(inst, "asset_class", "") or ""
+    words = _CONDITION_WORDS.get(alert.condition, alert.condition)
+    level = format_price(alert.target_price, ac, inst.symbol)
+    lines = [f"Price now: {format_price(current_price, ac, inst.symbol)}"]
+    if alert.note:
+        lines.append(f"Note: {alert.note}")
+    line = page_line(page_url("instrument_detail", inst.symbol))
+    if line:
+        lines.append(line)
+    return (f"Price alert · {inst.symbol} {words} {level}", lines,
+            MARKS["price_alert"])
+
+
 def check_price_alerts():
     """Check all active price alerts against current prices."""
     import logging
@@ -414,15 +445,24 @@ def check_price_alerts():
 
                 if alert.notify_telegram:
                     try:
-                        from alerts.channels.telegram_alert import send_telegram
+                        # To the USER's chat, in the house style. Until
+                        # 2026-09-26 this called send_telegram(chat id,
+                        # text): the chat id became the bold title and the
+                        # message went to the platform chat instead.
+                        from alerts.channels.telegram_alert import send_to_chat
                         prefs = alert.user.notification_prefs
                         if prefs.telegram_chat_id:
-                            # No leading mark for Telegram — the title already
-                            # opens with "Price Alert:", and a glyph here is
-                            # at the mercy of the reader's client font.
-                            send_telegram(prefs.telegram_chat_id, f"{title}\n{body}")
-                    except Exception:
-                        pass
+                            t_title, t_lines, t_mark = price_alert_telegram(
+                                alert, current_price)
+                            send_to_chat(prefs.telegram_chat_id, t_title,
+                                         lines=t_lines, mark=t_mark)
+                    except Exception as e:  # noqa: BLE001
+                        # send_to_chat never raises and logs a refusal
+                        # itself: what lands here is a message that could
+                        # not be built, said rather than swallowed.
+                        logger.warning("price alert %s: the Telegram "
+                                       "message was not sent: %s",
+                                       alert.id, e)
 
                 if alert.notify_email:
                     try:

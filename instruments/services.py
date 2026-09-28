@@ -161,7 +161,7 @@ INSTRUMENTS_DATA = {
         "LMT": ("Lockheed Martin", "NYSE"),
     },
 
-    # ── TOP ETFs (20) ────────────────────────────────────
+    # ── TOP ETFs (29) ────────────────────────────────────
     "etf": {
         "SPY": ("SPDR S&P 500 ETF", "NYSE"),
         "QQQ": ("Invesco QQQ Trust", "NASDAQ"),
@@ -177,6 +177,15 @@ INSTRUMENTS_DATA = {
         "XLF": ("Financial Select SPDR", "NYSE"),
         "XLE": ("Energy Select SPDR", "NYSE"),
         "XLK": ("Technology Select SPDR", "NYSE"),
+        "XLV": ("Health Care Select SPDR", "NYSE"),
+        "XLI": ("Industrial Select SPDR", "NYSE"),
+        "XLY": ("Consumer Discretionary Select SPDR", "NYSE"),
+        "XLP": ("Consumer Staples Select SPDR", "NYSE"),
+        "XLU": ("Utilities Select SPDR", "NYSE"),
+        "XLB": ("Materials Select SPDR", "NYSE"),
+        "XLRE": ("Real Estate Select SPDR", "NYSE"),
+        "XLC": ("Communication Services Select SPDR", "NYSE"),
+        "UUP": ("Invesco DB US Dollar Index Bullish Fund", "NYSE"),
         "ARKK": ("ARK Innovation ETF", "NYSE"),
         "VWO": ("Vanguard FTSE Emerging", "NYSE"),
         "AGG": ("iShares Core US Agg Bond", "NYSE"),

@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block title %}Trader Personalities — Sauron Vision{% endblock %}
+{# ◨ is the sidebar's Personalities mark (U+25E8, used nowhere else) — title and nav row agree. #}
+{% block page_title %}◨ TRADER PERSONALITIES · scalp · swing · position{% endblock %}
+
+{% block content %}
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">What a personality is — and the one correction about leverage</span></div>
+    <p style="color: var(--text-muted); padding: 0 16px 8px; max-width: 96ch;">
+        A personality is <strong>not a new engine</strong>. Every knob it needs already decides how a bot behaves; what was missing is that they were
+        set one at a time with no coherence between them, graded over one 90-day window that fits none of them, and allocated out of one 2–60% band.
+        A persona is therefore four things and nothing more: a <strong>coherent preset</strong> of knobs that already exist, a <strong>grading window</strong>
+        matched to its holding period, a <strong>share band</strong> in the account allocator, and a <strong>weight</strong> on the 5–10 year horizon prior.
+    </p>
+    <p style="color: var(--text-muted); padding: 0 16px 16px; max-width: 96ch;">
+        <strong>No personality borrows to fund a position.</strong> The only config a personality can be worn by carries no leverage and no margin field
+        at all, so there is nothing there for a persona to set. The claim is deliberately scoped to personalities: a sweeping one about the whole codebase
+        would be false, because the dormant futures engine carries both a leverage and a margin-mode field.
+        The honest short-term lever is the <strong>notional fraction</strong> the risk sizer is allowed to reach — how much position one fixed cash risk
+        budget buys when the stop is tight — and the <strong>number of concurrent positions</strong>. On every asset class but one, both are cash and
+        neither is a loan. <strong>Forex is the exception:</strong> the notional cap there stays at 4.0 — 400% of the pool — and that leverage is carried
+        by the broker&rsquo;s CFD margin, not by this code.
+        A persona changes <strong>no capital and no account share</strong> by itself, and never enables or disables a bot.
+        Applying one to a <strong>live</strong> config re-sizes real risk on the next entry, which is why the form below asks for the trading PIN.
+    </p>
+</div>
+
+{% if rows_error %}
+<p style="font-size: 12px; color: var(--accent-red, #c33); padding: 0 0 16px;">{{ rows_error }}</p>
+{% endif %}
+
+{% comment %} ── THE MIX MOVES WITH THE MARKET (2026-09-12) ──────────────
+   Three personalities × six regimes. Nobody knows yet which personality
+   suits which tape — not the operator, not this platform — so this table
+   never states a belief without saying where it came from: a MEASURED cell
+   is evidence (bold, gold, with its n), a PRIOR cell is an unproven guess
+   (muted, italic), a NEUTRAL cell is 1.00. The count underneath is the
+   whole point: it is how many guesses are left. {% endcomment %}
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">The mix moves with the market — which personality this tape rewards</span></div>
+    {% if mix_error %}
+    <p style="font-size: 12px; color: var(--accent-red, #c33); padding: 16px;">{{ mix_error }}</p>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 0 16px 10px; max-width: 96ch;">
+        Recorded regime right now: <strong>{{ mix.regime }}</strong>{% if mix.source %} — {{ mix.source }}{% endif %}.
+        Each cell is the factor that regime puts on that personality's <strong>share band</strong> — the band's centre moves, its width never does,
+        and the move is held to {{ mix.max_shift|floatformat:0 }} percentage points of the account whatever the number says. The mix moves
+        <strong>shares only</strong>: it never touches the risk per trade or the notional cap, because two dials moving in one week make the
+        grade unattributable. Read on the <strong>{{ mix.venue }}</strong> venue; paper is never pooled with it.
+    </p>
+    <div class="table-wrapper">
+    <table class="sv-perf-table" style="width: 100%; font-size: 11px;">
+      <thead>
+        <tr>
+          <th>Personality</th>
+          {% for c in matrix.0.cells %}
+          <th class="num"{% if c.current %} style="color: var(--accent-gold, #c9a227);"{% endif %}>{{ c.regime }}{% if c.current %}<br><span style="font-size: 9px;">▲ now</span>{% endif %}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in matrix %}
+        <tr>
+          <td class="sv-ident">{{ row.label }} <span style="font-size: 9px; color: var(--text-muted);">{{ row.key }}</span></td>
+          {% for c in row.cells %}
+          <td class="num" title="{{ c.reason }} — band {{ c.band }}"
+              style="{% if c.measured %}font-weight: 700; color: var(--accent-gold, #c9a227);{% else %}font-style: italic; color: var(--text-muted);{% endif %}{% if c.current %} background: var(--bg-elevated, rgba(127,127,127,.12));{% endif %}">
+            {{ c.factor|floatformat:2 }}<br>
+            <span style="font-size: 9px; font-style: normal;">{{ c.lane }}{% if c.lane == 'measured' %} n={{ c.n }}{% elif c.n %} n={{ c.n }}/{{ min_n }}{% endif %}</span>
+          </td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p style="font-size: 12px; padding: 12px 16px 4px;">
+        <strong>{{ mix.n_guesses }} of the {{ mix.n_cells }} cells are still guesses</strong> —
+        {{ mix.n_measured }} measured (bold), {{ mix.n_prior }} on an unproven prior (italic), {{ mix.n_neutral }} neutral.
+    </p>
+    <p style="font-size: 11px; color: var(--text-muted); padding: 0 16px 16px; max-width: 96ch;">
+        A cell becomes <strong>measured</strong> the first time configs wearing that personality close {{ min_n }} graded {{ mix.venue }} fills whose
+        <em>entry</em> fell inside a stretch the platform recorded as that regime — and a measured cell then replaces its prior entirely: not blended,
+        not decayed, gone. The priors are deliberately small and deliberately labelled; not one of them is backed by a single graded fill on this
+        deployment. Hover any cell for the sentence behind it. <code>unknown</code> is always exactly 1.00 — it is the absence of a reading, not a
+        state of the market. The same table from the shell: <code>python manage.py persona mix</code>.
+    </p>
+    {% endif %}
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; margin-bottom: 24px;">
+{% for r in rows %}
+    <div class="card fade-in-up">
+        <div class="card-header"><span class="card-title">{{ r.label }} · {{ r.key }}</span></div>
+        <div style="padding: 0 16px 16px;">
+            <p style="margin: 0 0 10px;">{{ r.purpose }}</p>
+            <p style="font-size: 11px; color: var(--text-muted); margin: 0 0 14px;">Holds: {{ r.holding }}.</p>
+
+            {# The share band drawn on one 0–100% axis, so the three are comparable by eye. #}
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">Share of the account: {{ r.share_floor_pct|floatformat:0 }}–{{ r.share_ceiling_pct|floatformat:0 }}%</div>
+            <div style="position: relative; height: 10px; background: var(--bg-elevated, rgba(127,127,127,.18)); border-radius: 5px; margin-bottom: 12px;" title="The floor keeps a measured-bad pool alive at a size that still grades; the ceiling is a concentration guard.">
+                <div style="position: absolute; top: 0; bottom: 0; left: {{ r.band_left }}%; width: {{ r.band_width }}%; background: var(--accent-gold, #c9a227); border-radius: 5px;"></div>
+            </div>
+
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 14px;">
+                Horizon weight ×{{ r.horizon_weight }} on the 5–10 year prior{% if r.horizon_weight == 0.0 %} — this persona ignores the 5-year view entirely{% endif %}.<br>
+                Graded over its own window: {{ r.evidence_days }} days.
+            </div>
+
+            <table class="sv-perf-table" style="width: 100%; font-size: 11px;">
+                <thead><tr><th>Knob</th><th class="num">Value</th></tr></thead>
+                <tbody>
+                {% for k in r.knobs %}
+                  <tr title="{{ k.why }}">
+                    <td class="sv-ident" style="{% if k.differs %}font-weight: 600;{% else %}color: var(--text-muted);{% endif %}">{{ k.knob }}{% if k.kind == 'extra' %} <span style="font-size: 9px; color: var(--text-muted);">extras</span>{% endif %}</td>
+                    <td class="num" style="{% if k.differs %}font-weight: 600;{% endif %}">{% if k.value is not None %}{{ k.value }}{% else %}<span style="color: var(--text-muted);" title="This persona does not set this knob — the config keeps whatever it has">—</span>{% endif %}</td>
+                  </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            <p style="font-size: 10px; color: var(--text-muted); margin: 6px 0 14px;">Bold rows are the knobs that differ between the three personalities. Hover any row for why that number.</p>
+
+            {# The record, over THIS persona's window. Paper and live are never pooled. #}
+            <table class="sv-perf-table" style="width: 100%; font-size: 11px; margin-bottom: 8px;">
+                <thead><tr><th>Lane</th><th class="num">Fills</th><th class="num">Σ R</th><th class="num">Win rate</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td class="sv-ident">live</td>
+                    <td class="num">{{ r.live.n }}</td>
+                    <td class="num {% if r.live.r_sum and r.live.r_sum > 0 %}up{% elif r.live.r_sum and r.live.r_sum < 0 %}down{% endif %}">{% if r.live.r_sum is not None %}{{ r.live.r_sum|floatformat:2 }}{% else %}—{% endif %}</td>
+                    <td class="num">{% if r.live.win_rate is not None %}{{ r.live.win_rate|floatformat:2 }}{% else %}—{% endif %}</td>
+                  </tr>
+                  <tr>
+                    <td class="sv-ident">paper</td>
+                    <td class="num">{{ r.paper.n }}</td>
+                    <td class="num {% if r.paper.r_sum and r.paper.r_sum > 0 %}up{% elif r.paper.r_sum and r.paper.r_sum < 0 %}down{% endif %}">{% if r.paper.r_sum is not None %}{{ r.paper.r_sum|floatformat:2 }}{% else %}—{% endif %}</td>
+                    <td class="num">{% if r.paper.win_rate is not None %}{{ r.paper.win_rate|floatformat:2 }}{% else %}—{% endif %}</td>
+                  </tr>
+                </tbody>
+            </table>
+            <p style="font-size: 11px; margin: 0 0 14px;">{{ r.sentence }}</p>
+
+            {% if r.configs %}
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px;">{{ r.n_configs }} config{{ r.n_configs|pluralize }} wear{{ r.n_configs|pluralize:"s," }} {{ r.key }}:</div>
+            {% for c in r.configs %}
+              <div style="border-top: 1px solid var(--border, rgba(127,127,127,.25)); padding: 8px 0;">
+                <div style="font-size: 12px;">[{{ c.pk }}] {{ c.name }}
+                    <span class="badge badge-medium">{{ c.asset_class }}</span>
+                    <span class="badge badge-{% if c.mode == 'live' %}bearish{% else %}bullish{% endif %}">{{ c.mode }}</span>
+                    {% if not c.enabled %}<span style="font-size: 10px; color: var(--text-muted);">off</span>{% endif %}
+                </div>
+                <div style="font-size: 11px; color: var(--text-muted);">{{ c.live_sentence }}</div>
+                <div style="font-size: 11px; color: var(--text-muted);">{{ c.paper_sentence }}</div>
+                {% if is_admin %}
+                {% comment %} Every config gets its own Apply form, including the ones already wearing a personality:
+                   changing one is the same write as giving one, and a form only on the unworn table would make
+                   "swing -> scalp" a shell-only operation. The PIN is asked for a LIVE config only. {% endcomment %}
+                <form method="post" action="{% url 'hq_apply_persona' %}" style="display:flex;gap:4px;align-items:center;margin-top:6px;">{% csrf_token %}
+                  <input type="hidden" name="config_id" value="{{ c.pk }}">
+                  <select name="persona" style="font-size:11px;padding:3px;">
+                    {% for k in keys %}<option value="{{ k }}"{% if k == r.key %} selected{% endif %}>{{ k }}</option>{% endfor %}
+                  </select>
+                  <input type="password" name="pin" placeholder="PIN" autocomplete="off" style="width:54px;padding:3px;font-size:11px;">
+                  <button class="btn btn-sm" type="submit">Apply</button>
+                </form>
+                {% endif %}
+              </div>
+            {% endfor %}
+            {% else %}
+            {# ◌ is the declared "nothing configured yet" mark; the <p> carries the meaning. #}
+            <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
+                <p>NO CONFIG WEARS {{ r.key|upper }} — give one this personality from the form below, or from the shell with
+                   <code>python manage.py persona apply &lt;config_id&gt; {{ r.key }} --yes</code>.</p></div>
+            {% endif %}
+        </div>
+    </div>
+{% endfor %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Configs wearing no personality</span></div>
+    {% if unworn_error %}
+    <p style="font-size: 12px; color: var(--accent-red, #c33); padding: 16px;">{{ unworn_error }}</p>
+    {% elif unworn %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack">
+      <thead><tr><th>Config</th><th>Class / Mode</th><th class="num">Timeframe</th><th class="num">Concurrent</th><th class="num">Hold ceiling</th>{% if is_admin %}<th>Apply a personality</th>{% endif %}</tr></thead>
+      <tbody>
+      {% for c in unworn %}
+        <tr>
+          <td class="sv-ident" data-label="Config">[{{ c.pk }}] {{ c.name }}</td>
+          <td data-label="Class / Mode"><span class="badge badge-medium">{{ c.asset_class }}</span> <span class="badge badge-{% if c.mode == 'live' %}bearish{% else %}bullish{% endif %}">{{ c.mode }}</span></td>
+          <td class="num" data-label="Timeframe">{{ c.timeframe }}</td>
+          <td class="num" data-label="Concurrent">{{ c.max_concurrent_positions }}</td>
+          <td class="num" data-label="Hold ceiling">{% if c.max_hold_hours is not None %}{{ c.max_hold_hours|floatformat:0 }}h{% else %}<span style="color: var(--text-muted);" title="Inherits the asset-class default">class default</span>{% endif %}</td>
+          {% if is_admin %}
+          <td data-label="Apply a personality">
+            <form method="post" action="{% url 'hq_apply_persona' %}" style="display:flex;gap:4px;align-items:center;">{% csrf_token %}
+              <input type="hidden" name="config_id" value="{{ c.pk }}">
+              <select name="persona" style="font-size:11px;padding:4px;">
+                {% for k in keys %}<option value="{{ k }}">{{ k }}</option>{% endfor %}
+              </select>
+              {# The PIN is required only when the config is live — applying then re-sizes real risk. #}
+              <input type="password" name="pin" placeholder="PIN" autocomplete="off" style="width:60px;padding:4px;font-size:11px;">
+              <button class="btn btn-sm btn-primary" type="submit">Apply</button>
+            </form>
+          </td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p style="font-size: 11px; color: var(--text-muted); padding: 12px 16px;">
+        A config with no personality is not "swing" — it is whatever its knobs were set to one at a time, graded over the default
+        {{ rows.1.evidence_days }}-day window and allocated out of the default band. Applying a personality writes only the knobs listed above:
+        never <code>capital</code>, never <code>account_share_pct</code>, never the on/off switch. The PIN is asked for a <strong>live</strong> config only.
+    </p>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
+        <p>EVERY CONFIG WEARS A PERSONALITY — there is nothing left to assign. Change one with <code>python manage.py persona apply &lt;config_id&gt; &lt;key&gt; --yes</code>, or from the three columns above.</p></div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">How to read this page</span></div>
+    <p style="color: var(--text-muted); padding: 0 16px 16px; max-width: 96ch;">
+        A number appears only when a grade exists: <strong>&mdash;</strong> means unmeasured, which is a different fact from zero, and a lane needs
+        {{ min_n }} graded fills before the platform calls it measured. Paper and live are never pooled — the gap between them is exactly what the
+        grading exists to measure. Each persona is graded over <em>its own</em> window, so a scalp book is judged on 21 days and a position book on 365.
+        Personalities cover the {{ asset_classes }} classes; options price their stops off premium and carry their own expiry gate, so an ATR preset
+        would describe a trade that class never takes. The same three presets, the same numbers and the same warnings are available from the shell:
+        <code>python manage.py persona list</code>, <code>python manage.py persona show scalp</code>, <code>python manage.py persona grade</code>.
+    </p>
+</div>
+{% endblock %}

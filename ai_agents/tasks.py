@@ -4,6 +4,10 @@ from core.task_gate import guarded_task
 import logging
 
 logger = logging.getLogger(__name__)
+from ai_agents.calibration import (  # noqa: E402 — after the logger, like the rest
+    CALLS_INSTRUCTION, clamp_horizon, extract_calls,
+    log_direction_prediction, register_calls, register_proposal_calls,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +52,7 @@ class DailyBriefingAgent:
             "and upcoming economic events, produce a concise, actionable morning briefing "
             "for a professional trader. Structure it as: Market Overview, Key Signals, "
             "Strategy Watch, News Highlights, Events to Watch. Be direct and data-driven."
+            + CALLS_INSTRUCTION
         )
 
         start = time.time()
@@ -65,7 +70,7 @@ class DailyBriefingAgent:
             AgentTask.objects.create(
                 agent=self.agent_name,
                 provider=self._provider_name,
-                model=self._model,
+                model=usage.get("model") or self._model,
                 prompt_summary=context[:500],
                 input_tokens=usage.get("input_tokens", 0),
                 output_tokens=usage.get("output_tokens", 0),
@@ -85,7 +90,7 @@ class DailyBriefingAgent:
             AgentTask.objects.create(
                 agent=self.agent_name,
                 provider=self._provider_name,
-                model=self._model,
+                model=billed.get("model") or self._model,
                 prompt_summary=context[:500],
                 input_tokens=billed.get("input_tokens", 0),
                 output_tokens=billed.get("output_tokens", 0),
@@ -125,7 +130,11 @@ class MondayPlanAgent:
             return OllamaProvider()
         raise ValueError(f"Unknown AI provider: {provider_name}")
 
-    def run(self, context: str) -> dict:
+    def run(self, context: str, week=None) -> dict:
+        """The plan for `context`. `week` (2026-09-27): the Monday of the
+        week it is for, kept beside the whole text on this run's AgentTask
+        row, the row /briefing/#monday-plan reads (ai_agents/monday_plan.py).
+        """
         from ai_agents.models import AgentTask
         import time
 
@@ -136,6 +145,7 @@ class MondayPlanAgent:
             "coming trading week. Cover: Weekly Macro Outlook, Priority Strategies, Key Levels "
             "to Watch, Economic Event Risk, Position Sizing Guidance, and Risk Management Reminders. "
             "Be specific, reference the actual data provided, and prioritise actionability."
+            + CALLS_INSTRUCTION
         )
 
         start = time.time()
@@ -153,13 +163,15 @@ class MondayPlanAgent:
             AgentTask.objects.create(
                 agent=self.agent_name,
                 provider=self._provider_name,
-                model=self._model,
+                model=usage.get("model") or self._model,
                 prompt_summary=context[:500],
                 input_tokens=usage.get("input_tokens", 0),
                 output_tokens=usage.get("output_tokens", 0),
                 cost_usd=usage.get("cost_usd", 0),
                 response_summary=raw[:500],
-                structured_output={"plan": raw},
+                # The WHOLE plan and its week: the store the page reads.
+                structured_output=({"plan": raw, "week_of": week.isoformat()}
+                                   if week is not None else {"plan": raw}),
                 success=True,
                 duration_seconds=round(duration, 2),
             )
@@ -173,7 +185,7 @@ class MondayPlanAgent:
             AgentTask.objects.create(
                 agent=self.agent_name,
                 provider=self._provider_name,
-                model=self._model,
+                model=billed.get("model") or self._model,
                 prompt_summary=context[:500],
                 input_tokens=billed.get("input_tokens", 0),
                 output_tokens=billed.get("output_tokens", 0),
@@ -221,7 +233,22 @@ def process_unanalyzed_news():
         except Exception as e:
             logger.error(f"Failed to process article {article.id}: {e}")
 
-    return {"status": "success", "processed": processed}
+    # Speak the counts `core.task_gate.judge_result` already reads, instead of
+    # a bare adjective. Until 2026-09-13 this returned {"status": "success",
+    # "processed": processed} unconditionally: with no ANTHROPIC_API_KEY on
+    # the box every one of the ten articles threw, each exception was
+    # swallowed above, and the task reported SUCCESS with processed=0 every
+    # five minutes. `agent_news_analyst` sat green while NewsArticle
+    # .ai_sentiment_score was never written once — and two setups
+    # (starter_news_event_bullish, generated_20260823_news_divergence_reclaim)
+    # were blind on that column, which `setups diagnose` finally surfaced as
+    # "only 1 sentiment-tagged articles".
+    #
+    # judge_result's WORK_KEYS/DONE_KEYS turn "attempted 10, stored 0" into a
+    # warning by itself — the machinery was there, this caller just never used
+    # its vocabulary. `processed` is kept for any existing reader.
+    return {"status": "success", "processed": processed,
+            "attempted": len(unprocessed), "stored": processed}
 
 
 # An agent's answer is unbounded and the detail card is a popup, not a
@@ -269,7 +296,9 @@ def _fresh_open_quotes(quotes, now_utc):
     kept, dropped_closed, dropped_stale = [], 0, 0
     for q in quotes:
         market = market_status_for(q.instrument.asset_class,
-                                   q.instrument.exchange, _status=status)
+                                   q.instrument.exchange, _status=status,
+                                   symbol=q.instrument.symbol,
+                                   now_utc=now_utc)
         if not market["is_open"]:
             dropped_closed += 1
             continue
@@ -372,6 +401,25 @@ def run_anomaly_detection():
     anomalies = result.get("anomalies", [])
     severe = [a for a in anomalies if a.get("severity", 0) >= 7]
 
+    # An anomaly that implies a direction is a call the calibration can
+    # grade; one without is a description. The call's confidence is the
+    # detector's own probability of that direction, even odds when it
+    # states none — never the severity: severity says how bad the
+    # anomaly is, and a severity-3 "up" stored as "30% up" was
+    # Brier-scored as a call that expected DOWN. The same symbol is not
+    # stacked while a call is live.
+    calls_registered = 0
+    for a in anomalies:
+        if not isinstance(a, dict):
+            continue
+        pred = log_direction_prediction(
+            "anomaly_detector", a.get("symbol"), a.get("expected_direction"),
+            horizon_hours=clamp_horizon(a.get("horizon_hours"), 24.0),
+            confidence=a.get("confidence", 0.5),
+            notes=str(a.get("description") or "")[:300])
+        if pred is not None:
+            calls_registered += 1
+
     # The agent re-detects the same condition every hour for as long as it
     # holds — correctly. Re-NOTIFYING it every hour is the spam. Anything
     # alerted within the cooldown window stays out of this notification;
@@ -449,6 +497,7 @@ def run_anomaly_detection():
         "excluded_stale": dropped_stale,
         "market_stress_level": result.get("market_stress_level"),
         "notifications_sent": len(severe) > 0,
+        "calls_registered": calls_registered,
     }
 
 
@@ -543,6 +592,7 @@ def review_active_strategies():
 
     # Create StrategyAdjustment records for proposed changes
     adjustments_created = 0
+    calls_registered = 0
     proposed_strategies = result.get("strategies", [])
     for proposal in proposed_strategies:
         # Match by name to existing active strategies if possible
@@ -563,12 +613,17 @@ def review_active_strategies():
             },
         )
         adjustments_created += 1
+        # The legs it proposed become calls the calibration grades — the
+        # StrategyAdjustment table is read by nobody, the grade is.
+        calls_registered += register_proposal_calls("strategy_advisor",
+                                                    proposal)
 
     return {
         "status": "success",
         "strategies_reviewed": len(active_strategies),
         "proposals": len(proposed_strategies),
         "adjustments_created": adjustments_created,
+        "calls_registered": calls_registered,
         "portfolio_notes": result.get("portfolio_notes", ""),
     }
 
@@ -644,6 +699,9 @@ def generate_daily_briefing():
 
     result = DailyBriefingAgent().run(context=context)
     briefing_text = result.get("briefing", "")
+    # The views it stated become calls the calibration grades.
+    calls_registered = register_calls("daily_briefing",
+                                      extract_calls(briefing_text))
 
     Notification.create_for_all(
         notification_type="system",
@@ -659,6 +717,7 @@ def generate_daily_briefing():
         "signals_included": signal_count,
         "news_included": len(recent_news),
         "events_included": len(upcoming_events),
+        "calls_registered": calls_registered,
     }
 
 
@@ -742,6 +801,8 @@ def generate_weekly_review():
     )
 
     review_text = result.get("review", "")
+    calls_registered = register_calls("weekly_reviewer",
+                                      extract_calls(review_text))
     week_label = now.strftime("Week of %d %b %Y")
 
     Newsletter.objects.create(
@@ -763,6 +824,7 @@ def generate_weekly_review():
         "news_articles": len(news_articles),
         "economic_events": len(economic_events),
         "review_length": len(review_text),
+        "calls_registered": calls_registered,
     }
 
 
@@ -872,6 +934,7 @@ def optimize_strategies():
     )
 
     # Create StrategyAdjustment records for AI proposals
+    calls_registered = 0
     for proposal in ai_result.get("strategies", []):
         matched = next(
             (s for s in active_strategies if s.name.lower() in proposal.get("name", "").lower()),
@@ -890,12 +953,15 @@ def optimize_strategies():
             },
         )
         adjustments_created += 1
+        calls_registered += register_proposal_calls("strategy_advisor",
+                                                    proposal)
 
     return {
         "status": "success",
         "strategies_optimized": len(active_strategies),
         "adjustments_created": adjustments_created,
         "ai_proposals": len(ai_result.get("strategies", [])),
+        "calls_registered": calls_registered,
         "portfolio_notes": ai_result.get("portfolio_notes", ""),
     }
 
@@ -965,7 +1031,8 @@ def generate_monday_plan():
     from strategies.models import Strategy
     from portfolio.models import Portfolio, PortfolioSnapshot
     from market_data.models import EconomicEvent
-    from alerts.models import Notification, Newsletter
+    from alerts.models import Newsletter
+    from ai_agents import monday_plan as mp
 
     logger.info("Generating Monday game plan")
 
@@ -1036,22 +1103,27 @@ def generate_monday_plan():
         f"LAST WEEKLY REVIEW:\n{last_review_text}"
     )
 
-    result = MondayPlanAgent().run(context=context)
+    # THE PLAN, READ WHOLE (2026-09-27). The operator: "the monday game
+    # plan is not fully visible it seems, only on hover". It went to the
+    # bell alone, cut at 2,000 characters, linked to a page that never
+    # showed it. The whole text stays on the run's own AgentTask row with
+    # the week it is for; /briefing/#monday-plan shows it; the bell and
+    # the staff group get a short summary and the way to it.
+    week = mp.week_of(now)
+    result = MondayPlanAgent().run(context=context, week=week)
     plan_text = result.get("plan", "")
-
-    Notification.create_for_all(
-        notification_type="system",
-        title=f"Monday Game Plan — {today.strftime('%d %b %Y')}",
-        body=plan_text[:2000],
-        url="/briefing/",
-    )
+    calls_registered = register_calls("monday_plan", extract_calls(plan_text))
+    announced = mp.announce(plan_text, week)
 
     return {
         "status": "success",
         "date": str(today),
+        "week_of": str(week),
+        "announced": announced,
         "plan_length": len(plan_text),
         "active_strategies": len(active_strategies),
         "events_this_week": len(upcoming_events),
+        "calls_registered": calls_registered,
     }
 
 

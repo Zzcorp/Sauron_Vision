@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+{% block title %}Oculus — Sauron Vision{% endblock %}
+{% comment %} ⦿ is the Oculus mark (U+29BF), used nowhere else — title and nav row agree.
+   U+25CE was the obvious pick and is already Trade Forensics'; every other
+   circled glyph in the sidebar was taken too. {% endcomment %}
+{% block page_title %}⦿ OCULUS · every cycle, and whether it is turning{% endblock %}
+
+{% block extra_css %}
+<style>
+  .ocu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+  .ocu-q { color: var(--text-muted); font-size: 12px; padding: 0 16px 10px; }
+  .ocu-gates { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 12px; }
+  .ocu-gate { font-size: 10px; letter-spacing: .04em; padding: 2px 7px; border-radius: 3px;
+              border: 1px solid var(--border, #333); white-space: nowrap; }
+  .ocu-gate.on  { color: #7fd18b; border-color: #2f5c36; }
+  .ocu-gate.off { color: var(--text-muted); }
+  .ocu-gate.unknown { color: #d9a441; border-color: #6b5320; }
+  .ocu-facts { width: 100%; border-collapse: collapse; }
+  .ocu-facts td { padding: 5px 16px; vertical-align: top; border-top: 1px solid var(--border, #2a2a2a); }
+  .ocu-v { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; width: 4.5em; white-space: nowrap; }
+  .ocu-v.dash { color: var(--text-muted); font-weight: 400; }
+  /* A sha is an identifier, not a count: it needs room and a mono face,
+     and it must not be right-aligned into a column sized for four digits. */
+  .ocu-v--text {
+    width: auto; text-align: left; font-family: var(--font-mono, monospace);
+    font-size: 11px; font-weight: 600; letter-spacing: .02em;
+  }
+  .ocu-l { font-size: 12px; }
+  .ocu-qual { display: block; color: var(--text-muted); font-size: 10.5px; margin-top: 2px; line-height: 1.35; }
+  tr.inert .ocu-v, tr.inert .ocu-l { color: var(--text-muted); }
+  tr.caution .ocu-v { color: #d9a441; }
+  .ocu-caveat { color: var(--text-muted); font-size: 11px; padding: 10px 16px 14px; line-height: 1.45;
+                border-top: 1px solid var(--border, #2a2a2a); }
+  .ocu-spark { display: flex; align-items: flex-end; gap: 1px; height: 34px; padding: 8px 16px 0; }
+  .ocu-bar { flex: 1 1 0; background: var(--accent, #5b8def); min-height: 1px; opacity: .75; border-radius: 1px 1px 0 0; }
+  .ocu-bar.zero { background: var(--border, #333); opacity: .5; }
+  .ocu-sparkcap { color: var(--text-muted); font-size: 10px; padding: 3px 16px 12px; }
+  .ocu-dead { color: #c9605f; font-size: 12px; padding: 12px 16px; }
+
+  /* THE BOOK. Two columns that never become one sum. The live column
+     carries the only coloured edge, the convention sauron.css states:
+     "an account whose connected broker routes to real money gets the only
+     coloured edge on the grid. Everything else is monochrome so this one
+     thing is findable at a glance." */
+  .ocu-book { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+  .ocu-venue { padding: 0 0 8px; border-top: 1px solid var(--border, #2a2a2a); }
+  .ocu-venue + .ocu-venue { border-left: 1px solid var(--border, #2a2a2a); }
+  .ocu-venue--live { border-left: 2px solid var(--accent-red, #e83030); }
+  .ocu-venue-head {
+    font-size: 11px; font-weight: 700; letter-spacing: .08em;
+    padding: 10px 16px 6px; color: var(--text-muted);
+  }
+  .ocu-venue--live .ocu-venue-head { color: var(--accent-red, #e83030); }
+  .ocu-gaps { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .ocu-gaps th {
+    text-align: right; font-weight: 600; color: var(--text-muted);
+    font-size: 10px; letter-spacing: .05em; padding: 6px 10px;
+    border-bottom: 1px solid var(--border, #2a2a2a);
+  }
+  .ocu-gaps th:first-child, .ocu-gaps td:first-child { text-align: left; }
+  .ocu-gaps td {
+    text-align: right; padding: 5px 10px; font-variant-numeric: tabular-nums;
+    border-top: 1px solid var(--border, #222);
+  }
+  .ocu-gaps td.dash { color: var(--text-muted); }
+  .ocu-gaps td.neg { color: var(--accent-red, #e83030); }
+  .ocu-gaps td.pos { color: #7fd18b; }
+
+  /* THE WAY OUT. A panel that reports a count and offers no way into it
+     is a report, not a command post. These are the existing pages,
+     unchanged — the Oculus summarises, they answer. */
+  .ocu-out {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    padding: 0 16px 14px; border-top: 1px solid var(--border, #2a2a2a);
+    padding-top: 10px;
+  }
+  .ocu-out a {
+    font-size: 10.5px; letter-spacing: .03em; text-decoration: none;
+    padding: 3px 8px; border-radius: 3px;
+    border: 1px solid var(--border, #333); color: var(--text-secondary, #9aa);
+    white-space: nowrap;
+  }
+  .ocu-out a:hover {
+    color: var(--accent, #5b8def); border-color: var(--accent, #5b8def);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="card fade-in-up" style="margin-bottom: 20px;">
+  <div class="card-header"><span class="card-title">What this page promises, and what it refuses to do</span></div>
+  <p style="color: var(--text-muted); padding: 0 16px 8px; max-width: 100ch; line-height: 1.55;">
+    Thirty dashboards each answer their own question well. This one answers the question none of them could carry alone:
+    <strong>is the machine turning, and which of its wheels are actually engaged?</strong>
+    It owns no data and invents no calculation — it puts the cycles side by side without letting the comparison lie.
+  </p>
+  <p style="color: var(--text-muted); padding: 0 16px 16px; max-width: 100ch; line-height: 1.55;">
+    Three rules hold the whole page. <strong>The switch is shown beside the number</strong>: a count produced by a task
+    nobody turned on measures the switch, not the market. <strong>The qualifier is in the same sentence as the number</strong>:
+    the common failure here is not a wrong number, it is a right number that reads backwards — "26 rules registered" sounds
+    like coverage when a research-stage rule cannot place an order <em>and</em> has its signals dropped from the vote.
+    And <strong>a dash is not a zero</strong>: "—" means not measurable, <code>0</code> means measured at zero, and you do not
+    act the same way on the two.
+  </p>
+</div>
+
+{% if oculus_error %}
+<div class="card fade-in-up" style="margin-bottom: 20px;">
+  <p class="ocu-dead">{{ oculus_error }}</p>
+</div>
+{% endif %}
+
+{% for c in oculus.cycles %}{% if c.key == "book" %}
+<div class="card fade-in-up" style="margin-bottom: 20px;">
+  <div class="card-header"><span class="card-title">{{ c.title }}</span></div>
+  {% if c.dead %}
+    <p class="ocu-dead">{{ c.caveat }}</p>
+  {% else %}
+    <p class="ocu-q">{{ c.question }}</p>
+    {% if c.gate %}
+    <div class="ocu-gates">
+      {% for g in c.gate %}
+        {% if not g.known %}<span class="ocu-gate unknown">{{ g.key }} · absent</span>
+        {% elif g.on %}<span class="ocu-gate on">{{ g.key }} · on</span>
+        {% else %}<span class="ocu-gate off">{{ g.key }} · off</span>{% endif %}
+      {% endfor %}
+    </div>
+    {% elif c.gate_withheld %}
+    <div class="ocu-gates"><span class="ocu-gate off" title="the switches are platform-wide and staff's, as on /health/ and /ops/">switches · staff only</span></div>
+    {% endif %}
+
+    <div class="ocu-book">
+      {% for v in c.venues %}
+      <div class="ocu-venue {% if v.venue == 'live' %}ocu-venue--live{% endif %}">
+        <div class="ocu-venue-head">{% if v.venue == 'live' %}LIVE · REAL MONEY{% else %}PAPER · SIMULATION{% endif %}</div>
+        {% if v.facts %}
+        <table class="ocu-facts">
+          {% for f in v.facts %}
+          <tr class="{{ f.tone }}">
+            {% if f.value is None %}
+              <td class="ocu-v dash" title="not measurable — this is not a zero">—</td>
+            {% elif f.text %}
+              <td class="ocu-v ocu-v--text">{{ f.value }}</td>
+            {% else %}
+              <td class="ocu-v">{{ f.value }}</td>
+            {% endif %}
+            <td class="ocu-l">{{ f.label }}{% if f.qualifier %}<span class="ocu-qual">{{ f.qualifier }}</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% else %}
+        <p class="ocu-dead">This book could not be read. No number is shown rather than a wrong one.</p>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+
+    {% if c.gaps %}
+    <div class="ocu-venue-head" style="border-top: 1px solid var(--border, #2a2a2a); padding-top: 12px;">
+      WHAT THE SIMULATOR PROMISED, AGAINST WHAT EXECUTION RETURNED
+    </div>
+    <div style="overflow-x: auto;">
+      <table class="ocu-gaps">
+        <tr>
+          <th>rule</th><th>class</th>
+          <th>n paper</th><th>paper expectancy</th>
+          <th>n live</th><th>live expectancy</th><th>gap (R)</th>
+        </tr>
+        {% for g in c.gaps %}
+        <tr>
+          <td>{{ g.rule }}</td>
+          <td>{{ g.asset_class }}</td>
+          <td>{{ g.n_paper }}</td>
+          <td class="{% if g.paper is None %}dash{% endif %}">{% if g.paper is None %}—{% else %}{{ g.paper|floatformat:2 }}{% endif %}</td>
+          <td>{{ g.n_live }}</td>
+          <td class="{% if g.live is None %}dash{% endif %}">{% if g.live is None %}—{% else %}{{ g.live|floatformat:2 }}{% endif %}</td>
+          <td class="{% if g.gap is None %}dash{% elif g.gap < 0 %}neg{% elif g.gap > 0 %}pos{% endif %}">{% if g.gap is None %}—{% else %}{{ g.gap|floatformat:2 }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+    <p class="ocu-caveat">
+      The gap is <strong>live minus paper</strong>, in multiples of R. Negative is the normal direction: a simulated fill pays a modelled
+      half-spread but never queues, never gaps through the stop, and is never partially executed. A heavily negative gap does not mean a rule
+      that stopped working — it means a rule whose edge is smaller than its costs, and the two call for opposite fixes.
+      A dash means one of the two venues closed nothing: that is not a small gap, it is the absence of measurement.
+    </p>
+    {% endif %}
+
+    <p class="ocu-caveat">{{ c.caveat }}</p>
+    {% if c.pages %}
+    <div class="ocu-out">{% for pg in c.pages %}<a href="{{ pg.href }}">{{ pg.label }} &rsaquo;</a>{% endfor %}</div>
+    {% endif %}
+  {% endif %}
+</div>
+{% endif %}{% endfor %}
+
+<div class="ocu-grid">
+  {% for c in oculus.cycles %}{% if c.key != "book" %}
+  <div class="card fade-in-up">
+    <div class="card-header"><span class="card-title">{{ c.title }}</span></div>
+
+    {% if c.dead %}
+      <p class="ocu-dead">{{ c.caveat }}</p>
+    {% else %}
+      {% if c.question %}<p class="ocu-q">{{ c.question }}</p>{% endif %}
+
+      {% if c.gate %}
+      <div class="ocu-gates">
+        {% for g in c.gate %}
+          {% if not g.known %}
+            <span class="ocu-gate unknown" title="no row in the database: the gate reads off">{{ g.key }} · absent</span>
+          {% elif g.on %}
+            <span class="ocu-gate on">{{ g.key }} · on</span>
+          {% else %}
+            <span class="ocu-gate off">{{ g.key }} · off</span>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% elif c.gate_withheld %}
+      <div class="ocu-gates"><span class="ocu-gate off" title="the switches are platform-wide and staff's, as on /health/ and /ops/">switches · staff only</span></div>
+      {% endif %}
+
+      {% if c.staff_only %}
+      {% comment %}The cockpit's rule and its words: the panel stays, with its ways out; the numbers are staff's.{% endcomment %}
+      <p class="ocu-caveat"><strong>STAFF ONLY</strong> — {{ c.caveat }}</p>
+      {% else %}
+      <table class="ocu-facts">
+        {% for f in c.facts %}
+        <tr class="{{ f.tone }}">
+          {% if f.value is None %}
+            <td class="ocu-v dash" title="not measurable — this is not a zero">—</td>
+          {% elif f.text %}
+            <td class="ocu-v ocu-v--text">{{ f.value }}</td>
+          {% else %}
+            <td class="ocu-v">{{ f.value }}</td>
+          {% endif %}
+          <td class="ocu-l">
+            {{ f.label }}
+            {% if f.qualifier %}<span class="ocu-qual">{{ f.qualifier }}</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+
+      {% if c.series %}
+      <div class="ocu-spark">
+        {% for p in c.series %}
+          {% if p.n %}
+            <div class="ocu-bar" style="height: {% widthratio p.n c.max_n 100 %}%" title="{{ p.d }} · {{ p.n }}"></div>
+          {% else %}
+            <div class="ocu-bar zero" title="{{ p.d }} · 0"></div>
+          {% endif %}
+        {% endfor %}
+      </div>
+      <p class="ocu-sparkcap">last {{ oculus.window_days }} days · peak {{ c.max_n }}/day · a grey bar is a real zero</p>
+      {% endif %}
+
+      <p class="ocu-caveat">{{ c.caveat }}</p>
+      {% endif %}
+      {% if c.pages %}
+      <div class="ocu-out">{% for pg in c.pages %}<a href="{{ pg.href }}">{{ pg.label }} &rsaquo;</a>{% endfor %}</div>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}{% empty %}
+  <div class="card fade-in-up"><p class="ocu-dead">No cycle could be read.</p></div>
+  {% endfor %}
+</div>
+
+{% if oculus.degraded %}
+<div class="card fade-in-up" style="margin-top: 20px;">
+  <div class="card-header"><span class="card-title">What could not be measured — {{ oculus.degraded|length }}</span></div>
+  <p style="color: var(--text-muted); padding: 0 16px 14px; max-width: 100ch; line-height: 1.5;">
+    Each of these counters renders "—" above. The normal causes are a table a migration has not created yet,
+    or a subsystem that has never run on this deployment. This block exists so that a dash never passes for a quiet zero:
+    <code style="font-size: 11px;">{{ oculus.degraded|join:" · " }}</code>
+  </p>
+</div>
+{% endif %}
+
+{% if oculus.generated_at %}
+<p style="color: var(--text-muted); font-size: 11px; padding: 14px 4px;">
+  Read {{ oculus.generated_at|date:"Y-m-d H:i" }} UTC. Nothing is cached: every number is counted at load time.
+</p>
+{% endif %}
+
+{% endblock %}

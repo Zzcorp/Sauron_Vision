@@ -38,6 +38,14 @@ SAURON_APPS = [
     "market_data",
     "alerts",
     "bot_program",
+    # Added 2026-09-11: these four were installed apps but absent here, so
+    # in production (root at WARNING) every INFO line they wrote was
+    # silenced — including the generator's "proposal rejected by
+    # validator: <reason>", the only trace of a paid idea being discarded.
+    "instruments",
+    "indicators",
+    "backtester",
+    "brain",
 ]
 
 

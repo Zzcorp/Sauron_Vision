@@ -1,0 +1,1008 @@
+# eToro departure — the operator's ordered plan
+
+Measured on the VPS on 2026-09-23 between 06:09 and 06:21 UTC, on commit 8eddee1
+(branch ibkr-sessions-and-working-entries). Written at 976e06d: three commits
+landed between the measurement and this file (20fa370, 3ac446f, 976e06d) and
+moved lines in bot_program/engine/etoro_client.py, bot_program/asset_engine/base.py,
+bot_program/reconcile_asset.py, bot_program/engine/venue_close.py and
+bot_program/manual_trade.py — treat every file:line below as read at 8eddee1 and
+re-read before editing. Every command runs on the VPS from ~/Sauron_Vision as
+`./deploy/dc exec worker-fast python manage.py ...` (deploy/dc is the compose
+wrapper). The Django username is Sauron. Companion: deploy/IBKR_RETIREMENT.md —
+its Stage 1 waits on §1-§2 below; its Stage 2b is §6-§7 below.
+
+The operator's goal, in their words: eToro trades every class, unattended, for
+weeks; IBKR is retired.
+
+## 0. Where things stand (measured)
+
+- **What the operator believed** on the morning of 2026-09-23: the three IBKR
+  positions closed by hand in the IBKR app, the cash withdrawn, the Gateway not
+  worth another IB Key push. **What the platform measured** once the Gateway was
+  logged in (06:09 UTC, `sync_broker_account` → `{'attempted': 1, 'stored': 1,
+  'unreachable': 0}`): equity **2,026.53 EUR**, read 70 s earlier; **NEM SELL 1**
+  and **HYG BUY 3 still HELD** at IBKR; GLDM absent; and
+  `IBKRTrader.resting_order_ids()` answered `set()` — **no protective leg rests
+  at IBKR any more** (77/78 and 64/65 are gone; NEM's mark of 127.50 sits above
+  its former stop of 126.45). This is the whole reason nothing in this platform
+  writes CLOSED on a statement: the statement was wrong on two rows out of three
+  and on the cash.
+- **#95 GLDM — CLOSED** at 06:20 UTC by `reconcile_user` against the live
+  IBKRTrader's own book (reason `reconciled-orphan`, `exit_price_inferred` True;
+  IBKR refused the quote — error 10089, no market-data subscription — so the exit
+  price is unavailable and the P&L is recorded **UNMEASURED, not zero**; legs
+  90/91 answered "not among the open orders — already filled or cancelled"). The
+  path, in this order and outside 13:00-21:59 UTC: the eToro keys forgotten on
+  /brokers/ (Forget eToro keys) so that `keyed_venue_count` == 1 and the carrier
+  guard's no-carrier refusal (bot_program/reconcile_asset.py:70-73) no longer
+  fires; then ONE shell that asserted `keyed_venue_count(u) == 1`, asserted the
+  routed client's class name was `IBKRTrader`, printed the book (NEM and HYG
+  present, GLDM absent — a raise here means the Gateway did not answer and
+  nothing is written), printed the resting orders, and only then called
+  `reconcile_user(u)` → `{'checked': 3, 'closed_as_orphan': 1,
+  'broker_unavailable': 0, 'errors': 0}`; then both eToro keys re-entered on
+  /brokers/, Demo unticked, **no class ticked** (`keyed 2 | etoro keys present:
+  True`). Why one process: the IBKR trading session is pooled per process, so
+  the class and the book printed before the walk are the client the walk uses.
+- **#94 NEM and #93 HYG — OPEN on both sides, unprotected at IBKR.** They close
+  through the platform at the NYSE open (§1). The operator close refused at
+  06:2x UTC with "No usable price mark for HYG — closing now would book the exit
+  at a price nobody quoted" (bot_program/manual_close.py:251, the same guard at
+  :415): market shut and delayed data only, no mark exists. That refusal is the
+  platform working.
+- **Config 10 ("manual", the TAKE TRADE lane) owns all three rows.** It is
+  disabled and stays disabled: the bot walks only enabled configs
+  (bot_program/asset_engine/base.py:381), so nothing ticks these rows; enabled,
+  the 336 h clock exit (bot_program/asset_models.py:46) would fire from
+  2026-09-28 into a client with no position id. Config 14 does NOT own GLDM's
+  row — the commodity config carries no trap.
+- **Live configs, all disabled:** [1] starter_fx_majors forex 150 EUR fixed
+  (EURUSD GBPUSD USDJPY USDCHF AUDUSD USDCAD NZDUSD); [14] commodity_etf stock
+  follower 20 % 402.40 EUR (GLDM SLV USO BNO UNG CPER WEAT CORN SOYB CANE DBC);
+  [10] manual stock follower, no share, 1609.62 EUR, no symbols; [6]
+  starter_megacaps stock 150 EUR fixed (AAPL MSFT NVDA AMZN GOOGL META TSLA).
+  base_currency EUR on all four; eToro reads USD; nothing converts; the
+  preflight names the mismatch a BLOCKER for every live config, enabled or not.
+- **eToro row:** keyed, live, no class ticked, 1.40 USD. Reads measured against
+  the real key on 2026-09-22 (aggregate-portfolio 200, portfolio 200, real/pnl
+  200, GET market-close-orders 405). The WRITE path — the v2 order POST, the
+  orders:lookup poll, the market-close POST, the PATCH stop mover — met eToro on
+  2026-09-23 on the DEMO segment (§4 D2, D2b-ii: three defects found, fixed in
+  D3), and on 2026-09-26 on the LIVE segment all but the PATCH: the order
+  POST, the lookup, the v3 DELETE and the close POST (§4 D5).
+- **Alerts:** telegram proven end to end (`_send_telegram` from worker-fast
+  returned True; preflight section 7 reads token and prefs row).
+- **Backup + export:** pg_dump `sauron-20260923T053524Z.dump` (39,641,466 B) and
+  `~/ibkr_equity_road_2026-09-23.json` (17,053 B), both copied to the operator's
+  own machine by `scp` over the IP (the hostname form was refused by the VPS's
+  SSH). `BACKUP_REMOTE` is still unset: dumps are local until an rclone remote
+  exists (deploy/backup.sh:5, deploy/RUNBOOK.md:414-420).
+- **Since the measurement, in the tree:** 20fa370 — the eToro adapter refuses a
+  stop or target that is present and not a price BEFORE the POST (`_level`) and
+  `ticker()` raises on a rates shape it has never seen rather than reading it
+  as a quiet market; 3ac446f — `AssetBot.venue_stamps` is the one rule for
+  `metadata["broker"]` / `broker_env` / `broker_position_id`, an eToro PENDING
+  answer is reported `working` (booked as an order, never as an OPEN position at
+  the pre-order ticker), `unattributable()` refuses a miss across worlds
+  (live row, demo book), and `close_or_refuse()` refuses to SEND a close at a
+  venue that did not carry the row; 976e06d — `etoro_smoke`, the read-only
+  probe §3 runs.
+
+## 1. Close NEM and HYG through the platform, at the NYSE open
+
+13:30 UTC (15:30 Paris). Test first, read-only — the shell twin of the
+preview page asks the broker whether it still holds the position, then asks for a
+mark; nothing is sent:
+
+```
+./deploy/dc exec worker-fast python manage.py shell -c "
+from django.contrib.auth.models import User
+from bot_program.models import AssetBotTrade
+from bot_program.manual_close import preview_close
+u = User.objects.get(username='Sauron')
+for i in (94, 93):
+    print(i, preview_close(u, AssetBotTrade.objects.get(id=i)))
+"
+```
+
+When the answer carries a price and no `error`, close by the pages, with the
+PIN: `/positions/94/close/preview/` then `/positions/94/close/`, the same for
+`/positions/93/…`. **Never on #95** — it is CLOSED, and a CLOSE on a flat symbol
+is an opening order. Expect the rows to read CLOSE_PENDING, then CLOSED with the
+broker's own fill once the drain reads it (hourly, all day).
+
+Then read the venue back — the proof is the book, not the row:
+
+```
+./deploy/dc exec worker-fast python manage.py shell -c "
+from django.contrib.auth.models import User
+from bot_program.models import AssetBotTrade
+from bot_program.engine.broker_router import client_for_symbol
+u = User.objects.get(username='Sauron'); t = AssetBotTrade.objects.get(id=94)
+c = client_for_symbol(u, t.symbol, t.config); print(type(c).__name__)
+print('positions', c.get_positions()); print('resting', c.resting_order_ids())
+"
+```
+
+Expect `IBKRTrader`, `positions []`, `resting set()`. A surviving order id in
+`resting` is cancelled with `c.cancel_order('<id>')` in the same shell — the
+platform's own cancel, never the portal's guesswork.
+
+If the preview answers "broker unavailable" the Gateway has dropped on 2FA:
+`./deploy/ibkr-doctor`, then the same restart-and-approve as the morning. If the
+operator closes in the IBKR app instead, the rows are settled the way #95 was
+(§0: forget the eToro keys, one process that prints the class and the book
+before `reconcile_user`, re-key), outside 13:00-21:59 UTC.
+
+An alternative for a future row whose carrier is provable: write
+`metadata["broker"] = "ibkr"` on it, so the guard's FIRST refusal protects it
+— an IBKRTrader closes only on its own measured [], and any PaperTrader the
+router falls back to is refused as "carried by ibkr and the router now answers
+paper" (bot_program/reconcile_asset.py:67-69; tests/test_venue_drift.py pins
+both sides) — with eToro's keys untouched and at any hour. The design
+refutation of 2026-09-23 preferred that stamp to un-keying eToro; this plan
+un-keyed because the in-process assertions above made it a measurement, and
+because the stamp is a provenance write by hand, which this platform has so far
+refused (10863a8). Either way: the class name and the book are printed BEFORE
+anything is written, in the process that then writes. There is no selective
+revert in this repo (deploy/RUNBOOK.md §10 restores the whole database).
+
+## 2. Withdraw, then retire IBKR at runtime — only after §1 shows IBKR flat
+
+Designed and refuted on 2026-09-23 (three lenses and a critic on the runtime
+sequence, read against 8eddee1). No code changes; nothing here moves money.
+The withdrawal is the operator's act at IBKR, before 2a.
+
+**Gate — all of it, or STOP.** #93, #94 and #95 CLOSED; no live row OPEN or
+CLOSE_PENDING; no live options/cfd row; §1's read of the venue answered
+`positions []` and `resting set()`; the cash withdrawn. While an UNSTAMPED
+live row is OPEN, dropping `keyed_venue_count` to 1 (2b) hands the reconcile
+beat a PaperTrader whose `get_positions()` is the paper table, and the row is
+orphan-closed against a simulator — the one thing this order exists to
+prevent. Read the gate in one shell:
+
+```
+./deploy/dc exec worker-fast python manage.py shell -c "
+from bot_program.models import AssetBotTrade
+from bot_program.equity_models import BrokerEquityReading
+for t in AssetBotTrade.objects.filter(id__in=(93, 94, 95)).order_by('id'):
+    m = t.metadata or {}
+    print(t.id, t.symbol, t.side, t.status, 'exit', t.exit_price, 'pnl', t.pnl, 'closed', t.closed_at, 'src', m.get('exit_fill_source'), 'inferred', m.get('exit_price_inferred'), 'unpriced', m.get('exit_price_unavailable'))
+print('live rows OPEN/CLOSE_PENDING', list(AssetBotTrade.objects.filter(status__in=('OPEN', 'CLOSE_PENDING'), paper=False).values_list('id', 'metadata__broker')))
+print('live options/cfd rows', list(AssetBotTrade.objects.filter(status__in=('OPEN', 'CLOSE_PENDING'), paper=False, asset_class__in=('options', 'cfd')).values_list('id', flat=True)))
+print('ibkr readings', BrokerEquityReading.objects.filter(broker='ibkr').count())
+"
+```
+
+Expect three CLOSED rows (#95 with `unpriced True` and pnl None — unmeasured,
+not zero; #93/#94 with the broker's fill and `src broker`), `live rows []`,
+`options/cfd []`. Write down `ibkr readings` N — 2b must reproduce it.
+
+- **2a. Untick the five IBKR routing flags** — the retirement's Stage 1,
+  whose gate is "every live row CLOSED". Reversible (set them back):
+
+  ```
+  ./deploy/dc exec worker-fast python manage.py shell -c "
+  from bot_program.models import IBKRAccount
+  a = IBKRAccount.objects.get(user__username='Sauron')
+  print('before', a.is_primary_for_stocks, a.is_primary_for_forex, a.is_primary_for_commodity, a.is_primary_for_options, a.is_primary_for_cfd)
+  a.is_primary_for_stocks = a.is_primary_for_forex = a.is_primary_for_commodity = a.is_primary_for_options = a.is_primary_for_cfd = False
+  a.save(update_fields=['is_primary_for_stocks', 'is_primary_for_forex', 'is_primary_for_commodity', 'is_primary_for_options', 'is_primary_for_cfd'])
+  a.refresh_from_db(); print('after', a.is_primary_for_stocks, a.is_primary_for_forex, a.is_primary_for_commodity, a.is_primary_for_options, a.is_primary_for_cfd)
+  "
+  ```
+
+  Expect `before True True True True False` then `after False False False
+  False False`; treasury section 3 then reads stock/forex/commodity/crypto
+  "by default" and the IBKR claims column is a dash. The row is still keyed,
+  still the book, still swept — nothing is blinded yet. Once unticked, the
+  router answers alpaca/paper for a stock row and the carrier guard refuses
+  every future miss on an unstamped row for ever — which is why this comes
+  AFTER the rows are CLOSED.
+- **2b. Un-key the row — the two writes HQ Disconnect makes, and nothing
+  else.** The shell twin is preferred over the × IBKR button because it
+  writes exactly two columns and prints the reading cells it leaves intact
+  (the page's flash does not), and because it works when the button is not
+  rendered. This is the step that makes `broker_backed()` return None — IBKR
+  is the book on its account id ALONE, eToro needs keyed AND a class — and
+  empties the IBKR sync's queryset, drops the row from the sweep and zeroes
+  the data feed's walk. **Never delete the IBKRAccount row**: the FK from
+  BrokerEquityReading is CASCADE and the 400-day road goes with it; un-keying
+  is a column write on the same row and cascades nothing. Never null the
+  cells either — the aged reading is the honest record.
+
+  ```
+  ./deploy/dc exec worker-fast python manage.py shell -c "
+  from bot_program.models import IBKRAccount
+  from bot_program.equity_models import BrokerEquityReading
+  a = IBKRAccount.objects.get(user__username='Sauron')
+  n_before = BrokerEquityReading.objects.filter(broker='ibkr', account_pk=a.pk).count()
+  a.account_id_enc = ''
+  a.connected = False
+  a.save(update_fields=['account_id_enc', 'connected'])
+  a.refresh_from_db()
+  print('pk', a.pk, 'keyed', bool(a.account_id_enc), 'connected', a.connected)
+  print('cells kept: equity', a.last_equity, a.last_equity_currency, a.last_equity_at, '| held', None if a.broker_positions is None else len(a.broker_positions), a.broker_positions_at, '| login stored', a.has_login)
+  print('ibkr readings', n_before, '->', BrokerEquityReading.objects.filter(broker='ibkr', account_pk=a.pk).count())
+  "
+  ```
+
+  ```
+  ./deploy/dc exec worker-fast python manage.py shell -c "from django.contrib.auth.models import User; from bot_program.capital_truth import broker_backed; print(broker_backed(User.objects.get(username='Sauron')))"
+  ```
+
+  Expect `keyed False connected False`, the cells line with the last reading
+  and its timestamp, `ibkr readings N -> N`, and `None`. Re-keying later is
+  re-saving the HQ IBKR form with the account id (it is in the dump).
+- **2c. Stop AND remove the Gateway container, and take `ibkr` out of
+  `COMPOSE_PROFILES`** so the one-command deploy (`./deploy/dc up -d --build`)
+  cannot recreate it — a recreated Gateway restart-loops on the IB Key push
+  nobody will approve and pings the phone for weeks. Done AFTER 2b so no beat
+  still opens a socket toward it. Never a bare `dc stop` or `dc rm` — without
+  a service name compose stops the whole stack.
+
+  ```
+  cd ~/Sauron_Vision && docker ps -a --format '{{.Names}} {{.Status}}' | grep -i gateway
+  ```
+
+  ```
+  cd ~/Sauron_Vision && ./deploy/dc --profile ibkr stop ibgateway && ./deploy/dc --profile ibkr rm -f ibgateway
+  ```
+
+  ```
+  cd ~/Sauron_Vision && cp -p .env .env.bak.$(date +%F) && chmod 600 .env.bak.$(date +%F) && grep -nE '^COMPOSE_PROFILES=|sauron: IBKR' .env && nano .env
+  ```
+
+  The dated copy holds every secret the platform has — `SECRET_KEY`,
+  `FERNET_KEY`, the database password and the very Gateway login this step
+  deletes. `.gitignore` covers it (`.env.bak.*`, beside ibkr-apply's
+  `.env.bak`), so a later `git add -A` from the box cannot stage it.
+
+  In nano: remove `ibkr` from `COMPOSE_PROFILES`; delete the managed block
+  from `# >>> sauron: IBKR gateway logins` through `# <<< sauron: IBKR gateway
+  logins` and any hand-typed `IBKR_USERNAME=` / `IBKR_PASSWORD=` lines. Proof:
+  `docker ps -a --format '{{.Names}}' | grep -ci gateway` prints 0;
+  `./deploy/dc config --services | grep -i gateway` prints nothing;
+  `grep -c 'sauron: IBKR' .env` prints 0. From now on: never
+  `./deploy/ibkr-apply`, never `./deploy/dc --profile ibkr … up`. The
+  Gateway login stored on the row (`has_login`) stays: preflight blocks on a
+  missing login until the coded Stage 6 removes that block; if the password
+  must leave the database, change it at IBKR.
+- **2d. Verify the walks:**
+
+  ```
+  ./deploy/dc exec worker-fast python manage.py shell -c "
+  from django.contrib.auth.models import User
+  from bot_program.tasks import sync_broker_account, sync_etoro_accounts
+  from bot_program.reconcile_asset import reconcile_unknown_positions, keyed_venue_count
+  u = User.objects.get(username='Sauron')
+  print('ibkr sync', sync_broker_account())
+  print('etoro sync', sync_etoro_accounts())
+  print('keyed venues', keyed_venue_count(u))
+  print('sweep', reconcile_unknown_positions(u))
+  "
+  ```
+
+  Expect `ibkr sync {'attempted': 0, 'stored': 0, 'unreachable': 0}`,
+  `etoro sync {'attempted': 1, 'stored': 1, 'unreachable': 0}`, `keyed
+  venues 1`, and a sweep with `broker_unavailable 0, errors 0` that names
+  eToro only. The 6-hourly "IBKR unreachable" alert stops here.
+- **2e. Verify the pages print the retired state honestly:**
+
+  ```
+  ./deploy/dc exec worker-fast python manage.py treasury --user Sauron
+  ```
+
+  ```
+  ./deploy/dc exec worker-fast python manage.py preflight_live --user Sauron
+  ```
+
+  Treasury: section 1 reads "no row is the book"; the IBKR line stays with
+  its aged reading and the session note "no account id", NOT `*book`; exactly
+  one BLOCKER — "No broker row is the book … the preflight will refuse to arm
+  money" — which is the honest retired state until an eToro class is ticked
+  (§6). Preflight: section 2 `ibkr … primary=nothing`, `book NOTHING`; NO
+  stale-reading blocker (it needs a book), NO IBKR floor line; each disabled
+  config "NO BROKER is primary … PaperTrader" as worth-reading. Three prints
+  stay dishonest in this state and are named rather than hidden: preflight
+  section 3 says "NEVER MEASURED" where the truth is "no book"; a follower's
+  `tracking_freeze_reason` says "no reading has landed yet — enable
+  broker_account_sync" where the sync is ON and the missing thing is a book
+  (it bites the moment config 14 is re-enabled before §6); and treasury's
+  worth-reading note says the IBKR row "holds N position(s)" in the present
+  tense over whatever snapshot the last sync left. Wording patches for the
+  three are designed (count-1 anchors) and ship with the next coded batch,
+  not alone.
+- **2f. Record what was done**, beside the equity export — the flags' prior
+  values, the un-key time, the container removal, the profile edit, N:
+
+  ```
+  ./deploy/dc exec worker-fast python manage.py shell -c "
+  from bot_program.models import IBKRAccount, AssetBotTrade
+  from bot_program.equity_models import BrokerEquityReading
+  from core.models import PlatformComponent
+  a = IBKRAccount.objects.get(user__username='Sauron')
+  print('ibkr row', a.pk, 'keyed', bool(a.account_id_enc), 'flags', a.is_primary_for_stocks, a.is_primary_for_forex, a.is_primary_for_commodity, a.is_primary_for_options, a.is_primary_for_cfd, 'connected', a.connected, 'login', a.has_login)
+  print('cells', a.last_equity, a.last_equity_currency, a.last_equity_at, None if a.broker_positions is None else len(a.broker_positions), a.broker_positions_at)
+  print('readings ibkr', BrokerEquityReading.objects.filter(broker='ibkr').count(), 'etoro', BrokerEquityReading.objects.filter(broker='etoro').count())
+  print('closed ibkr-era rows', list(AssetBotTrade.objects.filter(id__in=(93, 94, 95)).values_list('id', 'status', 'exit_price', 'pnl')))
+  print('components', list(PlatformComponent.objects.filter(key__in=('broker_account_sync', 'pipeline_asset_bots', 'platform_master')).values_list('key', 'is_enabled', 'last_status')))
+  " | tee -a ~/ibkr_retirement_$(date +%F).log
+  ```
+
+What still reads IBKR afterwards, and is ended only by the coded stages of
+deploy/IBKR_RETIREMENT.md (3 → 4 → 5 → 6, none of them while the operator is
+away): the IBKR sync walk returns attempted 0 and task_gate grades it
+"ran and produced nothing" on the SHARED `broker_account_sync` row every 15
+minutes, alternating with eToro's success — true and useless; the ibkr quote
+feed stays red for ever (the feed row exists, nothing writes it); the router
+and the preflight still NAME IBKR for options/cfd while the router hands back
+paper — never arm a live options or cfd config before Stage 4. Never untick
+`broker_account_sync` (it guards the eToro sync too) or `pipeline_asset_bots`
+(it guards the tick, the reconcile and the sweep) to quiet any of this.
+
+## 3. The eToro read-only probe
+
+```
+./deploy/dc exec worker-fast python manage.py etoro_smoke --user Sauron
+```
+
+Four states per read — ok / refused / no-such / unknown — and no order ever.
+It prints the row, the world's ping with the account currency, the nested
+equity, every symbol of every live config with eToro's OWN spelling beside the
+id (a lone /search result spelled differently is `unknown`, never `ok`), the
+rate as "no rate" whenever lastPrice is not > 0, the bars on the config's
+timeframe, the book, how many live platform rows are OPEN without an etoro
+stamp, the four write URLs it never calls, and the floor line. Add
+`--other-world` to re-measure the other world with the same pair — measured
+2026-09-23: the pair saved with Demo ticked answered 200 on the live
+aggregate-portfolio too, so ONE pair opens both worlds and only the Demo tick
+on /brokers/ picks which. Add `--symbol X` for a spelling that belongs to no
+config. Read every `unknown` before blaming the keys.
+
+## 4. Demo write proof — the first order ever, on the virtual portfolio, with NO row and NO tick
+
+Through the adapter itself — never through TAKE TRADE (config 10 is disabled
+and stays so; enabled, it would book a paper=False row on the venue that is
+about to trade unattended) and never with a class ticked (a tick makes the
+demo row the book and the venue in one click).
+
+- D1. On /brokers/ save the key pair from eToro's developer portal (the portal
+  calls it "virtual"; measured 2026-09-23 with `etoro_smoke --user Sauron
+  --other-world`, the SAME pair answered 200 on the demo AND the live
+  aggregate-portfolio — there is no demo-only pair, the Demo tick alone picks
+  the world), Demo ticked (it ships ticked), all four class boxes UNTICKED.
+  With no box ticked eToro is neither book nor venue; the 900 s sync stores a
+  virtual balance under env "paper" and re-sizes nothing. THE WORLD CHECK:
+  every demo write snippet in this section asserts, in this order and before
+  any order, `t.demo`, `t.ping()` True, and `net_liquidation` above 100,000
+  (the virtual balance measured 332,449.10 USD; the real one 1.40 USD). A
+  demo-shaped snippet on a row someone unticked would otherwise place a REAL
+  order with the same pair — the assert on the balance is the one that cannot
+  be fooled by the flag.
+- D2. One round trip, printed values only:
+
+  ```
+  ./deploy/dc exec worker-fast python manage.py shell -c "
+  from bot_program.models import EtoroAccount
+  from bot_program.engine.etoro_client import EtoroTrader
+  a = EtoroAccount.objects.get(user__username='Sauron'); k, u = a.get_credentials()
+  t = EtoroTrader(k, u, env='demo' if a.demo else 'live')
+  assert t.demo, 'REFUSING: the row is not demo'
+  assert t.ping(), 'REFUSING: the demo world did not answer'
+  nl = t.net_liquidation(); print('env', t.env, 'net_liquidation', nl)
+  assert nl and nl[0] > 100000, f'REFUSING: {nl} is not the virtual balance (332,449.10 USD measured 2026-09-23; the real one 1.40 USD)'
+  print('GLDM instrumentId', t.instrument_id('GLDM'))
+  tk = t.ticker('GLDM'); print('ticker', tk)
+  last = float(tk.get('lastPrice') or 0); assert last > 0, 'REFUSING: no price'
+  r = t.market_order('GLDM', 'BUY', 1, stop_loss=round(last * 0.97, 2), take_profit=round(last * 1.03, 2))
+  print('ORDER', {k2: v for k2, v in r.items() if k2 != 'raw'}, 'statusName', r['raw'].get('statusName'))
+  print('LOOKUP', r['raw'].get('lookup'))
+  print('POSITIONS', t.get_positions())
+  pid = r.get('positionId') or ''
+  print('CLOSE', t.close_position(pid, 'GLDM', open_order_id=r['orderId']) if pid else 'no positionId reported - close on the eToro portal by hand')
+  print('CLOSE PROOF', t.position_state(r['orderId'], until='closed'), 'MARGIN after', t.margin_cells()); import time; time.sleep(60); print('POSITIONS after 60 s (the /portfolio lag)', t.get_positions())
+  "
+  ```
+
+  MEASURED 2026-09-23 14:06 UTC (D2, 1x, GLDM, 1 unit), pinned in
+  tests/test_etoro_client.py::TheMeasuredWireTests: ORDER accepted as
+  `{token, orderId 383454450 (INT), referenceId <our uuid>}`, filled in 200 ms
+  (requestTime .263Z → executionTime .463Z). DEFECT 1/2: the adapter at
+  aa5cfb2 polled `orders:lookup?referenceId=` → 404 "No external operation was
+  found for referenceId …" (eToro keeps no client reference — the v1 order read
+  shows referenceID all zeros) and answered PENDING/working/pollFailed for a
+  filled order; `?orderId=383454450` → 200: `status` is an OBJECT `{id 3, name
+  "Filled", errorCode 0}`; the fill rides `positionExecutions[0]` (positionId
+  3603281458 camel, state "open", stopLossRate 82.22 / takeProfitRate 87.3 as
+  sent, openingData.units 1.0 / avgPrice 84.8 / fees 0.13 / markup 0.2 /
+  marketSpread 0.01, marginAccountCurrency 84.8 = accountTotalUsedMargin,
+  initialExposureAccountCurrency 84.8, asset.settlementType "CFD"). CLOSE
+  answered `{orderForClose: {orderID 383413813, orderType 19, statusID 1, …},
+  token}` — no executedQty ever — and that orderID is findable NOWHERE (lookup
+  404 "Order category … not found", v1 404). DEFECT 3: `POSITIONS after` is
+  NOT the proof — /portfolio still listed the row 3 s after the close (and had
+  not listed it 2 s after the fill); the proof is the OPEN order's lookup
+  turning `state "closed"` (measured on the 2x close, D2b-ii: ~8 s, three
+  transient 500s on the way; the 1x close's own lookup timing was not printed)
+  and the margin cells (accountTotalUsedMargin 84.8 → 0.0 in the same second).
+  Read it in three states still: FILLED with a positionId is a measurement; a
+  refusal is eToro refusing; PENDING with `working: True` is a real non-filled
+  status or every lookup failing (`pollFailed`). D3 fixes all three defects.
+- D2b. THE LEVERAGED ROUND TRIP — on the DEMO row, after D2 printed
+  `POSITIONS after []`, BEFORE D4, and before the component
+  `etoro_leverage_live` is ever ON. It ships OFF: while it is OFF every
+  levered entry is refused (`leverage_refused`) and preflight §4 blocks
+  arming; nothing is sent at 1 instead. Two sittings, because a levered
+  order sent off hours lands WaitingForMarket — the shape a WORKING levered
+  row needs, measured for free on funding night — and the filled round trip
+  needs a market day. Through the adapter, printed values only, one unit at
+  leverage 2 with both legs; every snippet runs D1's WORLD CHECK first.
+  - D2b-i — OFF HOURS. MEASURED 2026-09-23 20:29 UTC (order 383459788, GLDM
+    BUY 1 @2x, stop 82.17, take 87.25): first lookup 404 ~0.6 s after the
+    POST, then 200 status {11, WaitingForMarket}; positionExecutions [];
+    openStopLossRate/openTakeProfitRate 0.0 (legs not shown while held);
+    requestedAmount 42.37, frozenAmount 42.5; used margin 42.5 AND
+    accountFrozenCash 42.5; /portfolio []; DELETE
+    /api/v3/trading/execution/demo/orders/<id> → 202 {orderId, referenceId
+    ''}; lookup → {7, Canceled}; both cells 0.0. Pinned:
+    tests/test_etoro_client.py::TheHeldOrderTests. Live DELETE spelling
+    MEASURED 2026-09-26 (§4 D5: 202, then Canceled). As run: Print
+    `MARGIN before` (`t.margin_cells()`); the RAW
+    ELIGIBILITY read (`t._sess().post(f'{BASE}/api/v2/trading/info/eligibility',
+    json={'instrumentIds': [t.instrument_id('GLDM')]}, headers=t._headers(),
+    timeout=t.timeout)` and, on 404, the `.../trading/info/demo/eligibility`
+    and `.../trading/demo/info/eligibility` spellings — the demo segment's
+    placement on that tail is unmeasured); ONE order `t.market_order('GLDM',
+    'BUY', 1, stop_loss=round(last*0.97, 2), take_profit=round(last*1.03, 2),
+    leverage=2)` → expect PENDING with `working: True` (statusName
+    WaitingForMarket); print ORDER, LOOKUP, `pollFailed` if present, `MARGIN
+    after order` (do accountFrozenCash / accountTotalUsedMargin move for a
+    HELD order?); the COSTS read (`POST /api/v2/trading/info/costs` with the
+    same body at leverage 1 and at leverage 2 — record costType/amount per
+    row: markup, marketSpread, overnightFee, overWeekendFee); then the
+    DELETE (`t._sess().delete(f'{BASE}/api/v3/trading/execution/orders/{r["orderId"]}',
+    headers=t._headers(), timeout=t.timeout)` and its demo spelling) → record
+    the status code and text; LOOKUP again by orderId to prove status
+    7/8; `MARGIN after delete`. A 404/405 on the DELETE is a measurement:
+    the WORKING-row hole then stands and the flip's precondition is unmet.
+    If the order cannot be withdrawn it fills at the open at 2x — close it
+    by position id in D2b-ii, first thing.
+  - D2b-ii — IN HOURS. MEASURED 2026-09-23 between 14:06 and 14:13 UTC (order
+    383458277, 2x, GLDM, 1 unit; its positionId was not printed — 3603285267,
+    the PATCH target of §6, is paired with it by timing only): FILLED;
+    `asset.leverage 2`, requestedAmount 42.4 = notional / 2, frozenAmount
+    42.53 = 42.4 + fees 0.13, marginAccountCurrency 42.39 =
+    accountTotalUsedMargin, initialExposureAccountCurrency 84.79,
+    openingData.avgPrice 84.79 / units 1.0 (units are units at any leverage),
+    markup 0.01; positionExecutions[0].stopLossRate 82.22 = the SENT stop, TP
+    87.3 held — the THIRD state (a rewrite, 0.0001) did NOT occur; MARGIN
+    before / after open / after close: used 0.0 → 42.39 → 0.0, available
+    332448.87 → 332406.35 → 332448.59 (accountTotalValue 332448.87 → 332448.71
+    → 332448.59; the cells move within the second; available fell by 42.52 =
+    margin 42.39 + fees 0.13). The /portfolio row at 2x was NOT captured
+    (absent 1 s after the fill — the lag; closed before listing): `leverage`,
+    `amount`, `settlementTypeID` at 2x stay unmeasured. FIRST PATCH EVER:
+    `t.modify_protective('3603285267', 83.06)` → `{'ok': True, 'reason': '',
+    'price': 83.06}`, the lookup then showed stopLossRate 83.06 (TIGHTER only;
+    a widening PATCH stays unsent; 200 vs 202 not recorded). Close by id:
+    proof `state "closed"` after ~8 s with three 500s on the way. The
+    deliberate REFUSAL was NOT provoked: the refusal shape (POST 4xx vs
+    status.id 4 + errorCode) stays unmeasured.
+  - PINNED by D3 in tests/test_etoro_client.py::TheMeasuredWireTests, real
+    class over a patched session: the acceptance, the lookup key, the status
+    object, the fill facts at 1x and 2x, the stop echo after the PATCH, the
+    margin cells at the five moments, the close response, the close proof
+    through 500s, the /portfolio row. STILL TO PIN, unmeasured: D2b-i's
+    the costs rows (recorded in the measured doc §12, not yet in this plan);
+    the floor refusal (measured: status 4 / errorCode 720 — its poll-path
+    booking pinned by D3b, the un-truncated message pending); the DELETE's
+    refusal body; the 2x /portfolio row.
+  - THE FLIP, by hand, never by a deploy, and only when ALL of: D2b-i and
+    D2b-ii are pinned; the costs rows for GLDM at 1x and 2x are written into
+    this plan; the DELETE answer is written down (D2b-i: 202 → Canceled);
+    every levered config's
+    `max_hold_hours` has been set by the operator with the printed overnight
+    fee in mind (or the fee accepted here in writing); the operator's own
+    book is saved on /setup/. Command:
+    `./deploy/dc exec worker-fast python manage.py shell -c "from core.platform_control import PlatformComponent; print(PlatformComponent.objects.filter(key='etoro_leverage_live').update(is_enabled=True))"`
+    → prints 1; then `preflight_live` must show the config's leverage line
+    without a BLOCKER.
+- D2c. FRACTIONS — on the DEMO row, after D2 has closed flat and before any
+  class is ticked or the `fractional_units_live` switch is flipped. Every
+  answer written down by NAME; the shell idiom of D2 (values printed, never a
+  key; D1's WORLD CHECK first).
+  - D2c-0 THE ELIGIBILITY READ FIRST, for the 18 stock symbols of configs 6
+    and 14, by hand through the adapter's own session
+    (`t._sess().post(<url>, json={'symbols': [...], 'currency': 'USD'},
+    headers=t._headers(), timeout=t.timeout)`); the URL is POST
+    /api/v2/trading/info/eligibility from the public reference (unmeasured),
+    and whether the demo world takes a `demo/` segment there is unmeasured
+    too — try the adapter's `_v2("info/eligibility")` rule and the bare path,
+    and write down which answers and the status of the other. Record per
+    symbol: unitsQuantityType, allowedOrderQuantityType, minPositionExposure,
+    maxUnitsPerOrder, and the stop-percentage band. If it answers, the belief
+    in capabilities.py and `takes_fractional_units` are corrected in the same
+    commit to read the payload and answer None for an unread instrument.
+    MEASURED 2026-09-23; the adapter reads it since Stage 1
+    (`EtoroTrader.eligibility`, one POST per instrument per UTC day once
+    read — an unread row is asked again on every ask — and the accessors
+    beside it: `eligibility_state`, `unit_type`, `min_notional` (USD; a
+    body typed in another currency raises), `max_units_per_order`,
+    `allow_open_position`, `requires_w8ben`, `leverage_values`,
+    `max_stop_loss_pct`, `settlement_for` — `world='live'` reads the LIVE
+    list from the demo row). The demo read, values only, WORLD CHECK
+    first:
+
+    ```
+    ./deploy/dc exec worker-fast python manage.py shell -c "
+    from bot_program.models import EtoroAccount
+    from bot_program.engine.etoro_client import EtoroTrader
+    a = EtoroAccount.objects.get(user__username='Sauron'); k, u = a.get_credentials()
+    t = EtoroTrader(k, u, env='demo' if a.demo else 'live')
+    assert t.demo, 'REFUSING: the row is not demo'
+    assert t.ping() is True, 'REFUSING: the demo world did not answer'
+    nl = t.net_liquidation(); assert nl and nl[0] > 100000, f'REFUSING: {nl} is not the virtual balance'
+    [print(S, 'state', t.eligibility_state(S), 'units', t.unit_type(S), 'floor', t.min_notional(S), 'maxUnits', t.max_units_per_order(S), 'open', t.allow_open_position(S), 'w8', t.requires_w8ben(S), 'LIVE long cfd', t.leverage_values(S, 'BUY', 'cfd', world='live'), 'LIVE short cfd', t.leverage_values(S, 'SELL', 'cfd', world='live'), 'settlement@1x', t.settlement_for(S, 'BUY', 1)) for S in ('AAPL', 'GLDM', 'EURUSD', 'SPX500', 'BTC')]
+    "
+    ```
+  - D2c-1 THE FRACTION, four significant decimals above the believed
+    minimum: check `last` first and pick a size s with s × last > 10 USD
+    (0.2345 GLDM if it fits):
+    `r = t.market_order('GLDM', 'BUY', 0.2345, stop_loss=round(last*0.97, 2), take_profit=round(last*1.03, 2))`.
+    Write down: accepted or refused; the lookup `status` WIRE SHAPE (int or
+    object — this decides `_status_of` and the D3 fixture);
+    openingData.units and remainingUnits byte for byte (0.2345 exactly, or
+    rounded to how many decimals — this measures FRACTIONAL_DECIMALS = 4
+    against the venue's step); requestedUnits versus the fill (an over-fill
+    is a measurement, not a surprise); the /portfolio row's units and
+    amount; the margin cells before and after; the close with units=0.2345
+    and `POSITIONS after []`.
+  - D2c-2 THE FLOOR, deliberately BELOW it: `t.market_order('GLDM', 'BUY',
+    0.0123, …)` (0.0123 × last under 10 USD). A refusal measures the
+    minimum — record its shape: an HTTP 4xx at the POST (the raise now says
+    "eToro refused (<code>): <words>", ORDER_ERROR on the bot lane) or an
+    accepted order landing status 4 with errorCode/errorMessage
+    (ORDER_REJECTED with the words) — and its number becomes the value the
+    operator types into extras['venue_min_notional']; an acceptance refutes
+    the 10 USD belief and the position is closed by id.
+  - D2c-3 THE SHORT, overnight: `t.market_order('GLDM', 'SELL', 0.2345, …)`
+    held over one night; read /portfolio totalFees and the costs endpoint
+    for the same body; close by id. The number goes to the cost item; this
+    item only names it.
+  - D2c-4 THE QUOTA: on the demo key, more than 20 orders:lookup GETs
+    inside 60 s by hand; record the 429's status and body and whether the
+    demo world enforces it. Until written down, §7 runs the first eToro
+    stock config with max_concurrent_positions = 1.
+  - D2c-5 D3 lands each shape by name in tests/test_etoro_client.py with the
+    real class over _FakeSession: the fractional fill, the refusal in its
+    measured shape, the over-fill, the status wire shape; then and only
+    then the operator flips fractional_units_live on /health/, ticks
+    the class, and enables ONE config.
+- D3. LANDED after D2/D2b-ii: the three defects the first orders exposed,
+  fixed adapter-first and pinned by name with the real class and a patched
+  session — never a subclass (tests/test_etoro_client.py::TheMeasuredWireTests
+  and ::ConsumerKeyTests; the engine halves in tests/test_etoro_leverage.py,
+  tests/test_close_path.py::TheCloseIsProvenByTheOpenOrderTests and
+  tests/test_venue_drift.py).
+  (1) `_await_fill` polls `orders:lookup?orderId=` (the acceptance's INT id,
+  which both lanes already store as `AssetBotTrade.broker_order_id`), keeps
+  polling through a failed GET, and answers `pollFailed` only when EVERY
+  lookup failed; `status` is read as the object `{id, name, errorCode}` (only
+  id 3 measured; `raw.statusName` stays the table's word, which the one
+  measured name agrees with); the fill facts come off `positionExecutions[0]`.
+  (2) `EtoroTrader.position_state(order_id, until="closed")` reads the OPEN
+  order's execution state through the 500s (5 × 2 s);
+  `close_position(..., open_order_id=)` proves what it sent and answers FILLED
+  with executedQty and NO avgPrice, or PENDING with executedQty "0.0" (the
+  engine then books CLOSE_PENDING — never CLOSED on an unproven close; the
+  kill switch leaves the row CLOSE_PENDING and raises, and pressed again on
+  that row it refuses — nothing sent, never a second close);
+  `venue_close.close_or_refuse` hands the row's `broker_order_id` down;
+  `UnitsToDeduct` is NEVER sent (measured 17:43-17:58 UTC: two closes carrying
+  it were accepted and never executed; InstrumentID alone executed in ~6 s);
+  `pending_closes.retry_trade_close` reads the proof before the book — only
+  from the venue that carried the row (`unattributable`) —
+  (`RETRY_VENUE_PROVED_CLOSED`), BLOCKS while the venue still says open beside
+  a queued close, refuses a FLAT list while the venue says open, and never
+  proves by the close order's id; since D3b the drain's cancel-before-resend
+  hands that id to EtoroTrader.cancel_order, whose lookup-first gate reads it
+  once (404 — findable nowhere) and answers False without a DELETE, so the
+  queued-close block stands.
+  (3) `EtoroTrader.PORTFOLIO_LAG_S = 60`: `reconcile_asset.venue_lag_window`
+  refuses a miss inside the window (reconcile_user), the drain spends no
+  attempt on a FLAT or HELD read inside it, and the sweep keeps a symbol
+  claimed for `SWEEP_CLOSED_GRACE_S` after a close. `etoro_smoke` prints the
+  measured facts beside each write URL.
+  D3c LANDED c5375f5: UnitsToDeduct is never sent (a close carrying it is
+  accepted and never executes; InstrumentID alone closes).
+  D3b LANDED (2026-09-24): `order_status` (11 working / 3 filled / 7 dead / 4
+  dead with the refusal words / 404 unknown / 5xx None), `cancel_order`
+  (lookup-first; DELETE v3; True only on a lookup reading 7/8/9; False on any
+  other read; False, nothing sent, for any id it cannot read — the drain's
+  queued-close block stands and a None there is no longer a confirmation;
+  the live spelling raised until it was measured on 2026-09-26, §4 D5 —
+  since then the tick withdraws on both worlds), the tier `orders`,
+  `_finish_working_entry(venue=)`
+  stamping the carrier and the close handle on eToro rows only, comparing
+  the held stop with the sent one, alerting on NO stop read; the dead branch
+  books the refusal words; the age branch alerts when a withdrawal is not
+  confirmed. Measured the same night on BTC: fractional units fill (0.001
+  BTC), eToro REWRITES a stop in both directions (3 % → 10 % at 1x, 60 % →
+  25 % at 2x) and the held level lives in positionExecutions[0], the floor
+  refusal is status 4 / errorCode 720 with the numbers in errorMessage.
+  STILL UNMEASURED, therefore unpinned: whether a held order's legs attach
+  at the fill; a DELETE on a close order id; the
+  DELETE's refusal body; status ids 5 and 9; the over-fill; the 429 body; the
+  2x /portfolio row; a closing rate (the exit stays mark-priced);
+  `UnitsToDeduct` (never sent since D3c; measured accepted-and-never-executed) and a
+  close below the position; a second close on a closed positionId; a
+  stop-out's execution state; what eToro answers a lookup for an id another
+  venue issued; a live PATCH (every other live write met the real account
+  on 2026-09-26, §4 D5). Still in D3b, not started: the
+  TAKE TRADE lane calling `venue_stamps` (a hand-taken eToro row records no
+  `broker`, `broker_env` or `broker_position_id` at placement — since D3b a
+  hand-taken row that fills FROM WORKING gains all three at the fill through
+  `_finish_working_entry(venue=)`; one placed and filled in-hours still records
+  none; it closes only through
+  `protective_trade_id`, so a hand-taken row with both legs and a read fill
+  IS closable, while one taken without a stop or whose poll failed has no
+  handle); the WORDING of the three consumers that meet the unproven shape —
+  manual_close "The broker rejected the close" (false: the venue accepted it
+  and the drain proves it, never resends), base.py _notify_partial_close
+  "filled only 0 of N" (the unproven close, not a partial), the kill switch's
+  "needs closing by hand" raise over a queued close — every one of them is
+  loud and none moves money; after D3 those sentences mean "accepted, not
+  yet proven; the drain proves it by the open order"; the legacy crypto tick
+  (engine/runner.py) reads only `orderId` off market_order and books a
+  BotTrade at the pre-order price whatever the status says: NOT in D3, and
+  the crypto box on the eToro row stays UNTICKED until that reader reads
+  status/working/pollFailed.
+- D4. Re-save the SAME pair on /brokers/ with Demo UNTICKED — the switch to
+  live is the checkbox, not a key change (measured 2026-09-23) — all four
+  boxes still UNTICKED, and the trading PIN typed in the form's PIN field. The
+  save is refused, nothing written, while any live config is enabled, while
+  any class box is ticked on that same save, or without the PIN; the flash
+  names which. The environment flip drops the demo reading cells on purpose.
+  From this save every order the platform routes to eToro is real money.
+- D5. THE REAL WORLD, MEASURED — DONE 2026-09-26 (planned for Sunday
+  2026-09-27; run on Saturday ~21:25-22:03 UTC by the operator, code
+  097e72c, through a shell client built `env='live'` — the row stayed demo
+  on /brokers/, no class ticked; the WORLD CHECK inverted: the real world
+  and a balance under 100,000). Pinned in tests/test_real_account_measured.py
+  and tests/test_etoro_client.py::TheRealAccountProofTests.
+  - AAPL 0.04 BUY, market shut: the v2 POST with no segment ACCEPTED, order
+    1596774177; the lookup (no segment) read {11, WaitingForMarket},
+    asset.settlementType 'REAL' at leverage 1, requestedAmount 13.64,
+    frozenAmount 14.64, legs 0.0 while held. WITHDRAWN at 22:03:11 UTC:
+    `DELETE /api/v3/trading/execution/orders/1596774177` → 202
+    `{"orderId":1596774177,"referenceId":""}`; 3 s later the lookup read
+    {7, Canceled} and used margin fell 31.47 → 16.83 (the held 14.64
+    returned) — the demo answer exactly. `_V3_EXEC_REAL_SEG` carries
+    `"orders": ""` since, and the tick withdraws a held live entry after
+    ENTRY_WORKING_MAX_HOURS as it does on demo.
+  - BTC 0.0002 BUY: FILLED at once — order 1596774178, position 3588477891,
+    avgPrice 84145.8, settlementType 'REAL' at 1x, requestedAmount 16.83,
+    frozenAmount 17.0, fees 0.17 (1%, one side), marketSpread 0, markup 0.
+    eToro REWROTE THE STOP: sent 79934.97 (5% under the last 84142.07),
+    held 75745.8 (9.98% under the fill, on positionExecutions[0]
+    .stopLossRate — the top-level openStopLossRate keeps the sent level);
+    the target 88349.17 held as sent. The fill notification names it since
+    ("Stop moved by eToro: sent X, held Y (Z% from entry)"; reworded
+    2026-09-27 to "Stop moved by eToro: it holds Y, not the X sent (Z%
+    below the entry)", and the fill message's Stop and risk lines read the
+    stop eToro holds). CLOSED at
+    22:03:24 UTC through the adapter's close — the v1 market-close-orders
+    POST with no segment, attested until then by a GET answering 405 only:
+    orderForClose {orderID 1596736969, orderType 19, statusID 1}, the open
+    order's positionExecutions[0].state 'closed'; 5 s later available cash
+    2249.65, used margin 0.0, no position, broker_portfolio []. Round trip
+    0.33 USD (2249.98 → 2249.65). This is the crypto proof (§7, bullet 0):
+    `crypto` joined ETORO_PROVEN, proven at 1x. ETORO_PROVEN_LEVERAGE stays
+    empty, which binds the attack mode's chooser ALONE (it picks 1 for
+    crypto): a TYPED `extras["leverage"] = 2` on a crypto config is not
+    held to it and goes at 2x (CFD settlement, never met on the real
+    account) once etoro_leverage_live is ON — preflight §4 warns, never
+    refuses; tests/test_real_account_measured.py pins it.
+  - broker_portfolio listed the REAL BTC position as sec_type 'CFD',
+    market_price 0.0, currency '' — the label is a constant; the real
+    row's settlementTypeID was not printed, so it stays until it is.
+  - Not measured on the real account: the PATCH stop mover; a levered
+    order.
+
+## 5. Funding, and the pool arithmetic
+
+- eToro cannot be asked its size floor in UNITS before an order
+  (bot_program/engine/capabilities.py:74-87, Saxo's `size_floor` tier) — its
+  MONEY floor it can, and since Stage 1 (2026-09-25) the engine asks it
+  FIRST: `EtoroTrader.min_notional` reads minPositionExposure off the
+  eligibility row (MEASURED 2026-09-23, §4 D2c-0: 10 USD on stocks, ETFs and
+  crypto; 1,000 USD on forex, indices and commodities; USD only — a body in
+  another currency raises and reads as unmeasured) and `_venue_size_floor`
+  turns it into units at the entry price, refusing under it as
+  venue_min_size with both numbers. The typed extras['venue_min_notional']
+  (USD, unconverted) is the FALLBACK for a row unread today; without either
+  the venue's refusal is the only floor and the symbol is quiet for 24 h
+  after the first. Since 2026-09-23 the adapter declares `fractional_units`
+  — since Stage 1 a MEASUREMENT off the row's unitsQuantityType (True /
+  False / None unread), no longer a belief — and the stock bot SENDS a
+  fraction only while the fractional_units_live switch is ON (OFF today).
+  The fuel arithmetic is pool × risk_per_trade_pct / stop_fraction against
+  that minimum — preflight section 5 prints it — not the notional ceiling.
+  Whole units stay the rule on every other venue, and on eToro while the
+  switch is OFF: fund enough that one unit of the largest-priced symbol fits
+  inside the smallest pool's notional ceiling until then.
+- A DISABLED pool is not a follower (`followers_of` filters enabled=True), so
+  nothing is re-sized today. The moment configs 14 and 10 are BOTH enabled while
+  both follow, `allocate_shares` gives 10 the remainder after 14's 20 %. Before
+  §7 enables anything, decide about 10:
+  `./deploy/dc exec worker-fast python manage.py follow 10 --stop --yes`, or an
+  explicit share. Away for weeks, keep 10 disabled: there is no hand to take a
+  trade.
+- `tracking_freeze_reason` refuses every follower's entries until a reading
+  younger than 3600 s exists on the book.
+
+## 6. Ticking classes — the book moves on the click
+
+`broker_backed` returns eToro the moment it is keyed AND flagged for any of
+stock/forex/commodity/crypto. From that click: the IBKR equity road stops being
+readable by the production readers (why the export came first); the router
+sends that class to eToro before IBKR; on the next 900 s beat every ENABLED
+follower is re-sized from the eToro reading in USD (capital only — the rows
+keep saying EUR until §8).
+
+Tick ONE class at a time on /brokers/, re-entering both keys each time, with
+Demo left UNTICKED (the live row — re-ticking it is the §10 must-not). Never on
+the save that unticks Demo: the form refuses a demo -> live flip with a class
+ticked, so D4 and the first tick are two saves, in that order. Stocks
+first (configs 6 and 14; 10 stays disabled), forex second (config 1). Options
+and CFD have no eToro box and fall to paper by design; no live options config
+exists — and it stays so: eToro's CFD is a settlementType per instrument, not
+a class to configure, and a `cfd` config raises at make_bot every tick
+(bot_program/asset_engine/base.py, make_bot).
+
+Crypto (2026-09-26). The config keeps the platform spelling — BTCUSD, ETHUSD,
+XRPUSD, SOLUSD — and the adapter asks eToro for BTC, ETH, XRP, SOL
+(VENUE_SPELLING in bot_program/engine/etoro_client.py; ids 100000, 100001,
+100003, 100063, measured 2026-09-23; /search answers nothing to BTCUSD or
+ETHUSD). With the crypto box ticked the router sends crypto to eToro (a Saxo
+crypto flag would win); unticked, crypto goes to Binance, and to paper
+without Binance keys — which a live config refuses to trade against. Whether
+Sauron holds a BinanceAccount row is unread. A symbol with no Instrument row
+routes as crypto, and `etoro_smoke` prints `route=<broker>` beside every
+config symbol. The legacy tick (engine/runner.py) never sends to eToro:
+since 2026-09-26 it refuses every eToro-carried order, because it cannot
+check the account's headroom. Crypto routes nothing until a crypto config
+exists, and reaches eToro only with `crypto` in ETORO_PROVEN and its
+pinned proof (§7, bullet 0) — there since 2026-09-26, proven at 1x (§4
+D5; a typed multiplier is not held to that).
+
+Commodities (2026-09-26). CommodityBot no longer rewrites a live config to
+paper, so a live commodity config goes where the router sends it: eToro's
+commodities box (WHEATUSD → WHEAT.FUT 97, XPTUSD → PLATINUM 40; gold,
+silver and oil have no known spelling, §7 bullet 0s), or IBKR's or Saxo's
+commodity flag. The old rewrite kept those two flags asleep for the bots
+and TAKE TRADE, and IBKR's reads True until §2a. The entry gate refuses a
+live commodity order on any carrier but eToro (AssetBot._etoro_entry_refusal,
+step 0): nothing is sent to IBKR or Saxo, and /health/ reports such a
+config red. With no flag at all it meets a PaperTrader and every entry is
+refused (PAPER_FALLBACK). Read-only, before any commodity config is set
+live:
+
+```
+./deploy/dc exec worker-fast python manage.py shell -c "
+from bot_program.models import IBKRAccount, SaxoAccount, EtoroAccount, AssetBotConfig
+for M in (IBKRAccount, SaxoAccount, EtoroAccount):
+    print(M.__name__, list(M.objects.filter(user__username='Sauron').values_list('is_primary_for_commodity', flat=True)))
+print('live commodity configs', list(AssetBotConfig.objects.filter(user__username='Sauron', asset_class='commodity', mode='live').values_list('id', 'name', 'enabled', 'symbols')))
+"
+```
+
+Expect `IBKRAccount [True]` until §2a (its `before` line) and `live
+commodity configs []`. Every True printed is a venue a live commodity
+config would be sent to, and only eToro's may carry one. `etoro_smoke
+--user Sauron` prints `route=<broker>` beside every config symbol: a live
+commodity symbol reads `route=etoro` before its config is enabled.
+
+## 7. Follow before enable — per config, in this order
+
+- 0. The class's fill-and-close proof — on the demo segment OR the real
+  account, a real one being the stronger (crypto's, §4 D5) — is pinned as
+  `test_proof_<token>` and its token sits in `ETORO_PROVEN`
+  (bot_program/asset_engine/base.py) — until then every lane (the asset
+  bots, TAKE TRADE and the legacy tick)
+  refuses every eToro entry of that class as `gate_blocked`, before the
+  floor and before any POST. The per-class sitting list lands with the
+  proofs; nothing below lifts this bullet.
+- 0s. THE SPELLINGS eToro has not answered — gold, silver, oil, gas, copper
+  (VENUE_SPELLING_UNKNOWN in bot_program/engine/etoro_client.py: XAUUSD and
+  XAGUSD raise naming 2026-09-23) — before any commodity or metal config.
+  Read-only, demo, values only, D1's WORLD CHECK first; three parts, in this
+  order.
+  (1) One eligibility POST by `symbols`. Every spelling that prints is a
+  measurement, and the answer for the ones that do not — absent from the
+  list, or the whole POST a 4xx — is the unknown-symbol shape. GLDM is the
+  control: 3190 must print, or the read is wrong.
+
+    ```
+    ./deploy/dc exec worker-fast python manage.py shell -c "
+    from bot_program.models import EtoroAccount
+    from bot_program.engine.etoro_client import EtoroTrader, BASE
+    a=EtoroAccount.objects.get(user__username='Sauron'); k,u=a.get_credentials()
+    t=EtoroTrader(k,u,env='demo' if a.demo else 'live')
+    assert t.demo, 'WORLD CHECK: not demo'
+    assert t.ping() is True, 'WORLD CHECK: no ping'
+    nl=t.net_liquidation(); assert nl and float(nl[0]) > 100000, 'WORLD CHECK: real book'
+    r=t._sess().post(f'{BASE}/api/v2/trading/info/demo/eligibility', json={'symbols': ['GOLD','XAUUSD','SILVER','XAGUSD','OIL','WTIUSD','BRNUSD','NATGAS','NGUSD','COPPER','HGUSD','XPDUSD','GLDM'], 'currency': 'USD'}, headers=t._headers(), timeout=t.timeout)
+    print(r.status_code, [(e.get('instrumentId'), e.get('symbol')) for e in (r.json() or {}).get('eligibilities', [])] if r.status_code==200 else r.text[:200])
+    "
+    ```
+
+  Record the status and the list. Each printed (id, symbol) enters
+  VENUE_SPELLING with its id and the date; if the whole POST is a 4xx, the
+  range read below is the only way, and the unknown-symbol shape reads "4xx on
+  any unknown symbol in the body — send known spellings only".
+  (2) Then the id-range read, in windows typed per sitting (START, STOP):
+  first 1–400 (WHEAT.FUT 97 and PLATINUM 40 sit there), second 400–1,200,
+  third 3,000–3,400 (around GLDM 3190); at most 20 POSTs of 20 ids per
+  sitting, 3 s apart (the eligibility quota is unmeasured). It stops at the
+  first batch printing a symbol containing GOLD, XAU, SILVER, XAG, OIL,
+  BRENT, WTI, NATGAS or COPPER.
+
+    ```
+    ./deploy/dc exec worker-fast python manage.py shell -c "
+    import time
+    START, STOP = 1, 401          # typed per sitting: (1,401) then (401,1201) then (3001,3401)
+    from bot_program.models import EtoroAccount
+    from bot_program.engine.etoro_client import EtoroTrader, BASE
+    a=EtoroAccount.objects.get(user__username='Sauron'); k,u=a.get_credentials()
+    t=EtoroTrader(k,u,env='demo' if a.demo else 'live')
+    assert t.demo, 'WORLD CHECK: not demo'
+    assert t.ping() is True, 'WORLD CHECK: no ping'
+    nl=t.net_liquidation(); assert nl and float(nl[0]) > 100000, 'WORLD CHECK: real book'
+    WANT=('GOLD','XAU','SILVER','XAG','OIL','BRENT','WTI','NATGAS','COPPER')
+    for lo in range(START, STOP, 20):
+        r=t._sess().post(f'{BASE}/api/v2/trading/info/demo/eligibility', json={'instrumentIds': list(range(lo, lo+20))}, headers=t._headers(), timeout=t.timeout)
+        body=(r.json() or {}) if r.status_code==200 else {}
+        rows=[(e.get('instrumentId'), e.get('symbol'), e.get('minPositionExposure'), [c.get('settlementType') for c in e.get('leverageConfigs') or []][:1]) for e in body.get('eligibilities', [])]
+        print(lo, r.status_code, rows or r.text[:120])
+        if any(any(w in str(s).upper() for w in WANT) for _, s, *_ in rows): print('FOUND at batch', lo); break
+        time.sleep(3)
+    "
+    ```
+
+  (3) Write back every window that printed no wanted row into the comment
+  above VENUE_SPELLING_UNKNOWN ("ids scanned: 1-400 on <date>: none"), in the
+  same commit as any spelling found, so the next sitting starts where this
+  one stopped. Unmeasured until run: whether an unknown id answers an empty
+  list or a 4xx (the first batch with a gap measures it), and the order of
+  the rows.
+- a. `./deploy/dc exec worker-fast python manage.py follow --user Sauron` — who
+  follows, at what share.
+- b. One sync after the tick:
+  `./deploy/dc exec worker-fast python manage.py shell -c "from bot_program.tasks import sync_etoro_accounts; print(sync_etoro_accounts())"`
+  → attempted 1, stored 1.
+- c. `./deploy/dc exec worker-fast python manage.py follow 14` (plan), then
+  `./deploy/dc exec worker-fast python manage.py follow 14 --yes` (write). The
+  CLI has no venue refusal (the page's Follow button does), so run it only
+  after §6 made eToro the book for that class.
+- d. Relabel base_currency (§8) BEFORE enabling.
+- e. `./deploy/dc exec worker-fast python manage.py preflight_live --user Sauron`
+  → NO BLOCKERS FOUND. The first eToro stock config runs with
+  max_concurrent_positions = 1 until D2c's quota note exists.
+- f. `./deploy/dc exec worker-fast python manage.py bot on 14 --yes` — one
+  config per sitting; watch one full 5-minute tick and the Telegram before the
+  next.
+
+## 8. base_currency relabel to USD — no page edits it in isolation
+
+The only page that writes `base_currency` re-creates the config with it
+(hq_create_asset_bot's update_or_create rewrites every field); `follow` and the
+sync write `capital` only. Relabel before enabling, once per config, after its
+follow (the number is already USD):
+
+```
+./deploy/dc exec worker-fast python manage.py shell -c "from bot_program.models import AssetBotConfig; print(AssetBotConfig.objects.filter(user__username='Sauron', mode='live', id__in=(1, 6, 10, 14)).update(base_currency='USD'))"
+```
+
+Expect 4. The FIXED pools (1 and 6, "150") do not move — 150 becomes 150 USD;
+size them deliberately, ≤ the deposit. Proof:
+`./deploy/dc exec worker-fast python manage.py preflight_live --user Sauron`
+no longer prints CURRENCY MISMATCH.
+
+## 9. The departure picture
+
+eToro keyed live; stocks (then forex) ticked; configs 6 and 14 (then 1) enabled
+and following at explicit shares that sum to ≤ 100 %; config 10 disabled and
+not following; the five IBKR flags unticked, the IBKR account id cleared, the
+Gateway container stopped; #93, #94, #95 CLOSED — #95 with `exit_price_inferred`
+True and an unmeasured P&L, #93/#94 with the broker's fills; no resting order at
+IBKR; preflight NO BLOCKERS; telegram proven; `BACKUP_REMOTE` set. The
+retirement then continues at deploy/IBKR_RETIREMENT.md Stage 3.
+
+```
+./deploy/dc exec worker-fast python manage.py treasury --user Sauron
+./deploy/dc exec worker-fast python manage.py preflight_live --user Sauron
+./deploy/dc exec worker-fast python manage.py open_trades --all
+./deploy/dc exec worker-fast python manage.py follow --user Sauron
+```
+
+## 10. Must-nots
+
+- Never write status='CLOSED', exit_price, pnl or last_equity by hand. A
+  statement is not a measurement — 2026-09-23 proved it twice.
+- Never accept a CLOSED that was not preceded, in the same process, by the
+  routed client's class name (`IBKRTrader`, or `EtoroTrader` for an eToro row)
+  and a printed book.
+- Never untick the IBKR flags or press HQ Disconnect on IBKR while any live row
+  is OPEN or CLOSE_PENDING.
+- Never tick a class on /brokers/ before the demo write proof: the tick makes
+  eToro the book and the venue in one click.
+- Never tick crypto on the eToro row until its own sitting (§7). The reason
+  first written here — the legacy tick (engine/runner.py) booking a live
+  BotTrade on an unread eToro answer, with no stop — is gone: since
+  2026-09-26 that loop never sends to eToro (it refuses every eToro-carried
+  order, because it cannot check the account's headroom). The proof gate
+  refused every crypto entry until `crypto` joined ETORO_PROVEN with its
+  pinned proof on 2026-09-26 (the real BTC round trip at 1x, §4 D5 — a
+  typed 2x on a crypto config is not held to it); what stands is the
+  sitting itself (§6, §7).
+- Never add a token to `ETORO_PROVEN` (bot_program/asset_engine/base.py)
+  without its `test_proof_<token>` in tests/test_etoro_client.py in the
+  same commit, and never tick a class whose token is absent: every lane
+  (the asset-bot tick, TAKE TRADE and the legacy tick) refuses every
+  eToro entry of that class — and every short until "short" is pinned —
+  as `gate_blocked`, before the floor and before any POST, until the
+  proof lands (2026-09-24).
+- Never flip fractional_units_live before D2c's pins are in
+  tests/test_etoro_client.py, and never with more than one config enabled
+  until the 20-per-60-s quota's 429 shape is written down (D2c-4).
+- Never run the demo write proof through TAKE TRADE, and never enable config 10
+  for it. The TAKE TRADE lane refuses a config carrying extras['leverage']
+  above 1 (nothing sent, not at 1). Forex stays 1x on eToro until
+  capital_at_work reads the row's multiplier.
+- Never flip `etoro_leverage_live` ON before D2b (both sittings) is recorded
+  in tests/test_etoro_client.py, and never put extras['leverage'] above 1 on
+  a config while it is OFF: the preflight blocks arming and every tick
+  refuses the entry (`leverage_refused`) — nothing is sent at 1 instead.
+  Leverage changes the cash eToro locks and the financing it charges, never
+  the units or the loss at the stop; a bigger position is
+  risk_per_trade_pct, max_notional_fraction and funding (§5).
+- Never press CLOSE, close-all or EMERGENCY FLATTEN on a row whose symbol the
+  broker no longer holds: the ordinary close is an opposite MARKET order.
+- Never disarm a live config by setting mode='paper' (`client_for_symbol`
+  short-circuits to paper and reconcile filters neither enabled nor mode);
+  `bot off <id>` or the page toggle.
+- Never put a key in argv, chat or history; the /brokers/ form is the only
+  path, and every shell snippet above prints values, never a key.
+- Never enable two configs in one sitting.
+- Never rename a config symbol or an Instrument row to eToro's spelling, and
+  never add a VENUE_SPELLING entry (bot_program/engine/etoro_client.py) that
+  eToro has not answered with its id printed: every entry carries its id and
+  the date it was measured. The platform spelling is the key everywhere
+  (configs, Instrument rows, bars, exchange hours, the readers); the table
+  rewrites it for /search and the order body only. A lone /search result
+  spelled differently is refused, never adopted — map it only once the
+  eligibility row's `symbol` confirms the name.
+- Never take an index out of VENUE_QUOTE_UNMEASURED
+  (bot_program/engine/etoro_client.py) before its quote currency is read
+  and converted: FTSE100, CAC40, DAX40, NIKKEI225 and STOXX50 resolve (UK100
+  30, FRA40 31, GER40 32, JPN225 36, EUSTX50 43), and the entry gate refuses
+  them whatever ETORO_PROVEN holds, because the engine sizes a point of
+  price as one USD. The `index` proof on SPX500 lifts none of them.
+- Never set a commodity config live while IBKR's or Saxo's
+  is_primary_for_commodity is True and eToro's is not: the entry gate
+  refuses every order there, so the config would be enabled and dead (§6,
+  the read-only check).
+- Never read ticker "0" or a net_liquidation None as a measurement.
+- Never toggle `pipeline_asset_bots` or `broker_account_sync` to steer one
+  beat; each gates more than one walk.
+- Never re-save the eToro form with Demo ticked by accident: it ships ticked,
+  the row flips to demo, the live cells are dropped, and every save rewrites
+  all four class boxes — an unticked box is OFF.
+- Never treat the key pair as demo-only: measured 2026-09-23, the SAME pair
+  opens both worlds and the Demo tick alone picks which. Unticking it sends
+  real orders; the form refuses that flip while a live config is enabled,
+  with a class ticked on the same save, or without the trading PIN — and a
+  shell bypasses the form, which is why every demo snippet runs D1's WORLD
+  CHECK (`t.demo`, `t.ping()`, net_liquidation above 100,000).

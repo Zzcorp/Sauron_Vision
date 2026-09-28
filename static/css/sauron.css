@@ -1000,7 +1000,11 @@
             .sidebar { transform: translateX(-100%); transition: transform 0.3s; position: fixed; z-index: 1000; }
             .sidebar.open { transform: translateX(0); }
             .sidebar.mini { width: var(--sidebar-width); }
-            .main-content { margin-left: 0 !important; }
+            /* The sidebar is off-canvas on a phone, so the page takes the
+               whole width (2026-09-26). The desktop cap, 100vw minus the
+               sidebar (minus 68px when it is mini), was never lifted here:
+               a 360px screen was left a 100px column on every page. */
+            .main-content { margin-left: 0 !important; max-width: 100vw !important; }
             .topbar { padding: 0 14px; }
             .page-content { padding: 14px; }
             .grid-2,.grid-3,.grid-4,.grid-5,.grid-6,.grid-sidebar { grid-template-columns: 1fr !important; }
@@ -2289,6 +2293,34 @@
             color: var(--accent-red); border-color: var(--accent-red);
             background: color-mix(in srgb, var(--accent-red) 10%, transparent);
         }
+
+        /* ── THE VENUE CONVENTION, NAMED ONCE (2026-09-13) ──────────────
+           RED IS LIVE. MUTED IS PAPER. The two rules above already say it
+           and say why; this promotes the pair to a reusable marker so the
+           next surface does not invent a fourth spelling.
+
+           A fourth is not hypothetical — a survey on 2026-09-13 found
+           THREE conventions already running against each other: red=live
+           here and on .hq-acct--live, GOLD=live in the capital card's MODE
+           column, and /desk/ borrowing the `bearish` badge for live and
+           `medium` for paper. Three answers to one question is the same as
+           none, because the operator cannot learn any of them.
+
+           Use `sv-venue` on the LABEL, not on the value. Two reasons. The
+           value carries its own meaning already — up/down/red for a
+           negative free pool — and a live figure painted red would be
+           indistinguishable from a loss. And a whole row tinted by venue
+           shouts across the width of the card, which is exactly the
+           "paper position dressed as an alert" the comment above warns
+           against.
+
+           Deliberately NOT a background fill: this marker sits in dense
+           grids where a fill would fight the cell borders. */
+        .sv-venue {
+            font-weight: 700; letter-spacing: .04em;
+        }
+        .sv-venue--live { color: var(--accent-red); }
+        .sv-venue--paper { color: var(--text-muted); }
         /* Gold, and therefore --accent-gold-ink, not --accent-gold: this
            chip prints on a white card in light mode, where the neon gold
            has almost no contrast. */
@@ -2835,6 +2867,18 @@
             font-family: var(--font-mono); font-size: 13px; outline: none;
             transition: all 0.25s;
         }
+        /* The phone tier (2026-09-28, static/css/sv-responsive.css): iOS
+           zooms the page on focus into a field under 16px. Written here,
+           straight after the rule that sets 13px and at its weight, so it
+           lifts exactly the fields that rule sizes; a field a later rule
+           sizes on purpose (the lock screen's 19px PIN, the position
+           page's 22px PIN) keeps its size. A zero-weight floor in the
+           phone sheet could not reach these at all. */
+        @media (max-width: 768px) {
+            .form-input, .input,
+            input[type=text], input[type=password], input[type=email],
+            input[type=number], input[type=search], textarea, select { font-size: 16px; }
+        }
         .form-input:focus, .input:focus,
         input[type=text]:focus, input[type=password]:focus, input[type=email]:focus,
         input[type=number]:focus, input[type=search]:focus, textarea:focus, select:focus {
@@ -3249,7 +3293,35 @@
         --se-panel-width: calc((100vw - var(--se-left-chrome) - var(--se-right-edge)) / 2);
     }
     /* Right edge: align to right rail */
-    body:has(.signals-rail.open) { --se-right-edge: 296px; }    /* 280 + 16 */
+    /* Everywhere but the phone tier, and the breakpoint is the phone
+       tier's own (sv-responsive.css, max-width 768px) plus one, so the two
+       TOUCH.
+
+       The rail is drawn from 769px up and at no width below. Its own 768px
+       `display: none` (above) is dead — the later UPGRADE-2 `display: flex
+       !important` outranks it — but sv-responsive.css, linked after this
+       sheet, hides the rail at 768px and below with a `display: none
+       !important` of the same weight, and with it the ticker, the info
+       panel and the restore tabs that kept the rail's width clear. The
+       rail's open state is still restored from localStorage whatever the
+       width, so body:has(.signals-rail.open) matches a rail nobody can see
+       on a phone or an upright iPad; unscoped, this body-level rule would
+       hand them the 296px edge beside nothing. The phone tier states the
+       edge there itself — `--se-right-edge: 12px !important` on body,
+       which would outrank this rule in any case — and the scope keeps the
+       two from ever disagreeing. From 769px up the orb and the banner
+       stack, which reads the same edge, stand beside the open rail.
+
+       History, because the scope has moved twice: a first pass put it at
+       769px believing the rail's own hide won (it did not, and 641–768px
+       sat the orb on an open rail's watchlist); the second at 641px, one
+       over the 640px Mobile block below, while the rail was drawn at every
+       width; the 2026-09-28 phone tier made the hide win and brought it
+       back to 769px, as the second pass said it must. That Mobile block's
+       16px corner is now under the phone tier's 12px as well. */
+    @media (min-width: 769px) {
+        body:has(.signals-rail.open) { --se-right-edge: 296px; }    /* 280 + 16 */
+    }
     /* Bottom edge: sit ABOVE the info-panel with breathing room */
     body:has(.info-panel-wrap):not(.page-dashboard) {
         --se-bottom-edge: calc(60px + var(--se-fab-gap));   /* 60 panel + 18 gap */
@@ -5865,8 +5937,11 @@ table td.num, table th.num {
 /* ═══════════════════════════════════════════════════════════════════════
    STACKED TABLES (.sv-stack)
    ───────────────────────────────────────────────────────────────────────
-   Below 640px a seven-to-eleven column table cannot be a table: 304px of
-   content box divided eleven ways is 27px a column. Rather than hide the
+   At 768px and below, the phone tier of static/css/sv-responsive.css (it
+   was 640px until 2026-09-28: at 768x1024 the fourteen-column positions
+   table was 1314px wide in a 710px wrapper, measured 2026-09-27), a
+   seven-to-fourteen column table cannot be a table: 304px of content box
+   divided eleven ways is 27px a column. Rather than hide the
    columns or hand the operator a horizontal drag, each row becomes its
    own small record card — label left in the mono uppercase idiom the
    table headers already use, value right where the eye expects it.
@@ -5875,16 +5950,32 @@ table td.num, table th.num {
    per table: a stacked row with no labels is worse than a scroll, so a
    table only stacks once someone has actually named its columns.
 
-   The two Positions tables are pinned in by selector rather than by class
-   because that page's markup is owned elsewhere this wave. They are
-   matched by shape (eleven headers) and by the partial's own wrapper
-   class, so a column APPENDED to either table leaves the existing labels
-   correct; a column PREPENDED would shift them, and at that point the
-   pair below should be deleted in favour of data-label in the template.
+   The Positions analytics partial is still pinned in by selector rather
+   than by class, matched by its own wrapper class and labelled by
+   position below; a column APPENDED to it leaves the labels correct, a
+   column PREPENDED would shift them. Current Positions used to be pinned
+   the same way, by shape (eleven headers). The Capital column had already
+   put every label from the fourth on one cell out; the tick column
+   (2026-09-28, "Should I close?") moved the first three too, so on a
+   phone the checkbox read SYMBOL, BTCUSD read DIRECTION and the P&L read
+   OPENED. That table now carries .sv-stack and a data-label on each cell,
+   as this block always said it should.
+
+   THE WEIGHT. Every list below carries `.table-wrapper table.sv-stack:has(
+   th:nth-child(1))`, which matches nothing `.sv-stack` does not already
+   match and is there for its specificity alone. :is() takes the weight of
+   its MOST specific argument, whichever one matched, and the pinned
+   Current Positions selector was (0,3,2) — the exact weight of the 34rem
+   runway `.table-wrapper .sv-perf-table:has(thead th:nth-child(6))`,
+   which the stack then beat by being written later. Removing that
+   selector alone dropped every stacked table on the platform to (0,1,1):
+   the runway won, and a stacked table kept a 544px floor inside a 390px
+   screen. The argument that replaced it holds the same (0,3,2), so order
+   decides again, as test_card_responsiveness pins it to.
    ═══════════════════════════════════════════════════════════════════════ */
-@media (max-width: 640px) {
+@media (max-width: 768px) {
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) {
         display: block;
         min-width: 0;
@@ -5892,7 +5983,7 @@ table td.num, table th.num {
     /* Visually hidden, not display:none — the header text is still the
        accessible name for each cell in the a11y tree. */
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) thead {
         position: absolute;
         width: 1px; height: 1px;
@@ -5901,11 +5992,11 @@ table td.num, table th.num {
         white-space: nowrap;
     }
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody { display: block; }
 
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody tr {
         display: block;
         margin-bottom: 10px;
@@ -5915,11 +6006,11 @@ table td.num, table th.num {
         background: color-mix(in srgb, var(--bg-card-hover, var(--bg-card)) 30%, transparent);
     }
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody tr:last-child { margin-bottom: 0; }
 
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody td {
         display: grid;
         grid-template-columns: minmax(0, 10ch) minmax(0, 1fr);
@@ -5934,11 +6025,11 @@ table td.num, table th.num {
         max-width: none;
     }
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody td:last-child { border-bottom: none; }
 
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody td::before {
         font-family: var(--font-mono);
         font-size: 9.5px;
@@ -5955,25 +6046,8 @@ table td.num, table th.num {
     /* Numerics keep their tabular figures but drop the right edge: in a
        one-value-per-line layout there is no column left to align to. */
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody td.num { text-align: left; }
-
-    /* Positions — Current Positions (11 columns). */
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(1)::before { content: "Symbol"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(2)::before { content: "Direction"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(3)::before { content: "Qty"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(4)::before { content: "Entry"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(5)::before { content: "Current"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(6)::before { content: "Stop"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(7)::before { content: "Target"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(8)::before { content: "P&L"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(9)::before { content: "P&L %"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(10)::before { content: "Strategy"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(11)::before { content: "Opened"; }
-    /* Anything appended past the eleven is an action, not a field. */
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(n+12) {
-        grid-template-columns: minmax(0, 1fr);
-    }
 
     /* Positions — the htmx analytics partial (6 columns). */
     .positions-metrics table td:nth-child(1)::before { content: "Symbol"; }
@@ -7305,6 +7379,19 @@ body.light-mode .gollum-fab .gl-lid { fill: var(--bg-elev); }
     border-right: 1px solid var(--border);
 }
 .tk-k { font-size: 8.5px; letter-spacing: .16em; color: var(--text-muted); }
+/* THE VENUE, above the spread. The manual lane is armed per asset class, so
+   the LONG button here can move real money while the identical button on the
+   next instrument simulates. LIVE is the loud one on purpose: paper is the
+   safe default and needs no attention, real money does. */
+.tk-venue {
+    font-size: 8.5px; letter-spacing: .14em; font-weight: 600;
+    padding: 1px 5px; border-radius: 2px; line-height: 1.4;
+}
+.tk-venue--paper { color: var(--text-muted); border: 1px solid var(--border); }
+.tk-venue--live {
+    color: var(--accent-red); border: 1px solid var(--accent-red);
+    background: color-mix(in srgb, var(--accent-red) 12%, transparent);
+}
 .tk-v { font-size: 11px; color: var(--text-secondary); }
 /* A quote too old to trade on stops claiming a price. The buttons stay
    visible and stay clickable — the ticket prices at execution, not off

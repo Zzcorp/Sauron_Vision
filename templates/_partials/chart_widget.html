@@ -9,7 +9,11 @@ Parameters:
   timeframe  — initial timeframe: 1d, 1w, 1m, 3m, 1y (default: 1d)
 Optional page data (json_script blocks the widget picks up when present):
   <chart_id>-positions — [{id, source, side, entry, stop, tp, qty, opened_at, label}]
-  <chart_id>-signals   — [{id, price, at, direction, label}]
+  <chart_id>-signals   — [{id, price, at, direction, label} plus each dot's
+                          card: rule, type, urgency, score, at_text,
+                          price_at(_text), entry/stop/target(_text),
+                          rr(_text), active, outcome(_text), realized_r]
+                          (dashboard.views._chart_signal_marks)
 {% endcomment %}
 {% load static %}
 
@@ -307,6 +311,206 @@ Optional page data (json_script blocks the widget picks up when present):
 @media (prefers-reduced-motion: reduce) {
     .sv-chart-loading-overlay span { animation: none; opacity: 0.6; }
 }
+/* ── Signal dots: the key under the chart, the card over it ────────────
+   (2026-09-27) Theme tokens only, so the card is the site's card in both
+   themes. --sv-sig-tone is the signal's side: green buy, red sell, the
+   secondary text tone for a neutral one. The four sv-sig-s0..s3 steps are
+   the dots' own (window.svSignalDots.STEPS): size and intensity climb
+   together, so the key reads the way the chart does. */
+.sv-sig-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    margin-top: 6px;
+    padding: 0 2px;
+    font-family: var(--font-mono, monospace);
+    font-size: 10px;
+    letter-spacing: .04em;
+    color: var(--text-secondary, #7aaa8a);
+}
+.sv-sig-legend[hidden] { display: none; }
+.sv-sig-legend-title { color: var(--text-primary, #daf0e6); }
+.sv-sig-key { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.sv-sig-sep { color: var(--text-muted, #3a6850); }
+.sv-sig-sw {
+    display: inline-block;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: var(--accent, #00e868);
+}
+.sv-sig-sw--bear { background: var(--accent-red, #e83030); }
+.sv-sig-sw.sv-sig-s0 { width: 6px;  height: 6px;  opacity: .4; }
+.sv-sig-sw.sv-sig-s1 { width: 8px;  height: 8px;  opacity: .65; }
+.sv-sig-sw.sv-sig-s2 { width: 10px; height: 10px; opacity: .85; }
+.sv-sig-sw.sv-sig-s3 { width: 12px; height: 12px; opacity: 1; }
+.sv-sig-legend-dir { margin-left: auto; }
+.sv-sig-up { color: var(--accent, #00e868); }
+.sv-sig-down { color: var(--accent-red, #e83030); }
+/* The card. Absolute inside the container, which is the chart's box and
+   clips — the widget places it beside its dot and clamps it inside every
+   time it is shown; max-width / max-height keep it in on a narrow phone. */
+.sv-sig-card {
+    --sv-sig-tone: var(--text-secondary, #7aaa8a);
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 7;
+    box-sizing: border-box;
+    width: 252px;
+    max-width: calc(100% - 12px);
+    max-height: calc(100% - var(--sv-toolbar-h, 36px) - 12px);
+    overflow: auto;
+    padding: 10px 12px 9px;
+    background: var(--bg-card, #0a1a14);
+    color: var(--text-primary, #daf0e6);
+    border: 1px solid var(--border, #133020);
+    border-left: 3px solid var(--sv-sig-tone);
+    border-radius: var(--radius-md, 8px);
+    box-shadow: var(--shadow-card, 0 2px 20px rgba(0, 0, 0, .5));
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    line-height: 1.45;
+    /* The card never takes the pointer, hovered or pinned: it sits beside
+       the newest bars, where recent signals cluster, and it would steal
+       the crosshair and the clicks from the dots underneath it. A click or
+       a tap on it reaches the chart — another dot pins that one, anywhere
+       else closes the card. Only the pinned card's close button takes the
+       pointer (below). */
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(3px);
+    transition: opacity .12s ease, transform .12s ease;
+}
+.sv-sig-card[hidden] { display: none; }
+.sv-sig-card.on { opacity: 1; transform: none; }
+.sv-sig-card.is-pinned {
+    border-color: color-mix(in srgb, var(--sv-sig-tone) 55%, var(--border, #133020));
+    border-left-color: var(--sv-sig-tone);
+}
+.sv-sig-card.is-pinned .sv-sig-close { pointer-events: auto; }
+.sv-sig-card--bull { --sv-sig-tone: var(--accent, #00e868); }
+.sv-sig-card--bear { --sv-sig-tone: var(--accent-red, #e83030); }
+.sv-sig-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.sv-sig-side {
+    flex: 0 0 auto;
+    padding: 1px 7px;
+    border: 1px solid var(--sv-sig-tone);
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--sv-sig-tone) 14%, transparent);
+    color: var(--sv-sig-tone);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .1em;
+}
+.sv-sig-rule {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-heading, var(--font-mono, monospace));
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary, #daf0e6);
+}
+.sv-sig-close {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    margin: -8px -8px -8px 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-md, 8px);
+    background: transparent;
+    color: var(--text-secondary, #7aaa8a);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+}
+.sv-sig-close:hover,
+.sv-sig-close:focus-visible {
+    color: var(--text-primary, #daf0e6);
+    background: color-mix(in srgb, var(--text-primary, #daf0e6) 8%, transparent);
+}
+.sv-sig-score { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.sv-sig-meter {
+    flex: 1 1 auto;
+    height: 6px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--text-muted, #3a6850) 30%, transparent);
+}
+.sv-sig-meter > i { display: block; height: 100%; border-radius: inherit; background: var(--sv-sig-tone); }
+.sv-sig-s0 .sv-sig-meter > i { opacity: .45; }
+.sv-sig-s1 .sv-sig-meter > i { opacity: .65; }
+.sv-sig-s2 .sv-sig-meter > i { opacity: .85; }
+.sv-sig-pct { font-weight: 700; color: var(--text-primary, #daf0e6); font-variant-numeric: tabular-nums; }
+.sv-sig-strength {
+    color: var(--sv-sig-tone);
+    font-size: 9px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.sv-sig-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; margin: 0; }
+.sv-sig-facts > div { display: contents; }
+.sv-sig-facts dt { color: var(--text-secondary, #7aaa8a); }
+.sv-sig-facts dd {
+    margin: 0;
+    text-align: right;
+    color: var(--text-primary, #daf0e6);
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+}
+.sv-sig-levels {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    margin: 8px 0 7px;
+    padding: 7px 0;
+    border-top: 1px dashed var(--border, #133020);
+    border-bottom: 1px dashed var(--border, #133020);
+}
+.sv-sig-level { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.sv-sig-level > span {
+    font-size: 9px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--text-secondary, #7aaa8a);
+}
+.sv-sig-level > b {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+.sv-sig-level--entry > b { color: var(--accent-gold-ink, #d8b020); }
+.sv-sig-level--stop > b { color: var(--accent-red, #e83030); }
+.sv-sig-level--target > b { color: var(--accent, #00e868); }
+.sv-sig-status { display: flex; flex-wrap: wrap; gap: 5px; }
+.sv-sig-chip {
+    padding: 1px 7px;
+    border: 1px solid var(--border, #133020);
+    border-radius: 3px;
+    font-size: 10px;
+    color: var(--text-secondary, #7aaa8a);
+}
+.sv-sig-chip--live,
+.sv-sig-chip--win {
+    color: var(--accent, #00e868);
+    border-color: color-mix(in srgb, var(--accent, #00e868) 45%, transparent);
+    background: color-mix(in srgb, var(--accent, #00e868) 8%, transparent);
+}
+.sv-sig-chip--loss {
+    color: var(--accent-red, #e83030);
+    border-color: color-mix(in srgb, var(--accent-red, #e83030) 45%, transparent);
+    background: color-mix(in srgb, var(--accent-red, #e83030) 8%, transparent);
+}
+.sv-sig-foot { margin-top: 7px; font-size: 10px; color: var(--text-secondary, #7aaa8a); }
+@media (prefers-reduced-motion: reduce) {
+    .sv-sig-card { transition: none; transform: none; }
+}
 </style>
 
 <div class="sv-candle-container" id="{{ chart_id }}-container" style="height: {{ height }}px;" tabindex="0" aria-label="{{ symbol }} price chart">
@@ -447,6 +651,11 @@ Optional page data (json_script blocks the widget picks up when present):
     <!-- Bar-close countdown (intraday only) -->
     <div class="sv-chart-countdown" id="{{ chart_id }}-countdown" aria-live="off"></div>
 
+    {% comment %}The signal dot's card (2026-09-27): filled and placed by
+    the widget (window.svSignalDots.card / .place). Inside the container,
+    so its box is the chart's and the expand portal takes it along.{% endcomment %}
+    <div class="sv-sig-card" id="{{ chart_id }}-sig-card" aria-live="polite" hidden></div>
+
     <!-- Loading overlay -->
     <div class="sv-chart-loading-overlay" id="{{ chart_id }}-loading">
         <div style="text-align:center;">
@@ -465,6 +674,22 @@ Optional page data (json_script blocks the widget picks up when present):
     </div>
 </div>
 
+{% comment %}The signal dots' key, under the chart (2026-09-27). Outside the
+container on purpose: inside it would take a row from the canvas, whose
+height layout() owns. Hidden until the widget draws a dot, so a chart
+without signals carries no key for nothing.{% endcomment %}
+<div class="sv-sig-legend" id="{{ chart_id }}-sig-legend" hidden>
+    <span class="sv-sig-legend-title">Signal strength:</span>
+    <span class="sv-sig-key"><i class="sv-sig-sw sv-sig-s0" aria-hidden="true"></i><i class="sv-sig-sw sv-sig-sw--bear sv-sig-s0" aria-hidden="true"></i> weak</span>
+    <span class="sv-sig-sep" aria-hidden="true">·</span>
+    <span class="sv-sig-key"><i class="sv-sig-sw sv-sig-s1" aria-hidden="true"></i><i class="sv-sig-sw sv-sig-sw--bear sv-sig-s1" aria-hidden="true"></i> medium</span>
+    <span class="sv-sig-sep" aria-hidden="true">·</span>
+    <span class="sv-sig-key"><i class="sv-sig-sw sv-sig-s2" aria-hidden="true"></i><i class="sv-sig-sw sv-sig-sw--bear sv-sig-s2" aria-hidden="true"></i> strong</span>
+    <span class="sv-sig-sep" aria-hidden="true">·</span>
+    <span class="sv-sig-key"><i class="sv-sig-sw sv-sig-s3" aria-hidden="true"></i><i class="sv-sig-sw sv-sig-sw--bear sv-sig-s3" aria-hidden="true"></i> very strong</span>
+    <span class="sv-sig-legend-dir"><span class="sv-sig-up">▲ green buy</span> · <span class="sv-sig-down">▼ red sell</span> · hover or tap a dot for its details</span>
+</div>
+
 <!-- Lightweight Charts library (loaded once globally) -->
 <script>
 (function() {
@@ -476,6 +701,332 @@ Optional page data (json_script blocks the widget picks up when present):
         document.dispatchEvent(new CustomEvent('sv:lwcharts:ready'));
     };
     document.head.appendChild(s);
+})();
+</script>
+
+<script>
+/* ── Signal dots: the pure half of the chart's signal layer ─────────────
+   (2026-09-27) The operator: the instrument charts "need a lifting too,
+   for the signals appearance, maybe add a dot with some hover details on
+   it, different colors depending on strength".
+
+   Every function here is a function of its arguments alone: no DOM, no
+   chart it was not handed. So a node test drives the marker builder and
+   the hit test with a fake chart, and the inline-JS parse guard reaches
+   this block (it carries no template tags on purpose). The widget below
+   does the wiring. Defined once per page; a second widget reuses it. */
+(function () {
+    if (window.svSignalDots) return;
+
+    /* Strength, in four steps of the signal's score (0..1): a dot's size
+       and its colour's intensity climb together, so a small faint dot and
+       a large bright one read as "weak" and "very strong" before any
+       hover. The thresholds are the key's under the chart. */
+    var STEPS = [
+        { key: 'weak',        word: 'weak',        min: 0,    alpha: 0.4,  size: 0.6 },
+        { key: 'medium',      word: 'medium',      min: 0.6,  alpha: 0.65, size: 0.9 },
+        { key: 'strong',      word: 'strong',      min: 0.75, alpha: 0.85, size: 1.25 },
+        { key: 'very_strong', word: 'very strong', min: 0.9,  alpha: 1,    size: 1.7 }
+    ];
+    var SIDE_WORDS = { bull: 'BUY', bear: 'SELL', neutral: 'NEUTRAL' };
+    var DASH = '—';
+
+    /* The score as 0..1, or null when there is none. Clamped: a score is a
+       conviction, and a value outside the scale must not draw a dot bigger
+       than the biggest step or a bar wider than its track. */
+    function score01(v) {
+        var n = (typeof v === 'number') ? v : parseFloat(v);
+        if (!isFinite(n)) return null;
+        return Math.max(0, Math.min(1, n));
+    }
+
+    /* The score as the WHOLE percent the card prints, floored: a 0.599 is
+       59%, never a rounded-up 60% sitting beside the word "weak". The
+       step is read from this same number, so one printed percent always
+       carries one word, one size and one intensity. The epsilon keeps a
+       float product like 0.57 * 100 = 56.999... on 57. */
+    function percent(score) {
+        var s = score01(score);
+        return s === null ? null : Math.floor(s * 100 + 1e-9);
+    }
+
+    /* A missing score is the weakest step, never a guess upward. */
+    function step(score) {
+        var p = percent(score), i = 0;
+        if (p !== null) {
+            for (var k = STEPS.length - 1; k >= 0; k--) {
+                if (p >= Math.round(STEPS[k].min * 100)) { i = k; break; }
+            }
+        }
+        var st = STEPS[i];
+        return { index: i, key: st.key, word: st.word,
+                 alpha: st.alpha, size: st.size };
+    }
+
+    function tone(direction) {
+        var d = String(direction || '').toLowerCase();
+        if (d === 'bullish' || d === 'long' || d === 'buy') return 'bull';
+        if (d === 'bearish' || d === 'short' || d === 'sell') return 'bear';
+        return 'neutral';
+    }
+
+    /* The markers for one paint, one circle per signal on the bar that
+       CONTAINS its time. `opts.place(bars, epoch)` is the widget's own
+       nearestBarTime, so a dot lands where the position arrows would; a
+       signal from before the loaded range is left out, not clamped onto
+       the first bar. A buy sits under its bar with a small arrow up, a
+       sell over it with an arrow down, a neutral one on the bar. Returns
+       the marker and what the hover needs, per drawn signal. */
+    function build(signals, bars, opts) {
+        var out = [];
+        (signals || []).forEach(function (s) {
+            if (!s || typeof s !== 'object') return;
+            var t = opts.place(bars, s.at);
+            if (t === null || t === undefined) return;
+            var tn = tone(s.direction), st = step(s.score);
+            var base = opts.colors[tn] || opts.colors.neutral;
+            out.push({
+                id: s.id, time: t, sig: s, tone: tn, step: st,
+                marker: {
+                    time: t,
+                    position: tn === 'bull' ? 'belowBar'
+                            : tn === 'bear' ? 'aboveBar' : 'inBar',
+                    shape: 'circle',
+                    color: opts.alpha ? opts.alpha(base, st.alpha) : base,
+                    size: st.size,
+                    text: tn === 'bull' ? '▲' : tn === 'bear' ? '▼' : '',
+                    id: 'sv-sig-' + s.id
+                }
+            });
+        });
+        return out;
+    }
+
+    function sameBar(dots, dot) {
+        var n = 0;
+        (dots || []).forEach(function (d) {
+            if (d !== dot && d.time === dot.time) n++;
+        });
+        return n;
+    }
+
+    /* Which dot the pointer is on. lightweight-charts' own answer first
+       (the marker's id under the pointer: `byObject`); otherwise by BAR —
+       the pointer's x against each dot's bar, within half a bar and never
+       less than a fingertip (10px), so a thin bar on a zoomed-out chart
+       still answers and a tap on a phone need not be pixel-exact. The
+       nearest wins; on one bar, the strongest (see `cycle` for the
+       others). `ts` is the chart's time scale, or a fake with
+       timeToCoordinate() and options(). */
+    function hitTest(dots, x, ts, objectId) {
+        if (!dots || !dots.length || !ts) return null;
+        var xs = [], i, best = -1;
+        for (i = 0; i < dots.length; i++) {
+            var cx = null;
+            try { cx = ts.timeToCoordinate(dots[i].time); } catch (e) { cx = null; }
+            xs.push((typeof cx === 'number' && isFinite(cx)) ? cx : null);
+        }
+        var hasX = typeof x === 'number' && isFinite(x);
+        var spacing = 6;
+        try {
+            var o = ts.options ? ts.options() : null;
+            if (o && o.barSpacing > 0) spacing = o.barSpacing;
+        } catch (e) {}
+        var tol = Math.max(10, spacing / 2 + 2);
+        /* The library records the marker under the pointer AFTER its
+           crosshair listeners have run, so a move carries the marker of
+           the move before it: a pointer that jumped off a dot still names
+           that dot once. A named dot farther than a big marker's reach
+           (20px, or the bar's) is that stale name — the bar test answers. */
+        if (objectId !== undefined && objectId !== null) {
+            for (i = 0; i < dots.length; i++) {
+                if (xs[i] !== null && dots[i].marker
+                    && dots[i].marker.id === objectId
+                    && (!hasX || Math.abs(xs[i] - x) <= Math.max(tol, 20))) {
+                    best = i; break;
+                }
+            }
+        }
+        var byObject = best >= 0;
+        if (best < 0) {
+            if (!hasX) return null;
+            var bestDist = Infinity, bestScore = -1;
+            for (i = 0; i < dots.length; i++) {
+                if (xs[i] === null) continue;
+                var dist = Math.abs(xs[i] - x);
+                if (dist > tol) continue;
+                var sc = score01(dots[i].sig && dots[i].sig.score);
+                if (sc === null) sc = 0;
+                if (dist < bestDist - 0.5
+                    || (Math.abs(dist - bestDist) <= 0.5 && sc > bestScore)) {
+                    best = i; bestDist = dist; bestScore = sc;
+                }
+            }
+        }
+        if (best < 0) return null;
+        return { dot: dots[best], x: xs[best], others: sameBar(dots, dots[best]),
+                 byObject: byObject };
+    }
+
+    /* The signals of `dot`'s bar, strongest first (ties keep their order). */
+    function barDots(dots, dot) {
+        var on = [];
+        (dots || []).forEach(function (d, i) {
+            if (d.time === dot.time) on.push({ d: d, i: i });
+        });
+        on.sort(function (a, b) {
+            var sa = score01(a.d.sig && a.d.sig.score), sb = score01(b.d.sig && b.d.sig.score);
+            sa = sa === null ? 0 : sa; sb = sb === null ? 0 : sb;
+            return (sb - sa) || (a.i - b.i);
+        });
+        return on.map(function (o) { return o.d; });
+    }
+
+    /* Two signals on ONE bar, and no marker id from the library (a tap on
+       a phone, a click beside the dots): each click on that bar pins the
+       next of them, strongest first, round again after the last — so a
+       weaker signal under a stronger one is always reachable. `dot` is
+       what the hit test found there; `pinnedId` the signal pinned now. */
+    function cycle(dots, dot, pinnedId) {
+        if (!dot) return dot;
+        var on = barDots(dots, dot);
+        for (var i = 0; i < on.length; i++) {
+            if (on[i].id === pinnedId) return on[(i + 1) % on.length];
+        }
+        return dot;
+    }
+
+    /* The pointer on the pinned signal's bar with no marker id: the card
+       shows the pinned signal — the one whose levels are drawn — not the
+       strongest of that bar. A hit the library named stays as it is. */
+    function prefer(dots, hit, pinnedId) {
+        if (!hit || hit.byObject || pinnedId === null || pinnedId === undefined) return hit;
+        if (hit.dot.id === pinnedId) return hit;
+        var on = barDots(dots, hit.dot);
+        for (var i = 0; i < on.length; i++) {
+            if (on[i].id === pinnedId) {
+                return { dot: on[i], x: hit.x, others: hit.others, byObject: false };
+            }
+        }
+        return hit;
+    }
+
+    var ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    function esc(v) {
+        return String(v === null || v === undefined ? '' : v)
+            .replace(/[&<>"']/g, function (ch) { return ESC[ch]; });
+    }
+    /* A server string, escaped; an empty one is the dash, never "". */
+    function text(v) {
+        var s = (v === null || v === undefined) ? '' : String(v);
+        return s ? esc(s) : DASH;
+    }
+    function fact(label, value) {
+        return '<div><dt>' + label + '</dt><dd>' + text(value) + '</dd></div>';
+    }
+    function level(cls, label, value) {
+        return '<span class="sv-sig-level sv-sig-level--' + cls + '"><span>'
+            + label + '</span><b>' + text(value) + '</b></span>';
+    }
+    function hasLevels(sig) {
+        return ['entry', 'stop', 'target'].some(function (k) {
+            return typeof sig[k] === 'number' && isFinite(sig[k]);
+        });
+    }
+    function outcomeTone(sig) {
+        var r = (typeof sig.realized_r === 'number') ? sig.realized_r : null;
+        if (sig.outcome === 'hit_target' || (r !== null && r > 0)) return 'win';
+        if (sig.outcome === 'stopped_out' || (r !== null && r < 0)) return 'loss';
+        return 'flat';
+    }
+
+    function cardClass(sig, pinned) {
+        return 'sv-sig-card sv-sig-card--' + tone(sig && sig.direction)
+            + (pinned ? ' is-pinned' : '');
+    }
+
+    /* The card's markup. Every string that came from the server goes
+       through text()/esc(); the numbers are computed here. */
+    function card(sig, opts) {
+        sig = sig || {};
+        opts = opts || {};
+        var tn = tone(sig.direction), st = step(sig.score);
+        var pct = percent(sig.score);
+        var others = Math.max(0, parseInt(opts.others, 10) || 0);
+        var h = [];
+        h.push('<div class="sv-sig-head">'
+            + '<span class="sv-sig-side">' + SIDE_WORDS[tn] + '</span>'
+            + '<span class="sv-sig-rule">' + text(sig.rule || sig.label) + '</span>'
+            + (opts.pinned
+                ? '<button type="button" class="sv-sig-close" data-sv-sig-close'
+                  + ' aria-label="Close the signal card" title="Close">×</button>'
+                : '')
+            + '</div>');
+        h.push('<div class="sv-sig-score sv-sig-s' + st.index + '">'
+            + '<span class="sv-sig-meter" aria-hidden="true"><i style="width:'
+            + (pct === null ? 0 : pct) + '%"></i></span>'
+            + '<b class="sv-sig-pct">' + (pct === null ? DASH : pct + '%') + '</b>'
+            + '<span class="sv-sig-strength">' + esc(st.word) + '</span>'
+            + '</div>');
+        h.push('<dl class="sv-sig-facts">'
+            + fact('Signalled', sig.at_text)
+            + fact('Price then', sig.price_at_text)
+            + fact('Reward to risk', sig.rr_text)
+            + '</dl>');
+        h.push('<div class="sv-sig-levels">'
+            + level('entry', 'Entry', sig.entry_text)
+            + level('stop', 'Stop', sig.stop_text)
+            + level('target', 'Target', sig.target_text)
+            + '</div>');
+        var status;
+        if (sig.active) {
+            status = '<span class="sv-sig-chip sv-sig-chip--live">● Active</span>'
+                + (sig.urgency ? '<span class="sv-sig-chip">' + esc(sig.urgency) + '</span>' : '');
+        } else if (sig.outcome_text) {
+            status = '<span class="sv-sig-chip sv-sig-chip--' + outcomeTone(sig) + '">'
+                + esc(sig.outcome_text) + '</span>';
+        } else {
+            status = '<span class="sv-sig-chip">No longer active</span>';
+        }
+        h.push('<div class="sv-sig-status">' + status + '</div>');
+        var foot = [];
+        if (sig.type) foot.push(esc(sig.type) + ' signal');
+        if (others) {
+            foot.push('+' + others + (others === 1 ? ' more signal' : ' more signals')
+                + ' on this bar'
+                + (opts.pinned ? ': click or tap the bar again for the next' : ''));
+        }
+        if (hasLevels(sig)) {
+            foot.push(opts.pinned ? 'Entry, stop and target drawn on the chart'
+                                  : 'Click or tap the dot to draw its levels');
+        }
+        if (foot.length) h.push('<div class="sv-sig-foot">' + foot.join(' · ') + '</div>');
+        return h.join('');
+    }
+
+    /* Where the card goes: beside its dot (right of it, or left when the
+       right would spill), centred on the pointer's height, and ALWAYS
+       inside the box — `box` is the container ({width, height, top: where
+       the canvas starts, under the toolbar}), `anchor` the dot in the
+       container's pixels, `size` the card's measured box. The CSS caps
+       the card at the box, so the clamp can always be met. */
+    function place(box, anchor, size) {
+        var pad = 6, gap = 14;
+        var W = box.width, H = box.height, T = box.top || 0;
+        var w = size.w, h = size.h;
+        var left = anchor.x + gap;
+        if (left + w > W - pad) left = anchor.x - gap - w;
+        left = Math.max(pad, Math.min(left, W - pad - w));
+        var top = anchor.y - h / 2;
+        top = Math.max(T + pad, Math.min(top, H - pad - h));
+        return { left: Math.round(left), top: Math.round(top) };
+    }
+
+    window.svSignalDots = {
+        STEPS: STEPS, percent: percent, step: step, tone: tone, build: build,
+        sameBar: sameBar, hitTest: hitTest, cycle: cycle, prefer: prefer,
+        card: card, cardClass: cardClass, place: place, esc: esc
+    };
 })();
 </script>
 
@@ -498,6 +1049,8 @@ Optional page data (json_script blocks the widget picks up when present):
     var countdownEl = document.getElementById(CHART_ID + '-countdown');
     var loadingEl   = document.getElementById(CHART_ID + '-loading');
     var errorEl     = document.getElementById(CHART_ID + '-error');
+    var sigCardEl   = document.getElementById(CHART_ID + '-sig-card');
+    var sigLegendEl = document.getElementById(CHART_ID + '-sig-legend');
 
     if (!container || !canvasEl) return;
 
@@ -579,6 +1132,9 @@ Optional page data (json_script blocks the widget picks up when present):
                                 isDark ? 0.9 : 0.7),
             border:       token('--border', isDark ? '#133020' : '#c0d0c0'),
             text:         token('--text-muted', isDark ? '#3a6850' : '#8aaa8a'),
+            /* A neutral signal's dot: neither the buy green nor the sell
+               red, and readable on both grounds. */
+            neutral:      token('--text-secondary', isDark ? '#7aaa8a' : '#4a6a4a'),
         };
     }
     function indicatorTone(key, c) {
@@ -693,6 +1249,13 @@ Optional page data (json_script blocks the widget picks up when present):
     var posLines     = [];     // price lines belonging to positions
     var syncing      = false;  // guard against range ping-pong between panes
     var countdownTimer = null;
+    /* The signal layer (2026-09-27): the dots drawn on this paint, the dot
+       under the pointer, the pinned one and the dashed levels it drew. */
+    var sigDots      = [];     // [{id, time, sig, tone, step, marker}]
+    var sigHover     = null;   // {hit, y} while the pointer is on a dot
+    var sigPin       = null;   // {id, y} after a click (a tap) on a dot
+    var sigLines     = [];     // the pinned signal's Entry / Stop / Target
+    var sigCardKey   = '';     // what the card shows, so a move does not re-render it
 
     /* The operator's own lines on this instrument, as data rather than as
        chart handles — a lightweight-charts price line cannot be asked what
@@ -1122,11 +1685,24 @@ Optional page data (json_script blocks the widget picks up when present):
 
         applyLogScale();
 
+        /* The signal dots' card (see onSignalHover) listens FIRST. A throw
+           inside the library's listener loop skips every listener after
+           it and ends the crosshair update. The legend below threw on
+           every daily bar until 2026-09-27 (its 'YYYY-MM-DD' time read as
+           epoch seconds; fixed in onCrosshair), and the card must never
+           again depend on a handler it does not own. */
+        chart.subscribeCrosshairMove(onSignalHover);
+
         // Crosshair legend
         chart.subscribeCrosshairMove(onCrosshair);
 
         // Click handler for drawing tools
         chart.subscribeClick(onChartClick);
+
+        /* The dots' click (a tap) and the scroll that moves them: their
+           own subscriptions, the drawing tools keep theirs as they were. */
+        chart.subscribeClick(onSignalClick);
+        chart.timeScale().subscribeVisibleLogicalRangeChange(onSignalRange);
 
         /* Every pane follows the main chart's viewport and vice versa:
            a zoom anywhere moves all of them. */
@@ -1630,6 +2206,14 @@ Optional page data (json_script blocks the widget picks up when present):
         if (!bars.length || typeof epoch !== 'number' || !isFinite(epoch)) return null;
         var first = barEpoch(bars[0].time), last = barEpoch(bars[bars.length - 1].time);
         if (epoch < first) return null; /* opened before the loaded range: nowhere honest to put it */
+        /* ...and past the last bar's CLOSE, the same. The last bar holds
+           an instant only while it forms: on the daily default the
+           newest bar is the previous session's until the EOD fetch at
+           22:30 UTC, and clamping onto it put every signal fired today,
+           and every position opened today, on yesterday's candle — one
+           session before it happened, under a card that printed today
+           (2026-09-28). */
+        if (epoch >= last + barSpan(bars)) return null;
         if (epoch >= last) return bars[bars.length - 1].time;
         var lo = 0, hi = bars.length - 1;
         while (lo < hi) {
@@ -1642,6 +2226,16 @@ Optional page data (json_script blocks the widget picks up when present):
            late — on a chart, a day is a lie. */
         if (barEpoch(bars[lo].time) === epoch) return bars[lo].time;
         return bars[Math.max(0, lo - 1)].time;
+    }
+    /* How long a bar of this series holds, in seconds: a day for a
+       daily-family bar (a 'YYYY-MM-DD' string, or the library's
+       {year, month, day} — every daily range draws daily candles), the
+       frame's seconds for an intraday one. A frame with no known width
+       holds nothing past its open. */
+    function barSpan(bars) {
+        var t = bars[bars.length - 1].time;
+        if (typeof t === 'string' || (t && t.year)) return 86400;
+        return TF_SECONDS[currentTf] || 0;
     }
     /* The count the SERVER decided, passed in by the including page —
        it is the only side that knows the asset class, and forex needs
@@ -1713,21 +2307,222 @@ Optional page data (json_script blocks the widget picks up when present):
                     });
                 }
             });
-            SIGNALS.forEach(function (s) {
-                var t = nearestBarTime(bars, s.at);
-                if (t === null) return;
-                var bull = s.direction === 'bullish' || s.direction === 'long' || s.direction === 'buy';
-                markers.push({
-                    time: t, position: 'inBar', shape: 'circle', size: 0.6,
-                    color: bull ? c.accentWash : c.redDim,
-                    text: String(s.label || '') + ' ' + fmtPrice(s.price),
-                });
-            });
+            /* The signals as dots (2026-09-27): colour by side, size and
+               intensity by strength — window.svSignalDots.build. Re-built
+               on every paint like everything else here, so they survive
+               each setData. */
+            sigDots = signalDots(bars, c);
+            sigDots.forEach(function (d) { markers.push(d.marker); });
+        } else {
+            sigDots = [];
         }
         /* lightweight-charts wants markers ascending by time; two on the
            same bar are fine, out-of-order ones throw. */
         markers.sort(function (a, b) { return barEpoch(a.time) - barEpoch(b.time); });
         try { mainSeries.setMarkers(markers); } catch (e) {}
+        syncSignalFocus();
+    }
+
+    // ── Signal dots: the card on hover, the levels on a click ────────────
+    /* (2026-09-27) The operator: "the assets details pages graphs need a
+       lifting too, for the signals appearance, maybe add a dot with some
+       hover details on it, different colors depending on strength".
+
+       The pure half — the four strength steps, the colours, the hit test,
+       the card's markup and where the card may go — is window.svSignalDots,
+       in the plain script above this one, so a node test drives it with a
+       fake chart. This is the wiring.
+
+       Hover shows a card. A click (a tap, on a phone) PINS it and draws the
+       signal's entry, stop and target as dashed lines. A click that is not
+       on a dot, or the card's close button, un-pins it and takes the lines
+       away; clicking another dot moves both — the card lets every click
+       through to the chart, so a dot under it is still another dot. Two
+       signals on one bar: the library's marker id picks the one under the
+       mouse; without it, each click on the bar pins the next of them. The
+       drawing tools keep their clicks: with any tool but the crosshair
+       armed, a click is theirs. */
+    function sigApi() { return window.svSignalDots || null; }
+
+    function signalDots(bars, c) {
+        var api = sigApi();
+        if (!api) return [];
+        return api.build(SIGNALS, bars, {
+            colors: { bull: c.accent, bear: c.red, neutral: c.neutral },
+            alpha: c.alpha,
+            place: nearestBarTime,
+        });
+    }
+
+    function pinnedDot() {
+        if (!sigPin) return null;
+        for (var i = 0; i < sigDots.length; i++) {
+            if (sigDots[i].id === sigPin.id) return sigDots[i];
+        }
+        return null;
+    }
+
+    function clearSignalLevels() {
+        sigLines.forEach(function (pl) {
+            try { mainSeries.removePriceLine(pl); } catch (e) {}
+        });
+        sigLines = [];
+    }
+
+    /* Dashed and titled in words, so they never read as a position's own
+       solid entry line or its SL / TP. */
+    function drawSignalLevels(sig) {
+        clearSignalLevels();
+        if (!mainSeries || !sig) return;
+        var c = getThemeColors();
+        [['entry', 'Entry', c.gold], ['stop', 'Stop', c.red],
+         ['target', 'Target', c.accent]].forEach(function (lv) {
+            var p = sig[lv[0]];
+            if (typeof p !== 'number' || !isFinite(p)) return;
+            try {
+                sigLines.push(mainSeries.createPriceLine({
+                    price: p, color: lv[2], lineWidth: 1,
+                    lineStyle: LightweightCharts.LineStyle.Dashed,
+                    axisLabelVisible: true, title: lv[1],
+                }));
+            } catch (e) { /* a level this series will not take is not drawn */ }
+        });
+    }
+
+    function hideSignalCard() {
+        if (!sigCardEl) return;
+        sigCardEl.classList.remove('on');
+        sigCardEl.hidden = true;
+        sigCardKey = '';
+    }
+
+    /* Beside its dot and inside the chart's box: the pure `place`, measured
+       against the container every time it is shown, so an expanded chart,
+       a phone and a narrow window all keep the card in. */
+    function showSignalCard(hit, y) {
+        var api = sigApi();
+        if (!sigCardEl || !api || !hit) { hideSignalCard(); return; }
+        var pinned = !!(sigPin && sigPin.id === hit.dot.id);
+        var key = hit.dot.id + '|' + (pinned ? 'pin' : 'hover') + '|' + hit.others;
+        if (key !== sigCardKey) {
+            sigCardEl.className = api.cardClass(hit.dot.sig, pinned);
+            sigCardEl.innerHTML = api.card(hit.dot.sig,
+                                           { pinned: pinned, others: hit.others });
+            sigCardKey = key;
+        }
+        sigCardEl.hidden = false;
+        var pos = api.place(
+            { width: container.clientWidth, height: container.clientHeight,
+              top: canvasEl.offsetTop },
+            { x: hit.x + canvasEl.offsetLeft, y: y + canvasEl.offsetTop },
+            { w: sigCardEl.offsetWidth, h: sigCardEl.offsetHeight });
+        sigCardEl.style.left = pos.left + 'px';
+        sigCardEl.style.top = pos.top + 'px';
+        sigCardEl.classList.add('on');
+    }
+
+    /* The dot under the pointer, else the pinned one while its bar is on
+       screen, else nothing. */
+    function refreshSignalCard() {
+        if (sigHover) { showSignalCard(sigHover.hit, sigHover.y); return; }
+        var d = pinnedDot(), api = sigApi();
+        if (d && chart && api) {
+            var x = null;
+            try { x = chart.timeScale().timeToCoordinate(d.time); } catch (e) { x = null; }
+            var w = canvasEl.clientWidth || container.clientWidth;
+            if (typeof x === 'number' && isFinite(x) && x >= 0 && x <= w) {
+                showSignalCard({ dot: d, x: x, others: api.sameBar(sigDots, d) },
+                               sigPin.y);
+                return;
+            }
+        }
+        hideSignalCard();
+    }
+
+    function signalHit(param) {
+        var api = sigApi();
+        if (!api || !chart || !sigDots.length || !param || !param.point) return null;
+        return api.hitTest(sigDots, param.point.x, chart.timeScale(),
+                           param.hoveredObjectId);
+    }
+
+    /* Both handlers run inside the library's listener loop, the hover one
+       ahead of the legend: whatever goes wrong here is swallowed, so the
+       card can never cost the chart its legend or its drawing tools. */
+    function onSignalHover(param) {
+        try {
+            var api = sigApi();
+            var hit = signalHit(param);
+            if (hit && api) hit = api.prefer(sigDots, hit, sigPin ? sigPin.id : null);
+            sigHover = hit ? { hit: hit, y: param.point.y } : null;
+            refreshSignalCard();
+        } catch (e) { sigHover = null; }
+    }
+
+    function unpinSignal() {
+        sigPin = null;
+        sigHover = null;
+        clearSignalLevels();
+        refreshSignalCard();
+    }
+
+    function onSignalClick(param) {
+        if (activeTool !== 'crosshair') return;  /* a drawing tool owns this click */
+        try {
+            var hit = signalHit(param);
+            if (!hit) { unpinSignal(); return; }
+            if (!hit.byObject) {
+                /* No marker id (a tap, a click beside the dots): on a bar
+                   with several signals, the next one after the pinned. */
+                var next = sigApi().cycle(sigDots, hit.dot, sigPin ? sigPin.id : null);
+                hit = { dot: next, x: hit.x, others: hit.others, byObject: false };
+            }
+            sigPin = { id: hit.dot.id, y: param.point.y };
+            drawSignalLevels(hit.dot.sig);
+            sigHover = { hit: hit, y: param.point.y };
+            refreshSignalCard();
+        } catch (e) { /* the pin is a convenience; the chart goes on */ }
+    }
+
+    /* A zoom or a scroll moves the dots under a card that stays put: the
+       hover is dropped (the next move finds it again) and a pinned card
+       follows its dot, or hides while the dot is off screen. */
+    function onSignalRange() {
+        if (!sigHover && !sigPin) return;
+        sigHover = null;
+        refreshSignalCard();
+    }
+
+    /* After every paint: the key shows only while a dot is drawn; the
+       pinned signal's lines are drawn again (a chart-type switch replaces
+       the series and takes its price lines with it), or dropped with the
+       pin when the signal has left the tape; the card re-reads its signal,
+       which a refresh may have graded since. */
+    function syncSignalFocus() {
+        if (sigLegendEl) sigLegendEl.hidden = !sigDots.length;
+        var d = pinnedDot();
+        if (sigPin && !d) { sigPin = null; clearSignalLevels(); }
+        else if (d) drawSignalLevels(d.sig);
+        sigHover = null;
+        sigCardKey = '';
+        refreshSignalCard();
+    }
+
+    /* The close button is the only part of the card that takes the
+       pointer (the CSS: pointer-events). Everything else on the card lets
+       the click or the tap through to the chart, where a dot pins that
+       dot and anywhere else closes the card — on a phone, where the
+       pinned card covers most of the canvas, a tap on it IS the tap
+       elsewhere. */
+    if (sigCardEl) {
+        sigCardEl.addEventListener('click', function (ev) {
+            var t = ev.target;
+            if (t && t.closest && t.closest('[data-sv-sig-close]')) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                unpinSignal();
+            }
+        });
     }
 
     function applyOverlays(bars) {
@@ -1762,7 +2557,16 @@ Optional page data (json_script blocks the widget picks up when present):
         if (!bar) { legendEl.textContent = ''; return; }
 
         var intraday = isIntraday(currentTf);
-        var d = (typeof param.time === 'object')
+        /* A daily bar's time comes back as its own 'YYYY-MM-DD' string
+           (lightweight-charts 4): it IS the date. Read as epoch seconds it
+           threw on every move over a daily chart, and the throw ended the
+           library's crosshair update: this legend never showed, the
+           signal dots never learned which marker was under the pointer,
+           and a refresh under a resting crosshair failed its setData
+           (2026-09-27). */
+        var d = (typeof param.time === 'string')
+            ? param.time
+            : (typeof param.time === 'object')
             ? param.time.year + '-' + String(param.time.month).padStart(2,'0') + '-' + String(param.time.day).padStart(2,'0')
             : intraday
                 ? new Date(param.time * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'

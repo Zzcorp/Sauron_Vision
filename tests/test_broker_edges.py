@@ -230,7 +230,14 @@ class AnUnconfirmedLegIsAlwaysRecordedTests(TestCase):
         src = (Path(settings.BASE_DIR) / "bot_program" / "asset_engine"
                / "base.py").read_text(encoding="utf-8")
         block = src.split("cancelling\n")[1] if "cancelling\n" in src else src
-        self.assertEqual(
+        # AT LEAST the two close branches. It used to be exactly two; the
+        # GTC change added three more writers, and each is the same rule in
+        # a new place — a leg that became good-till-cancelled and was not
+        # confirmed cancelled now rests for days instead of dying at the
+        # session close, so the withdrawal path, the partial-fill path and
+        # the vanished-stop path all have to record it too. Pinning the
+        # exact number made adding a writer look like a regression.
+        self.assertGreaterEqual(
             src.count('meta["protective_legs_unconfirmed"] = True'), 2,
             "both close branches must record an unconfirmed protective leg")
         self.assertEqual(

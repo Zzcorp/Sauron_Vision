@@ -100,7 +100,10 @@ def refresh_option_chains_for_user(user_id: int) -> dict:
             inst = Instrument.objects.filter(symbol=symbol).first()
             if inst is None:
                 continue
-            client = client_for_symbol(user, symbol, configs[0])
+            # A chain refresh is a pure market-data read: it must not
+            # hold the exclusive trading session (see ibkr_sessions).
+            client = client_for_symbol(user, symbol, configs[0],
+                                       purpose="data")
             if not hasattr(client, "option_chain"):
                 continue  # paper / non-IBKR — chain refresh isn't supported
 
@@ -320,12 +323,17 @@ def sync_broker_account() -> dict:
     from django.utils import timezone
 
     from .capital_truth import broker_backed
-    from .engine.ibkr_client import (IBKRTrader, is_ibkr_available,
-                                     purpose_client_id)
+    from .engine.ibkr_client import is_ibkr_available
+    from .engine.ibkr_sessions import acquire_trader
     from .models import IBKRAccount
 
     out = {"attempted": 0, "stored": 0, "unreachable": 0}
     if not is_ibkr_available():
+        # No keyed account, nothing to read: the missing library costs
+        # nothing, so the pass is idle, not "not configured" (2026-09-26).
+        # A keyed account without the library is still the warning.
+        if not IBKRAccount.objects.exclude(account_id_enc="").exists():
+            return {**out, "idle": "no keyed IBKR account"}
         return {**out, "skipped": "ib_insync not installed"}
 
     # ib_insync needs an event loop; celery prefork workers, like web
@@ -343,16 +351,19 @@ def sync_broker_account() -> dict:
         out["attempted"] += 1
         client = None
         try:
-            # The probe id, not the trade id: a sync that connected with
-            # the trading clientId would EVICT the live trader mid-tick —
-            # IBKR keeps one session per clientId and drops the earlier
-            # holder. And always disconnect: a held slot fails every
-            # later connection with error 326.
-            client = IBKRTrader(
-                host=acct.host, port=acct.port,
-                client_id=purpose_client_id(acct.client_id, "probe"),
+            # The probe id, not the trade id: IBKR keeps one session per
+            # clientId and REFUSES a second connection on it (error 326),
+            # so a sync on the trading id would fail whenever the trader
+            # held the socket — or hold it against the trader. The session
+            # comes from ibkr_sessions, which leases this process its own
+            # slot; disconnecting below closes the socket and leaves the
+            # slot to this process for the next pass.
+            client = acquire_trader(
+                acct.host, acct.port, acct.client_id, "probe",
                 account_id=acct.get_account_id() or "",
                 paper=bool(acct.paper))
+            if client is None:
+                raise RuntimeError("no free IBKR clientId slot")
             reading = client.net_liquidation()
             rows = client.broker_portfolio()
         except Exception as e:  # noqa: BLE001 — one account must not stop the rest
@@ -365,6 +376,533 @@ def sync_broker_account() -> dict:
                     disconnect()
                 except Exception:  # noqa: BLE001
                     pass
+
+        if reading is None and rows is None:
+            out["unreachable"] += 1
+            # NONE IS THE CONTRACT HERE, NOT AN EXCEPTION (2026-09-15).
+            # `account_values()` and `broker_portfolio()` both document "or
+            # None when unreadable" and both return None from
+            # `if not self._connect()` without logging. So the `except`
+            # above never fires for the case that matters most — a Gateway
+            # that is up and not logged in — and this miss used to be
+            # counted in total silence: the live box showed misses = 8
+            # against zero "unreadable" lines in six hours of worker logs,
+            # while every equity figure on every page went stale.
+            #
+            # The line itself lives in `_note_broker_miss`, which is the
+            # only place the CONSECUTIVE count exists. `out["unreachable"]`
+            # counts accounts within THIS pass and resets every invocation,
+            # so logging it here printed "miss 1" forever on a one-account
+            # box — a number shaped like the one an operator needs and not
+            # it.
+            _note_broker_miss(acct, user)
+            continue
+        _clear_broker_miss(acct)
+
+        now = timezone.now()
+        fields = []
+        if reading is not None:
+            value, currency = reading
+            acct.last_equity = value
+            acct.last_equity_currency = currency
+            acct.last_equity_at = now
+            fields += ["last_equity", "last_equity_currency",
+                       "last_equity_at"]
+        if rows is not None:
+            acct.broker_positions = rows
+            acct.broker_positions_at = now
+            fields += ["broker_positions", "broker_positions_at"]
+        acct.save(update_fields=fields)
+        if reading is not None:
+            # The history row — the drawdown governor's memory. Written
+            # here and nowhere else, from the SAME reading the cell just
+            # stored, so the road and the current position can never
+            # quote two different syncs. A failed insert must not fail
+            # the sync (the cell is already written and the pools still
+            # need re-sizing), and a missed sync writes NOTHING: a zero
+            # placeholder would read as a total drawdown and pin the
+            # governor to its floor for 90 days (2026-09-12).
+            try:
+                from decimal import Decimal
+
+                from .equity_models import BrokerEquityReading
+                BrokerEquityReading.objects.create(
+                    broker="ibkr", account_pk=acct.pk,
+                    account=acct, value=Decimal(str(round(float(value), 2))),
+                    currency=currency or "", env=acct.env or "", at=now)
+                _prune_equity_history("ibkr", acct.pk, now)
+            except Exception as e:  # noqa: BLE001 — history is beside the sync, not in it
+                logger.warning("broker sync: history row failed: %s", e)
+            # ONLY WHEN THIS ROW IS THE BOOK. Both newer walks carry this
+            # guard — "two brokers retuning the same pools would fight" — and
+            # this one did not: from the moment a Saxo or eToro box was
+            # ticked, every follower pool was still being resized from IBKR's
+            # NetLiquidation while capital_truth gated the entries on the
+            # other broker's reading. Pools sized from one account, entries
+            # refused on another, and once both readings land the pools take
+            # whichever walk finished last.
+            book = broker_backed(user)
+            if book is not None and type(book) is type(acct) \
+                    and book.pk == acct.pk:
+                _follow_the_account(user, value, currency)
+                _shock_trigger(user, now)
+        out["stored"] += 1
+    if not out["attempted"]:
+        # IDLE, NOT "RAN AND PRODUCED NOTHING" (2026-09-26). No keyed IBKR
+        # account belongs to a user with a book, so this pass read nothing — IBKR is
+        # being retired, and on the live box that is every pass. The gate
+        # writes nothing for an idle result: broker_account_sync is the row
+        # of all three walks, and this verdict used to land on it minutes
+        # after eToro's, turning a healthy sync into a warning in the daily
+        # digest and an eToro error into a quiet "ran and produced
+        # nothing". A keyed account
+        # that answered nothing was attempted, and is still a warning.
+        out["idle"] = "no IBKR account to read"
+    return out
+
+
+def _shock_trigger(user, now) -> None:
+    """The fast path of the share allocator: a shock plan the moment the
+    sync that saw the shock has stored its reading, not up to four hours
+    later at the next :05 beat (2026-09-12). Cheap on purpose — the 24 h
+    drop and the drawdown off the rows just written, no brain context —
+    and once per SHOCK_TRIGGER_COOLDOWN_S per user through cache.add, so
+    a 15-minute beat on a bad day does not write a plan per beat. Gated
+    on the allocator's own component: when the proposer is off, nothing
+    proposes. Wrapped whole: a failed proposal must never fail the sync
+    whose reading the pools are being re-sized from.
+    """
+    try:
+        from django.core.cache import cache
+
+        from core.platform_control import is_component_enabled
+
+        from . import share_allocator
+        if not is_component_enabled("pipeline_share_allocator"):
+            return
+        if not share_allocator.shock_detected(user, now=now):
+            return
+        if not cache.add(f"shares:shock:{user.pk}", "1",
+                         timeout=share_allocator.SHOCK_TRIGGER_COOLDOWN_S):
+            return
+        plan, reason = share_allocator.propose_share_plan_with_reason(
+            user, now=now)
+        if plan is None:
+            logger.info("[shares] shock detected for %s but nothing "
+                        "proposed: %s", user.username, reason)
+            return
+        current = plan.current_shares or {}
+        n = 0
+        for k, target in (plan.targets or {}).items():
+            try:
+                if current.get(k) is not None \
+                        and float(target) < float(current[k]) - 1e-9:
+                    n += 1
+            except (TypeError, ValueError):
+                continue
+        from .notifications import notify_staff
+        notify_staff(
+            title="⚠ Shock plan proposed",
+            body=(f"{user.username}: {'; '.join(plan.mode_reasons or [])}; "
+                  f"{n} pool(s) to de-risk — open /shares/"),
+            url="/shares/", cooldown_hours=1)
+    except Exception as e:  # noqa: BLE001 — the sync's reading stands
+        logger.warning("[shares] shock proposal failed: %s", e)
+
+
+# The drawdown governor looks back 90 days; 400 keeps a year of context
+# for the operator's eye and bounds the table at ~1 row per sync.
+EQUITY_HISTORY_DAYS = 400
+
+
+def _prune_equity_history(broker: str, account_pk: int, now) -> None:
+    """Drop this account's history rows older than EQUITY_HISTORY_DAYS.
+
+    ONE helper for the three walks (2026-09-28): the IBKR walk pruned
+    inline and the Saxo and eToro walks never did, so on the box where
+    IBKR is being retired the table grew by a row every 900 s for ever —
+    some 35,000 rows a year per account. Scoped to the (broker,
+    account_pk) the walk just read, never fleet-wide, and called inside
+    the walk's history try beside the insert, so a failed prune is the
+    same logged warning as a failed insert and never a failed sync.
+    """
+    from datetime import timedelta
+
+    from .equity_models import BrokerEquityReading
+    BrokerEquityReading.objects.filter(
+        broker=broker, account_pk=account_pk,
+        at__lt=now - timedelta(days=EQUITY_HISTORY_DAYS)).delete()
+
+
+def _follow_the_account(user, value, currency) -> None:
+    """Retune every pool that OPTED IN to follow the broker's reading.
+
+    Phase B, operator-requested: "trade on the available funds, not the
+    number I typed once." The opt-in lives in
+    extras["capital_tracks_broker"], and the ONLY writer is this sync —
+    the same beat that stored the reading, so the pool and the reading
+    can never quote two different syncs. The entry paths freeze an
+    opted-in pool when the reading goes stale
+    (capital_truth.tracking_freeze_reason): following an account nobody
+    can read is following a memory.
+
+    Each follower takes a SHARE of the reading — explicit, or an equal
+    split of what the explicit ones leave (capital_truth.allocate_shares).
+    Shares that do not fit in one account retune NOTHING and raise one
+    alert per six hours: writing them would size every pool against money
+    the others already claim.
+
+    WITHDRAWALS ASKED FOR IN ADVANCE (2026-09-28). The shares apply to the
+    reading LESS what is held back for withdrawals (withdrawals.held_back:
+    every request still reserved, plus any withdrawal paid since this
+    reading was taken), floored at zero, taken off ONCE before any share
+    is applied. So every follower shrinks by the same proportion, the
+    shares themselves are untouched, and this path — as ever — only saves
+    `capital`: nothing is sold to find the money, it simply stops being
+    deployed and builds up as positions close. What was held back is on
+    the INFO line below, beside every pool it shrank. If the reserve
+    cannot be read, nothing is retuned: sizing the pools from the whole
+    reading would deploy money somebody has asked to take out.
+    """
+    from decimal import Decimal
+
+    from .capital_truth import allocate_shares, followers_of
+
+    try:
+        followers = followers_of(user)
+        if not followers:
+            return
+        alloc = allocate_shares(followers)
+        if not alloc["ok"]:
+            logger.error("broker sync: NO pool retuned for %s — %s",
+                         user.username, alloc["reason"])
+            _alert_over_allocation(user, alloc["reason"])
+            return
+        # THE RESERVE, once, before any share: raises into the except
+        # below on a failed read, and then nothing is retuned.
+        from .withdrawals import deployable
+        base, held = deployable(user, value)
+        if held > 0:
+            logger.info("broker sync: %s — %s %s held back for withdrawal "
+                        "requests; the pools follow %s of the %s read",
+                        user.username, f"{held:,.2f}", currency or "",
+                        f"{base:,.2f}", f"{float(value):,.2f}")
+        # WHICH BROKER EACH FOLLOWER ACTUALLY REACHES. One book, one
+        # reading, but the router picks per asset class — so a follower that
+        # trades somewhere else must not be sized from here. The test is
+        # capital_truth.foreign_venue (every symbol, not the first; only a
+        # known and different venue refuses), shared since 2026-09-28 with
+        # the withdrawals page, so the page's "with the reserve" column and
+        # this loop can never disagree about which pools move.
+        from .capital_truth import broker_backed, broker_kind, foreign_venue
+        _book = broker_backed(user)
+        _book_kind = broker_kind(_book) if _book is not None else ""
+
+        # One lookup per SYMBOL per sync, shared across pools: every
+        # follower is non-paper, so the routing of a symbol does not differ
+        # between them.
+        _venue_of: dict = {}
+
+        for cfg in followers:
+            foreign = foreign_venue(user, cfg, _book_kind, _venue_of)
+            if foreign:
+                logger.warning(
+                    "broker sync: %s pool %r NOT retuned — it trades at %s "
+                    "while the book is %s, and sizing it from the book would "
+                    "measure one account and trade another",
+                    user.username, cfg.name, foreign, _book_kind)
+                continue
+            share = float(alloc["plan"].get(cfg.pk, 0.0))
+            new = Decimal(str(round(float(base) * share, 2)))
+            if cfg.capital == new:
+                continue
+            old = cfg.capital
+            cfg.capital = new
+            cfg.save(update_fields=["capital"])
+            logger.info("broker sync: %s pool follows the account at "
+                        "%.1f%%: %s -> %s %s%s", cfg.name, share * 100.0,
+                        old, new, currency or "",
+                        (f" ({held:,.2f} held back for withdrawals)"
+                         if held > 0 else ""))
+    except Exception as e:  # noqa: BLE001 — the stored reading must stand
+        logger.warning("broker sync: pool-follow failed: %s", e)
+
+
+def _alert_over_allocation(user, reason: str) -> None:
+    """Once per six hours: the followers ask for more than one account."""
+    try:
+        from .notifications import notify_staff
+        notify_staff(
+            title="⚠ Pools over-allocated — nothing follows the account",
+            body=(f"{user.username}: {reason}. No pool was retuned this "
+                  f"sync and none will be until the shares fit in 100%. "
+                  f"Lower a share on /admin-dashboard/ (manual lane) or "
+                  f"/asset-bots/, or stand a follower down."),
+            url="/asset-bots/", cooldown_hours=6)
+    except Exception as e:  # noqa: BLE001 — an alert must never fail the sync
+        logger.warning("broker sync: over-allocation alert failed: %s", e)
+
+
+# ── The stall alert ───────────────────────────────────────────────────────
+# Three consecutive misses (45 minutes) before a word is said, and then one
+# word per six hours: a live Gateway restarts for 2FA roughly daily, and an
+# alert that fires on every single blip is an alert the operator mutes.
+BROKER_MISS_ALERT_AFTER = 3
+BROKER_MISS_ALERT_COOLDOWN = 6 * 3600
+
+
+@shared_task
+@guarded_task("broker_account_sync")
+def sync_saxo_accounts():
+    """Read every Saxo account with a live session: equity, holdings, one
+    history row.
+
+    The Saxo twin of sync_etoro_accounts. A row whose session is not alive
+    is skipped, not attempted: the keeper (refresh_saxo_sessions) owns the
+    session's health and the page already says "sign in again", so
+    attempting it here would count a known sign-in as an unreachable
+    broker and raise the staff alert twice for one fact.
+
+    `attempted` and `stored` are the gate's work/done counters.
+    """
+    from django.utils import timezone
+
+    from .engine.saxo_client import SaxoTrader
+    from .models import SaxoAccount
+
+    out = {"attempted": 0, "stored": 0, "unreachable": 0, "no_session": 0}
+    for acct in SaxoAccount.objects.exclude(app_key_enc=""):
+        if not acct.session_alive():
+            out["no_session"] += 1
+            continue
+        user = acct.user
+        out["attempted"] += 1
+        reading, rows = None, None
+        try:
+            client = SaxoTrader(acct)
+            reading = client.net_liquidation()
+            rows = client.broker_portfolio()
+        except Exception as e:  # noqa: BLE001 — one account must not stop the rest
+            logger.warning("broker sync: %s (saxo) unreadable: %s",
+                           acct.label, e)
+            reading, rows = None, None
+
+        if reading is None and rows is None:
+            out["unreachable"] += 1
+            _note_broker_miss(acct, user)
+            continue
+        _clear_broker_miss(acct)
+
+        now = timezone.now()
+        fields = []
+        if reading is not None:
+            value, currency = reading
+            acct.last_equity = value
+            acct.last_equity_currency = currency
+            acct.last_equity_at = now
+            fields += ["last_equity", "last_equity_currency", "last_equity_at"]
+        if rows is not None:
+            acct.broker_positions = rows
+            acct.broker_positions_at = now
+            fields += ["broker_positions", "broker_positions_at"]
+        acct.connected = True
+        acct.last_sync = now
+        fields += ["connected", "last_sync"]
+        acct.save(update_fields=fields)
+
+        if reading is not None:
+            from .equity_models import BrokerEquityReading
+            try:
+                BrokerEquityReading.objects.get_or_create(
+                    broker="saxo", account_pk=acct.pk, at=now,
+                    # Saxo's SIM and LIVE are two worlds on ONE row: without
+                    # this, a simulated balance and a real one are
+                    # indistinguishable in the same account's history.
+                    defaults={"value": value, "currency": currency,
+                              "env": "paper" if acct.sim else "live",
+                              "account": None})
+                _prune_equity_history("saxo", acct.pk, now)
+            except Exception as e:  # noqa: BLE001 — a history row is not the sync
+                logger.warning("broker sync: %s (saxo) history row failed: %s",
+                               acct.label, e)
+
+        # The gate's DONE counter: a pass that wrote the cells has stored
+        # something whether or not the history row landed and whether or
+        # not there was an equity reading. Counting it inside the history
+        # try graded the component "handled N rows and stored none".
+        out["stored"] += 1
+
+        # A pool that tracks the account is re-sized by the sync and by
+        # nothing else, and tracking_freeze_reason refuses every entry
+        # once the reading ages past an hour — so a Saxo book that never
+        # ran these two would quietly stop trading. Gated on being THE
+        # BOOK: two brokers retuning the same pools would fight.
+        if reading is not None:
+            from .capital_truth import broker_backed
+            book = broker_backed(user)
+            if book is not None and type(book) is type(acct) \
+                    and book.pk == acct.pk:
+                _follow_the_account(user, value, currency)
+                _shock_trigger(user, now)
+    if not out["attempted"]:
+        # IDLE (2026-09-26): no keyed Saxo account, or none with a live
+        # session — the keeper (refresh_saxo_sessions) owns the session and
+        # /brokers/ already says "sign in again". Nothing was read, so the
+        # gate writes nothing to the row the three walks share; see the
+        # IBKR walk above and core.task_gate.guarded_task.
+        out["idle"] = ("no live Saxo session" if out["no_session"]
+                       else "no keyed Saxo account")
+    return out
+
+
+@shared_task
+def refresh_saxo_sessions():
+    """Rotate every Saxo row's tokens. Ungated — see the module note in
+    engine/saxo_oauth.py and the docstring of this patch.
+
+    The counters are the honest ones for a keeper: `attempted` rows with a
+    refresh token, `renewed` rotations that landed, `lost` sessions whose
+    refresh token was past its life when the refresh failed. A transient
+    failure inside the window counts as neither — it is logged, the session
+    is kept, and the next cycle tries again.
+    """
+    from django.utils import timezone
+
+    from .engine import saxo_oauth
+    from .models import SaxoAccount
+
+    out = {"attempted": 0, "renewed": 0, "lost": 0, "retry": 0}
+    now = timezone.now()
+    for acct in SaxoAccount.objects.exclude(refresh_token_enc=""):
+        out["attempted"] += 1
+        try:
+            payload = saxo_oauth.refresh(acct)
+            saxo_oauth.store_tokens(acct, payload, now=now)
+            out["renewed"] += 1
+        except Exception as e:  # noqa: BLE001 — one row must not stop the rest
+            deadline = acct.refresh_expires_at
+            if deadline is not None and now < deadline:
+                out["retry"] += 1
+                logger.warning(
+                    "saxo session: %s refresh failed (%s: %s) — the refresh "
+                    "token is still alive until %s, retrying next cycle",
+                    acct.label, type(e).__name__, e, deadline.isoformat())
+                continue
+            reason = f"{type(e).__name__}: {e}"[:120]
+            # Compare-and-clear: only a row STILL holding the token that
+            # just failed is cleared. A concurrent run that rotated it in
+            # the meantime keeps its fresh session — this failure was about
+            # a token that no longer exists.
+            n = SaxoAccount.objects.filter(
+                pk=acct.pk, refresh_token_enc=acct.refresh_token_enc,
+            ).update(access_token_enc="", refresh_token_enc="",
+                     token_expires_at=None, refresh_expires_at=None,
+                     connected=False, session_lost_at=now,
+                     session_lost_reason=reason)
+            if n != 1:
+                logger.info("saxo session: %s was rotated by another run "
+                            "while this one failed — nothing cleared",
+                            acct.label)
+                continue
+            out["lost"] += 1
+            logger.warning(
+                "saxo session: %s is LOST (%s) — the refresh token was past "
+                "its life. Sign in again at /brokers/. Nothing on Saxo can "
+                "be read or traded until then.", acct.label, reason)
+            try:
+                from .notifications import notify_staff
+                notify_staff(
+                    title="Saxo session LOST — sign in again at /brokers/",
+                    body=f"{acct.label}: {reason}", url="/brokers/",
+                    cooldown_hours=6)
+            except Exception as alert_err:  # noqa: BLE001 — an alert must never fail the keeper
+                logger.warning("saxo session: staff alert failed (%s: %s)",
+                               type(alert_err).__name__, alert_err)
+    return out
+
+
+#: Row class -> the `broker` value its readings and miss keys are filed
+#: under. A class missing here would file as "ibkr" and its outage would
+#: count against IBKR's alert — so every account row that the sync can
+#: reach belongs in this table.
+_BROKER_KINDS = {"EtoroAccount": "etoro", "SaxoAccount": "saxo"}
+
+
+def _users_with_a_broker_row():
+    """Every user who has keyed ANY broker, once each.
+
+    One place, because three callers had written "IBKRAccount.objects.
+    exclude(account_id_enc='')" and each of them silently skipped a Saxo
+    or an eToro book.
+    """
+    from django.contrib.auth import get_user_model
+
+    from .models import EtoroAccount, IBKRAccount, SaxoAccount
+
+    ids = set(IBKRAccount.objects.exclude(account_id_enc="")
+              .values_list("user_id", flat=True))
+    ids |= set(EtoroAccount.objects.exclude(api_key_enc="")
+               .values_list("user_id", flat=True))
+    ids |= set(SaxoAccount.objects.exclude(app_key_enc="")
+               .values_list("user_id", flat=True))
+    return (get_user_model().objects
+            .filter(pk__in=[i for i in ids if i]).order_by("username"))
+
+
+def _broker_kind(acct) -> str:
+    """The `broker` value this row's readings and miss keys are filed under.
+    Mirrors capital_truth.broker_kind; duplicated here rather than imported
+    so the miss helpers stay importable when capital_truth is not."""
+    return _BROKER_KINDS.get(type(acct).__name__, "ibkr")
+
+
+@shared_task
+@guarded_task("broker_account_sync")
+def sync_etoro_accounts():
+    """Read every keyed eToro account: equity, holdings, one history row.
+
+    The eToro twin of sync_broker_account, and deliberately NOT a branch
+    inside it — that loop leases IBKR session slots and carries a year of
+    2FA-shaped guards. Same component switch, same five cells, same history
+    shape keyed (broker="etoro", account_pk). One switch governs "does the
+    platform read its brokers"; one row shape means the drawdown governor
+    and the preflight read eToro exactly as they read IBKR.
+
+    Not gated on broker_backed(): a keyed row's equity is a fact worth
+    storing whether or not that row is currently "the book". The page
+    shows last_sync for it either way.
+
+    `attempted` and `stored` are the gate's work/done counters, so a walk
+    that read N accounts and stored nothing is judged as such rather than
+    returning a clean dict.
+    """
+    from django.utils import timezone
+
+    from .engine.etoro_client import EtoroTrader
+    from .models import EtoroAccount
+
+    out = {"attempted": 0, "stored": 0, "unreachable": 0}
+    for acct in EtoroAccount.objects.exclude(api_key_enc=""):
+        user = acct.user
+        k, u = acct.get_credentials()
+        if not (k and u):
+            continue
+        out["attempted"] += 1
+        reading, rows = None, None
+        try:
+            margin = None
+            client = EtoroTrader(k, u, env="demo" if acct.demo else "live")
+            reading = client.net_liquidation()
+            rows = client.broker_portfolio()
+            # The margin cells, duck-typed and three-state: an adapter (or
+            # a test double) that answers no dict leaves the cells alone.
+            _mc = getattr(client, "margin_cells", None)
+            _m = _mc() if callable(_mc) else None
+            margin = _m if isinstance(_m, dict) else None
+        except Exception as e:  # noqa: BLE001 — one account must not stop the rest
+            logger.warning("broker sync: %s (etoro) unreadable: %s",
+                           acct.label, e)
+            reading, rows = None, None
 
         if reading is None and rows is None:
             out["unreachable"] += 1
@@ -385,54 +923,60 @@ def sync_broker_account() -> dict:
             acct.broker_positions = rows
             acct.broker_positions_at = now
             fields += ["broker_positions", "broker_positions_at"]
+        acct.connected = True
+        acct.last_sync = now
+        fields += ["connected", "last_sync"]
+        if margin is not None:
+            # THE MARGIN CELLS (2026-09-23), each on its own: a payload that
+            # carries one figure and not the other writes one cell and
+            # leaves the other None. Same save and same `now` as the equity,
+            # so the headroom gate's age test reads one clock.
+            if margin.get("available_cash") is not None:
+                acct.last_available_cash = margin["available_cash"]
+                fields.append("last_available_cash")
+            if margin.get("used_margin") is not None:
+                acct.last_used_margin = margin["used_margin"]
+                fields.append("last_used_margin")
+            if (margin.get("available_cash") is not None
+                    or margin.get("used_margin") is not None):
+                acct.last_margin_at = now
+                fields.append("last_margin_at")
+                # THE WORLD THE CELLS WERE READ IN (2026-09-26): the
+                # client's own (`EtoroTrader.demo`, the segment it POSTs
+                # to); the row's when a double states none — the client
+                # above was built from acct.demo, so on a real read the
+                # two never differ. Read by _leverage_headroom.
+                _demo = getattr(client, "demo", None)
+                if not isinstance(_demo, bool):
+                    _demo = bool(acct.demo)
+                acct.last_margin_world = "demo" if _demo else "live"
+                fields.append("last_margin_world")
         acct.save(update_fields=fields)
+
         if reading is not None:
-            _follow_the_account(user, value, currency)
+            from .equity_models import BrokerEquityReading
+            try:
+                BrokerEquityReading.objects.get_or_create(
+                    broker="etoro", account_pk=acct.pk, at=now,
+                    defaults={"value": value, "currency": currency,
+                              "env": "paper" if acct.demo else "live"})
+                _prune_equity_history("etoro", acct.pk, now)
+            except Exception as e:  # noqa: BLE001 — the cell is written; history must not fail the sync
+                logger.warning("broker sync: %s (etoro) history row failed: "
+                               "%s", acct.label, e)
+
+        # Same two corrections as the Saxo walk, for the same reasons: the
+        # gate's DONE counter belongs to the pass, and a pool that tracks
+        # an eToro book has never been re-sized by anything.
         out["stored"] += 1
+        if reading is not None:
+            from .capital_truth import broker_backed
+            book = broker_backed(user)
+            if book is not None and type(book) is type(acct) \
+                    and book.pk == acct.pk:
+                _follow_the_account(user, value, currency)
+                _shock_trigger(user, now)
     return out
-
-
-def _follow_the_account(user, value, currency) -> None:
-    """Retune every pool that OPTED IN to follow the broker's reading.
-
-    Phase B, operator-requested: "trade on the available funds, not the
-    number I typed once." The opt-in lives in
-    extras["capital_tracks_broker"], and the ONLY writer is this sync —
-    the same beat that stored the reading, so the pool and the reading
-    can never quote two different syncs. The entry paths freeze an
-    opted-in pool when the reading goes stale
-    (capital_truth.tracking_freeze_reason): following an account nobody
-    can read is following a memory.
-    """
-    from decimal import Decimal
-
-    from .models import AssetBotConfig
-
-    try:
-        configs = (AssetBotConfig.objects
-                   .filter(user=user, enabled=True)
-                   .exclude(mode="paper"))
-        for cfg in configs:
-            if not (cfg.extras or {}).get("capital_tracks_broker"):
-                continue
-            new = Decimal(str(round(float(value), 2)))
-            if cfg.capital == new:
-                continue
-            old = cfg.capital
-            cfg.capital = new
-            cfg.save(update_fields=["capital"])
-            logger.info("broker sync: %s pool follows the account: "
-                        "%s -> %s %s", cfg.name, old, new, currency or "")
-    except Exception as e:  # noqa: BLE001 — the stored reading must stand
-        logger.warning("broker sync: pool-follow failed: %s", e)
-
-
-# ── The stall alert ───────────────────────────────────────────────────────
-# Three consecutive misses (45 minutes) before a word is said, and then one
-# word per six hours: a live Gateway restarts for 2FA roughly daily, and an
-# alert that fires on every single blip is an alert the operator mutes.
-BROKER_MISS_ALERT_AFTER = 3
-BROKER_MISS_ALERT_COOLDOWN = 6 * 3600
 
 
 def _note_broker_miss(acct, user) -> None:
@@ -440,17 +984,59 @@ def _note_broker_miss(acct, user) -> None:
 
     from .notifications import notify_broker_unreachable
 
-    key = f"broker_sync:miss:{acct.pk}"
+    key = f"broker_sync:miss:{_broker_kind(acct)}:{acct.pk}"
     misses = int(cache.get(key) or 0) + 1
     cache.set(key, misses, 24 * 3600)
+
+    # EVERY miss is written down, with its true consecutive number, before
+    # any decision about alerting (2026-09-15).
+    #
+    # This used to be silent, and the silence was the defect. The caller
+    # logged from its `except`, but neither read raises: `account_values()`
+    # and `broker_portfolio()` both return None from
+    # `if not self._connect()` without a word, and "None means UNREADABLE"
+    # is their documented contract — a good one, argued for at length in
+    # `account_values`. The caller had simply relied on an exception it was
+    # never promised.
+    #
+    # So the case the whole ibkr-doctor exists for, a Gateway that is UP and
+    # not logged in, was the one case that produced no log line at all. The
+    # live box showed misses = 8 against zero matches in six hours of worker
+    # logs, while every equity figure on every page quietly aged.
+    #
+    # The notification below waits for the third miss and then goes quiet
+    # for six hours. The log does neither: a failure an operator can only
+    # learn about from an alert they have already been shown is a failure
+    # they cannot follow.
+    _kind = _broker_kind(acct)
+    _WHERE = {
+        "ibkr": "Check `dc ps` for (unhealthy) and `./deploy/ibkr-doctor`",
+        "saxo": "Check the session on /brokers/ — the refresh token lives "
+                "40 minutes and rotates, so a box down longer than that "
+                "needs a new sign-in",
+        "etoro": "Re-save the keys on /brokers/ — the probe answers ok, "
+                 "refused or unverified",
+    }
+    logger.warning(
+        "broker sync: %s [%s] (%s) returned no equity AND no holdings — "
+        "consecutive miss %d. Neither read raised; both answered None, "
+        "which is what an unauthenticated session looks like at any of the "
+        "three venues. %s",
+        acct.label, _kind,
+        f"{getattr(acct, 'host', '')}:{getattr(acct, 'port', '')}"
+        if _kind == "ibkr" else "no socket — a session, a key or a sign-in",
+        misses, _WHERE.get(_kind, _WHERE["ibkr"]))
+
     if misses < BROKER_MISS_ALERT_AFTER:
         return
-    gate = f"broker_sync:alerted:{acct.pk}"
+    gate = f"broker_sync:alerted:{_broker_kind(acct)}:{acct.pk}"
     if cache.get(gate):
         return
     try:
-        notify_broker_unreachable(user, label=acct.label, host=acct.host,
-                                  port=acct.port, misses=misses)
+        notify_broker_unreachable(user, label=acct.label,
+                                  host=getattr(acct, "host", "api"),
+                                  port=getattr(acct, "port", 0),
+                                  misses=misses, broker=_kind)
         cache.set(gate, 1, BROKER_MISS_ALERT_COOLDOWN)
     except Exception as e:  # noqa: BLE001 — an alert must never fail the sync
         logger.warning("broker sync: stall alert failed for %s: %s",
@@ -460,5 +1046,226 @@ def _note_broker_miss(acct, user) -> None:
 def _clear_broker_miss(acct) -> None:
     from django.core.cache import cache
 
-    cache.delete(f"broker_sync:miss:{acct.pk}")
-    cache.delete(f"broker_sync:alerted:{acct.pk}")
+    cache.delete(f"broker_sync:miss:{_broker_kind(acct)}:{acct.pk}")
+    cache.delete(f"broker_sync:alerted:{_broker_kind(acct)}:{acct.pk}")
+
+
+# ─── The share allocator ─────────────────────────────────────────────────
+
+@shared_task
+@guarded_task("pipeline_share_allocator")
+def propose_share_plans() -> dict:
+    """Every four hours: a SharePlan per broker-backed user, in shadow.
+
+    Runs at :05 so the :00 sync has stored a fresh reading first — a
+    proposal needs one under TRACKING_FRESH_SECONDS old, and a stale one
+    proposes nothing (counted in `not_proposed`, never invented). Before
+    proposing it expires the plans nobody decided on and grades the ones
+    whose 24h window has closed, so the housekeeping runs even on a day
+    with no reading. Writes a SharePlan row and nothing else: the share
+    on a config changes only when an admin applies a plan
+    (share_allocator.apply_share_plan), and this task never calls it.
+
+    The return dict carries no top-level `skipped` key and none of the
+    gate's work/done counters (parsed, attempted, stored, ...): task_gate
+    .judge_result reads a truthy `skipped` as "not configured" and a
+    zero `stored` as "produced nothing", and a user with a stale reading
+    is neither — it is the allocator declining, which is the design
+    (2026-09-12).
+    """
+    from .capital_truth import broker_backed
+    from .models import IBKRAccount
+    # Lazily: share_allocator imports _follow_the_account from this module
+    # at apply time, so a top-level import here would close the cycle.
+    from .share_allocator import (expire_stale_plans, grade_plans,
+                                  propose_share_plan_with_reason)
+
+    expired = expire_stale_plans()
+    graded = grade_plans()
+    users = proposals = not_proposed = errors = 0
+    last_error = ""
+    # Every user with an INTERFACED BROKER ROW, not just an IBKR one:
+    # walking IBKRAccount alone meant the allocator was silently dead for
+    # a Saxo or an eToro book. broker_backed() is still the real gate.
+    for user in _users_with_a_broker_row():
+        if broker_backed(user) is None:
+            continue
+        users += 1
+        try:
+            plan, reason = propose_share_plan_with_reason(user)
+        except Exception as e:  # noqa: BLE001 — one user's failure must not
+            # silence the next user's plan, but it must not pass as ok either
+            errors += 1
+            last_error = f"{user.username}: {e}"
+            logger.exception("[shares] user %s: proposal failed: %s",
+                             user.username, e)
+            continue
+        if plan is None:
+            not_proposed += 1
+        else:
+            proposals += 1
+    out = {"status": "ok", "users": users, "proposals": proposals,
+           "graded": graded, "expired": expired, "not_proposed": not_proposed}
+    if errors:
+        out.update({"status": "error", "errors": errors,
+                    "error": f"{errors} proposal(s) raised — last: {last_error}"})
+    return out
+
+
+@shared_task
+@guarded_task("pipeline_capital_desk")
+def grade_capital_desk() -> dict:
+    """Nightly: price what the capital desk refused, then score its plans.
+
+    Two passes, in this order and never the other way round. The resolver
+    walks every decision whose horizon has closed — a taken entry against
+    its own trade, a displaced one against the bars it never got to trade —
+    and only then does the grader subtract the two sets, because a plan
+    graded before its rows are priced would book the missing ones as
+    ungradeable forever.
+
+    THIS IS THE NUMBER THE LIVE SWITCH WAITS ON. `capital_desk_mode_live`
+    turns the plan into orders; the bar for flipping it is weeks of positive
+    edge_r in shadow, the same bar the share allocator had to clear. Until
+    then this task is the only thing measuring whether the ranking is worth
+    obeying (2026-09-12).
+
+    The return dict carries `resolved` and `graded` and none of the gate's
+    work/done counters: a night on which nothing had closed is the desk
+    being patient, not a task that handled rows and stored none.
+    """
+    from . import capital_desk
+
+    resolved = capital_desk.resolve_counterfactuals()
+    graded = capital_desk.grade_plans()
+    return {"status": "ok", "resolved": resolved, "graded": graded}
+
+
+# ─── 2026-09-15: the watchdog for a paper campaign ──────────────────────────
+
+#: One notification per cold spell, not one per day. A chain that stays cold
+#: for a week is one problem, and seven identical alerts is how an operator
+#: learns to ignore the eighth. Cleared the moment the chain is complete, so
+#: a NEW cold spell speaks immediately.
+CHAIN_COLD_ALERT_COOLDOWN = 24 * 3600
+
+
+@shared_task
+@guarded_task("pipeline_campaign_watch")
+def watch_evidence_chain():
+    """Is the paper-campaign evidence chain still complete? Say so if not.
+
+    `paper_readiness` answers the question the moment an operator asks it.
+    This asks on their behalf, daily, because the failure mode is silence:
+    a campaign that starts green and goes cold on day twelve spends
+    seventy-eight days producing nothing, and `guarded_task` no-ops without
+    raising on a component that is off or has no row.
+
+    The cost of a cold link is zero today and the whole campaign in ninety
+    days, which is exactly the shape of failure this platform keeps finding
+    — the funding feed that wrote nothing, the broker sync that missed eight
+    times in silence, the backtester that priced an absent bar at zero.
+
+    READ-ONLY. It measures and it notifies; it turns nothing on. A watchdog
+    that repaired the chain would be a watchdog nobody could trust to report
+    it honestly, and switching a pipeline back on is an operator's decision.
+    """
+    from django.contrib.auth.models import User
+    from django.core.cache import cache
+
+    from .campaign_readiness import readiness
+
+    report = readiness()
+    cold = report["cold_links"]
+    blockers = report["blockers"]
+    out = {"status": "ok", "cold_links": cold,
+           "blockers": len(blockers), "notified": 0}
+
+    if not blockers:
+        # A complete chain clears the gate, so the next cold spell is heard
+        # at once rather than swallowed by a cooldown from the last one.
+        cache.delete("campaign_watch:alerted")
+        return out
+
+    if cache.get("campaign_watch:alerted"):
+        out["status"] = "cooldown"
+        return out
+
+    recipients = list(User.objects.filter(is_staff=True, is_active=True))
+    if not recipients:
+        # Not an error and not a success: the check ran, the chain is cold,
+        # and there is nobody configured to tell. Said plainly rather than
+        # returned as a clean dict.
+        logger.warning(
+            "[campaign watch] chain is cold (%s) and no active staff user "
+            "exists to notify", ", ".join(cold) or "blockers with no key")
+        out["status"] = "nobody_to_tell"
+        return out
+
+    from .notifications import notify_evidence_chain_cold
+    for user in recipients:
+        try:
+            if notify_evidence_chain_cold(user, cold=cold, blockers=blockers):
+                out["notified"] += 1
+        except Exception as e:  # noqa: BLE001 — one failure must not eat the rest
+            logger.warning("[campaign watch] notify failed for %s: %s",
+                           user.id, e)
+
+    if out["notified"]:
+        cache.set("campaign_watch:alerted", 1, CHAIN_COLD_ALERT_COOLDOWN)
+    logger.warning(
+        "[campaign watch] evidence chain is cold: %s — %d blocker(s), "
+        "%d operator(s) told", ", ".join(cold) or "see blockers",
+        len(blockers), out["notified"])
+    return out
+
+
+# ── The Morgul guards (2026-09-26) ───────────────────────────────────────
+# Ten read-only guards over the book (bot_program/morgul.py). Their one
+# write besides the group's messages is the brake, behind its own switch.
+
+@shared_task
+@guarded_task("morgul_guards")
+def run_morgul_guards() -> dict:
+    """Every 5 min on the fast queue: run every guard, tell the group.
+
+    Gated by the morgul_guards component, OFF on arrival. Reads the
+    database and the cache: no broker call, no order, no close. The brake
+    (enabled = False on the offending configs, through the Eye's own
+    apply_brake) acts only while the morgul_brake component is ON.
+    """
+    from .morgul import run_guards
+    return run_guards()
+
+
+# ── The Telegram eye (2026-09-26) ────────────────────────────────────────
+# The group "Sauron Vision" asks, Sauron answers: in English, to the
+# configured chat only, and its one write is the brake (bots OFF, never
+# on). The whole of it is bot_program/telegram_eye.py; these are its two
+# Celery doors.
+
+@shared_task
+@guarded_task("telegram_eye")
+def poll_telegram_eye() -> dict:
+    """Every 15 s on the fast queue: read the group, answer, confirm.
+
+    Gated by the telegram_eye component, OFF on arrival. One poll at a
+    time handles a batch: telegram_eye.poll takes a Postgres advisory
+    lock without waiting, and a second worker skips at once (not the
+    component row, which the gate's mark_run writes after every run).
+    """
+    from .telegram_eye import poll
+    return poll()
+
+
+@shared_task
+def answer_telegram_question(pending_id: int) -> dict:
+    """One question from the group, answered on the ai queue.
+
+    Not gated, like brain.tasks.answer_research_question: the poll that
+    queued it was, and a skip here would leave the research row PENDING
+    for ever. The ai queue because one LLM turn takes tens of seconds and
+    the fast queue carries the quote poller.
+    """
+    from .telegram_eye import answer_question
+    return answer_question(pending_id)

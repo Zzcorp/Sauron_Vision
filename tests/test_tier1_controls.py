@@ -139,7 +139,8 @@ class TheKillSwitchStopsThisTickTests(TestCase):
 
 
 class TheRiskCeilingBindsOnTheFinalSizeTests(TestCase):
-    """`risk_fraction()` clamps to 5%, and then the allocator multiplies
+    """`risk_fraction()` clamps to 7% (5% until 2026-09-26), and then the
+    allocator multiplies
     the QUANTITY. Driven through scan_symbol, because the arithmetic is
     not the claim — the claim is that this entry path refuses."""
 
@@ -156,8 +157,10 @@ class TheRiskCeilingBindsOnTheFinalSizeTests(TestCase):
         self.cfg = _cfg(self.user, mode="paper", symbols=["CAP1"],
                         entry_score_min=0.6, min_signals_for_entry=1,
                         stop_loss_pct=30.0, take_profit_pct=60.0,
-                        # Sized AT the cap, so the only thing that can carry
-                        # this entry past it is the allocator multiplier —
+                        # Sized at 5% — AT the old cap, under the 7% one
+                        # since 2026-09-26 — so the only thing that can
+                        # carry this entry past the ceiling is still the
+                        # allocator multiplier (3x = 15%, past 7%) —
                         # which is precisely the hole being closed. The
                         # default risk fraction is far below the cap, and a
                         # 3x lane on top of it still clears, so a test left
@@ -190,7 +193,8 @@ class TheRiskCeilingBindsOnTheFinalSizeTests(TestCase):
         from bot_program.models import AssetBotTrade
         self._scan(3.0)
         self.assertEqual(AssetBotTrade.objects.count(), 0,
-                         "an entry risking 3x the 5% cap was written")
+                         "an entry risking 3x a 5% budget (15%, past "
+                         "the 7% cap) was written")
 
     def test_an_unscaled_entry_is_still_taken(self):
         """The ceiling must refuse the oversized trade, not all trades."""

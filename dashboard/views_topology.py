@@ -88,8 +88,13 @@ WIRING = {
     "scraper_tradingview":  {"task": "scraping.tasks.fetch_tradingview_ideas", "layer": "ingest", "writes": ["SentimentSnapshot"], "feeds": ["pipeline_sentiment_agg", "pipeline_opportunity_scanner"]},
     "scraper_calendar":     {"task": "scraping.tasks.check_economic_calendar", "layer": "ingest", "writes": ["EconomicEvent"], "feeds": ["execute_bots", "pipeline_opportunity_scanner"],
                              "note": "Needs FMP_API_KEY. While this table is empty the bot's earnings blackout cannot fire."},
-    "broker_account_sync":  {"task": "bot_program.tasks.sync_broker_account", "layer": "ingest", "writes": ["IBKRAccount.last_equity", "IBKRAccount.broker_positions"], "feeds": [],
-                             "note": "The broker's own NetLiquidation and holdings, cached every 15 min for the 'as IBKR sees it' cells. Feeds pages, not components — deliberately: nothing downstream divides by it, because a display showing broker truth over gates using platform truth is the failure this platform is built to avoid."},
+    # THREE tasks share this key, not one: sync_broker_account (IBKR),
+    # sync_saxo_accounts and sync_etoro_accounts. The `writes` list named the
+    # IBKR columns alone, so the map said switching this off cost the IBKR
+    # cells when it costs all three brokers' cells.
+    "broker_account_sync":  {"task": "bot_program.tasks.sync_broker_account", "layer": "ingest", "writes": ["IBKRAccount.last_equity", "IBKRAccount.broker_positions", "SaxoAccount.last_equity", "SaxoAccount.broker_positions", "EtoroAccount.last_equity", "EtoroAccount.broker_positions", "BrokerEquityReading"], "feeds": ["execute_bots"],
+                             "pages": ["/admin-dashboard/", "/asset-bots/"],
+                             "note": "ONE COMPONENT KEY GATES THREE TASKS: sync_broker_account (IBKR), sync_saxo_accounts and sync_etoro_accounts all carry @guarded_task(\"broker_account_sync\"), so unticking it stops all three brokers. `task` above names only the first because it is read as a real dotted path. The broker's own NetLiquidation and holdings, cached every 15 min. This table once said nothing downstream divides by it; since pools can follow the account that is false, and traced: every follower's capital — the denominator of its whole risk stack — is this reading times its share (tasks._follow_the_account), the entry path refuses to open on a follower whose reading is stale (capital_truth.tracking_freeze_reason), and arming measures the pool against it. The 'as the broker sees it' cells read it too, for whichever row is the book."},
     "scraper_sec":          {"task": "scraping.tasks.fetch_sec_filings", "cadence": 86400, "layer": "ingest", "writes": ["InstitutionalFiling"], "feeds": ["pipeline_opportunity_scanner"],
                              "note": "Form-4 issuers resolve to catalogue instruments through SEC's CIK map, so insider rows reach the evaluator. 13F rows stay filer-level (the holdings live in an attachment this scraper does not follow) and are unlinked by design."},
     "scraper_cot":          {"task": "scraping.tasks.fetch_cot_reports", "cadence": 604800, "layer": "ingest", "writes": ["COTReport"], "feeds": ["pipeline_opportunity_scanner"],
@@ -111,10 +116,11 @@ WIRING = {
     "pipeline_opportunity_scanner": {"task": "signals.tasks.scan_opportunities", "cadence": 86400, "layer": "eye", "writes": ["OpportunityFlag"], "feeds": ["execute_bots"]},
     "pipeline_event_engine":        {"layer": "eye", "writes": ["Signal", "FastEvent"], "feeds": ["execute_bots"],
                                      "note": "The switch gates the async dispatch wrapper (dispatch_event_task). Direct synchronous dispatch_event calls bypass it by design, so the admin test-fire button works even with the platform stopped."},
-    "agent_strategy":               {"task": "ai_agents.tasks.review_active_strategies", "layer": "eye", "writes": ["StrategyAdjustment"], "feeds": [],
-                                     "note": "Needs ANTHROPIC_API_KEY. Its adjustments are written and rendered nowhere."},
-    "agent_anomaly":                {"task": "ai_agents.tasks.run_anomaly_detection", "layer": "eye", "writes": ["AgentTask"], "feeds": [],
-                                     "note": "Needs ANTHROPIC_API_KEY. Produces prose for a human, nothing machine-readable."},
+    "agent_strategy":               {"task": "ai_agents.tasks.review_active_strategies", "layer": "eye", "writes": ["StrategyAdjustment", "AgentPrediction"], "feeds": ["pipeline_calibration"],
+                                     "note": "Needs ANTHROPIC_API_KEY. Its adjustments are written and rendered nowhere; every long/short leg it proposes is now registered as a direction call the calibration grades — that edge is the only thing that reads it, and the only thing that should."},
+    "agent_anomaly":                {"task": "ai_agents.tasks.run_anomaly_detection", "layer": "eye", "writes": ["AgentTask", "AgentPrediction"], "feeds": ["pipeline_calibration"],
+                                     "pages": ["/", "/ai/"],
+                                     "note": "Needs ANTHROPIC_API_KEY. Prose for a human, read on the dashboard's recent AI tasks and /ai/; nothing machine-readable, by design."},
 
     # ── gate ──────────────────────────────────────────────────────────
     "kill_switch":              {"layer": "gate", "writes": ["forced closes"], "feeds": ["execute_bots"],
@@ -122,20 +128,29 @@ WIRING = {
                                  "note": "Deliberately ungated: it must keep working when everything else is switched off. Operator-triggered only."},
     "feature_ai_pretrade_gate": {"layer": "gate", "writes": ["AgentPrediction"], "feeds": [],
                                  "note": "Consulted only by the legacy crypto bot, which is itself unscheduled."},
+    "pipeline_capital_desk":    {"task": "bot_program.tasks.grade_capital_desk", "cadence": 86400, "layer": "gate", "writes": ["DeskPlan", "DeskDecision", "AssetBotTrade.metadata.desk_*"], "feeds": ["execute_bots"],
+                                 "pages": ["/desk/"],
+                                 "note": "The fleet pass, two-phase, when this is on: every bot PROPOSES (nothing sent, the ticker read through the data session), the desk ranks the whole tick against one risk budget per venue on graded expected R per unit of MARGINAL risk (4h correlation over the candidates and the open book), then the chosen execute. It is a gate, not a sizer: size_mult is never above 1.0 and execute_entry re-judges MAX_RISK_FRACTION and the duplicate/theme gates after the multiplier lands. SHADOW by default — every candidate still trades at its own size and the plan is the counterfactual the nightly grade scores. Off: the legacy loop, zero overhead."},
     "pipeline_exposure":        {"task": "portfolio.tasks.recalculate_exposure", "layer": "gate", "writes": ["Portfolio.current_value", "Position marks"], "feeds": ["execute_bots"],
                                  "note": "Marks open positions to market (current_price + unrealized P&L, day-fresh data only), then recomputes exposure. The three per-category breakdowns are still returned without being stored."},
 
     # ── learn ─────────────────────────────────────────────────────────
     "pipeline_snapshot":        {"task": "portfolio.tasks.create_daily_snapshot", "cadence": 86400, "layer": "learn", "writes": ["PortfolioSnapshot"], "feeds": ["eye_core"],
                                  "note": "Drawdown and daily P&L are computed from these; with none taken, both read as unknown platform-wide."},
-    "pipeline_calibration":     {"task": "ai_agents.tasks.resolve_pending_calibrations", "cadence": 86400, "layer": "learn", "writes": ["RuleControl"], "feeds": ["pipeline_signals"]},
+    "pipeline_calibration":     {"task": "ai_agents.tasks.resolve_pending_calibrations", "cadence": 86400, "layer": "learn", "writes": ["AgentPrediction.was_correct"], "feeds": ["pipeline_signals"],
+                                 "pages": ["/calibration/"],
+                                 "note": "Grades every prediction past its deadline — trade outcomes, decay claims and direction calls against the first bar at the horizon. The trust score is computed from these grades on read, never stored; the strategist, the critic and the calibration page consume it."},
     "pipeline_actuator":        {"task": "signals.tasks.propose_rule_actions", "cadence": 86400, "layer": "learn", "writes": ["RuleControl"], "feeds": ["pipeline_signals", "execute_bots"]},
     "pipeline_meta_allocator":  {"task": "signals.tasks.propose_meta_allocation", "cadence": 604800, "layer": "learn", "writes": ["RuleControl.weight"], "feeds": ["execute_bots"]},
+    "pipeline_share_allocator": {"task": "bot_program.tasks.propose_share_plans", "cadence": 14400, "layer": "learn", "writes": ["SharePlan", "AssetBotConfig.extras.account_share_pct"], "feeds": ["broker_account_sync", "execute_bots"],
+                                 "pages": ["/shares/"],
+                                 "note": "Proposes a TARGET share of the broker account per live follower pool every 4 h (evidence × regime × opportunity × news, floors/ceilings, 10 points/day, drawdown governor over BrokerEquityReading) as a SharePlan in shadow. The share itself is written only when an admin applies a plan in LIVE mode (PIN on /shares/); the sync then re-sizes the pools from it, which is why this feeds the sync and not the bots directly. De-risk fast, re-risk slow: the sync itself also triggers a proposal at once (once per hour) when its fresh reading shows a shock — 3% off the 24 h high or past the drawdown knee — and a SHOCK plan lowers shares uncapped, raises none; with share_allocator_auto_derisk on, a pure de-risk applies itself in LIVE mode."},
     "pipeline_promotion":       {"task": "signals.tasks.auto_evaluate_promotions", "cadence": 86400, "layer": "learn", "writes": ["RuleControl.stage"], "feeds": ["pipeline_signals", "execute_bots"]},
     "pipeline_ai_decay":        {"task": "ai_agents.tasks.investigate_decaying_rules", "cadence": 86400, "layer": "learn", "writes": ["RuleControl"], "feeds": ["pipeline_actuator"],
                                  "note": "Needs ANTHROPIC_API_KEY."},
     "pipeline_ai_journal":      {"layer": "learn", "writes": ["Signal.journal"], "feeds": [],
-                                 "note": "Event-driven from signal grading rather than scheduled, which is correct."},
+                                 "pages": ["/ai-journal/"],
+                                 "note": "Event-driven from signal grading rather than scheduled, which is correct. Read by the operator on /ai-journal/."},
     "pipeline_evolution":       {"task": "signals.tasks.propose_strategy_evolutions", "cadence": 86400, "layer": "learn",
                                  "writes": ["RuleMutation", "RuleControl"],
                                  "feeds": ["pipeline_promotion"],
@@ -143,10 +158,17 @@ WIRING = {
                                          "rules (daily, evidence-gated) and forks "
                                          "approved ones into RESEARCH."},
     "pipeline_pattern_miner":   {"task": "signals.tasks.mine_patterns", "cadence": 604800, "layer": "learn", "writes": [], "feeds": ["pipeline_opportunity_scanner"]},
-    "agent_daily_briefing":     {"task": "ai_agents.tasks.generate_daily_briefing", "cadence": 86400, "layer": "learn", "writes": ["AgentTask"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},
-    "agent_weekly_review":      {"task": "ai_agents.tasks.generate_weekly_review", "cadence": 604800, "layer": "learn", "writes": ["AgentTask"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},
-    "agent_optimization":       {"task": "ai_agents.tasks.optimize_strategies", "cadence": 604800, "layer": "learn", "writes": ["StrategyAdjustment"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},
-    "agent_monday_plan":        {"task": "ai_agents.tasks.generate_monday_plan", "cadence": 604800, "layer": "learn", "writes": ["AgentTask"], "feeds": [], "note": "Needs ANTHROPIC_API_KEY."},
+    "agent_daily_briefing":     {"task": "ai_agents.tasks.generate_daily_briefing", "cadence": 86400, "layer": "learn", "writes": ["AgentTask", "AgentPrediction"], "feeds": ["pipeline_calibration"], "pages": ["/", "/ai/"],
+                                 "note": "Needs ANTHROPIC_API_KEY. Written for the operator, read on the dashboard and /ai/; the calls block it ends with is graded by the calibration."},
+    "agent_weekly_review":      {"task": "ai_agents.tasks.generate_weekly_review", "cadence": 604800, "layer": "learn", "writes": ["AgentTask", "AgentPrediction"], "feeds": ["pipeline_calibration"], "pages": ["/", "/ai/"],
+                                 "note": "Needs ANTHROPIC_API_KEY. Written for the operator, read on the dashboard and /ai/; the calls block it ends with is graded by the calibration."},
+    "agent_optimization":       {"task": "ai_agents.tasks.optimize_strategies", "cadence": 604800, "layer": "learn", "writes": ["StrategyAdjustment", "AgentPrediction"], "feeds": ["pipeline_calibration"],
+                                 "note": "Needs ANTHROPIC_API_KEY. Writes the same StrategyAdjustment table as agent_strategy, which nothing reads; its proposals' legs are registered as direction calls, and that grade is what survives."},
+    "agent_monday_plan":        {"task": "ai_agents.tasks.generate_monday_plan", "cadence": 604800, "layer": "learn", "writes": ["AgentTask", "AgentPrediction"], "feeds": ["pipeline_calibration"], "pages": ["/", "/ai/", "/briefing/"],
+                                 "note": "Needs ANTHROPIC_API_KEY. Written for the operator every Sunday evening and read whole on /briefing/ (#monday-plan, from its AgentTask row); the bell and the staff Telegram group get a summary and the link; the calls block it ends with is graded by the calibration."},
+    # Monthly on a crontab, so the 31-day cadence is declared here (2026-09-12).
+    "agent_horizon":            {"task": "brain.tasks.run_horizon", "cadence": 2678400, "layer": "learn", "writes": ["HorizonView", "AgentPrediction"], "feeds": ["pipeline_share_allocator", "pipeline_calibration"], "pages": ["/horizon/"],
+                                 "note": "Needs ANTHROPIC_API_KEY; ~1.5 USD a run on the frontier tier. The 5-10 year sector synthesis: sector tilts with 6/12-month direction calls the calibration grades, and asset-class tilts the share allocator folds in as a fifth factor, ±10% at most."},
 }
 
 # Components whose only job is to be a mode flag on another component. Drawn as
@@ -156,6 +178,9 @@ WIRING = {
 MODE_FLAGS = {
     "actuator_mode_live": "pipeline_actuator",
     "meta_allocator_mode_live": "pipeline_meta_allocator",
+    "share_allocator_mode_live": "pipeline_share_allocator",
+    "share_allocator_auto_derisk": "pipeline_share_allocator",
+    "capital_desk_mode_live": "pipeline_capital_desk",
 }
 
 # A component is late when it has missed more than two of its own beats. One
@@ -220,6 +245,10 @@ def _fmt_cadence(seconds):
     """The schedule in the operator's words, so the verdict shows its reason."""
     if not seconds:
         return "no declared cadence"
+    # 28 days and up is a month: the horizon agent's 31-day cadence read
+    # "weekly" under the branch below and its verdict named the wrong rhythm.
+    if seconds >= 86400 * 28:
+        return "monthly"
     if seconds >= 604800 * 0.9:
         return "weekly"
     if seconds >= 86400 * 0.9:
@@ -392,6 +421,10 @@ def build_topology(user):
             "enabled": comp.is_enabled,
             "writes": wiring["writes"],
             "feeds": wiring["feeds"],
+            # Pages where a PERSON reads what this writes. A component with
+            # readers and no machine consumer is not an orphan; it is a
+            # briefing.
+            "pages": wiring.get("pages", []),
             "last_run": _fmt_age(_age(comp.last_run_at)),
             # The schedule rides with the node so the inspector can say WHY a
             # 3-day-old weekly component is fine and a 10-minute-old poller is
@@ -564,13 +597,26 @@ def build_topology(user):
         # thing that 500s over a state nobody added to the vocabulary.
         counts[n["state"]] = counts.get(n["state"], 0) + 1
 
+    def _unconsumed(n):
+        return (n["kind"] == "component"
+                and not any(e["from"] == n["key"] for e in edges))
+
+    # Three kinds of "nothing consumes it", and the map used to name one.
+    # An orphan writes for nobody: no node reads it, no page renders it —
+    # agent_strategy's adjustments, the pre-trade gate the fleet never
+    # consults. A component with `pages` writes for the OPERATOR: the
+    # briefings, the anomaly scan, the journal. Calling those orphans put
+    # every human-facing agent under "producing nothing anything reads"
+    # for as long as the map existed, and hid the two real findings among
+    # seven false ones.
     orphans = [n["key"] for n in nodes
-               if n["kind"] == "component"
-               and not any(e["from"] == n["key"] for e in edges)]
+               if _unconsumed(n) and not n.get("pages")]
+    human_read = [{"key": n["key"], "pages": n["pages"]}
+                  for n in nodes if _unconsumed(n) and n.get("pages")]
 
     return {
         "layers": LAYERS, "nodes": nodes, "edges": edges,
-        "counts": counts, "orphans": orphans,
+        "counts": counts, "orphans": orphans, "human_read": human_read,
         "state_meta": STATE_META,
         # UNKNOWN earns a legend chip only when something actually is unknown;
         # a permanent 0 next to the six real states teaches nothing.

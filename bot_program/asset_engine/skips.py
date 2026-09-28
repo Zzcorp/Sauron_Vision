@@ -41,6 +41,62 @@ SIZED_TO_ZERO = "sized_to_zero"       # risk budget below one tradeable unit
 SHADOW = "shadow"                     # shadow mode: computed, not submitted
 ORDER_REJECTED = "order_rejected"     # broker refused
 ERROR = "error"                       # an exception on the entry path
+# The two exits that were still a bare `return None` when the entry path was
+# split for the capital desk (2026-09-12). Both looked, from outside, like a
+# quiet market.
+BRAIN_PAUSED = "brain_paused"         # the brain advised pause_recommended
+# An order that MAY BE LIVE. Distinct from order_error on purpose: that
+# one means "no order exists", and this one means "nobody knows" — the
+# request did not come back. A caller that treats them alike retries, and
+# doubles the position.
+ORDER_IN_DOUBT = "order_in_doubt"
+ORDER_ERROR = "order_error"           # the live order raised (never sent, or unknown)
+# 2026-09-20. THE SIZE IS FINE AND THE VENUE WILL NOT TAKE IT. Distinct from
+# sized_to_zero, which means the risk budget bought less than one unit of the
+# bot's OWN rounding granularity, and from order_error, whose advice sends
+# the operator to the gateway. This is neither: the quantity is positive,
+# judged and correct, and the venue's floor is above it. A forex bot sizing
+# 400 units from its stop distance (_round_qty snaps to 100, which is
+# OANDA/IBKR granularity and no venue's rule) was refused by the adapter on
+# every tick and recorded as order_error, so a repeated line read as a broken
+# connection instead of a decision to make. NOTHING IS RESIZED: raising the
+# size to the floor is a different trade (see SaxoTrader._amount), so the
+# operator is handed both numbers and chooses.
+VENUE_MIN_SIZE = "venue_min_size"
+# The capital desk ranked this candidate below the tick's budget, a rule or
+# class share cap, or an open position it correlates with — and the desk was
+# in LIVE mode, so nothing was sent. A CHOICE, not a fault: the detail names
+# the plan and the reason so the operator can read the ladder on /desk/ and
+# see what took the capital instead (2026-09-12).
+DESK_DISPLACED = "desk_displaced"
+# 2026-09-23. A LEVERED order the platform refused to send: extras['leverage']
+# is not a whole number or is past a cap, the order would be carried by a
+# venue other than eToro, the component etoro_leverage_live is OFF, the
+# operator's own book on /setup/ was never saved, the account's available
+# cash (the sync's cells) is unmeasured, stale, in another currency or too
+# small, the account would be pledged past its ceiling, or eToro refused a
+# levered order on that symbol within the quiet hours. Its own code so a
+# repeated line reads as a DECISION with both numbers, never as a broken
+# connection (order_error) or a small pool (sized_to_zero). NOTHING IS
+# RESIZED OR DE-LEVERED: the operator is handed the numbers and chooses.
+LEVERAGE_REFUSED = "leverage_refused"
+
+# 2026-09-25 (Stage 1). eToro's OWN eligibility row said no — read once per
+# instrument per UTC day once read, an unread row asked again on every ask
+# (EtoroTrader.eligibility, MEASURED 2026-09-23), by step 2 of
+# AssetBot._etoro_entry_refusal, on every lane: the venue lists no row for
+# the id today ("absent"), allowOpenPosition is false, the size is past
+# maxUnitsPerOrder (refused, never clamped), or the row could not be read
+# today for a levered order or for a class whose measured floor is 1,000
+# USD (forex, index, commodity). Its own code so the operator reads the
+# venue's answer, never a broken connection (order_error) or a small pool
+# (sized_to_zero). NOTHING IS RESIZED OR CLAMPED.
+ELIGIBILITY_REFUSED = "eligibility_refused"
+
+# 2026-09-26. A PAPER entry while the instrument's market is shut
+# (paper_trader.paper_market_shut): no fill, no row. Its own code so a
+# weekend of refusals reads as the clock, never as a dead feed (no_price).
+MARKET_SHUT = "market_shut"
 
 MAX_SYMBOLS_TRACKED = 200
 
@@ -116,6 +172,55 @@ def diagnose(cfg) -> str:
         SIZED_TO_ZERO: "the risk budget is below one tradeable unit — fund more "
                        "capital or raise extras['risk_per_trade_pct']",
         SHADOW: "shadow mode is on: everything is computed, nothing submitted",
+        BRAIN_PAUSED: "the brain has this rule on pause_recommended — read "
+                      "the latest BrainReport before overriding it",
+        ORDER_IN_DOUBT: "the order request did not come back, so the order "
+                        "MAY be live at the broker with no row here — "
+                        "search the broker for the reference in the detail "
+                        "before arming this symbol again",
+        ORDER_ERROR: "the broker client raised on the order — check the "
+                     "gateway and the bot log; nothing was booked",
+        # The remedies raise the UNIT COUNT, and a wider stop lowers it:
+        # units = risk budget / stop distance. This advice said "widen the
+        # stop" first, which would drive the size further below the floor it
+        # is meant to clear.
+        VENUE_MIN_SIZE: "the venue's minimum trade size is above the size "
+                        "the stop distance buys — nothing is wrong with the "
+                        "connection and nothing was resized. Raise the "
+                        "pool's capital, raise extras['risk_per_trade_pct'], "
+                        "or TIGHTEN the stop: a tighter stop buys more "
+                        "units, a wider one buys fewer. Moving the whole "
+                        "asset class off this venue on /brokers/ also works, "
+                        "but it moves every symbol in the class — close any "
+                        "position still open there first. The detail carries "
+                        "both numbers",
+        DESK_DISPLACED: "the capital desk is ranking these entries below "
+                        "others — read the ladder on /desk/ to see what "
+                        "took the risk budget instead",
+        LEVERAGE_REFUSED: "a levered eToro order was refused before it left "
+                          "— read the detail: the value, the carrier, the "
+                          "etoro_leverage_live switch, the instrument's "
+                          "LIVE leverageValues and maxStopLossPercentage "
+                          "(eligibility, doc 2026-09-23 §9), the class's "
+                          "ETORO_PROVEN token (ETORO_DEPARTURE §7-0), the "
+                          "book on /setup/, the account's cash and its "
+                          "world stamp, or a refusal eToro gave within the "
+                          "quiet hours; nothing was sent at 1 (since "
+                          "2026-09-26 a 1x eToro order needs the cells "
+                          "too) and nothing was de-levered",
+        ELIGIBILITY_REFUSED: "eToro's own eligibility row refused the entry "
+                             "before it left — read the detail: no row for "
+                             "the symbol today, allowOpenPosition false, a "
+                             "size past maxUnitsPerOrder, or a row unread "
+                             "today for a levered order or a forex/index/"
+                             "commodity symbol (their measured floor is "
+                             "1,000 USD). Nothing was sent and nothing was "
+                             "clamped; the row is re-read once per UTC day, "
+                             "an unread one on every ask",
+        MARKET_SHUT: "the instrument's market is shut, or opened less than "
+                     "15 minutes ago, so the paper venue fills nothing — "
+                     "nothing is wrong with the feed; paper fills resume "
+                     "at the hour the detail names",
     }.get(top, "")
     return (f"{top} accounts for {share:.0%} of {total} skips"
             + (f" — {advice}" if advice else ""))

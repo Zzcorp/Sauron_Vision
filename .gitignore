@@ -28,6 +28,10 @@ staticfiles/
 .env.local
 .env.production
 
+# The Book of Sauron's staff-only chapter (core/views_book.py): read from
+# private/ on a checkout, copied into the image, never committed.
+/private/
+
 # IDE
 .vscode/
 .idea/
@@ -47,12 +51,21 @@ frontend/dist/
 # Celery
 celerybeat-schedule
 celerybeat.pid
+# The filesystem:// broker settings.py falls back to without Redis (the
+# test suite, CI, a dev box): its spool and kombu's control queue land in
+# the repo root and are never source.
+.celery/
+control/
 
 # Claude Code local state
 .claude/
 
 # Operator screenshots dropped locally — never ship into the public static root
 static/screen/
+# ibkr-apply's .env backup, and the dated copies the departure runbook has
+# the operator take by hand (deploy/ETORO_DEPARTURE.md §2c) — every secret
+# the platform has, never source.
 .env.bak
+.env.bak.*
 .env.tmp
 .env.lock

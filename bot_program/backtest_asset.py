@@ -9,6 +9,55 @@ signal have been profitable?), Phase 18 measures *bot* quality (given the
 config's SL/TP %, cooldown, gating, etc., would the bot have been profitable
 acting on those signals?).
 
+WHAT A MISSING BAR USED TO COST (2026-09-14)
+--------------------------------------------
+
+`_simulate_exit` returned `(None, 0.0, "expired")` when the feed carried no
+bar after the signal, and the caller priced that 0.0 as a fill. A BUY at
+100 with a 2% stop therefore booked
+
+    r = (0.0 - 100) / |100 - 98| = -50
+
+as a completed, *expired* trade. Worse, `exit_time` was None, so neither
+the one-position-per-symbol guard nor the cooldown was ever armed for that
+symbol: every later signal on it booked another -50. A symbol the feed had
+never carried could bury a whole run under a four-figure negative total_R,
+and `avg_r`, `sharpe_r`, `max_drawdown_r` and `max_consecutive_losses` all
+reported it as measured.
+
+A signal with no bars after it is not a losing trade. It is not a trade.
+It is now dropped and COUNTED, in `BacktestResult.unmeasured` - because a
+run that silently discarded 900 of its 1000 signals is also a lie, just a
+quieter one.
+
+Two neighbours of the same defect went with it:
+
+  - A bar that OPENS beyond the stop used to fill AT the stop. A gap does
+    not respect a stop order. It now fills at the open, which is the only
+    direction of this error that matters: the old behaviour flattered the
+    backtest in precisely the events that empty accounts.
+  - "Expired" used to mean two different things - the walk ran its full
+    length and touched nothing (a measurement), or the bar feed simply ran
+    out (not one). The second is now `open_at_data_end`. On a platform
+    whose bars have gone stale for fourteen hours at a stretch, the
+    difference is between "this bot is flat" and "you have no data".
+
+THE EXIT THE BACKTEST DID NOT KNOW ABOUT (2026-09-14)
+-----------------------------------------------------
+
+The live engine flattens a position at `AssetBotConfig.time_stop_setting()`
+with reason TIME - `bot_program/asset_engine/base.py::_time_stop_hit`. This
+module had never heard of it, and walked up to `max_bars` bars regardless.
+So a scalper config with an 8h ceiling was backtested as a bot that holds
+for 500 hours: targets reached on day nine were booked as wins that the
+live bot could not have collected, and the run graded a strategy nothing
+would ever execute.
+
+That is the same defect as the three above wearing different clothes - a
+measurement that does not measure the thing. The ceiling is now read off
+the config and enforced, and its exits are labelled `time_stop`, the same
+word `bot_program/bot_grading.py` already uses for the live ones.
+
 Out of scope for v1:
   - Re-running decide() on every bar (too expensive). We use the Signal stream
     as the trigger source — same as live mode.
@@ -29,6 +78,18 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+#: Every outcome that is a trade. The last two are NOT interchangeable:
+#: `expired` is a measurement - the walk ran `max_bars` bars and touched
+#: neither level. `open_at_data_end` is a mark-to-market against the last
+#: bar that exists, which is a different claim.
+OUTCOMES = ("hit_target", "stopped_out", "time_stop", "expired",
+            "open_at_data_end")
+
+#: Not an outcome. The feed carries no bar after the signal, so there is no
+#: exit, no price, and nothing to average. The caller drops the signal and
+#: counts it; see the module docstring for what pricing it used to cost.
+NO_DATA = "no_data"
 
 
 # ── Inputs / outputs ─────────────────────────────────────────────────────
@@ -83,6 +144,11 @@ class BacktestResult:
     test_stats: Optional[dict] = None
     walk_forward_split_at: Optional[datetime] = None
     skipped: dict = field(default_factory=dict)
+    #: Signals that qualified but could not be simulated, because the bar
+    #: feed carried nothing after them. Always populated, so that zero is a
+    #: measurement rather than an absence:
+    #:   {"signals_without_bars": int, "by_symbol": {sym: int}}
+    unmeasured: dict = field(default_factory=dict)
 
 
 # ── Engine ───────────────────────────────────────────────────────────────
@@ -114,7 +180,16 @@ def run_backtest(params: BacktestParams) -> BacktestResult:
             .select_related("instrument")
             .order_by("created_at"))
 
+    # The one exit no broker holds and the live engine fires itself. A
+    # backtest that ignores it measures a bot that never lets go, which is
+    # not the bot that trades. `hours` is 0.0 exactly when the stop is off,
+    # and `time_stop_setting` has already resolved extras / field / class
+    # default, so there is nothing to re-derive here.
+    time_stop = cfg.time_stop_setting()
+    hold_hours = float(time_stop["hours"]) if time_stop["enabled"] else None
+
     trades: list[BacktestTrade] = []
+    unmeasured: dict[str, int] = {}             # sym -> signals with no bars after
     open_until: dict[str, datetime] = {}        # sym → exit time of last open trade
     cooldown_until: dict[str, datetime] = {}    # sym → cooldown expiry
     cooldown_minutes = max(0, cfg.cool_down_minutes or 0)
@@ -158,17 +233,22 @@ def run_backtest(params: BacktestParams) -> BacktestResult:
             sym_to_inst[sym], cfg.timeframe, sig.created_at,
             side=side, sl=sl, tp=tp,
             max_bars=params.max_bars_per_trade,
+            max_hold_hours=hold_hours,
         )
 
-        # Phase 22 — apply exit slippage. BUY pays slip on top of receiving;
+        # No bar after the signal means no exit and no price. Pricing the
+        # absence is what booked a -50 R "expired trade" on every signal of
+        # every symbol the feed had never carried; see the module docstring.
+        if outcome == NO_DATA or raw_exit_price is None:
+            unmeasured[sym] = unmeasured.get(sym, 0) + 1
+            continue
+
+        # Phase 22 - apply exit slippage. BUY pays slip on top of receiving;
         # SELL pays slip below.
-        if outcome in ("hit_target", "stopped_out", "expired"):
-            if side == "BUY":
-                exit_price = raw_exit_price * (1 - slip)
-            else:
-                exit_price = raw_exit_price * (1 + slip)
+        if side == "BUY":
+            exit_price = raw_exit_price * (1 - slip)
         else:
-            exit_price = raw_exit_price
+            exit_price = raw_exit_price * (1 + slip)
 
         # realized R — pnl / |signal_price - sl|. Note we use signal-price-
         # based risk so R-multiples stay comparable across trades regardless
@@ -233,18 +313,39 @@ def run_backtest(params: BacktestParams) -> BacktestResult:
         stats=compute_stats(trades),
         train_stats=train_stats, test_stats=test_stats,
         walk_forward_split_at=split_at,
+        unmeasured={
+            "signals_without_bars": sum(unmeasured.values()),
+            "by_symbol": dict(sorted(unmeasured.items())),
+        },
     )
 
 
 def _simulate_exit(instrument, timeframe: str, after: datetime,
                     *, side: str, sl: float, tp: float,
-                    max_bars: int):
+                    max_bars: int, max_hold_hours: Optional[float] = None):
     """Walk PriceData bars after `after`. Return (exit_time, exit_price, outcome).
 
-    Outcome ∈ {hit_target, stopped_out, expired}. When a bar's range covers
-    BOTH SL and TP, we conservatively assume SL hits first (the standard
-    backtest worst-case assumption — without intra-bar tick data we can't
-    know which actually happened first).
+    Outcome is one of `OUTCOMES`, or `NO_DATA` - in which case the price is
+    None and the caller MUST drop the signal rather than price it.
+
+    When a bar's range covers BOTH SL and TP, SL is assumed first: the
+    standard worst case, since without intra-bar ticks we cannot know which
+    came first.
+
+    A bar that OPENS beyond the stop fills at the open, not at the stop. A
+    gap does not respect a stop order, and filling at the stop anyway is
+    the one direction of this error that matters - it flatters the backtest
+    in exactly the events that empty an account. The mirror case, a gap
+    through the TARGET, still fills at the target: charging an unfavourable
+    gap while refusing to credit a favourable one is the asymmetry a
+    backtest is supposed to have.
+
+    `max_hold_hours` is the config's time-stop ceiling, or None when it is
+    off. A bar that OPENS after the ceiling has expired exits at that open
+    with outcome `time_stop`, and never gets to show its range: the live
+    engine's next tick would have flattened the position before this bar
+    traded, so crediting it with the bar's target would be inventing a fill
+    the bot could not have taken.
     """
     from market_data.models import PriceData
 
@@ -256,29 +357,36 @@ def _simulate_exit(instrument, timeframe: str, after: datetime,
     )
 
     if not bars:
-        return None, 0.0, "expired"
+        return None, None, NO_DATA
+
+    deadline = (after + timedelta(hours=max_hold_hours)
+                if max_hold_hours else None)
 
     for bar in bars:
-        h = float(bar.high)
-        lo = float(bar.low)
+        # Checked before the levels, deliberately. See the docstring.
+        if deadline is not None and bar.timestamp >= deadline:
+            return bar.timestamp, float(bar.open), "time_stop"
+
+        h, lo, op = float(bar.high), float(bar.low), float(bar.open)
         if side == "BUY":
-            hit_sl = lo <= sl
-            hit_tp = h >= tp
-            if hit_sl:  # worst case first
-                return bar.timestamp, sl, "stopped_out"
-            if hit_tp:
+            if lo <= sl:                        # worst case first
+                return bar.timestamp, min(op, sl), "stopped_out"
+            if h >= tp:
                 return bar.timestamp, tp, "hit_target"
         else:  # SELL
-            hit_sl = h >= sl
-            hit_tp = lo <= tp
-            if hit_sl:
-                return bar.timestamp, sl, "stopped_out"
-            if hit_tp:
+            if h >= sl:
+                return bar.timestamp, max(op, sl), "stopped_out"
+            if lo <= tp:
                 return bar.timestamp, tp, "hit_target"
 
-    # No SL / TP hit within window — close at last bar's close.
+    # Neither level touched, and there are two very different reasons for
+    # that. A full walk is a measured expiry. A short one means the slice
+    # exhausted the table: the position is still open, and the price below
+    # is the last close that exists, not a fill.
     last = bars[-1]
-    return last.timestamp, float(last.close), "expired"
+    ran_full_course = len(bars) >= max_bars
+    return (last.timestamp, float(last.close),
+            "expired" if ran_full_course else "open_at_data_end")
 
 
 # ── Stats ────────────────────────────────────────────────────────────────
@@ -327,7 +435,7 @@ def compute_stats(trades: list) -> dict:
         sharpe_r = 0.0
 
     # Outcome counts.
-    by_outcome = {"hit_target": 0, "stopped_out": 0, "expired": 0}
+    by_outcome = {key: 0 for key in OUTCOMES}
     for t in trades:
         by_outcome[t.outcome] = by_outcome.get(t.outcome, 0) + 1
 
@@ -355,7 +463,7 @@ def _empty_stats() -> dict:
         "profit_factor": None,
         "max_drawdown_r": 0, "max_consecutive_losses": 0,
         "sharpe_r": 0,
-        "by_outcome": {"hit_target": 0, "stopped_out": 0, "expired": 0},
+        "by_outcome": {key: 0 for key in OUTCOMES},
     }
 
 

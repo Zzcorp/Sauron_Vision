@@ -1,0 +1,539 @@
+"""The command registry — every shell twin and diagnostic, in one list.
+
+The decisions of this platform live on eight pages, and each page has a
+shell twin (`component`, `proposals`, `actuator`, `shares`, `persona`,
+`follow`, `bot`) and a set of read-only diagnostics beside it (`open_trades`,
+`preflight_live`, `why_no_trade`). By 2026-09-12 nothing on any screen
+said those twins existed: an operator learned a command's name from a
+runbook paragraph or a colleague, and the runbook and the commands
+drifted apart in silence. This module is the one place the catalogue
+lives; /ops/ renders it and `python manage.py ops` prints it, so both
+show the same list by construction.
+
+Every `usage` line is COPIED from the command's own module docstring —
+tests/test_ops_cockpit.py opens each command file and asserts every
+usage line appears there verbatim, so a flag renamed in the command
+without this list following it fails the suite rather than misleading
+the operator. Likewise every registered management command must exist
+and every management command under bot_program/brain/signals/core must
+be registered or named in EXEMPT: the registry cannot drift in either
+direction.
+
+Pure Python, no Django import at module level: `ops` and the page both
+import it before anything else, and a registry that needs the ORM to be
+read cannot be printed when the ORM is what is broken.
+"""
+
+# Categories: 'read' answers a question and writes nothing; 'decide' is a
+# page's Apply/Reject/On/Off button as a command (its `list` verb is read,
+# its other verbs write); 'ops' is a one-off operational write — a seed,
+# a backfill, a recalculation.
+CATEGORIES = (
+    ("read", "Read — answers a question, writes nothing"),
+    ("decide", "Decide — a page's buttons as a command (list is read; the rest write)"),
+    ("ops", "Ops — one-off operational writes: seed, backfill, recalculate"),
+)
+
+# What the page's Run lane may execute: only entries that are read_only AND
+# runnable. `run_args` is the FIXED argv the button passes — the browser
+# never supplies an argument, so the only variability is which registered
+# read-only command runs (2026-09-12: free-form argv from a form field is a
+# shell on the web, and the PIN gates would be the only thing between a
+# stolen session and `component off platform_master`).
+COMMANDS = [
+    # ── decide: the pages' buttons ──────────────────────────────────────
+    {
+        "name": "component",
+        "title": "Platform components",
+        "purpose": "Turn platform components on and off from the shell — the same write as the health page's toggle, with the nearest key suggested on a typo.",
+        "usage": [
+            "python manage.py component list",
+            "python manage.py component list --category agent",
+            "python manage.py component on generator_auto_research",
+            "python manage.py component off actuator_mode_live scraper_etoro",
+        ],
+        "mirrors": "/health/",
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    {
+        "name": "proposals",
+        "title": "Generator proposals",
+        "purpose": "Read, arm or reject the strategy generator's proposals — the brain page's click, with the same blocker check and audit row.",
+        "usage": [
+            "python manage.py proposals list",
+            "python manage.py proposals approve 10 11",
+            'python manage.py proposals reject 12 --notes "duplicates rule X"',
+        ],
+        "mirrors": "/generated/",
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    {
+        "name": "actuator",
+        "title": "Rule actuator",
+        "purpose": "The rule actuator's Apply / Reject / Rollback buttons as a command; --stale rejects every proposal a newer one supersedes.",
+        "usage": [
+            "python manage.py actuator list",
+            "python manage.py actuator apply 11 9",
+            "python manage.py actuator reject 2 4 6",
+            "python manage.py actuator reject --stale",
+            "python manage.py actuator rollback 11",
+        ],
+        "mirrors": "/rule-control/",
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    {
+        "name": "shares",
+        "title": "Share allocator",
+        "purpose": "The share allocator's page as a command: propose, apply (LIVE mode, --yes), reject, rollback and grade the plans that size each live follower pool.",
+        "usage": [
+            "python manage.py shares list                  # mode, pending, applied, last grade",
+            "python manage.py shares list --user alice",
+            "python manage.py shares propose --user alice  # a plan now, or the reason there is none",
+            "python manage.py shares apply 12              # plan only",
+            "python manage.py shares apply 12 --yes        # write it (LIVE mode only)",
+            "python manage.py shares reject 12 13",
+            "python manage.py shares rollback 12 --yes",
+            "python manage.py shares grade                 # score every plan whose 24h closed",
+        ],
+        "mirrors": "/shares/",
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    {
+        "name": "horizon",
+        "title": "Horizon (5-10y view)",
+        "purpose": "The Horizon page as a command: list the runs, show a view's sectors, tilts and graded calls, print the agent's grade, and run one synthesis (--yes: ~1.5 USD on the frontier model).",
+        "usage": [
+            "python manage.py horizon list             # runs: status, model, cost, calls, age",
+            "python manage.py horizon show             # the latest OK view: sectors, tilts, calls, grades",
+            "python manage.py horizon show 12          # one view by id",
+            "python manage.py horizon run              # prints the cost, does nothing",
+            "python manage.py horizon run --yes        # one synthesis now (~1.5 USD, frontier tier)",
+            "python manage.py horizon grade            # brier / trust for agent 'horizon'",
+        ],
+        "mirrors": "/horizon/",
+        # list/show/grade read; run spends — a decide entry, like shares.
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    {
+        "name": "desk",
+        "title": "Capital desk",
+        "purpose": "The capital desk's page as a command: the plans it wrote, the decisions on one of them, the nightly grade on demand, and what the desk would say about one config and symbol right now (read-only, no order).",
+        "usage": [
+            "python manage.py desk list                    # the last plans, newest first",
+            "python manage.py desk list --user alice",
+            "python manage.py desk show                    # the newest plan's decisions",
+            "python manage.py desk show 42                 # one plan by id",
+            "python manage.py desk grade                   # resolve counterfactuals + score plans",
+            "python manage.py desk explain 14 EURUSD       # what the desk would say, no order",
+        ],
+        "mirrors": "/desk/",
+        # list/show/explain read; grade writes the counterfactuals and
+        # the plan scores — a decide entry, like shares and horizon.
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    {
+        "name": "persona",
+        "title": "Trader personalities",
+        "purpose": "The three trader personalities as a command: the presets side by side, one in full, applying one to a config (--yes writes, the page's PIN), the grade over each persona's own window, and the regime mix matrix — which personality this tape has actually rewarded, and how many of the eighteen cells are still unproven priors.",
+        "usage": [
+            "python manage.py persona list",
+            "python manage.py persona show scalp",
+            "python manage.py persona apply 14 swing         # plan only, writes nothing",
+            "python manage.py persona apply 14 swing --yes   # writes",
+            "python manage.py persona grade",
+            "python manage.py persona mix                    # the matrix + the recorded regime",
+            "python manage.py persona mix --venue paper --regime trending",
+        ],
+        "mirrors": "/personas/",
+        # THE REGISTRY IS PER COMMAND, NOT PER SUBCOMMAND, and
+        # test_ops_cockpit pins read_only == (category == "read") — so a
+        # command with any writing verb is one 'decide' entry, exactly as
+        # `shares`, `horizon` and `desk` already are. list/show/grade read
+        # and write nothing; apply is the write, and the Run lane refuses
+        # the whole entry rather than offering three of its four verbs.
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    {
+        "name": "follow",
+        "title": "Follow the account",
+        "purpose": "Make a live pool a share of the account, or stop it following — the asset-bots page's Follow form, through the same arithmetic, writing only with --yes.",
+        "usage": [
+            "python manage.py follow                      # who follows, at what share",
+            "python manage.py follow 14 --share 20        # plan only",
+            "python manage.py follow 14 --share 20 --yes  # write it",
+            "python manage.py follow 14 --yes             # automatic share",
+            "python manage.py follow 14 --stop --yes      # stop following, pool stays",
+        ],
+        "mirrors": "/asset-bots/",
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    {
+        "name": "bot",
+        "title": "Asset bot on/off",
+        "purpose": "Enable or disable an asset bot — the admin page's toggle with its own rule: --yes plays the PIN's role to arm a live config, stopping never asks.",
+        "usage": [
+            "python manage.py bot list",
+            "python manage.py bot off 1",
+            "python manage.py bot on 6            # paper: writes; live: plan only",
+            "python manage.py bot on 6 --yes      # live: writes",
+        ],
+        "mirrors": "/asset-bots/",
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    {
+        "name": "setups",
+        "title": "Why a setup never fires",
+        "purpose": "Answer, per setup, whether it is too strict, blind on its data, or short of its threshold by two hundredths — and arm the ones the generator wrote that nobody clicked.",
+        "usage": [
+            "python manage.py setups list",
+            "python manage.py setups diagnose",
+            "python manage.py setups diagnose --near-miss 0.15 --limit 40",
+            "python manage.py setups show starter_forex_breakout",
+            "python manage.py setups arm advanced_smc_long              # plan only",
+            "python manage.py setups arm advanced_smc_long --yes        # writes",
+            "python manage.py setups grading --days 30",
+        ],
+        "mirrors": "/setups/",
+        # THE REGISTRY IS PER COMMAND, NOT PER SUBCOMMAND, and
+        # test_ops_cockpit pins read_only == (category == "read"). list,
+        # diagnose, show and grading write nothing; `arm` flips is_active
+        # through approve_proposal. So this is ONE decide entry, exactly as
+        # `persona`, `shares`, `horizon` and `desk` already are, and the Run
+        # lane refuses the whole entry rather than offering four of its five
+        # verbs (2026-09-12).
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    # 2026-09-26 -- the Morgul guards, once by hand (bot_program/morgul.py).
+    # A DECIDE entry for the reason `setups` is one: the bare command reads
+    # and writes nothing, but --send runs the beat's cycle (messages to the
+    # group, and the brake while its switch is ON), and the registry is
+    # per command, so the Run lane refuses the whole entry.
+    {
+        "name": "morgul",
+        "title": "Morgul guards",
+        "purpose": "Run the ten read-only guards over the book once and print what they find: bookings while a market was shut, live positions without a stop, stuck closes, margin, daily loss, drift. Bare, it sends and stops nothing; --send runs the beat's cycle.",
+        "usage": [
+            "python manage.py morgul",
+            "python manage.py morgul --send",
+        ],
+        "mirrors": "/health/",
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    # ── read: the diagnostics ───────────────────────────────────────────
+    {
+        "name": "open_trades",
+        "title": "Open trades",
+        "purpose": "Every position the bots hold with the platform's own mark, unrealised P&L and R against the stop; a trade without a stop is flagged.",
+        "usage": [
+            "python manage.py open_trades",
+            "python manage.py open_trades --symbol SOL",
+            "python manage.py open_trades --all      # closed rows of the last 7 days too",
+        ],
+        "mirrors": "/command/",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+    },
+    {
+        "name": "paper_readiness",
+        "title": "Paper readiness",
+        "purpose": "The mirror of preflight_live: not whether it is safe to arm money, but whether the evidence chain can produce a graded track record at all. Every link is a component, and a missing row reads as OFF while nothing raises.",
+        "usage": [
+            "python manage.py paper_readiness",
+            "python manage.py paper_readiness --window-days 90",
+        ],
+        "mirrors": "/ops/",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+    },
+    {
+        "name": "treasury",
+        "title": "Treasury",
+        "purpose": "Every broker, its capital, what it says it holds, what the platform believes is open, and the divergence between the two. Cached columns only — no broker call, nothing written. An em dash is never a zero.",
+        "usage": [
+            "python manage.py treasury",
+            "python manage.py treasury --user mathe",
+        ],
+        "mirrors": "/treasury/",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+    },
+    {
+        "name": "saxo_smoke",
+        "title": "Saxo smoke",
+        "purpose": "Exercise every READ of the Saxo adapter against the real SIM or LIVE for one user and report each in three states — ok, refused by Saxo, unknown — before any order exists. Places no order.",
+        "usage": [
+            "python manage.py saxo_smoke --user mathe",
+            "python manage.py saxo_smoke --user mathe --symbol AAPL",
+        ],
+        "mirrors": "/brokers/",
+        "read_only": True,
+        # No run_args: --user needs a value, and the Run lane cannot ask
+        # for one. The entry is not web-runnable anyway (below).
+        "run_args": [],
+        "category": "read",
+        # Read-only, and still not the web's to run: it presents the
+        # operator's Saxo session to an external service and prints the
+        # account's balance. The shell, with the operator's name typed.
+        "runnable": False,
+        "runnable_reason": "presents the operator's Saxo session to an external service and prints the balance",
+    },
+    {
+        "name": "notify_probe",
+        "title": "Notification probe",
+        "purpose": "Show where one user's alerts go: the channel, the bot-alert preference, the quiet hours, whether a Telegram chat id and the platform token are present in THIS process; with --send, push ONE test message through the Telegram sender and print its answer (a refusal is logged with Telegram's own words). Nothing traded, ticked or armed.",
+        "usage": [
+            "python manage.py notify_probe --user Sauron",
+            "python manage.py notify_probe --user Sauron --send",
+        ],
+        "mirrors": "/notifications/settings/",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+        # --user needs a value the Run lane cannot ask for, and --send
+        # writes to an external service (one Telegram message): the shell.
+        "runnable": False,
+        "runnable_reason": "takes --user; with --send it sends one Telegram message to the operator's chat",
+    },
+    {
+        "name": "etoro_smoke",
+        "title": "eToro smoke",
+        "purpose": "Exercise the READS of the eToro adapter with one user's stored key pair — the row, its world's ping, equity and book, every live config's symbols (id, eToro's spelling, rate, bars), optionally the other world with the same pair, and which write URLs have ever been attested — as ok, refused, no-such or unknown. Places no order.",
+        "usage": [
+            "python manage.py etoro_smoke --user Sauron",
+            "python manage.py etoro_smoke --user Sauron --symbol GLDM",
+            "python manage.py etoro_smoke --user Sauron --other-world",
+        ],
+        "mirrors": "/brokers/",
+        "read_only": True,
+        # No run_args: --user needs a value, and the Run lane cannot ask
+        # for one. The entry is not web-runnable anyway (below).
+        "run_args": [],
+        "category": "read",
+        # Read-only, and still not the web's to run: it presents the
+        # operator's eToro keys to an external service and prints the
+        # account's balance. The shell, with the operator's name typed.
+        "runnable": False,
+        "runnable_reason": "presents the operator's eToro keys to an external service and prints the balance",
+    },
+    {
+        "name": "preflight_live",
+        "title": "Preflight live",
+        "purpose": "Answer, in one pass, whether it is safe to arm real money right now — switches, connection, money, live configs, bars, PIN — from cached columns only.",
+        "usage": [
+            "python manage.py preflight_live",
+            "python manage.py preflight_live --user mathe",
+        ],
+        "mirrors": "/health/",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+    },
+    {
+        "name": "probe_routes",
+        "title": "Probe routes",
+        "purpose": "GET every argument-free route as a superuser and report, in three states, which pages answer, which are missing and which raise. Parameterised and mutating routes are counted, not probed. The forge shows the last tally.",
+        "usage": [
+            "python manage.py probe_routes",
+            "python manage.py probe_routes --show",
+        ],
+        "mirrors": "/oculus/",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+    },
+    {
+        "name": "signals",
+        "title": "Signals, filtered",
+        "purpose": "The signals page as a command: the same twelve filters, and the six answers per signal — can anything act on it, what the rule is worth, why it fired, what it would cost, whether anyone acted, and its own grade.",
+        "usage": [
+            "python manage.py signals list",
+            "python manage.py signals list --stage research --min-score 0.7",
+            "python manage.py signals list --rule starter_forex_breakout --active",
+            "python manage.py signals list --class crypto --direction bullish --acted no",
+            "python manage.py signals show 4211",
+            # (d) is answerable only against a pool: the round trip belongs to
+            # the config that would take the trade, not to the signal. Named,
+            # never guessed.
+            "python manage.py signals show 4211 --config \"Crypto Paper\"",
+        ],
+        "mirrors": "/signals/",
+        # Both verbs read and neither writes, so this is a `read` entry and
+        # the Run lane may execute it. `run_args` is the FIXED argv the
+        # button passes — the browser supplies nothing, ever.
+        "read_only": True,
+        "run_args": ["list"],
+        "category": "read",
+    },
+    {
+        "name": "why_no_trade",
+        "title": "Why no trade",
+        "purpose": "Answer, in one pass, why the bots are not opening positions — master switch, component rows, beats, symbols, bars and gates, including the silent ones.",
+        "usage": [
+            "python manage.py why_no_trade",
+            "python manage.py why_no_trade --symbols 8",
+        ],
+        "mirrors": "/health/",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+    },
+    {
+        "name": "ibkr-doctor",
+        "title": "IBKR doctor",
+        "purpose": "Why is the broker unreachable? One read-only host script that gathers every fact the runbook says to look at, in the order that decides.",
+        "usage": [
+            "./deploy/ibkr-doctor            slot 1 (ibgateway)",
+            "./deploy/ibkr-doctor --slot 2   a second login's container",
+        ],
+        "mirrors": "/health/",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+        # A shell script beside the compose file, not a management command:
+        # the registry-completeness test skips it and the Run lane refuses it.
+        "management_command": False,
+        "runnable": False,
+        "runnable_reason": "runs on the host, needs docker",
+    },
+    # ── ops: one-off writes ─────────────────────────────────────────────
+    {
+        "name": "seed_components",
+        "title": "Seed components",
+        "purpose": "Register all platform components — every switch the code knows, created OFF where it does not yet exist in the database.",
+        "usage": [
+            "python manage.py seed_components",
+        ],
+        "mirrors": "/health/",
+        "read_only": False,
+        "run_args": [],
+        "category": "ops",
+    },
+    {
+        "name": "seed_research_fleet",
+        "title": "Seed the research fleet",
+        "purpose": "Seed paper bots across the whole keyless catalogue, chunked ten symbols a config, within a budget the bar refresh can afford; --dry-run only prints.",
+        "usage": [
+            "python manage.py seed_research_fleet                 # every keyless class",
+            "python manage.py seed_research_fleet --budget 80     # fewer symbols",
+            "python manage.py seed_research_fleet --dry-run       # print, write nothing",
+            "python manage.py seed_research_fleet --reset         # remove the fleet",
+        ],
+        "mirrors": "/asset-bots/",
+        "read_only": False,
+        "run_args": [],
+        "category": "ops",
+    },
+    {
+        "name": "backfill_bars",
+        "title": "Backfill bars",
+        "purpose": "Backfill historical OHLCV bars for every asset class, keylessly, so the long-window rules have the lookback they need.",
+        "usage": [
+            "python manage.py backfill_bars --symbols BTCUSD,ETHUSD",
+            "python manage.py backfill_bars --symbols BTCUSD --intervals 4h --bars 800",
+            "python manage.py backfill_bars --symbols GLDM,SLV --intervals 1d --bars 300",
+            "python manage.py backfill_bars --from-configs        # every enabled bot",
+        ],
+        "mirrors": "/forensics/",
+        "read_only": False,
+        "run_args": [],
+        "category": "ops",
+    },
+    {
+        "name": "recalculate_all_indicators",
+        "title": "Recalculate indicators",
+        "purpose": "Recompute every indicator over the stored bars — the step backfill_bars prints as its 'Next'; a Celery task reached through the shell, not a management command.",
+        "usage": [
+            'python manage.py shell -c "from indicators.tasks import recalculate_all_indicators as r; print(r())"',
+        ],
+        "mirrors": "/forensics/",
+        "read_only": False,
+        "run_args": [],
+        "category": "ops",
+        "management_command": False,
+        "runnable": False,
+        "runnable_reason": "a Celery task, run through manage.py shell",
+    },
+]
+
+# Management commands under bot_program/brain/signals/core that the
+# catalogue deliberately leaves out, each with the reason. A command missing
+# from both this set and COMMANDS fails tests/test_ops_cockpit.py.
+EXEMPT = {
+    "ops": "the catalogue itself",
+    "bot_health": "heartbeat dump superseded by /health/ and why_no_trade",
+    "bot_reconcile": "Binance-only reconciliation, run by the worker on restart",
+    "backfill_taxlot_currency": "one-off data migration (forex tax lots)",
+    "render_ibkr_env": "deploy step, writes .env — the runbook's, not the cockpit's",
+    "seed_bots": "starter fleet seeder superseded by seed_research_fleet",
+    "repair_hypothesis_grading": "one-off repair of measurement-failure refutations",
+    "grade_signals": "nightly beat task; its CLI form is for the scheduler",
+    "scan_smc": "manual scanner for one symbol — a development aid",
+    "scan_smc_mtf": "manual scanner for one symbol — a development aid",
+    "track_smc_lifecycle": "beat task's CLI form",
+    "seed_advanced_strategies": "one-off seeder (phase 34-38)",
+    "seed_strategies": "one-off seeder (phase 31)",
+    "build_icons": "build step, rasterizes the mark",
+    "create_users": "first-install step — creates accounts, runbook §3",
+}
+
+# The Django apps whose management commands the registry must account for.
+REGISTRY_APPS = ("bot_program", "brain", "signals", "core")
+
+
+def get(name: str):
+    """The registry entry named `name`, or None."""
+    for entry in COMMANDS:
+        if entry["name"] == name:
+            return entry
+    return None
+
+
+def is_management_command(entry: dict) -> bool:
+    return bool(entry.get("management_command", True))
+
+
+def is_runnable(entry: dict) -> bool:
+    """True iff the page's Run lane may execute this entry: read-only,
+    a real management command, and not flagged unrunnable."""
+    return (bool(entry.get("read_only"))
+            and is_management_command(entry)
+            and bool(entry.get("runnable", True)))
+
+
+def runnable_names() -> set:
+    return {e["name"] for e in COMMANDS if is_runnable(e)}
+
+
+def by_category() -> list:
+    """[(key, label, [entries])] in CATEGORIES order — what the page and
+    `ops` both iterate, so they group identically."""
+    out = []
+    for key, label in CATEGORIES:
+        rows = [e for e in COMMANDS if e["category"] == key]
+        out.append((key, label, rows))
+    return out

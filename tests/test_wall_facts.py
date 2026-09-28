@@ -9,8 +9,10 @@ it is the claim disproving itself, in the same viewport.
 `core.wall_facts` replaces those literals. This module pins the four
 properties that make it safe to point the login gateway at a database:
 
-  1. The contract holds. Eleven keys, every one an int, every one a count —
-     the template and the other half of this wave both index that shape.
+  1. The contract holds. Every key an int, every one a count — the template
+     and the other half of this wave both index that shape. CONTRACT_KEYS
+     below is the list; adding a fact means adding it there too, which is
+     what makes the closed-set test below a real gate.
 
   2. The counts are real. Create rows, and the numbers move with them. A
      "real" number that ignores the database is just a slower literal.
@@ -18,7 +20,7 @@ properties that make it safe to point the login gateway at a database:
   3. It cannot 500. This is the LOGIN page: if a counter dies, the honest
      outcome is a 0 next to a label, not a locked front door for every user
      of an otherwise healthy platform. Each counter is fenced on its own, so
-     one dead query must not zero the other ten.
+     one dead query must not zero every other counter with it.
 
   4. Nothing personal escapes. Anonymous visitors read this context. Counts
      only — no username, no symbol, no P&L, no broker in use.
@@ -47,6 +49,14 @@ CONTRACT_KEYS = (
     "tests_green", "asset_classes", "broker_adapters", "evaluators",
     "instruments", "signals_graded", "trades_graded", "strategies",
     "chain_length", "news_24h", "bots",
+    # 2026-09-12: the capital desk, the share allocator and the evidence
+    # spine. Appended in _build_facts' own order so a mismatch between the
+    # two reads as one diff rather than as a shuffle.
+    "desk_plans", "desk_decisions_graded", "share_plans",
+    "agent_calls_graded", "components", "shell_commands", "rules_governed",
+    # 2026-09-12 (review): the two counts that replaced hardcoded sentences
+    # about the desk and the allocator having only ever run in shadow.
+    "desk_live_plans", "share_plans_applied",
 )
 
 
@@ -80,6 +90,39 @@ def _graded_trade(cfg, symbol="ZZTESTPAIR"):
         qty=Decimal("1"), entry_price=Decimal("100"), exit_price=Decimal("110"),
         status="CLOSED", outcome="hit_target", realized_r=2.0,
         closed_at=timezone.now())
+
+
+def _desk_plan(user, venue="paper", mode="shadow"):
+    """A recorded capital-desk pass. SHADOW by default because that is the
+    only mode any plan has ever been written in (2026-09-12)."""
+    from bot_program.desk_models import DeskPlan
+    return DeskPlan.objects.create(user=user, venue=venue, mode=mode)
+
+
+def _desk_decision(plan, cfg, symbol="ZZTESTPAIR", outcome="displaced", **kw):
+    from bot_program.desk_models import DeskDecision
+    return DeskDecision.objects.create(
+        plan=plan, config=cfg, symbol=symbol, direction="BUY",
+        rule_name="wf_rule", outcome=outcome, price=Decimal("100"),
+        stop=Decimal("95"), target=Decimal("115"), **kw)
+
+
+def _share_plan(user, state="proposed"):
+    from bot_program.share_models import SharePlan
+    return SharePlan.objects.create(user=user, state=state)
+
+
+def _agent_call(was_correct=None, agent="wf_agent"):
+    from ai_agents.models import AgentPrediction
+    return AgentPrediction.objects.create(
+        agent=agent, prediction_type="direction", predicted_value="up",
+        confidence=0.6, was_correct=was_correct)
+
+
+def _component(key, enabled=False):
+    from core.platform_control import PlatformComponent
+    return PlatformComponent.objects.create(
+        key=key, name=key, category="system", is_enabled=enabled)
 
 
 class WallFactsContractTests(TestCase):
@@ -426,6 +469,259 @@ class WallFactsRealDataTests(TestCase):
         self.client.force_login(self.user)
         r = self.client.get("/wall/")
         self.assertEqual(r.status_code, 302)
+
+
+class NewEngineFactsTests(TestCase):
+    """The 2026-09-12 counters: the capital desk, the share allocator and the
+    evidence spine.
+
+    These are the numbers a landing page is most tempted to round up, because
+    the machinery behind them is the most impressive thing the platform has
+    built and the honest counts are small. Every assertion here is that the
+    number moves with the database and means the narrow thing its label says
+    — an attempt is an attempt, a grade is a grade, and a shadow plan is not
+    a trade the platform placed.
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="wall_engines_fixture_user", password="x")
+        self.cfg = _cfg(self.user)
+
+    def test_desk_plans_counts_every_pass_including_the_shadow_ones(self):
+        """The desk has never placed an order, and the count is of thinking,
+        not of acting. Filtering to mode="live" would render 0 and read as
+        "the desk has never run" — false in the other direction."""
+        _desk_plan(self.user, venue="paper")
+        _desk_plan(self.user, venue="live")
+
+        self.assertEqual(wall_facts()["desk_plans"], 2)
+
+    def test_desk_live_plans_counts_only_the_passes_the_fleet_obeyed(self):
+        """The count that replaced a hardcoded sentence (2026-09-12 review).
+
+        The wall asserted, in prose, that shadow was "the only mode any plan
+        has been written in". That is a claim about deployment history typed
+        into a template — the exact species of literal this module exists to
+        abolish, and it would have gone on being served the day somebody
+        flipped `capital_desk_mode_live`. `desk_live_plans` is the counted
+        version: 0 is what licenses the modest wording.
+        """
+        _desk_plan(self.user, venue="paper", mode="shadow")
+        _desk_plan(self.user, venue="live", mode="shadow")
+        _desk_plan(self.user, venue="live", mode="live")
+
+        facts = wall_facts()
+        self.assertEqual(facts["desk_live_plans"], 1)
+        # And it is a strict subset of the passes: the desk THOUGHT three
+        # times and was obeyed once. A reading where these two were equal
+        # would mean the page's shadow wording had quietly gone stale.
+        self.assertEqual(facts["desk_plans"], 3)
+        self.assertLess(facts["desk_live_plans"], facts["desk_plans"])
+
+    def test_desk_live_plans_is_zero_while_every_pass_is_a_shadow(self):
+        """The state the page's SHADOW sentences are written for — and the
+        state a venue named "live" must not fake: `venue` is which book the
+        candidates belong to, `mode` is whether the plan was obeyed, and
+        counting the former would call an ordinary shadow pass over the live
+        book proof that the desk had been let off the leash."""
+        _desk_plan(self.user, venue="live", mode="shadow")
+        _desk_plan(self.user, venue="live", mode="shadow")
+
+        self.assertEqual(wall_facts()["desk_live_plans"], 0)
+
+    def test_desk_decisions_graded_counts_a_resolved_counterfactual(self):
+        """A displaced candidate is graded by walking the bars over its stored
+        horizon; the booked R is what makes it evidence."""
+        plan = _desk_plan(self.user)
+        _desk_decision(plan, self.cfg, "ZZONE", outcome="displaced",
+                       counterfactual_r=-1.0, counterfactual_outcome="stop",
+                       resolved_at=timezone.now())
+        _desk_decision(plan, self.cfg, "ZZTWO", outcome="displaced")  # pending
+
+        self.assertEqual(wall_facts()["desk_decisions_graded"], 1)
+
+    def test_a_taken_decision_counts_once_its_trade_carries_an_r(self):
+        """The OR on the trade's realized_r closes the window between the
+        trade grading and the desk's own resolver copying the R across: the
+        page must not under-report its evidence for a scheduling gap."""
+        plan = _desk_plan(self.user)
+        _desk_decision(plan, self.cfg, "ZZTHREE", outcome="chosen",
+                       trade=_graded_trade(self.cfg))
+
+        self.assertEqual(wall_facts()["desk_decisions_graded"], 1)
+
+    def test_a_decision_graded_both_ways_is_counted_once(self):
+        """The FK to AssetBotTrade is many-to-one, so the OR cannot duplicate
+        a row — pinned here because the day it becomes a reverse relation the
+        page silently doubles its own track record."""
+        plan = _desk_plan(self.user)
+        _desk_decision(plan, self.cfg, "ZZFOUR", outcome="chosen",
+                       trade=_graded_trade(self.cfg), counterfactual_r=2.0,
+                       counterfactual_outcome="target",
+                       resolved_at=timezone.now())
+
+        self.assertEqual(wall_facts()["desk_decisions_graded"], 1)
+
+    def test_an_ungradeable_resolution_is_not_evidence(self):
+        """`resolved_at` is stamped even when no bar could be priced, with
+        counterfactual_r left NULL. Resolved is not graded: counting a
+        decision the desk explicitly failed to measure as proof that it
+        measures itself is the overclaim this whole module exists to stop."""
+        plan = _desk_plan(self.user)
+        _desk_decision(plan, self.cfg, "ZZFIVE", outcome="displaced",
+                       counterfactual_outcome="ungradeable",
+                       resolved_at=timezone.now())
+
+        self.assertEqual(wall_facts()["desk_decisions_graded"], 0)
+
+    def test_share_plans_counts_proposals_in_every_state(self):
+        """The allocator proposes on a schedule and is graded whether or not
+        an admin ever applies the plan. An applied-only count would sit at 0
+        for as long as the switch stays off and read as "never ran"."""
+        _share_plan(self.user, state="proposed")
+        _share_plan(self.user, state="applied")
+        _share_plan(self.user, state="rejected")
+
+        self.assertEqual(wall_facts()["share_plans"], 3)
+
+    def test_share_plans_applied_counts_only_the_ones_that_moved_a_share(self):
+        """The other half of the pair (2026-09-12 review). `share_plans` says
+        how often the allocator proposed; this says how often a human agreed.
+        The wall used to assert the second number was zero in prose, on a
+        page that cannot know it."""
+        from bot_program.share_models import SharePlan
+
+        _share_plan(self.user, state="proposed")
+        _share_plan(self.user, state="rejected")
+        SharePlan.objects.create(user=self.user, state=SharePlan.STATE_APPLIED,
+                                 applied_at=timezone.now())
+
+        facts = wall_facts()
+        self.assertEqual(facts["share_plans_applied"], 1)
+        self.assertEqual(facts["share_plans"], 3)
+
+    def test_a_rolled_back_plan_still_counts_as_having_moved_a_share(self):
+        """It moved the share and then moved it back, which is two events and
+        not zero. `rollback` rewrites `state` and leaves `applied_at` alone,
+        so a state="applied" filter would drop it and round the page's story
+        in the flattering direction — the one direction it may not round."""
+        from bot_program.share_models import SharePlan
+
+        SharePlan.objects.create(user=self.user,
+                                 state=SharePlan.STATE_ROLLED_BACK,
+                                 applied_at=timezone.now(),
+                                 rolled_back_at=timezone.now())
+
+        self.assertEqual(wall_facts()["share_plans_applied"], 1)
+
+    def test_a_plan_nobody_applied_leaves_the_applied_count_at_zero(self):
+        """The state the allocator's SHADOW wording is written for."""
+        _share_plan(self.user, state="proposed")
+        _share_plan(self.user, state="expired")
+
+        self.assertEqual(wall_facts()["share_plans_applied"], 0)
+
+    def test_agent_calls_graded_counts_the_wrong_ones_too(self):
+        """Right and wrong summed, pending excluded. Publishing only the
+        correct calls would be a hit rate dressed up as a volume, on the page
+        whose entire pitch is that the platform grades itself both ways."""
+        _agent_call(was_correct=True)
+        _agent_call(was_correct=False)
+        _agent_call(was_correct=None)  # not resolved yet
+
+        self.assertEqual(wall_facts()["agent_calls_graded"], 2)
+
+    def test_components_counts_switches_whether_or_not_they_are_on(self):
+        """The claim is "this much of the platform sits behind a switch". An
+        enabled-only count would shrink every time somebody paused a
+        scraper, which tells a story about today rather than about the
+        architecture."""
+        _component("zz_wall_component_a", enabled=True)
+        _component("zz_wall_component_b", enabled=False)
+
+        self.assertEqual(wall_facts()["components"], 2)
+
+    def test_shell_commands_reads_the_registry_and_not_a_literal(self):
+        """len(COMMANDS), which tests/test_ops_cockpit.py already holds to
+        Django's own command list in both directions — so this number cannot
+        drift without that suite failing first."""
+        from core.ops_commands import COMMANDS
+        facts = wall_facts()
+        self.assertEqual(facts["shell_commands"], len(COMMANDS))
+        self.assertGreater(facts["shell_commands"], 0)
+
+    def test_rules_governed_counts_the_rule_controls(self):
+        """Deliberately the same rows as `strategies`, labelled for the other
+        sentence: every rule that can size money sits behind an
+        admin-confirmed control."""
+        from signals.models_control import RuleControl
+        RuleControl.objects.create(rule_name="wf_governed_a")
+        RuleControl.objects.create(rule_name="wf_governed_b")
+
+        facts = wall_facts()
+        self.assertEqual(facts["rules_governed"], 2)
+        # If these two ever diverge, one of the two labels on the page has
+        # become a claim about rows nobody counted.
+        self.assertEqual(facts["rules_governed"], facts["strategies"])
+
+    def test_the_new_counts_reach_the_rendered_page_context(self):
+        """End to end through the view, like the original eleven: the
+        template will index these names, and a typo here is a silent empty
+        string there."""
+        _desk_plan(self.user)
+        _share_plan(self.user)
+        _agent_call(was_correct=True)
+        _component("zz_wall_component_ctx")
+
+        r = self.client.get("/wall/")
+        self.assertEqual(r.status_code, 200)
+        wall = r.context["wall"]
+        self.assertEqual(wall["desk_plans"], 1)
+        self.assertEqual(wall["share_plans"], 1)
+        self.assertEqual(wall["agent_calls_graded"], 1)
+        self.assertEqual(wall["components"], 1)
+
+
+class NewEngineFactsOnAnEmptyPlatformTests(TestCase):
+    """Every new counter reports 0 on a database with nothing in it.
+
+    A fresh install genuinely has none of these, and 0 is the true answer.
+    The failure this guards is a counter written with a filter that raises,
+    or a len() over something unimportable, quietly becoming the fallback
+    for the lifetime of the deployment — indistinguishable, on the page,
+    from an engine that has never run (2026-09-12).
+    """
+
+    def setUp(self):
+        cache.clear()
+
+    def test_every_database_backed_new_counter_is_zero(self):
+        from core import wall_facts as wf
+        for name in ("_count_desk_plans", "_count_desk_decisions_graded",
+                     "_count_desk_live_plans",
+                     "_count_share_plans", "_count_share_plans_applied",
+                     "_count_agent_calls_graded",
+                     "_count_components", "_count_rules_governed"):
+            with self.subTest(counter=name):
+                self.assertEqual(getattr(wf, name)(), 0)
+
+    def test_the_registry_counter_is_not_a_database_count(self):
+        """shell_commands is a len() over an in-process list, so an empty
+        database must not zero it — the commands exist whether or not
+        anybody has used the platform yet."""
+        from core import wall_facts as wf
+        self.assertGreater(wf._count_shell_commands(), 0)
+
+    def test_the_wall_serves_an_empty_platform_without_raising(self):
+        r = self.client.get("/wall/")
+        self.assertEqual(r.status_code, 200)
+        wall = r.context["wall"]
+        for key in ("desk_plans", "desk_decisions_graded", "desk_live_plans",
+                    "share_plans", "share_plans_applied",
+                    "agent_calls_graded", "components", "rules_governed"):
+            self.assertEqual(wall[key], 0, f"{key} invented a row")
 
 
 class WallFactsFencingTests(TestCase):

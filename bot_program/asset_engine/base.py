@@ -4,6 +4,10 @@ Common loop (tick):
   1. manage_positions — for every OPEN trade, check current price vs SL/TP, close if hit.
   2. can_open_new — gate: max concurrent + daily loss limit.
   3. scan_for_entries — for each symbol in cfg.symbols, decide() and open if BUY/SELL.
+     scan_symbol = execute_entry(propose_entry(symbol)): the proposal is
+     every gate and the bot's own size (an EntryCandidate), the execution is
+     the shadow branch, the order and the row. The capital desk ranks a
+     fleet's candidates between the two.
 
 Default `decide()` consumes Phase-1 active Signal rows for the instrument:
 sufficient bullish/bearish agreement with score ≥ entry_score_min triggers an
@@ -131,6 +135,165 @@ def time_stop_status(position, *, config=None, now=None) -> dict:
     }
 
 
+def is_entry_working(trade) -> bool:
+    """True when this row is an ORDER at the broker, not yet a position.
+
+    Every consumer that treats an OPEN row as exposure has to ask: a
+    working entry has no position to reconcile against, none to flatten,
+    and no mark to book. Reconciliation in particular MUST skip these —
+    it walks OPEN rows, finds no position at the broker, and closes them
+    as orphans while cancelling their protective legs, which is precisely
+    how an unfilled parent goes on to fill naked.
+    """
+    return bool((getattr(trade, "metadata", None) or {}).get("entry_working"))
+
+
+def cancel_working_entry(trade, client, *, reason: str,
+                         cancel_parent: bool = True) -> bool:
+    """Withdraw an unfilled entry and mark the row CANCELED. Nothing traded.
+
+    Returns False and leaves the row WORKING when the withdrawal cannot be
+    confirmed: an order we could not cancel may still fill, and a CANCELED
+    row over a live order is the same lie as a CLOSED row over a live
+    position. `cancel_parent=False` is for a broker that has already
+    reported the order dead.
+    """
+    from bot_program.models import AssetBotTrade   # noqa: F401 — doc of type
+
+    meta = dict(trade.metadata or {})
+    if cancel_parent and not trade.broker_order_id:
+        # NO ID, NO WITHDRAWAL. Falling through here would cancel the
+        # protective legs and stamp the row CANCELED — "nothing traded" —
+        # over a parent that is still queued at the broker and about to
+        # fill NAKED, into a row nothing walks any more. The row stays
+        # WORKING instead, which every caller already reports honestly
+        # ("it may still fill — cancel it at the broker").
+        logger.error("[entry] %s: asked to withdraw a working entry with no "
+                     "broker order id — the parent can neither be cancelled "
+                     "nor read, so the row stays WORKING; cancel it at the "
+                     "broker", trade.symbol)
+        try:
+            from bot_program.notifications import notify_staff
+            notify_staff(
+                title=f"⚠ {trade.symbol}: queued order cannot be withdrawn",
+                body=(f"Trade #{trade.id} is a WORKING entry with no broker "
+                      f"order id, so the platform cannot cancel it or read "
+                      f"its state. It may still fill. Cancel it at the "
+                      f"broker. ({reason})"),
+                url="/positions/")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[entry] no-order-id alert failed: %s", e)
+        return False
+    if cancel_parent and trade.broker_order_id:
+        cancel = getattr(client, "cancel_order", None)
+        if not callable(cancel):
+            logger.error("[entry] %s: cannot withdraw working order %s — this "
+                         "broker client has no cancel_order; the row stays "
+                         "WORKING", trade.symbol, trade.broker_order_id)
+            return False
+        try:
+            sent = cancel(trade.broker_order_id)
+        except Exception as e:  # noqa: BLE001
+            logger.error("[entry] %s: withdrawing working order %s failed "
+                         "(%s) — the row stays WORKING; it may still fill",
+                         trade.symbol, trade.broker_order_id, e)
+            return False
+        if sent is False:
+            # The broker could not find the order to cancel. That is not
+            # proof it is gone: an order is visible only to the clientId
+            # that placed it, so this is equally "the wrong session asked".
+            logger.error("[entry] %s: the broker did not confirm cancelling "
+                         "order %s (it may be filled, or placed on another "
+                         "session) — the row stays WORKING",
+                         trade.symbol, trade.broker_order_id)
+            return False
+        # PROVE it is dead. This row is about to record that nothing was
+        # traded, so nothing short of the broker saying the order is dead
+        # will do: an unreadable socket, an exception, an id the session
+        # cannot see, all mean "we do not know", and marking a live
+        # full-size market order CANCELED is the same lie as marking a
+        # live position CLOSED.
+        status_fn = getattr(client, "order_status", None)
+        if not callable(status_fn):
+            logger.error("[entry] %s: no way to confirm order %s is dead — "
+                         "the row stays WORKING", trade.symbol,
+                         trade.broker_order_id)
+            return False
+        try:
+            st = status_fn(trade.broker_order_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[entry] %s: post-cancel read failed (%s) — the "
+                           "row stays WORKING", trade.symbol, e)
+            return False
+        if st is None:
+            logger.error("[entry] %s: the broker could not be read after the "
+                         "cancel — the row stays WORKING rather than claiming "
+                         "an order nobody confirmed dead", trade.symbol)
+            return False
+        state = str(st.get("state") or "")
+        if float(st.get("filled") or 0) > 0:
+            logger.error("[entry] %s: order %s filled while being withdrawn "
+                         "— leaving the row WORKING for the next poll to "
+                         "book", trade.symbol, trade.broker_order_id)
+            return False
+        if state != "dead":
+            logger.error("[entry] %s: order %s reads %r after the cancel, not "
+                         "dead — the row stays WORKING",
+                         trade.symbol, trade.broker_order_id,
+                         state or "unknown")
+            return False
+
+    # The children go too. TWS cancels a bracket's children with its
+    # parent, but a leg that outlives it is a resting order against a
+    # position that never opened — and since these legs became GTC it
+    # rests for days rather than dying at the session close.
+    cancel = getattr(client, "cancel_order", None)
+    leaked = []
+    for oid in (meta.get("protective_order_ids") or []):
+        try:
+            if callable(cancel) and cancel(str(oid)):
+                continue
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[entry] %s: leg %s may still rest at the broker "
+                           "(%s)", trade.symbol, oid, e)
+        leaked.append(str(oid))
+    if leaked:
+        # The row is still marked CANCELED below — nothing traded, which is
+        # true — but the leak is recorded and said out loud, because a
+        # resting exit against a flat book OPENS a position when it fires.
+        meta["protective_legs_unconfirmed"] = True
+        logger.error("[entry] %s: leg(s) %s were NOT confirmed cancelled and "
+                     "are GTC — cancel them at the broker; a resting exit "
+                     "against a flat book opens a position",
+                     trade.symbol, ", ".join(leaked))
+        try:
+            from bot_program.notifications import notify_staff
+            notify_staff(
+                title=f"⚠ {trade.symbol}: protective leg may still rest",
+                body=(f"The entry order was withdrawn ({reason}) but leg(s) "
+                      f"{', '.join(leaked)} were not confirmed cancelled. "
+                      f"They are good-till-cancelled: if one fires against a "
+                      f"flat book it OPENS a position. Cancel them at the "
+                      f"broker."),
+                url="/positions/")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[entry] leaked-leg alert failed: %s", e)
+
+    meta.pop("entry_working", None)
+    meta["entry_withdrawn_at"] = timezone.now().isoformat()
+    meta["entry_withdrawn_reason"] = reason
+    trade.metadata = meta
+    trade.status = "CANCELED"
+    trade.closed_at = timezone.now()
+    trade.reason = (f"{trade.reason}\nentry withdrawn: {reason}").strip()[:1000]
+    # pnl stays 0 and outcome stays blank ON PURPOSE: nothing traded, so
+    # there is nothing to grade. A CANCELED row is not a scratch trade.
+    trade.save(update_fields=["metadata", "status", "closed_at", "reason"])
+    logger.warning("[entry] %s: working entry withdrawn (%s) — nothing traded",
+                   trade.symbol, reason)
+    return True
+
+
 @dataclass
 class BotDecision:
     direction: str  # "BUY" | "SELL" | "HOLD"
@@ -154,10 +317,423 @@ class SmcVote:
     rule_name: str = SMC_RULE_NAME
 
 
+#: THE MOST A CONFIG MAY ASK OF eToro PER ORDER (2026-09-23; 20 since
+#: 2026-09-26 — the operator's written ceilings: "forex max x20", "indices
+#: en x20"). A hard cap, never a target and never a default. Units and the
+#: notional ceiling never see this number (sizing.qty_for_risk,
+#: MAX_NOTIONAL_FRACTION): at leverage L the same position pledges
+#: notional / L of cash, and its stop, as a fraction of THAT margin, is
+#: stop_fraction x L. At the 7% risk cap the stop floor is 7% / the
+#: notional cap: 1.75% of price on forex (cap 4.0) — 35% of the margin
+#: at 20x — and 3.5% on an index or a commodity (cap 2.0) — 70% at 20x,
+#: 35% at 10x. eToro bounds a stop as a percentage of the margin —
+#: MEASURED ONCE, on demo (doc §14 N2: a BTC 2x CFD stop sent 60% below was
+#: held 25% below, 50% of the margin = maxStopLossPercentage 50; clamped,
+#: not refused); unmeasured on live and on every other class. So a 3.5%
+#: stop fits that band at 10x and not at 20x: the attack mode picks 10
+#: there (_choose_auto_leverage), and a typed 20 is refused by
+#: _instrument_leverage_check wherever eToro prints the band. Restated as
+#: etoro_client.LEVERAGE_MAX, pinned equal.
+MAX_ORDER_LEVERAGE = 20
+
+#: THE CLASS CEILINGS (2a, 2026-09-26; forex, index and commodity raised
+#: the same day to the operator's written numbers — "forex max x20", "cfd
+#: matière première ... disons x10", "indices en x20"), per platform
+#: class, never above MAX_ORDER_LEVERAGE, and each INSIDE the LIVE list
+#: eToro printed for every instrument of the class read on 2026-09-23/25
+#: (doc §9-§10, §15 — the LIVE lists; the DEMO lists are wider and prove
+#: nothing): stock/etf 5 <= [2,5]; forex 20 <= 30 (AUD/NZD 20); index 20
+#: <= 20; commodity 10 <= 10; crypto 2 <= [2]. A ceiling is not a proof: a
+#: typed multiplier still needs etoro_leverage_live ON, and the attack
+#: mode never picks above ETORO_PROVEN_LEVERAGE, empty until a demo
+#: fill-and-close at that multiplier is pinned. Keyed on the
+#: INSTRUMENT's class (_instrument_class: SPX500 in a stock config is
+#: judged as an index); the instrument's OWN entry is judged next, on the
+#: client (_instrument_leverage_check: settlement, direction, the LIVE
+#: leverageValues and the stop band). forex above 1 since capital_at_work
+#: reads the row's multiplier (notional / L floored at the table's 1/30,
+#: the full notional at 1, measured). options and cfd have no eToro path
+#: (broker_router); the keys stay so a typed multiplier on such a config
+#: is refused by the table, not by silence. An unknown class reads 1.
+#: tests/test_etoro_leverage.py MeasuredLiveListsTests pins each value
+#: under the class's smallest LIVE long maximum.
+ORDER_LEVERAGE_CEILING = {"stock": 5, "etf": 5, "index": 20,
+                          "commodity": 10, "crypto": 2, "forex": 20,
+                          "options": 1, "cfd": 1}
+
+#: THE MOST OF THE ACCOUNT THE FLEET MAY HAVE PLEDGED after an order:
+#: (used margin + margin pledged since the reading + this order's margin)
+#: / equity. A BELIEF — eToro's close-out rule has met no key. The
+#: margin itself is MEASURED (D2b-ii, 2026-09-23, doc §2 and §5:
+#: accountTotalUsedMargin 84.8 at 1x and 42.39 at 2x on 84.8 of
+#: exposure — notional / L); what the venue does to a levered position
+#: as equity falls is not. Held at half. What half means at 20x, stated
+#: so nobody has to derive it: the pledged half carries a notional of half
+#: the equity x L — ten times the equity at 20x — so a 5% adverse move
+#: across all of it is 50% of equity (at 5x it took a 20% move), and a 10%
+#: gap across all of it is ALL of the equity (at 5x it took 40%). The
+#: stops, not this fraction, bound the ordinary loss: each position loses
+#: its risk fraction of its pool at its stop (<= sizing.MAX_RISK_FRACTION,
+#: 7%) whatever L is. A gap THROUGH the stops is bounded by nothing here:
+#: it costs the gap x L x the cash pledged, so this fraction bounds the
+#: cash locked, not what a gap past 1/L of price can take. Since
+#: 2026-09-26 it binds at 1x too (a 1x order pledges its FULL notional).
+#: Refused past it, never resized.
+MAX_PLEDGED_FRACTION = 0.5
+
+#: The PlatformComponent that stays OFF until deploy/ETORO_DEPARTURE.md §4
+#: D2b (both sittings) is recorded in tests/test_etoro_client.py. A
+#: missing row reads OFF (core.platform_control.is_component_enabled).
+LEVERAGE_SWITCH_KEY = "etoro_leverage_live"
+
+#: THE eToro CLASSES (and "short") WHOSE FILL-AND-CLOSE PROOF IS PINNED —
+#: on the demo segment OR the real account, a real one being the stronger —
+#: in tests/test_etoro_client.py (deploy/ETORO_DEPARTURE.md §7 bullet 0,
+#: one sitting per class). EMPTY ON ARRIVAL (2026-09-24): an eToro order
+#: whose instrument class — or direction, for a SELL — is not named here
+#: is refused in _etoro_entry_refusal (every lane: execute_entry, the
+#: TAKE TRADE lane and the legacy tick in engine/runner.py) BEFORE the
+#: venue floor (so an unproven class never fires _notify_venue_min_size),
+#: the idempotency id, the multiplier and the POST. A token is added only
+#: in the commit that adds test_proof_<token>; tests/test_etoro_proofs.py
+#: greps for it. Not a PlatformComponent on purpose: nothing on /health/
+#: can flip a proof that was never measured. Read at CALL time by the
+#: gate, never copied, so a test states a token by patching this name.
+#: "crypto" since 2026-09-26 (test_proof_crypto): BTC 0.0002 filled and
+#: closed on the REAL account (order 1596774178, position 3588477891,
+#: settlementType REAL at 1x, deploy/ETORO_DEPARTURE.md §4 D5). Proven at
+#: 1x, and that binds the attack mode's chooser ALONE: ETORO_PROVEN_LEVERAGE
+#: stays empty, so the chooser picks 1 for crypto. This token does NOT
+#: bound a TYPED multiplier: extras["leverage"] = 2 on a crypto config
+#: clears this gate and is judged as every typed number is
+#: (etoro_leverage_live ON, the 2x class ceiling, the own book, the LIVE
+#: list and the stop band; preflight §4 warns, never refuses), so it goes
+#: at 2x, a CFD settlement no real order has met.
+#: tests/test_real_account_measured.py pins that.
+ETORO_PROVEN = frozenset({"crypto"})
+
+#: THE MULTIPLIER EACH eToro CLASS HAS BEEN PROVEN AT (2026-09-26): class
+#: -> the highest multiplier whose demo fill-and-close is pinned as
+#: `test_proof_<class>_at_<L>x` in tests/test_etoro_client.py
+#: (tests/test_attack_mode.py greps for it, as tests/test_etoro_proofs.py
+#: does for ETORO_PROVEN). A class absent reads 1 (proven_leverage).
+#: EMPTY ON ARRIVAL: the Monday demo proofs (EURUSD at 20x, SPX500 at 20x,
+#: WHEAT at 10x, AAPL at 5x, BTC at 2x) each add ONE entry, in the commit
+#: that pins its test — {"forex": 20, "index": 20, "commodity": 10,
+#: "stock": 5, "crypto": 2} is the shape, never a value before its proof.
+#: It binds the attack mode's chooser ONLY (_choose_auto_leverage): a
+#: TYPED multiplier above it is judged as before — the switch, the class
+#: token (ETORO_PROVEN), the class ceiling, the instrument's LIVE list and
+#: its stop band — and preflight_live §4 says so under WORTH READING. Read
+#: at CALL time; a test states a value by patching this name. Not a
+#: PlatformComponent: nothing on /health/ can prove a multiplier.
+ETORO_PROVEN_LEVERAGE = {}
+
+#: THE ATTACK MODE (2026-09-26; the operator: "je veux surtout que ce mode
+#: d'attaque de leverage soit vraiment smart, qu'il soit ballsy si proba
+#: très high"). Opt-in per config: extras["leverage"] = "auto". Two
+#: halves, because under house rule 5 the multiplier changes ONLY the cash
+#: eToro locks (notional / L) — never the loss at the stop, never the gain
+#: per R:
+#:   RISK  (AssetBot._attack_tier, in _size_for_entry): the decision's
+#:         score picks a tier, and the tier scales the config's own risk
+#:         fraction — 0.50x STANDARD, 0.75x STRONG, 1.00x HIGH, HIGH only
+#:         with a measured edge. Being ballsy on a high-probability trade
+#:         is putting MORE RISK on it; no tier lifts risk above the
+#:         config's own fraction (itself clamped by MAX_RISK_FRACTION).
+#:   CASH  (AssetBot._choose_auto_leverage, in _order_leverage): the
+#:         highest multiplier on the instrument's LIVE list inside the class
+#:         ceiling, the proven multiplier and the stop band — the least
+#:         cash the stop allows — then judged by every gate a typed number
+#:         meets. The chooser picks; it never bypasses a gate.
+AUTO_LEVERAGE = "auto"
+
+#: The tier multipliers of the config's risk fraction. Overridable per
+#: config by extras["attack_tiers"] = {"standard": x, "strong": y,
+#: "high": z}, each read without raising and clamped to (0, 1]
+#: (attack_tier_scales).
+ATTACK_TIER_SCALES = {"standard": 0.50, "strong": 0.75, "high": 1.00}
+
+#: HIGH needs a MEASURED edge on the decision's rule, on the INSTRUMENT's
+#: class (bot_grading.bot_track_record_detail): at least this many graded
+#: trades, this win rate and this average realized R. A HIGH score without
+#: it is STRONG: the score alone is the rules' own opinion of themselves.
+#: The config's own venue is read first; the pooled record (paper and live)
+#: only when the own venue holds fewer than ATTACK_HIGH_MIN_N graded trades
+#: AND they do not average below 0 R — a losing record on the venue the
+#: order goes to is never outvoted by the other venue's fills. The record
+#: is keyed on the class a row is FILED under (AssetBotTrade.asset_class,
+#: the config's): an instrument of another class reads the record of the
+#: configs of its own class, and the words say so.
+ATTACK_HIGH_MIN_N = 20
+ATTACK_HIGH_MIN_WIN_RATE = 0.55
+ATTACK_HIGH_MIN_AVG_R = 0.20
+
+#: The stop band the chooser assumes where eToro's row prints none, as a
+#: percentage of the margin: the ONE band measured (doc §14 N2, BTC 2x on
+#: demo, maxStopLossPercentage 50). An assumption, said so in every line
+#: that uses it; a printed band always wins.
+ASSUMED_STOP_BAND_PCT = 50.0
+
+
+def proven_leverage(asset_class: str) -> int:
+    """ETORO_PROVEN_LEVERAGE[asset_class] as a whole number >= 1, read at
+    call time; 1 for a class absent or a value nothing can read."""
+    raw = ETORO_PROVEN_LEVERAGE.get(str(asset_class or ""), 1)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return 1
+    try:
+        val = int(raw)
+    except (TypeError, ValueError, OverflowError):
+        return 1
+    return val if val >= 1 and val == raw else 1
+
+
+def stop_moved_words(meta, entry_price, asset_class="", symbol="") -> str:
+    """The fill message's line for a stop the venue REWROTE at the fill
+    (metadata "stop_rewritten_by_venue" {sent, held}, stamped by
+    execute_entry on an immediate fill and by _finish_working_entry on a
+    held one): "Stop moved by eToro: it holds Y, not the X sent (Z% below
+    the entry)", Z the HELD stop's distance from the fill price, the
+    prices at the instrument's decimals (2026-09-27; "Stop moved by eToro:
+    sent X, held Y (Z% from entry)" before). "" for a row with no
+    rewrite, or a number nothing can read; no parenthesis without a
+    price. MEASURED 2026-09-26 on the real account, BTC 0.0002 at 1x:
+    sent 79934.97 (5% under the last 84142.07), held 75745.8 — 9.98%
+    under the 84145.8 fill. A held stop at or under 0.0001 (eToro's "no
+    stop" sentinel, public reference only, or a zero) is NO stop, never
+    a distance: "No stop at eToro: it holds none, not the X sent". A
+    rewrite smaller than the instrument's last decimal prints both with
+    as many more as it takes (price_pair_words), never one price twice.
+    Words only: nothing is resized, closed or sent again."""
+    from bot_program.notifications import (pct_words, price_pair_words,
+                                           price_words)
+    moved = (meta or {}).get("stop_rewritten_by_venue")
+    if not isinstance(moved, dict):
+        return ""
+    try:
+        sent = float(moved.get("sent"))
+        held = float(moved.get("held"))
+    except (TypeError, ValueError):
+        return ""
+    if sent != sent or held != held:
+        return ""
+    if held <= 0.0001:
+        return (f"No stop at eToro: it holds none, not the "
+                f"{price_words(sent, asset_class, symbol)} sent")
+    held_words, sent_words = price_pair_words(held, sent, asset_class,
+                                              symbol)
+    words = (f"Stop moved by eToro: it holds {held_words}, not the "
+             f"{sent_words} sent")
+    try:
+        entry = float(entry_price or 0)
+    except (TypeError, ValueError, InvalidOperation):
+        entry = 0.0
+    if entry > 0:
+        where = "below" if held < entry else "above"
+        words += (f" ({pct_words(abs(entry - held) / entry * 100)} "
+                  f"{where} the entry)")
+    return words
+
+
+def venue_moved_stop(sent, held, asset_class="", symbol="") -> bool:
+    """True when the stop the venue HOLDS is not the stop SENT, compared at
+    the instrument's TICK: one unit of the last decimal core.price_format
+    prints the price with (1.60726: 0.00001; 227.53: 0.01), the finer of
+    the two prices'. A held stop within a tick of the sent one is the
+    venue ROUNDING it to its grid, not a moved stop (2026-09-27: until
+    then any difference over 1e-9 stamped stop_rewritten_by_venue, and the
+    fill message said "Stop moved by eToro" of a stop only rounded, the
+    1.526892917 sent held as 1.52689). A tick or more is a rewrite, in
+    either direction (MEASURED: eToro moves a stop both ways).
+
+    eToro's "no stop" (a held stop at or under 0.0001: the sentinel, or a
+    zero) is a rewrite whatever the tick while a stop was sent: the stamp
+    keeps that meaning for its readers, the fill message ("No stop at
+    eToro") and Morgul's G2, which reads a held stop at or under the
+    sentinel as NO stop at the broker. Anything unreadable is False."""
+    from core.price_format import price_decimals
+    try:
+        sent, held = float(sent), float(held)
+    except (TypeError, ValueError):
+        return False
+    if sent != sent or held != held:
+        return False
+    if held <= 0.0001:
+        return sent > 0.0001
+    places = max(price_decimals(sent, asset_class, symbol),
+                 price_decimals(held, asset_class, symbol))
+    return abs(held - sent) >= (10.0 ** -places) * (1 - 1e-6)
+
+
+#: Why the staff alert for a rewritten stop went out (_alert_stop_rewrite):
+#: the one message there is, where no fill message names the stop.
+STOP_ALERT_WORKING = ("The order is still waiting at eToro, so no fill "
+                      "message has gone out yet.")
+STOP_ALERT_UNTOLD = ("The fill message was not delivered, so this is the "
+                     "one notice.")
+
+
+def leverage_is_auto(extras) -> bool:
+    """extras["leverage"] asks for the attack mode ("auto", any case)."""
+    raw = (extras or {}).get("leverage")
+    return isinstance(raw, str) and raw.strip().lower() == AUTO_LEVERAGE
+
+
+def attack_thresholds(entry_score_min) -> tuple:
+    """(strong_from, high_from) for an entry bar e: the band a score can
+    occupy above the bar, in thirds — e + (1 - e) / 3 and
+    e + 2 (1 - e) / 3. At e = 0.60: 0.7333 and 0.8667. An unreadable bar
+    reads 0; the bar is clamped to [0, 1]."""
+    try:
+        e = float(entry_score_min)
+    except (TypeError, ValueError):
+        e = 0.0
+    if e != e:
+        e = 0.0
+    e = min(max(e, 0.0), 1.0)
+    span = 1.0 - e
+    return e + span / 3.0, e + 2.0 * span / 3.0
+
+
+def attack_tier_scales(cfg) -> dict:
+    """The three tier multipliers for `cfg`: ATTACK_TIER_SCALES, with
+    extras["attack_tiers"] read WITHOUT RAISING — each value a number in
+    (0, 1]. Above 1 is clamped to 1: a tier never lifts risk above the
+    config's own fraction. Anything else (a string, a bool, zero, a
+    negative, NaN, a non-dict) keeps the default and logs a line."""
+    extras = getattr(cfg, "extras", None) or {}
+    out = dict(ATTACK_TIER_SCALES)
+    raw = extras.get("attack_tiers")
+    if raw is None:
+        return out
+    if not isinstance(raw, dict):
+        logger.warning("[attack] cfg %s: extras['attack_tiers']=%r is not "
+                       "a mapping — the default tiers", getattr(cfg, "id",
+                                                               "?"), raw)
+        return out
+    for name in ATTACK_TIER_SCALES:
+        if name not in raw:
+            continue
+        val = raw.get(name)
+        if (isinstance(val, bool) or not isinstance(val, (int, float))
+                or val != val or val <= 0):
+            logger.warning("[attack] cfg %s: extras['attack_tiers'][%r]=%r "
+                           "is not a number in (0, 1] — keeping %.2f",
+                           getattr(cfg, "id", "?"), name, val, out[name])
+            continue
+        out[name] = min(float(val), 1.0)
+    return out
+
+
+def judge_order_leverage(cfg, asset_class: str, carrier: str, *,
+                         pick=None) -> tuple:
+    """(leverage, refusal): what an eToro order body may carry for `cfg`.
+
+    ONE rule, read by execute_entry on the client an order goes through
+    (capabilities.adapter_key of its CLASS), by preflight_live §4 on the
+    venue the router names, and by the TAKE TRADE lane — imported, never
+    copied, so an armed config is never first refused at 02:00.
+
+    FOUR ANSWERS. (None, "") — no extras["leverage"]: no kwarg, the
+    adapter's own default, the row records nothing. (1, "") — the operator
+    typed 1: no kwarg (the body IS the default's), the row RECORDS 1
+    because it was said. (n, "") — a whole number >= 2 every check allows.
+    (None, why) — a refusal: the caller sends NOTHING, not at n and not at
+    1, because a multiplier the operator typed and this engine quietly
+    replaced would be a default nobody chose.
+
+    WHAT THIS NUMBER NEVER TOUCHES (house rule 5): units come from
+    risk_per_trade_pct and the stop (sizing.qty_for_risk); the notional cap
+    and apply_stop_floor are judged on qty x price; _judge_final_size
+    refuses on qty x |price - stop|. Leverage changes the margin eToro
+    locks and the financing it charges, nothing else this engine measures.
+
+    THE ATTACK MODE (extras["leverage"] = "auto", 2026-09-26). The
+    multiplier is not typed: AssetBot._choose_auto_leverage picks it on
+    the client an order goes through and hands it here as `pick`, and it
+    is judged by EVERY check below exactly as a typed number would be —
+    the chooser picks, it never bypasses a gate. A pick of 1 answers
+    (1, "") like a typed 1. Without a pick (preflight's own line, the
+    TAKE TRADE lane, which never levers a hand-taken ticket) "auto"
+    answers (None, ""): no kwarg, the unlevered order. `pick` is read
+    only under "auto".
+    """
+    extras = getattr(cfg, "extras", None) or {}
+    if "leverage" not in extras:
+        return None, ""
+    raw = extras.get("leverage")
+    if leverage_is_auto(extras):
+        if pick is None:
+            return None, ""
+        raw = pick
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None, (f"extras['leverage']={raw!r} is not a number — a "
+                      f"multiplier this bot cannot read is not sent at 1 "
+                      f"behind your back; fix the key or remove it")
+    lev = float(raw)
+    if lev != lev or lev in (float("inf"), float("-inf")) or lev < 1 \
+            or lev != int(lev):
+        return None, (f"extras['leverage']={raw!r} is not a whole number "
+                      f">= 1; eToro's multiplier is an integer and nothing "
+                      f"here rounds one")
+    lev = int(lev)
+    if lev == 1:
+        return 1, ""
+    if carrier != "etoro":
+        return None, (f"at {lev}x: this order would be carried by "
+                      f"{carrier or 'an unmapped client'} — leverage is an "
+                      f"eToro per-order field, every other adapter absorbs "
+                      f"the kwarg silently, and a row recording a multiplier "
+                      f"nothing applied is worse than no order")
+    if lev > MAX_ORDER_LEVERAGE:
+        return None, (f"at {lev}x: past the platform cap of "
+                      f"{MAX_ORDER_LEVERAGE}x — refused, not clamped")
+    ceiling = int(ORDER_LEVERAGE_CEILING.get(asset_class, 1))
+    if lev > ceiling:
+        return None, (f"at {lev}x: past the {ceiling}x ceiling this platform "
+                      f"holds for {asset_class} on eToro — refused, not "
+                      f"clamped; the class ceiling; the instrument's own "
+                      f"LIVE leverageValues are judged next, on the client")
+    from core.platform_control import is_component_enabled
+    if not is_component_enabled(LEVERAGE_SWITCH_KEY):
+        return None, (f"at {lev}x: {LEVERAGE_SWITCH_KEY} is OFF — no "
+                      f"leveraged eToro fill and close has been recorded "
+                      f"(deploy/ETORO_DEPARTURE.md §4 D2b). Nothing sent — "
+                      f"not at {lev}, not at 1")
+    # THE FLEET-LEVEL CEILING MUST BE A PERCENTAGE OF SOMETHING THE OPERATOR
+    # SAID. MAX TOTAL EXPOSURE reads gate_book_value, which prefers the
+    # operator's own /setup/ book and otherwise falls back to the shared row
+    # seeded at 10,000 that nobody entered. Margin is pledged against that
+    # ceiling only once the own book exists; the number is theirs and
+    # preflight §4 prints it beside this line.
+    from portfolio.models import Portfolio
+    from portfolio.risk_gate import book_value
+    from portfolio.services import PER_USER_SUFFIX
+    user = getattr(cfg, "user", None)
+    own = None
+    if user is not None:
+        own = Portfolio.objects.filter(
+            name=f"{getattr(user, 'username', '')}{PER_USER_SUFFIX}").first()
+    if own is None or book_value(own) is None:
+        return None, (f"at {lev}x: MAX TOTAL EXPOSURE has no book to be a "
+                      f"percentage of — your own book on /setup/ has never "
+                      f"been saved, and the gate would read a seeded 10,000 "
+                      f"instead. Save the capital form on /setup/ first; "
+                      f"nothing sent")
+    return lev, ""
+
+
 class AssetBot(ABC):
     """Base class. Subclass per asset_class to specialise decide()/sizing."""
 
     asset_class: str = ""
+
+    # Whether the capital desk may run this lane as propose_entry /
+    # execute_entry. OptionsBot overrides scan_symbol wholesale and sets
+    # this False (2026-09-12); the desk runs such a lane through
+    # scan_symbol as before and files its entries 'not_desked'.
+    DESKED = True
 
     def __init__(self, config):
         self.cfg = config
@@ -206,6 +782,9 @@ class AssetBot(ABC):
         from bot_program.engine.broker_router import client_for_symbol
 
         closed = 0
+        # Broker snapshots (resting orders, positions) read once per tick
+        # and shared across every protected row on the same client.
+        self._tick_broker_cache = {}
         for trade in AssetBotTrade.objects.filter(config=self.cfg, status="OPEN"):
             try:
                 protected = bool((trade.metadata or {}).get("protected"))
@@ -222,20 +801,167 @@ class AssetBot(ABC):
                         "[%s_bot] LIVE trade %s cannot be managed: broker "
                         "unavailable (PaperTrader fallback) — leaving OPEN",
                         self.asset_class, trade.symbol)
+                    # AND SAY SO. Refusing to manage is correct; doing it
+                    # silently is not. This branch used to be a log line and
+                    # nothing else, so a real position whose manager had been
+                    # switched off left no trace anywhere the operator looks.
+                    from bot_program.engine.broker_router import session_busy
+                    self._notify_unmanaged_live_position(
+                        trade, busy=session_busy(client))
                     continue
 
-                price = self._mark_price(trade, client)
-                if price is None or price <= 0:
+                # A WORKING entry is an order, not a position: nothing to
+                # mark, stop or time out yet. Ask the broker where it stands.
+                if (trade.metadata or {}).get("entry_working"):
+                    self._poll_working_entry(trade, client)
                     continue
 
-                # The time stop runs for protected trades too. It is the one
-                # exit the broker knows nothing about: a bracket holds SL and
-                # TP, but nothing at the broker will release capital from a
-                # thesis that simply never moved. _close_trade cancels the
-                # resting legs if the flatten is rejected, so there is no
-                # window where the position sits live and unprotected.
+                # A PAPER POSITION WAITS WHOLE WHILE ITS MARKET IS SHUT
+                # (2026-09-26) — and for the settling quarter hour after it
+                # opens. The only price a shut market offers is the last
+                # one before it shut, so nothing below may act for a paper
+                # row: no mark, no trailing move, no SL/TP — and no time
+                # stop, which would book the ENTRY price below. The row
+                # stays OPEN; the first tick after the window runs
+                # everything as usual at a price the market made, and a
+                # clock exit that still finds no price waits for the new
+                # session's first one (paper_awaits_first_price, below).
+                # Only the approach warning runs meanwhile: it reads no
+                # price, and a ceiling that falls due over a weekend must
+                # still be announced before the reopen books it. LIVE rows
+                # are untouched: the venue decides whether its close fills.
+                if trade.paper:
+                    from bot_program.engine.paper_trader import (
+                        paper_market_shut)
+                    shut = paper_market_shut(trade.symbol, trade.asset_class)
+                    if shut:
+                        logger.info("[%s_bot] %s #%s: %s — the paper "
+                                    "position waits; nothing is marked, "
+                                    "moved or booked until it reopens",
+                                    self.asset_class, trade.symbol,
+                                    trade.id, shut)
+                        ts = self._time_stop_status(trade)
+                        if ts["approaching"]:
+                            self._warn_time_stop_near(trade, ts)
+                        continue
+
+                # THE MARK IS READ HERE, FIRST, exactly as before — only
+                # the GATE below it moved, past the two checks that never look
+                # at a price. Nothing between this line and the gate is
+                # reordered, so a position the broker CAN price runs the same
+                # calls in the same order and ends the tick in the same state.
+                #
+                # And the read is not allowed to be fatal: a ticker that
+                # RAISES (a dead session, a 429) used to land in this loop's
+                # own handler and skip the position whole — killing the clock
+                # exit for the very reason it exists. An unreadable mark is
+                # None, which is what everything below is written for.
+                try:
+                    price = self._mark_price(trade, client)
+                except Exception as e:  # noqa: BLE001 — unreadable is None
+                    logger.warning("[%s_bot] %s: the mark could not be read "
+                                   "(%s: %s) — the clock exit still runs",
+                                   self.asset_class, trade.symbol,
+                                   type(e).__name__, e)
+                    price = None
+
+                # The time stop runs for protected trades too — AND FOR
+                # UNPRICED ONES, which is the point of this ordering. It is
+                # the one exit the broker knows nothing about: a bracket holds
+                # SL and TP, but nothing at the broker releases capital from a
+                # thesis that simply never moved. It compares CLOCKS, not
+                # prices — _time_stop_hit reads opened_at against the config's
+                # ceiling and never touches a mark — so behind the mark gate
+                # it could never fire on a Saxo CFD, whose SIM quote is 0
+                # (NoAccess on a demo not linked to a funded live account).
+                # Those positions were held for ever, in silence.
+                #
+                # NOT a claim that the close is seamless: _close_trade strips
+                # the resting bracket and then goes to market, and between
+                # those two the position is live with no stop at the broker.
+                # That window is the close path's, it is stated where it
+                # happens, and it is the same window every other exit takes.
                 if self._time_stop_hit(trade):
-                    if self._close_trade(trade, price, client, reason="TIME"):
+                    # The close needs no mark: _submit_close_order sends a
+                    # MARKET order (symbol, side, qty — no price), and
+                    # _close_trade books the exit off the broker's OWN fill,
+                    # falling back to what we pass only when the broker
+                    # reports none. So this is a FALLBACK, never the order.
+                    exit_basis = price
+                    if exit_basis is None or exit_basis <= 0:
+                        # UNMEASURED IS NOT ZERO, AND NOT A GUESS EITHER. A
+                        # live row passes None on purpose: resolve_exit_fill
+                        # owns that case already — it books the ENTRY price
+                        # and says so, which realises exactly 0 rather than a
+                        # number nobody quoted. Inventing a mark here would
+                        # collapse "could not be priced" into "priced".
+                        exit_basis = None
+                        if trade.paper:
+                            # BUT NOT IN THE HOURS AFTER A REOPEN (2026-09-26).
+                            # A clock exit that fell due while the market was
+                            # shut reaches its first open tick with no price
+                            # of the new session yet — Friday's quote is too
+                            # old, the stream drops OANDA's non-tradeable
+                            # snapshots, a poller has not run — and booking
+                            # the entry price there is an exit nobody could
+                            # have had. It waits for the first price (a
+                            # NO_PRICE skip says so); past
+                            # REOPEN_PRICE_GRACE_SECONDS the feed is dead and
+                            # the entry price below stands in, as before.
+                            from bot_program.engine.paper_trader import (
+                                paper_awaits_first_price)
+                            _waits = paper_awaits_first_price(
+                                trade.symbol, trade.asset_class)
+                            if _waits:
+                                logger.info("[%s_bot] %s #%s: the time stop "
+                                            "is due and waits: %s",
+                                            self.asset_class, trade.symbol,
+                                            trade.id, _waits)
+                                try:
+                                    from bot_program.asset_engine import (
+                                        skips as _skips)
+                                    _skips.record(
+                                        self.cfg, trade.symbol,
+                                        _skips.NO_PRICE,
+                                        f"the time stop waits: {_waits}")
+                                except Exception as e:  # noqa: BLE001
+                                    logger.warning(
+                                        "[%s_bot] could not record the time "
+                                        "stop's wait for %s: %s",
+                                        self.asset_class, trade.symbol, e)
+                                continue
+                            # Except on paper, where the modelled fill does
+                            # float(price) and float(None) raises TypeError
+                            # out of _close_trade — the row would stay OPEN
+                            # for ever, which is this bug re-entering by the
+                            # paper door. The entry price is the row's own
+                            # real number, and it is already what the options
+                            # expiry close falls back to.
+                            exit_basis = trade.entry_price
+                        # AND THE LEDGER RECORDS THE DECISION, not the fill:
+                        # the clock fired with no live mark, which stays true
+                        # for ever even if the broker reports a fill a second
+                        # later. Three states, read beside exit_fill_source:
+                        # the key absent means the exit had a live mark;
+                        # present with source "broker" means the fill was
+                        # measured anyway; present with source "mark" means
+                        # the entry price stood in and the P&L is an
+                        # accounting placeholder, not a measured round trip.
+                        # Saved BEFORE the close, because a failed close
+                        # saves only its own fields and would drop this.
+                        meta = dict(trade.metadata or {})
+                        meta["time_stop_unpriced"] = True
+                        trade.metadata = meta
+                        trade.save(update_fields=["metadata"])
+                        logger.warning(
+                            "[%s_bot] %s: the clock exit fires with NO usable "
+                            "mark — the exit books at the broker's own fill, "
+                            "or at the entry price if it reports none, and "
+                            "the row carries metadata.time_stop_unpriced so "
+                            "that 0 is not read as a measured round trip",
+                            self.asset_class, trade.symbol)
+                    if self._close_trade(trade, exit_basis, client,
+                                         reason="TIME"):
                         closed += 1
                     continue
 
@@ -243,9 +969,55 @@ class AssetBot(ABC):
                 # that was stopped for a week comes back to positions already
                 # past their ceiling, and "this will close soon" arriving in
                 # the same tick as "this closed" is noise, not a warning.
+                # Above the gate for the same reason as the stop itself:
+                # _time_stop_status takes no client and no price, and the
+                # warning an operator most needs is the one about a position
+                # nobody can price.
                 ts = self._time_stop_status(trade)
                 if ts["approaching"]:
                     self._warn_time_stop_near(trade, ts)
+
+                # NOW THE GATE. Everything from here down compares AGAINST a
+                # price: the vanished-stop net acts only to hand the position
+                # to bot-side SL/TP, break-even and trailing measure the move
+                # in R, and the SL/TP tests are literally price <= stop_loss.
+                # None of it can run on a mark that does not exist — and the
+                # net in particular must NOT run here, because its action is
+                # to cancel the last resting exit and hand the row to a
+                # bot-side stop that cannot compare anything either.
+                if price is None or price <= 0:
+                    logger.warning("[%s_bot] %s: no usable mark from the "
+                                   "broker — the clock exit ran, but NOTHING "
+                                   "price-based is managed on this position "
+                                   "this tick (no vanished-stop net, no stop "
+                                   "move, no bot-side SL/TP)",
+                                   self.asset_class, trade.symbol)
+                    try:
+                        # IMPORTED HERE. `skips` is not a module-level name in
+                        # this file — every other user imports it locally — so
+                        # the call added on 2026-09-20 raised NameError into
+                        # the bare except below and the ledger recorded
+                        # nothing: loud in the log, silent on the page.
+                        from bot_program.asset_engine import skips as _skips
+                        _skips.record(self.cfg, trade.symbol, _skips.NO_PRICE,
+                                      "open position only clock-managed: the "
+                                      "broker priced it at 0")
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("[%s_bot] could not record the "
+                                       "unpriced skip for %s: %s",
+                                       self.asset_class, trade.symbol, e)
+                    continue
+
+                # `protected` is a claim about the BROKER, and the broker is
+                # asked whether it still holds. A stop leg that expired,
+                # was cancelled at TWS, or was never accepted leaves the row
+                # saying protected while nothing rests — and protected rows
+                # skip every check below. When the leg is gone and the
+                # position is still held, the row is un-protected here and
+                # bot-side management takes the position back this tick.
+                if protected and not trade.paper and \
+                        self._protection_vanished(trade, client):
+                    protected = False
 
                 # Past here the broker owns SL/TP for protected trades
                 # (bracket or on-fill orders). Managing those here too would
@@ -302,6 +1074,60 @@ class AssetBot(ABC):
         skips.record(self.cfg, symbol, code, detail)
         return None
 
+    @staticmethod
+    def _leverage_hint_of(extras):
+        """extras['leverage'] as the whole number the operator typed
+        (>= 1), else None — ONE reading for every lane (the TAKE TRADE
+        lane calls this off cfg.extras; "0" is None on both). A HINT for
+        the later steps of _etoro_entry_refusal, never a judgement:
+        judge_order_leverage still decides what an order may carry, and
+        an unreadable value is ITS refusal (leverage_refused), not a
+        silent 1 here. "auto" (the attack mode, 2026-09-26) reads None
+        too, deliberately: the multiplier is chosen per order, on the
+        client, by _order_leverage, and before that choice every reader
+        of this hint counts the unlevered order — step 2 of
+        _etoro_entry_refusal asks at 1 (where the row is unread the
+        chooser can pick nothing above 1), and the TAKE TRADE lane never
+        levers a hand-taken ticket. The bot's MAX SINGLE POSITION reads
+        _margin_leverage_hint instead."""
+        raw = (extras or {}).get("leverage")
+        if raw is None or isinstance(raw, bool):
+            return None
+        text = str(raw).strip()
+        return int(text) if text.isdigit() and int(text) >= 1 else None
+
+    def _extras_leverage_hint(self):
+        """The config's extras['leverage'] through _leverage_hint_of."""
+        return self._leverage_hint_of(getattr(self.cfg, "extras", None))
+
+    def _leverage_is_auto(self) -> bool:
+        """The config asks for the attack mode (extras["leverage"] =
+        "auto")."""
+        return leverage_is_auto(getattr(self.cfg, "extras", None))
+
+    def _auto_leverage_bound(self, icls: str) -> int:
+        """The most the attack mode could pick for an instrument of class
+        `icls`: 1 while etoro_leverage_live is OFF, else the lowest of the
+        platform cap, the class ceiling and the proven multiplier. The
+        chooser may pick less (the LIVE list, the stop band)."""
+        from core.platform_control import is_component_enabled
+        if not is_component_enabled(LEVERAGE_SWITCH_KEY):
+            return 1
+        return max(1, min(int(MAX_ORDER_LEVERAGE),
+                          int(ORDER_LEVERAGE_CEILING.get(icls, 1)),
+                          proven_leverage(icls)))
+
+    def _margin_leverage_hint(self, symbol: str):
+        """The multiplier MAX SINGLE POSITION counts a ticket at before the
+        order: the typed hint (_extras_leverage_hint), or, in the attack
+        mode, the most the chooser could pick for this instrument
+        (_auto_leverage_bound). execute_entry judges the gate again at
+        the multiplier actually chosen, so every margin gate sees the
+        multiplier sent."""
+        if self._leverage_is_auto():
+            return self._auto_leverage_bound(self._instrument_class(symbol))
+        return self._extras_leverage_hint()
+
     def _extras_float(self, key: str, default: float = 0.0) -> float:
         """Read a numeric knob out of cfg.extras without ever raising.
 
@@ -319,6 +1145,858 @@ class AssetBot(ABC):
                            "treating as %s", self.asset_class, self.cfg.id,
                            key, raw, default)
             return float(default)
+
+    # How long a WORKING entry may stay unfilled before the bot withdraws
+    # it. IBKR queues a market order sent outside regular hours for the
+    # next open, so one overnight is normal; an order still working after
+    # a full session is a halted symbol, a dead route, or a book that
+    # never opened — none of which the thesis that placed it foresaw.
+    ENTRY_WORKING_MAX_HOURS = 26
+
+    def _working_entry_age_hours(self, trade) -> float:
+        since = (trade.metadata or {}).get("entry_working_since")
+        try:
+            from datetime import datetime as _dt
+            started = _dt.fromisoformat(since) if since else trade.opened_at
+        except (TypeError, ValueError):
+            started = trade.opened_at
+        if started is None:
+            return 0.0
+        return (timezone.now() - started).total_seconds() / 3600.0
+
+    #: How long a symbol whose order MAY be live is left alone. Long
+    #: enough for a human to look, short enough that the bot is not
+    #: silently retired by one network blip. The alert says the number.
+    IN_DOUBT_QUIET_HOURS = 12
+
+    #: The switch that lets a size be SENT as a fraction on a venue whose
+    #: adapter declares `fractional_units`. A component row (arrives OFF on
+    #: every deploy through seed_components); OFF reads as "unmeasured" and
+    #: rounds to whole shares, as before. Flipped by the operator after
+    #: ETORO_DEPARTURE §4 D2c measured a fractional fill.
+    FRACTIONAL_UNITS_COMPONENT = "fractional_units_live"
+
+    #: How long a symbol whose FRACTIONAL size the venue refused is left
+    #: alone. One recorded refusal and one alert instead of the same POST
+    #: every tick for weeks; the operator's remedy is named in both.
+    FRACTION_REFUSED_QUIET_HOURS = 24
+
+    #: How long a symbol is left alone after eToro REFUSED (or the wire
+    #: swallowed) a LEVERED order. Without it a config armed at 2x on an
+    #: instrument eToro will not lever POSTs once per tick for weeks, and
+    #: the fill polls those retries spend (up to 6 calls each against a
+    #: shared 20/60 s quota — public reference, unmeasured) can starve a
+    #: lookup into a WORKING row for an order eToro refused. Recorded as
+    #: leverage_refusals with both numbers; never re-sent at 1.
+    LEVERAGE_QUIET_HOURS = 12
+
+    def _remember_in_doubt(self, symbol: str, reference: str) -> None:
+        """Note on the config that `symbol` has an order nobody can account
+        for. Read by propose_entry, which refuses the symbol while it is
+        fresh — because the idempotency key buckets by the minute, so the
+        next tick would send a SECOND order under a new reference."""
+        try:
+            extras = dict(self.cfg.extras or {})
+            book = dict(extras.get("entry_in_doubt") or {})
+            book[str(symbol).upper()] = {
+                "reference": reference,
+                "at": timezone.now().isoformat(),
+            }
+            extras["entry_in_doubt"] = book
+            self.cfg.extras = extras
+            self.cfg.save(update_fields=["extras"])
+        except Exception as e:  # noqa: BLE001 — a lost note must not raise
+            logger.warning("[%s_bot] could not record the in-doubt order for "
+                           "%s: %s", self.asset_class, symbol, e)
+
+    def _remember_leverage_refusal(self, symbol: str, leverage: int,
+                                   why: str) -> None:
+        """Note on the config that eToro (or the wire) refused `symbol` at
+        `leverage`. Read by _order_leverage, which refuses the symbol while
+        the note is fresh — one POST per LEVERAGE_QUIET_HOURS, not one per
+        tick. The in-doubt note's shape and posture."""
+        try:
+            extras = dict(self.cfg.extras or {})
+            book = dict(extras.get("leverage_refusals") or {})
+            book[str(symbol).upper()] = {
+                "leverage": int(leverage), "why": str(why)[:200],
+                "at": timezone.now().isoformat(),
+            }
+            extras["leverage_refusals"] = book
+            self.cfg.extras = extras
+            self.cfg.save(update_fields=["extras"])
+        except Exception as e:  # noqa: BLE001 — a lost note must not raise
+            logger.warning("[%s_bot] could not record the leverage refusal "
+                           "for %s: %s", self.asset_class, symbol, e)
+
+    def _leverage_refusal_note(self, symbol: str):
+        """The fresh refusal note for `symbol` (with its age), or None.
+        Expires by itself, as _in_doubt_note does."""
+        try:
+            book = (self.cfg.extras or {}).get("leverage_refusals") or {}
+            note = book.get(str(symbol).upper())
+            if not note:
+                return None
+            from datetime import datetime as _dt
+            age_h = ((timezone.now() - _dt.fromisoformat(note["at"]))
+                     .total_seconds() / 3600.0)
+            if age_h >= self.LEVERAGE_QUIET_HOURS:
+                return None
+            return dict(note, age_h=age_h)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _remember_fraction_refused(self, symbol: str, words: str) -> None:
+        """Note on the config that the venue refused a FRACTIONAL size of
+        `symbol`, with its words. Read by propose_entry, which refuses the
+        symbol while the note is fresh — one POST per
+        FRACTION_REFUSED_QUIET_HOURS, not one per tick. The in-doubt
+        note's shape and posture."""
+        try:
+            extras = dict(self.cfg.extras or {})
+            book = dict(extras.get("entry_fraction_refused") or {})
+            book[str(symbol).upper()] = {
+                "words": str(words)[:160],
+                "at": timezone.now().isoformat(),
+            }
+            extras["entry_fraction_refused"] = book
+            self.cfg.extras = extras
+            self.cfg.save(update_fields=["extras"])
+        except Exception as e:  # noqa: BLE001 — a lost note must not raise
+            logger.warning("[%s_bot] could not record the fraction refusal "
+                           "for %s: %s", self.asset_class, symbol, e)
+
+    def _fraction_refused_note(self, symbol: str):
+        """The fresh refusal note for `symbol`, or None. Expires by itself,
+        as _in_doubt_note does."""
+        try:
+            book = (self.cfg.extras or {}).get("entry_fraction_refused") or {}
+            note = book.get(str(symbol).upper())
+            if not note:
+                return None
+            from datetime import datetime as _dt
+            age_h = ((timezone.now() - _dt.fromisoformat(note["at"]))
+                     .total_seconds() / 3600.0)
+            if age_h >= self.FRACTION_REFUSED_QUIET_HOURS:
+                return None
+            return dict(note, age_h=age_h)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _in_doubt_note(self, symbol: str):
+        """The fresh in-doubt note for `symbol`, or None. Expires by itself:
+        a note that never expired would retire the symbol permanently, which
+        is the failure mode this whole file argues against."""
+        try:
+            book = (self.cfg.extras or {}).get("entry_in_doubt") or {}
+            note = book.get(str(symbol).upper())
+            if not note:
+                return None
+            from datetime import datetime as _dt
+            age_h = ((timezone.now() - _dt.fromisoformat(note["at"]))
+                     .total_seconds() / 3600.0)
+            return note if age_h < self.IN_DOUBT_QUIET_HOURS else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _poll_working_entry(self, trade, client) -> None:
+        """Ask the broker where a WORKING entry stands, and act on it.
+
+        filled           -> the row becomes a position, priced from the fill
+        dead, 0 filled   -> the row is CANCELED, nothing traded
+        working          -> wait, unless it has outlived ENTRY_WORKING_MAX_HOURS
+        unknown          -> the account's position decides; flat and old
+                            means withdraw
+        unreadable       -> wait; "could not ask" is not an answer
+        """
+        meta = trade.metadata or {}
+        status_fn = getattr(client, "order_status", None)
+        if not callable(status_fn):
+            logger.error("[%s_bot] %s: entry %s is WORKING but this broker "
+                         "client cannot report an order's state — check the "
+                         "broker by hand",
+                         self.asset_class, trade.symbol, trade.broker_order_id)
+            # AND STILL WITHDRAW IT when it has outlived the limit. Returning
+            # here made a venue that cannot be polled a venue whose queued
+            # orders live forever: the row holds a concurrency slot, blocks
+            # its symbol in propose_entry, and reconciliation skips
+            # entry_working rows by design. The alert repeats daily.
+            self._warn_working_entry_unresolved(
+                trade, None,
+                detail=("this broker client cannot report an order's state, "
+                        "so nothing here can tell a fill from a cancel"))
+            if (self._working_entry_age_hours(trade)
+                    > self.ENTRY_WORKING_MAX_HOURS):
+                cancel_working_entry(
+                    trade, client,
+                    reason=(f"still working after "
+                            f"{self.ENTRY_WORKING_MAX_HOURS}h and this broker "
+                            f"cannot report an order's state"),
+                    cancel_parent=True)
+            return
+        try:
+            st = status_fn(trade.broker_order_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] %s: order_status failed: %s",
+                           self.asset_class, trade.symbol, e)
+            return
+        if st is None:
+            return
+        state = str(st.get("state") or "unknown")
+        filled = float(st.get("filled") or 0)
+        requested = float(meta.get("qty_requested") or trade.qty)
+
+        if state == "filled" or (filled > 0 and state == "dead"):
+            self._finish_working_entry(
+                trade, client, qty=filled or requested,
+                price=float(st.get("avgPrice") or 0), source="broker",
+                venue=st)
+            return
+        if state == "dead":
+            cancel_working_entry(
+                trade, client,
+                reason=(f"broker reported {st.get('status') or 'cancelled'}"
+                        + (f" \u2014 {st.get('refusal')}"
+                           if st.get("refusal") else "")
+                        + " with nothing filled"),
+                cancel_parent=False)
+            return
+        if state == "working" and filled > 0:
+            # Part of it printed and the rest is still working. The
+            # remainder is withdrawn — the legs were sized for the whole
+            # order and would over-cover — and what filled becomes the
+            # position.
+            # Proven, exactly as cancel_working_entry proves it: an
+            # unconfirmed withdrawal leaves the rest to fill into a row
+            # that claims only the part that printed, and those units are
+            # invisible to a reconciliation that walks rows.
+            cancel = getattr(client, "cancel_order", None)
+            if not callable(cancel):
+                logger.error("[%s_bot] %s: partly filled (%s of %s) and this "
+                             "client cannot withdraw the remainder — leaving "
+                             "the row WORKING", self.asset_class,
+                             trade.symbol, filled, requested)
+                return
+            try:
+                sent = cancel(trade.broker_order_id)
+            except Exception as e:  # noqa: BLE001
+                logger.error("[%s_bot] %s: could not withdraw the unfilled "
+                             "remainder of %s (%s) — leaving the row WORKING",
+                             self.asset_class, trade.symbol,
+                             trade.broker_order_id, e)
+                return
+            after = None
+            try:
+                after = status_fn(trade.broker_order_id)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[%s_bot] %s: post-cancel read failed: %s",
+                               self.asset_class, trade.symbol, e)
+            if sent is False or after is None or \
+                    str((after or {}).get("state") or "") == "working":
+                logger.error("[%s_bot] %s: the remainder of %s was not "
+                             "confirmed withdrawn — leaving the row WORKING "
+                             "rather than booking a partial the account may "
+                             "exceed", self.asset_class, trade.symbol,
+                             trade.broker_order_id)
+                return
+            # Book what actually printed, which the post-cancel read knows
+            # better than the pre-cancel one: units can print during it.
+            final_filled = float((after or {}).get("filled") or 0) or filled
+            final_px = float((after or {}).get("avgPrice") or 0) or \
+                float(st.get("avgPrice") or 0)
+            self._finish_working_entry(
+                trade, client, qty=final_filled, price=final_px,
+                source="broker", venue=after or st)
+            return
+        if state == "unknown":
+            # The broker does not recognise the id. Two causes it cannot
+            # separate: the order belongs to another clientId, or this
+            # session lost its trade table in a restart. The ACCOUNT can
+            # still settle it — but only when the position is attributable
+            # to this row. An account total that another row or a
+            # hand-bought lot also claims proves nothing, and booking it
+            # would put units on this row that belong to someone else.
+            positions = self._broker_snapshot(client, "positions")
+            if positions is None:
+                return
+            held = self._broker_still_holds(trade, positions)
+            if held is True:
+                pos_fn = getattr(client, "position_avg_cost", None)
+                pos = (pos_fn(trade.symbol,
+                              sec_types=self._SEC_TYPES.get(trade.asset_class))
+                       if callable(pos_fn) else None)
+                if pos:
+                    self._finish_working_entry(
+                        trade, client,
+                        qty=min(requested, float(pos.get("qty") or 0)
+                                or requested),
+                        price=float(pos.get("avg_cost") or 0),
+                        source="position")
+                    return
+            # Not attributable, or flat. Flat is NOT proof the order never
+            # filled: the entry may have filled and its GTC stop may have
+            # closed the position again while nothing was watching. So the
+            # row is never withdrawn on this evidence — it waits, visibly,
+            # and the operator is told once.
+            self._warn_working_entry_unresolved(trade, held)
+            return
+        if self._working_entry_age_hours(trade) > self.ENTRY_WORKING_MAX_HOURS:
+            if not cancel_working_entry(
+                    trade, client,
+                    reason=f"still working after {self.ENTRY_WORKING_MAX_HOURS}h",
+                    cancel_parent=True):
+                # An unconfirmed withdrawal is said daily, not logged once
+                # a tick (a DELETE refused, or no Canceled read after it).
+                # eToro's real DELETE answered as the demo one did
+                # (MEASURED 2026-09-26), so no world is refused by spelling.
+                self._warn_working_entry_unresolved(
+                    trade, None,
+                    detail=(f"still working after "
+                            f"{self.ENTRY_WORKING_MAX_HOURS}h and the "
+                            f"withdrawal was not confirmed \u2014 cancel it "
+                            f"at the broker"))
+
+    # How often to repeat the "this queued order cannot be resolved" alert.
+    # Once is not enough: nothing else resolves such a row, it holds a
+    # concurrency slot, and a single email at 03:00 is a message nobody
+    # sees. Daily, until a human acts.
+    UNRESOLVED_REALERT_HOURS = 24
+
+    def _warn_working_entry_unresolved(self, trade, held,
+                                       detail: str = "") -> None:
+        """Say — and keep saying — that a working entry cannot be resolved."""
+        meta = dict(trade.metadata or {})
+        last = meta.get("entry_unresolved_notified_at")
+        if last:
+            try:
+                from datetime import datetime as _dt
+                age_h = ((timezone.now() - _dt.fromisoformat(last))
+                         .total_seconds() / 3600.0)
+                if age_h < self.UNRESOLVED_REALERT_HOURS:
+                    return
+            except (TypeError, ValueError):
+                pass
+        elif meta.get("entry_unresolved_notified"):
+            # A row stamped by the earlier once-only version: re-alert now
+            # and start keeping the timestamp.
+            pass
+        detail = detail or (
+                 "the broker does not recognise the order and the account's "
+                  "position cannot be attributed to this row"
+                  if held is None else
+                  "the broker does not recognise the order and the account "
+                  "holds no matching position — it may never have filled, or "
+                  "it may have filled and already been stopped out")
+        logger.error("[%s_bot] %s: working entry %s unresolved — %s",
+                     self.asset_class, trade.symbol, trade.broker_order_id,
+                     detail)
+        try:
+            from bot_program.notifications import notify_staff
+            notify_staff(
+                title=f"⚠ {trade.symbol}: queued entry cannot be resolved",
+                body=(f"{self.asset_class.upper()} order "
+                      f"{trade.broker_order_id}: {detail}. The row is left "
+                      f"WORKING and is NOT withdrawn — check the broker's "
+                      f"orders and executions for it."),
+                url="/positions/")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] unresolved-entry alert failed: %s",
+                           self.asset_class, e)
+        meta["entry_unresolved_notified"] = True
+        meta["entry_unresolved_notified_at"] = timezone.now().isoformat()
+        trade.metadata = meta
+        trade.save(update_fields=["metadata"])
+
+    def _finish_working_entry(self, trade, client, *, qty: float, price: float,
+                              source: str,
+                              venue: Optional[dict] = None) -> None:
+        """A WORKING entry filled: the row becomes a position.
+
+        Size and price come from the broker. Protection is claimed only if
+        the stop leg is seen resting NOW — a partial fill withdraws the legs
+        (they would over-cover) and hands the position to bot-side
+        management, exactly as market_order does at placement.
+        """
+        meta = dict(trade.metadata or {})
+        requested = float(meta.get("qty_requested") or trade.qty)
+        legs = [str(x) for x in (meta.get("protective_order_ids") or [])]
+        partial = 0 < qty < requested * 0.999
+        if qty > 0:
+            trade.qty = Decimal(str(round(qty, 8)))
+        if price > 0:
+            trade.entry_price = Decimal(str(price))
+            meta["fill_source"] = source
+        else:
+            meta["fill_source"] = "ticker"      # the pre-order price stands
+        meta.pop("entry_working", None)
+        meta["entry_filled_at"] = timezone.now().isoformat()
+
+        protected = False
+        if legs:
+            if partial:
+                # The legs were sized for the WHOLE order, so on a partial
+                # fill they over-cover: one would close what filled and
+                # OPEN the remainder the other way. They come down — and an
+                # unconfirmed cancel is recorded as unconfirmed, because
+                # since these legs became GTC a leaked one rests for days.
+                cancel = getattr(client, "cancel_order", None)
+                unconfirmed = []
+                for oid in legs:
+                    try:
+                        if callable(cancel) and cancel(str(oid)):
+                            continue
+                    except Exception as e:  # noqa: BLE001
+                        logger.error("[%s_bot] %s: leg %s may still rest "
+                                     "after a partial fill (%s)",
+                                     self.asset_class, trade.symbol, oid, e)
+                    unconfirmed.append(str(oid))
+                if unconfirmed:
+                    meta["protective_legs_unconfirmed"] = True
+                    logger.error(
+                        "[%s_bot] %s: leg(s) %s were NOT confirmed cancelled "
+                        "after a partial fill — they are GTC and over-cover "
+                        "the position; cancel them at the broker",
+                        self.asset_class, trade.symbol,
+                        ", ".join(unconfirmed))
+                meta["protection_note"] = (
+                    f"filled {qty} of {requested}; protective legs withdrawn "
+                    f"(they would over-cover) — bot-side management"
+                    + (f"; NOT CONFIRMED: {', '.join(unconfirmed)}"
+                       if unconfirmed else ""))
+            else:
+                resting = self._broker_snapshot(client, "resting")
+                stop_id = meta.get("protective_stop_id")
+                want = [str(stop_id)] if stop_id else legs
+                if resting is None:
+                    # COULD NOT LOOK is not proof, here as everywhere else
+                    # (_protection_vanished refuses on exactly this). And
+                    # of the two ways to be wrong, only one is unbounded:
+                    # saying protected=False while a GTC leg really is
+                    # resting arms bot-side exits beside it, and _close_trade
+                    # goes to market BEFORE stripping legs — two exits, and
+                    # the account ends up reversed with no row describing
+                    # it. Saying protected=True when the legs never armed
+                    # leaves the position to the broker for one tick, and
+                    # the NEXT tick's _protection_vanished is the function
+                    # whose whole job is to catch precisely that and hand it
+                    # back to bot-side management. So: assume the bracket
+                    # armed (which is what a bracket does on a fill), say
+                    # so on the row, and let the detector correct it.
+                    protected = True
+                    meta["protection_note"] = (
+                        "the broker's resting orders were unreadable at the "
+                        "fill — assuming the bracket armed; the next tick's "
+                        "vanished-stop check confirms or corrects it")
+                    logger.warning(
+                        "[%s_bot] %s: could not read resting orders at the "
+                        "fill — leaving the broker in charge for this tick",
+                        self.asset_class, trade.symbol)
+                elif any(i in resting for i in want):
+                    protected = True
+                else:
+                    meta["protection_note"] = (
+                        "stop leg not seen resting at fill — bot-side "
+                        "management")
+                    # A leg that IS resting while the stop is not would sit
+                    # armed beside bot-side exits. Take it down first, and
+                    # keep the broker in charge if it will not come down —
+                    # the same rule _protection_vanished applies.
+                    others = [oid for oid in legs if oid in resting]
+                    cancel = getattr(client, "cancel_order", None)
+                    stuck = []
+                    for oid in others:
+                        try:
+                            if callable(cancel) and cancel(str(oid)):
+                                continue
+                        except Exception as e:  # noqa: BLE001
+                            logger.error("[%s_bot] %s: cancelling leg %s at "
+                                         "the fill failed: %s",
+                                         self.asset_class, trade.symbol,
+                                         oid, e)
+                        stuck.append(str(oid))
+                    if stuck:
+                        protected = True
+                        meta["protective_legs_unconfirmed"] = True
+                        meta["protection_note"] = (
+                            f"the stop leg did not arm but leg(s) "
+                            f"{', '.join(stuck)} rest and could not be "
+                            f"cancelled — the broker keeps this position; "
+                            f"cancel them at the broker")
+                        logger.error(
+                            "[%s_bot] %s: leg(s) %s rest and would not "
+                            "cancel — NOT arming bot-side exits beside them",
+                            self.asset_class, trade.symbol,
+                            ", ".join(stuck))
+        # THE VENUE'S OWN WORD ON THE FILL (D3b, eToro only). `venue` is the
+        # poller's order_status reading. Read only for a row eToro carried
+        # (adapter_key): eToro's stop rides the POSITION, not a resting leg,
+        # and only its order_status carries venueStopLoss/positionId off
+        # positionExecutions[0]. An IBKR/Saxo legless fill keeps today's
+        # silent protected=False. Stamps the carrier and the close handle
+        # through venue_stamps with setdefault: a hand-taken row (no
+        # carrier at placement) gains broker/broker_env/broker_position_id
+        # here; an engine row is never overwritten. Compares the HELD stop
+        # with the SENT one (MEASURED 2026-09-23 on BTC: eToro rewrites a
+        # stop in both directions) and refuses protected=True when no stop
+        # was read: whether a held order's legs attach at the fill is
+        # UNMEASURED (openStopLossRate was 0.0 while held).
+        from bot_program.engine.capabilities import adapter_key
+        moved_now = False
+        if (isinstance(venue, dict) and not legs
+                and adapter_key(client) == "etoro"):
+            for k, v in self.venue_stamps(client, venue).items():
+                meta.setdefault(k, v)
+            pid = venue.get("positionId")
+            held = venue.get("venueStopLoss")
+            try:
+                held = float(held) if held is not None else None
+            except (TypeError, ValueError):
+                held = None
+            sent = float(meta.get("initial_stop_loss")
+                         or trade.stop_loss or 0)
+            if held is not None and held > 0.0001 and pid:
+                protected = True
+                meta["protective_trade_id"] = str(pid)
+                # compared at the instrument's tick: a rounding is not a
+                # moved stop (venue_moved_stop, 2026-09-27)
+                if venue_moved_stop(sent, held,
+                                    trade.asset_class or self.asset_class,
+                                    trade.symbol):
+                    meta["stop_rewritten_by_venue"] = {"sent": sent,
+                                                       "held": held}
+                    moved_now = True
+                    logger.error("[%s_bot] %s: the venue holds the stop at "
+                                 "%s, not the %s sent - the risk of this "
+                                 "position is not the one budgeted",
+                                 self.asset_class, trade.symbol, held, sent)
+                    # ONE MESSAGE (2026-09-27): the fill message below names
+                    # it (its Stop and risk lines, "Stop moved by eToro");
+                    # the staff alert goes only when that message is not
+                    # delivered (_alert_stop_rewrite, after it).
+                if venue.get("venueTakeProfit") is None:
+                    meta["protection_note"] = ("stop held at the venue; no "
+                                               "target read at the venue")
+            else:
+                protected = False
+                meta["venue_stop_unread"] = True
+                meta["protection_note"] = (
+                    "filled from a held order and the venue reports NO stop "
+                    "on the position (openStopLossRate was 0.0 while held; "
+                    "whether the legs attach at the fill is UNMEASURED) - "
+                    "bot-side management; read the position at eToro")
+                logger.error("[%s_bot] %s: filled at eToro with NO stop read "
+                             "on the position - bot-side management",
+                             self.asset_class, trade.symbol)
+                try:
+                    from bot_program.notifications import notify_staff
+                    notify_staff(
+                        title=f"\u26a0 {trade.symbol}: filled at eToro with no stop read",
+                        body=(f"Trade #{trade.id} filled from a held order and "
+                              f"the venue reports no stop on the position. "
+                              f"Bot-side exits manage it; read it at eToro."),
+                        url="/positions/")
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("[%s_bot] no-stop alert failed: %s",
+                                   self.asset_class, e)
+        meta["protected"] = protected
+        trade.metadata = meta
+        trade.save(update_fields=["qty", "entry_price", "metadata"])
+        logger.info("[%s_bot] %s: WORKING entry filled — qty %s @ %s (%s), "
+                    "protected=%s", self.asset_class, trade.symbol, trade.qty,
+                    trade.entry_price, source, protected)
+        # The cost basis is opened HERE, on the real fill, for the real size
+        # at the real price — the entry path skips it for a working row
+        # precisely so no lot exists for units nobody owns yet.
+        try:
+            from bot_program.tax_lots import open_lot
+            open_lot(trade)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] tax_lots.open_lot failed: %s",
+                           self.asset_class, e)
+        # WHO placed it decides which voice announces it. A manual config is
+        # an ordinary enabled AssetBotConfig, so its WORKING rows are polled
+        # here too — and announcing a hand-placed order's fill as a bot event
+        # puts it behind the bot-alert preference. An operator who muted the
+        # fleet's chatter would then have "nothing has filled yet" as the
+        # last thing they were ever told about their own live order.
+        try:
+            from bot_program.manual_trade import MANUAL_RULE as _MANUAL
+        except Exception:  # noqa: BLE001
+            _MANUAL = "manual_take"
+        is_manual = str(trade.rule_name or "") == _MANUAL
+        told = False
+        try:
+            if is_manual:
+                from bot_program.notifications import notify_manual_fill_open
+                told = bool(notify_manual_fill_open(
+                    self.user, asset_class=self.asset_class,
+                    symbol=trade.symbol, side=trade.side, qty=trade.qty,
+                    entry_price=trade.entry_price, trade_id=trade.id,
+                    live=not trade.paper, trade=trade))
+            else:
+                from bot_program.notifications import notify_bot_fill_open
+                told = bool(notify_bot_fill_open(
+                    self.user, asset_class=self.asset_class,
+                    symbol=trade.symbol, side=trade.side, qty=trade.qty,
+                    entry_price=trade.entry_price,
+                    rule_name=trade.rule_name, trade=trade,
+                    trade_id=trade.id, **self._fill_words(trade)))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] fill notification failed: %s",
+                           self.asset_class, e)
+        if moved_now and not told:
+            # no fill message names the rewritten stop: the staff alert is
+            # the one message (2026-09-27)
+            self._alert_stop_rewrite(trade, STOP_ALERT_UNTOLD)
+
+    def _broker_snapshot(self, client, what: str):
+        """`what` in {"resting", "positions"} from this tick's cache.
+
+        None means the broker could not be asked. The cache lives for one
+        manage_positions pass, so a fleet of protected rows costs one
+        openTrades() and one positions() read, not one pair per row.
+        """
+        cache = getattr(self, "_tick_broker_cache", None)
+        if cache is None:
+            cache = self._tick_broker_cache = {}
+        # KEYED ON THE VENUE, NEVER ON THE OBJECT'S ADDRESS. `client` is
+        # rebound per row inside manage_positions and this cache keeps no
+        # reference to the old one, so a freed client's id() can be handed
+        # straight to the next — CPython reuses addresses for same-size
+        # objects — and the hit would then answer one venue's row out of
+        # another venue's book. The worst consumer of that is the in-doubt
+        # close, which reads False as "flat, send nothing". One venue, one
+        # read per pass is also exactly what the docstring above promises.
+        # adapter_key answers "" for a class it does not know, so the class
+        # name is the fallback rather than one shared empty bucket.
+        from bot_program.engine.capabilities import adapter_key
+        key = (what, adapter_key(client) or type(client).__name__)
+        if key in cache:
+            return cache[key]
+        value = None
+        try:
+            if what == "resting":
+                fn = getattr(client, "resting_order_ids", None)
+                value = fn() if callable(fn) else None
+            elif what == "positions":
+                fn = getattr(client, "get_positions", None)
+                value = fn() if callable(fn) else None
+        except Exception as e:  # noqa: BLE001 — unreachable reads as unknown
+            logger.warning("[%s_bot] broker %s snapshot failed: %s",
+                           self.asset_class, what, e)
+            value = None
+        cache[key] = value
+        return value
+
+    # The broker's secType for each asset class we route to IBKR. A position
+    # is only this row's if the instrument type matches too: IBKR reports an
+    # OPTION position under its UNDERLYING symbol, so an AAPL call answers a
+    # symbol-only test for an AAPL stock row.
+    _SEC_TYPES = {"stock": ("STK",), "etf": ("STK",), "index": ("IND", "STK"),
+                  "forex": ("CASH",), "options": ("OPT",),
+                  "commodity": ("FUT", "CMDTY", "STK"), "cfd": ("CFD",)}
+
+    def _broker_still_holds(self, trade, positions) -> "Optional[bool]":
+        """Does the broker still hold THIS row's position?
+
+        True / False, or None for "held by the account but not attributable
+        to this row" — which is not a yes and must never be treated as one.
+        Attribution fails when another OPEN row of this user, or a lot the
+        operator bought by hand, claims units of the same symbol: the
+        account total cannot then say whose they are.
+        """
+        # OPTIONS CANNOT BE ATTRIBUTED FROM A POSITION LIST. IBKR reports
+        # every option position under its UNDERLYING symbol, and the list
+        # carries no strike, expiry or right — so a different strike, a
+        # different expiry, one leg of a spread or a hand-bought lot all
+        # answer to the same (symbol, OPT, side) test. There is no honest
+        # yes available here, and a wrong yes books a phantom whose close
+        # sells contracts the account does not hold.
+        if trade.asset_class == "options":
+            return None
+
+        want_sym = trade.symbol.upper()
+        want_types = self._SEC_TYPES.get(trade.asset_class)
+        mine = [p for p in positions
+                if str(p.get("symbol", "")).upper() == want_sym
+                and (not want_types or not p.get("sec_type")
+                     or str(p.get("sec_type", "")).upper() in want_types)]
+        if not mine:
+            # NOT NAMED IS NOT NOT THERE. False is read by the in-doubt
+            # branch as a positive "the broker is flat and nothing is sent",
+            # so a close that may never have landed would never be re-sent.
+            # None is this docstring's own "cannot say" and every caller
+            # already handles it.
+            if any(p.get("symbol_unresolved") is True for p in positions
+                   if isinstance(p, dict)):
+                return None
+            return False
+        # Side matters: a SELL row is not held by a long position, and
+        # closing it would double the long rather than flatten a short.
+        same_side = [p for p in mine
+                     if not p.get("side")
+                     or str(p.get("side", "")).upper() == trade.side.upper()]
+        if not same_side:
+            return False
+        try:
+            held_qty = sum(float(p.get("qty") or 0) for p in same_side)
+        except (TypeError, ValueError):
+            return None
+        if held_qty <= 0:
+            return False
+
+        try:
+            want_qty = float(trade.qty)
+        except (TypeError, ValueError):
+            return None
+
+        from bot_program.models import AssetBotTrade
+        others = (AssetBotTrade.objects
+                  .filter(config__user=self.user, symbol=trade.symbol,
+                          side=trade.side, paper=False,
+                          asset_class=trade.asset_class,
+                          status__in=("OPEN", "CLOSE_PENDING"))
+                  .exclude(pk=trade.pk))
+        try:
+            # A WORKING row holds NOTHING at the broker: its full requested
+            # quantity sits on the row while the order is still queued.
+            # Counting it as a claim would make attribution impossible for
+            # every real position beside it — the vanished-stop net would
+            # never fire again. Rows of another asset class are excluded in
+            # the query above for the same reason: a CFD on AAPL and a
+            # share of AAPL are different positions at the broker.
+            claimed = sum(float(t.qty) for t in others
+                          if not is_entry_working(t))
+        except (TypeError, ValueError):
+            return None
+        # The broker's size must cover what this row claims — otherwise
+        # "the account holds one of the hundred shares this row says it
+        # owns" would read as "this row's position is still on", and the
+        # bot-side close that follows sells ninety-nine it does not have.
+        if held_qty + 1e-9 < want_qty + claimed:
+            if held_qty + 1e-9 >= want_qty and claimed <= 0:
+                return True
+            return None
+        return True
+
+    def _protection_vanished(self, trade, client) -> bool:
+        """True when the row's stop leg no longer rests at the broker while
+        the position is still held — and un-protect the row when it is.
+
+        Three answers are deliberately "no": a venue that cannot list its
+        resting orders (PaperTrader, OANDA's on-fill stops), a snapshot
+        that could not be read (never turn "could not look" into "gone"),
+        and a position the broker no longer holds either (the stop FILLED;
+        reconciliation finalises that row, and taking it back here would
+        book a second exit). Only a held position with no stop is ours.
+        """
+        if not callable(getattr(client, "resting_order_ids", None)):
+            return False
+        meta = trade.metadata or {}
+        stop_id = meta.get("protective_stop_id")
+        ids = ([str(stop_id)] if stop_id
+               else [str(x) for x in (meta.get("protective_order_ids") or [])])
+        if not ids:
+            return False
+
+        resting = self._broker_snapshot(client, "resting")
+        if resting is None:
+            return False
+        if any(oid in resting for oid in ids):
+            return False
+        positions = self._broker_snapshot(client, "positions")
+        if positions is None:
+            return False
+        held = self._broker_still_holds(trade, positions)
+        if held is None:
+            # Held by the account, but not attributable to THIS row (another
+            # row or a hand-bought lot claims the same symbol). Un-protecting
+            # would hand bot-side SL/TP a position it may not own, and its
+            # close would sell someone else's units.
+            logger.warning("[%s_bot] %s: the stop leg is gone but the "
+                           "broker's position cannot be attributed to this "
+                           "row — leaving it protected and alerting instead",
+                           self.asset_class, trade.symbol)
+            self._notify_protection_vanished(
+                trade, "the broker's stop leg is gone and the position "
+                       "could not be attributed to this row — check the "
+                       "broker's open orders by hand")
+            return False
+        if not held:
+            return False
+
+        reason = (f"stop leg {ids[0]} no longer rests at the broker while "
+                  f"the position is still held")
+        logger.error("[%s_bot] %s: %s — un-protecting the row; bot-side "
+                     "SL/TP management resumes this tick",
+                     self.asset_class, trade.symbol, reason)
+        # The SURVIVING leg comes down first. Bot-side SL/TP is driven off
+        # the same trade.stop_loss / trade.take_profit the resting leg sits
+        # at, and _close_trade goes to market BEFORE it strips the legs — so
+        # a target left armed beside a bot-side take-profit sells the
+        # position twice and leaves the account short. It is cancelled here,
+        # while the row is still marked protected, so a failure leaves the
+        # broker in charge rather than two exits racing.
+        surviving = [oid for oid in
+                     (meta.get("protective_order_ids") or []) if oid in resting]
+        cancel = getattr(client, "cancel_order", None)
+        unconfirmed = []
+        for oid in surviving:
+            try:
+                if callable(cancel) and cancel(str(oid)):
+                    continue
+            except Exception as e:  # noqa: BLE001
+                logger.error("[%s_bot] %s: cancelling the surviving leg %s "
+                             "failed: %s", self.asset_class, trade.symbol,
+                             oid, e)
+            unconfirmed.append(str(oid))
+        if unconfirmed:
+            logger.error("[%s_bot] %s: leg(s) %s still rest at the broker — "
+                         "leaving the row PROTECTED rather than running "
+                         "bot-side exits beside them",
+                         self.asset_class, trade.symbol,
+                         ", ".join(unconfirmed))
+            meta = dict(meta)
+            meta["protective_legs_unconfirmed"] = True
+            trade.metadata = meta
+            trade.save(update_fields=["metadata"])
+            self._notify_protection_vanished(
+                trade, f"the stop leg is gone but leg(s) "
+                       f"{', '.join(unconfirmed)} could not be cancelled — "
+                       f"cancel them at the broker before this position is "
+                       f"managed here")
+            return False
+
+        meta = dict(meta)
+        meta["protected"] = False
+        meta["protection_vanished_at"] = timezone.now().isoformat()
+        meta["protection_vanished_reason"] = reason
+        if surviving:
+            meta["protection_legs_cancelled"] = surviving
+        # The ids stay on the row: the close path cancels whatever is
+        # listed, and a leg this session could not see must still be tried.
+        trade.metadata = meta
+        trade.save(update_fields=["metadata"])
+        self._notify_protection_vanished(trade, reason)
+        return True
+
+    def _notify_protection_vanished(self, trade, reason: str) -> None:
+        """Tell the operator once per position that its broker stop is gone."""
+        meta = dict(trade.metadata or {})
+        if meta.get("protection_vanished_notified"):
+            return
+        try:
+            from bot_program.notifications import notify_protection_vanished
+            notify_protection_vanished(
+                self.user, asset_class=self.asset_class, symbol=trade.symbol,
+                side=trade.side, qty=trade.qty, stop_loss=trade.stop_loss,
+                reason=reason, trade_id=trade.id)
+            meta["protection_vanished_notified"] = True
+            trade.metadata = meta
+            trade.save(update_fields=["metadata"])
+        except Exception as e:  # noqa: BLE001 — never let an alert block exits
+            logger.warning("[%s_bot] protection-vanished notification failed: "
+                           "%s", self.asset_class, e)
 
     def _manage_broker_stop(self, trade, price, client) -> bool:
         """Run the stop rules against a position whose stop is AT THE BROKER.
@@ -396,40 +2074,97 @@ class AssetBot(ABC):
             return False
 
         meta_now = trade.metadata or {}
-        # A trade-level handle wins: on OANDA the stop is not a standalone
-        # order at all, and the trade id is the only thing that can move it.
-        # Then a NAMED stop leg, where the venue told us which one it is.
-        # The flat list is the last resort, and it is a list precisely
-        # because it does not say which id is which — which is why the
-        # venue client must refuse a leg that is not a stop rather than
-        # move whatever it is handed.
-        handle = (meta_now.get("protective_trade_id")
-                  or meta_now.get("protective_stop_id"))
-        ids = [handle] if handle else (
-            meta_now.get("protective_order_ids") or [])
+        # EVERY handle is tried, in the order most likely to be right — not
+        # the first one that happens to be set, which is the defect this
+        # replaces. The three keys state three different things and only the
+        # venue knows which one its bracket answers to:
+        #
+        #   protective_trade_id — the position/trade handle. On OANDA the stop
+        #     is not a standalone order at all and this is the only thing that
+        #     can move it. On Saxo it is the PositionId, which resolves the
+        #     legs under FifoEndOfDay and resolves NOTHING under the real-time
+        #     netting profiles, where the brackets are free-standing orders.
+        #   protective_stop_id — the NAMED leg, where the venue said which
+        #     order is the stop.
+        #   protective_order_ids LAST, because it does not say which is which:
+        #     on an Alpaca or IBKR long bracket its first entry is the
+        #     TAKE-PROFIT.
+        #
+        # Stopping at the first handle meant a Saxo real-time-netting row,
+        # which carries both a PositionId and a stop OrderId, only ever
+        # offered the PositionId: no leg resolved, and break-even and trailing
+        # never moved that stop again for the life of the position.
+        #
+        # THE SAFETY PROPERTY IS THE VENUE'S REFUSAL, not this ordering.
+        # Alpaca, IBKR and Saxo read the RESTING order's own type before they
+        # write, so a stop request can never land on a target. OANDA and eToro
+        # do not type-check at all — their movers write a field on the TRADE —
+        # and they are safe here only because both report protectiveOrders as
+        # empty, so their rows carry the trade handle and nothing else. If
+        # either ever records child order ids, that refusal must be added
+        # first.
+        flat = meta_now.get("protective_order_ids") or []
+        if isinstance(flat, (str, bytes)):
+            # One id, not a sequence of characters: splatting a string would
+            # ask the venue to move legs named "7" and "7".
+            flat = [flat]
+        ids, seen = [], set()
+        for cand in (meta_now.get("protective_trade_id"),
+                     meta_now.get("protective_stop_id"), *flat):
+            key = str(cand) if cand else ""
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            ids.append(key)
         if not ids:
             self._note_stop_rules_inert(trade)
             return False
 
-        moved, note, accepted = False, "no leg matched", None
+        # WHAT EACH HANDLE SAID, not only the last one: with three handles,
+        # "leg T1 is a take-profit" from the flat list would otherwise be the
+        # only thing recorded about a stop leg that is actually gone.
+        #
+        # And a WALL-CLOCK ceiling on one walk. Saxo's client timeout is 20s
+        # and its leg resolution costs two GETs per handle, so a transport
+        # stall turns a three-handle walk into a minute for ONE position —
+        # while manage_positions runs every row in one task, delaying the EXIT
+        # checks of every position behind it. Three handles are cheap when the
+        # venue answers; they must not be able to triple an outage. The FIRST
+        # handle is always asked: a slow but working venue still gets its move.
+        walk_started = timezone.now()
+        moved, notes, accepted = False, [], None
         for oid in ids:
+            if notes and ((timezone.now() - walk_started).total_seconds()
+                          > self.STOP_MOVE_WALK_BUDGET_S):
+                notes.append("remaining handles not asked: the venue did not "
+                             "answer within the walk budget")
+                break
             try:
                 res = mover(str(oid), float(candidate))
             except Exception as e:  # noqa: BLE001
-                note = str(e)
+                notes.append(f"{oid}: {e}")
                 continue
             if res and res.get("ok"):
-                moved, note = True, str(res.get("price"))
+                moved = True
                 accepted = res.get("price")
                 break
-            note = (res or {}).get("reason") or note
+            notes.append(
+                f"{oid}: {(res or {}).get('reason') or 'no leg matched'}")
 
         if not moved:
+            note = "; ".join(notes) or "no leg matched"
             logger.warning(
                 "[%s_bot] %s: %s wanted the stop at %s but the broker leg "
                 "could not be moved (%s) — the position is still protected "
                 "at its old level",
                 self.asset_class, trade.symbol, why, candidate, note)
+            # EVERY handle the row carries was refused, and that used to be
+            # completely silent: _note_stop_rules_inert is not reached from
+            # here (a mover EXISTS), so the row carried no stamp and every
+            # surface kept reading "protected, managed" while the stop rules
+            # had stopped reaching the venue. Nothing is sent here — this only
+            # writes down what already happened.
+            self._note_stop_move_failed(trade, note)
             return False
 
         # The venue accepted it, so the row may now say so — and it says
@@ -453,8 +2188,16 @@ class AssetBot(ABC):
         meta["stop_moves"] = moves[-20:]
         if why == "breakeven":
             meta["breakeven_armed"] = True
-        # A leg that MOVED is proof the rules are not inert after all.
+        # A leg that MOVED is proof the rules are not inert after all — and
+        # the run of failures that led to the stamp is over, so the count and
+        # the venue's last words go with it. Leaving the count would make the
+        # next single failure look like the fourth and stamp the row on a
+        # blip; leaving the detail would print a stale reason on the page.
         meta.pop("stop_rules_inert", None)
+        meta.pop("stop_rules_inert_detail", None)
+        meta.pop("stop_move_failures", None)
+        meta.pop("stop_move_last_error", None)
+        meta.pop("stop_move_last_at", None)
         trade.stop_loss = resting
         trade.metadata = meta
         trade.save(update_fields=["stop_loss", "metadata"])
@@ -463,26 +2206,92 @@ class AssetBot(ABC):
                     resting, candidate, price)
         return True
 
-    def _note_stop_rules_inert(self, trade) -> None:
-        """Warn once per trade that its stop rules cannot run.
+    #: Consecutive attempted moves — ticks on which a candidate existed AND
+    #: was an improvement — where EVERY recorded handle was refused, before
+    #: the row is stamped inert. A tick that wanted no move neither counts nor
+    #: clears. One failure is a blip: an expired session, a 202 the venue
+    #: never confirmed, a leg momentarily unroutable. Three are a fact about
+    #: the ROW rather than about the network. THREE STATES, deliberately: no
+    #: count means nothing has failed, a count below this means it failed and
+    #: we are not yet calling it dead, the stamp means dead until a leg moves.
+    STOP_MOVE_FAILURES_BEFORE_INERT = 3
+
+    #: A wall-clock ceiling on ONE walk of the handles, in seconds. See the
+    #: comment at the walk: three handles must not be able to triple a
+    #: transport outage for every position behind this one.
+    STOP_MOVE_WALK_BUDGET_S = 25.0
+
+    def _note_stop_move_failed(self, trade, note: str) -> None:
+        """Record an attempted move where every handle refused.
+
+        The old code logged one warning per tick and wrote nothing at all, so
+        the position card, the forensics timeline and the operator all kept
+        reading a managed position while break-even and trailing had stopped
+        reaching the venue for good.
+        """
+        try:
+            meta = dict(trade.metadata or {})
+            fails = int(meta.get("stop_move_failures") or 0) + 1
+            meta["stop_move_failures"] = fails
+            # The venue's OWN words, not our summary of them: "leg 3 is not
+            # among the open orders" and "no session" call for opposite
+            # actions from the operator.
+            meta["stop_move_last_error"] = str(note)[:300]
+            meta["stop_move_last_at"] = timezone.now().isoformat()
+            trade.metadata = meta
+            trade.save(update_fields=["metadata"])
+        except Exception as e:  # pragma: no cover — never block the tick
+            logger.warning("[%s_bot] could not record a failed stop move on "
+                           "%s: %s", self.asset_class, trade.symbol, e)
+            return
+        if fails >= self.STOP_MOVE_FAILURES_BEFORE_INERT:
+            self._note_stop_rules_inert(trade, reason="legs_unmovable",
+                                        detail=str(note)[:200])
+
+    def _note_stop_rules_inert(self, trade, reason: str = "broker_protected",
+                               detail: str = "") -> None:
+        """Warn once per trade, PER REASON, that its stop rules cannot run.
 
         Only for positions whose config actually asked for one: a config
         with no stop rules configured is not owed a warning about them.
+
+        The two reasons are not the same fact. "broker_protected" means no
+        client here can move a resting order at all — nothing to do at the
+        venue. "legs_unmovable" means the client CAN and every handle this row
+        carries was refused — a leg to go and look at. Collapsing them would
+        leave the operator unable to tell a missing capability from protection
+        that has come adrift.
         """
         if not (self._extras_float("breakeven_at_r") > 0
                 or self._extras_float("trail_pct") > 0):
             return
         meta = trade.metadata or {}
-        if meta.get("stop_rules_inert"):
+        if meta.get("stop_rules_inert") == reason:
             return
-        logger.warning(
-            "[%s_bot] %s: break-even/trailing are configured but this "
-            "position's stop RESTS AT THE BROKER, which no client can "
-            "modify yet - the stop stays where the bracket put it",
-            self.asset_class, trade.symbol)
+        if reason == "broker_protected":
+            logger.warning(
+                "[%s_bot] %s: break-even/trailing are configured but this "
+                "position's stop RESTS AT THE BROKER, which no client can "
+                "modify yet - the stop stays where the bracket put it",
+                self.asset_class, trade.symbol)
+        else:
+            logger.warning(
+                "[%s_bot] %s: break-even/trailing are configured and this "
+                "position's stop RESTS AT THE BROKER, but EVERY recorded leg "
+                "handle was refused (%s) - the stop rules are inert for this "
+                "position until a leg moves again",
+                self.asset_class, trade.symbol, detail or "no leg matched")
         try:
             meta = dict(meta)
-            meta["stop_rules_inert"] = "broker_protected"
+            meta["stop_rules_inert"] = reason
+            if detail:
+                meta["stop_rules_inert_detail"] = str(detail)[:200]
+            else:
+                # Re-stamped with a DIFFERENT reason and no detail of its own:
+                # the detail on the row belongs to the reason being replaced,
+                # and leaving it prints legs_unmovable's venue words beside a
+                # broker_protected stamp.
+                meta.pop("stop_rules_inert_detail", None)
             trade.metadata = meta
             trade.save(update_fields=["metadata"])
         except Exception as e:  # pragma: no cover - never block the tick
@@ -653,9 +2462,30 @@ class AssetBot(ABC):
         fast one-sided markets. Overrides must return it too; one that
         returns None degrades to a mark-priced exit, flagged as such.
         """
+        # A VENUE WHERE AN OPPOSITE ORDER DOES NOT FLATTEN — Saxo under the
+        # FifoEndOfDay netting profile, and eToro ALWAYS, whose market_order
+        # has no close branch at all and answers a SELL with `sellShort`. The
+        # decision is in engine/venue_close.py rather than here because the
+        # retry drain and the kill switch send closes too, and for the
+        # platform's whole life all three sent an opening order on those
+        # venues: the row booked CLOSED at that fill while the account held
+        # DOUBLE, hedged, paying both spreads.
+        #
+        # It RAISES rather than send an opening order when the venue needs a
+        # position id and the row has none. The refusal is the point: the row
+        # goes CLOSE_PENDING, where the drain reads the broker's own book.
+        from bot_program.engine.venue_close import close_or_refuse
+
         close_side = "SELL" if trade.side == "BUY" else "BUY"
-        return client.market_order(trade.symbol, close_side, float(trade.qty),
-                                   client_order_id=client_order_id)
+        return close_or_refuse(trade, client, float(trade.qty),
+                               close_side=close_side,
+                               client_order_id=client_order_id)
+
+    #: What each adapter's own `env` string means in the two words the
+    #: platform's money side uses. Unlisted is UNKNOWN, never "live":
+    #: entry_meta carries no world at all rather than a guessed one.
+    VENUE_WORLDS = {"live": "live", "paper": "paper", "sim": "paper",
+                    "demo": "paper", "practice": "paper", "testnet": "paper"}
 
     # A broker that ANSWERS with a refusal has not closed anything. Only
     # an exception used to reach the failure path, so a client that
@@ -676,6 +2506,19 @@ class AssetBot(ABC):
                 filled = float(res.get("executedQty") or 0)
             except (TypeError, ValueError):
                 filled = 0.0
+            # A CLOSE NOBODY CONFIRMED. An adapter that says inDoubt has
+            # placed an order it cannot vouch for; booking the row CLOSED on
+            # that is how a live position ends up with no owner, and
+            # re-sending it is how a closed long becomes a short. Marked so
+            # the in-doubt branch in _close_trade owns it.
+            if res.get("inDoubt") and filled <= 0:
+                err = RuntimeError(
+                    "the broker did not confirm the close"
+                    + (f" (reference {res.get('reference')})"
+                       if res.get("reference") else ""))
+                err.in_doubt = True
+                err.reference = str(res.get("reference") or "")
+                raise err
             if status in self.CLOSE_REFUSED_STATUSES and filled <= 0:
                 reason = ""
                 raw = res.get("raw")
@@ -707,7 +2550,27 @@ class AssetBot(ABC):
         ok = True
         for oid in ids:
             try:
-                cancel(oid)
+                # The RETURN VALUE counts, not just the absence of an
+                # exception. IBKR answers False (no raise) when it could
+                # not PROVE the leg gone: still working after the cancel,
+                # filled in the race, or absent from the open orders with
+                # a lookup that could not be read — a leg absent from the
+                # open orders whose lookup says cancelled, or unknown to
+                # TWS, is proved gone and answers True (2026-09-28: TWS
+                # cancels a bracket's children with the parent, and False
+                # there paged staff on every routine withdrawal). Since
+                # the legs became GTC they no longer expire
+                # at the session close, so a leaked stop rests for days and
+                # fires against a flat book, opening a reverse position.
+                # "We could not tell" must therefore be recorded as not
+                # done; the caller stamps the row.
+                if cancel(oid) is False:
+                    ok = False
+                    logger.error(
+                        "[%s_bot] %s: the broker did not confirm cancelling "
+                        "leg %s — it may still be resting (GTC), and a "
+                        "resting exit against a flat book OPENS a position",
+                        self.asset_class, trade.symbol, oid)
             except Exception as e:
                 ok = False
                 logger.error("[%s_bot] cancel protective order %s failed: "
@@ -715,15 +2578,178 @@ class AssetBot(ABC):
                              self.asset_class, oid, e)
         return ok
 
-    def _close_trade(self, trade, price: Decimal, client, *, reason: str) -> bool:
+    #: How often an unresolvable in-doubt close repeats itself. Once is
+    #: not enough — nothing else resolves such a row and it holds a live
+    #: position — and every tick is noise nobody reads.
+    CLOSE_DOUBT_REALERT_HOURS = 1.0
+
+    def _warn_close_in_doubt_unresolved(self, trade, doubt) -> None:
+        """Say — and keep saying — that a close may be live and cannot be
+        proved either way. The row is NOT closed and no order is sent."""
+        meta = dict(trade.metadata or {})
+        last = meta.get("close_doubt_alerted_at")
+        if last:
+            try:
+                from datetime import datetime as _dt
+                age_h = ((timezone.now() - _dt.fromisoformat(last))
+                         .total_seconds() / 3600.0)
+                if age_h < self.CLOSE_DOUBT_REALERT_HOURS:
+                    return
+            except (TypeError, ValueError):
+                pass
+        ref = (doubt or {}).get("reference") or "(none)"
+        logger.error("[%s_bot] %s: a close MAY be live under reference %s and "
+                     "the broker cannot be read — nothing is sent and the row "
+                     "stays OPEN", self.asset_class, trade.symbol, ref)
+        try:
+            from bot_program.notifications import notify_staff
+            notify_staff(
+                title=f"⚠ {trade.symbol}: a close may be live and cannot be "
+                      f"resolved",
+                body=(f"{self.asset_class.upper()} {trade.symbol}: the close "
+                      f"under reference {ref} did not come back, and the "
+                      f"broker's positions cannot be read — so the platform "
+                      f"cannot tell whether it filled. NOTHING is being sent "
+                      f"(a second close would reverse the position) and the "
+                      f"row stays OPEN. Check the broker by hand."),
+                url="/positions/")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] in-doubt close alert failed: %s",
+                           self.asset_class, e)
+        meta["close_doubt_alerted_at"] = timezone.now().isoformat()
+        trade.metadata = meta
+        trade.save(update_fields=["metadata"])
+
+    def _flag_unconfirmed_legs(self, trade, why: str) -> None:
+        """Record and ANNOUNCE a protective leg that may still rest.
+
+        protective_legs_unconfirmed was written at six places in this file and
+        read by no view, template, alert or task, while the identical event on
+        the entry-withdrawal path pages a human. A resting exit against a flat
+        book OPENS a position when it fires, and nothing in the platform
+        describes that position — so this is not a log line, it is an
+        incident.
+
+        Every line is fenced: this runs inside _close_trade's try, whose
+        handler marks the row CLOSE_PENDING, so an alert that raised would
+        turn a completed close into a pending one.
+        """
+        legs = []
+        try:
+            meta = dict(trade.metadata or {})
+            legs = [str(x) for x in (meta.get("protective_order_ids") or [])]
+            meta["protective_legs_unconfirmed"] = True
+            # WHICH legs, and when. The bare boolean sent the operator to the
+            # log to find out, and by then the log had rolled.
+            meta["protective_legs_unconfirmed_ids"] = legs
+            meta["protective_legs_unconfirmed_at"] = timezone.now().isoformat()
+            trade.metadata = meta
+            trade.save(update_fields=["metadata"])
+        except Exception as e:  # noqa: BLE001 — never fail the close
+            logger.critical("[%s_bot] %s: could not record an unconfirmed "
+                            "protective leg (%s) — the leg may be resting",
+                            self.asset_class, trade.symbol, e)
+        logger.critical("[%s_bot] %s: a protective leg could not be confirmed "
+                        "cancelled %s — check the broker for a resting order "
+                        "(%s)", self.asset_class, trade.symbol, why,
+                        ", ".join(legs) or "no ids recorded")
+        try:
+            from bot_program.notifications import notify_staff
+            notify_staff(
+                title=f"⚠ {trade.symbol}: a protective order may still rest "
+                      f"at the broker",
+                body=(f"{self.asset_class.upper()} {trade.symbol}: {why}, and "
+                      f"leg(s) {', '.join(legs) or '(none recorded)'} could "
+                      f"not be confirmed cancelled. They are GOOD-TILL-"
+                      f"CANCELLED: if one fires against a flat book it OPENS "
+                      f"a position the other way, at full size, and no row "
+                      f"here describes it. Cancel them at the broker."),
+                url="/treasury/")
+        except Exception as e:  # noqa: BLE001 — never fail the close
+            logger.critical("[%s_bot] %s: the loose-leg alert failed (%s) — "
+                            "the leg may be resting and nobody has been told",
+                            self.asset_class, trade.symbol, e)
+
+    def _close_trade(self, trade, price, client, *, reason: str) -> bool:
         """Close a trade — pnl is realised in the config's base_currency.
+
+        `price` is the FALLBACK exit price, never the order: the broker order
+        is a MARKET order and a live exit books at the fill the broker
+        reports. It is None when nothing could price the position — the clock
+        exit fires on those, because it reads the clock — and resolve_exit_fill
+        then books the entry price and records that it had to. A PAPER close
+        must still be handed a number: its modelled fill does float(price).
 
         The broker order is attempted FIRST; the row is finalised CLOSED only
         when that succeeded (or the trade is paper). On broker failure the row
         moves to CLOSE_PENDING — the position is still live at the broker —
         and the retry_pending_closes beat task drains it. Returns True when
         the trade ended CLOSED.
+
+        A PAPER close while the instrument's market is shut books NOTHING
+        and returns False (2026-09-26): the row stays OPEN for the first
+        tick after the reopen. Every AssetBot paper exit comes through here
+        — the tick's SL/TP and time stop, the CLOSE button, the TAKE TRADE
+        funding closes, the options expiry close — so this is the belt
+        under the callers' own words (the kill switch books its own exits
+        and asks the same question itself).
         """
+        if trade.paper:
+            from bot_program.engine.paper_trader import paper_market_shut
+            shut = paper_market_shut(trade.symbol, trade.asset_class)
+            if shut:
+                logger.warning(
+                    "[%s_bot] %s #%s: %s — no paper exit (%s); the row "
+                    "stays OPEN and nothing is booked",
+                    self.asset_class, trade.symbol, trade.id, shut, reason)
+                return False
+        # A CLOSE THAT MAY ALREADY BE LIVE IS RESOLVED BEFORE ANOTHER IS
+        # SENT. The row carries close_in_doubt when its close request never
+        # came back, and a second close turns a closed long into a full-size
+        # short — while the clock exit above would fire on every pass. So ask
+        # the broker what it holds, and act on the answer rather than on hope.
+        doubt = (trade.metadata or {}).get("close_in_doubt")
+        if doubt and not trade.paper:
+            held = None
+            try:
+                positions = self._broker_snapshot(client, "positions")
+                held = (None if positions is None
+                        else self._broker_still_holds(trade, positions))
+            except Exception as e:  # noqa: BLE001 — cannot say stays None
+                logger.warning("[%s_bot] %s: could not resolve the in-doubt "
+                               "close (%s)", self.asset_class, trade.symbol, e)
+            if held is False:
+                # The in-doubt close LANDED. Sending another would open a
+                # position. Nothing is sent: the row is flat at the broker,
+                # and reconciliation finalises it from the broker's own fill
+                # — which is a measured exit, not the mark we would book here.
+                logger.error("[%s_bot] %s: the in-doubt close (reference %s) "
+                             "DID land — the broker is flat and nothing is "
+                             "sent. Reconciliation books the exit from its "
+                             "own fill.", self.asset_class, trade.symbol,
+                             (doubt or {}).get("reference") or "(none)")
+                return False
+            if held is True:
+                # It did NOT land. The marker goes, and the close proceeds
+                # exactly as any other — this is the only branch that may.
+                meta = dict(trade.metadata or {})
+                meta.pop("close_in_doubt", None)
+                meta["close_in_doubt_resolved"] = "the broker still held it"
+                trade.metadata = meta
+                trade.save(update_fields=["metadata"])
+                logger.warning("[%s_bot] %s: the in-doubt close did NOT land "
+                               "— the broker still holds the position, so the "
+                               "close is sent once more",
+                               self.asset_class, trade.symbol)
+            else:
+                # COULD NOT ASK. Not proof of either, so nothing is sent: an
+                # unresolvable doubt that sends anyway is the double-close
+                # this marker exists to prevent. Said out loud once an hour,
+                # because a row nobody can resolve needs a human, and an
+                # alert every tick is an alert nobody reads.
+                self._warn_close_in_doubt_unresolved(trade, doubt)
+                return False
+
         stripped = False
         close_result = None
         if not trade.paper:
@@ -760,7 +2786,44 @@ class AssetBot(ABC):
                 try:
                     close_result = self._submit_close_or_raise(
                         trade, client, client_order_id)
-                except Exception:
+                except Exception as _e:
+                    # IN DOUBT IS NOT REFUSED. Cancelling the legs and
+                    # re-sending a close that may already be live turns a
+                    # closed long into a full-size short. The row keeps its
+                    # legs, carries the reference, and is left for a human
+                    # and for the retry loop's own position read.
+                    if getattr(_e, "in_doubt", False):
+                        ref = str(getattr(_e, "reference", "") or "")
+                        meta = dict(trade.metadata or {})
+                        meta["close_in_doubt"] = {
+                            "reference": ref,
+                            "at": timezone.now().isoformat(),
+                        }
+                        trade.metadata = meta
+                        trade.save(update_fields=["metadata"])
+                        logger.error(
+                            "[%s_bot] %s: the CLOSE request did not come back "
+                            "— it MAY be live at the broker under reference "
+                            "%s. The protective legs are untouched and "
+                            "nothing is re-sent.",
+                            self.asset_class, trade.symbol, ref or "(none)")
+                        try:
+                            from bot_program.notifications import notify_staff
+                            notify_staff(
+                                title=f"⚠ {trade.symbol}: a close may be live",
+                                body=(f"The close of {trade.symbol} did not "
+                                      f"come back. Reference {ref or '(none)'}. "
+                                      f"If it filled, the position is flat at "
+                                      f"the broker and this row still says "
+                                      f"OPEN; if it did not, the position is "
+                                      f"live with its brackets intact. Check "
+                                      f"before closing it by hand — a second "
+                                      f"close reverses the position."),
+                                url="/positions/")
+                        except Exception as e2:  # noqa: BLE001
+                            logger.warning("[%s_bot] in-doubt close alert "
+                                           "failed: %s", self.asset_class, e2)
+                        return False
                     if not (trade.metadata or {}).get("protective_order_ids"):
                         raise
                     logger.warning(
@@ -775,16 +2838,8 @@ class AssetBot(ABC):
                     # A resting exit against a flat book does not close
                     # anything - it opens a position the other way.
                     if not self._cancel_protective_orders(trade, client):
-                        meta = dict(trade.metadata or {})
-                        meta["protective_legs_unconfirmed"] = True
-                        trade.metadata = meta
-                        trade.save(update_fields=["metadata"])
-                        logger.critical(
-                            "[%s_bot] %s: a protective leg could not be "
-                            "confirmed cancelled while clearing the way "
-                            "for a close retry - check the broker for a "
-                            "resting order",
-                            self.asset_class, trade.symbol)
+                        self._flag_unconfirmed_legs(
+                            trade, "while clearing the way for a close retry")
                     # From here the position has no broker-side stop. If the
                     # retry also fails the row goes CLOSE_PENDING with a live,
                     # UNPROTECTED position behind it — a materially worse
@@ -801,18 +2856,10 @@ class AssetBot(ABC):
                     # position in the opposite direction — unmonitored,
                     # because no row in our database describes it.
                     if not self._cancel_protective_orders(trade, client):
-                        # Say so on the row: a leg we could not confirm
-                        # gone is the operator's problem now, and a
-                        # silent flag would hide it forever.
-                        meta = dict(trade.metadata or {})
-                        meta["protective_legs_unconfirmed"] = True
-                        trade.metadata = meta
-                        trade.save(update_fields=["metadata"])
-                        logger.critical(
-                            "[%s_bot] %s closed, but a protective leg could "
-                            "not be confirmed cancelled — check the broker "
-                            "for a resting order",
-                            self.asset_class, trade.symbol)
+                        # The row goes CLOSED — the exit really happened — so
+                        # reaching somebody is the only thing left to do.
+                        self._flag_unconfirmed_legs(
+                            trade, "after the position was closed")
             except Exception as e:
                 logger.error("[%s_bot] live close order failed for %s: %s — "
                              "marking CLOSE_PENDING",
@@ -904,7 +2951,7 @@ class AssetBot(ABC):
                 self.user, asset_class=self.asset_class, symbol=trade.symbol,
                 side=trade.side, qty=trade.qty, exit_price=trade.exit_price,
                 pnl=trade.pnl, outcome=trade.outcome or "",
-                trade_id=trade.id,
+                trade_id=trade.id, trade=trade,
             )
         except Exception as e:
             logger.warning("[%s_bot] close notification failed: %s",
@@ -1191,6 +3238,8 @@ class AssetBot(ABC):
                         self.user, asset_class=self.asset_class,
                         config_name=self.cfg.name,
                         realized_pnl=float(realized), limit=float(limit),
+                        currency=self.cfg.base_currency or "",
+                        unpriced=n_unmeasured,
                     )
             except Exception as e:
                 logger.warning("[%s_bot] drawdown notification failed: %s",
@@ -1234,9 +3283,49 @@ class AssetBot(ABC):
     # ── per-symbol scan ─────────────────────────────────────────────────
 
     def scan_symbol(self, symbol: str) -> Optional[dict]:
+        """Propose, then execute: the bot's own entry path, unchanged.
+
+        Split on 2026-09-12 into `propose_entry` (steps A-O: every gate and
+        the bot's own final size) and `execute_entry` (steps P-T: shadow,
+        order, row, notify) so the capital desk can rank a whole fleet's
+        candidates BETWEEN the two. A symbol ticking through here still does
+        exactly what it did before the split - the candidate is executed at
+        its default size, and every skip is recorded where it always was.
+        """
+        cand = self.propose_entry(symbol)
+        if cand is None:
+            return None
+        return self.execute_entry(cand)
+
+    def propose_entry(self, symbol: str, *, pricing: str = "trade",
+                      signal_stats: dict | None = None):
+        """Steps A-O of the entry path: decide, price, level, size, gate.
+
+        Returns an `EntryCandidate` - the entry this bot WOULD take, at the
+        size it would take it - or None after recording the skip, exactly as
+        scan_symbol always has. Nothing here submits an order or writes a
+        row. The two exits that used to be a bare `return None` (the brain
+        pause and the live-order exception) are recorded as BRAIN_PAUSED and
+        ORDER_ERROR now, so the skip distribution stops having two blind
+        spots.
+
+        `pricing="data"` reads the ticker through the router's DATA session
+        instead of the exclusive trade session. The desk's proposal pass
+        walks every config's symbols before anything is executed; holding
+        the one clientId that can place an order across that whole pass
+        would starve the pending-close drain and the kill switch for
+        minutes (see runner.run_all_asset_bots). `execute_entry` acquires
+        the trade client itself, whatever this pass priced through.
+
+        `signal_stats` is the tick-wide `calculate_signal_stats` aggregate,
+        threaded to `decide` so a fleet pass computes six months of signal
+        history once rather than once per symbol. None means "compute it
+        yourself", which is what a single-config tick still does.
+        """
         from bot_program.models import AssetBotTrade
         from bot_program.engine.broker_router import client_for_symbol
         from bot_program.asset_engine import skips
+        from bot_program.asset_engine.candidates import EntryCandidate
 
         # Skip if a trade for this symbol is already open (or awaiting a
         # retried close — the broker position is still live) under this config.
@@ -1245,6 +3334,29 @@ class AssetBot(ABC):
                 status__in=("OPEN", "CLOSE_PENDING")).exists():
             return self._skip(symbol, skips.ALREADY_OPEN,
                               "a position is already on")
+
+        # AND SKIP IF AN ORDER FOR IT MAY ALREADY BE LIVE. There is no row to
+        # find — that is the whole problem — so the note lives on the config.
+        # Without this the next tick sends a SECOND order: the idempotency key
+        # buckets by the minute, so the broker's duplicate guard does not see
+        # the first one either.
+        # AND SKIP WHILE THE VENUE'S REFUSAL OF A FRACTION IS FRESH. The
+        # words come first: skips.record keeps 200 chars, why_no_trade 88.
+        refused = self._fraction_refused_note(symbol)
+        if refused:
+            return self._skip(
+                symbol, skips.VENUE_MIN_SIZE,
+                f"{refused.get('words') or 'the venue refused'} — a "
+                f"fractional size refused at {refused.get('at')}; quiet for "
+                f"{self.FRACTION_REFUSED_QUIET_HOURS}h. Type "
+                f"extras['venue_min_notional'] to refuse before the order")
+        doubt = self._in_doubt_note(symbol)
+        if doubt:
+            return self._skip(
+                symbol, skips.ORDER_IN_DOUBT,
+                f"an order under reference "
+                f"{doubt.get('reference') or '(none)'} may already be live "
+                f"(since {doubt.get('at')})")
 
         # Cooldown: skip if a CLOSED trade for this symbol was created within cool_down_minutes.
         cool = self.cfg.cool_down_minutes or 0
@@ -1257,7 +3369,13 @@ class AssetBot(ABC):
                 return self._skip(symbol, skips.COOLDOWN,
                                   f"closed a trade within {cool}m")
 
-        decision = self.decide(symbol)
+        # Called exactly as before when no tick-wide stats were handed in,
+        # so a `decide` patched or overridden with the one-argument
+        # signature keeps working.
+        if signal_stats is None:
+            decision = self.decide(symbol)
+        else:
+            decision = self.decide(symbol, signal_stats=signal_stats)
         if decision.direction == "HOLD":
             reason = (decision.reasons or [""])[0]
             code = (skips.STALE_SIGNALS if "stale" in reason
@@ -1296,7 +3414,13 @@ class AssetBot(ABC):
                     )
                 except Exception:
                     pass
-                return None
+                # Recorded, not silent: this exit was one of the two bare
+                # `return None`s left on the path, so a rule the brain had
+                # parked read from outside exactly like a quiet market.
+                return self._skip(
+                    symbol, skips.BRAIN_PAUSED,
+                    f"brain pause_recommended for "
+                    f"{decision.rule_name or '?'}: {why}")
         except Exception:
             pass  # Brain advisory is never fatal.
 
@@ -1315,7 +3439,34 @@ class AssetBot(ABC):
             logger.warning("[%s_bot] orchestrator check failed for %s: %s",
                            self.asset_class, symbol, e)
 
-        client = client_for_symbol(self.user, symbol, self.cfg)
+        # The client this pass PRICES through. On the bot's own tick that is
+        # the trade session, as it always was; the desk's proposal pass asks
+        # for the data session so the exclusive clientId is not held across
+        # a fleet-wide walk. The trade session is acquired again, by
+        # execute_entry, right before an order.
+        if pricing == "data":
+            client = client_for_symbol(self.user, symbol, self.cfg,
+                                       purpose="data")
+            # THE DATA SESSION IS NOT THE MONEY GUARD, AND MUST NOT COST AN
+            # ENTRY. The router hands back a PaperTrader whenever the IBKR
+            # clientId for a purpose is unavailable, and the DATA id is the
+            # busy one — the bar writer takes it every 600 s. Left alone,
+            # the live-config guard below would read that stand-in as a
+            # credential failure and refuse an entry this same config takes
+            # today through its trade session: the desk's SHADOW pass would
+            # quietly stop the live fleet trading, which is the one thing
+            # shadow may never do. So a live config with no data session
+            # prices through the client this step always used. Nothing is
+            # sent from here either way, and `execute_entry` runs the real
+            # guard on the client an order actually goes through
+            # (2026-09-12).
+            if self.cfg.mode == "live" and self._is_paper_client(client):
+                logger.info("[%s_bot] %s: no live DATA session — pricing "
+                            "through the trade session, as before",
+                            self.asset_class, symbol)
+                client = client_for_symbol(self.user, symbol, self.cfg)
+        else:
+            client = client_for_symbol(self.user, symbol, self.cfg)
 
         # Money-safety: a live-mode config whose broker creds are missing or
         # broken gets a PaperTrader back from the router. Refuse to trade —
@@ -1326,8 +3477,12 @@ class AssetBot(ABC):
                 "[%s_bot] LIVE config %s fell back to PaperTrader for %s "
                 "(missing/invalid broker credentials?) — refusing to trade",
                 self.asset_class, self.cfg.id, symbol)
-            self._notify_paper_fallback(symbol)
+            from bot_program.engine.broker_router import session_busy
+            busy = session_busy(client)
+            self._notify_paper_fallback(symbol, busy=busy)
             return self._skip(symbol, skips.PAPER_FALLBACK,
+                              "the IBKR trading session is held by another "
+                              "process — nothing was sent" if busy else
                               "live config fell back to PaperTrader")
 
         try:
@@ -1341,6 +3496,14 @@ class AssetBot(ABC):
         except (TypeError, ValueError):
             price = 0
         if price <= 0:
+            if isinstance(tk, dict) and tk.get("market_shut"):
+                # The paper venue's own answer (PaperTrader.ticker): the
+                # instrument's market is shut, so there is no price — and
+                # the reason is the clock, never the feed (2026-09-26).
+                return self._skip(
+                    symbol, skips.MARKET_SHUT,
+                    f"{tk.get('reason') or 'the market is shut'} — no "
+                    f"paper fill")
             return self._skip(symbol, skips.NO_PRICE, "ticker returned 0")
 
         # A paper entry used to be recorded at the raw ticker, because the
@@ -1349,11 +3512,36 @@ class AssetBot(ABC):
         # levels and sizing, so the stop and the quantity are both relative
         # to the price actually obtained — which is how a real bracket is
         # placed.
+        # ── WHAT THE ROUND TRIP COSTS, MEASURED WHERE POSSIBLE ───────
+        # DEFAULT_COST_BPS is an asset-class ASSUMPTION and `tk` is already in
+        # hand: the venue's own quoted spread was three lines up and unread.
+        # `cost_to_charge` charges the WIDER of the assumption and the
+        # measurement and says which. Computed from the RAW tick and BEFORE
+        # `paper_fill_price` rewrites `price`, so the spread is never divided
+        # by a price that already contains half of it, and so ONE number feeds
+        # the paper fill, the gate and the row — three copies of one cost is
+        # how they start disagreeing.
+        #
+        # AND IT HAS A SECOND-ORDER EFFECT ON THE PAPER PATH, stated rather
+        # than denied: the adversely-adjusted `price` below is the argument to
+        # both `stop_and_target` and `_size_for_entry`, so a wider measured
+        # cost moves the paper stop and the paper size. That is correct and it
+        # is why the haircut sits above the levels at all (see the comment
+        # below) — a paper fill charged the table's half-spread where the
+        # venue quotes four times that flatters precisely the expectancy the
+        # promotion ladder reads to decide whether a rule may touch real
+        # money. Nothing on the LIVE path is resized: there the fill is the
+        # broker's own.
+        from bot_program.asset_engine.risk_levels import cost_to_charge
+        charge = cost_to_charge(self.cfg, symbol, tk)
+
         market_price = price
         paper_now = (self.cfg.mode == "paper")
         if paper_now:
             from bot_program.asset_engine.risk_levels import paper_fill_price
-            price = paper_fill_price(self.cfg, symbol, price, decision.direction)
+            price = paper_fill_price(self.cfg, symbol, price,
+                                     decision.direction,
+                                     cost_fraction=charge["fraction"])
 
         # ── Levels FIRST, because the stop is an input to the size ───────
         # Volatility-normalised levels: a fixed 2% stop is a different bet on
@@ -1369,11 +3557,17 @@ class AssetBot(ABC):
         # A planned move smaller than the round trip is negative-EV however
         # good the signal is.
         ok, cost_reason = passes_cost_filter(self.cfg, symbol, price, tp,
-                                              stop=sl)
+                                             stop=sl,
+                                             cost_fraction=charge["fraction"])
         if not ok:
-            logger.info("[%s_bot] skipping %s — %s",
-                        self.asset_class, symbol, cost_reason)
-            return self._skip(symbol, skips.COST_FILTER, cost_reason)
+            # The provenance travels with the refusal. /signal-surface/ has no
+            # venue client and still shows the assumed table cost, so when it
+            # says a setup clears its costs and the bot refuses it, the
+            # refusal has to say the venue quoted wider than the table.
+            logger.info("[%s_bot] skipping %s — %s (%s)",
+                        self.asset_class, symbol, cost_reason, charge["note"])
+            return self._skip(symbol, skips.COST_FILTER,
+                              f"{cost_reason} — {charge['note']}")
 
         # ── What the promotion stage permits ─────────────────────────────
         # A stage is a venue, not a size. Applying it as a multiplier meant
@@ -1421,11 +3615,12 @@ class AssetBot(ABC):
         # and refusing an entry the rest of the platform has approved because
         # a price history is thin would be the taper acting as a gate, which
         # is exactly what it is not.
+        inst = None
         try:
             from instruments.models import Instrument
             from portfolio.risk_gate import correlation_state
-            corr = correlation_state(
-                self.user, Instrument.objects.filter(symbol=symbol).first())
+            inst = Instrument.objects.filter(symbol=symbol).first()
+            corr = correlation_state(self.user, inst)
         except Exception as e:  # noqa: BLE001 — see above
             logger.warning("[%s_bot] correlation taper unavailable for %s: "
                            "%s — sizing untapered", self.asset_class, symbol, e)
@@ -1435,7 +3630,79 @@ class AssetBot(ABC):
             logger.info("[%s_bot] %s correlation taper: %s",
                         self.asset_class, symbol, corr["reason"])
 
-        qty = self._round_qty(qty, price)
+        # THE VENUE'S UNIT GRANULARITY, asked of the client this pass priced
+        # through — the same adapter class the order will go through, since
+        # `purpose` matters to IBKR alone (broker_router:243) — and carried
+        # on the candidate so execute_entry rounds by the same answer.
+        # Three states; None is whole shares for stocks, as before.
+        fractional = self._venue_fractional_units(client, symbol)
+        qty = self._round_qty(qty, price, fractional=fractional)
+
+        # Steps M-O: the ceiling, the single-position cap, the duplicate and
+        # theme gates - on the bot's own final size. execute_entry runs the
+        # same judgement again on the size actually sent.
+        if not self._judge_final_size(symbol, qty=qty, price=price, sl=sl,
+                                      decision=decision, sizing=sizing):
+            return None
+
+        # ── The candidate: everything decided, nothing sent ──────────────
+        # The horizon the desk grades a displaced candidate over. The
+        # config's time stop is the honest bound; 0.0 means "off" and a
+        # counterfactual with no bound would never resolve.
+        try:
+            from bot_program.asset_engine.candidates import (
+                DEFAULT_HORIZON_HOURS,
+            )
+            horizon = (float(self.cfg.time_stop_setting()["hours"] or 0.0)
+                       or DEFAULT_HORIZON_HOURS)
+        except Exception:  # noqa: BLE001 — a horizon must never cost an entry
+            horizon = 168.0
+        # The same value_per_unit the sizer used and the ceiling above
+        # re-derived, so risk_dollars_default is the number the ceiling
+        # judged, not a second opinion of it.
+        vpu = float(sizing.get("value_per_unit", 1.0))
+        per_unit_risk = abs(float(price) - float(sl)) * vpu
+        return EntryCandidate(
+            bot=self, cfg_id=self.cfg.id, user_id=self.user.id,
+            symbol=symbol, instrument_id=getattr(inst, "id", None),
+            asset_class=self.asset_class,
+            # The venue the row would be filed under - the same rule
+            # execute_entry applies to AssetBotTrade.paper.
+            venue=("paper" if (self.cfg.mode == "paper"
+                               or bool(stage["force_paper"])) else "live"),
+            decision=decision, price=float(price),
+            market_price=float(market_price),
+            stop=float(sl), target=float(tp), level_meta=dict(level_meta),
+            cost_reason=cost_reason, cost=dict(charge),
+            stage=dict(stage), sizing=dict(sizing),
+            qty_default=float(qty), per_unit_risk=per_unit_risk,
+            risk_dollars_default=float(qty) * per_unit_risk,
+            notional_default=float(qty) * float(price) * vpu,
+            value_per_unit=vpu, corr_scale=float(corr.get("scale", 1.0)),
+            fractional_units=fractional,
+            horizon_hours=horizon,
+        )
+
+    def _judge_final_size(self, symbol: str, *, qty: float, price: float,
+                          sl: float, decision, sizing: dict,
+                          leverage=None, note: str = "") -> bool:
+        """Steps M-O on a FINAL quantity: True when it may go to the book.
+
+        `leverage` (2026-09-26) is the multiplier MAX SINGLE POSITION
+        counts the ticket at; None reads _margin_leverage_hint — the typed
+        hint, or the most the attack mode could pick. execute_entry passes
+        the attack mode's actual pick, and `note` ("attack HIGH: at 10x: ")
+        then leads the MAX SINGLE POSITION refusal — the one check here the
+        multiplier moves — so the skip names the tier and the multiplier.
+
+        Records the skip and returns False otherwise. Shared by
+        propose_entry (on the bot's own size) and execute_entry (on that
+        size times the desk's multiplier), because every size multiplier
+        that exists must sit BEFORE these checks: anything applied after
+        them is a quantity nothing judged, and a multiplier past
+        MAX_RISK_FRACTION is refused here rather than clamped.
+        """
+        from bot_program.asset_engine import skips
 
         # THE CAP, ENFORCED WHERE THE FINAL QUANTITY EXISTS.
         # `risk_fraction()` clamps to MAX_RISK_FRACTION and its docstring
@@ -1465,7 +3732,8 @@ class AssetBot(ABC):
             # failure here means something is wrong enough to stop.
             logger.error("[%s_bot] %s: risk ceiling uncomputable (%s) — "
                          "refusing the entry", self.asset_class, symbol, e)
-            return self._skip(symbol, skips.ERROR, f"risk ceiling: {e}")
+            self._skip(symbol, skips.ERROR, f"risk ceiling: {e}")
+            return False
         # The 1e-9 slack is for float noise at exactly the cap, not
         # tolerance — the same slack the manual path uses.
         if (risk_ceiling > 0 and per_unit_risk > 0
@@ -1474,22 +3742,24 @@ class AssetBot(ABC):
                 "[%s_bot] %s REFUSED: %.4f units risk $%.2f, past the $%.2f "
                 "ceiling (%.1f%% of the pool)", self.asset_class, symbol,
                 qty, realised_risk, risk_ceiling, MAX_RISK_FRACTION * 100)
-            return self._skip(
+            self._skip(
                 symbol, skips.GATE_BLOCKED,
                 f"sized to ${realised_risk:,.2f} of risk, past the "
                 f"${risk_ceiling:,.2f} ceiling "
                 f"({MAX_RISK_FRACTION * 100:.1f}% of the bot pool) — the "
                 f"allocator lane scaled past the cap")
+            return False
 
         if qty <= 0:
             logger.info("[%s_bot] %s sized to zero (risk budget %.2f%% of "
                         "%s, stop %.3f%% away) — skipping", self.asset_class,
                         symbol, sizing["risk_fraction"] * 100, self.cfg.capital,
                         abs(price - sl) / price * 100 if price else 0)
-            return self._skip(
+            self._skip(
                 symbol, skips.SIZED_TO_ZERO,
                 f"risk budget {sizing['risk_fraction'] * 100:.2f}% of "
                 f"{self.cfg.capital} is below one tradeable unit")
+            return False
 
         # MAX SINGLE POSITION from /setup/, judged on the size actually about
         # to be sent — after every multiplier and after rounding, because a
@@ -1510,15 +3780,27 @@ class AssetBot(ABC):
             # number no bot consults, so measuring against it refused every
             # entry on any account whose pool exceeds its recorded book.
         notional = qty * price * self._value_per_unit(symbol)
+        # THE TICKET'S STAMP (2026-09-26): on an eToro carrier the margin
+        # the gate counts is notional / L of the multiplier this config
+        # would send (the hint; judge_order_leverage still decides), the
+        # full notional at 1 — measured 2026-09-23 — floored at the class
+        # table's forex 1/30. In the attack mode, the most the chooser
+        # could pick here, and the pick itself from execute_entry.
+        from bot_program.engine.broker_router import broker_name_for_symbol
         cap = single_position_state(
             limits_book(), asset_class=self.asset_class,
             notional=notional,
             capital_base=float(self.cfg.capital or 0),
-            base_label="bot pool")
+            base_label="bot pool",
+            leverage=(leverage if leverage is not None
+                      else self._margin_leverage_hint(symbol)),
+            carrier=broker_name_for_symbol(self.user, symbol, self.cfg))
         if not cap["ok"]:
             logger.info("[%s_bot] %s refused by the book's single-position "
-                        "limit: %s", self.asset_class, symbol, cap["reason"])
-            return self._skip(symbol, skips.GATE_BLOCKED, cap["reason"])
+                        "limit: %s%s", self.asset_class, symbol, note,
+                        cap["reason"])
+            self._skip(symbol, skips.GATE_BLOCKED, note + cap["reason"])
+            return False
 
         # NOT a per-ticket total-exposure pre-check here, deliberately.
         #
@@ -1562,14 +3844,63 @@ class AssetBot(ABC):
         if not dup["ok"]:
             logger.info("[%s_bot] %s refused as a duplicate expression: %s",
                         self.asset_class, symbol, dup["reason"])
-            return self._skip(symbol, skips.GATE_BLOCKED, dup["reason"])
+            self._skip(symbol, skips.GATE_BLOCKED, dup["reason"])
+            return False
         theme = theme_state(self.user, symbol=symbol,
                             side=decision.direction,
                             asset_class=self.asset_class)
         if not theme["ok"]:
             logger.info("[%s_bot] %s refused by the theme-leg cap: %s",
                         self.asset_class, symbol, theme["reason"])
-            return self._skip(symbol, skips.GATE_BLOCKED, theme["reason"])
+            self._skip(symbol, skips.GATE_BLOCKED, theme["reason"])
+            return False
+        return True
+
+    def execute_entry(self, cand, *, size_mult: float = 1.0) -> Optional[dict]:
+        """Steps P-T: re-judge the size, then shadow / order / row / notify.
+
+        `cand` is what propose_entry returned. `size_mult` is the desk's
+        multiplier, never above 1.0 by doctrine (caps only ever tighten),
+        applied to the bot's own final size and then judged AGAIN by the
+        MAX_RISK_FRACTION arithmetic, the single-position cap and the
+        duplicate/theme gates. Again, because the book may have moved since
+        the proposal - duplicate_state and theme_state read the live rows at
+        call time and see this tick's earlier fills - and because a size
+        nothing judged must never reach a broker. A multiplier that pushes
+        past the ceiling is refused there exactly as the allocator lane is,
+        not clamped.
+
+        Acquires the trade client itself: an order goes through the
+        exclusive session whatever session the proposal priced through, and
+        the money-safety guard against a PaperTrader fallback runs on THIS
+        client, which is the one that matters.
+        """
+        from bot_program.engine.broker_router import client_for_symbol
+        from bot_program.asset_engine import skips
+
+        symbol = cand.symbol
+        decision = cand.decision
+        price = float(cand.price)
+        market_price = float(cand.market_price)
+        paper_now = (self.cfg.mode == "paper")
+        sl, tp = float(cand.stop), float(cand.target)
+        level_meta, cost_reason = cand.level_meta, cand.cost_reason
+        stage, sizing = cand.stage, cand.sizing
+
+        # The multiplier lands BEFORE rounding and BEFORE the judgement, so
+        # the quantity judged is the quantity sent. At 1.0 this is the
+        # bot's own size rounded a second time, which every _round_qty is
+        # idempotent under (round-to-6, floor-to-whole, snap-to-100).
+        # The venue's unit granularity is the one the proposal read off its
+        # client (None for a candidate built by hand): the same answer, so
+        # the second rounding is idempotent on the first.
+        _fr = getattr(cand, "fractional_units", None)
+        _fr = _fr if (_fr is True or _fr is False) else None
+        qty = self._round_qty(float(cand.qty_default) * float(size_mult),
+                              price, fractional=_fr)
+        if not self._judge_final_size(symbol, qty=qty, price=price, sl=sl,
+                                      decision=decision, sizing=sizing):
+            return None
 
         # Shadow mode: everything is computed, nothing is submitted and no
         # row is written. The way to validate a change against live data
@@ -1580,25 +3911,90 @@ class AssetBot(ABC):
             return self._skip(symbol, skips.SHADOW,
                               "shadow mode — computed, not submitted")
 
+        # The TRADE client, acquired by the step that sends. On the bot's
+        # own tick propose_entry already held it and this is the pooled
+        # session handed straight back; on the desk's pass the proposal
+        # priced through the data session and this is the first time the
+        # exclusive id is asked for - after every refusal above, so a
+        # candidate the book no longer has room for never takes the lease.
+        client = client_for_symbol(self.user, symbol, self.cfg)
+
+        # Money-safety, on the client an order would actually go through:
+        # a live-mode config whose broker creds are missing or broken gets a
+        # PaperTrader back from the router. Refuse to trade — recording a
+        # paper fill as paper=False fabricates live history.
+        if self.cfg.mode == "live" and self._is_paper_client(client):
+            logger.error(
+                "[%s_bot] LIVE config %s fell back to PaperTrader for %s "
+                "(missing/invalid broker credentials?) — refusing to trade",
+                self.asset_class, self.cfg.id, symbol)
+            from bot_program.engine.broker_router import session_busy
+            busy = session_busy(client)
+            self._notify_paper_fallback(symbol, busy=busy)
+            return self._skip(symbol, skips.PAPER_FALLBACK,
+                              "the IBKR trading session is held by another "
+                              "process — nothing was sent" if busy else
+                              "live config fell back to PaperTrader")
+
         # A paper-STAGE rule trades on the paper venue even in a live config:
         # that is the whole point of the stage, and it is how the evidence to
         # promote it gets produced.
         paper = (self.cfg.mode == "paper") or bool(stage["force_paper"])
+        if paper:
+            # NO PAPER FILL WHILE THE MARKET IS SHUT (2026-09-26) — on a
+            # paper config, and on a live config whose rule's stage forces
+            # paper, whose price came off the LIVE client's tick and never
+            # met PaperTrader.ticker's clock. Keyed on the INSTRUMENT's
+            # class; nothing is booked, the skip says why.
+            from bot_program.engine.paper_trader import paper_market_shut
+            _shut = paper_market_shut(symbol, self._instrument_class(symbol))
+            if _shut:
+                return self._skip(symbol, skips.MARKET_SHUT,
+                                  f"{_shut} — no paper fill")
         order_id = ""
         entry_meta = dict(level_meta)
         entry_meta["cost_check"] = cost_reason
+        # WHAT WAS CHARGED AND WHO MEASURED IT, on every entry and not only
+        # the paper ones — `paper_fill_price`'s docstring gives the reason
+        # ("the fraction applied is recorded on the trade, so it can be
+        # retuned against real fills later") and it holds on the live path
+        # too. THREE STATES a later retune must be able to tell apart: a cost
+        # the venue QUOTED, a cost the table ASSUMED, and an entry that never
+        # came through this path — which is the ABSENCE of these keys, not a
+        # zero and not "assumed". A candidate built by hand (the desk tests do
+        # it) carries no charge and writes none.
+        charge = getattr(cand, "cost", None) or {}
+        if charge:
+            entry_meta["cost_fraction_charged"] = round(charge["fraction"], 8)
+            entry_meta["cost_source"] = charge["source"]
+            entry_meta["cost_note"] = charge["note"]
+            if charge["spread"] is not None:
+                # Written even where the measurement LOST to the table, so the
+                # retune can see the venue's real spread on those rows too.
+                # Absent means nothing was measured; 0.0 means a locked market.
+                entry_meta["cost_spread_fraction"] = round(charge["spread"], 8)
         # Frozen at entry so a trailing stop cannot rewrite the risk
         # denominator that realized_r (and therefore sizing) depends on. This
         # is the POST-floor stop — the one actually placed.
         entry_meta["initial_stop_loss"] = round(float(sl), 8)
         if paper or paper_now:
+            entry_meta["paper_fill"] = True
+            entry_meta["market_price"] = round(float(market_price), 8)
+        # `cost_applied_fraction` means APPLIED, so it is written only where
+        # `paper_fill_price` actually ran — `paper_now` alone. On a LIVE config
+        # whose rule's promotion stage forces paper, `paper` is True and no
+        # haircut was taken, and the first draft of this wrote the key anyway.
+        # `cost_fraction_charged` above carries the gate's number on every row,
+        # so nothing is lost by being strict here. A hand-built candidate
+        # carrying no charge keeps the behaviour this line always had: the
+        # table, halved.
+        if paper_now:
             from bot_program.asset_engine.risk_levels import (
                 round_trip_cost_fraction,
             )
-            entry_meta["paper_fill"] = True
-            entry_meta["market_price"] = round(float(market_price), 8)
-            entry_meta["cost_applied_fraction"] = round(
-                round_trip_cost_fraction(self.cfg, symbol) / 2.0, 8)
+            applied = (charge["fraction"] if charge
+                       else round_trip_cost_fraction(self.cfg, symbol))
+            entry_meta["cost_applied_fraction"] = round(applied / 2.0, 8)
         entry_meta["risk_fraction"] = sizing["risk_fraction"]
         entry_meta["risk_dollars"] = sizing["risk_dollars"]
         entry_meta["notional_fraction"] = sizing["notional_fraction"]
@@ -1607,11 +4003,123 @@ class AssetBot(ABC):
         # forex_usd_multiplier reads this on every close path and in
         # grading, so P&L and the R denominator convert by the same number.
         entry_meta["value_per_unit"] = sizing.get("value_per_unit", 1.0)
+        # THE ATTACK MODE's tier (2026-09-26): risk_fraction above is
+        # already the tiered one (_size_for_entry); the multiplier sent
+        # and its words join it below, on the live path.
+        _attack = sizing.get("attack") if isinstance(sizing, dict) else None
+        if isinstance(_attack, dict):
+            entry_meta["attack"] = dict(_attack)
+        else:
+            _attack = None
+        if getattr(cand, "fractional_units", None) is True and not paper:
+            # Rounded by the venue's answer, not by whole shares — so a later
+            # grader can select these rows and treasury can say so.
+            entry_meta["fractional_units"] = True
         if sizing["stop_widened"]:
             entry_meta["stop_widened"] = True
         if stage.get("stage"):
             entry_meta["promotion_stage"] = stage["stage"]
         if not paper:
+            # THE GRANULARITY THE SIZE WAS ROUNDED TO, on the client the
+            # order actually goes through. A non-whole size is one this
+            # bot's own rounding would not produce without a venue's
+            # promise; propose_entry read that promise off its pricing
+            # client, and a flag moved on /brokers/ — or the switch flipped
+            # — between the two passes would send it to a venue that floors
+            # to whole: a refusal at the order, on every tick. Refused HERE
+            # instead, recorded, nothing resized (2026-09-23). Compared
+            # against the candidate's recorded answer, never re-rounded, so
+            # the log does not contradict itself; the second read is silent.
+            _fr = getattr(cand, "fractional_units", None)
+            if (_fr is True and float(qty) != float(int(qty))
+                    and self._venue_fractional_units(client, symbol,
+                                                     say=False) is not True):
+                logger.error(
+                    "[%s_bot] %s REFUSED: sized %g units for a venue that "
+                    "takes fractions, and the client this order goes through "
+                    "(%s) does not vouch for it now — the switch or the route "
+                    "moved between proposal and order. Nothing sent, nothing "
+                    "resized.", self.asset_class, symbol, float(qty),
+                    type(client).__name__)
+                # verdict first: skips keeps 200 characters of detail
+                return self._skip(
+                    symbol, skips.GATE_BLOCKED,
+                    f"Nothing sent, nothing resized: sized {float(qty):g} "
+                    f"fractional units, but the client this order goes "
+                    f"through ({type(client).__name__}) does not vouch for "
+                    f"fractions now — the switch or the route moved since "
+                    f"proposal")
+            # THE PROOF GATE, before the floor, the id, the multiplier and
+            # the POST: an eToro order on a class — or a short — whose demo
+            # fill-and-close proof is not pinned (ETORO_PROVEN) sends
+            # nothing. ONE rule for every lane (_etoro_entry_refusal); a
+            # non-eToro carrier answers ("", "") at its first line. Keyed
+            # on the INSTRUMENT's class, the router's own key: one Instrument
+            # read per live entry, every carrier, on a path that already
+            # reads rows (duplicate_state, theme_state above).
+            _gate, _gate_why = self._etoro_entry_refusal(
+                client, symbol, decision.direction, float(qty), float(price),
+                self._instrument_class(symbol),
+                leverage_hint=self._extras_leverage_hint(),
+                horizon_hours=getattr(cand, "horizon_hours", None))
+            if _gate:
+                logger.warning("[%s_bot] %s REFUSED: %s", self.asset_class,
+                               symbol, _gate_why)
+                return self._skip(symbol, _gate, _gate_why)
+            # THE VENUE'S OWN FLOOR, BEFORE THE ORDER. `qty` above is the
+            # risk the operator chose, rounded by a `_round_qty` that knows
+            # the asset class and the venue's unit granularity (three
+            # states, off the client and the switch) and nothing else — and
+            # eToro's MEASURED money floor (minPositionExposure, the
+            # money_floor tier, 2026-09-23) and a money floor the OPERATOR
+            # declared (extras['venue_min_notional']) are turned into units
+            # with the entry price and value_per_unit here. Saxo already
+            # refuses a size under its MinimumTradeSize rather than upsizing
+            # it — correctly, and on every tick, as an ORDER_ERROR whose
+            # advice is "check the gateway". Asking here turns that into ONE
+            # recorded decision carrying both numbers.
+            #
+            # An UNMEASURED floor refuses nothing, and the log line does not
+            # claim the adapter will catch it either — that is true when the
+            # instrument publishes no floor and FALSE when the reference
+            # read failed, because `_details` caches the empty payload and
+            # `_amount` then has nothing left to check. What arrives in that
+            # case is Saxo's own rejection. Refusing here on an unmeasured
+            # floor would stop a venue trading for want of a lookup.
+            # qty > 0 is guaranteed: _judge_final_size above refuses a
+            # non-positive size with SIZED_TO_ZERO and returns first.
+            _floor, _why = self._venue_size_floor(
+                client, symbol, price=price,
+                min_notional=self._extras_float("venue_min_notional", 0.0),
+                value_per_unit=self._value_per_unit(symbol))
+            if _floor is None:
+                logger.info("[%s_bot] %s: no venue size floor measured (%s) "
+                            "— an under-minimum order, if this venue has "
+                            "one, will be refused at the order instead",
+                            self.asset_class, symbol, _why)
+            elif float(qty) < _floor - 1e-9:
+                # NOT resized. Raising it to the floor is a different trade
+                # and lowering it sends nothing; the house answer is to
+                # refuse loudly and name both numbers.
+                logger.error(
+                    "[%s_bot] %s REFUSED: sized %g units from the stop, the "
+                    "venue minimum here is %g (%.1fx the intended risk). "
+                    "Nothing sent, nothing resized.",
+                    self.asset_class, symbol, float(qty), _floor,
+                    _floor / float(qty))
+                self._notify_venue_min_size(symbol, qty=float(qty),
+                                            floor=_floor, note=_why)
+                return self._skip(
+                    symbol, skips.VENUE_MIN_SIZE,
+                    (f"sized {float(qty):g} units from the stop distance; "
+                     f"this venue's minimum is {_floor:g}. Refused rather "
+                     f"than traded at {_floor:g}, which is "
+                     f"{_floor / float(qty):.1f}x the chosen risk")
+                    # the label AFTER the multiple, so both numbers and the
+                    # multiple sit inside skips.record's 200 characters; a
+                    # measured floor has an empty note and the detail is
+                    # byte-identical to before
+                    + (f" ({_why})" if _why else ""))
             # Phase-33 idempotency — deterministic clientOrderId derived from
             # (config, symbol, signal/rule, minute-bucket). Retrying the same
             # logical entry within the bucket reuses the id, so the broker
@@ -1623,6 +4131,61 @@ class AssetBot(ABC):
                 signal_id=decision.rule_name or "", intent="ENTRY",
                 bar_ts=bar_ts,
             )
+            # THE MULTIPLIER, if the config asked for one — judged on the
+            # client an order actually goes through, and a refusal sends
+            # NOTHING: not at n and not at 1 (judge_order_leverage). None
+            # means "no kwarg": the adapter's own default rides the body and
+            # the row records nothing; 1 means the operator SAID 1: no
+            # kwarg, and the row records it. Sizing above never saw this.
+            # The INSTRUMENT's own LIVE entry (direction, settlement, the
+            # leverageValues, the stop band) is judged in the same call,
+            # at 1 too (E2.6, 2026-09-26).
+            leverage, lev_why = self._order_leverage(
+                client, symbol, side=decision.direction, price=float(price),
+                stop=float(sl), qty=float(qty))
+            if lev_why:
+                logger.error("[%s_bot] %s REFUSED: %s", self.asset_class,
+                             symbol, lev_why)
+                # verdict first; an attack-mode refusal names its tier
+                return self._skip(symbol, skips.LEVERAGE_REFUSED,
+                                  (f"attack {_attack['tier']}: "
+                                   if _attack else "") + lev_why)
+            if _attack is not None:
+                # THE ATTACK MODE's pick, judged again by MAX SINGLE
+                # POSITION at the multiplier actually chosen: the proposal
+                # counted the most the chooser could pick
+                # (_margin_leverage_hint), and every margin gate must see
+                # the multiplier sent. The refusal names the tier and the
+                # multiplier.
+                if not self._judge_final_size(
+                        symbol, qty=qty, price=price, sl=sl,
+                        decision=decision, sizing=sizing,
+                        leverage=int(leverage or 1),
+                        note=(f"attack {_attack['tier']}: at "
+                              f"{int(leverage or 1)}x: ")):
+                    return None
+            from bot_program.engine.capabilities import adapter_key
+            if adapter_key(client) == "etoro":
+                # THE ACCOUNT'S HEADROOM, from the sync's cells and never a
+                # round trip — before every eToro order this bot sends
+                # since 2026-09-26, not only a levered one (the TAKE TRADE
+                # lane runs the same method; the legacy BotConfig tick,
+                # which cannot, refuses every eToro order instead): at 1x
+                # the venue locks the FULL notional (MEASURED 2026-09-23:
+                # used margin 84.8 on 84.8 of exposure; 42.39 at 2x), so a
+                # 1x order needs cash exactly as a levered one does. None
+                # (no key) is 1.
+                lev_why = self._leverage_headroom(
+                    client, symbol, qty=float(qty), price=float(price),
+                    leverage=int(leverage or 1))
+                if lev_why:
+                    logger.error("[%s_bot] %s REFUSED at %sx: %s",
+                                 self.asset_class, symbol,
+                                 leverage or "1 (no key)", lev_why)
+                    return self._skip(symbol, skips.LEVERAGE_REFUSED,
+                                      (f"attack {_attack['tier']}: "
+                                       if _attack else "")
+                                      + f"at {leverage or 1}x: {lev_why}")
             if not self._still_armed():
                 return self._skip(symbol, skips.GATE_BLOCKED,
                                   "config was disarmed mid-tick — refusing "
@@ -1638,11 +4201,17 @@ class AssetBot(ABC):
                 # protected even when this worker is down. Clients without
                 # the capability ignore the kwargs; bot-side management then
                 # remains the safety net.
+                order_kwargs = {"client_order_id": client_order_id,
+                                "stop_loss": float(sl),
+                                "take_profit": float(tp)}
+                if leverage is not None and leverage > 1:
+                    # eToro only: judge_order_leverage refused every other
+                    # carrier above, so this kwarg never reaches an adapter
+                    # that would absorb it silently. A typed 1 passes no
+                    # kwarg: the body is the default's, byte for byte.
+                    order_kwargs["leverage"] = leverage
                 res = client.market_order(
-                    symbol, decision.direction, float(qty),
-                    client_order_id=client_order_id,
-                    stop_loss=float(sl), take_profit=float(tp),
-                )
+                    symbol, decision.direction, float(qty), **order_kwargs)
                 order_id = str(res.get("orderId", ""))
                 # Detect broker-side refusals: log + skip trade row.
                 # CANCELLED/INACTIVE/EXPIRED belong here too — brokers
@@ -1673,8 +4242,75 @@ class AssetBot(ABC):
                                     "(status=%s, client_order_id=%s)",
                                     self.asset_class, symbol, status,
                                     client_order_id)
-                    return self._skip(symbol, skips.ORDER_REJECTED,
-                                      f"broker status {status}")
+                    # WHOLE since 2026-09-24: the numbers a refusal
+                    # names sit at its END (errorCode 720); the record
+                    # and the row bound it (skips.record 200,
+                    # _remember_fraction_refused 160, trade.reason 1000),
+                    # the fraction-refused alert body and the log
+                    # carry it whole
+                    words = str(res.get("refusal") or "")
+                    if words:
+                        # the skip record keeps 200 characters after
+                        # the verdict, and the measured 720 message is
+                        # longer: the log carries the whole of it
+                        logger.warning("[%s_bot] %s refused by the venue: "
+                                       "%s", self.asset_class, symbol,
+                                       words)
+                    if leverage is not None and leverage > 1:
+                        # A LEVERED refusal quiets the symbol: one POST per
+                        # LEVERAGE_QUIET_HOURS, never a re-send at 1.
+                        self._remember_leverage_refusal(
+                            symbol, leverage, f"broker status {status}")
+                    if (getattr(cand, "fractional_units", None) is True
+                            and float(qty) != float(int(qty))):
+                        # A refused FRACTION quiets the symbol too, and is
+                        # alerted once with the venue's own words.
+                        self._remember_fraction_refused(
+                            symbol, words or f"broker status {status}")
+                        self._notify_fraction_refused(
+                            symbol, qty=float(qty),
+                            words=words or f"broker status {status}")
+                    return self._skip(
+                        symbol, skips.ORDER_REJECTED,
+                        (f"at {leverage}x: " if leverage is not None
+                         and leverage > 1 else "")
+                        + f"broker status {status}"
+                        + (f": {words}" if words else ""))
+
+                # WHICH BROKER carried this. Recorded from the client
+                # that actually placed the order, because the alternative
+                # — inferring it from the routing rule when the row is
+                # read — is wrong for every row opened before an operator
+                # moved a primary-for flag, and /treasury/ compares these
+                # rows against that broker's holdings.
+                # Plus the world it traded in and the handle a close needs —
+                # ONE rule, shared with the TAKE TRADE lane: venue_stamps.
+                entry_meta.update(self.venue_stamps(client, res))
+                if leverage is not None:
+                    # WHAT WAS ASKED (or SAID, for a typed 1), not what eToro
+                    # applied: the lookup's own `asset.leverage` (read back
+                    # 2 on the 2x demo order, D2b-ii, doc §2) sits in
+                    # res["raw"]["lookup"]. ABSENT on every row whose config
+                    # carried no key — sent at the adapter's default — so
+                    # absent is a state, never a typed 1. Read by
+                    # broker_vision, /treasury/ and _pledged_since, and
+                    # since 2026-09-26 by portfolio.risk_gate.capital_at_work
+                    # — every exposure gate, the capital pages, the
+                    # positions card and the book's ALLOCATED: on an eToro
+                    # carrier the row pledges notional / L, and an ABSENT
+                    # stamp counts as 1, the FULL notional (what the venue
+                    # locks at 1x, measured 2026-09-23). Never by sizing.
+                    # Not value_per_unit: that scales loss-per-point and
+                    # notional, this neither.
+                    entry_meta["leverage"] = int(leverage)
+                if _attack is not None:
+                    # the multiplier SENT (1 when the chooser settled on
+                    # the unlevered order) and the chooser's own words
+                    _pick = ((getattr(self, "_auto_pick", None) or {})
+                             .get(symbol) or {})
+                    entry_meta["attack"]["leverage"] = int(leverage or 1)
+                    entry_meta["attack"]["leverage_why"] = str(
+                        _pick.get("why") or "")[:300]
 
                 # Real fills: prefer the broker's average fill price and
                 # filled quantity over the pre-order ticker, so slippage
@@ -1686,16 +4322,104 @@ class AssetBot(ABC):
                     entry_meta["fill_source"] = "broker"
                 else:
                     entry_meta["fill_source"] = "ticker"
+                # WHAT WE ASKED FOR, before the broker's answer replaces
+                # it: a partial that is still working needs both numbers.
+                requested_qty = float(qty)
                 if fill_qty > 0:
                     qty = fill_qty
+                if fill_qty > requested_qty * (1 + 1e-6):
+                    # THE VENUE FILLED MORE THAN WAS SIZED (a venue that
+                    # rounds a fraction UP, or a shape D2c has not met). The
+                    # row is still booked — real units need an owner — at
+                    # the venue's units, nothing resized, nothing closed
+                    # (closing moves money); stamped and alerted so the
+                    # multiple of the chosen risk is a fact on the row.
+                    entry_meta["overfilled"] = {"requested": requested_qty,
+                                                "filled": float(fill_qty)}
+                    logger.error(
+                        "[%s_bot] %s OVERFILLED: sized %g, the venue filled "
+                        "%g (%.1fx the chosen risk) — booked at the venue's "
+                        "units, not resized", self.asset_class, symbol,
+                        requested_qty, float(fill_qty),
+                        float(fill_qty) / requested_qty)
+                    try:
+                        from bot_program.notifications import notify_staff
+                        notify_staff(
+                            title=(f"⚠ {symbol}: the venue filled more than "
+                                   f"was sized"),
+                            body=(f"{self.asset_class.upper()} {self.cfg.name} "
+                                  f"sized {requested_qty:g} units of {symbol}; "
+                                  f"the venue filled {float(fill_qty):g}, "
+                                  f"{float(fill_qty) / requested_qty:.1f}x the "
+                                  f"risk this entry was sized for. The row is "
+                                  f"booked at {float(fill_qty):g} with the "
+                                  f"judged stop; nothing was resized or "
+                                  f"closed."),
+                            url="/positions/")
+                    except Exception as e2:  # noqa: BLE001
+                        logger.warning("[%s_bot] over-fill alert failed: %s",
+                                       self.asset_class, e2)
 
                 # Broker-side protection bookkeeping. "protected" trades are
                 # skipped by bot-side SL/TP management (no double-close).
                 protective_ids = [str(x) for x in
                                   (res.get("protectiveOrders") or [])]
-                if protective_ids or res.get("protectedOnFill"):
-                    entry_meta["protected"] = True
+                if protective_ids:
                     entry_meta["protective_order_ids"] = protective_ids
+                # PROTECTED MEANS A STOP IS RESTING. The flag switches
+                # bot-side SL/TP off completely, so stamping it on any
+                # protective id let a bracket whose STOP was refused and
+                # whose LIMIT was accepted claim protection it did not have —
+                # and run with no stop anywhere, unmanaged. A venue that
+                # names its legs must name the stop; one that reports
+                # protection on the TRADE (OANDA) gives the trade handle;
+                # protectedOnFill is the venue asserting it outright.
+                # THE HANDLE A CLOSE MAY NEED, whatever the protection
+                # turned out to be. `broker_position_id` is read by
+                # _submit_close_order and by SaxoTrader.closing_fill and was
+                # written NOWHERE in this repo — so on a venue where an
+                # opposite order does not flatten (eToro always, Saxo under
+                # FifoEndOfDay) a row whose bracket was refused had nothing
+                # to close by, and the close fell through to an order that
+                # OPENS a second position.
+                # (`broker_position_id` is stamped above, by venue_stamps.)
+                if (res.get("protectiveStopId") or res.get("protectiveTradeId")
+                        or res.get("protectedOnFill")):
+                    entry_meta["protected"] = True
+                # THE STOP THE VENUE HOLDS versus the stop that was SENT.
+                # eToro CLAMPS a stop on fill rather than refuse it —
+                # MEASURED on demo BTC (doc §14): N2 at 2x tightened to
+                # 50% of the margin (maxStopLossPercentage 50), N1 at 1x
+                # widened 3% -> 10% below the price (a minimum distance
+                # no eligibility field explains) — and on the REAL account
+                # on 2026-09-26, BTC at 1x: sent 79934.97, held 75745.8,
+                # 9.98% under the 84145.8 fill; its
+                # 0.0001 "no stop" sentinel is a rewrite too. The row keeps
+                # initial_stop_loss = the SENT stop (the risk denominator
+                # must not move) and records the divergence. The fill
+                # message names both (stop_moved_words, through
+                # _fill_words), and the staff alert goes only where no fill
+                # message does (_alert_stop_rewrite, after the booking;
+                # 2026-09-27: two messages for one fact before); nothing
+                # is resized or sent again. Only a venue that echoes its legs
+                # (etoro_client: venueStopLoss) reaches this. A held stop
+                # within a tick of the one sent is the venue ROUNDING it,
+                # not a rewrite (venue_moved_stop, 2026-09-27).
+                held = res.get("venueStopLoss")
+                if held is not None:
+                    try:
+                        held = float(held)
+                    except (TypeError, ValueError):
+                        held = None
+                if held is not None and venue_moved_stop(
+                        float(sl), held, self.asset_class, symbol):
+                    entry_meta["stop_rewritten_by_venue"] = {
+                        "sent": float(sl), "held": held}
+                    logger.error("[%s_bot] %s: the venue holds a stop at %s, "
+                                 "the platform sent %s — recorded; risk is "
+                                 "measured at the SENT stop",
+                                 self.asset_class, symbol, held, float(sl))
+                if protective_ids or res.get("protectedOnFill"):
                     # Venues where protection rides the TRADE rather than
                     # standalone orders (OANDA) report the trade instead.
                     # It is the handle for moving the stop later, and it
@@ -1713,10 +4437,126 @@ class AssetBot(ABC):
                     stop_leg = res.get("protectiveStopId")
                     if stop_leg:
                         entry_meta["protective_stop_id"] = str(stop_leg)
+                # What the broker did to the protection, when it did
+                # something — a preset that rewrote the legs' time-in-
+                # force, a refused leg, a partial fill. The row explains
+                # itself instead of the operator reading it off a log.
+                note = res.get("protectionNote")
+                if note:
+                    entry_meta["protection_note"] = str(note)[:300]
+                # WORKING: the broker accepted the order and has not filled
+                # it (a market order held outside regular hours, most
+                # often). That is not a position. The row is booked so the
+                # order has an owner — the duplicate guard sees it, the
+                # kill switch can withdraw it — but it says WORKING, claims
+                # no protection, and manage_positions polls the broker
+                # until it fills, dies or is cancelled. Booking it as OPEN
+                # at the pre-order ticker is what let reconcile strip its
+                # bracket and let it fill naked.
+                if res.get("working"):
+                    entry_meta["entry_working"] = True
+                    if res.get("pollFailed"):
+                        # NOBODY READ THE LOOKUP: filled, refused or held
+                        # are all possible. Said on the row so the WORKING
+                        # alert prints "lookup failed", never "expected on
+                        # fill".
+                        entry_meta["entry_poll_failed"] = True
+                    if leverage is not None and leverage > 1:
+                        # A LEVERED order eToro holds is a financed position.
+                        # Since D3b the tick polls it and withdraws it after
+                        # ENTRY_WORKING_MAX_HOURS — on the real account too,
+                        # since the real DELETE answered as the demo one did
+                        # (MEASURED 2026-09-26, order 1596774177). Said NOW,
+                        # not when the tick withdraws it.
+                        try:
+                            from bot_program.notifications import notify_staff
+                            notify_staff(
+                                title=(f"⚠ {symbol}: a {leverage}x order is "
+                                       f"WORKING at eToro"),
+                                body=(f"{self.asset_class.upper()} {symbol} at "
+                                      f"{leverage}x was accepted and not "
+                                      f"filled"
+                                      + (" — the fill lookup could not be "
+                                         "read, so it may already be filled "
+                                         "or refused"
+                                         if res.get("pollFailed") else
+                                         " — eToro is holding it")
+                                      + ". The 5-minute tick polls it and "
+                                        "withdraws it if it is still unfilled "
+                                        f"after {self.ENTRY_WORKING_MAX_HOURS}h. "
+                                        "The legs ride the order "
+                                        "body and are NOT shown while held - the "
+                                        "fill alert says whether the venue holds "
+                                        "the stop."),
+                                url="/positions/")
+                        except Exception as e2:  # noqa: BLE001
+                            logger.warning("[%s_bot] levered-working alert "
+                                           "failed: %s", self.asset_class, e2)
+                    entry_meta["entry_working_since"] = timezone.now().isoformat()
+                    entry_meta["qty_requested"] = requested_qty
+                    entry_meta["protected"] = False
+                    entry_meta["protected_on_fill_expected"] = bool(protective_ids)
+                    if fill_qty > 0:
+                        # A PARTIAL THAT IS STILL WORKING. The remainder is
+                        # live at the broker, both legs were sized for the
+                        # whole order, and the poll is the only thing that
+                        # withdraws a remainder — booking this as a finished
+                        # position left those units with no owner and a stop
+                        # that would close what printed and OPEN the rest.
+                        entry_meta["entry_working_partial"] = float(fill_qty)
+                    else:
+                        entry_meta["fill_source"] = "pending"
             except Exception as e:
+                # IN DOUBT IS NOT REFUSED. The adapter marks a placement
+                # whose request never came back (`in_doubt`) and carries the
+                # reference the operator searches on; the engine reads the
+                # marker duck-typed, exactly as it reads every other adapter
+                # promise, rather than importing one venue's exception.
+                if getattr(e, "in_doubt", False):
+                    ref = str(getattr(e, "reference", "") or "")
+                    self._remember_in_doubt(symbol, ref)
+                    logger.error("[%s_bot] %s: the order request did not come "
+                                 "back — it MAY be live at the broker under "
+                                 "reference %s. NOT retried.",
+                                 self.asset_class, symbol, ref or "(none)")
+                    try:
+                        from bot_program.notifications import notify_staff
+                        notify_staff(
+                            title=f"⚠ {symbol}: an order may be live with no row",
+                            body=(f"{self.asset_class.upper()} placement for "
+                                  f"{symbol} did not come back. Search the "
+                                  f"broker for reference {ref or '(none)'}: if "
+                                  f"that order exists, this platform has no "
+                                  f"row for it and nothing is managing it. "
+                                  f"{symbol} is not retried for "
+                                  f"{self.IN_DOUBT_QUIET_HOURS}h."),
+                            url="/positions/")
+                    except Exception as e2:  # noqa: BLE001
+                        logger.warning("[%s_bot] in-doubt alert failed: %s",
+                                       self.asset_class, e2)
+                    return self._skip(symbol, skips.ORDER_IN_DOUBT,
+                                      f"reference {ref or '(none)'} may be "
+                                      f"live at the broker")
                 logger.error("[%s_bot] live order failed for %s: %s",
                              self.asset_class, symbol, e)
-                return None
+                # The other bare `return None`: an order the broker threw
+                # on used to leave the same trace as no order at all.
+                if leverage is not None and leverage > 1:
+                    self._remember_leverage_refusal(
+                        symbol, leverage, f"live order failed: {e}")
+                if (getattr(cand, "fractional_units", None) is True
+                        and float(qty) != float(int(qty))
+                        and str(e).startswith("eToro refused")):
+                    # The POST itself refused a FRACTION: the venue's words
+                    # (etoro_client re-raises them) quiet the symbol.
+                    self._remember_fraction_refused(symbol, str(e)[:160])
+                    self._notify_fraction_refused(symbol, qty=float(qty),
+                                                  words=str(e)[:160])
+                return self._skip(
+                    symbol, skips.ORDER_ERROR,
+                    (f"at {leverage}x: " if leverage is not None
+                     and leverage > 1 else "")
+                    + f"live order failed: {e}")
 
         from bot_program.models import AssetBotTrade
         trade = AssetBotTrade.objects.create(
@@ -1733,18 +4573,34 @@ class AssetBot(ABC):
             metadata=entry_meta,
         )
 
-        # Phase-20: notify on open
-        try:
-            from bot_program.notifications import notify_bot_fill_open
-            notify_bot_fill_open(
-                self.user, asset_class=self.asset_class, symbol=symbol,
-                side=decision.direction, qty=trade.qty,
-                entry_price=trade.entry_price, rule_name=trade.rule_name,
-                trade_id=trade.id,
-            )
-        except Exception as e:
-            logger.warning("[%s_bot] open notification failed: %s",
-                           self.asset_class, e)
+        # Phase-20: notify on open — unless the entry is still WORKING at
+        # the broker. "Opened" is then a claim about the future; the poll
+        # announces the fill when the broker reports it.
+        told = False
+        if entry_meta.get("entry_working"):
+            logger.info("[%s_bot] %s entry is WORKING at the broker (order "
+                        "%s) — booked as pending, polling for the fill",
+                        self.asset_class, symbol, order_id)
+        else:
+            try:
+                from bot_program.notifications import notify_bot_fill_open
+                told = bool(notify_bot_fill_open(
+                    self.user, asset_class=self.asset_class, symbol=symbol,
+                    side=decision.direction, qty=trade.qty,
+                    entry_price=trade.entry_price,
+                    rule_name=trade.rule_name, trade=trade,
+                    trade_id=trade.id, **self._fill_words(trade),
+                ))
+            except Exception as e:
+                logger.warning("[%s_bot] open notification failed: %s",
+                               self.asset_class, e)
+        # ONE MESSAGE for a stop the venue rewrote (2026-09-27): the fill
+        # message names it; the staff alert only where none went out.
+        if (not told and isinstance(
+                entry_meta.get("stop_rewritten_by_venue"), dict)):
+            self._alert_stop_rewrite(
+                trade, STOP_ALERT_WORKING if entry_meta.get("entry_working")
+                else STOP_ALERT_UNTOLD)
 
         # Phase-28: append to immutable audit log.
         try:
@@ -1754,13 +4610,20 @@ class AssetBot(ABC):
             logger.warning("[%s_bot] audit record_trade_open failed: %s",
                            self.asset_class, e)
 
-        # Phase-27: open a tax lot for long entries.
-        try:
-            from bot_program.tax_lots import open_lot
-            open_lot(trade)
-        except Exception as e:
-            logger.warning("[%s_bot] tax_lots.open_lot failed: %s",
-                           self.asset_class, e)
+        # Phase-27: open a tax lot for long entries — but NOT for an order
+        # that has not filled. A lot is a cost basis for units the account
+        # owns, and close_lots_for consumes open lots FIFO by (user, symbol,
+        # class, venue) rather than by source trade: a lot minted for a
+        # queued order at the pre-order ticker would be consumed by the next
+        # real close, reporting a gain against shares nobody bought. The
+        # lot is opened when the fill is booked (_finish_working_entry).
+        if not entry_meta.get("entry_working"):
+            try:
+                from bot_program.tax_lots import open_lot
+                open_lot(trade)
+            except Exception as e:
+                logger.warning("[%s_bot] tax_lots.open_lot failed: %s",
+                               self.asset_class, e)
 
         # Phase-23: push the open event to the user's Eye WebSocket.
         try:
@@ -1778,6 +4641,741 @@ class AssetBot(ABC):
                 "side": decision.direction, "qty": float(qty),
                 "entry": price, "score": decision.score}
 
+    # ── the venue stamps a LIVE row carries ─────────────────────────────
+
+    @classmethod
+    def venue_stamps(cls, client, res) -> dict:
+        """The three marks a LIVE row carries about the venue that filled
+        it — read from the CLIENT that placed the order and the FILL it
+        answered, never from today's routing rule, which is wrong for every
+        row opened before an operator moved a primary-for flag.
+
+          broker              capabilities.adapter_key(client). An adapter
+                              the map does not know answers "" and the key
+                              is left ABSENT: a wrong carrier is worse than
+                              none, because reconcile_asset.unattributable
+                              would then compare the row against the wrong
+                              book. A MagicMock or a subclass answers "".
+          broker_env          VENUE_WORLDS[client.env]. Saxo and eToro serve
+                              SIM and live from one row, so the name alone
+                              cannot tell a rehearsal fill from a real one.
+                              An adapter that does not say leaves the key
+                              ABSENT: an unknown world is not a live one.
+          broker_position_id  the handle a close may need on a venue where
+                              an opposite order OPENS a second position:
+                              `positionId` (eToro, on every fill) or
+                              `protectiveTradeId` (OANDA, Saxo). ABSENT when
+                              the fill offered neither — venue_close
+                              .position_id_for then answers "" and
+                              close_or_refuse refuses rather than opens.
+
+        ONE rule for both lanes. execute_entry has written these since
+        1da56db / d3c735f; the TAKE TRADE lane (manual_trade._execute)
+        wrote none of them until 2026-09-24 — a hand-taken eToro row
+        recorded no carrier, no handle and no world — and now stamps the
+        same three off the same client and fill. Absent is a state:
+        nothing here invents a
+        value the client or the fill did not give. For a non-dict `res`
+        nothing is stamped — the inline code used to stamp str(obj) for
+        any object answering .get; no test depends on that reading.
+        """
+        from bot_program.engine.capabilities import adapter_key
+        stamps: dict = {}
+        carried_by = adapter_key(client)
+        if carried_by:
+            stamps["broker"] = carried_by
+        world = cls.VENUE_WORLDS.get(
+            str(getattr(client, "env", "") or "").lower())
+        if world:
+            stamps["broker_env"] = world
+        fill = res if isinstance(res, dict) else {}
+        pos_id = fill.get("positionId") or fill.get("protectiveTradeId")
+        if pos_id:
+            stamps["broker_position_id"] = str(pos_id)
+        return stamps
+
+    # ── the eToro refusals, in order, for EVERY lane ──────────────────────
+
+    @classmethod
+    def _etoro_entry_refusal(cls, client, symbol: str, side: str, qty: float,
+                             price: float, icls: str, now_utc=None,
+                             leverage_hint=None, horizon_hours=None) -> tuple:
+        """THE eToro refusals, in order, for EVERY lane that reaches
+        market_order: execute_entry, manual_trade's TAKE TRADE and the
+        legacy tick (engine/runner.py). ("", "") when nothing refuses,
+        else (skip_code, text). Order is the money order: 1 ETORO_PROVEN — an
+        unproven class, or a short before "short" is pinned, never
+        reaches the venue; then, as later stages land INSIDE this method
+        (never a second anchor): 2 the eligibility row's own state /
+        allowOpenPosition / maxUnitsPerOrder; 3 the hours refusal; 4
+        the unmeasured carry. Steps 1 and 2 ship (C0 2026-09-24, C1
+        2026-09-25): step 2 reads qty and leverage_hint against the
+        eligibility row's own three-state, allowOpenPosition and
+        maxUnitsPerOrder (etoro_client.eligibility: one POST per
+        instrument per UTC day once read; an unread row is asked again on
+        every ask); price, now_utc and horizon_hours are the later steps'
+        inputs and are unread today. The floor stays in
+        execute_entry after this block because it resizes nothing. A
+        non-eToro carrier answers ("", "") at the first line —
+        capabilities.adapter_key reads the CLASS name, so a MagicMock or
+        a subclass is not eToro — save ONE refusal ahead of it (step 0,
+        2026-09-26): a live commodity order carried by IBKR or Saxo, since
+        CommodityBot no longer rewrites a live config to paper and neither
+        venue has a commodity proof. Step 1b refuses the index CFDs whose
+        quote currency is unread (etoro_client.VENUE_QUOTE_UNMEASURED),
+        whatever ETORO_PROVEN holds. `icls` is the INSTRUMENT's class
+        (_instrument_class; the lane passes inst.asset_class): an ETF in
+        a stock config is gated on "etf"."""
+        from bot_program.asset_engine import skips
+        from bot_program.engine.capabilities import adapter_key as _ak
+        # step 0 — THE COMMODITY CARRIER (2026-09-26). CommodityBot stopped
+        # rewriting a live config to paper, which woke the IBKR and Saxo
+        # commodity flags for the bots and TAKE TRADE alike: IBKR's reads
+        # True until deploy/ETORO_DEPARTURE.md §2a, IBKR is being retired,
+        # and neither venue has a commodity proof. A live commodity order
+        # goes to eToro, through the steps below, or nowhere. Keyed on the
+        # adapter name, so the desk seam's MagicMock ("") is untouched.
+        if str(icls) == "commodity" and _ak(client) in ("ibkr", "saxo"):
+            # verdict first: skips.record keeps 200 characters
+            return skips.GATE_BLOCKED, (
+                f"{symbol} (commodity, {side}): a live commodity order goes "
+                f"to eToro only — this one routes to {_ak(client)}, which "
+                f"has no commodity proof")
+        if _ak(client) != "etoro":
+            return "", ""
+        # step 1 — the proof. ETORO_PROVEN is read HERE, at call time,
+        # off the module: a test states a token by patching that name.
+        _need = {str(icls)} | ({"short"} if side == "SELL" else set())
+        _missing = sorted(_need - set(ETORO_PROVEN))
+        if _missing:
+            # verdict first: skips.record keeps 200 characters
+            return skips.GATE_BLOCKED, (
+                f"eToro {symbol} ({icls}, {side}): no demo fill-and-close "
+                f"proof pinned for {_missing} (test_proof_<token>, "
+                f"ETORO_DEPARTURE §7)")
+        # step 1b — THE QUOTE CURRENCY (2026-09-26): the index CFDs
+        # VENUE_SPELLING resolves with their quote currency unread (UK100
+        # FRA40 GER40 JPN225 EUSTX50, measured 2026-09-23) are refused
+        # whatever ETORO_PROVEN holds: sized as USD, their risk and their
+        # floor would be wrong by the exchange rate. Nothing is asked of
+        # the wire.
+        from bot_program.engine.etoro_client import VENUE_QUOTE_UNMEASURED
+        if str(symbol).upper() in VENUE_QUOTE_UNMEASURED:
+            return skips.GATE_BLOCKED, (
+                f"eToro {symbol} ({icls}, {side}): quote currency unread "
+                f"(VENUE_QUOTE_UNMEASURED) — sized as USD, its risk and its "
+                f"floor would be wrong")
+        # step 2 — THE VENUE'S OWN ROW (E1.4, 2026-09-25), on the
+        # `order_caps` tier: the read's THREE-STATE first, because
+        # "absent" is eToro saying it holds no row for this id — a
+        # stronger statement than "could not ask" — and the two are
+        # gated apart. ONE cached read per instrument per UTC day once
+        # read (etoro_client.eligibility); an unread row is asked again
+        # on every ask — the floor's min_notional asks once more this
+        # tick when a 1x stock/etf/crypto passes here on "error".
+        from bot_program.engine.capabilities import has_capability
+        if has_capability(client, "order_caps"):
+            try:
+                _state = client.eligibility_state(symbol)
+            except Exception as e:  # noqa: BLE001 — a raise IS could-not-ask
+                _state = "error"
+                logger.info("[etoro] %s: eligibility_state raised %s: %s",
+                            symbol, type(e).__name__, e)
+            if _state == "absent":
+                return skips.ELIGIBILITY_REFUSED, (
+                    f"eToro lists no eligibility row for {symbol} today — "
+                    f"the venue's own answer, not a failed read; nothing "
+                    f"sent")
+            if _state == "error":
+                # the attack mode's hint is None, read as 1: on an unread
+                # row its chooser can pick nothing above 1
+                _hint = int(leverage_hint or 1)
+                _unread = ([f"the LIVE leverage list a {_hint}x order is "
+                            f"judged on"] if _hint > 1 else [])
+                if icls in ("forex", "index", "commodity"):
+                    # MEASURED 2026-09-23 on every forex, index and
+                    # commodity row read: minPositionExposure 1,000 USD
+                    _unread.append("its measured 1,000 USD floor")
+                if _unread:
+                    # verdict first: skips.record keeps 200 characters
+                    return skips.ELIGIBILITY_REFUSED, (
+                        f"eToro {symbol} ({icls}, {_hint}x): eligibility row "
+                        f"unread today; {' and '.join(_unread)} unread — "
+                        f"nothing sent")
+                # [GAP 6] a 1x stock/etf/crypto order proceeds on the class
+                # table ONLY for a hold under 24 h: with the row unread its
+                # settlement is unknown (never free), and the carry step
+                # (a later stage) refuses an unknown settlement held a day
+                # or more. The caps below cannot be read either and are
+                # NOT asked again this tick (each ask would re-POST on a
+                # failing wire); an unread cap refuses nothing.
+                logger.info("[etoro] %s: eligibility row unread today; the "
+                            "1x %s order proceeds on the class table for a "
+                            "hold under 24 h only — settlement unknown, "
+                            "the carry step refuses at >= 24 h", symbol,
+                            icls)
+            else:
+                try:
+                    _open = client.allow_open_position(symbol)
+                    _cap = client.max_units_per_order(symbol)
+                except Exception as e:  # noqa: BLE001
+                    _open, _cap = None, None
+                    logger.info("[etoro] %s: order caps unmeasured (%s: %s)",
+                                symbol, type(e).__name__, e)
+                if _open is False:
+                    return skips.ELIGIBILITY_REFUSED, (
+                        f"eToro does not allow opening {symbol} today "
+                        f"(allowOpenPosition false) — nothing sent")
+                try:
+                    _cap = float(_cap) if _cap is not None else None
+                except (TypeError, ValueError):
+                    _cap = None
+                if _cap is not None and float(qty) > _cap + 1e-9:
+                    return skips.ELIGIBILITY_REFUSED, (
+                        f"sized {float(qty):g} units; eToro's "
+                        f"maxUnitsPerOrder for {symbol} is {_cap:g} — "
+                        f"refused, not clamped (a clamp is a different "
+                        f"trade)")
+        return "", ""
+
+    # ── the multiplier an eToro order may carry ───────────────────────────
+
+    def _order_leverage(self, client, symbol: str, *, side: str = "BUY",
+                        price=None, stop=None, qty=None) -> tuple:
+        """judge_order_leverage on the client an order actually goes
+        through — the adapter key of its CLASS (capabilities.adapter_key),
+        never today's routing rule — keyed on the INSTRUMENT's class
+        (2026-09-26: SPX500 in a stock config is judged as an index). A
+        MagicMock or a subclass answers "" and is refused above 1,
+        correctly. Then the instrument's OWN entry
+        (_instrument_leverage_check, at 1 too); then a fresh refusal note
+        for the symbol (a levered order eToro or the wire refused within
+        LEVERAGE_QUIET_HOURS) refuses before anything is sent again.
+
+        THE ATTACK MODE (extras["leverage"] = "auto", 2026-09-26):
+        _choose_auto_leverage picks L on this client first, and the pick is
+        then judged exactly as a typed L — judge_order_leverage(pick=L),
+        the instrument's own entry, the refusal note — the chooser picks,
+        it never bypasses a gate. `qty` (the final size, never changed
+        here) lets the chooser pass over an L whose margin would sit under
+        eToro's minimum. The pick and its words are kept on
+        self._auto_pick[symbol] for the row. A config without "auto"
+        never reaches the chooser."""
+        from bot_program.engine.capabilities import adapter_key
+        pick = None
+        if self._leverage_is_auto():
+            pick, pick_why = self._choose_auto_leverage(
+                client, symbol, side, price, stop, qty=qty)
+            if not isinstance(getattr(self, "_auto_pick", None), dict):
+                self._auto_pick = {}
+            self._auto_pick[symbol] = {"leverage": pick, "why": pick_why}
+            logger.info("[%s_bot] %s attack mode: %s", self.asset_class,
+                        symbol, pick_why)
+            if pick is None:
+                return None, pick_why
+        lev, why = judge_order_leverage(self.cfg, self._instrument_class(symbol),
+                                        adapter_key(client), pick=pick)
+        if why:
+            return lev, why
+        eff = int(lev or 1)   # no key / typed 1 -> 1: the check runs at 1 too
+        inst_why = self._instrument_leverage_check(client, symbol, side, eff,
+                                                   price, stop)
+        if inst_why:
+            return None, inst_why
+        if lev is None or lev <= 1:
+            return lev, ""
+        note = self._leverage_refusal_note(symbol)
+        if note:
+            return None, (f"at {lev}x: eToro refused {symbol} "
+                          f"{note['age_h']:.1f}h ago ({note.get('why')}); "
+                          f"quiet for {self.LEVERAGE_QUIET_HOURS}h — nothing "
+                          f"sent, not at {lev}, not at 1")
+        return lev, ""
+
+    def _choose_auto_leverage(self, client, symbol: str, side: str,
+                              price=None, stop=None, qty=None) -> tuple:
+        """THE ATTACK MODE's multiplier — the CASH half (2026-09-26).
+        (L, words) or (None, refusal).
+
+        The HIGHEST L on the instrument's LIVE list for this direction (the
+        union _instrument_leverage_check reads, at the settlement a levered
+        order lands on) such that ALL hold: L <= ORDER_LEVERAGE_CEILING[the
+        instrument's class] (and the platform cap); L <= proven_leverage
+        (ETORO_PROVEN_LEVERAGE, empty on arrival: 1 until a demo
+        fill-and-close at L is pinned); the stop, as a fraction of price
+        times L, inside the band — maxStopLossPercentage / 100 of the entry
+        carrying L where eToro prints it, else ASSUMED_STOP_BAND_PCT, the
+        one measured band, and the words say "assumed"; the margin at L
+        (qty x price x value_per_unit / L) not under the entry's printed
+        minPositionAmount — the smallest MARGIN eToro takes, whose
+        refusal would quiet the symbol for LEVERAGE_QUIET_HOURS, at 1x
+        too (unchecked when no qty is handed in or nothing is printed);
+        the switch etoro_leverage_live ON (OFF -> 1, the unlevered order,
+        the words name the switch). A carrier that is not eToro -> 1; an
+        unread row -> 1 (a typed 1 on an unread row proceeds on the class
+        ceiling alone, and so does this). No L above 1 fits -> 1 when 1 is
+        on the LIVE list at the settlement a 1x order lands on, or when
+        that LIVE list is unread or absent (a typed 1 proceeds there too,
+        on the class ceiling alone, and the words say "unread", never a
+        measured absence); else a refusal that sends nothing — the size is
+        never clamped and the stop never widened for the band. Units never
+        see L (house rule 5): the size was decided before this runs. The
+        pick then meets every gate a typed number meets
+        (_order_leverage)."""
+        from bot_program.engine.capabilities import (adapter_key,
+                                                     has_capability)
+        from core.platform_control import is_component_enabled
+        carrier = adapter_key(client)
+        if carrier != "etoro":
+            return 1, (f"auto: 1x — {carrier or 'this client'} carries no "
+                       f"per-order multiplier")
+        if not is_component_enabled(LEVERAGE_SWITCH_KEY):
+            return 1, (f"auto: 1x — {LEVERAGE_SWITCH_KEY} is OFF, so the "
+                       f"unlevered order")
+        if not has_capability(client, "leverage_values"):
+            return 1, "auto: 1x — this client reads no LIVE leverage list"
+        icls = self._instrument_class(symbol)
+        ceiling = min(int(MAX_ORDER_LEVERAGE),
+                      int(ORDER_LEVERAGE_CEILING.get(icls, 1)))
+        proven = proven_leverage(icls)
+        direction = "long" if str(side or "BUY").upper() == "BUY" else "short"
+        try:
+            _elig = getattr(client, "eligibility", None)
+            row = _elig(symbol) if callable(_elig) else None
+        except Exception as e:  # noqa: BLE001 — a raise IS could-not-read
+            logger.info("[%s_bot] %s: eligibility raised %s: %s",
+                        self.asset_class, symbol, type(e).__name__, e)
+            row = None
+        if not isinstance(row, dict):
+            return 1, (f"auto: 1x — eToro's eligibility row for {symbol} is "
+                       f"unread today, so there is no LIVE list to lever on")
+
+        def _live(settlement):
+            if not settlement:
+                return None
+            try:
+                return client.leverage_values(symbol, side, settlement,
+                                              world="live")
+            except Exception as e:  # noqa: BLE001 — could-not-read
+                logger.info("[%s_bot] %s: LIVE leverageValues (%s) raised "
+                            "%s: %s", self.asset_class, symbol, settlement,
+                            type(e).__name__, e)
+                return None
+
+        def _band(name, settlement, lev):
+            fn = getattr(client, name, None)
+            if not callable(fn):
+                return None
+            try:
+                v = fn(symbol, side, settlement, lev, world="live")
+                return None if v is None else float(v)
+            except Exception:  # noqa: BLE001 — unmeasured, never a number
+                return None
+
+        frac = None
+        try:
+            if price is not None and stop is not None and float(price) > 0:
+                frac = abs(float(price) - float(stop)) / float(price)
+        except (TypeError, ValueError):
+            frac = None
+        # the notional the margin at each L is a share of (qty is final:
+        # this reads it, never changes it)
+        notional = None
+        try:
+            if qty is not None and price is not None:
+                notional = (abs(float(qty)) * float(price)
+                            * float(self._value_per_unit(symbol) or 1.0))
+        except Exception:  # noqa: BLE001 — unmeasured, never a number
+            notional = None
+        try:
+            settle_up = client.settlement_for(symbol, side, 2)
+        except Exception:  # noqa: BLE001 — unknown, never free
+            settle_up = None
+        up_vals = _live(settle_up)
+        listed = sorted(v for v in (up_vals or []) if v > 1)
+        passed_over = []
+        for lev in sorted(listed, reverse=True):
+            if lev > ceiling or lev > proven:
+                continue
+            if frac is None:
+                passed_over.append("no stop was handed in, so the band "
+                                   "cannot be judged")
+                break
+            max_sl = _band("max_stop_loss_pct", settle_up, lev)
+            assumed = max_sl is None
+            band = ASSUMED_STOP_BAND_PCT if assumed else max_sl
+            if frac * lev > band / 100.0 + 1e-12:
+                passed_over.append(
+                    f"{lev}x puts the stop at {frac * lev:.1%} of the margin, "
+                    f"past the {band:g}% band"
+                    + (" (assumed)" if assumed else ""))
+                continue
+            min_sl = _band("min_stop_loss_pct", settle_up, lev)
+            if min_sl is not None and frac * lev < min_sl / 100.0 - 1e-12:
+                passed_over.append(
+                    f"{lev}x puts the stop at {frac * lev:.1%} of the margin, "
+                    f"under eToro's {min_sl:g}% minimum")
+                continue
+            min_amt = _band("min_amount", settle_up, lev)
+            if (notional is not None and min_amt is not None
+                    and notional / lev < min_amt - 1e-9):
+                passed_over.append(
+                    f"{lev}x pledges {notional / lev:,.2f}, under eToro's "
+                    f"minimum margin of {min_amt:g}")
+                continue
+            return lev, (
+                f"auto: {lev}x — the highest on {symbol}'s LIVE "
+                f"{direction}/{settle_up} list {listed} inside the {icls} "
+                f"ceiling ({ceiling}x) and the proven {proven}x; the stop is "
+                f"{frac * lev:.1%} of the margin, inside the {band:g}% band"
+                + (" (assumed from the one measured band)" if assumed
+                   else " (printed)")
+                + (f"; passed over: {'; '.join(passed_over)}"
+                   if passed_over else ""))
+        # an UNREAD LIVE list is not a measured absence: the words tell
+        # the two apart (the LIVE row itself unread, or read without the
+        # entry)
+        try:
+            _elig_live = getattr(client, "eligibility", None)
+            live_read = isinstance(
+                _elig_live(symbol, "live") if callable(_elig_live) else None,
+                dict)
+        except Exception:  # noqa: BLE001 — a raise IS could-not-read
+            live_read = False
+        unread = ("absent from its LIVE row" if live_read
+                  else "unread today")
+        if not settle_up:
+            reason = (f"eToro's row for {symbol} lists no {direction} entry "
+                      f"that carries a multiplier")
+        elif up_vals is None:
+            reason = (f"eToro's LIVE {direction}/{settle_up} list for "
+                      f"{symbol} is {unread}")
+        elif not listed:
+            reason = (f"eToro's LIVE {direction} list for {symbol} carries "
+                      f"nothing above 1")
+        elif proven <= 1:
+            reason = (f"no multiplier is proven for {icls} yet "
+                      f"(ETORO_PROVEN_LEVERAGE)")
+        elif not [v for v in listed if v <= min(ceiling, proven)]:
+            reason = (f"nothing on the LIVE list {listed} sits inside the "
+                      f"{icls} ceiling ({ceiling}x) and the proven "
+                      f"{proven}x")
+        else:
+            reason = "; ".join(passed_over) or "no multiplier passed"
+        try:
+            settle_one = client.settlement_for(symbol, side, 1)
+        except Exception:  # noqa: BLE001
+            settle_one = None
+        ones = _live(settle_one)
+        if ones and 1 in ones:
+            return 1, f"auto: 1x — {reason}"
+        if settle_one and ones is None:
+            # the typed 1's own rule (_instrument_leverage_check): an
+            # unread LIVE list at 1x leaves the class ceiling the only
+            # ceiling — said as unread, never as measured
+            return 1, (f"auto: 1x — {reason}; the LIVE {direction}/"
+                       f"{settle_one} list is {unread}, and at 1x the class "
+                       f"ceiling is the only ceiling, as for a typed 1")
+        return None, (f"auto: no multiplier fits {symbol} {direction} — "
+                      f"{reason}; and 1 is not on its LIVE list "
+                      f"({settle_one or 'no entry'}: {ones}) — nothing sent, "
+                      f"the size not clamped, the stop not widened")
+
+    def _instrument_leverage_check(self, client, symbol: str, side: str,
+                                   eff: int, price=None, stop=None) -> str:
+        """Why the INSTRUMENT's own eligibility row refuses an order at
+        `eff` (the multiplier the body would carry; 1 when none), or "".
+        E2.6 (2026-09-26), on the `leverage_values` tier only — any other
+        client answers "" here (Saxo, IBKR, a MagicMock: for them the
+        class ceiling was the whole judgement).
+
+        The row is this instance's own world; the LISTS and the BAND are
+        read from the LIVE world (world="live", readable from a demo
+        instance — MEASURED 2026-09-25, doc §15): the demo lists are
+        wider (stocks 20 vs 5, forex 400 vs 30) and prove nothing. An
+        unread row: at 1 the class ceiling is the only ceiling (logged);
+        above 1 refused naming "unread" — BNO CORN SOYB CANE DBC are
+        exactly the unread rows a 5x stock config would otherwise send
+        at 5x. A read row with no entry for the direction at `eff`
+        (settlement_for None) — refused naming both lists. `eff` not in
+        the LIVE union for (direction, settlement) — refused naming the
+        LIVE list, not clamped. The band: eToro's maxStopLossPercentage
+        of the entry carrying `eff`, READ AS A PERCENTAGE OF THE AMOUNT
+        (the margin) — MEASURED ONCE, on demo (doc §14 N2: BTC 2x CFD, a
+        stop sent 60 % below was held at 25 % below = 50 % of the 2x
+        margin = maxStopLossPercentage 50), unmeasured on live and on
+        every other class, hence "a BELIEF" in the refusal words. eToro
+        CLAMPS a stop into its band rather than refuse it (N2 tighter; N1
+        3 % -> 10 %, 3.3x the risk budget); refusing here, before the
+        POST, sends nothing nobody chose. So the stop's distance as a
+        fraction of price times `eff` must sit inside the band; None
+        (unprinted on every levered ETF/forex/index entry
+        read) passes with a log line and never a number nobody read.
+        minStopLossPercentage likewise, when printed. The settlement the
+        entry lands on is stashed in self._last_settlement[symbol]."""
+        from bot_program.engine.capabilities import has_capability
+        if not has_capability(client, "leverage_values"):
+            return ""
+        direction = "long" if str(side or "BUY").upper() == "BUY" else "short"
+        row = None
+        try:
+            _elig = getattr(client, "eligibility", None)
+            row = _elig(symbol) if callable(_elig) else None
+        except Exception as e:  # noqa: BLE001 — a raise IS could-not-read
+            logger.info("[%s_bot] %s: eligibility raised %s: %s",
+                        self.asset_class, symbol, type(e).__name__, e)
+            row = None
+        if not isinstance(row, dict):
+            row = None      # a row that is not a dict is not a measured row
+        if row is None:
+            if eff <= 1:
+                logger.info("[%s_bot] %s: eligibility unread — the class "
+                            "ceiling is the only ceiling at 1x",
+                            self.asset_class, symbol)
+                return ""
+            return (f"at {eff}x: eToro's eligibility row for {symbol} is "
+                    f"unread today — a levered order needs the instrument's "
+                    f"LIVE leverageValues and maxStopLossPercentage; "
+                    f"nothing sent, not at {eff}, not at 1")
+
+        def _live(settlement):
+            # the LIVE union for (direction, settlement); None = unread
+            try:
+                return client.leverage_values(symbol, side, settlement,
+                                              world="live")
+            except Exception as e:  # noqa: BLE001 — could-not-read
+                logger.info("[%s_bot] %s: LIVE leverageValues (%s) raised "
+                            "%s: %s", self.asset_class, symbol, settlement,
+                            type(e).__name__, e)
+                return None
+
+        settle = client.settlement_for(symbol, side, eff)
+        if not settle:
+            return (f"at {eff}x: eToro's row for {symbol} lists no "
+                    f"{direction} entry that carries {eff} (LIVE real: "
+                    f"{_live('real')}, cfd: {_live('cfd')}) — refused, "
+                    f"not clamped")
+        vals = _live(settle)
+        if vals is None:
+            if eff <= 1:
+                logger.info("[%s_bot] %s: LIVE leverageValues unread — the "
+                            "class ceiling is the only ceiling at 1x",
+                            self.asset_class, symbol)
+                return ""
+            return (f"at {eff}x: the LIVE leverageValues of {symbol} "
+                    f"{direction}/{settle} are unread today (the demo list "
+                    f"proves nothing) — nothing sent, not at {eff}, not "
+                    f"at 1")
+        if eff not in vals:
+            return (f"at {eff}x: not in eToro's LIVE leverageValues for "
+                    f"{symbol} {direction}/{settle} {vals} — refused, not "
+                    f"clamped")
+        frac = None
+        try:
+            if price is not None and stop is not None and float(price) > 0:
+                frac = abs(float(price) - float(stop)) / float(price)
+        except (TypeError, ValueError):
+            frac = None
+
+        def _band(name):
+            fn = getattr(client, name, None)
+            if not callable(fn):
+                return None
+            try:
+                v = fn(symbol, side, settle, eff, world="live")
+                return None if v is None else float(v)
+            except Exception:  # noqa: BLE001 — unmeasured, never a number
+                return None
+
+        max_sl = _band("max_stop_loss_pct")
+        min_sl = _band("min_stop_loss_pct")
+        if frac is None:
+            logger.info("[%s_bot] %s: no price/stop handed in — the stop "
+                        "band is not checked", self.asset_class, symbol)
+        elif max_sl is None:
+            logger.info("[%s_bot] %s: maxStopLossPercentage unmeasured on "
+                        "the %s/%s entry carrying %d — band not checked",
+                        self.asset_class, symbol, settle, direction, eff)
+        else:
+            if frac * eff > max_sl / 100.0 + 1e-12:
+                return (f"at {eff}x: the stop is {frac * eff:.1%} of the "
+                        f"margin at {eff}x; eToro allows {max_sl:g}% on "
+                        f"{symbol} {direction}/{settle} (read as % of the "
+                        f"amount — a BELIEF, the stricter reading) — "
+                        f"refused, not widened")
+            if min_sl is not None and frac * eff < min_sl / 100.0 - 1e-12:
+                return (f"at {eff}x: the stop is {frac * eff:.1%} of the "
+                        f"margin at {eff}x; eToro requires at least "
+                        f"{min_sl:g}% on {symbol} {direction}/{settle} "
+                        f"(read as % of the amount — a BELIEF) — refused, "
+                        f"not widened")
+        if not isinstance(getattr(self, "_last_settlement", None), dict):
+            self._last_settlement = {}
+        self._last_settlement[symbol] = settle
+        return ""
+
+    def _pledged_since(self, at, carrier: str) -> float:
+        """Cash this user's LIVE rows on `carrier` opened after `at` pledge
+        — the sync's reading can be 900 s old and one tick opens several.
+        A row that recorded the leverage it was sent at is charged
+        notional / L; a row on this carrier that recorded none is charged
+        its FULL notional (the venue's margin at leverage 1 IS the full
+        notional — MEASURED 2026-09-23, used margin 84.8 on 84.8 of
+        exposure; the class table's forex 1/30 is the dangerous direction
+        here); a
+        row stamped for another broker is not this account's cash and is
+        skipped; an unstamped row counts, in full."""
+        from bot_program.asset_models import AssetBotTrade
+        from portfolio.services import value_per_unit
+        total = 0.0
+        for t in AssetBotTrade.objects.filter(
+                config__user=self.user, paper=False, opened_at__gt=at,
+                status__in=("OPEN", "CLOSE_PENDING")):
+            meta = t.metadata or {}
+            stamped = str(meta.get("broker") or "")
+            if stamped and stamped != carrier:
+                continue
+            notional = (float(t.entry_price or 0) * float(t.qty or 0)
+                        * float(value_per_unit(t) or 1.0))
+            lev = meta.get("leverage")
+            try:
+                lev = float(lev) if lev is not None else None
+            except (TypeError, ValueError):
+                lev = None
+            total += (notional / lev if lev is not None and lev >= 1
+                      else notional)
+        return total
+
+    def _leverage_headroom(self, client, symbol: str, *, qty: float,
+                           price: float, leverage: int):
+        """Why an order at `leverage` (1 when the config carries none) may
+        not leave for want of cash, or None — before every eToro order
+        the asset bots (execute_entry) and the TAKE TRADE lane send,
+        since 2026-09-26; the legacy BotConfig tick cannot ask it and
+        refuses every eToro order instead (engine/runner.py). At 1x the
+        venue locks the FULL notional (MEASURED 2026-09-23, used margin
+        84.8 on 84.8; 42.39 at 2x), so a 1x order needs cash exactly as
+        a levered one. Reads the SYNC'S CELLS on the
+        carrier's row — looked up
+        by query, never through the User's cached reverse accessor — and
+        never the broker: capital_truth's rule, no broker I/O on an entry
+        path.
+
+        Refused, each a sentence with both numbers: either cell never
+        stored; older than TRACKING_FRESH_SECONDS; read in the OTHER
+        world (the same key pair answers both, EtoroAccount.demo alone
+        picks the segment; the sync stamps last_margin_world — "" is
+        refused too); a currency other than the pool's (nothing here
+        converts); notional / leverage plus what this tick already
+        pledged exceeds the available cash; or the account would be
+        pledged past MAX_PLEDGED_FRACTION of its equity.
+        `notional / leverage` is the margin — MEASURED 2026-09-23 (doc
+        §2, §5). Too strict sends nothing; too loose is answered by the
+        venue's own refusal.
+
+        WITHDRAWALS ASKED FOR IN ADVANCE (2026-09-28): the free cash is
+        the cell LESS what is held back for them (withdrawals.held_back_in:
+        the reserve, plus any withdrawal paid since the cell was read,
+        which the cell still counts) — when this row is the book, and in
+        the cell's currency only; a hold in another currency refuses the
+        order rather than being converted. Reserved cash is never pledged:
+        an order that would need it is refused with both numbers, never
+        resized and never answered by closing anything. A reserve that
+        cannot be read is refused too — reserved cash is not a number to
+        guess.
+        """
+        from bot_program.capital_truth import TRACKING_FRESH_SECONDS
+        from bot_program.engine.capabilities import adapter_key
+        from bot_program.models import EtoroAccount
+        carrier = adapter_key(client)
+        acct = (EtoroAccount.objects.filter(user_id=self.user.id).first()
+                if carrier == "etoro" else None)
+        cash = getattr(acct, "last_available_cash", None)
+        used = getattr(acct, "last_used_margin", None)
+        at = getattr(acct, "last_margin_at", None)
+        equity = getattr(acct, "last_equity", None)
+        if acct is None or cash is None or used is None or at is None:
+            return ("the account's available cash / used margin have never "
+                    "been stored by the sync — refused; margin is not a "
+                    "number to guess")
+        if equity is None:
+            return "the account's equity has never been stored — refused"
+        age = (timezone.now() - at).total_seconds()
+        if age > TRACKING_FRESH_SECONDS:
+            return (f"cash reading {age / 3600:.1f}h old (limit "
+                    f"{TRACKING_FRESH_SECONDS / 3600:.0f}h) — refused")
+        # THE CELLS' WORLD (2026-09-26): the same key pair answers both
+        # worlds and EtoroAccount.demo alone picks the segment, so a row
+        # unticked demo -> live keeps the DEMO reading (332,449.10, doc §5)
+        # for up to TRACKING_FRESH_SECONDS and would pass a 13,000 USD 1x
+        # order against a 2,000 USD book. The sync stamps the world it
+        # read in; "" (never stamped) is refused too — unmeasured is not
+        # free.
+        world = "demo" if acct.demo else "live"
+        stamped = str(getattr(acct, "last_margin_world", "") or "")
+        if stamped != world:
+            return (f"cash read in the {stamped or '?'} world; this row now "
+                    f"trades {world} — refused until the sync re-reads")
+        ccy = str(getattr(acct, "last_equity_currency", "") or "").upper()
+        pool_ccy = str(self.cfg.base_currency or "").upper()
+        if ccy != pool_ccy:
+            return (f"pool in {pool_ccy or '?'} against cash read in "
+                    f"{ccy or '?'} — nothing here converts; refused")
+        need = (float(qty) * float(price) * self._value_per_unit(symbol)
+                / float(leverage))
+        pledged = self._pledged_since(at, carrier)
+        # THE RESERVE IS THE BOOK'S, AND IN ITS CURRENCY (review,
+        # 2026-09-28). A withdrawal request is filed against the book —
+        # the account the reading comes from — and the router hands each
+        # asset class its own venue, Saxo first, so "Saxo book for stocks,
+        # this eToro row for crypto" is a supported setup. There the
+        # reserve already shrinks the Saxo followers; taking it off THIS
+        # row's cash as well spent it twice, on another account, in
+        # another currency — a real crypto order refused over money held at
+        # Saxo, or a demo row refused over a live reserve. So the hold
+        # counts only when this row IS the book, and then only in the
+        # cell's own currency: anything held in another is refused with
+        # both numbers, never converted and never subtracted across.
+        try:
+            from bot_program.capital_truth import broker_backed, broker_kind
+            from bot_program.withdrawals import held_back_in
+            book = broker_backed(self.user)
+            if (book is not None and broker_kind(book) == "etoro"
+                    and book.pk == acct.pk):
+                held_d, other = held_back_in(self.user, ccy, at)
+            else:
+                held_d, other = 0, {}
+            held = float(held_d)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] withdrawal reserve unreadable: %s",
+                           self.asset_class, e)
+            return ("the withdrawal reserve could not be read — refused; "
+                    "reserved cash is not a number to guess")
+        if other:
+            listed = ", ".join(f"{float(v):,.2f} {c or '?'}"
+                               for c, v in sorted(other.items()))
+            return (f"{listed} is held for withdrawals against cash read in "
+                    f"{ccy or '?'} — nothing here converts; refused until "
+                    f"that request is cancelled or filed again in "
+                    f"{ccy or '?'}")
+        free = float(cash) - pledged - held
+        if need > free + 1e-9:
+            kept = (f", less {held:,.2f} held for withdrawals" if held > 0
+                    else "")
+            return (f"{symbol} needs {need:,.2f} {ccy} of margin and "
+                    f"{free:,.2f} is free ({float(cash):,.2f} read "
+                    f"{age / 60:.0f} min ago, less {pledged:,.2f} pledged "
+                    f"since{kept}) — refused before the venue refuses it")
+        after = (float(used) + pledged + need) / max(float(equity), 1e-9)
+        if after > MAX_PLEDGED_FRACTION + 1e-9:
+            return (f"the account would be {after:.0%} pledged after "
+                    f"{symbol} ({float(used):,.2f} used + {pledged:,.2f} "
+                    f"since + {need:,.2f}) against {float(equity):,.2f} "
+                    f"equity; the ceiling is {MAX_PLEDGED_FRACTION:.0%} "
+                    f"(a belief: eToro's close-out rule is unmeasured) — "
+                    f"refused")
+        return None
+
     # ── live-mode paper-fallback guard ───────────────────────────────────
 
     @staticmethod
@@ -1785,8 +5383,306 @@ class AssetBot(ABC):
         from bot_program.engine.paper_trader import PaperTrader
         return isinstance(client, PaperTrader)
 
-    def _notify_paper_fallback(self, symbol: str):
-        """Best-effort alert, deduped to at most one per config per hour."""
+    # ── the venue's own size floor ──────────────────────────────────────
+    #
+    # `_round_qty` knows the ASSET CLASS and, since 2026-09-23, ONE venue
+    # fact handed to it in three states: whether the client takes fractions
+    # (`_venue_fractional_units`, read at proposal off the pricing client and
+    # the fractional_units_live switch, carried on the candidate). The
+    # forex bot's 100-unit boundary is still OANDA/IBKR granularity and its
+    # own comment calls it tidiness, not any venue's rule. The venue's FLOOR
+    # is the other question: the venue is known only through broker_router,
+    # and the one step holding the client an order actually goes through is
+    # `execute_entry`. So that question is asked there, on that client, and
+    # answered in three states — and a money floor (the operator's
+    # extras['venue_min_notional']) is converted into units with the entry
+    # price, labelled operator-declared.
+    #
+    # NOT gated by any PlatformComponent key: this rides the entry path, so
+    # there is no row whose absence turns it off. And it is never the
+    # enforcer — SaxoTrader._amount still raises on a too-small order at the
+    # client. This only moves the refusal one step earlier so it can be
+    # recorded as a DECISION with both numbers in it.
+    #
+    # It covers the AssetBotConfig lane only. runner.py:166-170, the legacy
+    # BotConfig loop, reaches the same clients through the same
+    # client_for_symbol and swallows the adapter's refusal in a bare log
+    # line — no skip code, no counter, no alert. Left alone, named here.
+
+    @staticmethod
+    def _venue_size_floor(client, symbol: str, price=None,
+                          min_notional=None, value_per_unit=1.0) -> tuple:
+        """(floor, unmeasured_reason) — the smallest size this venue takes.
+
+        THREE STATES, and a 0 would be a fourth this must never give:
+
+          (925.9, "")    a MONEY floor the VENUE itself states — eToro's
+                         minPositionExposure on its eligibility row,
+                         MEASURED 2026-09-23 (10 USD on stocks, ETFs and
+                         crypto; 1,000 USD on forex, indices and
+                         commodities), read through the `money_floor`
+                         tier FIRST and turned into units with the entry
+                         price and `value_per_unit` (a USDJPY floor typed
+                         in USD is 150x wrong without it). The note is
+                         EMPTY: the refusal reads byte for byte as a
+                         measured unit floor's. None from the tier (no row
+                         read today) falls through to the declared floor.
+          (1000.0, "")   the venue was asked and said 1000
+          (None, "...")  this adapter cannot be asked at all: it declares
+                         neither `money_floor` nor `size_floor`, because
+                         nothing it already reads from the venue carries a
+                         minimum size (IBKR, OANDA, Alpaca, Binance,
+                         paper); no adapter invents a minimum.
+          (0.05, "operator-declared: ...")  a MONEY floor the OPERATOR typed
+                         per config (extras['venue_min_notional'], the
+                         venue's order currency, unconverted), turned into
+                         units with the entry price. The refusal and the
+                         alert carry the label; a measured floor wins.
+          (None, "...")  the venue could be asked and did not answer: no
+                         session, an unknown spelling, or a payload without
+                         the field.
+
+        The last two are both None on purpose — from the entry path's point
+        of view unmeasured is ONE state, and the reason string is what tells
+        them apart in the log. What must never happen is either being read
+        as "any size is fine", which is why this returns None and not 0.0.
+        """
+        from bot_program.engine.capabilities import has_capability
+        unread = ""
+        if has_capability(client, "money_floor"):
+            # THE VENUE'S OWN MONEY FLOOR FIRST (eToro, MEASURED 2026-09-23):
+            # one cached read of the eligibility row. None means the row
+            # is not read today (absent or unread), never "no floor"; a
+            # body typed in any currency but usd RAISES from min_notional
+            # and is read below as unmeasured, the currency in the reason.
+            try:
+                amount = client.min_notional(symbol)
+                unread = (f"{type(client).__name__} has no eligibility row "
+                          f"for {symbol} today")
+            except Exception as e:  # noqa: BLE001 — could not ask IS an answer
+                amount = None
+                unread = (f"min_notional({symbol}) raised "
+                          f"{type(e).__name__}: {e}")
+            if amount is not None:
+                try:
+                    amount = float(amount)
+                except (TypeError, ValueError):
+                    # only a fake reaches this (the client answers
+                    # float | None) — named for what it answered
+                    unread = (f"min_notional({symbol}) answered {amount!r}: "
+                              f"not a number, so not a measurement")
+                    amount = None
+            if amount is not None:
+                try:
+                    px = float(price or 0) * float(value_per_unit or 0)
+                except (TypeError, ValueError):
+                    px = 0.0
+                if amount > 0 and px > 0:
+                    # MEASURED: an EMPTY note — execute_entry's refusal
+                    # detail and its log rely on it to read as a venue floor
+                    return amount / px, ""
+                if amount > 0:
+                    return None, (f"measured floor {amount:g} for {symbol} "
+                                  f"and no price to turn it into units")
+                unread = (f"min_notional({symbol}) answered {amount:g}: a "
+                          f"floor of zero or less is not a measurement")
+            # None: the operator's declared floor, then unmeasured — with
+            # the row's own reason on the way out
+        if not has_capability(client, "size_floor"):
+            declared_floor = AssetBot._declared_money_floor(
+                client, symbol, price, min_notional, value_per_unit)
+            if declared_floor is not None:
+                return declared_floor
+            if unread:
+                return None, unread
+            return None, (f"{type(client).__name__} declares no size_floor "
+                          f"capability: this venue publishes no minimum "
+                          f"trade size that the adapter already reads")
+        try:
+            floor = client.min_tradable(symbol)
+        except Exception as e:  # noqa: BLE001 — could not ask IS an answer
+            return None, (f"min_tradable({symbol}) raised "
+                          f"{type(e).__name__}: {e}")
+        if floor is None:
+            return None, (f"{type(client).__name__} could not state a "
+                          f"minimum trade size for {symbol}")
+        try:
+            floor = float(floor)
+        except (TypeError, ValueError):
+            return None, (f"min_tradable({symbol}) answered {floor!r}, "
+                          f"which is not a number")
+        if floor <= 0:
+            return None, (f"min_tradable({symbol}) answered {floor}: a "
+                          f"floor of zero or less is not a measurement")
+        return floor, ""
+
+    @staticmethod
+    def _venue_fractional_units(client, symbol: str, *, say: bool = True):
+        """THREE STATES, off the client AND the switch: True (declares the
+        `fractional_units` tier, answered True for `symbol`, and the
+        fractional_units_live component is ON), False (declared it and
+        answered False — the eligibility row's unitsQuantityType
+        "whole", read since 2026-09-25), None
+        (declares no such tier, the switch is OFF, raised, or answered
+        neither). None rounds exactly as before this tier existed, which
+        for stocks is whole shares. Asked of the INSTANCE through
+        has_capability — before any DB read, so a MagicMock or a tier-less
+        class answers None without touching the switch. `say=False` keeps
+        the second read (execute_entry's guard) silent.
+        """
+        from bot_program.engine.capabilities import has_capability
+        if not has_capability(client, "fractional_units"):
+            return None
+        from core.platform_control import is_component_enabled
+        if not is_component_enabled(AssetBot.FRACTIONAL_UNITS_COMPONENT):
+            if say:
+                logger.info("%s declares fractional units of %s; the %s "
+                            "switch is OFF — whole shares, as before",
+                            type(client).__name__, symbol,
+                            AssetBot.FRACTIONAL_UNITS_COMPONENT)
+            return None
+        try:
+            ans = client.takes_fractional_units(symbol)
+        except Exception as e:  # noqa: BLE001 — could not ask IS an answer
+            logger.info("takes_fractional_units(%s) raised %s: %s — "
+                        "rounding as if unmeasured", symbol,
+                        type(e).__name__, e)
+            return None
+        if ans is True:
+            if say:
+                logger.info("%s takes fractional units of %s (measured on "
+                            "eToro's eligibility row: unitsQuantityType "
+                            "fractional; the switch is ON)",
+                            type(client).__name__, symbol)
+            return True
+        if ans is False:
+            return False
+        return None
+
+    @staticmethod
+    def _declared_money_floor(client, symbol: str, price, min_notional,
+                              value_per_unit=1.0):
+        """(floor_units, "operator-declared: ...") from the per-config
+        extras['venue_min_notional'] — the OPERATOR's number, in the
+        venue's order currency, unconverted — turned into units with the
+        entry price and `value_per_unit` (2026-09-25: a USDJPY floor typed
+        in USD was 150x wrong without it); or (None, why) when a price is
+        missing; or None when no floor was declared, so the caller keeps
+        its own reason. Behind the venue's MEASURED money floor since
+        Stage 1 (_venue_size_floor asks the `money_floor` tier first)."""
+        try:
+            amount = float(min_notional or 0)
+        except (TypeError, ValueError):
+            amount = 0.0
+        if amount <= 0:
+            return None
+        try:
+            px = float(price or 0) * float(value_per_unit or 0)
+        except (TypeError, ValueError):
+            px = 0.0
+        if px <= 0:
+            return None, (f"extras['venue_min_notional'] {amount:g} is "
+                          f"declared for {symbol} and no price was given to "
+                          f"turn it into units")
+        return amount / px, (f"operator-declared: extras['venue_min_notional'] "
+                             f"{amount:g} in the venue's currency, "
+                             f"{amount / px:g} units at {px:g}; unconverted")
+
+    def _notify_fraction_refused(self, symbol: str, *, qty: float,
+                                 words: str) -> None:
+        """Say it ONCE per config per symbol per day: the venue refused a
+        FRACTIONAL size, in its own words. The remedies are named; never
+        'widen the stop' (a wider stop buys FEWER units)."""
+        try:
+            from datetime import timedelta as _td
+
+            from alerts.models import Notification as _N
+            title = (f"✕ {self.cfg.name} · {symbol}: the venue refused a "
+                     f"fractional size")[:200]
+            recent = _N.objects.filter(
+                user=self.user, notification_type="bot", title=title,
+                created_at__gte=timezone.now() - _td(hours=24),
+            ).exists()
+            if recent:
+                return
+            _N.objects.create(
+                user=self.user, notification_type="bot", title=title,
+                body=(f"{self.asset_class} config '{self.cfg.name}' sent "
+                      f"{qty:g} units of {symbol} — a fraction, because the "
+                      f"venue's adapter declares fractional units — and the "
+                      f"venue refused: {words}. Nothing was booked and "
+                      f"nothing was resized; the symbol is quiet for "
+                      f"{self.FRACTION_REFUSED_QUIET_HOURS}h. What raises the "
+                      f"unit count is more capital, a higher "
+                      f"extras['risk_per_trade_pct'], or a TIGHTER stop; "
+                      f"extras['venue_min_notional'] refuses before the order "
+                      f"next time, with both numbers."),
+                url="/asset-bots/",
+            )
+        except Exception as e:  # noqa: BLE001 — an alert must not cost a tick
+            logger.warning("[%s_bot] fraction-refused notification failed: "
+                           "%s", self.asset_class, e)
+
+    def _notify_venue_min_size(self, symbol: str, *, qty: float,
+                               floor: float, note: str = "") -> None:
+        """Say it ONCE, not once per tick.
+
+        The floor is a property of the instrument at the venue, so it will
+        refuse this size on every tick until the operator changes something.
+        Deduped per CONFIG per symbol per day: notify_staff and this table
+        de-dupe on the title, so a title carrying only the symbol would
+        silence a second pool refused on the same symbol for a day and the
+        operator would fund the wrong one. Two symbols with two floors are
+        two facts, and two pools with two sizes are two more. The skip
+        counter keeps counting either way — the alert is the once, the
+        counter is the frequency.
+        """
+        try:
+            from datetime import timedelta as _td
+
+            from alerts.models import Notification as _N
+            title = (f"✕ {self.cfg.name} · {symbol}: the venue will not "
+                     f"take this size")[:200]
+            recent = _N.objects.filter(
+                user=self.user, notification_type="bot", title=title,
+                created_at__gte=timezone.now() - _td(hours=24),
+            ).exists()
+            if recent:
+                return
+            times = (floor / qty) if qty > 0 else 0.0
+            _N.objects.create(
+                user=self.user, notification_type="bot", title=title,
+                body=(f"{self.asset_class} config '{self.cfg.name}' sized "
+                      f"{qty:g} units of {symbol} from its stop distance. "
+                      f"The venue's minimum there is {floor:g}"
+                      f"{(' — ' + note) if note else ''}, so nothing "
+                      f"was sent — and nothing was resized: trading "
+                      f"{floor:g} would be {times:.1f}x the risk this entry "
+                      f"was sized for, which is a different trade. What "
+                      f"raises the unit count is more capital, a higher "
+                      f"extras['risk_per_trade_pct'], or a TIGHTER stop — "
+                      f"widening the stop buys FEWER units and makes this "
+                      f"worse. Moving the whole asset class off this venue "
+                      f"on /brokers/ also works, but it moves every symbol "
+                      f"in the class and an open position there would have "
+                      f"its exit routed to a venue that does not hold it, "
+                      f"so close those first. Said once per pool per symbol "
+                      f"per day; the skip counter keeps counting."),
+                url="/asset-bots/",
+            )
+        except Exception as e:  # noqa: BLE001 — an alert must not cost a tick
+            logger.warning("[%s_bot] venue-minimum notification failed: %s",
+                           self.asset_class, e)
+
+    def _notify_paper_fallback(self, symbol: str, *, busy: bool = False):
+        """Best-effort alert, deduped to at most one per config per hour.
+
+        `busy` distinguishes the two reasons the router hands back a
+        PaperTrader. A held IBKR trading session means nothing was asked of
+        the broker and nothing is wrong with it; saying "missing or invalid
+        credentials" there sends the operator to the HQ disconnect, which
+        really would put every live path on paper.
+        """
         try:
             from datetime import timedelta as _td
             from alerts.models import Notification as _N
@@ -1800,16 +5696,103 @@ class AssetBot(ABC):
                 _N.objects.create(
                     user=self.user, notification_type="bot", title=title,
                     body=(
-                        f"{self.asset_class} config '{self.cfg.name}' is in LIVE "
-                        f"mode but its broker is unavailable (missing or invalid "
-                        f"credentials?). Entry on {symbol} was refused rather "
-                        f"than silently traded on paper."
+                        f"{self.asset_class} config '{self.cfg.name}' is in "
+                        f"LIVE mode but the exclusive IBKR trading session is "
+                        f"held by another process. NOTHING was sent and the "
+                        f"broker is fine; the entry on {symbol} was refused "
+                        f"and the next tick will try again."
+                        if busy else self._paper_fallback_words(symbol)
                     ),
                     url="/asset-bots/",
                 )
         except Exception as e:
             logger.warning("[%s_bot] paper-fallback notification failed: %s",
                            self.asset_class, e)
+
+    def _paper_fallback_words(self, symbol: str) -> str:
+        """The not-busy words of _notify_paper_fallback (2026-09-26). The
+        router hands back a PaperTrader for two different reasons: no
+        broker is set to carry the symbol's class at all (a live commodity
+        config with no commodity box ticked, the case CommodityBot's old
+        paper rewrite hid), or the broker that carries it has no usable
+        credentials. broker_router.broker_name_for_symbol reads the
+        database only and answers "paper" for the first; the words name
+        the fix that applies, never a credential that is fine."""
+        lead = (f"{self.asset_class} config '{self.cfg.name}' is in LIVE "
+                f"mode but ")
+        tail = (f" Entry on {symbol} was refused rather than silently "
+                f"traded on paper.")
+        try:
+            from bot_program.engine.broker_router import (
+                broker_name_for_symbol)
+            unrouted = broker_name_for_symbol(self.user, symbol,
+                                              self.cfg) == "paper"
+            icls = self._instrument_class(symbol)
+        except Exception:  # noqa: BLE001 — the words must not cost the alert
+            unrouted, icls = False, ""
+        if unrouted:
+            return (lead + f"no broker is set to carry {symbol}: no {icls} "
+                    f"box is ticked on /brokers/." + tail)
+        return (lead + "its broker is unavailable (missing or invalid "
+                "credentials?)." + tail)
+
+    def _notify_unmanaged_live_position(self, trade, *, busy: bool = False):
+        """A REAL position is open and its manager is switched off.
+
+        Strictly worse than the refused entry `_notify_paper_fallback`
+        reports: a refused entry costs an opportunity, this carries risk with
+        the thing that watches it turned off. And until now the only trace was
+        a `logger.error` — the code did the right thing (refuse to manage,
+        rather than stamp a row CLOSED off a PaperTrader's synthetic fill
+        while the real position is still open at the broker) and told nobody
+        who could act on it.
+
+        WHAT SURVIVES AND WHAT DOES NOT is the whole content of this alert,
+        because the honest answer is neither "you are fine" nor "you are
+        naked". The broker-side bracket survives: protective legs have been
+        GTC since 9e2bc10, so the stop and the target are still working
+        orders at IBKR and they outlive the session that placed them. What
+        stops is everything this platform adds on top — the time stop, the
+        trailing stop, the break-even move, and the check that notices a
+        protective leg has vanished. A missed 2FA push overnight is enough to
+        get here, and the operator needs it within the hour rather than at
+        the next morning's briefing.
+
+        Deduped per SYMBOL, not per config: two unmanaged positions are two
+        facts, and collapsing them would repeat the mistake the breaker alert
+        made by keying on the config name alone.
+        """
+        try:
+            from datetime import timedelta as _td
+            from alerts.models import Notification as _N
+            title = f"⚠ LIVE position unmanaged: {trade.symbol}"[:200]
+            recent = _N.objects.filter(
+                user=self.user, notification_type="bot", title=title,
+                created_at__gte=timezone.now() - _td(hours=1),
+            ).exists()
+            if recent:
+                return
+            why = ("the exclusive IBKR trading session is held by another "
+                   "process" if busy else
+                   "its broker is unreachable (is the Gateway logged in? a "
+                   "live account re-authenticates with 2FA most days)")
+            _N.objects.create(
+                user=self.user, notification_type="bot", title=title,
+                body=(
+                    f"A REAL {trade.symbol} position on '{self.cfg.name}' is "
+                    f"OPEN and is not being managed: {why}. Its broker-side "
+                    f"stop and target are GTC and still working at the "
+                    f"broker. What is NOT running: the time stop, the "
+                    f"trailing stop, the break-even move, and the check that "
+                    f"notices a protective leg has disappeared. Nothing was "
+                    f"closed and nothing was faked — the row is left OPEN on "
+                    f"purpose."
+                ),
+                url="/asset-bots/",
+            )
+        except Exception as e:  # noqa: BLE001 — an alert must not break a tick
+            logger.warning("[%s_bot] unmanaged-position notification failed: "
+                           "%s", self.asset_class, e)
 
     # ── default sizing ──────────────────────────────────────────────────
 
@@ -1838,18 +5821,304 @@ class AssetBot(ABC):
         """
         return 1.0
 
+    def _instrument_class(self, symbol: str) -> str:
+        """The INSTRUMENT's class — the router's own key (broker_router
+        .client_for_symbol reads the Instrument row; no row routes as
+        crypto) — for every per-instrument fact: the proof token today,
+        the leverage ceiling, the notional cap, the hours clock and the
+        eligibility row as their stages land. Falls back to the CONFIG's
+        class when no row exists (decide() already HOLDs on such a
+        symbol). Risk (risk_fraction), the cost table and the time stop
+        stay the CONFIG's: they are the pool's rule."""
+        from instruments.models import Instrument
+        cls = (Instrument.objects.filter(symbol=symbol)
+               .values_list("asset_class", flat=True).first())
+        return str(cls or self.asset_class)
+
     def _size_for_entry(self, symbol: str, price: float, stop: float,
                         decision) -> dict:
-        """Units to buy so that a stop-out costs a fixed fraction of equity."""
+        """Units to buy so that a stop-out costs a fixed fraction of equity.
+
+        THE ATTACK MODE's risk half lands HERE, the one place the bot
+        lane's risk fraction enters sizing (2026-09-26): with
+        extras["leverage"] = "auto" the tier (_attack_tier) scales the
+        config's fraction before size_position computes anything, so the
+        widened stop, the notional cap and _judge_final_size all read the
+        tiered fraction; the tier rides the sizing dict (sizing["attack"])
+        to the row. Without "auto" this is the call it always was."""
         from bot_program.asset_engine.sizing import size_position
-        return size_position(
+        attack = (self._attack_tier(symbol, decision)
+                  if self._leverage_is_auto() else None)
+        extra = {} if attack is None else {"risk_scale": attack["scale"]}
+        sizing = size_position(
             self.cfg, asset_class=self.asset_class, entry=price, stop=stop,
             direction=decision.direction,
             value_per_unit=self._value_per_unit(symbol),
+            # the notional cap and the stop floor are the INSTRUMENT's
+            # (SPX500 in a stock config sizes under the index cap); the
+            # risk fraction stays the config's (E2.5, 2026-09-26)
+            cap_class=self._instrument_class(symbol),
+            **extra,
         )
+        if attack is not None:
+            attack["risk_fraction"] = sizing["risk_fraction"]
+            sizing["attack"] = attack
+        return sizing
 
-    def _round_qty(self, qty: float, price: float) -> float:
+    def _attack_tier(self, symbol: str, decision) -> dict:
+        """THE CONVICTION TIER of the attack mode — the RISK half.
+
+        c is the decision's score as the trade records it (composite_score:
+        the SMC seat taken back out by _conviction_score, after
+        _apply_track_record on the headcount path); e is the config's
+        entry_score_min. The band above the bar, in thirds
+        (attack_thresholds):
+          STANDARD  c <  e + (1 - e) / 3                    0.50x risk
+          STRONG    c >= e + (1 - e) / 3                    0.75x
+          HIGH      c >= e + 2 (1 - e) / 3 AND a measured   1.00x
+                    edge (_attack_edge)
+        A HIGH score without the edge is STRONG; a record lookup that
+        raises or answers nothing is STANDARD — never HIGH on an unread
+        record — with a log line. The multipliers are
+        attack_tier_scales(cfg), each in (0, 1]: a tier never lifts risk
+        above the config's own fraction, which risk_fraction already
+        clamps at MAX_RISK_FRACTION."""
+        from bot_program.asset_engine.sizing import risk_fraction
+        scales = attack_tier_scales(self.cfg)
+        e = getattr(self.cfg, "entry_score_min", 0.0)
+        strong_from, high_from = attack_thresholds(e)
+        try:
+            c = float(getattr(decision, "score", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            c = 0.0
+        if c != c:
+            c = 0.0
+        if c >= high_from - 1e-9:
+            tier, why = self._attack_edge(symbol, decision, c)
+        elif c >= strong_from - 1e-9:
+            tier, why = "strong", (f"score {c:.4f} is at or above "
+                                   f"{strong_from:.4f}")
+        else:
+            tier, why = "standard", (f"score {c:.4f} is below "
+                                     f"{strong_from:.4f}")
+        base = risk_fraction(self.cfg)
+        return {"tier": tier.upper(), "scale": scales[tier],
+                "score": round(c, 4),
+                "strong_from": round(strong_from, 4),
+                "high_from": round(high_from, 4),
+                "config_risk_fraction": base,
+                "risk_fraction": base * scales[tier], "why": why}
+
+    def _attack_edge(self, symbol: str, decision, c: float) -> tuple:
+        """(tier, words) for a score in the HIGH band: "high" only on a
+        MEASURED edge — bot_grading.bot_track_record_detail for the
+        decision's rule on the INSTRUMENT's class: the config's own venue
+        (paper or live, its mode) when it holds ATTACK_HIGH_MIN_N graded
+        trades, else the pooled record — unless the own venue's thinner
+        record averages below 0 R, which the other venue's fills never
+        outvote (bot_grading: simulated fills must not size a real order);
+        n >= 20, win rate >= 0.55 and average realized R >= +0.20.
+        Otherwise "strong", naming what is missing; "standard" when the
+        lookup raises or answers nothing. The record is keyed on the class
+        a row is FILED under (the config's, AssetBotTrade.asset_class): an
+        instrument of another class reads its own class's record, which
+        this config's own trades of it are not in, and the words say so."""
+
+        def _num(v):
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                return None
+            return f if f == f else None
+
+        rule = str(getattr(decision, "rule_name", "") or "")
+        icls = self._instrument_class(symbol)
+        filed = ("" if icls == self.asset_class else
+                 f"; this {self.asset_class} config files its own {icls} "
+                 f"trades as {self.asset_class}, outside this record")
+        if not rule:
+            return "strong", (f"score {c:.4f} in the HIGH band; edge not yet "
+                              f"measured: the decision names no rule")
+        try:
+            from bot_program.bot_grading import (
+                VENUE_ALL, VENUE_LIVE, VENUE_PAPER, bot_track_record_detail,
+            )
+            own = VENUE_PAPER if self.cfg.mode == "paper" else VENUE_LIVE
+            rec = bot_track_record_detail(rule, icls,
+                                          min_n=ATTACK_HIGH_MIN_N, venue=own)
+            where = own
+            if isinstance(rec, dict) and rec and int(
+                    rec.get("n") or 0) < ATTACK_HIGH_MIN_N:
+                own_n = int(rec.get("n") or 0)
+                own_avg = _num(rec.get("expectancy"))
+                if own_n > 0 and own_avg is not None and own_avg < 0:
+                    return "strong", (
+                        f"score {c:.4f} in the HIGH band; edge not proven — "
+                        f"{rule} on {icls}, {own}: n {own_n}, avg R "
+                        f"{own_avg:+.2f}, a losing record on the venue this "
+                        f"order goes to, which the pooled record may not "
+                        f"lift to HIGH{filed}")
+                rec = bot_track_record_detail(rule, icls,
+                                              min_n=ATTACK_HIGH_MIN_N,
+                                              venue=VENUE_ALL)
+                where = "pooled (paper and live)"
+        except Exception as e:  # noqa: BLE001 — never HIGH on an unread record
+            logger.warning("[%s_bot] %s attack tier: the track record of %s "
+                           "on %s could not be read (%s: %s) — STANDARD, "
+                           "never HIGH on an unread record", self.asset_class,
+                           symbol, rule, icls, type(e).__name__, e)
+            return "standard", (f"score {c:.4f} in the HIGH band; the track "
+                                f"record could not be read "
+                                f"({type(e).__name__}) — STANDARD")
+        if not isinstance(rec, dict) or not rec:
+            logger.warning("[%s_bot] %s attack tier: the track record of %s "
+                           "on %s answered nothing — STANDARD, never HIGH on "
+                           "an unread record", self.asset_class, symbol,
+                           rule, icls)
+            return "standard", (f"score {c:.4f} in the HIGH band; the track "
+                                f"record answered nothing — STANDARD")
+
+        n = int(rec.get("n") or 0)
+        wr = _num(rec.get("win_rate"))
+        avg = _num(rec.get("expectancy"))
+        words = (f"{rule} on {icls}, {where}: n {n}, win "
+                 f"{'—' if wr is None else format(wr, '.0%')}, avg R "
+                 f"{'—' if avg is None else format(avg, '+.2f')}{filed}")
+        if (n >= ATTACK_HIGH_MIN_N and wr is not None and avg is not None
+                and wr >= ATTACK_HIGH_MIN_WIN_RATE - 1e-12
+                and avg >= ATTACK_HIGH_MIN_AVG_R - 1e-12):
+            return "high", f"score {c:.4f}; edge measured — {words}"
+        if n < ATTACK_HIGH_MIN_N:
+            return "strong", (f"score {c:.4f} in the HIGH band; edge not yet "
+                              f"measured — {words}; HIGH needs n >= "
+                              f"{ATTACK_HIGH_MIN_N}")
+        return "strong", (f"score {c:.4f} in the HIGH band; edge not proven "
+                          f"— {words}; HIGH needs win >= "
+                          f"{ATTACK_HIGH_MIN_WIN_RATE:.0%} and avg R >= "
+                          f"{ATTACK_HIGH_MIN_AVG_R:+.2f}")
+
+    def _alert_stop_rewrite(self, trade, why: str) -> None:
+        """The staff alert for a stop the venue rewrote at the fill
+        (stop_rewritten_by_venue), sent ONLY where no fill message names it
+        (2026-09-27): a WORKING entry, whose fill message has not gone out,
+        and a fill message that was not delivered (no channel took it, the
+        bell's row included, or its notifier raised). Until then it went
+        out beside every fill
+        message, which already names the moved stop (its Stop and risk
+        lines, "Stop moved by eToro"): two messages for one fact. The
+        title is its dedupe key (notify_staff) and unchanged; the body is
+        the fill message's own line, then `why`. Never raises."""
+        try:
+            from alerts.links import page_url
+            from bot_program.notifications import notify_staff
+            moved = stop_moved_words(
+                getattr(trade, "metadata", None) or {},
+                getattr(trade, "entry_price", None),
+                asset_class=(getattr(trade, "asset_class", "")
+                             or self.asset_class),
+                symbol=getattr(trade, "symbol", "") or "")
+            notify_staff(
+                title=f"⚠ {trade.symbol}: the venue rewrote the stop",
+                body=(f"{moved or 'eToro holds a stop other than the one sent'}"
+                      f". {why} The loss at this stop is not the risk the "
+                      f"entry was sized for; read the position at eToro "
+                      f"(trade #{trade.id} on the platform)."),
+                url=page_url("forensics_detail", trade.id) or "/positions/")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] stop-rewrite alert failed: %s",
+                           self.asset_class, e)
+
+    def _fill_words(self, trade) -> dict:
+        """The open notification's own facts beside its rule, each its own
+        argument of notify_bot_fill_open (2026-09-27; until then they rode
+        inside rule_name as extra lines, and the message printed the rule's
+        key with them):
+          attack      an attack-mode row's tier, the risk it carries at its
+                      stop, the multiplier and the margin (_attack_line):
+                      "Attack mode: high conviction · 7.0% of the pool at
+                      risk · 20x · 100.00 USD of margin";
+          stop_moved  a stop the venue rewrote at the fill
+                      (stop_rewritten_by_venue), attack mode or not
+                      (stop_moved_words).
+        Each is "" when the row has none."""
+        meta = getattr(trade, "metadata", None) or {}
+        att = meta.get("attack")
+        attack = self._attack_line(att, trade) if isinstance(att, dict) else ""
+        moved = stop_moved_words(
+            meta, getattr(trade, "entry_price", None),
+            asset_class=getattr(trade, "asset_class", "") or self.asset_class,
+            symbol=getattr(trade, "symbol", "") or "")
+        return {"attack": attack or "", "stop_moved": moved or ""}
+
+    def _attack_line(self, att: dict, trade) -> str:
+        """"Attack mode: TIER · F% of the pool at risk · Lx · M CCY of
+        margin", in the words the fill message prints (2026-09-27; "Attack:
+        HIGH · risk 7.0% of pool · 20x · margin 100.00 USD" before). The
+        risk is the one the ROW carries at its stop — qty x |entry - the
+        stop sent| x value_per_unit / the pool — so the desk's size_mult,
+        the allocator's multiplier, the correlation taper, the rounding and
+        a partial fill all show in it; the sizer's own fraction only when
+        the row cannot say (no stop, no pool). The margin is the row's
+        notional / L (measured: eToro pledges notional / L). A paper row
+        says so instead of a multiplier."""
+        from bot_program.notifications import (TIER_WORDS, money_words,
+                                               pct_words)
+        meta = getattr(trade, "metadata", None) or {}
+        f = None
+        try:
+            _stop = float(meta.get("initial_stop_loss")
+                          or trade.stop_loss or 0)
+            _pool = float(self.cfg.capital or 0)
+            if _stop > 0 and _pool > 0:
+                f = (float(trade.qty)
+                     * abs(float(trade.entry_price) - _stop)
+                     * float(meta.get("value_per_unit") or 1.0)
+                     / _pool * 100.0)
+        except (TypeError, ValueError, InvalidOperation):
+            f = None
+        if f is None:
+            try:
+                f = float(att.get("risk_fraction") or 0.0) * 100.0
+            except (TypeError, ValueError):
+                f = 0.0
+        tier = str(att.get("tier") or "").strip().upper()
+        # measured at the stop SENT: where the venue holds another one
+        # (stop_rewritten_by_venue) the line says so, and the fill
+        # message's risk line gives the figure at the stop it holds
+        at_sent = (" at the stop sent"
+                   if isinstance(meta.get("stop_rewritten_by_venue"), dict)
+                   else "")
+        parts = ["Attack mode: " + TIER_WORDS.get(tier,
+                                                  "conviction not recorded"),
+                 f"{pct_words(f)} of the pool at risk{at_sent}"]
+        if getattr(trade, "paper", False):
+            parts.append("simulated, no multiplier")
+            return " · ".join(parts)
+        try:
+            lev = int(att.get("leverage") or 0)
+        except (TypeError, ValueError):
+            lev = 0
+        if lev < 1:
+            return " · ".join(parts)
+        parts.append(f"{lev}x")
+        try:
+            vpu = float((trade.metadata or {}).get("value_per_unit") or 1.0)
+            notional = float(trade.qty) * float(trade.entry_price) * vpu
+            ccy = str(self.cfg.base_currency or "").strip()
+            margin = money_words(notional / lev, ccy)
+            if margin:
+                parts.append(f"{margin} of margin")
+        except (TypeError, ValueError, InvalidOperation, ZeroDivisionError):
+            pass
+        return " · ".join(parts)
+
+    def _round_qty(self, qty: float, price: float, *,
+                   fractional=None) -> float:
         """Snap a size to what the venue will actually accept.
+
+        `fractional` is the venue's unit-granularity answer in three states
+        (True / False / None) as `_venue_fractional_units` read it; the base
+        rounding ignores it (six decimals either way) and StockBot reads it.
 
         Applied LAST, after every multiplier, so rounding never silently
         rescales the risk budget by more than one tick of granularity.
@@ -1858,11 +6127,18 @@ class AssetBot(ABC):
 
     # ── default decision: consume Phase-1 Signal rows ────────────────────
 
-    def decide(self, symbol: str) -> BotDecision:
+    def decide(self, symbol: str, *,
+               signal_stats: dict | None = None) -> BotDecision:
         """Default decision: weighted vote over recent active Signal rows.
 
         Subclasses can override for asset-specific logic. Returns a BotDecision
         with rule_name=<top contributing rule> so Phase 5/7/8 multipliers apply.
+
+        `signal_stats` is the output of `aggregation.signal_stats_for_tick()`,
+        handed through to `weighted_consensus` so a fleet pass aggregates six
+        months of signal history once. None leaves the vote exactly as it was:
+        the consensus computes the aggregate itself, lazily, when a vote needs
+        weighing.
         """
         from signals.models import Signal
         from instruments.models import Instrument
@@ -1964,13 +6240,14 @@ class AssetBot(ABC):
                 min_net_weight=float(
                     extras.get("min_net_weight", default_threshold)),
                 min_signals=self.cfg.min_signals_for_entry,
-                venue=venue)
+                venue=venue, signal_stats=signal_stats)
             if verdict["direction"] == "HOLD":
                 return BotDecision("HOLD", 0, [verdict["detail"]])
             side = bullish if verdict["direction"] == "BUY" else bearish
             return BotDecision(
                 verdict["direction"],
-                self._conviction_score(verdict, side, venue=venue),
+                self._conviction_score(verdict, side, venue=venue,
+                                       signal_stats=signal_stats),
                 reasons=([verdict["detail"]]
                           + [f"{s.rule_name}: {s.title}" for s in side[:3]]),
                 rule_name=verdict["rule_name"] or "asset_bot_weighted_consensus",
@@ -2073,7 +6350,8 @@ class AssetBot(ABC):
         return bullish, bearish + [vote]
 
     def _conviction_score(self, verdict: dict, side: list, *,
-                          venue: str) -> float:
+                          venue: str,
+                          signal_stats: dict | None = None) -> float:
         """The winning side's conviction, with the SMC seat taken back out.
 
         `weighted_consensus` scores a side as its total evidence divided by
@@ -2114,7 +6392,7 @@ class AssetBot(ABC):
         rules_only = weighted_consensus(
             real if buy else [], [] if buy else real,
             asset_class=self.asset_class, min_net_weight=0.0, min_signals=1,
-            venue=venue)
+            venue=venue, signal_stats=signal_stats)
         return rules_only["score"]
 
     # ── Phase-17: optional bot-trade track-record feedback ──────────────

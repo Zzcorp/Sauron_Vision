@@ -610,7 +610,21 @@ class BotBacktestStripTests(TestCase):
     it never had the pending-forever defect. What it had was a status
     vocabulary mismatch: the model writes "complete"/"error" and the strip
     counted "completed"/"failed", so every aggregate on the page was
-    permanently zero however many runs had finished."""
+    permanently zero however many runs had finished.
+
+    It had a second mismatch of the same species, found 2026-09-13: the
+    strip read the trade count as `stats["n_trades"]` and the engine
+    writes `stats["n"]`, so `avg_trades` was a hard 0.0 on every run ever
+    displayed. This test did not catch it because THE FIXTURE BELOW was
+    written to match the page rather than the engine — it seeded
+    `{"n_trades": 12}`, a blob bot_program/backtest_asset.py has never
+    produced, so the assertion passed against a page that was wrong and
+    would have failed against a page that was right.
+
+    A fabricated fixture can only ever test the fabrication. The seed now
+    spells the keys compute_stats actually returns, and
+    tests/test_backtest_stat_keys.py checks that agreement directly,
+    without a fixture at all."""
 
     @classmethod
     def setUpTestData(cls):
@@ -619,7 +633,8 @@ class BotBacktestStripTests(TestCase):
         BotBacktestRun.objects.create(
             user=cls.user, config_name_snapshot="Crypto",
             asset_class_snapshot="crypto", status="complete",
-            stats={"n_trades": 12, "win_rate": 0.5, "total_r": 3.4})
+            # "n", not "n_trades" — the keys compute_stats really returns.
+            stats={"n": 12, "win_rate": 0.5, "total_r": 3.4})
         BotBacktestRun.objects.create(
             user=cls.user, config_name_snapshot="Forex",
             asset_class_snapshot="forex", status="error",

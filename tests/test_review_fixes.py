@@ -357,10 +357,53 @@ class HealthAccuracyTests(TestCase):
         self.assertEqual(res["state"], "fail")
         self.assertIn("EURUSD", res["detail"])
 
-    def test_commodity_paper_routing_is_not_reported_as_broken(self):
+    def test_a_live_commodity_config_with_no_box_is_reported_as_broken(self):
+        """2026-09-26: commodity is no longer paper by design. CommodityBot
+        stopped rewriting a live config to paper, so with no commodity box
+        ticked the router's PaperTrader refuses every entry
+        (PAPER_FALLBACK), and the row says so instead of 'paper-only by
+        asset class'."""
         from dashboard.views_system_health import check_live_mode_readiness
-        _cfg(self.user, asset_class="commodity", symbols=["XAUUSD"], name="Gold")
-        self.assertEqual(check_live_mode_readiness(self.user)["state"], "ok")
+        _instrument("WHEATUSD", "commodity")
+        _cfg(self.user, asset_class="commodity", symbols=["WHEATUSD"],
+             name="Wheat")
+        row = check_live_mode_readiness(self.user)
+        self.assertEqual(row["state"], "fail")
+        self.assertIn("falling back to paper: Wheat/WHEATUSD", row["detail"])
+        self.assertIn("tick a box for the class on /brokers/", row["hint"])
+        self.assertNotIn("paper-only by asset class", row["detail"])
+
+    def test_a_live_commodity_config_on_the_etoro_box_is_a_real_route(self):
+        from bot_program.models import EtoroAccount
+        from dashboard.views_system_health import check_live_mode_readiness
+        _instrument("WHEATUSD", "commodity")
+        _cfg(self.user, asset_class="commodity", symbols=["WHEATUSD"],
+             name="Wheat")
+        acct = EtoroAccount.objects.create(user=self.user, demo=True,
+                                           is_primary_for_commodity=True)
+        acct.set_credentials("k", "u")
+        acct.save()
+        row = check_live_mode_readiness(self.user)
+        self.assertEqual(row["state"], "ok", row)
+        self.assertEqual(row["detail"],
+                         "1 live bot(s) have a real broker route")
+
+    def test_a_live_commodity_config_routed_to_ibkr_is_reported_refused(self):
+        """IBKR's commodity flag reads True until deploy/ETORO_DEPARTURE.md
+        §2a, and the entry gate refuses a live commodity order there
+        (step 0, 2026-09-26): a real route and a dead bot, reported red."""
+        from dashboard.views_system_health import check_live_mode_readiness
+        _instrument("WHEATUSD", "commodity")
+        _cfg(self.user, asset_class="commodity", symbols=["WHEATUSD"],
+             name="Wheat")
+        ibkr = type("IBKRTrader", (), {})()
+        with patch("bot_program.engine.broker_router.client_for_symbol",
+                   return_value=ibkr):
+            row = check_live_mode_readiness(self.user)
+        self.assertEqual(row["state"], "fail")
+        self.assertIn("every entry is refused: Wheat/WHEATUSD (ibkr)",
+                      row["detail"])
+        self.assertIn("eToro only", row["hint"])
 
     def test_heartbeat_check_warns_when_some_bots_are_silent(self):
         from bot_program.asset_engine.safety import write_heartbeat

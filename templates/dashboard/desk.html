@@ -1,0 +1,464 @@
+{% extends "base.html" %}
+{% comment %} The capital desk — /desk/.
+
+   SERVER-RENDERED ONLY. No script tag, no chart library, no external asset:
+   every bar is a div width the view computed, and the ladder marks and the
+   sparkline are inline SVG whose points the view computed. A page about risk
+   must render when the network is the thing that is broken.
+
+   ▩ is the sidebar's Capital Desk mark — title and nav row agree, and the
+   mark is drawn from the house geometric set like every other one.
+
+   `--up` is not defined in sauron.css (only `--down` is), so every "good"
+   colour here is var(--up, var(--accent)) — the fallback is exactly what
+   .oc-strip-value.up already resolves to. {% endcomment %}
+{% block title %}Capital Desk — Sauron Vision{% endblock %}
+{% block page_title %}▩ CAPITAL DESK · {% if live_mode %}LIVE{% else %}SHADOW{% endif %}{% endblock %}
+
+{% block content %}
+
+{# ── 1. ONE SENTENCE. What makes this page understandable in three seconds. #}
+<div class="card fade-in-up" style="margin-bottom:18px;border-left:3px solid var(--accent);">
+    <div style="padding:16px 18px;font-size:14px;line-height:1.7;">{{ headline }}</div>
+    {% if plan %}
+    <div style="padding:0 18px 14px;font-size:11px;color:var(--text-muted);">
+        Source: plan #{{ plan.id }} ({{ plan.venue }}), written {{ plan.created_at|timesince }} ago
+        {% if plan.tick_id %} · tick {{ plan.tick_id|truncatechars:12 }}{% endif %}.
+        The desk ranks on expected R per unit of MARGINAL risk — what a bet adds to the book once its
+        correlation with everything already on is counted — and it may only ever shrink a size, never raise one.
+    </div>
+    {% endif %}
+</div>
+
+{# ── 2. KPI STRIP ───────────────────────────────────────────────────── #}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">MODE</span>
+        <span class="oc-strip-value {% if live_mode %}up{% endif %}">{% if live_mode %}LIVE{% else %}SHADOW{% endif %}</span>
+        <span class="oc-strip-sub">{% if live_mode %}the fleet obeys the plan{% else %}the plan is recorded, the fleet is unchanged{% endif %}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">LAST PLAN</span>
+        {% if plan %}
+        <span class="oc-strip-value">{{ plan.created_at|timesince }}</span>
+        <span class="oc-strip-sub">ago · #{{ plan.id }} {{ plan.venue }}{% if plan.error %} · ERRORED{% endif %}</span>
+        {% else %}
+        <span class="oc-strip-value">—</span>
+        <span class="oc-strip-sub">{% if desk_on %}no plan written yet{% else %}pipeline_capital_desk is OFF{% endif %}</span>
+        {% endif %}
+    </div>
+    {% for v in venues %}{% if v.venue == 'live' %}
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">BUDGET (LIVE)</span>
+        {% if v.capital %}
+        {% comment %} The numerator is the MARGINAL total the chooser spent, because that is
+           the unit the budget was consumed in; the raw risk at stop sits beside it, named.
+           An em dash for a plan written before the desk recorded a marginal total. {% endcomment %}
+        <span class="oc-strip-value">{% if v.new is not None %}{{ v.new|floatformat:0 }}{% else %}—{% endif %}<span style="color:var(--text-muted);font-size:0.7em;"> / {{ v.governed|floatformat:0 }}</span></span>
+        <span class="oc-strip-sub">{{ currency }} MARGINAL · raw at stop {{ v.new_raw|floatformat:0 }} · {{ risk_pct|floatformat:1 }}% of {{ v.capital|floatformat:0 }} pooled · governor ×{{ v.governor|floatformat:2 }}</span>
+        {% else %}
+        <span class="oc-strip-value">—</span>
+        <span class="oc-strip-sub">no enabled LIVE config — nothing to budget</span>
+        {% endif %}
+    </div>
+    {% endif %}{% endfor %}
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">CANDIDATES</span>
+        {% if plan %}
+        <span class="oc-strip-value">{{ plan.n_candidates }}</span>
+        <span class="oc-strip-sub">{{ plan.n_chosen }} chosen · {{ plan.n_resized }} resized · {{ plan.n_displaced }} displaced · {{ plan.n_duplicate }} duplicate</span>
+        {% else %}
+        <span class="oc-strip-value">—</span>
+        <span class="oc-strip-sub">nothing proposed yet</span>
+        {% endif %}
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">EDGE R · 7d</span>
+        {% comment %} Below one graded plan this is an em dash. A 0.00 here would read as
+           "the ranking made no difference", which is a measurement nobody made. {% endcomment %}
+        {% if edge_7d is not None %}
+        <span class="oc-strip-value {% if edge_7d > 0 %}up{% elif edge_7d < 0 %}down{% endif %}">{% if edge_7d > 0 %}+{% endif %}{{ edge_7d|floatformat:2 }}</span>
+        <span class="oc-strip-sub">over {{ edge_7d_n }} graded plan{{ edge_7d_n|pluralize }}</span>
+        {% else %}
+        <span class="oc-strip-value">—</span>
+        <span class="oc-strip-sub">no plan graded yet · <code>{{ cmd_grade }}</code></span>
+        {% endif %}
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">MATRIX</span>
+        {% if plan and plan.matrix_pairs_total %}
+        <span class="oc-strip-value">{{ plan.matrix_pairs_measured }}<span style="color:var(--text-muted);font-size:0.7em;"> / {{ plan.matrix_pairs_total }}</span></span>
+        <span class="oc-strip-sub">pairs measured of pairs the plan needed</span>
+        {% else %}
+        <span class="oc-strip-value">—</span>
+        <span class="oc-strip-sub">nothing to correlate on the last plan</span>
+        {% endif %}
+    </div>
+</div>
+
+{% if not desk_on %}
+<div class="card fade-in-up" style="margin-bottom:24px;border-left:3px solid var(--down);">
+    <div style="padding:16px 18px;font-size:12px;line-height:1.7;">
+        <strong>pipeline_capital_desk is OFF</strong> — the fleet pass is the legacy loop: one config after
+        another, each one's entry filling before the next one is even asked, and nothing ranking the tick's
+        opportunities against one another. Turn the desk on (it runs in SHADOW and changes nothing the bots do)
+        with:<br><code style="color:var(--accent);">{{ cmd_on }}</code>
+    </div>
+</div>
+{% endif %}
+
+{# ── 3. THE RISK BUDGET BAR, one per venue ──────────────────────────── #}
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">The risk budget — how much is on the table, how much is left</span></div>
+    <div style="padding:8px 18px 18px;">
+        {% for v in venues %}
+        <div style="margin-top:14px;">
+            <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px;">
+                <span style="text-transform:uppercase;letter-spacing:.08em;">{{ v.venue }}</span>
+                <span style="color:var(--text-muted);">
+                    {% if v.error %}unreadable: {{ v.error }}
+                    {% elif v.capital %}{{ risk_pct|floatformat:1 }}% of {{ v.capital|floatformat:0 }} {{ currency }} — {% if v.venue == 'paper' %}the capital pooled across every enabled config that can FILL on paper: the paper-mode ones and the live-mode ones, whose paper-stage rules fill here{% else %}the capital pooled across this user's enabled live configs{% endif %}
+                    {% else %}{% if v.venue == 'paper' %}no enabled config at all{% else %}no enabled live config{% endif %}{% endif %}
+                </span>
+            </div>
+            {% if v.capital %}
+            {% comment %} Full width is the UNGOVERNED allowance, so the slice the drawdown
+               governor removed is visible rather than merely absent. {% endcomment %}
+            <div style="position:relative;height:22px;border:1px solid var(--border);border-radius:3px;overflow:hidden;display:flex;">
+                <div style="width:{{ v.book_pct|floatformat:2 }}%;background:var(--text-muted);opacity:.55;" title="risk already at stop in the open book"></div>
+                <div style="width:{{ v.new_pct|floatformat:2 }}%;background:var(--accent);" title="risk this plan adds"></div>
+                <div style="width:{{ v.free_pct|floatformat:2 }}%;background:transparent;" title="free budget"></div>
+                <div style="width:{{ v.cut_pct|floatformat:2 }}%;background:repeating-linear-gradient(45deg,var(--down),var(--down) 2px,transparent 2px,transparent 6px);opacity:.5;" title="removed by the drawdown governor"></div>
+                <div style="position:absolute;top:0;bottom:0;left:{{ v.governed_pct|floatformat:2 }}%;width:2px;background:var(--down);"></div>
+            </div>
+            {% comment %} TWO NUMBERS, TWO LABELS. The bar is spent in MARGINAL risk because
+               that is the arithmetic the chooser performed; the raw risk at stop is the other
+               true thing about the same entries, and neither may wear the other's name. {% endcomment %}
+            <div style="display:flex;gap:18px;font-size:11px;margin-top:6px;flex-wrap:wrap;">
+                <span><span style="color:var(--text-muted);">■</span> open book {{ v.book|floatformat:2 }} {{ currency }}{% if v.n_open %} over {{ v.n_open }} position{{ v.n_open|pluralize }}{% endif %}</span>
+                <span><span style="color:var(--accent);">■</span> MARGINAL RISK this plan adds (the unit the budget was spent in): {% if v.new is not None %}{{ v.new|floatformat:2 }} {{ currency }}{% else %}—{% endif %}</span>
+                <span>□ free {{ v.free|floatformat:2 }} {{ currency }}</span>
+                <span style="color:var(--text-muted);">RAW RISK AT STOP on the same entries (what the account loses if every one of those stops is hit): {{ v.new_raw|floatformat:2 }} {{ currency }}</span>
+                <span style="color:var(--text-muted);">{{ v.governor_text }}</span>
+            </div>
+            {% if v.plan and v.new is None %}
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
+                Plan #{{ v.plan.id }} recorded no marginal total — it was written before the desk stored one, so the
+                bar above shows none rather than inventing one out of the raw risk at stop.
+            </div>
+            {% endif %}
+            {% if v.unmeasured_open %}
+            <div style="font-size:11px;color:var(--down);margin-top:4px;">
+                {{ v.unmeasured_open }} open position{{ v.unmeasured_open|pluralize }} carries no initial stop in its metadata — its risk is UNMEASURED and is not in this bar.
+            </div>
+            {% endif %}
+            {% else %}
+            <div style="font-size:11px;color:var(--text-muted);">
+                {% if v.venue == 'paper' %}No enabled config at all{% else %}No enabled live config{% endif %}, so there is no capital to take {{ risk_pct|floatformat:1 }}% of and no budget to draw.
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+        <p style="font-size:11px;color:var(--text-muted);margin-top:16px;">
+            The denominator is the capital assigned to the ENABLED configs that can FILL on that venue — the same
+            pool each entry's own risk fraction divides by — so the desk's ceiling and the per-order ceiling are
+            denominated in the same money. LIVE is the live-mode configs only. PAPER is every enabled config,
+            live-mode ones included: a rule with no promotion record, or still at the paper stage, is forced onto
+            the paper venue whatever its config's mode says, so a live config's capital backs paper fills too. A
+            live config therefore appears in BOTH denominators, and that is correct — these are two separate
+            books, never summed and never netted, and only the live one stands in front of real money. Paper and
+            live never share a budget, a book or a correlation penalty. The open book includes hand-taken
+            positions: they bypass the desk and they are still money at risk.
+        </p>
+    </div>
+</div>
+
+{# ── 4. THE CANDIDATE LADDER — the heart of the page ────────────────── #}
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">The ladder — every candidate of the last plan, in the order the money was offered</span></div>
+    {% if ladder %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+      <thead><tr>
+        <th>#</th><th>Bot / symbol</th><th>Expected R</th><th>Marginal risk</th><th>Outcome</th><th>Why</th>
+      </tr></thead>
+      <tbody>
+        {% for r in ladder %}
+        <tr>
+          <td class="num">{{ r.d.rank }}</td>
+          <td class="sv-ident">
+            {{ r.d.config.name }}<br>
+            <span style="font-family:var(--font-mono);">{{ r.d.symbol }}</span>
+            <span class="badge badge-{% if r.d.direction == 'BUY' %}bullish{% else %}bearish{% endif %}">{{ r.d.direction }}</span>
+            <div style="font-size:10px;color:var(--text-muted);">{{ r.d.rule_name|default:"(unnamed rule)" }}</div>
+          </td>
+          {% comment %} LEFT bar: expected R as a fraction of the tick's best. Muted with a
+             badge when the rank came from conviction × planned net RR instead —
+             and then NO number, because there is no expected R to show. {% endcomment %}
+          <td style="min-width:150px;">
+            <div style="height:9px;border:1px solid var(--border);border-radius:2px;overflow:hidden;">
+              <div style="width:{{ r.key_pct|floatformat:2 }}%;height:100%;background:{% if r.measured %}var(--up, var(--accent)){% else %}var(--text-muted){% endif %};"></div>
+            </div>
+            <div style="font-size:10px;margin-top:3px;">
+              {% if r.measured %}{% if r.d.e_r > 0 %}+{% endif %}{{ r.d.e_r|floatformat:2 }}R · n={{ r.d.n }} · {{ r.d.get_lane_display }}
+              {% else %}<span class="badge badge-medium" title="Under the floor of {{ min_n }} graded fills — ranked on conviction × planned net reward-to-risk">unmeasured</span> <span style="color:var(--text-muted);">—</span>{% endif %}
+            </div>
+          </td>
+          {# RIGHT bar: marginal risk as a fraction of the tick's budget. #}
+          <td style="min-width:130px;">
+            <div style="height:9px;border:1px solid var(--border);border-radius:2px;overflow:hidden;">
+              <div style="width:{{ r.risk_pct|floatformat:2 }}%;height:100%;background:var(--down);opacity:.75;"></div>
+            </div>
+            <div style="font-size:10px;margin-top:3px;color:var(--text-muted);">
+              {{ r.d.marginal_risk|floatformat:2 }} {{ currency }}{% if budget_base %} of {{ budget_base|floatformat:0 }}{% endif %}
+              {% if r.d.corr_max is not None %} · ρ {{ r.d.corr_max|floatformat:2 }}{% endif %}
+            </div>
+          </td>
+          <td><span class="badge badge-{% if r.tone == 'up' %}bullish{% elif r.tone == 'down' %}bearish{% else %}medium{% endif %}">{{ r.badge }}</span></td>
+          <td style="font-size:11px;color:var(--text-muted);max-width:52ch;">{{ r.why }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p style="font-size:11px;color:var(--text-muted);padding:12px 16px;">
+        Rank is the order the greedy pass actually offered the money in — expected R per unit of MARGINAL risk —
+        so the best candidate in R can sit below a slightly weaker one that diversifies the book. Every sentence
+        above is composed from what the decision stored at plan time; none of it is recomputed against today's
+        market. A resize below ×{{ min_mult|floatformat:2 }} is not taken at all: a quarter position pays a full
+        round trip against a stop nobody would have chosen for a bet that small.
+    </p>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
+        <p>{% if not desk_on %}NO PLAN — the desk is off. Turn it on with <code>{{ cmd_on }}</code>; it runs in SHADOW and changes nothing the bots do.{% else %}NO PLAN YET — the desk is on and has not seen a candidate. The fleet pass proposes on every tick of <code>pipeline_asset_bots</code>; a tick where every symbol skipped writes no plan.{% endif %}</p></div>
+    {% endif %}
+</div>
+
+{# ── 5. WHAT THE DESK CHANGED ───────────────────────────────────────── #}
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">What the desk changed</span></div>
+    <div style="padding:14px 18px;">
+    {% if not plan %}
+        <p style="font-size:12px;color:var(--text-muted);">Nothing yet — no plan has been written. {% if not desk_on %}<code>{{ cmd_on }}</code>{% endif %}</p>
+    {% elif live_mode %}
+        <p style="font-size:13px;">Applied: <strong>{{ changed.applied }}</strong>. In LIVE mode a displaced candidate is not sent —
+        it is recorded as a <code>desk_displaced</code> skip naming this plan, and one graded direction call is
+        logged under <code>desk:{config}</code> so the ledger can ask later whether the displacement was right.</p>
+    {% else %}
+        <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+            In shadow nothing was changed — this is the counterfactual being graded.
+        </p>
+        <div style="display:flex;gap:24px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:220px;border:1px solid var(--border);border-radius:3px;padding:12px;">
+                <div style="font-size:11px;letter-spacing:.08em;color:var(--text-muted);">THE FLEET DID</div>
+                <div style="font-size:20px;margin:6px 0;">{{ changed.fleet.entries }} <span style="font-size:12px;color:var(--text-muted);">entries</span></div>
+                <div style="font-size:12px;">{{ changed.fleet.risk|floatformat:2 }} {{ currency }} of risk at stop</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:6px;font-family:var(--font-mono);">{{ changed.fleet.symbols|join:" "|default:"—" }}</div>
+            </div>
+            <div style="flex:1;min-width:220px;border:1px solid var(--accent);border-radius:3px;padding:12px;">
+                <div style="font-size:11px;letter-spacing:.08em;color:var(--accent);">THE DESK WOULD HAVE</div>
+                <div style="font-size:20px;margin:6px 0;">{{ changed.desk.entries }} <span style="font-size:12px;color:var(--text-muted);">entries</span></div>
+                <div style="font-size:12px;">{{ changed.desk.risk|floatformat:2 }} {{ currency }} of risk at stop</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:6px;font-family:var(--font-mono);">{{ changed.desk.symbols|join:" "|default:"—" }}</div>
+            </div>
+        </div>
+        {% if changed.differ %}
+        <p style="font-size:11px;color:var(--text-muted);margin-top:10px;">
+            The symbols that differ: <span style="font-family:var(--font-mono);color:var(--down);">{{ changed.differ|join:" " }}</span>.
+            Those are what the grade turns on — each one is walked against the bars over its own horizon and
+            scored against what the fleet actually booked.
+        </p>
+        {% else %}
+        <p style="font-size:11px;color:var(--text-muted);margin-top:10px;">The two sets are identical on this plan — the desk would have changed nothing.</p>
+        {% endif %}
+        <p style="font-size:11px;color:var(--text-muted);margin-top:10px;">
+            Promote to LIVE only after weeks of positive edge in shadow, the same bar the share allocator had to
+            clear: <code>{{ cmd_live }}</code>
+        </p>
+    {% endif %}
+    </div>
+</div>
+
+{# ── 6. THE CORRELATION HEAT ────────────────────────────────────────── #}
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Correlation — the chosen set against the open book</span></div>
+    <div style="padding:14px 18px;">
+    {% if heat.rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table" style="font-size:11px;">
+      <thead><tr><th></th>{% for s in heat.symbols %}<th class="num" style="font-family:var(--font-mono);">{{ s }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for row in heat.rows %}
+        <tr>
+          <td class="sv-ident" style="font-family:var(--font-mono);">{{ row.symbol }} <span style="color:var(--text-muted);">{{ row.direction }}</span></td>
+          {% for c in row.cells %}
+          <td class="num" style="position:relative;">
+            {% if c.self %}<span style="color:var(--text-muted);">1.00</span>
+            {% elif c.value is None %}<span style="color:var(--text-muted);" title="fewer than the minimum shared 4h bars">·</span>
+            {% else %}
+              <span style="position:absolute;top:0;left:0;right:0;bottom:0;background:var(--down);opacity:{{ c.tint }};"></span>
+              <span style="position:relative;">{{ c.value|floatformat:2 }}</span>
+            {% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p style="font-size:11px;color:var(--text-muted);margin-top:10px;">
+        Bet correlation — ρ × the sign of each direction — so two instruments that mark together held in
+        opposite directions read NEGATIVE, which is what they are: a hedge. Blank with a middle dot = fewer
+        than the minimum {{ corr_bars }} shared 4h bars, so the pair is UNMEASURED and enters the arithmetic at
+        ρ = 0 rather than being called uncorrelated. {{ heat.measured }} of {{ heat.total }} pairs here were
+        measured.{% if heat.truncated %} Truncated to {{ heat_max }} symbols — chosen first, then the largest open positions.{% endif %}
+    </p>
+    {% else %}
+    <p style="font-size:12px;color:var(--text-muted);">
+        {{ heat.note|default:"Nothing to correlate" }} — a matrix needs at least two positions between the chosen
+        set and the open book. 4h bars come from the bar refresh over the enabled configs' symbols.
+    </p>
+    {% endif %}
+    </div>
+</div>
+
+{# ── 7. CONCENTRATION ───────────────────────────────────────────────── #}
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">Concentration — this tick's new risk, by rule and by class</span></div>
+    <div style="padding:14px 18px;">
+    {% if concentration.measured and concentration.rules %}
+      <div style="margin-bottom:18px;">
+        <div style="font-size:11px;letter-spacing:.08em;color:var(--text-muted);margin-bottom:8px;">
+            BY RULE — cap {{ concentration.rule_cap_pct|floatformat:0 }}% of the budget
+        </div>
+        {% for b in concentration.rules %}
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;">
+          <span style="width:20ch;font-size:11px;font-family:var(--font-mono);">{{ b.name|truncatechars:20 }}</span>
+          <div style="position:relative;flex:1;height:14px;border:1px solid var(--border);border-radius:2px;overflow:hidden;">
+            <div style="width:{{ b.pct|floatformat:2 }}%;height:100%;background:{% if b.at_cap %}var(--down){% else %}var(--accent){% endif %};opacity:.8;"></div>
+            <div style="position:absolute;top:0;bottom:0;left:{{ concentration.rule_cap_pct|floatformat:0 }}%;width:2px;background:var(--down);"></div>
+          </div>
+          <span style="width:12ch;text-align:right;font-size:11px;color:var(--text-muted);">{{ b.risk|floatformat:2 }} · {{ b.pct|floatformat:0 }}%</span>
+        </div>
+        {% endfor %}
+      </div>
+      <div style="margin-bottom:18px;">
+        <div style="font-size:11px;letter-spacing:.08em;color:var(--text-muted);margin-bottom:8px;">
+            BY ASSET CLASS — cap {{ concentration.class_cap_pct|floatformat:0 }}% of the budget
+        </div>
+        {% for b in concentration.classes %}
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;">
+          <span style="width:20ch;font-size:11px;font-family:var(--font-mono);">{{ b.name|truncatechars:20 }}</span>
+          <div style="position:relative;flex:1;height:14px;border:1px solid var(--border);border-radius:2px;overflow:hidden;">
+            <div style="width:{{ b.pct|floatformat:2 }}%;height:100%;background:{% if b.at_cap %}var(--down){% else %}var(--accent){% endif %};opacity:.8;"></div>
+            <div style="position:absolute;top:0;bottom:0;left:{{ concentration.class_cap_pct|floatformat:0 }}%;width:2px;background:var(--down);"></div>
+          </div>
+          <span style="width:12ch;text-align:right;font-size:11px;color:var(--text-muted);">{{ b.risk|floatformat:2 }} · {{ b.pct|floatformat:0 }}%</span>
+        </div>
+        {% endfor %}
+      </div>
+      <p style="font-size:11px;color:var(--text-muted);">
+        Both bars are measured against the tick's BUDGET ({{ concentration.base|floatformat:2 }} {{ currency }}),
+        not against what the tick happened to take — a cap denominated in the realised total would make the only
+        candidate of a quiet tick 100% of it. Neither cap binds on the FIRST entry of a bucket, for the same
+        reason: what they bound is one idea wearing six tickets. A bar touching its line explains a displacement
+        in the ladder above.
+      </p>
+    {% else %}
+      <p style="font-size:12px;color:var(--text-muted);">
+        No new risk on the last plan{% if not concentration.measured %} and no budget to measure a share against{% endif %} — nothing to concentrate.
+      </p>
+    {% endif %}
+    </div>
+</div>
+
+{# ── 8. THE RECORD ──────────────────────────────────────────────────── #}
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">The record — the last twenty plans, and whether the desk is earning its keep</span></div>
+    <div style="padding:14px 18px 0;">
+    {% if sparkline.points %}
+      {# Inline SVG, points computed in the view: this page ships no script. #}
+      <svg viewBox="0 0 {{ sparkline.width|floatformat:0 }} {{ sparkline.height|floatformat:0 }}" preserveAspectRatio="none"
+           style="width:100%;height:56px;overflow:visible;" role="img" aria-label="edge R across the last graded plans">
+        <line x1="0" y1="{{ sparkline.zero_y }}" x2="{{ sparkline.width|floatformat:0 }}" y2="{{ sparkline.zero_y }}"
+              stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="3 3"></line>
+        <polyline points="{{ sparkline.points }}" fill="none" stroke="var(--accent)" stroke-width="2"></polyline>
+      </svg>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
+        edge R across {{ sparkline.n }} graded plan{{ sparkline.n|pluralize }}, oldest at the left; the dashed line is zero.
+        Above it the ranking beat the fleet it overruled.
+      </div>
+    {% else %}
+      <p style="font-size:12px;color:var(--text-muted);">
+        — no plan has been graded yet. A plan is scored once every decision on it is resolved, or 48 hours after
+        it was written; the nightly pass is <code>bot_program.tasks.grade_capital_desk</code> at 03:45 UTC, and
+        you can run it now with <code>{{ cmd_grade }}</code>.
+      </p>
+    {% endif %}
+    </div>
+    {% if plans %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack">
+      {% comment %} Two columns, not one: the budget is spent in MARGINAL risk, and the raw
+         risk at stop is a different quantity that must not sit under the budget's heading. {% endcomment %}
+      <thead><tr><th>#</th><th>When</th><th>Venue</th><th>Mode</th><th class="num">Cand / chosen</th><th class="num">Marginal used / budget</th><th class="num">Raw risk at stop</th><th class="num">Edge R</th><th class="num">Graded</th></tr></thead>
+      <tbody>
+        {% for p in plans %}
+        <tr>
+          <td data-label="#">#{{ p.id }}</td>
+          <td data-label="When">{{ p.created_at|timesince }} ago</td>
+          <td data-label="Venue"><span class="badge badge-{% if p.venue == 'live' %}bearish{% else %}medium{% endif %}">{{ p.venue }}</span></td>
+          <td data-label="Mode"><span class="badge badge-{% if p.mode == 'live' %}bearish{% else %}medium{% endif %}">{{ p.mode }}</span></td>
+          <td class="num" data-label="Cand / chosen">{{ p.n_candidates }} / {{ p.n_chosen }}{% if p.n_resized %}+{{ p.n_resized }}{% endif %}</td>
+          <td class="num" data-label="Marginal used / budget">{% if p.new_risk_marginal is not None %}{{ p.new_risk_marginal|floatformat:2 }}{% else %}<span style="color:var(--text-muted);" title="written before the desk recorded a marginal total">—</span>{% endif %} / {{ p.budget|floatformat:2 }}</td>
+          <td class="num" data-label="Raw risk at stop">{{ p.new_risk_chosen|floatformat:2 }}</td>
+          {# An ungraded plan is an em dash; a graded one with nothing gradeable says so. #}
+          <td class="num {% if p.edge_r and p.edge_r > 0 %}up{% elif p.edge_r and p.edge_r < 0 %}down{% endif %}" data-label="Edge R">
+            {% if p.edge_r is not None %}{% if p.edge_r > 0 %}+{% endif %}{{ p.edge_r|floatformat:3 }}
+            {% elif p.graded_at %}<span style="color:var(--text-muted);" title="graded, and nothing on it could be priced">ungradeable</span>
+            {% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
+          </td>
+          <td class="num" data-label="Graded">{% if p.graded_at %}{{ p.edge_detail.n_graded|default:0 }}{% if p.edge_detail.n_ungradeable %} <span style="color:var(--text-muted);">(+{{ p.edge_detail.n_ungradeable }} unpriced)</span>{% endif %}{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">◌</div>
+        <p>NO PLANS — the desk has written nothing for this account. {% if not desk_on %}<code>{{ cmd_on }}</code>{% else %}It writes one per venue on every fleet pass that produces a candidate.{% endif %}</p></div>
+    {% endif %}
+</div>
+
+{# ── 9. The platform-wide zone: staff only, the rule /ops/ follows ──── #}
+<div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">The two switches</span></div>
+    <div style="padding:14px 18px;">
+    {% if platform.staff_only %}
+        <p style="font-size:12px;color:var(--text-muted);">{{ platform.error }}</p>
+    {% elif platform.error %}
+        <p style="font-size:12px;color:var(--down);">Unreadable: {{ platform.error }}</p>
+    {% else %}
+        <table class="sv-perf-table">
+          <thead><tr><th>Component</th><th>State</th><th>What it does</th><th>Command</th></tr></thead>
+          <tbody>
+            {% for c in platform.components %}
+            <tr>
+              <td class="sv-ident" style="font-family:var(--font-mono);">{{ c.key }}</td>
+              <td><span class="badge badge-{% if c.on %}bullish{% else %}medium{% endif %}">{% if not c.registered %}NOT REGISTERED{% elif c.on %}ON{% else %}OFF{% endif %}</span></td>
+              <td style="font-size:11px;color:var(--text-muted);max-width:52ch;">{{ c.row.description|default:"not registered — run seed_components" }}</td>
+              <td style="font-size:11px;font-family:var(--font-mono);">{{ c.command }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <p style="font-size:11px;color:var(--text-muted);margin-top:10px;">
+            The desk FAILS OPEN: if the ranking pass raises, the failure is written onto a plan of its own and
+            the fleet runs undesked — every candidate at its own size, exactly as with the component off. A
+            ranking agent that goes down must not stop the bots.
+            {% if platform.last_grade %} Last grade written {{ platform.last_grade.graded_at|timesince }} ago (plan #{{ platform.last_grade.id }}).{% else %} No plan has ever been graded.{% endif %}
+        </p>
+    {% endif %}
+    </div>
+</div>
+{% endblock %}

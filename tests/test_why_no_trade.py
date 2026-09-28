@@ -151,3 +151,116 @@ class TheManualConfigIsNotABlockerTests(TestCase):
         _config(name="starter_fx", symbols=())
         out = _run()
         self.assertIn("ENABLED WITH NO SYMBOLS", out)
+
+
+class EveryKeyItChecksIsARealComponentTests(TestCase):
+    """The remedy the command prints must be able to work.
+
+    `scraper_prices` sat at the end of the master-switch tuple and was not a
+    component: absent from DEFAULT_COMPONENTS, no task gated on it, and the
+    only occurrence of the string in the whole tree was that one line. So on
+    a perfectly seeded deployment it reported NO ROW, ranked itself blocker
+    #1, and prescribed `seed_components` — which cannot create a key the
+    defaults do not contain. The operator ran it, nothing changed, and the
+    real fault (a quote stream dead four days) sat further down the same page.
+
+    Pinned behaviourally rather than by reading the tuple: the invariant that
+    matters is not which keys are listed, it is that running the prescribed
+    command clears every row complaint the command can raise.
+    """
+
+    def test_seeding_the_components_clears_every_no_row_complaint(self):
+        from core.platform_control import seed_components
+        seed_components()
+        out = _run()
+        self.assertNotIn("NO ROW", out)
+        self.assertNotIn("no PlatformComponent row", out)
+
+    def test_the_phantom_key_is_gone(self):
+        """A named regression pin. The string is cheap to reintroduce by
+        copy-paste and impossible to notice: it fails open, as a blocker."""
+        self.assertNotIn("scraper_prices", _run())
+
+    def test_the_real_writers_of_live_marks_are_checked(self):
+        """Dropping the phantom must not drop the question it was reaching
+        for — a missing quote-writer row is genuinely silent and genuinely
+        starves the signal pipeline."""
+        out = _run()
+        for key in ("scraper_live_quotes", "scraper_forex",
+                    "scraper_commodities", "scraper_indices"):
+            self.assertIn(key, out)
+
+    def test_a_genuinely_missing_writer_row_is_still_named_a_blocker(self):
+        """The guard must not swallow the case the tuple exists for."""
+        from core.platform_control import PlatformComponent, seed_components
+        seed_components()
+        PlatformComponent.objects.filter(key="scraper_forex").delete()
+        out = _run()
+        self.assertIn("NO ROW", out)
+        self.assertIn("scraper_forex", out)
+
+
+class AnUnreadableSwitchIsABlockerTests(TestCase):
+    """Section 1 caught an exception from `is_component_enabled` as
+    `on = "ERR ..."`, printed it, and then tested `if on is False` — so an
+    ERR row never reached the blockers and the verdict still read "No
+    structural blocker found" under a header that says any False stops
+    everything below it. A switch whose state could not be read is not
+    ON, and the verdict must not vouch for it.
+    """
+
+    def _healthy_platform(self):
+        """Everything else green, so the verdict is decided by section 1."""
+        from django.utils import timezone
+
+        from core.platform_control import PlatformComponent, seed_components
+        from instruments.models import Instrument
+        from market_data.models import PriceData
+        seed_components()
+        PlatformComponent.objects.update(is_enabled=True)
+        PlatformComponent.objects.filter(key="pipeline_asset_bots").update(
+            last_run_at=timezone.now())
+        _config(name="FED", symbols=("AAPL",))
+        inst, _ = Instrument.objects.get_or_create(
+            symbol="AAPL", defaults={"name": "AAPL", "asset_class": "stock"})
+        PriceData.objects.create(
+            instrument=inst, timeframe="1d", timestamp=timezone.now(),
+            open=100, high=100, low=100, close=100, volume=1, source="test")
+
+    def test_a_healthy_platform_has_no_structural_blocker(self):
+        """The harness itself: with every switch readable and ON, the
+        verdict is the one the operator is told to read section 4 for."""
+        self._healthy_platform()
+        self.assertIn("No structural blocker", _run())
+
+    def test_an_unreadable_master_switch_is_named_a_blocker(self):
+        from unittest.mock import patch
+
+        from django.db import OperationalError
+
+        from core import platform_control
+        self._healthy_platform()
+        real = platform_control.is_component_enabled
+
+        def _flaky(key):
+            if key == "platform_master":
+                raise OperationalError("database is locked")
+            return real(key)
+
+        with patch.object(platform_control, "is_component_enabled",
+                          side_effect=_flaky):
+            out = _run()
+        self.assertIn("ERR", out)
+        self.assertIn("BLOCKERS", out)
+        self.assertIn("could not be read", out)
+        self.assertIn("database is locked", out)
+        self.assertNotIn("No structural blocker", out)
+
+    def test_a_switch_that_reads_off_is_still_off(self):
+        from core.platform_control import PlatformComponent
+        self._healthy_platform()
+        PlatformComponent.objects.filter(key="platform_master").update(
+            is_enabled=False)
+        out = _run()
+        self.assertIn("platform_master is OFF", out)
+        self.assertNotIn("could not be read", out)

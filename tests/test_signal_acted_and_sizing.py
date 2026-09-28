@@ -329,10 +329,11 @@ class SizingBoundsTests(TestCase):
         self.assertGreater(p["risk_per_unit"], 0)
         self.assertGreater(p["max_qty"], p["qty"],
                            "the default size is already at the ceiling")
-        # 5.0% of a $10,000 pool — the hard cap from sizing.py, raised from
-        # 1% so a SMALL account can risk enough for a win to clear its own
-        # costs. Not the 0.25% default budget, which is unchanged.
-        self.assertAlmostEqual(p["max_risk_dollars"], 500.0, places=2)
+        # 7.0% of a $10,000 pool — the hard cap from sizing.py, raised from
+        # 5% on 2026-09-26 (the operator's decision) and before that from
+        # 1%, so a SMALL account can risk enough for a win to clear its
+        # own costs. Not the 0.25% default budget, which is unchanged.
+        self.assertAlmostEqual(p["max_risk_dollars"], 700.0, places=2)
         # 20% notional for crypto.
         self.assertAlmostEqual(p["max_notional"], 2000.0, places=2)
 
@@ -487,9 +488,10 @@ class SizeOverrideRefusalTests(TestCase):
         Which of the two ceilings BINDS is set by the stop: sizing solves
         notional = equity x f / stop_fraction, so the risk ceiling binds
         only once the stop is wider than f / notional_cap. With f raised to
-        5% and the default 20% cap that boundary is a 25% stop — wider than
-        MAX_STOP_FRACTION allows — so this config lifts the notional cap in
-        order to test the risk one at an ordinary stop distance.
+        7% (2026-09-26) and the default 20% cap that boundary is a 35% stop
+        — wider than MAX_STOP_FRACTION allows — so this config lifts the
+        notional cap in order to test the risk one at an ordinary stop
+        distance.
         """
         from bot_program.manual_trade import (execute_take_trade,
                                               manual_config_for,

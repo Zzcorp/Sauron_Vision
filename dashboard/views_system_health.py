@@ -19,10 +19,50 @@ from django.db.models import Max
 from django.shortcuts import render
 from django.utils import timezone
 
-# Bars older than this mean the rule layer is deciding on stale structure.
+# Bars older than this mean the rule layer is deciding on stale structure —
+# WHILE ITS MARKET IS OPEN. See check_bot_bars: on a shut market this bound is
+# meaningless, and applying it anyway is what reported a weekend as an outage.
 BAR_STALE_SECONDS = 3 * 3600
+# One 4h bar. A bar is stamped with its period START, so the final bar of a
+# session begins up to this long before the close.
+BAR_PERIOD_SECONDS = 4 * 3600
 QUOTE_STALE_SECONDS = 900
 HEARTBEAT_STALE_SECONDS = 1800
+
+
+def _bar_window(asset_class: str) -> str:
+    """Which market calendar an asset class's bars follow.
+
+    Reuses `feeds.Window` rather than inventing a second calendar: that module
+    already owns the answer, `check_feeds` already trusts it, and two
+    calendars in one codebase drift apart in exactly the way that produces a
+    confident wrong verdict.
+
+    COMMODITY maps to the FOREX window, which is an approximation and worth
+    naming. Metals and energy really do run Sunday 17:00 ET to Friday 17:00 ET
+    — the operator's own bar ages proved it, with gold, silver, platinum,
+    palladium, copper, WTI, Brent and gas all fresh within three hours of the
+    Sunday reopen while every equity and FX pair still sat on Friday's close.
+    Grains and softs keep narrower hours, so between the FX reopen and theirs
+    they will be reported stale when they are merely shut. That residual error
+    is in the SAFE direction: it names a problem that is not there rather than
+    hiding one that is, which is the choice `window_is_open` makes for itself
+    ("any doubt resolves to True").
+
+    An unknown asset class gets ALWAYS, so it is never forgiven. A new class
+    should show up as a bar problem until somebody decides its calendar, not
+    be silently excused by a default.
+    """
+    from market_data.feeds import Window
+
+    return {
+        "crypto": Window.ALWAYS,
+        "stock": Window.US_EQUITY,
+        "etf": Window.US_EQUITY,
+        "index": Window.US_EQUITY,
+        "forex": Window.FOREX,
+        "commodity": Window.FOREX,
+    }.get((asset_class or "").lower(), Window.ALWAYS)
 
 
 def _check(key, label, state, detail, hint="", configured=True):
@@ -105,6 +145,7 @@ def check_bot_bars(user) -> dict:
     """
     from bot_program.models import AssetBotConfig
     from instruments.models import Instrument
+    from market_data.feeds import window_is_open, window_last_closed
     from market_data.models import PriceData
 
     symbols = set()
@@ -116,34 +157,67 @@ def check_bot_bars(user) -> dict:
                       configured=False)
 
     inst_by_symbol = {
-        i.symbol: i.id for i in Instrument.objects.filter(symbol__in=symbols)
+        i.symbol: (i.id, i.asset_class)
+        for i in Instrument.objects.filter(symbol__in=symbols)
     }
     latest_by_inst = {
         row["instrument_id"]: row["m"]
         for row in (PriceData.objects
-                    .filter(instrument_id__in=inst_by_symbol.values(),
+                    .filter(instrument_id__in=[v[0] for v
+                                               in inst_by_symbol.values()],
                             timeframe="4h")
                     .values("instrument_id").annotate(m=Max("timestamp")))
     }
 
-    missing, stale, fresh = [], [], []
+    missing, stale, fresh, shut = [], [], [], []
     for symbol in sorted(symbols):
-        inst_id = inst_by_symbol.get(symbol)
-        latest = latest_by_inst.get(inst_id) if inst_id else None
+        row = inst_by_symbol.get(symbol)
+        latest = latest_by_inst.get(row[0]) if row else None
         if latest is None:
             missing.append(symbol)
-        elif _age(latest) > BAR_STALE_SECONDS:
-            stale.append(f"{symbol} ({_fmt_age(_age(latest))})")
-        else:
+            continue
+        if _age(latest) <= BAR_STALE_SECONDS:
             fresh.append(symbol)
+            continue
+        # AN OLD BAR ON A SHUT MARKET IS NOT A FAULT.
+        #
+        # This compared every symbol against one duration and nothing else,
+        # across 35 instruments on five different market calendars. So on any
+        # weekend it reported an outage: 27 of 35 "stale", every equity, every
+        # FX pair, every soft. On 2026-09-06 that reading — "0/35 fresh" —
+        # sent its operator, and me, on a two-day hunt for a dead bar writer
+        # that had in fact been dispatched every ten minutes throughout. The
+        # only genuinely dead thing that weekend was a Finnhub stream, and it
+        # sat unnoticed underneath the fabricated one.
+        #
+        # A fabricated outage is not a harmless false positive. It costs the
+        # same attention a real one needs, and it teaches the operator that
+        # this row is noise — which is how a real four-day silence goes unread.
+        #
+        # `feeds.window_last_closed` already draws the line this needed, and
+        # `check_feeds` has been using it correctly all along: what separates
+        # "quiet because the market is shut" from "died during the session and
+        # the shut market is covering for it". One bar period of grace, because
+        # a 4h bar is stamped with its period START, so the last bar of a
+        # session begins up to four hours before the close.
+        window = _bar_window(row[1])
+        if not window_is_open(window):
+            closed_at = window_last_closed(window)
+            if closed_at is not None and latest >= closed_at - timedelta(
+                    seconds=BAR_PERIOD_SECONDS):
+                shut.append(symbol)
+                continue
+        stale.append(f"{symbol} ({_fmt_age(_age(latest))})")
 
-    if missing and not fresh and not stale:
+    if missing and not fresh and not stale and not shut:
         return _check("bars", "Bot bars (4h)", "fail",
                       f"no 4h bars for any of {len(symbols)} bot symbols — "
                       f"every rule returns HOLD",
                       "Run market_data.tasks.refresh_bot_bars_task")
     if missing or stale:
         detail = f"{len(fresh)}/{len(symbols)} symbols fresh"
+        if shut:
+            detail += f" · {len(shut)} waiting on a shut market"
         if missing:
             detail += " · missing: " + ", ".join(missing[:4])
         if stale:
@@ -152,6 +226,13 @@ def check_bot_bars(user) -> dict:
                       "fail" if missing else "warn", detail,
                       "Those symbols' rules cannot fire — check the bar feed "
                       "and that an Instrument row exists for each")
+    if shut:
+        # Deliberately OK rather than a warning. Nothing is wrong: every
+        # symbol is fed right up to its own market's close, and a row that
+        # goes amber every weekend is a row nobody reads on a Monday.
+        return _check("bars", "Bot bars (4h)", "ok",
+                      f"{len(fresh)}/{len(symbols)} fresh · {len(shut)} fed to "
+                      f"their market's close and waiting for it to reopen")
     return _check("bars", "Bot bars (4h)", "ok",
                   f"all {len(symbols)} bot symbols have fresh 4h bars")
 
@@ -415,13 +496,20 @@ def check_live_mode_readiness(user) -> dict:
     """Live configs whose broker route would fall back to paper. Entries and
     management both refuse in that state, so the bot is effectively off."""
     from bot_program.engine.broker_router import client_for_symbol
+    from bot_program.engine.capabilities import adapter_key
     from bot_program.engine.paper_trader import PaperTrader
     from bot_program.models import AssetBotConfig
 
-    # Asset classes with no wired execution broker route to paper by design
-    # (broker_router._broker_for_asset_class) — flagging them would make the
-    # page permanently red for a condition no credential can fix.
-    PAPER_BY_DESIGN = {"commodity"}
+    # Asset classes with no execution venue at all route to paper by
+    # design — flagging them would make the page permanently red for a
+    # condition no credential can fix. EMPTY since 2026-09-26: commodity
+    # left it when CommodityBot stopped rewriting a live config to paper.
+    # A live commodity config reaches eToro through its commodities box;
+    # routed to IBKR or Saxo it is refused at the entry gate (step 0 of
+    # AssetBot._etoro_entry_refusal), and with no box it meets a
+    # PaperTrader and every entry is refused (PAPER_FALLBACK). Both are
+    # exactly what this row exists to say, so neither is hidden.
+    PAPER_BY_DESIGN = frozenset()
 
     live_cfgs = list(
         AssetBotConfig.objects.filter(user=user, enabled=True, mode="live"))
@@ -437,7 +525,7 @@ def check_live_mode_readiness(user) -> dict:
                       "no bot is in live mode — nothing to verify yet",
                       configured=False)
 
-    broken, expected, symbolless = [], [], []
+    broken, expected, symbolless, gated = [], [], [], []
     for cfg in live_cfgs:
         if cfg.asset_class in PAPER_BY_DESIGN:
             expected.append(cfg.name)
@@ -452,15 +540,34 @@ def check_live_mode_readiness(user) -> dict:
         # a per-symbol fallback is exactly the silent failure we're hunting.
         for symbol in (cfg.symbols or []):
             try:
-                if isinstance(client_for_symbol(user, symbol, cfg), PaperTrader):
+                # purpose="data": this only TYPE-CHECKS the route. Taking
+                # the exclusive trading session to render a page would
+                # starve the tick of the one clientId that can place,
+                # read or cancel an order.
+                client = client_for_symbol(user, symbol, cfg, purpose="data")
+                if isinstance(client, PaperTrader):
                     broken.append(f"{cfg.name}/{symbol}")
+                elif (cfg.asset_class == "commodity"
+                      and adapter_key(client) in ("ibkr", "saxo")):
+                    # a real route the entry gate refuses (2026-09-26): a
+                    # live commodity order goes to eToro only
+                    gated.append(f"{cfg.name}/{symbol} "
+                                 f"({adapter_key(client)})")
             except Exception:
                 broken.append(f"{cfg.name}/{symbol}")
     if broken:
         return _check("live_ready", "Live broker credentials", "fail",
                       "live bots falling back to paper: " + ", ".join(broken[:6]),
-                      "Add or fix broker credentials — these bots refuse to "
-                      "trade rather than record fake live fills")
+                      "Add or fix broker credentials, or tick a box for the "
+                      "class on /brokers/ — these bots refuse to trade "
+                      "rather than record fake live fills")
+    if gated:
+        return _check("live_ready", "Live broker credentials", "fail",
+                      "live commodity routed where every entry is refused: "
+                      + ", ".join(gated[:6]),
+                      "A live commodity order goes to eToro only: tick "
+                      "eToro's commodities box on /brokers/ (Saxo's "
+                      "commodity flag outranks it)")
     if symbolless:
         return _check("live_ready", "Live broker credentials", "warn",
                       "live but scans nothing: " + ", ".join(symbolless[:6]),
@@ -505,6 +612,13 @@ def check_ai_models() -> dict:
                   " · ".join(f"{t}={resolve_tier(t)}" for t in TIERS))
 
 
+def check_morgul_guards() -> dict:
+    """The Morgul guards' last run (bot_program/morgul.py): quiet, or how
+    many findings and which. Read from the run's summary, never re-run."""
+    from bot_program.morgul import health_row
+    return health_row(_check)
+
+
 @login_required
 def system_health(request):
     # Per-user checks are safe for anyone; the platform-wide ones expose
@@ -521,6 +635,7 @@ def system_health(request):
         (check_component_staleness, False, True),
         (check_signal_flow, False, True),
         (check_ai_models, False, True),
+        (check_morgul_guards, False, True),
     ]
     checks = []
     for fn, needs_user, staff_only in plan:

@@ -64,10 +64,11 @@ def send_morning_digest():
     from alerts.scheduled_digests import generate_morning_digest, send_digest
     from django.contrib.auth.models import User
 
+    told = set()  # a chat several users share gets one brief (2026-09-26)
     for user in User.objects.filter(is_active=True):
         try:
             digest = generate_morning_digest(user=user)
-            send_digest(digest, user=user)
+            send_digest(digest, user=user, chats_done=told)
         except Exception as e:
             logger.error(f"Morning digest failed for {user.username}: {e}")
 
@@ -81,10 +82,11 @@ def send_eod_digest():
     from alerts.scheduled_digests import generate_eod_digest, send_digest
     from django.contrib.auth.models import User
 
+    told = set()  # a chat several users share gets one summary (2026-09-26)
     for user in User.objects.filter(is_active=True):
         try:
             digest = generate_eod_digest(user=user)
-            send_digest(digest, user=user)
+            send_digest(digest, user=user, chats_done=told)
         except Exception as e:
             logger.error(f"EOD digest failed for {user.username}: {e}")
 

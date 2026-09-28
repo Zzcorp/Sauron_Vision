@@ -43,7 +43,8 @@ QTY_DECIMALS = 8
 class CryptoBot(AssetBot):
     asset_class = "crypto"
 
-    def _round_qty(self, qty: float, price: float) -> float:
+    def _round_qty(self, qty: float, price: float, *,
+                   fractional=None) -> float:
         """Fractional units, to eight decimals.
 
         A $25 risk budget on BTC at $65,000 with a 3% stop is 0.0128 BTC.
@@ -53,8 +54,16 @@ class CryptoBot(AssetBot):
         """
         rounded = round(float(qty), QTY_DECIMALS)
         if rounded <= 0 and qty > 0:
+            # NOT "the venue's minimum increment": QTY_DECIMALS is THIS
+            # platform's rounding constant. Binance's real step comes from
+            # its own exchangeInfo LOT_SIZE and nothing here reads it, so
+            # this line used to name a venue rule that was never consulted.
+            # It matters more since venue_min_size landed, because a real
+            # venue floor IS now read — from Saxo, and from Saxo alone.
             logger.info(
-                "[crypto_bot] %s: size %.12f rounds to zero at %d decimals "
-                "— the risk budget is below the venue's minimum increment",
+                "[crypto_bot] %s: size %.12f rounds to zero at this "
+                "platform's %d-decimal granularity — the risk budget buys "
+                "less than one unit of it. Binance's own step size is not "
+                "read anywhere, so this is not the venue refusing",
                 self.cfg.name, qty, QTY_DECIMALS)
         return rounded

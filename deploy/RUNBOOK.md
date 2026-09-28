@@ -170,8 +170,13 @@ Leave OFF for now: `actuator_mode_live`, `meta_allocator_mode_live`,
 After editing `.env`, run `dc up -d` — **not** `restart`, which keeps the
 old environment.
 
-> Do **not** use "Start All" on the *system* category — it flips
-> `actuator_mode_live` alongside the master switch.
+> "all on" beside *System* on `/ops/` turns on the master switch, the
+> Telegram eye and the Morgul guards, and leaves every live-money switch
+> OFF — `actuator_mode_live`, `meta_allocator_mode_live`,
+> `share_allocator_mode_live`, `share_allocator_auto_derisk`,
+> `capital_desk_mode_live`, `fractional_units_live`, `etoro_leverage_live`
+> — and the Morgul brake with them; the page says so beside the button.
+> Each of those is its own `component on <key>` or its own toggle.
 
 Confirm it took:
 
@@ -193,7 +198,14 @@ docker compose --env-file .env -f deploy/docker-compose.yml exec web \
 **No broker account is needed for paper trading.** Bars and marks arrive
 keylessly for every asset class (Binance public for crypto, yfinance for the
 rest) within ~10 minutes of enabling the bots and the scrapers from step 5.
-Do **not** use `backfill_bars` for non-crypto symbols — it is Binance-only.
+That refresh keeps the bars current; it does not give a new instrument the
+history the long-window rules need (an SMA200 wants 210 bars). `backfill_bars`
+does, for every class through the same keyless feeds — run it once after
+seeding, and again for any instrument you add later:
+
+```bash
+./deploy/dc exec web python manage.py backfill_bars --from-configs --intervals 1d,4h --bars 300
+```
 
 Broker credentials are for **live trading** and for real-time marks that beat
 the delayed public feeds:
@@ -252,8 +264,27 @@ this is the only test that answers the question:
 ```
 
 **One session per IBKR username.** Logging into the IBKR portal or the
-mobile app with the same credentials kicks Gateway out mid-session. Use
-the paper username for Gateway and keep the live one for the portal.
+mobile app with the same credentials kicks Gateway out mid-session, and
+the newcomer is shown "Existing session detected" and asked to choose.
+IBC's default for that dialog is MANUAL — it waits for a click that never
+comes: on 2026-09-11 the Gateway logged in, passed 2FA, reached the dialog
+and sat on it, container "Up", reading 19h old. The compose now sets
+`EXISTING_SESSION_DETECTED_ACTION: primary`: the Gateway takes the session
+and the other one drops. A container created before that line keeps its
+old environment — recreate it (`./deploy/dc --profile ibkr up -d
+ibgateway`), a restart is not enough. The fight stays symmetric: the human
+logging in with the same name still kicks the Gateway out, and every
+re-login costs an IB Key push; unanswered, that is the `Authorization
+failed` loop with a stale reading (converting currency in the portal did
+exactly this). The
+fix is structural: a SECOND username on the same account for the
+Gateway (Client Portal → Settings → User Settings → Users & Access
+Rights → add a user with trading rights and its own IB Key), applied
+with `./deploy/ibkr-apply`; the human keeps the first username for the
+portal and the mobile app. Until then: log out of the portal before
+the Gateway logs in, and expect a push after every portal visit. For
+paper, use the paper username for Gateway and keep the live one for
+the portal.
 `TRADING_MODE` decides which account Gateway logs into and the PORT
 decides which one Sauron talks to — paper with 4004, live with 4003 (the
 socat relays for the internal 4002/4001). Set one without the other and
@@ -290,12 +321,27 @@ daily after. Which kind decides whether this can run unattended:
 * **Paper** — a separate paper username has NO second factor and logs in
   headless. Prove the whole chain on 4004 first.
 
-**Switching to the push, start to finish.** Activate IB Key in the IBKR
-Mobile app: log in there (this kicks a running Gateway — fine, you are
-about to re-login anyway), Menu → Two-Factor Authentication / Secure
-Login System → activate IB Key, and follow its verification. KEEP SMS
-enrolled as the backup — losing the phone must not mean losing the
-account. With both devices enrolled, the Gateway's login shows a device
+**Switching to the push, start to finish.** THERE IS NO SETTINGS MENU FOR
+THIS, which is the thing worth knowing: an earlier version of this file said
+"Menu → Two-Factor Authentication", an operator hunted for it, and it does
+not exist. Activation happens on the app's LOGIN SCREEN, or by QR code from
+the portal. Either route logs you into the app, which kicks a running
+Gateway — fine, you are about to re-login anyway.
+
+*From the app, no portal needed:* open IBKR Mobile → on the login screen tap
+**I Have an Account** → **Register Two-Factor** → username and password →
+Continue → pick the phone number → **Get Activation SMS** → enter the token
+that arrives → create a PIN (Android) or confirm with Face ID / passcode
+(iPhone) → Done.
+
+*From the portal:* log in at interactivebrokers.com/sso/Login → **user icon**
+→ Settings → Security → **Secure Login System** → the button reads
+**Complete**, not "IB Key" → scan the QR code it shows with the phone's
+camera → allow notifications → create the PIN.
+
+Notifications must be enabled for IBKR Mobile, and the phone must be able to
+receive an SMS: that is how the activation token arrives. KEEP SMS enrolled
+as the backup — losing the phone must not mean losing the account. With both devices enrolled, the Gateway's login shows a device
 list, and the stack auto-selects `IBKR_TWOFA_DEVICE` (default `IB Key` —
 override in `.env` only if IBKR spells your device differently; the value
 must match the list exactly). A missed push re-prompts rather than giving
@@ -323,7 +369,9 @@ IBC: detected dialog entitled: Gateway; event=Focused
 `dc ps` shows the container **(unhealthy)** in this state — the healthcheck
 probes the Gateway's internal API port, which only listens after login, so
 "Up 3 hours (unhealthy)" means stalled, not running. No IB Key push arrives
-because the server never reached the 2FA step. In order:
+because the server never reached the 2FA step. `./deploy/ibkr-doctor` runs
+every check below — and the API-session checks the Gateway itself cannot
+see — read-only, and names the next step; start there. By hand, in order:
 
 1. `./deploy/dc --profile ibkr restart ibgateway` — the interstitial
    variant is non-deterministic and a restart usually logs in clean.
@@ -429,6 +477,558 @@ docker compose --env-file .env -f deploy/docker-compose.yml ps   # nothing Resta
 
 ---
 
+## Three personalities (/personas/)
+
+A **trader personality** is not a new engine. Every knob it needs already
+decides how a bot behaves — the timeframe it reads, the ATR multiples its
+stop and target are cut from, how long a thesis may live, how many bets
+run at once, how much of the pool one stop-out costs. What was missing is
+that those knobs were set ONE AT A TIME with no coherence between them,
+graded over one 90-day window that fits none of them, and allocated out of
+one 2–60% band. A personality is four things and nothing more:
+
+1. a **coherent preset** of knobs that already exist and are already read;
+2. a **grading window** matched to the holding period (21 days of scalps
+   is a sample; 21 days of position trades is one trade);
+3. a **share band** in the account allocator (`bounds_for`);
+4. a **weight** on the 5–10 year horizon prior (`horizon_for`), clamped so
+   the factor can never leave 0.85–1.15 whatever the weight.
+
+**The leverage correction — read this one.** The ask was "short exposure in
+time and large in volume and leverage". **No personality borrows to fund a
+position.** The claim is scoped to personalities because the sweeping
+version of it is false, and was caught being false in review:
+`bot_program.models.BotConfig` carries both `leverage` and `margin_mode`,
+`engine/risk.py` multiplies the position dollars by the first, and
+`engine/runner.py` POSTs both at the Binance futures venue through
+`ensure_config`. That engine is dormant, not absent, and it is
+hand-triggerable from `views.run_tick_now`. Scoped, the claim is stronger
+than the sweeping one: `AssetBotConfig` — the only config a personality can
+be worn by — carries neither field, so no persona can set what it does not
+have.
+
+The honest short-term lever is (a) the **notional fraction** the risk sizer
+is allowed to reach — how much position one fixed *cash* risk budget buys
+when the stop is tight — and (b) the **number of concurrent positions**. On
+stock, ETF, index, commodity, crypto and options both are cash and neither
+is a loan. **Forex is the exception, and the leverage there is real:**
+`sizing.MAX_NOTIONAL_FRACTION` grants it 4.0 — 400% of the pool in notional
+— because 20% on an FX major is an economically meaningless constraint, and
+that module names where the leverage sits: *"the leverage is at the
+broker"*. **No personality ever lowers it.** "Large in volume" is delivered
+as eight concurrent bets at a 35% notional cap on a 0.15% risk budget
+everywhere else, and by the venue on FX.
+
+Separately and independently of all the above: IBKR refuses margin, shorts,
+currency conversion and futures outright below a 2,000 USD account floor
+(Error 201). That is the broker's constraint on the account, not a property
+of this code.
+
+| | **scalp** | **swing** | **position** |
+|---|---|---|---|
+| purpose | many small bets, hours not days | what Sauron is today: the 4h trend | the long view: weeks, few bets |
+| timeframe | `1h` | `4h` | `1d` |
+| entry_score_min | 0.65 | 0.60 | 0.65 |
+| min_signals_for_entry | 2 | 1 | 2 |
+| cool_down_minutes | 15 | 60 | 1440 |
+| max_concurrent_positions | 8 | 5 | 3 |
+| max_daily_loss_pct | 2.0 | 2.0 | 3.0 |
+| hold ceiling (`max_hold_hours`) | 8h | 72h | 720h |
+| risk_per_trade_pct | 0.15 | 0.25 | 0.40 |
+| ATR stop / target | 1.0 / 2.0 | 1.5 / 3.0 | 2.5 / 6.0 |
+| ATR measured on (`atr_timeframe`) | `1h` | `4h` | `1d` |
+| max_signal_age_hours | 4 | 24 | 72 |
+| max_notional_fraction | 0.35 (never forex) | class default | class default |
+| loss streak / drawdown breaker | 3 / 8% | 4 / 10% | 5 / 15% |
+| grading window | 21 days | 90 days | 365 days |
+| horizon weight | ×0.0 | ×0.5 | ×1.5 |
+| share band | 5–25% | 20–60% | 15–50% |
+
+A scalp config's horizon factor is therefore exactly 1.00, and the share
+plan says so in words: `horizon 1.00 (scalp ignores the 5-year view)`.
+
+**`atr_timeframe` is a separate key from `timeframe`, and it matters.**
+`risk_levels.stop_and_target` cuts every ATR multiple from
+`extras["atr_timeframe"]`, which defaults to `4h` for every config on the
+platform. A multiple is only as long as the frame it is measured on: a
+"1.0 ATR" stop measured on 4h bars is two to four times the hourly range a
+scalp is written around, and a 2.5 ATR stop measured on 4h bars is about
+2% on a liquid equity — which an ordinary week clears twice, so a
+thirty-day position thesis would be stopped out by four-hour noise. Each
+personality therefore sets `atr_timeframe` to its own frame, and the
+missing-bars warning covers it: with no `1d` bars, `atr_for` returns None
+and `stop_and_target` falls back to the flat `stop_loss_pct` percentage —
+a DIFFERENT stop, not a clamped one.
+
+**Two keys are REMOVED, not merged, when a personality is applied**, and
+the plan names both before the write:
+
+* `extras["max_hold_hours"]` — the legacy time-stop inlet.
+  `time_stop_setting()` reads it *before* the column, so leaving it would
+  let an old value outrank the personality's ceiling silently. It is
+  drained exactly as the migration and the settings form drain it.
+* a knob the **previous** personality set that the new one does not — today
+  only `max_notional_fraction`, which `scalp` writes and the other two do
+  not. Without the drop, `scalp -> swing` would leave a scalp's 35%
+  notional cap on a swing book for ever. Removed **only** when the stored
+  value is still exactly what the previous personality wrote; a number the
+  operator typed themselves is never touched by a change of style.
+
+**Applying one to a LIVE config re-sizes REAL risk** on the next entry:
+`risk_per_trade_pct`, the ATR stop distance and the notional cap all feed
+`sizing.size_position`. The page asks for the trading PIN there, and the
+command asks for `--yes`; `apply_persona` refuses a live config without
+that force. **A personality changes NO capital and NO account share by
+itself, and never enables or disables a bot.** It writes only the knobs in
+the table above, plus the `persona` / `persona_at` stamp in `extras`.
+
+```bash
+./deploy/dc exec web python manage.py persona list                 # the three side by side, and who wears them
+./deploy/dc exec web python manage.py persona show scalp           # one in full, with why each number
+./deploy/dc exec web python manage.py persona apply 14 swing       # the plan and every warning — WRITES NOTHING
+./deploy/dc exec web python manage.py persona apply 14 swing --yes # writes (--yes stands in for the page's PIN)
+./deploy/dc exec web python manage.py persona grade                # each personality over ITS OWN window
+./deploy/dc exec web python manage.py persona mix                  # which personality this tape rewards (see below)
+```
+
+Read the plan's warnings before the `--yes`. The three that matter: the
+timeframe has **no bars** for this config's symbols (nothing writes `1d`
+bars for crypto — the EOD task covers stock/etf/index/commodity/forex
+only); the config holds **open positions** and the time stop or the ATR
+multiples are moving (the time stop measures from `opened_at`, so a
+shorter ceiling can flatten a position on the very next tick); and the
+config is **live**.
+
+The eleven sector ETFs the Horizon view needs (`XLK XLE XLF XLV XLI XLY
+XLP XLU XLB XLRE XLC`) plus `UUP` are in the instrument catalogue, but
+their bars are not backfilled by adding them. That is an operator command:
+
+```bash
+./deploy/dc exec web python manage.py seed_instruments
+./deploy/dc exec web python manage.py backfill_bars --symbols XLV,XLI,XLY,XLP,XLU,XLB,XLRE,XLC,UUP --intervals 1d,4h --bars 300
+```
+
+`/personas/` shows the same three presets, the same grade and the same
+warnings as the commands, with an Apply form for superusers.
+
+### The mix moves with the market
+
+The ask was: *"make the three personalities interact continuously — under
+certain market states some personalities should be used more, no?"* The
+intuition is sound and the platform has every piece. **What it does not
+have is the answer.** Nobody knows yet which personality suits which
+regime: not the operator, not this runbook, and not the code. So the
+platform does not hard-code a belief — it runs **two lanes**, and every
+answer says which one spoke and with what `n`:
+
+* **MEASURED** — what configs wearing that personality actually earned
+  while the platform *recorded* that regime, above the evidence ledger's
+  own sample floor (10 graded fills). The regime is joined on the trade's
+  **entry**, against the `BrainReport` that existed *then* — never
+  today's. This lane wins whenever it exists.
+* **PRIOR** — a small, explicitly-labelled, **unproven** tilt, used only
+  where nothing is measured. The loudest entry in the table moves a band
+  by 9%; the largest one the code permits is 15%. Not one of them is
+  backed by a single graded fill on this deployment. **A measured cell
+  replaces its prior entirely** — not blended, not decayed, gone.
+* **NEUTRAL** — exactly 1.00, when the regime is `unknown` (the absence of
+  a reading, not a state of the market) or no prior says anything.
+
+**What the factor does, and the bound on it.** It moves that
+personality's **share band**: the band's *centre* shifts, its *width*
+never changes, and the shift is held to **5 percentage points of the
+account** whatever the factor says — so a ×1.15 on swing (20–60%) lands
+at 25–65%, never at 40–80%. Everything under the band is unchanged: the
+water-fill, the half-way smoothing, the **per-day cap** and the
+hysteresis all still bind, so **a regime flip moves a pool no further in
+one day than the allowance the allocator already granted it**: 10 points
+in NORMAL and SHOCK, and the 20 points upward that an EXPANSION tape
+already allowed before the mix existed. (Saying "still 10 points" would
+have been wrong on an expanding tape, and it was wrong there before this
+feature too.) An explicit
+`extras["share_floor_pct"]`/`["share_ceiling_pct"]` still wins over the
+mix, the manual lane still has no ceiling, and **a config wearing no
+personality is not touched at all** — its plan is byte-for-byte what it
+was before this existed.
+
+**When the shift does not run, the plan says which rule beat it.** The
+band shift sits inside one case of `bounds_for`'s precedence — manual
+lane, then an explicit band, then the persona band, then the defaults —
+so on the hand-taken pool and on a config whose band an operator typed
+by hand the mix is read, printed, and **not applied**. The plan's inputs
+carry `mix.applied: false` with `mix.outranked_by` naming the winner and
+the sentence reads *"not applied, the manual lane wins"*. It used to say
+*"the explicit band wins"* on the manual lane and then quote a band move
+(5–25 → 2–100%) the exemption had made and the mix had not — a plan
+must never claim a number it did not set (2026-09-12).
+
+**The mix moves SHARES ONLY.** It never touches `risk_per_trade_pct` or
+`max_notional_fraction`. Two dials moving in the same week make the grade
+unattributable: if a regime flip shifted both the share and the risk per
+trade, no reading afterwards could say which one earned the R — and being
+able to say is the entire point of recording the lane and the `n`.
+
+```bash
+./deploy/dc exec web python manage.py persona mix                          # the matrix, the regime, its confidence and age
+./deploy/dc exec web python manage.py persona mix --venue paper            # paper is NEVER pooled with live
+./deploy/dc exec web python manage.py persona mix --regime trending        # a what-if column, in full sentences
+```
+
+`/personas/` carries the same matrix: three rows, six regime columns,
+measured cells in bold with their `n`, priors in italic, the current
+regime's column marked, and one line saying **how many of the eighteen
+cells are still guesses**. On a fresh deployment that line reads 18 of
+18. Watching it fall is the feature — the priors retire cell by cell as
+the graded fills arrive, and the operator can see exactly which parts of
+the mix the platform has actually learned.
+
+---
+
+## The brokers (`/brokers/`)
+
+One page, one row per broker, and for each row: what it can hold, whether it
+is keyed, whether its session is alive, and which asset classes it is the
+**primary** venue for. Nothing on the platform reads a broker the operator
+has not made primary for something — a keyed, connected row with every box
+unticked is read by nothing and traded on by nothing. That is the default.
+
+**Precedence, when two rows claim one class:** `saxo`, then `etoro`, then
+`ibkr`. Saxo holds the real listing where eToro holds a CFD on it. Two
+brokers flagged for one class is a configuration mistake rather than a
+strategy, so the page names the conflict and says which venue wins instead
+of letting the router resolve it in silence.
+
+**Keys are never typed anywhere but this page.** They are encrypted with the
+platform's `FERNET_KEY` and stored in the database; they are not in `.env`,
+not in the compose file, and not in any log. A key pasted into a terminal
+is a key in that shell's history.
+
+### eToro
+
+Paste the **API key** and the **user key** from eToro's developer portal, and
+tick **demo** for their virtual account. Then tick the classes this account
+is primary for. eToro is a CFD venue: what it can hold is what its row says.
+
+### Saxo, in two halves
+
+Saxo is OAuth, so half of it happens at Saxo and half here, and the two must
+agree character for character.
+
+1. **At Saxo's Developer Portal**, create an application and register its
+   redirect URI as exactly:
+
+   ```
+   https://<your-host>/brokers/saxo/callback/
+   ```
+
+   The path is fixed by `dashboard/urls.py`. A URI that lands anywhere else
+   still *matches the portal*, so Saxo accepts the sign-in, the browser
+   returns to a page that ignores `?code=`, and nothing happens — the
+   failure is silent. The page refuses a URI whose path is not that one, and
+   refuses `http://` outside localhost, because the authorization code would
+   travel in clear text.
+
+2. **On `/brokers/`**, save the app key, the app secret and that same
+   redirect URI, tick **sim** for the simulator, tick the classes this
+   account is primary for, then press **Connect Saxo**. You are sent to
+   Saxo, you sign in, and the callback stores the session.
+
+### SIM and LIVE are one row and two worlds
+
+The same row serves both, and the `sim` box says which. Re-saving the key,
+the secret, the URI or the sim box closes whatever session was open — a
+session belongs to one application on one environment. Flipping the box
+additionally **clears the stored equity, cash and position readings**,
+because a simulated balance read as a live one is the kind of number that
+sizes a real order. The history rows keep their own environment and are
+never mixed; the drawdown governor reads only the environment in force.
+
+### The session, and the forty-minute fact
+
+The access token lives 1200 s and the refresh token 2400 s, and the refresh
+token **rotates** on every use. `refresh_saxo_sessions` runs every 600 s —
+four chances per token lifetime — and one missed cycle costs nothing.
+
+The consequence worth knowing before it happens: **a box that is down or
+paused for more than forty minutes comes back with a dead Saxo session.**
+Nothing is broken and nothing is lost; the row will say `session: LOST`
+with the time and the reason, and it needs one sign-in. That is a state,
+not an error to wait out. The row distinguishes five of them: `none`,
+`renewable`, `renewable (access expired, renewing next cycle)`, `EXPIRED`
+and `LOST — <reason>`.
+
+### Verify, in this order
+
+```bash
+./deploy/dc exec web python manage.py saxo_smoke --user <you>   # read-only, places NO order
+./deploy/dc exec web python manage.py etoro_smoke --user <you>  # read-only, places NO order; names the write URLs it never calls
+./deploy/dc exec web python manage.py treasury                  # what every broker holds
+```
+
+`saxo_smoke` exercises every read the adapter makes against the real SIM and
+reports each in three states: `ok`, `refused` (Saxo answered and said no)
+and `unknown` (the adapter, the network or the session is at fault). The
+three are never collapsed, because "Saxo refused" and "our adapter is wrong"
+call for opposite fixes. It is deliberately not runnable from `/ops/`: it
+presents your Saxo session to an external service and prints the account's
+balance.
+
+`treasury` is the shell twin of **`/treasury/`** — both render the same
+computation, so the page and the terminal cannot tell different stories.
+Neither one calls a broker: they read the cached columns the sync task
+writes, because a broker round trip does not belong on a render path. A
+**dash** means never measured. It is not a zero, and the two are not acted
+on the same way.
+
+### One exit that is not like the others
+
+Saxo under the `FifoEndOfDay` netting profile does not flatten on an
+opposite market order — both lots stay open until the evening netting. The
+engine asks the adapter and closes by `PositionId` on that venue. If the log
+ever says a close **will leave BOTH lots open**, the row had no broker
+position id: check `/treasury/` after the netting settles, because that is
+one position the platform's own row cannot see.
+
+## The Oculus (/oculus/)
+
+The page above the other thirty. They each answer their own subsystem's
+question well; this one answers the operator's — **is the machine
+turning, and which of its wheels are actually engaged?** It owns no data,
+adds no arithmetic, caches nothing, and writes nothing. Ten panels, one
+per cycle: the switches, the scan, the ladder, the signals, the
+evolution, the personalities, the allocation, the horizon, the backtests,
+the trust. The switches and the forge are platform-wide and follow
+`/health/`'s rule — staff only, as on `/ops/`: any other login reads the
+other cycles and its own book, with no switch state on any panel, and
+the forge's source-tree scan and migration plan run only for the reader
+who gets their answer.
+
+What it does that no single page could:
+
+1. **The gate sits beside the count.** A number written by a task nobody
+   switched on measures the switch, not the market. A component with no
+   row at all renders `absent` in amber rather than `off` — the two look
+   identical to `is_component_enabled` and have completely different
+   fixes. On 2026-09-13 that distinction was the whole bug: three
+   components had never had a row and three features had never run.
+
+2. **The qualifier sits inside the same line as the count.** The
+   recurring failure in this platform is not a wrong number, it is a
+   right number that reads as its opposite. "6 rules in research" reads
+   as coverage; a research-stage rule can neither place an order nor vote.
+   "40 entries chosen" reads as allocation; in shadow every candidate
+   executed at full size anyway. Counts that cannot act are toned down,
+   never celebrated.
+
+3. **An em-dash is not a zero.** `—` means *not measurable*; `0` means
+   *measured, and nothing happened*. `core/wall_facts.py` collapses
+   everything to 0 because it is the public login gateway and must never
+   raise; behind auth the duty is the opposite, because an operator acts
+   differently on each. Every counter that renders `—` is also listed by
+   name at the foot of the page, so a dash can never pass for a quiet
+   zero.
+
+Each panel is fenced on its own: a cycle whose table is mid-migration is
+reported **dead**, never dropped — a vanished panel reads as "there is no
+such cycle", which is a lie of omission the operator cannot see.
+
+The evolution strips are bucketed on creation stamps only, never on
+`completed_at` / `resolved_at` / `evaluated_at`: those are NULL on
+exactly the rows a stalled cycle would show, so bucketing on them hides
+the stall. Each strip is scaled to itself, never to the busiest cycle on
+the page — one shared axis would flatten every slow cycle into a flat
+line and read as "dead" when the honest reading is "slower than the
+scanner, by design".
+
+Nothing to run. Open the page; `tests/test_oculus.py` holds it to the
+three rules above.
+
+---
+
+## The cockpit (/ops/)
+
+One page that says "everything, now": every platform switch with its
+state, last run, status and error count (toggle from the page, superusers
+only); every decision queue with its count, the newest item's age and the
+page that decides it (actuator proposals, generator proposals, share plans,
+meta-allocation shadows, pending closes, open positions live/paper, the
+research fleet); the broker's last reading with its age, the drawdown and
+governor, the share-allocator mode, and `preflight_live`'s verdict (the
+BLOCKERS lines or NO BLOCKERS FOUND, cached two minutes per user); and the
+command catalogue. Every number carries its source and age and reads `—`
+where nothing has been measured. The switches and the queues are
+platform-wide and follow `/health/`'s rule — staff only; any login reads
+its own account, its own plans, the preflight verdict and the catalogue.
+
+The Run lane's rule: the page runs only a command registered as read-only
+in `core/ops_commands.py`, with the fixed arguments the registry gives it
+and nothing from the browser — `open_trades`, `preflight_live`,
+`why_no_trade`, `signals`. Every run and every refusal is an audit row (`ops_run`,
+`ops_run_refused`); the output is kept an hour, truncated at 20,000
+characters. Anything that writes — `component on`, `proposals approve`,
+`actuator apply`, `shares apply`, `follow`, `bot on`, the seeders, the
+backfill — shows its usage on the page and runs on the server, where
+`--yes` or the PIN keeps its meaning:
+
+```bash
+./deploy/dc exec web python manage.py ops            # the catalogue, as text
+./deploy/dc exec web python manage.py ops --category read
+```
+
+A management command missing from the registry (or from its EXEMPT set)
+fails `tests.test_ops_cockpit`, so the page and the shell cannot drift.
+
+---
+
+## Why a setup never fires (/setups/)
+
+On 2026-09-12 the platform carried 28 RuleControl rows, 26 of them at
+`research`. Sixteen of those 26 had produced ZERO signals in seven days AND
+zero graded signals in their entire life. The ladder wants 30 graded signals
+to leave `research`, so at that rate no designed rule is ever promoted, no
+designed rule ever trades, and every evidence lane stays unmeasured for ever.
+Until this page existed a silent setup was simply silent: nothing said
+whether its conditions were too strict, its data was missing, or it missed
+its threshold by 0.02.
+
+`/setups/` and `python manage.py setups diagnose` answer that. The diagnostic
+runs the SCANNER'S OWN `scan_setup` with `emit=False` — it writes no flag and
+no signal — over every active setup × every active instrument the setup's
+`asset_classes` admit (an empty `asset_classes` means all). Four verdicts and
+an empty case:
+
+| verdict | what it means | what to do |
+|---|---|---|
+| `fires` | it matched somewhere in the population | nothing — it is working |
+| `near` | its best composite is inside the near-miss band (default 0.10) below its threshold | lower `min_match_score`, or widen the weakest condition — the sentence names it |
+| `strict` | every condition EVALUATES and none combine past the threshold | it is a rare pattern, honestly measured. Loosen it or accept the rarity |
+| `blind` | a condition CANNOT EVALUATE on most of the population — no bars, no indicator row, no news | **loosening the threshold changes nothing, ever.** Backfill the data or drop the condition |
+
+A composite the scanner REFUSED is never counted as a near miss and never
+enters the distribution. When less than half a setup's authored weight could
+be measured on a pair, `scan_setup` returns `not_enough_measured` with a
+score on it — the surviving legs renormalised to themselves — and that
+number was never compared to the threshold. Those pairs are counted under
+"below quorum" in `setups show` and named in the verdict sentence; lowering
+`min_match_score` on such a setup changes nothing.
+| `empty` | no active instrument is in its asset classes at all | fix `asset_classes`, or activate instruments |
+
+The distinction between `strict` and `blind` is the whole point. A condition
+that evaluates and refuses is a judgement about the market; a condition that
+never got to look is a dead leg, and the scanner scores it as a zero either
+way — which is exactly why the silence looked identical from outside.
+
+```bash
+./deploy/dc exec web python manage.py setups list        # armed, stage, 7d, graded ever
+./deploy/dc exec web python manage.py setups diagnose    # every verdict, worst first
+./deploy/dc exec web python manage.py setups show advanced_smc_long
+./deploy/dc exec web python manage.py setups grading --days 30
+```
+
+**Arming what was never armed.** A generated setup is written `is_active=False`
+with a research-stage RuleControl row, so nobody clicking means it is neither
+scanned nor traded — pure dead weight. `setups arm <name> --yes` (or the Arm
+form on `/setups/`, superusers) arms it. Where a PENDING `GeneratedSetupProposal`
+exists it goes through `brain.strategy_generator.approve_proposal`, so the
+`approval_blocker` re-validation and the audit row are the `/generated/` page's
+own and not a second path; with no proposal row it flips `is_active` and writes
+its own `setup_armed` audit event. Without `--yes` it prints what it would arm
+and the blocker for anything it cannot.
+
+**Arming a research-stage setup is SAFE.** `is_active` decides whether the
+SCANNER looks at a setup; `RuleControl.promotion_stage` decides whether any bot
+may act on what it finds, and at `research` `stage_policy` returns
+`may_trade False` — no order is ever placed. A setup with NO RuleControl row is
+NOT research: `stage_policy` treats such a rule as PAPER — it may trade, at full
+nominal size, on the paper venue. The command prints that warning before it
+arms one, and so does the page.
+
+**The grading leak.** `setups grading --days 30` counts, per rule, how many
+signals were created, how many closed, and how many closed with no outcome or
+with an outcome and no `realized_r`. Both of those last two are INVISIBLE to
+the promotion ladder (`promotion_pipeline._stats_since` excludes both) and to
+every evidence lane (`bot_program.evidence.rule_rows` excludes both): the
+signal was produced, it cost a scan, and it taught nothing. If a material
+share of closed signals lands there, the repair is in `signals/performance.py`
+and `run_signal_lifecycle`, not in the scanner.
+
+**The scan cadence stays at daily 09:00 UTC — measured, not assumed.**
+A full `diagnose_setups` pass (the same loop `scan_all_setups` runs, one
+`scan_setup` per pair) over 6 active setups × 179 active instruments —
+**566 admitted pairs, 1,698 evaluator calls, 4.0-7.1 seconds** measured four
+times on the local development database on 2026-09-12 (7-12.5 ms a pair; the
+spread is OS page cache, cold to warm). That database holds only 5,600 price
+bars, so nearly every evaluator refused for want of data before doing any
+arithmetic: **the number is a FLOOR on the cost, not an estimate of it.**
+The live deployment carries 20 active setups over the same 179 instruments
+with a full bar history — about 3.3× the pairs, and a real window measured on
+each one instead of an early return. 3.3 × (4.0-7.1) s is 13-24 s of pure
+loop before a single real measurement is paid for, and the multiplier above
+that is unknown. **13-24 seconds with an unknown multiplier on top is not
+"comfortably under 60", so the cadence is NOT raised.** Re-measure on the box
+before changing it:
+
+```bash
+./deploy/dc exec web python manage.py setups diagnose | head -2   # prints the seconds
+```
+
+If that line reads comfortably under 60 s against the real 20-setup
+population, `config/celery.py`'s `scan-opportunities` entry may move from
+`crontab(hour=9, minute=0)` to `crontab(minute=5, hour='*/4')`: 4× the scans,
+4× the flag rate, 4× the evidence accrual, against that many seconds of
+worker time per pass. Do not raise a cadence nobody has timed on the
+population it will actually run against.
+
+## Reading a signal (/signals/)
+
+Every signal row answers six questions, and the first of them did not exist
+anywhere before 2026-09-12:
+
+1. **Can anything act on it?** One badge, derived from
+   `rule_actuator.stage_policy` + `is_rule_active` — the SAME two functions the
+   entry path calls, never a second implementation. `TRADEABLE` (live venue),
+   `PAPER ONLY` (paper stage, or NO RuleControl row at all, which reads
+   "unregistered - paper venue at full size" — `stage_policy` fails safe, not
+   closed), `WATCHED` (research: may_trade False, and the rule's votes are
+   dropped from every bot's consensus, which is why the fleet reads
+   "net evidence +0.00"), `PAUSED` / `REDUCED` from the admin lane.
+   **A PAUSE IS NOT A VENUE GATE.** `is_rule_active` is read in exactly two
+   places — the rule engine's signal write path (`signals/tasks.py`) and the
+   fast-rule runner. `scan_all_setups` never reads it, so a paused
+   setup-backed rule keeps scanning and publishing; and the bot entry path
+   reads `stage_policy` alone, so a bot WILL act on a signal that already
+   exists from a paused rule. The badge therefore shows `PAUSED` and still
+   reports the stage's own `may_trade`: to stop a rule reaching a venue,
+   demote its stage, not its status (2026-09-12).
+2. **What is the rule worth?** `bot_program.evidence.rule_rows`, held to that
+   module's own `MIN_EVIDENCE_N` floor. Below the floor it reads `unmeasured`,
+   never a number.
+3. **Why did it fire?** The linked OpportunityFlag's `conditions_evaluated`, or
+   `Signal.sub_scores` for an engine rule — and the block names which.
+4. **What would it cost?** The levels and R:R on the row. There is no cost
+   verdict without a config context, and the page says so rather than
+   inventing one.
+5. **Did anyone act?** The AssetBotTrade rows joined on rule_name + symbol +
+   time. **There is no foreign key from a trade to a signal**, so the block is
+   captioned as the inference it is.
+6. **Its own grade.** Outcome, realized R, time to outcome — or `ungraded`,
+   which is the loud one: a closed signal with no realized R is invisible to
+   the ladder and to every evidence lane.
+
+Twelve filters, all combinable as AND, each a removable chip, each a real
+queryset narrowing: `q` `rule` `stage` (multi) `asset_class` `direction`
+`signal_type` `urgency` `score_min` `age_hours` `state` `acted`, plus the
+original `active=1`. The header reads "N of M signals", so a filter matching
+nothing is visibly a filter and not an empty platform. An out-of-vocabulary
+value is IGNORED, not applied. The list is paginated at 50.
+
+```bash
+./deploy/dc exec web python manage.py signals list --stage research --min-score 0.7
+./deploy/dc exec web python manage.py signals show 4211     # the same six blocks
+```
+
+---
+
 ## Operating notes
 
 **Going live is deliberate.** Bots ship in paper mode; flipping one to live
@@ -447,6 +1047,355 @@ target orders where the broker supports it (Alpaca brackets, OANDA on-fill), so
 a reboot or a crashed worker does not leave a position unprotected. On restart,
 reconciliation compares the broker's positions to the database and the
 `retry_pending_closes` task drains anything stranded.
+
+**IBKR order presets rewrite API orders.** TWS/Gateway applies the
+account's order preset to anything the API leaves unset, and can override
+what it sets — announced as notice 10349, *"Order TIF was set to DAY based
+on order preset"*. Sauron sends the entry as DAY and the stop and target as
+GTC, then reads back the time-in-force the Gateway actually kept. A stop the
+preset turned into DAY would expire at the session close while the row said
+`protected`, so such legs are withdrawn on the spot, the row is booked
+unprotected (bot-side management owns the exit) and its `protection_note`
+says why. Set the preset's Time in Force to **GTC** before going live, from
+a TWS logged in as the same user: Global Configuration → Presets → the
+instrument type (Stocks, Forex…) → Time in Force. The headless Gateway
+applied one on this deployment with no TWS installed beside it, so the
+preset travels with the login; if the Gateway keeps reporting DAY after the
+change, the preset is not the only source and IBKR support is the next call.
+Until it is fixed, every live entry is booked unprotected and bot-managed.
+
+**The research fleet feeds the learning engine.** The promotion ladder
+counts graded Signals and paper fills per rule — thirty signals before a
+rule leaves research, twenty paper fills before it can touch live money —
+and a fleet of six starter bots on 35 symbols starves it. Seed paper bots
+across the whole keyless catalogue, chunked ten symbols a config, within a
+budget the bar refresh can afford:
+
+```bash
+./deploy/dc exec web python manage.py seed_research_fleet            # ~150 symbols
+./deploy/dc exec web python manage.py backfill_bars --from-configs --intervals 1d,4h --bars 300
+```
+
+Keep `pipeline_promotion` ON: it is the rung that admits a research rule
+into paper, and a paper bot never trades a rule still in research. Its
+steps toward real money keep their own gates (thirty days, venue fills,
+walk-forward evidence). `--dry-run` prints the plan; `--reset` stands the
+fleet down without erasing traded history. The keyless feed now downloads
+one sized window per symbol per pass instead of two two-year ones, and
+breathes between symbols, so the default budget of 150 is safe.
+
+**The weekly imagination pass runs on the frontier model.** The Strategy
+Generator (Sunday 04:00 UTC, at most three proposals) is the one call on
+the platform where imagination is the product, and it alone runs on the
+`frontier` tier — Claude Fable 5.1, twice the Opus price, thinking always
+on. Every other agent stays on its tier; change any of them on `/ai-models/`
+(or `AI_MODEL_FRONTIER` in `.env`). The generator reads the evidence
+ledger — what each rule has proven in paper and live — and cites it. Its
+proposals land as draft setups in RESEARCH stage; switch
+`generator_auto_research` ON on `/health/` and it arms them itself: the
+scanner grades their signals, the stage gate keeps every bot from trading
+them, the promotion ladder decides the rest, and the brain page still lets
+you reject one. A safety refusal by the frontier model is not an outage:
+the provider re-runs the call once on Opus and says so in the log. An
+idea the validator refuses is not lost either: it lands in the history
+on `/generated/` as REJECTED by `validator`, with the reason in the
+"why" column — the run's `n_validation_rejected` counts those rows. The
+`brain` logger keeps its INFO lines in production like every Sauron app,
+so `./deploy/dc logs web | grep generator` shows the same reasons.
+
+**The capital desk.** The trading rules size each entry on its own and
+nothing ever looked at a whole tick at once: the fleet pass walked config
+after config, and the third bot proposed its entry after the first two had
+already filled. Five bots each correctly risking 1% is 5% of the account on
+one tick, and no gate on this platform noticed. The desk is the agent that
+notices.
+
+With `pipeline_capital_desk` ON the fleet pass runs in two halves. Every bot
+PROPOSES first — the decision, the levels and its own final size, with the
+ticker read through the market-data session so nothing holds the exclusive
+IBKR trading client — and only then does anything execute. In between, the
+desk ranks the tick.
+
+- **What it ranks on.** Expected R per unit of MARGINAL risk. Expected R is
+  what the rule has really paid, on the narrowest population with at least
+  ten graded fills: this config live, then this account's live fleet in the
+  class, then every account's, then the paper fleet with a haircut, then the
+  signal lane with the same haircut. Under that floor there is NO expected R
+  — the candidate is ranked on conviction times its planned net
+  reward-to-risk and is flagged `unmeasured` everywhere it surfaces. A
+  decaying rule keeps its evidence and ranks at half. Marginal risk is what a
+  bet adds to the book once its 4h correlation with the chosen set AND the
+  open positions is counted: two 40-dollar bets that correlate 0.9 cost
+  nearly 80 together, two that correlate 0.0 cost 57. That is why the best
+  candidate in R sometimes ranks below one that diversifies.
+- **The budget denominator.** 2% of the capital assigned to that user's
+  ENABLED configs on that venue — the same pool each entry's own risk
+  fraction divides by — through the drawdown governor on live only, minus the
+  risk already at stop in the open book. Hand-taken positions are in that
+  book: they bypass the desk and they are still money at risk. Paper and live
+  never share a budget, a book or a correlation penalty. One rule may take at
+  most 40% of the tick's allowance and one asset class 60%, and neither cap
+  binds on the first entry of its bucket — what they bound is one idea
+  wearing six tickets, and the budget already bounds the first.
+- **The two switches.** `pipeline_capital_desk` makes the pass two-phase and
+  writes the plans; it is SHADOW, and in shadow every candidate still trades
+  at its own size exactly as it does today while the plan beside it records
+  what the desk would have done. `capital_desk_mode_live` makes the plan
+  obeyed: displaced entries are skipped (recorded as a `desk_displaced` skip
+  naming the plan) and chosen sizes multiplied. The multiplier is NEVER above
+  1.0, and `execute_entry` re-judges MAX_RISK_FRACTION, the single-position
+  cap and the duplicate/theme gates after it lands — a desk that is wrong
+  costs an opportunity and can never cost more risk than the bots had already
+  cleared.
+- **It fails open.** If the ranking pass raises, the failure is written onto
+  a plan of its own and the fleet runs UNDESKED — every candidate at its own
+  size, in config order, exactly as with the component off. A ranking agent
+  that goes down must not stop the bots.
+- **The grade.** `bot_program.tasks.grade_capital_desk` runs nightly at 03:45
+  UTC. It prices every decision whose horizon has closed — a taken entry by
+  its own trade's realized R, a displaced one by walking its own bars over
+  its own horizon against the stop and target it was refused with — and then
+  scores the plan: `edge_r` is the desk's set (realized R times the size it
+  chose) minus the default set (every desked candidate at size 1.0). Positive
+  means the ranking beat the fleet it overruled. An unpriceable decision is
+  NULL and counted separately; it is never folded in as a zero.
+
+Read all of it on `/desk/`, which explains the last tick in one sentence
+before it shows a number, or from the shell:
+
+```bash
+./deploy/dc exec web python manage.py component on pipeline_capital_desk   # SHADOW
+./deploy/dc exec web python manage.py desk list
+./deploy/dc exec web python manage.py desk show
+./deploy/dc exec web python manage.py desk explain 14 EURUSD   # read-only
+./deploy/dc exec web python manage.py desk grade
+```
+
+**The same bar as the share allocator: LIVE only after weeks of positive
+edge in shadow.** `capital_desk_mode_live` is the switch that lets an agent
+refuse an entry the bots had already approved. Nothing justifies it except
+the record on `/desk/` — a sparkline of `edge_r` that has been above zero
+over enough graded plans to be more than noise. Until then leave it off; the
+shadow plan costs nothing and is the only thing measuring whether the
+ranking is worth obeying.
+
+**The admin pages, as commands.** Every decision the pages take has a
+shell twin, for the operator at a terminal and for anyone who wants the
+proof pasted back. All of them are `./deploy/dc exec web python manage.py`
+followed by:
+
+- `component list` / `component on KEY...` / `component off KEY...` — the
+  health page's toggle. Says the state before and after, refuses a key it
+  does not know (and names the nearest), and registers a component the code
+  knows but the database does not before setting it.
+- `proposals list` / `proposals approve ID...` / `proposals reject ID...` —
+  the brain page's click, through the same `approve_proposal` and the same
+  blocker check. An approved proposal is a RESEARCH-stage setup: graded by
+  the scanner, traded by no bot.
+- `open_trades` (`--symbol SOL`, `--all` for the last 7 days closed too) —
+  every position the bots hold, paper or LIVE, with the platform's own
+  mark, unrealised P&L and R against the stop; a position with no stop is
+  flagged.
+- `follow` / `follow ID --share 20 --yes` / `follow ID --stop --yes` — the
+  asset-bots page's Follow form: a live pool becomes a share of the
+  broker account, through the same `allocate_shares` as the page, the
+  sync and the preflight. Prints the plan for every follower; writes
+  only with `--yes` (the page asks the PIN for this — say so).
+- `bot list` / `bot off ID` / `bot on ID [--yes]` — the admin page's
+  toggle with its rule: stopping is frictionless, arming a LIVE config
+  takes `--yes` where the page takes the PIN.
+- `actuator list` / `actuator apply ID...` / `actuator reject ID...` /
+  `actuator rollback ID` — the rule actuator's buttons (live mode
+  required to apply, daily caps, snapshot for rollback). `actuator
+  reject --stale` is the button the page lacks: the decay investigation
+  re-proposes the same enforcement every day it still holds, so one
+  finding shows up as six rows; --stale rejects every proposal a newer
+  one on the same rule and action supersedes.
+- `shares list` / `shares propose --user NAME` / `shares apply ID --yes` /
+  `shares reject ID...` / `shares rollback ID --yes` / `shares grade` — the
+  share allocator's page (`/shares/`): the same proposal the beat writes,
+  the same apply (LIVE mode, fresh reading, three a day, snapshot for
+  rollback). Prints the plan with every factor; writes only with `--yes`
+  (the page asks the PIN — say so). See the section below.
+- `horizon list` / `horizon show [ID]` / `horizon grade` / `horizon run
+  --yes` — the Horizon page (`/horizon/`): the 5-10 year sector view,
+  its tilts, its graded calls; `run` without `--yes` prints the cost
+  (~1.5 USD, frontier model) and does nothing. See the section below.
+- `preflight_live`, `why_no_trade`, `seed_components`, and
+  `./deploy/ibkr-doctor` (read-only) were already there.
+
+**The share allocator (shadow first).** Until now a live pool's share of
+the account was a number typed once on the Follow form. The allocator
+computes it instead — every four hours, at :05, after the sync has
+stored a reading — and proposes; it re-sizes nothing on its own.
+
+- *What it reads.* The last broker reading (must be under an hour old,
+  or it proposes nothing and says so), the 90-day road that reading took
+  (`BrokerEquityReading`, one row per sync, written by the sync ONLY —
+  a missed sync writes no row, never a zero), and per follower pool four
+  factors: graded evidence (this pool's LIVE closes, else the fleet's
+  live closes in the same class, else its paper closes, else unmeasured
+  = 1.0; NULL R is never counted as 0), regime fit from the brain
+  context (risk-off with confidence trims stock/crypto/CFD), opportunity
+  density (how much of the class's universe carries a flag or signal),
+  and news risk (tighten-only; blind = 1.0 when the analyst has been
+  idle two hours). A reader that fails costs a factor of 1.0 and a note
+  on the plan, never the plan.
+- *What it writes.* A `SharePlan` row in state PROPOSED with every
+  number on it: raw share, floors and ceilings (2%–60% unless the pool's
+  `extras["share_floor_pct"]` / `["share_ceiling_pct"]` say otherwise),
+  the smoothed and day-capped target (10 points per pool per rolling
+  24 h, counting what applied plans already moved), a "held" mark when
+  the move is under 1 point, and the drawdown governor (full deployment
+  to 5% under the high-water mark, 40% at 20% under; the rest is cash by
+  construction). It never writes a pool's capital and never talks to the
+  broker.
+- *The two switches.* After `./deploy/dc exec web python manage.py migrate`
+  (0026 creates both tables), `component on pipeline_share_allocator`
+  starts the proposals — shadow, safe, and worth a week of reading before
+  anything else. `component on share_allocator_mode_live` is the second
+  switch: only then does Apply work, and it still takes the trading PIN
+  on `/shares/` (or `--yes` on the shell) per plan, three plans per user
+  per day. Applying writes each follower's `extras["account_share_pct"]`
+  and re-splits the pools through the sync's own arithmetic at once;
+  Rollback puts every share back exactly as the apply found it (the key
+  removed where the pool was automatic).
+- *Read it.* `shares list` shows the mode, the pending plans with
+  "current → target" and one sentence of why per pool, the applied ones
+  (rollback possible), and the last grade. `shares propose --user NAME`
+  runs one proposal now and prints either the plan or the reason there
+  is none ("no fresh reading (age 5400s)" means run the sync first).
+- *The grade.* Twenty-four hours after a plan is proposed — applied,
+  rejected or not — `grade_plans` (inside the same beat, or `shares
+  grade`) scores it: Σ over pools of (target − current)/100 × the R that
+  pool's LIVE closes earned in the window. Positive means the plan leaned
+  toward what paid; "ungradeable" means nothing closed, which is not
+  wrong. A run of negative grades in shadow is the reason not to turn
+  LIVE on.
+- *De-risk fast, re-risk slow.* The 10-point cap and the half-way
+  smoothing are symmetric, and a 20% crash whose governor said 0.4 took
+  three plans to reach the pools. Every plan now carries a MODE (the
+  `mode` column, the badge on `/shares/`, the `mode …` line in `shares
+  list`). **SHOCK** — the drawdown is past the 5% knee, or equity is 3%
+  or more under its highest reading of the last 24 h, or the brain says
+  `risk_off` / `blow_off` at 0.65 confidence or more (`unknown` never
+  counts), or a shock plan was proposed in the last 24 h (the hold): a
+  share only goes DOWN or holds, uncapped and unsmoothed, nothing is
+  redistributed and what a pool releases is cash; floors still hold.
+  **EXPANSION** — no shock, the reading IS the 90-day high-water mark
+  and at least one pool's evidence is measured with a positive avg_r
+  over ten fills or more: the upward allowance is 20 points a day (down
+  stays 10). **NORMAL** — the rule exactly as above. The sync itself is
+  a trigger: when the reading it just stored is a shock (drop or
+  drawdown — no brain context on that path) it proposes at once, once
+  per hour per user, and staff get "⚠ Shock plan proposed"; the 4-hourly
+  beat is unchanged. Applying still takes the PIN — unless the third
+  switch is on: `component on share_allocator_auto_derisk` (LIVE mode
+  required too) applies a SHOCK plan that only LOWERS shares by itself,
+  under the same daily cap and fresh-reading rule, with the same snapshot
+  for rollback, an audit row whose decision reads `auto_derisk`, and a
+  "⚠ Shares de-risked automatically" alert. A plan with any upward
+  target — a pool entering at its floor counts — waits for a human, and
+  a refused apply (daily cap, stale reading) leaves it PROPOSED. The card
+  on `/admin-dashboard/` shows all three switches; `/shares/` shows the
+  mode and its reasons in the KPI strip.
+
+**Horizon: the 5-10 year view.** Every other agent looks hours to weeks
+ahead. Horizon (`brain/horizon.py`) writes the platform's STRUCTURAL
+view once a month — how each sector in its universe (the eleven US
+sector ETFs plus gold, oil, long Treasuries, the dollar and bitcoin)
+develops over 5-10 years, the risks that view must guard against, and
+a tilt per asset class — and is held to account like every other
+agent: each sector thesis ends in direction calls at 6 and 12 months,
+graded by the calibration beat against the first bar at or after the
+deadline, and `/horizon/` shows the Brier score and trust built from
+them ("—" until ten calls have graded).
+
+- *The switch and the cost.* `component on agent_horizon` arms the
+  monthly beat (the 1st at 04:45 UTC). One run is ~1.5 USD on the
+  frontier model, under the deep-tier reserve of the daily AI budget;
+  a day whose budget is gone skips it cleanly. Off by default.
+- *The commands.* `horizon list` (every run: status, model, cost, calls
+  registered/dropped, age), `horizon show [ID]` (the sectors, tilts,
+  calls and their grades — a REJECTED run shows the raw text the
+  operator paid for), `horizon grade` (brier/trust for agent
+  `horizon`), and `horizon run` (prints the cost and does nothing) /
+  `horizon run --yes` (one synthesis now — the page's Run now button,
+  superusers only there).
+- *The prior, and its ceiling.* The share allocator reads the latest
+  OK view (45 days at most) as its FIFTH factor: 1 + 0.05 × tilt ×
+  confidence per asset class, so ±2 at full confidence is ±10% and
+  nothing more. The rule: the prior is ±10% at most, by construction —
+  a structural view never out-votes graded evidence, and no view, a
+  stale view, or a class the view did not tilt reads ×1.00 with the
+  reason on the plan. `/shares/` and `shares list` print the factor
+  beside the other four.
+- *What a bad answer does.* A garbled answer (a sector outside the
+  universe, a tilt past ±2, a horizon that is not 6 or 12 months) is a
+  REJECTED row with the raw text kept, never a view; a provider error
+  is an ERROR row. Neither is read by the allocator.
+
+**A healthy Gateway is not a logged-in Gateway.** The container's
+healthcheck sees a process and a port. When the session behind it is gone
+(a Client Portal login took it — converting currency counts — or the daily
+IB Key push was never approved), the API accepts Sauron's socket and every
+request times out: `positions request timed out`, `open orders request
+timed out`, `account updates ... timed out`, and the sync returns
+`unreachable`. The doctor's verdict now reads step 3 (the server's
+`Authorization failed`) and step 5 (no reading for hours) before trusting
+`(healthy)`, hides the `remove Client` churn that buries IBC's own lines,
+and says the fix in order: approve the push on the phone; if none,
+`./deploy/dc --profile ibkr restart ibgateway` (IBC logs in afresh, the
+phone gets a push); then the sync. Restarting the workers changes nothing
+in that state.
+
+
+**No prose without a claim the platform can grade.** Every agent that
+talks about a symbol now registers a direction call — symbol, up or down,
+horizon, the price it was measured from: the strategy advisor's long/short
+legs, the anomaly scan's `expected_direction`, and the calls block each
+briefing ends with. The nightly calibration grades each call against the
+first bar at its horizon (flat is a miss; no bar within 48 of its market's
+own open hours — a weekend is not an outage — is "ungraded", never
+"wrong"), and the trust score the strategist and the critic read is built
+from those grades. `/calibration/` shows the ledger: who called what, from
+which price, and what the market said. An agent whose views never reach
+the block has a trust score of nothing, which is the truth.
+
+**Pools are shares of the account.** A pool that follows the account takes
+a share of the broker's equity reading — an explicit percentage, or blank
+for automatic: followers without a number split what the explicit ones
+leave, equally — and the broker sync retunes it every fifteen minutes, down
+as well as up. Arm the manual lane with "follow account" and an optional
+"% of account" on `/admin-dashboard/`; make a live bot follow from
+`/asset-bots/` (Follow, share, PIN). Shares that do not fit in 100% are
+refused at the click and, if they ever get in, retune nothing and raise an
+alert. Hand-typed pools are still allowed and still measured against the
+account by `preflight_live`, which also warns when armed pools together
+exceed it.
+
+**IBKR's 2,000 USD floor.** Under 2,000 USD of equity (or the equivalent)
+IBKR refuses margin, short sales, currency and futures — Error 201, in
+those words. That includes a plain long on a USD ETF from a EUR balance: the
+purchase borrows USD, a loan is margin, and the order is refused. Below the
+floor the account buys stocks and ETFs with settled cash **in the
+instrument's own currency**, and nothing else; convert at IBKR first
+(Client Portal → Transfer & Pay → Convert Currency). No forex, no CFDs, no
+futures until the account is funded past the floor. `preflight_live` reads
+the floor off the equity reading, blocks armed configs in margin classes,
+and lists the symbols quoted in another currency as worth reading — the
+reading is the base currency and cannot see cash already converted.
+Leverage is not a setting that gets around any of this.
+
+**Bars survive a mute venue.** Bars come from the venue a config fills on,
+and a venue can go quiet without an error — an IBKR historical request that
+never returns, a pacing refusal, a symbol it serves no history for. Every
+IBKR request is capped at half a minute, and a symbol the venue gave no bars
+for is written from the keyless public feed instead, tagged `*_public` so
+`/forensics/` still says where a candle came from. A fresh instrument starts
+with too little daily history for any evaluator; give it a year at once:
+`./deploy/dc exec web python manage.py backfill_bars --from-configs
+--intervals 1d,4h --bars 300`, then the indicator recalculation it prints.
 
 **Watch `/health/` and `/forensics/`** rather than tailing logs: the first
 answers "is the machine running", the second answers "why did it do that".
