@@ -92,6 +92,15 @@
         return (scope || d).querySelectorAll("input[data-sv-select-trade]");
     }
 
+    /* What a "select all" box covers: its own table when it sits in one
+       (the header box), else the block that declares itself a selection
+       scope (the phone box above a stacked table, whose header row is
+       visually hidden below 640px and so cannot be reached there). */
+    function scopeOf(all) {
+        if (!all.closest) return d;
+        return all.closest("table") || all.closest("[data-sv-select-scope]") || d;
+    }
+
     /* After a swap the boxes are new and unticked: tick them again from the
        record, and forget the rows that are gone. */
     function reapply() {
@@ -107,12 +116,17 @@
 
     function paint() {
         each(d.querySelectorAll("input[data-sv-select-all]"), function (all) {
-            var table = all.closest ? all.closest("table") : null;
-            var list = boxes(table || d);
+            var list = boxes(scopeOf(all));
             var on = 0;
             each(list, function (b) { if (b.checked) on += 1; });
             all.checked = list.length > 0 && on === list.length;
             all.indeterminate = on > 0 && on < list.length;
+        });
+        /* The phone's box has nothing to select on a book with no bot row;
+           hidden rather than offered. It sits OUTSIDE the live region, so
+           this attribute never reaches the markup the refresher compares. */
+        each(d.querySelectorAll("[data-sv-select-all-wrap]"), function (wrap) {
+            wrap.hidden = boxes(scopeOf(wrap)).length === 0;
         });
         var n = selected.length;
         each(d.querySelectorAll("[data-sv-select-bar]"), function (bar) {
@@ -211,6 +225,13 @@
                  hold: "is-hold" }[v] || "is-unknown";
     }
 
+    /* A row already being closed wears its own colour whatever its facts
+       say: a green "hold" chip over a position the platform is closing
+       reads as "this stays open", which the words beside it deny. */
+    function cardClass(p) {
+        return p.pending ? "is-pending" : verdictClass(p.verdict);
+    }
+
     function tone(n) {
         return !isNum(n) ? "sv-unknown" : (n > 0 ? "up" : (n < 0 ? "down" : ""));
     }
@@ -286,9 +307,14 @@
                 closeThese.onclick = function () {
                     closeSelected(open, {
                         trigger: closeThese,
+                        /* No clearIds here: closeSelected has already
+                           unticked exactly the rows that closed. Clearing
+                           every advised id as well would untick the ones
+                           that FAILED — after "PARTIALLY closed — 1 STILL
+                           OPEN" the row still open would lose the tick the
+                           operator needs to try it again. */
                         onClosed: function (res) {
                             w.SV.overlay.close(host);
-                            clearIds(open);
                             if (opts.onClosed) opts.onClosed(res);
                         }
                     });
@@ -357,6 +383,9 @@
         if (s.trim_or_tighten) reads.push(s.trim_or_tighten + " watch");
         if (s.hold) reads.push(s.hold + " hold");
         if (s.unknown) reads.push(s.unknown + " can't judge");
+        /* Counted apart by the server: a pending row is in none of the
+           four counts above, so nothing here is said twice. */
+        if (s.pending) reads.push(s.pending + " already being closed");
         fact(grid, "Sauron's read", reads.length ? reads.join(" · ") : DASH);
         if (a.not_found_words) {
             el(sum, "p", "sv-adv-note is-warn", a.not_found_words);
@@ -400,12 +429,12 @@
 
     function card(parent, p) {
         var n = p.numbers || {};
-        var c = el(parent, "article", "sv-adv-card " + verdictClass(p.verdict));
+        var c = el(parent, "article", "sv-adv-card " + cardClass(p));
         var head = el(c, "div", "sv-adv-card-head");
         el(head, "span", "sv-adv-title", p.headline || p.symbol);
         el(head, "span", "sv-adv-world is-" + (p.world || "paper"),
            p.world_words || DASH);
-        el(head, "span", "sv-adv-chip " + verdictClass(p.verdict),
+        el(head, "span", "sv-adv-chip " + cardClass(p),
            p.verdict_words || DASH);
 
         var grid = el(c, "dl", "sv-adv-grid");
@@ -593,9 +622,8 @@
             if (!tick(t, t.checked)) tooMany();
             paint();
         } else if (t.matches("input[data-sv-select-all]")) {
-            var table = t.closest("table");
             var on = t.checked, refused = false;
-            each(boxes(table || d), function (b) {
+            each(boxes(scopeOf(t)), function (b) {
                 if (!tick(b, on)) refused = true;
             });
             paint();

@@ -382,6 +382,185 @@ class VerdictRuleTests(_Case):
              if r.startswith("Its time limit")][0])
 
 
+class LevelsTests(_Case):
+    """"Hold" says what the levels are doing — only the levels the row has.
+
+    A target can be cleared from the positions page, and older rows carry
+    no stop at all. The hold sentence used to praise "the stop and the
+    target" on a row with neither, and a row with no stop has no R, so
+    every R-based warning was silent and the only possible answer was
+    "hold" — whatever it was losing.
+    """
+    username = "ca_levels"
+
+    def test_a_row_without_a_target_is_not_told_its_target_works(self):
+        _quote("BTCUSD", 60600)
+        t = _trade(self.user, target=None)
+        p = _one(self.advise(t), t)
+        self.assertEqual(p["verdict"], "hold")
+        self.assertIn("Nothing the watcher measures has fired: the stop is "
+                      "doing its job; no target is set.", p["reasons"])
+        self.assertFalse(any("the target are doing" in r
+                             for r in p["reasons"]))
+        self.assertEqual(p["numbers"]["r_to_target_text"], "—")
+
+    def test_a_row_without_a_stop_is_never_a_hold(self):
+        """T5 — the reviewer's case: no stop, no target, 1,500 USD down."""
+        _quote("BTCUSD", 57000)
+        t = _trade(self.user, stop=None, target=None)
+        a = self.advise(t)
+        p = _one(a, t)
+        self.assertEqual(p["numbers"]["pnl"], -1500.0)
+        self.assertEqual(p["verdict"], "trim_or_tighten")
+        self.assertEqual(p["reasons"][0],
+                         "No stop is set: nothing limits the loss, and with "
+                         "no stop to measure against there is no R, so the "
+                         "warnings that read R (near the stop, adverse "
+                         "excursion, give-back, risk against reward) cannot "
+                         "fire.")
+        self.assertFalse(any("doing its job" in r or "doing their job" in r
+                             for r in p["reasons"]))
+        # No R was invented to fill the gap.
+        self.assertIsNone(p["numbers"]["r_now"])
+        self.assertEqual(p["numbers"]["r_to_stop_text"], "—")
+        self.assertNotIn("hold", a["summary"]["overall"].lower())
+
+    def test_a_zero_stop_is_no_stop(self):
+        """An older row spells "none" as 0. The watcher measures it as a
+        level at price zero — "50R still at risk to the stop" on a long,
+        and on a short a mark THROUGH it, which would read as close."""
+        _quote("BTCUSD", 60600)
+        long_ = _trade(self.user, stop=0, initial_stop=58800)
+        short = _trade(self.user, side="SELL", stop=0, initial_stop=61200,
+                       target=57000)
+        a = self.advise(long_, short)
+        for t in (long_, short):
+            p = _one(a, t)
+            self.assertEqual(p["verdict"], "trim_or_tighten", p["reasons"])
+            self.assertEqual(p["reasons"][0],
+                             "No stop is set: nothing limits the loss.")
+            self.assertFalse(any("to the stop" in r or "BEYOND the stop" in r
+                                 for r in p["reasons"]), p["reasons"])
+            self.assertEqual(p["numbers"]["r_to_stop_text"], "—")
+            # R itself is still measured: the stop it OPENED with is known.
+            self.assertIsNotNone(p["numbers"]["r_now"])
+
+    def test_the_hold_sentence_names_the_levels_it_has(self):
+        from brain.close_advice import _hold_words
+        self.assertEqual(
+            [_hold_words(True, True), _hold_words(True, False),
+             _hold_words(False, True), _hold_words(False, False)],
+            ["Nothing the watcher measures has fired: the stop and the "
+             "target are doing their job.",
+             "Nothing the watcher measures has fired: the stop is doing its "
+             "job; no target is set.",
+             "Nothing the watcher measures has fired; a target is set, but "
+             "no stop is.",
+             "Nothing the watcher measures has fired; neither a stop nor a "
+             "target is set."])
+
+
+class PendingTests(_Case):
+    """A CLOSE_PENDING row is already being closed — the retry task sends
+    it every five minutes. Its facts are still judged, but nothing on the
+    card or in the selection's line may read as "this stays open"."""
+    username = "ca_pending"
+
+    def _pending(self, **kw):
+        return _trade(self.user, status="CLOSE_PENDING",
+                      metadata={"close_retry_attempts": 2}, **kw)
+
+    def test_a_pending_row_is_never_labelled_hold(self):
+        _quote("BTCUSD", 60600)
+        t = self._pending()
+        a = self.advise(t)
+        p = _one(a, t)
+        # The facts' reading is kept: if the retries are abandoned, whoever
+        # closes it at the broker wants to know what they said.
+        self.assertEqual(p["verdict"], "hold")
+        self.assertTrue(p["pending"])
+        self.assertEqual(p["verdict_words"],
+                         "Already being closed — on its facts alone Sauron "
+                         "would not have closed it")
+        self.assertNotIn("still stands", p["verdict_words"])
+        s = a["summary"]
+        self.assertEqual((s["hold"], s["pending"]), (0, 1))
+        self.assertEqual(s["overall"], p["verdict_words"] + ".")
+        self.assertTrue(p["reasons"][0].startswith(
+            "A close is already being retried"))
+
+    def test_every_verdict_has_pending_words(self):
+        from brain.close_advice import PENDING_WORDS, VERDICTS
+        self.assertEqual(set(PENDING_WORDS), set(VERDICTS))
+        for words in PENDING_WORDS.values():
+            self.assertTrue(words.startswith("Already being closed"), words)
+
+    def test_the_selection_line_counts_pending_rows_apart(self):
+        _quote("BTCUSD", 60600)
+        _quote("ETHUSD", 3030)
+        pending = self._pending()
+        eth = _trade(self.user, symbol="ETHUSD", qty="2", entry=3000,
+                     stop=2940, target=3150)
+        s = self.advise(pending, eth)["summary"]
+        self.assertEqual((s["hold"], s["pending"], s["count"]), (1, 1, 2))
+        self.assertEqual(
+            s["overall"],
+            "1 is already being closed (Sauron retries it every 5 minutes). "
+            "The other one, ETHUSD: hold — the reason it was opened still "
+            "stands.")
+        self.assertNotIn("Nothing here needs closing", s["overall"])
+
+    def test_the_rest_of_a_larger_selection_is_read_on_its_own(self):
+        _quote("BTCUSD", 60600)
+        _quote("ETHUSD", 3030)
+        _quote("SOLUSD", 150)
+        pending = self._pending()
+        eth = _trade(self.user, symbol="ETHUSD", qty="2", entry=3000,
+                     stop=2940, target=3150)
+        sol = _trade(self.user, symbol="SOLUSD", qty="10", entry=150,
+                     stop=147, target=156)
+        # Three crypto longs in one book is concentration, which the
+        # watcher rightly flags; silenced here so the line under test is
+        # the "all hold" one.
+        with patch("brain.position_review.evaluate_triggers",
+                   return_value=[]):
+            s = self.advise(pending, eth, sol)["summary"]
+        self.assertEqual(
+            s["overall"],
+            "1 is already being closed (Sauron retries it every 5 minutes). "
+            "Of the other 2: nothing here needs closing — hold all 2.")
+
+    def test_a_selection_that_is_all_pending_says_so(self):
+        _quote("BTCUSD", 60600)
+        _quote("ETHUSD", 3030)
+        a = self._pending()
+        b = self._pending(symbol="ETHUSD", qty="2", entry=3000, stop=2940,
+                          target=3150)
+        s = self.advise(a, b)["summary"]
+        self.assertEqual(s["overall"],
+                         "All 2 are already being closed: the broker refused "
+                         "each close and Sauron retries them every 5 "
+                         "minutes.")
+
+    def test_the_models_verdict_on_a_pending_row_wears_the_same_words(self):
+        _quote("BTCUSD", 60600)
+        t = self._pending()
+        raw = json.dumps({"positions": [
+            {"trade_id": t.id, "verdict": "hold", "reasoning": "Fine.",
+             "confidence": 0.6}], "overall": "Leave it."})
+        rec = []
+        with _stub(raw, recorder=rec), patch.dict(os.environ, KEY), \
+                patch("ai_agents.spend.can_spend", return_value=(True, "ok")):
+            a = self.advise(t, use_model=True)
+        m = _one(a, t)["model"]
+        self.assertEqual(m["verdict"], "hold")
+        self.assertTrue(m["verdict_words"].startswith("Already being closed"))
+        # The model is told the row is being closed.
+        self.assertIn('"pending": true',
+                      rec[0].provider.complete.call_args.kwargs[
+                          "user_message"])
+
+
 class VenueHeldStopTests(_Case):
     """eToro clamps a stop on fill rather than refuse it: on the real
     account, 5% was sent and 9.98% held. The distance that matters is to
@@ -748,6 +927,46 @@ class ModelPassTests(_Case):
         self.assertIn("today's AI budget refused the call (daily AI budget "
                       "spent", a["model"]["note"])
 
+    def test_the_budget_is_asked_for_what_this_selection_costs(self):
+        """One call covers one row or fifty; the estimate handed to the
+        guard grows with what is sent instead of a flat $0.08."""
+        seen = []
+        for trades in ((self.t1,), (self.t1, self.t2)):
+            with _stub("{}"), patch.dict(os.environ, KEY), \
+                    patch("ai_agents.spend.can_spend",
+                          return_value=(False, "no")) as cs:
+                self.advise(*trades, use_model=True)
+            seen.append(cs.call_args.kwargs["estimated_usd"])
+        self.assertGreater(seen[1], seen[0])
+        self.assertGreaterEqual(seen[0], 0.02)
+
+    def test_fifty_rows_are_priced_as_fifty(self):
+        """The reviewer's arithmetic: fifty rows of pretty-printed facts is
+        tens of thousands of tokens in, several thousand out — around
+        $0.25-0.35 on the balanced tier. The estimate must not sit below
+        that, or the guard waves the day's last call through."""
+        from brain.close_advice import (build_snapshot, context_for,
+                                        estimated_usd)
+        a = self.advise(self.t1)
+        snap = build_snapshot(a)
+        one = estimated_usd(context_for(snap), 1, model="claude-sonnet-5")
+        snap["positions"] = snap["positions"] * 50
+        fifty = estimated_usd(context_for(snap), 50, model="claude-sonnet-5")
+        self.assertGreaterEqual(fifty, 0.30)
+        self.assertGreater(fifty, 5 * one)
+        # And the text the estimate priced is the text that is sent.
+        import brain.close_advice as ca
+        rec = []
+        with _stub("{}", recorder=rec), patch.dict(os.environ, KEY), \
+                patch("ai_agents.spend.can_spend", return_value=(True, "ok")), \
+                patch.object(ca, "estimated_usd",
+                             wraps=ca.estimated_usd) as est:
+            self.advise(self.t1, use_model=True)
+        self.assertEqual(
+            est.call_args.args[0],
+            rec[0].provider.complete.call_args.kwargs["user_message"])
+        self.assertEqual(est.call_args.args[1], 1)
+
     def test_a_failed_call_says_so(self):
         with _stub(None, raises=RuntimeError("overloaded")), \
                 patch.dict(os.environ, KEY), \
@@ -938,6 +1157,12 @@ class CloseSelectedTests(_Endpoint):
                    return_value={"venue": "live", "pnl": 1.0}):
             p = self.post(PREVIEW, {"ids": [demo.id]}).json()
         self.assertEqual(p["worlds"], {"live": 0, "demo": 1, "paper": 0})
+        # The top-level counts too — not only the page script's `worlds`.
+        # preview_close says "live" for any paper=False row; any other
+        # reader of this JSON must not be told a demo row is real money.
+        self.assertEqual((p["live"], p["demo"], p["paper"]), (0, 1, 0))
+        self.assertEqual([r["world"] for r in p["rows"]], ["demo"])
+        self.assertNotIn('"live"', json.dumps(p["rows"]))
         self.assertTrue(p["needs_pin"])
 
     def test_only_the_selected_rows_are_closed(self):
@@ -1073,6 +1298,43 @@ class PageTests(_Endpoint):
     def test_the_positions_page(self):
         self._check(self._page("/positions/"))
 
+    def test_every_positions_cell_names_its_own_column(self):
+        """Below 640px the table stacks into cards. Its labels used to come
+        from nth-child rules in sauron.css, and the tick column shifted
+        every one of them: the checkbox read SYMBOL, BTCUSD read DIRECTION.
+        A data-label on the cell cannot drift from the column it names."""
+        page = self._page("/positions/")
+        table = re.search(r'<table class="sv-perf-table sv-stack">(.*?)'
+                          r'</table>', page, flags=re.S)
+        self.assertIsNotNone(table, "the open table no longer stacks")
+        heads = re.findall(r"<th\b[^>]*>(.*?)</th>",
+                           table.group(1).split("</thead>")[0], flags=re.S)
+        for row in re.findall(r"<tr data-sv-position-row.*?</tr>",
+                              table.group(1), flags=re.S):
+            labels = re.findall(r'<td\b[^>]*\bdata-label="([^"]*)"', row)
+            self.assertEqual(len(labels), len(re.findall(r"<td\b", row)),
+                             "a cell has no data-label")
+            self.assertEqual(labels[0], "Select")
+            # Every other label is its own header's text, in order.
+            self.assertEqual(
+                [lb.replace("&amp;", "&") for lb in labels[1:]],
+                [re.sub(r"<[^>]+>", "", h).replace("&amp;", "&").strip()
+                 for h in heads[1:]])
+
+    def test_a_phone_can_still_select_all(self):
+        """The header row is visually hidden when the table stacks, and
+        its "select all" with it; the phone gets its own, in the card the
+        ticks live in and outside the live region."""
+        page = self._page("/positions/")
+        card = page.split("data-sv-select-scope", 1)[1]
+        self.assertIn('<label class="sv-sel-all-phone" '
+                      'data-sv-select-all-wrap hidden><input type="checkbox" '
+                      'class="sv-sel-box" data-sv-select-all', card)
+        self.assertLess(card.index("data-sv-select-all-wrap"),
+                        card.index('data-sv-live="pos-open"'))
+        frag = self._page("/positions/live/")
+        self.assertNotIn("data-sv-select-all-wrap", frag)
+
     def test_the_portfolio_page(self):
         self._check(self._page("/portfolio/"))
 
@@ -1103,6 +1365,34 @@ class ScriptTests(SimpleTestCase):
     def setUp(self):
         self.js = _read("static", "js", "sv-close-advice.js")
         self.css = _read("static", "css", "sv-close-advice.css")
+
+    def test_closing_from_the_advice_keeps_the_failed_rows_ticked(self):
+        """closeSelected unticks exactly the rows that closed. The advice
+        dialog's own onClosed used to clear EVERY advised id on top of
+        that, so after "PARTIALLY closed — 1 STILL OPEN" the row still
+        open had lost the tick needed to retry it."""
+        block = self.js.split("closeThese.onclick = function () {", 1)[1] \
+            .split("\n                };", 1)[0]
+        self.assertIn("closeSelected(open,", block)
+        self.assertNotIn("clearIds(", block)
+        self.assertIn("clearIds((res.closed || []).map(function (c) "
+                      "{ return c.id; }));", self.js)
+
+    def test_a_pending_row_does_not_wear_the_hold_colour(self):
+        self.assertIn('return p.pending ? "is-pending" : verdictClass(p.verdict);',
+                      self.js)
+        self.assertIn(".sv-adv-chip.is-pending", self.css)
+        self.assertIn('if (s.pending) reads.push(s.pending + " already being '
+                      'closed");', self.js)
+
+    def test_the_phone_box_selects_its_card(self):
+        self.assertIn('all.closest("table") || '
+                      'all.closest("[data-sv-select-scope]") || d', self.js)
+        self.assertIn("each(boxes(scopeOf(t)), function (b) {", self.js)
+        phone = self.css.split("@media (max-width: 640px)", 1)[1]
+        self.assertIn(".sv-sel-all-phone:not([hidden])", phone)
+        self.assertIn(".sv-sel-all-phone { display: none; }",
+                      self.css.split("@media", 1)[0])
 
     def test_a_tick_is_not_a_click_on_the_row(self):
         card = _read("static", "js", "sv-position-card.js")

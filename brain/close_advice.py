@@ -102,6 +102,25 @@ VERDICT_WORDS = {
     VERDICT_UNKNOWN: "Can't judge — no fresh price",
 }
 
+# A CLOSE_PENDING row is already being closed: the broker refused the close
+# and the retry task sends it again every five minutes. Its facts are still
+# measured and its verdict still computed — if the retries are abandoned,
+# the operator closing it at the broker wants to know what the facts said —
+# but the verdict cannot wear its ordinary words. "Hold — the reason it was
+# opened still stands" over a row the platform is closing reads as "this
+# stays open", which it does not, and the top reason on the same card says
+# the opposite. So the chip leads with what is HAPPENING and gives the
+# facts' reading second, and the selection's line counts these rows apart.
+PENDING_WORDS = {
+    VERDICT_CLOSE: "Already being closed — and its facts say closing is "
+                   "right",
+    VERDICT_TRIM: "Already being closed — on its facts alone Sauron would "
+                  "say watch it",
+    VERDICT_HOLD: "Already being closed — on its facts alone Sauron would "
+                  "not have closed it",
+    VERDICT_UNKNOWN: "Already being closed — no fresh price to judge it by",
+}
+
 # A working entry is an ORDER, so the same two answers wear their own words:
 # "close" is "withdraw it", "hold" is "leave it working". Trim and tighten
 # mean nothing for an order that holds no position, and an order needs no
@@ -145,10 +164,26 @@ NO_STOP_SENTINEL = 0.0001
 # position is carrying at least half as much risk again as it was sized for.
 VENUE_STOP_WIDER_R = 1.5
 
-# Per-call estimate handed to can_spend. One call covers the whole selection
-# (up to fifty rows of facts, a few thousand tokens each way on the balanced
-# tier); generous on purpose so the guard trips before the budget does.
-ESTIMATED_USD_PER_ASK = 0.08
+# What one question is estimated to cost, handed to can_spend. It is worked
+# out from what is actually about to be sent, not a flat figure: one call
+# covers the whole selection, and a selection runs from one row to fifty.
+# A flat $0.08 was right for a handful and several times short at the cap —
+# fifty rows of pretty-printed facts is ~60k tokens in before the model says
+# a word — so the budget guard waved the last call of the day through and
+# the day overshot by the difference.
+#
+#   in   the system prompt and the snapshot, counted in characters and
+#        divided by CHARS_PER_TOKEN — three, not the usual four, because
+#        indented JSON of numbers and keys tokenises denser than prose;
+#   out  a base for the frame, the overall line and adaptive thinking, plus
+#        a few sentences of reasoning per position;
+#   then priced at the agent's own model's rates and multiplied by the
+#        margin, with a floor, so the guard trips before the budget does.
+CHARS_PER_TOKEN = 3.0
+OUTPUT_TOKENS_BASE = 2000
+OUTPUT_TOKENS_PER_POSITION = 400
+ESTIMATE_MARGIN = 1.5
+MIN_ESTIMATED_USD = 0.02
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -194,8 +229,23 @@ ESTIMATED_USD_PER_ASK = 0.08
 #               protect what it has made rather than hand it back;
 #            T3 the time stop is approaching (past its warning fraction);
 #            T4 the broker holds no stop at all, or holds one more than
-#               VENUE_STOP_WIDER_R from entry.
-#   HOLD     nothing above: the stop and the target are doing their job.
+#               VENUE_STOP_WIDER_R from entry;
+#            T5 the ROW carries no stop. Nothing limits the loss, and
+#               without a stop there is no R, so near_stop, give_back,
+#               adverse_excursion and risk_exceeds_reward can never fire:
+#               without this rule such a row could only ever come back
+#               "hold", however much it was losing.
+#   HOLD     nothing above: the stop (and the target, when one is set) are
+#            doing their job. The sentence that says so names only the
+#            levels the row actually has — a target can be cleared from
+#            the positions page, and "the target is doing its job" about a
+#            target that does not exist is a sentence the operator would
+#            rightly stop trusting.
+#
+# A CLOSE_PENDING row is judged by the same rules — its facts are real —
+# but it wears PENDING_WORDS and is counted apart in the selection's line:
+# the platform is already closing it, and "hold" must never read as "this
+# stays open".
 #
 # For an ORDER (a working entry) only two answers exist. WITHDRAW (close)
 # when fresh signals oppose its side more strongly than any agree, or the
@@ -438,8 +488,27 @@ def _review_words(review: Optional[dict], now) -> str:
     return text if text.endswith((".", "…")) else text + "."
 
 
+def _level(value) -> Optional[float]:
+    """A stop or target price, or None when the row has none. Zero is how
+    an older row spells "none" — never a level at price zero."""
+    v = _f(value)
+    return v if v is not None and v > 0 else None
+
+
+def _hold_words(has_stop: bool, has_target: bool) -> str:
+    """Why "hold", in terms of the levels this row actually carries."""
+    head = "Nothing the watcher measures has fired"
+    if has_stop and has_target:
+        return head + ": the stop and the target are doing their job."
+    if has_stop:
+        return head + ": the stop is doing its job; no target is set."
+    if has_target:
+        return head + "; a target is set, but no stop is."
+    return head + "; neither a stop nor a target is set."
+
+
 def _decide_position(*, triggers, facts, r_to_planned_stop, time_stop, vstop,
-                     venue_risk_r, sig, pnl) -> str:
+                     venue_risk_r, sig, pnl, has_stop=True) -> str:
     """The rules at the top of this file, in code. See them for the why."""
     codes = {}
     for t in triggers:
@@ -486,6 +555,8 @@ def _decide_position(*, triggers, facts, r_to_planned_stop, time_stop, vstop,
         return VERDICT_TRIM
     if vstop["none"] or (venue_risk_r is not None
                          and venue_risk_r >= VENUE_STOP_WIDER_R):  # T4
+        return VERDICT_TRIM
+    if not has_stop:                                        # T5
         return VERDICT_TRIM
     return VERDICT_HOLD
 
@@ -538,6 +609,7 @@ def _advise_one(trade, *, cache: dict, reviews: dict, now) -> dict:
     instrument = Instrument.objects.filter(symbol=sym).first()
     pos = bot_position(trade)
     order = is_entry_working(trade)
+    pending = trade.status == "CLOSE_PENDING"
     reasons = _Reasons()
 
     base = {
@@ -546,6 +618,9 @@ def _advise_one(trade, *, cache: dict, reviews: dict, now) -> dict:
         "side": pos["side"],
         "headline": "%s %s" % ("Long" if is_long else "Short", sym),
         "status": trade.status,
+        # Already being closed: its verdict wears PENDING_WORDS, and the
+        # selection counts it apart (see PENDING_WORDS for why).
+        "pending": pending,
         "kind": KIND_ORDER if order else KIND_POSITION,
         "world": world,
         "world_words": world_words,
@@ -634,6 +709,8 @@ def _advise_one(trade, *, cache: dict, reviews: dict, now) -> dict:
     qty = _f(trade.qty)
     risk = _f(facts.get("risk_per_unit"))
     sign = pos["dir_sign"]
+    has_stop = _level(pos.get("stop")) is not None
+    has_target = _level(pos.get("target")) is not None
 
     # The P&L off the SAME mark the R was measured on, with the positions
     # page's own value-per-unit — so the money and the R on the card are two
@@ -649,6 +726,15 @@ def _advise_one(trade, *, cache: dict, reviews: dict, now) -> dict:
     # when the venue holds a different one, and judge the triggers on that.
     judged_facts = dict(facts)
     r_to_planned = _f(facts.get("r_to_stop"))
+    if not has_stop:
+        # The watcher measures any stop that is not None, and 0 is how an
+        # older row spells "none" — so it would compute a distance to a stop
+        # at price ZERO: "50R still at risk to the stop" on a long, and on a
+        # short a mark "through" it, which reads as C1 and says close. A
+        # row with no stop has no distance to one; T5 says so instead.
+        r_to_planned = None
+        judged_facts["r_to_stop"] = None
+        judged_facts["stop"] = None
     r_to_held = None
     venue_risk_r = None
     initial = _f(pos.get("initial_stop"))
@@ -705,6 +791,16 @@ def _advise_one(trade, *, cache: dict, reviews: dict, now) -> dict:
                              format_price(vstop["sent"], ac, sym),
                              format_price(vstop["held"], ac, sym)))
 
+    if not has_stop:
+        # T5's sentence. Said whatever the price: an unpriced row with no
+        # stop is still a row with nothing limiting it.
+        text = "No stop is set: nothing limits the loss"
+        if not no_price and _f(facts.get("unrealized_r")) is None:
+            text += (", and with no stop to measure against there is no R, "
+                     "so the warnings that read R (near the stop, adverse "
+                     "excursion, give-back, risk against reward) cannot fire")
+        reasons.add(0.85, text + ".")
+
     if time_stop.get("hit"):
         reasons.add(0.95, "Its time limit is reached: held %s of the %s it "
                           "was allowed." % (
@@ -730,17 +826,17 @@ def _advise_one(trade, *, cache: dict, reviews: dict, now) -> dict:
         verdict = _decide_position(
             triggers=triggers, facts=facts, r_to_planned_stop=r_to_planned,
             time_stop=time_stop, vstop=vstop, venue_risk_r=venue_risk_r,
-            sig=sig, pnl=pnl)
+            sig=sig, pnl=pnl, has_stop=has_stop)
     if verdict == VERDICT_HOLD and not triggers:
-        reasons.add(0.15, "Nothing the watcher measures has fired: the stop "
-                          "and the target are doing their job.")
+        reasons.add(0.15, _hold_words(has_stop, has_target))
 
     severity = max((float(t.get("severity") or 0) for t in triggers),
                    default=0.0)
     r_to_stop = r_to_held if r_to_held is not None else r_to_planned
     return {**base,
             "verdict": verdict,
-            "verdict_words": VERDICT_WORDS[verdict],
+            "verdict_words": (PENDING_WORDS if pending
+                              else VERDICT_WORDS)[verdict],
             "reasons": reasons.top(),
             "severity": round(severity, 3),
             "triggers": [{"code": t["code"], "severity": t["severity"],
@@ -797,15 +893,19 @@ def _unmeasured(trade, err) -> dict:
     """The card for a row whose measurement raised — one bad row must not
     take the whole answer down, and it must not read as a clean bill."""
     world, world_words, needs_pin = world_of(trade)
+    pending = trade.status == "CLOSE_PENDING"
     return {
         "trade_id": trade.id, "symbol": trade.symbol or "",
         "side": "SELL" if (trade.side or "").upper() in ("SELL", "SHORT")
         else "BUY",
         "headline": trade.symbol or "", "status": trade.status,
+        "pending": pending,
         "kind": KIND_POSITION, "world": world, "world_words": world_words,
         "requires_pin": needs_pin, "rule": trade.rule_name or "",
         "verdict": VERDICT_UNKNOWN,
-        "verdict_words": "Can't judge — it could not be measured",
+        "verdict_words": ("Already being closed — it could not be measured"
+                          if pending
+                          else "Can't judge — it could not be measured"),
         "reasons": ["Sauron could not measure this position (%s), so it "
                     "can't judge it." % str(err)[:120]],
         "severity": 0.0, "triggers": [],
@@ -832,10 +932,19 @@ def _summary(positions: list, not_found: list) -> dict:
 
     count = len(positions)
     worlds = {WORLD_LIVE: 0, WORLD_DEMO: 0, WORLD_PAPER: 0}
+    # The four verdict counts cover the rows NOT already being closed; a
+    # CLOSE_PENDING row is counted under `pending` instead. Counted as a
+    # "hold", a row the retry task is closing would make "hold 1" and "1
+    # already being closed" two readings of one position — so the five
+    # counts add up to `count`, each row in exactly one of them.
     by_verdict = {v: 0 for v in VERDICTS}
+    pending = 0
     for p in positions:
         worlds[p["world"]] = worlds.get(p["world"], 0) + 1
-        by_verdict[p["verdict"]] = by_verdict.get(p["verdict"], 0) + 1
+        if p.get("pending"):
+            pending += 1
+        else:
+            by_verdict[p["verdict"]] = by_verdict.get(p["verdict"], 0) + 1
 
     # Money is only added up when every figure is measured AND in one
     # currency. One unmeasured row makes the TOTAL unmeasured — summing the
@@ -882,6 +991,7 @@ def _summary(positions: list, not_found: list) -> dict:
         "trim_or_tighten": by_verdict[VERDICT_TRIM],
         "hold": by_verdict[VERDICT_HOLD],
         "unknown": by_verdict[VERDICT_UNKNOWN],
+        "pending": pending,
         "pnl": pnl,
         "pnl_text": money(pnl, ccy, signed=True),
         "pnl_note": pnl_note,
@@ -895,29 +1005,44 @@ def _summary(positions: list, not_found: list) -> dict:
 
 
 def _overall(positions, by_verdict, worlds) -> str:
-    """One line a person can act on."""
+    """One line a person can act on.
+
+    Rows already being closed are said first and kept out of the read of
+    the rest: "Nothing here needs closing — hold all 3" over a selection in
+    which the platform is retrying one close is a line that says a
+    position stays open while it is being closed.
+    """
     n = len(positions)
     if not n:
         return "Nothing to judge: none of the ticked rows is open."
     if n == 1:
         # One row: its own verdict words ARE the read, and they already say
-        # "withdraw" rather than "close" when the row is an order.
+        # "withdraw" rather than "close" when the row is an order, and
+        # "already being closed" when it is pending.
         line = positions[0]["verdict_words"] + "."
         return line + (" It is real money." if worlds[WORLD_LIVE] else "")
 
+    judged = [p for p in positions if not p.get("pending")]
+    pending = n - len(judged)
+    m = len(judged)
+
     def names(verdict):
-        syms = [p["symbol"] for p in positions if p["verdict"] == verdict]
+        syms = [p["symbol"] for p in judged if p["verdict"] == verdict]
         head = ", ".join(syms[:4])
         return head + (" and %d more" % (len(syms) - 4) if len(syms) > 4
                        else "")
 
+    # Each reading is written to stand after "Of the other N:" as well as
+    # on its own, where it gets its capital letter.
     closing = by_verdict[VERDICT_CLOSE]
-    if closing == n:
-        line = "Closing looks right for all %d." % n
-    elif by_verdict[VERDICT_HOLD] == n:
-        line = "Nothing here needs closing — hold all %d." % n
-    elif by_verdict[VERDICT_UNKNOWN] == n:
-        line = "Sauron can't judge any of them: no fresh price."
+    if not m:
+        read = ""
+    elif closing == m:
+        read = "closing looks right for all %d" % m
+    elif by_verdict[VERDICT_HOLD] == m:
+        read = "nothing here needs closing — hold all %d" % m
+    elif by_verdict[VERDICT_UNKNOWN] == m:
+        read = "Sauron can't judge any of them: no fresh price"
     else:
         parts = []
         if closing:
@@ -930,7 +1055,29 @@ def _overall(positions, by_verdict, worlds) -> str:
         if by_verdict[VERDICT_UNKNOWN]:
             parts.append("%d can't be judged (no fresh price)"
                          % by_verdict[VERDICT_UNKNOWN])
-        line = "Sauron's read: " + "; ".join(parts) + "."
+        read = "; ".join(parts)
+        if not pending:
+            read = "Sauron's read: " + read
+
+    if not pending:
+        line = read[0].upper() + read[1:] + "."
+    elif not m:
+        line = ("All %d are already being closed: the broker refused each "
+                "close and Sauron retries them every 5 minutes." % n)
+    elif m == 1:
+        # "Of the other 1: closing looks right for all 1" is arithmetic, not
+        # English — one remaining row is named and given its own words.
+        words = judged[0]["verdict_words"]
+        line = ("%d %s already being closed (Sauron retries %s every 5 "
+                "minutes). The other one, %s: %s." % (
+                    pending, "is" if pending == 1 else "are",
+                    "it" if pending == 1 else "them", judged[0]["symbol"],
+                    words[0].lower() + words[1:]))
+    else:
+        line = ("%d %s already being closed (Sauron retries %s every 5 "
+                "minutes). Of the other %d: %s." % (
+                    pending, "is" if pending == 1 else "are",
+                    "it" if pending == 1 else "them", m, read))
     if worlds[WORLD_LIVE]:
         line += " %d of them %s real money." % (
             worlds[WORLD_LIVE], "is" if worlds[WORLD_LIVE] == 1 else "are")
@@ -1070,6 +1217,84 @@ ADVICE_SCHEMA = """{
 }"""
 
 
+# Module-level, not built inside the agent: the budget estimate has to count
+# what will be sent BEFORE an agent is constructed (a refused budget
+# constructs nothing and calls nothing), and one text read in two places
+# cannot drift apart.
+SYSTEM_PROMPT = (
+    "You are Sauron Vision's Close Advisor. A person has ticked one "
+    "or more OPEN positions and asks: is closing them NOW a good "
+    "idea? You receive, for each position, the measured facts, the "
+    "triggers that fired, the rule-based verdict and its reasons, "
+    "and a summary of the selection.\n\n"
+    "Answer per position with one of:\n"
+    "  close            — closing now looks right\n"
+    "  trim_or_tighten  — keep it, but tighten the stop or take some "
+    "off\n"
+    "  hold             — the reason it was opened still stands\n"
+    "  unknown          — there is no fresh price, so it cannot be "
+    "judged\n\n"
+    "Rules you must follow:\n"
+    "- A position whose rule-based verdict is 'unknown' has no fresh "
+    "price. Say so; do not guess its value.\n"
+    "- A row of kind 'order' is an unfilled ORDER, not a position: "
+    "'close' means withdraw it and 'hold' means keep it working.\n"
+    "- A row with pending true (status CLOSE_PENDING) is ALREADY being "
+    "closed: the broker refused the close and the platform retries it "
+    "every 5 minutes. Your verdict is what its facts say; say that it is "
+    "being closed, and never write as if it will stay open.\n"
+    "- Reason in R where R is given. A number given as null is "
+    "UNKNOWN — never treat it as zero and never invent it.\n"
+    "- World 'demo' and 'paper' are simulated money; only 'live' is "
+    "real money. Never call a demo position live.\n"
+    "- 'hold' is a real answer and often the right one. A trigger "
+    "firing is a reason to look, not a reason to act.\n"
+    "- You may disagree with the rule-based verdict; when you do, "
+    "say which fact decides it.\n"
+    "- Plain English for a non-specialist. Short sentences.\n"
+    "- You are ADVISING. Nothing you say closes anything; a person "
+    "presses the button.\n\n"
+    f"Respond ONLY with valid JSON in this schema:\n{ADVICE_SCHEMA}"
+    "\n\nNo code fences, no surrounding text."
+)
+
+
+def context_for(snapshot: dict) -> str:
+    """The user message for one question — the agent's build_context."""
+    return ("Positions the person is thinking of closing (JSON):\n\n"
+            f"{json.dumps(snapshot or {}, indent=2, default=str)}\n\n"
+            "Produce the close-advice JSON now.")
+
+
+def estimated_usd(user_message: str, n_positions: int, *,
+                  model: Optional[str] = None) -> float:
+    """What one question should cost at most, for can_spend.
+
+    Counted from the text about to be sent and the number of positions the
+    answer has to cover — see CHARS_PER_TOKEN and its neighbours for the
+    arithmetic and why a flat figure was wrong. Priced at the rates of the
+    model the agent will actually run on (a per-agent override included);
+    an unreadable setting falls back to the balanced tier's price rather
+    than to zero, because an estimate of zero is a guard that never trips.
+    """
+    from ai_agents.catalog import pricing_for, resolve_agent
+
+    if model is None:
+        try:
+            model = resolve_agent(CloseAdvisorAgent.agent_name,
+                                  CloseAdvisorAgent.default_tier)
+        except Exception:  # noqa: BLE001 — price it, whatever it runs on
+            model = ""
+    price = pricing_for(model or "")
+    tokens_in = (len(SYSTEM_PROMPT) + len(user_message or "")) \
+        / CHARS_PER_TOKEN
+    tokens_out = (OUTPUT_TOKENS_BASE
+                  + OUTPUT_TOKENS_PER_POSITION * max(0, int(n_positions)))
+    usd = (tokens_in * price["input"]
+           + tokens_out * price["output"]) / 1_000_000
+    return round(max(MIN_ESTIMATED_USD, usd * ESTIMATE_MARGIN), 4)
+
+
 class CloseAdvisorAgent(BaseAgent):
     """One bounded judgment on a handful of positions somebody is about to
     close. Balanced tier: the facts are measured already, and the question
@@ -1079,44 +1304,10 @@ class CloseAdvisorAgent(BaseAgent):
     default_tier = "balanced"
 
     def get_system_prompt(self) -> str:
-        return (
-            "You are Sauron Vision's Close Advisor. A person has ticked one "
-            "or more OPEN positions and asks: is closing them NOW a good "
-            "idea? You receive, for each position, the measured facts, the "
-            "triggers that fired, the rule-based verdict and its reasons, "
-            "and a summary of the selection.\n\n"
-            "Answer per position with one of:\n"
-            "  close            — closing now looks right\n"
-            "  trim_or_tighten  — keep it, but tighten the stop or take some "
-            "off\n"
-            "  hold             — the reason it was opened still stands\n"
-            "  unknown          — there is no fresh price, so it cannot be "
-            "judged\n\n"
-            "Rules you must follow:\n"
-            "- A position whose rule-based verdict is 'unknown' has no fresh "
-            "price. Say so; do not guess its value.\n"
-            "- A row of kind 'order' is an unfilled ORDER, not a position: "
-            "'close' means withdraw it and 'hold' means keep it working.\n"
-            "- Reason in R where R is given. A number given as null is "
-            "UNKNOWN — never treat it as zero and never invent it.\n"
-            "- World 'demo' and 'paper' are simulated money; only 'live' is "
-            "real money. Never call a demo position live.\n"
-            "- 'hold' is a real answer and often the right one. A trigger "
-            "firing is a reason to look, not a reason to act.\n"
-            "- You may disagree with the rule-based verdict; when you do, "
-            "say which fact decides it.\n"
-            "- Plain English for a non-specialist. Short sentences.\n"
-            "- You are ADVISING. Nothing you say closes anything; a person "
-            "presses the button.\n\n"
-            f"Respond ONLY with valid JSON in this schema:\n{ADVICE_SCHEMA}"
-            "\n\nNo code fences, no surrounding text."
-        )
+        return SYSTEM_PROMPT
 
     def build_context(self, **kwargs) -> str:
-        snap = kwargs.get("snapshot") or {}
-        return ("Positions the person is thinking of closing (JSON):\n\n"
-                f"{json.dumps(snap, indent=2, default=str)}\n\n"
-                "Produce the close-advice JSON now.")
+        return context_for(kwargs.get("snapshot") or {})
 
     def parse_response(self, raw_response: str) -> dict:
         text = (raw_response or "").strip()
@@ -1148,7 +1339,8 @@ def build_snapshot(answer: dict) -> dict:
         rows.append({
             "trade_id": p["trade_id"],
             "symbol": p["symbol"], "side": p["side"], "kind": p["kind"],
-            "status": p["status"], "world": p["world"],
+            "status": p["status"], "pending": bool(p.get("pending")),
+            "world": p["world"],
             "rule": p.get("rule", ""),
             "rule_based_verdict": p["verdict"],
             "rule_based_reasons": p["reasons"],
@@ -1207,6 +1399,7 @@ def _clamp(parsed: dict, positions: list) -> tuple:
         reasoning = reasoning.strip()[:1500] if isinstance(reasoning, str) \
             else ""
         words = (ORDER_WORDS if det["kind"] == KIND_ORDER
+                 else PENDING_WORDS if det.get("pending")
                  else VERDICT_WORDS)[verdict]
         out[tid] = {"verdict": verdict, "verdict_words": words,
                     "reasoning": reasoning, "confidence": confidence,
@@ -1235,8 +1428,13 @@ def _model_pass(user, answer: dict) -> None:
         part["note"] = ("The AI part is missing: no Anthropic API key is "
                         "configured on this server." + RULE_ONLY)
         return
-    allowed, reason = can_spend(tier=CloseAdvisorAgent.default_tier,
-                                estimated_usd=ESTIMATED_USD_PER_ASK)
+    # The message is built first so the estimate prices what will actually
+    # be sent — fifty rows cost several times what one does — and the same
+    # text is then sent, not rebuilt.
+    user_message = context_for(build_snapshot(answer))
+    allowed, reason = can_spend(
+        tier=CloseAdvisorAgent.default_tier,
+        estimated_usd=estimated_usd(user_message, len(answer["positions"])))
     if not allowed:
         part["note"] = ("The AI part is missing: today's AI budget refused "
                         "the call (%s)." % reason + RULE_ONLY)
@@ -1247,7 +1445,7 @@ def _model_pass(user, answer: dict) -> None:
         agent = CloseAdvisorAgent()
         raw, usage = agent.provider.complete(
             system_prompt=agent.get_system_prompt(),
-            user_message=agent.build_context(snapshot=build_snapshot(answer)),
+            user_message=user_message,
             model=agent.model,
             agent_name=agent.agent_name,
             # Which question this cost answered, for the ledger — the user

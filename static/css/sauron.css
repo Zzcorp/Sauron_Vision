@@ -5907,16 +5907,32 @@ table td.num, table th.num {
    per table: a stacked row with no labels is worse than a scroll, so a
    table only stacks once someone has actually named its columns.
 
-   The two Positions tables are pinned in by selector rather than by class
-   because that page's markup is owned elsewhere this wave. They are
-   matched by shape (eleven headers) and by the partial's own wrapper
-   class, so a column APPENDED to either table leaves the existing labels
-   correct; a column PREPENDED would shift them, and at that point the
-   pair below should be deleted in favour of data-label in the template.
+   The Positions analytics partial is still pinned in by selector rather
+   than by class, matched by its own wrapper class and labelled by
+   position below; a column APPENDED to it leaves the labels correct, a
+   column PREPENDED would shift them. Current Positions used to be pinned
+   the same way, by shape (eleven headers). The Capital column had already
+   put every label from the fourth on one cell out; the tick column
+   (2026-09-28, "Should I close?") moved the first three too, so on a
+   phone the checkbox read SYMBOL, BTCUSD read DIRECTION and the P&L read
+   OPENED. That table now carries .sv-stack and a data-label on each cell,
+   as this block always said it should.
+
+   THE WEIGHT. Every list below carries `.table-wrapper table.sv-stack:has(
+   th:nth-child(1))`, which matches nothing `.sv-stack` does not already
+   match and is there for its specificity alone. :is() takes the weight of
+   its MOST specific argument, whichever one matched, and the pinned
+   Current Positions selector was (0,3,2) — the exact weight of the 34rem
+   runway `.table-wrapper .sv-perf-table:has(thead th:nth-child(6))`,
+   which the stack then beat by being written later. Removing that
+   selector alone dropped every stacked table on the platform to (0,1,1):
+   the runway won, and a stacked table kept a 544px floor inside a 390px
+   screen. The argument that replaced it holds the same (0,3,2), so order
+   decides again, as test_card_responsiveness pins it to.
    ═══════════════════════════════════════════════════════════════════════ */
 @media (max-width: 640px) {
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) {
         display: block;
         min-width: 0;
@@ -5924,7 +5940,7 @@ table td.num, table th.num {
     /* Visually hidden, not display:none — the header text is still the
        accessible name for each cell in the a11y tree. */
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) thead {
         position: absolute;
         width: 1px; height: 1px;
@@ -5933,11 +5949,11 @@ table td.num, table th.num {
         white-space: nowrap;
     }
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody { display: block; }
 
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody tr {
         display: block;
         margin-bottom: 10px;
@@ -5947,11 +5963,11 @@ table td.num, table th.num {
         background: color-mix(in srgb, var(--bg-card-hover, var(--bg-card)) 30%, transparent);
     }
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody tr:last-child { margin-bottom: 0; }
 
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody td {
         display: grid;
         grid-template-columns: minmax(0, 10ch) minmax(0, 1fr);
@@ -5966,11 +5982,11 @@ table td.num, table th.num {
         max-width: none;
     }
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody td:last-child { border-bottom: none; }
 
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody td::before {
         font-family: var(--font-mono);
         font-size: 9.5px;
@@ -5987,25 +6003,8 @@ table td.num, table th.num {
     /* Numerics keep their tabular figures but drop the right edge: in a
        one-value-per-line layout there is no column left to align to. */
     :is(.sv-stack,
-        .pos-tabs ~ .card table:has(th:nth-child(11)),
+        .table-wrapper table.sv-stack:has(th:nth-child(1)),
         .positions-metrics table) tbody td.num { text-align: left; }
-
-    /* Positions — Current Positions (11 columns). */
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(1)::before { content: "Symbol"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(2)::before { content: "Direction"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(3)::before { content: "Qty"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(4)::before { content: "Entry"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(5)::before { content: "Current"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(6)::before { content: "Stop"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(7)::before { content: "Target"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(8)::before { content: "P&L"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(9)::before { content: "P&L %"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(10)::before { content: "Strategy"; }
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(11)::before { content: "Opened"; }
-    /* Anything appended past the eleven is an action, not a field. */
-    .pos-tabs ~ .card table:has(th:nth-child(11)) td:nth-child(n+12) {
-        grid-template-columns: minmax(0, 1fr);
-    }
 
     /* Positions — the htmx analytics partial (6 columns). */
     .positions-metrics table td:nth-child(1)::before { content: "Symbol"; }

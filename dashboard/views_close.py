@@ -427,7 +427,7 @@ def close_selected_preview(request):
         return JsonResponse({"error": err}, status=400)
 
     trades, missing = _selected_closable(request.user, ids)
-    rows, live_n, pending_n = [], 0, 0
+    rows, pending_n = [], 0
     worlds = {"live": 0, "demo": 0, "paper": 0}
     pnl_total, pnl_measured = 0.0, True
     for trade in trades:
@@ -437,9 +437,9 @@ def close_selected_preview(request):
             logger.exception("[close-selected] preview failed for trade %s",
                              trade.pk)
             p = {}
-        venue = str(p.get("venue") or ("paper" if trade.paper else "live"))
-        if venue == "live":
-            live_n += 1
+        # The world, never preview_close's "venue": that word is "live" for
+        # every paper=False row, an eToro demo included, because it says
+        # where the close is SENT (the broker) rather than whose money it is.
         world = world_of(trade)[0]
         worlds[world] = worlds.get(world, 0) + 1
         if p.get("pending") or trade.status == "CLOSE_PENDING":
@@ -456,7 +456,7 @@ def close_selected_preview(request):
                 pnl_measured = False
         rows.append({
             "id": trade.pk, "symbol": trade.symbol, "side": trade.side,
-            "qty": str(trade.qty), "venue": venue, "world": world,
+            "qty": str(trade.qty), "world": world,
             "pending": bool(p.get("pending")),
             "error": str(p.get("error") or "")[:160],
         })
@@ -468,8 +468,14 @@ def close_selected_preview(request):
            if pnl_measured and trades and len(ccys) == 1 else None)
     return JsonResponse({
         "count": len(rows),
-        "live": live_n,
-        "paper": len(rows) - live_n,
+        # close_all_preview's keys, but counted by WORLD: `live` is real
+        # money only, and a demo row is `demo`, never `live` and never
+        # folded into `paper` — whoever reads this JSON (this page, Gandalf,
+        # the next page) is told whose money each row is. The three add up
+        # to `count`; `worlds` carries the same three for the page script.
+        "live": worlds["live"],
+        "demo": worlds["demo"],
+        "paper": worlds["paper"],
         "pending": pending_n,
         "worlds": worlds,
         "pnl_text": money(pnl, ccys.pop() if len(ccys) == 1 else "",
