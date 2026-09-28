@@ -35,7 +35,8 @@ from core.platform_control import (DEFAULT_COMPONENTS, PlatformComponent,
 
 #: Directories that are not this project's source.
 SKIP = {".git", ".venv", "venv", "__pycache__", "staticfiles", "static",
-        "node_modules", ".pytest_cache", "test_backups", "migrations"}
+        "node_modules", ".pytest_cache", "test_backups", "migrations",
+        ".claude"}  # Claude Code's worktrees: whole copies of the tree
 
 GUARD_RE = re.compile(r"""guarded_task\(\s*["']([A-Za-z0-9_]+)["']""")
 

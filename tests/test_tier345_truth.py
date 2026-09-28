@@ -128,6 +128,10 @@ class EveryQuoteWriteGoesThroughTheOneGateTests(TestCase):
             rel = str(path.relative_to(root)).replace("\\", "/")
             if rel.startswith(("tests/", "SV_V/")) or "migrations" in rel:
                 continue
+            # Copies of the tree that are not the tree: a virtualenv, and
+            # the worktrees Claude Code keeps under .claude/ (2026-09-28).
+            if rel.startswith((".venv/", "venv/", ".claude/", "node_modules/")):
+                continue
             if rel == "market_data/quotes.py":
                 continue
             try:

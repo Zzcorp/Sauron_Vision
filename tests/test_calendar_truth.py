@@ -182,7 +182,10 @@ class ThePageIsHonestAboutItsScopeTests(TestCase):
             parts = set(path.parts)
             if "tests" in parts or "migrations" in parts:
                 continue
-            if ".venv" in parts or "SV_V" in parts:
+            # A dev checkout carries copies of the tree that are not the
+            # tree: a virtualenv, and the worktrees Claude Code keeps under
+            # .claude/ (each one a whole second sauron_vision, 2026-09-28).
+            if parts & {".venv", "venv", "SV_V", ".claude", "node_modules"}:
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="ignore")
