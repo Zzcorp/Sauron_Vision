@@ -696,7 +696,9 @@ class TheBookServes(TestCase):
     def test_it_links_to_the_wall_and_the_wall_links_back(self):
         self.assertIn('href="/wall/"', self.body)
         wall = self.client.get("/wall/").content.decode("utf-8")
-        self.assertEqual(wall.count('href="/book/"'), 1)
+        # Two doors since 2026-09-28: the nav's "The Book" at the top
+        # (tests/test_wall_book_link.py) and the line in the footer.
+        self.assertEqual(wall.count('href="/book/"'), 2)
         footer = wall[wall.index('<footer class="wall-footer">'):]
         self.assertIn('href="/book/"', footer[:footer.index("</footer>")])
 
