@@ -6205,9 +6205,11 @@ def kill_switch_api(request):
 
     reason = data.get('reason', 'manual activation')
     results = execute_kill_switch(user=request.user, reason=reason)
-    # The alarm chat hears the flatten (2026-09-28): counts only, after
-    # the commit, from a worker. Fenced: the kill is done, and nothing
-    # there can fail it or this answer.
+    # The alarm chat hears the flatten (2026-09-28): counts only, on the
+    # commit, from the request process (one HTTP call bounded by the
+    # sender's SEND_TIMEOUT_S; never a worker, which may be what is
+    # broken). Fenced: the kill is done, and nothing there can fail it or
+    # this answer.
     try:
         from bot_program.alarm import after_kill_switch
         after_kill_switch(results)

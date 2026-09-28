@@ -235,18 +235,21 @@ def _eye_chats() -> set:
             .values_list("telegram_chat_id", flat=True)}
 
 
-def config() -> tuple:
+def config(*, chat_required=True) -> tuple:
     """(token, chat, why not): `why not` is "" when the alarm bot may run,
-    else one sentence -- never the token."""
+    else one sentence -- never the token. The token's verdict comes
+    first: `manage.py alarm --chats`, which reads the group's id before
+    there is one, passes chat_required=False and is refused the Eye's
+    token like every other door."""
     token = os.getenv(TOKEN_ENV, "").strip()
     chat = os.getenv(CHAT_ENV, "").strip()
     if not token:
         why = f"{TOKEN_ENV} is not set"
-    elif not chat:
-        why = f"{CHAT_ENV} is not set"
     elif token == os.getenv("TELEGRAM_BOT_TOKEN", "").strip():
         why = (f"{TOKEN_ENV} is the Eye's token: two pollers on one bot "
                f"steal each other's updates; create a second bot")
+    elif not chat:
+        why = f"{CHAT_ENV} is not set" if chat_required else ""
     elif chat == os.getenv("TELEGRAM_CHAT_ID", "").strip():
         why = (f"{CHAT_ENV} is TELEGRAM_CHAT_ID: the platform's trading "
                f"messages go to that chat")

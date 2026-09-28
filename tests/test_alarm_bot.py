@@ -1243,6 +1243,11 @@ class FlattenTests(_AlarmCase):
         self.assertFalse(hasattr(tasks, "announce_alarm_kill_switch"))
         self.assertNotIn("apply_async", inspect.getsource(alarm))
         self.assertNotIn("delay(", inspect.getsource(alarm))
+        # and the two hook sites say so, not the opposite
+        for name in ("views.py", "views_admin_hq.py"):
+            src = _read("dashboard", name)
+            self.assertNotIn("from a worker", src, name)
+            self.assertIn("from the request process", src, name)
 
     def test_no_errors_no_warning_line_and_nothing_while_off(self):
         clean = dict(RESULTS, errors=[], paper_waiting=[])
@@ -1471,6 +1476,19 @@ class WiringTests(TestCase):
                      "The Eye's bot must not be in it"):
             self.assertIn(line, text)
 
+    def test_the_runbook_names_the_real_reasons_a_status_goes_unanswered(self):
+        """No path answers /status@bot while ignoring a bare /status
+        (_addressed_here returns True for any bare command); the
+        section names what does silence the bot, and where to look."""
+        text = _read("deploy", "RUNBOOK.md")
+        section = text.split("## The alarm bot")[1].split("\n## ")[0]
+        self.assertNotIn("/status@", section)
+        self.assertIn("send `/status`", section)
+        for cause in ("component on telegram_alarm", "manage.py alarm",
+                      "/health/", "./deploy/dc ps", "Group Privacy",
+                      "ten minutes", "`/stopall` never"):
+            self.assertIn(cause, section, cause)
+
     def test_the_command_is_in_the_ops_registry_and_not_on_the_web(self):
         from core import ops_commands
         entry = ops_commands.get("alarm")
@@ -1568,6 +1586,33 @@ class CommandTests(_AlarmCase):
         self.assertNotIn("offset", api.call_args.args[2])
         with patch.object(alarm, "_api", return_value=([], None)):
             self.assertIn("No chat seen", self._run("--chats"))
+
+    def test_chats_refuses_the_eyes_token_as_every_other_door_does(self):
+        """The runbook's step 3 is where the Eye's token would be pasted
+        by mistake: --chats must not poll the Eye's bot and list the
+        trading chats as the alarm group. A missing chat is what --chats
+        is for, and not refused."""
+        with patch.dict(os.environ, {"TELEGRAM_ALARM_BOT_TOKEN": EYE_TOKEN}), \
+                patch.object(alarm, "_api") as api:
+            text = self._run("--chats")
+        api.assert_not_called()
+        self.assertIn("the Eye's token", text)
+        self.assertNotIn(EYE_TOKEN, text)
+        self.assertNotIn("No chat seen", text)
+        with patch.dict(os.environ, {"TELEGRAM_ALARM_CHAT_ID": ""}), \
+                patch.object(alarm, "_api", return_value=([], None)) as api:
+            text = self._run("--chats")
+        api.assert_called_once()
+        self.assertIn("No chat seen", text)
+
+    def test_chats_says_to_send_a_command_never_any_message(self):
+        """With Group Privacy on, as the runbook leaves it, a plain
+        message never reaches the bot; a command does."""
+        with patch.object(alarm, "_api", return_value=([], None)):
+            text = self._run("--chats")
+        self.assertIn("send /status", text)
+        self.assertIn("Group Privacy", text)
+        self.assertNotIn("any message", text)
 
 
 # ── the health row ───────────────────────────────────────────────────────

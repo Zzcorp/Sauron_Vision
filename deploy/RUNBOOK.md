@@ -904,8 +904,10 @@ Set it up once:
 2. Create a NEW group with the operator and his father only, and add the
    new bot. The Eye's bot must not be in it. Then `@BotFather` →
    `/setjoingroups` → Disable, so nobody can add it to another group.
-3. Put the token in `.env` as `TELEGRAM_ALARM_BOT_TOKEN=`, write `/status`
-   in the new group, and read the group's id (a group id starts with `-`):
+3. Put the token in `.env` as `TELEGRAM_ALARM_BOT_TOKEN=`, send `/status`
+   in the new group (a command: with Group Privacy on, a plain message
+   never reaches the bot), and read the group's id (a group id starts
+   with `-`):
 
    ```bash
    ./deploy/dc up -d                     # not restart: up re-reads .env
@@ -929,10 +931,18 @@ It refuses to run with the Eye's token, or with the Eye's chats
 it — the pause is one of the things it reports; `component off
 telegram_alarm` does, and so does "all off" beside System. A standing
 problem is said again every three hours, a failing or stopped component
-every 24, an event once; nothing is said when a problem ends. If a bare
-`/status` gets no answer, send `/status@` followed by the bot's username.
-If the group is ever upgraded to a supergroup its id changes: the worker
-log names the new one, which goes in `TELEGRAM_ALARM_CHAT_ID`.
+every 24, an event once; nothing is said when a problem ends. If `/status`
+gets no answer: the switch is off (`manage.py component list`, then
+`component on telegram_alarm`); the configuration is refused — a wrong
+chat id, or the Eye's token — (`manage.py alarm` prints the verdict; the
+"Alarm bot" row on `/health/` says why); the fast worker is down
+(`./deploy/dc ps`, then `./deploy/dc logs --tail 100 worker-fast`); or
+another poll holds the batch, and the next one answers. A plain message is
+never heard with Group Privacy on, only a command; a second command inside
+three seconds is dropped; so is a `/status` older than ten minutes after
+an outage — `/stopall` never. If the group is ever upgraded to a supergroup
+its id changes: the worker log names the new one, which goes in
+`TELEGRAM_ALARM_CHAT_ID`.
 
 ---
 

@@ -10,7 +10,8 @@ sends ONE message to the alarm chat whatever the switch says: the
 operator proving the token and the chat, not an all-clear. --chats lists
 the chats in the updates Telegram holds for the alarm bot (getUpdates
 without an offset: nothing is confirmed, nothing forgotten), to read the
-new group's id once someone has written in it.
+new group's id once someone has sent /status in it; refused the Eye's
+token like every other door.
 
     python manage.py alarm
     python manage.py alarm --send
@@ -93,15 +94,18 @@ class Command(BaseCommand):
                           "criticals are relayed after each Morgul run).")
 
     def _chats(self, alarm):
-        import os
-        if not os.getenv(alarm.TOKEN_ENV, "").strip():
-            self.stdout.write(f"{alarm.TOKEN_ENV} is not set.")
+        # config()'s own verdict on the token (the Eye's token is refused
+        # here as at every other door); the chat is what this reads.
+        _token, _chat, why = alarm.config(chat_required=False)
+        if why:
+            self.stdout.write(f"Not read: {why}.")
             return
         rows = alarm.seen_chats()
         if not rows:
-            self.stdout.write("No chat seen: write any message in the new "
-                              "group (a /status will do), then run this "
-                              "again.")
+            self.stdout.write("No chat seen: send /status in the new group "
+                              "(with Group Privacy on the bot hears "
+                              "commands only, never a plain message), then "
+                              "run this again.")
             return
         for chat_id, kind, title in rows:
             self.stdout.write(f"{chat_id}  {kind}  {title}")

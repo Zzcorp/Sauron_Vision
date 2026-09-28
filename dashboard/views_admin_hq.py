@@ -98,9 +98,10 @@ def _pin_ok(request) -> bool:
 
 def _tell_the_alarm_chat(results):
     """The flatten, counts only, to the alarm bot's chat (2026-09-28,
-    bot_program/alarm.after_kill_switch: after the commit, from a worker).
-    Fenced: the kill has happened, and nothing here can fail it or its
-    page."""
+    bot_program/alarm.after_kill_switch): on the commit, and sent
+    from the request process — one HTTP call bounded by the sender's
+    SEND_TIMEOUT_S, never a worker, which may be what is broken. Fenced:
+    the kill has happened, and nothing here can fail it or its page."""
     try:
         from bot_program.alarm import after_kill_switch
         after_kill_switch(results)
