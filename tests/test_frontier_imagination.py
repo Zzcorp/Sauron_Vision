@@ -202,6 +202,34 @@ class TheProviderSurvivesARefusalTests(TestCase):
         self.assertTrue(rows["claude-opus-5"].success)
         self.assertEqual(rows["claude-opus-5"].agent, "anomaly_detector")
 
+    def test_the_inline_agents_rows_name_the_model_that_answered(self):
+        """DailyBriefingAgent and MondayPlanAgent opt out of the provider's
+        ledger (record=False) and write their own row from the usage they
+        are handed; after a refusal re-run that row must carry the model
+        that answered, not the one that declined. The declined generation's
+        own row comes from the provider."""
+        from ai_agents.models import AgentTask
+        from ai_agents.tasks import DailyBriefingAgent, MondayPlanAgent
+        for cls, run in ((DailyBriefingAgent, lambda a: a.run("context")),
+                         (MondayPlanAgent, lambda a: a.run("context"))):
+            AgentTask.objects.all().delete()
+            agent = cls()
+            asked = agent._model
+            answers = {asked: _response(stop_reason="refusal", category="cyber"),
+                       "claude-opus-5": _response(text="the words")}
+            client = MagicMock()
+            client.messages.stream.side_effect = (
+                lambda **kw: _Stream(answers[kw["model"]]))
+            with patch.object(agent._provider, "_get_client",
+                              return_value=client):
+                run(agent)
+            own = AgentTask.objects.filter(agent=agent.agent_name, success=True)
+            self.assertEqual([r.model for r in own], ["claude-opus-5"],
+                             cls.__name__)
+            self.assertEqual(
+                set(AgentTask.objects.values_list("model", flat=True)),
+                {asked, "claude-opus-5"}, cls.__name__)
+
     def test_a_fast_tier_refusal_stands_when_the_deep_reserve_is_gone(self):
         """The hourly scan and the news read are Haiku calls, guarded —
         where guarded at all — as Haiku money. Their re-run is Opus money,

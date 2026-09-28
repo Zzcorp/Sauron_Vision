@@ -70,7 +70,7 @@ class DailyBriefingAgent:
             AgentTask.objects.create(
                 agent=self.agent_name,
                 provider=self._provider_name,
-                model=self._model,
+                model=usage.get("model") or self._model,
                 prompt_summary=context[:500],
                 input_tokens=usage.get("input_tokens", 0),
                 output_tokens=usage.get("output_tokens", 0),
@@ -90,7 +90,7 @@ class DailyBriefingAgent:
             AgentTask.objects.create(
                 agent=self.agent_name,
                 provider=self._provider_name,
-                model=self._model,
+                model=billed.get("model") or self._model,
                 prompt_summary=context[:500],
                 input_tokens=billed.get("input_tokens", 0),
                 output_tokens=billed.get("output_tokens", 0),
@@ -163,7 +163,7 @@ class MondayPlanAgent:
             AgentTask.objects.create(
                 agent=self.agent_name,
                 provider=self._provider_name,
-                model=self._model,
+                model=usage.get("model") or self._model,
                 prompt_summary=context[:500],
                 input_tokens=usage.get("input_tokens", 0),
                 output_tokens=usage.get("output_tokens", 0),
@@ -185,7 +185,7 @@ class MondayPlanAgent:
             AgentTask.objects.create(
                 agent=self.agent_name,
                 provider=self._provider_name,
-                model=self._model,
+                model=billed.get("model") or self._model,
                 prompt_summary=context[:500],
                 input_tokens=billed.get("input_tokens", 0),
                 output_tokens=billed.get("output_tokens", 0),
