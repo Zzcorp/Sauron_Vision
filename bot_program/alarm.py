@@ -47,7 +47,9 @@ WHAT IT SAYS (each an Alarm: a stable key, a title, a few lines)
   F  The emergency flatten (engine/kill_switch.execute_kill_switch) having
      run, counts only, on the commit and from the kill's own process
      (after_kill_switch): a flatten is the moment the workers may be
-     what is broken, so its announcement never waits behind one.
+     what is broken, so its announcement never waits behind one; refused
+     there, it is on the flatten's own memory and the next sentinel
+     pass says it (replay_flatten).
   The brain being down is not here: no money moves on it, and its skip
   is a feed fault by design (the feeds are in D).
 
@@ -57,7 +59,8 @@ HOW OFTEN (the memory: STATE_KEY per source, seven days, never raises)
   pause, every 24 hours; an event (a booking, the brake, the flatten)
   once. Nothing is ever said about a problem that stopped. A delivery
   Telegram refused is not remembered as said, so the next pass says it
-  (an event from its own memory, once its source is gone). A cache that
+  (an event from its own memory, once its source is gone, for a day:
+  older, it is stale news). A cache that
   is down or flushed forgets, and a standing problem is said again: said
   twice is better than never said. More than MAX_MESSAGES due at once
   go as ONE message that names them. One pass per source at a time.
@@ -122,13 +125,21 @@ PREFIX = "Sauron alarm — "
 STANDING, FAULT, EVENT = "standing", "fault", "event"
 #: How long before a problem still standing is said again; an event never.
 REMIND_S = {STANDING: morgul.REMIND_S, FAULT: 24 * 3600, EVENT: None}
-#: One memory per source ("morgul", "sentinel"): each is written by one
-#: pass at a time under its own lock, so neither overwrites the other.
+#: An event Telegram refused is said from memory by a later pass, within
+#: this long of its first sight; older, it is stale news, not said.
+EVENT_REPLAY_S = 24 * 3600
+#: One memory per source ("morgul", "sentinel", "flatten"): each is
+#: written by one pass at a time under its own lock, so none overwrites
+#: another. The flatten's is its own because the kill's process writes it
+#: while a sentinel pass may be mid-send under the sentinel's lock.
 STATE_KEY = "telegram_alarm:state:{source}"
 STATE_TTL_S = 7 * 86400
 LOCK_KEY = "telegram_alarm:lock:{source}"
-#: The sentinel runs every 10 min; a pass that died frees its lock first.
-LOCK_S = 540
+#: Each lock dies before the next pass of its source is due (Morgul's
+#: beat 300 s, the sentinel's 600 s; the flatten is one send): a pass a
+#: worker died in, mid-send, frees its lock before the next pass, which
+#: would otherwise be skipped whole -- a brake in it with it.
+LOCK_S = {"morgul": 240, "sentinel": 540, "flatten": 60}
 #: More due at once than this, and they go as one message that names them:
 #: a flushed cache or a bad morning must not ring the phone ten times.
 MAX_MESSAGES = 5
@@ -377,7 +388,7 @@ def _lock(source) -> bool:
     from django.core.cache import cache
     try:
         return bool(cache.add(LOCK_KEY.format(source=source), "held",
-                              LOCK_S))
+                              LOCK_S[source]))
     except Exception:  # noqa: BLE001
         logger.warning("[telegram alarm] the lock could not be read; "
                        "running")
@@ -418,8 +429,8 @@ def _settle(source, alarms, now) -> dict:
     absent from this pass is not said and not cleared: nothing here ever
     says a problem stopped, and one that comes back inside its window is
     not said again. An event Telegram refused is said from memory on the
-    next pass even once its source is gone. Entries unseen for
-    STATE_TTL_S drop out."""
+    next pass even once its source is gone, within EVENT_REPLAY_S of its
+    first sight. Entries unseen for STATE_TTL_S drop out."""
     key = STATE_KEY.format(source=source)
     stamp = now.isoformat()
     cur = {}
@@ -439,8 +450,11 @@ def _settle(source, alarms, now) -> dict:
         if _due(alarm, entry, now):
             due.append(alarm)
     for k, entry in cur.items():
+        first = _parse(entry.get("first"))
         if (k not in present and entry.get("kind") == EVENT
-                and not entry.get("sent") and entry.get("words")):
+                and not entry.get("sent") and entry.get("words")
+                and (first is None
+                     or (now - first).total_seconds() < EVENT_REPLAY_S)):
             due.append(Alarm(k, entry["words"], entry.get("lines") or (),
                              kind=EVENT))
     sent = failed = 0
@@ -473,7 +487,12 @@ def morgul_alarms(report) -> list:
     """What of one Morgul run this chat hears: each critical finding
     (its title and its label; its facts carry amounts and never leave
     Morgul), a guard that can find something critical and could not run,
-    and the brake having stopped bots (an event)."""
+    and the brake having stopped bots (an event). Morgul files
+    ("stopped", ...) in the run that braked and ("earlier", ...) at its
+    reminders: both carry the brake's key here, so the memory says the
+    brake once -- from the reminder, in the reminder's words, when the
+    braking run's relay was skipped (its lock held by a pass a worker
+    died in) and never after the brake was said."""
     out = []
     for f in report.findings:
         if f.subject == "error":
@@ -493,13 +512,15 @@ def morgul_alarms(report) -> list:
                          [f.label, "Morgul watches it; details on /health/."],
                          kind=EVENT if f.event else STANDING))
     for key, outcome in (report.outcomes or {}).items():
-        if not outcome or outcome[0] != "stopped" or not outcome[1]:
+        if (not outcome or outcome[0] not in ("stopped", "earlier")
+                or not outcome[1]):
             continue
+        when = "At" if outcome[0] == "stopped" else "Noticed"
         out.append(Alarm(
             f"brake|{key}",
             f"the brake stopped {eye._plural(len(outcome[1]), 'bot')}",
             morgul.brake_lines([outcome])
-            + [f"At: {eye.when(report.ctx.now)}"], kind=EVENT))
+            + [f"{when}: {eye.when(report.ctx.now)}"], kind=EVENT))
     return out
 
 
@@ -708,6 +729,8 @@ def sentinel(*, now=None) -> dict:
         out = _settle("sentinel", problems(now), now)
     finally:
         _unlock("sentinel")
+    for k, v in replay_flatten(now).items():
+        out[k] = out.get(k, 0) + v
     result = {"status": "success", **out}
     if out["failed"]:
         result.update(status="error",
@@ -734,8 +757,14 @@ def kill_counts(results, now=None) -> dict:
             "at": (now or timezone.now()).isoformat()}
 
 
-def announce_kill_switch(counts) -> bool:
-    """The flatten, said once per execution, in counts."""
+def announce_kill_switch(counts) -> dict:
+    """The flatten, said once per execution, in counts: an EVENT settled
+    on the flatten's own memory (STATE_KEY source "flatten", keyed on
+    the kill's instant), so a delivery Telegram refused is said by the
+    next sentinel pass (replay_flatten) and one it took is never said
+    again. Its lock is taken and never waited for: held (the sentinel
+    replaying, a moment), the flatten is settled all the same -- said
+    twice is better than never said."""
     counts = counts if isinstance(counts, dict) else {}
     lines = [f"Bots turned off: {int(counts.get('bots') or 0)}",
              f"Positions closed: {int(counts.get('closed') or 0)}",
@@ -746,24 +775,48 @@ def announce_kill_switch(counts) -> bool:
     if counts.get("waiting"):
         lines.append(f"Paper positions left open, their market shut: "
                      f"{int(counts['waiting'])}")
-    lines.append(f"At: {eye.when(_parse(counts.get('at')))}")
-    return send_alarm(PREFIX + "the emergency flatten ran", lines)
+    at = _parse(counts.get("at"))
+    lines.append(f"At: {eye.when(at)}")
+    if at is None:
+        from django.utils import timezone
+        at = timezone.now()
+    flatten = Alarm(f"flatten|{at.isoformat()}", "the emergency flatten ran",
+                    lines, kind=EVENT)
+    mine = _lock("flatten")
+    try:
+        return _settle("flatten", [flatten], at)
+    finally:
+        if mine:
+            _unlock("flatten")
 
 
-def after_kill_switch(results) -> None:
+def replay_flatten(now) -> dict:
+    """The sentinel's read of the flatten's memory: a flatten Telegram
+    refused at the kill is said from it, once, within EVENT_REPLAY_S.
+    Nothing unsaid, nothing sent; the lock held, next pass."""
+    if not _lock("flatten"):
+        return {}
+    try:
+        return _settle("flatten", [], now)
+    finally:
+        _unlock("flatten")
+
+
+def after_kill_switch(results, *, now=None) -> None:
     """The two kill-switch views call this once execute_kill_switch has
     returned: the counts, and only the counts, to the alarm chat on the
     commit (transaction.on_commit; at once in a view that runs in
     autocommit). From the kill's own process, never through a worker: a
     flatten is the moment the workers may be what is broken, and one
     fenced call bounded by the sender's timeout costs the page nothing
-    it has not already paid at the broker. Never raises."""
+    it has not already paid at the broker; refused, it is remembered for
+    the sentinel (announce_kill_switch). Never raises."""
     try:
         if not enabled():
             return
         from django.db import transaction
         transaction.on_commit(partial(announce_kill_switch,
-                                      kill_counts(results)), robust=True)
+                                      kill_counts(results, now)), robust=True)
     except Exception as e:  # noqa: BLE001 (the kill is done; never fail it)
         logger.warning("[telegram alarm] the flatten was not announced (%s)",
                        type(e).__name__)

@@ -608,6 +608,32 @@ class MemoryTests(_AlarmCase):
         self.assertIn("Stopped: Forex swing #4", said[0])
         self.assertEqual(self.settle([], NOW + timedelta(minutes=2))[1], [])
 
+    def test_a_refused_event_older_than_a_day_is_stale_news_not_said(self):
+        event = [alarm.Alarm("brake|x", "the brake stopped 1 bot",
+                             ["Stopped: Forex swing #4"], kind=alarm.EVENT)]
+        self.settle(event, NOW, post=_refused)
+        self.assertEqual(len(self.settle([], NOW + timedelta(hours=23))[1]),
+                         1)
+        cache.clear()
+        self.settle(event, NOW, post=_refused)
+        self.assertEqual(self.settle([], NOW + timedelta(hours=25))[1], [])
+
+    def test_each_sources_lock_dies_before_its_own_beat(self):
+        """A pass hard-killed mid-send never releases its lock: the TTL
+        must run out before the next pass of that source, or the next
+        run is skipped whole (a brake in it with it)."""
+        from config.celery import app
+        beat = app.conf.beat_schedule
+        self.assertLess(alarm.LOCK_S["morgul"],
+                        beat["run-morgul-guards"]["schedule"])
+        self.assertLess(alarm.LOCK_S["sentinel"],
+                        beat["alarm-sentinel"]["schedule"])
+        with patch.object(cache, "add", wraps=cache.add) as add:
+            self.assertTrue(alarm._lock("morgul"))
+            self.assertTrue(alarm._lock("sentinel"))
+        self.assertEqual([c.args[2] for c in add.call_args_list],
+                         [alarm.LOCK_S["morgul"], alarm.LOCK_S["sentinel"]])
+
     def test_a_flushed_cache_says_a_standing_problem_again(self):
         standing = [alarm.Alarm("k|1", "a problem stands")]
         self.settle(standing, NOW)
@@ -741,14 +767,48 @@ class RelayTests(_AlarmCase):
         self.assertEqual(self.relay(_report(
             [_finding()], outcomes={"margin|account:3:pledged": outcome},
             now=NOW + timedelta(minutes=5)))[1], [])
-        # what the brake would do, or did earlier, is not the brake acting
+        # nor its reminder, once the brake has been said here
+        said = self.relay(_report(
+            [_finding()], outcomes={"margin|account:3:pledged": (
+                "earlier", ["Stocks <live> #4", "Forex swing #5"], [], {})},
+            now=NOW + timedelta(hours=3)))[1]
+        self.assertFalse(any("the brake stopped" in t for t in said), said)
+        # what the brake would do, or could not, is not the brake acting
         for kind in (("would", ["Forex swing #5"]),
-                     ("earlier", ["Forex swing #5"], [], {}),
-                     ("held", ["Forex swing #5"])):
+                     ("held", ["Forex swing #5"]),
+                     ("failed", ["Forex swing #5"], "RuntimeError")):
             cache.clear()
             said = self.relay(_report([_finding(severity="warning")],
                                       outcomes={"x|y": kind}))[1]
             self.assertEqual(said, [], kind)
+
+    def test_a_brake_whose_run_was_not_relayed_is_said_from_the_reminder(self):
+        """Morgul says ("stopped", ...) only in the run that braked and
+        ("earlier", ...) at its reminders. The relay of the braking run
+        can be skipped whole (the lock held by a pass a worker died in):
+        the brake it missed is said from the reminder, once, in the
+        reminder's words; one it said is not said again."""
+        key = "margin|account:3:pledged"
+        left = {"broker": 1, "bare": 1, "paper": 0}
+        cache.add(alarm.LOCK_KEY.format(source="morgul"), "held", 60)
+        with self.assertLogs("bot_program.alarm", level="WARNING"):
+            self.assertEqual(self.relay(_report(
+                [_finding()], outcomes={key: ("stopped", ["Forex swing #5"],
+                                              [], left)}))[1], [])
+        cache.delete(alarm.LOCK_KEY.format(source="morgul"))
+        earlier = ("earlier", ["Forex swing #5"], [], left)
+        out, said = self.relay(_report([_finding()], outcomes={key: earlier},
+                                       now=NOW + timedelta(hours=3)))
+        brake = next(t for t in said if "the brake stopped 1 bot" in t)
+        self.assertIn("Stopped earlier by the brake: Forex swing #5 — to "
+                      "re-arm: the server", brake)
+        self.assertIn("At the broker without a stop: 1", brake)
+        self.assertIn("Noticed: 2026-09-28 15:00 UTC", brake)
+        self.assertNotIn("Stopped: Forex swing #5 —", brake)
+        # once
+        said = self.relay(_report([_finding()], outcomes={key: earlier},
+                                  now=NOW + timedelta(hours=6)))[1]
+        self.assertFalse(any("the brake stopped" in t for t in said), said)
 
     def test_a_standing_finding_every_three_hours_an_event_once(self):
         standing = _report([_finding()])
@@ -1146,6 +1206,56 @@ class FlattenTests(_AlarmCase):
         with patch(POST, side_effect=RuntimeError("boom")), \
                 self.captureOnCommitCallbacks(execute=True):
             alarm.after_kill_switch(RESULTS)
+
+    def test_a_refused_flatten_is_said_by_the_next_sentinel_pass_once(self):
+        """Telegram answering 5xx at the moment of the kill: the one
+        message the father must get is remembered unsent, and the next
+        sentinel pass says it — once, and never a flatten Telegram took."""
+        with patch(POST, side_effect=_refused) as post, \
+                self.captureOnCommitCallbacks(execute=True):
+            alarm.after_kill_switch(RESULTS, now=NOW)
+        self.assertEqual(post.call_count, 1)   # attempted, refused
+        out, said = self.sentinel(now=NOW + timedelta(minutes=10))
+        self.assertEqual((out["status"], out["sent"], len(said)),
+                         ("success", 1, 1))
+        self.assertTrue(said[0].startswith(
+            f"<b>{alarm.MARK} Sauron alarm — the emergency flatten ran</b>\n"))
+        for line in ("Bots turned off: 3", "Positions closed: 4",
+                     "Close errors: 1", "At: 2026-09-28 12:00 UTC"):
+            self.assertIn(line, said[0])
+        self.assertEqual(self.sentinel(now=NOW + timedelta(minutes=20))[1],
+                         [])
+        # a flatten Telegram took at the commit is never said again
+        cache.clear()
+        with patch(POST, side_effect=_ok) as post, \
+                self.captureOnCommitCallbacks(execute=True):
+            alarm.after_kill_switch(RESULTS, now=NOW + timedelta(hours=1))
+        self.assertEqual(post.call_count, 1)
+        self.assertEqual(self.sentinel(now=NOW + timedelta(hours=1,
+                                                           minutes=10))[1],
+                         [])
+        # and one refused a day ago is stale news: nothing
+        cache.clear()
+        with patch(POST, side_effect=_refused), \
+                self.captureOnCommitCallbacks(execute=True):
+            alarm.after_kill_switch(RESULTS, now=NOW)
+        self.assertEqual(self.sentinel(now=NOW + timedelta(hours=25))[1], [])
+
+    def test_a_refused_flatten_survives_a_sentinel_pass_in_flight(self):
+        """The flatten's memory is its own (source "flatten"): a sentinel
+        pass mid-send holds the sentinel's lock and will store the
+        sentinel's memory over anything written to it meanwhile; the
+        flatten neither waits for that lock nor writes under it."""
+        cache.add(alarm.LOCK_KEY.format(source="sentinel"), "held", 60)
+        with patch(POST, side_effect=_refused), \
+                self.captureOnCommitCallbacks(execute=True):
+            alarm.after_kill_switch(RESULTS, now=NOW)
+        memory = cache.get(alarm.STATE_KEY.format(source="flatten")) or {}
+        self.assertEqual(len(memory), 1)
+        self.assertIsNone(cache.get(alarm.STATE_KEY.format(source="sentinel")))
+        cache.delete(alarm.LOCK_KEY.format(source="sentinel"))
+        self.assertEqual(len(self.sentinel(now=NOW + timedelta(minutes=10))[1]),
+                         1)
 
     def _pinned(self, superuser=False):
         from portfolio.trader_profile import get_or_create_profile
