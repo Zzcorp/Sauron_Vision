@@ -3281,7 +3281,31 @@
         --se-panel-width: calc((100vw - var(--se-left-chrome) - var(--se-right-edge)) / 2);
     }
     /* Right edge: align to right rail */
-    body:has(.signals-rail.open) { --se-right-edge: 296px; }    /* 280 + 16 */
+    /* Everywhere but a phone, and the breakpoint is the phone block's own
+       (Mobile, below: max-width 640px) plus one, so the two TOUCH.
+
+       The rail is drawn at every width, open or shut. Its own 768px
+       `display: none` is dead — the later UPGRADE-2 `display: flex
+       !important` outranks it — and its open state is restored from
+       localStorage whatever the width, so a rail left open on the desk is
+       280px wide on the phone too. Unscoped, this body-level rule outranked
+       the phone's :root 16px and parked the orb and the banner stack 296px
+       in from the right of a 390px screen, most of the way across it.
+
+       So on a phone the phone's 16px wins, and the orb keeps its corner of
+       the glass — over the foot of an open rail, as it always sat over the
+       foot of the shut one there. From 641px up the orb and the banners
+       stand beside the open rail. A first pass scoped this at 769px on the
+       belief that the rail was hidden below it; that left 641–768 (an iPad
+       upright, a desktop window split in two) with nothing but the shut
+       rail's 60px while 280px of rail was open, and the orb landed on the
+       watchlist. If the 768px hide is ever made to win, this must move to
+       769px with it — and that is a phone-layout change of its own: the
+       ticker, the info panel and the restore tabs all still keep the
+       rail's width clear down there. */
+    @media (min-width: 641px) {
+        body:has(.signals-rail.open) { --se-right-edge: 296px; }    /* 280 + 16 */
+    }
     /* Bottom edge: sit ABOVE the info-panel with breathing room */
     body:has(.info-panel-wrap):not(.page-dashboard) {
         --se-bottom-edge: calc(60px + var(--se-fab-gap));   /* 60 panel + 18 gap */
