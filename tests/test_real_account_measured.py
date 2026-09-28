@@ -375,8 +375,9 @@ class TheOnePromiseTests(TestCase):
         """The venue holds the stop FARTHER from the entry than the one
         sent (the real BTC fill's shape, on the AAPL fixture): the row
         keeps the SENT stop as its risk denominator, stamps both levels,
-        the staff alert names both, and the fill notification carries one
-        line. Nothing is resized, closed or sent again."""
+        and the fill message names both; the staff alert is NOT sent
+        beside it (ONE message, 2026-09-27). Nothing is resized, closed or
+        sent again."""
         from bot_program.models import AssetBotTrade
         from tests.test_etoro_leverage import (_account, _etoro,
                                                _order_posts, _switch)
@@ -402,13 +403,44 @@ class TheOnePromiseTests(TestCase):
                  f"({abs(100.0 - held) / 100.0 * 100:.1f}% below the entry)")
         self.assertEqual(fill.call_args.kwargs["stop_moved"], words)
         self.assertEqual(fill.call_args.kwargs["rule_name"], trade.rule_name)
-        self.assertTrue(any("the venue rewrote the stop"
-                            in c.kwargs.get("title", "")
-                            for c in staff.call_args_list))
+        # the fill message went out, so it is the one message
+        self.assertFalse(any("the venue rewrote the stop"
+                             in c.kwargs.get("title", "")
+                             for c in staff.call_args_list))
         self.assertEqual(len(_order_posts(fake)), 1)
         self.assertFalse([c for c in fake.calls
                           if "market-close" in c[1] or c[0] in ("PATCH",
                                                                 "DELETE")])
+
+    def test_an_immediate_fill_whose_message_is_not_delivered_alerts_once(
+            self):
+        """The failure path keeps the staff alert: the fill message was
+        not delivered (a muted owner, a refusal), so the staff alert is the
+        one message, in the fill message's own words."""
+        from bot_program.models import AssetBotTrade
+        from tests.test_etoro_leverage import _account, _etoro, _switch
+        _switch(True)
+        _account(self.user, cash=100000)
+        cand = self._cand()
+        sent = float(cand.stop)
+        held = round(sent * 0.97, 2)
+        t, _fake = _etoro(echo_stop=held)
+        with mock.patch("bot_program.notifications.notify_bot_fill_open",
+                        return_value=False), \
+                mock.patch("bot_program.notifications.notify_staff") as staff:
+            res = self._execute(cand, t)
+        trade = AssetBotTrade.objects.get(id=res["trade_id"])
+        alerts = [c.kwargs for c in staff.call_args_list
+                  if "the venue rewrote the stop" in c.kwargs.get("title", "")]
+        self.assertEqual(len(alerts), 1, staff.call_args_list)
+        self.assertEqual(alerts[0]["body"], (
+            f"Stop moved by eToro: it holds {held:.2f}, not the {sent:.2f} "
+            f"sent ({abs(100.0 - held) / 100.0 * 100:.1f}% below the "
+            f"entry). The fill message was not delivered, so this is the "
+            f"one notice. The loss at this stop is not the risk the entry "
+            f"was sized for; read the position at eToro (trade #{trade.id} "
+            f"on the platform)."))
+        self.assertEqual(alerts[0]["url"], f"/forensics/{trade.id}/")
 
 
 class TheTakeTradeNoteIsRunOnBothWorldsTests(TestCase):
@@ -732,8 +764,10 @@ class TheHeldFillCarriesTheLineTests(TestCase):
         self.assertEqual(fill.call_args.kwargs["stop_moved"],
                          "Stop moved by eToro: it holds 75745.80, not the "
                          "79934.97 sent (10.0% below the entry)")
+        # the fill message went out (the notifier is mocked, and a mock
+        # answers truthy): it is the one message, no staff alert beside it
         self.assertEqual(sum("the venue rewrote the stop"
                              in c.kwargs.get("title", "")
-                             for c in staff.call_args_list), 1)
+                             for c in staff.call_args_list), 0)
         self.assertEqual([c[0] for c in fake.calls], ["GET"],
                          "a fill reading sent something")

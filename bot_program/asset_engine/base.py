@@ -536,6 +536,44 @@ def stop_moved_words(meta, entry_price, asset_class="", symbol="") -> str:
     return words
 
 
+def venue_moved_stop(sent, held, asset_class="", symbol="") -> bool:
+    """True when the stop the venue HOLDS is not the stop SENT, compared at
+    the instrument's TICK: one unit of the last decimal core.price_format
+    prints the price with (1.60726: 0.00001; 227.53: 0.01), the finer of
+    the two prices'. A held stop within a tick of the sent one is the
+    venue ROUNDING it to its grid, not a moved stop (2026-09-27: until
+    then any difference over 1e-9 stamped stop_rewritten_by_venue, and the
+    fill message said "Stop moved by eToro" of a stop only rounded, the
+    1.526892917 sent held as 1.52689). A tick or more is a rewrite, in
+    either direction (MEASURED: eToro moves a stop both ways).
+
+    eToro's "no stop" (a held stop at or under 0.0001: the sentinel, or a
+    zero) is a rewrite whatever the tick while a stop was sent: the stamp
+    keeps that meaning for its readers, the fill message ("No stop at
+    eToro") and Morgul's G2, which reads a held stop at or under the
+    sentinel as NO stop at the broker. Anything unreadable is False."""
+    from core.price_format import price_decimals
+    try:
+        sent, held = float(sent), float(held)
+    except (TypeError, ValueError):
+        return False
+    if sent != sent or held != held:
+        return False
+    if held <= 0.0001:
+        return sent > 0.0001
+    places = max(price_decimals(sent, asset_class, symbol),
+                 price_decimals(held, asset_class, symbol))
+    return abs(held - sent) >= (10.0 ** -places) * (1 - 1e-6)
+
+
+#: Why the staff alert for a rewritten stop went out (_alert_stop_rewrite):
+#: the one message there is, where no fill message names the stop.
+STOP_ALERT_WORKING = ("The order is still waiting at eToro, so no fill "
+                      "message has gone out yet.")
+STOP_ALERT_UNTOLD = ("The fill message was not delivered, so this is the "
+                     "one notice.")
+
+
 def leverage_is_auto(extras) -> bool:
     """extras["leverage"] asks for the attack mode ("auto", any case)."""
     raw = (extras or {}).get("leverage")
@@ -1603,6 +1641,7 @@ class AssetBot(ABC):
         # was read: whether a held order's legs attach at the fill is
         # UNMEASURED (openStopLossRate was 0.0 while held).
         from bot_program.engine.capabilities import adapter_key
+        moved_now = False
         if (isinstance(venue, dict) and not legs
                 and adapter_key(client) == "etoro"):
             for k, v in self.venue_stamps(client, venue).items():
@@ -1618,26 +1657,22 @@ class AssetBot(ABC):
             if held is not None and held > 0.0001 and pid:
                 protected = True
                 meta["protective_trade_id"] = str(pid)
-                if abs(held - sent) > 1e-9:
+                # compared at the instrument's tick: a rounding is not a
+                # moved stop (venue_moved_stop, 2026-09-27)
+                if venue_moved_stop(sent, held,
+                                    trade.asset_class or self.asset_class,
+                                    trade.symbol):
                     meta["stop_rewritten_by_venue"] = {"sent": sent,
                                                        "held": held}
+                    moved_now = True
                     logger.error("[%s_bot] %s: the venue holds the stop at "
                                  "%s, not the %s sent - the risk of this "
                                  "position is not the one budgeted",
                                  self.asset_class, trade.symbol, held, sent)
-                    try:
-                        from bot_program.notifications import notify_staff
-                        notify_staff(
-                            title=f"\u26a0 {trade.symbol}: the venue rewrote the stop",
-                            body=(f"Trade #{trade.id} filled from a held order "
-                                  f"and eToro holds the stop at {held}, not "
-                                  f"the {sent} sent. The risk of this "
-                                  f"position is not the one budgeted; read "
-                                  f"it and decide."),
-                            url="/positions/")
-                    except Exception as e:  # noqa: BLE001
-                        logger.warning("[%s_bot] rewrite alert failed: %s",
-                                       self.asset_class, e)
+                    # ONE MESSAGE (2026-09-27): the fill message below names
+                    # it (its Stop and risk lines, "Stop moved by eToro");
+                    # the staff alert goes only when that message is not
+                    # delivered (_alert_stop_rewrite, after it).
                 if venue.get("venueTakeProfit") is None:
                     meta["protection_note"] = ("stop held at the venue; no "
                                                "target read at the venue")
@@ -1689,25 +1724,30 @@ class AssetBot(ABC):
         except Exception:  # noqa: BLE001
             _MANUAL = "manual_take"
         is_manual = str(trade.rule_name or "") == _MANUAL
+        told = False
         try:
             if is_manual:
                 from bot_program.notifications import notify_manual_fill_open
-                notify_manual_fill_open(
+                told = bool(notify_manual_fill_open(
                     self.user, asset_class=self.asset_class,
                     symbol=trade.symbol, side=trade.side, qty=trade.qty,
                     entry_price=trade.entry_price, trade_id=trade.id,
-                    live=not trade.paper, trade=trade)
+                    live=not trade.paper, trade=trade))
             else:
                 from bot_program.notifications import notify_bot_fill_open
-                notify_bot_fill_open(
+                told = bool(notify_bot_fill_open(
                     self.user, asset_class=self.asset_class,
                     symbol=trade.symbol, side=trade.side, qty=trade.qty,
                     entry_price=trade.entry_price,
                     rule_name=trade.rule_name, trade=trade,
-                    trade_id=trade.id, **self._fill_words(trade))
+                    trade_id=trade.id, **self._fill_words(trade)))
         except Exception as e:  # noqa: BLE001
             logger.warning("[%s_bot] fill notification failed: %s",
                            self.asset_class, e)
+        if moved_now and not told:
+            # no fill message names the rewritten stop: the staff alert is
+            # the one message (2026-09-27)
+            self._alert_stop_rewrite(trade, STOP_ALERT_UNTOLD)
 
     def _broker_snapshot(self, client, what: str):
         """`what` in {"resting", "positions"} from this tick's cache.
@@ -4351,37 +4391,29 @@ class AssetBot(ABC):
                 # 9.98% under the 84145.8 fill; its
                 # 0.0001 "no stop" sentinel is a rewrite too. The row keeps
                 # initial_stop_loss = the SENT stop (the risk denominator
-                # must not move) and records the divergence; the staff
-                # alert names both, and the fill notification carries one
-                # line (stop_moved_words, through _fill_words); nothing
+                # must not move) and records the divergence. The fill
+                # message names both (stop_moved_words, through
+                # _fill_words), and the staff alert goes only where no fill
+                # message does (_alert_stop_rewrite, after the booking;
+                # 2026-09-27: two messages for one fact before); nothing
                 # is resized or sent again. Only a venue that echoes its legs
-                # (etoro_client: venueStopLoss) reaches this.
+                # (etoro_client: venueStopLoss) reaches this. A held stop
+                # within a tick of the one sent is the venue ROUNDING it,
+                # not a rewrite (venue_moved_stop, 2026-09-27).
                 held = res.get("venueStopLoss")
                 if held is not None:
                     try:
                         held = float(held)
                     except (TypeError, ValueError):
                         held = None
-                if held is not None and abs(held - float(sl)) > 1e-9:
+                if held is not None and venue_moved_stop(
+                        float(sl), held, self.asset_class, symbol):
                     entry_meta["stop_rewritten_by_venue"] = {
                         "sent": float(sl), "held": held}
                     logger.error("[%s_bot] %s: the venue holds a stop at %s, "
                                  "the platform sent %s — recorded; risk is "
                                  "measured at the SENT stop",
                                  self.asset_class, symbol, held, float(sl))
-                    try:
-                        from bot_program.notifications import notify_staff
-                        notify_staff(
-                            title=f"⚠ {symbol}: the venue rewrote the stop",
-                            body=(f"{self.asset_class.upper()} {symbol}: sent "
-                                  f"stop {float(sl)}, the venue reports "
-                                  f"{held}. The loss at the stop is no longer "
-                                  f"the risk the entry was sized to. Read the "
-                                  f"position at the broker."),
-                            url="/positions/")
-                    except Exception as e2:  # noqa: BLE001
-                        logger.warning("[%s_bot] stop-rewrite alert failed: "
-                                       "%s", self.asset_class, e2)
                 if protective_ids or res.get("protectedOnFill"):
                     # Venues where protection rides the TRADE rather than
                     # standalone orders (OANDA) report the trade instead.
@@ -4539,6 +4571,7 @@ class AssetBot(ABC):
         # Phase-20: notify on open — unless the entry is still WORKING at
         # the broker. "Opened" is then a claim about the future; the poll
         # announces the fill when the broker reports it.
+        told = False
         if entry_meta.get("entry_working"):
             logger.info("[%s_bot] %s entry is WORKING at the broker (order "
                         "%s) — booked as pending, polling for the fill",
@@ -4546,16 +4579,23 @@ class AssetBot(ABC):
         else:
             try:
                 from bot_program.notifications import notify_bot_fill_open
-                notify_bot_fill_open(
+                told = bool(notify_bot_fill_open(
                     self.user, asset_class=self.asset_class, symbol=symbol,
                     side=decision.direction, qty=trade.qty,
                     entry_price=trade.entry_price,
                     rule_name=trade.rule_name, trade=trade,
                     trade_id=trade.id, **self._fill_words(trade),
-                )
+                ))
             except Exception as e:
                 logger.warning("[%s_bot] open notification failed: %s",
                                self.asset_class, e)
+        # ONE MESSAGE for a stop the venue rewrote (2026-09-27): the fill
+        # message names it; the staff alert only where none went out.
+        if (not told and isinstance(
+                entry_meta.get("stop_rewritten_by_venue"), dict)):
+            self._alert_stop_rewrite(
+                trade, STOP_ALERT_WORKING if entry_meta.get("entry_working")
+                else STOP_ALERT_UNTOLD)
 
         # Phase-28: append to immutable audit log.
         try:
@@ -5904,6 +5944,37 @@ class AssetBot(ABC):
                           f"— {words}; HIGH needs win >= "
                           f"{ATTACK_HIGH_MIN_WIN_RATE:.0%} and avg R >= "
                           f"{ATTACK_HIGH_MIN_AVG_R:+.2f}")
+
+    def _alert_stop_rewrite(self, trade, why: str) -> None:
+        """The staff alert for a stop the venue rewrote at the fill
+        (stop_rewritten_by_venue), sent ONLY where no fill message names it
+        (2026-09-27): a WORKING entry, whose fill message has not gone out,
+        and a fill message that was not delivered (no channel took it, the
+        bell's row included, or its notifier raised). Until then it went
+        out beside every fill
+        message, which already names the moved stop (its Stop and risk
+        lines, "Stop moved by eToro"): two messages for one fact. The
+        title is its dedupe key (notify_staff) and unchanged; the body is
+        the fill message's own line, then `why`. Never raises."""
+        try:
+            from alerts.links import page_url
+            from bot_program.notifications import notify_staff
+            moved = stop_moved_words(
+                getattr(trade, "metadata", None) or {},
+                getattr(trade, "entry_price", None),
+                asset_class=(getattr(trade, "asset_class", "")
+                             or self.asset_class),
+                symbol=getattr(trade, "symbol", "") or "")
+            notify_staff(
+                title=f"⚠ {trade.symbol}: the venue rewrote the stop",
+                body=(f"{moved or 'eToro holds a stop other than the one sent'}"
+                      f". {why} The loss at this stop is not the risk the "
+                      f"entry was sized for; read the position at eToro "
+                      f"(trade #{trade.id} on the platform)."),
+                url=page_url("forensics_detail", trade.id) or "/positions/")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] stop-rewrite alert failed: %s",
+                           self.asset_class, e)
 
     def _fill_words(self, trade) -> dict:
         """The open notification's own facts beside its rule, each its own

@@ -396,15 +396,43 @@ def plain_detail(text, limit: int = 200) -> str:
     return s if len(s) <= limit else s[:limit - 1].rstrip() + "…"
 
 
+def level(value, trade) -> str:
+    """A price of `trade`'s instrument as the fill messages print it
+    (notifications.price_words: its own decimals, core.price_format):
+    1.60726, 148.325, 227.53, never 1.60725571; the em dash for none
+    (2026-09-27). `price` above stays: Morgul's findings print with it."""
+    from bot_program.notifications import _number, price_words
+    n = _number(value)
+    if n is None or n <= 0:
+        return DASH
+    return price_words(value, getattr(trade, "asset_class", "") or "",
+                       getattr(trade, "symbol", "") or "") or DASH
+
+
 def position_line(trade, *, now=None, detailed: bool = False,
                   bullet: bool = True) -> str:
-    """AAPL long 0.04 @ 336.10 · stop 326.02 · paper."""
+    """AAPL long 0.04 @ 336.10 · stop 326.02 · paper.
+
+    In the fill messages' words since 2026-09-27 ("EURCAD long 7,900 @
+    1.60725571 · stop 1.52689292" before): the prices at the instrument's
+    decimals (level), the quantity trimmed (notifications.qty_words); a
+    stop the venue holds at a level of its own is the one named, as the
+    fill message names it: "stop 1.14000 at eToro", "no stop at eToro"
+    (notifications._held_stop)."""
+    from bot_program.notifications import _held_stop, qty_words
     side = SIDE_WORDS.get(trade.side, str(trade.side or "").lower())
-    parts = [f"{trade.symbol} {side} {quantity(trade.qty)} @ "
-             f"{price(trade.entry_price)}",
-             f"stop {price(trade.stop_loss)}"]
+    held = _held_stop(trade)
+    if held is None:
+        stop = f"stop {level(trade.stop_loss, trade)}"
+    elif held > 0:
+        stop = f"stop {level(held, trade)} at eToro"
+    else:
+        stop = "no stop at eToro"
+    parts = [f"{trade.symbol} {side} {qty_words(trade.qty) or DASH} @ "
+             f"{level(trade.entry_price, trade)}",
+             stop]
     if detailed:
-        parts.append(f"target {price(trade.take_profit)}")
+        parts.append(f"target {level(trade.take_profit, trade)}")
     parts.append("paper" if trade.paper else "live")
     if trade.status == "CLOSE_PENDING":
         parts.append("closing")

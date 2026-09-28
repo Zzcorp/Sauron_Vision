@@ -724,8 +724,11 @@ class ArmingTheManualLaneTests(TestCase):
         from bot_program.manual_trade import manual_config_for
         self.assertEqual(manual_config_for(self.user, "crypto").mode, "live")
         from alerts.models import Notification
+        # the record in words since 2026-09-27 ("Manual lane ARMED LIVE —
+        # crypto" before)
         self.assertTrue(Notification.objects.filter(
-            user=self.user, title__contains="ARMED LIVE").exists(),
+            user=self.user,
+            title="◆ Hand-taken trades in crypto now use real money").exists(),
             "arming live left no durable record")
 
     def test_disarming_needs_no_pin(self):

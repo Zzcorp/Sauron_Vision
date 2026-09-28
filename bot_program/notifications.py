@@ -89,11 +89,12 @@ def _staff_mark(title) -> str:
         return NOTIFY_MARKS["staff_warning"]
     return NOTIFY_MARKS["system_health"]
 
-#: The decay triggers in words.
+#: The decay triggers in words: why a rule was flagged (2026-09-27;
+#: "average R dropped" before, and a person does not read R).
 DECAY_WORDS = {
-    "avg_r_drop": "average R dropped",
-    "win_rate_drop": "win rate dropped",
-    "gone_negative": "average R turned negative",
+    "avg_r_drop": "the average result fell sharply",
+    "win_rate_drop": "it wins less often",
+    "gone_negative": "the average trade now loses",
 }
 
 
@@ -201,6 +202,64 @@ def units_words(qty, asset_class="") -> str:
     if abs(_number(qty)) == 1:
         word = word[:-1]
     return f"{amount} {word}"
+
+
+def r_words(value) -> str:
+    """A result in multiples of the risk: "+0.40", "−0.20" (a true minus),
+    "0.00" never signed; "" when not a number (2026-09-27: "+0.40R")."""
+    n = _number(value)
+    if n is None:
+        return ""
+    n = round(n, 2)
+    if n == 0:
+        return "0.00"
+    return "{:+.2f}".format(n).replace("-", MINUS)
+
+
+#: An asset class as a sentence names it: "hand-taken trades in stocks".
+CLASS_NOUNS = {"stock": "stocks", "etf": "ETFs", "index": "indices",
+               "forex": "forex", "commodity": "commodities",
+               "crypto": "crypto", "options": "options", "cfd": "CFDs"}
+
+
+def class_words(asset_class, *, capital=False) -> str:
+    """"stocks", "forex", "ETFs"; capital, "Stocks" (a fact line's value).
+    Never the code's own key: an unknown class reads in words."""
+    key = str(asset_class or "").strip().lower()
+    words = CLASS_NOUNS.get(key) or key.replace("_", " ")
+    if capital and words[:1].islower():
+        words = words[:1].upper() + words[1:]
+    return words
+
+
+def _and(items) -> str:
+    """"a", "a and b", "a, b and c"."""
+    items = [str(i) for i in items if str(i or "").strip()]
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _plain_size(qty, price, asset_class, symbol) -> str:
+    """"7,900 units at 1.60726": a fill's size in words for a bell row
+    whose message could not be built; the figures as they came when even
+    these cannot be read (a row is never lost to its words)."""
+    try:
+        said = units_words(qty, asset_class)
+        at = price_words(price, asset_class, symbol)
+        if at:
+            said = f"{said} at {at}" if said else f"at {at}"
+        return said
+    except Exception:  # noqa: BLE001
+        return f"{qty} at {price}" if price is not None else str(qty)
+
+
+def _sentence(text) -> str:
+    """"7,900 units at 1.60726." from its words; "" from none."""
+    text = " ".join(str(text or "").split())
+    if not text:
+        return ""
+    return text[:1].upper() + text[1:] + ("" if text.endswith(".") else ".")
 
 
 def _telegram_lines(items):
@@ -378,9 +437,13 @@ def dispatch_notification(user, kind: str, *, title: str, body: str = "",
         if kind == "strategist_briefing" and payload is not None:
             delivered = _send_briefing_email(user, payload) or delivered
         else:
-            delivered = _send_email(user, title, body) or delivered
+            # the message written for people when the notifier hands one
+            # (`telegram`, 2026-09-27), the bell's title and body otherwise
+            delivered = _send_email(
+                user, *_external_copy(telegram, title, body)) or delivered
     elif channel == "discord":
-        delivered = _send_discord(user, title, body) or delivered
+        delivered = _send_discord(
+            user, *_external_copy(telegram, title, body)) or delivered
     # "none" → skip external; in-app row already created.
 
     return delivered
@@ -621,6 +684,37 @@ def _send_telegram(user, title: str, body: str, *, lines=None,
         return False
 
 
+def _external_copy(message, title: str, body: str) -> tuple:
+    """(title, body) of the e-mail and Discord copies (2026-09-27).
+
+    A notifier that hands a message written for people (dispatch_
+    notification's `telegram`) is copied from it in plain text: its
+    title; whose money it is and the summary sentence; its facts; the
+    page its button opens, as a line. Until 2026-09-27 these copies
+    carried the bell's log line ("EURCAD BUY opened", "FOREX · qty
+    7900.00000000 @ 1.60725571"). The folded record stays on Telegram and
+    in the bell. A notifier that hands none keeps its title and body."""
+    if not (isinstance(message, dict) and message.get("title")):
+        return title, body
+    head = [" ".join(str(x).split())
+            for x in (message.get("subtitle"), message.get("summary"))
+            if str(x or "").strip()]
+    facts = [str(x) for x in (_telegram_lines(message.get("lines")) or [])
+             if str(x or "").strip()]
+    button = message.get("button")
+    if button:
+        try:
+            from alerts.channels.telegram_alert import page_line
+            line = page_line(button[1])
+        except Exception:  # noqa: BLE001 — a link never costs the copy
+            line = ""
+        if line:
+            facts.append(line)
+    text = "\n\n".join(part for part in ("\n".join(head), "\n".join(facts))
+                       if part)
+    return str(message["title"]), text or body
+
+
 def _send_email(user, title: str, body: str) -> bool:
     """Send via Django's email backend to user.email."""
     try:
@@ -670,16 +764,91 @@ def _send_discord(user, title: str, body: str) -> bool:
 
 # ── Convenience helpers used by the hook points ─────────────────────────
 
+#: The orchestrator's theme caps in words (bot_program/orchestrator.py).
+THEME_WORDS = {"usd": "exposure to the US dollar across markets",
+               "equity": "stock market exposure",
+               "vol_long": "exposure to rising volatility"}
+
+
+def _exposure(text) -> str:
+    """"+3.0", "−1.2": an exposure figure as the gate printed it, signed."""
+    n = _number(text)
+    if n is None:
+        return str(text)
+    return "{:+.1f}".format(n).replace("-", MINUS)
+
+
+def reject_words(reason) -> dict:
+    """The orchestrator's refusal (gate_new_entry's reason: "orchestrator:
+    equity theme cap |+3.0| > 2.0 (was |+2.0|, ...)", "orchestrator: USD
+    currency cap |+3.2| > 3.0", "orchestrator: tech sector cap 4 > 3") in
+    words (2026-09-27): {"clause": what the trade would have done, "" for
+    a reason of another shape; "lines": the facts}. A reason of another
+    shape reads as its own words, keys split (telegram_eye.plain_detail)."""
+    import re
+    raw = " ".join(str(reason or "").split())
+    num = r"([+\-]?\d+(?:\.\d+)?)"
+    m = re.match(r"^orchestrator: ([A-Za-z]{3}) currency cap \|" + num
+                 + r"\| > " + num + r"()", raw)
+    what = f"{m.group(1).upper()} exposure" if m else ""
+    if not m:
+        m = re.match(r"^orchestrator: (\w+) theme cap \|" + num + r"\| > "
+                     + num + r"(?: \(was \|" + num + r"\|)?", raw)
+        if m:
+            what = (THEME_WORDS.get(m.group(1).lower())
+                    or f"{m.group(1).replace('_', ' ')} exposure")
+    if m:
+        _key, after, cap, before = m.groups()
+        lines = [f"Limit: {what}, at most {cap}",
+                 f"After this trade: {_exposure(after)}"]
+        if before:
+            lines.append(f"Before this trade: {_exposure(before)}")
+        return {"clause": (f"it would take the {what} to "
+                           f"{_exposure(after)}, past its cap of {cap}"),
+                "lines": lines}
+    m = re.match(r"^orchestrator: (.+?) sector cap (\d+) > (\d+)$", raw)
+    if m:
+        sector, after, cap = m.groups()
+        where = f"the {sector.replace('_', ' ')} sector"
+        return {"clause": (f"it would make {after} positions in {where}, "
+                           f"past its cap of {cap}"),
+                "lines": [f"Limit: at most {cap} positions in {where}",
+                          f"After this trade: {after} positions"]}
+    from bot_program.telegram_eye import plain_detail
+    words = plain_detail(re.sub(r"^orchestrator:\s*", "", raw))
+    return {"clause": "", "lines": [f"Reason: {words}"] if words else []}
+
+
 def notify_orchestrator_reject(user, *, asset_class: str, symbol: str,
                                 side: str, reason: str) -> bool:
+    """The cross-asset orchestrator refused an entry (gate_new_entry). In
+    words since 2026-09-27 ("Orchestrator blocked NVDA BUY", "Asset class:
+    STOCK", "Reason: orchestrator: USD currency cap |+3.2| > 3.0" before):
+    the title says what was not done, one sentence says why
+    (reject_words), the facts follow; the gate's own reason is folded into
+    the record as code, and the button opens the exposure page, which
+    shows why the gate sees what it sees. The bell row reads the same
+    title and sentence; its link stays the Eye."""
+    long_ = _is_long(side)
+    title = (f"✕ Buying {symbol} was blocked" if long_
+             else f"✕ Selling {symbol} short was blocked")
+    words = reject_words(reason)
+    act = f"buy {symbol}" if long_ else f"sell {symbol} short"
+    summary = (f"Sauron did not {act}: "
+               + (words["clause"] or "the exposure limits held it back")
+               + ".")
+    items = list(words["lines"]) + [
+        f"Market: {class_words(asset_class, capital=True)}",
+        "No order was sent"]
+    mark = NOTIFY_MARKS["orchestrator_reject"]
     return dispatch_notification(
         user, "orchestrator_reject",
-        title=f"✕ Orchestrator blocked {symbol} {side}",
-        body=f"{asset_class.upper()} · {reason}",
-        url="/eye/",
-        row_data={"items": [f"Asset class: {asset_class.upper()}",
-                            f"Reason: {reason}"],
-                  "mark": NOTIFY_MARKS["orchestrator_reject"]},
+        title=title, body=summary, url="/eye/",
+        row_data={"items": items, "mark": mark},
+        telegram={"title": _plain_title(title), "mark": mark,
+                  "summary": summary, "lines": items,
+                  "details": [("Gate reason", str(reason or ""))],
+                  "button": ("Open exposure", "/eye/exposure/")},
     )
 
 
@@ -1062,7 +1231,8 @@ def fill_queued_message(*, asset_class, symbol, side, qty, trade=None,
 
 
 def fill_close_message(*, asset_class, symbol, side, qty, exit_price, pnl,
-                       outcome="", trade=None, trade_id=None) -> dict:
+                       outcome="", trade=None, trade_id=None,
+                       currency="") -> dict:
     """The Telegram message of a close:
 
         ✅ Closed EURCAD · +17.84 USD     (🔻 a loss, ⚪ zero or unknown)
@@ -1081,7 +1251,9 @@ def fill_close_message(*, asset_class, symbol, side, qty, exit_price, pnl,
                                             utc_clock)
     row = _fill_row(trade, trade_id)
     tid = getattr(row, "id", None) or trade_id
-    ccy = _row_ccy(row)
+    # the row's currency; without a row, the one the caller knows
+    # (2026-09-27: a close without a row printed "+17.84")
+    ccy = _row_ccy(row) or str(currency or "").strip()
     n = _number(pnl)
     if n is None:
         mark, result = CLOSE_MARKS["flat"], "result unknown"
@@ -1146,34 +1318,49 @@ def notify_bot_fill_open(user, *, asset_class: str, symbol: str, side: str,
                           qty, entry_price, rule_name: str = "",
                           trade_id=None, trade=None, attack: str = "",
                           stop_moved: str = "") -> bool:
-    """A bot's entry filled. The bell row keeps its title, body and url;
-    Telegram gets the message written for people (fill_open_message).
+    """A bot's entry filled. Telegram gets the message written for people
+    (fill_open_message); the bell row takes its title and summary, its
+    url kept, and the e-mail and Discord copies the message (2026-09-27).
     `trade` is the row (else `trade_id` names it); `attack` and
     `stop_moved` are the engine's own facts (AssetBot._fill_words), their
     own arguments since 2026-09-27 rather than lines inside rule_name."""
     from alerts.links import page_url
     tid = trade_id or getattr(trade, "id", None)
     rule_key, carried = _rule_key(rule_name)
-    body = (f"{asset_class.upper()} · qty {qty} @ {entry_price}"
-            + (f" · {rule_key}" if rule_key else ""))
+    long_ = _is_long(side)
     message = _built(fill_open_message, asset_class=asset_class,
                      symbol=symbol, side=side, qty=qty,
                      entry_price=entry_price, rule_name=rule_name,
                      trade=trade, trade_id=tid, attack=attack,
                      stop_moved=stop_moved)
-    # A message that could not be built still carries the engine's own
-    # facts: the body names only the rule, and they no longer ride in it.
+    # The bell's title and body are the message's (2026-09-27: "◉ EURCAD
+    # BUY opened" / "FOREX · qty 7900.00000000 @ 1.60725571 ·
+    # golden_cross" before), and so are the e-mail and Discord copies
+    # (_external_copy). A message that could not be built still reads in
+    # words and still carries the engine's own facts.
+    if message:
+        title, body = f"◉ {message['title']}", message["summary"]
+    else:
+        title = f"◉ {'Bought' if long_ else 'Sold short'} {symbol}"
+        try:
+            from dashboard.position_summary import rule_words
+            why = rule_words(rule_key)
+        except Exception:  # noqa: BLE001
+            why = ""
+        body = (_sentence(_plain_size(qty, entry_price, asset_class, symbol))
+                + (f" Why: {why}." if why else "")).strip()
     plain = [body] + [" ".join(str(f or "").split())
                       for f in [attack, stop_moved] + carried
                       if str(f or "").strip()]
     return dispatch_notification(
         user, "bot_fill_open",
-        title=f"◉ {symbol} {side} opened",
+        title=title,
         body=body,
         # the bell card renders the message's facts and its record
         row_data=({"items": _bell_items(message),
                    "mark": message["mark"]} if message else
-                  {"items": plain, "mark": OPEN_MARKS["long"]}),
+                  {"items": plain,
+                   "mark": OPEN_MARKS["long" if long_ else "short"]}),
         # The fill has a page: forensics carries the rule that fired, the
         # signals that voted and the gate decision behind THIS trade —
         # "why did it just buy that?", which is the question the banner
@@ -1196,9 +1383,11 @@ def notify_manual_fill_open(user, *, asset_class: str, symbol: str, side: str,
     hand" in words instead, so the attribution survives the external channels
     that strip the mark (see _plain_title).
 
-    `live` marks the venue in both title and body: since the LIVE manual
-    ticket exists, a fill notification that cannot say which venue the
-    money moved on tells the operator half a fact.
+    `live` marks the venue: since the LIVE manual ticket exists, a fill
+    notification that cannot say which venue the money moved on tells the
+    operator half a fact. Since 2026-09-27 the venue is the message's
+    subtitle, read from the row's own stamps ("Real money · eToro"), and
+    the bell card's first line; a caller without a row claims no venue.
 
     `working` is the case where the broker took the order and filled
     NOTHING (a market order sent outside regular hours queues for the next
@@ -1210,42 +1399,55 @@ def notify_manual_fill_open(user, *, asset_class: str, symbol: str, side: str,
     in words and "by hand" in the title, whose money it is under it
     (fill_open_message); a queued order says it is waiting and names no
     price (fill_queued_message). `trade` is the row (else `trade_id`).
-    The bell row keeps its title, body and url.
+    The bell row takes the message's title and summary, its url kept, and
+    the e-mail and Discord copies the message (2026-09-27).
     """
     from alerts.links import page_url
     tid = trade_id or getattr(trade, "id", None)
+    long_ = _is_long(side)
+    # The bell's title and body are the message's (2026-09-27: "▸ AAPL
+    # BUY QUEUED at the broker · LIVE" / "STOCK · qty 1 · TAKE TRADE ..."
+    # before); whose money it is is the bell card's first line (the
+    # message's subtitle), from the row's own stamps.
     if working:
-        body = (f"{asset_class.upper()} · qty {qty} · TAKE TRADE · the "
-                f"order is working and nothing has filled — no position "
-                f"is open yet"
-                + (" · LIVE — real funds once it fills" if live else ""))
         message = _built(fill_queued_message, asset_class=asset_class,
                          symbol=symbol, side=side, qty=qty, trade=trade,
                          trade_id=tid, live=live)
+        if message:
+            title, body = f"▸ {message['title']}", message["summary"]
+        else:
+            size = _plain_size(qty, None, asset_class, symbol)
+            title = (f"▸ Waiting to buy {symbol}" if long_
+                     else f"▸ Waiting to sell {symbol} short")
+            body = ("The broker has the order"
+                    + (f" for {size}" if size else "")
+                    + "; nothing has filled yet, so no position is open.")
         return dispatch_notification(
             user, "manual_fill_open",
-            title=(f"▸ {symbol} {side} QUEUED at the broker"
-                   + (" · LIVE" if live else "")),
+            title=title,
             body=body,
             row_data={"items": (_bell_items(message) if message
-                                else [body]),
+                                else [body, "Taken: by hand"]),
                       "mark": NOTIFY_MARKS["manual_fill_queued"]},
             url=page_url("forensics_detail", tid) or "/positions/",
             telegram=message,
         )
-    body = (f"{asset_class.upper()} · qty {qty} @ {entry_price} · "
-            f"TAKE TRADE"
-            + (" · LIVE — real funds" if live else ""))
     message = _built(fill_open_message, asset_class=asset_class,
                      symbol=symbol, side=side, qty=qty,
                      entry_price=entry_price, trade=trade, trade_id=tid,
                      manual=True, live=live)
+    if message:
+        title, body = f"▸ {message['title']}", message["summary"]
+    else:
+        title = (f"▸ {'Bought' if long_ else 'Sold short'} {symbol} "
+                 f"by hand")
+        body = _sentence(_plain_size(qty, entry_price, asset_class, symbol))
     return dispatch_notification(
         user, "manual_fill_open",
-        title=(f"▸ {symbol} {side} opened by hand"
-               + (" · LIVE" if live else "")),
+        title=title,
         body=body,
-        row_data={"items": (_bell_items(message) if message else [body]),
+        row_data={"items": (_bell_items(message) if message
+                            else [body, "Taken: by hand"]),
                   "mark": NOTIFY_MARKS["manual_fill_open"]},
         telegram=message,
         # Forensics renders any of this user's trades, and a hand-taken one
@@ -1259,65 +1461,86 @@ def notify_manual_fill_open(user, *, asset_class: str, symbol: str, side: str,
 
 
 def notify_manual_lane_mode(user, *, asset_class: str, mode: str,
-                            capital=None) -> bool:
+                            capital=None, currency: str = "") -> bool:
     """The manual lane's venue changed — the operator armed it live or
     stood it down. A durable record, because the moment a LONG/SHORT
     button starts moving real funds is the single most consequential
-    click this platform offers."""
+    click this platform offers.
+
+    In words since 2026-09-27 ("Manual lane ARMED LIVE — stock", "pool
+    $2,000.00" before): the class as a person names it, the pool in the
+    manual config's own currency (`currency`; a figure is printed bare
+    when none is handed, never with a "$" it may not be), one summary
+    sentence and the positions button. The bell row reads the same title
+    and sentence."""
     live = (mode == "live")
+    noun = class_words(asset_class)
+    pool = money_words(capital, currency) if capital else ""
+    if live:
+        title = f"◆ Hand-taken trades in {noun} now use real money"
+        summary = (f"From now on, a TAKE TRADE in {noun} places a real "
+                   f"order at the broker"
+                   + (f", from a pool of {pool}" if pool else "") + ".")
+        items = ["Money: real, at the broker"] + (
+            [f"Pool: {pool}"] if pool else [])
+        mark = NOTIFY_MARKS["manual_lane_live"]
+    else:
+        title = f"◇ Hand-taken trades in {noun} are back on simulated money"
+        summary = (f"From now on, a TAKE TRADE in {noun} books a simulated "
+                   f"trade; no real money moves.")
+        items = ["Money: simulated, for rehearsal only"]
+        mark = NOTIFY_MARKS["manual_lane_paper"]
     return dispatch_notification(
         user, "manual_lane_mode",
-        title=(f"◆ Manual lane ARMED LIVE — {asset_class}" if live
-               else f"◇ Manual lane back to paper — {asset_class}"),
-        body=((f"TAKE TRADE on {asset_class} instruments now moves REAL "
-               f"funds at the broker"
-               + (f" · pool ${float(capital):,.2f}" if capital else ""))
-              if live else
-              f"TAKE TRADE on {asset_class} instruments is back on the "
-              f"paper venue — rehearsal money only"),
-        url="/positions/",
-        row_data=({"items": ([f"Asset class: {asset_class}",
-                              "TAKE TRADE now moves real funds at the broker"]
-                             + ([f"Pool: ${float(capital):,.2f}"]
-                                if capital else [])),
-                   "mark": NOTIFY_MARKS["manual_lane_live"]} if live else
-                  {"items": [f"Asset class: {asset_class}",
-                             "TAKE TRADE is back on the paper venue: "
-                             "rehearsal money only"],
-                   "mark": NOTIFY_MARKS["manual_lane_paper"]}),
+        title=title, body=summary, url="/positions/",
+        row_data={"items": items, "mark": mark},
+        telegram={"title": _plain_title(title), "mark": mark,
+                  "summary": summary, "lines": items,
+                  "button": ("Open positions", "/positions/")},
     )
 
 
 def notify_bot_fill_close(user, *, asset_class: str, symbol: str, side: str,
                            qty, exit_price, pnl, outcome: str = "",
-                           trade_id=None, trade=None) -> bool:
-    """A position closed. The bell row keeps its title, body and url;
-    Telegram gets the message written for people (fill_close_message,
-    2026-09-27): the result in the title, the closing side and how long
-    it was held, how it ended in words. `trade` is the row (else
-    `trade_id` names it)."""
+                           trade_id=None, trade=None,
+                           currency: str = "") -> bool:
+    """A position closed. Telegram gets the message written for people
+    (fill_close_message, 2026-09-27): the result in the title, the
+    closing side and how long it was held, how it ended in words. The
+    bell row takes its title and summary ("⊕ Closed EURCAD · +17.84 USD";
+    "◯ EURCAD BUY closed · +17.8412" before), the e-mail and Discord
+    copies the message. `trade` is the row (else `trade_id` names it);
+    `currency` is for a caller without a row: the row's own wins."""
     from alerts.links import page_url
     tid = trade_id or getattr(trade, "id", None)
     # ⊕ target struck · ⊟ cut at the stop · ◯ closed flat by anything else.
     icon = "⊕" if outcome == "hit_target" else (
         "⊟" if outcome == "stopped_out" else "◯")
-    sign = "+" if (pnl is not None and pnl > 0) else ""
-    # A P&L of None is UNMEASURED (no exit price could be read, the
-    # reconciled close with no quote) — never printed as a number.
-    pnl_words = f"{sign}{pnl}" if pnl is not None else "P&L unmeasured"
-    body = (f"{asset_class.upper()} · qty {qty} @ {exit_price}"
-            + (f" · {outcome}" if outcome else ""))
     message = _built(fill_close_message, asset_class=asset_class,
                      symbol=symbol, side=side, qty=qty,
                      exit_price=exit_price, pnl=pnl, outcome=outcome,
-                     trade=trade, trade_id=tid)
+                     trade=trade, trade_id=tid, currency=currency)
+    if message:
+        title, body = f"{icon} {message['title']}", message["summary"]
+        items = _bell_items(message)
+    else:
+        # A P&L of None is UNMEASURED (no exit price could be read, the
+        # reconciled close with no quote) — never printed as a number;
+        # a priced one carries its currency wherever it is known.
+        ccy = _row_ccy(_fill_row(trade, tid)) or str(currency or "").strip()
+        result = (money_words(pnl, ccy, signed=True) if pnl is not None
+                  else "") or "result unknown"
+        title = f"{icon} Closed {symbol} · {result}"
+        size = _plain_size(qty, exit_price, asset_class, symbol)
+        body = ((f"Sold {size}." if _is_long(side) else f"Bought back {size}.")
+                if size else "")
+        items = [x for x in (body, f"Result: {result}") if x]
     return dispatch_notification(
         user, "bot_fill_close",
-        title=f"{icon} {symbol} {side} closed · {pnl_words}",
+        title=title,
         body=body,
-        row_data=({"items": _bell_items(message),
-                   "mark": message["mark"]} if message else
-                  {"items": [body], "mark": CLOSE_MARKS["flat"]}),
+        row_data=({"items": items, "mark": message["mark"]} if message else
+                  {"items": items, "mark": CLOSE_MARKS["flat"]}),
         # Same trade, same page — the close's own timeline, grade and R
         # multiple. /bot-performance/ aggregates every rule instead.
         url=page_url("forensics_detail", tid) or "/bot-performance/",
@@ -1512,25 +1735,49 @@ def notify_track_record_decay(user, *, rule_name: str, asset_class: str,
     """Phase-26: rule's bot-trade performance has decayed.
 
     Triggers list: ["avg_r_drop", "win_rate_drop", "gone_negative"] (any subset).
+
+    In words since 2026-09-27 ("golden_cross decay · recent -0.20R vs
+    baseline +0.40R", "Rule: golden_cross" before): the rule read aloud
+    (position_summary.rule_words), its results as multiples of the risk
+    (r_words), the triggers in words (DECAY_WORDS). The rule's key is
+    folded into the record as code; the button opens the strategies page,
+    which lists the rules the engine runs and their stage (no rule has a
+    page of its own). The bell row reads the same title and sentence; its
+    link stays the bot performance page.
     """
-    delta = recent_avg_r - baseline_avg_r
-    sign = "" if delta >= 0 else ""  # delta is negative when decaying
+    from dashboard.position_summary import rule_words
+    rule = rule_words(rule_name) or "A rule"
+    recent, before = r_words(recent_avg_r), r_words(baseline_avg_r)
+    try:
+        n = max(int(recent_n or 0), 0)
+    except (TypeError, ValueError):
+        n = 0
+    trades = f"{n} trade{'' if n == 1 else 's'}"
+    title = f"▲ {rule} is losing its edge"
+    if recent and before:
+        summary = (f"Over its last {trades} it made {recent} times the "
+                   f"risk, against {before} before.")
+    else:
+        summary = (f"Over its last {trades} it did worse than its own "
+                   f"record before.")
+    why = [DECAY_WORDS.get(t, str(t).replace("_", " "))
+           for t in (triggers or ())]
+    items = ([f"Last {trades}: {recent} times the risk per trade, on "
+              f"average"] if recent else []) + (
+        [f"Before: {before} times the risk per trade, on average"]
+        if before else []) + [
+        "Flagged because: " + (_and(why) if why else "no reason recorded"),
+        f"Market: {class_words(asset_class, capital=True)}"]
+    mark = NOTIFY_MARKS["track_record_decay"]
     return dispatch_notification(
         user, "track_record_decay",
-        title=(f"▲ {rule_name} decay · "
-                f"recent {recent_avg_r:+.2f}R vs baseline {baseline_avg_r:+.2f}R"),
-        body=(f"{asset_class.upper()} · last {recent_n} trades · "
-              f"triggers: {', '.join(triggers) or '—'}"),
-        url="/bot-performance/",
-        row_data={"items": [
-            f"Rule: {rule_name}",
-            f"Asset class: {asset_class.upper()}",
-            f"Recent: {recent_avg_r:+.2f}R over the last {recent_n} trades",
-            f"Baseline: {baseline_avg_r:+.2f}R",
-            "Triggers: " + (", ".join(
-                DECAY_WORDS.get(t, str(t).replace("_", " "))
-                for t in triggers) or "none recorded")],
-            "mark": NOTIFY_MARKS["track_record_decay"]},
+        title=title, body=summary, url="/bot-performance/",
+        row_data={"items": items, "mark": mark},
+        telegram={"title": _plain_title(title), "mark": mark,
+                  "summary": summary, "lines": items,
+                  "details": ([("Rule key", str(rule_name))]
+                              if str(rule_name or "").strip() else []),
+                  "button": ("Open strategies", "/strategies/")},
     )
 
 
@@ -1755,24 +2002,75 @@ def notify_evidence_chain_cold(user, *, cold: list, blockers: list) -> bool:
     an operator to a page and "pipeline_promotion is off" sends them to a
     switch.
     """
-    names = ", ".join(cold) if cold else "the chain"
-    first = blockers[0] if blockers else ""
+    # In words since 2026-09-27 ("Evidence chain cold: pipeline_promotion"
+    # before): the links as LINK_WORDS names them, what each does, the
+    # first blocker read by _plain_blocker; the keys, the blocker as it
+    # was written and the command that checks the whole chain are folded
+    # into the record as code. The bell row reads the same title and
+    # sentence.
+    keys = [str(k) for k in (cold or []) if str(k or "").strip()]
+    names = [_link_words(k) for k in keys]
+    first = str(blockers[0]) if blockers else ""
+    if names:
+        title = f"▲ The evidence chain is broken at {_and(names)}"
+        subject = _and(names)
+        summary = (subject[:1].upper() + subject[1:]
+                   + (" is" if len(names) == 1 else " are")
+                   + " not running, so the days passing now give the "
+                     "promotion ladder nothing to grade.")
+    else:
+        title = "▲ The evidence chain is broken"
+        summary = ("The paper campaign is not complete, so the days passing "
+                   "now give the promotion ladder nothing to grade.")
+    try:
+        from bot_program.campaign_readiness import EVIDENCE_CHAIN
+        jobs = dict(EVIDENCE_CHAIN)
+    except Exception:  # noqa: BLE001 — the words, never the message
+        jobs = {}
+    jobs.setdefault("platform_master", "every scheduled task")
+    items = [f"Not running: {name}"
+             + (f" ({jobs[key]})" if jobs.get(key) else "")
+             for key, name in zip(keys, names)]
+    if first:
+        items.append("First problem: " + _plain_blocker(first))
+    items.append("A link that is off is a decision; a link with no row "
+                 "was never set up")
+    details = ([("Links", ", ".join(keys))] if keys else [])
+    if first:
+        details.append(("Blocker", first))
+    details.append(("Full check", "manage.py paper_readiness"))
+    mark = NOTIFY_MARKS["evidence_chain_cold"]
     return dispatch_notification(
         user, "system_health",
-        title=f"▲ Evidence chain cold: {names}",
-        body=(f"The paper-campaign chain is not complete, so the days passing "
-              f"now are producing nothing the promotion ladder can grade. "
-              f"Cold: {names}. {first} "
-              f"Run `manage.py paper_readiness` for the full chain — it "
-              f"writes nothing. A link that is off is a decision; a link with "
-              f"NO ROW was never seeded, and the two are fixed by different "
-              f"commands."),
-        url="/ops/",
-        row_data={"items": (
-            [f"Cold: {names}"] + ([first] if first else [])
-            + ["Run manage.py paper_readiness for the full chain; it "
-               "writes nothing",
-               "A link that is off is a decision; a link with no row was "
-               "never seeded"]),
-            "mark": NOTIFY_MARKS["evidence_chain_cold"]},
+        title=title, body=summary, url="/ops/",
+        row_data={"items": items, "mark": mark},
+        telegram={"title": _plain_title(title), "mark": mark,
+                  "summary": summary, "lines": items, "details": details,
+                  "button": ("Open ops page", "/ops/")},
     )
+
+
+#: The evidence chain's links in words (bot_program/campaign_readiness).
+LINK_WORDS = {"platform_master": "the master switch",
+              "pipeline_indicators": "the indicator pipeline",
+              "pipeline_signals": "the signal pipeline",
+              "pipeline_asset_bots": "the bot pipeline",
+              "pipeline_promotion": "the promotion pipeline"}
+
+
+def _link_words(key) -> str:
+    """A link of the evidence chain in words: "the promotion pipeline"."""
+    key = str(key or "").strip()
+    return LINK_WORDS.get(key) or ("the " + key.replace("_", " "))
+
+
+def _plain_blocker(text) -> str:
+    """A readiness blocker (campaign_readiness.readiness) in the group's
+    words: the links as LINK_WORDS names them, "n=0" as what it means,
+    every other key split (telegram_eye.plain_detail)."""
+    s = str(text or "")
+    for key in sorted(LINK_WORDS, key=len, reverse=True):
+        s = s.replace(key, LINK_WORDS[key])
+    s = s.replace("n=0", "no graded trades")
+    from bot_program.telegram_eye import plain_detail
+    return plain_detail(s, limit=300)

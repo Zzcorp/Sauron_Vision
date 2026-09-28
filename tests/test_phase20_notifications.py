@@ -145,7 +145,9 @@ class HelperShapeTests(TestCase):
         self.assertTrue(ok)
         n = Notification.objects.filter(user=u).first()
         self.assertIn("NVDA", n.title)
-        self.assertIn("equity theme cap", n.body)
+        # the gate's reason in words since 2026-09-27
+        self.assertIn("stock market exposure to +3.0, past its cap of 2.0",
+                      n.body)
 
     def test_bot_fill_open_helper(self):
         from bot_program.notifications import notify_bot_fill_open
@@ -157,8 +159,11 @@ class HelperShapeTests(TestCase):
                               rule_name="rule_x")
         n = Notification.objects.filter(user=u).first()
         self.assertIn("AAPL", n.title)
-        self.assertIn("BUY", n.title)
-        self.assertIn("rule_x", n.body)
+        # the message's title and summary since 2026-09-27; the rule in
+        # words among the bell's lines
+        self.assertEqual(n.title, "◉ Bought AAPL")
+        self.assertEqual(n.body, "10 shares at 180.50.")
+        self.assertIn("Why: Rule x", n.data["items"])
 
     def test_bot_fill_close_helper_includes_pnl(self):
         from bot_program.notifications import notify_bot_fill_close
@@ -171,7 +176,8 @@ class HelperShapeTests(TestCase):
         n = Notification.objects.filter(user=u).first()
         self.assertIn("AAPL", n.title)
         self.assertIn("+", n.title)  # positive PnL → +
-        self.assertIn("hit_target", n.body)
+        self.assertEqual(n.title, "⊕ Closed AAPL · +195.00")
+        self.assertIn("How it ended: target reached", n.data["items"])
 
 
 # ── Hook integration ─────────────────────────────────────────────────────
@@ -200,7 +206,7 @@ class HookIntegrationTests(TestCase):
         self.assertFalse(ok)
         n = Notification.objects.filter(user=u, notification_type="bot").first()
         self.assertIsNotNone(n)
-        self.assertIn("Orchestrator blocked", n.title)
+        self.assertEqual(n.title, "✕ Buying C was blocked")
 
     def test_bot_open_fires_notification(self):
         """AssetBot.scan_symbol → opens trade → fires notification."""
@@ -227,7 +233,7 @@ class HookIntegrationTests(TestCase):
         n = Notification.objects.filter(user=u, notification_type="bot").first()
         self.assertIsNotNone(n)
         self.assertIn("AAPL", n.title)
-        self.assertIn("opened", n.title)
+        self.assertIn("Bought AAPL", n.title)
 
     def test_drawdown_warning_dedupes_within_hour(self):
         from bot_program.notifications import notify_drawdown_warning
@@ -269,7 +275,7 @@ class HookIntegrationTests(TestCase):
         n = Notification.objects.filter(user=u, notification_type="bot").first()
         self.assertIsNotNone(n)
         self.assertIn("AAPL", n.title)
-        self.assertIn("closed", n.title)
+        self.assertIn("Closed AAPL", n.title)
 
 
 # ── the Telegram text: HTML, escaped, one fact per line (2026-09-26) ───

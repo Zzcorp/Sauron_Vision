@@ -184,7 +184,7 @@ class ManualCloseEngineTests(TestCase):
         # Notification (Phase 20).
         self.assertTrue(Notification.objects.filter(
             user=self.user, notification_type="bot",
-            title__contains="closed").exists(),
+            title__contains="Closed").exists(),
             "no close notification for the manual close")
         # Tax lots (Phase 27) — the lot opened at entry must be consumed,
         # or the next trade's close eats a lot that was never its own.

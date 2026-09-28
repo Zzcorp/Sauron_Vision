@@ -487,10 +487,11 @@ class TheEntryPathBooksAWorkingRowTests(TestCase):
         self.assertEqual(trade.metadata["fill_source"], "pending")
         self.assertIn("entry_working_since", trade.metadata)
         self.assertEqual(trade.broker_order_id, "101")
-        # And the operator is NOT told a position opened.
+        # And the operator is NOT told a position opened ("Bought", the
+        # fill message's title since 2026-09-27).
         from alerts.models import Notification
         self.assertFalse(Notification.objects.filter(
-            user=self.user, title__icontains="opened").exists())
+            user=self.user, title__icontains="Bought").exists())
 
     def test_a_filled_order_books_an_ordinary_protected_row(self):
         """The guard must not swallow real fills."""
@@ -1128,7 +1129,13 @@ class AnEtoroHeldOrderIsPolledAndWithdrawnTests(TestCase):
                          {"sent": 82.17, "held": 83.06})
         self.assertEqual(float(trade.metadata["initial_stop_loss"]), 82.17)
         self.assertTrue(trade.metadata["protected"])
-        self.assertEqual(self._notes("rewrote the stop"), 1)
+        # ONE message (2026-09-27): the fill message names the moved stop,
+        # so the staff alert is not sent beside it
+        self.assertEqual(self._notes("rewrote the stop"), 0)
+        from alerts.models import Notification
+        fill = Notification.objects.get(title="◉ Bought NVDA")
+        self.assertIn("Stop moved by eToro: it holds 83.06, not the 82.17 "
+                      "sent (2.0% below the entry)", fill.data["items"])
 
     def test_a_fill_with_no_stop_read_is_managed_by_the_bot_and_told(self):
         from tests.test_etoro_client import _measured_lookup

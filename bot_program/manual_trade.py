@@ -1987,11 +1987,15 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             # message reads the held stop; nothing is resized, closed or
             # sent again. A queued order is compared when it fills
             # (AssetBot._finish_working_entry).
+            # Compared at the instrument's tick, as the engine compares
+            # (venue_moved_stop, 2026-09-27): a rounding is not a moved stop.
             try:
+                from bot_program.asset_engine.base import venue_moved_stop
                 held = res.get("venueStopLoss")
                 held = float(held) if held is not None else None
                 if (held is not None and not working
-                        and abs(held - float(stop)) > 1e-9):
+                        and venue_moved_stop(float(stop), held,
+                                             cfg.asset_class, inst.symbol)):
                     extra["stop_rewritten_by_venue"] = {
                         "sent": float(stop), "held": held}
             except (TypeError, ValueError):
@@ -2386,7 +2390,8 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
     try:
         from bot_program.notifications import notify_manual_lane_mode
         notify_manual_lane_mode(user, asset_class=cls, mode=mode,
-                                capital=float(cfg.capital))
+                                capital=float(cfg.capital),
+                                currency=str(cfg.base_currency or ""))
     except Exception as e:  # noqa: BLE001 — the record must not block the act
         logger.warning("[take-trade] lane-mode notification failed: %s", e)
     return {"ok": True, "asset_class": cls, "mode": mode,

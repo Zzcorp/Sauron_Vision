@@ -469,10 +469,11 @@ class TheFillMessagesTests(_Base):
             qty=row.qty, entry_price=row.entry_price,
             rule_name=row.rule_name, trade=row, trade_id=row.id))
         n = Notification.objects.get(user=self.user)
-        self.assertEqual(n.title, "◉ EURCAD BUY opened")
+        # the message's title and summary (2026-09-27, the polish)
+        self.assertEqual(n.title, "◉ Bought EURCAD")
         self.assertEqual(n.notification_type, "bot")
         self.assertEqual(n.url, "/forensics/108/")
-        self.assertIn("golden_cross", n.body)
+        self.assertEqual(n.body, "7,900 units at 1.60726 — about 9,269 USD.")
         # whose money it is first; the rule's key is not repeated where a
         # fact already names the rule, and never set raw
         self.assertEqual(n.data["items"], [

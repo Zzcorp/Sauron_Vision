@@ -612,15 +612,18 @@ class PositionsAndWhyTests(_EyeCase):
     def test_the_open_book(self):
         cfg = _cfg(self.user)
         _trade(cfg, target="352.90")
-        _trade(cfg, symbol="EURUSD", side="SELL", qty="10000",
-               entry="1.08345", stop="1.09", paper=False)
+        # a forex pair on a forex config: its prices at the pair's own
+        # decimals (the fill messages' words, 2026-09-27)
+        _trade(_cfg(self.user, "FX swing", "forex"), symbol="EURUSD",
+               side="SELL", qty="10000", entry="1.08345", stop="1.09",
+               paper=False)
         _etoro(self.user, demo=True, broker_positions=[{"symbol": "EURUSD"}],
                broker_positions_at=timezone.now() - timedelta(minutes=5))
         lines = _lines(eye.build_positions(self.user))
         self.assertEqual(lines[0], "Open on the platform: 2 (1 live · 1 paper)")
         self.assertIn("  • AAPL long 0.04 @ 336.10 · stop 326.02 · target "
                       "352.90 · paper · opened just now", lines)
-        self.assertIn("  • EURUSD short 10,000 @ 1.08345 · stop 1.09 · "
+        self.assertIn("  • EURUSD short 10,000 @ 1.08345 · stop 1.09000 · "
                       "target — · live · opened just now", lines)
         self.assertIn("Held at eToro (demo, synced 5 min ago): 1", lines)
 

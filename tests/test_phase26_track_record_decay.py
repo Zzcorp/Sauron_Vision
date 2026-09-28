@@ -145,8 +145,8 @@ class CheckUserDecayTests(TestCase):
         n = Notification.objects.filter(user=self.user,
                                           notification_type="bot").first()
         self.assertIsNotNone(n)
-        self.assertIn("declining", n.title)
-        self.assertIn("decay", n.title.lower())
+        # the rule read aloud, in words since 2026-09-27
+        self.assertEqual(n.title, "▲ Declining is losing its edge")
 
     def test_stable_rule_no_alert(self):
         """Recent ≈ baseline → no alert."""

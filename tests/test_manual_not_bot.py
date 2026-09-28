@@ -152,9 +152,10 @@ class ManualFillNotificationTests(TestCase):
         self._notify()
         n = Notification.objects.get(user=self.user)
         self.assertIn("BTCUSD", n.title)
-        self.assertIn("BUY", n.title)
         self.assertIn("by hand", n.title)
-        self.assertIn("TAKE TRADE", n.body)
+        # the message's title since 2026-09-27, and how it was taken
+        self.assertEqual(n.title, "▸ Bought BTCUSD by hand")
+        self.assertIn("Taken: by hand", n.data["items"])
         # The rule name is never echoed: "manual_take" sitting where a bot
         # fill prints its rule reads as a rule that fired.
         self.assertNotIn("manual_take", n.body)
