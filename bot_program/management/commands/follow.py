@@ -4,9 +4,11 @@ the shell, through the same arithmetic as the Follow button.
 The asset-bots page has a Follow form per live config: a share (percent)
 or blank for automatic, and the trading PIN, because following re-sizes
 a live pool on the spot. This is that form without the page. It reads
-the last stored broker reading, asks `allocate_shares` whether the share
-fits beside every other follower's, prints the whole plan, and writes
-only with `--yes`. It never touches the broker.
+the last stored broker reading, takes off what is held back for
+withdrawals asked for in advance (bot_program.withdrawals.deployable, the
+sync's own base), asks `allocate_shares` whether the share fits beside
+every other follower's, prints the whole plan, and writes only with
+`--yes`. It never touches the broker.
 
 The PIN gate is the page's; a shell on the server is already behind SSH,
 and `--yes` is the deliberate act here. Say so when handing this to an
@@ -84,14 +86,30 @@ class Command(BaseCommand):
 
         value = float(reading["value"])
         cur = reading["currency"] or ""
+        # The shares are of the reading LESS what is held back for
+        # withdrawals — the base the sync sizes from (review, 2026-09-28).
+        # Printing and writing reading × share gave the pool the full share
+        # until the follow below corrected it, and quoted that number. A
+        # reserve nobody can read writes nothing.
+        try:
+            from bot_program.withdrawals import deployable
+            base, held = deployable(user, value, reading_at=reading["at"])
+        except Exception as e:  # noqa: BLE001
+            raise CommandError(f"the withdrawal reserve could not be read ({e}) — "
+                               f"the pool's share of the account is unknown; "
+                               f"nothing written")
+        base = float(base)
         self.stdout.write(f"account reading: {value:.2f} {cur}")
+        if held > 0:
+            self.stdout.write(f"held back for withdrawals: {float(held):.2f} {cur} — "
+                              f"the pools follow {base:.2f} {cur}")
         self.stdout.write("plan, every follower after this change:")
         for f in followers:
             frac = float(alloc["plan"][f.pk])
             label = f"{share:g}%" if (f.pk == cfg.pk and share is not None) else (
                 "auto" if f.pk == cfg.pk else share_label(f, alloc["plan"]))
             mark = "  <- this one" if f.pk == cfg.pk else ""
-            self.stdout.write(f"  [{f.pk}] {f.name:<22} {label:<9} -> {value * frac:.2f} {cur}{mark}")
+            self.stdout.write(f"  [{f.pk}] {f.name:<22} {label:<9} -> {base * frac:.2f} {cur}{mark}")
         if not opts["yes"]:
             self.stdout.write("(plan only — add --yes to write)")
             return
@@ -103,7 +121,7 @@ class Command(BaseCommand):
         else:
             ex.pop("account_share_pct", None)
         cfg.extras = ex
-        cfg.capital = Decimal(str(round(value * fraction, 2)))
+        cfg.capital = Decimal(str(round(base * fraction, 2)))
         cfg.save(update_fields=["extras", "capital", "updated_at"])
         # The other followers' shares changed too (an automatic share is
         # what the explicit ones leave). Re-split them from the same
@@ -111,6 +129,8 @@ class Command(BaseCommand):
         # the next sync came round, and the preflight said so.
         from bot_program.tasks import _follow_the_account
         _follow_the_account(user, value, reading["currency"])
+        # The follow reloads its own rows: print what the database holds.
+        cfg.refresh_from_db(fields=["capital"])
         self.stdout.write(self.style.SUCCESS(
             f"[{cfg.pk}] {cfg.name} follows the account at {fraction * 100:.0f}% — "
             f"pool {cfg.capital} {cur}; every follower re-split from the "
@@ -132,13 +152,28 @@ class Command(BaseCommand):
             alloc = allocate_shares(followers)
             head = (f"{float(reading['value']):.2f} {reading['currency'] or ''}"
                     if reading else "no reading")
+            # What the pools are sized from: the reading less what is held
+            # back for withdrawals, as the sync sizes them. Unreadable, no
+            # "(= …)" is printed rather than a number from the whole reading.
+            base = None
+            if reading:
+                try:
+                    from bot_program.withdrawals import deployable
+                    b, held = deployable(user, float(reading["value"]),
+                                         reading_at=reading["at"])
+                    base = float(b)
+                    if held > 0:
+                        head += (f", {float(held):.2f} held back for withdrawals"
+                                 f" — the pools follow {base:.2f}")
+                except Exception as e:  # noqa: BLE001
+                    head += f", withdrawal reserve unreadable ({e})"
             self.stdout.write(f"{user.username}: account {head}, {len(followers)} follower(s)")
             for f in followers:
                 frac = alloc["plan"].get(f.pk) if alloc["ok"] else None
                 self.stdout.write(
                     f"  [{f.pk}] {f.name:<22} {share_label(f, alloc.get('plan')):<9} "
                     f"pool {f.capital}"
-                    + (f"  (= {float(reading['value']) * frac:.2f})" if reading and frac is not None else ""))
+                    + (f"  (= {base * frac:.2f})" if base is not None and frac is not None else ""))
             if not alloc["ok"]:
                 self.stdout.write(self.style.ERROR(f"  OVER-ALLOCATED: {alloc['reason']}"))
             fixed = [c for c in AssetBotConfig.objects.filter(user=user, enabled=True)

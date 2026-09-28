@@ -22,11 +22,21 @@ Pinned here:
     shock and not a governor cut — and the same drop without it still is;
   * the page: login, owner scope, the PIN on every act, POST-redirect-GET,
     an empty database renders with em dashes;
-  * the message: one per act, kind "withdrawal", never raising.
+  * the message: one per act, kind "withdrawal", never raising;
+  * what the review of 2026-09-28 found: the eToro gate holds only the
+    book's own reserve, in the cash's own currency; marking paid refuses
+    an amount larger than the account, asks the time when the sync has
+    already read the money gone, and wants a tick for an amount or a time
+    the readings contradict; a paid row can be corrected, PIN in hand; a
+    fallback USD request filed before any reading still counts as a flow
+    once the account reads in EUR; the Follow button and `manage.py
+    follow` size from the reading less the hold and quote what they
+    wrote; the page shows a pool that trades elsewhere as not retuned,
+    exactly as the sync skips it.
 
 Run with:  python manage.py test tests.test_withdrawals
 """
-from datetime import timedelta
+from datetime import timedelta, timezone as dt_timezone
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -96,11 +106,12 @@ def _cfg(user, *, name, asset_class="stock", mode="live", capital="100",
 
 
 def _wr(user, amount, *, status="reserved", currency="EUR", paid_at=None,
-        paid_amount=None, who="operator"):
+        paid_amount=None, who="operator", assumed=False):
     from bot_program.models import WithdrawalRequest
     return WithdrawalRequest.objects.create(
         user=user, requested_by=who, amount=Decimal(str(amount)),
-        currency=currency, status=status, paid_at=paid_at,
+        currency=currency, currency_assumed=assumed, status=status,
+        paid_at=paid_at,
         paid_amount=(Decimal(str(paid_amount)) if paid_amount is not None
                      else None))
 
@@ -509,10 +520,32 @@ class TheEtoroCashGateHoldsTheReserveTests(TestCase):
         self.assertIn("held for withdrawals", self._room())
 
     def test_an_unreadable_reserve_refuses(self):
-        with patch("bot_program.withdrawals.reserved_total",
+        # held_back_in since the review: the gate reads the hold split by
+        # currency, never the plain sum
+        with patch("bot_program.withdrawals.held_back_in",
                    side_effect=RuntimeError("db down")):
             why = self._room()
         self.assertIn("withdrawal reserve could not be read", why)
+
+    def test_a_hold_in_another_currency_is_refused_never_converted(self):
+        _wr(self.user, 500, currency="EUR")
+        why = self._room(qty=1)          # 100 USD would fit twice over
+        self.assertIn("500.00 EUR is held for withdrawals against cash read "
+                      "in USD — nothing here converts", why)
+        self.assertIn("cancelled or filed again in USD", why)
+
+    def test_an_assumed_currency_counts_as_the_cells_own(self):
+        # filed before any reading: "USD" was a guess, and the cash cell
+        # reads EUR — the hold is the account's money, in EUR
+        from bot_program.models import EtoroAccount
+        EtoroAccount.objects.filter(user=self.user).update(
+            last_equity_currency="EUR")
+        self.cfg.base_currency = "EUR"
+        self.cfg.save(update_fields=["base_currency"])
+        _wr(self.user, 500, currency="USD", assumed=True)
+        why = self._room()
+        self.assertIn("needs 600.00 EUR of margin and 500.00 is free", why)
+        self.assertIn("less 500.00 held for withdrawals", why)
 
 
 # ── 4. The history: a withdrawal is not a loss ───────────────────────────
@@ -868,3 +901,521 @@ class TheMessageTests(TestCase):
             self.assertFalse(notify_withdrawal(
                 self.user, _wr(self.user, 1), event="requested",
                 reserved_total=Decimal("1")))
+
+
+# ── 8. What the review of 2026-09-28 found ───────────────────────────────
+
+def _readers(user):
+    """What the governor, the shock detector and the pools read."""
+    from bot_program.capital_truth import equity_drawdown
+    from bot_program.share_allocator import drop_24h, shock_detected
+    from bot_program.withdrawals import held_back
+    dd = equity_drawdown(user)
+    return {"dd": dd["drawdown_pct"], "hwm": dd["hwm"],
+            "drop": drop_24h(user), "shock": shock_detected(user),
+            "held": held_back(user)}
+
+
+class TheCashGateReadsOnlyTheBooksOwnReserveTests(TestCase):
+    """Saxo is the book (live, stocks first by VENUE_PRECEDENCE); this
+    eToro row is a demo account beside it. A reserve filed against the
+    Saxo book already shrinks the Saxo followers — it is not this row's
+    cash, and a real-money reserve must not block the paper world."""
+
+    def setUp(self):
+        from bot_program.asset_engine.stock_bot import StockBot
+        from bot_program.engine.etoro_client import EtoroTrader
+        from tests.test_etoro_leverage import _account
+        from tests.test_saxo_wiring import saxo
+        self.user = _user("wd_gate_book")
+        book = saxo(self.user, flags=("stock",), sim=False)
+        _stamp(book, "10000", "EUR")
+        _account(self.user, cash=1000, equity=100000)
+        self.cfg = _cfg(self.user, name="ET", symbols=["AAPL"],
+                        currency="USD", capital="10000")
+        self.bot = StockBot(self.cfg)
+        self.client_ = EtoroTrader("api-k", "user-k", env="demo")
+
+    def _room(self, qty=6):
+        return self.bot._leverage_headroom(self.client_, "AAPL", qty=qty,
+                                           price=100.0, leverage=1)
+
+    def test_a_reserve_at_the_saxo_book_is_not_etoro_cash(self):
+        from bot_program.capital_truth import broker_backed
+        self.assertEqual(type(broker_backed(self.user)).__name__,
+                         "SaxoAccount")
+        _wr(self.user, 500, currency="EUR")
+        self.assertIsNone(self._room())          # 600 of 1,000 USD
+        self.assertIsNone(self._room(qty=9))     # 900 of 1,000 USD
+
+    def test_a_withdrawal_paid_at_the_book_is_not_etoro_cash_either(self):
+        _wr(self.user, 500, currency="EUR", status="paid",
+            paid_at=timezone.now())
+        self.assertIsNone(self._room())
+
+    def test_the_cash_itself_still_binds(self):
+        _wr(self.user, 500, currency="EUR")
+        why = self._room(qty=11)                 # 1,100 of 1,000
+        self.assertIn("needs 1,100.00 USD of margin and 1,000.00 is free",
+                      why)
+        self.assertNotIn("held for withdrawals", why)
+
+
+class MarkingTheAmountIsCheckedTests(_Quiet):
+    """One slipped digit must not erase every real loss for 90 days."""
+
+    def setUp(self):
+        super().setUp()
+        self.user = _user("wd_amount")
+        self.acct = _ibkr_book(self.user, "1000", "EUR")
+        _reading(self.acct, 1000, hours_ago=24 * 10)
+        _reading(self.acct, 1000, hours_ago=12)
+
+    def _file(self, amount="200"):
+        from bot_program.withdrawals import create_request
+        return create_request(self.user, requested_by="operator",
+                              amount=amount)["request"]
+
+    def test_an_amount_larger_than_the_account_is_refused_even_ticked(self):
+        from bot_program.withdrawals import mark_paid
+        wr = self._file()
+        for confirm in (False, True):
+            with self.subTest(confirm=confirm):
+                out = mark_paid(self.user, wr.pk, acted_by="operator",
+                                paid_amount="2000", confirm=confirm)
+                self.assertIn("2,000.00 EUR cannot have left an account "
+                              "that held 1,000.00 EUR", out["error"])
+                self.assertIn("Nothing changed", out["error"])
+        wr.refresh_from_db()
+        self.assertEqual(wr.status, "reserved")
+        self.assertIsNone(wr.paid_amount)
+        self.dispatch.assert_called_once()       # the filing, nothing more
+
+    def test_so_a_real_loss_after_the_withdrawal_is_still_measured(self):
+        from bot_program.withdrawals import mark_paid
+        wr = self._file()
+        self.assertIn("error", mark_paid(self.user, wr.pk,
+                                         acted_by="operator",
+                                         paid_amount="2000"))
+        self.assertTrue(mark_paid(self.user, wr.pk,
+                                  acted_by="operator").get("ok"))
+        _stamp(self.acct, "500")          # 800 after the 200, then -37.5%
+        r = _readers(self.user)
+        self.assertAlmostEqual(r["dd"], 0.375)
+        self.assertEqual(r["hwm"], 800.0)
+        self.assertTrue(r["shock"])
+
+    def test_an_amount_far_from_the_one_asked_needs_the_box(self):
+        from bot_program.withdrawals import mark_paid
+        wr = self._file()
+        out = mark_paid(self.user, wr.pk, acted_by="operator",
+                        paid_amount="150")
+        self.assertIn("Refused until checked", out["error"])
+        self.assertIn("150.00 EUR withdrawn is not the 200.00 EUR asked for",
+                      out["error"])
+        self.assertIn("I have checked", out["error"])
+        wr.refresh_from_db()
+        self.assertEqual(wr.status, "reserved")
+        out = mark_paid(self.user, wr.pk, acted_by="operator",
+                        paid_amount="150", confirm=True)
+        self.assertTrue(out.get("ok"), out)
+        wr.refresh_from_db()
+        self.assertEqual(wr.paid_amount, Decimal("150.00"))
+
+    def test_a_large_withdrawal_the_sync_already_read_is_asked_its_time(
+            self):
+        # 900 of 1,000, and the sync read the 100 left before the mark:
+        # "900 cannot have left an account that held 100" would be false
+        # — the question is WHEN it left, and the answer passes the bound
+        from bot_program.models import BrokerEquityReading
+        from bot_program.withdrawals import mark_paid
+        wr = self._file("900")
+        BrokerEquityReading.objects.create(
+            account=self.acct, value=Decimal("1000"), currency="EUR",
+            env="live", at=timezone.now() - timedelta(minutes=20))
+        _stamp(self.acct, "100", age_seconds=300)
+        self.acct.refresh_from_db()
+        b_at = self.acct.last_equity_at
+        BrokerEquityReading.objects.create(
+            account=self.acct, value=Decimal("100"), currency="EUR",
+            env="live", at=b_at)
+        out = mark_paid(self.user, wr.pk, acted_by="operator")
+        self.assertIn("the readings say the money has already left",
+                      out["error"])
+        self.assertNotIn("cannot have left", out["error"])
+        when = b_at.astimezone(dt_timezone.utc).strftime("%Y-%m-%dT%H:%M")
+        out = mark_paid(self.user, wr.pk, acted_by="operator", paid_at=when)
+        self.assertTrue(out.get("ok"), out)
+        self.assertEqual(_readers(self.user)["dd"], 0.0)
+
+    def test_a_fee_or_a_rounding_is_taken_as_typed(self):
+        from bot_program.withdrawals import mark_paid
+        wr = self._file()
+        out = mark_paid(self.user, wr.pk, acted_by="operator",
+                        paid_amount="195.00")    # a 5.00 fee, 2.5%
+        self.assertTrue(out.get("ok"), out)
+
+
+class AMarkAfterTheSyncReadTheMoneyGoneTests(_Quiet):
+    """History at 1,000; a 200 request; the money leaves; the sync reads
+    800 five minutes ago; the request is marked now. Blank would take the
+    200 off a reading that no longer holds it: a false 25% fall, a shock,
+    and the pools held back twice until the next sync."""
+
+    def setUp(self):
+        super().setUp()
+        from bot_program.models import BrokerEquityReading
+        from bot_program.withdrawals import create_request
+        self.user = _user("wd_late")
+        self.acct = _ibkr_book(self.user, "1000", "EUR")
+        _reading(self.acct, 1000, hours_ago=24 * 10)
+        _reading(self.acct, 1000, hours_ago=12)
+        self.follower = _cfg(self.user, name="manual", tracks=True,
+                             capital="1000")
+        self.wr = create_request(self.user, requested_by="gandalf",
+                                 amount="200")["request"]
+        now = timezone.now()
+        self.a_at = now - timedelta(minutes=20)
+        BrokerEquityReading.objects.create(
+            account=self.acct, value=Decimal("1000"), currency="EUR",
+            env="live", at=self.a_at)
+        _stamp(self.acct, "800", age_seconds=300)       # the sync
+        self.acct.refresh_from_db()
+        self.b_at = self.acct.last_equity_at
+        BrokerEquityReading.objects.create(
+            account=self.acct, value=Decimal("800"), currency="EUR",
+            env="live", at=self.b_at)
+
+    def _mark(self, **kw):
+        from bot_program.withdrawals import mark_paid
+        return mark_paid(self.user, self.wr.pk, acted_by="gandalf", **kw)
+
+    @staticmethod
+    def _local(at):
+        return at.astimezone(dt_timezone.utc).strftime("%Y-%m-%dT%H:%M")
+
+    def test_a_blank_time_is_refused_and_says_when_it_left(self):
+        out = self._mark()
+        err = out["error"]
+        self.assertIn("the readings say the money has already left", err)
+        self.assertIn("1,000.00 EUR", err)
+        self.assertIn("800.00 EUR", err)
+        self.assertIn(f"{self.b_at.astimezone(dt_timezone.utc):%H:%M} UTC",
+                      err)
+        self.assertIn("counted twice", err)
+        self.assertIn("Nothing changed", err)
+        self.wr.refresh_from_db()
+        self.assertEqual(self.wr.status, "reserved")
+
+    def test_the_time_it_left_counts_it_once(self):
+        out = self._mark(paid_at=self._local(self.b_at))
+        self.assertTrue(out.get("ok"), out)
+        r = _readers(self.user)
+        self.assertEqual(r["dd"], 0.0)
+        self.assertEqual(r["drop"], 0.0)
+        self.assertFalse(r["shock"])
+        self.assertEqual(r["held"], Decimal("0"))
+        self.follower.refresh_from_db()
+        self.assertEqual(float(self.follower.capital), 800.0)
+
+    def test_what_the_blank_default_would_have_done(self):
+        # the harm the refusal prevents, measured: the same flow at "now"
+        _wr(self.user, 200, status="paid", paid_at=timezone.now())
+        r = _readers(self.user)
+        self.assertAlmostEqual(r["dd"], 0.25)
+        self.assertTrue(r["shock"])
+        self.assertEqual(r["held"], Decimal("400.00"))
+
+    def test_a_time_after_the_reading_needs_the_box(self):
+        late = self._local(timezone.now() - timedelta(minutes=1))
+        out = self._mark(paid_at=late)
+        self.assertIn("Refused until checked", out["error"])
+        self.assertIn("is after the latest reading", out["error"])
+        self.assertTrue(self._mark(paid_at=late, confirm=True).get("ok"))
+
+    def test_a_time_before_the_money_left_needs_the_box(self):
+        early = self._local(self.a_at - timedelta(minutes=30))
+        out = self._mark(paid_at=early)
+        self.assertIn("Refused until checked", out["error"])
+        self.assertIn("still holds the money", out["error"])
+        self.assertIn("90 days", out["error"])
+        self.wr.refresh_from_db()
+        self.assertEqual(self.wr.status, "reserved")
+        self.assertTrue(self._mark(paid_at=early, confirm=True).get("ok"))
+
+    def test_a_withdrawal_inside_the_market_noise_is_not_matched(self):
+        from bot_program.withdrawals import create_request, mark_paid
+        small = create_request(self.user, requested_by="operator",
+                               amount="10")["request"]
+        _stamp(self.acct, "790", age_seconds=60)
+        self.assertTrue(mark_paid(self.user, small.pk,
+                                  acted_by="operator").get("ok"))
+
+    def test_the_page_shows_the_last_reading_beside_the_time(self):
+        _pin(self.user)
+        self.client.force_login(self.user)
+        page = self.client.get(reverse("withdrawals")).content.decode()
+        self.assertIn("Last account reading: "
+                      f"{self.b_at.astimezone(dt_timezone.utc):%Y-%m-%d %H:%M}"
+                      " UTC (800.00 EUR)", page)
+        self.assertIn('name="confirm"', page)
+
+
+class ACorrectionPutsAWrongNumberRightTests(_Quiet):
+    """Marked with a time before the broker's balance moved: the reading
+    two hours ago still held the money, so the history reads a 20% fall
+    for 90 days. Before the review only the database could fix it."""
+
+    def setUp(self):
+        super().setUp()
+        self.user = _user("wd_fix")
+        self.acct = _ibkr_book(self.user, "1000", "EUR")
+        _reading(self.acct, 1000, hours_ago=24 * 10)
+        _reading(self.acct, 1000, hours_ago=12)
+        _reading(self.acct, 1000, hours_ago=2)
+        _stamp(self.acct, "800")
+        self.wr = _wr(self.user, 200, status="paid", paid_amount=200,
+                      paid_at=timezone.now() - timedelta(hours=3))
+
+    def _fix(self, **kw):
+        from bot_program.withdrawals import correct_paid
+        return correct_paid(self.user, self.wr.pk, acted_by="operator", **kw)
+
+    def test_the_time_is_corrected_and_the_false_fall_goes(self):
+        self.assertAlmostEqual(_readers(self.user)["dd"], 0.2)
+        when = (timezone.now() - timedelta(hours=1)).astimezone(
+            dt_timezone.utc).strftime("%Y-%m-%dT%H:%M")
+        out = self._fix(paid_at=when, note="the bank took an hour")
+        self.assertTrue(out.get("ok"), out)
+        self.assertEqual(_readers(self.user)["dd"], 0.0)
+        self.wr.refresh_from_db()
+        self.assertEqual(self.wr.paid_amount, Decimal("200.00"))
+        self.assertEqual(self.wr.acted_by, "operator")
+        self.assertIn("Corrected", self.wr.closing_note)
+        self.assertIn("was 200.00 EUR at", self.wr.closing_note)
+        self.assertIn("the bank took an hour", self.wr.closing_note)
+        kw = self.dispatch.call_args.kwargs
+        self.assertEqual(kw["title"], "Withdrawal corrected: 200.00 EUR")
+        self.assertTrue(any(i.startswith("Was: 200.00 EUR at")
+                            for i in kw["row_data"]["items"]))
+
+    def test_a_correction_is_checked_like_the_mark(self):
+        out = self._fix(paid_amount="2000", confirm=True)
+        self.assertIn("cannot have left an account", out["error"])
+        out = self._fix(paid_amount="150")
+        self.assertIn("Refused until checked", out["error"])
+        self.wr.refresh_from_db()
+        self.assertEqual(self.wr.paid_amount, Decimal("200.00"))
+        self.dispatch.assert_not_called()
+
+    def test_the_time_box_sent_back_untouched_keeps_the_moment(self):
+        # the form shows the stored moment to the minute; sent back as it
+        # is, with only the amount changed, the seconds are not "corrected"
+        stored = self.wr.paid_at
+        shown = stored.astimezone(dt_timezone.utc).strftime("%Y-%m-%dT%H:%M")
+        out = self._fix(paid_at=shown, paid_amount="198", confirm=True)
+        self.assertTrue(out.get("ok"), out)
+        self.wr.refresh_from_db()
+        self.assertEqual(self.wr.paid_at, stored)
+        self.assertEqual(self.wr.paid_amount, Decimal("198.00"))
+        self.assertIn("Nothing to correct",
+                      self._fix(paid_at=shown, paid_amount="198")["error"])
+
+    def test_only_a_withdrawal_is_corrected_and_only_when_it_changes(self):
+        from bot_program.withdrawals import correct_paid
+        reserved = _wr(self.user, 50)
+        out = correct_paid(self.user, reserved.pk, acted_by="gandalf",
+                           paid_amount="50")
+        self.assertIn("only a withdrawal can be corrected", out["error"])
+        self.assertIn("Nothing to correct", self._fix(paid_amount="200")
+                      ["error"])
+
+    def test_the_page_corrects_with_the_pin_and_only_with_it(self):
+        _pin(self.user)
+        self.client.force_login(self.user)
+        page = self.client.get(reverse("withdrawals")).content.decode()
+        self.assertIn(reverse("withdrawal_correct", args=[self.wr.pk]), page)
+        url = reverse("withdrawal_correct", args=[self.wr.pk])
+        when = (timezone.now() - timedelta(hours=1)).astimezone(
+            dt_timezone.utc).strftime("%Y-%m-%dT%H:%M")
+        resp = self.client.post(url, {"acted_by": "gandalf",
+                                      "paid_at": when, "pin": "0000"})
+        self.assertEqual(resp.status_code, 302)
+        self.wr.refresh_from_db()
+        self.assertNotIn("Corrected", self.wr.closing_note)
+        resp = self.client.post(url, {"acted_by": "gandalf",
+                                      "paid_at": when, "pin": PIN})
+        self.assertRedirects(resp, reverse("withdrawals"),
+                             fetch_redirect_response=False)
+        msgs = " | ".join(str(m) for m in get_messages(resp.wsgi_request))
+        self.assertIn(f"Request #{self.wr.pk} corrected", msgs)
+        self.wr.refresh_from_db()
+        self.assertIn("Corrected", self.wr.closing_note)
+        other = _wr(_user("wd_fix_other"), 10, status="paid",
+                    paid_at=timezone.now())
+        resp = self.client.post(
+            reverse("withdrawal_correct", args=[other.pk]),
+            {"acted_by": "gandalf", "paid_amount": "5", "pin": PIN})
+        self.assertEqual(resp.status_code, 404)
+
+
+class AFallbackCurrencyIsNotALossTests(_Quiet):
+    """A request filed before any reading is recorded in USD by default;
+    the account then reads in EUR."""
+
+    def setUp(self):
+        super().setUp()
+        self.user = _user("wd_ccy")
+
+    def _eur_history_then_800(self):
+        acct = _ibkr_book(self.user, "1000", "EUR")
+        _reading(acct, 1000, hours_ago=24 * 10)
+        _reading(acct, 1000, hours_ago=12)
+        _reading(acct, 1000, hours_ago=2)
+        _stamp(acct, "800")
+        return acct
+
+    def test_filed_before_any_reading_then_paid_reads_as_a_flow(self):
+        from bot_program.withdrawals import create_request, mark_paid
+        wr = create_request(self.user, requested_by="gandalf",
+                            amount="200")["request"]
+        self.assertEqual((wr.currency, wr.currency_assumed), ("USD", True))
+        self._eur_history_then_800()
+        when = (timezone.now() - timedelta(hours=1)).astimezone(
+            dt_timezone.utc).strftime("%Y-%m-%dT%H:%M")
+        out = mark_paid(self.user, wr.pk, acted_by="gandalf", paid_at=when)
+        self.assertTrue(out.get("ok"), out)
+        wr.refresh_from_db()
+        self.assertEqual((wr.currency, wr.currency_assumed), ("EUR", False))
+        r = _readers(self.user)
+        self.assertEqual(r["dd"], 0.0)
+        self.assertFalse(r["shock"])
+
+    def test_a_flow_still_assumed_counts_in_the_readings_currency(self):
+        _wr(self.user, 200, status="paid", currency="USD", assumed=True,
+            paid_at=timezone.now() - timedelta(hours=1))
+        self._eur_history_then_800()
+        r = _readers(self.user)
+        self.assertEqual(r["dd"], 0.0)
+        self.assertFalse(r["shock"])
+
+    def test_a_real_other_currency_cannot_be_marked_and_the_page_says_so(
+            self):
+        from bot_program.withdrawals import mark_paid, readiness
+        _ibkr_book(self.user, "1000", "EUR")
+        wr = _wr(self.user, 200, currency="GBP")
+        out = mark_paid(self.user, wr.pk, acted_by="operator")
+        self.assertIn("is in GBP and the account now reads in EUR",
+                      out["error"])
+        self.assertIn("Cancel it and file it again in EUR", out["error"])
+        wr.refresh_from_db()
+        self.assertEqual(wr.status, "reserved")
+        r = readiness(self.user)
+        self.assertEqual([f["id"] for f in r["foreign_ccy"]], [wr.pk])
+        _wr(self.user, 100, currency="USD", assumed=True)   # not foreign
+        self.assertEqual(len(readiness(self.user)["foreign_ccy"]), 1)
+
+
+class TheFollowButtonSizesFromWhatIsLeftTests(_Quiet):
+    """The Follow button and `manage.py follow --yes` write a pool's share
+    themselves, before the follow runs: of the reading LESS the hold."""
+
+    def setUp(self):
+        super().setUp()
+        self.user = get_user_model().objects.create_user(
+            "wd_follow_btn", password="x", is_staff=True, is_superuser=True)
+        _pin(self.user)
+        _ibkr_book(self.user, "1000", "EUR")
+        self.cfg = _cfg(self.user, name="etf", capital="200")
+        _wr(self.user, 200)
+
+    def _post(self, **fields):
+        data = {"config_id": self.cfg.id, "follow": "1", "share": "70",
+                "pin": PIN}
+        data.update(fields)
+        self.client.force_login(self.user)
+        return self.client.post(reverse("hq_follow_asset_bot"), data)
+
+    def test_the_button_writes_and_quotes_the_pool_after_the_reserve(self):
+        resp = self._post()
+        msgs = " | ".join(str(m) for m in get_messages(resp.wsgi_request))
+        self.cfg.refresh_from_db()
+        self.assertEqual(float(self.cfg.capital), 560.0)     # 70% of 800
+        self.assertIn("pool 560.00 EUR", msgs)
+        self.assertIn("200.00 EUR held back for withdrawals", msgs)
+
+    def test_an_unreadable_reserve_follows_nothing(self):
+        with patch("bot_program.withdrawals.reserved_total",
+                   side_effect=RuntimeError("db down")):
+            resp = self._post()
+        msgs = " | ".join(str(m) for m in get_messages(resp.wsgi_request))
+        self.assertIn("withdrawal reserve could not be read", msgs)
+        self.cfg.refresh_from_db()
+        self.assertNotIn("capital_tracks_broker", self.cfg.extras)
+        self.assertEqual(float(self.cfg.capital), 200.0)
+
+    def test_the_command_plans_and_writes_the_pool_after_the_reserve(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+        plan = StringIO()
+        call_command("follow", str(self.cfg.pk), share=70, stdout=plan)
+        self.assertIn("held back for withdrawals: 200.00 EUR", plan.getvalue())
+        self.assertIn("-> 560.00 EUR", plan.getvalue())
+        out = StringIO()
+        call_command("follow", str(self.cfg.pk), share=70, yes=True,
+                     stdout=out)
+        self.cfg.refresh_from_db()
+        self.assertEqual(float(self.cfg.capital), 560.0)
+        self.assertIn("pool 560.00 EUR", out.getvalue())
+        listing = StringIO()
+        call_command("follow", stdout=listing)
+        self.assertIn("the pools follow 800.00", listing.getvalue())
+        self.assertIn("(= 560.00)", listing.getvalue())
+
+
+class ThePageShowsOnlyThePoolsTheSyncMovesTests(_Quiet):
+    """A follower whose orders route to a broker other than the book is
+    skipped by the sync — so the page must not show it shrinking."""
+
+    ROUTE = "bot_program.engine.broker_router.broker_name_for_symbol"
+
+    def setUp(self):
+        super().setUp()
+        self.user = _user("wd_venue")
+        _ibkr_book(self.user, "1000", "EUR")
+        self.fx = _cfg(self.user, name="fx", asset_class="forex",
+                       tracks=True, share=50, symbols=["EURUSD"],
+                       capital="321")
+        self.st = _cfg(self.user, name="st", tracks=True, share=50,
+                       symbols=["AAPL"])
+        _wr(self.user, 400)
+
+    @staticmethod
+    def _venue(user, sym, cfg=None):
+        return "saxo" if sym == "EURUSD" else "ibkr"
+
+    def test_the_page_and_the_sync_agree(self):
+        from bot_program.tasks import _follow_the_account
+        from bot_program.withdrawals import readiness
+        with patch(self.ROUTE, side_effect=self._venue):
+            r = readiness(self.user)
+            _follow_the_account(self.user, 1000.0, "EUR")
+        rows = {f["name"]: f for f in r["following"]}
+        self.assertEqual(rows["fx"]["foreign"], "saxo")
+        self.assertIsNone(rows["fx"]["after"])
+        self.assertEqual(rows["fx"]["before"], Decimal("500.00"))
+        self.assertEqual(rows["st"]["after"], Decimal("300.00"))
+        self.assertEqual([p["name"] for p in r["not_retuned"]], ["fx"])
+        self.fx.refresh_from_db()
+        self.st.refresh_from_db()
+        self.assertEqual(float(self.fx.capital), 321.0)   # not moved
+        self.assertEqual(float(self.st.capital), 300.0)   # as the page said
+
+    def test_the_page_says_it_in_words(self):
+        _pin(self.user)
+        self.client.force_login(self.user)
+        with patch(self.ROUTE, side_effect=self._venue):
+            page = self.client.get(reverse("withdrawals")).content.decode()
+        self.assertIn("not retuned — trades at saxo", page)
+        self.assertIn("are NOT retuned by the sync", page)

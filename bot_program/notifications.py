@@ -643,15 +643,18 @@ def notify_manual_lane_mode(user, *, asset_class: str, mode: str,
 
 
 def notify_withdrawal(user, request, *, event: str,
-                      reserved_total=None) -> bool:
-    """A withdrawal request was filed, sent or cancelled on /withdrawals/.
+                      reserved_total=None, was=None) -> bool:
+    """A withdrawal request was filed, sent, cancelled or corrected on
+    /withdrawals/.
 
     One message per act, to the book owner's chat — the group both men
     read. `request` is the WithdrawalRequest as it stands after the act;
-    `event` is "requested", "paid" or "cancelled"; `reserved_total` is
-    what is still held back once the act is done, so the group reads the
-    reserve without opening the page. Never raises: the act is already
-    written, and a message that fails must not look like one that undid it.
+    `event` is "requested", "paid", "cancelled" or "corrected";
+    `reserved_total` is what is still held back once the act is done, so
+    the group reads the reserve without opening the page; `was` is the
+    (amount, moment) a correction replaced, so the group sees both. Never
+    raises: the act is already written, and a message that fails must not
+    look like one that undid it.
     """
     try:
         from bot_program.withdrawals import money, who_label
@@ -683,6 +686,25 @@ def notify_withdrawal(user, request, *, event: str,
             body = (f"{sent} left the account ({by} asked); the reserve "
                     f"is released and the history reads it as a "
                     f"withdrawal, not a loss")
+        elif event == "corrected":
+            sent = money(request.flow_amount, ccy)
+            when = getattr(request, "paid_at", None)
+            title = f"Withdrawal corrected: {sent}"
+            items = [f"Withdrawn: {sent}",
+                     ("At: " + when.strftime("%Y-%m-%d %H:%M UTC")
+                      if when else "At: —")]
+            if was:
+                old_amount, old_at = was
+                items.append(
+                    f"Was: {money(old_amount, ccy)} at "
+                    + (old_at.strftime("%Y-%m-%d %H:%M UTC") if old_at
+                       else "—"))
+            items += [f"Asked by: {by}", f"Corrected by: {acted}",
+                      f"Reserved in total: {total}",
+                      "The history is read net of the corrected amount "
+                      "and time"]
+            body = (f"the withdrawal of {sent} was corrected ({acted}); "
+                    f"the account's history is re-read with it")
         elif event == "cancelled":
             title = f"Withdrawal request cancelled: {asked}"
             items = [f"Amount: {asked}", f"Asked by: {by}",

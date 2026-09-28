@@ -649,6 +649,19 @@ class NotifierTests(_Base):
                     wanted_by=None, closing_note="", paid_amount=None,
                     paid_at=None, flow_amount=Decimal("1234.56")),
                 event="requested", reserved_total=Decimal("1234.56"))),
+            # ...and one corrected after it was marked withdrawn
+            ("withdrawal", lambda: N.notify_withdrawal(
+                u, SimpleNamespace(
+                    amount=Decimal("1234.56"), currency="EUR",
+                    requested_by="gandalf", acted_by="operator",
+                    reason="", wanted_by=None,
+                    closing_note="bank_fee <5> & late",
+                    paid_amount=Decimal("1229.56"),
+                    paid_at=timezone.now(),
+                    flow_amount=Decimal("1229.56")),
+                event="corrected", reserved_total=Decimal("0"),
+                was=(Decimal("1234.56"),
+                     timezone.now() - timedelta(hours=1)))),
         ]
 
     def test_every_notifier_sends_its_mark_and_at_least_one_line(self):

@@ -516,6 +516,53 @@ def allocate_shares(followers, *, shares=None) -> dict:
     return {"ok": True, "plan": plan, "reason": ""}
 
 
+def foreign_venue(user, cfg, book_kind: str, venue_of=None) -> str:
+    """The broker a following pool trades at when that is NOT the book —
+    "saxo" / "etoro" / "ibkr" — or "" when it trades at the book or
+    nobody can tell.
+
+    ONE test, shared by the sync that retunes the followers
+    (tasks._follow_the_account) and the withdrawals page that shows what
+    a reserve will shrink (withdrawals.readiness) — moved here from the
+    sync on 2026-09-28, because the page listed every follower as
+    shrinking while the sync skipped the ones routed elsewhere, and a
+    money page must show the number the sync will actually write.
+
+    EVERY SYMBOL, NOT THE FIRST. The router routes per symbol (runner.py
+    asks client_for_symbol inside the symbol loop), so a pool holding one
+    Saxo symbol and one eToro symbol reaches two venues. Reading
+    symbols[0] made the answer depend on which one the operator typed
+    first — cfg.symbols is a list in typing order — so the same pool was
+    retuned or skipped by an accident of data entry. The first FOREIGN
+    venue decides: that only ever refuses more, and it can never size a
+    pool from an account it does not trade.
+
+    Only a KNOWN and DIFFERENT venue counts. "paper", the unflagged venues
+    and the symbol-less manual pools mean "cannot tell", and cannot-tell
+    keeps the behaviour it has always had: the pool follows. A router
+    that raises is cannot-tell too. `venue_of` is an optional
+    {symbol: venue} dict shared across pools, so one sync asks the router
+    once per symbol — every follower is non-paper, so the routing of a
+    symbol does not differ between them.
+    """
+    if not book_kind:
+        return ""
+    if venue_of is None:
+        venue_of = {}
+    try:
+        from bot_program.engine.broker_router import broker_name_for_symbol
+        for sym in list(cfg.symbols or []):
+            if sym not in venue_of:
+                venue_of[sym] = broker_name_for_symbol(user, sym, cfg)
+            venue = venue_of[sym]
+            if venue in ("saxo", "etoro", "ibkr") and venue != book_kind:
+                return venue
+    except Exception as e:  # noqa: BLE001 — unknown is not a mismatch
+        logger.debug("capital_truth: cannot tell %s's venue (%s)",
+                     cfg.name, e)
+    return ""
+
+
 def share_label(cfg, plan=None) -> str:
     """'30%' / 'auto 35%' / 'auto' — for the pages that show a follower."""
     pct = account_share_pct(cfg)

@@ -30,7 +30,11 @@ trading PIN; the page is /withdrawals/.
 `currency` is fixed at creation to the account reading's currency. "USD"
 is written only when no reading has ever landed, and the page says so:
 nothing here converts, and a reserve is subtracted from the reading as a
-number, which is the conservative direction if the two ever differ.
+number, which is the conservative direction if the two ever differ. That
+fallback is flagged (`currency_assumed`) and replaced by the reading's
+real currency when the request is marked withdrawn; a request in a REAL
+currency other than the reading's cannot be marked withdrawn at all
+(bot_program.withdrawals.mark_paid says why, in plain words).
 """
 from django.conf import settings
 from django.db import models
@@ -64,6 +68,15 @@ class WithdrawalRequest(models.Model):
     requested_by = models.CharField(max_length=16, choices=WHO_CHOICES)
     amount = models.DecimalField(max_digits=14, decimal_places=2)
     currency = models.CharField(max_length=8, default="USD")
+    # True when `currency` is the stated fallback, written because no
+    # reading (or a reading without a currency) had landed — a guess, not a
+    # fact. Such a request is read as "the account's own currency" wherever
+    # a currency is compared (the eToro cash gate, the flow accounting), and
+    # marking it withdrawn stamps the reading's real currency on it. Without
+    # this, a request filed before the first reading kept "USD" for ever,
+    # and an account that then read in EUR never counted its withdrawal as
+    # a flow: the history read it as a loss (review, 2026-09-28).
+    currency_assumed = models.BooleanField(default=False)
     # The date the money is wanted by, when there is one. Informational:
     # the reserve starts the moment the request is filed, whatever it says.
     wanted_by = models.DateField(null=True, blank=True)

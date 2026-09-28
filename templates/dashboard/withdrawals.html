@@ -23,7 +23,7 @@ Every money cell arrives pre-grouped ("1,234.56 EUR") from the view.
     <div style="padding:12px 16px 14px;font-family:var(--font-mono);font-size:12px;line-height:1.7;">
         <div>A request filed here <strong>holds the amount back</strong> from the moment it is filed. Every pool that follows the account is sized from the account <em>less</em> the reserve, so all of them shrink by the same proportion; the eToro cash gate will not spend the reserved cash on a new order.</div>
         <div style="margin-top:6px;">It <strong>sells nothing and closes nothing</strong>. The pools' shares of the account do not change, the bots keep trading their plan, and cash builds up as positions close on their own.</div>
-        <div style="margin-top:6px;">When the money is sent at the broker, press <strong>Mark withdrawn</strong> at that moment: the reserve is released and the account's history counts the amount as a withdrawal, not as a loss, so no drawdown alarm and no de-risking follow from it.</div>
+        <div style="margin-top:6px;">When the money is sent at the broker, press <strong>Mark withdrawn</strong> at that moment: the reserve is released and the account's history counts the amount as a withdrawal, not as a loss, so no drawdown alarm and no de-risking follow from it. If the amount or the time was wrong, correct it in the history below — both numbers change how the account's past reads.</div>
         <div style="margin-top:6px;color:var(--text-muted);">Not reduced by a reserve: live pools whose capital was typed by hand (listed below). Never affected: paper pools. Every action on this page takes the trading PIN.</div>
     </div>
 </div>
@@ -56,7 +56,7 @@ Every money cell arrives pre-grouped ("1,234.56 EUR") from the view.
         <span class="oc-strip-sub">nothing reserved</span>
         {% elif ready.cash_ready is None %}
         <span class="oc-strip-value">—</span>
-        <span class="oc-strip-sub">free cash not measured</span>
+        <span class="oc-strip-sub">{% if ready.cash_ready_note %}{{ ready.cash_ready_note }}{% else %}free cash not measured{% endif %}</span>
         {% elif ready.cash_ready %}
         <span class="oc-strip-value up">READY</span>
         <span class="oc-strip-sub">the free cash covers the reserve</span>
@@ -83,7 +83,7 @@ Every money cell arrives pre-grouped ("1,234.56 EUR") from the view.
             <td>{{ p.name }}</td><td>{{ p.asset_class }}</td>
             <td class="num">{% if p.share_pct is not None %}{{ p.share_pct|floatformat:1 }}%{% else %}—{% endif %}</td>
             <td class="num">{{ p.before_text }}</td>
-            <td class="num">{{ p.after_text }}</td>
+            <td class="num">{% if p.foreign %}<span style="color:var(--accent-gold);">not retuned — trades at {{ p.foreign }}</span>{% else %}{{ p.after_text }}{% endif %}</td>
             <td class="num">{{ p.now_text }}</td>
         </tr>
         {% empty %}
@@ -95,11 +95,20 @@ Every money cell arrives pre-grouped ("1,234.56 EUR") from the view.
     <div style="padding:10px 16px 14px;font-family:var(--font-mono);font-size:12px;line-height:1.7;">
         {% if ready.following_note %}<div style="color:var(--accent-gold);">{{ ready.following_note }}</div>{% endif %}
         {% if ready.following %}<div style="color:var(--text-muted);">Shares unchanged; each pool shrinks by the same proportion. "Pool now" is what the last follow wrote — it catches up at the next sync if it differs.</div>{% endif %}
+        {% if ready.not_retuned %}
+        <div style="margin-top:8px;color:var(--accent-gold);">Following pools whose orders go to a broker other than the book ({{ ready.book_name }}) are NOT retuned by the sync, so a reserve does not shrink them either. They keep the capital they have; lower it by hand on <a href="{% url 'asset_bots_dashboard' %}">/asset-bots/</a> if the reserve would leave them larger than what is left to deploy:</div>
+        <ul style="margin:4px 0 0 18px;padding:0;">
+            {% for p in ready.not_retuned %}<li>{{ p.name }} ({{ p.asset_class }}) — trades at {{ p.foreign }}, pool {{ p.now_text }}</li>{% endfor %}
+        </ul>
+        {% endif %}
         {% if ready.typed_live %}
         <div style="margin-top:8px;color:var(--accent-gold);">Live pools with a typed capital are NOT reduced by a reserve. Lower them by hand on <a href="{% url 'asset_bots_dashboard' %}">/asset-bots/</a> if the reserve would leave them larger than what is left to deploy:</div>
         <ul style="margin:4px 0 0 18px;padding:0;">
             {% for p in ready.typed_live %}<li>{{ p.name }} ({{ p.asset_class }}) — {{ p.capital_text }}{% if p.over %} <strong style="color:var(--accent-red);">larger than the {{ ready.deployable_text }} left to deploy</strong>{% endif %}</li>{% endfor %}
         </ul>
+        {% endif %}
+        {% if ready.foreign_ccy %}
+        <div style="margin-top:8px;color:var(--accent-red);">A request is in another currency than the account's {{ ready.currency|default:"—" }}: {% for r in ready.foreign_ccy %}#{{ r.id }} ({{ r.amount_text }}){% if not forloop.last %}, {% endif %}{% endfor %}. Nothing here converts. The pools are sized as if it were in {{ ready.currency|default:"—" }}, the eToro cash gate refuses every order while it is held, and it cannot be marked withdrawn. Cancel it and file it again in {{ ready.currency|default:"—" }}.</div>
         {% endif %}
         {% if ready.paper %}
         <div style="margin-top:8px;color:var(--text-muted);">Paper pools, never affected: {% for p in ready.paper %}{{ p.name }} ({{ p.asset_class }}, {{ p.capital_text }}){% if not forloop.last %} · {% endif %}{% endfor %}.</div>
@@ -149,7 +158,7 @@ Every money cell arrives pre-grouped ("1,234.56 EUR") from the view.
         {% for r in active %}
         <tr>
             <td>{{ r.id }}</td>
-            <td class="num"><strong>{{ r.amount_text }}</strong></td>
+            <td class="num"><strong>{{ r.amount_text }}</strong>{% if r.currency_assumed %}<br><span style="color:var(--text-muted);font-size:11px;">currency assumed — no reading when filed</span>{% endif %}</td>
             <td>{{ r.requested_by }}</td>
             <td>{% if r.wanted_by %}{{ r.wanted_by|date:"Y-m-d" }}{% else %}<span style="color:var(--text-muted);">no date</span>{% endif %}</td>
             <td>{{ r.created_at|date:"Y-m-d H:i" }} UTC</td>
@@ -162,10 +171,12 @@ Every money cell arrives pre-grouped ("1,234.56 EUR") from the view.
                     </select>
                     <input type="number" name="paid_amount" class="form-input" min="0.01" step="0.01" value="{{ r.amount_plain }}" title="The amount actually sent, in {{ r.currency }}">
                     <input type="datetime-local" name="paid_at" class="form-input" title="When the money was sent, UTC — leave blank for now">
+                    <span style="color:var(--text-muted);font-size:11px;">Last account reading: {% if ready and ready.at_text %}{{ ready.at_text }} ({{ ready.value_text }}){% else %}—{% endif %}. If the money left before that reading, give the time it left — blank would count it twice.</span>
                     <input type="text" name="note" class="form-input" placeholder="Note (optional)">
+                    <label style="font-size:11px;"><input type="checkbox" name="confirm" value="1"> I have checked the amount and the time</label>
                     <input type="password" name="pin" class="form-input" autocomplete="off" required placeholder="PIN">
                     <button type="submit" class="btn btn-sm btn-primary">Mark withdrawn</button>
-                    <span style="color:var(--text-muted);font-size:11px;">Do this at the moment you send the withdrawal at the broker. The time is UTC; blank means now — an earlier time only if the money left earlier.</span>
+                    <span style="color:var(--text-muted);font-size:11px;">Do this at the moment you send the withdrawal at the broker. The time is UTC; blank means now — an earlier time only if the money left earlier. An amount larger than the account is refused; one far from the amount asked for, or a time the readings contradict, needs the box ticked.</span>
                 </form>
             </td>
             <td>
@@ -192,7 +203,7 @@ Every money cell arrives pre-grouped ("1,234.56 EUR") from the view.
     <div class="card-header"><span class="card-title">History — withdrawn and cancelled</span></div>
     <div class="table-wrapper">
     <table class="sv-perf-table">
-        <thead><tr><th>#</th><th>Status</th><th class="num">Asked</th><th class="num">Withdrawn</th><th>Asked by</th><th>Closed by</th><th>When</th><th>Note</th></tr></thead>
+        <thead><tr><th>#</th><th>Status</th><th class="num">Asked</th><th class="num">Withdrawn</th><th>Asked by</th><th>Closed by</th><th>When</th><th>Note</th><th>Correct</th></tr></thead>
         <tbody>
         {% for r in history %}
         <tr>
@@ -203,10 +214,30 @@ Every money cell arrives pre-grouped ("1,234.56 EUR") from the view.
             <td>{{ r.requested_by }}</td>
             <td>{{ r.acted_by }}</td>
             <td>{% if r.status == 'paid' and r.paid_at %}{{ r.paid_at|date:"Y-m-d H:i" }} UTC{% elif r.cancelled_at %}{{ r.cancelled_at|date:"Y-m-d H:i" }} UTC{% else %}—{% endif %}</td>
-            <td>{% if r.closing_note %}{{ r.closing_note }}{% elif r.reason %}<span style="color:var(--text-muted);">{{ r.reason }}</span>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+            <td>{% if r.closing_note %}{{ r.closing_note|linebreaksbr }}{% elif r.reason %}<span style="color:var(--text-muted);">{{ r.reason }}</span>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+            <td>
+                {% if r.status == 'paid' %}
+                <details>
+                    <summary style="cursor:pointer;">Correct the amount or time</summary>
+                    <form method="post" action="{% url 'withdrawal_correct' r.id %}" style="display:flex;flex-direction:column;gap:4px;min-width:210px;margin-top:6px;">
+                        {% csrf_token %}
+                        <select name="acted_by" class="form-input" required>
+                            {% for code, label in who_choices %}<option value="{{ code }}"{% if code == r.requested_by_code %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                        </select>
+                        <input type="number" name="paid_amount" class="form-input" min="0.01" step="0.01" value="{{ r.paid_plain }}" title="The amount that actually left, in {{ r.currency }}">
+                        <input type="datetime-local" name="paid_at" class="form-input" value="{{ r.paid_at_input }}" title="When the broker's balance moved, UTC">
+                        <input type="text" name="note" class="form-input" placeholder="Why (optional)">
+                        <label style="font-size:11px;"><input type="checkbox" name="confirm" value="1"> I have checked the amount and the time</label>
+                        <input type="password" name="pin" class="form-input" autocomplete="off" required placeholder="PIN">
+                        <button type="submit" class="btn btn-sm btn-primary">Correct</button>
+                        <span style="color:var(--text-muted);font-size:11px;">The account's history is read net of this withdrawal: a wrong amount hides or invents a loss, a time before the broker's balance moved reads the readings in between as a loss. The old values are kept in the note.</span>
+                    </form>
+                </details>
+                {% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
+            </td>
         </tr>
         {% empty %}
-        <tr><td colspan="8" style="color:var(--text-muted);">Nothing withdrawn or cancelled yet.</td></tr>
+        <tr><td colspan="9" style="color:var(--text-muted);">Nothing withdrawn or cancelled yet.</td></tr>
         {% endfor %}
         </tbody>
     </table>

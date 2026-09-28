@@ -5,17 +5,26 @@ of the real account by the 5th") and the platform's whole answer is to
 STOP DEPLOYING X. It does not sell anything, it does not move a share, it
 does not touch a plan: the balance and the direction of the portfolio are
 exactly what they were, and cash builds up as positions close on their
-own. Three places read the reserve, and only three:
+own. The places that size from the account read the reserve, and only
+they do:
 
   tasks._follow_the_account     every pool that follows the account is
                                 sized from the reading LESS what is held
                                 back, so they all shrink by the same
                                 proportion and their shares are untouched
-  manual_trade.arm_manual_lane  the one path that writes a follower's
-                                capital itself, when the lane is armed
+  manual_trade.arm_manual_lane  the paths that write a follower's capital
+  views_admin_hq.hq_follow      themselves — arming the lane, the Follow
+  management/commands/follow    button, its shell twin — take the same
+                                `deployable` base, so none of them sizes a
+                                pool on reserved money, not even for the
+                                moment before the follow that runs after
+                                them (or for good, if that follow fails)
   AssetBot._leverage_headroom   the eToro cash gate never pledges the
                                 reserved cash to a new order — it refuses
-                                the order, never resizes it, never closes
+                                the order, never resizes it, never closes.
+                                Only when that eToro row IS the book, and
+                                only in its cash's currency: a reserve at
+                                Saxo is not eToro's cash (held_back_in)
 
 A pool with a TYPED capital is not reduced — nothing retunes a typed
 number, and a reserve must not become the first thing that does. The
@@ -35,9 +44,19 @@ money that left on purpose is not a loss, and the governor does not
 de-risk the account for it. Paid withdrawals only — a reserve has not
 left the account, and a reading that includes it is simply true.
 
-Every create, cancel and mark-paid re-runs the pool follow at once from
-the stored reading (the same call views_admin_hq makes after a share
-changes), so the pools do not wait for the next sync, and sends one
+The two numbers typed when marking it paid rewrite the recent history,
+so they are checked against the readings first (mark_paid; the section
+"Marking the money gone" says what and why): an amount larger than the
+account held is refused, a blank "now" after the sync already read the
+money gone is refused, and an amount or a time the readings contradict
+must be confirmed. A paid row can be corrected later (correct_paid), PIN
+in hand, keeping the old values in its note. A currency written only as
+the fallback (no reading yet) is flagged, counted as the account's own,
+and replaced by the reading's real one when the request is marked paid.
+
+Every create, cancel, mark-paid and correction re-runs the pool follow at
+once from the stored reading (the same call views_admin_hq makes after a
+share changes), so the pools do not wait for the next sync, and sends one
 message to the group. Neither may break the request: both are guarded.
 
 Nothing in this module places, closes or cancels an order.
@@ -89,20 +108,30 @@ def reserved_total(user) -> Decimal:
     return Decimal(total or 0)
 
 
-def paid_flows(user, currency=None) -> list:
+def paid_flows(user, currency=None, *, exclude_pk=None) -> list:
     """[(paid_at, amount)] for every withdrawal marked paid, oldest first.
 
     `currency` narrows to one: the equity history is compared in the
     current reading's currency only (capital_truth), and a flow in another
-    currency is a number nothing here converts.
+    currency is a number nothing here converts. A flow whose currency was
+    only ASSUMED (filed before any reading, and marked paid before one
+    landed) is counted in whatever currency is asked for: the amount was
+    typed as "the account's money", and leaving it out would read the
+    withdrawal as a loss — the one thing this accounting exists to stop.
+    `exclude_pk` leaves one request out: the one being marked or corrected,
+    so the checks never measure a flow against itself.
     """
+    from django.db.models import Q
+
     from .withdrawal_models import WithdrawalRequest
     rows = (WithdrawalRequest.objects
             .filter(user=user, status=WithdrawalRequest.STATUS_PAID,
                     paid_at__isnull=False)
             .order_by("paid_at"))
     if currency is not None:
-        rows = rows.filter(currency=currency)
+        rows = rows.filter(Q(currency=currency) | Q(currency_assumed=True))
+    if exclude_pk is not None:
+        rows = rows.exclude(pk=exclude_pk)
     return [(r.paid_at, Decimal(r.flow_amount)) for r in rows]
 
 
@@ -161,6 +190,39 @@ def deployable(user, value, reading_at=_LOOK_UP):
     return (base if base > 0 else ZERO), held
 
 
+def held_back_in(user, currency, reading_at):
+    """(held back in `currency`, {other currency: held}) — held_back split
+    by currency, for the one reader that must never mix two: the eToro
+    cash gate, which subtracts from a cash CELL in one currency.
+
+    The pool sizing subtracts the whole hold from the reading as a number
+    (held_back): a reserve in the wrong currency there only ever sizes the
+    pools smaller. The cash gate is different — subtracting 500 EUR from
+    1,000 USD of cash is a number nobody measured, in either direction —
+    so it takes this split, subtracts only its own currency, and refuses
+    the order while anything else is held. A request whose currency was
+    only assumed counts as `currency`: it was typed as the account's money.
+    """
+    from .withdrawal_models import WithdrawalRequest
+    want = str(currency or "").upper()
+    split: dict = {}
+
+    def _add(r, amount):
+        key = want if r.currency_assumed else str(r.currency or "").upper()
+        split[key] = split.get(key, ZERO) + Decimal(amount)
+
+    for r in WithdrawalRequest.objects.filter(
+            user=user, status=WithdrawalRequest.STATUS_RESERVED):
+        _add(r, r.amount)
+    if reading_at is not None:
+        for r in WithdrawalRequest.objects.filter(
+                user=user, status=WithdrawalRequest.STATUS_PAID,
+                paid_at__gt=reading_at):
+            _add(r, r.flow_amount)
+    held = split.pop(want, ZERO)
+    return held, {c: v for c, v in split.items() if v > 0}
+
+
 # ── Readiness: is the cash there, and what shrinks ───────────────────────
 
 def _free_cash(user, book):
@@ -187,28 +249,45 @@ def _free_cash(user, book):
     if str(getattr(book, "last_margin_world", "") or "") != world:
         return None, at, (f"the cash figure was read in another world than "
                           f"the {world} one this row trades")
-    return Decimal(cash) - paid_since(user, at), at, ""
+    # Only the withdrawals paid in the cell's own currency come off it —
+    # the same split the cash gate makes; nothing here converts.
+    ccy = str(getattr(book, "last_equity_currency", "") or "")
+    gone = sum((amount for paid_at, amount in paid_flows(user, currency=ccy)
+                if paid_at > at), ZERO)
+    return Decimal(cash) - gone, at, ""
 
 
 def readiness(user) -> dict:
     """Everything the page's readiness block shows, measured once.
 
     {value, currency, at, age_seconds, reserved, paid_unread, held,
-     deployable, free_cash, cash_at, cash_note, cash_ready, shortfall,
-     following, following_note, typed_live, paper, n_active, book_name}
+     deployable, free_cash, cash_at, cash_note, cash_ready, cash_ready_note,
+     shortfall, following, following_note, not_retuned, typed_live, paper,
+     foreign_ccy, n_active, book_name}
 
     Numbers are Decimals, None when not measured — the page prints an em
-    dash, never a zero. `cash_ready` is None when the cash cannot be read.
+    dash, never a zero. `cash_ready` is None when the cash cannot be read,
+    or cannot be compared (a request in another currency than the cash).
     Pure DB reads: no broker call on a render path.
+
+    `following` carries the number the sync WILL write, not a hope: a pool
+    whose orders route to a broker other than the book is skipped by
+    tasks._follow_the_account, so here it has no "after" number, says
+    where it trades, and is listed again in `not_retuned` beside the typed
+    pools — the page the two men use to judge whether the reserve is
+    really applied must not show a pool shrinking that will not move
+    (review, 2026-09-28). The test is capital_truth.foreign_venue, the
+    sync's own.
     """
     from .capital_truth import (account_equity, allocate_shares,
                                 broker_backed, broker_kind, followers_of,
-                                tracks_broker)
+                                foreign_venue, tracks_broker)
     from .models import AssetBotConfig
     from .withdrawal_models import WithdrawalRequest
 
     reading = account_equity(user)
     book = broker_backed(user)
+    book_kind = broker_kind(book) if book is not None else ""
     value = (Decimal(str(round(float(reading["value"]), 2)))
              if reading else None)
     currency = (reading["currency"] if reading else "") or ""
@@ -220,13 +299,33 @@ def readiness(user) -> dict:
         base = value - held
         base = base if base > 0 else ZERO
 
+    active = list(WithdrawalRequest.objects.filter(
+        user=user, status=WithdrawalRequest.STATUS_RESERVED))
+    # Requests in a REAL currency other than the reading's: the sizing
+    # takes them off as a number, the cash gate refuses every order while
+    # they are held, and they cannot be marked withdrawn — all three said
+    # on the page, with the way out.
+    foreign_ccy = []
+    if reading is not None:
+        for wr in active:
+            if not wr.currency_assumed and wr.currency != currency:
+                foreign_ccy.append({"id": wr.pk,
+                                    "amount_text": money(wr.amount,
+                                                         wr.currency),
+                                    "currency": wr.currency})
+
     free_cash, cash_at, cash_note = _free_cash(user, book)
     cash_ready = shortfall = None
+    cash_ready_note = ""
     if free_cash is not None:
-        cash_ready = free_cash >= reserved
-        shortfall = (reserved - free_cash) if not cash_ready else ZERO
+        if foreign_ccy:
+            cash_ready_note = (f"a request is in another currency than the "
+                               f"account's {currency or '?'}")
+        else:
+            cash_ready = free_cash >= reserved
+            shortfall = (reserved - free_cash) if not cash_ready else ZERO
 
-    following, following_note = [], ""
+    following, following_note, not_retuned = [], "", []
     followers = followers_of(user)
     if followers:
         alloc = allocate_shares(followers)
@@ -234,17 +333,23 @@ def readiness(user) -> dict:
             following_note = (f"The shares do not fit in the account "
                               f"({alloc['reason']}), so no pool follows it "
                               f"until they do.")
+        venue_of: dict = {}
         for cfg in followers:
             share = alloc["plan"].get(cfg.pk) if alloc["ok"] else None
+            foreign = foreign_venue(user, cfg, book_kind, venue_of)
             row = {"name": cfg.name, "asset_class": cfg.asset_class,
                    "share_pct": (share * 100.0 if share is not None
                                  else None),
                    "now": Decimal(cfg.capital or 0),
-                   "before": None, "after": None}
+                   "before": None, "after": None, "foreign": foreign}
             if share is not None and value is not None:
                 row["before"] = Decimal(str(round(float(value) * share, 2)))
-                row["after"] = Decimal(str(round(float(base) * share, 2)))
+                if not foreign:
+                    row["after"] = Decimal(str(round(float(base) * share,
+                                                     2)))
             following.append(row)
+            if foreign:
+                not_retuned.append(row)
 
     typed_live, paper = [], []
     for cfg in (AssetBotConfig.objects.filter(user=user, enabled=True)
@@ -268,16 +373,18 @@ def readiness(user) -> dict:
         "at": reading["at"] if reading else None,
         "age_seconds": reading["age_seconds"] if reading else None,
         "book_name": ({"saxo": "Saxo Bank", "etoro": "eToro",
-                       "ibkr": "IBKR"}.get(broker_kind(book), "broker")
+                       "ibkr": "IBKR"}.get(book_kind, "broker")
                       if book is not None else ""),
         "reserved": reserved, "paid_unread": paid_unread, "held": held,
         "deployable": base,
         "free_cash": free_cash, "cash_at": cash_at, "cash_note": cash_note,
-        "cash_ready": cash_ready, "shortfall": shortfall,
+        "cash_ready": cash_ready, "cash_ready_note": cash_ready_note,
+        "shortfall": shortfall,
         "following": following, "following_note": following_note,
+        "not_retuned": not_retuned,
         "typed_live": typed_live, "paper": paper,
-        "n_active": WithdrawalRequest.objects.filter(
-            user=user, status=WithdrawalRequest.STATUS_RESERVED).count(),
+        "foreign_ccy": foreign_ccy,
+        "n_active": len(active),
     }
 
 
@@ -353,7 +460,7 @@ def _who(raw):
     return code if who_label(code) else ""
 
 
-# ── The three acts ───────────────────────────────────────────────────────
+# ── The acts ─────────────────────────────────────────────────────────────
 
 def create_request(user, *, requested_by, amount, wanted_by=None,
                    reason="") -> dict:
@@ -396,14 +503,22 @@ def create_request(user, *, requested_by, amount, wanted_by=None,
         reading = account_equity(user)
         already = reserved_total(user)
         total = already + amt
+        assumed = reading is None or not reading["currency"]
         if reading is None:
             currency = FALLBACK_CURRENCY
             warnings.append(
                 "No account reading has landed yet, so the amount could not "
                 "be checked against the account, and the currency is "
-                f"recorded as {FALLBACK_CURRENCY} by default.")
+                f"recorded as {FALLBACK_CURRENCY} by default. Marking it "
+                "withdrawn records the account's own currency once a "
+                "reading has landed.")
         else:
             currency = reading["currency"] or FALLBACK_CURRENCY
+            if assumed:
+                warnings.append(
+                    "The account reading states no currency, so the request "
+                    f"is recorded in {FALLBACK_CURRENCY} by default; marking "
+                    "it withdrawn records the account's own currency.")
             value = Decimal(str(round(float(reading["value"]), 2)))
             gone = paid_since(user, reading["at"])
             room = value - gone
@@ -433,7 +548,7 @@ def create_request(user, *, requested_by, amount, wanted_by=None,
                             f"already past.")
         wr = WithdrawalRequest.objects.create(
             user=user, requested_by=who, amount=amt, currency=currency,
-            wanted_by=wanted_by, reason=reason)
+            currency_assumed=assumed, wanted_by=wanted_by, reason=reason)
     logger.info("[withdrawals] %s: #%s %s reserved by %s — %s in total",
                 user.username, wr.pk, money(amt, currency), who,
                 money(total, currency))
@@ -483,12 +598,268 @@ def cancel_request(user, request_id, *, acted_by, note="") -> dict:
     return {"ok": True, "request": wr, "warnings": []}
 
 
+# ── Marking the money gone: the checks a flow must pass ──────────────────
+#
+# A paid withdrawal is taken off every reading made before it, so the two
+# numbers typed on "Mark withdrawn" — how much, and when — rewrite the
+# account's whole recent history for the drawdown governor and the shock
+# detector. The review of 2026-09-28 found both could be typed wrong with
+# nothing to stop it:
+#
+#   * AN AMOUNT TOO LARGE — "2000" for a 200 request on a 1,000 account —
+#     lowers every earlier reading by 2,000, and a real 37.5% loss after it
+#     read as no drawdown at all for 90 days: the opposite of the rule this
+#     accounting keeps (err toward de-risking, never toward trusting money
+#     that may be gone). So an amount larger than the account held when it
+#     left is refused outright, and one that differs from the amount asked
+#     for by more than PAID_TOLERANCE must be confirmed on the form.
+#
+#   * A MOMENT TOO LATE — the blank "now", pressed a few minutes after the
+#     sync already read the lower balance — takes the amount off a reading
+#     that no longer holds it: a false fall of the whole amount (a 25%
+#     drawdown and a shock, for a 20% withdrawal) until the next sync, and
+#     the pools held back twice. So when the readings already show the
+#     fall, the blank default is refused and the form asks for the time.
+#
+#   * A MOMENT TOO EARLY — before the broker's balance moved — leaves the
+#     readings in between holding money the flow says had gone: a false
+#     fall that stays in the 90-day window. Confirmed on the form, or not
+#     at all.
+#
+# The readings are the sync's own history (BrokerEquityReading) in the
+# current reading's currency and world — the rows the governor reads. When
+# nothing can be checked (no reading, no history) the act goes through as
+# typed, as it did before; and a paid row can now be CORRECTED, PIN in
+# hand, so a wrong number is no longer fixed only in the database.
+
+#: Two readings a sync apart move with the market as well as with a
+#: withdrawal. A fall within this share of the account of the amount "is
+#: the amount"; and a withdrawal no bigger than it cannot be told from the
+#: market at all — nor, counted twice for one sync, raise a shock on its
+#: own (share_allocator.SHOCK_DROP_PCT is 3%).
+NOISE_FRACTION = Decimal("0.02")
+#: A paid amount this close to the amount asked for — a broker's fee, a
+#: rounding — is taken as typed; further off, it must be confirmed. A
+#: slipped digit is ten times off, never five percent.
+PAID_TOLERANCE = Decimal("0.05")
+#: The fall a request's money made is looked for from this long before it
+#: was filed: the money may have been sent the same day, then filed.
+LEFT_LOOKBACK = timedelta(days=1)
+#: The reading a paid amount is checked against must be this recent
+#: before the moment given; an older one says nothing about that day.
+BOUND_MAX_AGE = timedelta(days=1)
+
+CONFIRM_WORDS = "tick “I have checked” and send again"
+
+
+def _moment(paid_at, now):
+    """(when, blank, why) from what the form sent: blank means now."""
+    if paid_at in (None, ""):
+        return now, True, ""
+    if hasattr(paid_at, "tzinfo"):
+        return ((paid_at if paid_at.tzinfo is not None
+                 else paid_at.replace(tzinfo=dt_timezone.utc)), False, "")
+    when, why = parse_moment(paid_at)
+    if why:
+        return None, False, why
+    if when is None:
+        return now, True, ""
+    return when, False, ""
+
+
+def _utc(at):
+    return at.astimezone(dt_timezone.utc) if at.tzinfo is not None else at
+
+
+def _hm(at) -> str:
+    """'2026-09-28 10:15 UTC' — the form's datetime-local is read as UTC,
+    so every moment a refusal names is in the same clock. An em dash for
+    a moment never recorded."""
+    if at is None:
+        return EM_DASH
+    return f"{_utc(at):%Y-%m-%d %H:%M} UTC"
+
+
+def _book_history(user, reading, *, since, until) -> list:
+    """[(at, Decimal value)] oldest first: the book's own readings in the
+    stored reading's currency and world, from `since` to `until` — the
+    rows equity_high_water reads — with the stored reading itself added
+    when its history row is missing (a failed insert must not hide it)."""
+    from django.db.models import Q
+
+    from .capital_truth import broker_backed, broker_env, broker_kind
+    from .equity_models import BrokerEquityReading
+    book = broker_backed(user)
+    if book is None:
+        return []
+    rows = BrokerEquityReading.objects.filter(
+        broker=broker_kind(book), account_pk=book.pk,
+        currency=reading["currency"] or "", at__gte=since, at__lte=until)
+    env = broker_env(book)
+    if env:
+        rows = rows.filter(Q(env="") | Q(env=env))
+    out = [(at, Decimal(v)) for at, v in
+           rows.order_by("at").values_list("at", "value")]
+    r_at = reading["at"]
+    if since <= r_at <= until and all(at != r_at for at, _v in out):
+        out.append((r_at, Decimal(str(round(float(reading["value"]), 2)))))
+        out.sort(key=lambda p: p[0])
+    return out
+
+
+def _gone(flows, after, upto) -> Decimal:
+    """Withdrawals paid in (after, upto]."""
+    return sum((amount for paid_at, amount in flows
+                if after < paid_at <= upto), ZERO)
+
+
+def _value_before(user, reading, when, flows):
+    """(what the account held just before `when`, the reading's time) —
+    the latest reading at or before it, less what was paid between — or
+    (None, None) when no reading that recent exists."""
+    if when >= reading["at"]:
+        at = reading["at"]
+        value = Decimal(str(round(float(reading["value"]), 2)))
+    else:
+        points = _book_history(user, reading, since=when - BOUND_MAX_AGE,
+                               until=when)
+        if not points:
+            return None, None
+        at, value = points[-1]
+    return value - _gone(flows, at, when), at
+
+
+def _where_it_left(user, reading, amount, *, since, flows):
+    """The latest pair of consecutive readings between which the account
+    fell by about `amount` — {a_at, a, b_at, b} — or None.
+
+    "About" is within NOISE_FRACTION of the account; other withdrawals
+    paid between the two are taken off the first before comparing. A
+    withdrawal no bigger than the noise is never matched: it cannot be
+    told from the market."""
+    points = _book_history(user, reading, since=since, until=reading["at"])
+    for (a_at, a_v), (b_at, b_v) in reversed(list(zip(points,
+                                                      points[1:]))):
+        a_cmp = a_v - _gone(flows, a_at, b_at)
+        tol = abs(a_cmp) * NOISE_FRACTION
+        if amount <= tol:
+            continue
+        if abs((a_cmp - b_v) - amount) <= tol:
+            return {"a_at": a_at, "a": a_cmp, "b_at": b_at, "b": b_v}
+    return None
+
+
+def _judge_the_flow(user, wr, amount, when, *, blank, confirm, act):
+    """(refusal, currency to stamp, warnings) for a flow of `amount` at
+    `when` on request `wr` — refusal "" when it may be written.
+
+    `act` is "mark" or "correct": the words differ, the rules do not."""
+    from .capital_truth import account_equity
+    reading = account_equity(user)
+    if reading is None:
+        return "", None, ["No account reading has landed, so the amount "
+                          "and the time could not be checked against the "
+                          "account."]
+    rc = reading["currency"] or ""
+    stamp = None
+    if wr.currency_assumed:
+        stamp = rc or None
+    elif wr.currency != rc:
+        if act == "mark":
+            in_rc = rc or "the account's currency"
+            way_out = (f"Cancel it and file it again in {in_rc}, then mark "
+                       f"that one withdrawn.")
+        else:
+            way_out = "It cannot be checked against the account."
+        return (f"Refused: request #{wr.pk} is in {wr.currency} and the "
+                f"account now reads in {rc or 'no stated currency'}. "
+                f"Nothing here converts, so the account's history would "
+                f"read this withdrawal as a loss. {way_out} Nothing "
+                f"changed."), None, []
+    ccy = rc or wr.currency
+    exclude = wr.pk if act == "correct" else None
+    flows = paid_flows(user, currency=rc, exclude_pk=exclude)
+
+    # WHERE THE MONEY LEFT, first: a blank "now" after the readings
+    # already show it gone is refused with the interval it left in, before
+    # the amount is weighed against a reading that no longer holds it —
+    # otherwise a 900 withdrawal from 1,000, marked after the sync read
+    # 100, would be told "900 cannot have left an account that held 100".
+    left = _where_it_left(user, reading, amount, flows=flows,
+                          since=min(wr.created_at, when) - LEFT_LOOKBACK)
+    span = fell = ""
+    if left is not None:
+        fell = (f"the account fell from {money(left['a'], ccy)} "
+                f"({_hm(left['a_at'])}) to {money(left['b'], ccy)} "
+                f"({_hm(left['b_at'])})")
+        span = (f"after {_hm(left['a_at'])} and no later than "
+                f"{_hm(left['b_at'])}")
+        # The first reading without the money, to the minute the form
+        # takes: after the last reading with it, and not after this one.
+        safe = _utc(left["b_at"]).replace(second=0, microsecond=0)
+        if when > reading["at"] and blank:
+            return (f"Refused: the readings say the money has already "
+                    f"left — {fell}, about {money(amount, ccy)}. Give the "
+                    f"time it left, {span} ({safe:%Y-%m-%d %H:%M} is "
+                    f"safe). Left blank, it would be counted twice until "
+                    f"the next sync: a false fall of the whole amount, and "
+                    f"the pools held back twice. Nothing changed."), None, []
+
+    held, held_at = _value_before(user, reading, when, flows)
+    if held is not None and amount > held:
+        hint = ""
+        if left is not None and when > left["b_at"]:
+            hint = (f" If it left before that reading, give the time it "
+                    f"left: {span}.")
+        return (f"Refused: {money(amount, ccy)} cannot have left an "
+                f"account that held {money(held, ccy)} when it left (the "
+                f"reading of {_hm(held_at)}, less anything withdrawn "
+                f"after it). A withdrawal marked larger than the money "
+                f"that left would hide every real loss before it — check "
+                f"the amount.{hint} Nothing changed."), None, []
+
+    checks = []
+    if left is not None:
+        if when > reading["at"]:
+            checks.append(
+                f"the time given, {_hm(when)}, is after the latest "
+                f"reading ({_hm(reading['at'])}), which already reads the "
+                f"money gone — {fell} — so it would be counted twice "
+                f"until the next sync; the time it left is {span}.")
+        elif when <= left["a_at"]:
+            checks.append(
+                f"the time given, {_hm(when)}, is before the reading of "
+                f"{_hm(left['a_at'])}, which still holds the money — "
+                f"{fell} — so the readings in between would read as a "
+                f"loss for 90 days; the time it left is {span}.")
+    asked = Decimal(wr.amount)
+    if abs(amount - asked) > asked * PAID_TOLERANCE:
+        checks.append(
+            f"{money(amount, ccy)} withdrawn is not the "
+            f"{money(asked, ccy)} asked for (more than "
+            f"{PAID_TOLERANCE * 100:.0f}% apart).")
+    if checks and not confirm:
+        return ("Refused until checked: " + " Also, ".join(checks)
+                + f" If it is right as typed, {CONFIRM_WORDS}. Nothing "
+                f"changed."), None, []
+    return "", stamp, []
+
+
 def mark_paid(user, request_id, *, acted_by, paid_amount=None, paid_at=None,
-              note="") -> dict:
+              note="", confirm=False) -> dict:
     """The money has been sent at the broker: the reserve ends, the flow
     begins. `paid_amount` defaults to the amount asked for and `paid_at`
     to now; both are what the flow accounting reads, so the moment should
-    be the moment the broker's balance moved."""
+    be the moment the broker's balance moved.
+
+    Checked against the readings before anything is written (see above):
+    an amount larger than the account held is refused; a blank time when
+    the readings already show the money gone is refused with the interval
+    it left in; an amount far from the one asked for, or a time the
+    readings contradict, needs `confirm`. A request whose currency was
+    assumed takes the reading's own; one in a real other currency is
+    refused — its flow would never be counted, and would read as a loss.
+    """
     from django.db import transaction
     from django.utils import timezone
 
@@ -503,16 +874,9 @@ def mark_paid(user, request_id, *, acted_by, paid_amount=None, paid_at=None,
         if amt is None:
             return {"error": f"Refused: {why}. Nothing changed."}
     now = timezone.now()
-    if paid_at in (None, ""):
-        when = now
-    elif hasattr(paid_at, "tzinfo"):
-        when = (paid_at if paid_at.tzinfo is not None
-                else paid_at.replace(tzinfo=dt_timezone.utc))
-    else:
-        when, why = parse_moment(paid_at)
-        if why:
-            return {"error": f"Refused: {why}. Nothing changed."}
-        when = when or now
+    when, blank, why = _moment(paid_at, now)
+    if why:
+        return {"error": f"Refused: {why}. Nothing changed."}
     if when > now + FUTURE_SLACK:
         return {"error": ("Refused: the withdrawal time is in the future. "
                           "Mark it when the money is sent. Nothing "
@@ -525,28 +889,129 @@ def mark_paid(user, request_id, *, acted_by, paid_amount=None, paid_at=None,
             return {"error": (f"Request #{wr.pk} is already "
                               f"{wr.get_status_display().lower()}. Nothing "
                               f"changed.")}
+        paid = amt if amt is not None else Decimal(wr.amount)
+        refusal, stamp, warnings = _judge_the_flow(
+            user, wr, paid, when, blank=blank, confirm=bool(confirm),
+            act="mark")
+        if refusal:
+            return {"error": refusal}
+        fields = ["status", "paid_amount", "paid_at", "acted_by",
+                  "closing_note", "updated_at"]
+        if stamp:
+            wr.currency, wr.currency_assumed = stamp, False
+            fields += ["currency", "currency_assumed"]
         wr.status = WithdrawalRequest.STATUS_PAID
-        wr.paid_amount = amt if amt is not None else wr.amount
+        wr.paid_amount = paid
         wr.paid_at = when
         wr.acted_by = who
         wr.closing_note = str(note or "").strip()[:2000]
-        wr.save(update_fields=["status", "paid_amount", "paid_at",
-                               "acted_by", "closing_note", "updated_at"])
+        wr.save(update_fields=fields)
     logger.info("[withdrawals] %s: #%s withdrawn — %s at %s, marked by %s",
                 user.username, wr.pk, money(wr.paid_amount, wr.currency),
                 when.isoformat(), who)
     _after(user, wr, "paid")
-    return {"ok": True, "request": wr, "warnings": []}
+    return {"ok": True, "request": wr, "warnings": warnings}
+
+
+def correct_paid(user, request_id, *, acted_by, paid_amount=None,
+                 paid_at=None, note="", confirm=False) -> dict:
+    """Put right the amount or the moment of a withdrawal already marked
+    paid — the two numbers the history is read net of.
+
+    Before 2026-09-28 a wrong value could only be fixed in the database;
+    and since a moment too early leaves a false fall in the 90-day window,
+    and the broker's balance may move later than the button was pressed,
+    the fix has to be a page act. Blank fields keep what is there. The same
+    checks as mark_paid, measured without this flow itself; the old values
+    are kept in the closing note, so the history of the row is its own.
+    Only a paid request can be corrected — a reserve is cancelled and
+    filed again instead.
+    """
+    from django.db import transaction
+    from django.utils import timezone
+
+    from .withdrawal_models import WithdrawalRequest
+    who = _who(acted_by)
+    if not who:
+        return {"error": "Say who is correcting it: the operator or "
+                         "Gandalf. Nothing changed."}
+    amt = None
+    if paid_amount not in (None, ""):
+        amt, why = parse_amount(paid_amount)
+        if amt is None:
+            return {"error": f"Refused: {why}. Nothing changed."}
+    now = timezone.now()
+    when = None
+    if paid_at not in (None, ""):
+        when, _blank, why = _moment(paid_at, now)
+        if why:
+            return {"error": f"Refused: {why}. Nothing changed."}
+        if when > now + FUTURE_SLACK:
+            return {"error": ("Refused: the withdrawal time is in the "
+                              "future. Nothing changed.")}
+    with transaction.atomic():
+        wr = _locked(user, request_id)
+        if wr is None:
+            return {"error": "No such request. Nothing changed."}
+        if wr.status != WithdrawalRequest.STATUS_PAID:
+            return {"error": (f"Request #{wr.pk} is "
+                              f"{wr.get_status_display().lower()}, not "
+                              f"withdrawn: only a withdrawal can be "
+                              f"corrected. Nothing changed.")}
+        old_amt, old_at = Decimal(wr.flow_amount), wr.paid_at
+        # The form's time box holds the stored moment to the minute: sent
+        # back untouched, it is the same moment, not a correction.
+        if (when is not None and old_at is not None
+                and _utc(old_at).replace(second=0, microsecond=0)
+                == _utc(when)):
+            when = None
+        new_amt = amt if amt is not None else old_amt
+        new_at = when if when is not None else old_at
+        if new_at is None:
+            return {"error": (f"Request #{wr.pk} has no withdrawal time on "
+                              f"record: give the time the money left. "
+                              f"Nothing changed.")}
+        if new_amt == old_amt and new_at == old_at:
+            return {"error": (f"Nothing to correct: request #{wr.pk} "
+                              f"already reads {money(old_amt, wr.currency)} "
+                              f"at {_hm(old_at)}. Nothing changed.")}
+        refusal, stamp, warnings = _judge_the_flow(
+            user, wr, new_amt, new_at, blank=False, confirm=bool(confirm),
+            act="correct")
+        if refusal:
+            return {"error": refusal}
+        fields = ["paid_amount", "paid_at", "acted_by", "closing_note",
+                  "updated_at"]
+        if stamp:
+            wr.currency, wr.currency_assumed = stamp, False
+            fields += ["currency", "currency_assumed"]
+        line = (f"Corrected {_hm(now)} by {who_label(who)}: was "
+                f"{money(old_amt, wr.currency)} at {_hm(old_at)}, now "
+                f"{money(new_amt, wr.currency)} at {_hm(new_at)}.")
+        extra = str(note or "").strip()[:2000]
+        if extra:
+            line += f" {extra}"
+        wr.closing_note = "\n".join(p for p in (wr.closing_note, line) if p)
+        wr.paid_amount = new_amt
+        wr.paid_at = new_at
+        wr.acted_by = who
+        wr.save(update_fields=fields)
+    logger.info("[withdrawals] %s: #%s corrected by %s — %s at %s (was %s "
+                "at %s)", user.username, wr.pk, who,
+                money(new_amt, wr.currency), new_at.isoformat(),
+                money(old_amt, wr.currency), _hm(old_at))
+    _after(user, wr, "corrected", was=(old_amt, old_at))
+    return {"ok": True, "request": wr, "warnings": warnings}
 
 
 # ── After every act: the pools follow at once, the group hears ───────────
 
-def _after(user, wr, event) -> None:
+def _after(user, wr, event, **extra) -> None:
     refollow(user)
     try:
         from .notifications import notify_withdrawal
         notify_withdrawal(user, wr, event=event,
-                          reserved_total=reserved_total(user))
+                          reserved_total=reserved_total(user), **extra)
     except Exception as e:  # noqa: BLE001 — a message must never undo the act
         logger.warning("[withdrawals] notification failed: %s", e)
 

@@ -16,6 +16,7 @@ Owner-scoped: another user's request is a 404, not a refusal that
 confirms it exists. Nothing here places, closes or cancels an order.
 """
 import logging
+from datetime import timezone as dt_timezone
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -30,6 +31,13 @@ logger = logging.getLogger(__name__)
 def _pin_ok(request) -> bool:
     from dashboard.views_admin_hq import _pin_ok as hq_pin_ok
     return hq_pin_ok(request)
+
+
+def _confirmed(request) -> bool:
+    """The "I have checked" box: an amount or a time the readings
+    contradict goes through only when it is ticked."""
+    return str(request.POST.get("confirm", "")).strip().lower() in (
+        "1", "on", "yes", "true")
 
 
 def _own_request(request, pk):
@@ -74,6 +82,12 @@ def _dress(ready):
                 "free_cash", "shortfall"):
         ready[f"{key}_text"] = money(ready[key], ccy)
     ready["age_text"] = _age_text(ready["age_seconds"])
+    # Beside every "withdrawn at" box: the time of the reading the flow
+    # will be measured against. Money that left before it is already out
+    # of it, and the time typed must say so (withdrawals.mark_paid).
+    at = ready.get("at")
+    ready["at_text"] = (f"{at.astimezone(dt_timezone.utc):%Y-%m-%d %H:%M} UTC"
+                        if at else "")
     ready["cash_age_text"] = (
         _age_text((timezone.now() - ready["cash_at"]).total_seconds())
         if ready.get("cash_at") else "—")
@@ -104,6 +118,14 @@ def _row(wr) -> dict:
         "paid_at": wr.paid_at, "cancelled_at": wr.cancelled_at,
         "paid_text": (money(wr.paid_amount, wr.currency)
                       if wr.paid_amount is not None else "—"),
+        # The correction form's defaults: plain, as the inputs take them.
+        "paid_plain": (f"{wr.paid_amount:.2f}"
+                       if wr.paid_amount is not None else ""),
+        "paid_at_input": (
+            f"{wr.paid_at.astimezone(dt_timezone.utc):%Y-%m-%dT%H:%M}"
+            if wr.paid_at else ""),
+        # The fallback currency, said as a guess where the amount is shown.
+        "currency_assumed": bool(getattr(wr, "currency_assumed", False)),
         "closing_note": wr.closing_note,
     }
 
@@ -189,7 +211,8 @@ def withdrawal_mark_paid(request, pk):
                     acted_by=request.POST.get("acted_by", ""),
                     paid_amount=request.POST.get("paid_amount", "") or None,
                     paid_at=request.POST.get("paid_at", "") or None,
-                    note=request.POST.get("note", ""))
+                    note=request.POST.get("note", ""),
+                    confirm=_confirmed(request))
     success = ""
     if out.get("ok"):
         done = out["request"]
@@ -217,5 +240,36 @@ def withdrawal_cancel(request, pk):
     if out.get("ok"):
         success = (f"Request #{wr.pk} cancelled: "
                    f"{money(wr.amount, wr.currency)} can be deployed again.")
+    _flash(request, out, success)
+    return redirect("withdrawals")
+
+
+@login_required
+@require_POST
+def withdrawal_correct(request, pk):
+    """Put right the amount or the time of a withdrawal already marked —
+    the two numbers the account's history is read net of. Blank fields
+    keep what is there; the PIN, the checks and the one message are the
+    same as marking it."""
+    from bot_program.withdrawals import correct_paid, money
+    wr = _own_request(request, pk)
+    if not _pin_ok(request):
+        messages.error(request, "Wrong or missing trading PIN. Nothing "
+                                "changed.")
+        return redirect("withdrawals")
+    out = correct_paid(request.user, wr.pk,
+                       acted_by=request.POST.get("acted_by", ""),
+                       paid_amount=request.POST.get("paid_amount", "") or None,
+                       paid_at=request.POST.get("paid_at", "") or None,
+                       note=request.POST.get("note", ""),
+                       confirm=_confirmed(request))
+    success = ""
+    if out.get("ok"):
+        done = out["request"]
+        success = (f"Request #{done.pk} corrected: "
+                   f"{money(done.paid_amount, done.currency)} at "
+                   f"{done.paid_at:%Y-%m-%d %H:%M} UTC. The account's "
+                   f"history is read net of it from now on; the old values "
+                   f"are kept in its note.")
     _flash(request, out, success)
     return redirect("withdrawals")
