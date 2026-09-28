@@ -3691,7 +3691,18 @@ window.svWheelMarquee = function (frame, track) {
      source or spread did (nothing flashes that did not change). An older
      record is dropped: a tick that landed after the server rendered keeps
      its place. Fresh spark closes (twelve bars, not a quote) replace a
-     card's when they differ. */
+     card's when they differ.
+
+     Two more things a record brings. Its precision: the server decides
+     it afresh on every render, and an item with no quote at load was
+     rendered at the no-quote default (2), so a forex pair's first record
+     would otherwise read 1.33 / 1.33 until a reload. And its order
+     against a tick WITHOUT a time — a streamer still running the code
+     from before its broadcast carried `ts`: that price has no time to
+     compare (`t <= NaN` is false), so a record could be the older of the
+     two. Only a record at that same price may give it its time, source
+     and spread; a record at another price waits until a tick with a
+     time gives the item one. */
   window.svDhIngest = function (doc) {
     const seen = {};
     let redraw = false;
@@ -3712,14 +3723,20 @@ window.svWheelMarquee = function (frame, track) {
         redraw = true;
       });
       const rec = k => fresh.getAttribute('data-' + k) || '';
+      if (!(dhNum(rec('last')) > 0)) return;
+      const dec = rec('decimals');
+      if (dec) mine.forEach(el => {
+        if (el.getAttribute('data-decimals') !== dec) el.setAttribute('data-decimals', dec);
+      });
       const t = Date.parse(rec('at')), held = Date.parse(mine[0].getAttribute('data-at') || '');
-      if (!(dhNum(rec('last')) > 0) || isNaN(t) || t <= held) return;
+      if (isNaN(t) || t <= held) return;
       const d = { symbol: sym, last: rec('last'), change_pct: rec('pct'), bid: rec('bid'),
                   ask: rec('ask'), volume: rec('vol'), source: rec('src'), ts: rec('at') };
-      const n = svDecimals(mine[0], +d.last);
+      const n = svDecimals(mine[0], +d.last), had = mine[0].getAttribute('data-last');
       const shown = (v, k) => (dhNum(v) === null ? '' : dhNum(v).toFixed(k));
-      if (shown(mine[0].getAttribute('data-last'), n) !== shown(d.last, n)
-          || shown(mine[0].getAttribute('data-pct'), 2) !== shown(d.change_pct, 2)) applyTick(d);
+      const moved = shown(had, n) !== shown(d.last, n);
+      if (moved && isNaN(held) && dhNum(had) > 0) return;   // an untimed tick's price
+      if (moved || shown(mine[0].getAttribute('data-pct'), 2) !== shown(d.change_pct, 2)) applyTick(d);
       else mine.forEach(el => dhSync(el, d, +d.last, dhNum(d.change_pct)));
     });
     if (redraw && window.svRenderSparks) window.svRenderSparks();

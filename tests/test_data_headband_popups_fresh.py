@@ -15,6 +15,8 @@ What it was (templates/base.html and templates/_partials/dh_item.html on
   * no crypto or forex tick reached the band at all: the streamers
     broadcast BTCUSDT and EUR_USD, the band carries BTCUSD and EURUSD;
   * a 'quote' message (price, not last) painted 0.
+The sweep's records also bring a quote-less item its precision, and never
+roll back a price a tick brought without a time.
 
 These tests load the page's REAL inline scripts — the WebSocket block
 (applyTick and the card sync), the UPGRADE-9 popup engine (the portal that
@@ -111,6 +113,10 @@ def _band_at_load(t):
         _quote("XAUUSD", "commodity", 2400.5, 0.1, t["load"], "yfinance",
                2400.0, 2401.0),
         _no_quote("GBPUSD"),
+        _quote("AUDUSD", "forex", 0.66, 0.3, t["load"], "oanda", 0.65995,
+               0.66005),
+        _quote("NZDUSD", "forex", 0.59, -0.1, t["load"], "oanda", 0.58995,
+               0.59005),
     ]
 
 
@@ -118,7 +124,10 @@ def _band_at_sweep(t):
     """What /getting-started/ renders a minute later: EURUSD moved (a newer
     record), USDJPY did not (the same record), BTCUSD's record is OLDER
     than the tick the page already has, XAUUSD's is newer but only its
-    source and spread changed."""
+    source and spread changed. GBPUSD, quote-less at load, has its first
+    record (a forex pair: five decimals). AUDUSD and NZDUSD got a tick
+    WITHOUT a time before the sweep (a stream_oanda not yet restarted):
+    AUDUSD's record is at another price, NZDUSD's at the tick's own."""
     return [
         _quote("EURUSD", "forex", 1.2, 0.75, t["sweep"], "yfinance", 1.1999,
                1.2001, 1000, [1.0, 1.1, 1.2, 1.3]),
@@ -128,7 +137,12 @@ def _band_at_sweep(t):
                58999.0, 59001.0, 5000, [58000.0, 59000.0, 60000.0]),
         _quote("XAUUSD", "commodity", 2400.5, 0.1, t["sweep"], "oanda_rest",
                2400.2, 2400.8),
-        _no_quote("GBPUSD"),
+        _quote("GBPUSD", "forex", 1.33333, 0.1, t["sweep"], "oanda_stream",
+               1.3333, 1.33336),
+        _quote("AUDUSD", "forex", 0.665, 0.3, t["sweep"], "oanda_stream",
+               0.66495, 0.66505),
+        _quote("NZDUSD", "forex", 0.59123, -0.1, t["sweep"], "oanda_stream",
+               0.59122, 0.59124),
     ]
 
 
@@ -225,6 +239,12 @@ function boot() {
   win.window = win; win.self = win;
   doc.defaultView = win;
   const ctx = vm.createContext(win);
+  /* The page's clock starts at the ticks' instant and runs with the fake
+     timers, so a card's age ("just now") never depends on how long a busy
+     machine took to get here. Only the card's age reads Date.now. */
+  const T0 = Date.parse(IN.t_tick);
+  win.__svClock = () => T0 + now;
+  vm.runInContext('Date.now = function () { return __svClock(); };', ctx);
   for (const s of IN.scripts) {
     try { vm.runInContext(s.source, ctx, { filename: s.label }); }
     catch (e) { errors.push('LOAD ' + s.label + ': ' + (e && e.stack || e)); }
@@ -384,6 +404,14 @@ async function sweep() {
     bid: 61000.4, ask: 61000.6, volume: 7000, source: 'binance_ws', ts: IN.t_tick } });
   await W.advance(10);
   out.btc_after_tick = snap(W.by('BTCUSD', 0));
+  /* stream_oanda as it ran before its broadcast carried ts and source. */
+  W.wsSend({ type: 'quote_stream', data: { symbol: 'AUD_USD', last: 0.66789, change_pct: null,
+    bid: 0.66788, ask: 0.6679 } });
+  W.wsSend({ type: 'quote_stream', data: { symbol: 'NZD_USD', last: 0.59123, change_pct: null,
+    bid: 0.59122, ask: 0.59124 } });
+  await W.advance(10);
+  out.aud_after_tick = snap(W.by('AUDUSD', 0));
+  out.nzd_after_tick = snap(W.by('NZDUSD', 0));
   await W.open(eu1);
   out.open_before = snap(eu1);
   await W.advanceTo(20100);           // the sweep fires at 20 s
@@ -394,6 +422,11 @@ async function sweep() {
   out.btc_second_half = snap(W.by('BTCUSD', 1));
   out.xau = snap(W.by('XAUUSD', 0));
   out.jpy = snap(W.by('USDJPY', 0));
+  out.gbp = snap(W.by('GBPUSD', 0));
+  out.gbp_second_half = snap(W.by('GBPUSD', 1));
+  out.aud = snap(W.by('AUDUSD', 0));
+  out.aud_second_half = snap(W.by('AUDUSD', 1));
+  out.nzd = snap(W.by('NZDUSD', 0));
   out.items_kept = !!track && track.children.length === kids.length
     && track.children.every((c, i) => c === kids[i]);
   await W.leave();
@@ -469,11 +502,13 @@ class TheCardsFollowTheQuoteTests(SimpleTestCase):
     def test_an_open_card_shows_the_tick_that_lands_under_it(self):
         """The first stale step: a tick while the operator reads the card.
         OANDA's own spelling (EUR_USD), its own day change (none: the
-        card keeps the one it had), its spread, source and time."""
+        card keeps the one it had), its spread, source and time. It
+        carries no 24h volume, an aggregate rather than a print: the card
+        keeps the one it had rather than blank it."""
         r = self.report["ticks"]
         self.assertTrue(r["open_before"]["open"], self._dump("ticks", "open_before"))
         self.assertCard(r["open_during"], {
-            "open": True, "price": "1.25432", "pct": "+0.50%",
+            "open": True, "price": "1.25432", "pct": "+0.50%", "volume": "1000",
             "bidask": "1.25430 / 1.25434", "source": "oanda_stream",
             "as_of": "%s UTC · just now" % _clock(self.t["tick"]),
             "age_at": self.t["tick"].isoformat(), "cell": "1.25432",
@@ -489,7 +524,7 @@ class TheCardsFollowTheQuoteTests(SimpleTestCase):
         for step in ("closed_after", "reopened"):
             self.assertCard(r[step], {
                 "price": "1.25432", "bidask": "1.25430 / 1.25434",
-                "source": "oanda_stream",
+                "source": "oanda_stream", "volume": "1000",
                 "as_of": "%s UTC · just now" % _clock(self.t["tick"]),
             }, step)
         self.assertTrue(r["reopened"]["open"])
@@ -625,6 +660,37 @@ class TheCardsFollowTheQuoteTests(SimpleTestCase):
                          "1.000000,1.100000,1.200000,1.300000")
         self.assertTrue(r["load"]["spark_path"])
         self.assertNotEqual(r["open_during"]["spark_path"], r["load"]["spark_path"])
+
+    def test_a_quote_less_item_takes_its_precision_from_its_first_record(self):
+        """No quote at load renders the no-quote precision (2); the sweep's
+        first record for a forex pair brings the server's five, in the
+        cell and the card, in both halves."""
+        r = self.report["sweep"]
+        want = {"price": "1.33333", "cell": "1.33333",
+                "bidask": "1.33330 / 1.33336", "source": "oanda_stream",
+                "as_of": "%s UTC · just now" % _clock(self.t["sweep"])}
+        self.assertCard(r["gbp"], want, "GBPUSD: first record, first half")
+        self.assertCard(r["gbp_second_half"], want, "GBPUSD: second half")
+
+    def test_a_price_without_a_time_is_not_rolled_back_by_a_sweep(self):
+        """A stream_oanda not yet restarted sends ticks with no ts: the
+        card says "—" for the time and source it does not know, and a
+        record it cannot be ordered against — at another price — does not
+        take the price back. A record at the tick's own price gives it its
+        time, source and spread, without a flash."""
+        r = self.report["sweep"]
+        untimed = {"price": "0.66789", "cell": "0.66789",
+                   "bidask": "0.66788 / 0.66790", "source": "—", "as_of": "—"}
+        self.assertCard(r["aud_after_tick"], untimed, "AUD_USD tick, no ts")
+        self.assertCard(r["aud"], untimed, "AUDUSD after a sweep at another price")
+        self.assertCard(r["aud_second_half"], untimed, "AUDUSD, second half")
+        self.assertCard(r["nzd_after_tick"], {
+            "price": "0.59123", "source": "—", "as_of": "—"}, "NZD_USD tick, no ts")
+        self.assertCard(r["nzd"], {
+            "price": "0.59123", "cell": "0.59123", "cell_flash": "",
+            "bidask": "0.59122 / 0.59124", "source": "oanda_stream",
+            "as_of": "%s UTC · just now" % _clock(self.t["sweep"]),
+        }, "NZDUSD after a sweep at the tick's price")
 
 
 class TheCardSaysWhenTests(TestCase):
