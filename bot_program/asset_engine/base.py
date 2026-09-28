@@ -5211,6 +5211,15 @@ class AssetBot(ABC):
         `notional / leverage` is the margin — MEASURED 2026-09-23 (doc
         §2, §5). Too strict sends nothing; too loose is answered by the
         venue's own refusal.
+
+        WITHDRAWALS ASKED FOR IN ADVANCE (2026-09-28): the free cash is
+        the cell LESS what is held back for them (withdrawals.held_back:
+        the reserve, plus any withdrawal paid since the cell was read,
+        which the cell still counts). Reserved cash is never pledged: an
+        order that would need it is refused with both numbers, never
+        resized and never answered by closing anything. A reserve that
+        cannot be read is refused too — reserved cash is not a number to
+        guess.
         """
         from bot_program.capital_truth import TRACKING_FRESH_SECONDS
         from bot_program.engine.capabilities import adapter_key
@@ -5252,12 +5261,22 @@ class AssetBot(ABC):
         need = (float(qty) * float(price) * self._value_per_unit(symbol)
                 / float(leverage))
         pledged = self._pledged_since(at, carrier)
-        free = float(cash) - pledged
+        try:
+            from bot_program.withdrawals import held_back
+            held = float(held_back(self.user, at))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] withdrawal reserve unreadable: %s",
+                           self.asset_class, e)
+            return ("the withdrawal reserve could not be read — refused; "
+                    "reserved cash is not a number to guess")
+        free = float(cash) - pledged - held
         if need > free + 1e-9:
+            kept = (f", less {held:,.2f} held for withdrawals" if held > 0
+                    else "")
             return (f"{symbol} needs {need:,.2f} {ccy} of margin and "
                     f"{free:,.2f} is free ({float(cash):,.2f} read "
                     f"{age / 60:.0f} min ago, less {pledged:,.2f} pledged "
-                    f"since) — refused before the venue refuses it")
+                    f"since{kept}) — refused before the venue refuses it")
         after = (float(used) + pledged + need) / max(float(equity), 1e-9)
         if after > MAX_PLEDGED_FRACTION + 1e-9:
             return (f"the account would be {after:.0%} pledged after "

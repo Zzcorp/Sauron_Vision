@@ -535,10 +535,37 @@ def share_label(cfg, plan=None) -> str:
 # of the max, so a fresh account with no history has a high-water mark
 # equal to itself, a drawdown of 0 and n == 0 — "hwm from 1 reading",
 # never "no hwm". Pure DB reads, safe on any render path.
-def equity_high_water(user, *, window_days=90):
-    """{hwm, hwm_at, currency, n} over the last `window_days`, or None
-    when no reading has landed. `n` is the number of HISTORY rows that
-    took part (the current reading is counted separately)."""
+#
+# NET OF WITHDRAWALS (2026-09-28). A withdrawal marked paid on /withdrawals/
+# is money that left on purpose, and a history that did not know it would
+# read the first real withdrawal as a drawdown — the governor cutting the
+# desk budget and capping every share, a shock plan de-risking the account,
+# for 90 days, over money nobody lost. So every reading, the current one
+# included, is compared as it would read had every LATER paid withdrawal
+# already left (withdrawals.flow_adjusted_value): readings before a
+# withdrawal lose its amount, readings after it are unchanged. The
+# high-water mark is therefore in today's money. Paid withdrawals only, in
+# the reading's currency only; a reserve has not left the account. If the
+# flows cannot be read, the raw history is used — the old behaviour, which
+# errs toward de-risking, never toward trusting money that may be gone.
+def paid_flows_for(user, currency):
+    """[(paid_at, amount)] of paid withdrawals in `currency`, or [] when
+    they cannot be read (logged). Shared with share_allocator.drop_24h."""
+    try:
+        from bot_program.withdrawals import paid_flows
+        return paid_flows(user, currency=currency or "")
+    except Exception as e:  # noqa: BLE001 — raw history is the safe side
+        logger.warning("capital_truth: withdrawals unreadable, equity "
+                       "history read raw: %s", e)
+        return []
+
+
+def equity_high_water(user, *, window_days=90, flows=None):
+    """{hwm, hwm_at, currency, n, withdrawn} over the last `window_days`,
+    or None when no reading has landed. `n` is the number of HISTORY rows
+    that took part (the current reading is counted separately). `hwm` is
+    net of every withdrawal paid after the reading it came from;
+    `withdrawn` is what was paid inside the window (0.0 when nothing)."""
     from datetime import timedelta
 
     from django.utils import timezone
@@ -562,33 +589,45 @@ def equity_high_water(user, *, window_days=90):
     if env_now:
         from django.db.models import Q
         rows = rows.filter(Q(env="") | Q(env=env_now))
-    hwm, hwm_at = float(reading["value"]), reading["at"]
+    from bot_program.withdrawals import flow_adjusted_value
+    if flows is None:
+        flows = paid_flows_for(user, currency)
+    hwm = flow_adjusted_value(float(reading["value"]), reading["at"], flows)
+    hwm_at = reading["at"]
     n = 0
     for r in rows:
         n += 1
-        v = float(r.value)
+        v = flow_adjusted_value(float(r.value), r.at, flows)
         if v > hwm:
             hwm, hwm_at = v, r.at
-    return {"hwm": hwm, "hwm_at": hwm_at, "currency": currency, "n": n}
+    withdrawn = sum(float(amount) for paid_at, amount in flows
+                    if paid_at >= since)
+    return {"hwm": hwm, "hwm_at": hwm_at, "currency": currency, "n": n,
+            "withdrawn": withdrawn}
 
 
 def equity_drawdown(user, *, window_days=90):
     """The current reading against its high-water mark, or None.
 
     {value, currency, at, age_seconds, hwm, hwm_at, drawdown_pct (>= 0),
-     stale, n}. drawdown_pct is a FRACTION of the high-water mark (0.12 is
-    12% under), never negative: a reading above every row in the window IS
-    the new high-water mark.
+     stale, n, withdrawn}. drawdown_pct is a FRACTION of the high-water
+    mark (0.12 is 12% under), never negative: a reading above every row
+    in the window IS the new high-water mark. Both sides are net of paid
+    withdrawals (see above), so a withdrawal is not a drawdown; `value`
+    stays the reading as the broker gave it.
     """
     reading = account_equity(user)
     if reading is None:
         return None
-    hw = equity_high_water(user, window_days=window_days)
+    flows = paid_flows_for(user, reading["currency"] or "")
+    hw = equity_high_water(user, window_days=window_days, flows=flows)
     if hw is None:
         return None
+    from bot_program.withdrawals import flow_adjusted_value
     value = float(reading["value"])
+    net = flow_adjusted_value(value, reading["at"], flows)
     hwm = float(hw["hwm"])
-    dd = max(0.0, (hwm - value) / hwm) if hwm > 0 else 0.0
+    dd = max(0.0, (hwm - net) / hwm) if hwm > 0 else 0.0
     return {
         "value": value,
         "currency": reading["currency"],
@@ -599,4 +638,5 @@ def equity_drawdown(user, *, window_days=90):
         "drawdown_pct": dd,
         "stale": reading["age_seconds"] > TRACKING_FRESH_SECONDS,
         "n": hw["n"],
+        "withdrawn": hw["withdrawn"],
     }

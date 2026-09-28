@@ -453,6 +453,9 @@
             <a href="{% url 'portfolio_overview' %}" class="nav-link {% if page_id == 'portfolio' %}active{% endif %}"><span class="icon">◎</span> <span class="label-text">Portfolio</span></a>
             <a href="{% url 'brokers_page' %}" class="nav-link {% if page_id == 'brokers' %}active{% endif %}"><span class="icon">⌁</span> <span class="label-text">Brokers</span></a>
             <a href="{% url 'treasury_page' %}" class="nav-link {% if page_id == 'treasury' %}active{% endif %}"><span class="icon">⛁</span> <span class="label-text">Treasury</span></a>
+            {% comment %}Withdrawals asked for in advance (2026-09-28): the reserve held back from new sizing, then marked
+               withdrawn when the money leaves. Mark U+21E9, the down arrow beside the Promotion Ladder's U+21E7, used nowhere else.{% endcomment %}
+            <a href="{% url 'withdrawals' %}" class="nav-link {% if page_id == 'withdrawals' %}active{% endif %}"><span class="icon">⇩</span> <span class="label-text">Withdrawals</span></a>
             <a href="{% url 'positions_list' %}" data-nav-id="positions" class="nav-link {% if page_id == 'positions' %}active{% endif %}"><span class="icon">▣</span> <span class="label-text">Positions</span></a>
             <a href="{% url 'tax_lots_dashboard' %}" class="nav-link {% if page_id == 'tax_lots' %}active{% endif %}"><span class="icon">▦</span> <span class="label-text">Tax Lots</span></a>
             <a href="{% url 'bot_home' %}" class="nav-link {% if page_id == 'bot_program' %}active{% endif %}"><span class="icon">⟳</span> <span class="label-text">Bot Program</span></a>

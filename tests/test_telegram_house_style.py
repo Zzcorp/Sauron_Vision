@@ -640,6 +640,15 @@ class NotifierTests(_Base):
             ("evidence_chain_cold", lambda: N.notify_evidence_chain_cold(
                 u, cold=["pipeline_promotion"],
                 blockers=["pipeline_promotion is off."])),
+            # a withdrawal asked for in advance (2026-09-28)
+            ("withdrawal", lambda: N.notify_withdrawal(
+                u, SimpleNamespace(
+                    amount=Decimal("1234.56"), currency="EUR",
+                    requested_by="gandalf", acted_by="",
+                    reason="roof_fix <2> & tax",
+                    wanted_by=None, closing_note="", paid_amount=None,
+                    paid_at=None, flow_amount=Decimal("1234.56")),
+                event="requested", reserved_total=Decimal("1234.56"))),
         ]
 
     def test_every_notifier_sends_its_mark_and_at_least_one_line(self):

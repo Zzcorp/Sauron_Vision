@@ -80,6 +80,8 @@ NOTIFY_MARKS = {
     "staff_warning": "\u26A0\uFE0F",
     "broker_unreachable": "\U0001F50C",
     "evidence_chain_cold": "\u2744\uFE0F",
+    # A bank: money asked for in advance, sent, or released (2026-09-28).
+    "withdrawal": "\U0001F3E6",
 }
 
 
@@ -164,6 +166,11 @@ OPERATOR_KINDS = {
     # real money is running without a stop; a muted bot feed must not
     # mute it.
     "protection_vanished",
+    # A withdrawal asked for in advance, sent at the broker, or cancelled
+    # (2026-09-28) — by the operator or Gandalf, PIN in hand, on
+    # /withdrawals/. Money leaving the real account is the one thing both
+    # of them must always hear about, whoever of the two did it.
+    "withdrawal",
 }
 
 # The in-app row's type, per kind — "bot" for everything not listed, because
@@ -633,6 +640,76 @@ def notify_manual_lane_mode(user, *, asset_class: str, mode: str,
                              "rehearsal money only"],
                    "mark": NOTIFY_MARKS["manual_lane_paper"]}),
     )
+
+
+def notify_withdrawal(user, request, *, event: str,
+                      reserved_total=None) -> bool:
+    """A withdrawal request was filed, sent or cancelled on /withdrawals/.
+
+    One message per act, to the book owner's chat — the group both men
+    read. `request` is the WithdrawalRequest as it stands after the act;
+    `event` is "requested", "paid" or "cancelled"; `reserved_total` is
+    what is still held back once the act is done, so the group reads the
+    reserve without opening the page. Never raises: the act is already
+    written, and a message that fails must not look like one that undid it.
+    """
+    try:
+        from bot_program.withdrawals import money, who_label
+        ccy = getattr(request, "currency", "") or ""
+        asked = money(request.amount, ccy)
+        by = who_label(request.requested_by) or "—"
+        acted = who_label(getattr(request, "acted_by", "")) or "—"
+        wanted = getattr(request, "wanted_by", None)
+        wanted_text = (wanted.strftime("%Y-%m-%d") if wanted
+                       else "no date given")
+        total = money(reserved_total, ccy)
+        reason = str(getattr(request, "reason", "") or "").strip()
+        note = str(getattr(request, "closing_note", "") or "").strip()
+        if event == "paid":
+            sent = money(request.flow_amount, ccy)
+            when = getattr(request, "paid_at", None)
+            title = f"Withdrawal sent: {sent}"
+            items = [f"Withdrawn: {sent}"]
+            if request.paid_amount is not None \
+                    and request.paid_amount != request.amount:
+                items.append(f"Asked for: {asked}")
+            items += [f"Asked by: {by}", f"Marked withdrawn by: {acted}",
+                      ("At: " + when.strftime("%Y-%m-%d %H:%M UTC")
+                       if when else "At: —")]
+            if note:
+                items.append(f"Note: {note}")
+            items += [f"Reserved in total: {total}",
+                      "Counted as a withdrawal, not as a loss"]
+            body = (f"{sent} left the account ({by} asked); the reserve "
+                    f"is released and the history reads it as a "
+                    f"withdrawal, not a loss")
+        elif event == "cancelled":
+            title = f"Withdrawal request cancelled: {asked}"
+            items = [f"Amount: {asked}", f"Asked by: {by}",
+                     f"Cancelled by: {acted}"]
+            if note:
+                items.append(f"Note: {note}")
+            items += [f"Reserved in total: {total}",
+                      "The amount can be deployed again"]
+            body = (f"{asked} is no longer held back; the pools follow "
+                    f"the account without it")
+        else:
+            title = f"Withdrawal requested: {asked}"
+            items = [f"Amount: {asked}", f"Asked by: {by}",
+                     f"Wanted by: {wanted_text}"]
+            if reason:
+                items.append(f"Reason: {reason}")
+            items += [f"Reserved in total: {total}",
+                      "Nothing is sold: the pools stop deploying the "
+                      "reserve and cash builds up as positions close"]
+            body = (f"{asked} held back from new sizing ({by} asked); "
+                    f"nothing is sold")
+        return dispatch_notification(
+            user, "withdrawal", title=title, body=body, url="/withdrawals/",
+            row_data={"items": items, "mark": NOTIFY_MARKS["withdrawal"]})
+    except Exception as e:  # noqa: BLE001 — a notifier never raises
+        logger.warning("withdrawal notification failed: %s", e)
+        return False
 
 
 def notify_bot_fill_close(user, *, asset_class: str, symbol: str, side: str,

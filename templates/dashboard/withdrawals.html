@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}Withdrawals — Sauron Vision{% endblock %}
+{# ⇩ is the sidebar's Withdrawals mark — title and nav row agree. #}
+{% block page_title %}⇩ WITHDRAWALS · asked for in advance{% endblock %}
+{% comment %}
+WITHDRAWALS — bot_program.withdrawals does the arithmetic; dashboard.views_withdrawals only reads the form, checks the PIN
+and redirects. Cached columns only: this page makes no broker call. An em dash means NEVER MEASURED and is never a zero.
+Every money cell arrives pre-grouped ("1,234.56 EUR") from the view.
+{% endcomment %}
+{% block content %}
+{% if messages %}
+<div style="margin-bottom:18px;">
+    {% for msg in messages %}
+    <div class="card" style="border-color:{% if msg.tags == 'success' %}var(--accent){% elif msg.tags == 'error' %}var(--accent-red){% elif msg.tags == 'warning' %}var(--accent-gold-ink, var(--accent-gold)){% else %}var(--border){% endif %};padding:12px 20px;margin-bottom:8px;">
+        <span style="font-family:var(--font-mono);font-size:13px;">{% if msg.tags == 'success' %}OK{% elif msg.tags == 'error' %}ERR{% elif msg.tags == 'warning' %}WARN{% else %}NOTE{% endif %} {{ msg }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">What a request does, and what it does not</span></div>
+    <div style="padding:12px 16px 14px;font-family:var(--font-mono);font-size:12px;line-height:1.7;">
+        <div>A request filed here <strong>holds the amount back</strong> from the moment it is filed. Every pool that follows the account is sized from the account <em>less</em> the reserve, so all of them shrink by the same proportion; the eToro cash gate will not spend the reserved cash on a new order.</div>
+        <div style="margin-top:6px;">It <strong>sells nothing and closes nothing</strong>. The pools' shares of the account do not change, the bots keep trading their plan, and cash builds up as positions close on their own.</div>
+        <div style="margin-top:6px;">When the money is sent at the broker, press <strong>Mark withdrawn</strong> at that moment: the reserve is released and the account's history counts the amount as a withdrawal, not as a loss, so no drawdown alarm and no de-risking follow from it.</div>
+        <div style="margin-top:6px;color:var(--text-muted);">Not reduced by a reserve: live pools whose capital was typed by hand (listed below). Never affected: paper pools. Every action on this page takes the trading PIN.</div>
+    </div>
+</div>
+
+{% if not ready %}
+<div class="card fade-in-up" style="margin-bottom:18px;"><div style="padding:16px;font-family:var(--font-mono);font-size:12px;color:var(--accent-gold);">
+    The readiness of the account could not be computed{% if ready_error %} ({{ ready_error }}){% endif %}. The requests below are still listed and can still be acted on.
+</div></div>
+{% else %}
+<div class="oc-strip" style="margin-bottom:18px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ACCOUNT</span>
+        <span class="oc-strip-value">{{ ready.value_text }}</span>
+        <span class="oc-strip-sub">{% if ready.value is not None %}{% if ready.book_name %}{{ ready.book_name }} · {% endif %}read {{ ready.age_text }} ago{% else %}no broker reading yet{% endif %}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">FREE CASH</span>
+        <span class="oc-strip-value">{{ ready.free_cash_text }}</span>
+        <span class="oc-strip-sub">{% if ready.free_cash is not None %}read {{ ready.cash_age_text }} ago{% else %}{{ ready.cash_note }}{% endif %}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">RESERVED</span>
+        <span class="oc-strip-value">{% if ready.reserved %}{{ ready.reserved_text }}{% else %}nothing{% endif %}</span>
+        <span class="oc-strip-sub">{{ ready.n_active }} active request{{ ready.n_active|pluralize }}{% if ready.paid_unread %} · {{ ready.paid_unread_text }} withdrawn since the last reading, also held back{% endif %}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">CASH READY</span>
+        {% if not ready.reserved %}
+        <span class="oc-strip-value">—</span>
+        <span class="oc-strip-sub">nothing reserved</span>
+        {% elif ready.cash_ready is None %}
+        <span class="oc-strip-value">—</span>
+        <span class="oc-strip-sub">free cash not measured</span>
+        {% elif ready.cash_ready %}
+        <span class="oc-strip-value up">READY</span>
+        <span class="oc-strip-sub">the free cash covers the reserve</span>
+        {% else %}
+        <span class="oc-strip-value down">SHORT</span>
+        <span class="oc-strip-sub">short by {{ ready.shortfall_text }} — it builds up as positions close</span>
+        {% endif %}
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">DEPLOYABLE</span>
+        <span class="oc-strip-value">{{ ready.deployable_text }}</span>
+        <span class="oc-strip-sub">what the following pools are sized from</span>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">The pools, before and after the reserve</span></div>
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>Pool that follows the account</th><th>Class</th><th class="num">Share</th><th class="num">Without the reserve</th><th class="num">With the reserve</th><th class="num">Pool now</th></tr></thead>
+        <tbody>
+        {% for p in ready.following %}
+        <tr>
+            <td>{{ p.name }}</td><td>{{ p.asset_class }}</td>
+            <td class="num">{% if p.share_pct is not None %}{{ p.share_pct|floatformat:1 }}%{% else %}—{% endif %}</td>
+            <td class="num">{{ p.before_text }}</td>
+            <td class="num">{{ p.after_text }}</td>
+            <td class="num">{{ p.now_text }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6" style="color:var(--text-muted);">No live pool follows the account — a reserve shrinks nothing automatically.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div style="padding:10px 16px 14px;font-family:var(--font-mono);font-size:12px;line-height:1.7;">
+        {% if ready.following_note %}<div style="color:var(--accent-gold);">{{ ready.following_note }}</div>{% endif %}
+        {% if ready.following %}<div style="color:var(--text-muted);">Shares unchanged; each pool shrinks by the same proportion. "Pool now" is what the last follow wrote — it catches up at the next sync if it differs.</div>{% endif %}
+        {% if ready.typed_live %}
+        <div style="margin-top:8px;color:var(--accent-gold);">Live pools with a typed capital are NOT reduced by a reserve. Lower them by hand on <a href="{% url 'asset_bots_dashboard' %}">/asset-bots/</a> if the reserve would leave them larger than what is left to deploy:</div>
+        <ul style="margin:4px 0 0 18px;padding:0;">
+            {% for p in ready.typed_live %}<li>{{ p.name }} ({{ p.asset_class }}) — {{ p.capital_text }}{% if p.over %} <strong style="color:var(--accent-red);">larger than the {{ ready.deployable_text }} left to deploy</strong>{% endif %}</li>{% endfor %}
+        </ul>
+        {% endif %}
+        {% if ready.paper %}
+        <div style="margin-top:8px;color:var(--text-muted);">Paper pools, never affected: {% for p in ready.paper %}{{ p.name }} ({{ p.asset_class }}, {{ p.capital_text }}){% if not forloop.last %} · {% endif %}{% endfor %}.</div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">File a withdrawal request</span></div>
+    <form method="post" action="{% url 'withdrawal_create' %}" style="padding:14px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;font-family:var(--font-mono);font-size:12px;">
+        {% csrf_token %}
+        <label>Who is asking
+            <select name="requested_by" class="form-input" required>
+                <option value="">— choose —</option>
+                {% for code, label in who_choices %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+            </select>
+        </label>
+        <label>Amount ({{ form_currency }})
+            <input type="number" name="amount" class="form-input" min="0.01" step="0.01" required placeholder="1234.56">
+        </label>
+        <label>Wanted by (optional)
+            <input type="date" name="wanted_by" class="form-input" min="{{ today }}">
+        </label>
+        <label>Trading PIN
+            <input type="password" name="pin" class="form-input" autocomplete="off" required placeholder="PIN">
+        </label>
+        <label style="grid-column:1/-1;">Reason (optional)
+            <textarea name="reason" class="form-input" rows="2" placeholder="What the money is for"></textarea>
+        </label>
+        <div style="grid-column:1/-1;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            <button type="submit" class="btn btn-sm btn-primary">Reserve this amount</button>
+            <span style="color:var(--text-muted);">
+                {% if currency_fallback %}No account reading has landed yet: the request will be recorded in {{ form_currency }} by default and cannot be checked against the account.{% else %}Recorded in the account's currency, {{ form_currency }}. A reserve larger than the account is refused; above half of it is accepted with a warning.{% endif %}
+                {% if not has_pin %} No trading PIN is set on this account — set one in <a href="{% url 'profile' %}">Profile</a> first.{% endif %}
+            </span>
+        </div>
+    </form>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Active requests — held back now</span></div>
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>#</th><th class="num">Amount</th><th>Asked by</th><th>Wanted by</th><th>Filed</th><th>Reason</th><th>Mark withdrawn</th><th>Cancel</th></tr></thead>
+        <tbody>
+        {% for r in active %}
+        <tr>
+            <td>{{ r.id }}</td>
+            <td class="num"><strong>{{ r.amount_text }}</strong></td>
+            <td>{{ r.requested_by }}</td>
+            <td>{% if r.wanted_by %}{{ r.wanted_by|date:"Y-m-d" }}{% else %}<span style="color:var(--text-muted);">no date</span>{% endif %}</td>
+            <td>{{ r.created_at|date:"Y-m-d H:i" }} UTC</td>
+            <td>{% if r.reason %}{{ r.reason }}{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+            <td>
+                <form method="post" action="{% url 'withdrawal_mark_paid' r.id %}" style="display:flex;flex-direction:column;gap:4px;min-width:210px;">
+                    {% csrf_token %}
+                    <select name="acted_by" class="form-input" required>
+                        {% for code, label in who_choices %}<option value="{{ code }}"{% if code == r.requested_by_code %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                    </select>
+                    <input type="number" name="paid_amount" class="form-input" min="0.01" step="0.01" value="{{ r.amount_plain }}" title="The amount actually sent, in {{ r.currency }}">
+                    <input type="datetime-local" name="paid_at" class="form-input" title="When the money was sent, UTC — leave blank for now">
+                    <input type="text" name="note" class="form-input" placeholder="Note (optional)">
+                    <input type="password" name="pin" class="form-input" autocomplete="off" required placeholder="PIN">
+                    <button type="submit" class="btn btn-sm btn-primary">Mark withdrawn</button>
+                    <span style="color:var(--text-muted);font-size:11px;">Do this at the moment you send the withdrawal at the broker. The time is UTC; blank means now — an earlier time only if the money left earlier.</span>
+                </form>
+            </td>
+            <td>
+                <form method="post" action="{% url 'withdrawal_cancel' r.id %}" style="display:flex;flex-direction:column;gap:4px;min-width:150px;">
+                    {% csrf_token %}
+                    <select name="acted_by" class="form-input" required>
+                        {% for code, label in who_choices %}<option value="{{ code }}"{% if code == r.requested_by_code %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                    </select>
+                    <input type="text" name="note" class="form-input" placeholder="Note (optional)">
+                    <input type="password" name="pin" class="form-input" autocomplete="off" required placeholder="PIN">
+                    <button type="submit" class="btn btn-sm btn-danger">Cancel</button>
+                </form>
+            </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="8" style="color:var(--text-muted);">No active request. Nothing is held back.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">History — withdrawn and cancelled</span></div>
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>#</th><th>Status</th><th class="num">Asked</th><th class="num">Withdrawn</th><th>Asked by</th><th>Closed by</th><th>When</th><th>Note</th></tr></thead>
+        <tbody>
+        {% for r in history %}
+        <tr>
+            <td>{{ r.id }}</td>
+            <td>{{ r.status_label }}</td>
+            <td class="num">{{ r.amount_text }}</td>
+            <td class="num">{% if r.status == 'paid' %}{{ r.paid_text }}{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+            <td>{{ r.requested_by }}</td>
+            <td>{{ r.acted_by }}</td>
+            <td>{% if r.status == 'paid' and r.paid_at %}{{ r.paid_at|date:"Y-m-d H:i" }} UTC{% elif r.cancelled_at %}{{ r.cancelled_at|date:"Y-m-d H:i" }} UTC{% else %}—{% endif %}</td>
+            <td>{% if r.closing_note %}{{ r.closing_note }}{% elif r.reason %}<span style="color:var(--text-muted);">{{ r.reason }}</span>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="8" style="color:var(--text-muted);">Nothing withdrawn or cancelled yet.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endblock %}

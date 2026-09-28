@@ -177,7 +177,13 @@ def drop_24h(user, *, now=None):
     the last 24 h in the current currency — 0.042 is 4.2% under — or None
     when no history row landed in the window. The current reading is part
     of the max, so the answer is never negative; a history in another
-    currency is an exchange rate, not a drop, and does not count."""
+    currency is an exchange rate, not a drop, and does not count.
+
+    NET OF WITHDRAWALS (2026-09-28): every reading is compared as it would
+    read had every later PAID withdrawal already left
+    (withdrawals.flow_adjusted_value), exactly as the high-water mark is —
+    a 20% withdrawal sent this morning is not a 20% shock, and must not
+    propose a plan that de-risks the account for it."""
     from bot_program.capital_truth import (account_equity, broker_backed,
                                            broker_env, broker_kind)
     from bot_program.equity_models import BrokerEquityReading
@@ -198,8 +204,12 @@ def drop_24h(user, *, now=None):
     if env_now:
         from django.db.models import Q
         history = history.filter(Q(env="") | Q(env=env_now))
-    rows = history.values_list("value", flat=True)
-    values = [float(v) for v in rows]
+    from bot_program.capital_truth import paid_flows_for
+    from bot_program.withdrawals import flow_adjusted_value
+    flows = paid_flows_for(user, reading["currency"] or "")
+    current = flow_adjusted_value(current, reading["at"], flows)
+    rows = history.values_list("value", "at")
+    values = [flow_adjusted_value(float(v), at, flows) for v, at in rows]
     if not values:
         return None
     top = max(max(values), current)
