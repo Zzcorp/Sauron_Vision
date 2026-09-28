@@ -27,8 +27,16 @@ logger = logging.getLogger(__name__)
 
 @login_required
 def evidence_ledger(request):
+    # The rules are the platform's evidence and read platform-wide, like
+    # /calibration/. A CONFIG — its name, its owner, its booked P&L and
+    # its live R — is one user's, the rule every other bot page in this
+    # unit keeps (config__user=request.user): staff reads every user's
+    # with the owner beside each, as on /ops/; any other login reads its
+    # own (2026-09-28).
+    staff = bool(request.user.is_staff or request.user.is_superuser)
+    scope = None if staff else request.user
     rules = rule_rows()
-    configs = config_rows()
+    configs = config_rows(user=scope)
     totals = {
         "rules": len(rules),
         "sig_n": sum(r["sig_n"] for r in rules),
@@ -42,7 +50,7 @@ def evidence_ledger(request):
     # nothing to do with them.
     personas, personas_error = [], ""
     try:
-        personas = persona_rows()
+        personas = persona_rows(user=scope)
     except Exception as e:  # noqa: BLE001
         logger.warning("[evidence] persona grade unreadable: %s", e)
         personas_error = (f"The personality grade could not be read ({e}). "
@@ -51,4 +59,5 @@ def evidence_ledger(request):
         "page_id": "evidence", "rules": rules, "configs": configs,
         "totals": totals, "personas": personas,
         "personas_error": personas_error,
+        "show_owner": staff,
     })

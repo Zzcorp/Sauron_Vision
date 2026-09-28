@@ -31,6 +31,11 @@ to carry together:
 Read-only: it places no orders, writes no rows and flips no switch.
 Fenced like /shares/ and /personas/ — a page that 500s because one table
 is mid-migration hides the nine panels that were healthy.
+
+Staff's, in part (2026-09-28): the switches and the forge follow
+/health/'s rule as the cockpit applies it. oculus() reads the viewer and
+withholds those two cycles, and every panel's gate chips, from a login
+that is not staff — nothing here decides it.
 """
 import logging
 

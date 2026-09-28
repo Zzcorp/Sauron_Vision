@@ -797,7 +797,11 @@ turning, and which of its wheels are actually engaged?** It owns no data,
 adds no arithmetic, caches nothing, and writes nothing. Ten panels, one
 per cycle: the switches, the scan, the ladder, the signals, the
 evolution, the personalities, the allocation, the horizon, the backtests,
-the trust.
+the trust. The switches and the forge are platform-wide and follow
+`/health/`'s rule — staff only, as on `/ops/`: any other login reads the
+other cycles and its own book, with no switch state on any panel, and
+the forge's source-tree scan and migration plan run only for the reader
+who gets their answer.
 
 What it does that no single page could:
 

@@ -119,10 +119,18 @@ def personas_dashboard(request):
     from bot_program.personas import (PERSONA_KEYS, PERSONAS,
                                       PERSONA_ASSET_CLASSES)
 
+    # The presets, the knobs and the matrix are the platform's (the matrix
+    # already reads request.user's book). A CONFIG is one user's, the rule
+    # every other bot page keeps: staff reads every user's, as on /ops/;
+    # any other login reads its own — the wearing configs and their
+    # record, and the unworn table (2026-09-28).
+    staff = bool(request.user.is_staff or request.user.is_superuser)
+    scope = None if staff else request.user
+
     rows, rows_error = [], ""
     try:
         from bot_program.evidence import persona_rows
-        rows = persona_rows()
+        rows = persona_rows(user=scope)
     except Exception as e:  # noqa: BLE001 — the page renders regardless
         logger.warning("[personas page] grade unreadable: %s", e)
         rows_error = (f"The persona grade could not be read ({e}). The "
@@ -175,9 +183,10 @@ def personas_dashboard(request):
     try:
         from bot_program.models import AssetBotConfig
         from bot_program.personas import persona_of
-        unworn = [c for c in
-                  AssetBotConfig.objects.select_related("user")
-                  .order_by("asset_class", "name")
+        configs = AssetBotConfig.objects.select_related("user")
+        if scope is not None:
+            configs = configs.filter(user=scope)
+        unworn = [c for c in configs.order_by("asset_class", "name")
                   if not persona_of(c)]
     except Exception as e:  # noqa: BLE001
         logger.warning("[personas page] configs unreadable: %s", e)

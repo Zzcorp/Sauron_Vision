@@ -2206,6 +2206,14 @@ without signals carries no key for nothing.{% endcomment %}
         if (!bars.length || typeof epoch !== 'number' || !isFinite(epoch)) return null;
         var first = barEpoch(bars[0].time), last = barEpoch(bars[bars.length - 1].time);
         if (epoch < first) return null; /* opened before the loaded range: nowhere honest to put it */
+        /* ...and past the last bar's CLOSE, the same. The last bar holds
+           an instant only while it forms: on the daily default the
+           newest bar is the previous session's until the EOD fetch at
+           22:30 UTC, and clamping onto it put every signal fired today,
+           and every position opened today, on yesterday's candle — one
+           session before it happened, under a card that printed today
+           (2026-09-28). */
+        if (epoch >= last + barSpan(bars)) return null;
         if (epoch >= last) return bars[bars.length - 1].time;
         var lo = 0, hi = bars.length - 1;
         while (lo < hi) {
@@ -2218,6 +2226,16 @@ without signals carries no key for nothing.{% endcomment %}
            late — on a chart, a day is a lie. */
         if (barEpoch(bars[lo].time) === epoch) return bars[lo].time;
         return bars[Math.max(0, lo - 1)].time;
+    }
+    /* How long a bar of this series holds, in seconds: a day for a
+       daily-family bar (a 'YYYY-MM-DD' string, or the library's
+       {year, month, day} — every daily range draws daily candles), the
+       frame's seconds for an intraday one. A frame with no known width
+       holds nothing past its open. */
+    function barSpan(bars) {
+        var t = bars[bars.length - 1].time;
+        if (typeof t === 'string' || (t && t.year)) return 86400;
+        return TF_SECONDS[currentTf] || 0;
     }
     /* The count the SERVER decided, passed in by the including page —
        it is the only side that knows the asset class, and forex needs

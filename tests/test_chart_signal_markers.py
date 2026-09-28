@@ -525,6 +525,18 @@ class TheWiringTests(SimpleTestCase):
         self.assertIn("applyPositions(bars);",
                       self.src.split("function applyOverlays(bars) {")[1][:200])
 
+    def test_the_last_bar_holds_an_instant_only_while_it_forms(self):
+        """A bar contains an instant from its open to its close: a day
+        for a daily-family bar (a 'YYYY-MM-DD' string — every daily range
+        draws daily candles), the frame's seconds for an intraday one."""
+        body = self._fn("nearestBarTime")
+        self.assertIn("if (epoch >= last + barSpan(bars)) return null;", body)
+        self.assertLess(body.index("barSpan(bars)"),
+                        body.index("if (epoch >= last) return"))
+        span = self._fn("barSpan")
+        self.assertIn("86400", span)
+        self.assertIn("TF_SECONDS[currentTf]", span)
+
     def test_the_old_faint_circle_is_gone_and_the_positions_are_not(self):
         self.assertNotIn("color: bull ? c.accentWash : c.redDim,", self.src)
         self.assertIn("shape: isLong ? 'arrowUp' : 'arrowDown', color: tone,",
@@ -1145,6 +1157,12 @@ const refresh = async function (payload) {
     for (let i = 0; i < 6; i++) await flush();
     R.swapped = { kind: candle().kind, lines: sigLines(), card: cardState(),
                   series: chart.series.map(function (s) { return s.kind; }) };
+    /* A signal fired after the last loaded bar CLOSED, one fired inside
+       that bar while it forms, and a position opened after the close. */
+    const edge = JSON.parse(JSON.stringify(M.payload));
+    edge.signals = M.edge.signals; edge.positions = M.edge.positions;
+    await refresh(edge);
+    R.edge = { markers: lastMarkers(), legendHidden: legend.hidden };
     const none = JSON.parse(JSON.stringify(M.payload));
     none.signals = [];
     await refresh(none);
@@ -1200,6 +1218,19 @@ def _payload():
             "positions": [position], "signals": [s1, s2, early, shared]}
 
 
+def _edge():
+    """The last loaded bar is 2026-09-09, which closes at 2026-09-10
+    00:00 UTC: a signal fired after that close, one fired inside the bar
+    while it forms, and a position opened after the close."""
+    base = _payload()
+    s1, position = base["signals"][0], base["positions"][0]
+    late = dict(s1, id=15, at=_epoch(2026, 9, 10, 14, 0))
+    forming = dict(s1, id=16, at=_epoch(2026, 9, 9, 15, 30))
+    late_pos = dict(position, id="bot-2", opened_at=_epoch(2026, 9, 10, 12),
+                    label="LONG late")
+    return {"signals": [s1, late, forming], "positions": [position, late_pos]}
+
+
 @unittest.skipUnless(NODE, "node is not installed")
 class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
     """The widget's real script, a stub page and a fake lightweight-charts
@@ -1212,7 +1243,7 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
         cls.r = _node(WIDGET_HARNESS, {
             "pure": pure, "main": main, "payload": _payload(),
             "barS1": "2026-08-10", "barS2": "2026-08-25",
-            "barFar": "2026-09-08"})
+            "barFar": "2026-09-08", "edge": _edge()})
 
     def _sig_markers(self, markers):
         return {m["id"]: m for m in markers
@@ -1247,6 +1278,28 @@ class TheWidgetAgainstAFakeChartTests(SimpleTestCase):
                          ("arrowUp", "LONG @ 1.08000"))
         self.assertEqual(first["others"], ["LONG 1000", "SL", "TP"])
         self.assertEqual(self.r["cleared"]["others"], ["LONG 1000", "SL", "TP"])
+
+    def test_a_signal_after_the_last_bars_close_is_not_drawn_on_that_bar(self):
+        """On the daily default the newest bar is the previous session's
+        until the EOD fetch at 22:30 UTC, and a signal fired today sat on
+        yesterday's candle — one session before it fired, under a card
+        that printed today. Past the last bar's CLOSE there is nowhere
+        honest to put it, exactly as before the first bar; inside the
+        last bar it is the forming candle, and stays (2026-09-28)."""
+        edge = self.r["edge"]
+        dots = self._sig_markers(edge["markers"])
+        self.assertNotIn("sv-sig-15", dots, "drawn on a bar that closed "
+                                            "before it fired")
+        self.assertIn("sv-sig-16", dots)
+        self.assertEqual(dots["sv-sig-16"]["time"], "2026-09-09")
+        self.assertEqual(dots["sv-sig-11"]["time"], "2026-08-10")
+        self.assertFalse(edge["legendHidden"])
+
+    def test_the_positions_arrow_follows_the_same_rule(self):
+        """One placement for the arrows and the dots: a position opened
+        after the last bar's close has no arrow, and keeps its lines."""
+        arrows = [m for m in self.r["edge"]["markers"] if "id" not in m]
+        self.assertEqual([a["time"] for a in arrows], ["2026-08-05"])
 
     def test_hover_shows_the_card_beside_the_dot(self):
         """On a DAILY bar, whose string date the legend's handler cannot

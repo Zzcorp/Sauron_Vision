@@ -194,3 +194,33 @@ class ThePageTests(TestCase):
         self.assertIn("r1", html)
         self.assertIn("/calibration/", html)
         self.assertIn("Evidence Ledger", html)          # the nav link
+
+    def test_a_login_that_is_not_staff_reads_its_own_configs_only(self):
+        """A config, its owner, its booked P&L and its live R are one
+        user's — the rule every other bot page in this unit keeps
+        (config__user=request.user). The ledger listed every user's to
+        any login (2026-09-28)."""
+        mine = User.objects.create_user("pg_mine", password="x")
+        other = User.objects.create_user("pg_other", password="x")
+        _fill(_cfg(mine, name="my_pool"), "r1", 1.0, 10)
+        _fill(_cfg(other, name="their_pool", mode="live"), "r1", 2.0, 20,
+              paper=False)
+        client = Client()
+        client.force_login(mine)
+        html = client.get("/evidence/").content.decode()
+        self.assertIn("my_pool", html)
+        self.assertNotIn("their_pool", html)
+        self.assertNotIn("pg_other", html)
+
+    def test_staff_reads_every_users_configs_with_the_owner(self):
+        """The cockpit's rule: platform-wide is staff's, and then the
+        owner stands beside each row."""
+        staff = User.objects.create_user("pg_staff", password="x",
+                                         is_staff=True)
+        other = User.objects.create_user("pg_theirs", password="x")
+        _fill(_cfg(other, name="their_pool"), "r1", 2.0, 20)
+        client = Client()
+        client.force_login(staff)
+        html = client.get("/evidence/").content.decode()
+        self.assertIn("their_pool", html)
+        self.assertIn("pg_theirs", html)

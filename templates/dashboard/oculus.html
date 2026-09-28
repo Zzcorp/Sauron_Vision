@@ -126,6 +126,8 @@
         {% else %}<span class="ocu-gate off">{{ g.key }} · off</span>{% endif %}
       {% endfor %}
     </div>
+    {% elif c.gate_withheld %}
+    <div class="ocu-gates"><span class="ocu-gate off" title="the switches are platform-wide and staff's, as on /health/ and /ops/">switches · staff only</span></div>
     {% endif %}
 
     <div class="ocu-book">
@@ -216,8 +218,14 @@
           {% endif %}
         {% endfor %}
       </div>
+      {% elif c.gate_withheld %}
+      <div class="ocu-gates"><span class="ocu-gate off" title="the switches are platform-wide and staff's, as on /health/ and /ops/">switches · staff only</span></div>
       {% endif %}
 
+      {% if c.staff_only %}
+      {% comment %}The cockpit's rule and its words: the panel stays, with its ways out; the numbers are staff's.{% endcomment %}
+      <p class="ocu-caveat"><strong>STAFF ONLY</strong> — {{ c.caveat }}</p>
+      {% else %}
       <table class="ocu-facts">
         {% for f in c.facts %}
         <tr class="{{ f.tone }}">
@@ -250,6 +258,7 @@
       {% endif %}
 
       <p class="ocu-caveat">{{ c.caveat }}</p>
+      {% endif %}
       {% if c.pages %}
       <div class="ocu-out">{% for pg in c.pages %}<a href="{{ pg.href }}">{{ pg.label }} &rsaquo;</a>{% endfor %}</div>
       {% endif %}

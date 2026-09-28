@@ -4274,12 +4274,17 @@ def instrument_detail(request, symbol):
     # the ticket already makes about prices, in its own comment: pairing a
     # button with the fact that governs it "was work the operator was doing
     # that the markup should have been doing."
+    #
+    # A READ, never manual_config_for (2026-09-28): that is a get_or_create,
+    # and a page view was inserting a lane the viewer never armed. No row
+    # yet reads paper — the venue the POST would create it in.
     lane_mode = "paper"
     try:
-        from bot_program.manual_trade import EXECUTABLE_CLASS, manual_config_for
+        from bot_program.manual_trade import (EXECUTABLE_CLASS,
+                                              manual_config_if_any)
         cls = EXECUTABLE_CLASS.get(instrument.asset_class)
         if cls and request.user.is_authenticated:
-            lane_mode = getattr(manual_config_for(request.user, cls),
+            lane_mode = getattr(manual_config_if_any(request.user, cls),
                                 "mode", "paper")
     except Exception:  # noqa: BLE001 — a badge must never 500 the page
         lane_mode = "paper"

@@ -475,3 +475,118 @@ class EveryCycleOffersAWayIntoItTests(TestCase):
         for key, pages in CYCLE_PAGES.items():
             self.assertNotIn("oculus_dashboard", [n for n, _l in pages],
                              f"cycle {key!r} links back to the Oculus")
+
+
+class TheSwitchesAndTheForgeAreStaffsTests(TestCase):
+    """/health/'s rule, as the cockpit applies it (tests/test_ops_cockpit
+    pins it for /ops/): every component's state is staff's, and so is the
+    forge — the image's sha, the migrations not applied on this database
+    and a read of the whole source tree, which is also the page's one
+    costly read. The Oculus showed all of it to any login, and ran the
+    scan and the migration plan for each GET (2026-09-28)."""
+
+    def setUp(self):
+        self.url = reverse("oculus_dashboard")
+        self.viewer = User.objects.create_user("ocu_viewer", password="x")
+        self.staff = User.objects.create_user("ocu_staff", password="x",
+                                              is_staff=True)
+
+    SWITCHES = ("platform_master", "pipeline_asset_bots",
+                "pipeline_evolution", "share_allocator_mode_live")
+    FORGE_AND_GATES = ("commit of this image", "migrations pending",
+                       "guarded tasks with no switch", "components on",
+                       "on but never run")
+
+    def test_a_non_staff_login_reads_no_switch_state_and_no_forge_fact(self):
+        import html as _html
+        self.client.force_login(self.viewer)
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        body = _html.unescape(resp.content.decode())
+        # The panels stay — a vanished panel reads as "no such cycle" —
+        # and say whose they are, in the cockpit's words.
+        self.assertIn("The forge", body)
+        self.assertIn("The switches", body)
+        self.assertIn("staff only — platform-wide, as on /health/", body)
+        self.assertIn("STAFF ONLY", body)
+        # Not one switch state on any panel, not one forge fact.
+        for key in self.SWITCHES:
+            self.assertNotIn(f"{key} ·", body)
+        for label in self.FORGE_AND_GATES:
+            self.assertNotIn(label, body)
+
+    def test_staff_reads_both_as_before(self):
+        import html as _html
+        from core.platform_control import PlatformComponent
+        PlatformComponent.objects.get_or_create(
+            key="platform_master", defaults={"is_enabled": True})
+        self.client.force_login(self.staff)
+        body = _html.unescape(self.client.get(self.url).content.decode())
+        self.assertIn("platform_master · on", body)
+        for label in self.FORGE_AND_GATES:
+            self.assertIn(label, body)
+        self.assertNotIn("STAFF ONLY", body)
+
+    def test_the_forge_reads_nothing_for_a_viewer_who_may_not_see_it(self):
+        """The two costly reads run for the reader who gets the answer,
+        and for nobody else: a reload loop from a phone was enough to
+        have the web worker read every .py file and load the migration
+        graph, again and again, for a page that then showed the result."""
+        from unittest import mock
+        with mock.patch("pathlib.Path.rglob", return_value=iter(())) as scan, \
+                mock.patch("django.db.migrations.executor.MigrationExecutor"
+                           ) as plan:
+            data = oculus(user=self.viewer)
+        scan.assert_not_called()
+        plan.assert_not_called()
+        cycles = {c["key"]: c for c in data["cycles"]}
+        for key in ("forge", "gates"):
+            self.assertTrue(cycles[key]["staff_only"], key)
+            self.assertEqual(cycles[key]["facts"], [], key)
+            self.assertFalse(cycles[key]["dead"], key)
+        for key, cycle in cycles.items():
+            self.assertEqual(cycle["gate"], [], f"{key} still carries a gate")
+        # Withheld is not unmeasured: neither cycle names itself below.
+        self.assertEqual([d for d in data["degraded"]
+                          if d.startswith(("forge", "gates"))], [])
+
+        with mock.patch("pathlib.Path.rglob", return_value=iter(())) as scan, \
+                mock.patch("django.db.migrations.executor.MigrationExecutor"
+                           ) as plan:
+            data = oculus(user=self.staff)
+        scan.assert_called()
+        plan.assert_called()
+        cycles = {c["key"]: c for c in data["cycles"]}
+        self.assertFalse(cycles["forge"].get("staff_only"))
+        self.assertTrue(cycles["forge"]["facts"])
+        self.assertTrue(cycles["gates"]["gate"])
+
+    def test_the_withheld_cycle_keeps_its_title_and_question(self):
+        """The header is the same whoever reads it: the panel a viewer
+        sees is the panel staff sees, minus the numbers — and its ways
+        out, which apply their own rule."""
+        mine = {c["key"]: c for c in oculus(user=self.viewer)["cycles"]}
+        theirs = {c["key"]: c for c in oculus(user=self.staff)["cycles"]}
+        for key in ("forge", "gates"):
+            self.assertEqual(mine[key]["title"], theirs[key]["title"])
+            self.assertEqual(mine[key]["question"], theirs[key]["question"])
+            self.assertEqual([p["name"] for p in mine[key]["pages"]],
+                             [p["name"] for p in theirs[key]["pages"]])
+            self.assertTrue(mine[key]["pages"])
+
+    def test_the_shell_is_the_operator(self):
+        """No user — a management command, a test — reads everything:
+        there is no viewer to withhold from."""
+        forge = next(c for c in oculus()["cycles"] if c["key"] == "forge")
+        self.assertFalse(forge.get("staff_only"))
+        self.assertTrue(forge["facts"])
+
+    def test_the_personalities_are_read_once_per_render(self):
+        """Seven facts read the wearing map, and each read was a scan of
+        every config on the platform."""
+        from unittest import mock
+        from bot_program.models import AssetBotConfig
+        with mock.patch.object(AssetBotConfig.objects, "values_list",
+                               wraps=AssetBotConfig.objects.values_list) as vl:
+            oculus()
+        self.assertEqual(vl.call_count, 1)

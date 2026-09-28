@@ -194,6 +194,23 @@ def manual_config_for(user, asset_class):
     return cfg
 
 
+def manual_config_if_any(user, asset_class):
+    """The per-user manual config for this class, or None — the READ side
+    of manual_config_for, for a page that only asks (2026-09-28).
+
+    A GET must not write. The instrument page's venue badge asked through
+    manual_config_for, and every first visit to an instrument of a class
+    inserted a config — enabled, paper, no symbols, the default capital —
+    the viewer never armed; it then counted on /personas/, in the Oculus
+    and on the backtest form, and its capital in the HQ totals. The POST
+    that trades or arms is the one that creates the lane.
+    """
+    from bot_program.models import AssetBotConfig
+
+    return AssetBotConfig.objects.filter(
+        user=user, asset_class=asset_class, name=MANUAL_CONFIG_NAME).first()
+
+
 def _config_error(cfg):
     """Why this config must not take a trade right now, or None."""
     if cfg.symbols:

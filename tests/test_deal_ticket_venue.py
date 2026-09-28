@@ -115,12 +115,46 @@ class TheBadgeNeverBreaksThePageTests(TestCase):
 
         _instrument("GLDM", "etf")
         _lane(self.user, "stock", "live")
-        with patch("bot_program.manual_trade.manual_config_for",
+        with patch("bot_program.manual_trade.manual_config_if_any",
                    side_effect=RuntimeError("boom")):
             r = self.client.get("/instruments/GLDM/")
         self.assertEqual(r.status_code, 200)
         # Degrades to the SAFE side: never claims live it could not confirm.
         self.assertNotIn("tk-venue--live", r.content.decode())
+
+
+class TheBadgeReadsAndNeverWritesTests(TestCase):
+    """A GET must not write. The badge asked through manual_config_for, a
+    get_or_create, so every first visit to an instrument of a class
+    inserted a 'manual' config — enabled, paper, no symbols, the default
+    capital — the viewer never armed; it then counted on /personas/, in
+    the Oculus and on the backtest form, and added its capital to the HQ
+    totals. The POST that trades is the one that creates the lane
+    (2026-09-28)."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("ticket_reader", password="x")
+        self.client = Client()
+        self.client.force_login(self.user)
+
+    def test_a_first_visit_creates_no_lane_and_reads_paper(self):
+        from bot_program.models import AssetBotConfig
+        _instrument("GBPJPY", "forex")
+        html = self.client.get("/instruments/GBPJPY/").content.decode()
+        self.assertEqual(AssetBotConfig.objects.count(), 0,
+                         "a page read created a bot config")
+        # The venue the POST would create it in, said as such.
+        self.assertIn("tk-venue--paper", html)
+        self.assertNotIn("tk-venue--live", html)
+
+    def test_a_viewer_with_a_lane_still_reads_it_and_gains_no_other(self):
+        from bot_program.models import AssetBotConfig
+        _instrument("GBPJPY", "forex")
+        _lane(self.user, "forex", "live")
+        self.assertEqual(AssetBotConfig.objects.count(), 1)
+        html = self.client.get("/instruments/GBPJPY/").content.decode()
+        self.assertIn("tk-venue--live", html)
+        self.assertEqual(AssetBotConfig.objects.count(), 1)
 
 
 class TheOtherIncludesAreUntouchedTests(SimpleTestCase):

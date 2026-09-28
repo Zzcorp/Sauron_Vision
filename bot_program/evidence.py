@@ -99,8 +99,14 @@ def shadow_agent_for(cfg) -> str:
     return f"bot:{name[:max(0, limit - len('bot:') - len(tail))]}{tail}"
 
 
-def config_rows() -> list:
-    """One row per AssetBotConfig: what it did, and what its shadow called."""
+def config_rows(user=None) -> list:
+    """One row per AssetBotConfig: what it did, and what its shadow called.
+
+    `user` narrows it to that user's configs — a config, its owner, its
+    booked P&L and its live R are one user's, and the page shows a login
+    that is not staff its own (2026-09-28). None is the platform: the
+    shell, and staff.
+    """
     from ai_agents.models import AgentPrediction
     from bot_program.asset_engine.safety import is_shadow
     from bot_program.capital_truth import (allocate_shares, followers_of,
@@ -109,8 +115,10 @@ def config_rows() -> list:
 
     plans: dict = {}
     rows = []
-    for cfg in (AssetBotConfig.objects.select_related("user")
-                .order_by("user__username", "asset_class", "name")):
+    configs = AssetBotConfig.objects.select_related("user")
+    if user is not None:
+        configs = configs.filter(user=user)
+    for cfg in configs.order_by("user__username", "asset_class", "name"):
         if cfg.user_id not in plans:
             try:
                 plans[cfg.user_id] = allocate_shares(
@@ -360,7 +368,7 @@ def _lane_sentence(label, lane, days) -> str:
             f"of them winners.")
 
 
-def persona_rows() -> list:
+def persona_rows(user=None) -> list:
     """One row per persona, over THAT persona's own grading window.
 
     [{key, label, purpose, holding, evidence_days, horizon_weight,
@@ -372,6 +380,10 @@ def persona_rows() -> list:
     each wearing config with its own live and paper record over the same
     window, so the page can show which of them the persona's number is
     actually made of.
+
+    `user` narrows the wearing configs, and so the record, to that user's
+    — the page's rule for a login that is not staff (2026-09-28). None is
+    the platform: the shell (`persona list`), and staff.
     """
     from datetime import timedelta
 
@@ -382,8 +394,10 @@ def persona_rows() -> list:
 
     now = timezone.now()
     wearing: dict = {k: [] for k in PERSONAS}
-    for cfg in (AssetBotConfig.objects.select_related("user")
-                .order_by("asset_class", "name")):
+    configs = AssetBotConfig.objects.select_related("user")
+    if user is not None:
+        configs = configs.filter(user=user)
+    for cfg in configs.order_by("asset_class", "name"):
         key = persona_of(cfg)
         if key in wearing:
             wearing[key].append(cfg)

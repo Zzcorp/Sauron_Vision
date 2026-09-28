@@ -782,6 +782,29 @@ class PersonasPageTests(TestCase):
         self.assertIn("worn", body)
         self.assertIn("has earned", body)
 
+    def test_a_login_that_is_not_staff_reads_its_own_configs_only(self):
+        """The wearing configs, their records and the unworn table are
+        one user's each — the rule every other bot page keeps, and the
+        one this page kept for its own matrix (_mix_matrix(request.user))
+        while listing every user's configs beside it (2026-09-28). Staff
+        reads the platform, as on /ops/."""
+        other = User.objects.create_user("page_other", password="x")
+        _cfg(other, name="their_worn", extras={"persona": "swing"})
+        _cfg(other, name="their_bare")
+        _cfg(self.user, name="my_worn", extras={"persona": "swing"})
+        _cfg(self.user, name="my_bare")
+        self.client.force_login(self.user)
+        body = self.client.get(self.url).content.decode()
+        for name in ("my_worn", "my_bare"):
+            self.assertIn(name, body)
+        for name in ("their_worn", "their_bare"):
+            self.assertNotIn(name, body)
+        self.assertNotIn("page_other", body)
+        self.client.force_login(self.admin)
+        body = self.client.get(self.url).content.decode()
+        for name in ("my_worn", "my_bare", "their_worn", "their_bare"):
+            self.assertIn(name, body)
+
     def test_an_unmeasured_lane_renders_a_dash_and_not_a_zero(self):
         """The old assertion here looked for '&mdash;' ANYWHERE in the
         body — and the page's own 'How to read this page' card prints

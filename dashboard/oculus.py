@@ -51,6 +51,8 @@ from django.db.models import Count, Q
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 
+from .views_ops import STAFF_ONLY
+
 logger = logging.getLogger(__name__)
 
 #: Days of history in the evolution strips.
@@ -58,6 +60,17 @@ WINDOW_DAYS = 30
 
 #: A fact whose builder failed, or whose table holds nothing to measure.
 UNMEASURED = None
+
+#: The cycles a login that is not staff reads as a header and the
+#: STAFF_ONLY caveat, never as numbers (2026-09-28). /health/'s rule, as
+#: the cockpit applies it to its switches and queues (views_ops): THE
+#: SWITCHES are every component's state, which /ops/ and /health/ keep
+#: from any other login; THE FORGE is the image's sha, the migrations not
+#: applied on this database, and a read of every guarded_task in the
+#: source tree — the page's two costly reads, which are not made for a
+#: reader who may not see the answer. The gate chips on every other
+#: panel are switch states too, and go the same way (see oculus()).
+STAFF_ONLY_CYCLES = ("forge", "gates")
 
 #: WHERE EACH CYCLE IS ANSWERED IN FULL (2026-09-13).
 #:
@@ -228,6 +241,20 @@ def _gate(*keys):
     return out
 
 
+def _withheld(key, title, question):
+    """A STAFF_ONLY_CYCLES panel, for a login that is not staff.
+
+    The panel stays — a vanished panel reads as "there is no such cycle",
+    the lie of omission this page refuses — with its title, its question
+    and its ways out, which apply their own rule. Its builder is not run:
+    nothing is counted, scanned or planned for a reader who does not get
+    the count.
+    """
+    return {"key": key, "title": title, "question": question, "gate": [],
+            "facts": [], "caveat": STAFF_ONLY, "series": [],
+            "staff_only": True}
+
+
 # ── the cycles ──────────────────────────────────────────────────────────
 
 def _venue_facts(user, venue):
@@ -328,7 +355,9 @@ def _cycle_book(user):
     }
 
 
-def _cycle_gates():
+def _cycle_gates(staff=True):
+    if not staff:
+        return _withheld("gates", 'The switches', 'What is allowed to run?')
     from core.platform_control import PlatformComponent
 
     def _on():
@@ -509,15 +538,25 @@ def _cycle_personas():
     from bot_program import personas
     from bot_program.models import AssetBotConfig
 
+    wearing = []   # the map, once read: seven facts ask for it
+
     def _wearing_map():
-        """The Python bucket persona_mix._wearing uses — never a JSON query."""
+        """The Python bucket persona_mix._wearing uses — never a JSON query.
+
+        Read ONCE per render: seven facts ask for it and each read was a
+        scan of every config on the platform (2026-09-28). A read that
+        fails memoises nothing, so the next fact asks again inside its
+        own fence."""
         from types import SimpleNamespace
+        if wearing:
+            return wearing[0]
         out = {}
         for pk, extras, enabled in AssetBotConfig.objects.values_list(
                 "pk", "extras", "enabled"):
             key = personas.persona_of(SimpleNamespace(extras=extras or {}))
             if key:
                 out.setdefault(key, []).append((pk, enabled))
+        wearing.append(out)
         return out
 
     def _count_for(key, only_enabled=False):
@@ -757,7 +796,7 @@ def _cycle_trust():
     }
 
 
-def _cycle_forge():
+def _cycle_forge(staff=True):
     """THE FORGE — the state of the code that is running, not of the market.
 
     Every other cycle answers a question about trading. This one answers
@@ -777,7 +816,16 @@ def _cycle_forge():
     approves it from this page is the next brick; a table of proposals
     that do not exist yet would be a panel of em dashes pretending to be
     a feature.
+
+    Staff's, like the switches (STAFF_ONLY_CYCLES): the sha and the
+    pending migrations are what /ops/ and /health/ keep from any other
+    login, and the guard scan reads every .py file of the image — the
+    page's one costly read, made only for the reader who gets its answer.
     """
+    if not staff:
+        return _withheld("forge", 'The forge',
+                         'Which code is this platform running, and is it '
+                         'the code that was written?')
     from core.build_stamp import stamp
 
     st = stamp()
@@ -818,7 +866,10 @@ def _cycle_forge():
         declared = {c["key"] for c in DEFAULT_COMPONENTS}
         skip = {".git", ".venv", "venv", "__pycache__", "staticfiles",
                 "static", "node_modules", ".pytest_cache", "test_backups",
-                "migrations"}
+                "migrations",
+                # the agents' worktrees: whole copies of this tree, on a
+                # dev checkout only (.dockerignore drops them)
+                ".claude"}
         pattern = re.compile(r"""guarded_task\(\s*["']([A-Za-z0-9_]+)["']""")
         root = Path(settings.BASE_DIR)
         used = set()
@@ -909,7 +960,17 @@ def oculus(user=None) -> dict:
     is entirely platform-wide, which is what an anonymous or system
     caller should get: a book pooled across users would be a number
     nobody could act on.
+
+    `user` also decides what may be read (2026-09-28). /health/'s rule,
+    as the cockpit applies it (views_ops.ops_dashboard: is_staff or
+    is_superuser): the switches and the forge are staff's, and so are
+    the gate chips on every panel, which are switch states. Any other
+    login gets those two cycles as a header and the STAFF_ONLY caveat,
+    and no chip. No user is the shell, which is the operator: it reads
+    everything.
     """
+    staff = user is None or bool(getattr(user, "is_staff", False)
+                                 or getattr(user, "is_superuser", False))
     cycles, degraded = [], []
     builders = list(BUILDERS)
     if user is not None and getattr(user, "is_authenticated", False):
@@ -918,14 +979,18 @@ def oculus(user=None) -> dict:
         name = getattr(builder, "__name__", "_cycle_book")
         if name == "<lambda>":
             name = "_cycle_book"
+        key = name.replace("_cycle_", "")
         try:
-            cycle = builder()
+            if not staff and key in STAFF_ONLY_CYCLES:
+                cycle = builder(staff=False)
+            else:
+                cycle = builder()
         except Exception as exc:  # noqa: BLE001
             logger.warning("oculus: cycle %s failed (%s)", name, exc)
             degraded.append(name)
             cycles.append({
-                "key": name.replace("_cycle_", ""),
-                "title": name.replace("_cycle_", "").title(),
+                "key": key,
+                "title": key.title(),
                 "question": "",
                 "gate": [],
                 "facts": [],
@@ -936,6 +1001,12 @@ def oculus(user=None) -> dict:
             })
             continue
         cycle.setdefault("dead", False)
+        cycle.setdefault("staff_only", False)
+        if not staff:
+            # The chips are switch states, every one of them staff's;
+            # the panel says so in their place.
+            cycle["gate"] = []
+            cycle["gate_withheld"] = True
         # The spark's own scale. Each strip is scaled to ITSELF, never to
         # the busiest cycle on the page: one shared axis would flatten
         # every slow cycle into a line of nothing and read as "dead" when
