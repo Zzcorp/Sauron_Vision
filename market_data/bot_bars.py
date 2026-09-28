@@ -144,6 +144,24 @@ def _venue_symbol(client, symbol: str) -> str:
     return venue_symbol(symbol)
 
 
+def _source_tag(client) -> str:
+    """The provenance a client's bars are written under.
+
+    One feed, one spelling. The scheduled path stripped "Trader" and
+    "Client" from the class name but not "Feed", so the same Yahoo feed
+    wrote `yfinancefeed_public` for a config with no broker and
+    `yfinance_public` from the fallback and from backfill_bars — and an
+    audit of the keyless rows by either spelling missed the other half.
+    """
+    name = type(client).__name__
+    for word in ("Trader", "Client", "Feed"):
+        name = name.replace(word, "")
+    tag = name.lower() or "broker"
+    if getattr(client, "_sv_public_feed", False):
+        tag += "_public"
+    return tag
+
+
 def _upsert_rows(inst, interval, rows, source) -> tuple[int, int]:
     """Persist Binance-style kline rows. Returns (written, skipped)."""
     from market_data.models import PriceData
@@ -204,10 +222,7 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
             out["no_client"] += 1
             continue
 
-        source = type(client).__name__.replace("Trader", "").replace(
-            "Client", "").lower() or "broker"
-        if getattr(client, "_sv_public_feed", False):
-            source += "_public"
+        source = _source_tag(client)
         out["symbols"] += 1
         fetch_symbol = _venue_symbol(client, symbol)
         for interval in intervals:
@@ -248,6 +263,26 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                                        "instead, and not asked again for "
                                        "%dh", symbol, interval, source,
                                        MUTE_VENUE_MEMO_S // 3600)
+                    # THE STAND-IN FILLS THE GAP, NOT THE HISTORY. Yahoo's
+                    # 4h grid is anchored at exchange midnight and a
+                    # venue's at its own session close (OANDA: 17:00 New
+                    # York), so the two never share a timestamp, and a
+                    # stand-in written across the venue's window sat
+                    # BESIDE its bars: one series at twice the density,
+                    # read by every ATR stop and IPDA range on the pair.
+                    # Only the bars after the venue's newest are written.
+                    rows = _after_the_venues_last_bar(inst, interval, rows)
+            elif rows and not getattr(client, "_sv_public_feed", False):
+                # THE VENUE ANSWERED: ITS WINDOW IS ITS OWN. The stand-in
+                # rows from the venue's oldest returned bar onward go, so
+                # the window it covers holds one grid — the venue's.
+                # History behind that window (a backfilled year) stays.
+                evicted = _evict_stand_in_rows(inst, interval, rows)
+                if evicted:
+                    logger.info("[bars] %s %s: %s answered — %d public-feed "
+                                "stand-in bars in its window gave way to "
+                                "the venue's", symbol, interval, source,
+                                evicted)
             written, skipped = _upsert_rows(inst, interval, rows, row_source)
             out["bars"] += written
             out["skipped"] += skipped
@@ -267,9 +302,51 @@ def _fallback_rows(cfg, symbol, interval, limit) -> "tuple[list, str]":
         logger.warning("[bars] public feed klines(%s, %s) failed: %s",
                        symbol, interval, e)
         return [], ""
-    tag = (type(feed).__name__.replace("Feed", "").replace("Client", "")
-           .lower() or "public") + "_public"
-    return rows, tag
+    return rows, _source_tag(feed)
+
+
+def _after_the_venues_last_bar(inst, interval, rows) -> list:
+    """The stand-in's rows newer than the venue's newest bar — all of them
+    when no venue has ever written this frame."""
+    from market_data.models import PriceData
+
+    last = (PriceData.objects
+            .filter(instrument=inst, timeframe=interval)
+            .exclude(source__endswith="_public")
+            .order_by("-timestamp")
+            .values_list("timestamp", flat=True).first())
+    if last is None:
+        return rows
+    last_ms = int(last.timestamp() * 1000)
+    kept = []
+    for row in rows:
+        try:
+            if int(row[0]) > last_ms:
+                kept.append(row)
+        except (TypeError, ValueError, IndexError):
+            kept.append(row)        # _upsert_rows counts it as skipped
+    return kept
+
+
+def _evict_stand_in_rows(inst, interval, rows) -> int:
+    """Delete the public feed's rows from the venue's oldest returned bar
+    onward. Returns how many went."""
+    from market_data.models import PriceData
+
+    stamps = []
+    for row in rows:
+        try:
+            stamps.append(int(row[0]))
+        except (TypeError, ValueError, IndexError):
+            continue
+    if not stamps:
+        return 0
+    since = datetime.fromtimestamp(min(stamps) / 1000, tz=dt_tz.utc)
+    deleted, _ = (PriceData.objects
+                  .filter(instrument=inst, timeframe=interval,
+                          timestamp__gte=since, source__endswith="_public")
+                  .delete())
+    return deleted
 
 
 # Starred instruments beyond the fleet get bars too, capped per pass —
@@ -322,10 +399,7 @@ def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
             out["no_client"] += 1
             continue
         fetch_symbol = _venue_symbol(client, inst.symbol)
-        source = type(client).__name__.replace("Trader", "").replace(
-            "Client", "").lower() or "broker"
-        if getattr(client, "_sv_public_feed", False):
-            source += "_public"
+        source = _source_tag(client)
         out["symbols"] += 1
         for interval in intervals:
             try:
@@ -339,6 +413,10 @@ def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
             written, skipped = _upsert_rows(inst, interval, rows, source)
             out["bars"] += written
             out["skipped"] += skipped
+        # The same breath as the config pass: this pass runs straight
+        # after it, on the same keyless feed, for up to thirty more.
+        if getattr(client, "_sv_public_feed", False) is True:
+            _pace()
     return out
 
 
@@ -348,7 +426,7 @@ def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dic
     from bot_program.models import AssetBotConfig
 
     totals = {"configs": 0, "symbols": 0, "bars": 0, "skipped": 0, "errors": 0,
-              "no_client": 0}
+              "no_client": 0, "fallback": 0}
     covered: set = set()
     for cfg in (AssetBotConfig.objects.filter(enabled=True)
                 .select_related("user")):
@@ -360,13 +438,15 @@ def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dic
             logger.exception("[bars] config %s failed: %s", cfg.id, e)
             totals["errors"] += 1
             continue
-        for k in ("symbols", "bars", "skipped", "errors", "no_client"):
+        for k in ("symbols", "bars", "skipped", "errors", "no_client",
+                  "fallback"):
             totals[k] += res.get(k, 0)
 
     try:
         wl = refresh_watchlist_bars(intervals=intervals, limit=limit,
                                     covered=covered)
-        for k in ("symbols", "bars", "skipped", "errors", "no_client"):
+        for k in ("symbols", "bars", "skipped", "errors", "no_client",
+                  "fallback"):
             totals[k] += wl.get(k, 0)
     except Exception as e:
         logger.exception("[bars] watchlist pass failed: %s", e)

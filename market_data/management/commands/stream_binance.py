@@ -40,6 +40,43 @@ BINANCE_QUOTE_ASSETS = ("USDT", "BUSD", "USDC", "BTC")
 # write_quote needs an Instrument row — so falling back here is logged.
 DEFAULT_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
 
+#: After the first, one failure report per this many — the futures
+#: sibling's cadence. A feed broken for an hour must not hide, and must
+#: not fill the disk either.
+FAILURE_REPORT_EVERY = 100
+
+#: What this process has DONE. Module-level on purpose: one streamer per
+#: container, and the numbers outlive every reconnection.
+STATS = {"quotes_written": 0, "quotes_failed": 0}
+
+#: `asyncio.create_task` returns a task the event loop only weakly holds.
+#: Dropping it permits collection before the coroutine runs and discards
+#: any exception it raises. Own it until it is done.
+_PENDING: set = set()
+
+
+def _fire(coro):
+    """Run `coro` in the background, keeping the task alive until it ends."""
+    task = asyncio.create_task(coro)
+    _PENDING.add(task)
+    task.add_done_callback(_PENDING.discard)
+    return task
+
+
+def _report_failure(where: str, symbol: str, exc: Exception, count: int):
+    """The first failure is loud. The hundredth is a footnote.
+
+    This was a `log.debug`, which in production is not a volume choice but
+    a deletion: the root logger sits at WARNING when DEBUG is off, so a
+    stream whose every LiveQuote write failed looked exactly like a healthy
+    one while the inline broadcast kept the headband animating from the
+    same ticks. The futures sibling learned this on 2026-09-14
+    (stream_binance_futures); this is the same fix.
+    """
+    if count == 1 or count % FAILURE_REPORT_EVERY == 0:
+        log.warning("spot: %s failed for %s (failure #%d) — %s: %s",
+                    where, symbol or "?", count, type(exc).__name__, exc)
+
 
 def binance_symbols(catalogue_symbols, quote_assets=BINANCE_QUOTE_ASSETS) -> list[str]:
     """Catalogue spelling -> Binance stream spelling.
@@ -121,17 +158,24 @@ def discover_symbols(override: list[str] | None) -> list[str]:
 
 @sync_to_async
 def update_live_quote(symbol: str, last: float, change_pct: float,
-                      bid: float, ask: float, volume: float):
+                      bid: float, ask: float, volume: float) -> bool:
+    """True when the quote was written."""
     from market_data.quotes import write_quote
     try:
         # Binance streams BTCUSDT while the Instrument row is BTCUSD, so a
         # direct symbol match silently dropped every tick. write_quote()
         # resolves the equivalent symbol and applies source precedence.
-        write_quote(symbol, last=last, source="binance_ws",
-                    change_pct=change_pct, bid=bid or None, ask=ask or None,
-                    volume=volume or 0)
+        written = write_quote(symbol, last=last, source="binance_ws",
+                              change_pct=change_pct, bid=bid or None,
+                              ask=ask or None, volume=volume or 0)
     except Exception as e:
-        log.debug("update_live_quote(%s) failed: %s", symbol, e)
+        STATS["quotes_failed"] += 1
+        _report_failure("update_live_quote", symbol, e,
+                        STATS["quotes_failed"])
+        return False
+    if written:
+        STATS["quotes_written"] += 1
+    return bool(written)
 
 
 async def broadcast(symbol: str, last: float, change_pct: float,
@@ -171,6 +215,8 @@ async def run(override_symbols: list[str] | None):
         log.error("The 'websockets' package is required. Install with: pip install websockets")
         return
 
+    from market_data.management.commands.backfill_bars import catalogue_symbol
+
     backoff = 1
     current_task: asyncio.Task | None = None
     current_symbols: list[str] = []
@@ -187,7 +233,12 @@ async def run(override_symbols: list[str] | None):
                     try:
                         msg = json.loads(raw)
                         d = msg.get("data") or msg
-                        sym = (d.get("s") or "").upper()
+                        # The rename Binance made (POLUSDT is the
+                        # catalogue's MATICUSD) is undone here, on the way
+                        # in: neither write_quote's resolution nor the
+                        # headband's dhSym can guess it, while both turn
+                        # BTCUSDT into BTCUSD on their own.
+                        sym = catalogue_symbol((d.get("s") or "").upper())
                         if not sym:
                             continue
                         last = float(d.get("c") or 0)           # last price
@@ -195,10 +246,10 @@ async def run(override_symbols: list[str] | None):
                         bid = float(d.get("b") or 0)
                         ask = float(d.get("a") or 0)
                         volume = float(d.get("v") or 0)         # base volume 24h
-                        # Fire and forget DB write; broadcast inline.
-                        asyncio.create_task(
-                            update_live_quote(sym, last, change_pct, bid, ask, volume)
-                        )
+                        # DB write in the background, owned until it
+                        # finishes; broadcast inline.
+                        _fire(update_live_quote(sym, last, change_pct, bid,
+                                                ask, volume))
                         await broadcast(sym, last, change_pct, bid, ask, volume)
                     except Exception as e:
                         log.debug("tick parse failed: %s", e)

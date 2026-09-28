@@ -201,6 +201,10 @@ class AHeldManualPairGetsBarsTests(TestCase):
         self.starred = [f"AAA{i:02d}" for i in range(30)]
         for sym in self.starred:
             _instrument(sym, "stock")
+        # Thirty-one keyless symbols would each breathe PUBLIC_FEED_PACE_S.
+        pacer = mock.patch("market_data.bot_bars._pace")
+        pacer.start()
+        self.addCleanup(pacer.stop)
         AssetBotTrade.objects.create(
             config=cfg, asset_class="forex", symbol="USDCHF", side="BUY",
             qty=Decimal("1000"), entry_price=Decimal("0.8116"),

@@ -160,3 +160,139 @@ class TheMuteVenueTests(TestCase):
         cache.clear()                       # the window passed
         self._refresh(venue, feed)
         self.assertEqual(venue.klines.call_count, 2)
+
+    def _rows(self):
+        from market_data.models import PriceData
+        return sorted(PriceData.objects.filter(instrument=self.inst)
+                      .values_list("timestamp", "source"))
+
+    def test_the_stand_in_fills_the_gap_after_the_venues_last_bar(self):
+        """Yahoo's 4h grid is anchored at exchange midnight and an execution
+        venue's at its own session close, so the two never share a
+        timestamp: side by side they read as ONE series at twice the
+        density, and every ATR and IPDA range on the pair is measured on
+        it. The stand-in covers only what the venue has not."""
+        two_hours = 2 * 3_600_000
+        feed = YFinanceFeed(_klines(4, start_ms=1_756_000_000_000 + two_hours))
+        self._refresh(self._venue(rows=_klines(3)), feed)     # S, S+4h, S+8h
+        out, _ = self._refresh(self._venue(rows=[]), feed)    # mute; S+2h.. on offer
+        self.assertEqual(out["fallback"], 1)
+        venue_ts = [ts for ts, src in self._rows() if src != "yfinance_public"]
+        public_ts = [ts for ts, src in self._rows() if src == "yfinance_public"]
+        self.assertEqual(len(venue_ts), 3)
+        self.assertTrue(public_ts,
+                        "the gap after the venue's last bar was not filled")
+        self.assertGreater(min(public_ts), max(venue_ts))
+
+    def test_a_venue_that_answers_again_takes_its_window_back(self):
+        """Once the memo expires and the venue answers, its bars are the
+        truth for the window they cover: the stand-in's rows from that
+        window onward go, so the bot reads one grid, not two interleaved."""
+        from django.core.cache import cache
+        two_hours = 2 * 3_600_000
+        feed = YFinanceFeed(_klines(3, start_ms=1_756_000_000_000 + two_hours))
+        self._refresh(self._venue(rows=[]), feed)             # S+2h, S+6h, S+10h
+        self.assertEqual(set(self._written()), {"yfinance_public"})
+        cache.clear()                                         # the window passed
+        out, _ = self._refresh(self._venue(rows=_klines(3)), feed)   # S, S+4h, S+8h
+        self.assertEqual(out["fallback"], 0)
+        self.assertEqual([src for _ts, src in self._rows()], ["magicmock"] * 3)
+
+    def test_history_before_the_venues_window_is_left_alone(self):
+        """A year of backfilled Yahoo bars behind the venue's 200 is what
+        the long-window rules read: taking the window back means the
+        window, not the table."""
+        from datetime import datetime, timezone as dt_tz
+
+        from market_data.models import PriceData
+        old = datetime.fromtimestamp((1_756_000_000_000 - 40 * 3_600_000) / 1000,
+                                     tz=dt_tz.utc)
+        PriceData.objects.create(
+            instrument=self.inst, timeframe="4h", timestamp=old, open=1,
+            high=1, low=1, close=1, volume=0, source="yfinance_public")
+        self._refresh(self._venue(rows=_klines(3)), YFinanceFeed([]))
+        self.assertIn((old, "yfinance_public"), self._rows())
+
+
+class OneTagForTheKeylessFeedTests(TestCase):
+    """The provenance column is worth reading only if one feed has one name.
+
+    The scheduled path stripped "Trader" and "Client" from the class name
+    but not "Feed", so the same Yahoo feed wrote `yfinancefeed_public` for
+    a config with no broker and `yfinance_public` from the fallback and
+    from backfill_bars: an audit of the keyless rows by either spelling
+    missed the other half.
+    """
+
+    def setUp(self):
+        from bot_program.models import AssetBotConfig
+        from instruments.models import Instrument
+        self.user = User.objects.create_user("tag_u", password="x")
+        self.inst, _ = Instrument.objects.get_or_create(
+            symbol="EURUSD", defaults={"name": "EURUSD",
+                                       "asset_class": "forex"})
+        self.cfg = AssetBotConfig.objects.create(
+            user=self.user, asset_class="forex", name="TAG", mode="paper",
+            symbols=["EURUSD"], capital=Decimal("150"), enabled=True)
+
+    def _sources(self, inst):
+        from market_data.models import PriceData
+        return set(PriceData.objects.filter(instrument=inst)
+                   .values_list("source", flat=True))
+
+    def test_the_scheduled_path_spells_it_as_the_fallback_does(self):
+        from market_data.bot_bars import refresh_bars_for_config
+        with patch("market_data.bot_bars._client_for",
+                   return_value=YFinanceFeed(_klines(3))), \
+                patch("market_data.bot_bars._pace"):
+            refresh_bars_for_config(self.cfg, intervals=("4h",), limit=3)
+        self.assertEqual(self._sources(self.inst), {"yfinance_public"})
+
+    def test_the_watchlist_path_spells_it_the_same(self):
+        from instruments.models import Instrument
+        from market_data.bot_bars import refresh_watchlist_bars
+        star, _ = Instrument.objects.get_or_create(
+            symbol="GBPUSD", defaults={"name": "GBPUSD",
+                                       "asset_class": "forex"})
+        Instrument.objects.filter(pk=star.pk).update(is_watchlist=True,
+                                                     is_active=True)
+        with patch("market_data.public_feed.public_feed_for",
+                   return_value=YFinanceFeed(_klines(3))), \
+                patch("market_data.bot_bars._pace"):
+            refresh_watchlist_bars(intervals=("4h",), limit=3)
+        self.assertEqual(self._sources(star), {"yfinance_public"})
+
+
+class TheRefreshTotalsCountTheFallbackTests(TestCase):
+    """`refresh_bars_for_config` counted the fallback; `refresh_bot_bars`
+    summed every key but that one, so the pass-level "[bars] refresh
+    complete" line the operator reads — and the task's return — said
+    bars=N with no word that none of them came from the venue."""
+
+    def setUp(self):
+        from django.core.cache import cache
+
+        from bot_program.models import AssetBotConfig
+        from instruments.models import Instrument
+        cache.clear()
+        self.user = User.objects.create_user("totals_u", password="x")
+        Instrument.objects.get_or_create(
+            symbol="EURUSD", defaults={"name": "EURUSD",
+                                       "asset_class": "forex"})
+        AssetBotConfig.objects.create(
+            user=self.user, asset_class="forex", name="TOTALS", mode="live",
+            symbols=["EURUSD"], capital=Decimal("150"), enabled=True)
+
+    def test_the_totals_and_the_log_line_carry_the_fallback(self):
+        from market_data.bot_bars import refresh_bot_bars
+        venue = MagicMock()
+        venue._sv_public_feed = False
+        venue.klines.return_value = []
+        with patch("market_data.bot_bars._client_for", return_value=venue), \
+                patch("market_data.bot_bars._public_market_data_client",
+                      return_value=YFinanceFeed(_klines(3))), \
+                self.assertLogs("market_data.bot_bars", level="INFO") as logs:
+            totals = refresh_bot_bars(intervals=("4h",), limit=3)
+        self.assertEqual(totals["fallback"], 1)
+        line = next(x for x in logs.output if "refresh complete" in x)
+        self.assertIn("'fallback': 1", line)

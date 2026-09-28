@@ -63,6 +63,7 @@ INTERVAL_MINUTES = {
 # September 2024 and MATICUSDT stopped answering; the fleet-wide backfill
 # of 2026-09-10 got zero pages for it.
 BINANCE_RENAMES = {"MATICUSD": "POLUSDT"}
+_CATALOGUE_SPELLING = {venue: ours for ours, venue in BINANCE_RENAMES.items()}
 
 
 def venue_symbol(symbol: str) -> str:
@@ -80,6 +81,20 @@ def venue_symbol(symbol: str) -> str:
     if s.endswith("USD"):
         return s[:-3] + "USDT"
     return s
+
+
+def catalogue_symbol(symbol: str) -> str:
+    """Binance spelling -> platform spelling, for the pairs Binance renamed.
+
+    The reverse of `venue_symbol` for BINANCE_RENAMES only; the stablecoin
+    suffix stays the business of `market_data.quotes` (BTCUSDT resolves to
+    BTCUSD there). Nothing can infer that POLUSDT is the catalogue's
+    MATICUSD, so a tick that arrived under the venue's spelling resolved
+    to no instrument and was dropped, and the headband's MATICUSD card
+    never saw the stream that ticked for it every second.
+    """
+    s = (symbol or "").upper()
+    return _CATALOGUE_SPELLING.get(s, s)
 
 
 class Command(BaseCommand):

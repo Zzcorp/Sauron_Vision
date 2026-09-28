@@ -163,3 +163,23 @@ class TheWriterBreathesTests(TestCase):
                 patch("market_data.bot_bars._pace") as pace:
             refresh_bars_for_config(cfg, intervals=("4h",), limit=3)
         pace.assert_not_called()
+
+    def test_the_watchlist_pass_breathes_too(self):
+        """Every client on the watchlist pass is keyless by construction —
+        the held book plus up to thirty starred symbols, straight after
+        the config pass — and it never breathed between them."""
+        from instruments.models import Instrument
+        from market_data.bot_bars import refresh_watchlist_bars
+        for s in ("AAPL", "MSFT", "NVDA"):
+            inst, _ = Instrument.objects.get_or_create(
+                symbol=s, defaults={"name": s, "asset_class": "stock"})
+            Instrument.objects.filter(pk=inst.pk).update(is_watchlist=True,
+                                                         is_active=True)
+        client = MagicMock()
+        client._sv_public_feed = True
+        client.klines.return_value = []
+        with patch("market_data.public_feed.public_feed_for",
+                   return_value=client), \
+                patch("market_data.bot_bars._pace") as pace:
+            refresh_watchlist_bars(intervals=("4h",), limit=3)
+        self.assertEqual(pace.call_count, 3)
