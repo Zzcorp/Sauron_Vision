@@ -362,12 +362,20 @@ class StopAllTests(_ChatCase):
 
 class HandleTests(_ChatCase):
     def test_only_the_alarm_chat_is_obeyed(self):
-        for update in (_update(1, "/stopall", chat=EYE_GROUP),
-                       _update(2, "/status", chat="-5337454557"),
-                       _update(3, "/stopall", chat="111", chat_type="private")):
-            verdict, said = self.said(update)
-            self.assertEqual((verdict, said), ("unauthorised", []))
-        verdict, said = self.said(_chat(4, "/status"))
+        """No reply, and nothing changed: a bot running stays running,
+        and the brake is not even called."""
+        cfg = _cfg(self.user)
+        with patch.object(eye, "apply_brake") as brake:
+            for update in (_update(1, "/stopall", chat=EYE_GROUP),
+                           _update(2, "/status", chat="-5337454557"),
+                           _update(3, "/stopall", chat="111",
+                                   chat_type="private")):
+                verdict, said = self.said(update)
+                self.assertEqual((verdict, said), ("unauthorised", []))
+            verdict, said = self.said(_chat(4, "/status"))
+        brake.assert_not_called()
+        cfg.refresh_from_db()
+        self.assertTrue(cfg.enabled)
         self.assertEqual(verdict, "answered:status")
         self.assertEqual(len(said), 1)
 
@@ -570,8 +578,10 @@ class PollTests(_ChatCase):
         self.assertEqual(eye._last_handled(TOKEN), 700)
 
     def test_another_chat_is_confirmed_and_ignored(self):
+        cfg = _cfg(self.user)
         fake = FakeTelegram([_update(610, "/stopall", chat=EYE_GROUP)])
         with patch("requests.get", side_effect=fake.get), \
+                patch.object(eye, "apply_brake") as brake, \
                 self.assertLogs("bot_program.alarm", level="INFO") as logs:
             out, said = self.polled()
         self.assertEqual(out, {"status": "success", "updates": 1,
@@ -581,6 +591,10 @@ class PollTests(_ChatCase):
         self.assertTrue(any(f"ignored chat {EYE_GROUP}" in ln
                             for ln in logs.output))
         self.assertFalse(any("/stopall" in ln for ln in logs.output))
+        # the brake was not called, and the bot still runs
+        brake.assert_not_called()
+        cfg.refresh_from_db()
+        self.assertTrue(cfg.enabled)
 
     def test_the_token_never_reaches_the_log(self):
         boom = requests.ConnectionError(

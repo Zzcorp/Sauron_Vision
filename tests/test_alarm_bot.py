@@ -79,26 +79,58 @@ SNAKE = re.compile(r"\b[a-z]+_[a-z0-9_]+\b")
 ACCENTED = re.compile(r"[À-ÖØ-öø-ÿŒœ]")
 FRENCH = (" le ", " la ", " les ", " des ", " est ", " pas ", " une ",
           " du ", " et ")
-#: THE MONEY TRIPWIRE: a currency sign or code beside a digit, an amount
-#: with two decimals, or a money word followed by a number. Run over the
-#: plain text of every message the module can produce.
+#: THE MONEY TRIPWIRE: a currency sign or code beside a digit (before or
+#: after it), a number with a decimal part of any length (a forex mark
+#: has four or five, a stock two, an index one), a bare percentage, or a
+#: money word followed by a number. Run over the plain text of every
+#: message the module can produce. Counts, row numbers, "#14", times
+#: ("22:42", "3 h") and "+6 more" carry no decimal point and no sign.
 MONEY = re.compile(
     r"[$€£¥]\s?\d"
+    r"|\d\s?[$€£¥]"
     r"|\d\s?(?:USD|EUR|GBP|CHF|JPY|CAD|AUD|USDT)\b"
     r"|\b(?:USD|EUR|GBP|CHF|JPY|CAD|AUD|USDT)\s?\d"
-    r"|\d[\d,]*\.\d{2}\b"
-    r"|\d\s?%\s?of\s(?:equity|capital|margin)"
+    r"|\d[\d,]*\.\d+\b"
+    r"|[-+−]?\d+(?:\.\d+)?\s?%"
     r"|\b(?:P&L|PnL|equity|margin|balance|cash|capital|price|prices|profit"
     r"|loss|drawdown)\b\s*(?:[:=]|of|at|is|was|used|left)?\s*[-+−]?\d",
     re.IGNORECASE)
-#: What Morgul's G6 and G7 facts carry: none of it may reach the chat.
+#: What Morgul's G6, G7 and G4 facts carry: none of it may reach the chat.
 MONEY_FACTS = ["Used margin: 60.00 USD", "Equity: 100.00 EUR",
                "Pledged: 60% of equity; the limit is 50%, the alarm 55%",
                "Realized live P&L, last 24 h: -900.00 USD",
-               "Daily stop used: 2.0% of 10,000.00 USD = 200.00 USD"]
+               "Daily stop used: 2.0% of 10,000.00 USD = 200.00 USD",
+               "EURUSD at 1.13716, the mark 1.13702: -3.2% on the day",
+               "Balance: 84.8 EUR, of which 12€ pledged"]
 LEAKS = ("60.00", "100.00", "900.00", "10,000", "200.00", "1,234", "12,345",
-         "12345", "336.", "326.", "180.55", "1.0850", "Used margin",
+         "12345", "336.", "326.", "180.55", "1.0850", "1.0790", "1.13716",
+         "1.13702", "1.13200", "84.8", "3.2%", "12€", "Used margin",
          "Equity", "P&L", "Pledged", "27h", "below the floor")
+#: Every shape of an amount this platform prints (telegram_eye.money,
+#: price, percent; the brokers' own strings): the tripwire must see each.
+MONEY_SHAPES = ("1.13716", "EURUSD at 1.13716", "stop 1.0790", "336.1",
+                "84.8", "1,234.50", "-3.2%", "+0.4 %", "60%", "12€", "12 €",
+                "$12", "12 USD", "USD 12", "12 USDT", "P&L -900",
+                "P&L: 12", "equity 84.8", "margin: 60", "balance is 1,234",
+                "cash left 12", "capital of 10,000.00 USD", "price 336",
+                "prices at 1.2", "profit +3", "loss -84.80 USD",
+                "drawdown 4")
+#: What the replies are made of: counts, numbers of rows, times, ages.
+BENIGN_SHAPES = ("Bots running: 3 (1 live)", "Open positions: 2 (1 live)",
+                 "Orders waiting at the broker: 1", "Stopped (24)",
+                 "Account #2", "EURUSD #12", "#14", "MSFT long #9 · live",
+                 "Checked: 2026-09-28 22:42 UTC", "22:42", "3 h",
+                 "(11 min ago)", "last ran 12 min ago", "every 15 minutes",
+                 "+6 more on the platform", "+1,234 more on the platform",
+                 "Bots turned off: 3", "Close errors: 1",
+                 "Critical problems now: 14",
+                 "the scheduler seems stopped: 5 safety-critical tasks "
+                 "have not run", "the daily loss is past the stop",
+                 "the margin pledged is past the limit",
+                 "Guards: 2 critical findings — Daily loss, Margin (last "
+                 "ran 12 min ago)", "Live bots of account #3 · USD",
+                 "has not answered 4 syncs in a row",
+                 "Sent: 2026-09-28 11:00 UTC (11 min ago)")
 
 
 def _ok(*_args, **_kwargs):
@@ -468,6 +500,8 @@ class MoneyTripwireTests(_AlarmCase):
         _trade(live, "NVDA", entry="180.55", stop="170.25", paper=False,
                metadata={"entry_working": True, "protected": False})
         _trade(paper, "EURUSD", entry="1.0850", stop="1.0790")
+        _trade(paper, "GBPUSD", entry="1.13716", stop="1.13200",
+               pnl="-84.80", metadata={"pnl_pct": "-3.2%"})
         _trade(live, "MSFT", entry="420.15", stop="410.00", paper=False,
                status="ERROR", pnl="-900.00")
         acct = _etoro(user, demo=False, last_equity=Decimal("12345.67"),
@@ -551,6 +585,26 @@ class MoneyTripwireTests(_AlarmCase):
                      "Live bots of account #3 · USD", "EURUSD #12",
                      "Bots turned off: 3", "Close errors: 1",
                      "the daily loss is past the stop"):
+            self.assertIsNone(MONEY.search(text), text)
+
+    def test_the_tripwire_catches_every_shape_of_an_amount(self):
+        """The review's probe: a forex mark of four or five decimals (the
+        platform's commonest price), a one-decimal price, a bare
+        percentage, a trailing sign or code, thousands with commas, and a
+        money word before a number -- each alone and inside a sentence."""
+        for shape in MONEY_SHAPES:
+            for text in (shape, f"the row reads {shape} now",
+                         f"{shape}."):
+                self.assertIsNotNone(MONEY.search(text), text)
+        # the literals with a decimal part, a percent or a sign are the
+        # regex's too; a bare "10,000" is a quantity as often as an
+        # amount, and "336." a prefix: those stay literal checks
+        for leak in LEAKS:
+            if re.search(r"\d\.\d|\d\s?[%€$]", leak):
+                self.assertIsNotNone(MONEY.search(leak), leak)
+
+    def test_the_tripwire_spares_counts_numbers_of_rows_and_times(self):
+        for text in BENIGN_SHAPES:
             self.assertIsNone(MONEY.search(text), text)
 
 
