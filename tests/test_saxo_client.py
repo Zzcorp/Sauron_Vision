@@ -719,7 +719,7 @@ class ConsumerKeyTests(SimpleTestCase):
                 / "base.py").read_text(encoding="utf-8")
         for key in ("protectiveOrders", "protectedOnFill", "protectiveTradeId",
                     "protectiveStopId", "protectiveTargetId", "protectionNote",
-                    "working", "executedQty", "avgPrice"):
+                    "working", "executedQty", "avgPrice", "positionId"):
             with self.subTest(key):
                 self.assertIn(f'"{key}"', body)
 
@@ -978,4 +978,85 @@ class RealTimeNettingTests(SimpleTestCase):
         self.assertTrue(res["ok"], res)
         self.assertEqual(sess.sent("PATCH", "trade/v2/orders")["StopLimitPrice"],
                          1.0895)
+
+
+class AnUnprotectedOrderIsNeverSentSilentlyTests(SimpleTestCase):
+    """`if stop_loss:` dropped a 0.0 stop, attached the target alone and
+    reported the fill PROTECTED — protectiveOrders, protectedOnFill and
+    protectiveTradeId all set with no stop anywhere — so base.py stamped
+    `protected`, which switches bot-side SL/TP off, over a position with a
+    target resting at Saxo and no stop at the venue or in the box. The eToro
+    adapter refuses the same level before the POST (etoro_client._level);
+    this is the same rule in the same voice, and a bracket whose stop was
+    never accepted claims no protection, whatever else it carries."""
+
+    TARGET_ONLY = ("POST", "trade/v2/orders", 200, {
+        "OrderId": "1000001", "Orders": [{"OrderId": "1000003"}]})
+
+    def setUp(self):
+        sc._UIC_CACHE.clear()
+        sc._SYMBOL_BY_UIC.clear()
+        sc._DETAILS_CACHE.clear()
+
+    def _refused(self, **levels):
+        t, sess = _fx([self.TARGET_ONLY, FILLED])
+        with mock.patch.object(sc.time, "sleep"):
+            with self.assertRaises(ValueError) as caught:
+                t.market_order("EURUSD", "BUY", 5000, **levels)
+        self.assertEqual(sess.urls("POST"), [],
+                         "the order was POSTed despite the refusal")
+        return str(caught.exception)
+
+    def test_a_zero_stop_is_refused_before_the_post(self):
+        msg = self._refused(stop_loss=0.0, take_profit=1.12)
+        self.assertIn("NOT SENT", msg[:88],
+                      "the fact is past the 88 characters why_no_trade prints")
+        self.assertIn("stop_loss", msg[:88])
+        self.assertIn("EURUSD BUY", msg)
+
+    def test_a_zero_target_is_refused_too(self):
+        msg = self._refused(stop_loss=1.09, take_profit=0)
+        self.assertIn("take_profit", msg[:88])
+
+    def test_a_negative_nan_inf_or_non_number_level_is_refused(self):
+        for bad in (-1.09, float("nan"), float("inf"), "abc", True):
+            with self.subTest(bad=bad):
+                self._refused(stop_loss=bad, take_profit=1.12)
+
+    def test_a_target_alone_is_sent_and_is_not_protection(self):
+        """None is no leg asked for — the caller's choice — and the fill
+        then names the target it does have without claiming a stop it does
+        not: base.py stamps `protected` on protectiveStopId,
+        protectiveTradeId or protectedOnFill, and none of the three is
+        offered. The close handle rides `positionId`, apart from the
+        protection claim, exactly as eToro offers it on every fill."""
+        t, sess = _fx([self.TARGET_ONLY, FILLED])
+        with mock.patch.object(sc.time, "sleep"):
+            out = t.market_order("EURUSD", "BUY", 5000, stop_loss=None,
+                                 take_profit=1.12001)
+        body = sess.sent("POST", "trade/v2/orders")
+        self.assertEqual([o["OrderType"] for o in body["Orders"]], ["Limit"])
+        self.assertEqual(out["status"], "FILLED")
+        self.assertEqual(out["protectiveOrders"], ["1000003"])
+        self.assertEqual(out["protectiveTargetId"], "1000003")
+        self.assertNotIn("protectiveStopId", out)
+        self.assertNotIn("protectedOnFill", out,
+                         "protection was claimed on a bracket with no stop")
+        self.assertNotIn("protectiveTradeId", out,
+                         "protection was claimed on a bracket with no stop")
+        self.assertEqual(out["positionId"], "19968201")
+
+    def test_a_full_bracket_still_reports_protection(self):
+        t, _ = _fx([("POST", "trade/v2/orders", 200, {
+            "OrderId": "1000001",
+            "Orders": [{"OrderId": "1000002"}, {"OrderId": "1000003"}]}),
+            FILLED])
+        with mock.patch.object(sc.time, "sleep"):
+            out = t.market_order("EURUSD", "BUY", 5000, stop_loss=1.09,
+                                 take_profit=1.12)
+        self.assertIs(out["protectedOnFill"], True)
+        self.assertEqual(out["protectiveTradeId"], "19968201")
+        self.assertEqual(out["protectiveStopId"], "1000002")
+        self.assertEqual(out["protectiveTargetId"], "1000003")
+        self.assertEqual(out["positionId"], "19968201")
 

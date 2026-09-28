@@ -46,6 +46,7 @@ command the operator runs against SIM to prove each promise live.
 from __future__ import annotations
 
 import logging
+import math
 import time
 import uuid
 from datetime import datetime, timezone as dt_tz
@@ -200,6 +201,51 @@ def _round_to_tick(price: float, tick: Optional[float]) -> float:
         return float(price)
     steps = round(float(price) / tick)
     return round(steps * tick, 10)
+
+
+def _level(value, name: str, symbol: str, side: str):
+    """A protective level for a bracket child, or None when the caller sent
+    none — and a RAISE, before any request, for a level that is not a price.
+
+    `market_order` attached the legs under `if stop_loss:`, the gate
+    etoro_client._level replaced on the sibling adapter: a stop the engine
+    computed at 0.0 was dropped SILENTLY, the target went out alone, and
+    the fill was then reported PROTECTED on the strength of the limit — so
+    base.py stamped `protected`, bot-side SL/TP switched off, and the
+    position ran with a target resting at Saxo and no stop anywhere. The
+    routes to such a stop are the ones that docstring names: the Take
+    Trade lane, where an engine-derived BUY stop of 0 passes the wrong-side
+    check `stop < price < target`, and stop_and_target's pct fallback with
+    stop_loss_pct >= 100 (asset_models.AssetBotConfig, no validator, no
+    form clean). A negative stop, being truthy, was sent for Saxo to
+    refuse; a NaN or an inf reached _round_to_tick. None stays None: a
+    caller that sent no level asked for no leg, and that is its choice.
+
+    ValueError is what both callers already catch: asset_engine/base.py
+    execute_entry's `except Exception` books it as skips.ORDER_ERROR
+    ("live order failed: ..."); manual_trade returns it in the error dict.
+    The message LEADS with the fact because skips.record keeps 200
+    characters and why_no_trade prints 88.
+    """
+    if value is None:
+        return None
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        level = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"Saxo NOT SENT: {name} {value!r} is not a number "
+            f"({symbol} {side}). The caller asked for a broker-held leg; "
+            f"an order without it would go out unprotected."
+        ) from None
+    if not math.isfinite(level) or level <= 0:
+        raise ValueError(
+            f"Saxo NOT SENT: {name} {level!r} is not a price "
+            f"({symbol} {side}). The caller asked for a broker-held leg; "
+            f"an order without it would go out unprotected."
+        )
+    return level
 
 
 class SaxoTrader:
@@ -887,14 +933,19 @@ class SaxoTrader:
 
     def market_order(self, symbol: str, side: str, quantity: float, **kwargs) -> dict:
         """Open a position at market, with the brackets attached at the
-        broker. stop_loss / take_profit are absolute prices; `trailing` is
-        an absolute distance to market (with stop_loss as the initial
-        level, which the help desk says the request still needs).
+        broker. stop_loss / take_profit are absolute prices — a level that
+        is present and not a price is refused by `_level` before any
+        request leaves, and None asks for no leg; `trailing` is an absolute
+        distance to market (with stop_loss as the initial level, which the
+        help desk says the request still needs).
 
         The response carries an OrderId only; the fill is read from the
         audit log. PENDING and UNKNOWN are honest states, and UNKNOWN
         (Saxo's 202 TradeNotCompleted) must not be retried by the caller.
         """
+        stop_loss = _level(kwargs.get("stop_loss"), "stop_loss", symbol, side)
+        take_profit = _level(kwargs.get("take_profit"), "take_profit",
+                             symbol, side)
         uic, atype, details = self.resolve(symbol)
         ident = self.identity()
         buy = str(side).upper() == "BUY"
@@ -907,9 +958,8 @@ class SaxoTrader:
                 "ManualOrder": False, "OrderDuration": {"DurationType": "DayOrder"},
                 "ExternalReference": reference}
         children = []
-        stop_loss, take_profit = kwargs.get("stop_loss"), kwargs.get("take_profit")
         trailing = kwargs.get("trailing")
-        if stop_loss:
+        if stop_loss is not None:
             stop_price = _round_to_tick(float(stop_loss), self._tick(details, "stop", float(stop_loss)))
             if trailing:
                 otype = self._pick(details, TRAIL_TYPES) or TRAIL_TYPES[0]
@@ -922,7 +972,7 @@ class SaxoTrader:
                 otype = self._pick(details, STOP_TYPES) or STOP_TYPES[0]
                 children.append(self._child(ident, uic, atype, opposite, amount,
                                             otype, stop_price))
-        if take_profit:
+        if take_profit is not None:
             target = _round_to_tick(float(take_profit), self._tick(details, "limit", float(take_profit)))
             children.append(self._child(ident, uic, atype, opposite, amount,
                                         "Limit", target))
@@ -1016,6 +1066,14 @@ class SaxoTrader:
                     "httpStatus": r.status_code,
                     "nettingProfile": ident.get("netting_profile")},
         }
+        if polled["positionId"]:
+            # THE HANDLE A CLOSE MAY NEED, apart from any protection claim.
+            # venue_stamps reads `positionId` first (eToro offers it on
+            # every fill) and fell back to protectiveTradeId — which is now
+            # offered only beside an accepted stop, while a fill with a
+            # target alone still has a PositionId to be closed BY under
+            # FifoEndOfDay.
+            out["positionId"] = polled["positionId"]
         # The brackets are reported as soon as Saxo has ACCEPTED them, fill
         # or no fill: they are GTC and already resting. Withholding them
         # until a fill left the engine holding a position whose legs it
@@ -1052,13 +1110,21 @@ class SaxoTrader:
             stop_id = target_id = ""
         elif child_ids:
             out["protectiveOrders"] = child_ids
-            out["protectedOnFill"] = (not child_errors
-                                      and polled["executedQty"] > 0)
+            # A TARGET ALONE IS NOT PROTECTION EITHER. protectedOnFill and
+            # protectiveTradeId are the two handles base.py stamps
+            # `protected` on besides the stop id itself, so a bracket whose
+            # only accepted child is the Limit offers neither: the target
+            # is still named (protectiveOrders, protectiveTargetId) so the
+            # engine can move it and cancel it at the close, and bot-side
+            # SL/TP keeps the exit.
+            if stop_id:
+                out["protectedOnFill"] = (not child_errors
+                                          and polled["executedQty"] > 0)
         if child_ids and not child_errors:
-            if polled["positionId"]:
-                out["protectiveTradeId"] = polled["positionId"]
             if stop_id:
                 out["protectiveStopId"] = stop_id
+                if polled["positionId"]:
+                    out["protectiveTradeId"] = polled["positionId"]
             if target_id:
                 out["protectiveTargetId"] = target_id
         if polled["executedQty"] <= 0 and polled["status"] in ("PENDING",
