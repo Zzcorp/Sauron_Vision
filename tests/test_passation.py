@@ -9,8 +9,9 @@ What these tests pin (core/passation.py, dashboard/views_passation.py):
 
   * The clock is 2026-09-29 16:00 Paris, written in UTC (14:00) so no
     server timezone can move it.
-  * Before the hour: /passation/ is a 404 and no page carries the card.
-    Not a teaser, not a countdown — nothing.
+  * Before the hour: /passation/ sends the reader to the dashboard and no
+    page carries the card. Not a teaser, not a countdown — nothing. (Not
+    a 404 either: probe_routes counts a 404 as a page wired to nothing.)
   * From the hour: the page serves the letter, and the card leading to it
     stands on every logged-in page for the length of the watch (21 days),
     then the page stays and the card goes.
@@ -70,7 +71,9 @@ class TheLetterTests(TestCase):
 
     def test_nothing_before_the_hour(self):
         with _at(BEFORE):
-            self.assertEqual(self.client.get(reverse("passation")).status_code, 404)
+            r = self.client.get(reverse("passation"))
+            self.assertEqual(r.status_code, 302)
+            self.assertEqual(r["Location"], reverse("dashboard"))
             body = self.client.get("/calendar/").content.decode()
         self.assertNotIn("sv-passation-card", body)
         self.assertNotIn("Gandalf", body)

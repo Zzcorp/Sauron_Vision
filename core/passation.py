@@ -9,9 +9,11 @@ duty". Gandalf is his father, who keeps the house on the same account.
 
 One clock, read here and nowhere else: OPENS_AT, 2026-09-29 16:00 Paris
 (CEST, UTC+2 until 25 October), as an aware UTC datetime so no server
-timezone can move it. Before it the page answers 404 and no card is
-rendered; after it the page serves the letter for ever, and the card that
-points to it stands on every page for CARD_DAYS, the length of the watch.
+timezone can move it. Before it the page sends the reader to the
+dashboard (never a 404: probe_routes would count the page as missing)
+and no card is rendered; after it the page serves the letter for ever,
+and the card that points to it stands on every page for CARD_DAYS, the
+length of the watch.
 
 Tests patch `_now`, nothing else (tests/test_passation.py).
 """
