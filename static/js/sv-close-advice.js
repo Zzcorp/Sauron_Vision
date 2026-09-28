@@ -220,6 +220,20 @@
         return parts.length ? parts.join(" · ") : DASH;
     }
 
+    /* A close the platform GAVE UP on: the row is ERROR with no closed_at,
+       still open at the broker, and outside every open-book read. The
+       server keeps it out of `missing` and counts it in `abandoned`; these
+       are its words, the same before the PIN and after the close. */
+    function abandonedWords(n) {
+        var those = n === 1 ? "that position is" : "those positions are";
+        var them = n === 1 ? "it" : "them";
+        return plural(n, "close") + (n === 1 ? " was" : " were") +
+               " ABANDONED after repeated broker failures — " + those +
+               " still open at the broker and nothing here is retrying " +
+               them + ". Close " + them + " at the broker; the retry history " +
+               "is on /forensics/";
+    }
+
     function verdictClass(v) {
         return { close: "is-close", trim_or_tighten: "is-trim",
                  hold: "is-hold" }[v] || "is-unknown";
@@ -498,7 +512,8 @@
                     title: "Nothing to close",
                     message: "None of the selected positions is still open." +
                              (missing.length ? " " + plural(missing.length, "row") +
-                              " had already gone." : "")
+                              " had already gone." : "") +
+                             (p.abandoned ? " " + abandonedWords(p.abandoned) + "." : "")
                 });
                 clearIds(ids);
                 return;
@@ -518,6 +533,7 @@
                 facts.push(["No longer open", plural(missing.length, "row") +
                             " — left out; nothing takes their place"]);
             }
+            if (p.abandoned) facts.push(["Abandoned", abandonedWords(p.abandoned)]);
             var names = (p.rows || []).map(function (r) {
                 return r.side + " " + r.qty + " " + r.symbol +
                        (r.world === "live" ? " (real money)"
@@ -588,10 +604,7 @@
                                 (gone ? ". " + plural(gone, "row") + " had already " +
                                     "gone before the close and " + (gone === 1 ? "was" : "were") +
                                     " left out." : "") +
-                                (res.abandoned ? ". " + res.abandoned + " close(s) were " +
-                                    "ABANDONED after repeated broker failures — those " +
-                                    "positions are still open at the broker and nothing " +
-                                    "here is retrying them. Close them at the broker." : "") +
+                                (res.abandoned ? ". " + abandonedWords(res.abandoned) : "") +
                                 "."
                         });
                     });

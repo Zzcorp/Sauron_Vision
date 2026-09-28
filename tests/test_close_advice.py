@@ -445,6 +445,49 @@ class LevelsTests(_Case):
             # R itself is still measured: the stop it OPENED with is known.
             self.assertIsNotNone(p["numbers"]["r_now"])
 
+    def test_a_zero_stop_with_no_opening_stop_has_no_r(self):
+        """The review's case: an older long, stop 0, NO initial_stop_loss
+        stamp, up 2%. _initial_stop falls back to the stop's 0, the watcher
+        takes abs(entry - 0) as 1R, and the card read "+0.02R" — the
+        fractional return labelled as R, handed to the model as r_now —
+        while T5's sentence left out "there is no R". A row that opened
+        with no stop has no R at all, exactly as one whose stop is None."""
+        _quote("BTCUSD", 61200)
+        long_ = _trade(self.user, stop=0, target=None)
+        short = _trade(self.user, side="SELL", stop=0, target=57000)
+        for t in (long_, short):
+            # The helper stamps the stop it was given; an older row carries
+            # no stamp at all, and _initial_stop then reads the 0.
+            t.metadata.pop("initial_stop_loss", None)
+            t.save(update_fields=["metadata"])
+        a = self.advise(long_, short)
+        for t in (long_, short):
+            p = _one(a, t)
+            self.assertEqual(p["verdict"], "trim_or_tighten", p["reasons"])
+            self.assertEqual(p["reasons"][0],
+                             "No stop is set: nothing limits the loss, and with "
+                             "no stop to measure against there is no R, so the "
+                             "warnings that read R (near the stop, adverse "
+                             "excursion, give-back, risk against reward) cannot "
+                             "fire.")
+            n = p["numbers"]
+            self.assertEqual([n["r_now"], n["r_to_stop"], n["r_to_target"]],
+                             [None, None, None])
+            self.assertEqual([n["r_now_text"], n["r_to_stop_text"],
+                              n["r_to_target_text"]], ["—", "—", "—"])
+            self.assertEqual([p["facts"]["mae_r"], p["facts"]["mfe_r"]],
+                             [None, None])
+            self.assertFalse(any(re.search(r"\d\.\d\dR\b", r)
+                                 for r in p["reasons"]), p["reasons"])
+        # The money is still read, off the same mark: up 600 and down 600.
+        self.assertEqual(_one(a, long_)["numbers"]["pnl"], 600.0)
+        self.assertEqual(_one(a, short)["numbers"]["pnl"], -600.0)
+        # And the model is told no R either.
+        from brain.close_advice import build_snapshot
+        for row in build_snapshot(a)["positions"]:
+            self.assertIsNone(row["numbers"]["r_now"])
+            self.assertIsNone(row["facts"]["mae_r"])
+
     def test_the_hold_sentence_names_the_levels_it_has(self):
         from brain.close_advice import _hold_words
         self.assertEqual(
@@ -1194,6 +1237,44 @@ class CloseSelectedTests(_Endpoint):
         self.other.refresh_from_db()
         self.assertEqual(self.other.status, "OPEN")
 
+    def test_an_abandoned_close_is_not_a_row_that_had_gone(self):
+        """A ticked row that pending_closes._give_up flipped to ERROR — no
+        closed_at, the position still open at the broker — is outside the
+        OPEN/CLOSE_PENDING filter, so it fell into `missing` and the answer
+        said flat: true; the dialog then read "1 row had already gone
+        before the close" about a live position nobody is retrying. It is
+        reported apart, as close-all reports it, denies flat, and nothing
+        is sent for it — in the preview and at execute alike."""
+        type(self.b).objects.filter(pk=self.b.pk).update(status="ERROR")
+        p = self.post(PREVIEW, {"ids": [self.a.id, self.b.id]}).json()
+        self.assertEqual(p["ids"], [self.a.id])
+        self.assertEqual(p["missing"], [])
+        self.assertEqual(p["abandoned"], 1)
+        with patch("bot_program.manual_close.execute_close",
+                   side_effect=_closed_ok) as ex:
+            out = self.post(CLOSE, {"ids": [self.a.id, self.b.id]}).json()
+        self.assertEqual([c.args[1].id for c in ex.call_args_list],
+                         [self.a.id])
+        self.assertEqual(out["n_closed"], 1)
+        self.assertEqual(out["missing"], [])
+        self.assertEqual(out["abandoned"], 1)
+        self.assertEqual(out["still_open"], 0)
+        self.assertFalse(out["flat"], "reported flat over a live position")
+        self.b.refresh_from_db()
+        self.assertEqual((self.b.status, self.b.closed_at), ("ERROR", None))
+
+    def test_an_abandoned_close_booked_later_is_a_row_that_had_gone(self):
+        """closed_at set means it did eventually close: that one IS a row
+        that had gone, as it is for close-all."""
+        type(self.b).objects.filter(pk=self.b.pk).update(
+            status="ERROR", closed_at=timezone.now())
+        with patch("bot_program.manual_close.execute_close",
+                   side_effect=_closed_ok):
+            out = self.post(CLOSE, {"ids": [self.a.id, self.b.id]}).json()
+        self.assertEqual(out["missing"], [self.b.id])
+        self.assertEqual(out["abandoned"], 0)
+        self.assertTrue(out["flat"])
+
     def test_another_users_row_is_not_closed(self):
         theirs = _trade(get_user_model().objects.create_user("ca_cs_other"))
         with patch("bot_program.manual_close.execute_close",
@@ -1425,6 +1506,19 @@ class ScriptTests(SimpleTestCase):
         self.assertIn("if (w.refreshPanelCounts) w.refreshPanelCounts();",
                       self.js)
         self.assertIn("Ask Sauron to reason about it (AI)", self.js)
+
+    def test_the_confirm_dialog_names_an_abandoned_close(self):
+        """The server keeps such a row out of `missing`; the confirm dialog
+        and the result must say what it is, in the same words."""
+        preview = self.js.split("post(PREVIEW_URL,", 1)[1] \
+            .split("post(CLOSE_URL,", 1)[0]
+        self.assertIn("abandonedWords(p.abandoned)", preview)
+        self.assertIn("abandonedWords(res.abandoned)", self.js)
+        words = self.js.split("function abandonedWords(", 1)[1] \
+            .split("\n    }", 1)[0]
+        self.assertIn("ABANDONED", words)
+        self.assertIn("still open at the broker", words)
+        self.assertIn("/forensics/", words)
 
     def test_server_text_is_never_parsed_as_markup(self):
         self.assertNotIn("innerHTML", self.js)

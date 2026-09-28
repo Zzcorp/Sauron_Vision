@@ -700,6 +700,14 @@ def _advise_one(trade, *, cache: dict, reviews: dict, now) -> dict:
                           "rule_state": rule_state}}
 
     # ── A POSITION ──────────────────────────────────────────────────────
+    # The stop the row OPENED with, read as _level reads every level: 0 is
+    # how an older row spells "none", and _initial_stop falls back to the
+    # row's stop when no initial_stop_loss was stamped. The watcher would
+    # take abs(entry - 0) as 1R and book the fractional return as R —
+    # "+0.02R" on a row up 2%, on the card and in what the model is sent.
+    # No opening stop, no R: the row is judged on its money, as one whose
+    # stop is None already is, and T5's sentence says there is no R.
+    pos["initial_stop"] = _level(pos.get("initial_stop"))
     facts = measure(pos, cache)
     mark = _f(facts.get("mark"))
     option = is_option_row(trade)

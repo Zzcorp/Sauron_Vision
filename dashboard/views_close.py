@@ -361,12 +361,19 @@ def _ccy(trade) -> str:
 
 
 def _selected_closable(user, ids):
-    """(trades in the order asked, missing ids).
+    """(trades in the order asked, missing ids, abandoned ids).
 
     The same ownership and status filter as `_open_closable` — the user's
     own rows, OPEN or CLOSE_PENDING — narrowed to the ids. A missing id is
     another user's row, a closed one, or one that never existed; the
     answer does not say which, for the reason `_trade_for` answers 404.
+
+    An abandoned id is none of those: the user's own row that
+    `pending_closes._give_up` flipped to ERROR with no `closed_at`, still
+    open at the broker (see `_abandoned_count`). ERROR is outside the
+    status filter, so it would read as missing — "had already gone", the
+    one thing it has not done. It is kept apart: nothing is sent for it,
+    and it denies "flat" here as it does in close-all.
     """
     from bot_program.models import AssetBotTrade
     found = {t.pk: t for t in (
@@ -374,8 +381,12 @@ def _selected_closable(user, ids):
         .select_related("config", "config__user")
         .filter(pk__in=ids, config__user=user,
                 status__in=("OPEN", "CLOSE_PENDING")))}
+    abandoned = set(AssetBotTrade.objects.filter(
+        pk__in=ids, config__user=user, status="ERROR",
+        closed_at__isnull=True).values_list("pk", flat=True))
     return ([found[i] for i in ids if i in found],
-            [i for i in ids if i not in found])
+            [i for i in ids if i not in found and i not in abandoned],
+            [i for i in ids if i in abandoned])
 
 
 @login_required
@@ -426,7 +437,7 @@ def close_selected_preview(request):
     if err:
         return JsonResponse({"error": err}, status=400)
 
-    trades, missing = _selected_closable(request.user, ids)
+    trades, missing, abandoned = _selected_closable(request.user, ids)
     rows, pending_n = [], 0
     worlds = {"live": 0, "demo": 0, "paper": 0}
     pnl_total, pnl_measured = 0.0, True
@@ -489,6 +500,10 @@ def close_selected_preview(request):
         "unclosable": 0,
         "ids": [t.pk for t in trades],
         "missing": missing,
+        # Ticked rows whose close the platform GAVE UP on: not in `ids`, so
+        # nothing is sent for them, and not in `missing`, because they are
+        # still open at the broker. The dialog names them before the PIN.
+        "abandoned": len(abandoned),
         "rows": rows[:12],
         "more": max(0, len(rows) - 12),
     })
@@ -528,7 +543,7 @@ def close_selected_execute(request):
     if err:
         return JsonResponse({"error": err}, status=400)
 
-    trades, missing = _selected_closable(request.user, ids)
+    trades, missing, abandoned = _selected_closable(request.user, ids)
     pin_ok = _pin_ok(request, body)
     if not pin_ok and any(requires_pin(t) for t in trades):
         return JsonResponse({
@@ -537,8 +552,8 @@ def close_selected_execute(request):
                       "wrong. Nothing was closed."),
             "pin_required": True,
             "closed": [], "failed": [], "n_closed": 0, "n_failed": 0,
-            "still_open": len(trades), "unclosable": 0, "abandoned": 0,
-            "flat": False, "missing": missing,
+            "still_open": len(trades), "unclosable": 0,
+            "abandoned": len(abandoned), "flat": False, "missing": missing,
         }, status=403)
 
     closed, failed = [], []
@@ -574,8 +589,12 @@ def close_selected_execute(request):
     still_open = AssetBotTrade.objects.filter(
         pk__in=picked, config__user=request.user,
         status__in=("OPEN", "CLOSE_PENDING")).count()
+    # Over the ids ASKED, not the rows picked: a close abandoned before
+    # this ran was never picked (ERROR is outside the open filter), and one
+    # abandoned during the loop is no longer open. Both are still at the
+    # broker, and both deny "flat" — as they do in close-all.
     abandoned = AssetBotTrade.objects.filter(
-        pk__in=picked, config__user=request.user, status="ERROR",
+        pk__in=ids, config__user=request.user, status="ERROR",
         closed_at__isnull=True).count()
     return JsonResponse({
         "closed": closed,
@@ -589,5 +608,6 @@ def close_selected_execute(request):
         # Every selected row that was still there is no longer open. The
         # ids in `missing` were not open when this ran, so they cannot
         # deny it — but they are reported, never silently counted as done.
+        # An abandoned one is not missing: it is still open at the broker.
         "flat": not still_open and not abandoned,
     })
