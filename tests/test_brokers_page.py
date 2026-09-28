@@ -445,7 +445,7 @@ class TheDemoTickIsGuardedTests(TestCase):
         return EtoroAccount.objects.get(user=self.user)
 
     def _trade(self, *, symbol="AAPL", status="OPEN", paper=False,
-               broker="etoro", world="live"):
+               broker="etoro", world="live", asset_class="stock"):
         from bot_program.models import AssetBotConfig, AssetBotTrade
         cfg, _ = AssetBotConfig.objects.get_or_create(
             user=self.user, name="megacaps",
@@ -457,7 +457,7 @@ class TheDemoTickIsGuardedTests(TestCase):
         if world:
             meta["broker_env"] = world
         return AssetBotTrade.objects.create(
-            config=cfg, asset_class="stock", symbol=symbol, side="BUY",
+            config=cfg, asset_class=asset_class, symbol=symbol, side="BUY",
             qty=1, entry_price=100, status=status, paper=paper,
             metadata=meta)
 
@@ -507,13 +507,20 @@ class TheDemoTickIsGuardedTests(TestCase):
         self.assertIn("1 real position is still open at eToro", body)
 
     def test_what_is_not_a_real_etoro_position_does_not_count(self):
-        """Closed, paper, filled in the virtual world, or carried by another
-        broker: none of them is stranded by the flip."""
+        """Closed, paper, filled in the virtual world, stamped as carried by
+        another broker, or unstamped in a class this row does not carry:
+        none of them is stranded by the flip. (EURUSD is booked forex and
+        its Instrument says forex; ZZZ has no Instrument, so the router
+        reads it as crypto — neither is a class this row is primary for.)"""
+        from instruments.models import Instrument
+        Instrument.objects.create(symbol="EURUSD", name="EUR/USD",
+                                  asset_class="forex")
         self._trade(status="CLOSED")
         self._trade(paper=True)
         self._trade(world="paper")
         self._trade(broker="ibkr")
-        self._trade(broker="")
+        self._trade(broker="", symbol="EURUSD", asset_class="forex")
+        self._trade(broker="", symbol="ZZZ", asset_class="forex")
         body, probe = self._post(confirm_world_change="on")
         acct = self._row()
         self.assertTrue(acct.demo)
@@ -524,16 +531,50 @@ class TheDemoTickIsGuardedTests(TestCase):
         self.assertIn("Demo TICKED: from this save every order and every "
                       "close goes to the virtual portfolio", body)
 
+    def test_a_row_with_no_carrier_counts_when_this_row_carries_its_class(
+            self):
+        """A TAKE TRADE booked before 2026-09-24 has no metadata["broker"].
+        venue_close refuses nothing for it, so its close goes wherever the
+        router answers — here, this row, primary for stocks — and after the
+        flip, to the virtual portfolio. Unknown carrier, like unknown world,
+        counts."""
+        t = self._trade(broker="")
+        body, probe = self._post(confirm_world_change="on")
+        self.assertStillLive(probe)
+        self.assertIn(f"1 real position is still open at eToro; switching "
+                      f"to demo would cut the platform off from closing it "
+                      f"([{t.pk}] AAPL)", body)
+
+    def test_a_row_with_no_carrier_counts_by_the_instrument_class_too(self):
+        """The router asks the INSTRUMENT's class, not the class the trade
+        was booked under: a forex instrument in a stock config goes to the
+        row primary for forex."""
+        from instruments.models import Instrument
+        Instrument.objects.create(symbol="EURUSD", name="EUR/USD",
+                                  asset_class="forex")
+        EtoroAccount.objects.filter(user=self.user).update(
+            is_primary_for_stocks=False, is_primary_for_forex=True)
+        self._trade(broker="", world="", symbol="EURUSD")
+        body, probe = self._post(confirm_world_change="on",
+                                 primary_stocks="", primary_forex="on")
+        acct = self._row()
+        self.assertFalse(acct.demo)
+        self.assertTrue(acct.is_primary_for_forex)
+        probe.assert_not_called()
+        self.assertIn("1 real position is still open at eToro", body)
+
     def test_a_routing_save_that_keeps_the_row_live_needs_nothing(self):
         """The save the trap used to catch: Demo left as it is on file
-        (unticked), one class box changed."""
+        (unticked), one class box changed, the pair on file retyped."""
         body, probe = self._post(demo="", primary_stocks="",
-                                 primary_forex="on")
+                                 primary_forex="on",
+                                 etoro_api_key=RAW_KEY,
+                                 etoro_user_key=RAW_USER)
         acct = self._row()
         self.assertFalse(acct.demo)
         self.assertTrue(acct.is_primary_for_forex)
         self.assertFalse(acct.is_primary_for_stocks)
-        probe.assert_called_once_with("k2", "u2", demo=False)
+        probe.assert_called_once_with(RAW_KEY, RAW_USER, demo=False)
         self.assertNotIn("REFUSED", body)
         self.assertNotIn("environment changed", body)
 
@@ -547,6 +588,151 @@ class TheDemoTickIsGuardedTests(TestCase):
         probe.assert_not_called()
         self.assertIn("REFUSED to untick Demo for dt_u", body)
         self.assertIn("the trading PIN was not supplied", body)
+
+
+class TheKeySwapIsGuardedTests(TestCase):
+    """A different pair on a LIVE row is a different account (2026-09-28).
+
+    The eToro form opens on the logged-in account now, not on an empty
+    "pick an account" the browser refused to submit. The failure that
+    makes possible: a superuser with a LIVE row types a teammate's pair and
+    forgets the dropdown; live -> live had no guard, the probe passes (the
+    pair is good), and from then on the superuser's live configs place real
+    orders in the teammate's account while every close of the superuser's
+    open positions goes where their positionId does not exist. So a pair
+    that differs from the one on file, on a LIVE row that stays live, needs
+    the "Replace keys" tick, and is refused — tick or no tick — while a
+    real eToro position is open. Nothing is written on a refusal, and the
+    probe is not sent. The rows here are the superuser's OWN, posted with
+    the preselected target, because that is the scenario."""
+
+    def setUp(self):
+        self.admin = User.objects.create_superuser("ks_admin", "a@x", "x")
+        acct = EtoroAccount.objects.create(user=self.admin, demo=False,
+                                           connected=True,
+                                           is_primary_for_stocks=True)
+        acct.set_credentials(RAW_KEY, RAW_USER)
+        acct.save()
+        self.client.force_login(self.admin)
+
+    def _post(self, **extra):
+        """A save of a TEAMMATE's pair onto the preselected (own) account,
+        the row's boxes as they are on file."""
+        data = {"target_username": "ks_admin",
+                "etoro_api_key": "teammate-k", "etoro_user_key": "teammate-u",
+                "primary_stocks": "on"}
+        data.update(extra)
+        with mock.patch("dashboard.views_brokers.etoro_probe",
+                        return_value=("ok", "200")) as probe:
+            r = self.client.post(reverse("hq_save_etoro"), data, follow=True)
+        return r.content.decode(), probe
+
+    def _row(self):
+        return EtoroAccount.objects.get(user=self.admin)
+
+    def _trade(self, *, broker="etoro"):
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+        cfg, _ = AssetBotConfig.objects.get_or_create(
+            user=self.admin, name="megacaps",
+            defaults={"asset_class": "stock", "mode": "live",
+                      "enabled": False, "symbols": ["AAPL"]})
+        meta = {"broker_env": "live"}
+        if broker:
+            meta["broker"] = broker
+        return AssetBotTrade.objects.create(
+            config=cfg, asset_class="stock", symbol="AAPL", side="BUY",
+            qty=1, entry_price=100, status="OPEN", paper=False,
+            metadata=meta)
+
+    def assertKeptTheOwnPair(self, probe):
+        acct = self._row()
+        self.assertFalse(acct.demo)
+        self.assertTrue(acct.is_primary_for_stocks)
+        self.assertEqual(acct.get_credentials(), (RAW_KEY, RAW_USER))
+        probe.assert_not_called()
+
+    def test_a_teammates_pair_on_the_preselected_row_is_refused(self):
+        body, probe = self._post()
+        self.assertKeptTheOwnPair(probe)
+        self.assertIn("REFUSED to replace the key pair on "
+                      "ks_admin&#x27;s LIVE row — nothing was saved", body)
+        self.assertIn("the &#x27;Replace keys&#x27; box was not ticked", body)
+        self.assertIn("pick it in the dropdown", body)
+
+    def test_refused_with_a_real_position_open_even_ticked(self):
+        """Nothing here can prove two pairs open one account, so a
+        rotation waits for the open positions too."""
+        t = self._trade()
+        body, probe = self._post(confirm_key_change="on")
+        self.assertKeptTheOwnPair(probe)
+        self.assertIn(f"1 real position is still open at eToro under the "
+                      f"pair on file; a different pair would send its close "
+                      f"to the account that pair opens, where it does not "
+                      f"exist ([{t.pk}] AAPL)", body)
+        self.assertNotIn("Replace keys&#x27; box was not ticked", body)
+
+    def test_an_unstamped_position_counts_here_too(self):
+        self._trade(broker="")
+        body, probe = self._post(confirm_key_change="on")
+        self.assertKeptTheOwnPair(probe)
+        self.assertIn("1 real position is still open at eToro under the "
+                      "pair on file", body)
+
+    def test_both_reasons_are_printed_at_once(self):
+        self._trade()
+        body, probe = self._post()
+        self.assertKeptTheOwnPair(probe)
+        self.assertIn("(1) the &#x27;Replace keys&#x27; box", body)
+        self.assertIn("(2) 1 real position is still open at eToro", body)
+
+    def test_a_ticked_replacement_with_nothing_open_goes_through(self):
+        """A rotation meant on purpose: the box ticked, and the only open
+        row is stamped as another broker's — that stamp is a fact, and the
+        pair on this row cannot close it anyway."""
+        self._trade(broker="ibkr")
+        body, probe = self._post(confirm_key_change="on")
+        acct = self._row()
+        self.assertFalse(acct.demo)
+        self.assertEqual(acct.get_credentials(),
+                         ("teammate-k", "teammate-u"))
+        probe.assert_called_once_with("teammate-k", "teammate-u", demo=False)
+        self.assertNotIn("REFUSED", body)
+
+    def test_retyping_the_pair_on_file_is_not_asked(self):
+        """The routing-only save: same pair, a class box moved."""
+        self._trade()
+        body, probe = self._post(etoro_api_key=RAW_KEY,
+                                 etoro_user_key=RAW_USER,
+                                 primary_stocks="", primary_forex="on")
+        acct = self._row()
+        self.assertTrue(acct.is_primary_for_forex)
+        self.assertFalse(acct.is_primary_for_stocks)
+        probe.assert_called_once_with(RAW_KEY, RAW_USER, demo=False)
+        self.assertNotIn("REFUSED", body)
+
+    def test_a_live_row_with_no_pair_on_file_is_not_asked(self):
+        """Nothing to swap from — "Forget eToro keys" leaves a live row with
+        no pair, the router answers paper for it, and re-entering a pair is
+        how its open positions become reachable again."""
+        self._trade()
+        EtoroAccount.objects.filter(user=self.admin).update(
+            api_key_enc="", user_key_enc="")
+        body, probe = self._post()
+        self.assertEqual(self._row().get_credentials(),
+                         ("teammate-k", "teammate-u"))
+        probe.assert_called_once_with("teammate-k", "teammate-u", demo=False)
+        self.assertNotIn("REFUSED", body)
+
+    def test_a_demo_row_is_not_asked(self):
+        """A demo row's positions are virtual; a new pair there moves no
+        real money and strands nothing real."""
+        EtoroAccount.objects.filter(user=self.admin).update(demo=True)
+        body, probe = self._post(demo="on")
+        acct = self._row()
+        self.assertTrue(acct.demo)
+        self.assertEqual(acct.get_credentials(),
+                         ("teammate-k", "teammate-u"))
+        self.assertNotIn("REFUSED", body)
 
 
 class TheFormShowsTheRowOnFileTests(TestCase):
@@ -640,6 +826,18 @@ class TheFormShowsTheRowOnFileTests(TestCase):
             self.assertIn('name="confirm_world_change"', form)
             self.assertNotIn("checked", self._box(form,
                                                   "confirm_world_change"))
+
+    def test_the_replace_keys_box_is_there_never_prefilled_or_carried(self):
+        """eToro only: a new Saxo key closes the session, so nothing trades
+        on it until the next sign-in. The script unticks it with Switch
+        world whenever the dropdown moves."""
+        body = self._page()
+        etoro, saxo = self._forms(body)
+        self.assertIn('name="confirm_key_change"', etoro)
+        self.assertNotIn("checked", self._box(etoro, "confirm_key_change"))
+        self.assertNotIn('name="confirm_key_change"', saxo)
+        script = body[body.index("form[data-reflects-row]") - 2000:]
+        self.assertIn('"confirm_world_change", "confirm_key_change"', script)
 
     def test_the_stale_session_sentence_is_gone(self):
         """It said "Re-saving closes any open session" two lines above the

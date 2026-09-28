@@ -84,6 +84,8 @@
             <div data-on-file-line style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">{{ etoro_on_file.words }}</div>
             <input type="password" name="etoro_api_key" placeholder="x-api-key" required autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
             <input type="password" name="etoro_user_key" placeholder="x-user-key" required autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
+            <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="confirm_key_change"> Replace keys — tick only to put a <strong>different</strong> pair on a LIVE row on purpose</label>
+            <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">The account above opens on yours. On a LIVE row a different pair is a different account as far as the platform can tell: every later order and every close goes to it. So a pair that differs from the one on file is refused without <em>Replace keys</em>, and while any real eToro position is still open. Retyping the same pair to change the class boxes is not asked.</div>
             <label style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted);"><input type="checkbox" name="demo" data-on-file-box{% if "demo" in etoro_on_file.ticked %} checked{% endif %}> Demo — route this pair to eToro's virtual portfolio</label>
             <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">Measured 2026-09-23: the <strong>same pair opens both worlds</strong>; this tick alone picks the world, and it starts as it is on file. <strong>Unticking it sends real orders</strong> and is refused without the trading PIN below, with a class box ticked on the same save, or while any live config is enabled. <strong>Ticking it on a LIVE row sends every later close to the virtual portfolio</strong> and is refused without <em>Switch world</em> below, and while any real eToro position is still open.</div>
             <input type="password" name="pin" placeholder="Trading PIN — needed only to untick Demo" autocomplete="off" style="padding:8px;background:var(--bg-darker);border:1px solid var(--border);color:var(--text);font-family:var(--font-mono);font-size:12px;">
@@ -132,7 +134,7 @@
 
 {% block extra_js %}
 {% if can_edit %}
-{# The two forms post every box at once, so each box must start where the picked account's row is: a Demo or SIM box left at a default is a world flip nobody chose. The server renders the preselected account; this moves the boxes when the dropdown moves. Switch world is never carried over. #}
+{# The two forms post every box at once, so each box must start where the picked account's row is: a Demo or SIM box left at a default is a world flip nobody chose. The server renders the preselected account; this moves the boxes when the dropdown moves. Switch world and Replace keys are never carried over. #}
 <script>
 (function () {
     function reflect(form) {
@@ -151,8 +153,12 @@
         var uri = form.elements["saxo_redirect_uri"];
         var onFileUri = opt.getAttribute("data-redirect-uri");
         if (uri && onFileUri) { uri.value = onFileUri; }
-        var confirmBox = form.elements["confirm_world_change"];
-        if (confirmBox) { confirmBox.checked = false; }
+        // Neither confirmation is ever carried over to another account.
+        var confirms = ["confirm_world_change", "confirm_key_change"];
+        for (var c = 0; c < confirms.length; c++) {
+            var confirmBox = form.elements[confirms[c]];
+            if (confirmBox) { confirmBox.checked = false; }
+        }
     }
     var forms = document.querySelectorAll("form[data-reflects-row]");
     for (var i = 0; i < forms.length; i++) {
