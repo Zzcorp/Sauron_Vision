@@ -360,7 +360,7 @@ def evaluate_prediction(prediction_id, actual_value, was_correct):
 # horizon, and the price it was measured from. It resolves against the
 # first bar at or after the deadline, with no model in the loop.
 DIRECTION_FLAT_BAND = 0.001            # |move| under 0.1% is flat: a miss
-DIRECTION_GRACE_HOURS = 48.0           # how long past the deadline to wait for a bar
+DIRECTION_GRACE_HOURS = 48.0           # market-open hours past the deadline to wait for a bar
 DIRECTION_MIN_HORIZON_H = 1.0
 DIRECTION_MAX_HORIZON_H = 24.0 * 60    # sixty days
 DEFAULT_HORIZON_HOURS = 24.0
@@ -507,6 +507,50 @@ def log_direction_prediction(agent: str, symbol, direction, *,
         evaluation_notes=str(notes or "")[:500])
 
 
+def market_hours_between(symbol: str, start, end, *,
+                         cap: float = DIRECTION_GRACE_HOURS) -> float:
+    """Hours the market behind `symbol` was open between `start` and `end`,
+    on core.exchange_status.market_clock's calendar, counted to the hour
+    and no further than `cap` — the resolver only asks whether the grace
+    window has run, not by how much.
+
+    A weekend, a holiday and the overnight gap count for nothing, so a
+    deadline after Friday's last bar on a weekday-only market has seen no
+    market time at Monday's 03:30 beat, and Monday's bar can still grade
+    it. Wall-clock hours for crypto (open around the clock), for a class
+    the clock does not model, for a symbol the catalogue no longer holds,
+    and whenever the clock cannot say when a shut market reopens — the
+    reading the resolver had before it asked the clock.
+    """
+    from core.exchange_status import market_clock
+    from instruments.models import Instrument
+
+    if end <= start:
+        return 0.0
+    inst = Instrument.objects.filter(symbol=symbol).first()
+    if inst is None:
+        return min((end - start).total_seconds() / 3600, cap)
+    step = timedelta(hours=1)
+    t, open_s = start, 0.0
+    while t < end and open_s < cap * 3600:
+        clock = market_clock(inst.asset_class, inst.exchange or "",
+                             symbol=symbol, now_utc=t)
+        if clock["is_open"]:
+            if clock.get("opened") is None:      # crypto, unmodelled: never shuts
+                open_s += (end - t).total_seconds()
+                break
+            nxt = min(t + step, end)
+            open_s += (nxt - t).total_seconds()
+            t = nxt
+            continue
+        reopens = clock.get("reopens")
+        if reopens is None:                      # shut, reopening unknowable
+            open_s += (end - t).total_seconds()
+            break
+        t = reopens if reopens > t else t + step
+    return min(open_s / 3600, cap)
+
+
 def _resolve_direction_prediction(pred, now=None) -> bool:
     """Grade a call against the first bar at or after its deadline."""
     from market_data.models import PriceData
@@ -520,13 +564,17 @@ def _resolve_direction_prediction(pred, now=None) -> bool:
                    timestamp__gte=deadline)
            .order_by("timestamp").first())
     if bar is None:
-        if (now - deadline).total_seconds() < DIRECTION_GRACE_HOURS * 3600:
+        # The window runs on the instrument's own market clock: a
+        # weekend on a weekday-only market is not an outage, and the
+        # bar that grades a Friday-evening deadline prints on Monday.
+        if market_hours_between(pred.instrument_symbol, deadline,
+                                now) < DIRECTION_GRACE_HOURS:
             return False                    # the bar may still arrive
         pred.actual_value = "ungradeable_no_bar"
         pred.evaluated_at = now
         pred.evaluation_notes = (prefix + f"no bar within "
-                                 f"{DIRECTION_GRACE_HOURS:.0f}h after the "
-                                 f"deadline — not graded")
+                                 f"{DIRECTION_GRACE_HOURS:.0f} market hours "
+                                 f"after the deadline — not graded")
         pred.save(update_fields=["actual_value", "evaluated_at",
                                  "evaluation_notes"])
         return True

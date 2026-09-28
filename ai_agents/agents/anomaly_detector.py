@@ -34,10 +34,14 @@ Look for:
 Return JSON with:
 - anomalies: list of {symbol, type, description, severity (1-10), suggested_action,
   expected_direction ("up" | "down" | "none" — where the symbol's price goes if the
-  anomaly resolves the way you expect), horizon_hours (integer, 4 to 168)}
+  anomaly resolves the way you expect), horizon_hours (integer, 4 to 168),
+  confidence (0.5 to 1.0 — your probability that the price goes in
+  expected_direction by horizon_hours; severity says how bad the anomaly is,
+  not how sure you are of the direction)}
 - market_stress_level: 1-10 overall market stress assessment
 Every anomaly with an expected_direction is graded against the price at its
-horizon; say "none" rather than guess.
+horizon, and its confidence is scored as that probability; say "none" rather
+than guess.
 
 Respond ONLY with valid JSON."""
 

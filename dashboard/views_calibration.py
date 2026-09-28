@@ -17,13 +17,20 @@ def calibration_dashboard(request):
     tracker = CalibrationTracker()
     all_agents = sorted(set(AgentPrediction.objects.values_list("agent", flat=True).distinct()))
 
+    # Three states, not two: a call the market never answered is stamped
+    # evaluated with was_correct left NULL — ungraded, never wrong — and
+    # is neither pending nor resolved. Every pending count on this page
+    # must say so, or the PENDING tile grows for ever and disagrees with
+    # the DUE SOON list beneath it.
+    pending_q = dict(was_correct__isnull=True, evaluated_at__isnull=True)
+
     rows = []
     reliability_by_agent = {}
     for agent in all_agents:
         m = tracker.get_agent_accuracy(agent)
         if m.get("total", 0) == 0 and m.get("total_predictions", 0) == 0:
             # Pure pending — still useful to surface.
-            pending = AgentPrediction.objects.filter(agent=agent, was_correct__isnull=True).count()
+            pending = AgentPrediction.objects.filter(agent=agent, **pending_q).count()
             rows.append({
                 "agent": agent, "total": 0, "correct": 0,
                 "accuracy": None, "brier": None, "trust": 1.0, "pending": pending,
@@ -36,7 +43,7 @@ def calibration_dashboard(request):
             "accuracy": m.get("accuracy"),
             "brier": m.get("brier_score"),
             "trust": m.get("trust_adjustment", 1.0),
-            "pending": AgentPrediction.objects.filter(agent=agent, was_correct__isnull=True).count(),
+            "pending": AgentPrediction.objects.filter(agent=agent, **pending_q).count(),
         })
         # Reliability buckets for the diagram.
         reliability_by_agent[agent] = []
@@ -49,8 +56,10 @@ def calibration_dashboard(request):
 
     rows.sort(key=lambda r: -(r["total"] or 0))
 
-    pending_total = AgentPrediction.objects.filter(was_correct__isnull=True).count()
+    pending_total = AgentPrediction.objects.filter(**pending_q).count()
     resolved_total = AgentPrediction.objects.filter(was_correct__isnull=False).count()
+    ungraded_total = AgentPrediction.objects.filter(
+        was_correct__isnull=True, evaluated_at__isnull=False).count()
 
     recent_resolved = list(
         AgentPrediction.objects.filter(was_correct__isnull=False)
@@ -58,8 +67,7 @@ def calibration_dashboard(request):
         .order_by("-evaluated_at")[:30]
     )
     recent_pending = list(
-        AgentPrediction.objects.filter(was_correct__isnull=True,
-                                       evaluated_at__isnull=True)
+        AgentPrediction.objects.filter(**pending_q)
         .order_by("expected_resolution_at")[:30]
     )
     # Every directional claim an agent made, with the price it was measured
@@ -76,6 +84,7 @@ def calibration_dashboard(request):
         "reliability_by_agent": reliability_by_agent,
         "pending_total": pending_total,
         "resolved_total": resolved_total,
+        "ungraded_total": ungraded_total,
         "recent_resolved": recent_resolved,
         "recent_pending": recent_pending,
         "calls": calls,

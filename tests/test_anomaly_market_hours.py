@@ -253,3 +253,54 @@ class AnomalyScanGateTests(TestCase):
         _scan([_severe("AAVEUSD", kind="volume_spike")])
         _scan([_severe("AAVEUSD", kind="correlation_break")])
         self.assertEqual(Notification.objects.filter(user=self.user).count(), 2)
+
+
+class AnomalyCallConfidenceTests(TestCase):
+    """A call's confidence is the probability of its DIRECTION, never the
+    anomaly's severity. AgentPrediction.confidence is Brier-scored as
+    P(predicted_value): a severity-3 "up" stored as 0.3 was rewarded for
+    being wrong (0.09) and penalised for being right (0.49), so ten such
+    calls inverted the trust score on /calibration/."""
+
+    def setUp(self):
+        _enable("agent_anomaly")
+        User.objects.create_user("conf_op")
+        cache.clear()
+
+    def _anomaly(self, symbol, severity, direction, **extra):
+        a = {"symbol": symbol, "type": "volume_spike",
+             "description": "40x the 30d average", "severity": severity,
+             "expected_direction": direction, "horizon_hours": 24}
+        a.update(extra)
+        return a
+
+    def _calls(self, *anomalies):
+        from ai_agents.models import AgentPrediction
+        out = _scan(list(anomalies))
+        self.assertEqual(out["status"], "success")
+        return {p.instrument_symbol: p for p in
+                AgentPrediction.objects.filter(agent="anomaly_detector")}
+
+    def test_severity_never_becomes_the_calls_probability(self):
+        _quote(_instrument("AAVEUSD", "crypto", "CRYPTO"))
+        _quote(_instrument("BTCUSD", "crypto", "CRYPTO"))
+        rows = self._calls(self._anomaly("AAVEUSD", 3, "up"),
+                           self._anomaly("BTCUSD", 9, "down"))
+        self.assertEqual(rows["AAVEUSD"].predicted_value, "up")
+        # No stated probability: even odds — not "30% up", which the
+        # Brier score reads as "probably down".
+        self.assertEqual(rows["AAVEUSD"].confidence, 0.5)
+        self.assertEqual(rows["BTCUSD"].predicted_value, "down")
+        self.assertEqual(rows["BTCUSD"].confidence, 0.5)   # not "90% down"
+
+    def test_the_detectors_own_confidence_is_what_is_stored(self):
+        _quote(_instrument("AAVEUSD", "crypto", "CRYPTO"))
+        rows = self._calls(self._anomaly("AAVEUSD", 2, "up", confidence=0.8))
+        self.assertEqual(rows["AAVEUSD"].confidence, 0.8)
+
+    def test_the_prompt_asks_for_the_probability_beside_the_direction(self):
+        from ai_agents.agents.anomaly_detector import AnomalyDetectorAgent
+        prompt = AnomalyDetectorAgent.get_system_prompt(
+            object.__new__(AnomalyDetectorAgent))
+        self.assertIn("confidence", prompt)
+        self.assertIn("expected_direction", prompt)

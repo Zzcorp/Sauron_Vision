@@ -402,20 +402,20 @@ def run_anomaly_detection():
     severe = [a for a in anomalies if a.get("severity", 0) >= 7]
 
     # An anomaly that implies a direction is a call the calibration can
-    # grade; one without is a description. Severity stands in for
-    # confidence, and the same symbol is not stacked while a call is live.
+    # grade; one without is a description. The call's confidence is the
+    # detector's own probability of that direction, even odds when it
+    # states none — never the severity: severity says how bad the
+    # anomaly is, and a severity-3 "up" stored as "30% up" was
+    # Brier-scored as a call that expected DOWN. The same symbol is not
+    # stacked while a call is live.
     calls_registered = 0
     for a in anomalies:
         if not isinstance(a, dict):
             continue
-        try:
-            sev = float(a.get("severity") or 0)
-        except (TypeError, ValueError):
-            sev = 0.0
         pred = log_direction_prediction(
             "anomaly_detector", a.get("symbol"), a.get("expected_direction"),
             horizon_hours=clamp_horizon(a.get("horizon_hours"), 24.0),
-            confidence=min(1.0, max(0.0, sev / 10.0)),
+            confidence=a.get("confidence", 0.5),
             notes=str(a.get("description") or "")[:300])
         if pred is not None:
             calls_registered += 1

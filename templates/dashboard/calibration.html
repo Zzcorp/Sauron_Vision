@@ -18,7 +18,7 @@
     <div class="oc-strip-cell">
         <span class="oc-strip-label">PENDING</span>
         <span class="oc-strip-value">{{ pending_total }}</span>
-        <span class="oc-strip-sub">awaiting resolution</span>
+        <span class="oc-strip-sub">awaiting resolution{% if ungraded_total %} · {{ ungraded_total }} ungraded{% endif %}</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">RESOLVER</span>

@@ -235,10 +235,11 @@ class GradingACallTests(TestCase):
         self.assertIsNone(pred.evaluated_at)
 
     def test_no_bar_within_the_grace_window_is_ungraded_not_wrong(self):
-        from ai_agents.calibration import DIRECTION_GRACE_HOURS
         pred = self._call("up")
-        pred.expected_resolution_at = timezone.now() - timedelta(
-            hours=DIRECTION_GRACE_HOURS + 1)
+        # The window is 48 of AAPL's own market hours — about eight New
+        # York sessions; three weeks back is past it whatever weekday and
+        # holidays the run lands on.
+        pred.expected_resolution_at = timezone.now() - timedelta(days=21)
         pred.save()
         self._resolve()
         pred.refresh_from_db()
@@ -252,9 +253,11 @@ class GradingACallTests(TestCase):
     def test_ungraded_calls_do_not_touch_the_trust_score(self):
         from ai_agents.calibration import trust_adjustment_for
         pred = self._call("up")
-        pred.expected_resolution_at = timezone.now() - timedelta(days=5)
+        pred.expected_resolution_at = timezone.now() - timedelta(days=21)
         pred.save()
         self._resolve()
+        pred.refresh_from_db()
+        self.assertEqual(pred.actual_value, "ungradeable_no_bar")
         self.assertEqual(trust_adjustment_for("strategy_advisor"), 1.0)
 
 

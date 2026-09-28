@@ -1344,11 +1344,12 @@ talks about a symbol now registers a direction call — symbol, up or down,
 horizon, the price it was measured from: the strategy advisor's long/short
 legs, the anomaly scan's `expected_direction`, and the calls block each
 briefing ends with. The nightly calibration grades each call against the
-first bar at its horizon (flat is a miss; no bar within 48h is "ungraded",
-never "wrong"), and the trust score the strategist and the critic read is
-built from those grades. `/calibration/` shows the ledger: who called
-what, from which price, and what the market said. An agent whose views
-never reach the block has a trust score of nothing, which is the truth.
+first bar at its horizon (flat is a miss; no bar within 48 of its market's
+own open hours — a weekend is not an outage — is "ungraded", never
+"wrong"), and the trust score the strategist and the critic read is built
+from those grades. `/calibration/` shows the ledger: who called what, from
+which price, and what the market said. An agent whose views never reach
+the block has a trust score of nothing, which is the truth.
 
 **Pools are shares of the account.** A pool that follows the account takes
 a share of the broker's equity reading — an explicit percentage, or blank

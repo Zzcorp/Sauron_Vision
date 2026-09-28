@@ -8,13 +8,16 @@ Covers:
   - trust_adjustment_for: bucket transitions
   - risk_gate AI scale dampening when trust < 1
   - Idempotent resolution (already-resolved predictions are skipped)
+  - /calibration/ pending counts leave ungraded calls out, as DUE SOON does
+  - Direction-call grace window runs on the instrument's market clock
 
 Run with:  python manage.py test tests.test_calibration
 """
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
+import pytz
 from django.contrib.auth.models import User
 from django.test import TestCase
 from django.utils import timezone
@@ -288,3 +291,159 @@ class RiskGateTrustDampingTests(TestCase):
         self.assertEqual(ai["trust_adjustment"], 0.5)
         # adjusted = 1 - (1 - 0.4) * 0.5 = 0.7
         self.assertAlmostEqual(ai["adjusted_scale"], 0.7, places=4)
+
+
+# ── Ungraded calls are neither pending nor resolved ────────────────────────
+
+class UngradedCallsAreNotPendingTests(TestCase):
+    """A call the market never answered is stamped evaluated with
+    was_correct left NULL — ungraded, not wrong, and not pending either.
+    The PENDING tile and the per-agent Pending column must leave it out,
+    or they grow for ever and disagree with the DUE SOON list beneath
+    them, which already leaves it out."""
+
+    def _row(self, agent, **kw):
+        from ai_agents.models import AgentPrediction
+        fields = dict(agent=agent, prediction_type="direction",
+                      predicted_value="up", instrument_symbol="AAPL",
+                      confidence=0.6, reference_price=Decimal("100"),
+                      horizon_hours=24.0)
+        fields.update(kw)
+        return AgentPrediction.objects.create(**fields)
+
+    def test_the_page_counts_an_ungraded_call_as_neither_pending_nor_resolved(self):
+        from django.test import Client
+        _instrument("AAPL", asset_class="stock")
+        now = timezone.now()
+        # One agent with a grade already: one live call, one the market
+        # never answered, one graded.
+        self._row("anomaly_detector",
+                  expected_resolution_at=now + timedelta(hours=24))
+        self._row("anomaly_detector",
+                  expected_resolution_at=now - timedelta(days=3),
+                  evaluated_at=now, actual_value="ungradeable_no_bar")
+        self._row("anomaly_detector",
+                  expected_resolution_at=now - timedelta(days=2),
+                  evaluated_at=now, actual_value="up", was_correct=True)
+        # One agent with nothing graded yet (the page's "pure pending"
+        # row): one live call, one ungraded.
+        self._row("daily_briefing",
+                  expected_resolution_at=now + timedelta(hours=24))
+        self._row("daily_briefing",
+                  expected_resolution_at=now - timedelta(days=3),
+                  evaluated_at=now, actual_value="ungradeable_no_bar")
+
+        user = User.objects.create_user("cal_pending", password="x")
+        client = Client()
+        client.force_login(user)
+        ctx = client.get("/calibration/").context
+
+        self.assertEqual(ctx["pending_total"], 2)
+        self.assertEqual(ctx["pending_total"], len(ctx["recent_pending"]),
+                         "the PENDING tile and DUE SOON must agree")
+        self.assertEqual(ctx["resolved_total"], 1)
+        self.assertEqual(ctx["ungraded_total"], 2)
+        self.assertEqual({r["agent"]: r["pending"] for r in ctx["rows"]},
+                         {"anomaly_detector": 1, "daily_briefing": 1})
+
+
+# ── The grace window runs on the instrument's market clock ─────────────────
+
+# A summer Friday: New York closes 20:00 UTC, so a 21:00 UTC deadline
+# falls after Friday's last bar, and Monday's first bar is at 13:30 UTC.
+FRIDAY_DEADLINE = datetime(2026, 8, 21, 21, 0, tzinfo=pytz.UTC)
+MONDAY_BEAT = datetime(2026, 8, 24, 3, 30, tzinfo=pytz.UTC)      # 54.5h later
+MONDAYS_FIRST_BAR = datetime(2026, 8, 24, 13, 30, tzinfo=pytz.UTC)
+WEDNESDAY_BEAT = datetime(2026, 8, 26, 3, 30, tzinfo=pytz.UTC)   # 102.5h later
+NINE_SESSIONS_LATER = datetime(2026, 9, 4, 3, 30, tzinfo=pytz.UTC)
+
+
+def _bar(inst, when, close, timeframe="1h"):
+    from market_data.models import PriceData
+    return PriceData.objects.create(
+        instrument=inst, timeframe=timeframe, timestamp=when,
+        open=close, high=close, low=close, close=Decimal(str(close)),
+        volume=1, source="test")
+
+
+class DirectionGraceOnTheMarketClockTests(TestCase):
+    """The 48h a call waits for its bar are 48 hours of ITS market being
+    open, on core.exchange_status.market_clock's calendar. Counted on the
+    wall clock, a deadline after Friday's last bar on a weekday-only
+    market was 54.5h old at Monday's 03:30 beat and thrown away as
+    ungradeable ten hours before the bar that would have graded it."""
+
+    def setUp(self):
+        self.inst = _instrument("AAPL", asset_class="stock")
+
+    def _call(self, symbol="AAPL", deadline=FRIDAY_DEADLINE):
+        from ai_agents.models import AgentPrediction
+        return AgentPrediction.objects.create(
+            agent="anomaly_detector", prediction_type="direction",
+            predicted_value="up", instrument_symbol=symbol, confidence=0.6,
+            expected_resolution_at=deadline,
+            reference_price=Decimal("100"), horizon_hours=4.0)
+
+    def _resolve(self, now):
+        from ai_agents.calibration import resolve_pending_predictions
+        return resolve_pending_predictions(now=now)
+
+    def test_a_friday_deadline_on_a_weekday_market_waits_for_mondays_bar(self):
+        pred = self._call()
+        self._resolve(MONDAY_BEAT)
+        pred.refresh_from_db()
+        self.assertIsNone(pred.evaluated_at,
+                          "no market hours have passed: the bar may still come")
+        self.assertIsNone(pred.was_correct)
+        _bar(self.inst, MONDAYS_FIRST_BAR, 103.0)
+        self._resolve(MONDAY_BEAT + timedelta(days=1))
+        pred.refresh_from_db()
+        self.assertTrue(pred.was_correct)
+        self.assertEqual(pred.actual_value, "up")
+
+    def test_the_window_is_market_hours_not_wall_clock_hours(self):
+        pred = self._call()
+        # Wednesday's beat: 102 wall-clock hours, two 6.5h sessions.
+        self._resolve(WEDNESDAY_BEAT)
+        pred.refresh_from_db()
+        self.assertIsNone(pred.evaluated_at)
+        # Nine sessions on: the market has had its 48 hours to answer.
+        self._resolve(NINE_SESSIONS_LATER)
+        pred.refresh_from_db()
+        self.assertEqual(pred.actual_value, "ungradeable_no_bar")
+        self.assertIsNone(pred.was_correct)
+        self.assertIsNotNone(pred.evaluated_at)
+        self.assertIn("market hours", pred.evaluation_notes)
+
+    def test_crypto_keeps_the_wall_clock_window(self):
+        from ai_agents.calibration import DIRECTION_GRACE_HOURS
+        _instrument("BTCUSD", asset_class="crypto")
+        pred = self._call("BTCUSD")
+        self._resolve(FRIDAY_DEADLINE
+                      + timedelta(hours=DIRECTION_GRACE_HOURS - 1))
+        pred.refresh_from_db()
+        self.assertIsNone(pred.evaluated_at)
+        self._resolve(FRIDAY_DEADLINE
+                      + timedelta(hours=DIRECTION_GRACE_HOURS + 1))
+        pred.refresh_from_db()
+        self.assertEqual(pred.actual_value, "ungradeable_no_bar")
+
+    def test_market_hours_between_counts_only_open_time(self):
+        from ai_agents.calibration import (DIRECTION_GRACE_HOURS,
+                                           market_hours_between)
+        _instrument("BTCUSD", asset_class="crypto")
+        self.assertEqual(
+            market_hours_between("AAPL", FRIDAY_DEADLINE, MONDAY_BEAT), 0.0)
+        by_wednesday = market_hours_between("AAPL", FRIDAY_DEADLINE,
+                                            WEDNESDAY_BEAT)
+        self.assertGreaterEqual(by_wednesday, 13.0)   # Monday + Tuesday,
+        self.assertLess(by_wednesday, 15.0)           # counted to the hour
+        # Crypto never shuts: the wall clock, stopping at the cap.
+        self.assertAlmostEqual(
+            market_hours_between("BTCUSD", FRIDAY_DEADLINE, MONDAY_BEAT,
+                                 cap=1000.0), 54.5, places=2)
+        self.assertEqual(
+            market_hours_between("BTCUSD", FRIDAY_DEADLINE, MONDAY_BEAT),
+            DIRECTION_GRACE_HOURS)
+        self.assertEqual(
+            market_hours_between("AAPL", MONDAY_BEAT, FRIDAY_DEADLINE), 0.0)
