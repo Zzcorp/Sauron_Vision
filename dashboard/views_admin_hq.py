@@ -1746,7 +1746,10 @@ def hq_run_horizon(request):
                 request,
                 f"Horizon: view #{out['view_id']} written — "
                 f"{out['calls_registered']} call(s) registered, "
-                f"{out['calls_dropped']} dropped; {cost:.2f} USD on "
+                f"{out['calls_dropped']} dropped"
+                + (f" ({out['calls_dropped_standing']} held by a standing call)"
+                   if out.get("calls_dropped_standing") else "")
+                + f"; {cost:.2f} USD on "
                 f"{out.get('model') or 'the frontier model'}.")
         else:
             messages.error(

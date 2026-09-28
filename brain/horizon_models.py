@@ -50,7 +50,9 @@ class HorizonView(models.Model):
     # each call in place (2026-09-12):
     # [{key, thesis_md, structural_drivers, risks, catalysts, tilt,
     #   confidence, calls: [{symbol, direction, horizon_hours, confidence,
-    #   why, registered: bool, drop_reason: str when not registered}]}]
+    #   why, registered: bool, drop_reason: str when not registered,
+    #   standing_prediction_id: int when refused for a live call from an
+    #   earlier view}]}]
     # `registered`/`drop_reason` are the ONLY thing a display may read to
     # decide a call's state; a view written before that date carries
     # neither and falls back to a bare 'not registered'.
@@ -81,6 +83,15 @@ class HorizonView(models.Model):
     @property
     def age_days(self) -> float:
         return (timezone.now() - self.created_at).total_seconds() / 86400.0
+
+    @property
+    def calls_standing(self) -> int:
+        """How many of `calls_dropped` were refused for a live call from an
+        EARLIER view (the annotation's `standing_prediction_id`): the
+        normal state of every monthly run after the first, not a feed
+        fault, so `horizon list` and the runs table count them apart."""
+        return sum(1 for s in self.sectors or [] for c in s.get("calls") or []
+                   if c.get("standing_prediction_id"))
 
 
 def latest_view(max_age_days: int = DEFAULT_MAX_AGE_DAYS):

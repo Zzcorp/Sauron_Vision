@@ -184,6 +184,49 @@ class AllStaleProbesSkipTheSynthesisTests(_MidweekClock, TestCase):
         self.assertNotEqual(out.get("status"), "skipped")
 
 
+class AProbeBlockThatRaisesIsASkipNotABlindRunTests(_MidweekClock, TestCase):
+    """The whole probe block sits in one try, and its except set the probes
+    to [] and nothing else. The gate lets an empty list through on purpose
+    (a fresh install has no bars), so any exception in the block — a table
+    the worker cannot read, a frame it cannot judge — sent the Opus call
+    out with zero probes, hourly, with no line in the log saying why."""
+
+    def setUp(self):
+        super().setUp()
+        User.objects.create_user("brain_staff2", password="x", is_staff=True)
+
+    def test_an_exception_in_the_probe_block_is_logged_and_skips_the_run(self):
+        from unittest.mock import patch
+
+        from brain.models import BrainReport
+        from brain.synthesizer import _build_world_snapshot, synthesize_now
+        _bars(_instrument("AAPL"), age_hours=2)          # a fed book, not a
+        _bars(_instrument("AMZN"), age_hours=3)          # fresh install
+        boom = RuntimeError("book table gone")
+        with patch("brain.synthesizer._held_symbols", side_effect=boom), \
+                self.assertLogs("brain.synthesizer", level="WARNING") as logs:
+            snap = _build_world_snapshot()
+        self.assertEqual(snap["regime_probes"], [])
+        self.assertIn("RuntimeError: book table gone",
+                      snap["regime_probes_error"])
+        self.assertTrue(any("book table gone" in line for line in logs.output))
+        before = BrainReport.objects.count()
+        with patch("brain.synthesizer._held_symbols", side_effect=boom), \
+                patch("ai_agents.providers.claude_provider.ClaudeProvider"
+                      ".complete") as complete, \
+                self.assertLogs("brain.synthesizer", level="WARNING") as logs:
+            out = synthesize_now()
+        complete.assert_not_called()
+        self.assertEqual(out["status"], "skipped")
+        self.assertIn("RuntimeError: book table gone", out["reason"])
+        self.assertEqual(BrainReport.objects.count(), before)
+        self.assertTrue(any("SKIPPED" in line and "book table gone" in line
+                            for line in logs.output))
+        from alerts.models import Notification
+        self.assertTrue(Notification.objects.filter(
+            title__icontains="not synthesising").exists())
+
+
 class TheSpendGuardNamesTheTierItActuallySpendsTests(SimpleTestCase):
     """spend.can_spend keys DEEP_TIER_SHARE off the guard's tier string, so a
     deep agent guarded as "balanced" is exempt from the reserve that exists

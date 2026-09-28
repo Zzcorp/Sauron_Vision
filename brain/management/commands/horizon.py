@@ -55,7 +55,9 @@ class Command(BaseCommand):
                 f"  #{v.pk:<4} {v.status.upper():<9} {v.created_at:%Y-%m-%d %H:%M}  "
                 f"age {v.age_days:5.1f}d  {v.horizon_years:>2}y  "
                 f"model {v.model_used or '-':<22} cost {float(v.cost_usd):.3f} USD  "
-                f"calls {v.calls_registered} registered / {v.calls_dropped} dropped")
+                f"calls {v.calls_registered} registered / {v.calls_dropped} dropped"
+                + (f", {v.calls_standing} held by a standing call"
+                   if v.calls_standing else ""))
             if v.error:
                 self.stdout.write(f"        {v.error[:160]}")
 
@@ -160,7 +162,10 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(
                 f"view #{out['view_id']} OK — {out['n_sectors']} sector(s), "
                 f"{out['calls_registered']} call(s) registered, "
-                f"{out['calls_dropped']} dropped; {float(out.get('cost_usd') or 0):.3f} USD "
+                f"{out['calls_dropped']} dropped"
+                + (f" ({out['calls_dropped_standing']} held by a standing call)"
+                   if out.get("calls_dropped_standing") else "")
+                + f"; {float(out.get('cost_usd') or 0):.3f} USD "
                 f"on {out.get('model')}"))
             self._show(out["view_id"])
         else:

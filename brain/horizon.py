@@ -656,6 +656,20 @@ def view_predictions(view) -> dict:
     return out
 
 
+def standing_call(symbol):
+    """The live 'horizon' call on `symbol`, or None: the row that makes
+    log_direction_prediction refuse a second one — its one-live-call
+    filter, verbatim, so the two never disagree about what stands."""
+    from ai_agents.models import AgentPrediction
+
+    return (AgentPrediction.objects
+            .filter(agent=AGENT_NAME, prediction_type="direction",
+                    instrument_symbol=str(symbol or "").strip().upper(),
+                    was_correct__isnull=True, evaluated_at__isnull=True,
+                    expected_resolution_at__gt=timezone.now())
+            .order_by("-created_at").first())
+
+
 def call_drop_reason(call) -> str:
     """The annotated reason this call was not registered, without the
     'not registered — ' prefix the displays add themselves.
@@ -683,8 +697,12 @@ def register_view_calls(parsed: dict, *, universe_block=None) -> dict:
 
     The second call on a symbol inside one view is dropped here; a call
     on a symbol the agent already has a LIVE call on (last month's
-    12-month call) is dropped by the calibration's own one-live-call rule.
-    Both are counted, so the run result says what it did not register.
+    6-month call, for the next five monthly runs) is refused by the
+    calibration's one-live-call rule — and found here FIRST, so the
+    annotation names that call and its deadline rather than a feed
+    fault, and it is counted apart from the calls that had no instrument
+    row or price. The run result says what it did not register, and
+    why, bucket by bucket.
 
     Two rules the first live view broke (2026-09-12):
 
@@ -704,7 +722,7 @@ def register_view_calls(parsed: dict, *, universe_block=None) -> dict:
     """
     from ai_agents.calibration import log_direction_prediction
 
-    registered, dropped_dup, dropped_unreg = 0, 0, 0
+    registered, dropped_dup, dropped_standing, dropped_unreg = 0, 0, 0, 0
     # symbol -> the horizon (hours) actually registered on it, so a
     # dropped duplicate can name the call that superseded it. Only a
     # SUCCESSFUL registration lands here: naming a call that was itself
@@ -721,6 +739,23 @@ def register_view_calls(parsed: dict, *, universe_block=None) -> dict:
             c["drop_reason"] = (f"superseded by the {_months(taken[sym])}m "
                                 f"call on {sym} — one live call per symbol")
             continue
+        standing = standing_call(sym)
+        if standing is not None:
+            # The calibration refuses this call under its one-live-call
+            # rule with the same bare None as a missing price, and every
+            # run after the first hit it on every symbol: each line read
+            # 'no instrument row or no usable price' — the operator sent
+            # to check healthy feeds, five months out of six. Name the
+            # call that stands, and count it apart.
+            dropped_standing += 1
+            c["registered"] = False
+            c["standing_prediction_id"] = standing.pk
+            c["drop_reason"] = (
+                f"{NOT_REGISTERED} — a {_months(standing.horizon_hours)}-month "
+                f"call from the view of {standing.created_at:%Y-%m-%d} still "
+                f"stands until {standing.expected_resolution_at:%Y-%m-%d}; "
+                f"see /calibration/")
+            continue
         pred = log_direction_prediction(
             AGENT_NAME, sym, c["direction"],
             horizon_hours=c["horizon_hours"],
@@ -731,18 +766,19 @@ def register_view_calls(parsed: dict, *, universe_block=None) -> dict:
         if pred is None:
             dropped_unreg += 1
             c["registered"] = False
-            # log_direction_prediction also returns None when a live call
-            # from an earlier view still stands on the symbol; that call
-            # is on the /calibration/ ledger, and this reason names the
-            # two causes the operator can act on.
+            # A standing live call was taken above, so None here is the
+            # calibration's other two refusals — no Instrument row, no
+            # price to measure from — the causes the operator can act on.
             c["drop_reason"] = (f"{NOT_REGISTERED} — no instrument row or no "
                                 f"usable price for {sym}")
         else:
             registered += 1
             taken[sym] = c["horizon_hours"]
             c["registered"] = True
-    return {"registered": registered, "dropped": dropped_dup + dropped_unreg,
+    return {"registered": registered,
+            "dropped": dropped_dup + dropped_standing + dropped_unreg,
             "dropped_duplicate": dropped_dup,
+            "dropped_standing": dropped_standing,
             "dropped_unregistered": dropped_unreg}
 
 
@@ -824,7 +860,7 @@ def run_horizon_now() -> dict:
     view.save()
 
     calls = {"registered": 0, "dropped": 0, "dropped_duplicate": 0,
-             "dropped_unregistered": 0}
+             "dropped_standing": 0, "dropped_unregistered": 0}
     try:
         calls = register_view_calls(parsed,
                                     universe_block=snapshot.get("universe"))
@@ -849,6 +885,7 @@ def run_horizon_now() -> dict:
             "calls_registered": calls["registered"],
             "calls_dropped": calls["dropped"],
             "calls_dropped_duplicate": calls["dropped_duplicate"],
+            "calls_dropped_standing": calls["dropped_standing"],
             "calls_dropped_unregistered": calls["dropped_unregistered"],
             "model": view.model_used, "cost_usd": float(view.cost_usd)}
 

@@ -154,7 +154,7 @@
             <td>{{ h.created_at|timesince }} ago</td>
             <td style="font-family: var(--font-mono); font-size: 11px;">{{ h.model_used|default:"—" }}</td>
             <td class="num">{{ h.cost_usd|floatformat:3 }} USD</td>
-            <td class="num">{{ h.calls_registered }} registered / {{ h.calls_dropped }} dropped</td>
+            <td class="num">{{ h.calls_registered }} registered / {{ h.calls_dropped }} dropped{% if h.calls_standing %}, {{ h.calls_standing }} held by a standing call{% endif %}</td>
             <td style="font-size: 11px; color: var(--text-muted); max-width: 50ch;">{% if h.error %}{{ h.error|truncatechars:160 }}{% endif %}{% if h.status == 'rejected' and h.raw %} <details><summary>raw output</summary><pre style="white-space: pre-wrap; font-size: 10px;">{{ h.raw|truncatechars:4000 }}</pre></details>{% endif %}</td>
           </tr>
         {% endfor %}

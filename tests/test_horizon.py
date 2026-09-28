@@ -427,6 +427,47 @@ class RunTests(_Universe, TestCase):
         self.assertIn("no instrument row or no usable price for XLK",
                       c["drop_reason"])
 
+    def test_a_second_run_against_a_standing_call_names_that_call_not_a_price(self):
+        """Calls run six and twelve months and the beat runs monthly, so
+        every run after the first finds a live call on every symbol it
+        names. Each of those was annotated 'no instrument row or no usable
+        price' — a phantom feed fault on every line of the page, the shell
+        and `horizon list`, five months out of six, while every feed was
+        healthy. The refusal names the standing call and its deadline, and
+        is counted apart from the catalogue/price failures."""
+        from ai_agents.models import AgentPrediction
+        from brain.horizon import run_horizon_now
+        from brain.horizon_models import HorizonView
+        self._seed_universe()
+        with _stub_horizon(_good_view()):
+            self.assertEqual(run_horizon_now()["calls_registered"], 2)
+        standing = {p.instrument_symbol: p
+                    for p in AgentPrediction.objects.filter(agent="horizon")}
+        with _stub_horizon(_good_view()):
+            out = run_horizon_now()
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["calls_registered"], 0)
+        self.assertEqual(out["calls_dropped"], 2)
+        self.assertEqual(out["calls_dropped_standing"], 2)
+        self.assertEqual(out["calls_dropped_unregistered"], 0)   # no feed fault
+        self.assertEqual(AgentPrediction.objects.filter(agent="horizon").count(), 2)
+        view = HorizonView.objects.order_by("-pk").first()
+        self.assertEqual((view.calls_registered, view.calls_dropped), (0, 2))
+        self.assertEqual(view.calls_standing, 2)
+        calls = {c["symbol"]: c for s in view.sectors for c in s["calls"]}
+        xlk = standing["XLK"]
+        self.assertIs(calls["XLK"]["registered"], False)
+        self.assertEqual(
+            calls["XLK"]["drop_reason"],
+            f"not registered — a 12-month call from the view of "
+            f"{xlk.created_at:%Y-%m-%d} still stands until "
+            f"{xlk.expected_resolution_at:%Y-%m-%d}; see /calibration/")
+        self.assertEqual(calls["XLK"]["standing_prediction_id"], xlk.pk)
+        self.assertIn("a 6-month call from the view of",
+                      calls["XLE"]["drop_reason"])
+        for c in calls.values():
+            self.assertNotIn("no instrument row", c["drop_reason"])
+
     def test_a_friday_close_is_the_reference_when_no_fresh_mark_exists(self):
         """A monthly run on the 1st can land on a Monday with Friday's bar
         as the newest — 60+ hours old, outside mark_for_symbol's window."""
@@ -819,6 +860,34 @@ class HorizonPageTests(TestCase):
         # Exactly one date on the page's calls: the registered call's.
         self.assertEqual(resp.content.decode().count("pending until"), 1)
 
+    def test_a_call_held_by_a_standing_call_shows_that_call_not_a_phantom_price(self):
+        """The second monthly view's page said 'not registered — no
+        instrument row or no usable price' on every call — the operator
+        sent to check healthy feeds — and showed nothing of the earlier
+        view's call that actually stands on the symbol."""
+        from ai_agents.models import AgentPrediction
+        from brain.horizon import run_horizon_now
+        for sym in ("XLK", "XLE"):
+            _daily_history(_instrument(sym))
+        with _stub_horizon(_good_view()):
+            run_horizon_now()
+        with _stub_horizon(_good_view()):
+            run_horizon_now()
+        xlk = AgentPrediction.objects.get(agent="horizon", instrument_symbol="XLK")
+        self.client.force_login(self.user)
+        resp = self.client.get(reverse("horizon_dashboard"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "XLK UP · 12m")
+        self.assertContains(resp, "not registered")
+        self.assertContains(
+            resp, f"a 12-month call from the view of {xlk.created_at:%Y-%m-%d} "
+                  f"still stands until {xlk.expected_resolution_at:%Y-%m-%d}")
+        self.assertNotContains(resp, "no instrument row")
+        # The runs table counts the held calls apart from the dropped ones;
+        # the first view's line is unchanged.
+        self.assertContains(resp, "0 registered / 2 dropped, 2 held by a standing call")
+        self.assertContains(resp, "2 registered / 0 dropped")
+
     def test_the_stale_view_is_marked_on_the_page(self):
         _ok_view_row(days_ago=60)
         self.client.force_login(self.user)
@@ -899,6 +968,30 @@ class CommandTests(TestCase):
                       "superseded by the 6m call on XLK — one live call "
                       "per symbol", text)
         self.assertEqual(text.count("pending until"), 1)
+
+    def test_list_and_show_count_and_name_a_call_held_by_a_standing_one(self):
+        """`horizon list` printed `calls 0 registered / 2 dropped` month
+        after month, and `show` blamed a missing price on every line, when
+        the calls were refused for the earlier view's live calls."""
+        from ai_agents.models import AgentPrediction
+        from brain.horizon import run_horizon_now
+        for sym in ("XLK", "XLE"):
+            _daily_history(_instrument(sym))
+        with _stub_horizon(_good_view()):
+            run_horizon_now()
+        with _stub_horizon(_good_view()):
+            text = self._run("run", "--yes")
+        xlk = AgentPrediction.objects.get(agent="horizon", instrument_symbol="XLK")
+        self.assertIn("0 call(s) registered, 2 dropped (2 held by a standing "
+                      "call)", text)
+        self.assertIn(f"call XLK UP 12m conf 0.70 — not registered — a "
+                      f"12-month call from the view of {xlk.created_at:%Y-%m-%d} "
+                      f"still stands until {xlk.expected_resolution_at:%Y-%m-%d}; "
+                      f"see /calibration/", text)
+        self.assertNotIn("no instrument row", text)
+        text = self._run("list")
+        self.assertIn("0 registered / 2 dropped, 2 held by a standing call", text)
+        self.assertIn("2 registered / 0 dropped", text)     # the first view
 
     def test_a_view_written_before_the_annotation_still_shows(self):
         """Views from before 2026-09-12 carry no `registered` key: the

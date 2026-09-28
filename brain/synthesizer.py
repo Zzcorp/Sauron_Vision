@@ -397,8 +397,15 @@ def _build_world_snapshot(*, max_obs: int = 80) -> dict:
         fresh = [p for p in regime_probes if not p.get("stale")]
         snap["regime_probes_fresh"] = len(fresh)
         snap["regime_probes_stale"] = len(regime_probes) - len(fresh)
-    except Exception:
+    except Exception as e:  # noqa: BLE001 — the gate below must SEE this
+        # A block that raised is not "no probes". The feed gate lets an
+        # empty list through on purpose (a fresh install has no bars), so
+        # a bare [] here sent the Opus call out with zero probes, hourly,
+        # and nothing in the log said why. Say so, and mark the snapshot:
+        # synthesize_now skips on the marker as it does on a stale feed.
+        logger.warning("[brain] regime probes failed: %s", e, exc_info=True)
         snap["regime_probes"] = []
+        snap["regime_probes_error"] = f"{type(e).__name__}: {e}"[:300]
 
     # 5. Recent decay alerts.
     try:
@@ -837,25 +844,41 @@ def synthesize_now() -> dict:
     # brain with no fresh report.
     probes = snapshot.get("regime_probes") or []
     fresh = snapshot.get("regime_probes_fresh")
-    if probes and fresh is not None and fresh < MIN_FRESH_PROBES:
+    failed = snapshot.get("regime_probes_error")
+    reason = None
+    if failed:
+        # The probe block raised (the snapshot's marker): not the "no bars
+        # yet" state the gate lets through below, but no probe READ at
+        # all. The same outcome as a stale feed — a skip that names the
+        # exception — where before the run went out with zero probes and
+        # no log line: an Opus call an hour, on nothing.
+        what = "the regime probes could not be read"
+        hint = ("The traceback is in the worker log; synthesis resumes on "
+                "its own once the probes read again.")
+        reason = (f"{what} ({failed}) — a synthesis here would read a "
+                  f"platform fault as a market with no regime")
+    elif probes and fresh is not None and fresh < MIN_FRESH_PROBES:
         behind = [p for p in probes if p.get("stale")]
         named = ", ".join(
             f"{p['symbol']} {p['timeframe']} closed "
             f"{p.get('last_bar_age_hours') or 0:.0f}h ago"
             for p in behind[:4])
+        what = "the bars are stale"
+        hint = ("Fix the bar feed (manage.py why_no_trade names the "
+                "blocker) and synthesis resumes on its own.")
         reason = (f"{len(behind)} of {len(probes)} regime probes are stale "
                   f"behind their own market's clock ({fresh} fresh, "
                   f"{MIN_FRESH_PROBES} needed: {named}) — the bar feed has "
                   f"stopped, so a synthesis here would read a frozen frame "
                   f"as a live market")
+    if reason:
         logger.warning("[brain] synthesis SKIPPED: %s", reason)
         try:
             from bot_program.notifications import notify_staff
             notify_staff(
-                title="⚠ Sauron's Mind is not synthesising: the bars are stale",
+                title=f"⚠ Sauron's Mind is not synthesising: {what}",
                 body=(f"{reason}. No LLM call was made and no report was "
-                      f"written. Fix the bar feed (manage.py why_no_trade "
-                      f"names the blocker) and synthesis resumes on its own."),
+                      f"written. {hint}"),
                 url="/health/", cooldown_hours=6)
         except Exception as e:  # noqa: BLE001 — never block the skip
             logger.debug("[brain] stale-probe alert failed: %s", e)
