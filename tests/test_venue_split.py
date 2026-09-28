@@ -181,3 +181,49 @@ class TheVenueColourIsSaidOnceTests(SimpleTestCase):
         self.assertIn(".pos-pop-venue.is-live", css)
         self.assertIn(".hq-acct--live", css)
         self.assertIn("real money", css)
+
+
+class LiveEngagedIsRealMoneyOnlyTests(TestCase):
+    """LIVE ENGAGED counts the rows whose WORLD is real money — the rule the
+    positions page reads a row by (`position_summary.venue_of`) — never the
+    config's mode. A live config routinely holds simulated rows: its
+    paper-stage rules fill on the paper venue (`paper = mode == "paper" or
+    stage["force_paper"]`, asset_engine/base.py), a PaperTrader-carried row
+    is stamped broker "paper", and an eToro demo fill is paper=False with
+    broker_env "paper". None of those is money at work.
+    """
+
+    def setUp(self):
+        self.user = _user("vs_world")
+        self.live = _config(self.user, "live-pool", "live", "10000")
+
+    def _row(self, paper, **meta):
+        from bot_program.models import AssetBotTrade
+        return AssetBotTrade.objects.create(
+            config=self.live, asset_class="crypto", symbol="BTCUSD",
+            side="BUY", qty=Decimal("2"), entry_price=Decimal("1000"),
+            status="OPEN", paper=paper, metadata=meta)
+
+    def test_a_live_configs_simulated_rows_are_never_live_engaged(self):
+        from portfolio.services import capital_summary
+        self._row(True)                                      # paper-stage rule
+        self._row(False, broker="paper")                     # PaperTrader
+        self._row(False, broker="etoro", broker_env="paper")  # eToro demo
+        self._row(False, broker="etoro")                     # real money
+        cap = capital_summary(self.user)
+        self.assertEqual(cap["used_live"], 2000.0)
+        self.assertEqual(cap["used_paper"], 6000.0)
+        self.assertEqual(cap["used_total"], 8000.0)
+
+    def test_the_pool_room_still_charges_every_row_of_the_pool(self):
+        """FREE is the room the next entry can draw, and the TAKE TRADE
+        lane's pool check charges a live config's paper-stage rows against
+        its capital (manual_trade's committed sum has no venue filter) — so
+        LIVE FREE keeps the pool's arithmetic. ENGAGED and FREE answer two
+        questions and need not sum to the pool."""
+        from portfolio.services import capital_summary
+        self._row(True)
+        self._row(False, broker="etoro")
+        cap = capital_summary(self.user)
+        self.assertEqual(cap["used_live"], 2000.0)
+        self.assertEqual(cap["free_live"], 6000.0)

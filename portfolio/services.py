@@ -277,6 +277,7 @@ def capital_summary(user):
     from collections import defaultdict
 
     from bot_program.models import AssetBotConfig, AssetBotTrade
+    from dashboard.position_summary import venue_of
     from portfolio.risk_gate import capital_at_work
 
     # Keyed by (asset_class, mode): a paper pool and a live pool are not
@@ -288,6 +289,15 @@ def capital_summary(user):
         pools[(cfg.asset_class, cfg.mode)] += float(cfg.capital or 0)
 
     used = defaultdict(float)
+    # ENGAGED, keyed by the ROW's world (2026-09-28). `used` charges the
+    # POOL the row sits in; `engaged` says whose money is at work, and a
+    # live config routinely holds simulated rows: its paper-stage rules
+    # fill on the paper venue (`paper = mode == "paper" or
+    # stage["force_paper"]`), a PaperTrader-carried row is stamped broker
+    # "paper", an eToro demo fill is paper=False with broker_env "paper".
+    # The world is read by `venue_of` — the rule the positions page reads
+    # a row by — never by `config.mode`, which called all of those live.
+    engaged = defaultdict(float)
     for trade in AssetBotTrade.objects.filter(
             config__user=user, status__in=("OPEN", "CLOSE_PENDING")
             ).select_related("config"):
@@ -296,10 +306,12 @@ def capital_summary(user):
         # the ROW's stamp (2026-09-26): an eToro forex row sent at 1 is
         # USED in full — the gate counts it so; a "free" printed at 1/30
         # would be a free the next entry cannot draw
-        used[(trade.asset_class, trade.config.mode)] += capital_at_work(
+        at_work = capital_at_work(
             trade.asset_class, notional,
             leverage=(trade.metadata or {}).get("leverage"),
             carrier=str((trade.metadata or {}).get("broker") or ""))
+        used[(trade.asset_class, trade.config.mode)] += at_work
+        engaged["live" if venue_of(trade)[1] else "paper"] += at_work
 
     classes = []
     for ac, mode in sorted(set(pools) | set(used)):
@@ -342,8 +354,15 @@ def capital_summary(user):
         # `classes` — and the bottom strip, which is where that question is
         # actually asked, took the POOLED `used_total` instead and showed
         # simulated capital as though it were engaged.
-        "used_live": _mode_total(used, "live"),
-        "used_paper": _mode_total(used, "paper"),
+        #
+        # ENGAGED is the row's world; FREE stays the pool's arithmetic
+        # (2026-09-28). A live config's paper-stage rows are not money at
+        # work, yet the TAKE TRADE lane's pool check charges them against
+        # the pool's capital (manual_trade's committed sum has no venue
+        # filter), so LIVE FREE is still the room the next live entry can
+        # draw. Two questions; they need not sum to the pool.
+        "used_live": round(engaged.get("live", 0.0), 2),
+        "used_paper": round(engaged.get("paper", 0.0), 2),
         "free_live": round(_mode_total(pools, "live")
                            - _mode_total(used, "live"), 2),
         "free_paper": round(_mode_total(pools, "paper")

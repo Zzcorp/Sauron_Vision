@@ -300,7 +300,7 @@ def why_block(signal, flag=None) -> dict:
                         "fired.")}
 
 
-def acted_index(signals) -> dict:
+def acted_index(signals, user=None) -> dict:
     """{signal_id: [trade dicts]} for a page of signals, in ONE query.
 
     THERE IS NO FOREIGN KEY from AssetBotTrade to Signal. The platform joins
@@ -309,6 +309,12 @@ def acted_index(signals) -> dict:
     at or after the signal, because a position opened BEFORE a signal fired
     cannot have been opened because of it. That join is EVIDENCE, not proof,
     and `ACTED_CAPTION` says so wherever it is rendered.
+
+    Given a `user`, the READER'S OWN trades only. AssetBotTrade is per-user
+    and every other trade surface fetches `config__user=request.user` —
+    another login's size, status and realized R are not hidden from the
+    page, they are never fetched. The shell (`signals show`) has no reader
+    and sees the fleet.
     """
     from django.db.models import Q
 
@@ -325,8 +331,11 @@ def acted_index(signals) -> dict:
                    opened_at__gte=s.created_at)
     if not pairs:
         return {}
+    rows = AssetBotTrade.objects.filter(pairs)
+    if user is not None:
+        rows = rows.filter(config__user=user)
     try:
-        trades = list(AssetBotTrade.objects.filter(pairs).order_by("-opened_at")[:400])
+        trades = list(rows.order_by("-opened_at")[:400])
     except Exception as e:  # noqa: BLE001
         logger.warning("[signal surface] acted join failed: %s", e)
         return {}
@@ -530,12 +539,15 @@ def _stage_filter(qs, stages):
     return qs.filter(q)
 
 
-def apply_filters(qs, params):
+def apply_filters(qs, params, user=None):
     """(qs, chips, active) — every filter as a real queryset narrowing.
 
     `chips` is one dict per engaged filter, each carrying the querystring that
     REMOVES it, so a filter is never something the operator has to guess their
     way out of by editing a URL.
+
+    `user` scopes `?acted=` to the reader's own trades, as `acted_index` is;
+    the shell passes none and asks the fleet.
     """
     from datetime import timedelta
 
@@ -631,6 +643,8 @@ def apply_filters(qs, params):
             symbol=OuterRef("instrument__symbol"),
             rule_name=OuterRef("rule_name"),
             opened_at__gte=OuterRef("created_at"))
+        if user is not None:
+            sub = sub.filter(config__user=user)
         qs = qs.annotate(_acted=Exists(sub)).filter(_acted=(acted == "yes"))
         active["acted"] = acted
 

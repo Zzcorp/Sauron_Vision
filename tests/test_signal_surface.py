@@ -648,3 +648,68 @@ class PaginationTests(TestCase):
         second = self.client.get("/signals/?page=2").content.decode()
         self.assertIn("page 2 of 2", second)
         self.assertEqual(second.count("six answers"), 5)
+
+
+# ══ Review, 2026-09-28: (e) is answered from the READER'S OWN trades ═══════
+#
+# AssetBotTrade is per-user (NOTES.md: "Only BotConfig, BotTrade, and Binance
+# credentials are per-user"), and every other trade surface on the dashboard
+# fetches `config__user=request.user` — another login's trade is not hidden
+# from the page, it is never fetched. The acted join and the ?acted= filter
+# read the whole table, so any login could read any other's live size,
+# status and realized R off /signals/.
+
+
+class ActedIsScopedToTheReaderTests(TestCase):
+
+    def setUp(self):
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+        self.inst = _instrument("USDCAD")
+        _control("r_acted", stage="research")
+        self.signal = _signal(self.inst, "r_acted")
+        self.me = User.objects.create_user("sig_me", password="x")
+        self.other = User.objects.create_user("sig_other", password="x")
+        for user, qty in ((self.me, "1"), (self.other, "7")):
+            cfg = AssetBotConfig.objects.create(
+                user=user, asset_class="forex", name=f"p_{user.username}",
+                mode="paper", enabled=True, symbols=["USDCAD"],
+                capital=Decimal("1000"))
+            AssetBotTrade.objects.create(
+                config=cfg, asset_class="forex", symbol="USDCAD", side="BUY",
+                qty=Decimal(qty), entry_price=Decimal("1"), status="OPEN",
+                paper=True, rule_name="r_acted")
+
+    def test_the_join_returns_only_the_readers_own_trades(self):
+        from dashboard.signal_surface import acted_index
+        mine = acted_index([self.signal], user=self.me)[self.signal.pk]
+        self.assertEqual([t["qty"] for t in mine], [1.0])
+        theirs = acted_index([self.signal], user=self.other)[self.signal.pk]
+        self.assertEqual([t["qty"] for t in theirs], [7.0])
+
+    def test_the_acted_filter_asks_only_the_readers_own_trades(self):
+        from dashboard.signal_surface import apply_filters
+        from signals.models import Signal
+        nobody = User.objects.create_user("sig_nobody", password="x")
+
+        def _n(user, acted):
+            qs, _chips, _active = apply_filters(
+                Signal.objects.select_related("instrument"),
+                QueryDict(f"acted={acted}", mutable=True), user=user)
+            return qs.count()
+
+        self.assertEqual(_n(self.me, "yes"), 1)
+        self.assertEqual(_n(nobody, "yes"), 0)
+        self.assertEqual(_n(nobody, "no"), 1)
+
+    def test_the_page_shows_a_login_its_own_trade_and_never_anothers(self):
+        self.client.force_login(self.me)
+        body = self.client.get("/signals/").content.decode()
+        self.assertIn("PAPER BUY 1.0", body)
+        self.assertNotIn("PAPER BUY 7.0", body)
+        # A login with no trades of its own: ?acted=yes matches nothing, and
+        # nobody's trade line is on the page.
+        nobody = User.objects.create_user("sig_nobody2", password="x")
+        self.client.force_login(nobody)
+        body = self.client.get("/signals/?acted=yes").content.decode()
+        self.assertIn("0 of 1 signals", body)
+        self.assertNotIn("PAPER BUY", body)

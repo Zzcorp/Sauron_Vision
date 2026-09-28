@@ -485,13 +485,17 @@ def economic_calendar(request):
     return render(request, "dashboard/economic_calendar.html", ctx)
 
 
-def _signal_rows(signals, configs=None):
+def _signal_rows(signals, configs=None, user=None):
     """One page of Signals, each carrying its six answers (2026-09-12).
 
     `configs` is the viewing user's enabled bot configs — the only thing that
     makes block (d) answerable, fetched ONCE for the page rather than per row,
     because the cost of a trade belongs to the pool that would take it and a
     signal on its own does not know one.
+
+    `user` is the reader, and block (e) is answered from THEIR trades: a
+    trade is per-user, and another login's is never fetched — the rule every
+    other trade surface here keeps.
 
     A FIXED query budget, whatever the page size: one query for the linked
     flags, one for the evidence ledger, one for the trade join, and one
@@ -522,7 +526,7 @@ def _signal_rows(signals, configs=None):
     names = [s.rule_name or "" for s in signals]
     badges = signal_surface.badges_for(names)
     records = signal_surface.rule_records(names)
-    acted = signal_surface.acted_index(signals)
+    acted = signal_surface.acted_index(signals, user=user)
 
     rows = []
     for s in signals:
@@ -576,8 +580,8 @@ def signals_list(request):
             conditions_evaluated, or Signal.sub_scores, NAMED
         (d) WHAT WOULD IT COST — the levels on the row; the cost verdict only
             where a config context makes it answerable
-        (e) DID ANYONE ACT — the rule_name + symbol + time join, captioned as
-            the inference it is
+        (e) DID ANYONE ACT — the rule_name + symbol + time join over the
+            reader's own trades, captioned as the inference it is
         (f) ITS OWN GRADE — outcome, realized R, time to outcome
 
     Twelve filters, every one a real queryset narrowing (never a Python pass
@@ -600,7 +604,7 @@ def signals_list(request):
     # 412" says both how narrow the view is and how big the platform is.
     n_total = base_qs.count()
     qs, filter_chips, active_filters = signal_surface.apply_filters(
-        base_qs, request.GET)
+        base_qs, request.GET, user=request.user)
     n_shown = qs.count()
 
     paginator = Paginator(qs, 50)
@@ -609,7 +613,8 @@ def signals_list(request):
     # One query for the viewing user's enabled pools, not one per card: (d) is
     # answerable only against a config, and which config answers is a property
     # of the reader, not of the signal.
-    rows = _signal_rows(page_signals, signal_surface.configs_for(request.user))
+    rows = _signal_rows(page_signals, signal_surface.configs_for(request.user),
+                        user=request.user)
     # The chips' own querystring, minus `page`: changing a filter must land on
     # page 1 of the new result, not on page 7 of a list that no longer has one.
     page_params = request.GET.copy()
