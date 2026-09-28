@@ -19,6 +19,7 @@ exercised against a fake session.
 
 Run with:  python manage.py test tests.test_news_bodies
 """
+import socket
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -39,9 +40,9 @@ class _Resp:
     """The bits of a requests Response that fetch_article_body touches."""
 
     def __init__(self, *, status=200, ctype="text/html; charset=utf-8",
-                 body="", encoding="utf-8"):
+                 body="", encoding="utf-8", headers=None):
         self.status_code = status
-        self.headers = {"Content-Type": ctype}
+        self.headers = {"Content-Type": ctype, **(headers or {})}
         self.encoding = encoding
         self._body = body.encode("utf-8") if isinstance(body, str) else body
         self.closed = False
@@ -56,14 +57,35 @@ class _Resp:
 
 class _Session:
     def __init__(self, resp):
+        """`resp` is one response for every URL, an exception to raise, or a
+        {url: response} map for a fetch that touches more than one URL."""
         self._resp = resp
         self.calls = []
 
     def get(self, url, **kw):
         self.calls.append((url, kw))
-        if isinstance(self._resp, Exception):
-            raise self._resp
-        return self._resp
+        resp = self._resp.get(url) if isinstance(self._resp, dict) else self._resp
+        if isinstance(resp, Exception):
+            raise resp
+        if resp is None:
+            raise AssertionError(f"unexpected GET {url}")
+        return resp
+
+
+#: A public address, for the resolver double: the fetch refuses a host that
+#: resolves into the private ranges, so every test that expects a request
+#: has to answer the resolver with something on the internet.
+_PUBLIC = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+
+def _resolver(**by_host):
+    """A socket.getaddrinfo double: {host: ip}; anything else is public."""
+    def getaddrinfo(host, *a, **kw):
+        ip = by_host.get(host)
+        if ip is None:
+            return list(_PUBLIC)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))]
+    return getaddrinfo
 
 
 class ExtractionTests(SimpleTestCase):
@@ -129,7 +151,8 @@ class FetchGuardTests(SimpleTestCase):
 
     def _fetch(self, resp, *, allowed=True, url="https://example.com/a"):
         from scraping import article_body
-        with patch.object(article_body, "_robots_allows", return_value=allowed):
+        with patch.object(article_body, "_robots_allows", return_value=allowed), \
+                patch("socket.getaddrinfo", side_effect=_resolver()):
             return article_body.fetch_article_body(url, session=_Session(resp))
 
     def test_robots_is_asked_before_the_page(self):
@@ -188,6 +211,238 @@ class FetchGuardTests(SimpleTestCase):
         text, reason = article_body.fetch_article_body("", session=session)
         self.assertEqual(text, "")
         self.assertEqual(session.calls, [])
+
+
+def _robots(session, url):
+    """_robots_allows against a fresh per-process cache."""
+    from scraping import article_body
+    with patch.dict(article_body._robots, clear=True), \
+            patch("socket.getaddrinfo", side_effect=_resolver()):
+        return article_body._robots_allows(url, session=session)
+
+
+class OneHostCannotHoldTheWorkerTests(SimpleTestCase):
+    """Review 2026-09-28: robots.txt was read by `RobotFileParser.read()`,
+    which is `urllib.request.urlopen(url)` with NO timeout, and the page
+    read was bounded per socket operation only — a host that accepted the
+    connection and never answered, or dripped a byte every ten seconds,
+    held one of worker-slow's two slots (shared with the ai queue) until
+    the container was restarted. One deadline now covers the whole fetch."""
+
+    def test_robots_is_read_through_the_session_with_a_timeout(self):
+        session = _Session(_Resp(ctype="text/plain",
+                                 body="User-agent: *\nDisallow: /private/\n"))
+        self.assertTrue(_robots(session, "https://example.com/a"))
+        url, kw = session.calls[0]
+        self.assertEqual(url, "https://example.com/robots.txt")
+        self.assertTrue(kw.get("timeout"))
+        self.assertIn("SauronVision", kw["headers"]["User-Agent"])
+        self.assertFalse(_robots(session, "https://example.com/private/x"))
+
+    def test_a_forbidden_robots_refuses_and_a_missing_one_allows(self):
+        """RobotFileParser.read()'s own table, kept: 401/403 disallow all,
+        any other 4xx allows all."""
+        self.assertFalse(_robots(_Session(_Resp(status=403, ctype="text/plain")),
+                                 "https://shut.example.com/a"))
+        self.assertTrue(_robots(_Session(_Resp(status=404, ctype="text/plain")),
+                                "https://open.example.com/a"))
+
+    def test_an_unreachable_robots_still_allows(self):
+        """The docstring's promise: an unreadable file is not an outage."""
+        self.assertTrue(_robots(_Session(RuntimeError("timed out")),
+                                "https://dead.example.com/a"))
+
+    def test_the_whole_fetch_has_one_wall_clock_deadline(self):
+        """A host that drips bytes resets a per-read timeout on every chunk.
+        The budget is on the clock, not on the socket."""
+        from scraping import article_body
+        clock = {"t": 1000.0}
+        body = _page("<article>" + "".join(
+            f"<p>{_para(i, words=60)}</p>" for i in range(400)) + "</article>")
+
+        class _Trickle(_Resp):
+            def iter_content(self, chunk_size=65536, decode_unicode=False):
+                for chunk in super().iter_content(chunk_size, decode_unicode):
+                    # 20s between chunks — each one inside the socket
+                    # timeout, all of them together far past the budget.
+                    clock["t"] += 20.0
+                    yield chunk
+
+        self.assertGreater(len(body), 3 * 65536)
+        with patch.object(article_body.time, "monotonic",
+                          side_effect=lambda: clock["t"]):
+            text, reason = FetchGuardTests._fetch(self, _Trickle(body=body))
+        self.assertEqual(text, "")
+        self.assertIn("deadline", reason)
+
+    def test_the_socket_timeout_is_bounded_by_the_remaining_budget(self):
+        from scraping import article_body
+        session = _Session(_Resp(body=_page("<article><p>x</p></article>")))
+        with patch.object(article_body, "_robots_allows", return_value=True), \
+                patch("socket.getaddrinfo", side_effect=_resolver()):
+            article_body.fetch_article_body("https://example.com/a",
+                                            session=session)
+        _url, kw = session.calls[0]
+        self.assertLessEqual(kw["timeout"], article_body.FETCH_DEADLINE_S)
+        self.assertLessEqual(kw["timeout"], article_body.FETCH_TIMEOUT_S)
+
+
+class TheBytesAreDecodedAsThePageSaysTests(SimpleTestCase):
+    """Review 2026-09-28: requests sets `Response.encoding` to ISO-8859-1 for
+    any text/* Content-Type without a charset parameter, and the fetch took
+    that word for it. A UTF-8 page that declares its charset only in <meta>
+    — common — was decoded as Latin-1 and 'Société Générale' was stored as
+    'SociÃ©tÃ© GÃ©nÃ©rale' in raw_content, the article page and the
+    analyst's reading."""
+
+    _FRENCH = ("Société Générale a annoncé ses résultats trimestriels — "
+               "« très solides », selon l’équipe dirigeante, qui évoque une "
+               "croissance à deux chiffres et un bénéfice net en hausse.")
+
+    def _french_page(self, head=""):
+        return ("<html><head>" + head + "<title>t</title></head><body><article>"
+                + "".join(f"<p>{self._FRENCH} ({i})</p>" for i in range(6))
+                + "</article></body></html>").encode("utf-8")
+
+    def test_a_meta_charset_beats_requests_latin1_default(self):
+        text, reason = FetchGuardTests._fetch(self, _Resp(
+            ctype="text/html", encoding="ISO-8859-1",
+            body=self._french_page('<meta charset="utf-8">')))
+        self.assertEqual(reason, "ok")
+        self.assertIn("Société Générale", text)
+        self.assertNotIn("Ã", text)
+
+    def test_without_any_charset_the_bytes_are_sniffed(self):
+        text, reason = FetchGuardTests._fetch(self, _Resp(
+            ctype="text/html", encoding="ISO-8859-1", body=self._french_page()))
+        self.assertEqual(reason, "ok")
+        self.assertIn("Société Générale", text)
+        self.assertNotIn("Ã", text)
+
+    def test_a_charset_the_header_states_is_believed(self):
+        body = ("<html><body><article>" + "".join(
+            f"<p>Sociedad Española de Electromedicina — resultados {i} "
+            f"{_para(i)}</p>" for i in range(6)) + "</article></body></html>"
+                ).encode("iso-8859-1", "replace")
+        text, reason = FetchGuardTests._fetch(self, _Resp(
+            ctype="text/html; charset=iso-8859-1", encoding="ISO-8859-1",
+            body=body))
+        self.assertEqual(reason, "ok")
+        self.assertIn("Española", text)
+
+
+class TheFetchStaysOnTheInternetTests(SimpleTestCase):
+    """Review 2026-09-28: the fetch followed redirects with requests' default
+    and checked nothing but the scheme, so a feed link that answered 30x
+    into the compose network (web:8000, the metadata address) was fetched
+    from inside worker-slow, and robots.txt had been asked for the original
+    host only. A host is resolved and refused when it lands in a private,
+    loopback or link-local range; a redirect is one hop of a new fetch, with
+    the same guards and its own robots answer."""
+
+    def _prose(self):
+        return _page(f"<article><p>{_para(1)}</p><p>{_para(2)}</p>"
+                     f"<p>{_para(3)}</p></article>")
+
+    def test_a_host_on_a_private_range_is_never_requested(self):
+        from scraping import article_body
+        session = _Session(_Resp(body=self._prose()))
+        with patch.object(article_body, "_robots_allows") as robots, \
+                patch("socket.getaddrinfo",
+                      side_effect=_resolver(**{"metadata.example.com":
+                                               "169.254.169.254"})):
+            text, reason = article_body.fetch_article_body(
+                "https://metadata.example.com/a", session=session)
+        self.assertEqual(text, "")
+        self.assertIn("private", reason)
+        self.assertEqual(session.calls, [])
+        # robots.txt is a GET to the same host: not asked either.
+        robots.assert_not_called()
+
+    def test_loopback_and_the_compose_network_are_private(self):
+        from scraping import article_body
+        for host, ip in (("localhost", "127.0.0.1"), ("web", "172.18.0.3"),
+                         ("box", "10.0.0.5"), ("six", "::1")):
+            session = _Session(_Resp(body=self._prose()))
+            with patch.object(article_body, "_robots_allows", return_value=True), \
+                    patch("socket.getaddrinfo", side_effect=_resolver(**{host: ip})):
+                text, reason = article_body.fetch_article_body(
+                    f"http://{host}:8000/a", session=session)
+            self.assertEqual((text, session.calls), ("", []), host)
+            self.assertIn("private", reason, host)
+
+    def test_a_redirect_is_one_hop_with_its_own_robots_answer(self):
+        from scraping import article_body
+        first = "https://feed.example.com/go/1"
+        final = "https://paper.example.com/story"
+        session = _Session({
+            first: _Resp(status=302, headers={"Location": final}),
+            final: _Resp(body=self._prose())})
+        asked = []
+
+        def robots(url, **kw):
+            asked.append(url)
+            return True
+
+        with patch.object(article_body, "_robots_allows", side_effect=robots), \
+                patch("socket.getaddrinfo", side_effect=_resolver()):
+            text, reason = article_body.fetch_article_body(first, session=session)
+        self.assertEqual(reason, "ok")
+        self.assertIn("sentence1word0", text)
+        # requests must not follow on its own: every hop is ours to check.
+        for _url, kw in session.calls:
+            self.assertIs(kw.get("allow_redirects"), False)
+        self.assertEqual(asked, [first, final])
+
+    def test_a_relative_location_is_resolved_against_the_hop(self):
+        from scraping import article_body
+        first = "https://paper.example.com/amp/story"
+        session = _Session({
+            first: _Resp(status=301, headers={"Location": "/story"}),
+            "https://paper.example.com/story": _Resp(body=self._prose())})
+        with patch.object(article_body, "_robots_allows", return_value=True), \
+                patch("socket.getaddrinfo", side_effect=_resolver()):
+            text, reason = article_body.fetch_article_body(first, session=session)
+        self.assertEqual(reason, "ok")
+
+    def test_a_redirect_into_the_private_network_is_refused(self):
+        from scraping import article_body
+        first = "https://feed.example.com/go/2"
+        session = _Session({
+            first: _Resp(status=302, headers={"Location": "http://web:8000/x"}),
+            "http://web:8000/x": _Resp(body=self._prose())})
+        with patch.object(article_body, "_robots_allows", return_value=True), \
+                patch("socket.getaddrinfo", side_effect=_resolver(web="172.18.0.3")):
+            text, reason = article_body.fetch_article_body(first, session=session)
+        self.assertEqual(text, "")
+        self.assertIn("private", reason)
+        self.assertEqual([u for u, _ in session.calls], [first])
+
+    def test_a_redirect_the_new_hosts_robots_refuses_is_not_fetched(self):
+        from scraping import article_body
+        first = "https://feed.example.com/go/3"
+        final = "https://shut.example.com/story"
+        session = _Session({
+            first: _Resp(status=302, headers={"Location": final}),
+            final: _Resp(body=self._prose())})
+        with patch.object(article_body, "_robots_allows",
+                          side_effect=lambda url, **kw: "shut." not in url), \
+                patch("socket.getaddrinfo", side_effect=_resolver()):
+            text, reason = article_body.fetch_article_body(first, session=session)
+        self.assertEqual((text, reason), ("", "robots"))
+        self.assertEqual([u for u, _ in session.calls], [first])
+
+    def test_a_redirect_loop_ends(self):
+        from scraping import article_body
+        a, b = "https://a.example.com/1", "https://b.example.com/1"
+        session = _Session({a: _Resp(status=302, headers={"Location": b}),
+                            b: _Resp(status=302, headers={"Location": a})})
+        with patch.object(article_body, "_robots_allows", return_value=True), \
+                patch("socket.getaddrinfo", side_effect=_resolver()):
+            text, reason = article_body.fetch_article_body(a, session=session)
+        self.assertEqual(text, "")
+        self.assertIn("redirect", reason)
+        self.assertLessEqual(len(session.calls), article_body.MAX_REDIRECTS + 1)
 
 
 def _article(url="https://example.com/1", *, age_hours=1.0, raw="",
@@ -324,6 +579,76 @@ class TheTaskFillsTheFieldNobodyFilledTests(TestCase):
                    return_value=("body", "ok")):
             out = self._run(limit=3)
         self.assertEqual(out["considered"], 3)
+
+
+class TheSharedRowKeepsTheFeedsVerdictTests(TestCase):
+    """Review 2026-09-28. fetch_news_bodies writes the scraper_news row the
+    feed task writes, every 10 minutes to the feed's 15, and it returned
+    keys the gate could not read (`considered`, `filled`), so judge_result
+    graded every run 'success' — a run that considered 25 and filled 0, and
+    a run with nothing to do — and mark_run wrote that over the feed's real
+    verdict within ten minutes of it landing. A dead RSS host showed green.
+    This is the shared-row overwrite core.task_gate's own docstring
+    describes, and `idle` is the convention it gives a second writer."""
+
+    def setUp(self):
+        from core.platform_control import PlatformComponent
+        PlatformComponent.objects.update_or_create(
+            key="platform_master",
+            defaults={"name": "Platform Master Switch", "category": "system",
+                      "is_enabled": True})
+        self.then = timezone.now() - timedelta(minutes=4)
+        PlatformComponent.objects.update_or_create(
+            key="scraper_news",
+            defaults={"name": "Breaking News", "category": "scraper",
+                      "is_enabled": True, "last_status": "error",
+                      "last_message": "rss: feed.example.com answered 503",
+                      "last_run_at": self.then, "run_count": 9,
+                      "error_count": 1})
+
+    def _row(self):
+        from core.platform_control import PlatformComponent
+        return PlatformComponent.objects.get(key="scraper_news")
+
+    def _run(self, **kw):
+        from scraping.tasks import fetch_news_bodies
+        return fetch_news_bodies(**kw)
+
+    def test_nothing_due_leaves_the_feeds_error_on_the_row(self):
+        with patch("scraping.article_body.fetch_article_body") as f:
+            out = self._run()
+        f.assert_not_called()
+        self.assertTrue(out.get("idle"))
+        row = self._row()
+        self.assertEqual((row.last_status, row.last_message, row.last_run_at,
+                          row.run_count),
+                         ("error", "rss: feed.example.com answered 503",
+                          self.then, 9))
+
+    def test_a_batch_that_filled_nothing_is_not_a_success(self):
+        _article(url="https://example.com/1")
+        _article(url="https://example.com/2")
+        with patch("scraping.article_body.fetch_article_body",
+                   return_value=("", "too short (12 chars) — paywall or wall")):
+            out = self._run()
+        self.assertFalse(out.get("idle"))
+        row = self._row()
+        self.assertEqual(row.last_status, "warning")
+        self.assertIn("2", row.last_message)
+
+    def test_a_batch_is_graded_on_what_it_stored(self):
+        _article(url="https://example.com/1")
+        _article(url="https://example.com/2")
+
+        def fake(url, **kw):
+            return ("body", "ok") if url.endswith("/1") else ("", "robots")
+
+        with patch("scraping.article_body.fetch_article_body", side_effect=fake):
+            out = self._run()
+        self.assertEqual((out["considered"], out["filled"]), (2, 1))
+        row = self._row()
+        self.assertEqual(row.last_status, "success")
+        self.assertEqual(row.last_message, "handled 2, stored 1")
 
 
 class TheFeedSummaryIsBackfilledTests(TestCase):

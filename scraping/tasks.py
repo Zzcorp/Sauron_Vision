@@ -80,6 +80,9 @@ BODY_FETCH_BATCH = 25
 # nobody mentioned — the exact failure mode this platform has already been
 # bitten by. Fetching an article body IS news scraping; it belongs behind the
 # switch the operator already turned on for news.
+# The flip side: this task is the SECOND WRITER of the scraper_news row, every
+# 10 minutes to the feed's 15, so what it returns is what the row says. See
+# the return values below and `core.task_gate.guarded_task` on `idle`.
 @guarded_task("scraper_news")
 def fetch_news_bodies(*, limit: int = BODY_FETCH_BATCH,
                       max_age_hours: int = BODY_FETCH_MAX_AGE_HOURS) -> dict:
@@ -108,6 +111,19 @@ def fetch_news_bodies(*, limit: int = BODY_FETCH_BATCH,
                .filter(published_at__gte=cutoff, raw_content="")
                .order_by("-published_at")[:max(1, int(limit))])
 
+    if not due:
+        # `idle`, not a verdict. A pass with nothing due is not a run of news
+        # scraping, and the gate must not grade it: this used to return
+        # {"considered": 0, "filled": 0}, keys judge_result cannot read, so
+        # it kept the benefit of the doubt — "success" — and mark_run wrote
+        # that over the feed task's real verdict on the shared row within
+        # ten minutes of it landing. A dead RSS host showed green. The
+        # convention for a second writer is the gate's own (the war story in
+        # core.task_gate.guarded_task): say idle, and the row keeps the last
+        # verdict of a pass that was a run.
+        return {"status": "success", "idle": "no article is due for a body",
+                "considered": 0, "filled": 0, "reasons": {}}
+
     filled, reasons = 0, {}
     for article in due:
         try:
@@ -128,8 +144,13 @@ def fetch_news_bodies(*, limit: int = BODY_FETCH_BATCH,
 
     logger.info("fetch_news_bodies: %d/%d filled (%s)", filled, len(due),
                 ", ".join(f"{k}={v}" for k, v in sorted(reasons.items())))
+    # attempted/stored are the gate's words (task_gate.WORK_KEYS/DONE_KEYS),
+    # so a batch that fetched none of what it was given reads "handled N
+    # rows and stored none" on the row rather than success, and a batch
+    # that filled some earns its success. considered/filled stay: they are
+    # this task's own words, for the log and the operator.
     return {"status": "success", "considered": len(due), "filled": filled,
-            "reasons": reasons}
+            "attempted": len(due), "stored": filled, "reasons": reasons}
 
 
 @shared_task
