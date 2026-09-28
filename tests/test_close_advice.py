@@ -1304,7 +1304,10 @@ class PageTests(_Endpoint):
         every one of them: the checkbox read SYMBOL, BTCUSD read DIRECTION.
         A data-label on the cell cannot drift from the column it names."""
         page = self._page("/positions/")
-        table = re.search(r'<table class="sv-perf-table sv-stack">(.*?)'
+        # The class list may carry the stack's variants (sv-stack--pairs
+        # since the 2026-09-28 merge with the phone tier); what this test
+        # pins is that the table stacks and that every cell is labelled.
+        table = re.search(r'<table class="sv-perf-table sv-stack[^"]*">(.*?)'
                           r'</table>', page, flags=re.S)
         self.assertIsNotNone(table, "the open table no longer stacks")
         heads = re.findall(r"<th\b[^>]*>(.*?)</th>",
