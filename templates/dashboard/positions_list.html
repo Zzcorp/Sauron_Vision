@@ -4,6 +4,12 @@
 {% block title %}Positions — Sauron Vision{% endblock %}
 {% block page_title %}POSITIONS{% endblock %}
 
+{# The selection bar and the "Should I close?" dialog. A sheet of its own #}
+{# rather than this page's own style block: /portfolio/ and the position #}
+{# page carry the same controls, and one component styled in three places #}
+{# is how the three start disagreeing. #}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/sv-close-advice.css' %}">{% endblock %}
+
 {% block content %}
 {% comment %}
 LIVE REGIONS. Anything inside a data-sv-live wrapper is re-rendered by
@@ -206,7 +212,7 @@ honest freshness claim.{% endcomment %}
 {# position is a rounding error or half the pool. Every price cell carries #}
 {# its own percentage underneath — a distance for the levels, the move #}
 {# since entry for the mark — so no cell asks the operator to divide. #}
-<thead><tr><th>Symbol</th><th>Direction</th><th class="num">Qty</th><th class="num">Capital</th><th class="num">Entry</th><th class="num">Current</th><th class="num">Stop</th><th class="num">Target</th><th class="num">P&L</th><th class="num">P&L %</th><th class="num">R</th><th>Strategy</th><th class="nowrap">Opened</th><th class="nowrap">Action</th></tr></thead>
+<thead><tr><th class="sv-sel-cell" scope="col"><input type="checkbox" class="sv-sel-box" data-sv-select-all aria-label="Select every position shown" title="Select all visible"></th><th>Symbol</th><th>Direction</th><th class="num">Qty</th><th class="num">Capital</th><th class="num">Entry</th><th class="num">Current</th><th class="num">Stop</th><th class="num">Target</th><th class="num">P&L</th><th class="num">P&L %</th><th class="num">R</th><th>Strategy</th><th class="nowrap">Opened</th><th class="nowrap">Action</th></tr></thead>
         <tbody>
         {# ── The row's own numbers are unchanged; the data-pos-* set feeds the ── #}
         {# ── dwell card (static/js/sv-position-card.js), which answers what   ── #}
@@ -226,7 +232,7 @@ honest freshness claim.{% endcomment %}
         {% for g in open_view.groups %}{% if not forloop.first %}
         </tbody>
         <tbody>{% endif %}
-        {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=14 scope="pos" %}{% endif %}
+        {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=15 scope="pos" %}{% endif %}
         {% for p, d in g.pairs %}
         {% if p.instrument.has_page %}{% url 'instrument_detail' p.instrument.symbol as instrument_url%}{% endif %}
         <tr data-sv-position-row
@@ -268,6 +274,12 @@ honest freshness claim.{% endcomment %}
             data-pos-spark="{{ d.spark }}" data-pos-spark-min="{{ d.spark_min }}"
             data-pos-spark-max="{{ d.spark_max }}" data-pos-spark-up="{{ d.spark_up }}"
             data-pos-href="{{ d.href }}">
+            {# THE TICK (static/js/sv-close-advice.js). Only a bot trade has #}
+            {# one: a row from the shared portfolio book has no close path, #}
+            {# so selecting it for "Close selected" would promise a close #}
+            {# nothing can do. The cell is marked so the row's own click #}
+            {# (sv-position-card.js) never turns a tick into a navigation. #}
+            <td class="sv-sel-cell" data-sv-select-cell>{% if p.trade_id %}<input type="checkbox" class="sv-sel-box" data-sv-select-trade="{{ p.trade_id }}" aria-label="Select {{ p.symbol }}, position #{{ p.trade_id }}">{% endif %}</td>
             {# The symbol is the INSTRUMENT, not the trade, and it now goes #}
             {# where it says: the underlying's own page. The trade's detail #}
             {# is the row's click — and DETAIL beside it is that same page #}
@@ -382,6 +394,7 @@ honest freshness claim.{% endcomment %}
     </div>
     {% endif %}
     </div>
+    {% include "_partials/close_selection_bar.html" %}
 </div>
 
 {% if not live_only %}
@@ -994,6 +1007,8 @@ a.ph-sym.is-neutral:hover, a.ph-sym.is-neutral:focus-visible {
 {# scripts, so SV.dwell (static/js/sv-notif-card.js) is already defined #}
 {# when this runs — deferred scripts execute in document order. #}
 <script src="{% static 'js/sv-position-card.js' %}" defer></script>
+{# The ticks, the selection bar, "Should I close?" and "Close selected". #}
+<script src="{% static 'js/sv-close-advice.js' %}" defer></script>
 
 <script>
 /* CLOSE ALL. Position by position is the safe default and the wrong tool

@@ -1,0 +1,329 @@
+/* sv-close-advice.css — the ticks, the selection bar and the
+ * "Should I close?" dialog (static/js/sv-close-advice.js).
+ *
+ * One sheet for three pages — /positions/, /portfolio/ and the father's
+ * position page — because it is one component, and a component styled in
+ * three <style> blocks is how the three start disagreeing.
+ *
+ * House rules this file keeps, on purpose:
+ *   - colours are theme tokens only: light mode redefines the tokens, so
+ *     nothing here needs a second copy for it, and a raw colour could not
+ *     follow;
+ *   - layers come from the ladder in sv-overlay.css. The dialog rides
+ *     .sv-dialog's own z-index; the bar sits at --z-sticky;
+ *   - nothing sets a width a phone cannot hold: every track shrinks, every
+ *     long word wraps, and the page never scrolls sideways because of it;
+ *   - selection state is never written into the markup. The table lives in
+ *     a live region whose swap is decided by comparing markup, and a class
+ *     stamped on a ticked row would make every sweep a full rebuild. A
+ *     ticked row is found with :has() instead.
+ */
+
+/* ── The tick column ──────────────────────────────────────────────── */
+.sv-sel-cell {
+    width: 2.25rem;
+    padding-left: 10px !important;
+    padding-right: 4px !important;
+    text-align: center;
+    vertical-align: middle;
+    cursor: default;
+}
+.sv-sel-box {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    vertical-align: middle;
+    cursor: pointer;
+    accent-color: var(--accent);
+}
+[data-sv-position-row]:has(> td > .sv-sel-box:checked) > td {
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+/* ── The bar that appears at the first tick ───────────────────────── */
+.sv-sel-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: var(--z-sticky);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    margin: 10px 0 0;
+    padding: 10px 14px;
+    background: var(--bg-card);
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+    border-radius: var(--radius-lg, 8px);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-primary);
+    min-width: 0;
+}
+.sv-sel-bar[hidden] { display: none; }
+.sv-sel-count { font-weight: 700; letter-spacing: .04em; }
+.sv-sel-sep { color: var(--text-muted); }
+.sv-sel-btn,
+.sv-sel-clear,
+.sv-advice-launch {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    min-height: 36px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.sv-sel-btn--ask,
+.sv-advice-launch {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+    color: var(--accent);
+}
+.sv-sel-btn--close {
+    background: color-mix(in srgb, var(--accent-red) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent-red) 50%, transparent);
+    color: var(--accent-red);
+}
+.sv-sel-clear {
+    margin-left: auto;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-weight: 400;
+}
+.sv-sel-btn:hover,
+.sv-advice-launch:hover { filter: brightness(1.15); }
+.sv-sel-btn[disabled],
+.sv-advice-launch[disabled] { opacity: .5; cursor: progress; }
+
+/* The father's page: the question sits just above the close button. */
+.pd-advice-row { margin: 0 0 12px; }
+.pd-advice-row .sv-advice-launch { min-height: 48px; font-size: 14px; }
+.pd-advice-row[hidden] { display: none; }
+
+/* ── The dialog ───────────────────────────────────────────────────── */
+.sv-dialog.sv-advice {
+    width: min(94vw, 760px);
+    max-height: min(90vh, 900px);
+}
+.sv-adv-body { display: grid; gap: 12px; min-width: 0; }
+.sv-adv-status {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+.sv-adv-status.is-error { color: var(--accent-red); }
+
+.sv-adv-summary {
+    border: 1px solid var(--pop-border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: var(--pop-bg-2);
+    min-width: 0;
+}
+.sv-adv-overall {
+    margin: 0 0 10px;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.45;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+.sv-adv-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(9.5rem, 100%), 1fr));
+    gap: 8px 14px;
+    margin: 0;
+}
+.sv-adv-grid > div { min-width: 0; }
+.sv-adv-grid dt {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.sv-adv-grid dd {
+    margin: 2px 0 0;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+.sv-adv-grid dd small {
+    display: block;
+    font-size: 10.5px;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+.sv-adv-note {
+    margin: 8px 0 0;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--text-muted);
+    overflow-wrap: anywhere;
+}
+.sv-adv-note.is-warn { color: var(--warning); }
+
+/* The AI half: a button until asked, then its own framed answer. */
+.sv-adv-ai {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+}
+.sv-adv-ai-btn {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    min-height: 36px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    background: color-mix(in srgb, var(--accent-gold) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent-gold) 50%, transparent);
+    color: var(--accent-gold);
+}
+.sv-adv-ai-btn[disabled] { opacity: .55; cursor: progress; }
+.sv-adv-ai-text {
+    flex: 1 1 16rem;
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+/* One card per position. */
+.sv-adv-cards { display: grid; gap: 10px; min-width: 0; }
+.sv-adv-card {
+    border: 1px solid var(--pop-border);
+    border-left: 3px solid var(--text-muted);
+    border-radius: 8px;
+    padding: 10px 12px;
+    min-width: 0;
+}
+.sv-adv-card.is-close { border-left-color: var(--accent-red); }
+.sv-adv-card.is-trim { border-left-color: var(--warning); }
+.sv-adv-card.is-hold { border-left-color: var(--accent); }
+.sv-adv-card-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    margin-bottom: 8px;
+}
+.sv-adv-title {
+    font-family: var(--font-heading, var(--font-mono));
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+.sv-adv-world {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+}
+.sv-adv-world.is-live {
+    color: var(--accent-red);
+    border-color: color-mix(in srgb, var(--accent-red) 50%, transparent);
+}
+.sv-adv-world.is-demo {
+    color: var(--accent-gold);
+    border-color: color-mix(in srgb, var(--accent-gold) 50%, transparent);
+}
+.sv-adv-chip {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    white-space: normal;
+}
+.sv-adv-chip.is-close {
+    color: var(--accent-red);
+    background: color-mix(in srgb, var(--accent-red) 12%, transparent);
+    border-color: color-mix(in srgb, var(--accent-red) 45%, transparent);
+}
+.sv-adv-chip.is-trim {
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+}
+.sv-adv-chip.is-hold {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.sv-adv-reasons {
+    margin: 8px 0 0;
+    padding-left: 18px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--text-primary);
+}
+.sv-adv-reasons li + li { margin-top: 3px; }
+.sv-adv-reasons li { overflow-wrap: anywhere; }
+.sv-adv-card .up { color: var(--accent); }
+.sv-adv-card .down { color: var(--accent-red); }
+.sv-adv-card .sv-unknown { color: var(--text-muted); }
+
+.sv-adv-model {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--accent-gold) 7%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent-gold) 30%, transparent);
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+.sv-adv-model-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--accent-gold);
+}
+.sv-adv-model p { margin: 6px 0 0; white-space: pre-line; }
+
+.sv-adv-foot-note {
+    margin: 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+    .sv-dialog.sv-advice {
+        width: 100%;
+        max-height: 92vh;
+    }
+    .sv-sel-bar { font-size: 11.5px; }
+    .sv-sel-btn, .sv-sel-clear { min-height: 44px; }
+    .sv-adv-chip { margin-left: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sv-sel-btn:hover,
+    .sv-advice-launch:hover { filter: none; }
+}

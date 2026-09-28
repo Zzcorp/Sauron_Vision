@@ -312,3 +312,276 @@ def position_levels(request, trade_id):
         return JsonResponse({"error": result.get("error", "Refused.")},
                             status=400)
     return JsonResponse(result)
+
+
+# ── Close what was TICKED, and ask first whether to ──────────────────────
+# Between one row and the whole book there was nothing: an operator who
+# wanted out of the three crypto longs had three dialogs and three PINs, or
+# the button that also closed the forex. These act on the ids the page
+# sends and on nothing else — re-read owner-scoped at every step, so a row
+# that vanished between the tick and the confirm is REPORTED, never
+# replaced by whatever else happens to be open.
+
+#: At most this many rows per request. Past it the question is the whole
+#: book, which already has its own button and its own dialog.
+MAX_SELECTED = 50
+
+
+def _ids_from(body):
+    """(ids, error) — the ticked trade ids, in the order sent.
+
+    Strict for the same reason `_body` is: this list decides which real
+    positions close. Anything that is not a positive whole number is a
+    malformed request, not something to guess about; duplicates are
+    folded so a row can never be closed "twice" in one loop.
+    """
+    raw = (body or {}).get("ids")
+    if not isinstance(raw, list) or not raw:
+        return None, "ids must be a non-empty list of position ids"
+    if len(raw) > MAX_SELECTED:
+        return None, "At most %d positions at a time" % MAX_SELECTED
+    ids = []
+    for value in raw:
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            return None, "ids must be whole numbers"
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            return None, "ids must be whole numbers"
+        if n <= 0:
+            return None, "ids must be whole numbers"
+        if n not in ids:
+            ids.append(n)
+    return ids, None
+
+
+def _ccy(trade) -> str:
+    """The currency a row's money is booked in — its config's."""
+    return (getattr(trade.config, "base_currency", "") or "USD").strip()
+
+
+def _selected_closable(user, ids):
+    """(trades in the order asked, missing ids).
+
+    The same ownership and status filter as `_open_closable` — the user's
+    own rows, OPEN or CLOSE_PENDING — narrowed to the ids. A missing id is
+    another user's row, a closed one, or one that never existed; the
+    answer does not say which, for the reason `_trade_for` answers 404.
+    """
+    from bot_program.models import AssetBotTrade
+    found = {t.pk: t for t in (
+        AssetBotTrade.objects
+        .select_related("config", "config__user")
+        .filter(pk__in=ids, config__user=user,
+                status__in=("OPEN", "CLOSE_PENDING")))}
+    return ([found[i] for i in ids if i in found],
+            [i for i in ids if i not in found])
+
+
+@login_required
+def close_advice(request):
+    """POST {ids, model} — is closing these a good idea? Advice only.
+
+    Nothing here closes, claims or sends anything: brain.close_advice has
+    no path to the engine, and a source test pins that. `model: true` asks
+    for the one AI call too; the answer says in words when it could not be
+    had (no key, no budget, an error) and stands on the rules alone.
+    """
+    from brain.close_advice import advise
+
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    body, err = _body(request)
+    if err:
+        return JsonResponse({"error": err}, status=400)
+    ids, err = _ids_from(body)
+    if err:
+        return JsonResponse({"error": err}, status=400)
+    model = body.get("model", False)
+    if not isinstance(model, bool):
+        return JsonResponse({"error": "model must be true or false"},
+                            status=400)
+    return JsonResponse(advise(request.user, ids, use_model=model))
+
+
+@login_required
+def close_selected_preview(request):
+    """POST {ids} — what closing the ticked rows would do, before it is done.
+
+    close_all_preview's shape, over the selection, plus the ids that are no
+    longer there and the three worlds counted apart: the close-all dialog
+    counts an eToro demo row as "live" because its preview venue is, and
+    this dialog must not say real money about simulated money.
+    """
+    from bot_program.manual_close import preview_close, requires_pin
+    from brain.close_advice import world_of
+    from dashboard.position_summary import money
+
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    body, err = _body(request)
+    if err:
+        return JsonResponse({"error": err}, status=400)
+    ids, err = _ids_from(body)
+    if err:
+        return JsonResponse({"error": err}, status=400)
+
+    trades, missing = _selected_closable(request.user, ids)
+    rows, live_n, pending_n = [], 0, 0
+    worlds = {"live": 0, "demo": 0, "paper": 0}
+    pnl_total, pnl_measured = 0.0, True
+    for trade in trades:
+        try:
+            p = preview_close(request.user, trade)
+        except Exception:  # noqa: BLE001 — one bad row must not hide the rest
+            logger.exception("[close-selected] preview failed for trade %s",
+                             trade.pk)
+            p = {}
+        venue = str(p.get("venue") or ("paper" if trade.paper else "live"))
+        if venue == "live":
+            live_n += 1
+        world = world_of(trade)[0]
+        worlds[world] = worlds.get(world, 0) + 1
+        if p.get("pending") or trade.status == "CLOSE_PENDING":
+            pending_n += 1
+        pnl = p.get("pnl")
+        if pnl is None:
+            # Same rule as close-all: one unmeasured row makes the total
+            # unmeasured rather than a flattering partial sum.
+            pnl_measured = False
+        else:
+            try:
+                pnl_total += float(pnl)
+            except (TypeError, ValueError):
+                pnl_measured = False
+        rows.append({
+            "id": trade.pk, "symbol": trade.symbol, "side": trade.side,
+            "qty": str(trade.qty), "venue": venue, "world": world,
+            "pending": bool(p.get("pending")),
+            "error": str(p.get("error") or "")[:160],
+        })
+
+    # Summed only inside one currency: 12 USD and 900 JPY is not a total,
+    # and printing one would state a realised figure nobody will receive.
+    ccys = {_ccy(t) for t in trades}
+    pnl = (round(pnl_total, 2)
+           if pnl_measured and trades and len(ccys) == 1 else None)
+    return JsonResponse({
+        "count": len(rows),
+        "live": live_n,
+        "paper": len(rows) - live_n,
+        "pending": pending_n,
+        "worlds": worlds,
+        "pnl_text": money(pnl, ccys.pop() if len(ccys) == 1 else "",
+                          signed=True),
+        # All or nothing, as on the execute below: ANY row that needs the
+        # PIN arms it for the whole selection.
+        "needs_pin": any(requires_pin(t) for t in trades),
+        "pnl": pnl,
+        # Legacy rows have no trade id and can never be ticked; the key is
+        # kept so this answer reads like close-all's.
+        "unclosable": 0,
+        "ids": [t.pk for t in trades],
+        "missing": missing,
+        "rows": rows[:12],
+        "more": max(0, len(rows) - 12),
+    })
+
+
+@login_required
+def close_selected_execute(request):
+    """POST {ids, pin} — close exactly the ticked rows that are still open.
+
+    Two differences from close_all_execute, both deliberate.
+
+    ALL OR NOTHING ON THE PIN. Close-all lets a wrong PIN close the paper
+    rows and refuse the live ones, which is a half-closed book the operator
+    did not ask for. Here, if ANY selected row needs the PIN and it is
+    missing or wrong, the whole batch is refused before a single close is
+    attempted: one decision, one answer.
+
+    ONLY THE IDS. The rows are re-read at execute time, owner-scoped and
+    still open. One that vanished since the preview is reported in
+    `missing`, and nothing takes its place — close-all re-reads the BOOK,
+    which is right for "close everything" and wrong for "close these".
+
+    Then sequential, exactly like close_all_execute, for the same reason:
+    real orders, one broker session, one claim lock at a time. Same
+    response shape; `still_open`, `abandoned` and `flat` describe the
+    SELECTION, re-read after the loop rather than inferred from it.
+    """
+    from bot_program.manual_close import execute_close, requires_pin
+    from dashboard.position_summary import money
+
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    body, err = _body(request)
+    if err:
+        return JsonResponse({"error": err}, status=400)
+    ids, err = _ids_from(body)
+    if err:
+        return JsonResponse({"error": err}, status=400)
+
+    trades, missing = _selected_closable(request.user, ids)
+    pin_ok = _pin_ok(request, body)
+    if not pin_ok and any(requires_pin(t) for t in trades):
+        return JsonResponse({
+            "error": ("At least one of these positions is held at a broker, "
+                      "so your trading PIN is needed — it was missing or "
+                      "wrong. Nothing was closed."),
+            "pin_required": True,
+            "closed": [], "failed": [], "n_closed": 0, "n_failed": 0,
+            "still_open": len(trades), "unclosable": 0, "abandoned": 0,
+            "flat": False, "missing": missing,
+        }, status=403)
+
+    closed, failed = [], []
+    for trade in trades:
+        try:
+            result = execute_close(request.user, trade, pin_ok=pin_ok)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("[close-selected] close failed for trade %s",
+                             trade.pk)
+            failed.append({"id": trade.pk, "symbol": trade.symbol,
+                           "error": str(e)[:160]})
+            continue
+        if result.get("error") or result.get("not_found"):
+            failed.append({
+                "id": trade.pk, "symbol": trade.symbol,
+                "error": str(result.get("error") or "no longer open")[:160],
+            })
+            continue
+        closed.append({
+            "id": trade.pk,
+            "symbol": result.get("symbol", trade.symbol),
+            "side": result.get("side", trade.side),
+            "qty": str(result.get("qty", trade.qty)),
+            "exit": result.get("exit"),
+            "pnl": result.get("pnl"),
+            "pnl_text": money(result.get("pnl"), _ccy(trade), signed=True),
+        })
+
+    # RE-READ the selection, as close-all re-reads the book: "every close
+    # returned ok" is not the claim "none of these is open".
+    from bot_program.models import AssetBotTrade
+    picked = [t.pk for t in trades]
+    still_open = AssetBotTrade.objects.filter(
+        pk__in=picked, config__user=request.user,
+        status__in=("OPEN", "CLOSE_PENDING")).count()
+    abandoned = AssetBotTrade.objects.filter(
+        pk__in=picked, config__user=request.user, status="ERROR",
+        closed_at__isnull=True).count()
+    return JsonResponse({
+        "closed": closed,
+        "failed": failed,
+        "n_closed": len(closed),
+        "n_failed": len(failed),
+        "still_open": still_open,
+        "unclosable": 0,
+        "abandoned": abandoned,
+        "missing": missing,
+        # Every selected row that was still there is no longer open. The
+        # ids in `missing` were not open when this ran, so they cannot
+        # deny it — but they are reported, never silently counted as done.
+        "flat": not still_open and not abandoned,
+    })
