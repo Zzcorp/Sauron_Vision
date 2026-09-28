@@ -51,9 +51,12 @@
        page's own single-class rule although the page's style loads
        later.
      - A stacked-table rule starts with the stack block's exact prefix,
-       :is(.sv-stack, .pos-tabs ~ .card table:has(th:nth-child(11)),
+       :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)),
        .positions-metrics table). The stack block in sauron.css weighs
-       0,3,x through that list's pos-tabs argument, which is also what
+       0,3,x through that list's weight argument (the .table-wrapper
+       table.sv-stack:has(...) one, since the 2026-09-28 merge; it was
+       .pos-tabs ~ .card table:has(th:nth-child(11)) before, the same
+       0,3,2), which is also what
        lifts it over the 34rem runway (.table-wrapper
        .sv-perf-table:has(thead th:nth-child(6)), 0,3,2, declared
        earlier). A shorter prefix here loses to the rule it refines.
@@ -237,19 +240,19 @@
        table puts two fields on a line, the label above the value; the
        wide cell, the action cell and a spanning cell (a group header, a
        th in the positions table) take the whole line. */
-    :is(.sv-stack, .pos-tabs ~ .card table:has(th:nth-child(11)), .positions-metrics table) tbody td { font-size: 14px; }
-    :is(.sv-stack, .pos-tabs ~ .card table:has(th:nth-child(11)), .positions-metrics table) tbody td::before { font-size: 11px; }
-    :is(.sv-stack, .pos-tabs ~ .card table:has(th:nth-child(11)), .positions-metrics table) tbody td.sv-cell-action { grid-template-columns: minmax(0, 1fr); }
-    :is(.sv-stack, .pos-tabs ~ .card table:has(th:nth-child(11)), .positions-metrics table) tbody td.sv-cell-action::before { content: none; }
-    :is(.sv-stack, .pos-tabs ~ .card table:has(th:nth-child(11)), .positions-metrics table) tbody td.sv-cell-action :is(.btn, button) { width: 100%; justify-content: center; }
-    :is(.sv-stack, .pos-tabs ~ .card table:has(th:nth-child(11)), .positions-metrics table).sv-stack--pairs tbody tr {
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table) tbody td { font-size: 14px; }
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table) tbody td::before { font-size: 11px; }
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table) tbody td.sv-cell-action { grid-template-columns: minmax(0, 1fr); }
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table) tbody td.sv-cell-action::before { content: none; }
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table) tbody td.sv-cell-action :is(.btn, button) { width: 100%; justify-content: center; }
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table).sv-stack--pairs tbody tr {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         column-gap: 14px;
     }
-    :is(.sv-stack, .pos-tabs ~ .card table:has(th:nth-child(11)), .positions-metrics table).sv-stack--pairs tbody td { grid-template-columns: minmax(0, 1fr); gap: 2px; }
-    :is(.sv-stack, .pos-tabs ~ .card table:has(th:nth-child(11)), .positions-metrics table).sv-stack--pairs tbody td:is(.sv-cell-wide, .sv-cell-action, [colspan]),
-    :is(.sv-stack, .pos-tabs ~ .card table:has(th:nth-child(11)), .positions-metrics table).sv-stack--pairs tbody th[colspan] { grid-column: 1 / -1; }
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table).sv-stack--pairs tbody td { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table).sv-stack--pairs tbody td:is(.sv-cell-wide, .sv-cell-action, [colspan]),
+    :is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), .positions-metrics table).sv-stack--pairs tbody th[colspan] { grid-column: 1 / -1; }
 
     /* (k) Page-scoped. /positions/: the detail link was 9px and muted
        until hovered, which a finger never does; the price sub-lines were

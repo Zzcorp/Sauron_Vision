@@ -60,8 +60,12 @@ NODE = shutil.which("node")
 BASE = Path(settings.BASE_DIR)
 HOST = "127.0.0.1"
 
-#: The stack block's exact prefix (sauron.css, STACKED TABLES).
-P = (":is(.sv-stack, .pos-tabs ~ .card table:has(th:nth-child(11)), "
+#: The stack block's exact prefix (sauron.css, STACKED TABLES). The
+#: weight argument was `.pos-tabs ~ .card table:has(th:nth-child(11))`
+#: until the 2026-09-28 merge with the close-advice branch, whose
+#: `.table-wrapper table.sv-stack:has(th:nth-child(1))` holds the same
+#: (0,3,2) and matches nothing .sv-stack does not already match.
+P = (":is(.sv-stack, .table-wrapper table.sv-stack:has(th:nth-child(1)), "
      ".positions-metrics table)")
 
 #: This slice's stacked templates; later stages add theirs.
@@ -430,15 +434,19 @@ class StackTierTests(SimpleTestCase):
         self.assertRegex(css, r"@media \(max-width: 768px\) \{\s*:is\(\.sv-stack,")
         self.assertNotRegex(css, r"@media \(max-width: 640px\) \{\s*:is\(\.sv-stack,")
 
-    def test_the_pos_tabs_argument_keeps_the_stack_over_the_runway(self):
+    def test_the_weight_argument_keeps_the_stack_over_the_runway(self):
         """Its weight is the point: the stack's display:block and
         min-width:0 tie the 34rem runway at 0,3,2 and win by coming later.
-        Without the pos-tabs argument the :is() would weigh 0,1,0 and every
-        wide stacked table would keep its 34rem floor."""
+        Without the weight argument the :is() would weigh 0,1,0 and every
+        wide stacked table would keep its 34rem floor. The argument is
+        `.table-wrapper table.sv-stack:has(th:nth-child(1))` since the
+        2026-09-28 merge (test_card_responsiveness pins that the old
+        `.pos-tabs ~ .card table` is gone); what is pinned here is that it
+        is in every list, weighs 0,3,2, and comes after the runway."""
         css = self._css()
         lists = re.findall(
-            r":is\(\.sv-stack,\s*\.pos-tabs ~ \.card table:has\(th:nth-child"
-            r"\(11\)\),\s*\.positions-metrics table\)", css)
+            r":is\(\.sv-stack,\s*\.table-wrapper table\.sv-stack:has\(th:"
+            r"nth-child\(1\)\),\s*\.positions-metrics table\)", css)
         self.assertEqual(len(lists), 9)
         runway = ".table-wrapper .sv-perf-table:has(thead th:nth-child(6))"
         self.assertIn(runway + " { min-width: 34rem; }", css)
@@ -533,16 +541,22 @@ class RenderedPhoneMarkupTests(TestCase):
         self.assertIn("sv-stack--pairs", classes)
         thead = re.search(r"<thead>(.*?)</thead>", table, re.S).group(1)
         heads = [_text(h) for h in re.findall(r"<th\b[^>]*>(.*?)</th>", thead)]
-        self.assertEqual(len(heads), 14)
+        # Fifteen since the 2026-09-28 merge: the tick column ("Should I
+        # close?", tests/test_close_advice.py) comes first. Its header is
+        # the select-all box and has no words, so its cells carry the one
+        # label the header cannot: "Select".
+        self.assertEqual(len(heads), 15)
+        self.assertEqual(heads[0], "")
         row = re.search(r"<tr data-sv-position-row.*?</tr>", table, re.S)
         self.assertIsNotNone(row, "no open row rendered")
         tds = _cells(row.group(0)).tds
-        self.assertEqual([td.get("data-label") for td in tds], heads)
-        self.assertIn("sv-cell-wide", tds[0].get("class", "").split())
+        self.assertEqual([td.get("data-label") for td in tds],
+                         ["Select"] + heads[1:])
+        self.assertIn("sv-cell-wide", tds[1].get("class", "").split())
         self.assertIn("sv-cell-action", tds[-1].get("class", "").split())
         self.assertEqual(
             [i for i, td in enumerate(tds)
-             if "sv-cell-action" in td.get("class", "").split()], [13])
+             if "sv-cell-action" in td.get("class", "").split()], [14])
         self.assertIn('data-sv-close-trade="%d"' % self.trade.id,
                       row.group(0).split('data-label="Action"', 1)[1])
 

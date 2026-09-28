@@ -1392,7 +1392,9 @@ class ScriptTests(SimpleTestCase):
         self.assertIn('all.closest("table") || '
                       'all.closest("[data-sv-select-scope]") || d', self.js)
         self.assertIn("each(boxes(scopeOf(t)), function (b) {", self.js)
-        phone = self.css.split("@media (max-width: 640px)", 1)[1]
+        # 768px, not 640: the 2026-09-28 merge moved the phone rules to the
+        # tier the table stacks at (sauron.css, STACKED TABLES).
+        phone = self.css.split("@media (max-width: 768px)", 1)[1]
         self.assertIn(".sv-sel-all-phone:not([hidden])", phone)
         self.assertIn(".sv-sel-all-phone { display: none; }",
                       self.css.split("@media", 1)[0])
@@ -1441,7 +1443,8 @@ class ScriptTests(SimpleTestCase):
         self.assertEqual(re.findall(r"#[0-9a-fA-F]{3,8}\b", self.css), [])
         for z in re.findall(r"z-index\s*:\s*([^;]+);", self.css):
             self.assertRegex(z.strip(), r"^(calc\()?var\(--z-", z)
-        self.assertIn("@media (max-width: 640px)", self.css)
+        self.assertIn("@media (max-width: 768px)", self.css)
+        self.assertNotIn("@media (max-width: 640px)", self.css)
 
 
 @unittest.skipUnless(NODE, "node is not installed")
