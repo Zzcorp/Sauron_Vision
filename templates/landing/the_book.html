@@ -343,9 +343,9 @@
             45% { transform: scaleX(0.62); }
             60% { transform: scaleX(0.7); }
         }
-        /* Every moving part of the iris is its own layer (an <svg> or a
-           box, never a shape inside one), so the compositor moves it and
-           nothing is repainted frame by frame. */
+        /* Every moving part of the iris is its own layer (its own SVG
+           or box, never a shape inside one), so the compositor moves it
+           and nothing is repainted frame by frame. */
         .iris-mer { animation: turn 10s ease-in-out infinite; }
         .iris-mer.b { animation-delay: -5s; }
         @keyframes turn {
@@ -667,7 +667,7 @@
             box-shadow: inset 0 0 18px rgba(0,0,0,0.5), 0 0 22px rgba(0,232,104,0.06);
         }
         .glyph svg { width: 34px; height: 34px; overflow: visible; }
-        /* a glyph is a stack of <svg> layers in one cell: the still drawing,
+        /* a glyph is a stack of SVG layers in one cell: the still drawing,
            then each moving part as its own layer the compositor can move */
         .glyph > svg { grid-area: 1 / 1; }
         .glyph svg * { fill: none; stroke: var(--tone); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
