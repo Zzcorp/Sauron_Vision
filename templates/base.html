@@ -4859,6 +4859,20 @@ never nags. He never acts.{% endcomment %}
     </svg>
     <span class="se-fab-label">ASK</span>
     {% comment %}
+    The unread sign: a hairline ring just outside the rim and a pip sitting on
+    it at half past one. Its own element, on purpose — the button's ::before
+    and ::after are already the ASK SAURON tooltip and its arrow, and the old
+    mark borrowed the arrow, inherited its borders and its opacity 0, and so
+    drew a blinking ellipse that vanished outright under reduced motion.
+    Shown by the 'answered' class (plus 'answered-failed' when Sauron could
+    not answer); the words live on the button's aria-label and title, so this
+    stays out of the accessibility tree.
+    {% endcomment %}
+    <span class="se-fab-unread" aria-hidden="true">
+        <i class="se-fab-unread-ring"></i>
+        <i class="se-fab-unread-pip"></i>
+    </span>
+    {% comment %}
     Corner marks. They appear on hover to say the orb is a control rather than
     an ornament — the eye is decorative enough that people were not sure it
     could be clicked. When the panel is open the same corners give way to a
@@ -4972,6 +4986,12 @@ never nags. He never acts.{% endcomment %}
 
     function openPanel() {
         panel.classList.add('open'); fab.classList.add('open');
+        /* Every way in comes through here — the orb, the ? key, Ctrl+K,
+           askSauronAbout, [data-ask-sauron], the banner's Open — so this is
+           the one place the unread mark is read. Clearing it on the orb's
+           click alone let it survive every other path and come back the
+           moment the panel closed over an answer already read. */
+        clearUnread();
         /* Opening it anywhere shows the live thread, not just what this
            page happened to type. */
         loadThread();
@@ -5803,7 +5823,8 @@ never nags. He never acts.{% endcomment %}
             if (!j.pending && !panel.classList.contains('open')) {
                 /* No server push follows the fallback path, so this page
                    raises the banner itself — as it always did. */
-                notifyAnswer(j.assistant_text || j.error || 'Answer ready.');
+                notifyAnswer(j.assistant_text || j.error || 'Answer ready.',
+                             j.ok !== false);
             }
         })
         .catch(function(e) {
@@ -5818,6 +5839,56 @@ never nags. He never acts.{% endcomment %}
         });
     }
 
+    /* ── The unread mark ───────────────────────────────────────────────
+       An answer that lands on a shut panel marks the orb until the panel is
+       next opened (openPanel clears it, whichever path opened it). The mark
+       is drawn by .se-fab-unread; what it MEANS is said here, on the
+       button's aria-label and title, because a ring and a pip say nothing
+       to a screen reader and not much more to a new operator.
+
+       It lives in sessionStorage because the socket only speaks once: the
+       answer is pushed to the page you were on when it landed, and a click
+       to the next page used to wipe the mark before you had read anything.
+       Per tab, not per browser — each open tab receives its own push — and
+       every access is guarded, because a private window or blocked site
+       data throws on the accessor itself and must never cost the orb. */
+    var UNREAD_KEY = 'sauron-eye-unread';
+    var FAB_LABEL = fab.getAttribute('aria-label') || 'Ask Sauron';
+    var FAB_TITLE = fab.getAttribute('title') || FAB_LABEL;
+
+    function markUnread(ok, settled) {
+        var words = ok ? 'Ask Sauron — new answer'
+                       : 'Ask Sauron — the last question failed';
+        /* A second answer on top of an unread one is news too: take the
+           sign down for a frame so it arrives, once, again. */
+        if (!settled && fab.classList.contains('answered')) {
+            fab.classList.remove('answered');
+            void fab.offsetWidth;
+        }
+        fab.classList.add('answered');
+        fab.classList.toggle('answered-failed', !ok);
+        /* settled: restored on a new page, so the sign is already there
+           rather than arriving a second time. */
+        fab.classList.toggle('answered-settled', !!settled);
+        fab.setAttribute('aria-label', words);
+        fab.setAttribute('title', words);
+        try { sessionStorage.setItem(UNREAD_KEY, ok ? 'answer' : 'failed'); }
+        catch (e) { /* storage unavailable — the mark holds for this page */ }
+    }
+    function clearUnread() {
+        fab.classList.remove('answered', 'answered-failed', 'answered-settled');
+        fab.setAttribute('aria-label', FAB_LABEL);
+        fab.setAttribute('title', FAB_TITLE);
+        try { sessionStorage.removeItem(UNREAD_KEY); }
+        catch (e) { /* nothing was kept, so nothing to forget */ }
+    }
+    (function restoreUnread() {
+        var kept = null;
+        try { kept = sessionStorage.getItem(UNREAD_KEY); }
+        catch (e) { kept = null; }
+        if (kept === 'answer' || kept === 'failed') markUnread(kept === 'answer', true);
+    })();
+
     /* ── The answer announces itself ───────────────────────────────────
        Pushed by the server on the operator's own socket when the worker
        settles the row, so it arrives on whatever page they are on by then.
@@ -5827,7 +5898,10 @@ never nags. He never acts.{% endcomment %}
         var msg = (ev && ev.detail) || {};
         if (msg.kind !== 'sauron_answer') return;
         if (!panel.classList.contains('open')) {
-            fab.classList.add('answered');
+            /* The worker announces a failure on this same event with
+               ok:false; only an explicit false is a failure, so an older
+               payload without the flag still reads as an answer. */
+            markUnread(!(msg.data && msg.data.ok === false));
         } else {
             /* The answer just resolved in front of the operator; a banner
                announcing it as well is noise. The live listener appends its
@@ -5857,9 +5931,9 @@ never nags. He never acts.{% endcomment %}
        server raises the banner, so it reaches pages this script never ran
        on. Takes plain text: the body is model output and must not be
        parsed as markup just to read a preview out of it. */
-    function notifyAnswer(answerText) {
+    function notifyAnswer(answerText, ok) {
         var text = String(answerText || '').trim().replace(/\s+/g, ' ');
-        fab.classList.add('answered');
+        markUnread(ok !== false);
         if (window.svBanner) {
             window.svBanner('sauron_answer', {
                 preview: text.slice(0, 180) + (text.length > 180 ? '…' : ''),
@@ -5867,8 +5941,6 @@ never nags. He never acts.{% endcomment %}
             });
         }
     }
-    /* The unread mark clears the moment the panel is opened. */
-    fab.addEventListener('click', function () { fab.classList.remove('answered'); });
 
     function greetingBubble() {
         return '<div class="se-bubble assistant se-bubble-greeting">' +

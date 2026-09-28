@@ -1515,7 +1515,18 @@ class EyeFabAffordanceTests(TestCase):
         self.assertIn(".se-eye-fab.open:hover .se-fab-corner { opacity: 0; }", self.css)
 
     def test_an_unread_answer_is_marked_on_the_orb(self):
-        self.assertIn(".se-eye-fab.answered::after", self.css)
+        """This used to pin `.se-eye-fab.answered::after`, and that rule was
+        the bug. The host's ::after is the ASK SAURON tooltip's arrow in
+        sauron.css, so the "dot" inherited the arrow's borders, transform and
+        opacity 0: it drew a 17×22 ellipse off the orb's crown, hid the arrow
+        while it was up, and under reduced motion — where its blink was the
+        only thing lifting that opacity — it was not drawn at all. The mark
+        is now a dedicated child element, shown by the same 'answered'
+        class; OrbUnreadSignTests below pins the rest of it."""
+        self.assertIn('class="se-fab-unread"', self.body)
+        self.assertIn(".se-eye-fab.answered .se-fab-unread { display: block; }",
+                      self.css)
+        self.assertNotIn(".se-eye-fab.answered::after", self.css)
 
     def test_the_send_control_sits_beside_the_input(self):
         """Structural: the textarea and the send button share one flex row,
@@ -1528,3 +1539,171 @@ class EyeFabAffordanceTests(TestCase):
     def test_the_hover_growth_respects_reduced_motion(self):
         self.assertIn("prefers-reduced-motion", self.css)
         self.assertIn(".se-eye-fab:hover { transform: none; }", self.css)
+
+
+class OrbUnreadSignTests(TestCase):
+    """The sign on the orb that says an answer landed while the panel was
+    shut — a hairline ring just outside the rim and a pip on it.
+
+    The old mark hijacked the tooltip arrow's pseudo-element, blinked
+    forever, and vanished under reduced motion. These pin the replacement's
+    three promises: it is its own element and leaves the tooltip alone; it
+    arrives once and then holds still, and is shown whole when motion is
+    reduced; and it means what it says — cleared by every way of opening the
+    panel, red when Sauron failed, named on the button for a screen reader,
+    and still there on the next page of the same tab."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="orb_unread_u", password="x")
+        self.client.force_login(self.user)
+        self.body = self.client.get(
+            "/signals/", HTTP_HOST="127.0.0.1").content.decode("utf-8", "replace")
+        self.css = _read("static", "css", "sv-overlay.css")
+        self.sauron_css = _read("static", "css", "sauron.css")
+
+    def _script(self):
+        """The Ask-Sauron script as rendered, comments removed — the prose
+        explains sessionStorage and the old ::after, and a scan that cannot
+        tell prose from code would forbid explaining the rule it enforces."""
+        import re
+        at = self.body.index("var fab = document.getElementById('seEyeFab');")
+        src = self.body[self.body.rindex("<script>", 0, at):self.body.index("</script>", at)]
+        return re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+
+    def _rule(self, selector, css=None):
+        css = self.css if css is None else css
+        self.assertIn(selector + " {", css, f"no rule for {selector}")
+        return css.split(selector + " {", 1)[1].split("}", 1)[0]
+
+    # ── It is its own element, and the tooltip gets its arrow back ──────
+
+    def test_the_sign_is_a_child_of_the_orb_on_every_page(self):
+        start = self.body.index('id="seEyeFab"')
+        button = self.body[start:self.body.index("</button>", start)]
+        self.assertIn('<span class="se-fab-unread" aria-hidden="true">', button)
+        self.assertIn('class="se-fab-unread-ring"', button)
+        self.assertIn('class="se-fab-unread-pip"', button)
+
+    def test_no_stylesheet_hangs_the_mark_on_the_host_pseudo_elements(self):
+        """Both of the orb's own pseudo-elements are taken — ::before is the
+        tooltip, ::after its arrow — so any `.answered::` rule is the old
+        bug coming back."""
+        for css in (self.css, self.sauron_css):
+            self.assertNotIn(".answered::after", css)
+            self.assertNotIn(".answered::before", css)
+            self.assertNotIn("@keyframes seUnread {", css)
+
+    # ── It arrives once, then holds still ───────────────────────────────
+
+    def test_nothing_in_the_sign_blinks(self):
+        import re
+        self.assertNotIn("infinite", self._rule(".se-fab-unread-pip::before"))
+        # The one loop left is the ring's breath, and it is slow.
+        loops = re.findall(r"seUnread(\w+) ([\d.]+)s[^,;]*infinite", self.css)
+        self.assertTrue(loops, "the ring no longer breathes at all")
+        for name, seconds in loops:
+            self.assertEqual(name, "Breathe", f"seUnread{name} loops forever")
+            self.assertGreaterEqual(float(seconds), 3.0,
+                                    "a breath faster than 3s reads as a blink")
+
+    def test_the_sign_is_drawn_by_its_own_declarations_not_its_animation(self):
+        """The old dot's only opacity came from its blink. Whatever the
+        animations do, the resting rules must draw the sign whole."""
+        for sel in (".se-fab-unread", ".se-fab-unread-ring", ".se-fab-unread-pip::before"):
+            block = self._rule(sel)
+            self.assertNotIn("opacity: 0", block, f"{sel} rests invisible")
+            self.assertNotIn("visibility: hidden", block, f"{sel} rests invisible")
+
+    def test_reduced_motion_shows_it_whole_and_still(self):
+        import re
+        blocks = [b for b in re.findall(
+            r"@media \(prefers-reduced-motion: reduce\) \{(.*?)\n\}", self.css, flags=re.S)
+            if ".se-fab-unread" in b]
+        self.assertTrue(blocks, "no reduced-motion rule for the unread sign")
+        guard = blocks[-1]
+        self.assertIn(".se-fab-unread-ring", guard)
+        self.assertIn(".se-fab-unread-pip::before", guard)
+        self.assertIn("animation: none", guard)
+        # Stilled, never hidden.
+        self.assertNotIn("display: none", guard)
+        self.assertNotIn("opacity: 0", guard)
+
+    # ── Light mode, phones, failures ────────────────────────────────────
+
+    def test_light_mode_uses_the_light_ink_not_the_dark_neon(self):
+        """--accent-bright is never redefined for the pale theme."""
+        block = self._rule("body.light-mode .se-fab-unread")
+        self.assertIn("var(--accent", block)
+        self.assertNotIn("--accent-bright", block)
+
+    def test_the_sign_scales_with_the_phone_orb(self):
+        import re
+        phone = re.findall(r"@media \(max-width: 640px\) \{(.*?)\n\}", self.css, flags=re.S)
+        self.assertTrue(any(".se-fab-unread {" in b for b in phone))
+
+    def test_a_failed_answer_turns_the_pip_red(self):
+        block = self._rule(".se-eye-fab.answered-failed .se-fab-unread")
+        self.assertIn("--unread-pip-tone: var(--accent-red", block)
+        script = self._script()
+        self.assertIn("msg.data.ok === false", script)
+        self.assertIn("fab.classList.toggle('answered-failed', !ok);", script)
+        # The broker-down fallback carries the outcome too.
+        self.assertIn("j.ok !== false", script)
+
+    # ── It means what it says ───────────────────────────────────────────
+
+    def test_the_button_says_what_the_sign_means_and_says_it_back(self):
+        script = self._script()
+        self.assertIn("'Ask Sauron — new answer'", script)
+        self.assertIn("'Ask Sauron — the last question failed'", script)
+        self.assertIn("fab.setAttribute('aria-label', words);", script)
+        self.assertIn("fab.setAttribute('title', words);", script)
+        self.assertIn("fab.setAttribute('aria-label', FAB_LABEL);", script)
+        self.assertIn("fab.setAttribute('title', FAB_TITLE);", script)
+
+    def test_opening_the_panel_by_any_path_clears_it(self):
+        """Every way in — the orb, ?, Ctrl+K, askSauronAbout,
+        [data-ask-sauron], the banner — goes through openPanel, so that is
+        where it clears. It used to clear on the orb's click alone and come
+        back the moment the panel closed over an answer already read."""
+        script = self._script()
+        opener = script.split("function openPanel() {", 1)[1].split("function closePanel()", 1)[0]
+        self.assertIn("clearUnread();", opener)
+        for entry in ("window.askSauronAbout = function (subject, kind) {\n        openPanel();",
+                      "window.openEyeWithQuery = function(q) {\n        openPanel();",
+                      "e.preventDefault(); openPanel();"):
+            self.assertIn(entry, script)
+        self.assertNotIn("fab.classList.remove('answered'); });", script)
+
+    def test_it_survives_navigation_within_the_tab(self):
+        import re
+        script = self._script()
+        self.assertIn("sessionStorage.setItem(UNREAD_KEY", script)
+        self.assertIn("sessionStorage.removeItem(UNREAD_KEY)", script)
+        self.assertIn("sessionStorage.getItem(UNREAD_KEY)", script)
+        # Restored on load, without replaying the arrival.
+        self.assertIn("markUnread(kept === 'answer', true);", script)
+        self.assertIn(".se-eye-fab.answered-settled .se-fab-unread-pip::before { animation: none; }",
+                      self.css)
+        # A private window throws on the accessor itself.
+        for line in script.splitlines():
+            if "sessionStorage." in line:
+                self.assertRegex(line, r"try \{", f"unguarded storage access: {line.strip()}")
+        self.assertFalse(re.search(r"localStorage\.[a-zA-Z]+\(UNREAD_KEY", script),
+                         "the unread mark is per tab, not per browser")
+
+
+class OrbMobileEdgeTests(TestCase):
+    """The rail's open state is restored from localStorage at any width, and
+    :has() still matches a display:none rail — so the open-rail 296px edge
+    used to outrank the phone's 16px and push the orb off to the left."""
+
+    def test_the_open_rail_edge_applies_to_wide_screens_only(self):
+        import re
+        css = _read("static", "css", "sauron.css")
+        self.assertEqual(css.count("--se-right-edge: 296px"), 1)
+        self.assertRegex(
+            css,
+            r"@media \(min-width: 769px\) \{\s*"
+            r"body:has\(\.signals-rail\.open\) \{ --se-right-edge: 296px; \}")
+        self.assertIn(":root { --se-right-edge: 16px; --se-fab-size: 46px; }", css)

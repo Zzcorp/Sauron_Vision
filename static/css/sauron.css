@@ -3281,7 +3281,15 @@
         --se-panel-width: calc((100vw - var(--se-left-chrome) - var(--se-right-edge)) / 2);
     }
     /* Right edge: align to right rail */
-    body:has(.signals-rail.open) { --se-right-edge: 296px; }    /* 280 + 16 */
+    /* Wide screens only. The rail's open state is restored from localStorage
+       at every width, and below 769px the rail is display:none while :has()
+       still matches it — so on a phone this body-level 296px outranked the
+       mobile :root 16px and parked the orb and the banner stack above it
+       296px from the right edge of a 390px screen, beside a rail that was
+       not even drawn. */
+    @media (min-width: 769px) {
+        body:has(.signals-rail.open) { --se-right-edge: 296px; }    /* 280 + 16 */
+    }
     /* Bottom edge: sit ABOVE the info-panel with breathing room */
     body:has(.info-panel-wrap):not(.page-dashboard) {
         --se-bottom-edge: calc(60px + var(--se-fab-gap));   /* 60 panel + 18 gap */

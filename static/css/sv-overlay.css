@@ -864,15 +864,144 @@ body.light-mode .sr-popup::after {
 .se-eye-fab.open:hover .se-fab-close,
 .se-eye-fab.open:focus-visible .se-fab-close { opacity: 1; }
 
-/* An answer landed while the panel was shut. */
-.se-eye-fab.answered::after {
-    content: ""; position: absolute; top: 2px; right: 2px;
-    width: 10px; height: 10px; border-radius: 50%;
-    background: var(--accent, #00e868);
-    box-shadow: 0 0 0 2px rgba(2, 8, 5, .9), 0 0 10px var(--accent, #00e868);
-    animation: seUnread 1.6s ease-in-out infinite;
+/* ── The unread sign: an answer landed while the panel was shut ──────
+   It used to be the host's ::after — which sauron.css had already given to
+   the ASK SAURON tooltip's ARROW. The "10px dot" therefore inherited the
+   arrow's transparent borders and translateY(-50%) and painted as a 17×22
+   green ellipse poking out of the orb's crown, blinking for as long as the
+   answer went unread; it took the arrow away from the tooltip while it was
+   there; and because its only opacity came from the blink, reduced motion
+   left it at the arrow's opacity 0 — invisible to exactly the people who
+   asked for less motion, not for less information.
+
+   It is now its own element (.se-fab-unread, in base.html), in two parts
+   that belong to the stone rather than sit on it. A hairline ring just
+   outside the rim, where the sonar ripples fade out, says the palantír is
+   holding something. It is quiet all the way round and gathers light
+   towards half past one, where a small pip sits on it and says the thing is
+   waiting for you. (A ring bright all the way round read as a target:
+   three concentric circles, counting the rim and the ripples.) The sign
+   arrives once — the ring settles in from a little further out, the pip
+   pops — and then it holds still. The only motion left is a slow breath in
+   the ring's glow, slower than the orb's own float, so it reads as part of
+   the stone and never as a second thing asking to be looked at. Under
+   reduced motion it is simply there, whole.
+
+   A failed answer turns the pip, and the light gathering towards it, red.
+   The worker announces failures on the same sauron_answer event (ok:false),
+   and a green "new answer" over "Sauron could not answer" would be a small
+   lie told in colour.
+
+   The pip's hairline is --bg-void, which is also the page, so it reads as a
+   cut-out on the orb's glow in either theme without a second rule. */
+.se-fab-unread {
+    --unread-gap: 5px;     /* ring distance outside the rim */
+    --unread-pip: 7px;
+    --unread-tone: var(--accent-bright, #40ff90);
+    --unread-line: color-mix(in srgb, var(--accent, #00e868) 30%, transparent);
+    --unread-halo: color-mix(in srgb, var(--accent, #00e868) 55%, transparent);
+    --unread-pip-tone: var(--accent-bright, #40ff90);
+    --unread-pip-halo: color-mix(in srgb, var(--accent, #00e868) 80%, transparent);
+    --unread-cut: var(--bg-void, #030806);
+    position: absolute; inset: calc(-1 * var(--unread-gap));
+    border-radius: 50%;
+    pointer-events: none;
+    display: none;
 }
-@keyframes seUnread { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+.se-eye-fab.answered .se-fab-unread { display: block; }
+.se-fab-unread-ring,
+.se-fab-unread-pip { position: absolute; inset: 0; border-radius: 50%; }
+/* The quiet full circle. Its glow is a filter rather than a box-shadow so
+   it follows the arc drawn on top — brighter where the arc is. */
+.se-fab-unread-ring {
+    border: 1px solid var(--unread-line);
+    filter: drop-shadow(0 0 2px var(--unread-halo));
+    transition: opacity .18s ease;
+    /* backwards, not both: once settled the ring must fall back to its own
+       declarations, or the held keyframe would outrank the hover fade. */
+    animation: seUnreadSettle .7s cubic-bezier(.2, .7, .3, 1) backwards,
+               seUnreadBreathe 6s ease-in-out .7s infinite;
+}
+/* The arc: a conic sweep centred on the pip, cut to a hairline by a radial
+   mask. Only where masks exist — without one this would paint a disc over
+   the eye, and the plain circle above already says enough. */
+@supports ((-webkit-mask-image: radial-gradient(#000, #000)) or (mask-image: radial-gradient(#000, #000))) {
+    .se-fab-unread-ring::before {
+        content: ""; position: absolute; inset: -1px; border-radius: 50%;
+        background: conic-gradient(from 45deg,
+            var(--unread-tone) 0deg,
+            color-mix(in srgb, var(--unread-tone) 40%, transparent) 60deg,
+            transparent 150deg, transparent 210deg,
+            color-mix(in srgb, var(--unread-tone) 40%, transparent) 300deg,
+            var(--unread-tone) 360deg);
+        -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1.4px), #000 calc(100% - .6px));
+                mask: radial-gradient(farthest-side, transparent calc(100% - 1.4px), #000 calc(100% - .6px));
+    }
+}
+/* The pip rides a full-size layer turned 45°: its top-centre is then the
+   point on the ring at half past one, whatever the orb's size. */
+.se-fab-unread-pip { transform: rotate(45deg); }
+.se-fab-unread-pip::before {
+    content: ""; position: absolute; top: .5px; left: 50%;
+    width: var(--unread-pip); height: var(--unread-pip);
+    margin: calc(var(--unread-pip) / -2) 0 0 calc(var(--unread-pip) / -2);
+    border-radius: 50%;
+    background: var(--unread-pip-tone);
+    box-shadow: 0 0 0 1.25px var(--unread-cut), 0 0 9px 2px var(--unread-pip-halo);
+    animation: seUnreadPip .45s cubic-bezier(.3, 1.5, .5, 1) .32s backwards;
+}
+/* The whole sign turns, not just the pip: a red arc running into a green
+   line mixed to brown where they met. */
+.se-eye-fab.answered-failed .se-fab-unread {
+    --unread-tone: color-mix(in srgb, var(--accent-red, #e83030) 90%, transparent);
+    --unread-line: color-mix(in srgb, var(--accent-red, #e83030) 26%, transparent);
+    --unread-halo: color-mix(in srgb, var(--accent-red, #e83030) 45%, transparent);
+    --unread-pip-tone: var(--accent-red, #e83030);
+    --unread-pip-halo: color-mix(in srgb, var(--accent-red, #e83030) 70%, transparent);
+}
+/* Restored from sessionStorage on a new page: the answer is not arriving
+   again, so it does not arrive again — the sign is simply there, breathing. */
+.se-eye-fab.answered-settled .se-fab-unread-ring { animation: seUnreadBreathe 6s ease-in-out infinite; }
+.se-eye-fab.answered-settled .se-fab-unread-pip::before { animation: none; }
+/* On hover the corner brackets take over the framing; two frames at once
+   is one too many. The pip stays — it is the part that carries the news. */
+.se-eye-fab:hover .se-fab-unread-ring,
+.se-eye-fab:focus-visible .se-fab-unread-ring { opacity: .3; }
+/* Light mode: --accent-bright is never redefined for the pale theme and is
+   a neon that vanishes on it, so the light stone takes the ink green. */
+body.light-mode .se-fab-unread {
+    --unread-tone: var(--accent, #00994d);
+    --unread-line: color-mix(in srgb, var(--accent, #00994d) 45%, transparent);
+    --unread-halo: color-mix(in srgb, var(--accent, #00994d) 30%, transparent);
+    --unread-pip-tone: var(--accent, #00994d);
+    --unread-pip-halo: color-mix(in srgb, var(--accent, #00994d) 40%, transparent);
+}
+body.light-mode .se-eye-fab.answered-failed .se-fab-unread {
+    --unread-tone: var(--accent-red, #e83030);
+    --unread-line: color-mix(in srgb, var(--accent-red, #e83030) 38%, transparent);
+    --unread-halo: color-mix(in srgb, var(--accent-red, #e83030) 30%, transparent);
+    --unread-pip-tone: var(--accent-red, #e83030);
+    --unread-pip-halo: color-mix(in srgb, var(--accent-red, #e83030) 40%, transparent);
+}
+/* The orb is 46px on a phone; the sign keeps its proportions. */
+@media (max-width: 640px) {
+    .se-fab-unread { --unread-gap: 4px; --unread-pip: 6px; }
+}
+@keyframes seUnreadSettle {
+    from { opacity: 0; transform: scale(1.14); }
+    to   { opacity: 1; transform: none; }
+}
+@keyframes seUnreadPip {
+    0%   { opacity: 0; transform: scale(0); }
+    60%  { opacity: 1; transform: scale(1.3); }
+    100% { opacity: 1; transform: scale(1); }
+}
+/* Starts and ends on the ring's own declared glow, so the hand-over from
+   the settle is seamless; the swell is a few pixels of halo, nothing more. */
+@keyframes seUnreadBreathe {
+    0%, 100% { filter: drop-shadow(0 0 2px var(--unread-halo)); }
+    50%      { filter: drop-shadow(0 0 4.5px var(--unread-halo)); }
+}
 
 /* ── The subject a question is about ─────────────────────────────────
    Carried as a chip rather than baked into the text, so it survives the
@@ -908,6 +1037,11 @@ body.light-mode .sr-popup::after {
 @media (prefers-reduced-motion: reduce) {
     .se-eye-fab, .se-fab-corner { transition: none; }
     .se-eye-fab:hover { transform: none; }
-    .se-eye-fab.answered::after { animation: none; }
+    /* The unread sign loses its arrival and its breath, never itself: every
+       part is fully drawn by its own declarations, so with the animations
+       gone it is shown whole and still. */
+    .se-fab-unread-ring,
+    .se-eye-fab.answered-settled .se-fab-unread-ring,
+    .se-fab-unread-pip::before { animation: none; transition: none; }
 }
 .tp-cta-alt { color: var(--text-muted, #7d8590); font-weight: 400; }
