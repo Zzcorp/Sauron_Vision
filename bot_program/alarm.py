@@ -885,10 +885,36 @@ def could_not_answer(name):
                       "Send it again in a minute."])
 
 
+def _guards_line(now) -> str:
+    """/status's guards line from Morgul's last summary, its CRITICAL
+    findings only: morgul.status_line names every finding of the run,
+    warnings included, which is the Eye's line and not this chat's (no
+    warning reaches it, not even a guard's name in a reply). Morgul's
+    own words when it is off or has not run, and its staleness tail."""
+    from core.platform_control import is_component_enabled
+    if not is_component_enabled(morgul.COMPONENT_KEY):
+        return "Guards: off"
+    summary, at = morgul._summary(now)
+    if at is None:
+        return "Guards: no run recorded yet"
+    tail = (f" (last ran {eye.ago(at, now)})"
+            if (now - at).total_seconds() > morgul.SUMMARY_STALE_S else "")
+    critical = [f for f in summary.get("findings") or []
+                if isinstance(f, dict) and f.get("severity") == "critical"]
+    if not critical:
+        return f"Guards: no critical finding{tail}"
+    names = list(dict.fromkeys(str(f.get("name") or "") for f in critical))
+    shown = ", ".join(names[:3]) + (f", +{len(names) - 3} more"
+                                    if len(names) > 3 else "")
+    return (f"Guards: {eye._plural(len(critical), 'critical finding')} — "
+            f"{shown}{tail}")
+
+
 def build_status(now=None):
     """Counts and names, never an amount: the platform's own words for
     what is on, how many bots and positions (how many live), the guards'
-    line, and the critical problems the sentinel sees now."""
+    line (critical findings only), and the critical problems the
+    sentinel sees now."""
     from django.utils import timezone
 
     from bot_program.asset_engine.base import is_entry_working
@@ -909,7 +935,7 @@ def build_status(now=None):
     if orders:
         lines.append(f"Orders waiting at the broker: {len(orders)}")
     try:
-        lines.append(morgul.status_line(now))
+        lines.append(_guards_line(now))
     except Exception as e:  # noqa: BLE001 (a status never raises)
         lines.append(f"Guards: unreadable ({type(e).__name__})")
     found = problems(now)
@@ -927,6 +953,22 @@ def build_status(now=None):
                      eye._cap(lines[:-1], eye.MAX_LINES - 1) + lines[-1:])
 
 
+def _recap(head, limit) -> list:
+    """eye._cap over a head the Eye has already capped: its own "+X more
+    on the platform" line is folded into the count, never dropped as if
+    it were a line of the list (eye.fit folds the same way)."""
+    head = list(head)
+    more = 0
+    match = eye._MORE_RE.match(str(head[-1])) if head else None
+    if match:
+        more = int(match.group(1).replace(",", ""))
+        head.pop()
+    if len(head) + (1 if more else 0) <= limit:
+        return head + ([f"+{more} more on the platform"] if more else [])
+    keep = head[:limit - 1]
+    return keep + [f"+{len(head) - len(keep) + more} more on the platform"]
+
+
 def stop_all(*, now=None, sent_at=None) -> list:
     """THE BRAKE from the alarm chat: telegram_eye.apply_brake, the Eye's
     own write, for every account with a bot running -- an inactive
@@ -936,8 +978,13 @@ def stop_all(*, now=None, sent_at=None) -> list:
     account; nothing maps this chat to a user). Never the kill switch,
     never the master switch, never a close. One reply per account, named
     by number: a username is typed by a person and may read like code
-    on the phone."""
+    on the phone. Each account's brake in a savepoint of its own: one
+    that raises rolls back that account alone and is said in its reply
+    -- an order withdrawn at the broker cannot be rolled back, and a
+    config a reply calls stopped must stay stopped -- and the others
+    stand."""
     from django.contrib.auth import get_user_model
+    from django.db import transaction
     from django.utils import timezone
     now = now or timezone.now()
     users = list(get_user_model().objects
@@ -949,14 +996,30 @@ def stop_all(*, now=None, sent_at=None) -> list:
                            f"Checked: {eye.when(now)}"])]
     out = []
     for user in users:
-        reply = eye.apply_brake(user, everything=True, now=now,
-                                sent_at=sent_at, withdraw=True)
+        try:
+            with transaction.atomic():
+                reply = eye.apply_brake(user, everything=True, now=now,
+                                        sent_at=sent_at, withdraw=True)
+        except Exception as e:  # noqa: BLE001 (this account's; said)
+            logger.warning("[telegram alarm] the brake failed on account "
+                           "#%s (%s)", user.pk, type(e).__name__,
+                           exc_info=True)
+            lines = [f"The brake failed on this account "
+                     f"({type(e).__name__}): its bots may still be running.",
+                     "Send /stopall again in a minute, or stop them on the "
+                     "server.", f"Checked: {eye.when(now)}"]
+            if len(users) > 1:
+                lines.insert(0, eye.heading(f"Account #{user.pk}"))
+            out.append(eye.Reply(eye.MARK_WARN, STOP_TITLE, lines,
+                                 meta={"stopped": [],
+                                       "failed": type(e).__name__}))
+            continue
         lines = list(reply.lines)
         if len(users) > 1:
             keep = min(int(reply.meta.get("keep_tail") or 0), len(lines))
             head, tail = lines[:len(lines) - keep], lines[len(lines) - keep:]
             lines = ([eye.heading(f"Account #{user.pk}")]
-                     + eye._cap(head, eye.MAX_LINES - 1 - keep) + tail)
+                     + _recap(head, eye.MAX_LINES - 1 - keep) + tail)
         out.append(eye.Reply(eye.MARK_BRAKE, STOP_TITLE, lines,
                              meta=reply.meta))
     return out

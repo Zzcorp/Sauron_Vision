@@ -140,7 +140,7 @@ class StatusTests(_ChatCase):
             "Bots running: 3 (1 live)",
             "Open positions: 2 (1 live)",
             "Orders waiting at the broker: 1",
-            "Guards: 1 finding — Daily loss",
+            "Guards: 1 critical finding — Daily loss",
             "No critical problem now.",
             "Checked: 2026-09-28 12:00 UTC"])
         plain = _plain(reply.text())
@@ -168,12 +168,46 @@ class StatusTests(_ChatCase):
         self.assertNotIn("No critical problem now.", lines)
 
     def test_a_guards_line_that_raises_never_breaks_the_status(self):
+        _component(morgul.COMPONENT_KEY)
         with patch(FAULTS, return_value=CLEAR), \
-                patch.object(morgul, "status_line",
+                patch.object(morgul, "_summary",
                              side_effect=RuntimeError("boom")):
             reply = alarm.build_status(NOW)
         self.assertIn("Guards: unreadable (RuntimeError)",
                       [str(ln) for ln in reply.lines])
+
+    def test_the_guards_line_names_critical_findings_only(self):
+        """Morgul's own status_line names every finding of its last run,
+        warnings included: the Eye's line. This chat hears no warning,
+        not even a guard's name in a reply."""
+        def summary(at, *findings):
+            cache.set(morgul.SUMMARY_KEY, {
+                "at": at.isoformat(), "guards": 10, "failed": [],
+                "findings": [{"guard": g, "name": n, "severity": s,
+                              "label": "x"} for g, n, s in findings]})
+
+        def line():
+            with patch(FAULTS, return_value=CLEAR):
+                reply = alarm.build_status(NOW)
+            return next(str(ln) for ln in reply.lines
+                        if str(ln).startswith("Guards:"))
+        _component(morgul.COMPONENT_KEY)
+        summary(NOW, ("stuck_close", "Stuck close", "warning"),
+                ("margin", "Margin", "warning"))
+        self.assertEqual(line(), "Guards: no critical finding")
+        summary(NOW - timedelta(hours=1),
+                ("stuck_close", "Stuck close", "warning"),
+                ("daily_loss", "Daily loss", "critical"),
+                ("margin", "Margin", "critical"),
+                ("no_stop", "No stop", "critical"),
+                ("proofs", "Proofs", "critical"),
+                ("proofs", "Proofs", "critical"))
+        self.assertEqual(line(), "Guards: 5 critical findings — Daily loss, "
+                                 "Margin, No stop, +1 more (last ran 1 h ago)")
+        cache.delete(morgul.SUMMARY_KEY)
+        self.assertEqual(line(), "Guards: no run recorded yet")
+        _component(morgul.COMPONENT_KEY, on=False)
+        self.assertEqual(line(), "Guards: off")
 
     def test_many_problems_are_counted_not_listed_whole(self):
         live = _cfg(self.user, "Stocks <live>", "stock", mode="live")
@@ -257,6 +291,71 @@ class StopAllTests(_ChatCase):
         self.assertEqual(len(replies), 1)
         self.assertNotIn("Account #", replies[0].text())
         self.assertIn("Stopped (1)", replies[0].text())
+
+    def test_one_accounts_failure_neither_undoes_another_nor_hides_it(self):
+        """/stopall over two accounts, the second's brake raising: the
+        first stays stopped (a withdrawal at the broker cannot be rolled
+        back, and a config the reply calls stopped must stay so), the
+        second's reply says the brake failed there, and nothing reads
+        "nothing was changed"."""
+        from django.db import DatabaseError
+        other = User.objects.create_user("gone_fishing", password="x",
+                                         is_active=False)
+        mine = _cfg(self.user, "Stocks <live>", "stock", mode="live")
+        theirs = _cfg(other, "Inactive account's bot", "crypto")
+        real = eye.apply_brake
+
+        def brake(user, *args, **kwargs):
+            if user.pk == other.pk:
+                raise DatabaseError("lost mid-command")
+            return real(user, *args, **kwargs)
+        with patch.object(eye, "apply_brake", side_effect=brake), \
+                self.assertLogs("bot_program.alarm", level="WARNING") as logs:
+            verdict, said = self.said(_chat(1, "/stopall"))
+        self.assertEqual(verdict, "answered:stopall")
+        mine.refresh_from_db()
+        theirs.refresh_from_db()
+        self.assertFalse(mine.enabled)
+        self.assertTrue(theirs.enabled)
+        self.assertEqual(len(said), 2)
+        first, second = _plain(said[0]), _plain(said[1])
+        self.assertIn(f"Account #{self.user.pk}", first)
+        self.assertIn("Stopped (1)", first)
+        self.assertIn(f"Account #{other.pk}", second)
+        self.assertIn("The brake failed on this account (DatabaseError)",
+                      second)
+        self.assertIn("still be running", second)
+        for text in (first, second):
+            self.assertNotIn("nothing was changed", text)
+            self.assertNotIn("gone_fishing", text)
+        self.assertTrue(any(f"account #{other.pk}" in ln
+                            and "DatabaseError" in ln for ln in logs.output))
+
+    def test_six_accounts_the_biggest_ones_remainder_counted_right(self):
+        """The Eye caps apply_brake's head itself, ending it on "+X more
+        on the platform"; the account heading costs one more line, and
+        the second cap must fold X into its own count, not drop that
+        line as if it were a bot."""
+        users = [self.user] + [User.objects.create_user(f"u{i}", password="x")
+                               for i in range(5)]
+        for u in users[1:]:
+            _cfg(u, f"Bot of {u.pk}")
+        for i in range(24):
+            _cfg(self.user, f"Bot {i:02d}", "stock")
+        replies = alarm.stop_all(now=NOW)
+        self.assertEqual(len(replies), 6)
+        for reply in replies:
+            lines = [str(ln) for ln in reply.lines]
+            self.assertLessEqual(len(lines), eye.MAX_LINES)
+            listed = sum(1 for ln in lines if ln.startswith(eye.BULLET))
+            more = sum(int(m.group(1).replace(",", ""))
+                       for ln in lines for m in [eye._MORE_RE.match(ln)] if m)
+            self.assertEqual(listed + more, len(reply.meta["stopped"]),
+                             lines)
+        big = [str(ln) for ln in replies[0].lines]
+        self.assertIn("Stopped (24)", big)
+        self.assertIn("+6 more on the platform", big)
+        self.assertEqual(len(big), eye.MAX_LINES)
 
 
 # ── one update ───────────────────────────────────────────────────────────
