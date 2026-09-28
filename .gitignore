@@ -51,6 +51,11 @@ frontend/dist/
 # Celery
 celerybeat-schedule
 celerybeat.pid
+# The filesystem:// broker settings.py falls back to without Redis (the
+# test suite, CI, a dev box): its spool and kombu's control queue land in
+# the repo root and are never source.
+.celery/
+control/
 
 # Claude Code local state
 .claude/
