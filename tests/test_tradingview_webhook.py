@@ -15,9 +15,11 @@ Run with:  python manage.py test tests.test_tradingview_webhook
 """
 import json
 import os
+from datetime import timedelta
 from decimal import Decimal
 
 from django.test import TestCase
+from django.utils import timezone
 
 SECRET = "test-secret-value-1234"
 
@@ -179,3 +181,54 @@ class ARetryIsNotASecondBetTests(_Base):
         self.post(sell)
         self.assertEqual(
             Signal.objects.filter(rule_name="tradingview:squeeze").count(), 2)
+
+    def test_a_repeat_past_the_window_while_the_row_is_active_is_one_bet(self):
+        """`once per bar close` on a 5-minute bar is past the 90 s window
+        every time, and the first row stays active until the lifecycle
+        closes it. The consensus sums evidence PER ROW (aggregation.
+        side_weight) while it counts rules as a set, so a second active
+        row for one rule and direction votes twice — the invariant the
+        rule engine and the scanner keep: ONE active Signal per rule. The
+        standing row is named, nothing is written, nothing is announced."""
+        from signals.models import Signal
+        from signals.tradingview_webhook import DEDUPE_SECONDS
+        body = {"secret": SECRET, "symbol": "BRNUSD", "action": "buy",
+                "price": 82.5, "strategy": "squeeze"}
+        with self.captureOnCommitCallbacks(execute=False):
+            first = self.post(body).json()["signal_id"]
+        Signal.objects.filter(pk=first).update(
+            created_at=timezone.now() - timedelta(seconds=DEDUPE_SECONDS + 300))
+
+        with self.assertLogs("signals.tradingview_webhook", "INFO") as cm, \
+                self.captureOnCommitCallbacks(execute=False) as callbacks:
+            second = self.post(body)
+
+        self.assertEqual(second.status_code, 200)
+        self.assertTrue(second.json().get("duplicate"))
+        self.assertEqual(second.json().get("signal_id"), first)
+        self.assertEqual(
+            Signal.objects.filter(rule_name="tradingview:squeeze").count(), 1)
+        self.assertEqual(len(callbacks), 0)          # no second announcement
+        self.assertIn(f"#{first}", "\n".join(cm.output))
+
+    def test_a_closed_row_does_not_block_the_next_alert(self):
+        """The dedupe is on the ACTIVE row: once the lifecycle has closed
+        it, the next alert on a later bar is a new bet."""
+        from signals.models import Signal
+        from signals.tradingview_webhook import DEDUPE_SECONDS
+        body = {"secret": SECRET, "symbol": "BRNUSD", "action": "buy",
+                "price": 82.5, "strategy": "squeeze"}
+        with self.captureOnCommitCallbacks(execute=False):
+            first = self.post(body).json()["signal_id"]
+        Signal.objects.filter(pk=first).update(
+            is_active=False, outcome="expired", expired_at=timezone.now(),
+            created_at=timezone.now() - timedelta(seconds=DEDUPE_SECONDS + 300))
+
+        with self.captureOnCommitCallbacks(execute=False) as callbacks:
+            second = self.post(body)
+
+        self.assertFalse(second.json().get("duplicate"))
+        self.assertNotEqual(second.json()["signal_id"], first)
+        self.assertEqual(
+            Signal.objects.filter(rule_name="tradingview:squeeze").count(), 2)
+        self.assertEqual(len(callbacks), 1)          # announced, once

@@ -217,23 +217,34 @@ def dispatch_event(event_type: str, payload: dict, *,
             fired_rule_names=fired_names, signal_ids=signal_ids,
             dispatch_ms=round(elapsed_ms, 2), error=error_msg[:1000],
         )
-    finally:
-        # Every row this dispatch created is announced (signals.announce),
-        # once, after the timing and the audit row: a second rule's
-        # evaluation never waits on the first rule's Telegram post, and
-        # dispatch_ms stays the dispatcher's own latency. Never raises.
-        # Not for the HQ "fire test event" button (source="admin"): its
-        # payload and its price are typed by hand, and an announcement
-        # would reach every chat, the group included, as a real signal.
-        if created and source == "admin":
-            logger.info("[fast_rules] %s from the admin test button: %d "
-                        "signal(s) written, not announced (#%s)",
-                        event_type, len(created),
-                        ", #".join(str(s.pk) for s in created))
-        elif created:
-            from signals.announce import announce_new_signal
-            for sig in created:
-                announce_new_signal(sig)
+    except Exception:
+        # The Signal rows are written and the audit row is not. They are
+        # announced only once it is (below), so the rows are named here
+        # for a replay, and the failure reaches the caller as it always
+        # did. An announcement in a `finally` went out for rows no audit
+        # row would ever account for.
+        if created:
+            logger.warning("[fast_rules] %s: the FastEvent audit row was not "
+                           "written; %d signal(s) written and not announced "
+                           "(#%s)", event_type, len(created),
+                           ", #".join(str(s.pk) for s in created))
+        raise
+    # Every row this dispatch created is announced (signals.announce),
+    # once, after the timing and the audit row: a second rule's
+    # evaluation never waits on the first rule's Telegram post, and
+    # dispatch_ms stays the dispatcher's own latency. Never raises.
+    # Not for the HQ "fire test event" button (source="admin"): its
+    # payload and its price are typed by hand, and an announcement
+    # would reach every chat, the group included, as a real signal.
+    if created and source == "admin":
+        logger.info("[fast_rules] %s from the admin test button: %d "
+                    "signal(s) written, not announced (#%s)",
+                    event_type, len(created),
+                    ", #".join(str(s.pk) for s in created))
+    elif created:
+        from signals.announce import announce_new_signal
+        for sig in created:
+            announce_new_signal(sig)
     return {
         "event_id": fe.id,
         "rules_evaluated": len(candidates),

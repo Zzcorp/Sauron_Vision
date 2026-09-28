@@ -262,6 +262,28 @@ class OpportunityDensityTests(TestCase):
         self.assertEqual(out["etf"]["share"], 1.0)
         self.assertEqual(out["stock"]["share"], 0.0)
 
+    def test_a_deactivated_instrument_is_out_of_the_numerator_too(self):
+        """An instrument deactivated after it was flagged or signalled is
+        not in the universe below the line, so it cannot carry above it:
+        both counts describe the same population, and a class whose only
+        setups sit on retired instruments reads 0/4, not 3/4."""
+        from signals.opportunity_density import opportunity_density
+        self._scanner(True)
+        a = _inst("AAA"); _inst("BBB"); _inst("CCC"); _inst("DDD")
+        x, y, z = (_inst(s, active=False) for s in ("XXX", "YYY", "ZZZ"))
+        self._flag(x); self._flag(y); self._signal(z)
+        d = opportunity_density()["stock"]
+        self.assertEqual(d["universe"], 4)
+        self.assertEqual(d["n_flags"], 0)
+        self.assertEqual(d["n_signals"], 0)
+        self.assertEqual(d["n_flag_instruments"], 0)
+        self.assertEqual(d["n_signal_instruments"], 0)
+        self.assertTrue(d["measured"])
+        self.assertEqual(d["share"], 0.0)
+        # an active one still counts, over the same four
+        self._flag(a)
+        self.assertAlmostEqual(opportunity_density()["stock"]["share"], 0.25)
+
 
 class NewsRiskTests(TestCase):
 

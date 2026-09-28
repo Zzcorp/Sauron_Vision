@@ -37,9 +37,12 @@ def opportunity_density(*, hours_flags=DEFAULT_HOURS_FLAGS,
     (plus any class a flag or signal names).
 
     `share` is distinct instruments carrying a flag or a signal over the
-    class's active universe, 0..1. Signals the scanner itself raised
-    (sub_scores["opportunity_setup"]) are excluded so a flag is not
-    counted twice through its linked Signal.
+    class's active universe, 0..1 — the same population above and below
+    the line: a flag or a signal on an instrument deactivated since it
+    was raised names the class and counts for nothing, since the
+    instrument is not in the universe it would be measured against.
+    Signals the scanner itself raised (sub_scores["opportunity_setup"])
+    are excluded so a flag is not counted twice through its linked Signal.
     """
     from django.db.models import Count
 
@@ -65,9 +68,13 @@ def opportunity_density(*, hours_flags=DEFAULT_HOURS_FLAGS,
     flags = (OpportunityFlag.objects
              .filter(scanned_at__gte=now - timedelta(hours=hours_flags),
                      outcome="")
-             .values_list("instrument_id", "instrument__asset_class"))
-    for inst_id, ac in flags:
-        _slot(ac)["n_flags"] += 1
+             .values_list("instrument_id", "instrument__asset_class",
+                          "instrument__is_active"))
+    for inst_id, ac, active in flags:
+        slot = _slot(ac)
+        if not active:
+            continue                    # not in the universe it is measured against
+        slot["n_flags"] += 1
         flagged.setdefault(ac, set()).add(inst_id)
 
     signalled: dict = {}
@@ -76,9 +83,13 @@ def opportunity_density(*, hours_flags=DEFAULT_HOURS_FLAGS,
                        created_at__gte=now - timedelta(hours=hours_signals),
                        score__gte=min_signal_score)
                .exclude(sub_scores__has_key="opportunity_setup")
-               .values_list("instrument_id", "instrument__asset_class"))
-    for inst_id, ac in signals:
-        _slot(ac)["n_signals"] += 1
+               .values_list("instrument_id", "instrument__asset_class",
+                            "instrument__is_active"))
+    for inst_id, ac, active in signals:
+        slot = _slot(ac)
+        if not active:
+            continue
+        slot["n_signals"] += 1
         signalled.setdefault(ac, set()).add(inst_id)
 
     try:

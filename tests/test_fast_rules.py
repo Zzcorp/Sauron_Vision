@@ -330,3 +330,74 @@ class NewsShockRuleTests(TestCase):
             "symbol": "NS4", "sentiment": 0.9, "headline": "x", "source": "x",
         })
         self.assertEqual(r["rules_fired"], 0)
+
+
+# ── The audit row precedes the announcement ────────────────────────────────
+
+class AuditRowPrecedesAnnouncementTests(TestCase):
+    """Every row a dispatch creates is announced once the FastEvent audit
+    row is written (signals.announce, 2026-09-26). A dispatch whose audit
+    row failed to write therefore announces nothing: the rows it wrote are
+    named in the log for a replay, and the failure reaches the caller as
+    it always did."""
+
+    def setUp(self):
+        from signals.fast_rules import (
+            reset_fast_rules, register_fast_rule, FastRule, SignalSpec,
+        )
+        reset_fast_rules()
+        self.addCleanup(_isolate_registry)
+
+        class AuditedRule(FastRule):
+            rule_name = "audited_rule"
+            event_types = ["audit_evt"]
+            cooldown_seconds = 0
+            def evaluate(self, event_type, payload):
+                from instruments.models import Instrument
+                inst = Instrument.objects.filter(symbol=payload["symbol"]).first()
+                return SignalSpec(
+                    instrument=inst, direction="bullish", score=0.9,
+                    title="audited", price=100.0,
+                ) if inst else None
+        register_fast_rule(AuditedRule())
+
+    def test_a_failed_audit_write_announces_nothing(self):
+        from unittest.mock import patch
+        from signals.fast_rules import dispatch_event
+        from signals.models import FastEvent, Signal
+        _instrument("AUD1")
+        with patch("signals.announce.announce_new_signal") as ann, \
+                patch.object(FastEvent.objects, "create",
+                             side_effect=RuntimeError("audit table locked")), \
+                self.assertRaises(RuntimeError):
+            dispatch_event("audit_evt", {"symbol": "AUD1"})
+        ann.assert_not_called()
+        # the Signal row itself is written; it is the audit row that is not
+        self.assertEqual(Signal.objects.filter(rule_name="audited_rule").count(), 1)
+        self.assertEqual(FastEvent.objects.count(), 0)
+
+    def test_the_rows_written_and_not_announced_are_named(self):
+        from unittest.mock import patch
+        from signals.fast_rules import dispatch_event
+        from signals.models import FastEvent, Signal
+        _instrument("AUD2")
+        with patch("signals.announce.announce_new_signal"), \
+                patch.object(FastEvent.objects, "create",
+                             side_effect=RuntimeError("audit table locked")), \
+                self.assertLogs("signals.fast_rules", "WARNING") as cm, \
+                self.assertRaises(RuntimeError):
+            dispatch_event("audit_evt", {"symbol": "AUD2"})
+        sig = Signal.objects.get(rule_name="audited_rule")
+        text = "\n".join(cm.output)
+        self.assertIn("not announced", text)
+        self.assertIn(f"#{sig.pk}", text)
+
+    def test_a_written_audit_row_is_followed_by_the_announcement(self):
+        from unittest.mock import patch
+        from signals.fast_rules import dispatch_event
+        from signals.models import FastEvent
+        _instrument("AUD3")
+        with patch("signals.announce.announce_new_signal") as ann:
+            out = dispatch_event("audit_evt", {"symbol": "AUD3"})
+        ann.assert_called_once()
+        self.assertTrue(FastEvent.objects.filter(pk=out["event_id"]).exists())
