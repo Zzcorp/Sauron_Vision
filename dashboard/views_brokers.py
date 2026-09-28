@@ -83,14 +83,18 @@ THE SAXO SAVE HAS THE SAME TRAP AND A RACE (2026-09-28)
 The SIM box shipped checked too, so a routing-only save on a LIVE Saxo row
 flipped it to SIM, closed the session the operator had just signed in for
 and dropped the readings. A flip while the session is alive now needs the
-same "Switch world" tick. And a save that does not change the application
-writes the four class flags and nothing else: a full-row save wrote back
-the token pair as it was loaded, and a refresh landing in between
-(saxo_oauth.store_tokens) rotates that pair — the stale refresh token put
-back is refused at the next refresh and the session is lost anyway. The
-eToro save, which waits up to ETORO_PROBE_TIMEOUT_S on the network before it
-writes, names its columns for the same reason: sync_etoro_accounts writes
-the margin cells in that window.
+same "Switch world" tick — and, tick or no tick, session alive or not, the
+flip is refused while any real Saxo position the platform carried is still
+OPEN or CLOSE_PENDING (`live_saxo_positions`): broker_router builds
+SaxoTrader from the SIM box at call time, so every later close would go to
+the other gateway, where the position does not exist. And a save that does
+not change the application writes the four class flags and nothing else: a
+full-row save wrote back the token pair as it was loaded, and a refresh
+landing in between (saxo_oauth.store_tokens) rotates that pair — the stale
+refresh token put back is refused at the next refresh and the session is
+lost anyway. The eToro save, which waits up to ETORO_PROBE_TIMEOUT_S on the
+network before it writes, names its columns for the same reason:
+sync_etoro_accounts writes the margin cells in that window.
 """
 import logging
 
@@ -612,12 +616,41 @@ def live_etoro_positions(user) -> list:
 
     Filtered in Python, as etoro_smoke._unstamped_open_rows explains: a
     JSON-key filter in the ORM drops rows whose metadata lacks the key."""
+    from bot_program.models import EtoroAccount
+    return _real_positions_carried_by(
+        user, EtoroAccount.objects.filter(user=user).first(), "etoro")
+
+
+def live_saxo_positions(user) -> list:
+    """The target user's REAL positions at Saxo that the platform still has
+    to close — live_etoro_positions' twin, reading the same three marks
+    the same way: AssetBotTrade rows, OPEN or CLOSE_PENDING, not paper,
+    carried by Saxo (metadata["broker"] "saxo", or no carrier at all while
+    the Saxo row on file is primary for the class the trade was booked
+    under or for the instrument's class the router asks; a row stamped
+    with ANOTHER broker is skipped), and not stamped as filled on the
+    simulator (broker_env "paper", VENUE_WORLDS' word for SIM; an unstamped
+    world counts).
+
+    Saxo serves SIM and live from one row, and broker_router
+    ._saxo_client_for builds SaxoTrader from that row's SIM box at call
+    time, so a flip with one of these open sends its close to the other
+    gateway, where the position does not exist."""
+    from bot_program.models import SaxoAccount
+    return _real_positions_carried_by(
+        user, SaxoAccount.objects.filter(user=user).first(), "saxo")
+
+
+def _real_positions_carried_by(user, acct, carrier: str) -> list:
+    """The rows live_etoro_positions describes, for the row `acct` (an
+    EtoroAccount or a SaxoAccount, or None) under the adapter key
+    `carrier` — one body for both twins, so the reading of an unstamped
+    row cannot drift between them."""
     from bot_program.engine.broker_router import _instrument_for
-    from bot_program.models import AssetBotTrade, EtoroAccount
-    acct = EtoroAccount.objects.filter(user=user).first()
+    from bot_program.models import AssetBotTrade
     router_class = {}
 
-    def could_be_etoros(tr) -> bool:
+    def could_be_its(tr) -> bool:
         if acct is None:
             return False
         if tr.symbol not in router_class:
@@ -633,10 +666,10 @@ def live_etoro_positions(user) -> list:
                .only("pk", "symbol", "asset_class", "metadata")
                .order_by("pk")):
         meta = tr.metadata if isinstance(tr.metadata, dict) else {}
-        carrier = str(meta.get("broker") or "")
-        if carrier and carrier != "etoro":
+        stamped = str(meta.get("broker") or "")
+        if stamped and stamped != carrier:
             continue
-        if not carrier and not could_be_etoros(tr):
+        if not stamped and not could_be_its(tr):
             continue
         if str(meta.get("broker_env") or "").lower() == "paper":
             continue
@@ -944,6 +977,43 @@ def save_saxo_credentials(request):
 
     acct, _created = SaxoAccount.objects.get_or_create(user=user)
     was_sim = None if _created else acct.sim
+    # THE WORLD FLIP, WITH A REAL POSITION OPEN. broker_router builds
+    # SaxoTrader from this row's SIM box at call time, so from the flip on
+    # every close the platform sends — the time stop, a bot exit, the
+    # operator's close, EMERGENCY FLATTEN — goes to the other gateway, where
+    # the position does not exist: under FifoEndOfDay the row goes
+    # CLOSE_PENDING and the real position sits unmanaged; under a real-time
+    # netting profile the opposite order OPENS a simulator position and the
+    # row books CLOSED at its fill. The session rule below could not see
+    # this: with the tick it let the flip through, and a row whose refresh
+    # token had lapsed (the ordinary state after a long pause) was not asked
+    # at all. Refused, tick or no tick, session alive or not, while any real
+    # Saxo position is OPEN or CLOSE_PENDING — the eToro rule
+    # (demo_tick_refusals). Nothing is written and the session is not
+    # touched. Close them first (or let them close), then switch.
+    if was_sim is not None and was_sim != sim:
+        real = live_saxo_positions(user)
+        if real:
+            on_file, asked = ("SIM", "LIVE") if was_sim else ("LIVE", "SIM")
+            n = len(real)
+            named = ", ".join(f"[{t.pk}] {t.symbol}" for t in real)
+            if n == 1:
+                cost = (f"1 real position is still open at Saxo; switching "
+                        f"world would cut the platform off from closing it "
+                        f"({named}) — close it first, then switch")
+            else:
+                cost = (f"{n} real positions are still open at Saxo; "
+                        f"switching world would cut the platform off from "
+                        f"closing them ({named}) — close them first, then "
+                        f"switch")
+            messages.error(request,
+                           f"Saxo: REFUSED to switch {target_username} from "
+                           f"{on_file} to {asked} — nothing was saved. {cost}. "
+                           f"No tick makes that safe: the router builds the "
+                           f"Saxo client from the SIM box at call time, and "
+                           f"a close sent to the {asked} gateway finds no "
+                           f"such position there.")
+            return redirect("brokers_page")
     # THE WORLD FLIP, WHILE A SESSION IS OPEN. The SIM box used to ship
     # checked whatever the row said, so a save made on a LIVE row to tick
     # one class box flipped it to SIM: the session the operator had just

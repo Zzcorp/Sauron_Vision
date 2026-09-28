@@ -555,6 +555,129 @@ class EtoroClosesByPositionIdOrNotAtAllTests(TestCase):
         client.market_order.assert_not_called()
 
 
+class ACloseNeverCrossesWorldsTests(TestCase):
+    """Saxo and eToro serve SIM and live from ONE row, and broker_router
+    builds the client from that row's SIM/Demo box AT CALL TIME. The carrier
+    check in close_or_refuse cannot see a flipped box: SaxoTrader on the
+    simulator and SaxoTrader on the live gateway both answer "saxo". So a
+    flip made with a real position open sent every later close to the other
+    world — under a real-time netting profile the opposite order OPENED a
+    simulator position and the row booked CLOSED at that fill; under
+    FifoEndOfDay the live PositionId does not exist on the SIM host. The
+    row carries the world it was filled in (broker_env, stamped by
+    AssetBot.venue_stamps), so the SEND now compares it with
+    VENUE_WORLDS[client.env] and refuses two KNOWN and DIFFERENT worlds, as
+    reconcile_asset.unattributable already reads the same pair on the MISS
+    path. An unstamped row, or a client whose env the map does not know,
+    refuses nothing. The refusal raises where the carrier refusal raises,
+    so the engine, the drain and the kill switch land where they already
+    land."""
+
+    def setUp(self):
+        self.user = _user("world_u")
+        self.cfg = _cfg(self.user, name="WORLD")
+
+    @staticmethod
+    def _saxo_on(env):
+        """A client whose class NAME answers "saxo" — the name is all
+        adapter_key reads, so nothing is subclassed from the real adapter —
+        built for the gateway `env` names. It nets in real time, so the
+        ordinary close applies: the one that OPENS in the wrong world."""
+        from tests.test_venue_drift import _Book
+
+        class SaxoTrader(_Book):
+            pass
+
+        book = SaxoTrader(symbols=[{"symbol": "AAPL", "qty": "10",
+                                    "side": "BUY"}])
+        if env is not None:
+            book.env = env
+        book.market_order = mock.MagicMock(
+            return_value={"status": "FILLED", "avgPrice": "97",
+                          "executedQty": "10"})
+        return book
+
+    def _live_row(self, **kw):
+        meta = {"broker": "saxo", "broker_env": "live",
+                "broker_position_id": "P77", "initial_stop_loss": 98.0}
+        meta.update(kw)
+        return _trade(self.cfg, metadata=meta)
+
+    def test_a_close_into_the_other_world_is_refused_before_anything_is_sent(
+            self):
+        from bot_program.engine.venue_close import close_or_refuse
+        trade = self._live_row()
+        book = self._saxo_on("sim")
+        with self.assertLogs("bot_program.engine.venue_close", level="ERROR"):
+            with self.assertRaises(RuntimeError) as cm:
+                close_or_refuse(trade, book, 10.0, close_side="SELL")
+        self.assertIn("live world", str(cm.exception))
+        self.assertIn("paper world", str(cm.exception))
+        book.market_order.assert_not_called()
+
+    def test_the_refusal_runs_both_ways(self):
+        """A row filled on the simulator is not closed on the live gateway
+        either: that close would open a real position."""
+        from bot_program.engine.venue_close import close_or_refuse
+        trade = self._live_row(broker_env="paper")
+        book = self._saxo_on("live")
+        with self.assertLogs("bot_program.engine.venue_close", level="ERROR"):
+            with self.assertRaises(RuntimeError):
+                close_or_refuse(trade, book, 10.0, close_side="SELL")
+        book.market_order.assert_not_called()
+
+    def test_the_same_world_an_unstamped_world_or_an_unknown_env_still_closes(
+            self):
+        """Three states, both sides: only two KNOWN and DIFFERENT worlds
+        refuse. A row stamped before broker_env existed, a client that does
+        not say, and an env the map has never heard of all close as before."""
+        from bot_program.engine.venue_close import close_or_refuse
+        same = self._saxo_on("live")
+        close_or_refuse(self._live_row(), same, 10.0, close_side="SELL")
+        same.market_order.assert_called_once()
+        unstamped = _trade(self.cfg, metadata={"broker": "saxo",
+                                               "broker_position_id": "P78"})
+        sim = self._saxo_on("sim")
+        close_or_refuse(unstamped, sim, 10.0, close_side="SELL")
+        sim.market_order.assert_called_once()
+        silent = self._saxo_on(None)
+        close_or_refuse(self._live_row(), silent, 10.0, close_side="SELL")
+        silent.market_order.assert_called_once()
+        stranger = self._saxo_on("staging")
+        close_or_refuse(self._live_row(), stranger, 10.0, close_side="SELL")
+        stranger.market_order.assert_called_once()
+
+    def test_the_kill_switch_leaves_the_row_open_and_sends_nothing(self):
+        """EMERGENCY FLATTEN takes the same path, and it is the worst place
+        to send a simulator order for a real position: the raise lands in
+        the sweep's errors channel, which is 'may still be OPEN at the
+        broker'."""
+        from bot_program.engine.kill_switch import _close_asset_trade
+        trade = self._live_row()
+        book = self._saxo_on("sim")
+        with mock.patch("bot_program.engine.broker_router.client_for_symbol",
+                        return_value=book):
+            with self.assertRaises(RuntimeError):
+                _close_asset_trade(trade, timezone.now())
+        book.market_order.assert_not_called()
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "OPEN")
+
+    def test_the_retry_drain_records_the_refusal_and_sends_nothing(self):
+        from bot_program.pending_closes import retry_trade_close
+        trade = self._live_row()
+        trade.status = "CLOSE_PENDING"
+        trade.save(update_fields=["status"])
+        book = self._saxo_on("sim")
+        with mock.patch("bot_program.engine.broker_router.client_for_symbol",
+                        return_value=book):
+            self.assertFalse(retry_trade_close(trade))
+        book.market_order.assert_not_called()
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSE_PENDING")
+        self.assertIn("paper world", str(trade.metadata))
+
+
 # ── the close is proven by the open order, never by a fresh list ──────────
 
 class TheCloseIsProvenByTheOpenOrderTests(TestCase):

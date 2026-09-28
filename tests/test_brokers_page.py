@@ -885,6 +885,216 @@ class SavingSaxoTests(TestCase):
         self.assertFalse(SaxoAccount.objects.exists())
 
 
+class TheSaxoWorldFlipIsGuardedTests(TestCase):
+    """The Saxo twin of TheDemoTickIsGuardedTests (2026-09-28).
+
+    Saxo serves SIM and live from ONE row, and broker_router builds
+    SaxoTrader from the row's SIM box at call time, so a flip made with a
+    real position open sends every later close — the time stop, a bot
+    exit, the operator's close, EMERGENCY FLATTEN — to the other gateway,
+    where the position does not exist. The guard on the flip asked only
+    about the SESSION: alive, the Switch world tick let it through; dead
+    (the ordinary state after a long pause), it asked for nothing at all.
+    Now the flip is refused, nothing written and the session untouched,
+    while any real Saxo position is OPEN or CLOSE_PENDING — tick or no
+    tick, session alive or not. A row with nothing open keeps the session
+    rule exactly as it was."""
+
+    URI = "https://host/brokers/saxo/callback/"
+
+    def setUp(self):
+        self.user = User.objects.create_user("sw_u", password="x")
+        self.admin = User.objects.create_superuser("sw_admin", "a@x", "x")
+        acct = SaxoAccount.objects.create(user=self.user, sim=False,
+                                          redirect_uri=self.URI,
+                                          is_primary_for_stocks=True)
+        acct.set_credentials(RAW_APP, RAW_SECRET)
+        acct.save()
+        self.client.force_login(self.admin)
+
+    def _post(self, **extra):
+        """SIM ticked on a LIVE row, a new pair typed and the class box
+        moved: a save that goes through leaves every one of those on the
+        row, so a refusal is checked on all of them."""
+        data = {"target_username": "sw_u", "saxo_app_key": "k2",
+                "saxo_app_secret": "s2", "saxo_redirect_uri": self.URI,
+                "sim": "on", "primary_forex": "on"}
+        data.update(extra)
+        r = self.client.post(reverse("hq_save_saxo"), data, follow=True)
+        return r.content.decode()
+
+    def _row(self):
+        return SaxoAccount.objects.get(user=self.user)
+
+    def _sign_in(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+        acct = self._row()
+        acct.set_tokens("acc", "ref", timezone.now() + timedelta(seconds=1200),
+                        refresh_expires_at=timezone.now()
+                        + timedelta(seconds=2400))
+        acct.connected = True
+        acct.save()
+
+    def _trade(self, *, symbol="AAPL", status="OPEN", paper=False,
+               broker="saxo", world="live", asset_class="stock"):
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+        cfg, _ = AssetBotConfig.objects.get_or_create(
+            user=self.user, name="megacaps",
+            defaults={"asset_class": "stock", "mode": "live",
+                      "enabled": False, "symbols": ["AAPL"]})
+        meta = {}
+        if broker:
+            meta["broker"] = broker
+        if world:
+            meta["broker_env"] = world
+        return AssetBotTrade.objects.create(
+            config=cfg, asset_class=asset_class, symbol=symbol, side="BUY",
+            qty=1, entry_price=100, status=status, paper=paper,
+            metadata=meta)
+
+    def assertNothingWritten(self, body):
+        acct = self._row()
+        self.assertFalse(acct.sim)
+        self.assertTrue(acct.is_primary_for_stocks)
+        self.assertFalse(acct.is_primary_for_forex)
+        self.assertEqual(acct.get_credentials(), (RAW_APP, RAW_SECRET))
+        self.assertIn("REFUSED to switch sw_u from LIVE to SIM", body)
+        self.assertIn("nothing was saved", body)
+
+    def test_the_flip_is_refused_with_real_positions_open_even_ticked(self):
+        """The finding's own scenario: the refresh token has lapsed, so the
+        session rule asks for nothing — and the tick is given anyway."""
+        a = self._trade(symbol="AAPL")
+        b = self._trade(symbol="MSFT", status="CLOSE_PENDING")
+        body = self._post(confirm_world_change="on")
+        self.assertNothingWritten(body)
+        self.assertIn("2 real positions are still open at Saxo; switching "
+                      "world would cut the platform off from closing them",
+                      body)
+        self.assertIn(f"[{a.pk}] AAPL, [{b.pk}] MSFT", body)
+
+    def test_the_flip_is_refused_with_the_session_alive_and_no_tick_too(self):
+        """Refused on the positions, and the session and the readings the
+        flip would have closed and dropped are left exactly as they were."""
+        from decimal import Decimal
+        self._sign_in()
+        SaxoAccount.objects.filter(user=self.user).update(
+            last_equity=Decimal("2500"))
+        t = self._trade()
+        body = self._post()
+        self.assertNothingWritten(body)
+        self.assertIn(f"1 real position is still open at Saxo; switching "
+                      f"world would cut the platform off from closing it "
+                      f"([{t.pk}] AAPL)", body)
+        acct = self._row()
+        self.assertTrue(acct.session_alive())
+        self.assertEqual(acct.get_refresh_token(), "ref")
+        self.assertEqual(acct.last_equity, Decimal("2500"))
+
+    def test_the_other_direction_is_refused_the_same_way(self):
+        """SIM -> live strands a real position just as well: the row is
+        SIM today, and an unstamped world may be the real one."""
+        SaxoAccount.objects.filter(user=self.user).update(sim=True)
+        t = self._trade(world="")
+        body = self._post(sim="", confirm_world_change="on")
+        acct = self._row()
+        self.assertTrue(acct.sim)
+        self.assertFalse(acct.is_primary_for_forex)
+        self.assertEqual(acct.get_credentials(), (RAW_APP, RAW_SECRET))
+        self.assertIn("REFUSED to switch sw_u from SIM to LIVE", body)
+        self.assertIn(f"1 real position is still open at Saxo; switching "
+                      f"world would cut the platform off from closing it "
+                      f"([{t.pk}] AAPL)", body)
+
+    def test_a_row_with_no_world_stamp_counts_as_real(self):
+        self._trade(world="")
+        body = self._post(confirm_world_change="on")
+        self.assertNothingWritten(body)
+        self.assertIn("1 real position is still open at Saxo", body)
+
+    def test_what_is_not_a_real_saxo_position_does_not_count(self):
+        """Closed, paper, filled on the simulator, stamped as carried by
+        another broker, or unstamped in a class this row does not carry:
+        none of them is stranded by the flip. (EURUSD is booked forex and
+        its Instrument says forex; ZZZ has no Instrument, so the router
+        reads it as crypto — neither is a class this row is primary for.)
+        No session, so no tick is needed either — the rule as it was."""
+        from instruments.models import Instrument
+        Instrument.objects.create(symbol="EURUSD", name="EUR/USD",
+                                  asset_class="forex")
+        self._trade(status="CLOSED")
+        self._trade(paper=True)
+        self._trade(world="paper")
+        self._trade(broker="etoro")
+        self._trade(broker="", symbol="EURUSD", asset_class="forex")
+        self._trade(broker="", symbol="ZZZ", asset_class="forex")
+        body = self._post()
+        acct = self._row()
+        self.assertTrue(acct.sim)
+        self.assertTrue(acct.is_primary_for_forex)
+        self.assertFalse(acct.is_primary_for_stocks)
+        self.assertEqual(acct.get_credentials(), ("k2", "s2"))
+        self.assertNotIn("REFUSED", body)
+        self.assertIn("Saxo application saved for sw_u (sim)", body)
+
+    def test_a_row_with_no_carrier_counts_when_this_row_carries_its_class(
+            self):
+        """A TAKE TRADE booked before 2026-09-24 has no metadata["broker"];
+        its close goes wherever the router answers — this row, primary for
+        stocks — and after the flip, to the other gateway."""
+        t = self._trade(broker="")
+        body = self._post(confirm_world_change="on")
+        self.assertNothingWritten(body)
+        self.assertIn(f"1 real position is still open at Saxo; switching "
+                      f"world would cut the platform off from closing it "
+                      f"([{t.pk}] AAPL)", body)
+
+    def test_a_row_with_no_carrier_counts_by_the_instrument_class_too(self):
+        from instruments.models import Instrument
+        Instrument.objects.create(symbol="EURUSD", name="EUR/USD",
+                                  asset_class="forex")
+        SaxoAccount.objects.filter(user=self.user).update(
+            is_primary_for_stocks=False, is_primary_for_forex=True)
+        self._trade(broker="", world="", symbol="EURUSD")
+        body = self._post(confirm_world_change="on")
+        acct = self._row()
+        self.assertFalse(acct.sim)
+        self.assertTrue(acct.is_primary_for_forex)
+        self.assertEqual(acct.get_credentials(), (RAW_APP, RAW_SECRET))
+        self.assertIn("1 real position is still open at Saxo", body)
+
+    def test_a_save_that_keeps_the_world_is_not_asked(self):
+        """Positions open, SIM left as it is on file, one class box moved:
+        the routing save the trap used to catch goes through."""
+        self._trade()
+        body = self._post(sim="", saxo_app_key=RAW_APP,
+                          saxo_app_secret=RAW_SECRET)
+        acct = self._row()
+        self.assertFalse(acct.sim)
+        self.assertTrue(acct.is_primary_for_forex)
+        self.assertFalse(acct.is_primary_for_stocks)
+        self.assertNotIn("REFUSED", body)
+        self.assertIn("Saxo routing saved for sw_u", body)
+
+    def test_a_row_with_nothing_open_keeps_the_session_rule(self):
+        """No positions: a dead session flips with no tick, an alive one
+        is refused on the session and says nothing about positions."""
+        self._sign_in()
+        body = self._post()
+        self.assertTrue(self._row().session_alive())
+        self.assertIn("REFUSED to switch sw_u from LIVE to SIM", body)
+        self.assertIn("has an open session", body)
+        self.assertNotIn("still open at Saxo", body)
+        acct = self._row()
+        acct.clear_session()
+        acct.save()
+        body = self._post()
+        self.assertTrue(self._row().sim)
+        self.assertNotIn("REFUSED", body)
+
+
 class TheRailReachesItTests(TestCase):
 
     def test_the_page_is_on_the_rail_under_the_money(self):

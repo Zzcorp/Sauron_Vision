@@ -110,6 +110,35 @@ def close_or_refuse(trade, client, qty: float, *, close_side: str,
             f"this row was carried by {carried} and the router now answers "
             f"{now_at} — a close sent here would open a position at the "
             f"wrong venue; move the flag back or close it at {carried}")
+    # AND THE ROW'S OWN WORLD. Saxo and eToro serve SIM and live from ONE
+    # row, and the router builds the client from that row's SIM/Demo box at
+    # call time, so the carrier check above cannot see a flipped box:
+    # SaxoTrader on the simulator and SaxoTrader on the live gateway both
+    # answer "saxo". Flip the box with a real position open and every later
+    # close went to the other world — an opposite order OPENED a simulator
+    # position and the row booked CLOSED at that fill; under FifoEndOfDay
+    # the live PositionId does not exist on the SIM host. The row carries
+    # the world it was filled in (metadata["broker_env"], stamped by
+    # AssetBot.venue_stamps), read against VENUE_WORLDS[client.env] the way
+    # reconcile_asset.unattributable reads it on the MISS path — this is the
+    # send path, which nothing read before. The same three states as the
+    # carrier: an unstamped row, or a client whose env the map does not
+    # know, refuses nothing. Raised where the carrier refusal is raised, so
+    # every caller lands where it already lands.
+    from bot_program.asset_engine.base import AssetBot
+    filled_in = str(_meta.get("broker_env") or "")
+    answers_from = AssetBot.VENUE_WORLDS.get(
+        str(getattr(client, "env", "") or "").lower(), "")
+    if filled_in and answers_from and filled_in != answers_from:
+        log.error("venue_close: %s was filled in the %s world and the router "
+                  "now answers the %s world — NOTHING has been sent, because "
+                  "a close in the other world is an opening order there",
+                  symbol, filled_in, answers_from)
+        raise RuntimeError(
+            f"this row was filled in the {filled_in} world and the router "
+            f"now answers the {answers_from} world — a close sent there would "
+            f"open a position in the wrong world; flip the SIM/Demo box back "
+            f"or close it at the venue")
     if not venue_needs_position_id(client):
         return client.market_order(symbol, close_side, float(qty),
                                    client_order_id=client_order_id,
