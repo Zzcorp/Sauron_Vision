@@ -25,6 +25,28 @@ _MAX_ATTEMPTS = 2
 # same classifiers; one re-run there is the platform's own fallback, and
 # it never chains (a decline on the fallback is returned as it is).
 REFUSAL_FALLBACK_MODEL = "claude-opus-5"
+# The tiers whose caller cleared the deep reserve BEFORE calling:
+# spend.can_spend keys DEEP_TIER_SHARE off "deep" and "frontier" alike, so
+# a decline there re-runs on money the caller was already allowed. A fast-
+# or balanced-tier caller (the hourly scan, the news read, the briefing)
+# was guarded — where guarded at all — for a Haiku or a Sonnet call; its
+# re-run is Opus money, late in the day exactly what the reserve holds
+# back, so it asks the deep tier's own question first (_fallback_held).
+_RESERVE_ALREADY_CLEARED = ("deep", "frontier")
+
+
+def _fallback_held(model: str, usage: dict) -> str:
+    """Why a decline on `model` may NOT re-run on the deep tier — "" when
+    it may. Priced as the re-run will bill: the same prompt again, at the
+    fallback's own input rate."""
+    from ai_agents.catalog import MODELS, pricing_for
+    from ai_agents.spend import can_spend
+    if MODELS.get(model, {}).get("tier_hint") in _RESERVE_ALREADY_CLEARED:
+        return ""
+    rerun = (usage["input_tokens"]
+             * pricing_for(REFUSAL_FALLBACK_MODEL)["input"] / 1_000_000)
+    allowed, reason = can_spend(tier="deep", estimated_usd=rerun)
+    return "" if allowed else reason
 
 
 class ClaudeProvider:
@@ -66,7 +88,10 @@ class ClaudeProvider:
         `agent_name` attributes the row; `record=False` is for the ONE
         caller that writes its own richer AgentTask row (BaseAgent.run) —
         anything else passing it is re-opening the hole, and a test
-        source-pins that it does not.
+        source-pins that it does not. The usage dict names the `model`
+        that answered: after a refusal re-run that is the fallback, not
+        the model asked for, and the opt-out caller's own row must say
+        whose rate it was billed at.
         """
         from ai_agents.catalog import pricing_for, supports_effort, supports_thinking
 
@@ -127,17 +152,6 @@ class ClaudeProvider:
         # content[0] blindly.
         text = next((b.text for b in response.content if b.type == "text"), "")
 
-        if (getattr(response, "stop_reason", "") == "refusal"
-                and model != REFUSAL_FALLBACK_MODEL):
-            details = getattr(response, "stop_details", None)
-            logger.warning("[claude] %s declined the request (%s) — "
-                           "re-running once on %s", model,
-                           getattr(details, "category", None) or "no category",
-                           REFUSAL_FALLBACK_MODEL)
-            return self.complete(system_prompt, user_message,
-                                 model=REFUSAL_FALLBACK_MODEL, effort=effort,
-                                 agent_name=agent_name, record=record)
-
         # Usage FIRST, before any verdict on the response: a refused or
         # empty generation was still generated, Anthropic still billed it,
         # and a ledger that only counts the calls that went well is the
@@ -154,10 +168,16 @@ class ClaudeProvider:
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "cost_usd": round(cost, 6),
+            "model": model,
         }
 
-        def _ledger(success: bool, summary: str, error: str = ""):
-            if not record:
+        def _ledger(success: bool, summary: str, error: str = "",
+                    unclaimed: bool = False):
+            # `unclaimed`: a billed call no caller will ever write a row
+            # for — the generation a refusal re-run replaces. A record=False
+            # caller writes ONE row from the usage it gets back, and that
+            # is the re-run's; this one is nobody's but the provider's.
+            if not record and not unclaimed:
                 return
             # Fenced: a ledger hiccup must not kill the call it measures —
             # but it fails LOUDLY, because a quiet miss here is exactly the
@@ -206,9 +226,32 @@ class ClaudeProvider:
                            model, max_tokens)
         elif stop_reason == "refusal":
             details = getattr(response, "stop_details", None)
-            _raise_billed(
-                f"Claude declined the request (model={model}, "
-                f"category={getattr(details, 'category', None)})")
+            declined = (f"Claude declined the request (model={model}, "
+                        f"category={getattr(details, 'category', None)})")
+            if model != REFUSAL_FALLBACK_MODEL:
+                held = _fallback_held(model, usage)
+                if not held:
+                    # The declined generation was billed — on the frontier
+                    # tier at the platform's dearest rate on its largest
+                    # prompt — and it lands in the ledger BEFORE the re-run,
+                    # under the model that declined it, opt-out or not (see
+                    # `unclaimed`). The re-run's row is written by whoever
+                    # writes rows for this call, under the model that
+                    # answers it.
+                    _ledger(False, text, unclaimed=True,
+                            error=f"{declined}; re-run on "
+                                  f"{REFUSAL_FALLBACK_MODEL}")
+                    logger.warning(
+                        "[claude] %s declined the request (%s) — re-running "
+                        "once on %s", model,
+                        getattr(details, "category", None) or "no category",
+                        REFUSAL_FALLBACK_MODEL)
+                    return self.complete(system_prompt, user_message,
+                                         model=REFUSAL_FALLBACK_MODEL,
+                                         effort=effort, agent_name=agent_name,
+                                         record=record, source_ref=source_ref)
+                declined += f"; not re-run on {REFUSAL_FALLBACK_MODEL}: {held}"
+            _raise_billed(declined)
         if not text:
             _raise_billed(
                 f"Claude returned no text (model={model}, "

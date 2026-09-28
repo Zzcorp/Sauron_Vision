@@ -84,11 +84,13 @@ class BaseAgent(ABC):
             result = self.parse_response(raw_response)
             duration = time.time() - start_time
 
-            # Log the task
+            # Log the task — under the model that ANSWERED: after a
+            # refusal re-run that is the provider's fallback, not
+            # self.model, and the row must say whose rate it was billed at.
             AgentTask.objects.create(
                 agent=self.agent_name,
                 provider=self.provider_name,
-                model=self.model,
+                model=usage.get("model") or self.model,
                 prompt_summary=context[:500],
                 input_tokens=usage.get("input_tokens", 0),
                 output_tokens=usage.get("output_tokens", 0),
@@ -111,7 +113,7 @@ class BaseAgent(ABC):
             AgentTask.objects.create(
                 agent=self.agent_name,
                 provider=self.provider_name,
-                model=self.model,
+                model=billed.get("model") or self.model,
                 prompt_summary=str(kwargs)[:500],
                 input_tokens=billed.get("input_tokens", 0),
                 output_tokens=billed.get("output_tokens", 0),

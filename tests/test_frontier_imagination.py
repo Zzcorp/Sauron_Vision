@@ -127,6 +127,139 @@ class TheProviderSurvivesARefusalTests(TestCase):
                           model="claude-fable-5-1", agent_name="test")
         self.assertEqual(len(calls), 1)
 
+    def test_the_declined_generation_is_ledgered_under_its_own_model(self):
+        """Anthropic bills a refusal, and on the frontier tier it is the
+        platform's most expensive single input. Two billed calls, two
+        rows: each under the model that answered it, at that model's
+        rate, both carrying the caller's source_ref — and the usage the
+        caller gets back names the model that actually answered."""
+        from ai_agents.catalog import pricing_for
+        from ai_agents.models import AgentTask
+        provider, _ = self._provider({
+            "claude-fable-5-1": _response(stop_reason="refusal",
+                                          category="frontier_llm"),
+            "claude-opus-5": _response(text='{"ok": true}')})
+        _, usage = provider.complete(system_prompt="s", user_message="u",
+                                     model="claude-fable-5-1",
+                                     agent_name="strategy_generator",
+                                     source_ref="Proposal:7")
+        rows = {r.model: r for r in AgentTask.objects.all()}
+        self.assertEqual(set(rows), {"claude-fable-5-1", "claude-opus-5"})
+        declined = rows["claude-fable-5-1"]
+        self.assertFalse(declined.success)
+        self.assertIn("declined", declined.error)
+        self.assertIn("claude-opus-5", declined.error)
+        self.assertEqual((declined.input_tokens, declined.output_tokens),
+                         (100, 20))
+        p = pricing_for("claude-fable-5-1")
+        self.assertEqual(float(declined.cost_usd),
+                         round((100 * p["input"] + 20 * p["output"]) / 1e6, 6))
+        answered = rows["claude-opus-5"]
+        self.assertTrue(answered.success)
+        p = pricing_for("claude-opus-5")
+        self.assertEqual(float(answered.cost_usd),
+                         round((100 * p["input"] + 20 * p["output"]) / 1e6, 6))
+        for row in rows.values():
+            self.assertEqual(row.agent, "strategy_generator")
+            self.assertEqual(row.structured_output,
+                             {"source_ref": "Proposal:7"})
+        self.assertEqual(usage["model"], "claude-opus-5")
+        self.assertEqual(usage["cost_usd"], float(answered.cost_usd))
+
+    def test_a_record_false_caller_is_told_which_model_answered(self):
+        """BaseAgent.run and the two inline agents write their own row
+        from the usage they get back — it must say Opus, not the model
+        they asked for. The declined call, which no caller will ever see,
+        is the provider's to ledger, opt-out or not."""
+        from ai_agents.models import AgentTask
+        provider, _ = self._provider({
+            "claude-fable-5-1": _response(stop_reason="refusal",
+                                          category="frontier_llm"),
+            "claude-opus-5": _response(text="fine")})
+        _, usage = provider.complete(system_prompt="s", user_message="u",
+                                     model="claude-fable-5-1",
+                                     agent_name="test", record=False)
+        self.assertEqual(usage["model"], "claude-opus-5")
+        row = AgentTask.objects.get()
+        self.assertEqual(row.model, "claude-fable-5-1")
+        self.assertFalse(row.success)
+
+    def test_a_base_agent_row_names_the_model_that_answered(self):
+        from ai_agents.agents.anomaly_detector import AnomalyDetectorAgent
+        from ai_agents.models import AgentTask
+        agent = AnomalyDetectorAgent()
+        asked = agent.model
+        answers = {asked: _response(stop_reason="refusal", category="cyber"),
+                   "claude-opus-5": _response(text='{"anomalies": []}')}
+        client = MagicMock()
+        client.messages.stream.side_effect = (
+            lambda **kw: _Stream(answers[kw["model"]]))
+        with patch.object(agent.provider, "_get_client", return_value=client):
+            agent.run(market_data="snapshot")
+        rows = {r.model: r for r in AgentTask.objects.all()}
+        self.assertEqual(set(rows), {asked, "claude-opus-5"})
+        self.assertFalse(rows[asked].success)
+        self.assertTrue(rows["claude-opus-5"].success)
+        self.assertEqual(rows["claude-opus-5"].agent, "anomaly_detector")
+
+    def test_a_fast_tier_refusal_stands_when_the_deep_reserve_is_gone(self):
+        """The hourly scan and the news read are Haiku calls, guarded —
+        where guarded at all — as Haiku money. Their re-run is Opus money,
+        late in the day exactly what DEEP_TIER_SHARE holds back: the deep
+        tier's own question is asked first, and a no leaves the refusal a
+        refusal — ledgered and raised, no Opus call."""
+        from ai_agents import spend
+        from ai_agents.models import AgentTask
+        provider, calls = self._provider({
+            "claude-haiku-4-5": _response(stop_reason="refusal",
+                                          category="cyber"),
+            "claude-opus-5": _response(text="would have answered")})
+        with patch.object(spend, "daily_budget", return_value=15.0), \
+                patch.object(spend, "spent_today",
+                             return_value=15.0 * spend.DEEP_TIER_SHARE + 0.01):
+            with self.assertRaises(RuntimeError) as ctx:
+                provider.complete(system_prompt="s", user_message="u",
+                                  model="claude-haiku-4-5",
+                                  agent_name="news_analyst")
+        self.assertEqual([c["model"] for c in calls], ["claude-haiku-4-5"])
+        self.assertIn("reserve", str(ctx.exception))
+        self.assertEqual(ctx.exception.usage["model"], "claude-haiku-4-5")
+        row = AgentTask.objects.get()
+        self.assertEqual(row.model, "claude-haiku-4-5")
+        self.assertFalse(row.success)
+        self.assertIn("reserve", row.error)
+
+    def test_a_fast_tier_refusal_re_runs_once_the_deep_tier_agrees(self):
+        from ai_agents import spend
+        provider, calls = self._provider({
+            "claude-haiku-4-5": _response(stop_reason="refusal",
+                                          category="cyber"),
+            "claude-opus-5": _response(text="fine")})
+        with patch.object(spend, "can_spend", wraps=spend.can_spend) as asked:
+            _, usage = provider.complete(system_prompt="s", user_message="u",
+                                         model="claude-haiku-4-5",
+                                         agent_name="news_analyst")
+        self.assertEqual([c["model"] for c in calls],
+                         ["claude-haiku-4-5", "claude-opus-5"])
+        asked.assert_called_once()
+        self.assertEqual(asked.call_args.kwargs["tier"], "deep")
+        self.assertEqual(usage["model"], "claude-opus-5")
+
+    def test_a_frontier_refusal_does_not_ask_the_reserve_twice(self):
+        """The generator's task cleared can_spend(tier="frontier") — the
+        same reserve — before the call; its re-run is money it was allowed."""
+        from ai_agents import spend
+        provider, calls = self._provider({
+            "claude-fable-5-1": _response(stop_reason="refusal",
+                                          category="frontier_llm"),
+            "claude-opus-5": _response(text="fine")})
+        with patch.object(spend, "can_spend",
+                          return_value=(False, "reserve reached")):
+            provider.complete(system_prompt="s", user_message="u",
+                              model="claude-fable-5-1", agent_name="test")
+        self.assertEqual([c["model"] for c in calls],
+                         ["claude-fable-5-1", "claude-opus-5"])
+
 
 def _stub_generator(parsed):
     import json
