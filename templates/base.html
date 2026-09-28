@@ -5851,8 +5851,14 @@ never nags. He never acts.{% endcomment %}
        to the next page used to wipe the mark before you had read anything.
        Per tab, not per browser — each open tab receives its own push — and
        every access is guarded, because a private window or blocked site
-       data throws on the accessor itself and must never cost the orb. */
-    var UNREAD_KEY = 'sauron-eye-unread';
+       data throws on the accessor itself and must never cost the orb.
+
+       And per user: nothing clears the tab's storage at logout, so an
+       unkeyed mark left by one operator would light the orb for the next
+       one to sign in on the same tab — "new answer" on a thread that holds
+       no such answer. A key carrying the user's id is simply not found by
+       anyone else; the stale one dies with the tab. */
+    var UNREAD_KEY = 'sauron-eye-unread:{{ request.user.pk }}';
     var FAB_LABEL = fab.getAttribute('aria-label') || 'Ask Sauron';
     var FAB_TITLE = fab.getAttribute('title') || FAB_LABEL;
 

@@ -1692,18 +1692,66 @@ class OrbUnreadSignTests(TestCase):
         self.assertFalse(re.search(r"localStorage\.[a-zA-Z]+\(UNREAD_KEY", script),
                          "the unread mark is per tab, not per browser")
 
+    def test_it_belongs_to_the_operator_who_was_asked(self):
+        """Nothing clears the tab's storage at logout (no sessionStorage.clear,
+        no Clear-Site-Data), so an unkeyed mark would light the orb for the
+        next user to sign in on the same tab with an answer that is not in
+        their thread. The key carries the user's id."""
+        script = self._script()
+        self.assertIn(f"var UNREAD_KEY = 'sauron-eye-unread:{self.user.pk}';", script)
+        other = User.objects.create_user(username="orb_unread_other", password="x")
+        self.client.force_login(other)
+        body = self.client.get("/signals/", HTTP_HOST="127.0.0.1").content.decode("utf-8", "replace")
+        self.assertIn(f"var UNREAD_KEY = 'sauron-eye-unread:{other.pk}';", body)
+        self.assertNotIn(f"'sauron-eye-unread:{self.user.pk}'", body)
+
 
 class OrbMobileEdgeTests(TestCase):
-    """The rail's open state is restored from localStorage at any width, and
-    :has() still matches a display:none rail — so the open-rail 296px edge
-    used to outrank the phone's 16px and push the orb off to the left."""
+    """Where the orb (and the banner stack, which reads the same edge) stands
+    when the signals rail is open.
 
-    def test_the_open_rail_edge_applies_to_wide_screens_only(self):
+    The rail is drawn at EVERY width: its 768px `display: none` loses to the
+    later UPGRADE-2 `display: flex !important`, and its open state comes back
+    from localStorage whatever the width — so a rail left open on the desk is
+    280px of watchlist on a tablet and on a phone too. Unscoped, the
+    open-rail 296px edge outranked the phone's :root 16px and sent the orb
+    most of the way across a 390px screen. The first fix scoped it at 769px
+    on the belief that the rail was hidden below that, and in doing so left
+    641–768px with the shut rail's 60px while the rail was open: the orb sat
+    on the watchlist. These pin the two breakpoints touching, and the premise
+    that makes 641 — not 769 — the right place for them to touch."""
+
+    def setUp(self):
+        self.css = _read("static", "css", "sauron.css")
+
+    def test_the_open_rail_edge_takes_over_exactly_where_the_phone_edge_stops(self):
         import re
-        css = _read("static", "css", "sauron.css")
-        self.assertEqual(css.count("--se-right-edge: 296px"), 1)
-        self.assertRegex(
-            css,
-            r"@media \(min-width: 769px\) \{\s*"
-            r"body:has\(\.signals-rail\.open\) \{ --se-right-edge: 296px; \}")
-        self.assertIn(":root { --se-right-edge: 16px; --se-fab-size: 46px; }", css)
+        self.assertEqual(self.css.count("--se-right-edge: 296px"), 1)
+        rail = re.search(
+            r"@media \(min-width: (\d+)px\) \{\s*"
+            r"body:has\(\.signals-rail\.open\) \{ --se-right-edge: 296px; \}", self.css)
+        phone = re.search(
+            r"@media \(max-width: (\d+)px\) \{\s*"
+            r":root \{ --se-right-edge: 16px; --se-fab-size: 46px; \}", self.css)
+        self.assertIsNotNone(rail, "the open-rail edge must be scoped away from phones")
+        self.assertIsNotNone(phone, "the phone edge lives in its own max-width block")
+        # A gap between them is a band of widths where an open rail gets the
+        # shut rail's 60px and the orb lands on it; an overlap is the phone
+        # being overruled again.
+        self.assertEqual(int(rail.group(1)), int(phone.group(1)) + 1)
+
+    def test_the_rail_is_still_drawn_below_769px(self):
+        """The premise of the 641px scope. If the 768px hide is ever made to
+        win, an open-but-hidden rail would again hand a tablet the 296px
+        edge beside nothing — the scope has to move to 769px in the same
+        change, and this test is here to say so."""
+        import re
+        hide = self.css.index("@media (max-width: 768px) {\n            .signals-rail { display: none; }")
+        drawn = re.search(r"\.signals-rail \{\s*display: flex !important;", self.css)
+        self.assertIsNotNone(drawn)
+        self.assertGreater(drawn.start(), hide,
+                           "the rail's 768px hide now wins — move the open-rail "
+                           "edge's scope in sauron.css up to 769px with it")
+        self.assertNotRegex(self.css, r"\.signals-rail \{ display: none !important",
+                            "the rail's 768px hide now wins — move the open-rail "
+                            "edge's scope in sauron.css up to 769px with it")
