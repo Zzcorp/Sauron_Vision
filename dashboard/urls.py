@@ -11,6 +11,7 @@ from .views_profile_modals import (
 )
 from .lock_views import locked_page, session_lock, session_ping, session_unlock
 from .views_livecheck import live_selftest
+from .views_passation import passation_letter
 from .views_admin_bots import (
     admin_bots_panel, admin_bot_toggle, admin_bot_shadow,
     admin_bot_reset_circuit, admin_bot_reconcile,
@@ -131,6 +132,8 @@ urlpatterns = [
 
     # ── Frontend Pages ──────────────────────────────────────
     path("", views.dashboard, name="dashboard"),
+    # The handover letter (core/passation.py): 404 until 2026-09-29 16:00 Paris.
+    path("passation/", passation_letter, name="passation"),
     path("instruments/", views.instruments_list, name="instruments_list"),
     path("instruments/<str:symbol>/", views.instrument_detail, name="instrument_detail"),
     path("instruments/<str:symbol>/watchlist/", views.toggle_watchlist, name="toggle_watchlist"),
