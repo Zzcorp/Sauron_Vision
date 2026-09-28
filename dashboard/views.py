@@ -2263,6 +2263,38 @@ def _pos_modelled_margin(asset_class: str, notional, meta=None):
     return None if not frac else float(notional) * frac
 
 
+def _pos_committed(asset_class: str, notional, meta=None):
+    """(committed, levered) — what one position ties up, and which KIND of
+    money that is.
+
+    An eToro row above 1x carries margin, not cash, whatever its class:
+    the multiplier is the ROW's (GAP 3, 2026-09-26). On a levered row the
+    figure is the MODELLED margin, not a dash.
+
+    That margin used to be None on the grounds that it is the broker's
+    number and nothing records it. The platform does model it —
+    `manual_trade.CAPITAL_USE_FRACTION` is what the risk gates and the
+    book's own ALLOCATED figure size against — so dashing it left the one
+    class where capital and exposure differ by 30x as the one class whose
+    capital the card would not name. `levered` is what labels it
+    "margin", so it is never read as cash spent, and it is the same number
+    the gate used.
+
+    One function because two surfaces ask: the positions hover card, and
+    the close adviser's "capital freed" (brain/close_advice.py). Two
+    copies of the levered test would drift the way the value-per-unit
+    copies once did, and the adviser would then promise to free a
+    different sum from the one the card says the position holds.
+    """
+    meta = meta or {}
+    levered = asset_class in _POS_LEVERED_CLASSES or (
+        str(meta.get("broker") or "") == "etoro"
+        and _pos_stamp_multiplier(meta) > 1)
+    committed = (_pos_modelled_margin(asset_class, notional, meta=meta)
+                 if levered else notional)
+    return committed, levered
+
+
 def _pos_leverage(asset_class: str, meta=None, notional=None) -> str:
     """How many times its own capital a position of this class carries —
     or, on an eToro-stamped row, THIS ROW (GAP 3, 2026-09-26): notional
@@ -2495,23 +2527,7 @@ def _position_card_details(user, positions):
         # `trade` is None on a legacy portfolio.Position row: no stamp.
         _meta = (getattr(trade, "metadata", None) if trade is not None
                  else None) or {}
-        # An eToro row above 1x carries margin, not cash, whatever its
-        # class: the multiplier is the ROW's (GAP 3, 2026-09-26).
-        levered = asset_class in _POS_LEVERED_CLASSES or (
-            str(_meta.get("broker") or "") == "etoro"
-            and _pos_stamp_multiplier(_meta) > 1)
-        # The MODELLED margin on a levered row, not a dash.
-        #
-        # This used to be None on the grounds that the margin is the
-        # broker's number and nothing records it. The platform does model
-        # it — `manual_trade.CAPITAL_USE_FRACTION` is what the risk gates
-        # and the book's own ALLOCATED figure size against — so dashing it
-        # here left the one class where capital and exposure differ by 30x
-        # as the one class whose capital the card would not name. It is
-        # labelled `committed_kind = "margin"` so it is never read as cash
-        # spent, and it is the same number the gate used.
-        committed = (_pos_modelled_margin(asset_class, notional, meta=_meta)
-                     if levered else notional)
+        committed, levered = _pos_committed(asset_class, notional, _meta)
         exit_cost = _pos_exit_cost(trade, mark, qty_abs, vpu)
         if pnl is None:
             net_now = None

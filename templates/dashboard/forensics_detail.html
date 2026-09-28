@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}{% if summary %}{{ summary.headline }}{% else %}{{ trade.symbol }}{% endif %} #{{ trade.id }} — Position{% endblock %}
 {# ◎ is the sidebar's Trade Forensics mark — title and nav row agree. #}
 {# On a phone the topbar keeps "◎ Position #id": the headline is the first #}
@@ -199,6 +200,8 @@
         .pd-dialog-actions { flex-direction: column-reverse; }
     }
 </style>
+{# "Should I close?" — the shared sheet /positions/ and /portfolio/ load. #}
+<link rel="stylesheet" href="{% static 'css/sv-close-advice.css' %}">
 {% endblock %}
 
 {% block content %}
@@ -206,6 +209,12 @@
 {% include "dashboard/_position_summary.html" %}
 <p class="pd-note pd-note-warn" id="pdLiveStatus" role="status" hidden></p>
 {% if summary.closable %}
+{# ASK FIRST (static/js/sv-close-advice.js): the same "Should I close?" #}
+{# answer the positions pages give for ticked rows, for this one. Advice #}
+{# only — it closes nothing, so the dialog points back at the button #}
+{# below instead of carrying a second close path on this page. Hidden #}
+{# until the script that drives it has run. #}
+<p class="pd-advice-row" hidden><button type="button" class="sv-advice-launch" data-sv-advice-ids="{{ trade.id }}" data-sv-advice-no-close="1" aria-haspopup="dialog">Should I close?</button></p>
 {# THE WAY OUT, one tap from the numbers. It asks the EXISTING preview #}
 {# endpoint once per press and posts to the EXISTING single-position close #}
 {# endpoint — the same pair, the same JSON and the same PIN rule as the #}
@@ -451,6 +460,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="{% static 'js/sv-close-advice.js' %}" defer></script>
 <script>
 /* The close dialog's words, apart from the page so they can be read (and
    tested) on their own. Every number arrives from the preview or the close

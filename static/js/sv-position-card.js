@@ -530,11 +530,19 @@
      * destination of its own — the symbol goes to the instrument, the
      * DETAIL link to this same page, CLOSE to the confirm dialog — and a
      * row handler that also navigated would race the browser for it. This
-     * one guard is what keeps the three gestures three. */
+     * one guard is what keeps the three gestures three.
+     *
+     * A form control is the same case with no destination at all: the
+     * tick that selects the row for "Should I close?" / "Close selected"
+     * (sv-close-advice.js) toggles, and must never ALSO open the trade's
+     * page. The whole tick cell counts, not just the 16px box — a finger
+     * that misses the box by a pixel is still ticking, not navigating. */
+    var NOT_THE_ROW = "a, button, input, label, select, textarea, " +
+                      "[data-sv-select-cell]";
     function rowNav(row, e) {
         var href = val(row, "href");
         if (!href) return;
-        if (e.target.closest("a, button")) return;
+        if (e.target.closest(NOT_THE_ROW)) return;
         follow(e, href);
     }
 

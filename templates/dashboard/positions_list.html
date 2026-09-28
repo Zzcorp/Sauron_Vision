@@ -4,6 +4,12 @@
 {% block title %}Positions — Sauron Vision{% endblock %}
 {% block page_title %}POSITIONS{% endblock %}
 
+{# The selection bar and the "Should I close?" dialog. A sheet of its own #}
+{# rather than this page's own style block: /portfolio/ and the position #}
+{# page carry the same controls, and one component styled in three places #}
+{# is how the three start disagreeing. #}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/sv-close-advice.css' %}">{% endblock %}
+
 {% block content %}
 {% comment %}
 LIVE REGIONS. Anything inside a data-sv-live wrapper is re-rendered by
@@ -175,7 +181,9 @@ honest freshness claim.{% endcomment %}
 
 {% if tab == 'open' %}
 <!-- ── Open Positions Tab ──────────────────────────── -->
-<div class="card fade-in-up">
+{# data-sv-select-scope: what the phone's "select all" below covers — the #}
+{# ticks in this card and no other (static/js/sv-close-advice.js). #}
+<div class="card fade-in-up" data-sv-select-scope>
     {# flex-wrap, or the title and the chip set a floor wider than a 360px #}
     {# card and take the whole body sideways with them. #}
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -196,17 +204,28 @@ honest freshness claim.{% endcomment %}
         </span>
     </div>
     {% if not live_only %}{% include "_partials/position_filter.html" with view=open_view label="open positions" %}{% endif %}
+    {# THE PHONE'S "SELECT ALL". Below 640px the table stacks into cards and #}
+    {# its header row is visually hidden, taking the header's box with it; #}
+    {# this one is shown only there (sv-close-advice.css), and only once #}
+    {# the script has found a bot row to tick. Outside the live region, so #}
+    {# the sweep never rebuilds it under a thumb. #}
+    {% if not live_only %}<label class="sv-sel-all-phone" data-sv-select-all-wrap hidden><input type="checkbox" class="sv-sel-box" data-sv-select-all aria-label="Select every position shown"> Select all shown</label>{% endif %}
     <div data-sv-live="pos-open">
     {% include "_partials/position_view_note.html" with view=open_view noun="open positions" closes=1 %}
     {% if positions_detailed %}
     <div class="table-wrapper">
-    <table class="sv-perf-table">
+    {# sv-stack: below 640px each row is a card, every cell labelled by its #}
+    {# own data-label. The labels used to come from nth-child rules in #}
+    {# sauron.css, which the tick column shifted by one — the checkbox read #}
+    {# SYMBOL and BTCUSD read DIRECTION. A label on the cell cannot drift #}
+    {# from the column it names, whatever is added in front of it. #}
+    <table class="sv-perf-table sv-stack">
         {# Capital sits beside the prices because it is the question the price #}
 {# cells cannot answer: an entry of 2,400 says nothing about whether this #}
 {# position is a rounding error or half the pool. Every price cell carries #}
 {# its own percentage underneath — a distance for the levels, the move #}
 {# since entry for the mark — so no cell asks the operator to divide. #}
-<thead><tr><th>Symbol</th><th>Direction</th><th class="num">Qty</th><th class="num">Capital</th><th class="num">Entry</th><th class="num">Current</th><th class="num">Stop</th><th class="num">Target</th><th class="num">P&L</th><th class="num">P&L %</th><th class="num">R</th><th>Strategy</th><th class="nowrap">Opened</th><th class="nowrap">Action</th></tr></thead>
+<thead><tr><th class="sv-sel-cell" scope="col"><input type="checkbox" class="sv-sel-box" data-sv-select-all aria-label="Select every position shown" title="Select all visible"></th><th>Symbol</th><th>Direction</th><th class="num">Qty</th><th class="num">Capital</th><th class="num">Entry</th><th class="num">Current</th><th class="num">Stop</th><th class="num">Target</th><th class="num">P&L</th><th class="num">P&L %</th><th class="num">R</th><th>Strategy</th><th class="nowrap">Opened</th><th class="nowrap">Action</th></tr></thead>
         <tbody>
         {# ── The row's own numbers are unchanged; the data-pos-* set feeds the ── #}
         {# ── dwell card (static/js/sv-position-card.js), which answers what   ── #}
@@ -226,7 +245,7 @@ honest freshness claim.{% endcomment %}
         {% for g in open_view.groups %}{% if not forloop.first %}
         </tbody>
         <tbody>{% endif %}
-        {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=14 scope="pos" %}{% endif %}
+        {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=15 scope="pos" %}{% endif %}
         {% for p, d in g.pairs %}
         {% if p.instrument.has_page %}{% url 'instrument_detail' p.instrument.symbol as instrument_url%}{% endif %}
         <tr data-sv-position-row
@@ -268,6 +287,12 @@ honest freshness claim.{% endcomment %}
             data-pos-spark="{{ d.spark }}" data-pos-spark-min="{{ d.spark_min }}"
             data-pos-spark-max="{{ d.spark_max }}" data-pos-spark-up="{{ d.spark_up }}"
             data-pos-href="{{ d.href }}">
+            {# THE TICK (static/js/sv-close-advice.js). Only a bot trade has #}
+            {# one: a row from the shared portfolio book has no close path, #}
+            {# so selecting it for "Close selected" would promise a close #}
+            {# nothing can do. The cell is marked so the row's own click #}
+            {# (sv-position-card.js) never turns a tick into a navigation. #}
+            <td class="sv-sel-cell" data-sv-select-cell data-label="Select">{% if p.trade_id %}<input type="checkbox" class="sv-sel-box" data-sv-select-trade="{{ p.trade_id }}" aria-label="Select {{ p.symbol }}, position #{{ p.trade_id }}">{% endif %}</td>
             {# The symbol is the INSTRUMENT, not the trade, and it now goes #}
             {# where it says: the underlying's own page. The trade's detail #}
             {# is the row's click — and DETAIL beside it is that same page #}
@@ -279,17 +304,17 @@ honest freshness claim.{% endcomment %}
             {# an OS bubble over the row a moment before the card the #}
             {# operator was actually waiting for. The label is for the #}
             {# screen reader, which has no such race. #}
-            <td class="nowrap"><span class="pos-sym-cell">{% if instrument_url %}<a href="{{ instrument_url }}" class="pos-sym-link" aria-label="{{ p.instrument.symbol }} — instrument page">{{ p.instrument.symbol }}</a>{% else %}<span class="pos-sym-plain">{{ p.instrument.symbol|default:"—" }}</span>{% endif %}{% if d.href %}<a href="{{ d.href }}" class="pos-row-detail" aria-label="Full detail for this {{ p.instrument.symbol }} trade">detail&nbsp;&rsaquo;</a>{% endif %}</span></td>
-            <td><span class="badge badge-{% if p.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ p.direction }}</span></td>
-            <td class="num" style="font-family: var(--font-mono);">{{ p.quantity }}</td>
+            <td class="nowrap" data-label="Symbol"><span class="pos-sym-cell">{% if instrument_url %}<a href="{{ instrument_url }}" class="pos-sym-link" aria-label="{{ p.instrument.symbol }} — instrument page">{{ p.instrument.symbol }}</a>{% else %}<span class="pos-sym-plain">{{ p.instrument.symbol|default:"—" }}</span>{% endif %}{% if d.href %}<a href="{{ d.href }}" class="pos-row-detail" aria-label="Full detail for this {{ p.instrument.symbol }} trade">detail&nbsp;&rsaquo;</a>{% endif %}</span></td>
+            <td data-label="Direction"><span class="badge badge-{% if p.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ p.direction }}</span></td>
+            <td class="num" data-label="Qty" style="font-family: var(--font-mono);">{{ p.quantity }}</td>
             {# What it ties up, and out of how much. `committed_kind` matters: #}
             {# on a levered position the money down is MARGIN, and printing #}
             {# the notional as the cost overstates what was spent by 30x. #}
-            <td class="num pos-cap-cell" title="{% if d.committed_kind == 'margin' %}Margin posted — the broker sets it; notional exposure is larger{% else %}Cash cost at entry: quantity x entry price{% endif %}">
+            <td class="num pos-cap-cell" data-label="Capital" title="{% if d.committed_kind == 'margin' %}Margin posted — the broker sets it; notional exposure is larger{% else %}Cash cost at entry: quantity x entry price{% endif %}">
                 {% if d.committed %}<span class="pos-cap-money">{{ d.committed }}</span>{% if d.committed_pct %}<span class="pos-cap-share">{{ d.committed_pct }}% of pool</span>{% endif %}{% if d.committed_kind == 'margin' %}<span class="pos-cap-kind">margin</span>{% endif %}
                 {% else %}<span class="sv-unknown">&mdash;</span>{% endif %}
             </td>
-            <td class="num pos-price-cell" style="font-family: var(--font-mono);">
+            <td class="num pos-price-cell" data-label="Entry" style="font-family: var(--font-mono);">
                 <span class="pos-price">{{ p.entry_price }}</span><span class="pos-price-pct is-ref">entry</span>
             </td>
             {# None is a real state here (no quote for the symbol, or an #}
@@ -299,7 +324,7 @@ honest freshness claim.{% endcomment %}
             {# the price. On a short it is the opposite of the P&L sign — a #}
             {# mark 4% below entry is a 4% fall that made money — so the two #}
             {# columns deliberately disagree rather than one of them lying. #}
-            <td class="num pos-price-cell" style="font-family: var(--font-mono); font-weight: 600;" data-sv-live-key="{{ p.key }}.last">
+            <td class="num pos-price-cell" data-label="Current" style="font-family: var(--font-mono); font-weight: 600;" data-sv-live-key="{{ p.key }}.last">
                 {% if p.current_price is not None %}<span class="pos-price">{{ p.last_text }}</span>{% if d.mark_pct %}<span class="pos-price-pct sign-{{ d.mark_pct|sign_class }}">{{ d.mark_pct }}% since entry</span>{% endif %}
                 {% else %}<span class="sv-unknown">&mdash;</span>{% endif %}
             </td>
@@ -311,7 +336,7 @@ honest freshness claim.{% endcomment %}
             decimal_places=8 columns and were rendered raw: a stop of
             80.00 came out as 80.00000000.
             {% endcomment %}
-            <td class="num pos-price-cell is-stop" style="font-family: var(--font-mono);">
+            <td class="num pos-price-cell is-stop" data-label="Stop" style="font-family: var(--font-mono);">
                 {% if p.trade_id and p.status == 'OPEN' %}
                 <button type="button" class="lvl-edit" data-lvl-trade="{{ p.trade_id }}"
                         data-lvl-symbol="{{ p.symbol }}" data-lvl-side="{{ p.direction|upper }}"
@@ -328,7 +353,7 @@ honest freshness claim.{% endcomment %}
                     {% if p.stop_loss %}<span class="pos-price">{% px p.stop_loss p.asset_class p.symbol %}</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}
                 {% endif %}
             </td>
-            <td class="num pos-price-cell is-target" style="font-family: var(--font-mono);">
+            <td class="num pos-price-cell is-target" data-label="Target" style="font-family: var(--font-mono);">
                 {% if p.trade_id and p.status == 'OPEN' %}
                 <button type="button" class="lvl-edit" data-lvl-trade="{{ p.trade_id }}"
                         data-lvl-symbol="{{ p.symbol }}" data-lvl-side="{{ p.direction|upper }}"
@@ -345,19 +370,19 @@ honest freshness claim.{% endcomment %}
                     {% if p.take_profit %}<span class="pos-price">{% px p.take_profit p.asset_class p.symbol %}</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}
                 {% endif %}
             </td>
-            <td class="num {{ p.pnl_tone }}" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.pnl">{% if p.unrealized_pnl is not None %}{{ p.pnl_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
-            <td class="num {{ p.pct_tone }}" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.pct">{% if p.unrealized_pnl_pct is not None %}{{ p.pct_text }}{% if p.cap_pct_text %} <span class="cap-pct" title="The same P&L measured against the CAPITAL this position ties up (margin for forex, premium for options) — the notional figure is silent about your cash">{{ p.cap_pct_text }} cap</span>{% endif %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+            <td class="num {{ p.pnl_tone }}" data-label="P&amp;L" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.pnl">{% if p.unrealized_pnl is not None %}{{ p.pnl_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+            <td class="num {{ p.pct_tone }}" data-label="P&amp;L %" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.pct">{% if p.unrealized_pnl_pct is not None %}{{ p.pct_text }}{% if p.cap_pct_text %} <span class="cap-pct" title="The same P&L measured against the CAPITAL this position ties up (margin for forex, premium for options) — the notional figure is silent about your cash">{{ p.cap_pct_text }} cap</span>{% endif %}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
             {# R against the stop the position OPENED with, not the current #}
             {# one: a trailing stop rewrites that column, and grading against #}
             {# it scores every trailed winner at ~1.0R. No stop recorded and #}
             {# no mark both mean no R — an em-dash, never 0.0R, which would #}
             {# read as a trade sitting exactly at entry. #}
-            <td class="num {{ p.r_tone }}" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.r" title="{{ p.r_title }}">{% if p.r_multiple is not None %}{{ p.r_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
+            <td class="num {{ p.r_tone }}" data-label="R" style="font-family: var(--font-mono);" data-sv-live-key="{{ p.key }}.r" title="{{ p.r_title }}">{% if p.r_multiple is not None %}{{ p.r_text }}{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
             {# sv-ident is the sheet's opt-in for identifier columns: a rule name is one long token whose min-content width would otherwise set the table's floor. #}
-            <td class="sv-ident" style="font-size: 12px;">{{ p.strategy.name|default:"-"|truncatechars:20 }}</td>
-            <td class="nowrap" style="font-size: 11px; color: var(--text-muted);">{{ p.opened_at|date:"M d H:i" }}</td>
+            <td class="sv-ident" data-label="Strategy" style="font-size: 12px;">{{ p.strategy.name|default:"-"|truncatechars:20 }}</td>
+            <td class="nowrap" data-label="Opened" style="font-size: 11px; color: var(--text-muted);">{{ p.opened_at|date:"M d H:i" }}</td>
             {# Only bot trades have a close path; a portfolio Position row has nothing that could flatten it, so it gets a dash rather than a dead button. #}
-            <td class="nowrap">
+            <td class="nowrap" data-label="Action">
                 {% if p.trade_id %}
                     <button type="button" class="btn btn-sm btn-danger" data-sv-close-trade="{{ p.trade_id }}">{% if p.status == 'CLOSE_PENDING' %}RETRY CLOSE{% else %}CLOSE{% endif %}</button>
                 {% else %}
@@ -382,6 +407,7 @@ honest freshness claim.{% endcomment %}
     </div>
     {% endif %}
     </div>
+    {% include "_partials/close_selection_bar.html" %}
 </div>
 
 {% if not live_only %}
@@ -994,6 +1020,8 @@ a.ph-sym.is-neutral:hover, a.ph-sym.is-neutral:focus-visible {
 {# scripts, so SV.dwell (static/js/sv-notif-card.js) is already defined #}
 {# when this runs — deferred scripts execute in document order. #}
 <script src="{% static 'js/sv-position-card.js' %}" defer></script>
+{# The ticks, the selection bar, "Should I close?" and "Close selected". #}
+<script src="{% static 'js/sv-close-advice.js' %}" defer></script>
 
 <script>
 /* CLOSE ALL. Position by position is the safe default and the wrong tool

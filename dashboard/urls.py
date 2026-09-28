@@ -37,7 +37,9 @@ from .views_brain_phase38 import (
 
 from .views_close import (close_position_preview, close_position_execute,
                           position_levels,
-                          close_all_preview, close_all_execute)
+                          close_all_preview, close_all_execute,
+                          close_advice, close_selected_preview,
+                          close_selected_execute)
 from .views_signals_htmx import signal_cards_htmx, signal_performance_htmx
 from .views_performance import performance_dashboard
 from .views_risk import risk_dashboard, risk_dashboard_live
@@ -172,6 +174,13 @@ urlpatterns = [
     # server-side loop that cannot be half-abandoned by a closed tab.
     path("positions/close-all/preview/", close_all_preview, name="close_all_preview"),
     path("positions/close-all/", close_all_execute, name="close_all_execute"),
+    # Between one row and the whole book: the rows the operator TICKED.
+    # First the question — is closing them a good idea? (advice only; it
+    # closes nothing) — then the same preview/confirm/execute pair as
+    # close-all, over exactly those ids, with one PIN for the whole batch.
+    path("positions/close-advice/", close_advice, name="close_advice"),
+    path("positions/close-selected/preview/", close_selected_preview, name="close_selected_preview"),
+    path("positions/close-selected/", close_selected_execute, name="close_selected_execute"),
     path("api/instrument-preview/<str:symbol>/", views.instrument_preview_api, name="instrument_preview_api"),
     path("quotes/", views.market_quotes, name="market_quotes"),
     path("calendar/", views.economic_calendar, name="economic_calendar"),

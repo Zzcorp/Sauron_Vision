@@ -1,0 +1,26 @@
+{% comment %}
+THE SELECTION BAR — what the ticks in a position table are for.
+
+Driven by static/js/sv-close-advice.js, which keeps the ticked trade ids in
+a set of its own: the table sits inside a live region that is rebuilt every
+sweep a mark moves, so the boxes themselves cannot be the record of what was
+ticked. The bar is OUTSIDE that region for the same reason — a bar rebuilt
+under the pointer would lose the button being reached for.
+
+It starts hidden and appears at the first tick. "Should I close?" asks
+Sauron and closes nothing; "Close selected…" runs the same preview, confirm
+and PIN the other close buttons run, over exactly the ticked rows.
+
+Not in the live fragment: /positions/live/ and /portfolio/live/ carry the
+regions only, and a copy of this there would be markup nobody reads.
+{% endcomment %}
+{% if not live_only %}
+<div class="sv-sel-bar" data-sv-select-bar role="region" aria-label="Selected positions" hidden>
+    <span class="sv-sel-count" data-sv-select-count aria-live="polite">0 selected</span>
+    <span class="sv-sel-sep" aria-hidden="true">·</span>
+    <button type="button" class="sv-sel-btn sv-sel-btn--ask" data-sv-advice-open aria-haspopup="dialog">Should I close?</button>
+    <span class="sv-sel-sep" aria-hidden="true">·</span>
+    <button type="button" class="sv-sel-btn sv-sel-btn--close" data-sv-close-selected aria-haspopup="dialog">Close selected…</button>
+    <button type="button" class="sv-sel-clear" data-sv-select-clear>Clear</button>
+</div>
+{% endif %}

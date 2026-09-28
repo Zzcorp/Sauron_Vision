@@ -329,6 +329,30 @@ class StackedTableLabelTests(SimpleTestCase):
             "these wide tables lost their stacked phone layout: %r"
             % sorted(expected - stacked))
 
+    def test_no_stacked_table_is_labelled_by_position_any_more(self):
+        """Current Positions was labelled by nth-child and matched by shape;
+        the tick column (2026-09-28) put every label one cell out. It now
+        carries .sv-stack and data-label, and the positional block is gone
+        — a leftover would label its cells a second time, wrongly."""
+        css = _strip_comments(_css())
+        self.assertNotIn(".pos-tabs ~ .card table", css)
+        # "Opened" was only ever a Current Positions positional label.
+        self.assertNotIn('content: "Opened"', css)
+
+    def test_the_stack_outweighs_the_runway(self):
+        """:is() takes the specificity of its MOST specific argument. The
+        34rem runway `.table-wrapper .sv-perf-table:has(thead
+        th:nth-child(6))` weighs (0,3,2) and the stack beats it only by
+        weighing the same and coming later — a weight the pinned Current
+        Positions selector used to lend every stacked table. Without it a
+        stacked table keeps a 544px floor on a 390px phone."""
+        css = _strip_comments(_css())
+        starts = [m.end() for m in re.finditer(r":is\(\s*\.sv-stack,", css)]
+        self.assertGreaterEqual(len(starts), 9)
+        for at in starts:
+            self.assertIn(".table-wrapper table.sv-stack:has(th:nth-child(1))",
+                          css[at:at + 120])
+
     def test_the_stacked_layout_is_defined_and_scoped_to_phone_width(self):
         css = _strip_comments(_css())
         self.assertIn("@media (max-width: 640px)", css)
