@@ -171,7 +171,9 @@ After editing `.env`, run `dc up -d` — **not** `restart`, which keeps the
 old environment.
 
 > "all on" beside *System* on `/ops/` turns on the master switch, the
-> Telegram eye and the Morgul guards, and leaves every live-money switch
+> Telegram eye, the Morgul guards and the alarm bot (`telegram_alarm`,
+> which moves no money; see "The alarm bot" below), and leaves every
+> live-money switch
 > OFF — `actuator_mode_live`, `meta_allocator_mode_live`,
 > `share_allocator_mode_live`, `share_allocator_auto_derisk`,
 > `capital_desk_mode_live`, `fractional_units_live`, `etoro_leverage_live`
@@ -877,6 +879,60 @@ backfill — shows its usage on the page and runs on the server, where
 
 A management command missing from the registry (or from its EXEMPT set)
 fails `tests.test_ops_cockpit`, so the page and the shell cannot drift.
+
+---
+
+## The alarm bot (critical problems only)
+
+The operator, 2026-09-28: his father must not be flooded with trading
+messages, and must be woken for real emergencies only. The Eye's group
+keeps every fill, signal, digest and Morgul warning. The alarm bot
+(`bot_program/alarm.py`) is a SECOND bot in a SECOND group — the operator,
+his father and the alarm bot, **never the Eye's bot** — and it says one
+kind of thing: a critical problem. A Morgul critical finding, a safety
+check that cannot run, the brake stopping bots, automation paused, a close
+the platform abandoned, a safety-critical task failing or stopped, a quote
+feed not delivering, a live broker account not answering, the emergency
+flatten having run. It never says that all is well, it never prints an
+amount, and it obeys two commands: `/status` and `/stopall` (every bot
+OFF, never on, unfilled live orders withdrawn; no position is closed).
+
+Set it up once:
+
+1. In Telegram, `@BotFather` → `/newbot`; keep the token. Leave Group
+   Privacy **on**: the bot then hears commands only.
+2. Create a NEW group with the operator and his father only, and add the
+   new bot. The Eye's bot must not be in it. Then `@BotFather` →
+   `/setjoingroups` → Disable, so nobody can add it to another group.
+3. Put the token in `.env` as `TELEGRAM_ALARM_BOT_TOKEN=`, write `/status`
+   in the new group, and read the group's id (a group id starts with `-`):
+
+   ```bash
+   ./deploy/dc up -d                     # not restart: up re-reads .env
+   ./deploy/dc exec web python manage.py alarm --chats
+   ```
+
+   (or open `https://api.telegram.org/bot<token>/getUpdates` in a browser
+   and read `"chat":{"id":…}`).
+4. Put the id in `.env` as `TELEGRAM_ALARM_CHAT_ID=`, then:
+
+   ```bash
+   ./deploy/dc up -d
+   ./deploy/dc exec web python manage.py alarm            # the verdict, and what it sees now
+   ./deploy/dc exec web python manage.py alarm --test     # one test message to the group
+   ./deploy/dc exec web python manage.py component on telegram_alarm
+   ```
+
+It refuses to run with the Eye's token, or with the Eye's chats
+(`TELEGRAM_CHAT_ID`, any chat saved on `/notifications/settings/`), and the
+"Alarm bot" row on `/health/` says why. The master switch does not silence
+it — the pause is one of the things it reports; `component off
+telegram_alarm` does, and so does "all off" beside System. A standing
+problem is said again every three hours, a failing or stopped component
+every 24, an event once; nothing is said when a problem ends. If a bare
+`/status` gets no answer, send `/status@` followed by the bot's username.
+If the group is ever upgraded to a supergroup its id changes: the worker
+log names the new one, which goes in `TELEGRAM_ALARM_CHAT_ID`.
 
 ---
 

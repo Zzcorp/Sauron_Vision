@@ -1229,6 +1229,22 @@ class WiringTests(TestCase):
         with patch.dict(os.environ, ENV):
             self.assertNotIn(TOKEN, scrub(f"failed at bot{TOKEN}/send"))
 
+    def test_both_env_examples_document_both_keys(self):
+        for name in (".env.example", ".env.production.example"):
+            text = _read(name)
+            for var in ("TELEGRAM_ALARM_BOT_TOKEN=", "TELEGRAM_ALARM_CHAT_ID="):
+                self.assertIn(var, text, f"{name} omits {var}")
+            self.assertIn("up -d", text)
+
+    def test_the_runbook_has_the_section(self):
+        text = _read("deploy", "RUNBOOK.md")
+        self.assertIn("## The alarm bot", text)
+        for line in ("component on telegram_alarm", "manage.py alarm --test",
+                     "manage.py alarm --chats", "/setjoingroups",
+                     "TELEGRAM_ALARM_BOT_TOKEN=", "TELEGRAM_ALARM_CHAT_ID=",
+                     "The Eye's bot must not be in it"):
+            self.assertIn(line, text)
+
     def test_the_command_is_in_the_ops_registry_and_not_on_the_web(self):
         from core import ops_commands
         entry = ops_commands.get("alarm")
