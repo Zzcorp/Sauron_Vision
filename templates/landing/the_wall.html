@@ -2400,13 +2400,15 @@
             around one heartbeat. Hover a step, or tap it on a phone, to read what it runs
             and how often. Times are UTC.
         </p>
-        <div class="day-grid reveal-scale delay-4">
+        <div class="day-frame reveal-scale delay-4">
+        <div class="day-grid">
             <div class="day-scheme-wrap">
-                <svg class="day-scheme" id="dayScheme" viewBox="0 0 1200 700" role="img"
+                <svg class="day-scheme" id="dayScheme" viewBox="0 0 1200 700" role="group"
                      data-panel="dayPanel" data-stamp="read from the beat schedule when this page was served · times UTC"
                      aria-label="The loop of Sauron: markets in; see, think, decide, act, watch, tell, learn around the beat; venues and people out."></svg>
             </div>
             <aside class="day-panel" id="dayPanel" aria-live="polite"></aside>
+        </div>
         </div>
         {{ day|json_script:"dayData" }}
         <script src="{% static 'js/sv-day-scheme.js' %}" defer></script>

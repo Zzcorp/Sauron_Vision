@@ -70,21 +70,24 @@ the static file, never here (tests/test_chart_surfaces.py forbids building
 SVG inside a template). Collapsible; the choice is remembered per browser
 under the localStorage key the section names.
 {% endcomment %}
-<section class="day-home" id="dayHome" data-day-live-url="{% url 'day_live' %}"
+{# The live layer is for staff: every component's state, the master switch and Morgul's findings are what /health/ and the system map keep from a non-staff login (review, 2026-09-29). A non-staff reader gets the ring from the schedule, as on the Wall. #}
+<section class="day-home" id="dayHome"{% if user.is_staff %} data-day-live-url="{% url 'day_live' %}"{% endif %}
          data-day-collapse-key="sv-day-collapsed" aria-labelledby="dayHomeTitle">
     <div class="day-home-head">
         <button type="button" class="day-home-toggle" id="dayHomeToggle"
                 aria-expanded="true" aria-controls="dayHomeBody">
             <span class="day-home-chev" aria-hidden="true">▾</span>
-            <span class="day-home-title" id="dayHomeTitle">A DAY OF SAURON · LIVE</span>
+            <span class="day-home-title" id="dayHomeTitle">A DAY OF SAURON{% if user.is_staff %} · LIVE{% endif %}</span>
         </button>
-        <div class="day-home-meta" id="dayHomeMeta" data-day-total="{{ day.total }}">{{ day.total }} scheduled tasks · reading the beat…</div>
+        <div class="day-home-meta" id="dayHomeMeta" data-day-total="{{ day.total }}">{{ day.total }} scheduled tasks · {% if user.is_staff %}reading the beat…{% else %}the schedule the platform ships with{% endif %}</div>
     </div>
     <div class="day-home-body" id="dayHomeBody">
+        {% if user.is_staff %}
         <div class="day-tiles" id="dayTiles">
             {% for st in day.stages %}
+            {# No aria-label: it replaced the button's content, so a screen reader heard "SEE: open its panel" and never the state or the numbers (review, 2026-09-29). #}
             <button type="button" class="day-tile day-quiet" data-day-tile="{{ st.key }}"
-                    title="{{ st.job }}" aria-label="{{ st.title }}: open its panel">
+                    title="{{ st.job }} Opens its panel.">
                 <span class="day-tile-head">
                     <span class="day-tile-dot" aria-hidden="true"></span>
                     <span class="day-tile-n">{{ st.n }}</span>
@@ -92,21 +95,25 @@ under the localStorage key the section names.
                 </span>
                 <span class="day-tile-nums">
                     <span class="day-tile-num" data-day-tile-m="0"><b>—</b><small>{{ st.count }} scheduled tasks</small></span>
-                    <span class="day-tile-num" data-day-tile-m="1"><b>—</b><small>fastest {{ st.fastest }}</small></span>
+                    <span class="day-tile-num" data-day-tile-m="1"><b>—</b><small>{{ st.pace }}</small></span>
                 </span>
                 <span class="day-tile-words" data-day-tile-words="">reading…</span>
             </button>
             {% endfor %}
         </div>
+        {% endif %}
+        <div class="day-frame">
         <div class="day-grid">
             <div class="day-scheme-wrap">
-                <svg class="day-scheme" id="dayScheme" viewBox="0 0 1200 700" role="img"
-                     data-panel="dayPanel" data-stamp="live · refreshed every minute"
+                <svg class="day-scheme" id="dayScheme" viewBox="0 0 1200 700" role="group"
+                     data-panel="dayPanel" data-stamp="{% if user.is_staff %}live · refreshed every minute{% else %}read from the beat schedule when this page was served · times UTC{% endif %}"
                      aria-label="The loop of Sauron, live: markets in; see, think, decide, act, watch, tell, learn around the beat; venues and people out. Each step carries its state right now."></svg>
             </div>
             {# aria-live="off" here, "polite" on the Wall: this panel is rewritten by the minute poll, and a polite region would read the whole panel to a screen reader once a minute (review, 2026-09-29). The Wall's changes only on the reader's own hover. #}
             <aside class="day-panel" id="dayPanel" aria-live="off"></aside>
         </div>
+        </div>
+        {% if user.is_staff %}
         <div class="day-clock" id="dayClock" aria-label="The 24-hour UTC day: the daily tasks on their minute, the US session, the night of learning, and now.">
             <div class="day-clock-head">
                 <span class="day-k">THE 24-HOUR DAY · UTC</span>
@@ -114,7 +121,7 @@ under the localStorage key the section names.
             </div>
             <div class="day-clock-track" id="dayClockTrack">
                 <div class="day-clock-band day-clock-night" style="left:8.333%;width:20.833%" title="The night of learning, 02:00–07:00 UTC"><span>NIGHT OF LEARNING</span></div>
-                <div class="day-clock-band day-clock-us" style="left:56.25%;width:31.25%" title="The US session, 13:30–21:00 UTC"><span>US SESSION</span></div>
+                <div class="day-clock-band day-clock-us" id="dayClockUs" style="left:{{ day_us.left }}%;width:{{ day_us.width }}%" title="The US session, {{ day_us.words }} UTC"><span>US SESSION</span></div>
                 <div class="day-clock-ticks" id="dayClockTicks" aria-hidden="true"></div>
                 <div class="day-clock-marks" id="dayClockMarks" aria-hidden="true"></div>
                 <div class="day-clock-cursor" id="dayClockCursor" style="left:0%" aria-hidden="true"></div>
@@ -125,9 +132,10 @@ under the localStorage key the section names.
                 <span><i class="day-clock-swatch day-stale"></i>late or silent</span>
                 <span><i class="day-clock-swatch day-broken"></i>last run failed</span>
                 <span><i class="day-clock-swatch day-off"></i>switched off</span>
-                <span><i class="day-clock-swatch day-quiet"></i>not gated, no record</span>
+                <span><i class="day-clock-swatch day-quiet"></i>no record of its own</span>
             </div>
         </div>
+        {% endif %}
     </div>
     {{ day|json_script:"dayData" }}
 </section>

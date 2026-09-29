@@ -16,7 +16,7 @@
                         removes both classes when the transition ends.
      b. HTMX SWAPS      the swap target fades out on .htmx-swapping and
                         its new children fade in from .htmx-added; a
-                        live region that re-swapped blinks (.sv-swapped).
+                        live region that re-swapped fades from .35.
      c. PAGE LEAVE      body.sv-leaving fades .page-content while the
                         browser goes; the script never intercepts the
                         navigation itself.
@@ -102,25 +102,18 @@
     opacity: 0;
 }
 /* A new node is born hidden under .htmx-added; the script answers
-   htmx:afterSwap by putting .sv-in on each one, and that animation owns
-   the opacity from the first frame until 260ms later, across the moment
-   htmx takes .htmx-added away. An animation rather than a transition on
-   the node: a transition has to live on the node itself, and .card
-   already declares its own list (the hover lift, sauron.css) without
-   opacity in it — measured 2026-09-29, a swapped-in card appeared in one
-   step while the strip beside it faded. Without the script, the node
-   simply appears at the settle tick. */
+   htmx:afterSwap with a Web Animations fade (sv-motion.js fadeFrom) that
+   owns the opacity from the first frame until 260ms later, across the
+   moment htmx takes .htmx-added away. Not a CSS class carrying
+   `animation`: that shorthand replaced the node's own animation list,
+   and the node's pageEnterUp restarted from 0 when the class came off
+   (review, 2026-09-29). Without the script, the node simply appears at
+   the settle tick. A refresh nobody asked for (a fill, a sweep) has its
+   .htmx-added taken off at once and fades from .35, never from 0: a
+   region blinking blank reads as data lost, not data refreshed. */
 :where(#ocTabBody, .sv-metrics-wrapper, [data-sv-live], [hx-get]:not([hx-target])) > .htmx-added {
     opacity: 0;
 }
-.sv-in { animation: svIn var(--sv-swap-in) ease; }
-@keyframes svIn { from { opacity: 0; } to { opacity: 1; } }
-/* A live region (_partials/live_region.html) swaps its own innerHTML
-   and announces sv:live-swapped; the script puts this on the region for
-   one beat. From .35, never from 0: a region blinking blank reads as
-   data lost, not data refreshed. */
-.sv-swapped { animation: svSwapIn var(--sv-swap-in) ease; }
-@keyframes svSwapIn { from { opacity: .35; } to { opacity: 1; } }
 
 /* ── c. PAGE LEAVE ──────────────────────────────────────────────────────
    The slide is on .page-content and the fade is on its children, and
@@ -216,8 +209,6 @@ body.sv-leaving .page-content > * {
     :where(#ocTabBody, .sv-metrics-wrapper, [data-sv-live], [hx-get]:not([hx-target])) { transition: none; }
     :where(#ocTabBody, .sv-metrics-wrapper, [data-sv-live], [hx-get]:not([hx-target])).htmx-swapping { opacity: 1; }
     :where(#ocTabBody, .sv-metrics-wrapper, [data-sv-live], [hx-get]:not([hx-target])) > .htmx-added { opacity: 1; }
-    .sv-in,
-    .sv-swapped,
     .sv-tick,
     .sv-pop,
     .notif-dropdown.is-open,

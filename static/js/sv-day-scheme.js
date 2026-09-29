@@ -38,8 +38,12 @@
   function esc(s) {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
+  /* Thousands separators on the integer part only: the regex over the
+   * whole string grouped the decimals too ("12.3,457", review 2026-09-29). */
   function fmt(n) {
-    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    var parts = String(n).split('.');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return parts.join('.');
   }
   function pos(a) {
     var r = a * Math.PI / 180;
@@ -55,7 +59,7 @@
       markets: {
         title: 'MARKETS', lines: ['price streams and quotes', 'news · calendar · sentiment', 'FRED · SEC · COT'],
         job: 'What comes in: prices from the streams and the pollers, news from the feeds, the economic calendar, social sentiment, and the slow macro tape.',
-        rows: [['streams', 'exchange and broker price streams, on their own containers'], ['pollers', 'quotes by asset class, on the beat'], ['feeds', 'breaking news, news bodies, crypto news, TradingView ideas'], ['tape', 'FRED series, SEC filings, COT reports, the economic calendar']],
+        rows: [['streams', 'exchange and broker price streams, where they are enabled'], ['pollers', 'quotes by asset class, on the beat'], ['feeds', 'breaking news, news bodies, crypto news, TradingView ideas'], ['tape', 'FRED series, SEC filings, COT reports, the economic calendar']],
         next: 'Feeds SEE.'
       },
       venues: {
@@ -112,7 +116,9 @@
       arcs.push(arc);
     }
     // the beat at the centre
-    var beat = el('g', { 'class': 'day-beat', tabindex: '0', 'data-key': 'beat' }, g);
+    /* Every hotspot is a named button (review, 2026-09-29: eleven focusable
+     * groups inside role="img" were announced as "group", no name). */
+    var beat = el('g', { 'class': 'day-beat', tabindex: '0', role: 'button', 'aria-label': 'The beat: the scheduler every stage hangs on. Open its panel.', 'data-key': 'beat' }, g);
     var h2 = el('circle', { cx: CX, cy: CY, r: 62, 'class': 'day-heart2' }, beat);
     var h1 = el('circle', { cx: CX, cy: CY, r: 46, 'class': 'day-heart' }, beat);
     var core = el('circle', { cx: CX, cy: CY, r: 9, 'class': 'day-core' }, beat);
@@ -129,11 +135,11 @@
     var nodes = {};
     for (i = 0; i < data.stages.length && i < ANGLES.length; i++) {
       var st = data.stages[i], p = pos(ANGLES[i]);
-      var n = el('g', { 'class': 'day-node', tabindex: '0', 'data-key': st.key, 'data-arc': String(i) }, g);
+      var n = el('g', { 'class': 'day-node', tabindex: '0', role: 'button', 'aria-label': 'Step ' + st.n + ', ' + st.title + ': ' + st.job + ' Open its panel.', 'data-key': st.key, 'data-arc': String(i) }, g);
       el('rect', { x: p.x - W / 2, y: p.y - H / 2, width: W, height: H, rx: 8, 'class': 'day-box' }, n);
       text(n, p.x, p.y - 6, 'day-ttl', st.title);
       var l1 = text(n, p.x, p.y + 10, 'day-sub', fmt(st.count) + ' scheduled tasks');
-      var l2 = text(n, p.x, p.y + 22, 'day-sub', st.fastest ? 'fastest ' + st.fastest : '');
+      var l2 = text(n, p.x, p.y + 22, 'day-sub', st.pace || (st.fastest ? 'fastest ' + st.fastest : ''));
       var b = el('g', {}, n);
       el('circle', { cx: p.x - W / 2, cy: p.y - H / 2, r: 11, 'class': 'day-badge' }, b);
       text(b, p.x - W / 2, p.y - H / 2 + 4, 'day-badge-t', String(st.n));
@@ -142,7 +148,7 @@
     }
     function cluster(x, y, w, h, key) {
       var c = ext[key];
-      var cg = el('g', { 'class': 'day-ext', tabindex: '0', 'data-key': key }, g);
+      var cg = el('g', { 'class': 'day-ext', tabindex: '0', role: 'button', 'aria-label': c.title.charAt(0) + c.title.slice(1).toLowerCase() + ': ' + c.job + ' Open its panel.', 'data-key': key }, g);
       el('rect', { x: x, y: y, width: w, height: h, rx: 10, 'class': 'day-box' }, cg);
       text(cg, x + w / 2, y + 22, 'day-ttl', c.title);
       for (var j = 0; j < c.lines.length; j++) text(cg, x + w / 2, y + 42 + j * 13, 'day-sub', c.lines[j]);
@@ -218,7 +224,9 @@
       rows.push(['fastest', data.fastest || '']);
       rows.push(['slowest', data.slowest || '']);
       h += '<div class="day-h">WHAT RUNS</div>' + rowsHtml(rows);
-      h += '<div class="day-next">Feeds every stage. Nothing outside the beat watches the beat but the container healthcheck.</div>';
+      /* No healthcheck watches the beat container (deploy/docker-compose.yml
+       * declares none for it): the line claimed one (review, 2026-09-29). */
+      h += '<div class="day-next">Feeds every stage. Nothing outside the box watches the beat.</div>';
       return h;
     }
     function extHtml(key) {

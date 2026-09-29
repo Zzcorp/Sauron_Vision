@@ -197,10 +197,15 @@
 
   /* ── d. count-up ──────────────────────────────────────────────────── */
 
-  function fmt(n, dec) {
+  /* Grouped only when the server grouped it: USE_THOUSAND_SEPARATOR is
+     off, so the server writes 1234, and a count that ended on 1,234 read
+     differently from the same cell after its next refresh (review,
+     2026-09-29). */
+  function fmt(n, dec, grouped) {
     try {
       return n.toLocaleString('en-US', {
-        minimumFractionDigits: dec, maximumFractionDigits: dec });
+        minimumFractionDigits: dec, maximumFractionDigits: dec,
+        useGrouping: !!grouped });
     } catch (e) {
       return n.toFixed(dec);
     }
@@ -215,8 +220,9 @@
     if (!isFinite(target)) return;
     var dec = (raw.split('.')[1] || '').length;
     if (dec > 6) dec = 6;
+    var grouped = /\d[,\u00a0\u202f ]\d{3}/.test(el.textContent || '');
     if (reduce || typeof w.requestAnimationFrame !== 'function') {
-      el.textContent = fmt(target, dec);
+      el.textContent = fmt(target, dec, grouped);
       return;
     }
     var t0 = null;
@@ -225,13 +231,13 @@
       var p = Math.min(1, (ts - t0) / COUNT_MS);
       var eased = 1 - Math.pow(1 - p, 3);
       if (p < 1) {
-        el.textContent = fmt(target * eased, dec);
+        el.textContent = fmt(target * eased, dec, grouped);
         w.requestAnimationFrame(frame);
       } else {
-        el.textContent = fmt(target, dec);
+        el.textContent = fmt(target, dec, grouped);
       }
     }
-    el.textContent = fmt(0, dec);
+    el.textContent = fmt(0, dec, grouped);
     w.requestAnimationFrame(frame);
   }
 
@@ -246,8 +252,21 @@
     });
   }
 
-  function scanCounts(root) {
-    var els = root.querySelectorAll('[data-sv-count]');
+  /* `fading`: the scan follows a swap whose new nodes are fading in from
+     0, so a counter on screen restarts unseen. On a plain load a counter
+     already on screen and not inside a hidden card keeps the server's
+     text: counting it showed the real number, snapped it to 0 and rolled
+     it back up in plain sight (review, 2026-09-29). */
+  function onScreenAtRest(el) {
+    if (el.closest('.sv-rv')) return false;
+    var r = el.getBoundingClientRect();
+    return r.bottom > 0 && r.top < w.innerHeight;
+  }
+
+  function scanCounts(root, fading) {
+    var els = Array.prototype.filter.call(
+      root.querySelectorAll('[data-sv-count]'),
+      function (el) { return fading || !onScreenAtRest(el); });
     if (!els.length) return;
     if (!hasIO) { each(els, countUp); return; }
     if (!countIO) {
@@ -267,20 +286,38 @@
     each(els, function (el) { countIO.observe(el); });
   }
 
-  function scan(root) {
+  function scan(root, fading) {
     scanReveal(root);
-    scanCounts(root);
+    scanCounts(root, fading);
   }
 
   /* ── b. htmx and the live regions ─────────────────────────────────── */
 
-  /* One beat of a class, restartable, taken off again so the node goes
-     back to its own styles (and a later insertion can play it again). */
-  function beat(el, cls, ms) {
-    el.classList.remove(cls);
-    void el.offsetWidth;                        /* restart the keyframe */
-    el.classList.add(cls);
-    setTimeout(function () { el.classList.remove(cls); }, ms);
+  var SWAP_IN_MS = 260;       /* the sheet's --sv-swap-in */
+
+  /* One opacity beat through the Web Animations API. A class carrying
+     the `animation` shorthand REPLACED the node's own animation list, and
+     when the class came off the node's pageEnterUp or fadeInUp restarted
+     from its first frame: every sweep of a live strip faded in from .35,
+     dropped to 0 at translateY(18px) and rose again, a containing block
+     for fixed children all the while (review, 2026-09-29). el.animate()
+     never touches the CSS list, and with the default fill it leaves
+     nothing behind. No API, no beat: the node simply appears. */
+  function fadeFrom(el, from) {
+    if (reduce || !el || typeof el.animate !== 'function') return;
+    try {
+      el.animate([{ opacity: from }, { opacity: 1 }],
+                 { duration: SWAP_IN_MS, easing: 'ease' });
+    } catch (e) { /* an engine that refuses the keyframes shows the node as it is */ }
+  }
+
+  /* Caused by a person: a real click or key. A synthetic event (the Eye
+     page's `eyeUpdate`, dispatched on every socket message, or a
+     script's .click()) is not trusted, and counted as the operator's it
+     blanked the whole Eye page on every fill (review, 2026-09-29). */
+  function byHand(detail) {
+    var ev = detail && detail.requestConfig && detail.requestConfig.triggeringEvent;
+    return !!(ev && ev.isTrusted);
   }
 
   /* Every node htmx just inserted fades in from the first frame. The
@@ -299,15 +336,15 @@
        metrics strip carry no triggeringEvent: their new nodes are shown
        at once and beat .sv-swapped (from .35) instead — a region blinking
        blank reads as data lost (review, 2026-09-29). */
-    var byHand = !!(e.detail.requestConfig && e.detail.requestConfig.triggeringEvent);
+    var hand = byHand(e.detail);
     var first = !t.hasAttribute('data-sv-motion-seen');
     each(t.children, function (kid) {
       if (!kid.classList || !kid.classList.contains('htmx-added')) return;
-      if (byHand || first) {
-        beat(kid, 'sv-in', 400);
+      if (hand || first) {
+        fadeFrom(kid, 0);
       } else {
         kid.classList.remove('htmx-added');
-        beat(kid, 'sv-swapped', 400);
+        fadeFrom(kid, 0.35);
       }
     });
   });
@@ -318,16 +355,16 @@
        of the new content; one scan per swap, on the target. */
     if (!t || t !== e.target || !t.querySelectorAll) return;
     var first = !t.hasAttribute('data-sv-motion-seen');
-    var byHand = !!(e.detail.requestConfig && e.detail.requestConfig.triggeringEvent);
+    var hand = byHand(e.detail);
     t.setAttribute('data-sv-motion-seen', '1');
-    if (first || byHand) scan(t);
+    if (first || hand) scan(t, true);
   });
 
   d.addEventListener('sv:live-swapped', function (e) {
     if (reduce) return;
     var node = e.detail && e.detail.node;
     if (!node || !node.classList) return;
-    beat(node, 'sv-swapped', 400);
+    fadeFrom(node, 0.35);
   });
 
   /* ── c. page leave ────────────────────────────────────────────────── */
@@ -386,26 +423,75 @@
     revealAll();
   });
 
-  /* htmx snapshots the page BEFORE it swaps, so a card still hidden would
-     be saved hidden and, on a history cache hit, restored hidden with the
-     target already marked seen. Strip the motion classes from the
-     snapshot, and reveal whatever an older snapshot brings back. */
-  d.addEventListener('htmx:beforeHistorySave', function (e) {
-    var root = (e.detail && e.detail.historyElt) || d.body;
-    if (!root.querySelectorAll) return;
-    each(root.querySelectorAll('.sv-rv, .sv-in, .sv-swapped'), function (el) {
-      el.classList.remove('sv-rv', 'in', 'sv-in', 'sv-swapped');
+  /* htmx snapshots the page's innerHTML BEFORE it swaps, synchronously
+     after this event. A card still hidden was saved hidden with its
+     target marked seen, and a snapshot taken inside another swap's 120 ms
+     delay saved #ocTabBody wearing .htmx-swapping — opacity 0 here — so
+     Back restored a blank tab body (review, 2026-09-29). The motion and
+     swap classes come off for the snapshot and go back on the next tick,
+     so the live page loses nothing. */
+  var TRANSIENT = ['sv-rv', 'in', 'htmx-swapping', 'htmx-added', 'htmx-settling'];
+
+  function strip(root) {
+    var undo = [];
+    each(root.querySelectorAll('.sv-rv, .htmx-swapping, .htmx-added, .htmx-settling'), function (el) {
+      var had = TRANSIENT.filter(function (c) { return el.classList.contains(c); });
+      var step = el.style.getPropertyValue('--sv-i');
+      undo.push([el, had, step]);
+      el.classList.remove.apply(el.classList, had);
       el.style.removeProperty('--sv-i');
     });
+    if (root.classList) {
+      var own = TRANSIENT.filter(function (c) { return root.classList.contains(c); });
+      if (own.length) { undo.push([root, own, '']); root.classList.remove.apply(root.classList, own); }
+    }
     each(root.querySelectorAll('[data-sv-motion-seen]'), function (el) {
+      undo.push([el, null, null]);
       el.removeAttribute('data-sv-motion-seen');
     });
+    return undo;
+  }
+
+  d.addEventListener('htmx:beforeHistorySave', function (e) {
+    var root = (e.detail && e.detail.historyElt) || d.body;
+    if (!root || !root.querySelectorAll) return;
+    var undo = strip(root);
+    setTimeout(function () {
+      each(undo, function (u) {
+        if (u[1] === null) { u[0].setAttribute('data-sv-motion-seen', '1'); return; }
+        u[0].classList.add.apply(u[0].classList, u[1]);
+        if (u[2]) u[0].style.setProperty('--sv-i', u[2]);
+      });
+    }, 0);
   });
-  d.addEventListener('htmx:historyRestore', function () { revealAll(); });
+
+  /* A restored page carries no swap in flight: whatever an older
+     snapshot (saved before this fix, still in a reader's localStorage)
+     brings back hidden is shown. */
+  d.addEventListener('htmx:historyRestore', function () {
+    strip(d.body);
+    revealAll();
+  });
+
+  /* A target the server already filled and that refreshes itself (a
+     poll, an event trigger) is not on its first fill when the first
+     refresh lands: counted as first, the Eye page's body faded in from 0
+     on its first ten-second poll (review, 2026-09-29). A `load` trigger's
+     target holds only its loading line and keeps its first fill. */
+  function markServerFilled() {
+    each(d.querySelectorAll('[hx-get][hx-trigger], [hx-post][hx-trigger]'), function (el) {
+      if (/\bload\b/.test(el.getAttribute('hx-trigger') || '')) return;
+      var sel = el.getAttribute('hx-target');
+      var t = (!sel || sel === 'this') ? el
+        : (sel.charAt(0) === '#' ? d.getElementById(sel.slice(1)) : null);
+      if (t && t.children && t.children.length) t.setAttribute('data-sv-motion-seen', '1');
+    });
+  }
 
   /* ── go ───────────────────────────────────────────────────────────── */
 
   /* Deferred: the DOM is parsed and nothing is painted yet, so what
      the scan hides was never shown. */
-  scan(d);
+  markServerFilled();
+  scan(d, false);
 })(window, document);

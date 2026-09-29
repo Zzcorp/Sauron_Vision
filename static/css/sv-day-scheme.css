@@ -11,12 +11,27 @@
  * SVG, paused wholesale under prefers-reduced-motion by the script. What
  * remains here is transitions, and those are stilled below.
  */
+/* The ring needs 760px of its own, the panel 330 beside it. Whether both
+   fit is a question of the space the SECTION has, not the viewport: on
+   the home page a sidebar and a rail eat 300px of it, and between 901 and
+   1180px the grid kept two columns and hid VENUES and PEOPLE behind a
+   scroll (review, 2026-09-29). .day-frame is the container both pages
+   wrap the grid in. Two columns need 740 (the ring's floor) + 18 (its
+   frame) + 14 (the gap) + 330 (the panel) = 1102px of it: below that the
+   panel goes under the ring. The Wall's 1120px container keeps both
+   side by side. The viewport rule further down is the fallback for an
+   engine without container queries. */
+.day-frame { container-type: inline-size; }
 .day-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 330px;
     gap: 14px;
     align-items: start;
     text-align: left;
+}
+@container (max-width: 1101px) {
+    .day-grid { grid-template-columns: 1fr; }
+    .day-panel { position: static; min-height: 0; }
 }
 .day-scheme-wrap {
     background: radial-gradient(ellipse at 50% 45%, rgba(0, 232, 104, 0.08), transparent 55%), var(--bg2);
@@ -26,7 +41,7 @@
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
 }
-.day-scheme { display: block; width: 100%; min-width: 760px; height: auto; }
+.day-scheme { display: block; width: 100%; min-width: 740px; height: auto; }
 .day-scheme text { font-family: var(--font-h, var(--font-heading, sans-serif)); fill: var(--text); font-size: 13px; }
 .day-scheme .day-ttl { font-family: var(--font-d, var(--font-display, sans-serif)); font-weight: 700; letter-spacing: 3px; fill: var(--accent); font-size: 16px; }
 .day-scheme .day-sub { font-family: var(--font-m, var(--font-mono, monospace)); font-size: 11.5px; fill: var(--text2); letter-spacing: 0.4px; }
@@ -53,6 +68,10 @@
 .day-scheme .day-ext.day-hot .day-box { stroke: var(--accent); fill: var(--bg3); filter: drop-shadow(0 0 14px rgba(0, 232, 104, 0.55)); }
 .day-scheme .day-node:focus-visible .day-box,
 .day-scheme .day-ext:focus-visible .day-box { stroke: var(--accent-bright); }
+/* The beat had outline:none and nothing in its place: a keyboard on it
+   showed no focus at all (review, 2026-09-29). */
+.day-scheme .day-beat:focus-visible .day-heart2,
+.day-scheme .day-beat.day-hot .day-heart2 { stroke: var(--accent-bright); stroke-width: 2; }
 .day-scheme .day-arrow.day-lit { stroke: var(--accent-bright); stroke-width: 3; filter: drop-shadow(0 0 6px rgba(64, 255, 144, 0.7)); }
 
 /* The live layer (home page): a dot per stage and a tint on its box. */

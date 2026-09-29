@@ -80,7 +80,11 @@
   setCollapsed(readCollapsed(), false);
   if (toggle) {
     toggle.addEventListener('click', function () {
-      setCollapsed(!section.classList.contains('day-collapsed'), true);
+      var opening = section.classList.contains('day-collapsed');
+      setCollapsed(!opening, true);
+      /* A collapsed section is not polled (below); opening it reads NOW
+         once rather than showing the reading from before it was shut. */
+      if (opening && started) { stopped = false; fetchLive(); }
     });
   }
 
@@ -210,7 +214,10 @@
     section.classList.add('day-has-live');
   }
   function fetchLive() {
+    /* Not while collapsed: each read costs the server some twenty queries
+       and a shut section paints nothing (review, 2026-09-29). */
     if (!LIVE_URL || inflight || document.hidden) return;
+    if (section.classList.contains('day-collapsed')) return;
     inflight = true;
     fetch(LIVE_URL, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
       .then(function (r) {
@@ -234,7 +241,9 @@
       .then(function () { inflight = false; }, function () { inflight = false; });
   }
   function start() {
-    if (started) return;
+    /* A non-staff reader's page carries no live door: the ring stands on
+       the schedule alone, as on the Wall, and nothing polls. */
+    if (started || !LIVE_URL) return;
     started = true;
     fetchLive();
     window.setInterval(function () { if (!document.hidden && !stopped) fetchLive(); }, POLL_MS);
@@ -243,6 +252,14 @@
     if (document.hidden) return;
     stopped = false;
     paintCursor();
+    if (started) fetchLive(); else start();
+  });
+  /* The idle lock unlocks in place (static/js/idle-lock.js never reloads)
+     and announces it; a 423 had stopped the poll, and a visible tab kept
+     its pre-lock reading until it was hidden and shown again (review,
+     2026-09-29). */
+  document.addEventListener('sv:pin-unlocked', function () {
+    stopped = false;
     if (started) fetchLive(); else start();
   });
   document.addEventListener('sv:eye-event', function (e) {

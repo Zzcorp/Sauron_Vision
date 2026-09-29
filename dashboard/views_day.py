@@ -40,7 +40,6 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
 from core.day_of_sauron import STAGES, beat_components, day_scheme
-from dashboard.views_topology import _expected_cadence, _stale_after
 
 logger = logging.getLogger(__name__)
 
@@ -56,12 +55,29 @@ HEARTBEAT_STALE_S = 1800
 #: A broker reading older than this is stale (capital_truth's own
 #: TRACKING_FRESH_SECONDS, the freeze the entry path applies).
 BROKER_STALE_S = 3600
-#: The two bands the 24-hour strip shades, in minutes of the UTC day.
-US_SESSION = (13 * 60 + 30, 21 * 60)
+#: The two bands the 24-hour strip shades, in minutes of the UTC day. The
+#: US band is read from core.constants.MARKET_SESSIONS (us_session());
+#: this is only its fallback.
+US_SESSION = (13 * 60 + 30, 20 * 60)
 NIGHT_OF_LEARNING = (2 * 60, 7 * 60)
 
 _COMPONENT_FIELDS = ("key", "is_enabled", "last_run_at", "last_status",
                      "last_message", "run_count", "error_count")
+
+#: Beat entries whose pass can be IDLE: with nothing to do they return
+#: {"idle": ...} and the gate writes nothing on the row they share
+#: (core.task_gate.guarded_task, bot_program.alarm.alarm_task). The row's
+#: rhythm is then its other writer's, and judging it against the idle
+#: writer's 15 s read the alarm's row stale 93% of the time (review,
+#: 2026-09-29). The IBKR and Saxo walks go idle with no account or no
+#: session; the alarm's poll with nothing to read.
+IDLE_WRITERS = frozenset({"poll-telegram-alarm", "sync-broker-account",
+                          "sync-saxo-accounts"})
+
+#: A row judged against a beat this short or shorter is still given this
+#: long before it reads stale: a 15 s poller on a busy fast queue can lag
+#: a minute without being stopped.
+STALE_FLOOR_S = 5 * 60
 
 
 # ── words ────────────────────────────────────────────────────────────────
@@ -103,24 +119,54 @@ def _group(name, builder, fallback):
 
 # ── the state of one entry, one stage, the beat ──────────────────────────
 
-def _entry_state(row, cadence, now):
-    """(state, age seconds) of a beat entry from its component row, judged
-    the way dashboard.views_topology._component_state judges a component:
-    off / broken / silent / idle / stale / live, stale past 2.5x the
-    entry's own cadence (48 h when it states none)."""
+def _stale_after_s(widest):
+    """Seconds of quiet after which a row reads stale, from the WIDEST gap
+    of the beat that writes it (core.day_of_sauron.widest_gap, the digest's
+    own reading of a schedule).
+
+    The tighter of the system map's 2.5 periods and the daily digest's
+    silence window (core.component_digest.silent_window_hours: 26 h for a
+    beat of a day or less, 1.2 periods plus 2 h beyond), with a five-minute
+    floor. A daily snapshot 31 h old read green under 2.5 periods (60 h)
+    while the digest called it stopped at 26 (review, 2026-09-29).
+    None — nothing schedules the row — means it cannot be late."""
+    if not widest:
+        return None
+    from core.component_digest import (SILENT_AFTER_HOURS, SILENT_PERIODS,
+                                       SILENT_SLACK_HOURS)
+    if widest <= 86400:
+        silent = SILENT_AFTER_HOURS * 3600.0
+    else:
+        silent = max(SILENT_AFTER_HOURS * 3600.0,
+                     SILENT_PERIODS * widest + SILENT_SLACK_HOURS * 3600.0)
+    return max(STALE_FLOOR_S, min(2.5 * widest, silent))
+
+
+def _row_state(row, widest, now, paused):
+    """(state, age seconds) of ONE component row, in the page's five words.
+
+    A missing row is off: the gate skips a task whose row does not exist
+    (core.platform_control.is_component_enabled answers False). `paused` —
+    the master switch off or missing — is off too for every row the master
+    gates: the gate skips those tasks without touching their rows, which
+    then only age, and an operator's deliberate pause read amber on six
+    stages (review, 2026-09-29). A warning (ran and stored nothing) reads
+    stale, a row that never ran reads quiet, and a row nothing schedules
+    can be off or broken but never late."""
     if row is None:
-        return "quiet", None
-    if not row["is_enabled"]:
-        return "off", _age(row["last_run_at"], now)
-    status = (row["last_status"] or "").lower()
+        return "off", None
     age = _age(row["last_run_at"], now)
+    if not row["is_enabled"] or paused:
+        return "off", age
+    status = (row["last_status"] or "").lower()
     if status == "error":
         return "broken", age
     if status == "warning":
-        return "silent", age
+        return "stale", age
     if age is None:
-        return "idle", None
-    if age > _stale_after(cadence):
+        return "quiet", None
+    limit = _stale_after_s(widest)
+    if limit is not None and age > limit:
         return "stale", age
     return "live", age
 
@@ -128,7 +174,9 @@ def _entry_state(row, cadence, now):
 def _stage_state(states) -> str:
     """'broken' if any entry is broken, else 'stale' if any is stale or
     silent, else 'off' if every judged entry is off, else 'live' if any is
-    live, else 'quiet'. Entries the gate does not wrap are not judged."""
+    live, else 'quiet'. Quiet entries (not gated, or sharing a record
+    another entry owns) are not judged; 'idle' — switched on and never ran —
+    is judged, so it keeps a stage from reading all-off."""
     judged = [s for s in states if s != "quiet"]
     if "broken" in judged:
         return "broken"
@@ -319,22 +367,58 @@ def day_live_payload(user, now=None) -> dict:
                 PlatformComponent.objects.values(*_COMPONENT_FIELDS)}
     rows = _group("component rows", _rows, {})
 
-    # Each component judged against the cadence the system map declares for
-    # it (WATCH's stale/broken counts and the beat's own line).
-    comp_states = {key: _entry_state(row, _expected_cadence(key), now)[0]
-                   for key, row in rows.items()}
+    # The master switch: off, or MISSING (the gate reads a missing row as
+    # off), pauses every row it gates. The alarm bot's row is its own
+    # switch and nothing else (bot_program.alarm.alarm_task): the pause is
+    # one of the things it reports.
+    master = rows.get("platform_master")
+    paused = master is None or not master["is_enabled"]
+    try:
+        from bot_program.alarm import COMPONENT_KEY as ALARM_KEY
+    except Exception:  # noqa: BLE001 — no alarm module, no exemption
+        ALARM_KEY = "telegram_alarm"
+
+    # ONE OWNER PER ROW. Several beat entries write one component row (the
+    # bot tick, the reconcile, the chains, the IBKR feed and the daily
+    # decay check all write pipeline_asset_bots), so the row says only
+    # when ANY of them last ran and whether THAT run failed. Judged once,
+    # against its most frequent writer that always writes — the digest's
+    # rule (core.component_digest.beat_periods) — and handed to that
+    # writer alone. The other writers are "shared": off when the row is
+    # off, else quiet, never a green "ran 2 min ago" borrowed from the
+    # tick, never five broken entries for one failed row (review,
+    # 2026-09-29).
+    all_tasks = [t for st in scheme.get("stages") or [] for t in st.get("tasks") or []]
+    writers = {}
+    for t in all_tasks:
+        comp = mapping.get(t["key"])
+        if comp:
+            writers.setdefault(comp, []).append(t)
+    owner = {}
+    for comp, ts in writers.items():
+        cands = [t for t in ts if t["key"] not in IDLE_WRITERS] or ts
+        owner[comp] = min(cands, key=lambda t: (t.get("widest") or float("inf"), t["key"]))
+
+    # Every row judged once: against its owner's widest gap when the beat
+    # writes it; a row nothing schedules (a switch, a per-event gate) can
+    # be off or broken but never late.
+    comp_states = {}
+    for key, row in rows.items():
+        widest = owner[key].get("widest") if key in owner else None
+        comp_states[key] = _row_state(row, widest, now,
+                                      paused and key not in ("platform_master", ALARM_KEY)
+                                      )[0]
 
     tasks, stages, marks = {}, {}, []
     counts = {"live": 0, "stale": 0, "off": 0, "broken": 0, "quiet": 0,
               "total": 0}
     for st in scheme.get("stages") or []:
-        states, newest, n_ungated, n_norow = [], None, 0, 0
+        states, newest = [], None
+        n_ungated = n_norow = n_shared = 0
         for task in st.get("tasks") or []:
             comp_key = mapping.get(task["key"])
             row = rows.get(comp_key) if comp_key else None
-            cadence = task.get("seconds")
-            if not isinstance(cadence, (int, float)) or cadence == float("inf"):
-                cadence = None
+            shared_with = None
             if comp_key is None:
                 # Not wrapped by the task gate: nothing records its runs.
                 state, age = "quiet", None
@@ -346,32 +430,53 @@ def day_live_payload(user, now=None) -> dict:
                 state, age = "off", None
                 n_norow += 1
             else:
-                state, age = _entry_state(row, cadence, now)
-            states.append(state)
-            last = row["last_run_at"] if row else None
+                row_state, age = _row_state(
+                    row, owner[comp_key].get("widest"), now,
+                    paused and comp_key != ALARM_KEY)
+                if owner[comp_key]["key"] == task["key"]:
+                    state = row_state
+                else:
+                    shared_with = owner[comp_key]["key"]
+                    state = "off" if row_state == "off" else "quiet"
+                    age = None
+                    n_shared += 1
+            # The stage's own judgement hears "idle" for an owner that is
+            # switched on and never ran (the page shows it quiet): one off
+            # entry beside it must not make the whole stage read off.
+            states.append("idle" if (state == "quiet" and row is not None
+                                     and shared_with is None) else state)
+            last = row["last_run_at"] if (row and shared_with is None) else None
             tasks[task["key"]] = {
                 "state": state,
                 "component": comp_key,
-                "ago": _ago(age) if last is not None else "never",
+                "shared_with": shared_with,
+                "ago": ("shared record" if shared_with
+                        else _ago(age) if last is not None else "never"),
                 "last": last.isoformat() if last is not None else None,
             }
             counts["total"] += 1
-            bucket = {"silent": "stale", "idle": "quiet"}.get(state, state)
-            counts[bucket] = counts.get(bucket, 0) + 1
+            counts[state] = counts.get(state, 0) + 1
             if last is not None and (newest is None or last > newest):
                 newest = last
             if task.get("kind") == "cron" and task.get("seconds") == 86400.0:
                 marks.append({"m": int(task.get("first") or 0),
                               "label": task.get("label") or task["key"],
-                              "key": task["key"], "state": state})
+                              "key": task["key"], "state": state,
+                              "shared": bool(shared_with)})
         stage_state = _stage_state(states)
         notes = []
+        if paused and stage_state == "off":
+            notes.append("The master switch is off: the gate skips every "
+                         "task it guards.")
         if n_ungated:
             notes.append(f"{n_ungated} of {len(states)} entries run outside "
                          f"the task gate and record no runs.")
         if n_norow:
             notes.append(f"{n_norow} wrapped by the gate have no component "
                          f"row yet, so the gate skips them (seed_components).")
+        if n_shared:
+            notes.append(f"{n_shared} share their record with a more frequent "
+                         f"task, which alone the record speaks for.")
         stages[st["key"]] = {
             "state": stage_state,
             "words": _run_words(stage_state, _age(newest, now)),
@@ -443,8 +548,9 @@ def day_live_payload(user, now=None) -> dict:
     n_broken = sum(1 for s in comp_states.values() if s == "broken")
     newest_any = max((r["last_run_at"] for r in rows.values()
                       if r["last_run_at"] is not None), default=None)
-    master = rows.get("platform_master")
-    if master is not None and not master["is_enabled"]:
+    if master is None:
+        beat_state, beat_words = "off", "master switch has no row: the gate skips everything"
+    elif not master["is_enabled"]:
         beat_state, beat_words = "off", "master switch off"
     elif n_broken:
         beat_state = "broken"
@@ -518,15 +624,38 @@ def day_live_payload(user, now=None) -> dict:
         "clusters": {"markets": markets, "venues": venues, "people": people},
         "tasks": tasks,
         "clock": {"minute": now.hour * 60 + now.minute, "marks": marks,
-                  "us_session": list(US_SESSION),
+                  "us_session": list(us_session()),
                   "night": list(NIGHT_OF_LEARNING)},
         "counts": counts,
     }
+
+
+def us_session():
+    """(open, close) of the New York session in minutes of the UTC day,
+    off core.constants.MARKET_SESSIONS — the table the Wall's session pills
+    read. The strip typed 13:30–21:00 while the table says 13:30–20:00
+    (review, 2026-09-29)."""
+    try:
+        from core.constants import MARKET_SESSIONS
+        ny = MARKET_SESSIONS["new_york"]
+        oh, om = (int(x) for x in ny["open"].split(":"))
+        ch, cm = (int(x) for x in ny["close"].split(":"))
+        return (oh * 60 + om, ch * 60 + cm)
+    except Exception:  # noqa: BLE001 — a band is decoration, never a 500
+        return US_SESSION
 
 
 @login_required
 @never_cache
 @require_GET
 def day_live(request):
-    """GET /api/day/live/ — the live layer for the signed-in operator."""
+    """GET /api/day/live/ — the live layer, for staff.
+
+    Staff only (review, 2026-09-29): every component's state and last run,
+    the master switch, Morgul's findings and the two Telegram voices are
+    what /health/, the system map and oculus keep from a non-staff login.
+    A non-staff reader's home page draws the ring from the schedule, as
+    the public Wall does, and never asks this door."""
+    if not request.user.is_staff:
+        return JsonResponse({"staff_only": True}, status=403)
     return JsonResponse(day_live_payload(request.user))

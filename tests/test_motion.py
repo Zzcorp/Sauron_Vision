@@ -393,6 +393,11 @@ class MotionScriptTests(SimpleTestCase):
         self.assertIn("data-sv-count", js)
         self.assertIn("isFinite(target)", js)
         self.assertIn("toLocaleString('en-US'", js)
+        # Grouped only as the server grouped it; never on a number already
+        # on screen at rest (second review, 2026-09-29).
+        self.assertIn("useGrouping: !!grouped", js)
+        self.assertIn("function onScreenAtRest(el)", js)
+        self.assertIn("return fading || !onScreenAtRest(el);", js)
         # Under reduced motion the final value is written, not animated.
         self.assertRegex(js, r"if \(reduce \|\| typeof w\.requestAnimationFrame")
 
@@ -423,10 +428,23 @@ class MotionScriptTests(SimpleTestCase):
         0; the rest beat .sv-swapped, from .35."""
         js = _script()
         handler = js[js.index("d.addEventListener('htmx:afterSwap'"):js.index("d.addEventListener('htmx:afterSettle'")]
-        self.assertIn("requestConfig.triggeringEvent", handler)
+        self.assertIn("byHand(e.detail)", handler)
         self.assertIn("kid.classList.remove('htmx-added');", handler)
-        self.assertIn("beat(kid, 'sv-swapped', 400);", handler)
-        self.assertIn("beat(kid, 'sv-in', 400);", handler)
+        self.assertIn("fadeFrom(kid, 0.35);", handler)
+        self.assertIn("fadeFrom(kid, 0);", handler)
+
+    def test_only_a_person_s_click_counts_as_the_operator_s(self):
+        """Second review, 2026-09-29: the Eye page's `eyeUpdate`, dispatched
+        on every socket message, carried a triggeringEvent and blanked the
+        whole page on every fill. Only a trusted event is a person."""
+        js = _script()
+        fn = js[js.index("function byHand(detail)"):]
+        fn = fn[:fn.index("}") + 1]
+        self.assertIn("ev.isTrusted", fn)
+        self.assertIn("function markServerFilled()", js)
+        self.assertIn("markServerFilled();\n  scan(d, false);", js)
+        filled = js[js.index("function markServerFilled()"):]
+        self.assertIn("/\\bload\\b/", filled[:400])
 
     def test_the_history_snapshot_carries_no_hidden_card(self):
         """Review, 2026-09-29: htmx snapshots the page before it swaps, so
@@ -435,9 +453,16 @@ class MotionScriptTests(SimpleTestCase):
         js = _script()
         self.assertIn("'htmx:beforeHistorySave'", js)
         self.assertIn("'htmx:historyRestore'", js)
-        save = js[js.index("'htmx:beforeHistorySave'"):js.index("'htmx:historyRestore'")]
-        self.assertIn("classList.remove('sv-rv', 'in', 'sv-in', 'sv-swapped')", save)
-        self.assertIn("removeAttribute('data-sv-motion-seen')", save)
+        self.assertIn("var TRANSIENT = ['sv-rv', 'in', 'htmx-swapping', 'htmx-added', 'htmx-settling'];", js)
+        strip = js[js.index("function strip(root)"):js.index("d.addEventListener('htmx:beforeHistorySave'")]
+        self.assertIn("removeAttribute('data-sv-motion-seen')", strip)
+        save = js[js.index("d.addEventListener('htmx:beforeHistorySave'"):js.index("d.addEventListener('htmx:historyRestore'")]
+        # Off for the snapshot, back on the next tick: the live page loses nothing.
+        self.assertIn("var undo = strip(root);", save)
+        self.assertIn("}, 0);", save)
+        restore = js[js.index("d.addEventListener('htmx:historyRestore'"):]
+        self.assertIn("strip(d.body);", restore[:200])
+        self.assertIn("revealAll();", restore[:200])
 
     def test_a_leave_that_never_left_comes_back_within_a_second(self):
         """Review, 2026-09-29: a click that turned out to be a download left
@@ -463,17 +488,26 @@ class MotionScriptTests(SimpleTestCase):
             for a in anchors:
                 self.assertIn(" download", a, "%s: %s" % (tpl, a))
 
-    def test_every_swapped_in_node_fades_alike(self):
+    def test_every_swapped_in_node_fades_alike_without_touching_its_animations(self):
         """Measured 2026-09-29: with the fade as a transition on the node,
         a swapped-in .card appeared in one step (its own transition list
-        has no opacity in it) while the strip beside it faded. So the
-        script answers htmx:afterSwap by putting .sv-in, an animation, on
-        each .htmx-added node, and the sheet names .sv-in."""
+        has no opacity in it) while the strip beside it faded. The fade
+        then became a class carrying `animation`, which REPLACED the
+        node's own list: when it came off, pageEnterUp restarted from 0
+        on every sweep (second review). The beat is a Web Animations
+        fade now, and no class in the sheet carries a swap animation."""
         js = _script()
         self.assertIn("htmx:afterSwap", js)
         self.assertIn("contains('htmx-added')", js)
-        self.assertIn("'sv-in'", js)
-        self.assertIn(".sv-in { animation:", _norm(_sheet()))
+        self.assertIn("el.animate([{ opacity: from }, { opacity: 1 }]", js)
+        self.assertIn("fadeFrom(kid, 0);", js)
+        self.assertIn("fadeFrom(kid, 0.35);", js)
+        self.assertIn("fadeFrom(node, 0.35);", js)
+        self.assertNotIn("function beat(", js)
+        sheet = _norm(_sheet())
+        self.assertNotIn(".sv-in", sheet)
+        self.assertNotIn(".sv-swapped", sheet)
+        self.assertNotIn("@keyframes svIn", sheet)
 
 
 # ── D. the pages ─────────────────────────────────────────────────────────
@@ -506,6 +540,12 @@ class RenderedPagesTests(TestCase):
         # The tab body's own load trigger keeps no delay: a delayed first
         # paint is a delay for nobody.
         self.assertRegex(body, r'id="ocTabBody"[^>]*hx-swap="innerHTML"')
+
+    def test_the_quick_link_cards_carry_no_inline_transition(self):
+        """Their inline transition overrode the reveal's; they popped in
+        instead of rising (second review, 2026-09-29)."""
+        src = _read("templates", "dashboard", "_command_bots.html")
+        self.assertNotIn("transition:transform 0.2s", src)
 
     def test_the_tab_bodies_carry_the_reveal_and_count_hooks(self):
         live = self._get("/command/tab/live/")

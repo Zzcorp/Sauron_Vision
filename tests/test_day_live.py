@@ -56,8 +56,16 @@ STATES = {"live", "stale", "off", "quiet", "broken"}
 STAGE_KEYS = ["see", "think", "decide", "act", "watch", "tell", "learn"]
 
 
-def _user(name="dl_u"):
-    return User.objects.create_user(username=name, password="x")
+def _user(name="dl_u", staff=True):
+    """The live door is for staff (review, 2026-09-29); every test that
+    reads it signs in as staff unless it is testing the refusal."""
+    return User.objects.create_user(username=name, password="x", is_staff=staff)
+
+
+def _master(enabled=True):
+    """The master switch's row. The gate reads a missing row as OFF, and so
+    does the page: a test that expects a live stage seeds it on."""
+    return _component("platform_master", ago=timedelta(minutes=1), enabled=enabled)
 
 
 def _component(key, *, ago=None, enabled=True, status="success", message=""):
@@ -153,6 +161,7 @@ class StageStateTests(TestCase):
     def setUp(self):
         self.user = _user("dl_state")
         self.client.force_login(self.user)
+        _master()
 
     def _live(self):
         return self.client.get(URL).json()
@@ -211,7 +220,8 @@ class StageStateTests(TestCase):
         self.assertIn("no component row", live["stages"]["see"]["note"])
 
     def test_the_master_switch_off_is_the_beats_word(self):
-        _component("platform_master", enabled=False)
+        from core.platform_control import PlatformComponent
+        PlatformComponent.objects.filter(key="platform_master").update(is_enabled=False)
         _component("morgul_guards", ago=timedelta(minutes=1))
         live = self._live()
         self.assertEqual(live["beat"]["state"], "off")
@@ -352,6 +362,7 @@ class TheClockTests(TestCase):
     def setUp(self):
         self.user = _user("dl_clock")
         self.client.force_login(self.user)
+        _master()
 
     def test_the_marks_are_the_daily_crontab_entries(self):
         live = self.client.get(URL).json()
@@ -378,7 +389,9 @@ class TheClockTests(TestCase):
         now = timezone.now()
         self.assertAlmostEqual(live["clock"]["minute"],
                                now.hour * 60 + now.minute, delta=1)
-        self.assertEqual(live["clock"]["us_session"], [810, 1260])
+        # New York 13:30–20:00 UTC, off core.constants.MARKET_SESSIONS —
+        # the strip typed 13:30–21:00 (review, 2026-09-29).
+        self.assertEqual(live["clock"]["us_session"], [810, 1200])
         self.assertEqual(live["clock"]["night"], [120, 420])
 
     def test_a_mark_tints_with_its_row(self):
@@ -554,3 +567,216 @@ class TheStaticFilesTests(SimpleTestCase):
             self.assertIn(cls, reduced, cls)
         self.assertIn("transition: none", reduced)
         self.assertIn("home", SHEET.read_text(encoding="utf-8"))
+
+
+# ── 8. The second review (2026-09-29): each finding, pinned ─────────────
+
+class OneRowOneJudgementTests(TestCase):
+    """Several beat entries write one component row. The row is judged
+    once, against its most frequent writer that always writes, and handed
+    to that writer alone; the others are shared."""
+
+    def setUp(self):
+        self.user = _user("dl_shared")
+        self.client.force_login(self.user)
+        _master()
+
+    def _live(self):
+        return self.client.get(URL).json()
+
+    def test_a_daily_task_never_borrows_the_ticks_green(self):
+        _component("pipeline_asset_bots", ago=timedelta(minutes=2))
+        live = self._live()
+        self.assertEqual(live["tasks"]["tick-asset-bots"]["state"], "live")
+        decay = live["tasks"]["track-record-decay-check"]
+        self.assertEqual(decay["state"], "quiet")
+        self.assertEqual(decay["shared_with"], "tick-asset-bots")
+        self.assertEqual(decay["ago"], "shared record")
+        self.assertIsNone(decay["last"])
+        mark = next(m for m in live["clock"]["marks"]
+                    if m["key"] == "track-record-decay-check")
+        self.assertEqual(mark["state"], "quiet")
+        self.assertTrue(mark["shared"])
+
+    def test_one_failed_row_is_one_broken_entry_not_five(self):
+        _component("pipeline_asset_bots", ago=timedelta(minutes=2), status="error")
+        live = self._live()
+        self.assertEqual(live["counts"]["broken"], 1)
+        broken = [k for k, t in live["tasks"].items() if t["state"] == "broken"]
+        self.assertEqual(broken, ["tick-asset-bots"])
+
+    def test_the_alarm_row_is_judged_by_the_sentinel_not_the_idle_poll(self):
+        """The poll goes idle with nothing to read and writes nothing; the
+        row moves every 10 min with the sentinel. Judged against 15 s it
+        read stale 93% of the time."""
+        _component("telegram_alarm", ago=timedelta(minutes=4))
+        live = self._live()
+        self.assertEqual(live["tasks"]["alarm-sentinel"]["state"], "live")
+        self.assertEqual(live["tasks"]["poll-telegram-alarm"]["state"], "quiet")
+        self.assertEqual(live["tasks"]["poll-telegram-alarm"]["shared_with"],
+                         "alarm-sentinel")
+        self.assertNotEqual(live["stages"]["tell"]["state"], "stale")
+
+    def test_a_fifteen_second_poller_ten_hours_silent_is_stale(self):
+        """The component states came from the system map's WIRING, which
+        knows neither Telegram voice nor Morgul: 48 h for a 15 s poller."""
+        _component("telegram_eye", ago=timedelta(hours=10))
+        live = self._live()
+        self.assertEqual(live["tasks"]["poll-telegram-eye"]["state"], "stale")
+        self.assertIn("the Eye stale", live["clusters"]["people"]["words"])
+        watch = {w: n for n, w in live["stages"]["watch"]["metrics"]}
+        self.assertGreaterEqual(watch["components stale"], 1)
+
+    def test_a_daily_task_that_missed_a_run_is_stale_as_the_digest_says(self):
+        """31 h after a daily run is a missed run: the digest calls it
+        stopped at 26 h; 2.5 periods said green until 60."""
+        _component("pipeline_snapshot", ago=timedelta(hours=31))
+        live = self._live()
+        self.assertEqual(live["tasks"]["daily-portfolio-snapshot"]["state"], "stale")
+        _component("pipeline_calibration", ago=timedelta(hours=20))
+        live = self._live()
+        self.assertEqual(live["tasks"]["resolve-pending-calibrations"]["state"], "live")
+
+    def test_the_thresholds_in_isolation(self):
+        from dashboard.views_day import STALE_FLOOR_S, _stale_after_s
+        self.assertEqual(_stale_after_s(15.0), STALE_FLOOR_S)
+        self.assertEqual(_stale_after_s(300.0), 750.0)
+        self.assertEqual(_stale_after_s(86400.0), 26 * 3600.0)
+        self.assertAlmostEqual(_stale_after_s(7 * 86400.0),
+                               1.2 * 7 * 86400.0 + 2 * 3600.0)
+        self.assertIsNone(_stale_after_s(None))
+
+
+class TheMasterSwitchTests(TestCase):
+    def setUp(self):
+        self.user = _user("dl_master")
+        self.client.force_login(self.user)
+
+    def test_a_pause_reads_off_not_amber(self):
+        """The gate skips every master-gated task without touching its row,
+        so the rows only age: six stages read stale for a deliberate
+        pause."""
+        _master(enabled=False)
+        for key in ("scraper_news", "pipeline_signals", "pipeline_asset_bots",
+                    "morgul_guards", "telegram_eye"):
+            _component(key, ago=timedelta(hours=2))
+        live = self.client.get(URL).json()
+        for stage in ("see", "think", "decide", "act", "watch"):
+            self.assertEqual(live["stages"][stage]["state"], "off", stage)
+        self.assertEqual(live["counts"]["stale"], 0)
+        self.assertIn("master switch is off", live["stages"]["see"]["note"])
+        self.assertEqual(live["beat"]["words"], "master switch off")
+
+    def test_the_alarm_keeps_its_own_state_through_a_pause(self):
+        _master(enabled=False)
+        _component("telegram_alarm", ago=timedelta(minutes=3))
+        live = self.client.get(URL).json()
+        self.assertEqual(live["tasks"]["alarm-sentinel"]["state"], "live")
+
+    def test_a_missing_master_row_is_a_pause_too(self):
+        _component("morgul_guards", ago=timedelta(minutes=1))
+        live = self.client.get(URL).json()
+        self.assertEqual(live["tasks"]["run-morgul-guards"]["state"], "off")
+        self.assertEqual(live["beat"]["state"], "off")
+        self.assertIn("no row", live["beat"]["words"])
+
+
+class OneVocabularyEvenWithRowsTests(TestCase):
+    def test_silent_and_never_run_speak_the_pages_five_words(self):
+        """The vocabulary test passed only because it seeded no row: a
+        warning row sent 'silent', a never-run row 'idle', and the strip
+        painted both as 'not gated'."""
+        user = _user("dl_vocab")
+        self.client.force_login(user)
+        _master()
+        _component("pipeline_snapshot", ago=timedelta(hours=1), status="warning")
+        _component("scraper_sec", ago=None)
+        live = self.client.get(URL).json()
+        self.assertEqual(live["tasks"]["daily-portfolio-snapshot"]["state"], "stale")
+        self.assertEqual(live["tasks"]["fetch-sec-filings"]["state"], "quiet")
+        for t in live["tasks"].values():
+            self.assertIn(t["state"], STATES)
+        for m in live["clock"]["marks"]:
+            self.assertIn(m["state"], STATES)
+        self.assertEqual(set(live["counts"]) - {"total"}, STATES)
+
+
+class StaffOnlyTests(TestCase):
+    """/health/, the system map and oculus keep component states, the master
+    switch and Morgul's findings from a non-staff login; the live door did
+    not (review, 2026-09-29)."""
+
+    def test_a_non_staff_login_is_refused_the_door(self):
+        self.client.force_login(_user("dl_viewer", staff=False))
+        r = self.client.get(URL)
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.json(), {"staff_only": True})
+
+    def test_a_non_staff_home_page_draws_the_schedule_and_polls_nothing(self):
+        self.client.force_login(_user("dl_viewer2", staff=False))
+        body = self.client.get("/command/").content.decode()
+        self.assertIn('id="dayScheme"', body)
+        self.assertIn('<script id="dayData" type="application/json">', body)
+        self.assertNotIn("data-day-live-url", body)
+        self.assertNotIn('data-day-tile="', body)
+        self.assertNotIn('id="dayClock"', body)
+        self.assertIn('id="dayHomeTitle">A DAY OF SAURON</span>', body)
+        self.assertIn("the schedule the platform ships with", body)
+
+    def test_the_staff_page_carries_the_live_parts(self):
+        self.client.force_login(_user("dl_staff"))
+        body = self.client.get("/command/").content.decode()
+        self.assertIn('data-day-live-url="/api/day/live/"', body)
+        self.assertEqual(body.count('data-day-tile="'), 7)
+        # The US band off the session table, never typed.
+        self.assertIn('style="left:56.25%;width:27.083%"', body)
+        self.assertIn("The US session, 13:30–20:00 UTC", body)
+        # The tiles carry no aria-label: it replaced the state and numbers.
+        tiles = re.findall(r'<button type="button" class="day-tile[^>]*>', body)
+        self.assertEqual(len(tiles), 7)
+        for t in tiles:
+            self.assertNotIn("aria-label", t)
+
+
+class TheScriptsAfterTheReviewTests(SimpleTestCase):
+    def test_the_live_layer_resumes_after_an_unlock_and_rests_when_shut(self):
+        js = JS.read_text(encoding="utf-8")
+        self.assertIn("'sv:pin-unlocked'", js)
+        unlock = js[js.index("'sv:pin-unlocked'"):]
+        self.assertIn("stopped = false;", unlock[:200])
+        self.assertIn("if (section.classList.contains('day-collapsed')) return;", js)
+        self.assertIn("if (started || !LIVE_URL) return;", js)
+
+    def test_the_ring_formats_decimals_and_names_its_buttons(self):
+        js = RING_JS.read_text(encoding="utf-8")
+        self.assertIn("var parts = String(n).split('.');", js)
+        self.assertEqual(js.count("role: 'button'"), 3)
+        self.assertEqual(js.count("'aria-label':"), 3)
+        self.assertNotIn("container healthcheck", js)
+        self.assertNotIn("on their own containers", js)
+        self.assertIn("st.pace ||", js)
+        if NODE_OK:
+            import subprocess
+            out = subprocess.run(
+                ["node", "-e",
+                 "function fmt(n){var parts=String(n).split('.');parts[0]=parts[0]"
+                 ".replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');return parts.join('.');}"
+                 "console.log(fmt(12.3457)+'|'+fmt(1234567)+'|'+fmt(1234.5678))"],
+                capture_output=True, text=True, timeout=20)
+            self.assertEqual(out.stdout.strip(), "12.3457|1,234,567|1,234.5678")
+
+    def test_the_grid_asks_its_container_not_the_viewport(self):
+        css = SHEET.read_text(encoding="utf-8")
+        self.assertIn(".day-frame { container-type: inline-size; }", css)
+        self.assertIn("@container (max-width: 1101px)", css)
+        self.assertIn(".day-beat:focus-visible", css)
+        page = PAGE.read_text(encoding="utf-8")
+        self.assertIn('<div class="day-frame">', page)
+        self.assertIn('role="group"', page.split('id="dayScheme"')[1][:200])
+
+
+try:
+    import shutil as _shutil
+    NODE_OK = bool(_shutil.which("node"))
+except Exception:  # noqa: BLE001
+    NODE_OK = False
