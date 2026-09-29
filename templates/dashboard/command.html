@@ -60,12 +60,15 @@
 {# data-oc-metric is the refresh hook; the tone class comes from the server #}
 {# rather than from sniffing the first character, which read "$-4" as neither #}
 {# up nor down and painted an em-dash green on the day it started with "+". #}
+{# swap:120ms on the tab buttons only: the swap delay is what lets the old body #}
+{# fade out under .htmx-swapping (static/css/sv-motion.css) before the new one #}
+{# fades in. The body's own load trigger and the live refresh keep no delay. #}
 <div class="oc-tabs" id="ocTabs" role="tablist">
     <button type="button"
             class="oc-tab {% if active_tab == 'live' %}active{% endif %}"
             data-tab="live" data-ws-events="fill,gate_reject,position_change,regime_shift" role="tab"
             hx-get="{% url 'command_tab_live' %}"
-            hx-target="#ocTabBody" hx-swap="innerHTML"
+            hx-target="#ocTabBody" hx-swap="innerHTML swap:120ms"
             hx-push-url="?tab=live">
         <span class="oc-tab-head">
             <span class="oc-tab-glyph">◉</span>
@@ -81,7 +84,7 @@
             class="oc-tab {% if active_tab == 'portfolio' %}active{% endif %}"
             data-tab="portfolio" data-ws-events="position_change,fill,daily_snapshot" role="tab"
             hx-get="{% url 'command_tab_portfolio' %}"
-            hx-target="#ocTabBody" hx-swap="innerHTML"
+            hx-target="#ocTabBody" hx-swap="innerHTML swap:120ms"
             hx-push-url="?tab=portfolio">
         <span class="oc-tab-head">
             <span class="oc-tab-glyph">▦</span>
@@ -97,7 +100,7 @@
             class="oc-tab {% if active_tab == 'history' %}active{% endif %}"
             data-tab="history" data-ws-events="fill" role="tab"
             hx-get="{% url 'command_tab_history' %}"
-            hx-target="#ocTabBody" hx-swap="innerHTML"
+            hx-target="#ocTabBody" hx-swap="innerHTML swap:120ms"
             hx-push-url="?tab=history">
         <span class="oc-tab-head">
             <span class="oc-tab-glyph">▣</span>
@@ -113,7 +116,7 @@
             class="oc-tab {% if active_tab == 'bots' %}active{% endif %}"
             data-tab="bots" data-ws-events="bot_heartbeat,fill" role="tab"
             hx-get="{% url 'command_tab_bots' %}"
-            hx-target="#ocTabBody" hx-swap="innerHTML"
+            hx-target="#ocTabBody" hx-swap="innerHTML swap:120ms"
             hx-push-url="?tab=bots">
         <span class="oc-tab-head">
             <span class="oc-tab-glyph">⌬</span>

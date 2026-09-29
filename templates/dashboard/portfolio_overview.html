@@ -124,7 +124,8 @@ honest.{% endcomment %}
 {% endif %}
 
 {# ── 3. Allocation donut + Top contributors/detractors ──────── #}
-<div class="grid grid-2" style="gap:14px;margin-bottom:18px;">
+{# data-sv-reveal: the motion layer rises this grid's cards as the page is scrolled (static/js/sv-motion.js); the donut card excludes itself. #}
+<div class="grid grid-2" style="gap:14px;margin-bottom:18px;" data-sv-reveal>
     <div class="card">
         <div class="card-header"><span class="card-title">Allocation</span></div>
         <div data-sv-live="pf-alloc">
@@ -246,7 +247,7 @@ trade and this page would go on showing nothing until they reloaded it.
 
 {% if not live_only %}
 {# ── 5. Risk limits + recent snapshots ───────────────────────── #}
-<div class="grid grid-2" style="gap:14px;">
+<div class="grid grid-2" style="gap:14px;" data-sv-reveal>
     <div class="card">
         <div class="card-header"><span class="card-title">Risk limits</span></div>
         <ul class="kv-list">
