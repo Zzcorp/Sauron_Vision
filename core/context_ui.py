@@ -70,7 +70,17 @@ def ui_extras(request):
         "ui_watchlist": [],
         "ui_metrics": {},
         "ui_headband": [],
+        # The handover card (core/passation.py): on every logged-in page
+        # from the hour the letter opens, for the length of the watch.
+        "passation_card": False,
     }
+    try:
+        from core import passation
+        user = getattr(request, "user", None)
+        if user is not None and user.is_authenticated:
+            data["passation_card"] = passation.card_due()
+    except Exception:
+        pass
     # ── Watchlist (with live quotes + 12-bar sparkline) ──
     try:
         from instruments.models import Instrument

@@ -125,7 +125,9 @@
             <form method="post" action="{% url 'login' %}">
                 {% csrf_token %}
                 <div class="form-group"><label for="id_username">Operator ID</label><input type="text" name="username" id="id_username" autofocus autocomplete="username" required></div>
-                <div class="form-group"><label for="id_password">Access Key</label><input type="password" name="password" id="id_password" autocomplete="current-password" required></div>
+                <div class="form-group"><label for="id_password">Access Key</label>
+                    <div class="key-wrap"><input type="password" name="password" id="id_password" autocomplete="current-password" required>{% include "registration/_key_eye.html" with target="id_password" what="access key" %}</div>
+                </div>
                 <input type="hidden" name="next" value="{{ next }}">
                 <button type="submit" class="btn-login">Initialize Session</button>
             </form>

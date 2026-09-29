@@ -954,13 +954,18 @@ class TheProvenMultipliersTests(SimpleTestCase):
     for multipliers: class -> the highest multiplier whose demo
     fill-and-close is pinned as test_proof_<class>_at_<L>x."""
 
-    def test_the_table_ships_empty_and_every_class_reads_one(self):
+    def test_the_table_carries_forex_at_five_and_every_other_class_reads_one(self):
+        """Empty on arrival; forex 5 since 2026-09-28 (the demo EURUSD
+        round trip at 5x, tests/test_etoro_client.py
+        test_proof_forex_at_5x). Every other class still reads 1."""
         from bot_program.asset_engine.base import (ETORO_PROVEN_LEVERAGE,
                                                    ORDER_LEVERAGE_CEILING,
                                                    proven_leverage)
-        self.assertEqual(ETORO_PROVEN_LEVERAGE, {})
+        self.assertEqual(ETORO_PROVEN_LEVERAGE, {"forex": 5})
+        self.assertEqual(proven_leverage("forex"), 5)
         for cls in ORDER_LEVERAGE_CEILING:
-            self.assertEqual(proven_leverage(cls), 1, cls)
+            if cls != "forex":
+                self.assertEqual(proven_leverage(cls), 1, cls)
 
     @staticmethod
     def _unpinned(table, src):
@@ -972,9 +977,9 @@ class TheProvenMultipliersTests(SimpleTestCase):
                       if (cls, str(lev)) not in pinned)
 
     def test_every_entry_has_its_pinned_proof_under_its_ceiling(self):
-        """Empty today, so nothing is unpinned — the point: the first
-        value that lands without its proof fails here, in the same
-        commit."""
+        """forex 5 is pinned (test_proof_forex_at_5x) and sits under the
+        forex ceiling of 20 — the point: the first value that lands
+        without its proof fails here, in the same commit."""
         from bot_program.asset_engine.base import (ETORO_PROVEN_LEVERAGE,
                                                    ORDER_LEVERAGE_CEILING)
         src = (Path(settings.BASE_DIR) / "tests"
