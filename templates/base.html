@@ -99,6 +99,9 @@
     {# The motion layer (2026-09-29): scroll reveal, swap fades, page leave, panel pop-ins, count-ups. After the tour sheet, before the phone tier, which stays the last shell sheet. #}
     <link rel="stylesheet" href="{% static 'css/sv-motion.css' %}">
     <script src="{% static 'js/sv-motion.js' %}" defer></script>
+    {# The activity drawer under the signals rail (2026-09-29). After the motion layer, before the phone tier, whose one-line rule hides it at 768px and below. #}
+    <link rel="stylesheet" href="{% static 'css/sv-activity.css' %}">
+    <script src="{% static 'js/sv-activity.js' %}" defer></script>
     {# The phone tier (2026-09-28): the last shell sheet, so at 768px and below it overrides the sheets above; a page's own extra_css still loads after it. #}
     <link rel="stylesheet" href="{% static 'css/sv-responsive.css' %}">
 {% block extra_css %}{% endblock %}
@@ -1516,6 +1519,9 @@
         </div>
     </div>
 </div>
+
+{# The activity drawer (2026-09-29): Sauron's live log, tucked under the rail above with only its tab showing. Staff only — the feed is. #}
+{% if user.is_staff %}{% include "_partials/activity_drawer.html" %}{% endif %}
 
 <script>
 /* Phase 62 — render sparkline paths from data-points attrs. Dimensions

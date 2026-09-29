@@ -1,0 +1,47 @@
+{% comment %}
+THE ACTIVITY DRAWER (2026-09-29). The operator, 2026-09-28: "pour le système
+de print des logs de détail de l'activité de Sauron, un bandeau latéral
+vertical qui se place sous le bandeau des signaux et watchlist actuel, avec
+juste un bout dépassant."
+
+A vertical drawer tucked UNDER the signals rail (z-index --z-drawer, one rung
+below --z-rail) with only its tab showing at the rail's left edge. The tab
+slides it out to the left of the rail; the tab again, the close button or
+Escape slides it back under. Staff only: base.html includes this inside an
+if on user.is_staff, so the feed URL below is never printed for anyone
+else, and dashboard.views_activity answers 403 to anyone who asks without
+it.
+
+The log is dashboard/activity_feed.py (trades, gate refusals, agent calls,
+pipeline runs, bot ticks, the bell), read by static/js/sv-activity.js: on
+first open, then every 20 s while open and the tab is visible, and 800 ms
+after a fill, a refusal or an alert on the shared sv:eye-event. Closed, it
+does not poll; the tab's badge counts what the eye announced meanwhile.
+Styles: static/css/sv-activity.css. Hidden on phones by the one-line rule
+in static/css/sv-responsive.css.
+{% endcomment %}
+<aside class="sv-activity" id="svActivity" data-feed-url="{% url 'activity_feed' %}" aria-label="Sauron activity">
+    <button type="button" class="sv-activity-tab" id="svActivityTab" aria-expanded="false" aria-controls="svActivityPanel" title="Sauron's activity log">
+        <span class="sv-activity-tab-label">ACTIVITY</span>
+        <span class="sv-activity-badge" id="svActivityBadge" hidden>0</span>
+    </button>
+    <div class="sv-activity-panel" id="svActivityPanel" role="region" aria-labelledby="svActivityTitle" inert>
+        <div class="sv-activity-head">
+            <span class="sv-activity-dot" id="svActivityDot" aria-hidden="true"></span>
+            <span class="sv-activity-title" id="svActivityTitle">SAURON ACTIVITY</span>
+            <span class="sv-activity-stamp" id="svActivityStamp"></span>
+            <button type="button" class="sv-activity-close" id="svActivityClose" aria-label="Close the activity log" title="Close (Esc)">&times;</button>
+        </div>
+        <div class="sv-activity-chips" role="toolbar" aria-label="Show only">
+            <button type="button" class="sv-activity-chip" data-filter="all" aria-pressed="true">All</button>
+            <button type="button" class="sv-activity-chip" data-filter="trade" aria-pressed="false">Trades</button>
+            <button type="button" class="sv-activity-chip" data-filter="gate" aria-pressed="false">Gates</button>
+            <button type="button" class="sv-activity-chip" data-filter="ai" aria-pressed="false">AI</button>
+            <button type="button" class="sv-activity-chip" data-filter="pipeline" aria-pressed="false">Pipelines</button>
+            <button type="button" class="sv-activity-chip" data-filter="bot" aria-pressed="false">Bots</button>
+            <button type="button" class="sv-activity-chip" data-filter="alert" aria-pressed="false">Alerts</button>
+        </div>
+        <div class="sv-activity-state" id="svActivityState"><div class="sv-loading">Reading Sauron's log</div></div>
+        <ol class="sv-activity-list" id="svActivityList" aria-live="polite"></ol>
+    </div>
+</aside>

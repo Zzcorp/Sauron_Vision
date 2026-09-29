@@ -63,9 +63,16 @@ class ZIndexLadderTests(TestCase):
         self.base = _read("static", "css", "sauron.css")
 
     def test_the_ladder_is_declared_once_as_tokens(self):
+        import re
         for token in ("--z-hovercard", "--z-menu", "--z-panel", "--z-banner",
-                      "--z-backdrop", "--z-dialog", "--z-toast", "--z-sidebar"):
+                      "--z-backdrop", "--z-dialog", "--z-toast", "--z-sidebar",
+                      "--z-chrome", "--z-drawer", "--z-rail"):
             self.assertIn(token, self.css)
+        # The activity drawer (2026-09-29) is tucked UNDER the signals rail
+        # and slides out over the headbands: its rung is between the two.
+        z = {k: int(v) for k, v in re.findall(r"--z-([a-z-]+):\s*(\d+)", self.css)}
+        self.assertLess(z["chrome"], z["drawer"])
+        self.assertLess(z["drawer"], z["rail"])
 
     def test_the_maximum_integer_hack_is_retired(self):
         """.sr-popup declared z-index 2147483000 and still painted below the

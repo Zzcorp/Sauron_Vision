@@ -105,6 +105,7 @@ from .views_command import (
     command_tab_history, command_tab_bots, command_tab_metrics,
 )
 from .views_day import day_live
+from .views_activity import activity_feed
 from .views_bot_performance import bot_performance_dashboard
 from .views_bot_backtest import (
     bot_backtest_list, bot_backtest_run, bot_backtest_detail,
@@ -137,6 +138,10 @@ urlpatterns = [
     # strip on /command/. Under /api/ so the idle lock answers a locked
     # tab's poll with 423 instead of a redirect.
     path("api/day/live/", day_live, name="day_live"),
+    # Sauron's activity log (2026-09-29): trades, gate refusals, agent
+    # calls, pipeline runs, bot ticks and the bell, newest first, for the
+    # staff drawer under the signals rail. Under /api/ for the same 423.
+    path("api/activity/feed/", activity_feed, name="activity_feed"),
 
     # ── Frontend Pages ──────────────────────────────────────
     path("", views.dashboard, name="dashboard"),
