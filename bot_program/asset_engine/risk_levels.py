@@ -341,6 +341,54 @@ def cost_to_charge(cfg, symbol: str, tick=None) -> dict:
     }
 
 
+# ── what the venue charges beside the spread ────────────────────────────
+# The table and the quote above both miss a fee a venue charges per order
+# that no quote shows. eToro's, MEASURED:
+#   * crypto: 1% of the notional on EACH side (the real BTC round trip,
+#     2026-09-26: fees 0.17 on 16.83 to open, 0.33 for the round trip).
+#     The table charged 10 bps for the whole round trip; the venue takes
+#     about 200.
+#   * a stock at 1x (settlementType REAL): 1.00 USD per order on EACH side,
+#     whatever the size (the demo AAPL round trips, 2026-09-29: fees 1.0 on
+#     4 units = 1347.52 and on 0.05 units = 16.86; the 0.05 round trip cost
+#     1.98). On a 30 USD position that is 6.7% of the notional.
+# Forex, indices, commodities and the ETF were measured at 0.00-0.13 in
+# fees: nothing here for them. Charged on LIVE eToro entries at the final
+# size (AssetBot._venue_fee_refusal), on top of what cost_to_charge charges,
+# because a flat fee is a fraction only once the notional is known.
+ETORO_CRYPTO_FEE_PER_SIDE = 0.01
+ETORO_STOCK_FEE_USD_PER_SIDE = 1.00
+
+
+def venue_fee_fraction(carrier: str, instrument_class: str,
+                       notional: float) -> tuple:
+    """(round-trip fee as a fraction of notional, the words), or (0.0, "").
+
+    `carrier` is capabilities.adapter_key(client); `instrument_class` is the
+    INSTRUMENT's class, the key the proof gate uses. A crypto order at a
+    multiplier above 1 is a CFD, whose fee eToro has not been measured
+    charging; the 1% is charged there too, the stricter reading of
+    unmeasured."""
+    if (carrier or "") != "etoro":
+        return 0.0, ""
+    if instrument_class == "crypto":
+        return (2 * ETORO_CRYPTO_FEE_PER_SIDE,
+                "eToro takes 1% of the notional on each side of a crypto "
+                "trade")
+    if instrument_class == "stock":
+        try:
+            notional = float(notional)
+        except (TypeError, ValueError):
+            return 0.0, ""
+        if notional <= 0:
+            return 0.0, ""
+        fee = 2 * ETORO_STOCK_FEE_USD_PER_SIDE
+        return (fee / notional,
+                f"eToro takes {ETORO_STOCK_FEE_USD_PER_SIDE:.2f} USD on each "
+                f"side of a stock order: {fee:.2f} on {notional:,.2f}")
+    return 0.0, ""
+
+
 def paper_fill_price(cfg, symbol: str, price: float, side: str,
                      *, cost_fraction: float | None = None) -> float:
     """The price a paper order would REALISTICALLY fill at.

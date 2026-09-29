@@ -821,10 +821,20 @@ commodity symbol reads `route=etoro` before its config is enabled.
   SPX500 1 unit, CFD; WHEATUSD as WHEAT.FUT 2 units, CFD — each proven
   "closed" through eToro's transient 500s). The shell client was built
   `env='demo'` with D1's WORLD CHECK; the row stayed live and no box moved.
+  FRACTIONS, measured the same day 12:02 UTC (D2c-1 at two decimals, pinned
+  as test_proof_stock_fraction / _index_fraction / _commodity_fraction):
+  AAPL 0.05, SPX500 0.14 and WHEAT.FUT 1.5 each filled EXACTLY as sent and
+  closed by id — the precondition for `fractional_units_live` (a runtime
+  switch: `manage.py component on fractional_units_live`), which a stock
+  or index config below one whole unit needs. Four-decimal fractions stay
+  unmeasured. FEES eToro takes beside the spread, measured and charged
+  since 2026-09-29 on live eToro entries at the size sent
+  (risk_levels.venue_fee_fraction, AssetBot._venue_fee_refusal): 1% of the
+  notional each side on crypto, 1.00 USD each side on a stock whatever its
+  size (0.05 AAPL's round trip cost 1.98 of 16.86). A trade whose planned
+  move does not cover them sends nothing (cost_filter).
   STILL UNPROVEN: "short" (no eToro SELL has filled, so every SELL is
-  refused), a fractional stock fill (the stock bot floors to whole shares
-  until `fractional_units_live` is ON), and any leverage above 1x but
-  forex's 5x. What the proofs do not lift: an index in
+  refused) and any leverage above 1x but forex's 5x. What the proofs do not lift: an index in
   VENUE_QUOTE_UNMEASURED, a commodity while eToro's commodities box is
   unticked (the router sends it elsewhere), and the 1,000 USD floor per
   order on indices and commodities.

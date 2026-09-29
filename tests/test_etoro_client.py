@@ -1321,6 +1321,52 @@ CLASS_PROOFS = {
 }
 
 
+# ── MEASURED 2026-09-29 12:02 UTC, the same demo sitting's second pass: one
+# FRACTIONAL BUY at 1x per class (deploy/ETORO_DEPARTURE.md §4 D2c-1, at two
+# decimals), closed at once by position id. The legs were sent at the last
+# price x 0.97 / x 1.03 to two decimals and held as sent. AAPL's and
+# WHEAT.FUT's first fill poll answered 404 before the 200 (the lookup not
+# yet indexed); the close proofs met one, one and three 500s.
+CLASS_FRACTION_PROOFS = {
+    "stock": {
+        "symbol": "AAPL", "venue": "AAPL", "iid": 1001, "units": 0.05,
+        "sent": (327.08, 347.32), "held": (327.08, 347.32),
+        "order": 384799082, "position": 3605955721, "close_order": 384842884,
+        "avg": 337.21, "settlement": "REAL", "requested": 16.86,
+        "frozen": 17.86, "total_costs": 1.0, "margin": 16.86,
+        "exposure": 16.8605, "spread": 0.0, "markup": 0.0, "fees": 1.0,
+        "times": ("2026-09-29T12:02:23.097Z", "2026-09-29T12:02:23.187Z",
+                  "2026-09-29T12:02:23.153Z", "2026-09-29T12:02:23.22Z",
+                  "2026-09-29T12:02:25.6696274Z"),
+        "fill_404s": 1, "close_500s": 1, "cash_after_close": 332434.74,
+    },
+    "index": {
+        "symbol": "SPX500", "venue": "SPX500", "iid": 27, "units": 0.14,
+        "sent": (7473.1, 7935.36), "held": (7473.1, 7935.36),
+        "order": 384769398, "position": 3605955732, "close_order": 384823407,
+        "avg": 7704.5, "settlement": "CFD", "requested": 1078.63,
+        "frozen": 1078.63, "total_costs": 0.0, "margin": 1078.63,
+        "exposure": 1078.63, "spread": 0.06, "markup": 0.04, "fees": 0.0,
+        "times": ("2026-09-29T12:02:35.82Z", "2026-09-29T12:02:35.907Z",
+                  "2026-09-29T12:02:35.867Z", "2026-09-29T12:02:35.97Z",
+                  "2026-09-29T12:02:37.2121022Z"),
+        "fill_404s": 0, "close_500s": 1, "cash_after_close": 332434.7,
+    },
+    "commodity": {
+        "symbol": "WHEATUSD", "venue": "WHEAT.FUT", "iid": 97, "units": 1.5,
+        "sent": (668.09, 709.41), "held": (668.09, 709.41),
+        "order": 384799086, "position": 3605955741, "close_order": 384823413,
+        "avg": 689.0, "settlement": "CFD", "requested": 1033.5,
+        "frozen": 1033.5, "total_costs": 0.0, "margin": 1033.5,
+        "exposure": 1033.5, "spread": 0.38, "markup": 3.0, "fees": 0.0,
+        "times": ("2026-09-29T12:02:45.37Z", "2026-09-29T12:02:45.503Z",
+                  "2026-09-29T12:02:45.45Z", "2026-09-29T12:02:45.547Z",
+                  "2026-09-29T12:02:50.8835143Z"),
+        "fill_404s": 1, "close_500s": 3, "cash_after_close": 332434.32,
+    },
+}
+
+
 def _class_lookup(p, state="open"):
     """orders:lookup?orderId= of one 2026-09-29 class proof, verbatim; after
     the close the same body but for state "closed"."""
@@ -1583,15 +1629,17 @@ class TheMeasuredWireTests(SimpleTestCase):
                                first["initialExposureAccountCurrency"],
                                places=1)
 
-    def _class_round_trip(self, token):
+    def _class_round_trip(self, token, proofs=None):
         """One 2026-09-29 class proof through the real adapter over the fake
-        wire: the order on the demo segment, the fill read by orderId, the
-        close by position id proven by the OPEN order through the 500s that
-        close met, the cells after."""
-        p = CLASS_PROOFS[token]
+        wire: the order on the demo segment, the fill read by orderId
+        through the 404s it met first, the close by position id proven by
+        the OPEN order through the 500s that close met, the cells after."""
+        p = (proofs or CLASS_PROOFS)[token]
         order_id, position = str(p["order"]), str(p["position"])
+        fill_404s = p.get("fill_404s", 0)
         t, fake = self._t(
-            [(200, _class_lookup(p, "open"))]
+            [(404, {})] * fill_404s
+            + [(200, _class_lookup(p, "open"))]
             + [(500, {})] * p["close_500s"]
             + [(200, _class_lookup(p, "closed"))],
             routes=[
@@ -1652,8 +1700,10 @@ class TheMeasuredWireTests(SimpleTestCase):
                          ("FILLED", "closed", str(p["close_order"]), order_id))
         self.assertNotIn("executedQty", c, "no units asked, none claimed")
         self.assertNotIn("avgPrice", c, "a close carries no price")
-        self.assertEqual(len(_polls(fake)), 1 + p["close_500s"] + 1,
-                         "the close was proven through the 500s it met")
+        self.assertEqual(len(_polls(fake)),
+                         fill_404s + 1 + p["close_500s"] + 1,
+                         "the fill read through its 404s, the close proven "
+                         "through its 500s")
         self.assertEqual(t.margin_cells()["used_margin"], 0.0)
         for m, url, _k in fake.calls:
             if m == "POST":
@@ -1720,6 +1770,50 @@ class TheMeasuredWireTests(SimpleTestCase):
         still have no measured eToro spelling."""
         r, lk = self._class_round_trip("commodity")
         self.assertEqual(lk["asset"]["symbol"], "WHEAT.FUT")
+
+    def test_proof_stock_fraction(self):
+        """MEASURED ON THE DEMO SEGMENT, 2026-09-29 12:02:23 UTC (§4 D2c-1
+        for a stock): AAPL 0.05 BUY at 1x FILLED as 0.05 exactly
+        (requestedUnits = openingData.units = remainingUnits 0.05), order
+        384799082, avgPrice 337.21, settlementType REAL, requestedAmount
+        16.86, frozenAmount 17.86: the 1.00 fee is FLAT, the same 1.00 as
+        on 4 units (test_proof_stock). Closed by id through one 500; the
+        round trip cost 1.98 of 16.86 — 11.7% of the position, the fee
+        twice. risk_levels.ETORO_STOCK_FEE_USD_PER_SIDE is this number."""
+        r, lk = self._class_round_trip("stock", CLASS_FRACTION_PROOFS)
+        first = lk["positionExecutions"][0]
+        self.assertEqual((lk["requestedUnits"], first["openingData"]["units"],
+                          first["remainingUnits"]), (0.05, 0.05, 0.05))
+        self.assertEqual((first["openingData"]["fees"], lk["totalCosts"]),
+                         (1.0, 1.0), "the same flat 1.00 as on 4 units")
+        from bot_program.asset_engine.risk_levels import (
+            ETORO_STOCK_FEE_USD_PER_SIDE)
+        self.assertEqual(ETORO_STOCK_FEE_USD_PER_SIDE,
+                         first["openingData"]["fees"])
+
+    def test_proof_index_fraction(self):
+        """MEASURED ON THE DEMO SEGMENT, 2026-09-29 12:02:35 UTC: SPX500
+        0.14 BUY at 1x (1078.63 of notional, above the 1000 USD floor)
+        FILLED as 0.14 exactly, order 384769398, avgPrice 7704.5, CFD, the
+        whole notional locked, fees 0.0. Closed by id through one 500; the
+        round trip cost 0.04."""
+        r, lk = self._class_round_trip("index", CLASS_FRACTION_PROOFS)
+        first = lk["positionExecutions"][0]
+        self.assertEqual((lk["requestedUnits"], first["openingData"]["units"],
+                          first["remainingUnits"]), (0.14, 0.14, 0.14))
+        self.assertGreaterEqual(lk["requestedAmount"], 1000.0,
+                                "above eToro's 1000 USD index floor")
+
+    def test_proof_commodity_fraction(self):
+        """MEASURED ON THE DEMO SEGMENT, 2026-09-29 12:02:45 UTC: WHEATUSD
+        as WHEAT.FUT 1.5 BUY at 1x (1033.5 of notional) FILLED as 1.5
+        exactly, order 384799086, avgPrice 689.0, CFD, fees 0.0, markup
+        3.0. Its first fill poll answered 404, its close proof met three
+        500s before "closed"; the round trip cost 0.38."""
+        r, lk = self._class_round_trip("commodity", CLASS_FRACTION_PROOFS)
+        first = lk["positionExecutions"][0]
+        self.assertEqual((lk["requestedUnits"], first["openingData"]["units"],
+                          first["remainingUnits"]), (1.5, 1.5, 1.5))
 
     def test_the_accepted_payload_is_token_int_orderid_and_the_echoed_reference(self):
         t, fake = self._t((200, _measured_lookup()))
