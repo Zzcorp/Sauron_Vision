@@ -2176,8 +2176,12 @@ class ReviewWhatsAppNumberTests(_Base):
         readers = []
         for path in base.rglob("*.py"):
             parts = path.relative_to(base).parts
+            # Hidden directories are not the platform: .claude/worktrees
+            # holds other checkouts of this repository on a developer's
+            # machine, and they are not in CI's.
             if parts[0] in ("tests", "venv", "staticfiles") or \
-                    "migrations" in parts:
+                    "migrations" in parts or \
+                    any(p.startswith(".") for p in parts):
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
             if _re.search(r"\.(?:sms_number|notify_sms)\b", text):
