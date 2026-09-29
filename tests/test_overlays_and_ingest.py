@@ -594,9 +594,11 @@ class DestructiveActionTests(TestCase):
         # scanning or the explanation trips the check it is explaining.
         comments = re.compile(r"/\*.*?\*/|//[^\n]*|\{#.*?#\}|\{%\s*comment.*?endcomment\s*%\}",
                               re.S)
+        # admin_newsletters.html (2026-09-29): sending an edition to every
+        # subscriber cannot be taken back either.
         for tpl in ("admin_dashboard.html", "bot_console.html",
                     "_admin_bots.html", "dashboard.html",
-                    "_profile_credentials.html"):
+                    "_profile_credentials.html", "admin_newsletters.html"):
             code = comments.sub("", _read("templates", "dashboard", tpl))
             code = code.replace("SV.overlay.confirm(", "").replace(
                 "SV.overlay.alert(", "")

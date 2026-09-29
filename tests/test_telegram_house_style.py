@@ -498,9 +498,14 @@ class UserChatTests(_Base):
 # ── T4: the newsletter, the news alert, the strategy proposal ────────────
 
 class PlatformChatTests(_Base):
+    # 2026-09-29: the newsletter no longer posts once to the platform
+    # group. Each subscriber whose channel is Telegram receives it in
+    # their OWN chat (alerts/newsletter_service.py; tests/test_newsletter.py
+    # pins the audience and the ledger); the house style is unchanged.
     def test_the_newsletter_is_lines_not_markdown(self):
         from alerts.models import Newsletter
         from alerts.newsletter_service import send_newsletter
+        _user("nl_reader", chat="4242", channel="telegram")
         nl = Newsletter.objects.create(
             title="Weekly Market Report", status="approved",
             send_email=False, send_telegram=True,
@@ -511,15 +516,19 @@ class PlatformChatTests(_Base):
         with patch("requests.post", return_value=_ok()) as post:
             out = send_newsletter(nl)
         self.assertEqual(out["recipients"], 1)
+        self.assertEqual(len(post.call_args_list), 1)
         p = _payloads(post)[0]
         self.assertHouse(p)
-        self.assertEqual(p["chat_id"], "-100999")
+        self.assertEqual(p["chat_id"], "4242")
+        self.assertNotIn("-100999", str(_payloads(post)))
         self.assertEqual(p["text"].split("\n"), [
             "<b>\U0001F4F0 Sauron Vision · Weekly Market Report</b>",
             "<b>Market Overview</b>",
             "Risk on, rates_up &amp; &lt;volatile&gt;",
             "• item_one now", "• item two",
-            "Read the note (https://sauron.invalid/n/1) today"])
+            "Read the note (https://sauron.invalid/n/1) today",
+            f"Read it on the platform: /newsletters/{nl.pk}/ on the "
+            f"platform"])
 
     def test_markdown_emphasis_comes_off_but_never_inside_a_word(self):
         from alerts.channels.telegram_alert import markdown_lines
@@ -531,8 +540,9 @@ class PlatformChatTests(_Base):
              "chart (https://sauron.invalid/c.png) https://x.io"])
 
     def test_a_refused_newsletter_is_not_counted_and_does_not_raise(self):
-        from alerts.models import Newsletter
+        from alerts.models import Newsletter, NewsletterDelivery
         from alerts.newsletter_service import send_newsletter
+        reader = _user("nl_refused", chat="4343", channel="telegram")
         nl = Newsletter.objects.create(title="W", status="approved",
                                        send_email=False,
                                        content_markdown="x")
@@ -540,6 +550,11 @@ class PlatformChatTests(_Base):
                 self.assertLogs("alerts.channels.telegram_alert", "WARNING"):
             out = send_newsletter(nl)
         self.assertEqual(out["recipients"], 0)
+        self.assertEqual(out["failed"], 1)
+        row = NewsletterDelivery.objects.get(newsletter=nl, user=reader)
+        self.assertEqual((row.channel, row.status, row.attempts),
+                         ("telegram", "failed", 1))
+        self.assertIn("Telegram refused", row.error)
 
     def test_the_news_alert(self):
         from alerts.dispatch import dispatch_news_alert

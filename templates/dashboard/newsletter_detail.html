@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} — Sauron Vision{% endblock %}
+{% block page_title %}✉ THE WEEKLY LETTER{% endblock %}
+
+{% block content %}
+<style>
+.nld { max-width: 760px; }
+.nld-kind { font-family: var(--font-mono); font-size: 11px; letter-spacing: 2px; color: var(--accent); text-transform: uppercase; }
+.nld-title { font-family: var(--font-heading); font-size: 28px; line-height: 1.2; font-weight: 700; color: var(--text-primary); margin: 6px 0 4px; overflow-wrap: anywhere; }
+.nld-date { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); margin-bottom: 18px; }
+.nld-draft { border: 1px solid var(--accent-gold); color: var(--accent-gold); border-radius: var(--radius); padding: 8px 12px; font-size: 12px; margin-bottom: 16px; }
+/* The letter's renderer writes email colours inline (light paper); on
+   the platform the theme's own tokens take over. */
+.nld-body { font-size: 16px; line-height: 1.65; overflow-wrap: anywhere; }
+.nld-body .nl-p, .nld-body .nl-li { color: var(--text-primary) !important; font-size: 16px !important; }
+.nld-body .nl-h2, .nld-body .nl-h3 { color: var(--text-primary) !important; font-family: var(--font-heading); }
+.nld-body .nl-a { color: var(--accent) !important; }
+.nld-body .nl-code, .nld-body .nl-pre { background: var(--bg-void) !important; color: var(--text-secondary) !important; }
+.nld-body .nl-hr { border-top-color: var(--border) !important; }
+.nld-foot { margin-top: 18px; font-size: 12px; color: var(--text-muted); display: flex; gap: 14px; flex-wrap: wrap; }
+.nld-foot a { color: var(--accent); }
+</style>
+
+<div class="card fade-in-up nld">
+    <div class="nld-kind">{{ edition }}</div>
+    <h1 class="nld-title">{{ title }}</h1>
+    <div class="nld-date">{{ date_words }}</div>
+    {% if not published %}<div class="nld-draft">Not sent yet: only staff can open this page ({{ nl.get_status_display }}).</div>{% endif %}
+    <div class="nld-body">{{ body_html }}</div>
+    <div class="nld-foot">
+        <a href="{% url 'newsletter_archive' %}">All editions</a>
+        <a href="{% url 'user_notifications' %}">How you receive it</a>
+        {% if request.user.is_superuser %}<a href="{% url 'admin_newsletters' %}#nl-{{ nl.id }}">Manage</a>{% endif %}
+    </div>
+</div>
+{% endblock %}

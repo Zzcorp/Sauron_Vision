@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="light dark">
+<title>Weekly Letter — Sauron Vision</title>
+<style>
+  :root { --bg: #e9eeeb; --card: #ffffff; --ink: #2b3640; --head: #0e1a14; --muted: #5d6b64; --band: #0b1612; --accent: #00e868; --accent-ink: #06130c; --link: #00753a; --line: #dfe6e2; --bad: #b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0b1110; --card: #121a17; --ink: #d3ddd8; --head: #eef5f1; --muted: #8fa39a; --link: #3cf08a; --line: #23332c; --bad: #ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--ink); font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; display: flex; align-items: flex-start; justify-content: center; padding: 48px 16px; }
+  .box { width: 100%; max-width: 480px; border-radius: 8px; overflow: hidden; background: var(--card); box-shadow: 0 2px 16px rgba(0, 0, 0, 0.08); }
+  .band { background: var(--band); border-top: 4px solid var(--accent); padding: 18px 28px; color: var(--accent); font-weight: 700; letter-spacing: 4px; font-size: 14px; }
+  .body { padding: 26px 28px 28px; }
+  h1 { margin: 0 0 10px; font-size: 22px; line-height: 1.3; color: var(--head); }
+  p { margin: 0 0 14px; font-size: 15px; line-height: 1.6; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .bad { color: var(--bad); }
+  button { appearance: none; border: 0; border-radius: 4px; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 15px; padding: 12px 22px; cursor: pointer; }
+  button:focus-visible { outline: 3px solid var(--link); outline-offset: 2px; }
+  a { color: var(--link); }
+  .foot { border-top: 1px solid var(--line); padding: 14px 28px; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main class="box">
+  <div class="band">SAURON VISION</div>
+  <div class="body">
+    {% if state == "bad" %}
+      <h1 class="bad">This link does not work</h1>
+      <p>The unsubscribe link is incomplete or was altered. Open the link from the letter itself, or sign in and untick &ldquo;Weekly newsletter&rdquo; on your notification settings page.</p>
+      <p><a href="{% url 'user_notifications' %}">Notification settings</a></p>
+    {% elif state == "done" %}
+      <h1>You are unsubscribed</h1>
+      <p>The weekly letter will no longer be sent to {{ email|default:"you" }}. Nothing else changes: your other notifications stay as they were.</p>
+      <p class="muted">Changed your mind? Tick &ldquo;Weekly newsletter&rdquo; again on your <a href="{% url 'user_notifications' %}">notification settings</a> page.</p>
+    {% elif state == "off" %}
+      <h1>You are not subscribed</h1>
+      <p>The weekly letter is already off for {{ email|default:"this account" }}. There is nothing to do.</p>
+      <p class="muted">To receive it again, tick &ldquo;Weekly newsletter&rdquo; on your <a href="{% url 'user_notifications' %}">notification settings</a> page.</p>
+    {% else %}
+      <h1>Stop the weekly letter?</h1>
+      <p>{{ email|default:"This account" }} will no longer receive the Sauron Vision weekly letter. Your other notifications are not affected.</p>
+      <form method="post">
+        <button type="submit">Unsubscribe</button>
+      </form>
+    {% endif %}
+  </div>
+  <div class="foot">Sauron Vision &middot; the weekly letter</div>
+</main>
+</body>
+</html>

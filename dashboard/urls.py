@@ -11,6 +11,8 @@ from .views_profile_modals import (
 )
 from .lock_views import locked_page, session_lock, session_ping, session_unlock
 from .views_livecheck import live_selftest
+from .views_newsletter import (admin_newsletters, newsletter_archive,
+                               newsletter_detail, newsletter_unsubscribe)
 from .views_passation import passation_letter
 from .views_admin_bots import (
     admin_bots_panel, admin_bot_toggle, admin_bot_shadow,
@@ -235,7 +237,14 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     path("admin-dashboard/bulk-toggle/", views.admin_bulk_toggle, name="admin_bulk_toggle"),
     path("admin-dashboard/create-user/", views.admin_create_user, name="admin_create_user"),
     path("admin-dashboard/toggle-market/", views.admin_toggle_market, name="admin_toggle_market"),
-    path("admin-dashboard/newsletters/", views.admin_newsletters, name="admin_newsletters"),
+    path("admin-dashboard/newsletters/", admin_newsletters, name="admin_newsletters"),
+    # The weekly letter (2026-09-29, dashboard/views_newsletter.py): the
+    # archive for signed-in readers, and the one-click unsubscribe every
+    # letter carries (no login: the signed token is the authority).
+    path("newsletters/", newsletter_archive, name="newsletter_archive"),
+    path("newsletters/<int:pk>/", newsletter_detail, name="newsletter_detail"),
+    path("newsletter/unsubscribe/<str:token>/", newsletter_unsubscribe,
+         name="newsletter_unsubscribe"),
 
     # ── Admin HQ Console: run-now endpoints ───────────────────
     path("admin-dashboard/run/signal-scan/", run_signal_scan, name="hq_run_signal_scan"),

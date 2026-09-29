@@ -32,7 +32,23 @@ class AlertRule(models.Model):
 
 
 class Newsletter(models.Model):
-    """Admin-created newsletter for distribution."""
+    """One edition of the weekly letter (2026-09-29).
+
+    ONE WEEKLY LETTER. The Saturday weekly review (ai_agents.tasks.
+    generate_weekly_review) writes the edition, READY ("ai_generated")
+    with `scheduled_for` set to the next Sunday 08:00 Europe/Paris, and
+    tells the staff; alerts.tasks.send_due_newsletters sends it then
+    unless it was cancelled. An ad-hoc edition comes from the admin page
+    ("Generate with AI", a Celery task: "generating" until it lands).
+    "monthly" stays a choice so old rows render; nothing makes one now.
+
+    The send (alerts.newsletter_service.send_newsletter, run by
+    alerts.tasks.send_newsletter_task) holds the row in "sending" under
+    a lease (`send_started_at`), records every recipient in
+    NewsletterDelivery, and ends "sent" when at least one delivery went
+    out, "failed" when none did. `last_error` is what went wrong, said
+    on the admin page.
+    """
     FREQ_CHOICES = [
         ("weekly", "Weekly"),
         ("monthly", "Monthly"),
@@ -40,15 +56,26 @@ class Newsletter(models.Model):
     ]
     STATUS_CHOICES = [
         ("draft", "Draft"),
-        ("ai_generated", "AI Generated — Pending Review"),
+        ("generating", "Generating"),
+        ("ai_generated", "Ready"),
         ("approved", "Approved"),
+        ("sending", "Sending"),
         ("sent", "Sent"),
         ("failed", "Failed"),
+        ("cancelled", "Cancelled"),
     ]
 
     title = models.CharField(max_length=200)
     frequency = models.CharField(max_length=10, choices=FREQ_CHOICES, default="weekly")
     status = models.CharField(max_length=15, choices=STATUS_CHOICES, default="draft")
+    # When send_due_newsletters sends it (READY or APPROVED only). None:
+    # it waits for "Send now" or a reschedule.
+    scheduled_for = models.DateTimeField(null=True, blank=True, db_index=True)
+    # The send's lease: set when a worker claims the edition, refreshed
+    # after every batch, cleared when the run ends. A "sending" row whose
+    # lease is older than SEND_LEASE_MINUTES was abandoned and is resumed.
+    send_started_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=500, blank=True)
 
     # Content
     content_markdown = models.TextField(blank=True)
@@ -76,6 +103,51 @@ class Newsletter(models.Model):
 
     def __str__(self):
         return f"[{self.status}] {self.title}"
+
+    @property
+    def archive_path(self) -> str:
+        return f"/newsletters/{self.pk}/"
+
+
+class NewsletterDelivery(models.Model):
+    """One recipient of one edition on one channel: the send's ledger.
+
+    Created "pending" (or "skipped", with the reason in `error`) when the
+    send builds its audience; each attempt counts in `attempts`; a
+    delivery that went out is "sent" and is never sent again. A failed
+    one is retried by the next send_due pass until MAX_ATTEMPTS.
+    """
+    CHANNELS = [("email", "Email"), ("telegram", "Telegram")]
+    STATUSES = [
+        ("pending", "Pending"),
+        ("sent", "Sent"),
+        ("failed", "Failed"),
+        ("skipped", "Skipped"),
+    ]
+    MAX_ATTEMPTS = 3
+
+    newsletter = models.ForeignKey(Newsletter, on_delete=models.CASCADE,
+                                   related_name="deliveries")
+    user = models.ForeignKey(User, on_delete=models.CASCADE,
+                             related_name="newsletter_deliveries")
+    channel = models.CharField(max_length=10, choices=CHANNELS)
+    status = models.CharField(max_length=10, choices=STATUSES,
+                              default="pending")
+    attempts = models.PositiveSmallIntegerField(default=0)
+    # Scrubbed (core.secret_scrub) and cut at 500: an SMTP answer can
+    # quote the account it logged in with.
+    error = models.CharField(max_length=500, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["newsletter_id", "user_id"]
+        unique_together = [("newsletter", "user", "channel")]
+        indexes = [models.Index(fields=["newsletter", "status"])]
+
+    def __str__(self):
+        return (f"{self.newsletter_id} → {self.user_id} "
+                f"[{self.channel}/{self.status}]")
 
 
 class UserNotificationPrefs(models.Model):

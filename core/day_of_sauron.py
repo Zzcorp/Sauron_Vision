@@ -122,6 +122,9 @@ STAGE_OF = {
     "component-digest": ("tell", "the component digest"),
     "send-eod-digest": ("tell", "the end-of-day digest"),
     "daily-market-commentary": ("tell", "the daily commentary"),
+    # Not "when one is due": tests/test_day_of_sauron.py refuses a count
+    # word in a label ("one" reads as a typed number).
+    "send-due-newsletters": ("tell", "the newsletter, when an edition is due"),
     # ── LEARN: the night and the weekend ────────────────────────────────
     "investigate-decaying-rules": ("learn", "decaying rules investigated"),
     # The night's governance and grading, not the tick's sizing (review,

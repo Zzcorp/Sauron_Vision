@@ -6,24 +6,71 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# ── The weekly letter (2026-09-29; alerts/newsletter_service.py) ─────────
+# auto_generate_newsletter (a "Monthly Market Report" nobody scheduled)
+# is gone: the Saturday weekly review is the week's edition, and an
+# ad-hoc one is written by generate_newsletter_task, queued by the admin
+# page instead of run inside its POST.
+
 @shared_task
-def auto_generate_newsletter(frequency="weekly"):
-    """Auto-generate a newsletter with AI."""
+def generate_newsletter_task(newsletter_id):
+    """Write an ad-hoc edition with the model. The row is "generating"
+    until this lands: READY with its content, or "failed" with the
+    reason on the admin page. Routed to the ai queue (config/celery.py)."""
     from alerts.models import Newsletter
     from alerts.newsletter_service import generate_newsletter_with_ai
 
-    title = f"{'Weekly' if frequency == 'weekly' else 'Monthly'} Market Report"
-    nl = Newsletter.objects.create(
-        title=title,
-        frequency=frequency,
-        send_telegram=True,
-        send_email=True,
-        status="draft",
-    )
-    success = generate_newsletter_with_ai(nl, frequency)
-    if success:
-        logger.info(f"Newsletter '{title}' generated — awaiting admin review")
-    return {"status": "generated" if success else "failed", "id": nl.id}
+    nl = Newsletter.objects.filter(pk=newsletter_id).first()
+    if nl is None or nl.status != "generating":
+        return {"status": "skipped",
+                "reason": "gone" if nl is None else f"status {nl.status}"}
+    ok = generate_newsletter_with_ai(nl)
+    return {"status": "generated" if ok else "failed", "id": nl.pk}
+
+
+@shared_task
+def send_newsletter_task(newsletter_id, scheduled=False):
+    """Send one edition (newsletter_service.send_newsletter): the ledger,
+    the batches, the retries. `scheduled`: queued by send_due_newsletters,
+    so it sends only an edition still due; the admin's "Send now" queues
+    it without. Routed to the slow queue (config/celery.py): a thousand
+    SMTP round trips must not sit in front of the quote poller. Not
+    behind the newsletter_send switch: "Send now" is the operator's own
+    decision; the switch governs what goes out on a schedule."""
+    from alerts.models import Newsletter
+    from alerts.newsletter_service import send_newsletter
+
+    nl = Newsletter.objects.filter(pk=newsletter_id).first()
+    if nl is None:
+        return {"status": "skipped", "reason": "gone"}
+    return send_newsletter(nl, scheduled=scheduled)
+
+
+@shared_task
+@guarded_task("newsletter_send")
+def send_due_newsletters():
+    """Every 15 min: queue the send of every edition whose time has come
+    (READY or APPROVED with scheduled_for passed) and the retries due
+    ("sending" with a released or abandoned lease). Light: it queues
+    send_newsletter_task on the slow queue and returns. Behind the
+    newsletter_send switch, OFF on arrival like everything that sends to
+    people: after the deploy, `manage.py component on newsletter_send`."""
+    from alerts.newsletter_service import due_newsletter_ids
+
+    due = due_newsletter_ids()
+    queued = 0
+    for pk in due:
+        try:
+            send_newsletter_task.delay(pk, scheduled=True)
+            queued += 1
+        except Exception as e:  # noqa: BLE001 — the next pass tries again
+            logger.warning("[newsletter] the send of %s could not be "
+                           "queued: %s", pk, e)
+    if due and queued < len(due):
+        return {"status": "error",
+                "error": f"{len(due) - queued} of {len(due)} due editions "
+                         f"could not be queued"}
+    return {"status": "ok", "due": len(due), "queued": queued}
 
 
 @shared_task

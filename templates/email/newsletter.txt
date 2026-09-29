@@ -1,0 +1,15 @@
+{% autoescape off %}SAURON VISION · {{ edition|upper }}
+
+{{ title }}
+{{ date_words }}
+
+{{ body_text }}
+{% if archive_url %}
+Read it on the platform: {{ archive_url }}
+{% endif %}
+--
+You receive this {{ edition }} because "Weekly newsletter" is on in your {{ brand }} notification settings, with email as your channel.
+{% if settings_url %}Notification settings: {{ settings_url }}
+{% endif %}{% if unsubscribe_url %}Unsubscribe in one click: {{ unsubscribe_url }}
+{% else %}To stop receiving it, untick "Weekly newsletter" on the Notification settings page of the platform.
+{% endif %}{% endautoescape %}

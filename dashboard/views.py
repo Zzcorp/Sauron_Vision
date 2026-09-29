@@ -5143,71 +5143,8 @@ def admin_toggle_market(request):
     return redirect("admin_dashboard")
 
 
-@login_required
-def admin_newsletters(request):
-    """Newsletter management page."""
-    if not request.user.is_superuser:
-        from django.http import HttpResponseForbidden
-        return HttpResponseForbidden()
-
-    from alerts.models import Newsletter
-    from django.contrib import messages
-
-    if request.method == "POST":
-        action = request.POST.get("action", "")
-
-        if action == "create":
-            nl = Newsletter.objects.create(
-                title=request.POST.get("title", "Weekly Report"),
-                frequency=request.POST.get("frequency", "weekly"),
-                send_telegram="send_telegram" in request.POST,
-                send_email="send_email" in request.POST,
-                send_whatsapp="send_whatsapp" in request.POST,
-                created_by=request.user,
-            )
-            # Auto-generate with AI
-            from alerts.newsletter_service import generate_newsletter_with_ai
-            generate_newsletter_with_ai(nl, nl.frequency)
-            messages.success(request, f"Newsletter '{nl.title}' generated. Review before sending.")
-
-        elif action == "approve":
-            nl_id = request.POST.get("newsletter_id")
-            nl = Newsletter.objects.get(id=nl_id)
-            nl.status = "approved"
-            nl.save()
-            messages.success(request, f"Newsletter '{nl.title}' approved.")
-
-        elif action == "send":
-            nl_id = request.POST.get("newsletter_id")
-            nl = Newsletter.objects.get(id=nl_id)
-            from alerts.newsletter_service import send_newsletter
-            result = send_newsletter(nl)
-            if "error" in result:
-                messages.error(request, result["error"])
-            else:
-                messages.success(request, f"Newsletter sent to {result['recipients']} recipients.")
-
-        elif action == "edit":
-            nl_id = request.POST.get("newsletter_id")
-            nl = Newsletter.objects.get(id=nl_id)
-            nl.content_markdown = request.POST.get("content", nl.content_markdown)
-            nl.title = request.POST.get("title", nl.title)
-            nl.save()
-            messages.success(request, "Newsletter updated.")
-
-        elif action == "delete":
-            nl_id = request.POST.get("newsletter_id")
-            Newsletter.objects.filter(id=nl_id).delete()
-            messages.success(request, "Newsletter deleted.")
-
-        from django.shortcuts import redirect
-        return redirect("admin_newsletters")
-
-    newsletters = Newsletter.objects.all()[:30]
-    return render(request, "dashboard/admin_newsletters.html", {
-        "page_id": "admin_newsletters",
-        "newsletters": newsletters,
-    })
+# admin_newsletters moved to dashboard/views_newsletter.py (2026-09-29),
+# with the archive and the unsubscribe page: the weekly letter's pages.
 
 
 @login_required

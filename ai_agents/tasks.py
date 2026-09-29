@@ -733,7 +733,6 @@ def generate_weekly_review():
     from portfolio.models import PortfolioSnapshot
     from scraping.models import NewsArticle
     from market_data.models import EconomicEvent
-    from alerts.models import Newsletter
     from ai_agents.agents.weekly_reviewer import WeeklyReviewerAgent
 
     logger.info("Generating AI weekly review")
@@ -805,19 +804,27 @@ def generate_weekly_review():
                                       extract_calls(review_text))
     week_label = now.strftime("Week of %d %b %Y")
 
-    Newsletter.objects.create(
-        title=f"Sauron Vision Weekly Review — {week_label}",
-        frequency="weekly",
-        status="ai_generated",
-        content_markdown=review_text,
-        ai_prompt=f"Weekly review for {week_label}. "
-                  f"{len(snapshots)} portfolio snapshots, {len(signals)} signals, "
-                  f"{len(strategies)} strategies.",
-    )
+    # THE REVIEW IS THE WEEK'S LETTER (2026-09-29). It used to land as an
+    # ai_generated row nobody was told about. weekly_draft makes it the
+    # edition: READY, scheduled for the next Sunday 08:00 Paris (sent by
+    # alerts.tasks.send_due_newsletters unless cancelled), any older
+    # waiting weekly edition cancelled, and the staff told at once, on the
+    # bell and on Telegram, when it goes out and where to read, edit or
+    # cancel it. generate_monday_plan reads this row's content as before.
+    from alerts.newsletter_service import weekly_draft
+    newsletter, announced = weekly_draft(
+        review_text, now=now,
+        prompt=f"Weekly review for {week_label}. "
+               f"{len(snapshots)} portfolio snapshots, {len(signals)} signals, "
+               f"{len(strategies)} strategies.")
 
     return {
         "status": "success",
         "week": week_label,
+        "newsletter_id": newsletter.pk,
+        "scheduled_for": (newsletter.scheduled_for.isoformat()
+                          if newsletter.scheduled_for else None),
+        "staff_told": announced,
         "snapshots": len(snapshots),
         "strategies": len(strategies),
         "signals": len(signals),
@@ -1083,11 +1090,13 @@ def generate_monday_plan():
         .values("title", "country", "datetime", "impact", "forecast", "currency_affected")
     )
 
-    # Last weekly review newsletter (most recent ai_generated or approved)
+    # Last weekly review newsletter: the Saturday edition, whether it is
+    # still waiting, approved, going out (its retries run in "sending",
+    # 2026-09-29) or sent. A cancelled or failed row is not read.
     last_review = (
         Newsletter.objects.filter(
             frequency="weekly",
-            status__in=["ai_generated", "approved", "sent"],
+            status__in=["ai_generated", "approved", "sending", "sent"],
         )
         .order_by("-created_at")
         .first()

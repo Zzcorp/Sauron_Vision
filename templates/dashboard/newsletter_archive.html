@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Weekly Letter — Sauron Vision{% endblock %}
+{% block page_title %}✉ THE WEEKLY LETTER{% endblock %}
+
+{% block content %}
+<style>
+.nla-list { list-style: none; margin: 0; padding: 0; }
+.nla-item { border-top: 1px solid var(--border); }
+.nla-item:first-child { border-top: 0; }
+.nla-link { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 14px 4px; color: var(--text-primary); text-decoration: none; flex-wrap: wrap; }
+.nla-link:hover .nla-title { color: var(--accent); }
+.nla-title { font-family: var(--font-heading); font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
+.nla-when { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.nla-kind { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; color: var(--text-secondary); text-transform: uppercase; margin-right: 8px; }
+</style>
+
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <p style="color:var(--text-secondary);font-size:0.95rem;line-height:1.6;margin:0;">
+        Every edition that went out, newest first. The weekly letter is the Saturday review,
+        sent on Sunday morning to everyone who keeps &ldquo;Weekly newsletter&rdquo; on, by email or on
+        Telegram, as their profile says. <a href="{% url 'user_notifications' %}" style="color:var(--accent);">Change how you receive it</a>.
+    </p>
+</div>
+
+<div class="card fade-in-up delay-1">
+    <div class="card-header"><span class="card-title">Editions</span></div>
+    {% if items %}
+    <ul class="nla-list">
+        {% for item in items %}
+        <li class="nla-item">
+            <a class="nla-link" href="{% url 'newsletter_detail' item.nl.id %}">
+                <span><span class="nla-kind">{{ item.edition }}</span><span class="nla-title">{{ item.title }}</span></span>
+                <span class="nla-when">{{ item.date_words }}</span>
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="empty-state" style="padding:30px;"><p>NO EDITION HAS GONE OUT YET</p><p class="empty-sub">The first one arrives on a Sunday morning.</p></div>
+    {% endif %}
+</div>
+{% endblock %}

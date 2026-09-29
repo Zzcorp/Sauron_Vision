@@ -49,7 +49,9 @@ LOCKED_KEY = "pin_locked"
 
 # Paths the lock must never sit in front of: the unlock/lock endpoints
 # themselves, every way OUT (logout, login, the wall), infrastructure
-# probes, and static assets. Matched by prefix.
+# probes, and static assets. Matched by prefix. The newsletter's
+# unsubscribe link (2026-09-29) is a way out too: it needs no login, and a
+# locked session clicking it in a letter must not be sent to the PIN.
 EXEMPT_PREFIXES = (
     "/api/session/lock/",
     "/api/session/unlock/",
@@ -61,6 +63,7 @@ EXEMPT_PREFIXES = (
     "/static/",
     "/media/",
     "/favicon",
+    "/newsletter/unsubscribe/",
 )
 
 # The one request that means "a human is still here". Everything else a
