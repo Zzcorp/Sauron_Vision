@@ -40,7 +40,7 @@
   "use strict";
 
   var SAFETY_MS = 2500;      /* everything still hidden is revealed here */
-  var LEAVE_RESET_MS = 2500; /* a leave that never left comes back here */
+  var LEAVE_RESET_MS = 900;  /* a leave that never left (a download, a cancelled navigation) comes back here; a real navigation that outlasts it just shows the page again */
   var STEP_CAP = 8;          /* --sv-i beyond this is one long wait, not a cascade */
   var RV_MS = 550;           /* the sheet's --sv-rv-dur */
   var RV_STEP_MS = 60;       /* the sheet's --sv-rv-step */
@@ -293,8 +293,22 @@
     if (reduce) return;
     var t = e.detail && e.detail.target;
     if (!t || t !== e.target || !t.children) return;
+    /* Born from 0 only for a swap the operator caused (a tab click
+       carries a triggeringEvent) or the target's first fill. The
+       fill-driven refresh of the tab body and the sweep's refresh of a
+       metrics strip carry no triggeringEvent: their new nodes are shown
+       at once and beat .sv-swapped (from .35) instead — a region blinking
+       blank reads as data lost (review, 2026-09-29). */
+    var byHand = !!(e.detail.requestConfig && e.detail.requestConfig.triggeringEvent);
+    var first = !t.hasAttribute('data-sv-motion-seen');
     each(t.children, function (kid) {
-      if (kid.classList && kid.classList.contains('htmx-added')) beat(kid, 'sv-in', 400);
+      if (!kid.classList || !kid.classList.contains('htmx-added')) return;
+      if (byHand || first) {
+        beat(kid, 'sv-in', 400);
+      } else {
+        kid.classList.remove('htmx-added');
+        beat(kid, 'sv-swapped', 400);
+      }
     });
   });
 
@@ -362,12 +376,32 @@
   d.addEventListener('click', onLinkClick);
 
   w.addEventListener('pageshow', function (e) {
-    if (e.persisted) {
-      d.body.classList.remove('sv-leaving');
-      if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = null; }
-    }
+    /* Only a bfcache return. pageshow fires on every load, persisted or
+       not, and revealing here on an ordinary load played every rise
+       off-screen before the operator had scrolled (review, 2026-09-29):
+       on a plain load the observer and the safety timer are in charge. */
+    if (!e.persisted) return;
+    d.body.classList.remove('sv-leaving');
+    if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = null; }
     revealAll();
   });
+
+  /* htmx snapshots the page BEFORE it swaps, so a card still hidden would
+     be saved hidden and, on a history cache hit, restored hidden with the
+     target already marked seen. Strip the motion classes from the
+     snapshot, and reveal whatever an older snapshot brings back. */
+  d.addEventListener('htmx:beforeHistorySave', function (e) {
+    var root = (e.detail && e.detail.historyElt) || d.body;
+    if (!root.querySelectorAll) return;
+    each(root.querySelectorAll('.sv-rv, .sv-in, .sv-swapped'), function (el) {
+      el.classList.remove('sv-rv', 'in', 'sv-in', 'sv-swapped');
+      el.style.removeProperty('--sv-i');
+    });
+    each(root.querySelectorAll('[data-sv-motion-seen]'), function (el) {
+      el.removeAttribute('data-sv-motion-seen');
+    });
+  });
+  d.addEventListener('htmx:historyRestore', function () { revealAll(); });
 
   /* ── go ───────────────────────────────────────────────────────────── */
 

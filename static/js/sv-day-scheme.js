@@ -234,7 +234,20 @@
       h += '<div class="day-next">' + esc(c.next) + '</div>';
       return h;
     }
-    function render(key) {
+    /* The live slice behind a key, as a string, so a poll that changed
+     * nothing under the pointer re-renders nothing (review, 2026-09-29:
+     * every poll replayed the panel's entrance and, through aria-live,
+     * re-read the whole panel to a screen reader once a minute). */
+    var lastSlice = '';
+    function sliceFor(key) {
+      if (!live) return '';
+      var s = key === 'beat' ? live.beat
+        : (live.stages && live.stages[key]) || (live.clusters && live.clusters[key]) || null;
+      try { return JSON.stringify(s); } catch (e) { return ''; }
+    }
+    /* `silent`: a live refresh of the open panel — the text changes in
+     * place, without the entrance replayed under the pointer. */
+    function render(key, silent) {
       var h;
       if (key === 'beat') h = beatHtml();
       else if (ext[key]) h = extHtml(key);
@@ -245,13 +258,13 @@
         h = stageHtml(st);
       }
       if (stamp) h += '<div class="day-stamp">' + esc(stamp) + '</div>';
-      panel.classList.add('day-pre');
+      if (!silent) panel.classList.add('day-pre');
       panel.innerHTML = h;
-      void panel.offsetWidth;
-      panel.classList.remove('day-pre');
+      if (!silent) { void panel.offsetWidth; panel.classList.remove('day-pre'); }
       panel.classList.toggle('day-open', key !== 'beat');
       panel.setAttribute('data-day-key', key);
       current = key;
+      lastSlice = sliceFor(key);
     }
     function light(node) {
       if (hot) hot.classList.remove('day-hot');
@@ -277,19 +290,22 @@
     /* The home page's live layer: per stage a state and a line, per task
      * nothing yet. Re-renders the open panel so the numbers move under the
      * pointer, and paints each node's dot and second line. */
+    var STATES = ['live', 'stale', 'off', 'quiet', 'broken'];
     function setLive(state) {
       live = state || null;
       for (var k in nodes) {
         if (!Object.prototype.hasOwnProperty.call(nodes, k)) continue;
         var nd = nodes[k], lv = live && live.stages && live.stages[k];
-        nd.g.classList.remove('day-live', 'day-stale', 'day-off', 'day-quiet');
+        /* Every state comes off before the new one goes on — a stage that
+         * once read broken must not keep its red once it recovers. */
+        for (var s = 0; s < STATES.length; s++) nd.g.classList.remove('day-' + STATES[s]);
         if (lv) {
-          nd.g.classList.add('day-' + (lv.state || 'quiet'));
+          nd.g.classList.add('day-' + (STATES.indexOf(lv.state) === -1 ? 'quiet' : lv.state));
           nd.l2.textContent = lv.words || nd.l2.textContent;
         }
       }
       if (live && live.beat && live.beat.words) beatSub.textContent = live.beat.words;
-      if (current) render(current);
+      if (current && sliceFor(current) !== lastSlice) render(current, true);
     }
     return { setLive: setLive, render: render, light: light, nodes: nodes, svg: svg, panel: panel };
   }

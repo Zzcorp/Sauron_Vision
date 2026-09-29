@@ -403,6 +403,66 @@ class MotionScriptTests(SimpleTestCase):
         self.assertIn("triggeringEvent", js)
         self.assertIn("sv:live-swapped", js)
 
+    def test_pageshow_reveals_only_on_a_bfcache_return(self):
+        """Review, 2026-09-29: pageshow fires on every load, persisted or
+        not, and an unguarded revealAll() there played every rise
+        off-screen before the operator had scrolled — the scroll reveal
+        never showed on a server-rendered page."""
+        js = _script()
+        handler = js[js.index("w.addEventListener('pageshow'"):js.index("htmx:beforeHistorySave")]
+        self.assertIn("if (!e.persisted) return;", handler)
+        self.assertLess(handler.index("if (!e.persisted) return;"),
+                        handler.index("revealAll();"))
+        self.assertEqual(handler.count("revealAll();"), 1)
+
+    def test_a_refresh_nobody_asked_for_never_blanks_a_region(self):
+        """Review, 2026-09-29: the fill-driven refresh of the tab body and
+        the sweep's refresh of a metrics strip carried .htmx-added, so
+        every data refresh was born from opacity 0. Only a swap with a
+        triggeringEvent (a tab click) or a target's first fill fades from
+        0; the rest beat .sv-swapped, from .35."""
+        js = _script()
+        handler = js[js.index("d.addEventListener('htmx:afterSwap'"):js.index("d.addEventListener('htmx:afterSettle'")]
+        self.assertIn("requestConfig.triggeringEvent", handler)
+        self.assertIn("kid.classList.remove('htmx-added');", handler)
+        self.assertIn("beat(kid, 'sv-swapped', 400);", handler)
+        self.assertIn("beat(kid, 'sv-in', 400);", handler)
+
+    def test_the_history_snapshot_carries_no_hidden_card(self):
+        """Review, 2026-09-29: htmx snapshots the page before it swaps, so
+        a card still hidden was saved hidden with the target marked seen;
+        a history cache hit would restore it invisible."""
+        js = _script()
+        self.assertIn("'htmx:beforeHistorySave'", js)
+        self.assertIn("'htmx:historyRestore'", js)
+        save = js[js.index("'htmx:beforeHistorySave'"):js.index("'htmx:historyRestore'")]
+        self.assertIn("classList.remove('sv-rv', 'in', 'sv-in', 'sv-swapped')", save)
+        self.assertIn("removeAttribute('data-sv-motion-seen')", save)
+
+    def test_a_leave_that_never_left_comes_back_within_a_second(self):
+        """Review, 2026-09-29: a click that turned out to be a download left
+        the page blank for 2.5 s; the reset now runs well under a second,
+        and a real navigation that outlasts it just shows the page again."""
+        js = _script()
+        m = re.search(r"LEAVE_RESET_MS = (\d+);", js)
+        self.assertIsNotNone(m)
+        self.assertLessEqual(int(m.group(1)), 1000)
+
+    def test_every_attachment_link_opts_out_of_the_leave_fade(self):
+        """The views that answer Content-Disposition: attachment are
+        audit_export, tax_lots_export and the PDF report; an anchor to one
+        of them without `download` tripped the page-leave fade (measured:
+        a 2.5 s blank page on every CSV export). The script skips
+        a[download]."""
+        for tpl, name in (("audit_log.html", "audit_export"),
+                          ("tax_lots.html", "tax_lots_export")):
+            src = _read("templates", "dashboard", tpl)
+            tag = re.escape("{% url '" + name + "' %}")
+            anchors = re.findall(r"<a [^>]*" + tag + r"[^>]*>", src)
+            self.assertTrue(anchors, "%s links %s" % (tpl, name))
+            for a in anchors:
+                self.assertIn(" download", a, "%s: %s" % (tpl, a))
+
     def test_every_swapped_in_node_fades_alike(self):
         """Measured 2026-09-29: with the fade as a transition on the node,
         a swapped-in .card appeared in one step (its own transition list

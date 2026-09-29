@@ -492,6 +492,49 @@ class TheStaticFilesTests(SimpleTestCase):
         self.assertNotIn("createElementNS", PAGE.read_text(encoding="utf-8"))
         self.assertIn("createElementNS", RING_JS.read_text(encoding="utf-8"))
 
+    def test_the_ring_takes_every_state_off_before_the_new_one_goes_on(self):
+        """Review, 2026-09-29: setLive stripped four of the five states, so
+        a stage that once read broken kept its red after it recovered."""
+        js = RING_JS.read_text(encoding="utf-8")
+        self.assertIn("var STATES = ['live', 'stale', 'off', 'quiet', 'broken'];", js)
+        for s in STATES:
+            self.assertIn(f"'{s}'", js, s)
+        self.assertIn("STATES.length; s++) nd.g.classList.remove('day-' + STATES[s]);", js)
+
+    def test_a_poll_that_changed_nothing_under_the_pointer_rewrites_nothing(self):
+        """Review, 2026-09-29: every poll replayed the panel's entrance and,
+        the panel being aria-live, re-read it whole to a screen reader
+        once a minute. The ring re-renders only a changed slice, silently;
+        the home page's panel is aria-live=\"off\" while the Wall's, which
+        changes only on the reader's own hover, stays polite."""
+        js = RING_JS.read_text(encoding="utf-8")
+        self.assertIn("function sliceFor(key)", js)
+        self.assertIn("sliceFor(current) !== lastSlice) render(current, true)", js)
+        self.assertIn("if (!silent) panel.classList.add('day-pre');", js)
+        page = PAGE.read_text(encoding="utf-8")
+        self.assertIn('id="dayPanel" aria-live="off"', page)
+        wall = (Path(settings.BASE_DIR) / "templates" / "landing"
+                / "the_wall.html").read_text(encoding="utf-8")
+        self.assertIn('id="dayPanel" aria-live="polite"', wall)
+
+    def test_an_ended_session_stops_the_poll(self):
+        """Review, 2026-09-29: login_required answers the Wall's HTML with
+        a 200 after a redirect, so r.ok was true, r.json() threw, and the
+        tab fetched the Wall once a minute for ever."""
+        js = JS.read_text(encoding="utf-8")
+        self.assertIn("r.redirected", js)
+        self.assertIn("/json/i.test(type)", js)
+        self.assertIn("!r.ok || r.redirected || !/json/i.test(type)", js)
+
+    def test_the_see_tile_reads_no_bar_table(self):
+        """Review, 2026-09-29: MAX(timestamp) over every stored bar was a
+        full scan per poll (PriceData has no lone timestamp index); the
+        newest quote comes off LiveQuote, one row per instrument."""
+        src = (Path(settings.BASE_DIR) / "dashboard" / "views_day.py").read_text(encoding="utf-8")
+        self.assertNotIn("PriceData.objects", src)
+        self.assertNotIn("import LiveQuote, PriceData", src)
+        self.assertIn('LiveQuote.objects.aggregate(m=Max("updated_at"))', src)
+
     def test_the_template_keeps_its_comments_single_line(self):
         src = PAGE.read_text(encoding="utf-8")
         for m in re.finditer(r"\{#(.*?)#\}", src, re.S):

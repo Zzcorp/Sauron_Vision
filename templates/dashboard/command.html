@@ -104,7 +104,8 @@ under the localStorage key the section names.
                      data-panel="dayPanel" data-stamp="live · refreshed every minute"
                      aria-label="The loop of Sauron, live: markets in; see, think, decide, act, watch, tell, learn around the beat; venues and people out. Each step carries its state right now."></svg>
             </div>
-            <aside class="day-panel" id="dayPanel" aria-live="polite"></aside>
+            {# aria-live="off" here, "polite" on the Wall: this panel is rewritten by the minute poll, and a polite region would read the whole panel to a screen reader once a minute (review, 2026-09-29). The Wall's changes only on the reader's own hover. #}
+            <aside class="day-panel" id="dayPanel" aria-live="off"></aside>
         </div>
         <div class="day-clock" id="dayClock" aria-label="The 24-hour UTC day: the daily tasks on their minute, the US session, the night of learning, and now.">
             <div class="day-clock-head">

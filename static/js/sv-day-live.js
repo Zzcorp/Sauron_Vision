@@ -214,12 +214,16 @@
     inflight = true;
     fetch(LIVE_URL, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
       .then(function (r) {
-        if (!r.ok) {
-          /* 423 is the idle lock; anything else is a server that cannot
-             answer. Either way the last reading stands and the polling
-             stops until the tab is next looked at. */
+        /* 423 is the idle lock; a redirect or a page that is not JSON is
+           a session that ended (login_required answers the Wall's HTML
+           with a 200 after the redirect, review 2026-09-29); anything
+           else is a server that cannot answer. Either way the last
+           reading stands and the polling stops until the tab is next
+           looked at, rather than fetching the Wall once a minute. */
+        var type = (r.headers && r.headers.get('content-type')) || '';
+        if (!r.ok || r.redirected || !/json/i.test(type)) {
           stopped = true;
-          throw new Error('HTTP ' + r.status);
+          throw new Error('HTTP ' + r.status + ' ' + type);
         }
         return r.json();
       })

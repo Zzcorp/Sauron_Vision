@@ -152,19 +152,23 @@ def _run_words(state, newest_age) -> str:
 # ── the metric groups: today, cheap, fenced ──────────────────────────────
 
 def _see_metrics(now, start):
-    from market_data.models import LiveQuote, PriceData
+    from market_data.models import LiveQuote
     from scraping.models import NewsArticle
     news = NewsArticle.objects.filter(scraped_at__gte=start).count()
     fresh = LiveQuote.objects.filter(
         updated_at__gte=now - timedelta(seconds=FRESH_QUOTE_S)).count()
-    newest = PriceData.objects.aggregate(m=Max("timestamp"))["m"]
+    # The newest quote, off LiveQuote: one row per instrument, a small
+    # table. This read MAX(timestamp) over every stored bar before
+    # (review, 2026-09-29): PriceData carries no lone timestamp index, so
+    # that was a full scan of the bar table per poll per open tab.
+    newest = LiveQuote.objects.aggregate(m=Max("updated_at"))["m"]
     age = _age(newest, now)
     out = [[news, "news items scraped today"],
            [fresh, "instruments with a price under 15 min old"]]
     if age is None:
-        out.append([0, "bot bars stored — none yet"])
+        out.append([0, "live quotes stored — none yet"])
     else:
-        out.append([int(age // 60), "min since the newest bot bar"])
+        out.append([int(age // 60), "min since the newest live quote"])
     return out
 
 
