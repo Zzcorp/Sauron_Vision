@@ -4,25 +4,26 @@
 {# With no bot configured there is no population to count enabled, live or #}
 {# alive members of, and a red "0" under ALIVE 6H reads as "your bots died" #}
 {# rather than "you have none". The colour keys off n_configs for that. #}
+{# data-sv-count: the motion layer counts each tally up from 0 on reveal (static/js/sv-motion.js); the rendered text is the fallback. #}
 <div class="oc-strip">
     <div class="oc-strip-cell">
         <span class="oc-strip-label">CONFIGS</span>
-        <span class="oc-strip-value">{{ n_configs }}</span>
+        <span class="oc-strip-value" data-sv-count="{{ n_configs }}">{{ n_configs }}</span>
         <span class="oc-strip-sub">across all asset classes</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">ENABLED</span>
-        <span class="oc-strip-value {% if n_configs and n_enabled %}up{% endif %}">{{ n_enabled }}</span>
+        <span class="oc-strip-value {% if n_configs and n_enabled %}up{% endif %}" data-sv-count="{{ n_enabled }}">{{ n_enabled }}</span>
         <span class="oc-strip-sub">currently scanning</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">LIVE-MODE</span>
-        <span class="oc-strip-value {% if n_configs and n_live %}up{% endif %}">{{ n_live }}</span>
+        <span class="oc-strip-value {% if n_configs and n_live %}up{% endif %}" data-sv-count="{{ n_live }}">{{ n_live }}</span>
         <span class="oc-strip-sub">real-money bots</span>
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">ALIVE 6H</span>
-        <span class="oc-strip-value {% if not n_configs %}{% elif n_alive %}up{% else %}down{% endif %}">{{ n_alive }}</span>
+        <span class="oc-strip-value {% if not n_configs %}{% elif n_alive %}up{% else %}down{% endif %}" data-sv-count="{{ n_alive }}">{{ n_alive }}</span>
         <span class="oc-strip-sub">{% if n_configs %}recent trade activity{% else %}no bots to watch{% endif %}</span>
     </div>
 </div>
@@ -113,7 +114,7 @@
 </div>
 
 {# ── 3. Quick links to operations dashboards ─────────────────────── #}
-<div class="grid grid-3" style="gap:14px;">
+<div class="grid grid-3" style="gap:14px;" data-sv-reveal>
     <a href="{% url 'bot_performance_dashboard' %}" class="card" style="padding:18px;text-align:center;text-decoration:none;display:block;transition:transform 0.2s, border-color 0.2s;">
         <div style="font-size:24px;margin-bottom:4px;color:var(--accent);">▣</div>
         <div style="font-family:var(--font-mono);font-size:11px;letter-spacing:2px;color:var(--text-muted);text-transform:uppercase;">Bot Performance</div>

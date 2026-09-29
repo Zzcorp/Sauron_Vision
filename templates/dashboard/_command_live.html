@@ -53,7 +53,8 @@ Layered rendering:
 </div>
 
 {# ── 1.5 Session pulse: 12-trade R sparkline + best/worst callouts ─── #}
-<div class="grid grid-3" style="gap:14px;margin:14px 0 18px 0;">
+{# data-sv-reveal: the motion layer (static/js/sv-motion.js) rises this grid's cards into view as the page is scrolled; the chart card excludes itself. #}
+<div class="grid grid-3" style="gap:14px;margin:14px 0 18px 0;" data-sv-reveal>
     <div class="card">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="card-title">Session pulse · last {{ live_24h_spark|length }} closes</span>
@@ -103,7 +104,7 @@ Layered rendering:
 </div>
 
 {# ── 2. Recent fills (last 24h) + Brain concerns side-by-side ──────── #}
-<div class="grid grid-2" style="gap:14px;margin-bottom:18px;">
+<div class="grid grid-2" style="gap:14px;margin-bottom:18px;" data-sv-reveal>
     <div class="card">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="card-title">Recent fills (24h)</span>

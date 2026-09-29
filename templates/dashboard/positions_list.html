@@ -126,7 +126,8 @@ honest freshness claim.{% endcomment %}
 
 {# ── 2. Direction donut + asset-class breakdown + monthly P&L ─── #}
 {% include "_partials/capital_card.html" %}
-<div class="grid grid-3" style="gap:14px;margin-bottom:18px;">
+{# data-sv-reveal: the motion layer rises this grid's cards as the page is scrolled (static/js/sv-motion.js). #}
+<div class="grid grid-3" style="gap:14px;margin-bottom:18px;" data-sv-reveal>
 <div class="card">
         <div class="card-header"><span class="card-title">Direction · open</span></div>
         <div data-sv-live="pos-dir">

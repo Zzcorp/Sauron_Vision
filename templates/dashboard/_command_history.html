@@ -7,7 +7,8 @@
 <div class="oc-strip">
     <div class="oc-strip-cell">
         <span class="oc-strip-label">CLOSED 90D</span>
-        <span class="oc-strip-value">{{ n_closed }}</span>
+        {# data-sv-count: the motion layer counts this up from 0 on reveal (static/js/sv-motion.js); the rendered text is the fallback. #}
+        <span class="oc-strip-value" data-sv-count="{{ n_closed }}">{{ n_closed }}</span>
         <span class="oc-strip-sub">{{ n_wins }} wins · {{ n_graded }} graded</span>
     </div>
     <div class="oc-strip-cell">
@@ -22,13 +23,14 @@
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">DECAY ALERTS</span>
-        <span class="oc-strip-value {% if decay_alerts %}down{% endif %}">{{ decay_alerts|length }}</span>
+        <span class="oc-strip-value {% if decay_alerts %}down{% endif %}" data-sv-count="{{ decay_alerts|length }}">{{ decay_alerts|length }}</span>
         <span class="oc-strip-sub">unresolved</span>
     </div>
 </div>
 
 {# ── 2. Cumulative R curve + Rolling 30d win rate (side by side) ──── #}
-<div class="grid grid-2" style="gap:14px;margin-bottom:18px;">
+{# data-sv-reveal: the motion layer rises a grid's cards as the page is scrolled (static/js/sv-motion.js); the chart cards exclude themselves. #}
+<div class="grid grid-2" style="gap:14px;margin-bottom:18px;" data-sv-reveal>
     <div class="card">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="card-title">Cumulative R · last 90d</span>
@@ -54,7 +56,7 @@
 </div>
 
 {# ── 3. Day-of-week heatmap + Top rules by Sharpe ─────────────────── #}
-<div class="grid grid-2" style="gap:14px;margin-bottom:18px;">
+<div class="grid grid-2" style="gap:14px;margin-bottom:18px;" data-sv-reveal>
     <div class="card">
         <div class="card-header"><span class="card-title">Day-of-week performance</span></div>
         {% if dow_max_n > 0 %}
