@@ -3979,7 +3979,10 @@ def admin_bulk_toggle(request):
             # core.platform_control.BULK_ENABLE_EXEMPT. "All off" is bulk.
             from core.platform_control import BULK_ENABLE_EXEMPT
             rows = rows.exclude(key__in=BULK_ENABLE_EXEMPT)
-        count = rows.update(is_enabled=enable)
+        # updated_at is auto_now, which a queryset update skips: it is the
+        # instant of the flip, and the alarm bot reads it off
+        # platform_master to tell a pause from a stop (alarm._resumed_at).
+        count = rows.update(is_enabled=enable, updated_at=timezone.now())
         verb = "started" if enable else "stopped"
         messages.success(request, f"{count} {category} components {verb}.")
     from django.shortcuts import redirect
@@ -6205,6 +6208,17 @@ def kill_switch_api(request):
 
     reason = data.get('reason', 'manual activation')
     results = execute_kill_switch(user=request.user, reason=reason)
+    # The alarm chat hears the flatten (2026-09-28): counts only, on the
+    # commit, from the request process (one HTTP call bounded by the
+    # sender's SEND_TIMEOUT_S; never a worker, which may be what is
+    # broken). Fenced: the kill is done, and nothing there can fail it or
+    # this answer.
+    try:
+        from bot_program.alarm import after_kill_switch
+        after_kill_switch(results)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[kill switch] the alarm chat was not told (%s)",
+                       type(e).__name__)
     return JsonResponse(results)
 
 

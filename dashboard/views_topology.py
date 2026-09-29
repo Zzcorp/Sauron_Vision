@@ -708,5 +708,8 @@ def system_map_toggle(request):
     if comp is None:
         return JsonResponse({"ok": False, "error": f"no component '{key}'"}, status=404)
     comp.is_enabled = not comp.is_enabled
-    comp.save(update_fields=["is_enabled"])
+    # updated_at is auto_now, which update_fields skips: it is the instant
+    # of the flip, and the alarm bot reads it off platform_master to tell
+    # a pause from a stop (bot_program/alarm._resumed_at).
+    comp.save(update_fields=["is_enabled", "updated_at"])
     return JsonResponse({"ok": True, "enabled": comp.is_enabled, "label": comp.name})

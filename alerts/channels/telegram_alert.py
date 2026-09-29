@@ -200,7 +200,8 @@ def button_markup(button):
     or None (2026-09-27).
 
     A URL button only, never a callback: a message never acts from
-    Telegram (the Eye's commands are the one door). The address is
+    Telegram (the Eye's commands, and the alarm bot's /stopall, are the
+    only doors). The address is
     platform_link's; there is no button when it has none (no DOMAIN, a
     placeholder) or when its host has no dot ("localhost"): Telegram
     refuses a button a phone cannot open, and a refused button would

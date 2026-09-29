@@ -241,6 +241,25 @@ COMMANDS = [
         "run_args": [],
         "category": "decide",
     },
+    # 2026-09-28 -- the alarm bot, by hand (bot_program/alarm.py). A
+    # DECIDE entry for Morgul's reason: bare, it reads; --send and --test
+    # write to the alarm chat, an external service, and the registry is
+    # per command, so the Run lane refuses the whole entry.
+    {
+        "name": "alarm",
+        "title": "Alarm bot",
+        "purpose": "Print what the alarm bot sees now: its switch, whether its token and chat are accepted, and every critical problem by name. Bare, it sends nothing; --send runs one sentinel pass, --test sends one message to the alarm chat, --chats lists the chats that wrote to the bot.",
+        "usage": [
+            "python manage.py alarm",
+            "python manage.py alarm --send",
+            "python manage.py alarm --test",
+            "python manage.py alarm --chats",
+        ],
+        "mirrors": "/health/",
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
     # ── read: the diagnostics ───────────────────────────────────────────
     {
         "name": "open_trades",
