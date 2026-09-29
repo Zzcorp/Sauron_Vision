@@ -4098,6 +4098,23 @@ class AssetBot(ABC):
                 logger.warning("[%s_bot] %s REFUSED: %s", self.asset_class,
                                symbol, _gate_why)
                 return self._skip(symbol, _gate, _gate_why)
+            # THE VENUE'S OWN FEE, AT THE SIZE SENT (2026-09-29). The
+            # proposal's cost filter charged the table and the quote; eToro
+            # also takes 1% a side on crypto and 1.00 USD a side on a stock,
+            # which no quote shows. The filter is asked again with that on
+            # top; a trade the fee makes negative-edge sends nothing.
+            _fee, _fee_why = self._venue_fee_refusal(
+                client, symbol, qty=float(qty), price=float(price),
+                target=float(tp), stop=float(sl), charge=charge)
+            if _fee_why:
+                logger.info("[%s_bot] skipping %s — %s", self.asset_class,
+                            symbol, _fee_why)
+                return self._skip(symbol, skips.COST_FILTER, _fee_why)
+            if _fee:
+                entry_meta["venue_fee_fraction"] = round(_fee, 8)
+                if charge:
+                    entry_meta["cost_fraction_charged"] = round(
+                        float(charge["fraction"]) + _fee, 8)
             # THE VENUE'S OWN FLOOR, BEFORE THE ORDER. `qty` above is the
             # risk the operator chose, rounded by a `_round_qty` that knows
             # the asset class and the venue's unit granularity (three
@@ -4725,6 +4742,61 @@ class AssetBot(ABC):
         if pos_id:
             stamps["broker_position_id"] = str(pos_id)
         return stamps
+
+    def _venue_fee_refusal(self, client, symbol: str, *, qty: float,
+                           price: float, target: float, stop: float,
+                           charge=None) -> tuple:
+        """(fee fraction, refusal words or "") — the cost filter asked again
+        at the FINAL size with the venue's own per-order fee on top
+        (risk_levels.venue_fee_fraction: eToro's 1% a side on crypto, its
+        1.00 USD a side on a stock). (0.0, "") when the carrier charges
+        nothing the filter did not already count.
+
+        Asked in execute_entry, where the quantity is the one sent and the
+        client the one that carries it: a flat fee is a fraction only once
+        the notional is known, and the proposal's filter ran before sizing
+        (2026-09-29: a 150 USD stock pool sized ~30 USD positions, and the
+        1.00 USD a side made every one of them 6.7% down before the market
+        moved).
+
+        THE FEE'S OWN EFFECT, and nothing else. Sizing may widen the stop
+        after the proposal's filter judged the levels (sizing.stop_widened),
+        and at the widened stop the net reward:risk can fail with no fee at
+        all — a trade this lane has always sent; re-judging it here would be
+        a second, different filter. So: the GROSS edge (the planned move
+        against the whole cost, stop-free) must cover the fee; and the net
+        reward:risk refuses only when it passes without the fee and fails
+        with it."""
+        from bot_program.asset_engine.risk_levels import (
+            passes_cost_filter, round_trip_cost_fraction, venue_fee_fraction,
+        )
+        from bot_program.engine.capabilities import adapter_key
+        try:
+            notional = (float(qty) * float(price)
+                        * float(self._value_per_unit(symbol) or 1.0))
+        except (TypeError, ValueError):
+            notional = 0.0
+        fee, words = venue_fee_fraction(adapter_key(client),
+                                        self._instrument_class(symbol),
+                                        notional)
+        if fee <= 0:
+            return 0.0, ""
+        base = (float(charge["fraction"]) if charge and charge.get("fraction")
+                is not None else float(round_trip_cost_fraction(self.cfg,
+                                                                symbol)))
+        args = (self.cfg, symbol, float(price), float(target))
+        ok, reason = passes_cost_filter(*args, stop=None,
+                                        cost_fraction=base + fee)
+        if not ok:
+            return fee, f"{reason} — {words}"
+        net_before, _ = passes_cost_filter(*args, stop=float(stop),
+                                           cost_fraction=base)
+        if net_before:
+            ok, reason = passes_cost_filter(*args, stop=float(stop),
+                                            cost_fraction=base + fee)
+            if not ok:
+                return fee, f"{reason} — {words}"
+        return fee, ""
 
     # ── the eToro refusals, in order, for EVERY lane ──────────────────────
 
