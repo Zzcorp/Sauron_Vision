@@ -1,0 +1,73 @@
+{% comment %}
+THE EYE ON THE KEY (2026-09-28). The operator: "un petit œil vert à l'image
+de Sauron pour pouvoir voir son mot de passe tapé". A button at the right
+end of a password field that shows what was typed while it is pressed on,
+and hides it again on the second press.
+
+The eye is the mark's own eye (static/logo/sauron_eye.svg) reduced to a
+26x16 glyph and painted in currentColor, so its state is a colour, not a
+second drawing: shut and dim in the label's grey while the key is hidden,
+open and lit in the accent while it is shown. Two groups, one visible at
+a time; the lid band is the mark's evenodd vesica so it keeps its weight
+at 16 px, and the pupil is the ground colour knocked out of the iris.
+
+Included with:  {% include "registration/_key_eye.html" with target="id_password" what="access key" %}
+`target` is the id of the password input the eye reveals; the input must
+be wrapped in <div class="key-wrap"> with the include right after it.
+`what` is the noun the accessible name uses ("Show the access key").
+
+Never a submit: type="button", and the form leaving (submit, or the page
+going to the background on a phone that switches apps) hides the key
+again, so a revealed key is never the state a page is left in.
+{% endcomment %}<button type="button" class="key-eye" data-for="{{ target }}" data-what="{{ what }}" aria-controls="{{ target }}" aria-pressed="false" aria-label="Show the {{ what }}" title="Show the {{ what }}">
+    <svg viewBox="0 0 48 30" width="26" height="16" aria-hidden="true" focusable="false">
+        <g class="eye-open">
+            <path fill="currentColor" fill-rule="evenodd" d="M 2,15 Q 24,-11 46,15 Q 24,41 2,15 Z M 7,15 Q 24,-2 41,15 Q 24,32 7,15 Z"/>
+            <circle cx="24" cy="15" r="7" fill="currentColor"/>
+            <circle cx="24" cy="15" r="3" fill="#030806"/>
+            <circle cx="22.8" cy="13.8" r="1" fill="#d8ffe9" opacity="0.9"/>
+        </g>
+        <g class="eye-shut">
+            <path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" d="M 2,15 Q 24,36 46,15"/>
+            <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M 10,21 L 8,26 M 24,25.5 L 24,30 M 38,21 L 40,26" opacity="0.7"/>
+        </g>
+    </svg>
+</button>
+<style>
+    .key-wrap{position:relative}
+    .key-wrap>input{padding-right:54px}
+    .key-eye{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:42px;height:32px;display:flex;align-items:center;justify-content:center;background:none;border:0;border-radius:6px;padding:0;cursor:pointer;color:var(--text3);transition:color .2s,filter .2s}
+    .key-eye:hover,.key-eye:focus-visible{color:var(--accent);outline:none}
+    .key-eye:focus-visible{box-shadow:0 0 0 1px var(--accent)}
+    .key-eye.on{color:var(--accent-bright);filter:drop-shadow(0 0 7px rgba(0,232,104,0.65))}
+    .key-eye .eye-open{display:none}
+    .key-eye.on .eye-open{display:inline}
+    .key-eye.on .eye-shut{display:none}
+</style>
+<script>
+(function(){
+    /* One binding per eye, however many times this partial is included. */
+    Array.prototype.forEach.call(document.querySelectorAll('.key-eye'), function(eye){
+        if(eye.getAttribute('data-bound')) return;
+        eye.setAttribute('data-bound', '1');
+        var key = document.getElementById(eye.getAttribute('data-for'));
+        if(!key) return;
+        var what = eye.getAttribute('data-what');
+        function set(shown){
+            key.type = shown ? 'text' : 'password';
+            eye.classList.toggle('on', shown);
+            eye.setAttribute('aria-pressed', shown ? 'true' : 'false');
+            eye.setAttribute('aria-label', (shown ? 'Hide the ' : 'Show the ') + what);
+            eye.setAttribute('title', (shown ? 'Hide the ' : 'Show the ') + what);
+        }
+        eye.addEventListener('click', function(){
+            set(key.type === 'password');
+            key.focus({preventScroll: true});
+        });
+        /* Hidden again the moment the form leaves: on submit, and when the
+           page goes to the background (a phone switching apps). */
+        if(key.form) key.form.addEventListener('submit', function(){ set(false); });
+        document.addEventListener('visibilitychange', function(){ if(document.hidden) set(false); });
+    });
+})();
+</script>

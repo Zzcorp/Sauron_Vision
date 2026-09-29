@@ -169,6 +169,21 @@
         .nav-links a:hover { color: var(--accent); text-shadow: 0 0 12px rgba(0,232,104,0.3); }
         .nav-links a:hover::after { width: 100%; }
         .nav-links a.btn-access::after { display: none; }
+        /* THE BOOK (2026-09-28): the one link that leaves the page for the
+           story, drawn as the Access button's quiet twin — outlined, not
+           filled — so a reader tells "read" from "log in" at a glance. */
+        .nav-links a.nav-book {
+            padding: 9px 16px; border: 1px solid var(--accent-dim); border-radius: 6px;
+            color: var(--accent); font-family: var(--font-d); font-weight: 700;
+            letter-spacing: 3px;
+            transition: color 0.3s, border-color 0.3s, box-shadow 0.3s, transform 0.3s;
+        }
+        .nav-links a.nav-book::after { display: none; }
+        .nav-links a.nav-book:hover {
+            color: var(--accent-bright); border-color: var(--accent);
+            box-shadow: 0 0 16px rgba(0,232,104,0.25); transform: translateY(-2px);
+            text-shadow: none;
+        }
         .nav-links .btn-access,
         .btn-access {
             display: inline-flex; align-items: center; gap: 8px;
@@ -187,7 +202,9 @@
         }
         @media (max-width: 768px) {
             .wall-nav { padding: 14px 20px; }
-            .nav-links a:not(.btn-access) { display: none; }
+            .nav-links a:not(.btn-access):not(.nav-book) { display: none; }
+            .nav-links { gap: 10px; }
+            .nav-links a.nav-book { padding: 8px 12px; letter-spacing: 2px; font-size: 10px; }
         }
 
         /* ══════════════════════════════════════════════════════════════ */
@@ -1884,6 +1901,8 @@
         <a href="#research">Ask</a>
         <a href="#brokers">Brokers</a>
         <a href="#trust">Trust</a>
+        {# The Book of Sauron, from the top of the Wall (2026-09-28): a reader should not have to scroll four screens to find the story. Kept on the phone tier beside the Access button. #}
+        <a href="{% url 'the_book' %}" class="nav-book">The Book</a>
         <a href="{% url 'login' %}" class="btn-access">Access Terminal</a>
     </div>
 </nav>

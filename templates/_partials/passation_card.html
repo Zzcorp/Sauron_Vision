@@ -1,0 +1,45 @@
+{% comment %}
+THE CARD TO THE LETTER (2026-09-28, core/passation.py): rendered on every
+logged-in page while `passation_card` is true — from the hour the letter
+opens, for the length of the watch. Dismissable per browser (localStorage);
+the letter itself stays at /passation/ whatever the card does.
+{% endcomment %}
+<div class="sv-passation-card" id="svPassationCard" role="note" aria-label="Une lettre pour Gandalf">
+    <svg class="sv-passation-eye" viewBox="0 0 48 30" width="30" height="19" aria-hidden="true" focusable="false">
+        <path fill="currentColor" fill-rule="evenodd" d="M 2,15 Q 24,-11 46,15 Q 24,41 2,15 Z M 7,15 Q 24,-2 41,15 Q 24,32 7,15 Z"/>
+        <circle cx="24" cy="15" r="7" fill="currentColor"/>
+        <circle cx="24" cy="15" r="3" fill="#030806"/>
+        <circle cx="22.8" cy="13.8" r="1" fill="#d8ffe9" opacity="0.9"/>
+    </svg>
+    <div class="sv-passation-text">
+        <span class="sv-passation-kicker">UNE LETTRE T'ATTEND</span>
+        <span class="sv-passation-line">Gandalf, la maison est à toi pour trois semaines. Il y a un mot pour toi, et la garde en trois pages.</span>
+    </div>
+    <a href="{% url 'passation' %}" class="sv-passation-open">LIRE LA LETTRE &rarr;</a>
+    <button type="button" class="sv-passation-dismiss" id="svPassationDismiss" aria-label="Fermer ce rappel" title="Fermer ce rappel">&times;</button>
+</div>
+<style>
+    .sv-passation-card{display:flex;align-items:center;gap:16px;margin:0 0 18px;padding:14px 18px;border:1px solid var(--accent-dim,#0a5028);border-radius:10px;background:linear-gradient(135deg,rgba(0,232,104,0.08),rgba(0,232,104,0.02));box-shadow:0 0 30px rgba(0,232,104,0.08);color:var(--accent,#00e868)}
+    .sv-passation-card.hidden{display:none}
+    .sv-passation-eye{flex:0 0 auto;filter:drop-shadow(0 0 6px rgba(0,232,104,0.5))}
+    .sv-passation-text{display:flex;flex-direction:column;gap:3px;flex:1 1 auto;min-width:0}
+    .sv-passation-kicker{font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;letter-spacing:3px}
+    .sv-passation-line{font-family:'Rajdhani',sans-serif;font-size:15px;color:var(--text,#c8e8d8)}
+    .sv-passation-open{flex:0 0 auto;font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:2px;color:#020804;background:linear-gradient(135deg,var(--accent-dim,#0a5028),var(--accent,#00e868));padding:9px 14px;border-radius:6px;text-decoration:none;white-space:nowrap}
+    .sv-passation-dismiss{flex:0 0 auto;background:none;border:0;color:var(--text3,#3a6850);font-size:20px;line-height:1;cursor:pointer;padding:2px 6px}
+    .sv-passation-dismiss:hover{color:var(--accent,#00e868)}
+    @media (max-width:768px){.sv-passation-card{flex-wrap:wrap;gap:10px}.sv-passation-open{width:100%;text-align:center}}
+</style>
+<script>
+(function(){
+    var card = document.getElementById('svPassationCard');
+    var x = document.getElementById('svPassationDismiss');
+    if(!card || !x) return;
+    var KEY = 'sv-passation-dismissed';
+    try { if(localStorage.getItem(KEY)) card.classList.add('hidden'); } catch(e){}
+    x.addEventListener('click', function(){
+        card.classList.add('hidden');
+        try { localStorage.setItem(KEY, '1'); } catch(e){}
+    });
+})();
+</script>

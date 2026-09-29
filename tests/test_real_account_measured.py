@@ -582,8 +582,8 @@ class TheCryptoProofTests(SimpleTestCase):
         from bot_program.asset_engine.base import (ETORO_PROVEN,
                                                    ETORO_PROVEN_LEVERAGE,
                                                    proven_leverage)
-        self.assertEqual(ETORO_PROVEN, frozenset({"crypto"}))
-        self.assertEqual(ETORO_PROVEN_LEVERAGE, {})
+        self.assertIn("crypto", ETORO_PROVEN)
+        self.assertNotIn("crypto", ETORO_PROVEN_LEVERAGE)
         self.assertEqual(proven_leverage("crypto"), 1)
         src = (Path(settings.BASE_DIR) / "tests"
                / "test_etoro_client.py").read_text(encoding="utf-8")

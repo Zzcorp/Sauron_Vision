@@ -1370,6 +1370,7 @@
 
 
 <div class="page-content fade-in">
+            {% if passation_card %}{% include "_partials/passation_card.html" %}{% endif %}
             {% block content %}{% endblock %}
         </div>
     </main>
