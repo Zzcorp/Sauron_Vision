@@ -83,7 +83,10 @@ class Command(BaseCommand):
             after = "ON" if enabled else "OFF"
             if row.is_enabled != enabled:
                 row.is_enabled = enabled
-                row.save(update_fields=["is_enabled"])
+                # updated_at is auto_now, which update_fields skips: it
+                # is the instant of the flip, and the alarm bot reads it
+                # off platform_master to tell a pause from a stop.
+                row.save(update_fields=["is_enabled", "updated_at"])
             self.stdout.write(f"{key}: {before} → {after}"
                               + ("" if before != after else " (unchanged)"))
             if key == MASTER and not enabled:
