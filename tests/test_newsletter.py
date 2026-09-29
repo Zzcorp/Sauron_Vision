@@ -18,8 +18,8 @@ The operator's decisions, pinned:
     connection, a failure recorded and retried (3 attempts at most), a
     delivered row never sent again, "sent" / "failed" by the rules, and a
     row another worker holds is left alone.
-  * The admin page, the archive, the settings page, and the wiring (the
-    beat entry, the switch, the route).
+  * The admin page, the archive, the settings page, the briefing email's
+    three defects, and the wiring (the beat entry, the switch, the route).
 
 Run with:  python manage.py test tests.test_newsletter
 """
@@ -1364,6 +1364,73 @@ class SettingsPageTests(_Base):
         self.client.post(self.URL, {"action": "save_prefs"})
         prefs.refresh_from_db()
         self.assertFalse(prefs.receive_weekly_newsletter)
+
+
+# ── the briefing email shares the conventions ────────────────────────────
+
+@override_settings(**MAIL)
+class BriefingEmailConventionsTests(_Base):
+    def briefing(self):
+        from brain.briefing_models import StrategistBriefing
+        return StrategistBriefing.objects.create(
+            outlook_md="USD **weakens** & equities firm.\n\nWatch DXY.",
+            posture="defensive", posture_rationale="a **risk-off** pulse",
+            watchlist=[{"kind": "macro", "ref": "DXY",
+                        "what_to_watch": "below **102**"}],
+            ideas=[{"summary": "fade **USD** strength", "confidence": 0.8}],
+            model_used="claude-stub", cost_usd="0.30000")
+
+    def send(self, staff=False):
+        from alerts.channels.briefing_email import send_briefing_email
+        self.assertTrue(send_briefing_email("u@x.io", self.briefing(),
+                                            staff=staff))
+        return mail.outbox[-1]
+
+    def test_the_links_are_absolute(self):
+        msg = self.send()
+        html = msg.alternatives[0][0]
+        hrefs = re.findall(r'href="([^"]*)"', html)
+        self.assertEqual(hrefs, [f"https://{DOMAIN}/briefing/",
+                                 f"https://{DOMAIN}/notifications/settings/"])
+        self.assertIn(f"https://{DOMAIN}/briefing/", msg.body)
+        with mock.patch.dict(os.environ, {"DOMAIN": ""}):
+            msg = self.send()
+        self.assertEqual(re.findall(r'href="([^"]*)"',
+                                    msg.alternatives[0][0]), [])
+        self.assertNotIn(" /briefing/", msg.body)
+
+    def test_the_emphasis_is_rendered_not_printed(self):
+        msg = self.send()
+        html = msg.alternatives[0][0]
+        self.assertIn("<strong>weakens</strong>", html)
+        self.assertNotIn("**", html)
+        self.assertNotIn("**", msg.body)
+        self.assertIn("USD weakens & equities firm.", msg.body)
+
+    def test_the_subject_names_the_brand_once(self):
+        subject = self.send().subject
+        self.assertEqual(subject.lower().count("sauron"), 1)
+        self.assertIn("DEFENSIVE", subject)
+        self.assertTrue(subject.startswith("Sauron Vision — "))
+
+    def test_model_and_cost_are_for_staff_only(self):
+        reader = self.send(staff=False)
+        self.assertNotIn("claude-stub", reader.alternatives[0][0])
+        self.assertNotIn("claude-stub", reader.body)
+        self.assertNotIn("0.30000", reader.body)
+        staff = self.send(staff=True)
+        self.assertIn("claude-stub", staff.alternatives[0][0])
+        self.assertIn("claude-stub", staff.body)
+
+    def test_the_dispatch_passes_who_is_staff(self):
+        from bot_program.notifications import _send_briefing_email
+        briefing = self.briefing()
+        with mock.patch("alerts.channels.briefing_email.send_briefing_email",
+                        return_value=True) as send:
+            _send_briefing_email(_reader("nonstaff"), briefing)
+            _send_briefing_email(_reader("staffer", staff=True), briefing)
+        self.assertEqual([c.kwargs["staff"] for c in send.call_args_list],
+                         [False, True])
 
 
 # ── the wiring ───────────────────────────────────────────────────────────

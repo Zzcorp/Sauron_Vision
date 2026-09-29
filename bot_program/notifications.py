@@ -745,7 +745,10 @@ def _send_briefing_email(user, briefing) -> bool:
         if not getattr(user, "email", ""):
             return False
         from alerts.channels.briefing_email import send_briefing_email
-        return send_briefing_email(user.email, briefing)
+        # The model and the run's cost are staff facts (2026-09-29).
+        return send_briefing_email(user.email, briefing,
+                                   staff=bool(getattr(user, "is_staff",
+                                                      False)))
     except Exception as e:
         logger.warning("briefing email dispatch failed: %s", e)
         return False
