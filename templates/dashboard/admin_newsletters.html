@@ -77,6 +77,7 @@
                 <div class="nl-row-title">{{ row.title }}</div>
                 <div class="nl-badges">
                     <span class="badge badge-{{ row.tone }}">{{ row.badge }}</span>
+                    {% if row.queued %}<span class="badge badge-high">QUEUED</span>{% endif %}
                     {% if row.scheduled_words %}<span class="badge badge-medium">SCHEDULED</span>{% endif %}
                     <span class="badge badge-neutral">{{ nl.get_frequency_display }}</span>
                 </div>
@@ -85,6 +86,7 @@
         </div>
         <div class="nl-meta">
             <div><span class="lbl">Subject</span>{{ row.subject }}</div>
+            {% if row.queued %}<div class="nl-note"><span class="lbl">Queued</span>Send now was pressed {{ row.queued_words }}; it goes out when a worker takes it. Cancel stops it until then.</div>{% endif %}
             {% if row.scheduled_words %}<div><span class="lbl">Goes out</span>{{ row.scheduled_words }}</div>{% endif %}
             {% if nl.sent_at %}<div><span class="lbl">Sent</span>{{ nl.sent_at|date:"D d M Y, H:i" }} UTC{% if row.archived %} · <a href="{% url 'newsletter_detail' nl.id %}" style="color:var(--accent);">archive copy</a>{% endif %}</div>{% endif %}
             {% if row.reach %}<div><span class="lbl">Audience</span>{{ row.reach }}</div>{% endif %}

@@ -325,12 +325,48 @@ def send_to_chat(chat_id, title, body="", *, lines=None, mark="",
     platform path), one URL button (message_parts, post_message), since
     2026-09-27.
     """
+    return send_to_chat_outcome(
+        chat_id, title, body, lines=lines, mark=mark, subtitle=subtitle,
+        summary=summary, details=details, button=button) == "sent"
+
+
+#: The outcomes send_to_chat_outcome answers.
+SENT, REFUSED, UNSENT, UNKNOWN = "sent", "refused", "unsent", "unknown"
+
+
+def _answer_lost(exc) -> bool:
+    """True when the request left and no answer came back: a read
+    timeout, or a connection dropped while waiting for the answer
+    ("Connection aborted", RemoteDisconnected). Telegram may have posted
+    the message. A connect timeout or a refused connection never reached
+    it."""
+    if isinstance(exc, requests.exceptions.ReadTimeout):
+        return True
+    if isinstance(exc, (requests.exceptions.ConnectTimeout,
+                        requests.exceptions.SSLError)):
+        return False
+    if isinstance(exc, (requests.exceptions.ChunkedEncodingError,
+                        requests.exceptions.ConnectionError)):
+        words = str(exc).lower()
+        return "aborted" in words or "remotedisconnected" in words
+    return False
+
+
+def send_to_chat_outcome(chat_id, title, body="", *, lines=None, mark="",
+                         subtitle="", summary="", details=None,
+                         button=None) -> str:
+    """send_to_chat, saying what happened (review, 2026-09-29): SENT;
+    REFUSED (Telegram answered no); UNSENT (never reached Telegram: no
+    token or chat, a connection that could not be made, a message that
+    could not be built); UNKNOWN (the request left and the answer was
+    lost: it may have been posted, and sending it again may post it
+    twice). The same logging as send_to_chat; it never raises."""
     chat = str(chat_id or "").strip()
     token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     if not (token and chat):
         logger.debug("telegram: %r not sent (no bot token or no chat)",
                      str(title)[:120])
-        return False
+        return UNSENT
     try:
         text, markup, fallback = message_parts(
             title, body, lines=lines, mark=mark, subtitle=subtitle,
@@ -342,7 +378,7 @@ def send_to_chat(chat_id, title, body="", *, lines=None, mark="",
     except Exception as e:  # noqa: BLE001 — a message never breaks its caller
         logger.warning("telegram send failed %r: %s", str(title)[:120],
                        str(e).replace(token, "<token>")[:200])
-        return False
+        return UNKNOWN if _answer_lost(e) else UNSENT
     if refused is not None:
         logger.warning("telegram refused the button (%s) %r: %s; sent "
                        "again without it",
@@ -353,8 +389,8 @@ def send_to_chat(chat_id, title, body="", *, lines=None, mark="",
         logger.warning("telegram refused (%s) %r: %s",
                        getattr(r, "status_code", "?"), str(title)[:120],
                        str(getattr(r, "text", ""))[:200])
-        return False
-    return True
+        return REFUSED
+    return SENT
 
 
 def send_telegram(title, message="", *, lines=None, mark="", subtitle="",

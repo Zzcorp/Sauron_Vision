@@ -245,12 +245,16 @@ class AudienceTests(_Base):
         self.assertEqual(people["first"][2], "")
         self.assertIn("sent there once", people["second"][2])
 
-    def test_missing_prefs_are_created_with_the_model_defaults(self):
+    def test_missing_prefs_read_as_the_defaults_and_no_row_is_created(self):
+        """Review, 2026-09-29 (finding 9). This test used to assert the
+        row WAS created: the defaults it carried (receive_signals,
+        email_notifications) subscribed the user to signal emails. The
+        audience reads an unsaved row now."""
         from alerts.models import UserNotificationPrefs
         _reader("fresh", prefs=False)
         self.assertIn("fresh", self.people())
-        prefs = UserNotificationPrefs.objects.get(user__username="fresh")
-        self.assertTrue(prefs.receive_weekly_newsletter)
+        self.assertFalse(UserNotificationPrefs.objects.filter(
+            user__username="fresh").exists())
 
     def test_a_user_without_a_profile_has_the_model_default_channel(self):
         _reader("noprofile", channel=None, chat="777")
@@ -794,9 +798,10 @@ class ScheduleTests(_Base):
 
     def test_the_admin_input_is_paris_time(self):
         from alerts.newsletter_service import paris_input, parse_paris_input
-        self.assertEqual(parse_paris_input("2026-10-04T08:00"),
+        now = self.at(2026, 9, 29, 12, 0)
+        self.assertEqual(parse_paris_input("2026-10-04T08:00", now=now),
                          self.at(2026, 10, 4, 6, 0))
-        self.assertEqual(parse_paris_input("2026-12-06T08:00"),
+        self.assertEqual(parse_paris_input("2026-12-06T08:00", now=now),
                          self.at(2026, 12, 6, 7, 0))
         self.assertIsNone(parse_paris_input("next sunday"))
         self.assertEqual(paris_input(self.at(2026, 10, 4, 6, 0)),
@@ -967,14 +972,87 @@ class WeeklyReviewTests(_Base):
         self.assertEqual(result["staff_told"]["telegram"],
                          {"chats": 1, "sent": 1})
 
-    def test_a_newer_review_supersedes_the_one_still_waiting(self):
-        older = _edition(status="ai_generated",
+    def test_a_newer_review_supersedes_an_untouched_one_and_says_so(self):
+        """Review, 2026-09-29 (finding 3). This test used to pin that ANY
+        waiting weekly edition was cancelled; now only an untouched review
+        scheduled no later than the new slot is, and the staff notice
+        names it."""
+        older = _edition(title="Weekly Review · week of 21 September 2026",
+                         status="ai_generated", origin="weekly_review",
                          scheduled_for=SATURDAY + timedelta(hours=20))
-        result, _post = self.review(now=SATURDAY + timedelta(days=7))
+        result, post = self.review(now=SATURDAY + timedelta(days=7))
         older.refresh_from_db()
         self.assertEqual(older.status, "cancelled")
         self.assertIsNone(older.scheduled_for)
         self.assertIn("Superseded", older.last_error)
+        text = post.call_args.kwargs["json"]["text"]
+        self.assertIn("Cancelled, superseded by this one: Weekly Review · "
+                      "week of 21 September 2026", text)
+        from alerts.models import Notification
+        self.assertIn("week of 21 September 2026", Notification.objects.get(
+            notification_type="newsletter").body)
+
+    def test_a_human_touched_or_later_edition_is_never_superseded(self):
+        """Review, 2026-09-29 (finding 3): a review a person rescheduled
+        (to Tuesday 6 October) was cancelled "Superseded"."""
+        rescheduled = _edition(
+            status="approved", origin="weekly_review",
+            scheduled_for=datetime(2026, 10, 6, 7, 0, tzinfo=dt_tz.utc),
+            touched_at=SATURDAY - timedelta(days=1))
+        edited = _edition(status="ai_generated", origin="weekly_review",
+                          scheduled_for=SATURDAY - timedelta(hours=1),
+                          touched_at=SATURDAY - timedelta(hours=2))
+        later = _edition(status="ai_generated", origin="weekly_review",
+                         scheduled_for=SATURDAY + timedelta(days=5))
+        queued = _edition(status="ai_generated", origin="weekly_review",
+                          scheduled_for=SATURDAY - timedelta(hours=1),
+                          send_requested_at=SATURDAY - timedelta(minutes=5))
+        admin_made = _edition(status="approved", origin="admin",
+                              scheduled_for=SATURDAY - timedelta(hours=1))
+        _result, post = self.review()
+        for nl in (rescheduled, edited, later, queued, admin_made):
+            nl.refresh_from_db()
+            self.assertIn(nl.status, ("approved", "ai_generated"), nl.pk)
+            self.assertIsNotNone(nl.scheduled_for)
+        self.assertNotIn("superseded",
+                         post.call_args.kwargs["json"]["text"].lower())
+
+    def test_the_admin_marks_what_a_person_touched(self):
+        admin = _reader("toucher", superuser=True)
+        self.client.force_login(admin)
+        for action, extra in (("approve", {}),
+                              ("edit", {"content": "## x"}),
+                              ("reschedule", {"scheduled_for": (
+                                  timezone.now() + timedelta(days=2))
+                                  .astimezone(__import__("zoneinfo")
+                                              .ZoneInfo("Europe/Paris"))
+                                  .strftime("%Y-%m-%dT%H:%M")})):
+            nl = _edition(status="ai_generated", origin="weekly_review")
+            self.client.post("/admin-dashboard/newsletters/", dict(
+                action=action, newsletter_id=nl.pk, **extra))
+            nl.refresh_from_db()
+            self.assertIsNotNone(nl.touched_at, action)
+
+    def test_a_review_written_on_sunday_after_eight_goes_out_that_day(self):
+        """Review, 2026-09-29 (finding 4): it was scheduled a week later,
+        then cancelled by the next Saturday's review."""
+        from alerts.models import Newsletter
+        sunday = datetime(2026, 10, 4, 7, 7, tzinfo=dt_tz.utc)   # 09:07 Paris
+        result, post = self.review(now=sunday)
+        nl = Newsletter.objects.get(pk=result["newsletter_id"])
+        self.assertEqual(nl.scheduled_for,
+                         datetime(2026, 10, 4, 7, 15, tzinfo=dt_tz.utc))
+        text = post.call_args.kwargs["json"]["text"]
+        self.assertIn("goes out today 09:15 Paris time", text)
+        self.assertIn("The Sunday 08:00 slot had passed", text)
+        # Before 08:00 on that Sunday, the 08:00 slot itself.
+        from alerts.newsletter_service import weekly_slot
+        self.assertEqual(
+            weekly_slot(datetime(2026, 10, 4, 5, 0, tzinfo=dt_tz.utc)),
+            (datetime(2026, 10, 4, 6, 0, tzinfo=dt_tz.utc), False))
+        self.assertEqual(
+            weekly_slot(datetime(2026, 10, 4, 7, 15, tzinfo=dt_tz.utc)),
+            (datetime(2026, 10, 4, 7, 30, tzinfo=dt_tz.utc), True))
 
     def test_an_empty_review_is_failed_not_scheduled(self):
         from alerts.models import Newsletter
@@ -986,34 +1064,61 @@ class WeeklyReviewTests(_Base):
         self.assertIn("Weekly letter not ready",
                       post.call_args.kwargs["json"]["text"])
 
-    def test_the_monday_plan_still_reads_the_latest_weekly_row(self):
+    def plan_context(self):
         from ai_agents.tasks import MondayPlanAgent, generate_monday_plan
-        _edition(title="Old", content_markdown="OLDER REVIEW TEXT",
-                 status="sent", sent_at=timezone.now())
-        self.review()
-        # A cancelled special edition written after it is not the review.
-        _edition(title="X", frequency="weekly", status="cancelled",
-                 content_markdown="CANCELLED TEXT")
         provider = _Provider("## Plan\nHold.")
         with mock.patch.object(MondayPlanAgent, "_get_provider",
                                lambda self, name: provider), \
                 mock.patch("requests.post", return_value=_ok()):
             generate_monday_plan.__wrapped__.__wrapped__()
-        context = provider.seen[0]["user_message"]
+        return provider.seen[0]["user_message"]
+
+    def test_the_monday_plan_reads_the_latest_review_whatever_its_email(self):
+        """Review, 2026-09-29 (finding 2). This test used to pin that a
+        cancelled row is not read: cancel Sunday's email, and Sunday's plan
+        read a review a week older. The latest row the review WROTE is
+        read, whatever became of its email."""
+        from alerts.models import Newsletter
+        _edition(title="Old", content_markdown="OLDER REVIEW TEXT",
+                 status="sent", sent_at=timezone.now(),
+                 origin="weekly_review")
+        result, _post = self.review()
+        Newsletter.objects.filter(pk=result["newsletter_id"]).update(
+            status="cancelled", scheduled_for=None)
+        # Written after it, but not by the review: an admin edition, and
+        # a review that came back empty.
+        _edition(title="X", frequency="weekly", status="approved",
+                 origin="admin", content_markdown="ADMIN TEXT")
+        _edition(title="Y", status="failed", origin="weekly_review",
+                 content_markdown="")
+        context = self.plan_context()
         self.assertIn("LAST WEEKLY REVIEW:\n# Market Overview", context)
         self.assertNotIn("OLDER REVIEW TEXT", context)
-        self.assertNotIn("CANCELLED TEXT", context)
+        self.assertNotIn("ADMIN TEXT", context)
 
-    def test_the_monday_plan_reads_a_row_still_sending(self):
-        from ai_agents.tasks import MondayPlanAgent, generate_monday_plan
-        _edition(content_markdown="SENDING REVIEW", status="sending",
-                 sent_at=timezone.now())
-        provider = _Provider("## Plan\nHold.")
-        with mock.patch.object(MondayPlanAgent, "_get_provider",
-                               lambda self, name: provider), \
-                mock.patch("requests.post", return_value=_ok()):
-            generate_monday_plan.__wrapped__.__wrapped__()
-        self.assertIn("SENDING REVIEW", provider.seen[0]["user_message"])
+    def test_the_monday_plan_reads_a_review_whose_send_failed(self):
+        _edition(content_markdown="FAILED SEND REVIEW", status="failed",
+                 origin="weekly_review")
+        self.assertIn("FAILED SEND REVIEW", self.plan_context())
+
+    def test_a_review_from_before_the_origin_field_is_still_read(self):
+        """The migration marks the rows the review wrote before the field
+        existed (their title), so the first Monday after the deploy still
+        has a review to read."""
+        import importlib
+        from django.apps import apps as global_apps
+        from alerts.models import Newsletter
+        legacy = _edition(title="Sauron Vision Weekly Review — Week of 26 "
+                                "Sep 2026", status="ai_generated",
+                          content_markdown="LEGACY REVIEW")
+        other = _edition(title="Weekly Market Report", status="sent")
+        migration = importlib.import_module(
+            "alerts.migrations.0013_newsletter_schedule_and_ledger")
+        migration.mark_weekly_reviews(global_apps, None)
+        self.assertEqual(Newsletter.objects.get(pk=legacy.pk).origin,
+                         "weekly_review")
+        self.assertEqual(Newsletter.objects.get(pk=other.pk).origin, "")
+        self.assertIn("LEGACY REVIEW", self.plan_context())
 
 
 # ── the ad-hoc edition, written in the background ────────────────────────
@@ -1206,11 +1311,17 @@ class AdminPageTests(_Base):
         self.assertFalse(Newsletter.objects.filter(pk=nl.pk).exists())
 
     def test_send_now_queues_the_send_and_returns(self):
+        """The task now carries the request (review, 2026-09-29, finding
+        10): this test pinned the call without it."""
         nl = _edition(status="ai_generated")
         with mock.patch("alerts.tasks.send_newsletter_task.delay") as d:
             r = self.post(action="send", newsletter_id=nl.pk)
         self.assertEqual(r.status_code, 302)
-        d.assert_called_once_with(nl.pk, scheduled=False)
+        nl.refresh_from_db()
+        self.assertIsNotNone(nl.send_requested_at)
+        d.assert_called_once_with(
+            nl.pk, scheduled=False,
+            requested=nl.send_requested_at.isoformat())
         self.assertEqual(mail.outbox, [])
 
     def test_a_sent_edition_can_be_neither_sent_nor_edited(self):
@@ -1357,6 +1468,7 @@ class SettingsPageTests(_Base):
         self.client.post(self.URL, {"action": "save_prefs",
                                     "receive_weekly_newsletter": "on"})
         prefs = UserNotificationPrefs.objects.get(user=self.user)
+        # A POST without the WhatsApp field (an older form) keeps it.
         self.assertEqual(prefs.whatsapp_number, "+33600000000")
         self.assertEqual(prefs.sms_number, "+33611111111")
         self.assertTrue(prefs.receive_monthly_newsletter)
@@ -1487,3 +1599,537 @@ class WiringTests(TestCase):
     def test_the_unsubscribe_link_is_not_behind_the_idle_lock(self):
         from core.idle_lock import EXEMPT_PREFIXES
         self.assertIn("/newsletter/unsubscribe/", EXEMPT_PREFIXES)
+
+
+# ══ The review, 2026-09-29: thirteen defects, each pinned ═══════════════
+#
+# Two adversarial reviewers read the first cut of the weekly letter and
+# confirmed thirteen defects. Each class below names its finding; every
+# test here failed before its fix.
+
+class _FakeSMTP:
+    """An smtplib session's shape, for the one method the send watches."""
+
+    def data(self, msg):
+        return (250, b"2.0.0 queued")
+
+
+class TimeoutBackend(LocMemBackend):
+    """An SMTP-like backend: "slow" addresses time out AFTER DATA (the
+    server may have taken the message), "early" ones are dropped BEFORE
+    it (it never left)."""
+
+    def open(self):
+        self.connection = _FakeSMTP()
+        return True
+
+    def close(self):
+        self.connection = None
+
+    def send_messages(self, messages):
+        for m in messages:
+            if any("slow" in r for r in m.recipients()):
+                self.connection.data(b"...")
+                raise TimeoutError("timed out waiting for the final reply")
+            if any("early" in r for r in m.recipients()):
+                raise smtplib.SMTPServerDisconnected(
+                    "Connection unexpectedly closed")
+        return super().send_messages(messages)
+
+
+class TakeoverBackend(LocMemBackend):
+    """locmem, but while its first message goes out another worker takes
+    the edition over (its lease is replaced), as a second worker does
+    once the first looks stale."""
+    armed = True
+
+    def send_messages(self, messages):
+        from alerts.models import Newsletter
+        sent = super().send_messages(messages)
+        if type(self).armed:
+            type(self).armed = False
+            Newsletter.objects.filter(status="sending").update(
+                send_started_at=timezone.now() + timedelta(seconds=5))
+        return sent
+
+
+@override_settings(**MAIL)
+class ReviewOneWorkerPerDeliveryTests(_Base):
+    """Finding 1 (HIGH): a worker that outlived its lease and the worker
+    that took over both sent every pending row; attempts lived in memory
+    until the ledger write."""
+
+    def rows(self, nl):
+        from alerts.models import NewsletterDelivery
+        return {d.user.username: d for d in NewsletterDelivery.objects
+                .filter(newsletter=nl).select_related("user")}
+
+    def test_a_delivery_is_taken_by_exactly_one_worker(self):
+        from alerts import newsletter_service as ns
+        from alerts.models import NewsletterDelivery
+        reader = _reader("once")
+        nl, _why = ns.claim(_edition().pk)
+        row = NewsletterDelivery.objects.create(newsletter=nl, user=reader,
+                                                channel="email")
+        mine = NewsletterDelivery.objects.get(pk=row.pk)
+        theirs = NewsletterDelivery.objects.get(pk=row.pk)
+        self.assertTrue(ns._Run(nl).take(mine, "once@readers.test"))
+        self.assertFalse(ns._Run(nl).take(theirs, "once@readers.test"))
+        row.refresh_from_db()
+        # Written before the message leaves, not after.
+        self.assertEqual((row.status, row.attempts, row.address),
+                         ("sending", 1, "once@readers.test"))
+
+    @override_settings(EMAIL_BACKEND="tests.test_newsletter.TakeoverBackend")
+    def test_a_worker_that_lost_its_lease_stops_and_nobody_gets_two(self):
+        from alerts.newsletter_service import send_newsletter
+        for name in ("r1", "r2", "r3"):
+            _reader(name)
+        nl = _edition()
+        TakeoverBackend.armed = True
+        with self.assertLogs("alerts.newsletter_service", "WARNING") as cm:
+            out = send_newsletter(nl)
+        self.assertEqual(out["status"], "stopped")
+        self.assertIn("another worker took the edition over",
+                      "\n".join(cm.output))
+        self.assertEqual(len(mail.outbox), 1)
+        nl.refresh_from_db()
+        # The stopped run wrote no verdict: the new holder writes it.
+        self.assertEqual((nl.status, nl.recipients_count), ("sending", 0))
+        statuses = sorted(d.status for d in self.rows(nl).values())
+        self.assertEqual(statuses, ["pending", "pending", "sent"])
+        # The new holder resumes (here: the lease has gone stale) and
+        # sends the two rows left, never the one already sent.
+        from alerts.models import Newsletter
+        Newsletter.objects.filter(pk=nl.pk).update(
+            send_started_at=timezone.now() - timedelta(minutes=31))
+        out = send_newsletter(nl, scheduled=True)
+        self.assertEqual((out["status"], out["recipients"]), ("sent", 3))
+        addresses = sorted(m.to[0] for m in mail.outbox)
+        self.assertEqual(addresses, ["r1@readers.test", "r2@readers.test",
+                                     "r3@readers.test"])
+
+    def test_a_row_left_in_flight_is_unknown_and_never_sent_again(self):
+        """A worker killed between the SMTP server's yes and the ledger
+        write left the row "sending": it may have gone."""
+        from alerts.models import NewsletterDelivery
+        from alerts.newsletter_service import (delivery_words, ledger_counts,
+                                               send_newsletter)
+        ghost = _reader("ghost")
+        _reader("waiting")
+        nl = _edition(status="sending",
+                      send_started_at=timezone.now() - timedelta(minutes=40))
+        NewsletterDelivery.objects.create(
+            newsletter=nl, user=ghost, channel="email", status="sending",
+            attempts=1, address="ghost@readers.test")
+        with self.assertLogs("alerts.newsletter_service", "WARNING"):
+            out = send_newsletter(nl, scheduled=True)
+        self.assertEqual([m.to for m in mail.outbox],
+                         [["waiting@readers.test"]])
+        row = self.rows(nl)["ghost"]
+        self.assertEqual((row.status, row.attempts), ("unknown", 1))
+        self.assertEqual(out["unknown"], 1)
+        self.assertIn("1 outcome unknown",
+                      delivery_words(ledger_counts([nl.pk])[nl.pk]))
+        nl.refresh_from_db()
+        self.assertIn("1 outcome unknown", nl.last_error)
+
+    def test_the_lease_is_renewed_after_every_telegram_message(self):
+        from alerts.models import Newsletter, NewsletterDelivery
+        from alerts.newsletter_service import send_newsletter
+        _reader("t1", channel="telegram", chat="101")
+        _reader("t2", channel="telegram", chat="102")
+        nl = _edition()
+        seen = []
+
+        def post(url, json=None, timeout=None):
+            row = NewsletterDelivery.objects.get(
+                newsletter=nl, address=json["chat_id"])
+            seen.append((Newsletter.objects.get(pk=nl.pk).send_started_at,
+                         row.status, row.attempts))
+            return _ok()
+
+        with mock.patch("requests.post", side_effect=post):
+            out = send_newsletter(nl)
+        self.assertEqual(out["telegram"], 2)
+        (lease1, status1, tries1), (lease2, status2, tries2) = seen
+        self.assertLess(lease1, lease2)
+        # The attempt is in the ledger before the message leaves.
+        self.assertEqual((status1, tries1, status2, tries2),
+                         ("sending", 1, "sending", 1))
+
+    def test_a_verdict_is_written_only_by_the_lease_holder(self):
+        from alerts import newsletter_service as ns
+        _reader("v")
+        nl, _why = ns.claim(_edition().pk)
+        run = ns._Run(nl)
+        from alerts.models import Newsletter
+        Newsletter.objects.filter(pk=nl.pk).update(
+            send_started_at=timezone.now() + timedelta(minutes=1))
+        with self.assertLogs("alerts.newsletter_service", "WARNING"):
+            out = ns._conclude(run)
+        self.assertEqual(out["status"], "stopped")
+        nl.refresh_from_db()
+        self.assertEqual(nl.status, "sending")
+        with self.assertRaises(ns._LeaseLost):
+            run.renew()
+
+
+@override_settings(EMAIL_BACKEND="tests.test_newsletter.TimeoutBackend",
+                   DEFAULT_FROM_EMAIL="letters@sauron.test")
+class ReviewUnknownOutcomeTests(_Base):
+    """Finding 7: an outcome that cannot be known was recorded failed and
+    retried up to three times: up to three copies."""
+
+    def test_an_smtp_timeout_after_data_is_unknown_and_never_retried(self):
+        from alerts.models import NewsletterDelivery
+        from alerts.newsletter_service import (due_newsletter_ids,
+                                               send_newsletter)
+        _reader("slow", email="slow@readers.test")
+        _reader("fine")
+        nl = _edition()
+        with self.assertLogs("alerts.newsletter_service", "WARNING"):
+            out = send_newsletter(nl)
+        row = NewsletterDelivery.objects.get(newsletter=nl,
+                                             user__username="slow")
+        self.assertEqual(row.status, "unknown")
+        self.assertIn("not sent again", row.error)
+        self.assertEqual((out["status"], out["unknown"]), ("sent", 1))
+        self.assertNotIn(nl.pk, due_newsletter_ids())
+        self.assertEqual(send_newsletter(nl, scheduled=True)["status"],
+                         "skipped")
+        row.refresh_from_db()
+        self.assertEqual(row.attempts, 1)
+
+    def test_a_connection_dropped_before_data_is_failed_and_retried(self):
+        from alerts.models import NewsletterDelivery
+        from alerts.newsletter_service import due_newsletter_ids, send_newsletter
+        _reader("early", email="early@readers.test")
+        nl = _edition()
+        with self.assertLogs("alerts.newsletter_service", "WARNING"):
+            send_newsletter(nl)
+        row = NewsletterDelivery.objects.get(newsletter=nl)
+        self.assertEqual(row.status, "failed")
+        self.assertIn(nl.pk, due_newsletter_ids())
+
+    def test_the_email_outcome_rules(self):
+        from alerts.newsletter_service import email_outcome
+        refused = smtplib.SMTPDataError(554, b"rejected")
+        self.assertEqual(email_outcome(refused, True), "failed")
+        self.assertEqual(email_outcome(
+            smtplib.SMTPRecipientsRefused({}), True), "failed")
+        dropped = smtplib.SMTPServerDisconnected("gone")
+        self.assertEqual(email_outcome(dropped, True), "unknown")
+        self.assertEqual(email_outcome(dropped, None), "unknown")
+        self.assertEqual(email_outcome(dropped, False), "failed")
+        self.assertEqual(email_outcome(TimeoutError(), None), "unknown")
+        self.assertEqual(email_outcome(ValueError("bad"), True), "failed")
+
+    def test_a_telegram_read_timeout_is_unknown_a_refused_connect_is_not(self):
+        import requests
+
+        from alerts.models import NewsletterDelivery
+        from alerts.newsletter_service import send_newsletter
+        _reader("lost", channel="telegram", chat="201")
+        _reader("unreached", channel="telegram", chat="202")
+        nl = _edition()
+
+        def post(url, json=None, timeout=None):
+            if json["chat_id"] == "201":
+                raise requests.exceptions.ReadTimeout("read timed out")
+            raise requests.exceptions.ConnectTimeout("connect timed out")
+
+        with mock.patch("requests.post", side_effect=post), \
+                self.assertLogs("alerts.channels.telegram_alert", "WARNING"):
+            out = send_newsletter(nl)
+        rows = {d.user.username: d for d in NewsletterDelivery.objects
+                .filter(newsletter=nl).select_related("user")}
+        self.assertEqual(rows["lost"].status, "unknown")
+        self.assertEqual(rows["unreached"].status, "failed")
+        self.assertEqual(out["status"], "sending")   # "unreached" retries
+
+
+@override_settings(**MAIL)
+class ReviewOncePerAddressTests(_Base):
+    """Findings 5 and 6: a shared chat got two posts across a retry pass,
+    and two accounts with one address got two emails."""
+
+    def test_a_chat_that_has_the_edition_is_not_posted_again(self):
+        from alerts.models import NewsletterDelivery, UserNotificationPrefs
+        from alerts.newsletter_service import send_newsletter
+        first = _reader("first_in_group", channel="telegram", chat="-100g")
+        nl = _edition(status="sending", send_started_at=None,
+                      sent_at=timezone.now())
+        NewsletterDelivery.objects.create(
+            newsletter=nl, user=first, channel="telegram", status="sent",
+            attempts=1, address="-100g", sent_at=timezone.now())
+        UserNotificationPrefs.objects.filter(user=first).update(
+            receive_weekly_newsletter=False)
+        _reader("joined_later", channel="telegram", chat="-100g")
+        with mock.patch("requests.post", return_value=_ok()) as post:
+            send_newsletter(nl, scheduled=True)
+        post.assert_not_called()
+        row = NewsletterDelivery.objects.get(newsletter=nl,
+                                             user__username="joined_later")
+        self.assertEqual(row.status, "skipped")
+        self.assertIn("already has this edition", row.error)
+
+    def test_two_accounts_with_one_address_get_one_email(self):
+        from alerts.models import NewsletterDelivery
+        from alerts.newsletter_service import send_newsletter
+        _reader("owner_a", email="Shared@Readers.test")
+        _reader("owner_b", email="shared@readers.test")
+        nl = _edition()
+        out = send_newsletter(nl)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual((out["email"], out["skipped"]), (1, 1))
+        row = NewsletterDelivery.objects.get(newsletter=nl,
+                                             user__username="owner_b")
+        self.assertEqual(row.status, "skipped")
+        self.assertIn("shares the address", row.error)
+
+    def test_an_address_that_had_it_in_an_earlier_pass_is_not_mailed(self):
+        from alerts.models import NewsletterDelivery
+        from alerts.newsletter_service import send_newsletter
+        old = _reader("old_account", email="twice@readers.test")
+        nl = _edition(status="sending", send_started_at=None,
+                      sent_at=timezone.now())
+        NewsletterDelivery.objects.create(
+            newsletter=nl, user=old, channel="email", status="sent",
+            attempts=1, address="twice@readers.test",
+            sent_at=timezone.now())
+        old.is_active = False
+        old.save()
+        _reader("new_account", email="TWICE@readers.test")
+        send_newsletter(nl, scheduled=True)
+        self.assertEqual(mail.outbox, [])
+
+
+class ReviewUnsubscribeTokenTests(_Base):
+    """Finding 8: the token's first part was base64 of {"u": <pk>}."""
+
+    def test_the_token_signs_a_random_value_not_the_user_id(self):
+        import base64
+
+        from django.core import signing
+
+        from alerts.models import UserNotificationPrefs
+        from alerts.newsletter_service import (unsubscribe_token,
+                                               user_for_token)
+        user = _reader("private")
+        token = unsubscribe_token(user)
+        value = token.rsplit(":", 1)[0]
+        stored = UserNotificationPrefs.objects.get(user=user).newsletter_token
+        self.assertEqual(value, stored)
+        self.assertGreaterEqual(len(value), 20)
+        padded = value + "=" * (-len(value) % 4)
+        self.assertNotIn(b'"u"', base64.urlsafe_b64decode(padded))
+        # Stable, and another user's differs.
+        self.assertEqual(unsubscribe_token(user), token)
+        self.assertNotEqual(unsubscribe_token(_reader("other")), token)
+        self.assertEqual(user_for_token(token), user)
+        # The first cut's form names nobody now.
+        old = signing.dumps({"u": user.pk}, salt="newsletter-unsubscribe",
+                            compress=True)
+        self.assertIsNone(user_for_token(old))
+        self.assertEqual(self.client.post(
+            f"/newsletter/unsubscribe/{old}/").status_code, 400)
+
+    def test_a_forged_value_is_refused(self):
+        from alerts.newsletter_service import unsubscribe_token, user_for_token
+        victim = _reader("victim")
+        token = unsubscribe_token(victim)
+        signature = token.rsplit(":", 1)[1]
+        self.assertIsNone(user_for_token(f"guessed-value:{signature}"))
+
+    def test_a_user_without_prefs_gets_a_quiet_row_at_the_send(self):
+        """The token lives on the preferences row; a user who had none
+        gets one when a letter is BUILT for them (never on a page view),
+        with signal alerts off: alerts/dispatch.py mails signals to any
+        user with a row that has them on."""
+        from alerts.models import UserNotificationPrefs
+        from alerts.newsletter_service import unsubscribe_token
+        user = _reader("rowless", prefs=False)
+        unsubscribe_token(user)
+        prefs = UserNotificationPrefs.objects.get(user=user)
+        self.assertFalse(prefs.receive_signals)
+        self.assertTrue(prefs.receive_weekly_newsletter)
+
+
+@override_settings(**MAIL)
+class ReviewReadsWriteNothingTests(_Base):
+    """Finding 9 (HIGH): audience() created a preferences row with the
+    model's defaults for every user without one, and a GET of the admin
+    page thereby subscribed them all to signal emails."""
+
+    def test_the_admin_get_writes_nothing(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        from alerts.models import UserNotificationPrefs
+        admin = _reader("boss_nw", superuser=True)
+        for i in range(3):
+            _reader(f"rowless{i}", prefs=False)
+        _edition(status="ai_generated")
+        before = UserNotificationPrefs.objects.count()
+        self.client.force_login(admin)
+        with CaptureQueriesContext(connection) as ctx:
+            r = self.client.get("/admin-dashboard/newsletters/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("will reach 4 people", r.content.decode())
+        writes = [q["sql"] for q in ctx.captured_queries
+                  if q["sql"].lstrip().upper().startswith(
+                      ("INSERT", "UPDATE", "DELETE"))
+                  and "alerts_" in q["sql"]]
+        self.assertEqual(writes, [])
+        self.assertEqual(UserNotificationPrefs.objects.count(), before)
+
+    def test_the_staff_notice_writes_no_preferences(self):
+        from alerts.models import UserNotificationPrefs
+        from alerts.newsletter_service import weekly_draft
+        _reader("rowless_x", prefs=False)
+        with mock.patch("requests.post", return_value=_ok()):
+            weekly_draft(LETTER, now=SATURDAY)
+        self.assertFalse(UserNotificationPrefs.objects.filter(
+            user__username="rowless_x").exists())
+
+    def test_the_signal_dispatch_still_skips_a_rowless_reader(self):
+        """After the letter was sent to them, a user who had no row still
+        receives no signal email (the row made for the token has signal
+        alerts off)."""
+        from alerts.dispatch import _match_users
+        from alerts.newsletter_service import send_newsletter
+        user = _reader("rowless_signal", prefs=False)
+        send_newsletter(_edition())
+        self.assertEqual(len(mail.outbox), 1)
+        signal = mock.MagicMock(score=0.9, title="t", direction="bullish",
+                                signal_type="composite", urgency="high")
+        signal.instrument.symbol = "MSFT"
+        signal.instrument.asset_class = "stock"
+        chats, later = [], []
+        _match_users(signal, chats, later)
+        self.assertEqual([p.args[0] for p in later if hasattr(p, "args")
+                          and p.args and p.args[0] == user], [])
+
+
+@override_settings(**MAIL)
+class ReviewCancelStopsQueuedSendTests(_Base):
+    """Finding 10 (HIGH): Cancel did not stop a queued "Send now": the
+    task mailed everyone anyway."""
+    URL = "/admin-dashboard/newsletters/"
+
+    def setUp(self):
+        super().setUp()
+        self.admin = _reader("boss_q", superuser=True)
+        self.client.force_login(self.admin)
+        _reader("subscriber_q")
+
+    def send_now(self, nl):
+        with mock.patch("alerts.tasks.send_newsletter_task.delay") as d:
+            self.client.post(self.URL, {"action": "send",
+                                        "newsletter_id": nl.pk})
+        return d.call_args
+
+    def run_captured(self, call):
+        from alerts.tasks import send_newsletter_task
+        return send_newsletter_task(*call.args, **call.kwargs)
+
+    def test_send_now_then_cancel_then_the_task_sends_nothing(self):
+        from alerts.models import NewsletterDelivery
+        nl = _edition(status="approved")
+        call = self.send_now(nl)
+        body = self.client.get(self.URL).content.decode()
+        self.assertIn(">QUEUED</span>", body)
+        self.assertNotIn(">Send now</button>", body)
+        self.assertIn(">Cancel</button>", body)
+        self.client.post(self.URL, {"action": "cancel",
+                                    "newsletter_id": nl.pk})
+        nl.refresh_from_db()
+        self.assertEqual(nl.status, "cancelled")
+        self.assertIsNone(nl.send_requested_at)
+        out = self.run_captured(call)
+        self.assertEqual(out["status"], "skipped")
+        self.assertIn("cancelled or rescheduled", out["reason"])
+        self.assertEqual(mail.outbox, [])
+        self.assertFalse(NewsletterDelivery.objects.exists())
+        nl.refresh_from_db()
+        self.assertEqual(nl.status, "cancelled")
+
+    def test_a_cancelled_edition_queued_then_cancelled_again_stays_so(self):
+        nl = _edition(status="cancelled")
+        call = self.send_now(nl)
+        self.client.post(self.URL, {"action": "cancel",
+                                    "newsletter_id": nl.pk})
+        self.assertEqual(self.run_captured(call)["status"], "skipped")
+        self.assertEqual(mail.outbox, [])
+
+    def test_send_now_then_reschedule_then_the_task_sends_nothing(self):
+        from zoneinfo import ZoneInfo
+        nl = _edition(status="approved")
+        call = self.send_now(nl)
+        later = (timezone.now() + timedelta(days=2)).astimezone(
+            ZoneInfo("Europe/Paris")).strftime("%Y-%m-%dT%H:%M")
+        self.client.post(self.URL, {"action": "reschedule",
+                                    "newsletter_id": nl.pk,
+                                    "scheduled_for": later})
+        self.assertEqual(self.run_captured(call)["status"], "skipped")
+        self.assertEqual(mail.outbox, [])
+
+    def test_a_request_that_stands_is_sent(self):
+        nl = _edition(status="approved")
+        call = self.send_now(nl)
+        self.assertEqual(self.run_captured(call)["status"], "sent")
+        self.assertEqual(len(mail.outbox), 2)
+        nl.refresh_from_db()
+        self.assertIsNone(nl.send_requested_at)
+
+    def test_a_direct_call_never_sends_a_cancelled_edition(self):
+        from alerts.newsletter_service import send_newsletter
+        out = send_newsletter(_edition(status="cancelled"))
+        self.assertEqual(out["status"], "skipped")
+        self.assertEqual(mail.outbox, [])
+
+
+class ReviewScheduleInputTests(_Base):
+    """Finding 11: an aware or out-of-range time was saved, then every GET
+    of the admin page raised OverflowError until fixed from the shell."""
+    URL = "/admin-dashboard/newsletters/"
+    NOW = datetime(2026, 9, 29, 12, 0, tzinfo=dt_tz.utc)
+
+    def test_only_a_naive_paris_time_within_a_year_is_taken(self):
+        from alerts.newsletter_service import parse_paris_input as parse
+        for bad in ("9999-12-31T23:59+00:00", "0001-01-01T00:00+05:00",
+                    "2026-10-04T08:00Z", "2026-10-04T08:00+02:00",
+                    "0001-01-01T00:00", "9999-12-31T23:59",
+                    "2026-09-29T08:00",            # past
+                    "2027-10-01T08:00",            # more than a year
+                    "2026-13-01T08:00", "tomorrow", ""):
+            self.assertIsNone(parse(bad, now=self.NOW), bad)
+        self.assertEqual(parse("2027-09-28T08:00", now=self.NOW),
+                         datetime(2027, 9, 28, 6, 0, tzinfo=dt_tz.utc))
+
+    def test_the_post_refuses_and_the_page_still_answers(self):
+        admin = _reader("boss_s", superuser=True)
+        self.client.force_login(admin)
+        nl = _edition(status="approved")
+        for bad in ("9999-12-31T23:59+00:00", "0001-01-01T00:00+05:00"):
+            r = self.client.post(self.URL, {"action": "reschedule",
+                                            "newsletter_id": nl.pk,
+                                            "scheduled_for": bad})
+            self.assertEqual(r.status_code, 302, bad)
+        nl.refresh_from_db()
+        self.assertIsNone(nl.scheduled_for)
+
+    def test_a_bad_value_already_stored_renders(self):
+        from alerts.newsletter_service import (date_words, paris_input,
+                                               paris_words)
+        admin = _reader("boss_b", superuser=True)
+        self.client.force_login(admin)
+        far = datetime(9999, 12, 31, 23, 59, tzinfo=dt_tz.utc)
+        _edition(status="approved", scheduled_for=far)
+        r = self.client.get(self.URL)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("9999-12-31 23:59 UTC", r.content.decode())
+        self.assertEqual(paris_words(far), "9999-12-31 23:59 UTC")
+        self.assertEqual(date_words(far), "9999-12-31 23:59 UTC")
+        self.assertEqual(paris_input(far), "")

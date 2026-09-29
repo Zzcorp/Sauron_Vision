@@ -1090,15 +1090,16 @@ def generate_monday_plan():
         .values("title", "country", "datetime", "impact", "forecast", "currency_affected")
     )
 
-    # Last weekly review newsletter: the Saturday edition, whether it is
-    # still waiting, approved, going out (its retries run in "sending",
-    # 2026-09-29) or sent. A cancelled or failed row is not read.
+    # The last weekly review: the latest row the Saturday review WROTE
+    # (origin "weekly_review") with content, whatever became of its email
+    # (review, 2026-09-29). Picking by send status skipped a review whose
+    # letter was cancelled or failed on Sunday morning, and the Sunday
+    # evening plan read a review a week older. An empty row (the model
+    # answered nothing) and an admin-made edition are not the review.
     last_review = (
-        Newsletter.objects.filter(
-            frequency="weekly",
-            status__in=["ai_generated", "approved", "sending", "sent"],
-        )
-        .order_by("-created_at")
+        Newsletter.objects.filter(origin="weekly_review")
+        .exclude(content_markdown="")
+        .order_by("-created_at", "-pk")
         .first()
     )
     last_review_text = last_review.content_markdown[:3000] if last_review else "No previous weekly review available."

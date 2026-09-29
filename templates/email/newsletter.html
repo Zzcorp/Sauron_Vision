@@ -95,6 +95,8 @@
             {% endif %}
             {% if not web %}{% if unsubscribe_url %}
             <p style="margin:0;">Unsubscribing takes one click and needs no login.</p>
+            {% elif preview %}
+            <p style="margin:0;">Each reader&rsquo;s copy carries their own one-click unsubscribe link here.</p>
             {% else %}
             <p style="margin:0;">To stop receiving it, untick &ldquo;Weekly newsletter&rdquo; on the Notification settings page of the platform.</p>
             {% endif %}{% endif %}

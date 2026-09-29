@@ -40,6 +40,8 @@ EDITABLE = ("draft", "ai_generated", "approved", "cancelled", "failed")
 CANCELLABLE = ("draft", "generating", "ai_generated", "approved")
 APPROVABLE = ("draft", "ai_generated")
 RESCHEDULABLE = ("draft", "ai_generated", "approved", "cancelled", "failed")
+#: What "Send now" starts from (newsletter_service.SENDABLE).
+SENDABLE_NOW = ("draft", "ai_generated", "approved", "cancelled", "failed")
 
 
 def _edition(request):
@@ -92,7 +94,7 @@ def _create(request):
         return
     nl = Newsletter.objects.create(
         title=title or "Special edition", frequency=frequency,
-        status="generating", send_email=by_email,
+        status="generating", origin="admin", send_email=by_email,
         send_telegram=by_telegram, send_whatsapp=False,
         created_by=request.user)
     why = _queue(generate_newsletter_task, nl.pk)
@@ -115,16 +117,21 @@ def _approve(request):
                                 f": nothing to approve.")
         return
     nl.status = "approved"
-    nl.save(update_fields=["status", "updated_at"])
+    nl.touched_at = timezone.now()
+    nl.save(update_fields=["status", "touched_at", "updated_at"])
     messages.success(request, f"“{nl.title}” approved.")
 
 
+def _queued(nl) -> bool:
+    """A "Send now" is waiting in the queue for this edition."""
+    return nl.send_requested_at is not None and nl.status in SENDABLE_NOW
+
+
 def _send(request):
-    from alerts.newsletter_service import SENDABLE
     from alerts.tasks import send_newsletter_task
     nl = _edition(request)
     resumable = nl.status == "sending" and _lease_free(nl)
-    if nl.status not in SENDABLE and not resumable:
+    if nl.status not in SENDABLE_NOW and not resumable:
         messages.error(request, f"“{nl.title}” is "
                                 f"{nl.get_status_display()}: it cannot be "
                                 f"sent now.")
@@ -132,40 +139,59 @@ def _send(request):
     if not (nl.content_markdown or "").strip():
         messages.error(request, f"“{nl.title}” is empty: nothing to send.")
         return
-    why = _queue(send_newsletter_task, nl.pk, scheduled=False)
+    # The request is recorded before the task is queued, and the task
+    # carries it (review, 2026-09-29): Cancel and Reschedule clear it, and
+    # a task whose request is gone sends nothing.
+    requested = timezone.now()
+    nl.send_requested_at = requested
+    nl.save(update_fields=["send_requested_at", "updated_at"])
+    why = _queue(send_newsletter_task, nl.pk, scheduled=False,
+                 requested=requested.isoformat())
     if why:
+        nl.send_requested_at = None
+        nl.save(update_fields=["send_requested_at", "updated_at"])
         messages.error(request, f"The send could not be queued: {why}")
         return
-    messages.success(request, f"“{nl.title}” is going out. The page shows "
-                              f"the deliveries as they are recorded.")
+    messages.success(request, f"“{nl.title}” is queued to go out. Cancel "
+                              f"stops it until a worker starts sending; "
+                              f"the page then shows the deliveries.")
 
 
 def _cancel(request):
     nl = _edition(request)
-    if nl.status not in CANCELLABLE:
+    if nl.status not in CANCELLABLE and not _queued(nl):
         messages.error(request, f"“{nl.title}” is "
                                 f"{nl.get_status_display()}: it cannot be "
                                 f"cancelled.")
         return
+    was_queued = _queued(nl)
     nl.status = "cancelled"
     nl.scheduled_for = None
-    nl.save(update_fields=["status", "scheduled_for", "updated_at"])
+    nl.send_requested_at = None
+    nl.save(update_fields=["status", "scheduled_for", "send_requested_at",
+                           "updated_at"])
     messages.success(request, f"“{nl.title}” cancelled: it will not be "
-                              f"sent.")
+                              f"sent" + (", and the queued send is stopped."
+                                         if was_queued else "."))
 
 
 def _reschedule(request):
-    from alerts.newsletter_service import paris_words, parse_paris_input
+    from alerts.newsletter_service import (MAX_SCHEDULE_DAYS, paris_words,
+                                           parse_paris_input)
     nl = _edition(request)
     if nl.status not in RESCHEDULABLE:
         messages.error(request, f"“{nl.title}” is "
                                 f"{nl.get_status_display()}: it cannot be "
                                 f"rescheduled.")
         return
+    # Paris time as the input sends it, in the future, within a year
+    # (review, 2026-09-29): an offset, a year 9999 or a year 1 is refused
+    # here instead of being saved and breaking the page.
     when = parse_paris_input(request.POST.get("scheduled_for"))
-    if when is None or when <= timezone.now():
-        messages.error(request, "Pick a date and time in the future (Paris "
-                                "time).")
+    if when is None:
+        messages.error(request, f"Pick a date and time in Paris time, in the "
+                                f"future and within {MAX_SCHEDULE_DAYS} "
+                                f"days.")
         return
     if not (nl.content_markdown or "").strip():
         messages.error(request, f"“{nl.title}” is empty: nothing to "
@@ -175,8 +201,11 @@ def _reschedule(request):
     if nl.status not in ("ai_generated", "approved"):
         nl.status = "approved"
     nl.last_error = ""
+    nl.touched_at = timezone.now()
+    # A "Send now" still queued is replaced by the new time.
+    nl.send_requested_at = None
     nl.save(update_fields=["scheduled_for", "status", "last_error",
-                           "updated_at"])
+                           "touched_at", "send_requested_at", "updated_at"])
     messages.success(request, f"“{nl.title}” goes out {paris_words(when)}.")
 
 
@@ -190,7 +219,9 @@ def _edit(request):
     title = " ".join(request.POST.get("title", "").split())[:200]
     nl.title = title or nl.title
     nl.content_markdown = request.POST.get("content", nl.content_markdown)
-    nl.save(update_fields=["title", "content_markdown", "updated_at"])
+    nl.touched_at = timezone.now()
+    nl.save(update_fields=["title", "content_markdown", "touched_at",
+                           "updated_at"])
     messages.success(request, f"“{nl.title}” saved.")
 
 
@@ -247,14 +278,17 @@ def _rows(request, newsletters):
         delivered = sum(counts.values()) if counts else 0
         waiting = (nl.status in ("ai_generated", "approved")
                    and nl.scheduled_for is not None)
+        queued = _queued(nl)
         has_content = bool((nl.content_markdown or "").strip())
-        can_send = has_content and (
-            nl.status in ns.SENDABLE
+        can_send = has_content and not queued and (
+            nl.status in SENDABLE_NOW
             or (nl.status == "sending" and _lease_free(nl)))
         preview = ""
         if has_content:
             try:
-                preview = ns.render_email(nl, request.user)[1]
+                # preview=True: the page writes nothing (review,
+                # 2026-09-29), not even the reader's unsubscribe token.
+                preview = ns.render_email(nl, request.user, preview=True)[1]
             except Exception:  # noqa: BLE001 — a row, not the page
                 logger.warning("[newsletter] preview of %s failed", nl.pk,
                                exc_info=True)
@@ -262,19 +296,24 @@ def _rows(request, newsletters):
             "nl": nl,
             "badge": label,
             "tone": tone,
+            "queued": queued,
+            "queued_words": ns.paris_words(nl.send_requested_at)
+            if queued else "",
             "title": ns.plain_title(nl.title),
             "subject": ns.email_subject(nl),
+            # Never raises, whatever was stored (review, 2026-09-29: a
+            # year 9999 made every GET of this page a 500).
             "scheduled_words": ns.paris_words(nl.scheduled_for)
             if waiting else "",
-            "schedule_input": ns.paris_input(
-                nl.scheduled_for or ns.next_send_time()),
+            "schedule_input": (ns.paris_input(nl.scheduled_for)
+                               or ns.paris_input(ns.next_send_time())),
             "reach": ns.reach_words(reach_for(nl))
             if nl.status not in ("sent", "sending") else "",
             "delivery": ns.delivery_words(counts) if delivered else "",
             "preview": preview,
             "has_content": has_content,
             "can_send": can_send,
-            "can_cancel": nl.status in CANCELLABLE,
+            "can_cancel": nl.status in CANCELLABLE or queued,
             "can_approve": nl.status in APPROVABLE and has_content,
             "can_edit": nl.status in EDITABLE,
             "can_reschedule": nl.status in RESCHEDULABLE and has_content,
@@ -372,10 +411,13 @@ def newsletter_unsubscribe(request, token):
     if request.method not in ("GET", "HEAD", "POST"):
         return HttpResponseNotAllowed(["GET", "POST"])
     user = ns.user_for_token(token)
-    if user is None:
+    # The token names a preferences row (it holds the signed value): read,
+    # never created here.
+    prefs = (UserNotificationPrefs.objects.filter(user=user).first()
+             if user is not None else None)
+    if prefs is None:
         return render(request, "newsletter/unsubscribe.html",
                       {"state": "bad"}, status=400)
-    prefs, _ = UserNotificationPrefs.objects.get_or_create(user=user)
     if request.method == "POST":
         if prefs.receive_weekly_newsletter:
             prefs.receive_weekly_newsletter = False

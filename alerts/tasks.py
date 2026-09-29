@@ -29,21 +29,24 @@ def generate_newsletter_task(newsletter_id):
 
 
 @shared_task
-def send_newsletter_task(newsletter_id, scheduled=False):
+def send_newsletter_task(newsletter_id, scheduled=False, requested=None):
     """Send one edition (newsletter_service.send_newsletter): the ledger,
     the batches, the retries. `scheduled`: queued by send_due_newsletters,
-    so it sends only an edition still due; the admin's "Send now" queues
-    it without. Routed to the slow queue (config/celery.py): a thousand
-    SMTP round trips must not sit in front of the quote poller. Not
-    behind the newsletter_send switch: "Send now" is the operator's own
-    decision; the switch governs what goes out on a schedule."""
+    so it sends only an edition still due. `requested`: queued by the
+    admin's "Send now", the request it carries (review, 2026-09-29): it
+    sends only while the edition still holds that request, so a Cancel or
+    a Reschedule made while it waited in the queue stops it. Routed to the
+    slow queue (config/celery.py): a thousand SMTP round trips must not
+    sit in front of the quote poller. Not behind the newsletter_send
+    switch: "Send now" is the operator's own decision; the switch governs
+    what goes out on a schedule."""
     from alerts.models import Newsletter
     from alerts.newsletter_service import send_newsletter
 
     nl = Newsletter.objects.filter(pk=newsletter_id).first()
     if nl is None:
         return {"status": "skipped", "reason": "gone"}
-    return send_newsletter(nl, scheduled=scheduled)
+    return send_newsletter(nl, scheduled=scheduled, requested=requested)
 
 
 @shared_task

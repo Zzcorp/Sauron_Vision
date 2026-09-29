@@ -64,17 +64,34 @@ class Newsletter(models.Model):
         ("failed", "Failed"),
         ("cancelled", "Cancelled"),
     ]
+    ORIGINS = [
+        ("weekly_review", "Saturday weekly review"),
+        ("admin", "Admin page"),
+    ]
 
     title = models.CharField(max_length=200)
     frequency = models.CharField(max_length=10, choices=FREQ_CHOICES, default="weekly")
     status = models.CharField(max_length=15, choices=STATUS_CHOICES, default="draft")
+    # Who made the row (review, 2026-09-29): the Monday plan reads the
+    # latest row the weekly review wrote, whatever became of its email,
+    # and only such a row, untouched by a person, may be superseded.
+    origin = models.CharField(max_length=20, choices=ORIGINS, blank=True)
     # When send_due_newsletters sends it (READY or APPROVED only). None:
     # it waits for "Send now" or a reschedule.
     scheduled_for = models.DateTimeField(null=True, blank=True, db_index=True)
-    # The send's lease: set when a worker claims the edition, refreshed
-    # after every batch, cleared when the run ends. A "sending" row whose
-    # lease is older than SEND_LEASE_MINUTES was abandoned and is resumed.
+    # The send's lease and its token: set when a worker claims the
+    # edition, renewed after every message, cleared when the run ends; a
+    # worker writes only while it still equals the value it holds. A
+    # "sending" row whose lease is older than SEND_LEASE_MINUTES was
+    # abandoned and is resumed.
     send_started_at = models.DateTimeField(null=True, blank=True)
+    # A "Send now" waiting in the queue (review, 2026-09-29): the task
+    # carries this value and sends only while it is unchanged, so Cancel
+    # and Reschedule, which clear it, stop a send already queued.
+    send_requested_at = models.DateTimeField(null=True, blank=True)
+    # The last time a person approved, edited or rescheduled it: a
+    # newer Saturday review never supersedes such an edition.
+    touched_at = models.DateTimeField(null=True, blank=True)
     last_error = models.CharField(max_length=500, blank=True)
 
     # Content
@@ -113,15 +130,23 @@ class NewsletterDelivery(models.Model):
     """One recipient of one edition on one channel: the send's ledger.
 
     Created "pending" (or "skipped", with the reason in `error`) when the
-    send builds its audience; each attempt counts in `attempts`; a
-    delivery that went out is "sent" and is never sent again. A failed
-    one is retried by the next send_due pass until MAX_ATTEMPTS.
+    send builds its audience. A worker takes a row with one conditional
+    UPDATE ("pending"/"failed" at the attempts it read → "sending",
+    attempts + 1) and sends only when that UPDATE changed exactly one
+    row, so two workers can never both send it. A delivery that went out
+    is "sent" and is never sent again; a refused one is "failed" and is
+    retried by the next send_due pass until MAX_ATTEMPTS. "unknown"
+    (review, 2026-09-29): the message may have gone (a read timeout, an
+    SMTP timeout after DATA, a row left "sending" by a worker that died
+    between the send and the ledger write): never retried, counted.
     """
     CHANNELS = [("email", "Email"), ("telegram", "Telegram")]
     STATUSES = [
         ("pending", "Pending"),
+        ("sending", "Sending"),
         ("sent", "Sent"),
         ("failed", "Failed"),
+        ("unknown", "Outcome unknown"),
         ("skipped", "Skipped"),
     ]
     MAX_ATTEMPTS = 3
@@ -134,6 +159,10 @@ class NewsletterDelivery(models.Model):
     status = models.CharField(max_length=10, choices=STATUSES,
                               default="pending")
     attempts = models.PositiveSmallIntegerField(default=0)
+    # Where it went: the address or the chat id, written when a worker
+    # takes the row. A later pass reads it so an address or a chat that
+    # already has the edition is not sent it again under another account.
+    address = models.CharField(max_length=254, blank=True)
     # Scrubbed (core.secret_scrub) and cut at 500: an SMTP answer can
     # quote the account it logged in with.
     error = models.CharField(max_length=500, blank=True)
@@ -177,6 +206,14 @@ class UserNotificationPrefs(models.Model):
     # Quiet hours (UTC)
     quiet_start = models.TimeField(null=True, blank=True)
     quiet_end = models.TimeField(null=True, blank=True)
+
+    # The random value the newsletter's unsubscribe link signs (review,
+    # 2026-09-29): the link used to carry the user id. Made the first time
+    # a letter is built for the user (newsletter_service.
+    # newsletter_token_for); NULL until then, so unique never collides.
+    newsletter_token = models.CharField(max_length=40, unique=True,
+                                        null=True, blank=True,
+                                        editable=False)
 
     class Meta:
         verbose_name_plural = "User notification preferences"
