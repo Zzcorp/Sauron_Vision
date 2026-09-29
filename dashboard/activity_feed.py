@@ -70,6 +70,11 @@ DEFAULT_LIMIT = 60
 MAX_LIMIT = 200
 #: A component whose last run is older than this is not "activity".
 PIPELINE_WINDOW = timedelta(hours=24)
+#: Routine runs (ok or info) printed per answer, newest first. Some
+#: components run every 15 s: uncapped, the first read of a fresh drawer
+#: was all pipelines and the trades behind them fell off the limit. A run
+#: that warned or failed is never capped.
+PIPELINE_QUIET_MAX = 12
 #: A bot tick that says RUNNING and is older than this died mid-tick
 #: (bot_program.asset_engine.safety.HEARTBEAT_STALE_SECONDS, the health
 #: page's own threshold).
@@ -425,10 +430,15 @@ def _pipelines(user, since, n, now):
     if since is not None:
         qs = qs.filter(last_run_at__gt=since)
     out = []
+    quiet = 0
     for row in qs.order_by("-last_run_at", "-id").values(
             "key", "name", "is_enabled", "last_run_at", "last_status",
             "last_message")[:n]:
         level, verb = PIPELINE_WORDS.get(row["last_status"] or "", ("info", "ran"))
+        if level in ("ok", "info"):
+            quiet += 1
+            if quiet > PIPELINE_QUIET_MAX:
+                continue
         name = row["name"] or _words(row["key"])
         detail = _scrubbed(row["last_message"])
         if not row["is_enabled"]:

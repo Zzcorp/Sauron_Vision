@@ -339,6 +339,28 @@ class TheLogTests(TestCase):
         self.assertTrue(events[2]["detail"].startswith("switched off"))
         self.assertEqual(events[0]["url"], "/admin-dashboard/system-map/")
 
+    def test_routine_runs_are_capped_and_failures_never_are(self):
+        """Some components run every 15 s: uncapped, a fresh drawer's first
+        read was all pipelines and the trades behind them fell off the
+        limit."""
+        for i in range(feed.PIPELINE_QUIET_MAX + 5):
+            _component(f"quiet_{i:02d}", _ago(seconds=10 + i))
+        _component("loud_warn", _ago(minutes=30), status="warning",
+                   message="parsed 40 rows, stored none")
+        _component("loud_err", _ago(minutes=31), status="error",
+                   message="timed out")
+        _open_trade(self.user, "EURUSD", _ago(minutes=20))
+        events = feed.activity_events(self.user, limit=200)
+        quiet = [e for e in events if e["kind"] == "pipeline"
+                 and e["level"] in ("ok", "info")]
+        loud = [e["title"] for e in events if e["kind"] == "pipeline"
+                and e["level"] in ("warn", "error")]
+        self.assertEqual(len(quiet), feed.PIPELINE_QUIET_MAX)
+        self.assertEqual([e["id"].split(":")[1] for e in quiet[:2]],
+                         ["quiet_00", "quiet_01"], "not the newest runs")
+        self.assertEqual(loud, ["Loud Warn ran with a warning", "Loud Err failed"])
+        self.assertIn("trade", [e["kind"] for e in events])
+
     def test_a_pipeline_that_runs_again_is_a_new_line(self):
         from core.platform_control import PlatformComponent
         row = _component("scraper_fred", _ago(minutes=5))
@@ -661,6 +683,16 @@ class TheScriptTests(SimpleTestCase):
                      "fill_open", "fill_close", "gate_reject", "notification"):
             self.assertIn(word, self.code, word)
         self.assertNotIn("setInterval(fetchFeed", self.code)
+
+    def test_a_quiet_rerun_replaces_its_own_line_a_failure_never(self):
+        """One line per run of a 15-second component buried every trade
+        and refusal in minutes: a pipeline or bot that ran well replaces
+        its own last quiet line, keyed on the id less its run stamp."""
+        for word in ("quietRow", "replace(/:\\d+$/, '')",
+                     "ev.kind !== 'pipeline' && ev.kind !== 'bot'",
+                     "ev.level === 'ok' || ev.level === 'info'",
+                     "list.removeChild(prev)"):
+            self.assertIn(word, self.code, word)
 
     def test_it_parses(self):
         from tests.test_inline_js_parses import NODE, _parse_all

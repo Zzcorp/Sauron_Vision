@@ -25,6 +25,8 @@
  *   - Rows are built with textContent only — every string in them came
  *     from a database row — and at most 200 stay in the list. New rows
  *     slide in unless the reader asked for reduced motion.
+ *   - A pipeline or a bot that runs again and runs well replaces its own
+ *     last quiet line; a run that warned or failed keeps a line of its own.
  */
 (function () {
   'use strict';
@@ -200,9 +202,20 @@
   function trim() {
     while (list.children.length > MAX_ROWS) {
       var last = list.lastChild;
+      var group = last.getAttribute('data-group');
+      if (group && quietRow[group] === last) delete quietRow[group];
       delete seen[last.getAttribute('data-id')];
       list.removeChild(last);
     }
+  }
+  /* A pipeline or a bot that ran again and ran well REPLACES its own last
+     quiet line: some components run every 15 s, and one line per run
+     buried every trade and refusal under them in minutes. A run that
+     warned or failed stays a line of its own, and is never replaced. */
+  var quietRow = {};
+  function groupOf(ev) {
+    if (ev.kind !== 'pipeline' && ev.kind !== 'bot') return '';
+    return String(ev.id).replace(/:\d+$/, '');
   }
   function apply(data) {
     var events = (data && data.events) || [];
@@ -210,8 +223,19 @@
     for (var i = events.length - 1; i >= 0; i--) {
       var ev = events[i];
       if (!ev || !ev.id || seen[ev.id]) continue;
-      var li = buildRow(ev);
       seen[ev.id] = 1;
+      var group = groupOf(ev);
+      var quiet = ev.level === 'ok' || ev.level === 'info';
+      if (group && quiet) {
+        var prev = quietRow[group];
+        if (prev && prev.parentNode === list) {
+          if (prev.getAttribute('data-at') >= String(ev.at || '')) continue;
+          list.removeChild(prev);
+        }
+      }
+      var li = buildRow(ev);
+      if (group) li.setAttribute('data-group', group);
+      if (group && quiet) quietRow[group] = li;
       insert(li);
       if (animate) {
         li.classList.add('sv-act-new');
