@@ -35,6 +35,7 @@
     --z-canvas:       0;   /* globe-eye, particles, grid background */
     --z-sticky:     100;   /* sticky table headers, section heads   */
     --z-chrome:     500;   /* headbands, ticker bar, info panel     */
+    --z-drawer:     550;   /* activity drawer, UNDER the rail       */
     --z-rail:       600;   /* signal rail                          */
     --z-nav-scrim:  700;   /* mobile sidebar scrim                  */
     --z-sidebar:    800;   /* sidebar, including mobile-open        */

@@ -35,6 +35,10 @@ from tests.test_execution_trust import _instrument, _signal, _user
 
 ROUTER = "bot_program.engine.broker_router.client_for_symbol"
 PROVEN = "bot_program.asset_engine.base.ETORO_PROVEN"
+#: The set as it shipped before 2026-09-29, when stock was still unproven:
+#: the tests below that show a class REFUSED state it on this set, so they
+#: keep proving the refusal now that stock's own proof is pinned.
+STOCK_UNPROVEN = frozenset({"crypto", "etf", "forex"})
 
 
 def _gate(client, symbol="AAPL", side="BUY", icls="stock", **kw):
@@ -46,22 +50,25 @@ def _gate(client, symbol="AAPL", side="BUY", icls="stock", **kw):
 class TheSetAsShippedTests(SimpleTestCase):
     """What the tree says: no class was proven on 2026-09-24; since
     2026-09-26 crypto is, at 1x, off the BTC round trip measured on the
-    REAL account (test_proof_crypto)."""
+    REAL account (test_proof_crypto); since 2026-09-29 every class is, and
+    no short is."""
 
-    def test_crypto_etf_and_forex_are_in_the_set_at_this_commit(self):
+    def test_every_class_is_in_the_set_and_the_short_is_not(self):
         """crypto since 2026-09-26 (the real BTC round trip); etf since
         2026-09-28 (the demo GLDM round trip of 2026-09-23, test_proof_etf:
         GLDM's row is an ETF and the gate keys on the instrument's class);
         forex since 2026-09-28 (the demo EURUSD round trips at 1x and 5x,
-        test_proof_forex and test_proof_forex_at_5x). stock, index and
-        commodity are NOT: no eToro order of any of them has ever filled,
-        demo or real, and the gate refuses them."""
+        test_proof_forex and test_proof_forex_at_5x); stock, index and
+        commodity since 2026-09-29 (the demo AAPL, SPX500 and WHEAT.FUT
+        round trips, test_proof_stock, test_proof_index,
+        test_proof_commodity). "short" is NOT: no eToro SELL has ever
+        filled, demo or real, and the gate refuses every one."""
         from bot_program.asset_engine.base import (ETORO_PROVEN,
                                                    ETORO_PROVEN_LEVERAGE)
         self.assertIsInstance(ETORO_PROVEN, frozenset)
-        self.assertEqual(ETORO_PROVEN, frozenset({"crypto", "etf", "forex"}))
-        for token in ("stock", "index", "commodity", "short"):
-            self.assertNotIn(token, ETORO_PROVEN)
+        self.assertEqual(ETORO_PROVEN, frozenset({
+            "commodity", "crypto", "etf", "forex", "index", "stock"}))
+        self.assertNotIn("short", ETORO_PROVEN)
         self.assertEqual(ETORO_PROVEN_LEVERAGE, {"forex": 5},
                          "forex is proven at 5x (test_proof_forex_at_5x); "
                          "crypto and etf at 1x: the attack mode's chooser "
@@ -121,7 +128,8 @@ class TheGateTests(SimpleTestCase):
     def test_an_etoro_carrier_is_refused_naming_the_class_and_touches_no_wire(self):
         from bot_program.asset_engine import skips
         t, fake = _etoro_client([])
-        code, why = _gate(t)
+        with mock.patch(PROVEN, STOCK_UNPROVEN):
+            code, why = _gate(t)
         self.assertEqual(code, skips.GATE_BLOCKED)
         self.assertTrue(why.startswith("eToro AAPL (stock, BUY): "), why)
         self.assertIn("no demo fill-and-close proof pinned for ['stock']",
@@ -132,7 +140,8 @@ class TheGateTests(SimpleTestCase):
     def test_a_sell_needs_the_short_token_too(self):
         from bot_program.asset_engine import skips
         t, _ = _etoro_client([])
-        code, why = _gate(t, side="SELL")
+        with mock.patch(PROVEN, STOCK_UNPROVEN):
+            code, why = _gate(t, side="SELL")
         self.assertEqual(code, skips.GATE_BLOCKED)
         self.assertIn("(stock, SELL)", why)
         self.assertIn("['short', 'stock']", why)
@@ -160,10 +169,12 @@ class TheGateTests(SimpleTestCase):
         test that pushes a real EtoroTrader through a lane relies on
         (tests/test_etoro_leverage.py _proven)."""
         t, _ = _etoro_client([])
-        self.assertNotEqual(_gate(t), ("", ""))
-        with mock.patch(PROVEN, frozenset({"stock"})):
-            self.assertEqual(_gate(t), ("", ""))
-        self.assertNotEqual(_gate(t), ("", ""))
+        self.assertEqual(_gate(t), ("", ""), "stock is proven as shipped")
+        with mock.patch(PROVEN, STOCK_UNPROVEN):
+            self.assertNotEqual(_gate(t), ("", ""))
+        self.assertEqual(_gate(t), ("", ""))
+        self.assertNotEqual(_gate(t, side="SELL"), ("", ""),
+                            "no short is proven as shipped")
 
     def test_the_words_fit_the_skip_record_and_start_with_the_verdict(self):
         """skips.record keeps 200 characters; the verdict and both names
@@ -271,6 +282,7 @@ class TheEntryLaneTests(TestCase):
 
     def _execute(self, cand, client):
         with mock.patch(ROUTER, return_value=client), \
+                mock.patch(PROVEN, STOCK_UNPROVEN), \
                 mock.patch("time.sleep"), \
                 mock.patch("bot_program.asset_engine.base.AssetBot"
                            "._notify_venue_min_size") as floor_note:
@@ -416,7 +428,8 @@ class TheLegacyTickMeetsTheGateTests(TestCase):
     def test_an_etoro_carried_unproven_class_sends_nothing_and_books_no_row(self):
         from bot_program.models import BotTrade
         t, fake = self._etoro()
-        with mock.patch.object(t, "market_order", wraps=t.market_order) as spy, \
+        with mock.patch(PROVEN, STOCK_UNPROVEN), \
+                mock.patch.object(t, "market_order", wraps=t.market_order) as spy, \
                 self.assertLogs("bot_program.engine.runner",
                                 level="ERROR") as cm:
             self._tick(t)

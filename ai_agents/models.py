@@ -30,6 +30,11 @@ class AgentTask(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        # The activity drawer reads the newest calls every 20 s while open
+        # (dashboard.activity_feed._ai): without this, every read sorted
+        # the whole ledger.
+        indexes = [models.Index(fields=["-created_at"],
+                                name="agenttask_created_desc")]
 
     def __str__(self):
         return f"[{self.agent}] {self.provider}/{self.model} — {'OK' if self.success else 'FAIL'}"

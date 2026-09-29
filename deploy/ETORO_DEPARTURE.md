@@ -814,6 +814,20 @@ commodity symbol reads `route=etoro` before its config is enabled.
   refuses every eToro entry of that class as `gate_blocked`, before the
   floor and before any POST. The per-class sitting list lands with the
   proofs; nothing below lifts this bullet.
+  PINNED, every class at 1x: crypto (2026-09-26, real, BTC), etf
+  (2026-09-28, demo, GLDM), forex (2026-09-28, demo, EURUSD, also at 5x),
+  stock, index and commodity (2026-09-29 10:57 UTC, demo, one BUY each
+  closed by position id: AAPL 4 units, settlementType REAL, a 1.00 fee;
+  SPX500 1 unit, CFD; WHEATUSD as WHEAT.FUT 2 units, CFD — each proven
+  "closed" through eToro's transient 500s). The shell client was built
+  `env='demo'` with D1's WORLD CHECK; the row stayed live and no box moved.
+  STILL UNPROVEN: "short" (no eToro SELL has filled, so every SELL is
+  refused), a fractional stock fill (the stock bot floors to whole shares
+  until `fractional_units_live` is ON), and any leverage above 1x but
+  forex's 5x. What the proofs do not lift: an index in
+  VENUE_QUOTE_UNMEASURED, a commodity while eToro's commodities box is
+  unticked (the router sends it elsewhere), and the 1,000 USD floor per
+  order on indices and commodities.
 - 0s. THE SPELLINGS eToro has not answered — gold, silver, oil, gas, copper
   (VENUE_SPELLING_UNKNOWN in bot_program/engine/etoro_client.py: XAUUSD and
   XAGUSD raise naming 2026-09-23) — before any commodity or metal config.

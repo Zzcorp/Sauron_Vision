@@ -425,7 +425,20 @@ LEVERAGE_SWITCH_KEY = "etoro_leverage_live"
 #: 1137.16 locked) and at 5x (order 384647176, position 3605812677, margin
 #: 227.42), settlementType CFD, each proven by the open order's execution
 #: state; measured by the operator the night before leaving.
-ETORO_PROVEN = frozenset({"crypto", "etf", "forex"})
+#: "stock", "index" and "commodity" since 2026-09-29 (test_proof_stock,
+#: test_proof_index, test_proof_commodity): one BUY at 1x each on the DEMO
+#: segment the day of leaving, 10:57 UTC, filled and closed by position id,
+#: proven by the open order's execution state through eToro's transient
+#: 500s — AAPL 4 units (order 384798829, settlementType REAL, a 1.00 fee),
+#: SPX500 1 unit (order 384769149, CFD), WHEATUSD as WHEAT.FUT 2 units
+#: (order 384769151, CFD). At 1x only: ETORO_PROVEN_LEVERAGE has no entry
+#: for them. "short" stays OUT: no eToro SELL has ever been measured, so a
+#: SELL of any class is still refused. "index" lifts the USD-quoted
+#: indices (SPX500, NSDQ100, DJ30); VENUE_QUOTE_UNMEASURED stays refused
+#: whatever this set holds. "commodity" lifts the gate only: the router
+#: sends a commodity to eToro only with eToro's commodities box ticked.
+ETORO_PROVEN = frozenset({"commodity", "crypto", "etf", "forex", "index",
+                          "stock"})
 
 #: THE MULTIPLIER EACH eToro CLASS HAS BEEN PROVEN AT (2026-09-26): class
 #: -> the highest multiplier whose demo fill-and-close is pinned as

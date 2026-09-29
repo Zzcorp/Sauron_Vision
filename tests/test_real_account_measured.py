@@ -594,7 +594,10 @@ class TheCryptoProofTests(SimpleTestCase):
     def test_the_gate_lets_a_1x_crypto_buy_through_and_refuses_the_rest(self):
         """A real client, the measured LIVE BTC row on the wire: a BUY
         clears the proof and the row's caps; a SELL still needs "short"; a
-        stock still needs its own proof. No order POST either way."""
+        class without its own proof is refused (stated on the set as it
+        shipped before 2026-09-29, stock unproven). No order POST either
+        way."""
+        from unittest import mock
         from bot_program.asset_engine import skips
         from bot_program.asset_engine.base import AssetBot
         t, fake = _client([SEARCH_BTC,
@@ -607,7 +610,9 @@ class TheCryptoProofTests(SimpleTestCase):
         self.assertEqual(code, skips.GATE_BLOCKED)
         self.assertIn("(crypto, SELL)", why)
         self.assertIn("['short']", why)
-        code, why = gate(t, "AAPL", "BUY", 0.04, 341.0, "stock")
+        with mock.patch("bot_program.asset_engine.base.ETORO_PROVEN",
+                        frozenset({"crypto", "etf", "forex"})):
+            code, why = gate(t, "AAPL", "BUY", 0.04, 341.0, "stock")
         self.assertEqual(code, skips.GATE_BLOCKED)
         self.assertIn("['stock']", why)
         self.assertEqual([c for c in fake.calls if "/orders" in c[1]], [])

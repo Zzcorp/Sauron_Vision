@@ -106,8 +106,11 @@
        loaded later, this wins at the same weight. A saved
        sauron_signals_rail=open used to keep the page's 280px right
        margin, an 80px column at 360, with nothing on screen to close the
-       rail: the margin goes whatever localStorage says. */
-    .signals-rail, .rail-toggle-btn, .sidebar-toggle-btn, .mobile-toggle { display: none !important; }
+       rail: the margin goes whatever localStorage says. The activity
+       drawer tucked under the rail, and its tab, go with it: a saved
+       sauron_activity_open would otherwise slide 360px of log over a
+       390px screen. */
+    .signals-rail, .rail-toggle-btn, .sidebar-toggle-btn, .mobile-toggle, .sv-activity, .sv-activity-tab { display: none !important; }
     .main-content { margin-right: 0 !important; }
 
     /* (c) The news ticker and the info panel: 56px stubs at 360, nothing

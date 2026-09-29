@@ -307,10 +307,15 @@ class TheEntryGateKeepsCommoditiesOnEtoroAndUnreadQuotesOutTests(TestCase):
                          ("", ""))
 
     def test_an_etoro_commodity_order_meets_the_proof_gate_not_step_0(self):
+        """Stated on the set as it shipped before 2026-09-29, commodity
+        unproven: the refusal an eToro commodity meets is the proof gate's,
+        never step 0's "eToro only"."""
+        from unittest import mock
         from bot_program.asset_engine import skips
         from tests.test_etoro_client import _client
         t, fake = _client([])
-        code, why = self._gate(t, "WHEATUSD", "commodity")
+        with mock.patch(self.PROVEN, frozenset({"crypto", "etf", "forex"})):
+            code, why = self._gate(t, "WHEATUSD", "commodity")
         self.assertEqual(code, skips.GATE_BLOCKED)
         self.assertIn("no demo fill-and-close proof pinned for ['commodity']",
                       why)
