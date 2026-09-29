@@ -18,8 +18,8 @@ The operator's decisions, pinned:
     connection, a failure recorded and retried (3 attempts at most), a
     delivered row never sent again, "sent" / "failed" by the rules, and a
     row another worker holds is left alone.
-  * The admin page, the archive, and the wiring (the beat entry, the
-    switch, the route).
+  * The admin page, the archive, the settings page, and the wiring (the
+    beat entry, the switch, the route).
 
 Run with:  python manage.py test tests.test_newsletter
 """
@@ -1313,6 +1313,57 @@ class ArchiveTests(_Base):
     def test_the_rail_links_the_archive(self):
         body = self.client.get("/newsletters/").content.decode()
         self.assertIn('<span class="label-text">Weekly Letter</span>', body)
+
+
+# ── the settings page ────────────────────────────────────────────────────
+
+class SettingsPageTests(_Base):
+    URL = "/notifications/settings/"
+
+    def setUp(self):
+        super().setUp()
+        from alerts.models import UserNotificationPrefs
+        self.user = _reader("settler", channel="email")
+        UserNotificationPrefs.objects.filter(user=self.user).update(
+            whatsapp_number="+33600000000", sms_number="+33611111111",
+            receive_monthly_newsletter=True)
+        self.client.force_login(self.user)
+
+    def test_whatsapp_sms_and_monthly_are_gone_weekly_stays(self):
+        body = self.client.get(self.URL).content.decode()
+        self.assertNotIn('name="whatsapp_number"', body)
+        self.assertNotIn('name="sms_number"', body)
+        self.assertNotIn("receive_monthly_newsletter", body)
+        self.assertNotIn("Monthly newsletter", body)
+        self.assertIn('name="receive_weekly_newsletter"', body)
+        self.assertIn("Sent on Sunday morning by email", body)
+        self.assertIn('href="/profile/"', body)
+        self.assertIn('href="/newsletters/"', body)
+
+    def test_the_channel_is_said(self):
+        from portfolio.trader_profile import TraderProfile
+        TraderProfile.objects.filter(user=self.user).update(
+            notify_channel="telegram")
+        body = self.client.get(self.URL).content.decode()
+        self.assertIn("your own Telegram chat", body)
+        self.assertIn("set your Telegram chat ID above", body)
+        TraderProfile.objects.filter(user=self.user).update(
+            notify_channel="none")
+        self.assertIn("the letter is not sent to you",
+                      self.client.get(self.URL).content.decode())
+
+    def test_a_save_keeps_the_fields_that_left_the_form(self):
+        from alerts.models import UserNotificationPrefs
+        self.client.post(self.URL, {"action": "save_prefs",
+                                    "receive_weekly_newsletter": "on"})
+        prefs = UserNotificationPrefs.objects.get(user=self.user)
+        self.assertEqual(prefs.whatsapp_number, "+33600000000")
+        self.assertEqual(prefs.sms_number, "+33611111111")
+        self.assertTrue(prefs.receive_monthly_newsletter)
+        self.assertTrue(prefs.receive_weekly_newsletter)
+        self.client.post(self.URL, {"action": "save_prefs"})
+        prefs.refresh_from_db()
+        self.assertFalse(prefs.receive_weekly_newsletter)
 
 
 # ── the wiring ───────────────────────────────────────────────────────────

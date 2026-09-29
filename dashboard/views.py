@@ -5159,16 +5159,17 @@ def user_notifications(request):
         action = request.POST.get("action", "")
 
         if action == "save_prefs":
+            # The WhatsApp and SMS numbers and the monthly newsletter left
+            # the form (2026-09-29: no path sends on them, and there is one
+            # weekly letter). Their fields stay, untouched here: a save must
+            # not blank what an older form stored.
             prefs.telegram_chat_id = request.POST.get("telegram_chat_id", "")
-            prefs.whatsapp_number = request.POST.get("whatsapp_number", "")
             prefs.email_notifications = "email_notifications" in request.POST
-            prefs.sms_number = request.POST.get("sms_number", "")
             prefs.receive_signals = "receive_signals" in request.POST
             prefs.receive_strategies = "receive_strategies" in request.POST
             prefs.receive_news_alerts = "receive_news_alerts" in request.POST
             prefs.receive_portfolio_alerts = "receive_portfolio_alerts" in request.POST
             prefs.receive_weekly_newsletter = "receive_weekly_newsletter" in request.POST
-            prefs.receive_monthly_newsletter = "receive_monthly_newsletter" in request.POST
             prefs.receive_bot_alerts = "receive_bot_alerts" in request.POST
             prefs.receive_strategist_briefing = "receive_strategist_briefing" in request.POST
             # Phase-44 — quiet hours (UTC). Empty string clears the window.
@@ -5209,10 +5210,19 @@ def user_notifications(request):
         return redirect("user_notifications")
 
     rules = AlertRule.objects.filter(user=request.user)
+    # The letter goes by the profile's ONE channel (alerts/
+    # newsletter_service.audience): say which, beside the checkbox.
+    from bot_program.notifications import _user_channel
+    from portfolio.trader_profile import TraderProfile
+    has_profile = TraderProfile.objects.filter(user=request.user).exists()
+    channel = (_user_channel(request.user) if has_profile else
+               TraderProfile._meta.get_field("notify_channel").default)
     return render(request, "dashboard/user_notifications.html", {
         "page_id": "notifications",
         "prefs": prefs,
         "rules": rules,
+        "letter_channel": channel,
+        "has_email": bool((request.user.email or "").strip()),
     })
 
 
