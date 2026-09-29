@@ -1,0 +1,149 @@
+"""A day of Sauron, on the Wall.
+
+The ring scheme (seven stages around the beat, markets in, venues and
+people out) is drawn from the beat schedule the page was served with, by
+static/js/sv-day-scheme.js off a json_script the view hands it. These
+tests pin that the section is on the page, that the JSON on it is the
+schedule read whole, that the drawing lives in a static file (the chart
+tests forbid SVG built inside a template), that the section and its script
+keep the stripe parity of the sections after them, and that the two
+cadences the brokers pillar used to type wrongly are gone.
+
+Run with:  python manage.py test tests.test_wall_day
+"""
+import json
+import re
+from pathlib import Path
+
+from django.conf import settings
+from django.test import TestCase
+
+from config.celery import app
+
+WALL = Path(settings.BASE_DIR) / "templates" / "landing" / "the_wall.html"
+SCRIPT = Path(settings.BASE_DIR) / "static" / "js" / "sv-day-scheme.js"
+SHEET = Path(settings.BASE_DIR) / "static" / "css" / "sv-day-scheme.css"
+
+
+def _json_on(body):
+    m = re.search(r'<script id="dayData" type="application/json">(.*?)</script>', body, re.S)
+    assert m, "the day's json_script is not on the page"
+    return json.loads(m.group(1))
+
+
+class TheDayIsOnTheWallTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.src = WALL.read_text(encoding="utf-8")
+
+    def setUp(self):
+        self.body = self.client.get("/wall/").content.decode()
+
+    def test_the_section_and_its_parts(self):
+        body = self.body
+        self.assertIn('<section class="wall-section" id="day">', body)
+        self.assertIn("A Day of Sauron", body)
+        self.assertIn("What the Machine Does,", body)
+        self.assertIn('id="dayScheme"', body)
+        self.assertIn('id="dayPanel"', body)
+        self.assertIn('viewBox="0 0 1200 700"', body)
+        self.assertIn('data-panel="dayPanel"', body)
+        self.assertIn("js/sv-day-scheme.js", body)
+        self.assertIn("css/sv-day-scheme.css", body)
+        # The reader is told the number the picture is drawn from.
+        self.assertIn(f"{len(app.conf.beat_schedule)} scheduled tasks", body)
+
+    def test_the_nav_reaches_it_and_stands_it_down_with_the_others(self):
+        nav = re.search(r'<nav class="wall-nav" id="wallNav">(.*?)</nav>', self.body, re.S).group(1)
+        self.assertIn('<a href="#day">Day</a>', nav)
+        self.assertLess(nav.index('href="#pipeline"'), nav.index('href="#day"'))
+        self.assertLess(nav.index('href="#day"'), nav.index('href="#demo"'))
+        narrow = (self.src.split("@media (min-width: 769px) and (max-width: 1080px) {")[1]
+                  .split("display: none;")[0])
+        self.assertIn('.nav-links a[href="#day"]', narrow)
+
+    def test_the_json_is_the_schedule_read_whole(self):
+        day = _json_on(self.body)
+        self.assertEqual(day["total"], len(app.conf.beat_schedule))
+        self.assertEqual([s["title"] for s in day["stages"]],
+                         ["SEE", "THINK", "DECIDE", "ACT", "WATCH", "TELL", "LEARN"])
+        self.assertEqual(day["unplaced"], [])
+        self.assertEqual(sum(s["count"] for s in day["stages"]), day["total"])
+        tell = next(s for s in day["stages"] if s["key"] == "tell")
+        self.assertEqual(tell["rows"][0]["when"], "15 s")
+        self.assertIn("the Eye reads its Telegram group", tell["rows"][0]["what"])
+        # The facts are the Wall's own counts, ints, never a typed figure.
+        for stage in day["stages"]:
+            for n, words in stage["facts"]:
+                self.assertIsInstance(n, int)
+                self.assertTrue(words)
+
+    def test_the_section_and_its_script_keep_the_stripes(self):
+        """`.wall-section:nth-child(even)` tints every second child of
+        #wallContent. The section plus its sibling <script> add two, so
+        every stripe after them keeps its tint; a third child would flip
+        them all."""
+        src = self.src
+        start = src.index('<section class="wall-section" id="day">')
+        end = src.index('<section class="wall-section" id="demo">')
+        between = src[start:end]
+        self.assertEqual(between.count("<section"), 1)
+        self.assertEqual(between.count("</section>"), 1)
+        after = between[between.index("</section>"):]
+        scripts = re.findall(r"<script[^>]*>", after)
+        self.assertEqual(len(scripts), 1, scripts)
+        self.assertIn("sv-day-scheme.js", scripts[0])
+        # The JSON lives INSIDE the section (json_script is a <script> too).
+        self.assertIn('json_script:"dayData"', between[:between.index("</section>")])
+
+    def test_the_drawing_is_a_static_file_and_parses(self):
+        """tests/test_chart_surfaces.py forbids createElementNS inside a
+        template; the ring is built in static/js/sv-day-scheme.js."""
+        src = self.src
+        self.assertNotIn("createElementNS", src)
+        js = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("createElementNS", js)
+        self.assertIn("window.SVDay", js)
+        self.assertIn("pauseAnimations", js)
+        self.assertIn("prefers-reduced-motion", js)
+        self.assertIn("'dayData'", js)
+        for word in ("{{", "{%"):
+            self.assertNotIn(word, js)
+
+    def test_the_sheet_adds_no_token_and_no_keyframe(self):
+        """The Book copies the Wall's :root and pins every token; the Wall
+        keeps its keyframe list short. The ring's sheet reads the tokens
+        both pages define and animates through SMIL instead."""
+        css = re.sub(r"/\*.*?\*/", "", SHEET.read_text(encoding="utf-8"), flags=re.S)
+        self.assertNotIn(":root", css)
+        self.assertNotIn("@keyframes", css)
+        self.assertIn("prefers-reduced-motion", css)
+        for token in ("--bg2", "--bg3", "--border", "--text2", "--text3",
+                      "--accent", "--accent-dim", "--accent-bright"):
+            self.assertIn(f"var({token}", css, token)
+        wall_root = self.src.split(":root {")[1].split("}")[0]
+        self.assertNotIn("--day", wall_root)
+
+    def test_the_brokers_pillar_reads_the_beat_s_own_clock(self):
+        """It typed a 06:30 snapshot and a 03:30 pg_dump; the snapshot runs
+        at 23:30 and no backup is on the beat (deploy/backup.sh has its own
+        clock)."""
+        body = self.body
+        self.assertNotIn("pg_dump</code> at 03:30", body)
+        self.assertNotIn("30-day retention", body)
+        self.assertNotIn('<div class="pillar-num">06:30</div>', body)
+        self.assertIn('<div class="pillar-num">23:30</div>', body)
+        self.assertIn("snapshot at 23:30 UTC, decay scan at 06:15 UTC", body)
+
+    def test_it_says_nothing_the_wall_forbids(self):
+        low = _json_on(self.body)
+        blob = json.dumps(low).lower()
+        for word in ("proven", "fully autonomous", "hands-free", "no human needed",
+                     "trades your account", "allocates your capital", "667"):
+            self.assertNotIn(word, blob, word)
+
+    def test_a_signed_in_reader_is_still_sent_home(self):
+        from django.contrib.auth import get_user_model
+        user = get_user_model().objects.create_user("zz_day_reader", password="x")
+        self.client.force_login(user)
+        self.assertEqual(self.client.get("/wall/").status_code, 302)
