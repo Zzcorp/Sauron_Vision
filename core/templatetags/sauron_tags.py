@@ -324,8 +324,10 @@ def newsletter_md(value):
     from django.utils.html import escape
     from django.utils.safestring import mark_safe
 
-    # \x00 and \x01 are the placeholders below: text never carries them.
-    raw = str(value or "").replace("\x00", "").replace("\x01", "")
+    # \x00, \x01 and \x02 are the placeholders below: text never carries
+    # them.
+    raw = (str(value or "").replace("\x00", "").replace("\x01", "")
+           .replace("\x02", ""))
     text = escape(raw).replace("\r\n", "\n").strip()
     if not text:
         return ""
@@ -344,20 +346,29 @@ def newsletter_md(value):
     text = re.sub(r"(?m)^```[^\n]*\n(.*?)^```[ \t]*$", _fence, text,
                   flags=re.S)
 
-    def _link(m):
-        label, url = m.group(1), m.group(2)
-        # The url was escaped with the rest: "&amp;" is what an href holds.
-        href = _nl_href(url.replace("&amp;", "&"))
-        if not href:
-            return label
-        return (f'<a class="nl-a" href="{escape(href)}" target="_blank" '
-                f'style="color:{NL_LINK};text-decoration:underline;">'
-                f"{label}</a>")
+    def _emph(s):
+        """**bold** and *emphasis* on text that holds no tag of ours but
+        the ones these two passes make (and the placeholders)."""
+        s = re.sub(r"\*\*(.+?)\*\*", r'<strong style="font-weight:700;">'
+                   r"\1</strong>", s)
+        # Emphasis never inside a word: rates_up, golden_cross, 5 * 3
+        # keep their characters. Outside tags only.
+        parts = re.split(r"(<[^>]+>)", s)
+        for i, part in enumerate(parts):
+            if part and not part.startswith("<"):
+                parts[i] = re.sub(
+                    _NL_EMPHASIS,
+                    lambda m: "<em>" + (m.group(1) or m.group(2)) + "</em>",
+                    part)
+        return "".join(parts)
 
     def _inline(s):
-        # Code spans leave first and come back last: nothing inside one
-        # is bolded, emphasised or linked.
-        codes = []
+        # Code spans and links leave first, as placeholders, and come back
+        # last (review, 2026-09-29): the bold pass used to run over a
+        # built <a href>, so "[x](/a/**) and then evil**" put a <strong>
+        # inside the href. Nothing inside a code span is bolded,
+        # emphasised or linked; a link's label is emphasised on its own.
+        codes, links = [], []
 
         def _code(m):
             codes.append(
@@ -366,21 +377,24 @@ def newsletter_md(value):
                 f'padding:1px 4px;border-radius:3px;">{m.group(1)}</code>')
             return "\x01%d\x01" % (len(codes) - 1)
 
+        def _link(m):
+            label, url = m.group(1), m.group(2)
+            # The url was escaped with the rest: "&amp;" is what an href
+            # holds.
+            href = _nl_href(url.replace("&amp;", "&"))
+            if not href:
+                return label
+            links.append(
+                f'<a class="nl-a" href="{escape(href)}" target="_blank" '
+                f'style="color:{NL_LINK};text-decoration:underline;">'
+                f"{_emph(label)}</a>")
+            return "\x02%d\x02" % (len(links) - 1)
+
         s = re.sub(r"`([^`\n]+)`", _code, s)
         s = re.sub(r"\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)",
                    _link, s)
-        s = re.sub(r"\*\*(.+?)\*\*", r'<strong style="font-weight:700;">'
-                   r"\1</strong>", s)
-        # Emphasis never inside a word: rates_up, golden_cross, 5 * 3
-        # keep their characters. Outside tags only: an href holds "_".
-        parts = re.split(r"(<[^>]+>)", s)
-        for i, part in enumerate(parts):
-            if part and not part.startswith("<"):
-                parts[i] = re.sub(
-                    _NL_EMPHASIS,
-                    lambda m: "<em>" + (m.group(1) or m.group(2)) + "</em>",
-                    part)
-        s = "".join(parts)
+        s = _emph(s)
+        s = re.sub(r"\x02(\d+)\x02", lambda m: links[int(m.group(1))], s)
         return re.sub(r"\x01(\d+)\x01", lambda m: codes[int(m.group(1))], s)
 
     p_style = (f"margin:0 0 16px;color:{NL_INK};font-size:16px;"

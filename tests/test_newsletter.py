@@ -2183,3 +2183,65 @@ class ReviewWhatsAppNumberTests(_Base):
             if _re.search(r"\.(?:sms_number|notify_sms)\b", text):
                 readers.append(str(path.relative_to(base)))
         self.assertEqual(readers, [])
+
+
+class ReviewRendererLinkTests(_Base):
+    """Finding 13: the bold pass ran over a built <a href>, so a "**" in a
+    link's address and another after it put a <strong> into the href."""
+
+    def md(self, text):
+        from core.templatetags.sauron_tags import newsletter_md
+        return str(newsletter_md(text))
+
+    def assertWellFormed(self, html_text):
+        from html.parser import HTMLParser
+
+        test = self
+
+        class Walk(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.stack = []
+
+            def handle_starttag(self, tag, attrs):
+                if tag in ("hr", "br"):
+                    return
+                self.stack.append(tag)
+                for name, value in attrs:
+                    if name == "href":
+                        test.assertRegex(value, r"^https://[^<>\"]*$")
+                        test.assertNotIn("strong", value)
+                        test.assertNotIn("<", value)
+
+            def handle_endtag(self, tag):
+                test.assertTrue(self.stack, f"</{tag}> with nothing open")
+                test.assertEqual(self.stack.pop(), tag, html_text)
+
+        walk = Walk()
+        walk.feed(html_text)
+        walk.close()
+        self.assertEqual(walk.stack, [], html_text)
+
+    def test_the_reported_case(self):
+        html = self.md("[x](/a/**) and then evil**")
+        self.assertIn(f'href="https://{DOMAIN}/a/**"', html)
+        self.assertNotIn("<strong", html)
+        self.assertWellFormed(html)
+
+    def test_a_label_keeps_its_own_emphasis(self):
+        html = self.md("see **[the *page*](/briefing/)** now")
+        self.assertIn("<em>page</em></a>", html)
+        self.assertWellFormed(html)
+
+    def test_fuzz(self):
+        import random
+        pieces = ["**", "*", "_", "`", "[a](/p/**)", "[b](https://x.io/q_r*)",
+                  "[c**](/s)", "<s>", "&", "x", " ", "word_word",
+                  "[d](javascript:alert(1))", "\n", "- ", "# "]
+        rng = random.Random(20260929)
+        for _ in range(400):
+            text = "".join(rng.choice(pieces)
+                           for _ in range(rng.randint(1, 14)))
+            html = self.md(text)
+            self.assertNotIn("<s>", html)
+            self.assertWellFormed(html)
