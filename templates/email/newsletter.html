@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>{{ subject }}</title>
+<style>
+  :root { color-scheme: light dark; supported-color-schemes: light dark; }
+  body { margin: 0; padding: 0; }
+  @media (prefers-color-scheme: dark) {
+    .nl-bg { background: #0b1110 !important; }
+    .nl-card { background: #121a17 !important; }
+    .nl-title, .nl-h2, .nl-h3 { color: #eef5f1 !important; }
+    .nl-body, .nl-p, .nl-li { color: #d3ddd8 !important; }
+    .nl-a { color: #3cf08a !important; }
+    .nl-code, .nl-pre { background: #1b2621 !important; color: #d3ddd8 !important; }
+    .nl-hr { border-top-color: #23332c !important; }
+    .nl-date { color: #8fa39a !important; }
+    .nl-foot { background: #0f1614 !important; border-top-color: #23332c !important; color: #8fa39a !important; }
+    .nl-foot-a { color: #c3d2ca !important; }
+  }
+  [data-ogsc] .nl-title, [data-ogsc] .nl-h2, [data-ogsc] .nl-h3 { color: #eef5f1 !important; }
+  [data-ogsc] .nl-body, [data-ogsc] .nl-p, [data-ogsc] .nl-li { color: #d3ddd8 !important; }
+  [data-ogsc] .nl-a { color: #3cf08a !important; }
+  [data-ogsc] .nl-date, [data-ogsc] .nl-foot { color: #8fa39a !important; }
+  [data-ogsb] .nl-card { background: #121a17 !important; }
+  [data-ogsb] .nl-foot { background: #0f1614 !important; }
+  @media only screen and (max-width: 620px) {
+    .nl-pad { padding-left: 20px !important; padding-right: 20px !important; }
+    .nl-title { font-size: 22px !important; }
+  }
+  @media only screen and (max-width: 420px) {
+    .nl-edition { display: none !important; }
+  }
+</style>
+</head>
+<body class="nl-bg" style="margin:0;padding:0;background:#e9eeeb;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+<div style="display:none;max-height:0;max-width:0;overflow:hidden;opacity:0;mso-hide:all;font-size:1px;line-height:1px;color:#e9eeeb;">{{ preheader }}</div>
+<table role="presentation" class="nl-bg" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#e9eeeb;border-collapse:collapse;">
+  <tr>
+    <td align="center" style="padding:24px 12px;">
+      <!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;border-collapse:separate;">
+        <tr>
+          <td class="nl-pad" style="background:#0b1612;border-top:4px solid #00e868;border-radius:8px 8px 0 0;padding:20px 32px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:15px;line-height:20px;font-weight:700;letter-spacing:4px;color:#00e868;">{% if home_url %}<a href="{{ home_url }}" target="_blank" style="color:#00e868;text-decoration:none;">SAURON VISION</a>{% else %}SAURON VISION{% endif %}</td>
+                <td class="nl-edition" align="right" style="font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:11px;line-height:20px;letter-spacing:2px;color:#a9bdb3;text-transform:uppercase;">{{ edition }}</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td class="nl-card nl-pad" style="background:#ffffff;padding:30px 32px 4px;">
+            <h1 class="nl-title" style="margin:0 0 6px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:26px;line-height:1.25;font-weight:700;color:#0e1a14;">{{ title }}</h1>
+            {% if date_words %}<p class="nl-date" style="margin:0;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;line-height:1.5;color:#5d6b64;">{{ date_words }}</p>{% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td class="nl-card nl-pad nl-body" style="background:#ffffff;padding:4px 32px 8px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#2b3640;">
+            {{ body_html }}
+          </td>
+        </tr>
+        {% if archive_url and not web %}
+        <tr>
+          <td class="nl-card nl-pad" style="background:#ffffff;padding:8px 32px 32px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="border-radius:4px;background:#00e868;">
+                  <a href="{{ archive_url }}" target="_blank" style="display:inline-block;padding:12px 22px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:14px;line-height:18px;font-weight:700;color:#06130c;text-decoration:none;border-radius:4px;">Read it on the platform</a>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td class="nl-card" style="background:#ffffff;padding:0 0 16px;font-size:0;line-height:0;">&nbsp;</td></tr>
+        {% endif %}
+        <tr>
+          <td class="nl-foot nl-pad" style="background:#f4f7f5;border-top:1px solid #dfe6e2;border-radius:0 0 8px 8px;padding:20px 32px 24px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:12px;line-height:1.7;color:#5d6b64;">
+            {% if web %}
+            <p style="margin:0 0 8px;">This is the platform copy of the {{ edition }}. Subscribers receive it by email or on Telegram, as their notification settings say.</p>
+            {% else %}
+            <p style="margin:0 0 8px;">You receive this {{ edition }} because &ldquo;Weekly newsletter&rdquo; is on in your {{ brand }} notification settings, with email as your channel.</p>
+            {% endif %}
+            {% if archive_url or settings_url or unsubscribe_url %}
+            <p style="margin:0 0 8px;">
+              {% if archive_url %}<a class="nl-foot-a" href="{{ archive_url }}" target="_blank" style="color:#34423b;text-decoration:underline;">Read it on the web</a>{% endif %}{% if archive_url and settings_url %} &middot; {% endif %}{% if settings_url %}<a class="nl-foot-a" href="{{ settings_url }}" target="_blank" style="color:#34423b;text-decoration:underline;">Notification settings</a>{% endif %}{% if unsubscribe_url %}{% if archive_url or settings_url %} &middot; {% endif %}<a class="nl-foot-a" href="{{ unsubscribe_url }}" target="_blank" style="color:#34423b;text-decoration:underline;">Unsubscribe</a>{% endif %}
+            </p>
+            {% endif %}
+            {% if not web %}{% if unsubscribe_url %}
+            <p style="margin:0;">Unsubscribing takes one click and needs no login.</p>
+            {% elif preview %}
+            <p style="margin:0;">Each reader&rsquo;s copy carries their own one-click unsubscribe link here.</p>
+            {% else %}
+            <p style="margin:0;">To stop receiving it, untick &ldquo;Weekly newsletter&rdquo; on the Notification settings page of the platform.</p>
+            {% endif %}{% endif %}
+          </td>
+        </tr>
+      </table>
+      <!--[if mso]></td></tr></table><![endif]-->
+    </td>
+  </tr>
+</table>
+</body>
+</html>

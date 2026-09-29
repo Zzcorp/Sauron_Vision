@@ -69,6 +69,13 @@ app.conf.task_routes = {
     # 10 min, on the default queue the same worker consumes.
     "bot_program.tasks.poll_telegram_alarm": {"queue": "fast"},
     "bot_program.tasks.run_alarm_sentinel": {"queue": "default"},
+    # 2026-09-29 -- the weekly letter (alerts/newsletter_service.py). One
+    # edition's send is a thousand SMTP round trips and Telegram posts:
+    # the slow worker, never in front of the quote poller. An ad-hoc
+    # edition is a model call: the ai queue, like every agent. The due
+    # pass that queues the sends stays on the default queue (a query).
+    "alerts.tasks.send_newsletter_task": {"queue": "slow"},
+    "alerts.tasks.generate_newsletter_task": {"queue": "ai"},
 }
 
 # ============================================================
@@ -576,6 +583,15 @@ app.conf.beat_schedule = {
     "check-price-alerts": {
         "task": "alerts.tasks.check_all_price_alerts",
         "schedule": 60.0,  # Every minute
+    },
+    # 2026-09-29 -- the weekly letter: every 15 min, queue the send of each
+    # edition whose time has come (the Saturday review is scheduled for
+    # Sunday 08:00 Paris) and the retries due. Behind the newsletter_send
+    # switch, OFF on arrival: after the deploy, `manage.py component on
+    # newsletter_send`.
+    "send-due-newsletters": {
+        "task": "alerts.tasks.send_due_newsletters",
+        "schedule": crontab(minute="*/15"),
     },
 
     # ── 2026-09-26 — the Telegram eye: the group's commands answered

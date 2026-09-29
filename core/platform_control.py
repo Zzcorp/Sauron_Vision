@@ -346,6 +346,16 @@ DEFAULT_COMPONENTS = [
     {"key": "pipeline_digest", "name": "Morning and EOD Digests",
      "description": "The 07:00 and 17:00 UTC digests. OFF on arrival — turning it on SENDS messages outward on a schedule, so it is the operator's decision, not a deploy's.",
      "category": "pipeline"},
+    # ── The weekly letter (2026-09-29) ──────────────────────────
+    # alerts.tasks.send_due_newsletters, every 15 min: the Saturday
+    # review goes out on Sunday 08:00 Paris by itself, and the failed
+    # deliveries are retried. OFF on arrival like everything that sends
+    # to people: after the deploy, `manage.py component on
+    # newsletter_send`. The admin's "Send now" does not wait for it.
+    # Description measured under 300 chars.
+    {"key": "newsletter_send", "name": "Weekly Newsletter (scheduled send)",
+     "description": "Every 15 min: sends each newsletter edition whose time has come (the Saturday review goes out Sunday 08:00 Paris unless cancelled) to the users who opted in, and retries failed deliveries. OFF on arrival: turning it on SENDS email and Telegram to people.",
+     "category": "pipeline"},
     {"key": "agent_commentator", "name": "Market Commentator",
      "description": "Daily market commentary from the commentator agent. OFF on arrival: it costs model spend on every run.",
      "category": "agent"},

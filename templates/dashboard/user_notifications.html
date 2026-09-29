@@ -13,8 +13,7 @@
         <div class="card-header"><span class="card-title">Notification Channels</span></div>
         <form method="post">{% csrf_token %}<input type="hidden" name="action" value="save_prefs">
             <div style="margin-bottom:14px;"><label class="form-label">TELEGRAM CHAT ID</label><input type="text" name="telegram_chat_id" value="{{ prefs.telegram_chat_id }}" placeholder="Your Telegram chat ID" class="form-input"><div class="form-hint">Message @userinfobot on Telegram to get your ID</div></div>
-            <div style="margin-bottom:14px;"><label class="form-label">WHATSAPP NUMBER</label><input type="text" name="whatsapp_number" value="{{ prefs.whatsapp_number }}" placeholder="+33 6 00 00 00 00" class="form-input"><div class="form-hint">International format with country code</div></div>
-            <div style="margin-bottom:14px;"><label class="form-label">SMS NUMBER</label><input type="text" name="sms_number" value="{{ prefs.sms_number }}" placeholder="+33 6 00 00 00 00" class="form-input"></div>
+            <div style="margin-bottom:14px;"><label class="form-label" for="nsWhatsApp">WHATSAPP NUMBER</label><input id="nsWhatsApp" type="text" name="whatsapp_number" value="{{ prefs.whatsapp_number }}" placeholder="+33 6 00 00 00 00" maxlength="20" class="form-input"><div class="form-hint">International format with country code. Alert rules with WhatsApp ticked send here; leave it empty to stop them.</div></div>
             <div style="margin-bottom:14px;"><label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" name="email_notifications" {% if prefs.email_notifications %}checked{% endif %}> Email notifications (uses your profile email)</label></div>
             <div class="section-label" style="margin-top:20px;">What to receive</div>
             <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
@@ -22,8 +21,16 @@
                 <label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="receive_strategies" {% if prefs.receive_strategies %}checked{% endif %}> Strategy proposals</label>
                 <label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="receive_news_alerts" {% if prefs.receive_news_alerts %}checked{% endif %}> Critical news alerts</label>
                 <label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="receive_portfolio_alerts" {% if prefs.receive_portfolio_alerts %}checked{% endif %}> Portfolio alerts</label>
-                <label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="receive_weekly_newsletter" {% if prefs.receive_weekly_newsletter %}checked{% endif %}> Weekly newsletter</label>
-                <label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="receive_monthly_newsletter" {% if prefs.receive_monthly_newsletter %}checked{% endif %}> Monthly newsletter</label>
+                <div>
+                    <label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="receive_weekly_newsletter" {% if prefs.receive_weekly_newsletter %}checked{% endif %}> Weekly newsletter</label>
+                    <div class="form-hint" style="margin:4px 0 0 20px;">
+                        {% if letter_channel == "none" %}Your channel is &ldquo;No notifications&rdquo;: the letter is not sent to you.
+                        {% elif not has_email %}Your profile has no email address: the letter is not sent to you until it has one.
+                        {% elif letter_channel == "telegram" %}Sent on Sunday morning to your own Telegram chat{% if not prefs.telegram_chat_id %} &mdash; set your Telegram chat ID above, or it cannot reach you{% endif %}.
+                        {% else %}Sent on Sunday morning by email.{% endif %}
+                        <a href="{% url 'profile' %}" style="color:var(--accent);">Change the channel</a> &middot; <a href="{% url 'newsletter_archive' %}" style="color:var(--accent);">Past editions</a>
+                    </div>
+                </div>
                 <label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="receive_bot_alerts" {% if prefs.receive_bot_alerts %}checked{% endif %}> Bot fills · gate rejections · drawdown warnings</label>
                 <label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="receive_strategist_briefing" {% if prefs.receive_strategist_briefing %}checked{% endif %}> <strong>Daily Sauron's Mind briefing</strong> (06:00 UTC)</label>
             </div>

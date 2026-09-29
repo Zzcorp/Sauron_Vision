@@ -868,11 +868,14 @@ class EtoroTrader:
         rows = []
         for c in candles:
             ts = _iso_to_ms(str(c.get("fromDate") or c.get("date") or ""))
+            # `"volume": null` is 0, never the text "None", which bot_bars
+            # read as an unreadable bar and skipped, price and all.
+            volume = c.get("volume")
             rows.append([
                 ts,
                 str(c.get("open", "0")), str(c.get("high", "0")),
                 str(c.get("low", "0")), str(c.get("close", "0")),
-                str(c.get("volume", 0)),
+                str(volume if volume is not None else 0),
                 ts + span_ms,
                 "0", 0, "0", "0", "0",
             ])

@@ -443,6 +443,25 @@ class CanThisPoolEvenPlaceAnOrderTests(TestCase):
         out = _run()
         self.assertNotIn("ONE UNIT", out)
 
+    def test_a_crypto_pool_is_never_whole_unit_blocked(self):
+        """2026-09-29: a BTC pool of 225 has a 45 USD ceiling, and 45 USD
+        is 0.00057 BTC — the crypto bot sizes to 8 decimals whatever the
+        fractional switch says. Only the STOCK bot floors to whole units;
+        this blocked the crypto config as "rounds to zero"."""
+        u = _user()
+        _acct(u, equity=100000, currency="USD")
+        _pin(u)
+        _cfg(u, capital="225", base_currency="USD", asset_class="crypto",
+             symbols=("BTCUSD",))
+        inst = _bars("BTCUSD", age_hours=1.0)
+        from market_data.models import PriceData
+        PriceData.objects.filter(instrument=inst, timeframe="4h").update(
+            close=78475)
+        out = _run()
+        self.assertNotIn("ONE UNIT", out)
+        self.assertNotIn("rounds to zero", out)
+        self.assertIn("crypto sizes in fractions", out)
+
     def test_a_disarmed_config_is_not_size_checked(self):
         u = _user()
         _acct(u, equity=100000, currency="USD")

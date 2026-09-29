@@ -555,6 +555,7 @@
 
             <a href="{% url 'profile' %}" class="nav-link {% if page_id == 'profile' %}active{% endif %}"><span class="icon">◐</span> <span class="label-text">Profile</span></a>
             <a href="{% url 'notifications_inbox' %}" class="nav-link {% if page_id == 'notifications_inbox' or page_id == 'notifications' %}active{% endif %}"><span class="icon">◌</span> <span class="label-text">Notifications</span></a>
+            <a href="{% url 'newsletter_archive' %}" class="nav-link {% if page_id == 'newsletters' %}active{% endif %}"><span class="icon">✉</span> <span class="label-text">Weekly Letter</span></a>
             <a href="{% url 'setup' %}" class="nav-link {% if page_id == 'setup' %}active{% endif %}"><span class="icon">⊡</span> <span class="label-text">Setup</span></a>
             <a href="{% url 'getting_started' %}" class="nav-link {% if page_id == 'getting_started' %}active{% endif %}"><span class="icon">★</span> <span class="label-text">Getting Started</span></a>
         </nav>

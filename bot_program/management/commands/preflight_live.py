@@ -1125,15 +1125,28 @@ class Command(BaseCommand):
                         newest = row["timestamp"] if row else None
                         price = float(row["close"] or 0) if row else 0.0
                         note = ""
+                        # Only the STOCK bot floors to whole units (the
+                        # comment above); crypto sizes to 8 decimals and
+                        # commodities to 4 whatever the switch says. This
+                        # read every crypto config as "rounds to zero" and
+                        # blocked a BTC pool whose 45 USD buys 0.00057 BTC
+                        # (2026-09-29).
+                        whole_only = (cfg.asset_class == "stock"
+                                      and not fractional)
                         if price > 0 and ceiling > 0 and price > ceiling:
                             if fractional:
                                 note = (f"  ← a whole unit ({price:,.2f}) "
                                         f"exceeds the ceiling; a fraction "
                                         f"fits (FRACTIONS at {kind5}, switch "
                                         f"ON, believed)")
-                            else:
+                            elif whole_only:
                                 note = (f"  ← ONE UNIT ({price:,.2f}) EXCEEDS "
                                         f"THE CEILING")
+                            else:
+                                note = (f"  ← a whole unit ({price:,.2f}) "
+                                        f"exceeds the ceiling; "
+                                        f"{cfg.asset_class} sizes in "
+                                        f"fractions")
                         market = _market_note(row, newest, now)
                         w(f"   {sym:<12} newest 4h bar {_age(newest, now)}"
                           f"{market}{note}")
@@ -1143,7 +1156,7 @@ class Command(BaseCommand):
                         else:
                             _bar_findings(sym, row, newest, now,
                                           blockers, warnings)
-                        if note and not fractional:
+                        if note and whole_only:
                             blockers.append(
                                 f"config {cfg.id} ({cfg.name}): one unit of "
                                 f"{sym} costs {price:,.2f} and the notional "

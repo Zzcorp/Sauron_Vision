@@ -5143,71 +5143,8 @@ def admin_toggle_market(request):
     return redirect("admin_dashboard")
 
 
-@login_required
-def admin_newsletters(request):
-    """Newsletter management page."""
-    if not request.user.is_superuser:
-        from django.http import HttpResponseForbidden
-        return HttpResponseForbidden()
-
-    from alerts.models import Newsletter
-    from django.contrib import messages
-
-    if request.method == "POST":
-        action = request.POST.get("action", "")
-
-        if action == "create":
-            nl = Newsletter.objects.create(
-                title=request.POST.get("title", "Weekly Report"),
-                frequency=request.POST.get("frequency", "weekly"),
-                send_telegram="send_telegram" in request.POST,
-                send_email="send_email" in request.POST,
-                send_whatsapp="send_whatsapp" in request.POST,
-                created_by=request.user,
-            )
-            # Auto-generate with AI
-            from alerts.newsletter_service import generate_newsletter_with_ai
-            generate_newsletter_with_ai(nl, nl.frequency)
-            messages.success(request, f"Newsletter '{nl.title}' generated. Review before sending.")
-
-        elif action == "approve":
-            nl_id = request.POST.get("newsletter_id")
-            nl = Newsletter.objects.get(id=nl_id)
-            nl.status = "approved"
-            nl.save()
-            messages.success(request, f"Newsletter '{nl.title}' approved.")
-
-        elif action == "send":
-            nl_id = request.POST.get("newsletter_id")
-            nl = Newsletter.objects.get(id=nl_id)
-            from alerts.newsletter_service import send_newsletter
-            result = send_newsletter(nl)
-            if "error" in result:
-                messages.error(request, result["error"])
-            else:
-                messages.success(request, f"Newsletter sent to {result['recipients']} recipients.")
-
-        elif action == "edit":
-            nl_id = request.POST.get("newsletter_id")
-            nl = Newsletter.objects.get(id=nl_id)
-            nl.content_markdown = request.POST.get("content", nl.content_markdown)
-            nl.title = request.POST.get("title", nl.title)
-            nl.save()
-            messages.success(request, "Newsletter updated.")
-
-        elif action == "delete":
-            nl_id = request.POST.get("newsletter_id")
-            Newsletter.objects.filter(id=nl_id).delete()
-            messages.success(request, "Newsletter deleted.")
-
-        from django.shortcuts import redirect
-        return redirect("admin_newsletters")
-
-    newsletters = Newsletter.objects.all()[:30]
-    return render(request, "dashboard/admin_newsletters.html", {
-        "page_id": "admin_newsletters",
-        "newsletters": newsletters,
-    })
+# admin_newsletters moved to dashboard/views_newsletter.py (2026-09-29),
+# with the archive and the unsubscribe page: the weekly letter's pages.
 
 
 @login_required
@@ -5222,16 +5159,25 @@ def user_notifications(request):
         action = request.POST.get("action", "")
 
         if action == "save_prefs":
+            # The SMS number and the monthly newsletter left the form
+            # (2026-09-29): nothing sends SMS (notify_sms and sms_number are
+            # read by no path) and there is one weekly letter. Their fields
+            # stay, untouched here: a save must not blank what an older
+            # form stored. The WhatsApp number stays on the form (review,
+            # 2026-09-29): alert rules with WhatsApp ticked still send
+            # through Twilio to it (alerts/dispatch.py,
+            # alerts/channels/whatsapp_alert.py), so the user must be able
+            # to see, change and clear it; an empty field clears it.
             prefs.telegram_chat_id = request.POST.get("telegram_chat_id", "")
-            prefs.whatsapp_number = request.POST.get("whatsapp_number", "")
+            if "whatsapp_number" in request.POST:
+                prefs.whatsapp_number = " ".join(
+                    request.POST.get("whatsapp_number", "").split())[:20]
             prefs.email_notifications = "email_notifications" in request.POST
-            prefs.sms_number = request.POST.get("sms_number", "")
             prefs.receive_signals = "receive_signals" in request.POST
             prefs.receive_strategies = "receive_strategies" in request.POST
             prefs.receive_news_alerts = "receive_news_alerts" in request.POST
             prefs.receive_portfolio_alerts = "receive_portfolio_alerts" in request.POST
             prefs.receive_weekly_newsletter = "receive_weekly_newsletter" in request.POST
-            prefs.receive_monthly_newsletter = "receive_monthly_newsletter" in request.POST
             prefs.receive_bot_alerts = "receive_bot_alerts" in request.POST
             prefs.receive_strategist_briefing = "receive_strategist_briefing" in request.POST
             # Phase-44 — quiet hours (UTC). Empty string clears the window.
@@ -5272,10 +5218,19 @@ def user_notifications(request):
         return redirect("user_notifications")
 
     rules = AlertRule.objects.filter(user=request.user)
+    # The letter goes by the profile's ONE channel (alerts/
+    # newsletter_service.audience): say which, beside the checkbox.
+    from bot_program.notifications import _user_channel
+    from portfolio.trader_profile import TraderProfile
+    has_profile = TraderProfile.objects.filter(user=request.user).exists()
+    channel = (_user_channel(request.user) if has_profile else
+               TraderProfile._meta.get_field("notify_channel").default)
     return render(request, "dashboard/user_notifications.html", {
         "page_id": "notifications",
         "prefs": prefs,
         "rules": rules,
+        "letter_channel": channel,
+        "has_email": bool((request.user.email or "").strip()),
     })
 
 

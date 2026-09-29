@@ -3,53 +3,179 @@
 {% block page_title %}NEWSLETTER MANAGEMENT{% endblock %}
 
 {% block content %}
+<style>
+.nl-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-bottom: 24px; }
+.nl-facts { display: grid; gap: 8px; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+.nl-fact b { color: var(--text-primary); font-weight: 600; }
+.nl-on { color: var(--accent); }
+.nl-off { color: var(--accent-gold); }
+.nl-row { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; background: var(--bg-card); }
+.nl-row-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.nl-row-title { font-family: var(--font-display); font-size: 14px; font-weight: 700; color: var(--text-primary); overflow-wrap: anywhere; }
+.nl-badges { display: inline-flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.nl-when { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+.nl-meta { display: grid; gap: 4px; font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.nl-meta .lbl { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; color: var(--text-muted); text-transform: uppercase; margin-right: 6px; }
+.nl-error { color: var(--accent-red); }
+.nl-note { color: var(--accent-gold); }
+.nl-row details { margin-bottom: 10px; }
+.nl-row summary { cursor: pointer; font-size: 12px; color: var(--accent); font-family: var(--font-mono); }
+.nl-preview { display: block; width: 100%; max-width: 680px; height: 560px; border: 1px solid var(--border); border-radius: var(--radius); background: #e9eeeb; margin-top: 8px; }
+.nl-edit { display: grid; gap: 8px; margin-top: 8px; max-width: 680px; }
+.nl-textarea { min-height: 280px; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; resize: vertical; }
+.nl-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.nl-actions form { display: inline-flex; gap: 6px; align-items: center; margin: 0; flex-wrap: wrap; max-width: 100%; }
+.nl-dt { width: auto; min-width: 0; flex: 1 1 250px; max-width: 280px; padding: 5px 8px; font-size: 12px; }
+.nl-tz { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; color: var(--text-muted); text-transform: uppercase; }
+.nl-channels { display: flex; gap: 14px; margin-top: 8px; flex-wrap: wrap; }
+.nl-channels label { font-size: 12px; color: var(--text-secondary); display: inline-flex; gap: 6px; align-items: center; }
+@media (max-width: 760px) {
+  .nl-grid { grid-template-columns: minmax(0, 1fr); }
+  .nl-preview { height: 480px; }
+}
+</style>
+
 {% if messages %}
 <div style="margin-bottom:16px;">{% for msg in messages %}<div class="card" style="border-color:{% if msg.tags == 'success' %}var(--accent){% else %}var(--accent-red){% endif %};padding:10px 16px;margin-bottom:6px;"><span style="font-family:var(--font-mono);font-size:12px;">{{ msg }}</span></div>{% endfor %}</div>
 {% endif %}
 
-<!-- Create Newsletter -->
-<div class="card fade-in-up" style="margin-bottom:24px;">
-    <div class="card-header"><span class="card-title">Create Newsletter</span></div>
-    <form method="post">{% csrf_token %}<input type="hidden" name="action" value="create">
-        <div class="grid grid-3" style="margin-bottom:16px;">
-            <div><label class="form-label">TITLE</label><input type="text" name="title" value="Weekly Market Report" class="form-input"></div>
-            <div><label class="form-label">FREQUENCY</label><select name="frequency" class="form-input"><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="adhoc">Ad-hoc</option></select></div>
-            <div><label class="form-label">CHANNELS</label><div style="display:flex;gap:12px;margin-top:8px;"><label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="send_telegram" checked> Telegram</label><label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="send_email" checked> Email</label><label style="font-size:12px;color:var(--text-secondary);"><input type="checkbox" name="send_whatsapp"> WhatsApp</label></div></div>
-        </div>
-        <button type="submit" class="btn btn-primary">Generate with AI</button>
-    </form>
-</div>
-
-<!-- Existing Newsletters -->
-<div class="card fade-in-up delay-2">
-    <div class="card-header"><span class="card-title">Newsletters</span></div>
-    {% for nl in newsletters %}
-    <div style="border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-            <div>
-                <span style="font-family:var(--font-display);font-size:14px;font-weight:700;">{{ nl.title }}</span>
-                <span class="badge badge-{% if nl.status == 'sent' %}active{% elif nl.status == 'approved' %}bullish{% elif nl.status == 'ai_generated' %}high{% else %}neutral{% endif %}" style="margin-left:8px;">{{ nl.status|upper }}</span>
+<div class="nl-grid">
+    <div class="card fade-in-up">
+        <div class="card-header"><span class="card-title">How the letter goes out</span></div>
+        <div class="nl-facts">
+            <div class="nl-fact">The Saturday weekly review is the week's letter. It is ready at once and goes out <b>Sunday 08:00 Paris time</b> unless you cancel it; next slot: <b>{{ next_sunday }}</b>.</div>
+            <div class="nl-fact">Scheduled sending:
+                {% if auto_send_on %}<b class="nl-on">ON</b> — due editions go out within 15 minutes of their time.
+                {% else %}<b class="nl-off">OFF</b> — nothing goes out by itself until <code>manage.py component on newsletter_send</code>. Send now still works.{% endif %}
             </div>
-            <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);">{{ nl.created_at|date:"M d, H:i" }}</span>
-        </div>
-        {% if nl.content_markdown %}
-        <details style="margin-bottom:10px;">
-            <summary style="cursor:pointer;font-size:12px;color:var(--accent);font-family:var(--font-mono);">Preview content</summary>
-            <pre style="background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);padding:12px;font-size:11px;color:var(--text-secondary);white-space:pre-wrap;margin-top:8px;max-height:300px;overflow-y:auto;">{{ nl.content_markdown }}</pre>
-        </details>
-        {% endif %}
-        <div style="display:flex;gap:8px;">
-            {% if nl.status == 'ai_generated' %}
-            <form method="post" style="display:inline;">{% csrf_token %}<input type="hidden" name="action" value="approve"><input type="hidden" name="newsletter_id" value="{{ nl.id }}"><button type="submit" class="btn btn-primary btn-sm">Approve</button></form>
-            {% endif %}
-            {% if nl.status == 'approved' %}
-            <form method="post" style="display:inline;">{% csrf_token %}<input type="hidden" name="action" value="send"><input type="hidden" name="newsletter_id" value="{{ nl.id }}"><button type="submit" class="btn btn-primary btn-sm">Send Now</button></form>
-            {% endif %}
-            <form method="post" style="display:inline;">{% csrf_token %}<input type="hidden" name="action" value="delete"><input type="hidden" name="newsletter_id" value="{{ nl.id }}"><button type="submit" class="btn btn-sm btn-danger">Delete</button></form>
+            <div class="nl-fact">Email:
+                {% if email_unconfigured %}<b class="nl-off">not configured</b> — {{ email_unconfigured }}.
+                {% else %}<b class="nl-on">configured</b>.{% endif %}
+            </div>
+            <div class="nl-fact">Each subscriber receives it once, on the channel of their profile (email or their own Telegram chat). <a href="{% url 'newsletter_archive' %}" style="color:var(--accent);">Open the archive</a></div>
         </div>
     </div>
-    {% empty %}
-    <div class="empty-state" style="padding:30px;"><p>NO NEWSLETTERS YET</p></div>
+
+    <div class="card fade-in-up delay-1">
+        <div class="card-header"><span class="card-title">New edition</span></div>
+        <form method="post">{% csrf_token %}<input type="hidden" name="action" value="create">
+            <div style="margin-bottom:12px;"><label class="form-label" for="nlNewTitle">TITLE</label><input id="nlNewTitle" type="text" name="title" value="Special edition" maxlength="200" class="form-input"></div>
+            <div style="margin-bottom:12px;"><label class="form-label" for="nlNewFreq">FREQUENCY</label><select id="nlNewFreq" name="frequency" class="form-input"><option value="adhoc">Ad-hoc</option><option value="weekly">Weekly</option></select></div>
+            <div style="margin-bottom:14px;"><span class="form-label">CHANNELS</span><div class="nl-channels"><label><input type="checkbox" name="send_email" checked> Email</label><label><input type="checkbox" name="send_telegram" checked> Telegram</label></div></div>
+            <button type="submit" class="btn btn-primary">Generate with AI</button>
+            <div class="form-hint" style="margin-top:8px;">The model writes it in the background; the edition shows GENERATING until it lands. It is not scheduled: send it, or give it a time.</div>
+        </form>
+    </div>
+</div>
+
+<div class="card fade-in-up delay-2">
+    <div class="card-header"><span class="card-title">Editions</span></div>
+    {% for row in rows %}{% with nl=row.nl %}
+    <article class="nl-row" id="nl-{{ nl.id }}">
+        <div class="nl-row-head">
+            <div>
+                <div class="nl-row-title">{{ row.title }}</div>
+                <div class="nl-badges">
+                    <span class="badge badge-{{ row.tone }}">{{ row.badge }}</span>
+                    {% if row.queued %}<span class="badge badge-high">QUEUED</span>{% endif %}
+                    {% if row.scheduled_words %}<span class="badge badge-medium">SCHEDULED</span>{% endif %}
+                    <span class="badge badge-neutral">{{ nl.get_frequency_display }}</span>
+                </div>
+            </div>
+            <span class="nl-when">created {{ nl.created_at|date:"M d, H:i" }} UTC</span>
+        </div>
+        <div class="nl-meta">
+            <div><span class="lbl">Subject</span>{{ row.subject }}</div>
+            {% if row.queued %}<div class="nl-note"><span class="lbl">Queued</span>Send now was pressed {{ row.queued_words }}; it goes out when a worker takes it. Cancel stops it until then.</div>{% endif %}
+            {% if row.scheduled_words %}<div><span class="lbl">Goes out</span>{{ row.scheduled_words }}</div>{% endif %}
+            {% if nl.sent_at %}<div><span class="lbl">Sent</span>{{ nl.sent_at|date:"D d M Y, H:i" }} UTC{% if row.archived %} · <a href="{% url 'newsletter_detail' nl.id %}" style="color:var(--accent);">archive copy</a>{% endif %}</div>{% endif %}
+            {% if row.reach %}<div><span class="lbl">Audience</span>{{ row.reach }}</div>{% endif %}
+            {% if row.delivery %}<div><span class="lbl">Deliveries</span>{{ row.delivery }}</div>{% endif %}
+            {% if nl.last_error %}<div class="{% if nl.status == 'failed' %}nl-error{% else %}nl-note{% endif %}"><span class="lbl">Note</span>{{ nl.last_error }}</div>{% endif %}
+            {% if nl.status == 'generating' %}<div class="nl-note">The model is writing it. Reload the page in a minute.</div>{% endif %}
+        </div>
+
+        {% if row.preview %}
+        <details>
+            <summary>Preview the email</summary>
+            <iframe class="nl-preview" title="Email preview: {{ row.title }}" loading="lazy" sandbox="allow-popups allow-popups-to-escape-sandbox" srcdoc="{{ row.preview|force_escape }}"></iframe>
+        </details>
+        {% endif %}
+
+        {% if row.can_edit %}
+        <details>
+            <summary>Edit</summary>
+            <form method="post" class="nl-edit">{% csrf_token %}<input type="hidden" name="action" value="edit"><input type="hidden" name="newsletter_id" value="{{ nl.id }}">
+                <label class="form-label" for="nlTitle{{ nl.id }}">TITLE</label>
+                <input id="nlTitle{{ nl.id }}" type="text" name="title" value="{{ nl.title }}" maxlength="200" class="form-input">
+                <label class="form-label" for="nlBody{{ nl.id }}">CONTENT (MARKDOWN)</label>
+                <textarea id="nlBody{{ nl.id }}" name="content" rows="16" class="form-input nl-textarea">{{ nl.content_markdown }}</textarea>
+                <div class="form-hint">Headings (##), bullets (-), **bold**, *emphasis*, links. A table becomes a list; the json calls block at the end is kept for grading and never sent.</div>
+                <div><button type="submit" class="btn btn-primary btn-sm">Save</button></div>
+            </form>
+        </details>
+        {% endif %}
+
+        <div class="nl-actions">
+            {% if row.can_send %}
+            <form method="post" class="nl-confirm" data-title="Send this edition now" data-message="It goes out at once to every subscriber, each on their own channel. This cannot be taken back." data-label="Send it now" data-danger="1" data-edition="{{ row.title }}" data-reach="{{ row.reach }}">{% csrf_token %}<input type="hidden" name="action" value="send"><input type="hidden" name="newsletter_id" value="{{ nl.id }}"><button type="submit" class="btn btn-primary btn-sm">{% if nl.status == 'sending' %}Retry now{% else %}Send now{% endif %}</button></form>
+            {% endif %}
+            {% if row.has_content %}
+            <form method="post">{% csrf_token %}<input type="hidden" name="action" value="test"><input type="hidden" name="newsletter_id" value="{{ nl.id }}"><button type="submit" class="btn btn-sm" {% if not requester_email %}disabled title="Your account has no email address"{% endif %}>Send a test to me</button></form>
+            {% endif %}
+            {% if row.can_approve %}
+            <form method="post" class="nl-confirm" data-title="Approve this edition" data-message="Approved means read and fit to send. If it has a time, it still goes out then." data-label="Approve" data-edition="{{ row.title }}">{% csrf_token %}<input type="hidden" name="action" value="approve"><input type="hidden" name="newsletter_id" value="{{ nl.id }}"><button type="submit" class="btn btn-sm">Approve</button></form>
+            {% endif %}
+            {% if row.can_reschedule %}
+            <form method="post" class="nl-confirm" data-title="Reschedule this edition" data-message="It goes out at the new time (Paris time), if scheduled sending is on." data-label="Reschedule" data-edition="{{ row.title }}" data-reach="{{ row.reach }}">{% csrf_token %}<input type="hidden" name="action" value="reschedule"><input type="hidden" name="newsletter_id" value="{{ nl.id }}"><span class="nl-tz">Paris time</span><input type="datetime-local" name="scheduled_for" value="{{ row.schedule_input }}" class="form-input nl-dt" aria-label="New time, Paris" required><button type="submit" class="btn btn-sm">Reschedule</button></form>
+            {% endif %}
+            {% if row.can_cancel %}
+            <form method="post" class="nl-confirm" data-title="Cancel this edition" data-message="It will not be sent and its schedule is cleared. You can reschedule it later." data-label="Cancel the edition" data-cancel-label="Keep it" data-edition="{{ row.title }}">{% csrf_token %}<input type="hidden" name="action" value="cancel"><input type="hidden" name="newsletter_id" value="{{ nl.id }}"><button type="submit" class="btn btn-sm">Cancel</button></form>
+            {% endif %}
+            {% if row.can_delete %}
+            <form method="post" class="nl-confirm" data-title="Delete this edition" data-message="The edition, its archive copy and its delivery records are removed for good." data-label="Delete" data-danger="1" data-edition="{{ row.title }}">{% csrf_token %}<input type="hidden" name="action" value="delete"><input type="hidden" name="newsletter_id" value="{{ nl.id }}"><button type="submit" class="btn btn-sm btn-danger">Delete</button></form>
+            {% endif %}
+        </div>
+    </article>
+    {% endwith %}{% empty %}
+    <div class="empty-state" style="padding:30px;"><p>NO EDITIONS YET</p><p class="empty-sub">The Saturday weekly review writes the first one.</p></div>
     {% endfor %}
 </div>
+
+<script>
+/* The newsletter's guarded actions. Every form marked nl-confirm asks
+   through SV.overlay.confirm first, showing the edition and its audience:
+   a native dialog could show neither. Without the overlay nothing is sent. */
+(function () {
+    function facts(form) {
+        var out = [];
+        var edition = form.getAttribute("data-edition");
+        var reach = form.getAttribute("data-reach");
+        var when = form.querySelector("input[name=scheduled_for]");
+        if (edition) out.push(["Edition", edition]);
+        if (reach) out.push(["Audience", reach]);
+        if (when) out.push(["New time (Paris)", when.value ? when.value.replace("T", " ") : "not set"]);
+        return out;
+    }
+    document.addEventListener("submit", function (e) {
+        var form = e.target;
+        if (!form || !form.classList || !form.classList.contains("nl-confirm")) return;
+        if (form.getAttribute("data-armed") === "1") return;
+        e.preventDefault();
+        if (!(window.SV && window.SV.overlay && window.SV.overlay.confirm)) return;
+        window.SV.overlay.confirm({
+            title: form.getAttribute("data-title") || "Confirm",
+            message: form.getAttribute("data-message") || "",
+            facts: facts(form),
+            danger: form.getAttribute("data-danger") === "1",
+            confirmLabel: form.getAttribute("data-label") || "Confirm",
+            cancelLabel: form.getAttribute("data-cancel-label") || "Cancel"
+        }).then(function (ok) {
+            if (!ok) return;
+            form.setAttribute("data-armed", "1");
+            form.submit();
+        });
+    }, true);
+})();
+</script>
 {% endblock %}
