@@ -1799,6 +1799,7 @@
         @media (min-width: 769px) and (max-width: 1080px) {
             .nav-links { gap: 14px; }
             .nav-links a[href="#demo"],
+            .nav-links a[href="#day"],
             .nav-links a[href="#brokers"],
             .nav-links a[href="#horizon"] { display: none; }
         }
@@ -1826,6 +1827,8 @@
             }
         }
     </style>
+    {# The ring scheme's own sheet (2026-09-29): shared with the home page, so one drawing has one style. After the inline sheet, which owns the tokens it reads. #}
+    <link rel="stylesheet" href="{% static 'css/sv-day-scheme.css' %}">
 </head>
 <body>
 
@@ -1892,6 +1895,7 @@
     <div class="nav-links">
         <a href="#platform">Platform</a>
         <a href="#pipeline">Pipeline</a>
+        <a href="#day">Day</a>
         <a href="#demo">Demo</a>
         <a href="#operations">Operations</a>
         <a href="#fleet">Fleet</a>
@@ -2086,7 +2090,7 @@
                 <div class="feature-text">
                     Append-only sha256 hash-chained <code>AuditLogEntry</code> captures every trade open,
                     close, and gate reject. Tamper detection via verify-chain. FIFO/LIFO/HIFO tax-lot
-                    bookkeeping with Form-8949-ready CSV export. Daily <code>pg_dump</code> with 30-day retention.
+                    bookkeeping with Form-8949-ready CSV export. Daily <code>pg_dump</code> with rolling retention.
                 </div>
             </div>
             <div class="feature-card reveal delay-6">
@@ -2369,6 +2373,45 @@
             for 7 will fire a notification, get auto-demoted from <em>live-full</em> back to <em>live-small</em>,
             and surface in the audit log &mdash; without anyone watching.
         </p>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- A DAY OF SAURON — the loop as a ring around the beat (2026-09-29)  -->
+<!-- The seven stages, the markets in, the venues and the people out.   -->
+<!-- Every task and cadence on it is read from the beat schedule at     -->
+<!-- render time (core.day_of_sauron) and drawn by                      -->
+<!-- static/js/sv-day-scheme.js; the same drawing serves the home page. -->
+<!-- Its <script> sits INSIDE the section, like #demo's: one new child  -->
+<!-- of #wallContent, so every stripe after it flips and the           -->
+<!-- .wall-section:nth-child(even) tint keeps alternating everywhere.  -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="day">
+    <div class="container">
+        <div class="section-label reveal">A Day of Sauron <span class="new-pill">ONE HEARTBEAT</span></div>
+        <h2 class="section-title reveal delay-1">
+            What the Machine Does,<br>Every Day.
+        </h2>
+        <div class="sep-left reveal delay-2"></div>
+        <p class="section-desc reveal delay-3">
+            Drawn from the schedule the platform ships with, read when this page was served:
+            <strong>{{ day.total }} scheduled tasks</strong> on one beat, plus the price streams where they are enabled.
+            Markets come in on the left, orders and words go out on the right, and the loop turns
+            around one heartbeat. Hover a step, or tap it on a phone, to read what it runs
+            and how often. Times are UTC.
+        </p>
+        <div class="day-frame reveal-scale delay-4">
+        <div class="day-grid">
+            <div class="day-scheme-wrap">
+                <svg class="day-scheme" id="dayScheme" viewBox="0 0 1200 700" role="group"
+                     data-panel="dayPanel" data-stamp="read from the beat schedule when this page was served · times UTC"
+                     aria-label="The loop of Sauron: markets in; see, think, decide, act, watch, tell, learn around the beat; venues and people out."></svg>
+            </div>
+            <aside class="day-panel" id="dayPanel" aria-live="polite"></aside>
+        </div>
+        </div>
+        {{ day|json_script:"dayData" }}
+        <script src="{% static 'js/sv-day-scheme.js' %}" defer></script>
     </div>
 </section>
 
@@ -3760,10 +3803,11 @@
                 mid-call. Binance, Alpaca and OANDA dedup server-side.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num">06:30</div>
+                <div class="pillar-num">23:30</div>
                 <div class="pillar-lbl">UTC Snapshot</div>
-                <div class="pillar-desc">Daily decay scan at 06:15 UTC. Daily <code>pg_dump</code> at 03:30 UTC
-                with 30-day retention. The platform looks after itself.</div>
+                {# The cadences here are the beat's own (config/celery.py): the snapshot at 23:30, the decay scan at 06:15. The backup is not on the beat — deploy/backup.sh runs on its own interval in its own container. The old copy typed 06:30 and a 03:30 pg_dump that never existed (2026-09-29). #}
+                <div class="pillar-desc">Daily portfolio snapshot at 23:30 UTC, decay scan at 06:15 UTC. Backups run
+                from the deploy's own container on their own clock. The platform looks after itself.</div>
             </div>
         </div>
     </div>
@@ -3945,7 +3989,7 @@
             Battle-tested OSS. Multi-stage Docker build, non-root runtime, ASGI worker
             for Channels. <code>gunicorn</code> + <code>uvicorn</code> serving HTTP and WebSockets;
             Sentry-instrumented; Celery beat for the recurring tasks; Channels for the per-user Eye push;
-            a <code>pg_dump</code> nightly with 30-day retention. The platform looks after itself.
+            a <code>pg_dump</code> nightly with rolling retention. The platform looks after itself.
         </p>
         <div class="tech-grid reveal delay-4">
             <span class="tech-badge">Python 3.12</span>

@@ -41,7 +41,8 @@
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
         <span class="card-title">Chain integrity</span>
         {# ↓ from the arrow block; the heavy download arrow it replaces renders as a colour emoji. #}
-        <a href="{% url 'audit_export' %}" class="btn btn-sm">↓ Export CSV</a>
+        {# `download`: the view answers Content-Disposition: attachment, and the motion layer's page-leave fade skips a[download] (review, 2026-09-29). #}
+        <a href="{% url 'audit_export' %}" class="btn btn-sm" download>↓ Export CSV</a>
     </div>
     <p class="form-hint" style="margin:0 0 8px;line-height:1.5;font-size:11px;">
         Each row's <code>payload_hash</code> = sha256(<code>prev_hash</code> || kind || canonical(data)).

@@ -1,0 +1,320 @@
+/* A day of Sauron — the ring scheme's own sheet (static/js/sv-day-scheme.js).
+ *
+ * One drawing serves two pages: the public Wall and the home page. Both
+ * define the same surface and text tokens (--bg2, --bg3, --border, --text,
+ * --text2, --text3, --accent, --accent-dim, --accent-bright, --accent-glow);
+ * the fonts differ in name, so each font reads the Wall's token first and
+ * the dashboard's as its fallback. Nothing here introduces a token of its
+ * own: the Book copies the Wall's :root and pins it (tests/test_the_book.py).
+ *
+ * No @keyframes: the flows and the heartbeat are SMIL animations inside the
+ * SVG, paused wholesale under prefers-reduced-motion by the script. What
+ * remains here is transitions, and those are stilled below.
+ */
+/* The ring needs 760px of its own, the panel 330 beside it. Whether both
+   fit is a question of the space the SECTION has, not the viewport: on
+   the home page a sidebar and a rail eat 300px of it, and between 901 and
+   1180px the grid kept two columns and hid VENUES and PEOPLE behind a
+   scroll (review, 2026-09-29). .day-frame is the container both pages
+   wrap the grid in. Two columns need 740 (the ring's floor) + 18 (its
+   frame) + 14 (the gap) + 330 (the panel) = 1102px of it: below that the
+   panel goes under the ring. The Wall's 1120px container keeps both
+   side by side. The viewport rule further down is the fallback for an
+   engine without container queries. */
+.day-frame { container-type: inline-size; }
+.day-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 330px;
+    gap: 14px;
+    align-items: start;
+    text-align: left;
+}
+@container (max-width: 1101px) {
+    .day-grid { grid-template-columns: 1fr; }
+    .day-panel { position: static; min-height: 0; }
+}
+.day-scheme-wrap {
+    background: radial-gradient(ellipse at 50% 45%, rgba(0, 232, 104, 0.08), transparent 55%), var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.day-scheme { display: block; width: 100%; min-width: 740px; height: auto; }
+.day-scheme text { font-family: var(--font-h, var(--font-heading, sans-serif)); fill: var(--text); font-size: 13px; }
+.day-scheme .day-ttl { font-family: var(--font-d, var(--font-display, sans-serif)); font-weight: 700; letter-spacing: 3px; fill: var(--accent); font-size: 16px; }
+.day-scheme .day-sub { font-family: var(--font-m, var(--font-mono, monospace)); font-size: 11.5px; fill: var(--text2); letter-spacing: 0.4px; }
+.day-scheme .day-tiny,
+.day-scheme .day-hint { font-family: var(--font-m, var(--font-mono, monospace)); font-size: 10px; fill: var(--text3); letter-spacing: 2px; }
+.day-scheme .day-box { fill: var(--bg3); stroke: var(--border); stroke-width: 1.2; transition: stroke 0.25s, fill 0.25s, filter 0.25s; }
+.day-scheme .day-node .day-box { stroke: var(--accent-dim); }
+.day-scheme .day-ext .day-box { stroke-dasharray: 4 3; }
+.day-scheme .day-ring { fill: none; stroke: var(--border); stroke-width: 1; }
+.day-scheme .day-spoke { stroke: var(--border); stroke-width: 1; stroke-dasharray: 2 5; }
+.day-scheme .day-arrow { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 10 8; transition: stroke 0.25s, stroke-width 0.25s; }
+.day-scheme .day-arrow.day-soft { stroke: var(--text3); stroke-width: 1.4; stroke-dasharray: 5 6; }
+.day-scheme .day-ah { fill: var(--accent); }
+.day-scheme .day-ahs { fill: var(--text3); }
+.day-scheme .day-heart { fill: var(--accent-glow); stroke: var(--accent); stroke-width: 1.5; }
+.day-scheme .day-heart2 { fill: none; stroke: var(--accent-dim); }
+.day-scheme .day-core { fill: var(--accent); filter: drop-shadow(0 0 10px rgba(0, 232, 104, 0.6)); }
+.day-scheme .day-badge { fill: var(--bg); stroke: var(--accent); stroke-width: 1; }
+.day-scheme .day-badge-t { font-family: var(--font-d, var(--font-display, sans-serif)); font-size: 11px; fill: var(--accent); }
+.day-scheme .day-node,
+.day-scheme .day-ext,
+.day-scheme .day-beat { cursor: pointer; outline: none; }
+.day-scheme .day-node.day-hot .day-box,
+.day-scheme .day-ext.day-hot .day-box { stroke: var(--accent); fill: var(--bg3); filter: drop-shadow(0 0 14px rgba(0, 232, 104, 0.55)); }
+.day-scheme .day-node:focus-visible .day-box,
+.day-scheme .day-ext:focus-visible .day-box { stroke: var(--accent-bright); }
+/* The beat had outline:none and nothing in its place: a keyboard on it
+   showed no focus at all (review, 2026-09-29). */
+.day-scheme .day-beat:focus-visible .day-heart2,
+.day-scheme .day-beat.day-hot .day-heart2 { stroke: var(--accent-bright); stroke-width: 2; }
+.day-scheme .day-arrow.day-lit { stroke: var(--accent-bright); stroke-width: 3; filter: drop-shadow(0 0 6px rgba(64, 255, 144, 0.7)); }
+
+/* The live layer (home page): a dot per stage and a tint on its box. */
+.day-scheme .day-dot { fill: none; stroke: none; transition: fill 0.4s; }
+.day-scheme .day-live .day-dot { fill: var(--accent-bright); filter: drop-shadow(0 0 6px rgba(64, 255, 144, 0.8)); }
+.day-scheme .day-stale .day-dot { fill: var(--accent-gold, var(--gold, #d8b020)); }
+.day-scheme .day-off .day-dot { fill: var(--text3); }
+.day-scheme .day-off .day-box { stroke-dasharray: 3 3; }
+.day-scheme .day-off .day-ttl { fill: var(--text3); }
+
+/* The panel: what really runs at the step under the pointer. */
+.day-panel {
+    position: sticky;
+    top: 90px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px 16px 14px;
+    min-width: 0;
+    min-height: 420px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: border-color 0.35s, box-shadow 0.35s;
+}
+.day-panel.day-open { border-color: var(--accent-dim); box-shadow: 0 0 40px rgba(0, 232, 104, 0.10), inset 0 0 40px rgba(0, 232, 104, 0.04); }
+.day-panel > * { transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+.day-panel.day-pre > * { opacity: 0; transform: translateY(8px); transition: none; }
+.day-panel > :nth-child(2) { transition-delay: 0.04s; }
+.day-panel > :nth-child(3) { transition-delay: 0.08s; }
+.day-panel > :nth-child(4) { transition-delay: 0.12s; }
+.day-panel > :nth-child(5) { transition-delay: 0.16s; }
+.day-panel > :nth-child(6) { transition-delay: 0.20s; }
+.day-panel > :nth-child(7) { transition-delay: 0.24s; }
+.day-panel > :nth-child(n+8) { transition-delay: 0.28s; }
+.day-k,
+.day-stamp { font-family: var(--font-m, var(--font-mono, monospace)); font-size: 10px; letter-spacing: 3px; color: var(--text3); text-transform: uppercase; }
+.day-stamp { letter-spacing: 1px; font-size: 9.5px; text-transform: none; }
+.day-panel h3 { font-family: var(--font-d, var(--font-display, sans-serif)); font-size: 16px; letter-spacing: 4px; color: var(--accent); display: flex; align-items: center; gap: 10px; margin: 0; font-weight: 700; }
+.day-pn { display: inline-flex; width: 22px; height: 22px; border: 1px solid var(--accent); border-radius: 50%; align-items: center; justify-content: center; font-size: 11px; flex: 0 0 auto; }
+.day-job,
+.day-note { color: var(--text2); font-size: 15px; margin: 0; line-height: 1.4; }
+.day-note { font-size: 13px; }
+.day-h { font-family: var(--font-m, var(--font-mono, monospace)); font-size: 10px; letter-spacing: 2px; color: var(--accent); margin-top: 4px; }
+.day-h-live { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.day-state { font-family: var(--font-m, var(--font-mono, monospace)); font-size: 10px; letter-spacing: 1px; padding: 1px 7px; border-radius: 9px; border: 1px solid var(--border); color: var(--text2); text-transform: none; }
+.day-state-live { color: var(--accent-bright); border-color: var(--accent-dim); }
+.day-state-stale { color: var(--accent-gold, var(--gold, #d8b020)); }
+.day-state-off { color: var(--text3); }
+.day-rows,
+.day-facts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.day-rows li { display: grid; grid-template-columns: 96px 1fr; gap: 8px; font-size: 14px; line-height: 1.35; align-items: baseline; color: var(--text); }
+.day-t { font-family: var(--font-m, var(--font-mono, monospace)); font-size: 10.5px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.day-facts li { border-left: 2px solid var(--accent-dim); padding-left: 8px; color: var(--text); font-size: 14px; line-height: 1.35; }
+.day-facts li b { color: var(--accent-bright); font-weight: 600; font-family: var(--font-m, var(--font-mono, monospace)); font-size: 13px; }
+.day-next { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); font-family: var(--font-m, var(--font-mono, monospace)); font-size: 10.5px; color: var(--text2); letter-spacing: 0.5px; }
+
+.day-scheme .day-broken .day-dot { fill: var(--accent-red, var(--danger, var(--text3))); }
+.day-scheme .day-broken .day-box { stroke: var(--accent-red, var(--danger, var(--border))); }
+.day-scheme .day-quiet .day-dot { fill: var(--text3); opacity: 0.5; }
+.day-state-broken { color: var(--accent-red, var(--danger, var(--text2))); }
+.day-state-quiet { color: var(--text3); }
+
+/* ── home: the section on /command/ (static/js/sv-day-live.js) ──────────
+ * The same ring inside a collapsible card, with seven tiles above it and
+ * the 24-hour strip below. Tokens only; transitions only — the reduced-
+ * motion block at the foot stills every one of them. No transform
+ * animation with a filling mode anywhere here: the section is a card on
+ * the page, and a filling transform would make it a containing block for
+ * every position:fixed descendant (static/css/sauron.css, fadeInUp). */
+.day-home {
+    margin-bottom: 18px;
+    padding: 12px 14px 14px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 6px);
+}
+.day-home-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.day-home-toggle {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: transparent; border: 0; padding: 4px 2px; cursor: pointer;
+    color: var(--accent); font-family: var(--font-d, var(--font-display, sans-serif));
+    font-size: 13px; font-weight: 700; letter-spacing: 3px; min-height: 32px;
+}
+.day-home-toggle:focus-visible { outline: 1px solid var(--accent-bright); outline-offset: 2px; border-radius: 4px; }
+.day-home-chev { display: inline-block; transition: transform 0.25s; font-size: 12px; }
+.day-collapsed .day-home-chev { transform: rotate(-90deg); }
+.day-home-meta {
+    font-family: var(--font-m, var(--font-mono, monospace)); font-size: 10.5px; letter-spacing: 1px;
+    color: var(--text3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    transition: color 0.4s;
+}
+.day-home-meta.day-live { color: var(--text2); }
+.day-home-meta.day-stale { color: var(--accent-gold, var(--gold, var(--text2))); }
+.day-home-meta.day-broken { color: var(--accent-red, var(--danger, var(--text2))); }
+.day-home-body { margin-top: 12px; display: flex; flex-direction: column; gap: 14px; }
+.day-home-body[hidden] { display: none; }
+
+/* the tiles */
+.day-tiles { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+.day-tile {
+    display: flex; flex-direction: column; gap: 6px; min-width: 0; text-align: left;
+    background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius, 6px);
+    padding: 9px 10px; cursor: pointer; color: var(--text);
+    transition: border-color 0.25s, box-shadow 0.25s, background 0.25s;
+}
+.day-tile:hover,
+.day-tile:focus-visible { border-color: var(--accent-dim); box-shadow: 0 0 18px var(--accent-glow); outline: none; }
+.day-tile-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.day-tile-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+    background: var(--text3); opacity: 0.5; transition: background 0.4s, box-shadow 0.4s, opacity 0.4s;
+}
+.day-tile.day-live .day-tile-dot { background: var(--accent-bright); opacity: 1; box-shadow: 0 0 8px var(--accent-bright); }
+.day-tile.day-stale .day-tile-dot { background: var(--accent-gold, var(--gold, #d8b020)); opacity: 1; }
+.day-tile.day-broken .day-tile-dot { background: var(--accent-red, var(--danger, #e83030)); opacity: 1; box-shadow: 0 0 8px var(--accent-red, var(--danger, #e83030)); }
+.day-tile.day-off .day-tile-dot { background: var(--text3); opacity: 0.9; }
+.day-tile.day-off { border-style: dashed; }
+.day-tile.day-broken { border-color: var(--accent-red, var(--danger, var(--border))); }
+.day-tile-n {
+    display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+    width: 16px; height: 16px; border: 1px solid var(--accent); border-radius: 50%;
+    font-family: var(--font-d, var(--font-display, sans-serif)); font-size: 9px; color: var(--accent);
+}
+.day-tile-title {
+    font-family: var(--font-d, var(--font-display, sans-serif)); font-size: 11px; font-weight: 700;
+    letter-spacing: 2px; color: var(--accent); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.day-tile.day-off .day-tile-title { color: var(--text3); }
+.day-tile-nums { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.day-tile-num { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.day-tile-num b {
+    font-family: var(--font-m, var(--font-mono, monospace)); font-size: 17px; font-weight: 600; line-height: 1.1;
+    color: var(--text); font-variant-numeric: tabular-nums; flex: 0 0 auto;
+    transition: color 0.45s, text-shadow 0.45s; border-radius: 3px;
+}
+.day-tile-num b.day-changed { color: var(--accent-bright); text-shadow: 0 0 10px var(--accent-bright); }
+.day-tile-num small {
+    font-family: var(--font-m, var(--font-mono, monospace)); font-size: 9.5px; letter-spacing: 0.3px; color: var(--text3);
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.day-tile-words {
+    font-family: var(--font-m, var(--font-mono, monospace)); font-size: 9.5px; letter-spacing: 1px; color: var(--text2);
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.day-tile.day-live .day-tile-words { color: var(--accent-bright); }
+.day-tile.day-stale .day-tile-words { color: var(--accent-gold, var(--gold, #d8b020)); }
+.day-tile.day-broken .day-tile-words { color: var(--accent-red, var(--danger, #e83030)); }
+.day-tile.day-off .day-tile-words { color: var(--text3); }
+
+/* the 24-hour strip */
+.day-clock { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius, 6px); padding: 10px 12px 8px; min-width: 0; }
+.day-clock-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 14px; }
+.day-clock-now-text { font-family: var(--font-m, var(--font-mono, monospace)); font-size: 10px; letter-spacing: 2px; color: var(--accent-bright); font-variant-numeric: tabular-nums; }
+.day-clock-track { position: relative; height: 54px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin: 0 4px 20px; }
+.day-clock-band { position: absolute; top: 0; bottom: 0; background: var(--accent-glow); border-left: 1px dashed var(--accent-dim); border-right: 1px dashed var(--accent-dim); }
+.day-clock-band span {
+    position: absolute; left: 6px; bottom: 3px; font-family: var(--font-m, var(--font-mono, monospace));
+    font-size: 8.5px; letter-spacing: 2px; color: var(--text3); white-space: nowrap;
+}
+.day-clock-night { background: var(--bg2); border-color: var(--border); }
+.day-clock-ticks { position: absolute; inset: 0; pointer-events: none; }
+.day-clock-tick { position: absolute; top: 0; width: 1px; height: 5px; background: var(--border); }
+.day-clock-tick-major { height: 9px; background: var(--text3); }
+.day-clock-tick-major::after {
+    content: attr(data-h); position: absolute; top: 58px; left: 0; transform: translateX(-50%);
+    font-family: var(--font-m, var(--font-mono, monospace)); font-size: 9px; letter-spacing: 1px; color: var(--text3);
+}
+.day-clock-marks { position: absolute; inset: 0; }
+.day-clock-mark {
+    position: absolute; top: 14px; width: 9px; height: 9px; margin-left: -4.5px; border-radius: 50%;
+    background: var(--text3); opacity: 0.55; border: 1px solid var(--bg3); cursor: help;
+    transition: background 0.4s, box-shadow 0.4s, opacity 0.4s;
+}
+.day-clock-mark[data-row="1"] { top: 26px; }
+.day-clock-mark[data-row="2"] { top: 38px; }
+.day-clock-mark.day-live { background: var(--accent-bright); opacity: 1; box-shadow: 0 0 6px var(--accent-bright); }
+.day-clock-mark.day-stale { background: var(--accent-gold, var(--gold, #d8b020)); opacity: 1; }
+.day-clock-mark.day-broken { background: var(--accent-red, var(--danger, #e83030)); opacity: 1; }
+.day-clock-mark.day-off { background: var(--text3); opacity: 0.9; }
+/* The label rides above its mark on hover only: twenty-four daily tasks
+   cluster around the night hours, and a label each would pile up. The
+   readable form is the chip list under the strip. */
+.day-clock-mark i {
+    display: none; position: absolute; bottom: 13px; left: 50%; transform: translateX(-50%);
+    font-style: normal; font-family: var(--font-m, var(--font-mono, monospace)); font-size: 9px; letter-spacing: 0.5px;
+    color: var(--text); white-space: nowrap; pointer-events: none;
+    background: var(--bg2); border: 1px solid var(--accent-dim); border-radius: 4px; padding: 2px 6px;
+}
+.day-clock-mark:hover { opacity: 1; box-shadow: 0 0 10px var(--accent-bright); z-index: 1; }
+.day-clock-mark:hover i { display: block; }
+.day-clock-list { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 10px; }
+.day-clock-chip {
+    display: inline-flex; align-items: center; gap: 5px; min-width: 0; white-space: nowrap;
+    font-family: var(--font-m, var(--font-mono, monospace)); font-size: 9.5px; letter-spacing: 0.4px; color: var(--text2);
+}
+.day-clock-chip b { color: var(--accent); font-weight: 600; letter-spacing: 1px; font-variant-numeric: tabular-nums; }
+.day-clock-chip.day-off { color: var(--text3); }
+.day-clock-chip.day-broken { color: var(--accent-red, var(--danger, var(--text2))); }
+.day-clock-chip.day-stale { color: var(--accent-gold, var(--gold, var(--text2))); }
+.day-clock-cursor {
+    position: absolute; top: -6px; bottom: -6px; width: 2px; margin-left: -1px;
+    background: var(--accent); box-shadow: 0 0 8px var(--accent); pointer-events: none;
+    transition: left 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.day-clock-cursor::before {
+    content: ''; position: absolute; top: -4px; left: -3px; width: 8px; height: 8px;
+    border-radius: 50%; background: var(--accent);
+}
+.day-clock-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-family: var(--font-m, var(--font-mono, monospace)); font-size: 9px; letter-spacing: 1px; color: var(--text3); }
+.day-clock-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.day-clock-swatch { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--text3); opacity: 0.55; }
+.day-clock-swatch.day-live { background: var(--accent-bright); opacity: 1; }
+.day-clock-swatch.day-stale { background: var(--accent-gold, var(--gold, #d8b020)); opacity: 1; }
+.day-clock-swatch.day-broken { background: var(--accent-red, var(--danger, #e83030)); opacity: 1; }
+.day-clock-swatch.day-off { opacity: 0.9; }
+
+@media (max-width: 1180px) {
+    .day-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+    .day-grid { grid-template-columns: 1fr; }
+    .day-panel { position: static; min-height: 0; }
+    .day-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+    .day-home { padding: 10px 10px 12px; }
+    .day-home-toggle { letter-spacing: 2px; font-size: 12px; }
+    .day-home-meta { white-space: normal; line-height: 1.5; }
+    .day-tile-num b { font-size: 15px; }
+    .day-clock-band span { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .day-scheme .day-box,
+    .day-scheme .day-arrow,
+    .day-scheme .day-dot,
+    .day-panel,
+    .day-panel > *,
+    .day-home-chev,
+    .day-home-meta,
+    .day-tile,
+    .day-tile-dot,
+    .day-tile-num b,
+    .day-clock-mark,
+    .day-clock-cursor { transition: none; }
+}

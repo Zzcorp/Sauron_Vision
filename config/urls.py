@@ -6,6 +6,7 @@ from django.shortcuts import render, redirect
 from django.views.generic import RedirectView
 from dashboard.auth_views import SauronLoginView, login_pin, login_pin_forgot
 from core.health import health_check
+from core.day_of_sauron import day_scheme, page_scheme
 from core.wall_facts import market_sessions, wall_facts
 from core.views_book import the_book
 
@@ -20,11 +21,18 @@ def the_wall(request):
     """
     if request.user.is_authenticated:
         return redirect("dashboard")
+    wall = wall_facts()
     return render(request, "landing/the_wall.html", {
         # Not cached with the facts: session state is clock arithmetic, and a
         # five-minute-stale "OPEN" is the kind of small lie this page forbids.
-        "wall": wall_facts(),
+        "wall": wall,
         "sessions": market_sessions(),
+        # The day of Sauron (2026-09-29): the beat schedule read into seven
+        # stages for the ring scheme, with the counts above as its facts.
+        # Its own key, not one of wall's: the facts contract is closed.
+        # page_scheme: only what the drawing reads — no import paths, beat
+        # keys or queues for an anonymous visitor.
+        "day": page_scheme(day_scheme(wall)),
     })
 
 

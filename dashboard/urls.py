@@ -102,6 +102,7 @@ from .views_command import (
     command_center, command_tab_live, command_tab_portfolio,
     command_tab_history, command_tab_bots, command_tab_metrics,
 )
+from .views_day import day_live
 from .views_bot_performance import bot_performance_dashboard
 from .views_bot_backtest import (
     bot_backtest_list, bot_backtest_run, bot_backtest_detail,
@@ -129,6 +130,11 @@ urlpatterns = [
     # The tab-head metrics and hero readouts as JSON, so they move without a
     # page reload. Nothing recomputed them once the page was rendered.
     path("command/tab/metrics/", command_tab_metrics, name="command_tab_metrics"),
+    # A day of Sauron, live (2026-09-29): the state of every beat entry and
+    # the day's counts per stage, for the ring, the tiles and the 24-hour
+    # strip on /command/. Under /api/ so the idle lock answers a locked
+    # tab's poll with 423 instead of a redirect.
+    path("api/day/live/", day_live, name="day_live"),
 
     # ── Frontend Pages ──────────────────────────────────────
     path("", views.dashboard, name="dashboard"),

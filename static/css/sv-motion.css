@@ -1,0 +1,221 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   THE MOTION LAYER (2026-09-29)
+   ───────────────────────────────────────────────────────────────────────
+   The operator, 2026-09-28: "add fade in, slide in, fade out, etc,
+   impressive animations for the users, same for all the platform".
+
+   One sheet and one script (static/js/sv-motion.js) for every authed
+   page. sauron.css already owns the page-entry cascade (.page-content
+   > *, pageEnterUp), the card entrances (.fade-in, .fade-in-up), the
+   value pulses (.oc-changed, .sc-changed), the rail's width and the
+   hover beat. This sheet adds what those do not cover:
+
+     a. SCROLL REVEAL   .sv-rv / .sv-rv.in — cards below the fold rise
+                        into view as the page is scrolled; the script
+                        adds the class, staggers siblings with --sv-i and
+                        removes both classes when the transition ends.
+     b. HTMX SWAPS      the swap target fades out on .htmx-swapping and
+                        its new children fade in from .htmx-added; a
+                        live region that re-swapped fades from .35.
+     c. PAGE LEAVE      body.sv-leaving fades .page-content while the
+                        browser goes; the script never intercepts the
+                        navigation itself.
+     d. PANELS          .sv-pop, and the panels base.html toggles with a
+                        class or an inline display, get one pop-in; the
+                        sidebar scrim and the rail bodies fade.
+     e. LIVE VALUES     .sv-tick, an opacity flash for any page's own
+                        refresher; [data-sv-count] counts up in the
+                        script.
+
+   RULES THIS SHEET LIVES BY
+     1. VISIBLE AT REST WITHOUT JAVASCRIPT. The only opacity-0 states
+        here hang off classes the script adds (.sv-rv, .sv-leaving) or
+        htmx adds and removes (.htmx-added, .htmx-swapping). Nothing in
+        the markup is born hidden, and every class with a hidden state
+        is removed, or revealed by a timer, by the script.
+     2. NO FILLING TRANSFORM ANIMATION. sauron.css, lines 535-595: a
+        transform animation with fill-mode forwards or both keeps the
+        element under animation control for ever, and a browser makes
+        that element the containing block for every position:fixed
+        descendant — the chart's expand pin, a portalled popup, a
+        dialog. Every keyframe animation here runs with the default
+        fill (none) and every transition ends at transform: none, so
+        the moment the motion is over the element is its own plain
+        self again. tests/test_motion.py checks the fill modes.
+     3. REDUCED MOTION. The block at the end names every selector this
+        sheet animates or transitions, turns the motion off and puts
+        any opacity-0 rest state back to 1 — the Wall's .desk-row
+        lesson (templates/landing/the_wall.html, "animation: none alone
+        would leave the rows permanently invisible"). sauron.css's
+        global .001ms rule would make the motion instant anyway; this
+        block is what keeps it from also making things vanish.
+     4. THE PHONE (768px and below): shorter distances, and no page
+        leave fade, which fights the browser's own transition there.
+
+   LOAD ORDER. base.html links this after sv-tour.css and before
+   sv-responsive.css, the phone tier, which stays the last shell sheet
+   (tests/test_phone_layout.py pins that).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+:root {
+    --sv-rv-dur: .55s;
+    --sv-rv-dy: 14px;
+    --sv-rv-step: 60ms;
+    --sv-rv-ease: cubic-bezier(.16, 1, .3, 1);
+    --sv-swap-out: 120ms;
+    --sv-swap-in: 260ms;
+    --sv-leave-dur: 160ms;
+    --sv-pop-dur: 160ms;
+}
+
+/* ── a. SCROLL REVEAL ───────────────────────────────────────────────────
+   Added by the script to elements whose top is below the viewport at
+   scan time, when IntersectionObserver exists and motion is not reduced.
+   --sv-i is the element's index among its revealed siblings, so a grid
+   of cards rises one after another rather than as a block. The script
+   removes .sv-rv and .in once the transition has ended: .card carries
+   its own transform transition for the hover lift (sauron.css), and a
+   lingering `transform: none` at this weight would win over it. */
+.sv-rv {
+    opacity: 0;
+    transform: translateY(var(--sv-rv-dy));
+    transition: opacity var(--sv-rv-dur) ease, transform var(--sv-rv-dur) var(--sv-rv-ease);
+    transition-delay: calc(var(--sv-i, 0) * var(--sv-rv-step));
+}
+.sv-rv.in { opacity: 1; transform: none; }
+
+/* ── b. HTMX SWAPS ──────────────────────────────────────────────────────
+   htmx 1.9 (base.html loads 1.9.10): the swap target carries
+   .htmx-swapping for the swap delay (`hx-swap="innerHTML swap:120ms"`,
+   which the Operations Center's tab buttons declare; with no delay the
+   class comes and goes in one tick and this fade simply does not show),
+   and every new top-level node carries .htmx-added until the settle
+   tasks run, 20ms after the swap. The target's own fade rides those
+   classes alone; :where() keeps it at zero weight so a target with a
+   transition of its own keeps it. The targets: the Operations Center's
+   tab body, the metrics wrappers every list page loads, the live
+   regions, and anything that fetches into itself. */
+:where(#ocTabBody, .sv-metrics-wrapper, [data-sv-live], [hx-get]:not([hx-target])) {
+    transition: opacity var(--sv-swap-out) ease;
+}
+:where(#ocTabBody, .sv-metrics-wrapper, [data-sv-live], [hx-get]:not([hx-target])).htmx-swapping {
+    opacity: 0;
+}
+/* A new node is born hidden under .htmx-added; the script answers
+   htmx:afterSwap with a Web Animations fade (sv-motion.js fadeFrom) that
+   owns the opacity from the first frame until 260ms later, across the
+   moment htmx takes .htmx-added away. Not a CSS class carrying
+   `animation`: that shorthand replaced the node's own animation list,
+   and the node's pageEnterUp restarted from 0 when the class came off
+   (review, 2026-09-29). Without the script, the node simply appears at
+   the settle tick. A refresh nobody asked for (a fill, a sweep) has its
+   .htmx-added taken off at once and fades from .35, never from 0: a
+   region blinking blank reads as data lost, not data refreshed. */
+:where(#ocTabBody, .sv-metrics-wrapper, [data-sv-live], [hx-get]:not([hx-target])) > .htmx-added {
+    opacity: 0;
+}
+
+/* ── c. PAGE LEAVE ──────────────────────────────────────────────────────
+   The slide is on .page-content and the fade is on its children, and
+   the split is deliberate. .page-content is born with .fade-in, whose
+   fadeIn animation FILLS forwards (sauron.css): an animation's value
+   beats a plain declaration, so `opacity: 0` on the wrapper never
+   takes; and replacing that animation (`animation: none`) in the same
+   change was measured (2026-09-29, headless Chromium) to SNAP the
+   opacity to 0 with no transition at all. The children carry the entry
+   cascade with a backwards fill, long over by the time anyone clicks,
+   so a plain transition on them runs. The wrapper has no background of
+   its own: fading every child is fading the page. The transform is a
+   transition, ends at none the moment the class goes, and only ever
+   holds while the page is on its way out. */
+body.sv-leaving .page-content {
+    transform: translateY(-6px);
+    transition: transform var(--sv-leave-dur) ease;
+}
+body.sv-leaving .page-content > * {
+    opacity: 0;
+    transition: opacity var(--sv-leave-dur) ease;
+}
+
+/* ── d. PANELS AND DRAWERS ──────────────────────────────────────────────
+   One entrance for the surfaces base.html opens by flipping display:
+   the bell panel (.is-open, the overlay controller), the headband
+   dropdowns (the band's script writes display:block inline, so the
+   attribute is the hook), the live-status dropdown (:hover) and the
+   shortcuts modal. The user menu, the rail popup, the restore pill and
+   the hover cards already carry their own motion in sauron.css and
+   sv-overlay.css and are left to it. Default fill: after 160ms the
+   panel is under no animation and has no transform. .sv-pop is the same
+   entrance for any page's own popover. */
+.sv-pop,
+.notif-dropdown.is-open,
+.ip-dropdown[style*="display: block"],
+.live-status-pill:hover .lsp-dropdown,
+.kbd-modal-overlay.open .kbd-modal {
+    animation: svPopIn var(--sv-pop-dur) var(--sv-rv-ease);
+    transform-origin: 50% 0;
+}
+/* The headband dropdowns open upward, anchored to the band. */
+.ip-dropdown[style*="display: block"] { transform-origin: 50% 100%; }
+@keyframes svPopIn {
+    from { opacity: 0; transform: scale(.98); }
+    to   { opacity: 1; transform: none; }
+}
+/* Scrims fade; a scrim that pops would read as a flash. */
+.sidebar-overlay.visible,
+.kbd-modal-overlay.open {
+    animation: svFadeIn var(--sv-pop-dur) ease;
+}
+/* The signals rail's sections: sauron.css turns the body display:none
+   when collapsed and snaps the section's flex-basis. The resizer between
+   the sections measures heights, which an opacity fade leaves alone — so
+   the body fades back in and the height still snaps. */
+.rail-section:not(.collapsed) .rail-body {
+    animation: svFadeIn 220ms ease;
+}
+@keyframes svFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── e. LIVE VALUES ─────────────────────────────────────────────────────
+   .oc-changed and .sc-changed (sauron.css, command.html) stay as they
+   are. .sv-tick is the same idea for any page with its own refresher: a
+   short opacity flash, no transform, no colour, restartable the usual
+   way (remove, reflow, add). */
+.sv-tick { animation: svTick .9s ease-out; }
+@keyframes svTick {
+    0%   { opacity: 1; }
+    35%  { opacity: .35; }
+    100% { opacity: 1; }
+}
+
+/* ── g. THE PHONE ───────────────────────────────────────────────────────
+   Shorter distances, and no leave fade: the script does not add
+   .sv-leaving on a phone either, this is the sheet's own half of that. */
+@media (max-width: 768px) {
+    .sv-rv { --sv-rv-dy: 8px; }
+    body.sv-leaving .page-content { transform: none; transition: none; }
+    body.sv-leaving .page-content > * { opacity: 1; transition: none; }
+}
+
+/* ── f. REDUCED MOTION ──────────────────────────────────────────────────
+   Every selector above that animates or transitions, verbatim, with the
+   motion off and every opacity-0 rest state back at 1. The script adds
+   none of its classes under this preference either; this block is for
+   the classes htmx adds regardless, and for anything a page adds by
+   hand. tests/test_motion.py parses the sheet and checks the list. */
+@media (prefers-reduced-motion: reduce) {
+    .sv-rv { opacity: 1; transform: none; transition: none; }
+    body.sv-leaving .page-content { transform: none; transition: none; }
+    body.sv-leaving .page-content > * { opacity: 1; transition: none; }
+    :where(#ocTabBody, .sv-metrics-wrapper, [data-sv-live], [hx-get]:not([hx-target])) { transition: none; }
+    :where(#ocTabBody, .sv-metrics-wrapper, [data-sv-live], [hx-get]:not([hx-target])).htmx-swapping { opacity: 1; }
+    :where(#ocTabBody, .sv-metrics-wrapper, [data-sv-live], [hx-get]:not([hx-target])) > .htmx-added { opacity: 1; }
+    .sv-tick,
+    .sv-pop,
+    .notif-dropdown.is-open,
+    .ip-dropdown[style*="display: block"],
+    .live-status-pill:hover .lsp-dropdown,
+    .kbd-modal-overlay.open .kbd-modal,
+    .sidebar-overlay.visible,
+    .kbd-modal-overlay.open,
+    .rail-section:not(.collapsed) .rail-body { animation: none; }
+}

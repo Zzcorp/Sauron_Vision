@@ -415,9 +415,41 @@ def command_center(request):
         # The broker's own reading, rendered BESIDE the platform book —
         # cached columns only, so this adds no broker I/O to the render.
         "broker": broker_view(request.user),
+        # A day of Sauron (2026-09-29): the same ring the Wall draws, read
+        # off the beat schedule at render; its live layer arrives from
+        # /api/day/live/ once the page is up (dashboard.views_day).
+        "day": _day_context(),
+        "day_us": _us_band(),
         **_hero_context(request.user),
     }
     return render(request, "dashboard/command.html", context)
+
+
+def _us_band() -> dict:
+    """The 24-hour strip's US band, off core.constants.MARKET_SESSIONS
+    through dashboard.views_day.us_session — never typed in the template
+    (it read 13:30–21:00 against the table's 13:30–20:00)."""
+    from dashboard.views_day import us_session
+    open_m, close_m = us_session()
+    return {"left": round(open_m / 1440 * 100, 3),
+            "width": round((close_m - open_m) / 1440 * 100, 3),
+            "words": f"{open_m // 60:02d}:{open_m % 60:02d}–{close_m // 60:02d}:{close_m % 60:02d}"}
+
+
+def _day_context() -> dict:
+    """The ring's data for json_script — the schedule read into seven
+    stages with the Wall's cached counts. wall_facts() never raises; the
+    schedule read is fenced here so a beat entry with an odd schedule
+    cannot take the home page down with it."""
+    from core.day_of_sauron import day_scheme, page_scheme
+    from core.wall_facts import wall_facts
+    try:
+        # page_scheme: what the ring draws, not every task's import path.
+        return page_scheme(day_scheme(wall_facts()))
+    except Exception as e:  # noqa: BLE001 — the home page renders anyway
+        logger.warning("Op Center day scheme unavailable: %s", e, exc_info=True)
+        return {"stages": [], "total": 0, "queues": {}, "fastest": "",
+                "slowest": "", "unplaced": 0, "adapters": 0}
 
 
 @login_required
