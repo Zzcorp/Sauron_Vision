@@ -506,6 +506,21 @@ class MarketDataTests(SimpleTestCase):
                          "closeTime is not openTime plus the interval")
         self.assertLess(rows[0][0], rows[1][0], "not oldest-first")
 
+    def test_a_null_volume_is_zero_not_the_text_none(self):
+        """A candle's `"volume": null` came out as "None", which the bar
+        writer read as an unreadable bar and skipped, price and all."""
+        candles = {"candles": [{"instrumentId": 1001, "candles": [
+            {"instrumentID": 1001, "fromDate": "2026-09-29T08:00:00Z",
+             "open": 83000, "high": 83900, "low": 82800, "close": 83738.56,
+             "volume": None},
+            {"instrumentID": 1001, "fromDate": "2026-09-29T12:00:00Z",
+             "open": 83738.56, "high": 83800, "low": 83700, "close": 83750}]}],
+            "interval": "FourHours"}
+        t, _ = _client([SEARCH_AAPL, ("GET", "/history/candles", 200, candles)])
+        rows = t.klines("AAPL", interval="4h", limit=2)
+        self.assertEqual([r[5] for r in rows], ["0", "0"])
+        self.assertEqual(rows[0][4], "83738.56")
+
     def test_klines_three_states_of_shape(self):
         """A flat list of bars (the shape believed before the key) is still
         read; a group with an empty inner list is an answer (no bars, so

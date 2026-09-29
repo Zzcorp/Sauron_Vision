@@ -310,12 +310,14 @@ class TheRefreshTotalsCountTheFallbackTests(TestCase):
 
 
 class AStaleVenueWindowTests(TestCase):
-    """2026-09-29: eToro answered BTCUSD's 4h request with a window whose
-    newest bar was 33.7 days old. The refresh evicted every public bar from
-    that window's start ONWARD — last night's 600-bar backfill with them —
-    every ten minutes, and an armed bot decided on a month-old candle. The
-    eviction now stops one interval past the venue's newest bar, and a
-    stale window is followed by the public feed, as a mute venue is."""
+    """A venue can answer with a window that ends in the past: a history
+    farm that lags, a symbol it stopped quoting. The refresh used to evict
+    every public bar from that window's start ONWARD, the fresh ones
+    included. The eviction now stops one interval past the venue's newest
+    bar, and a stale window is followed by the public feed, as a mute venue
+    is. (Written on 2026-09-29 for what was first read as eToro answering
+    with the past; it was not, see AnAnswerThatWritesNothingTests. The
+    defence stands on its own.)"""
 
     DAY_MS = 86_400_000
 
@@ -425,3 +427,165 @@ class AStaleVenueWindowTests(TestCase):
         thirteen_h = _klines(1, start_ms=RECENT_MS + 3 * _FOUR_H - 13 * 3_600_000)
         self.assertIsNotNone(_venue_window_is_stale(self.btc, "4h", thirteen_h, now=now))
         self.assertIsNone(_venue_window_is_stale(self.btc, "4h", [], now=now))
+
+    def test_a_shut_market_is_not_said(self):
+        """Four days of a closed market (a long weekend) is past the 72 h
+        line, but the public feed has nothing newer either: nothing is
+        filled and nothing is said."""
+        from instruments.models import Instrument
+        from bot_program.models import AssetBotConfig
+        spy, _ = Instrument.objects.get_or_create(
+            symbol="GLDM", defaults={"name": "GLDM", "asset_class": "etf"})
+        cfg = AssetBotConfig.objects.create(
+            user=self.user, asset_class="etf", name="LONG WEEKEND",
+            mode="live", symbols=["GLDM"], capital=Decimal("1000"),
+            enabled=True)
+        shut = RECENT_MS - 4 * self.DAY_MS
+        venue_rows = _klines(3, start_ms=shut)
+        with self.assertNoLogs("market_data.bot_bars", level="WARNING"):
+            out = self._refresh(self._venue(venue_rows),
+                                YFinanceFeed(venue_rows), cfg)
+        self.assertEqual(out["fallback"], 0)
+
+
+def _etoro_rows(n=3, start_ms=RECENT_MS, close="83050.5", volume="None"):
+    """Rows as the eToro adapter wrote them before 2026-09-29: a candle's
+    `"volume": null` came out as the text "None"."""
+    return [[start_ms + i * _FOUR_H, "83000", "83100", "82900", close,
+             volume, start_ms + (i + 1) * _FOUR_H, "0", 0, "0", "0", "0"]
+            for i in range(n)]
+
+
+class AnAnswerThatWritesNothingTests(TestCase):
+    """2026-09-29, measured on the VPS. BTC config 29 armed on eToro:
+    eToro's klines answered 200 fresh 4h bars (27 Aug 04:00 to 29 Sep
+    08:00 UTC) and 200 fresh 1h bars, yet the table held no eToro row at
+    all, and no public row after 26 Aug 16:00 (4h) or 20 Sep 17:00 (1h).
+    The refresh evicted the public stand-ins in the venue's window FIRST,
+    then wrote the venue's bars, and none of them reached the table. The
+    writer skipped a whole bar on an unreadable volume, the adapter turned
+    a null volume into the text "None", and a value the database refused
+    aborted the config after the eviction had run: any of the three leaves
+    the table as it was found. Every ten minutes the stand-ins went and
+    nothing replaced them, so the bot read a 4h candle 33 days old.
+
+    Now: a bar without a volume is still a bar; the venue's bars are
+    written before any stand-in goes, in one transaction; and an answer
+    that writes nothing evicts nothing and falls back to the public feed,
+    as a mute venue does."""
+
+    def setUp(self):
+        from django.core.cache import cache
+
+        from bot_program.models import AssetBotConfig
+        from instruments.models import Instrument
+        cache.clear()
+        self.user = User.objects.create_user("unwritten_u", password="x")
+        self.btc, _ = Instrument.objects.get_or_create(
+            symbol="BTCUSD", defaults={"name": "Bitcoin",
+                                       "asset_class": "crypto"})
+        self.cfg = AssetBotConfig.objects.create(
+            user=self.user, asset_class="crypto", name="BTC eToro",
+            mode="live", symbols=["BTCUSD"], capital=Decimal("225"),
+            enabled=True)
+        # Last night's backfill: fresh public bars across the window.
+        self.backfill = [RECENT_MS + i * _FOUR_H for i in range(3)]
+        from datetime import datetime, timezone as dt_tz
+
+        from market_data.models import PriceData
+        for ms in self.backfill:
+            PriceData.objects.create(
+                instrument=self.btc, timeframe="4h",
+                timestamp=datetime.fromtimestamp(ms / 1000, tz=dt_tz.utc),
+                open=1, high=1, low=1, close=1, volume=0,
+                source="binance_public")
+
+    def _venue(self, rows):
+        client = MagicMock(name="EtoroTrader")
+        client._sv_public_feed = False
+        client.klines.return_value = rows
+        return client
+
+    def _refresh(self, venue, feed):
+        from market_data.bot_bars import refresh_bars_for_config
+        with patch("market_data.bot_bars._client_for", return_value=venue), \
+                patch("market_data.bot_bars._public_market_data_client",
+                      return_value=feed):
+            return refresh_bars_for_config(self.cfg, intervals=("4h",),
+                                           limit=3)
+
+    def _rows(self):
+        from market_data.models import PriceData
+        return list(PriceData.objects.filter(instrument=self.btc)
+                    .order_by("timestamp")
+                    .values_list("timestamp", "source", "volume"))
+
+    def test_a_bar_without_a_volume_is_still_a_bar(self):
+        out = self._refresh(self._venue(_etoro_rows(3)), YFinanceFeed([]))
+        self.assertEqual(out["bars"], 3)
+        self.assertEqual(out["skipped"], 0)
+        self.assertEqual([(src, vol) for _ts, src, vol in self._rows()],
+                         [("magicmock", 0)] * 3,
+                         "the venue's bars did not replace the stand-ins")
+
+    def test_an_answer_that_writes_nothing_evicts_nothing(self):
+        """The incident's shape: the venue answers over the backfill's
+        window and not one of its bars can be written."""
+        unwritable = _etoro_rows(3, close="None")
+        self._refresh(self._venue(unwritable), YFinanceFeed([]))
+        public = [ts for ts, src, _v in self._rows() if src == "binance_public"]
+        self.assertEqual(len(public), 3,
+                         "the stand-ins were deleted for bars that never "
+                         "reached the table")
+
+    def test_an_answer_that_writes_nothing_falls_back_and_says_so(self):
+        feed = YFinanceFeed(_klines(4, start_ms=RECENT_MS + _FOUR_H))
+        with self.assertLogs("market_data.bot_bars", level="WARNING") as logs:
+            out = self._refresh(self._venue(_etoro_rows(3, close="None")),
+                                feed)
+        self.assertEqual(out["fallback"], 1)
+        self.assertEqual(feed.calls, [("BTCUSD", "4h", 3)])
+        self.assertTrue(any("none could be written" in m for m in logs.output),
+                        logs.output)
+        newest_ts, _src, _v = self._rows()[-1]
+        self.assertEqual(int(newest_ts.timestamp() * 1000),
+                         RECENT_MS + 4 * _FOUR_H)
+
+    def test_a_database_refusal_evicts_nothing_and_raises_nothing(self):
+        """A value the column refuses (a volume past BIGINT, a price past
+        the Decimal's twelve integer digits) is one skipped bar, said at
+        WARNING. It used to abort the refresh of the whole config, after
+        the eviction had already run."""
+        from django.db import DataError
+        from django.db.models.query import QuerySet
+        with patch.object(QuerySet, "update_or_create",
+                          side_effect=DataError("bigint out of range")), \
+                self.assertLogs("market_data.bot_bars",
+                                level="WARNING") as logs:
+            out = self._refresh(self._venue(_etoro_rows(3, volume="12")),
+                                YFinanceFeed([]))
+        self.assertEqual(out["bars"], 0)
+        self.assertEqual(len(self._rows()), 3)
+        self.assertEqual({src for _ts, src, _v in self._rows()},
+                         {"binance_public"})
+        self.assertTrue(any("database refused" in m for m in logs.output),
+                        logs.output)
+
+    def test_a_failed_eviction_takes_the_venues_bars_back_with_it(self):
+        """One transaction: the window is the venue's entirely or not at
+        all, never half the venue's bars beside half the stand-ins."""
+        from django.db import OperationalError
+        with patch("market_data.bot_bars._evict_stand_in_rows",
+                   side_effect=OperationalError("lock timeout")):
+            out = self._refresh(self._venue(_etoro_rows(3, volume="5")),
+                                YFinanceFeed([]))
+        self.assertEqual(out["bars"], 0)
+        self.assertEqual({src for _ts, src, _v in self._rows()},
+                         {"binance_public"})
+
+    def test_the_volume_reading_in_isolation(self):
+        from market_data.bot_bars import _BIGINT_MAX, _volume
+        for raw, want in ((None, 0), ("None", 0), ("null", 0), ("", 0),
+                          ("nan", 0), ("inf", 0), ("-5", 0), ("12.7", 12),
+                          (1000, 1000), ("1e30", _BIGINT_MAX)):
+            self.assertEqual(_volume(raw), want, repr(raw))
