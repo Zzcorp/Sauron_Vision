@@ -415,9 +415,28 @@ def command_center(request):
         # The broker's own reading, rendered BESIDE the platform book —
         # cached columns only, so this adds no broker I/O to the render.
         "broker": broker_view(request.user),
+        # A day of Sauron (2026-09-29): the same ring the Wall draws, read
+        # off the beat schedule at render; its live layer arrives from
+        # /api/day/live/ once the page is up (dashboard.views_day).
+        "day": _day_context(),
         **_hero_context(request.user),
     }
     return render(request, "dashboard/command.html", context)
+
+
+def _day_context() -> dict:
+    """The ring's data for json_script — the schedule read into seven
+    stages with the Wall's cached counts. wall_facts() never raises; the
+    schedule read is fenced here so a beat entry with an odd schedule
+    cannot take the home page down with it."""
+    from core.day_of_sauron import day_scheme
+    from core.wall_facts import wall_facts
+    try:
+        return day_scheme(wall_facts())
+    except Exception as e:  # noqa: BLE001 — the home page renders anyway
+        logger.warning("Op Center day scheme unavailable: %s", e, exc_info=True)
+        return {"stages": [], "total": 0, "queues": {}, "fastest": "",
+                "slowest": "", "unplaced": [], "adapters": 0}
 
 
 @login_required
