@@ -1267,6 +1267,108 @@ FX_CELLS_AFTER_CLOSE_5X = {"accountCurrency": "USD",
                                              "accountTotalUsedMargin": 0.0}}
 
 
+# ── MEASURED 2026-09-29 10:57 UTC, demo segment, the operator's pair (a
+# client built env='demo' in the shell, D1's WORLD CHECK first:
+# net_liquidation 332440.14 USD; the row itself stayed live, no box moved):
+# one BUY at 1x per class, each closed by position id at once, printed by
+# the real adapter. The legs sent were the last price x 0.97 / x 1.03 to
+# four decimals; eToro HELD them rounded to the instrument's two decimals
+# (positionExecutions[0]), the top level keeping the sent value. Every
+# close proof met eToro's transient 500 on the way (AAPL twice, SPX500 and
+# WHEAT.FUT once) before "closed". /portfolio read [] 60 s after the last.
+# The acceptance bodies were not printed raw: composed with the measured
+# int orderId, as the forex fixtures are.
+CLASS_PROOFS = {
+    "stock": {
+        "symbol": "AAPL", "venue": "AAPL", "iid": 1001, "units": 4.0,
+        "sent": (326.6184, 346.8216), "held": (326.62, 346.82),
+        "order": 384798829, "position": 3605938942, "close_order": 384822839,
+        "avg": 336.87, "settlement": "REAL", "requested": 1347.52,
+        "frozen": 1348.52, "total_costs": 1.0, "margin": 1347.48,
+        "exposure": 1347.48, "spread": 0.64, "markup": 0.0, "fees": 1.0,
+        "times": ("2026-09-29T10:57:01.907Z", "2026-09-29T10:57:02.05Z",
+                  "2026-09-29T10:57:01.997Z", "2026-09-29T10:57:02.093Z",
+                  "2026-09-29T10:57:03.3669863Z"),
+        "close_500s": 2, "cash_after_open": 331091.66,
+        "cash_after_close": 332437.62,
+    },
+    "index": {
+        "symbol": "SPX500", "venue": "SPX500", "iid": 27, "units": 1.0,
+        "sent": (7458.5531, 7919.9069), "held": (7458.56, 7919.9),
+        "order": 384769149, "position": 3605939058, "close_order": 384793580,
+        "avg": 7689.63, "settlement": "CFD", "requested": 7689.63,
+        "frozen": 7689.63, "total_costs": 0.0, "margin": 7689.63,
+        "exposure": 7689.63, "spread": 0.4, "markup": 0.04, "fees": 0.0,
+        "times": ("2026-09-29T10:57:15.853Z", "2026-09-29T10:57:15.963Z",
+                  "2026-09-29T10:57:15.92Z", "2026-09-29T10:57:16.013Z",
+                  "2026-09-29T10:57:17.3660212Z"),
+        "close_500s": 1, "cash_after_open": 324747.99,
+        "cash_after_close": 332437.22,
+    },
+    "commodity": {
+        "symbol": "WHEATUSD", "venue": "WHEAT.FUT", "iid": 97, "units": 2.0,
+        "sent": (662.995, 704.005), "held": (663.0, 704.0),
+        "order": 384769151, "position": 3605939068, "close_order": 384813052,
+        "avg": 683.75, "settlement": "CFD", "requested": 1367.5,
+        "frozen": 1367.5, "total_costs": 0.0, "margin": 1367.5,
+        "exposure": 1367.5, "spread": 0.5, "markup": 0.06, "fees": 0.0,
+        "times": ("2026-09-29T10:57:25.66Z", "2026-09-29T10:57:25.793Z",
+                  "2026-09-29T10:57:25.743Z", "2026-09-29T10:57:25.853Z",
+                  "2026-09-29T10:57:27.3307109Z"),
+        "close_500s": 1, "cash_after_open": 331069.72,
+        "cash_after_close": 332436.72,
+    },
+}
+
+
+def _class_lookup(p, state="open"):
+    """orders:lookup?orderId= of one 2026-09-29 class proof, verbatim; after
+    the close the same body but for state "closed"."""
+    open_time, exec_time, req_time, last_update, _close_time = p["times"]
+    return {
+        "accountId": 15153738, "gcid": 13883661, "portfolioId": 0,
+        "orderId": p["order"], "action": "open", "transaction": "buy",
+        "type": "mkt", "etoroOrderTypeId": 18,
+        "status": {"id": 3, "name": "Filled", "errorCode": 0},
+        "asset": {"symbol": p["venue"], "instrumentId": p["iid"],
+                  "currency": "USD", "settlementType": p["settlement"],
+                  "leverage": 1, "side": "long"},
+        "orderCurrency": "usd", "requestedAmount": p["requested"],
+        "requestedUnits": p["units"], "requestedContracts": p["units"],
+        "frozenAmount": p["frozen"], "openStopLossRate": p["sent"][0],
+        "openTakeProfitRate": p["sent"][1], "stopLossType": "fixed",
+        "totalCosts": p["total_costs"], "positionsToClose": [],
+        "positionExecutions": [{
+            "positionId": p["position"], "state": state,
+            "investedAmountCurrency": 1,
+            "initialExposureAccountCurrency": p["exposure"],
+            "initialExposureAssetCurrency": p["exposure"], "addedFunds": 0.0,
+            "marginAccountCurrency": p["margin"],
+            "marginAssetCurrency": p["margin"],
+            "remainingUnits": p["units"], "remainingContracts": p["units"],
+            "stopLossRate": p["held"][0], "takeProfitRate": p["held"][1],
+            "openingData": {
+                "openTime": open_time, "orderId": p["order"],
+                "executionTime": exec_time, "units": p["units"],
+                "contracts": p["units"], "avgPrice": p["avg"],
+                "avgConversionRate": 1.0, "marketSpread": p["spread"],
+                "markup": p["markup"], "priceId": 0, "fees": p["fees"],
+                "taxes": 0.0}}],
+        "requestTime": req_time, "lastUpdate": last_update,
+        "openActionType": "customer", "requestType": "byUnits",
+    }
+
+
+def _class_close(p):
+    return {"orderForClose": {"positionID": p["position"],
+                              "instrumentID": p["iid"],
+                              "orderID": p["close_order"], "orderType": 19,
+                              "statusID": 1, "CID": 15153738,
+                              "openDateTime": p["times"][4],
+                              "lastUpdate": p["times"][4]},
+            "token": "<not asserted>"}
+
+
 class TheMeasuredWireTests(SimpleTestCase):
     """Every shape the first demo orders printed, pinned byte for byte with
     the real EtoroTrader over a patched session. The three DEFECTS they
@@ -1480,6 +1582,144 @@ class TheMeasuredWireTests(SimpleTestCase):
         self.assertAlmostEqual(lk["requestedAmount"] * 5,
                                first["initialExposureAccountCurrency"],
                                places=1)
+
+    def _class_round_trip(self, token):
+        """One 2026-09-29 class proof through the real adapter over the fake
+        wire: the order on the demo segment, the fill read by orderId, the
+        close by position id proven by the OPEN order through the 500s that
+        close met, the cells after."""
+        p = CLASS_PROOFS[token]
+        order_id, position = str(p["order"]), str(p["position"])
+        t, fake = self._t(
+            [(200, _class_lookup(p, "open"))]
+            + [(500, {})] * p["close_500s"]
+            + [(200, _class_lookup(p, "closed"))],
+            routes=[
+                ("GET", "/market-data/search", 200,
+                 [{"instrumentId": p["iid"],
+                   "internalSymbolFull": p["venue"]}]),
+                ("POST", "/execution/demo/orders", 200,
+                 {"token": "<not captured>", "orderId": p["order"],
+                  "referenceId": "<not captured>"}),
+                ("POST", f"/market-close-orders/positions/{position}", 200,
+                 _class_close(p)),
+                ("GET", "/aggregate-portfolio", 200,
+                 {"accountCurrency": "USD",
+                  "accountTotals": {
+                      "accountAvailableCash": p["cash_after_close"],
+                      "accountTotalUsedMargin": 0.0}})])
+        with mock.patch("time.sleep"):
+            r = t.market_order(p["symbol"], "BUY", p["units"],
+                               stop_loss=p["sent"][0],
+                               take_profit=p["sent"][1])
+        post = [c for c in fake.calls if c[0] == "POST"][0]
+        self.assertEqual(post[1],
+                         f"{BASE}/api/v2/trading/execution/demo/orders")
+        body = post[2]["json"]
+        self.assertEqual((body["symbol"], float(body["units"]),
+                          body["leverage"], body["stopLossRate"],
+                          body["takeProfitRate"]),
+                         (p["venue"], p["units"], 1) + p["sent"])
+        self.assertEqual(_polls(fake)[0][2]["params"], {"orderId": order_id})
+        self.assertEqual((r["orderId"], r["status"], r["executedQty"],
+                          r["avgPrice"], r["positionId"]),
+                         (order_id, "FILLED", str(p["units"]),
+                          str(p["avg"]), position))
+        self.assertEqual((r["venueStopLoss"], r["venueTakeProfit"]),
+                         p["held"], "the HELD legs, rounded by eToro")
+        lk = r["raw"]["lookup"]
+        self.assertEqual((lk["asset"]["settlementType"],
+                          lk["asset"]["leverage"], lk["asset"]["symbol"],
+                          lk["asset"]["instrumentId"]),
+                         (p["settlement"], 1, p["venue"], p["iid"]))
+        self.assertEqual((lk["openStopLossRate"], lk["openTakeProfitRate"]),
+                         p["sent"], "the top level keeps the SENT legs")
+        first = lk["positionExecutions"][0]
+        self.assertEqual((lk["requestedAmount"], lk["frozenAmount"],
+                          first["marginAccountCurrency"],
+                          first["openingData"]["fees"],
+                          first["openingData"]["markup"]),
+                         (p["requested"], p["frozen"], p["margin"],
+                          p["fees"], p["markup"]))
+        with mock.patch("time.sleep"):
+            c = t.close_position(position, p["symbol"], open_order_id=order_id)
+        close_post = [x for x in fake.calls if x[0] == "POST"][1]
+        self.assertTrue(close_post[1].endswith(
+            f"/market-close-orders/positions/{position}"), close_post[1])
+        self.assertEqual(close_post[2]["json"], {"InstrumentID": p["iid"]})
+        self.assertEqual((c["status"], c["positionState"], c["orderId"],
+                          c["openOrderId"]),
+                         ("FILLED", "closed", str(p["close_order"]), order_id))
+        self.assertNotIn("executedQty", c, "no units asked, none claimed")
+        self.assertNotIn("avgPrice", c, "a close carries no price")
+        self.assertEqual(len(_polls(fake)), 1 + p["close_500s"] + 1,
+                         "the close was proven through the 500s it met")
+        self.assertEqual(t.margin_cells()["used_margin"], 0.0)
+        for m, url, _k in fake.calls:
+            if m == "POST":
+                self.assertIn("/demo/", url, url)
+                self.assertNotIn("/real/", url, url)
+        return r, lk
+
+    def test_proof_stock(self):
+        """MEASURED ON THE DEMO SEGMENT, 2026-09-29 10:57:01 UTC, by the
+        operator the day of leaving: AAPL 4 units BUY at 1x, stop 326.6184 /
+        target 346.8216 sent (the last 336.72 x 0.97 / x 1.03). FILLED in
+        ~150 ms — order 384798829, position 3605938942, avgPrice 336.87,
+        settlementType REAL (a stock at 1x is the share itself, as BTC was
+        on the real account), requestedAmount 1347.52, frozenAmount 1348.52
+        (the notional and the 1.00 fee: totalCosts 1.0, fees 1.0, markup
+        0.0, marketSpread 0.64), used margin 0.0 -> 1347.48. The legs HELD
+        as 326.62 / 346.82. CLOSED by position id (orderForClose {orderID
+        384822839, orderType 19, statusID 1}), proven "closed" through two
+        500s; used margin 0.0, available 332437.62 (the round trip cost
+        2.52 of 332440.14). The eligibility row the same minute: units
+        fractional, floor 10 USD, open True. "stock" joins ETORO_PROVEN in
+        the commit that pins this, at 1x, BUY only ("short" stays out)."""
+        r, lk = self._class_round_trip("stock")
+        self.assertEqual(lk["totalCosts"], 1.0, "a stock pays a fee to open")
+
+    def test_proof_index(self):
+        """MEASURED ON THE DEMO SEGMENT, 2026-09-29 10:57:15 UTC, fourteen
+        seconds after the AAPL close: SPX500 1 unit BUY at 1x, stop
+        7458.5531 / target 7919.9069 sent (the last 7689.23 x 0.97 /
+        x 1.03). FILLED in ~110 ms — order 384769149, position 3605939058,
+        avgPrice 7689.63, settlementType CFD, requestedAmount 7689.63 = the
+        whole notional, all of it locked (used margin 0.0 -> 7689.63),
+        fees 0.0, markup 0.04, marketSpread 0.4. The legs HELD as 7458.56 /
+        7919.9. CLOSED by position id (orderForClose {orderID 384793580,
+        orderType 19, statusID 1}), proven "closed" through one 500; used
+        margin 0.0, available 332437.22. Eligibility: units fractional,
+        floor 1000 USD, open True. "index" joins ETORO_PROVEN in the commit
+        that pins this, at 1x: it lifts SPX500, NSDQ100 and DJ30 (USD
+        quoted); the indices in VENUE_QUOTE_UNMEASURED stay refused
+        whatever this set holds, because the engine sizes a point of their
+        price as one USD."""
+        r, lk = self._class_round_trip("index")
+        self.assertEqual(lk["requestedAmount"],
+                         lk["positionExecutions"][0]["initialExposureAccountCurrency"],
+                         "at 1x the whole notional is locked")
+
+    def test_proof_commodity(self):
+        """MEASURED ON THE DEMO SEGMENT, 2026-09-29 10:57:25 UTC: the
+        platform's WHEATUSD, sent to eToro as WHEAT.FUT (id 97, through
+        VENUE_SPELLING — the order body carries eToro's spelling), 2 units
+        BUY at 1x, stop 662.995 / target 704.005 sent (the last 683.5 x
+        0.97 / x 1.03). FILLED in ~130 ms — order 384769151, position
+        3605939068, avgPrice 683.75, settlementType CFD, requestedAmount
+        1367.5 = the notional (one unit is priced as 683.5 USD: the quote
+        in cents a bushel reads as dollars a unit), fees 0.0, markup 0.06,
+        marketSpread 0.5, used margin 0.0 -> 1367.5. The legs HELD as
+        663.0 / 704.0. CLOSED by position id (orderForClose {orderID
+        384813052, orderType 19, statusID 1}), proven "closed" through one
+        500; used margin 0.0, available 332436.72; /portfolio [] 60 s
+        later. Eligibility: units fractional, floor 1000 USD, open True.
+        "commodity" joins ETORO_PROVEN in the commit that pins this, at
+        1x: it lifts the gate only; the router sends a commodity to eToro
+        only with eToro's commodities box ticked, and gold, silver and oil
+        still have no measured eToro spelling."""
+        r, lk = self._class_round_trip("commodity")
+        self.assertEqual(lk["asset"]["symbol"], "WHEAT.FUT")
 
     def test_the_accepted_payload_is_token_int_orderid_and_the_echoed_reference(self):
         t, fake = self._t((200, _measured_lookup()))

@@ -1112,8 +1112,9 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
     on one line, what eToro answered on 2026-09-23 (stocks real at 1x from
     10 USD; ETFs CFD only; forex, indices and commodities a 1,000 USD
     minimum; crypto real at 1x from 10 USD) and the class's proof state.
-    ETORO_PROVEN carries crypto alone since 2026-09-26, so every other box
-    reads "no proof pinned — entries refused"; a save that ticks a box
+    Since 2026-09-29 every class box has its proof pinned (only "short"
+    is still unproven); a box without one reads "no proof pinned —
+    entries refused", and a save that ticks a box
     names what the gate will
     refuse — on the verified branch too, which said nothing before. The
     gate keys on the INSTRUMENT's class, so the stocks box needs three
@@ -1171,25 +1172,32 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
                      "unticked, crypto routes to Binance"):
             self.assertIn(fact, crypto)
 
-    def test_every_box_but_crypto_says_no_proof_is_pinned(self):
-        """As the tree ships since 2026-09-28: crypto's proof is pinned
-        (the real BTC round trip, test_proof_crypto), forex's too (the
-        demo EURUSD round trips, test_proof_forex), the stocks box carries
-        the ETF proof alone (the demo GLDM round trip, test_proof_etf) with
-        stock and index still refused; commodity alone reads "no proof
-        pinned — entries refused"."""
+    def test_every_box_says_its_proof_is_pinned(self):
+        """As the tree ships since 2026-09-29: every class box has its
+        proof pinned — crypto (the real BTC round trip, test_proof_crypto),
+        forex (the demo EURUSD round trips), the stocks box's three tokens
+        (GLDM for etf, AAPL for stock, SPX500 for index) and commodity
+        (WHEAT.FUT) — so no box reads "no proof pinned — entries refused";
+        no eToro SELL has been measured, so the stocks box says so."""
         form = self._form()
-        self.assertIn("no proof pinned — entries refused",
-                      self._label(form, "primary_commodity"))
-        for name in ("primary_crypto", "primary_forex"):
+        for name in ("primary_crypto", "primary_forex", "primary_commodity",
+                     "primary_stocks"):
             label = self._label(form, name)
             self.assertIn("proof pinned", label, name)
             self.assertNotIn("no proof pinned", label, name)
-        stocks = self._label(form, "primary_stocks")
-        self.assertIn("proof pinned for etf only — stock, index entries "
-                      "refused", stocks)
+        self.assertEqual(form.count("no proof pinned — entries refused"), 0)
+        self.assertNotIn("entries refused", self._label(form, "primary_stocks"))
+        self.assertIn("no short proven", self._label(form, "primary_stocks"))
+
+    def test_an_unproven_box_still_says_so(self):
+        """The words for a box with no proof, as commodity read until
+        2026-09-29: the set is read at render time."""
+        with mock.patch(self.PROVEN, frozenset({"crypto", "etf", "forex",
+                                                "stock", "index"})):
+            form = self._form()
+        self.assertIn("no proof pinned — entries refused",
+                      self._label(form, "primary_commodity"))
         self.assertEqual(form.count("no proof pinned — entries refused"), 1)
-        self.assertIn("no short proven", stocks)
 
     def test_a_pinned_proof_reads_beside_its_box_only(self):
         with mock.patch(self.PROVEN, self.ALL_STOCKS):
@@ -1208,10 +1216,16 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
         self.assertIn("proof pinned for etf only — stock, index entries "
                       "refused", stocks)
 
+    #: The set as it shipped on 2026-09-28, before the stock, index and
+    #: commodity proofs: what a box with an unproven class says is still
+    #: pinned, on a set that has one.
+    BEFORE_0929 = frozenset({"crypto", "etf", "forex"})
+
     def test_a_verified_save_names_the_unproven_class_and_the_refusal(self):
-        body = self._save(primary_stocks="on")
+        with mock.patch(self.PROVEN, self.BEFORE_0929):
+            body = self._save(primary_stocks="on")
         self.assertIn("eToro keys saved and verified for pf_u (demo).", body)
-        # etf's proof is pinned since 2026-09-28; stock and index are not.
+        # etf's proof pinned, stock and index not (the 2026-09-28 set).
         self.assertIn("No demo fill-and-close proof is pinned for stock, "
                       "index", body)
         self.assertIn("gate_blocked", body)
@@ -1254,8 +1268,9 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
         self.assertNotIn("Every short is refused", body)
 
     def test_a_refused_save_carries_both_notes(self):
-        # commodity: the one class still unproven on 2026-09-28.
-        body = self._save(("refused", "401"), primary_commodity="on")
+        # commodity unproven, as it was until 2026-09-29.
+        with mock.patch(self.PROVEN, self.BEFORE_0929 | {"stock", "index"}):
+            body = self._save(("refused", "401"), primary_commodity="on")
         self.assertIn("now the book", body)
         self.assertIn("No demo fill-and-close proof is pinned for commodity "
                       "(ETORO_PROVEN", body)
