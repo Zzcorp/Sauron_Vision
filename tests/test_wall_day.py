@@ -53,6 +53,17 @@ class TheDayIsOnTheWallTests(TestCase):
         # The reader is told the number the picture is drawn from.
         self.assertIn(f"{len(app.conf.beat_schedule)} scheduled tasks", body)
 
+    def test_it_claims_the_shipped_schedule_not_the_running_one(self):
+        """Review, 2026-09-29: the beat runs the database scheduler, whose
+        rows an admin can edit or disable (and which adds celery's own
+        result cleanup), and every price stream is opt-in. The page reads
+        the code's schedule and says so."""
+        body = self.body
+        self.assertIn("the schedule the platform ships with", body)
+        self.assertIn("price streams where they are enabled", body)
+        self.assertNotIn("as it runs on this deployment", body)
+        self.assertNotIn("streams that never stop", body)
+
     def test_the_nav_reaches_it_and_stands_it_down_with_the_others(self):
         nav = re.search(r'<nav class="wall-nav" id="wallNav">(.*?)</nav>', self.body, re.S).group(1)
         self.assertIn('<a href="#day">Day</a>', nav)
@@ -67,8 +78,14 @@ class TheDayIsOnTheWallTests(TestCase):
         self.assertEqual(day["total"], len(app.conf.beat_schedule))
         self.assertEqual([s["title"] for s in day["stages"]],
                          ["SEE", "THINK", "DECIDE", "ACT", "WATCH", "TELL", "LEARN"])
-        self.assertEqual(day["unplaced"], [])
+        self.assertEqual(day["unplaced"], 0)
         self.assertEqual(sum(s["count"] for s in day["stages"]), day["total"])
+        # Only what the drawing reads (review, 2026-09-29): no import
+        # path, beat key or queue per task for an anonymous visitor.
+        blob = json.dumps(day)
+        for internal in ("bot_program.tasks", "market_data.tasks", '"task"',
+                         '"tasks"', "run-morgul-guards"):
+            self.assertNotIn(internal, blob, internal)
         tell = next(s for s in day["stages"] if s["key"] == "tell")
         self.assertEqual(tell["rows"][0]["when"], "15 s")
         self.assertIn("the Eye reads its Telegram group", tell["rows"][0]["what"])
@@ -78,23 +95,24 @@ class TheDayIsOnTheWallTests(TestCase):
                 self.assertIsInstance(n, int)
                 self.assertTrue(words)
 
-    def test_the_section_and_its_script_keep_the_stripes(self):
+    def test_the_section_is_one_child_so_the_stripes_keep_alternating(self):
         """`.wall-section:nth-child(even)` tints every second child of
-        #wallContent. The section plus its sibling <script> add two, so
-        every stripe after them keeps its tint; a third child would flip
-        them all."""
+        #wallContent. A sibling <script> kept the parity of the sections
+        after it but left #day and #demo two untinted neighbours, the one
+        break in the pattern (review, 2026-09-29). Everything lives inside
+        the section, like #demo's own script: one child, every later
+        stripe flips, the alternation holds everywhere."""
         src = self.src
         start = src.index('<section class="wall-section" id="day">')
         end = src.index('<section class="wall-section" id="demo">')
         between = src[start:end]
         self.assertEqual(between.count("<section"), 1)
         self.assertEqual(between.count("</section>"), 1)
+        inside = between[:between.index("</section>")]
         after = between[between.index("</section>"):]
-        scripts = re.findall(r"<script[^>]*>", after)
-        self.assertEqual(len(scripts), 1, scripts)
-        self.assertIn("sv-day-scheme.js", scripts[0])
-        # The JSON lives INSIDE the section (json_script is a <script> too).
-        self.assertIn('json_script:"dayData"', between[:between.index("</section>")])
+        self.assertEqual(re.findall(r"<script[^>]*>", after), [])
+        self.assertIn("sv-day-scheme.js", inside)
+        self.assertIn('json_script:"dayData"', inside)
 
     def test_the_drawing_is_a_static_file_and_parses(self):
         """tests/test_chart_surfaces.py forbids createElementNS inside a

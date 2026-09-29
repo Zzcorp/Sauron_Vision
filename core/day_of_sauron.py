@@ -68,7 +68,11 @@ STAGE_OF = {
     "fetch-sec-filings": ("see", "SEC filings"),
     "fetch-cot-reports": ("see", "COT reports"),
     "refresh-bot-bars": ("see", "the bots' bars"),
-    "scan-funding-signals": ("see", "funding rates"),
+    # Market data, not orders (review, 2026-09-29): the IBKR feed upserts
+    # klines and tickers into PriceData/LiveQuote, the chains are Greeks
+    # and quotes.
+    "refresh-option-chains": ("see", "option chains"),
+    "ibkr-data-feed": ("see", "IBKR market data (legacy)"),
     # ── THINK: indicators, signals, the brain ───────────────────────────
     "ai-process-new-news": ("think", "news analysed"),
     "recalculate-technicals-watchlist": ("think", "watchlist indicators"),
@@ -78,7 +82,6 @@ STAGE_OF = {
     "smc-universe-scan": ("think", "SMC universe"),
     "sauron-anomaly-scanner": ("think", "anomaly scanner"),
     "ai-anomaly-scan": ("think", "AI anomaly detection"),
-    "sauron-position-review": ("think", "open-position review"),
     "sauron-mind-synthesize": ("think", "Sauron's mind"),
     "sauron-mind-resolve-predictions": ("think", "brain predictions resolved"),
     "aggregate-sentiment-scores": ("think", "sentiment aggregated"),
@@ -91,17 +94,15 @@ STAGE_OF = {
     # ── DECIDE: the bots, the desk, the allocators ──────────────────────
     "tick-asset-bots": ("decide", "every asset bot ticks: entries, exits, stops"),
     "propose-share-plans": ("decide", "share plans proposed"),
-    "propose-rule-actions": ("decide", "the rule actuator proposes"),
-    "grade-capital-desk": ("decide", "the capital desk grades itself"),
-    "propose-strategy-evolutions": ("decide", "strategy evolutions proposed"),
     # ── ACT: the venue ──────────────────────────────────────────────────
     "retry-pending-closes": ("act", "pending closes retried, confirmed by the venue"),
     "refresh-saxo-sessions": ("act", "Saxo sessions refreshed"),
     "reconcile-asset-bot-trades": ("act", "trades reconciled against the venue"),
-    "refresh-option-chains": ("act", "option chains refreshed"),
-    "ibkr-data-feed": ("act", "IBKR market data refreshed"),
     # ── WATCH: the guards, the syncs ────────────────────────────────────
-    "run-morgul-guards": ("watch", "Morgul's ten guards"),
+    # No typed count of guards here: the Wall's numbers are counted, and
+    # "ten" would drift the day an eleventh guard lands.
+    "run-morgul-guards": ("watch", "Morgul's guards"),
+    "sauron-position-review": ("watch", "open positions reviewed"),
     "sync-broker-account": ("watch", "IBKR account synced"),
     "sync-etoro-accounts": ("watch", "eToro account synced"),
     "sync-saxo-accounts": ("watch", "Saxo account synced"),
@@ -113,6 +114,9 @@ STAGE_OF = {
     "poll-telegram-eye": ("tell", "the Eye reads its Telegram group"),
     "poll-telegram-alarm": ("tell", "the alarm bot reads its group"),
     "check-price-alerts": ("tell", "price alerts"),
+    # It reads the funding rows already stored and raises notifications
+    # on a squeeze or extreme crowding: a voice, not a feed.
+    "scan-funding-signals": ("tell", "funding squeeze alerts"),
     "ai-daily-briefing": ("tell", "the daily briefing"),
     "send-morning-digest": ("tell", "the morning digest"),
     "component-digest": ("tell", "the component digest"),
@@ -120,6 +124,12 @@ STAGE_OF = {
     "daily-market-commentary": ("tell", "the daily commentary"),
     # ── LEARN: the night and the weekend ────────────────────────────────
     "investigate-decaying-rules": ("learn", "decaying rules investigated"),
+    # The night's governance and grading, not the tick's sizing (review,
+    # 2026-09-29): the actuator reads the decay investigations, the
+    # evolutions mutate decaying rules, the desk scores its own plans.
+    "propose-rule-actions": ("learn", "the rule actuator proposes"),
+    "grade-capital-desk": ("learn", "the capital desk graded"),
+    "propose-strategy-evolutions": ("learn", "strategy evolutions proposed"),
     "sauron-consolidation-nightly": ("learn", "brain consolidation"),
     "resolve-pending-calibrations": ("learn", "calibrations resolved"),
     "nightly-cleanup": ("learn", "nightly cleanup"),
@@ -157,9 +167,12 @@ FACTS_OF = {
 }
 
 _DOW = {0: "Sun", 1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat"}
+_MON = {1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
+        7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"}
 _DAY = 86400.0
 _WEEK = 7 * _DAY
 _MONTH = 30 * _DAY
+_YEAR = 365 * _DAY
 
 
 def _time(h: int, m: int) -> str:
@@ -186,65 +199,111 @@ def interval_words(seconds: float) -> str:
     return f"{s / _DAY:g} d"
 
 
-def crontab_words(cron) -> tuple[str, float, int]:
-    """(words, period in seconds, minute of day of the first fire).
+def _dow_words(dows) -> tuple[str, int]:
+    """('Mon–Fri' | 'Sat · Sun' | 'Tue', Monday-first index of the first).
+    Celery counts Sunday as 0; a reader's week starts on Monday."""
+    order = sorted(dows, key=lambda d: (d + 6) % 7)
+    idx = [(d + 6) % 7 for d in order]
+    if len(order) >= 3 and idx == list(range(idx[0], idx[0] + len(idx))):
+        return f"{_DOW[order[0]]}–{_DOW[order[-1]]}", idx[0]
+    return " · ".join(_DOW.get(d, str(d)) for d in order), idx[0]
 
-    A crontab says WHEN; the words say it the way the operator reads a
-    clock: '03:00', 'Sat 10:00', '1st 04:45', 'every 4 h at :05',
-    'hourly 13:15–20:15', 'every 15 min, 13:00–21:45'. The period is the
-    typical gap, for sorting beside the interval entries.
-    """
-    minutes = sorted(cron.minute)
-    hours = sorted(cron.hour)
-    dows = sorted(cron.day_of_week)
-    doms = sorted(cron.day_of_month)
-    first = (hours[0] * 60 + minutes[0]) if hours and minutes else 0
-    prefix, period = "", _DAY
-    if len(dows) < 7:
-        prefix = " · ".join(_DOW.get(d, str(d)) for d in dows) + " "
-        period = _WEEK
-        # Sorted Monday-first inside the week, so Saturday's entries come
-        # before Sunday's on the picture (celery counts Sunday as 0).
-        first += ((dows[0] + 6) % 7) * 1440
-    if len(doms) < 31:
-        prefix = ("1st " if doms == [1] else
-                  "day " + ", ".join(str(d) for d in doms) + " ")
-        period = _MONTH
-    if len(hours) == 1 and len(minutes) == 1:
-        return prefix + _time(hours[0], minutes[0]), period, first
+
+def _time_words(minutes, hours) -> tuple[str, float, int]:
+    """(words, typical gap in seconds, fires per day) for the hour and
+    minute fields alone."""
+    n = len(minutes) * len(hours)
+    if n == 1:
+        return _time(hours[0], minutes[0]), _DAY, 1
+    hstep = _step(hours)
     if len(minutes) == 1:
         m = minutes[0]
         if len(hours) == 24:
-            return f"hourly at :{m:02d}", 3600.0, first
-        step = _step(hours)
-        if step and step > 1 and len(hours) * step == 24:
-            return f"every {step} h at :{m:02d}", step * 3600.0, first
-        if step == 1:
-            return (f"hourly {_time(hours[0], m)}–{_time(hours[-1], m)}",
-                    3600.0, first)
-        return ("at " + ", ".join(_time(h, m) for h in hours),
-                _DAY / max(len(hours), 1), first)
-    step = _step(minutes)
-    if step and len(minutes) * step == 60:
-        every = f"every {step} min"
+            return f"hourly at :{m:02d}", 3600.0, n
+        if hstep and hstep > 1 and len(hours) * hstep == 24:
+            return f"every {hstep} h at :{m:02d}", hstep * 3600.0, n
+        if hstep == 1:
+            return f"hourly {_time(hours[0], m)}–{_time(hours[-1], m)}", 3600.0, n
+        return "at " + ", ".join(_time(h, m) for h in hours), _DAY / n, n
+    mstep = _step(minutes)
+    if mstep:
+        every = f"every {mstep} min"
+        # A step that does not divide the hour (*/7) restarts at :00 each
+        # hour: say which minutes, or the words promise an even beat.
+        if len(minutes) * mstep != 60:
+            every += f" (:{minutes[0]:02d}–:{minutes[-1]:02d} each hour)"
         if len(hours) == 24:
-            return every, step * 60.0, first
-        if len(hours) == 1 or _step(hours) == 1:
+            return every, mstep * 60.0, n
+        if len(hours) == 1 or hstep == 1:
             return (f"{every}, {_time(hours[0], minutes[0])}"
-                    f"–{_time(hours[-1], minutes[-1])}", step * 60.0, first)
+                    f"–{_time(hours[-1], minutes[-1])}", mstep * 60.0, n)
+        return (f"{every} during " + ", ".join(f"{h:02d}h" for h in hours),
+                mstep * 60.0, n)
     fires = [_time(h, m) for h in hours for m in minutes]
-    return "at " + ", ".join(fires[:6]) + (" …" if len(fires) > 6 else ""), _DAY, first
+    return ("at " + ", ".join(fires[:6]) + (" …" if len(fires) > 6 else ""),
+            _DAY / n, n)
 
 
-def schedule_words(schedule) -> tuple[str, float, str, int]:
-    """(words, period seconds, kind 'interval'|'cron'|'other', first minute)."""
+def crontab_words(cron) -> tuple[str, float, int]:
+    """(words, period in seconds, minute of the week of the first fire).
+
+    A crontab says WHEN; the words say it the way the operator reads a
+    clock: '03:00', 'Sat 10:00', '1st 04:45', 'every 4 h at :05',
+    'hourly 13:15–20:15', 'every 15 min, 13:00–21:45', 'Mon–Fri every
+    15 min, 13:00–21:45', 'Jan 09:00'. Every calendar restriction (month,
+    day of the month, day of the week) is said in front of every shape
+    (review, 2026-09-29: a weekday restriction survived only on a single
+    daily fire, and the month was never read). The period is the typical
+    gap, for sorting beside the interval entries: the time-of-day gap when
+    the entry fires more than once a day, else the calendar's.
+    """
+    minutes = sorted(cron.minute)
+    hours = sorted(cron.hour)
+    if not minutes or not hours:
+        return "never", _YEAR, 0
+    words, gap, per_day = _time_words(minutes, hours)
+    first = hours[0] * 60 + minutes[0]
+    period = gap
+    prefix = []
+    moys = sorted(cron.month_of_year)
+    doms = sorted(cron.day_of_month)
+    dows = sorted(cron.day_of_week)
+    if len(moys) < 12:
+        prefix.append(" · ".join(_MON.get(m, str(m)) for m in moys))
+        if per_day == 1:
+            period = max(period, _YEAR / len(moys))
+    if len(doms) < 31:
+        prefix.append("1st" if doms == [1] else
+                      "day " + ", ".join(str(d) for d in doms))
+        if per_day == 1:
+            period = max(period, _MONTH / len(doms))
+    if len(dows) < 7:
+        dw, monday_index = _dow_words(dows)
+        prefix.append(dw)
+        # Sorted Monday-first inside the week, so Saturday's entries come
+        # before Sunday's on the picture.
+        first += monday_index * 1440
+        if per_day == 1:
+            period = max(period, _WEEK / len(dows))
+    if prefix:
+        words = " · ".join(prefix) + " " + words
+    return words, period, first
+
+
+def schedule_words(schedule) -> tuple[str, float | None, str, int]:
+    """(words, period seconds, kind 'interval'|'cron'|'other', first minute).
+
+    A schedule this cannot read (a solar event, a custom BaseSchedule,
+    nothing) has period None, never infinity: the result goes into a
+    json_script, and `Infinity` is not JSON — the ring's JSON.parse threw
+    and the whole drawing stayed blank (review, 2026-09-29)."""
     from datetime import timedelta
 
     from celery.schedules import crontab
     from celery.schedules import schedule as interval
 
     if isinstance(schedule, bool) or schedule is None:
-        return "unscheduled", float("inf"), "other", 0
+        return "unscheduled", None, "other", 0
     if isinstance(schedule, (int, float)):
         return interval_words(schedule), float(schedule), "interval", 0
     if isinstance(schedule, timedelta):
@@ -256,7 +315,20 @@ def schedule_words(schedule) -> tuple[str, float, str, int]:
     if isinstance(schedule, interval):
         secs = schedule.run_every.total_seconds()
         return interval_words(secs), secs, "interval", 0
-    return str(schedule), float("inf"), "other", 0
+    return type(schedule).__name__, None, "other", 0
+
+
+def widest_gap(schedule) -> float | None:
+    """The WIDEST gap between two runs, in seconds — what a staleness
+    judgement must use (a 13:00–21:45 entry is silent all night by design,
+    and a weekday one all weekend). The digest's own reading
+    (core.component_digest._period_hours), so the two never disagree."""
+    try:
+        from core.component_digest import _period_hours
+        hours = _period_hours(schedule)
+    except Exception:  # noqa: BLE001 — an odd schedule has no period
+        return None
+    return hours * 3600.0 if hours else None
 
 
 def queue_of(task_path: str, routes: dict) -> str:
@@ -306,7 +378,8 @@ def day_scheme(wall: dict | None = None) -> dict:
         words, period, kind, first = schedule_words(entry.get("schedule"))
         stage, label = STAGE_OF.get(entry_key, (None, entry_key))
         task = {"key": entry_key, "label": label, "task": task_path,
-                "when": words, "seconds": period, "kind": kind,
+                "when": words, "seconds": period,
+                "widest": widest_gap(entry.get("schedule")), "kind": kind,
                 "first": first, "queue": queue_of(task_path, routes)}
         every.append(task)
         if stage is None:
@@ -315,13 +388,26 @@ def day_scheme(wall: dict | None = None) -> dict:
             stages[stage]["tasks"].append(task)
 
     def order(t):
-        return (t["seconds"], t["first"], t["when"], t["label"])
+        secs = t["seconds"] if t["seconds"] is not None else float("inf")
+        return (secs, t["first"], t["when"], t["label"])
 
     for st in stages.values():
         st["tasks"].sort(key=order)
         st["rows"] = _rows(st["tasks"])
         st["count"] = len(st["tasks"])
         st["fastest"] = st["tasks"][0]["when"] if st["tasks"] else ""
+        # "fastest 15 s" for a beat, "first at 02:30" for a stage whose
+        # quickest entry is a clock time (review, 2026-09-29: "fastest
+        # 02:30" read a time of day as a speed).
+        lead = st["tasks"][0] if st["tasks"] else None
+        if lead is None:
+            st["pace"] = ""
+        elif lead["seconds"] is not None and lead["seconds"] < _DAY and lead["kind"] == "interval":
+            st["pace"] = f"fastest {lead['when']}"
+        elif lead["kind"] == "cron" and lead["seconds"] is not None and lead["seconds"] >= _DAY:
+            st["pace"] = f"first at {lead['when']}"
+        else:
+            st["pace"] = lead["when"]
         st["facts"] = [[int(wall.get(k) or 0), words]
                        for k, words in FACTS_OF.get(st["key"], ())]
     every.sort(key=order)
@@ -336,6 +422,29 @@ def day_scheme(wall: dict | None = None) -> dict:
         "slowest": every[-1]["when"] if every else "",
         "unplaced": unplaced,
         "adapters": int(wall.get("broker_adapters") or 0),
+    }
+
+
+#: What the drawing reads off a stage — and so all a page is handed.
+_DRAWN = ("key", "n", "title", "job", "next", "rows", "count", "fastest",
+          "pace", "facts")
+
+
+def page_scheme(scheme: dict) -> dict:
+    """The copy a page carries in its json_script: what
+    static/js/sv-day-scheme.js draws and nothing else. The full scheme
+    names every task's import path, beat key and queue; the public Wall
+    shipped all of it to every visitor while the drawing read none of it
+    (review, 2026-09-29). Unplaced entries become a count."""
+    return {
+        "stages": [{k: st[k] for k in _DRAWN if k in st}
+                   for st in scheme.get("stages") or []],
+        "total": scheme.get("total", 0),
+        "queues": scheme.get("queues", {}),
+        "fastest": scheme.get("fastest", ""),
+        "slowest": scheme.get("slowest", ""),
+        "unplaced": len(scheme.get("unplaced") or []),
+        "adapters": scheme.get("adapters", 0),
     }
 
 

@@ -68,8 +68,28 @@ class EveryBeatEntryHasAStageTests(SimpleTestCase):
                            ("run-signal-engine", "think"),
                            ("fetch-live-quotes-watchlist", "see"),
                            ("retry-pending-closes", "act"),
-                           ("sauron-consolidation-nightly", "learn")):
+                           ("sauron-consolidation-nightly", "learn"),
+                           # Review, 2026-09-29: market data is SEE, the
+                           # night's governance and grading is LEARN, a
+                           # watcher of open positions is WATCH, an alert
+                           # scanner is TELL.
+                           ("ibkr-data-feed", "see"),
+                           ("refresh-option-chains", "see"),
+                           ("propose-rule-actions", "learn"),
+                           ("propose-strategy-evolutions", "learn"),
+                           ("grade-capital-desk", "learn"),
+                           ("sauron-position-review", "watch"),
+                           ("scan-funding-signals", "tell")):
             self.assertEqual(_stage_of(scheme, key), stage, key)
+
+    def test_no_typed_count_rides_a_label(self):
+        """The Wall's numbers are counted, never typed: 'ten guards' would
+        drift the day an eleventh lands."""
+        import re
+        for key, (_stage, label) in day.STAGE_OF.items():
+            self.assertIsNone(
+                re.search(r"\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
+                          label.lower()), f"{key}: {label}")
 
     def test_a_new_beat_entry_is_counted_and_named_not_dropped(self):
         extra = {"zz-something-new": {"task": "zz.tasks.new_thing", "schedule": 42.0}}
@@ -79,6 +99,49 @@ class EveryBeatEntryHasAStageTests(SimpleTestCase):
         self.assertEqual([t["key"] for t in scheme["unplaced"]], ["zz-something-new"])
         self.assertEqual(scheme["unplaced"][0]["when"], "42 s")
         self.assertEqual(scheme["unplaced"][0]["label"], "zz-something-new")
+
+    def test_a_schedule_it_cannot_read_never_blanks_the_page(self):
+        """Review, 2026-09-29: an unreadable schedule (a custom
+        BaseSchedule, a solar event) had period Infinity, json_script
+        wrote `Infinity`, the ring's JSON.parse threw and the drawing
+        stayed blank. The period is None now and the JSON is strict."""
+        from celery.schedules import BaseSchedule
+
+        class Odd(BaseSchedule):
+            """Neither a crontab nor an interval: a custom schedule."""
+
+        odd = Odd()
+        with mock.patch.dict(app.conf.beat_schedule,
+                             {"zz-odd": {"task": "zz.tasks.odd", "schedule": odd}}):
+            scheme = day.day_scheme()
+        self.assertEqual(scheme["unplaced"][0]["seconds"], None)
+        self.assertEqual(scheme["unplaced"][0]["widest"], None)
+        self.assertEqual(scheme["unplaced"][0]["when"], "Odd")
+        json.dumps(scheme, allow_nan=False)
+        blob = json.dumps(day.page_scheme(scheme), allow_nan=False)
+        self.assertEqual(json.loads(blob)["unplaced"], 1)
+        self.assertEqual(day.schedule_words(None)[1], None)
+
+
+class ThePageCopyTests(SimpleTestCase):
+    """page_scheme: what the drawing reads, and nothing else — the public
+    Wall shipped every task's import path, beat key and queue to every
+    visitor while the drawing read none of it (review, 2026-09-29)."""
+
+    def test_it_keeps_what_the_ring_draws_and_drops_the_internals(self):
+        full = day.day_scheme({"instruments": 5})
+        page = day.page_scheme(full)
+        blob = json.dumps(page, allow_nan=False)
+        for internal in ("bot_program.tasks", "market_data.tasks", '"task"',
+                         '"queue"', "run-morgul-guards", '"widest"'):
+            self.assertNotIn(internal, blob, internal)
+        for stage in page["stages"]:
+            self.assertEqual(set(stage), {"key", "n", "title", "job", "next", "rows",
+                                          "count", "fastest", "pace", "facts"})
+        self.assertEqual(page["total"], full["total"])
+        self.assertEqual(page["queues"], full["queues"])
+        self.assertEqual(page["unplaced"], 0)
+        self.assertLess(len(blob), len(json.dumps(full)) / 2)
 
 
 class TheCadencesAreTheSchedulesOwnWordsTests(SimpleTestCase):
@@ -126,6 +189,60 @@ class TheCadencesAreTheSchedulesOwnWordsTests(SimpleTestCase):
         self.assertEqual(day.interval_words(90), "1.5 min")
         self.assertEqual(day.interval_words(172800), "2 d")
 
+    def test_every_calendar_restriction_survives_every_shape(self):
+        """Review, 2026-09-29: the weekday survived only on a single daily
+        fire, the day of the month dropped it, the month was never read,
+        and a step that does not divide the hour read as a list of times.
+        The three entries commented "≈ NYSE hours" are one mon-fri edit
+        away from each of those."""
+        words = lambda **kw: day.crontab_words(crontab(**kw))[0]  # noqa: E731
+        self.assertEqual(words(minute="*/15", hour="13-21", day_of_week="mon-fri"),
+                         "Mon–Fri every 15 min, 13:00–21:45")
+        self.assertEqual(words(minute=0, hour="*/4", day_of_week="sat"),
+                         "Sat every 4 h at :00")
+        self.assertEqual(words(minute=0, hour=9, month_of_year=1), "Jan 09:00")
+        self.assertEqual(words(minute=0, hour=9, day_of_month=1, day_of_week="mon"),
+                         "1st · Mon 09:00")
+        self.assertEqual(words(minute=0, hour=9, day_of_week="sat,sun"),
+                         "Sat · Sun 09:00")
+        self.assertEqual(words(minute=15, hour="13-20", day_of_week="mon-fri"),
+                         "Mon–Fri hourly 13:15–20:15")
+        self.assertEqual(words(minute="*/15", hour="9,17"),
+                         "every 15 min during 09h, 17h")
+        w, period, _first = day.crontab_words(crontab(minute="*/7"))
+        self.assertEqual(w, "every 7 min (:00–:56 each hour)")
+        self.assertEqual(period, 7 * 60.0)
+        # The period is the time-of-day gap when it fires more than once a
+        # day, the calendar's when once.
+        self.assertEqual(day.crontab_words(crontab(minute=0, hour="*/4", day_of_week="sat"))[1],
+                         4 * 3600.0)
+        self.assertEqual(day.crontab_words(crontab(minute=0, hour=9, month_of_year=1))[1],
+                         365 * 86400.0)
+        # Monday-first inside the week: Saturday sorts before Sunday.
+        sat = day.crontab_words(crontab(minute=0, hour=9, day_of_week="sat"))[2]
+        sun = day.crontab_words(crontab(minute=0, hour=9, day_of_week="sun"))[2]
+        self.assertLess(sat, sun)
+
+    def test_the_widest_gap_is_what_staleness_reads(self):
+        """A 13:00–21:45 entry is silent all night by design; its widest
+        gap (the digest's own reading) is what a staleness judgement
+        must use, never its 15-minute beat."""
+        scheme = day.day_scheme()
+        rec = next(t for s in scheme["stages"] for t in s["tasks"]
+                   if t["key"] == "reconcile-asset-bot-trades")
+        self.assertEqual(rec["seconds"], 15 * 60.0)
+        self.assertEqual(rec["widest"], (24 - 21.75 + 13) * 3600.0)
+        eye = next(t for s in scheme["stages"] for t in s["tasks"]
+                   if t["key"] == "poll-telegram-eye")
+        self.assertEqual(eye["widest"], 15.0)
+
+    def test_the_pace_says_a_speed_or_a_clock_never_a_clock_as_a_speed(self):
+        scheme = day.day_scheme()
+        pace = {s["key"]: s["pace"] for s in scheme["stages"]}
+        self.assertEqual(pace["tell"], "fastest 15 s")
+        self.assertEqual(pace["learn"], "first at 02:30")
+        self.assertFalse(any(p.startswith("fastest ") and ":" in p for p in pace.values()), pace)
+
     def test_within_a_stage_the_fast_come_first_then_the_clock(self):
         scheme = day.day_scheme()
         learn = next(s for s in scheme["stages"] if s["key"] == "learn")
@@ -171,7 +288,7 @@ class TheFactsComeFromTheWallTests(TestCase):
             day.day_scheme({"instruments": 3})
 
     def test_it_is_json_for_the_page(self):
-        blob = json.dumps(day.day_scheme({"bots": 4}))
+        blob = json.dumps(day.day_scheme({"bots": 4}), allow_nan=False)
         self.assertNotIn("{{", blob)
         self.assertNotIn("{%", blob)
         # The Wall forbids these words (tests/test_the_wall.py); the picture

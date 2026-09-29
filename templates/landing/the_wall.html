@@ -2382,9 +2382,9 @@
 <!-- Every task and cadence on it is read from the beat schedule at     -->
 <!-- render time (core.day_of_sauron) and drawn by                      -->
 <!-- static/js/sv-day-scheme.js; the same drawing serves the home page. -->
-<!-- The <script> below is this section's sibling ON PURPOSE: the two   -->
-<!-- together add an even number of children to #wallContent, so the   -->
-<!-- .wall-section:nth-child(even) stripes after them keep their tint.  -->
+<!-- Its <script> sits INSIDE the section, like #demo's: one new child  -->
+<!-- of #wallContent, so every stripe after it flips and the           -->
+<!-- .wall-section:nth-child(even) tint keeps alternating everywhere.  -->
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <section class="wall-section" id="day">
     <div class="container">
@@ -2394,10 +2394,10 @@
         </h2>
         <div class="sep-left reveal delay-2"></div>
         <p class="section-desc reveal delay-3">
-            Drawn from the platform's own schedule as it runs on this deployment:
-            <strong>{{ day.total }} scheduled tasks</strong> on one beat, plus the price streams that never stop.
+            Drawn from the schedule the platform ships with, read when this page was served:
+            <strong>{{ day.total }} scheduled tasks</strong> on one beat, plus the price streams where they are enabled.
             Markets come in on the left, orders and words go out on the right, and the loop turns
-            around one heartbeat. Hover a step, or tap it on a phone, to read what really runs there
+            around one heartbeat. Hover a step, or tap it on a phone, to read what it runs
             and how often. Times are UTC.
         </p>
         <div class="day-grid reveal-scale delay-4">
@@ -2409,9 +2409,9 @@
             <aside class="day-panel" id="dayPanel" aria-live="polite"></aside>
         </div>
         {{ day|json_script:"dayData" }}
+        <script src="{% static 'js/sv-day-scheme.js' %}" defer></script>
     </div>
 </section>
-<script src="{% static 'js/sv-day-scheme.js' %}" defer></script>
 
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <!-- INTERACTIVE ORCHESTRATOR DEMO — touch the gate without signing up   -->
