@@ -5159,11 +5159,19 @@ def user_notifications(request):
         action = request.POST.get("action", "")
 
         if action == "save_prefs":
-            # The WhatsApp and SMS numbers and the monthly newsletter left
-            # the form (2026-09-29: no path sends on them, and there is one
-            # weekly letter). Their fields stay, untouched here: a save must
-            # not blank what an older form stored.
+            # The SMS number and the monthly newsletter left the form
+            # (2026-09-29): nothing sends SMS (notify_sms and sms_number are
+            # read by no path) and there is one weekly letter. Their fields
+            # stay, untouched here: a save must not blank what an older
+            # form stored. The WhatsApp number stays on the form (review,
+            # 2026-09-29): alert rules with WhatsApp ticked still send
+            # through Twilio to it (alerts/dispatch.py,
+            # alerts/channels/whatsapp_alert.py), so the user must be able
+            # to see, change and clear it; an empty field clears it.
             prefs.telegram_chat_id = request.POST.get("telegram_chat_id", "")
+            if "whatsapp_number" in request.POST:
+                prefs.whatsapp_number = " ".join(
+                    request.POST.get("whatsapp_number", "").split())[:20]
             prefs.email_notifications = "email_notifications" in request.POST
             prefs.receive_signals = "receive_signals" in request.POST
             prefs.receive_strategies = "receive_strategies" in request.POST

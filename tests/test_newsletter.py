@@ -1440,9 +1440,11 @@ class SettingsPageTests(_Base):
             receive_monthly_newsletter=True)
         self.client.force_login(self.user)
 
-    def test_whatsapp_sms_and_monthly_are_gone_weekly_stays(self):
+    def test_sms_and_monthly_are_gone_weekly_stays(self):
+        """Review, 2026-09-29 (finding 12): this test pinned the WhatsApp
+        field as gone; WhatsApp alerts still send to it, so it is back
+        (WhatsAppNumberTests). Nothing sends SMS: that field stays gone."""
         body = self.client.get(self.URL).content.decode()
-        self.assertNotIn('name="whatsapp_number"', body)
         self.assertNotIn('name="sms_number"', body)
         self.assertNotIn("receive_monthly_newsletter", body)
         self.assertNotIn("Monthly newsletter", body)
@@ -2133,3 +2135,51 @@ class ReviewScheduleInputTests(_Base):
         self.assertEqual(paris_words(far), "9999-12-31 23:59 UTC")
         self.assertEqual(date_words(far), "9999-12-31 23:59 UTC")
         self.assertEqual(paris_input(far), "")
+
+
+class ReviewWhatsAppNumberTests(_Base):
+    """Finding 12: the WhatsApp number left the settings page while
+    WhatsApp alerts still send to it through Twilio."""
+    URL = "/notifications/settings/"
+
+    def setUp(self):
+        super().setUp()
+        from alerts.models import UserNotificationPrefs
+        self.user = _reader("whatsapper")
+        UserNotificationPrefs.objects.filter(user=self.user).update(
+            whatsapp_number="+33600000000")
+        self.client.force_login(self.user)
+
+    def prefs(self):
+        from alerts.models import UserNotificationPrefs
+        return UserNotificationPrefs.objects.get(user=self.user)
+
+    def test_the_number_is_shown_changed_and_cleared(self):
+        body = self.client.get(self.URL).content.decode()
+        self.assertIn('name="whatsapp_number" value="+33600000000"', body)
+        self.assertNotIn('name="sms_number"', body)
+        self.client.post(self.URL, {"action": "save_prefs",
+                                    "whatsapp_number": " +33 7 11 22 33 44 "})
+        self.assertEqual(self.prefs().whatsapp_number, "+33 7 11 22 33 44")
+        self.client.post(self.URL, {"action": "save_prefs",
+                                    "whatsapp_number": ""})
+        self.assertEqual(self.prefs().whatsapp_number, "")
+
+    def test_nothing_sends_sms(self):
+        """The SMS field stays off the page only because no path sends
+        SMS: the day one does, this fails and the field comes back."""
+        import re as _re
+        from pathlib import Path
+
+        from django.conf import settings
+        base = Path(settings.BASE_DIR)
+        readers = []
+        for path in base.rglob("*.py"):
+            parts = path.relative_to(base).parts
+            if parts[0] in ("tests", "venv", "staticfiles") or \
+                    "migrations" in parts:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if _re.search(r"\.(?:sms_number|notify_sms)\b", text):
+                readers.append(str(path.relative_to(base)))
+        self.assertEqual(readers, [])

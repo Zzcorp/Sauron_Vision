@@ -13,6 +13,7 @@
         <div class="card-header"><span class="card-title">Notification Channels</span></div>
         <form method="post">{% csrf_token %}<input type="hidden" name="action" value="save_prefs">
             <div style="margin-bottom:14px;"><label class="form-label">TELEGRAM CHAT ID</label><input type="text" name="telegram_chat_id" value="{{ prefs.telegram_chat_id }}" placeholder="Your Telegram chat ID" class="form-input"><div class="form-hint">Message @userinfobot on Telegram to get your ID</div></div>
+            <div style="margin-bottom:14px;"><label class="form-label" for="nsWhatsApp">WHATSAPP NUMBER</label><input id="nsWhatsApp" type="text" name="whatsapp_number" value="{{ prefs.whatsapp_number }}" placeholder="+33 6 00 00 00 00" maxlength="20" class="form-input"><div class="form-hint">International format with country code. Alert rules with WhatsApp ticked send here; leave it empty to stop them.</div></div>
             <div style="margin-bottom:14px;"><label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" name="email_notifications" {% if prefs.email_notifications %}checked{% endif %}> Email notifications (uses your profile email)</label></div>
             <div class="section-label" style="margin-top:20px;">What to receive</div>
             <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
