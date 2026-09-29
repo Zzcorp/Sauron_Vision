@@ -47,7 +47,18 @@ class TheRequestTimeoutTests(SimpleTestCase):
         self.assertLessEqual(IBKRTrader.REQUEST_TIMEOUT_S, 120)
 
 
-def _klines(n=3, start_ms=1_756_000_000_000, step_ms=14_400_000):
+import time as _time
+
+_FOUR_H = 14_400_000
+
+#: The fixtures' bars end at the present. They were dated August 2025,
+#: and since 2026-09-29 a venue window that old is a STALE answer the
+#: public feed fills after (market_data.bot_bars._venue_window_is_stale);
+#: these tests are about a venue answering with today's bars.
+RECENT_MS = (int(_time.time() * 1000) // _FOUR_H) * _FOUR_H - 3 * _FOUR_H
+
+
+def _klines(n=3, start_ms=RECENT_MS, step_ms=_FOUR_H):
     return [[start_ms + i * step_ms, "1.10", "1.11", "1.09", "1.105", "0"]
             for i in range(n)]
 
@@ -173,7 +184,7 @@ class TheMuteVenueTests(TestCase):
         density, and every ATR and IPDA range on the pair is measured on
         it. The stand-in covers only what the venue has not."""
         two_hours = 2 * 3_600_000
-        feed = YFinanceFeed(_klines(4, start_ms=1_756_000_000_000 + two_hours))
+        feed = YFinanceFeed(_klines(4, start_ms=RECENT_MS + two_hours))
         self._refresh(self._venue(rows=_klines(3)), feed)     # S, S+4h, S+8h
         out, _ = self._refresh(self._venue(rows=[]), feed)    # mute; S+2h.. on offer
         self.assertEqual(out["fallback"], 1)
@@ -190,7 +201,7 @@ class TheMuteVenueTests(TestCase):
         window onward go, so the bot reads one grid, not two interleaved."""
         from django.core.cache import cache
         two_hours = 2 * 3_600_000
-        feed = YFinanceFeed(_klines(3, start_ms=1_756_000_000_000 + two_hours))
+        feed = YFinanceFeed(_klines(3, start_ms=RECENT_MS + two_hours))
         self._refresh(self._venue(rows=[]), feed)             # S+2h, S+6h, S+10h
         self.assertEqual(set(self._written()), {"yfinance_public"})
         cache.clear()                                         # the window passed
@@ -205,7 +216,7 @@ class TheMuteVenueTests(TestCase):
         from datetime import datetime, timezone as dt_tz
 
         from market_data.models import PriceData
-        old = datetime.fromtimestamp((1_756_000_000_000 - 40 * 3_600_000) / 1000,
+        old = datetime.fromtimestamp((RECENT_MS - 40 * 3_600_000) / 1000,
                                      tz=dt_tz.utc)
         PriceData.objects.create(
             instrument=self.inst, timeframe="4h", timestamp=old, open=1,
@@ -296,3 +307,121 @@ class TheRefreshTotalsCountTheFallbackTests(TestCase):
         self.assertEqual(totals["fallback"], 1)
         line = next(x for x in logs.output if "refresh complete" in x)
         self.assertIn("'fallback': 1", line)
+
+
+class AStaleVenueWindowTests(TestCase):
+    """2026-09-29: eToro answered BTCUSD's 4h request with a window whose
+    newest bar was 33.7 days old. The refresh evicted every public bar from
+    that window's start ONWARD — last night's 600-bar backfill with them —
+    every ten minutes, and an armed bot decided on a month-old candle. The
+    eviction now stops one interval past the venue's newest bar, and a
+    stale window is followed by the public feed, as a mute venue is."""
+
+    DAY_MS = 86_400_000
+
+    def setUp(self):
+        from django.core.cache import cache
+
+        from bot_program.models import AssetBotConfig
+        from instruments.models import Instrument
+        cache.clear()
+        self.user = User.objects.create_user("stale_u", password="x")
+        self.btc, _ = Instrument.objects.get_or_create(
+            symbol="BTCUSD", defaults={"name": "Bitcoin",
+                                       "asset_class": "crypto"})
+        self.cfg = AssetBotConfig.objects.create(
+            user=self.user, asset_class="crypto", name="STALE", mode="live",
+            symbols=["BTCUSD"], capital=Decimal("225"), enabled=True)
+
+    def _venue(self, rows):
+        client = MagicMock(name="EtoroTrader")
+        client._sv_public_feed = False
+        client.klines.return_value = rows
+        return client
+
+    def _refresh(self, venue, feed, cfg=None):
+        from market_data.bot_bars import refresh_bars_for_config
+        with patch("market_data.bot_bars._client_for", return_value=venue), \
+                patch("market_data.bot_bars._public_market_data_client",
+                      return_value=feed):
+            return refresh_bars_for_config(cfg or self.cfg, intervals=("4h",),
+                                           limit=3)
+
+    def _rows(self, inst=None):
+        from market_data.models import PriceData
+        return sorted(PriceData.objects.filter(instrument=inst or self.btc)
+                      .values_list("timestamp", "source"))
+
+    def _seed_public(self, stamps_ms, inst=None):
+        from datetime import datetime, timezone as dt_tz
+
+        from market_data.models import PriceData
+        for ms in stamps_ms:
+            PriceData.objects.create(
+                instrument=inst or self.btc, timeframe="4h",
+                timestamp=datetime.fromtimestamp(ms / 1000, tz=dt_tz.utc),
+                open=1, high=1, low=1, close=1, volume=0,
+                source="binance_public")
+
+    def test_fresh_public_bars_beyond_a_stale_window_survive(self):
+        old = RECENT_MS - 34 * self.DAY_MS
+        fresh = [RECENT_MS + i * _FOUR_H for i in range(3)]
+        self._seed_public(fresh)
+        self._refresh(self._venue(_klines(3, start_ms=old)), YFinanceFeed([]))
+        public = [ts for ts, src in self._rows() if src == "binance_public"]
+        self.assertEqual(len(public), 3,
+                         "the fresh backfill was evicted by a month-old window")
+
+    def test_a_stale_window_is_followed_by_the_public_feed(self):
+        old = RECENT_MS - 34 * self.DAY_MS
+        feed = YFinanceFeed(_klines(3))                  # today's bars
+        out = self._refresh(self._venue(_klines(3, start_ms=old)), feed)
+        self.assertEqual(out["fallback"], 1)
+        self.assertEqual(feed.calls, [("BTCUSD", "4h", 3)])
+        newest_ts, newest_src = self._rows()[-1]
+        self.assertEqual(newest_src, "yfinance_public")
+        self.assertGreater(newest_ts.timestamp() * 1000, RECENT_MS - _FOUR_H)
+
+    def test_the_warning_is_said_once_per_window(self):
+        old = RECENT_MS - 34 * self.DAY_MS
+        venue = self._venue(_klines(3, start_ms=old))
+        with self.assertLogs("market_data.bot_bars", level="WARNING") as logs:
+            self._refresh(venue, YFinanceFeed(_klines(3)))
+            self._refresh(venue, YFinanceFeed(_klines(3)))
+        said = [m for m in logs.output if "answered with a window" in m]
+        self.assertEqual(len(said), 1)
+
+    def test_inside_the_window_the_venue_still_wins(self):
+        """The old promise holds within the window: a public bar that
+        interleaves with the venue's grid there goes."""
+        old = RECENT_MS - 34 * self.DAY_MS
+        self._seed_public([old + 2 * 3_600_000])
+        self._refresh(self._venue(_klines(3, start_ms=old)), YFinanceFeed([]))
+        self.assertNotIn("binance_public", [src for _ts, src in self._rows()])
+
+    def test_a_closed_market_is_not_a_stale_venue(self):
+        """Forex over a weekend: the venue's newest 4h bar is two days old
+        because the market is shut. Under 72 h, nobody second-guesses it."""
+        from instruments.models import Instrument
+        from bot_program.models import AssetBotConfig
+        eur, _ = Instrument.objects.get_or_create(
+            symbol="EURUSD", defaults={"name": "EURUSD", "asset_class": "forex"})
+        cfg = AssetBotConfig.objects.create(
+            user=self.user, asset_class="forex", name="WEEKEND", mode="live",
+            symbols=["EURUSD"], capital=Decimal("1200"), enabled=True)
+        weekend = RECENT_MS - 2 * self.DAY_MS
+        feed = YFinanceFeed(_klines(3))
+        out = self._refresh(self._venue(_klines(3, start_ms=weekend)), feed, cfg)
+        self.assertEqual(out["fallback"], 0)
+        self.assertEqual(feed.calls, [])
+
+    def test_the_judgement_in_isolation(self):
+        from datetime import datetime, timezone as dt_tz
+
+        from market_data.bot_bars import _venue_window_is_stale
+        now = datetime.fromtimestamp((RECENT_MS + 3 * _FOUR_H) / 1000, tz=dt_tz.utc)
+        fresh = _klines(3)
+        self.assertIsNone(_venue_window_is_stale(self.btc, "4h", fresh, now=now))
+        thirteen_h = _klines(1, start_ms=RECENT_MS + 3 * _FOUR_H - 13 * 3_600_000)
+        self.assertIsNotNone(_venue_window_is_stale(self.btc, "4h", thirteen_h, now=now))
+        self.assertIsNone(_venue_window_is_stale(self.btc, "4h", [], now=now))

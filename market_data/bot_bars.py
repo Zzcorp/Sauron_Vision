@@ -274,9 +274,10 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                     rows = _after_the_venues_last_bar(inst, interval, rows)
             elif rows and not getattr(client, "_sv_public_feed", False):
                 # THE VENUE ANSWERED: ITS WINDOW IS ITS OWN. The stand-in
-                # rows from the venue's oldest returned bar onward go, so
-                # the window it covers holds one grid — the venue's.
-                # History behind that window (a backfilled year) stays.
+                # rows inside the window the venue returned go, so the
+                # window it covers holds one grid — the venue's. History
+                # behind that window (a backfilled year) stays, and so does
+                # anything newer than it (see _evict_stand_in_rows).
                 evicted = _evict_stand_in_rows(inst, interval, rows)
                 if evicted:
                     logger.info("[bars] %s %s: %s answered — %d public-feed "
@@ -286,6 +287,29 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
             written, skipped = _upsert_rows(inst, interval, rows, row_source)
             out["bars"] += written
             out["skipped"] += skipped
+            stale_age = (_venue_window_is_stale(inst, interval, rows)
+                         if rows and row_source == source
+                         and not getattr(client, "_sv_public_feed", False)
+                         else None)
+            if stale_age is not None:
+                # THE VENUE ANSWERED WITH THE PAST (2026-09-29). Its window
+                # is written above; the public feed fills AFTER its newest
+                # bar, exactly as it does for a venue that said nothing, so
+                # the bot never decides on a candle the market left behind.
+                pub, pub_source = _fallback_rows(cfg, symbol, interval, limit)
+                pub = _after_the_venues_last_bar(inst, interval, pub)
+                if pub:
+                    w2, s2 = _upsert_rows(inst, interval, pub, pub_source)
+                    out["bars"] += w2
+                    out["skipped"] += s2
+                    out["fallback"] += 1
+                if not _venue_is_mute(source + ":stale", symbol, interval):
+                    _remember_mute(source + ":stale", symbol, interval)
+                    logger.warning(
+                        "[bars] %s %s: %s answered with a window whose newest "
+                        "bar is %.1f h old — the public feed fills after it "
+                        "(%d bars)", symbol, interval, source,
+                        stale_age / 3600, len(pub))
         if getattr(client, "_sv_public_feed", False) is True:
             _pace()
     return out
@@ -329,8 +353,19 @@ def _after_the_venues_last_bar(inst, interval, rows) -> list:
 
 
 def _evict_stand_in_rows(inst, interval, rows) -> int:
-    """Delete the public feed's rows from the venue's oldest returned bar
-    onward. Returns how many went."""
+    """Delete the public feed's rows INSIDE the venue's returned window —
+    from its oldest bar to one interval past its newest. Returns how many
+    went.
+
+    The window, not "from the oldest bar onward" (2026-09-29). A venue can
+    answer with a window that ends in the past: eToro's 4h BTCUSD answer
+    ended 33.7 days back, and every ten minutes the refresh deleted every
+    public bar newer than that window's start — last night's 600-bar
+    backfill among them — so an armed bot decided on a month-old candle.
+    Stand-ins beyond the window are a stretch the venue does not cover;
+    they stay. The interval of slack past the venue's newest bar keeps the
+    tail on one grid (a Yahoo bar two hours after the venue's last would
+    otherwise sit beside it)."""
     from market_data.models import PriceData
 
     stamps = []
@@ -342,11 +377,47 @@ def _evict_stand_in_rows(inst, interval, rows) -> int:
     if not stamps:
         return 0
     since = datetime.fromtimestamp(min(stamps) / 1000, tz=dt_tz.utc)
+    until = datetime.fromtimestamp(
+        (max(stamps) + INTERVAL_SECONDS.get(interval, 3600) * 1000) / 1000,
+        tz=dt_tz.utc)
     deleted, _ = (PriceData.objects
                   .filter(instrument=inst, timeframe=interval,
-                          timestamp__gte=since, source__endswith="_public")
+                          timestamp__gte=since, timestamp__lt=until,
+                          source__endswith="_public")
                   .delete())
     return deleted
+
+
+#: Seconds per bar, for the eviction window and the staleness judgement.
+INTERVAL_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800,
+                    "1h": 3600, "4h": 14400, "1d": 86400, "1w": 604800}
+
+#: A venue whose newest bar is older than this answered with a STALE
+#: window. Crypto trades round the clock, so three bars behind is stale;
+#: every other class closes for weekends and holidays, so a Monday-morning
+#: window three days old is only the market being shut.
+STALE_VENUE_BARS_CRYPTO = 3
+STALE_VENUE_AFTER_S = 72 * 3600
+
+
+def _venue_window_is_stale(inst, interval, rows, now=None) -> "float | None":
+    """Age in seconds of the venue's newest returned bar when that is
+    stale for this instrument's class, else None."""
+    stamps = []
+    for row in rows or []:
+        try:
+            stamps.append(int(row[0]))
+        except (TypeError, ValueError, IndexError):
+            continue
+    if not stamps:
+        return None
+    now = now or datetime.now(dt_tz.utc)
+    age = now.timestamp() - max(stamps) / 1000
+    if (getattr(inst, "asset_class", "") or "") == "crypto":
+        limit = STALE_VENUE_BARS_CRYPTO * INTERVAL_SECONDS.get(interval, 3600)
+    else:
+        limit = STALE_VENUE_AFTER_S
+    return age if age > limit else None
 
 
 # Starred instruments beyond the fleet get bars too, capped per pass —
