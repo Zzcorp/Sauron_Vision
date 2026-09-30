@@ -633,13 +633,13 @@ class TheEyeLineTests(TestCase):
                       paper=False)
         self.assertEqual(eye.position_line(row),
                          "  • EURCAD long 7,900 @ 1.60726 · stop 1.52689 · "
-                         "live")
+                         "REAL MONEY")
         self.assertEqual(eye.position_line(row, detailed=True, bullet=False),
                          "EURCAD long 7,900 @ 1.60726 · stop 1.52689 · "
-                         "target 1.76798 · live · opened just now")
+                         "target 1.76798 · REAL MONEY · opened just now")
         lines = [str(x) for x in eye.build_positions(self.user).lines]
         self.assertIn("  • EURCAD long 7,900 @ 1.60726 · stop 1.52689 · "
-                      "target 1.76798 · live · opened just now", lines)
+                      "target 1.76798 · REAL MONEY · opened just now", lines)
         for line in lines:
             self.assertEqual(jargon(line), [], line)
 
@@ -650,11 +650,11 @@ class TheEyeLineTests(TestCase):
         row = _eurusd_attack(cfg)
         self.assertEqual(eye.position_line(row, bullet=False),
                          "EURUSD long 1,700 @ 1.17650 · stop 1.14000 at "
-                         "eToro · live")
+                         "eToro · REAL MONEY")
         row.metadata["stop_rewritten_by_venue"]["held"] = 0.0001
         self.assertEqual(eye.position_line(row, bullet=False),
                          "EURUSD long 1,700 @ 1.17650 · no stop at eToro · "
-                         "live")
+                         "REAL MONEY")
         stock = _trade(_cfg(self.user, "stock", "Stocks"), 160,
                        symbol="AAPL", side="SELL",
                        qty=Decimal("10.00000000"),

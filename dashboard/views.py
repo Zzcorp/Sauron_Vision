@@ -15,6 +15,7 @@ from django.db.models import Avg, Sum, Count
 # copies whose docstrings each asserted that the other two agreed with them.
 # `core.fork_names` imports nothing but `re`, so the import is free here.
 from core.fork_names import FORK_INFIX, fork_parent
+from dashboard.position_summary import world_of as _world_of
 
 # The mover buckets the quotes page understands. Anything else arriving in
 # ?movers= — a typo, a truncated link, an old bookmark — is not an error the
@@ -2552,6 +2553,10 @@ def _position_card_details(user, positions):
             "qty": _pos_fmt(p.quantity, 8),
             "status": getattr(p, "status", "") or "",
             "venue": "" if paper is None else ("PAPER" if paper else "LIVE"),
+            # The money world from the row's own stamps (2026-09-30): the
+            # table's marker and the dwell card's. A demo fill is "demo",
+            # never the LIVE `venue` above says for it.
+            "world": _world_of(trade if trade is not None else p),
             "entry": _pos_fmt(entry),
             "mark": _pos_fmt(mark),
             "stop": _pos_fmt(stop),

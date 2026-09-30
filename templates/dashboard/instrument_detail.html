@@ -206,7 +206,7 @@ exactly what a second queryset built for a table would eventually do.
                     <td><span class="ipos-side ipos-side--{{ p.side }}">{{ p.side|upper }}</span></td>
                     <td class="ipos-via">
                         {{ p.via|default:"—" }}
-                        {% if p.paper %}<span class="ipos-tag">PAPER</span>{% endif %}
+                        {% money_world p %}
                         {% if p.protected %}<span class="ipos-tag ipos-tag--ok" title="Stop and target rest at the broker — this position survives the platform being down">BRACKET</span>{% endif %}
                     </td>
                     <td class="num">{{ p.qty|floatformat:"-4" }}</td>

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load sauron_tags %}
 {% block title %}Fills — Sauron Vision{% endblock %}
 {% block page_title %}▣ FILLS · BOT TRADE HISTORY{% endblock %}
 
@@ -117,7 +118,7 @@
                 <td class="num {% if t.pnl > 0 %}up{% elif t.pnl < 0 %}down{% endif %}" data-label="P&amp;L">{{ t.pnl|floatformat:2 }}</td>
                 <td class="num {% if t.realized_r > 0 %}up{% elif t.realized_r < 0 %}down{% endif %}" data-label="R">{{ t.realized_r|floatformat:2|default:"—" }}</td>
                 <td data-label="Outcome">{{ t.outcome|default:"—" }}</td>
-                <td data-label="Mode">{% if t.paper %}<span style="color:var(--text-muted);">paper</span>{% else %}<span style="color:var(--accent-gold);">LIVE</span>{% endif %}</td>
+                <td data-label="Mode">{% money_world t %}</td>
             </tr>
         {% endfor %}
         </tbody>

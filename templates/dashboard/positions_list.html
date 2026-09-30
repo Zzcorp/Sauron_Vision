@@ -247,7 +247,9 @@ honest freshness claim.{% endcomment %}
         {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=15 scope="pos" %}{% endif %}
         {% for p, d in g.pairs %}
         {% if p.instrument.has_page %}{% url 'instrument_detail' p.instrument.symbol as instrument_url%}{% endif %}
-        <tr data-sv-position-row
+        {# The money world (2026-09-30): REAL MONEY rows carry a red edge and the solid marker in the symbol cell. #}
+        <tr data-sv-position-row{% if d.world == "live" %} class="sv-row--live"{% endif %}
+            data-pos-world="{{ d.world }}"
             data-pos-instrument-href="{{ instrument_url }}"
             data-pos-symbol="{{ d.symbol }}" data-pos-side="{{ d.side }}"
             data-pos-qty="{{ d.qty }}" data-pos-status="{{ d.status }}"
@@ -303,7 +305,7 @@ honest freshness claim.{% endcomment %}
             {# an OS bubble over the row a moment before the card the #}
             {# operator was actually waiting for. The label is for the #}
             {# screen reader, which has no such race. #}
-            <td data-label="Symbol" class="nowrap sv-cell-wide"><span class="pos-sym-cell">{% if instrument_url %}<a href="{{ instrument_url }}" class="pos-sym-link" aria-label="{{ p.instrument.symbol }} — instrument page">{{ p.instrument.symbol }}</a>{% else %}<span class="pos-sym-plain">{{ p.instrument.symbol|default:"—" }}</span>{% endif %}{% if d.href %}<a href="{{ d.href }}" class="pos-row-detail" aria-label="Full detail for this {{ p.instrument.symbol }} trade">detail&nbsp;&rsaquo;</a>{% endif %}</span></td>
+            <td data-label="Symbol" class="nowrap sv-cell-wide"><span class="pos-sym-cell">{% if instrument_url %}<a href="{{ instrument_url }}" class="pos-sym-link" aria-label="{{ p.instrument.symbol }} — instrument page">{{ p.instrument.symbol }}</a>{% else %}<span class="pos-sym-plain">{{ p.instrument.symbol|default:"—" }}</span>{% endif %}{% money_world d.world %}{% if d.href %}<a href="{{ d.href }}" class="pos-row-detail" aria-label="Full detail for this {{ p.instrument.symbol }} trade">detail&nbsp;&rsaquo;</a>{% endif %}</span></td>
             <td data-label="Direction"><span class="badge badge-{% if p.direction == 'long' %}bullish{% else %}bearish{% endif %}">{{ p.direction }}</span></td>
             <td data-label="Qty" class="num" style="font-family: var(--font-mono);">{{ p.quantity }}</td>
             {# What it ties up, and out of how much. `committed_kind` matters: #}
@@ -500,12 +502,13 @@ honest freshness claim.{% endcomment %}
         {# The card toggles on click, so the symbol link has to say the #}
         {# click was for it: without the guard, following the link ALSO #}
         {# expanded the card the operator was leaving. #}
-        <div class="ph-trade-card" onclick="if (!event.target.closest('a')) { this.classList.toggle('expanded'); }">
+        <div class="ph-trade-card{% if d.world == "live" %} sv-row--live{% endif %}" onclick="if (!event.target.closest('a')) { this.classList.toggle('expanded'); }">
             <div class="ph-trade-row">
                 <div style="display:flex;align-items:center;gap:10px;">
                     <span class="badge badge-{% if p.direction == 'long' %}bullish{% else %}bearish{% endif %}" style="font-size:9px;padding:2px 6px;">{{ p.direction }}</span>
                     {% if p.instrument.has_page %}{% url 'instrument_detail' p.instrument.symbol as closed_url%}{% endif %}
                     {% if closed_url %}<a href="{{ closed_url }}" class="ph-sym">{{ p.instrument.symbol }}</a>{% else %}<span class="ph-sym">{{ p.instrument.symbol }}</span>{% endif %}
+                    {% money_world d.world %}
                     {% if p.strategy %}<span style="font-size:10px;color:var(--text-muted);">via {{ p.strategy.name|truncatechars:20 }}</span>{% endif %}
                 </div>
                 <div style="display:flex;align-items:center;gap:16px;">

@@ -241,6 +241,35 @@ def venue_of(trade):
     return "Real money", True, (named or "Broker not recorded")
 
 
+#: THE THREE MONEY WORLDS (2026-09-30), one word each, read by every
+#: surface through world_of and the money_world tag. The operator: live and
+#: paper "still light" for him and his father. A demo row (paper False,
+#: broker_env "paper") is simulated money and never prints as real.
+WORLD_LIVE, WORLD_DEMO, WORLD_PAPER = "live", "demo", "paper"
+WORLD_WORDS = {WORLD_LIVE: "REAL MONEY", WORLD_DEMO: "DEMO",
+               WORLD_PAPER: "PAPER"}
+
+
+def world_of(row) -> str:
+    """"live", "demo" or "paper" from the row's own stamps, as venue_of
+    reads them; "" when the row states no venue at all (a legacy Position,
+    whose `paper` is None). Takes a trade, any object with `paper` and
+    `metadata`, or a dict carrying the same keys."""
+    if isinstance(row, dict):
+        paper, meta = row.get("paper"), row.get("metadata")
+    else:
+        paper, meta = getattr(row, "paper", None), getattr(row, "metadata", None)
+    if paper is None:
+        return ""
+    meta = meta if isinstance(meta, dict) else {}
+    carrier = str(meta.get("broker") or "").strip().lower()
+    if paper or carrier == "paper":
+        return WORLD_PAPER
+    if str(meta.get("broker_env") or "").strip().lower() == "paper":
+        return WORLD_DEMO
+    return WORLD_LIVE
+
+
 def _state(trade):
     """(kind, chip words, "open" | "closed") for the row's status."""
     from bot_program.asset_engine.base import is_entry_working

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load sauron_tags %}
 {% block title %}Evidence ledger{% endblock %}
 {% block content %}
 <div class="page-header">
@@ -66,7 +67,7 @@
       {% for c in configs %}
         <tr>
           <td class="sv-ident" data-label="Config">{{ c.cfg.name }} <span style="font-size: 10px; color: var(--text-muted);">{{ c.cfg.asset_class }}{% if show_owner %} · {{ c.owner }}{% endif %}{% if c.research %} · research{% endif %}</span></td>
-          <td data-label="Mode"><span class="badge badge-{% if c.cfg.mode == 'live' %}bearish{% else %}bullish{% endif %}">{{ c.cfg.mode }}</span>{% if not c.cfg.enabled %} <span style="font-size: 10px; color: var(--text-muted);">off</span>{% endif %}{% if c.shadow %} <span style="font-size: 10px; color: var(--accent-gold-ink, var(--accent-gold));">shadow</span>{% endif %}{% if c.share %} <span style="font-size: 10px; color: var(--text-muted);">follows · {{ c.share }}</span>{% endif %}</td>
+          <td data-label="Mode">{% money_world c.cfg.mode %}{% if not c.cfg.enabled %} <span style="font-size: 10px; color: var(--text-muted);">off</span>{% endif %}{% if c.shadow %} <span style="font-size: 10px; color: var(--accent-gold-ink, var(--accent-gold));">shadow</span>{% endif %}{% if c.share %} <span style="font-size: 10px; color: var(--text-muted);">follows · {{ c.share }}</span>{% endif %}</td>
           <td class="num" data-label="Open">{{ c.open_n }}</td>
           <td class="num" data-label="Closed">{{ c.closed_n }}</td>
           <td class="num {% if c.pnl > 0 %}up{% elif c.pnl < 0 %}down{% endif %}" data-label="P&amp;L">{{ c.pnl|floatformat:2 }}</td>

@@ -107,6 +107,15 @@ def verify_chain(*, start_id: int = None, limit: int = None) -> dict:
 
 # ── Convenience helpers used by hook points ───────────────────────────────
 
+def _world(trade) -> str:
+    """position_summary.world_of, fenced: an audit row is never lost to it."""
+    try:
+        from dashboard.position_summary import world_of
+        return world_of(trade)
+    except Exception:  # noqa: BLE001 — the row matters more than the word
+        return ""
+
+
 def record_trade_open(user, *, trade) -> None:
     """Hook from `AssetBot.scan_symbol` after a trade is created."""
     try:
@@ -121,6 +130,9 @@ def record_trade_open(user, *, trade) -> None:
             "take_profit": str(trade.take_profit) if trade.take_profit is not None else None,
             "rule_name": trade.rule_name or "",
             "mode": "paper" if trade.paper else "live",
+            # The money world (2026-09-30): "demo" for a broker's demo fill,
+            # which "mode" alone calls live. Read by the activity drawer.
+            "world": _world(trade),
             "broker_order_id": trade.broker_order_id or "",
         }
         record_event("trade_open", data, user=user)
@@ -148,6 +160,7 @@ def record_trade_close(user, *, trade) -> None:
             "duration_minutes": trade.duration_minutes,
             "rule_name": trade.rule_name or "",
             "mode": "paper" if trade.paper else "live",
+            "world": _world(trade),
         }
         record_event("trade_close", data, user=user)
         from brain.observations import record_observation

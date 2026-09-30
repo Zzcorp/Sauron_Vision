@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load sauron_tags %}
 {% block title %}Trade Forensics — Sauron Vision{% endblock %}
 {# ◎ is the sidebar's Trade Forensics mark — title and nav row agree. #}
 {% block page_title %}◎ TRADE FORENSICS{% endblock %}
@@ -56,7 +57,7 @@
                 {% if t.status == 'CLOSE_PENDING' %}<span style="color:var(--danger);">CLOSE PENDING</span>
                 {% elif t.status == 'OPEN' %}<span style="color:var(--accent-gold);">OPEN</span>
                 {% else %}{{ t.status }}{% endif %}
-                {% if t.paper %}<span style="color:var(--text-muted);"> · paper</span>{% endif %}
+                {% money_world t %}
             </td>
             <td>{{ t.pnl|default_if_none:"—" }}</td>
             <td>{{ t.realized_r|default_if_none:"—" }}</td>

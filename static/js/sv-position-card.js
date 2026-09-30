@@ -364,9 +364,19 @@
                           side || DASH);
         if (!side) sideChip.className += " sv-unknown";
         el(sub, "span", "pos-pop-qty", val(row, "qty") || DASH);
-        var venue = val(row, "venue");
-        el(sub, "span", "pos-pop-venue is-" + (venue || "unknown").toLowerCase(),
-           venue || DASH);
+        /* The money world (2026-09-30): the row's own three-way reading,
+         * the same marker as the table's symbol cell. A demo fill says DEMO,
+         * never the LIVE its venue flag alone would print. A row with no
+         * world (an older page) keeps the venue chip. */
+        var world = val(row, "world");
+        var WORLD_WORDS = {live: "REAL MONEY", demo: "DEMO", paper: "PAPER"};
+        if (WORLD_WORDS[world]) {
+            el(sub, "span", "sv-world sv-world--" + world, WORLD_WORDS[world]);
+        } else {
+            var venue = val(row, "venue");
+            el(sub, "span", "pos-pop-venue is-" + (venue || "unknown").toLowerCase(),
+               venue || DASH);
+        }
         if (val(row, "status") === "CLOSE_PENDING") {
             /* Not an error and not healthy: the bot wants this flat and the
              * broker has not agreed yet, which is exactly the state an

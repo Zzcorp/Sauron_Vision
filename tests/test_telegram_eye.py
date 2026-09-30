@@ -505,7 +505,7 @@ class StatusReportTests(_EyeCase):
                 # (WHEAT.FUT), all demo but crypto.
                 # tests/test_etoro_proofs.py pins it.
                 "Proofs pinned: Commodities, Crypto, ETFs, Forex, Indices, "
-                "Stocks", "Open on the platform (1)",
+                "Stocks", "Open on the platform (1) · 0 real money, 1 simulated",
                 "  • AAPL long 0.04 @ 336.10 · stop 326.02 · paper"):
             self.assertIn(expected, lines)
         self.assertLessEqual(len(lines), eye.MAX_LINES)
@@ -649,11 +649,11 @@ class PositionsAndWhyTests(_EyeCase):
         _etoro(self.user, demo=True, broker_positions=[{"symbol": "EURUSD"}],
                broker_positions_at=timezone.now() - timedelta(minutes=5))
         lines = _lines(eye.build_positions(self.user))
-        self.assertEqual(lines[0], "Open on the platform: 2 (1 live · 1 paper)")
+        self.assertEqual(lines[0], "Open on the platform: 2 (1 real money · 1 simulated)")
         self.assertIn("  • AAPL long 0.04 @ 336.10 · stop 326.02 · target "
                       "352.90 · paper · opened just now", lines)
         self.assertIn("  • EURUSD short 10,000 @ 1.08345 · stop 1.09000 · "
-                      "target — · live · opened just now", lines)
+                      "target — · REAL MONEY · opened just now", lines)
         self.assertIn("Held at eToro (demo, synced 5 min ago): 1", lines)
 
     def test_the_last_skip_in_words(self):

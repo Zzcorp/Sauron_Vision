@@ -7,6 +7,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from .exchange_status import get_exchange_status
+from dashboard.position_summary import world_of as _world_of
 
 logger = logging.getLogger(__name__)
 
@@ -325,6 +326,9 @@ def _book_truth(user, portfolio):
             "pct": _f(getattr(row, "unrealized_pnl_pct", None)),
             "pnl": _f(getattr(row, "unrealized_pnl", None)),
             "paper": getattr(row, "paper", None),
+            # The money world from the row's own stamps (2026-09-30): a
+            # demo fill is "demo", never the live its paper flag implies.
+            "world": _world_of(row),
             "source": source,
             "status": getattr(row, "status", "") or "",
             "opened_at": getattr(row, "opened_at", None),

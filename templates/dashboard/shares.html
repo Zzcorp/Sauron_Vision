@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load sauron_tags %}
 {% block title %}Share Allocator — Sauron Vision{% endblock %}
 {# ◫ is the sidebar's Share Allocator mark — title and nav row agree. #}
 {% block page_title %}◫ SHARE ALLOCATOR · {% if live_mode %}LIVE{% else %}SHADOW{% endif %} · auto de-risk {% if auto_derisk %}ON{% else %}OFF{% endif %}{% endblock %}
@@ -75,7 +76,7 @@
         {% for r in rows %}
           <tr>
             <td class="sv-ident" data-label="Config">{{ r.cfg.name }}</td>
-            <td data-label="Class / Mode"><span class="badge badge-medium">{{ r.cfg.asset_class }}</span> <span class="badge badge-{% if r.cfg.mode == 'live' %}bearish{% else %}bullish{% endif %}">{{ r.cfg.mode }}</span></td>
+            <td data-label="Class / Mode"><span class="badge badge-medium">{{ r.cfg.asset_class }}</span> {% money_world r.cfg.mode %}</td>
             <td class="num" data-label="Current">{{ r.current }}</td>
             {# '—' when no plan has measured this follower: an unmeasured target is not 0. #}
             <td class="num" data-label="Target">{% if r.target is not None %}{{ r.target|floatformat:2 }}%{% if r.held %} <span class="badge badge-medium" title="Move under the hysteresis threshold — the target repeats the current share exactly">held</span>{% endif %}{% else %}<span style="color: var(--text-muted);">—</span>{% endif %}</td>
