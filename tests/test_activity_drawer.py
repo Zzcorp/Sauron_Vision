@@ -48,7 +48,7 @@ BASE = Path(settings.BASE_DIR)
 JS = BASE / "static" / "js" / "sv-activity.js"
 SHEET = BASE / "static" / "css" / "sv-activity.css"
 PARTIAL = BASE / "templates" / "_partials" / "activity_drawer.html"
-KEYS = {"id", "at", "ago", "kind", "level", "title", "detail", "url"}
+KEYS = {"id", "at", "ago", "kind", "level", "title", "detail", "url", "world"}
 
 
 def _read(*parts):

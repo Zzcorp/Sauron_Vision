@@ -2321,6 +2321,66 @@
         }
         .sv-venue--live { color: var(--accent-red); }
         .sv-venue--paper { color: var(--text-muted); }
+        /* ── THE MONEY WORLD, ON EVERY ROW (2026-09-30) ─────────────────
+           The operator, on the live box: live and paper were "still light"
+           for him and his father. The survey behind this found the
+           /positions/ table with NO per-row marker (the venue lived in a
+           hover card), /asset-bots/ and the home page with none, four
+           colour answers, demo rows printed LIVE and paper painted green.
+
+           So the label above stays for dense grids, and every POSITION ROW
+           and every BOT gets this marker, from one tag (sauron_tags
+           money_world, reader position_summary.world_of):
+             REAL MONEY — the only SOLID RED FILL on the platform;
+             DEMO       — gold outline: a broker's demo account;
+             PAPER      — grey outline: the platform's simulator.
+           And a real-money row carries a red edge (.sv-row--live): an inset
+           stripe on its first cell, never a tinted row — the value cells
+           keep their own up/down colours, so a live figure never reads as
+           a loss. */
+        .sv-world {
+            display: inline-block; vertical-align: middle;
+            padding: 1px 6px; border-radius: 3px; border: 1px solid;
+            font-family: var(--font-mono); font-size: 9.5px; font-weight: 700;
+            letter-spacing: .08em; line-height: 1.5; white-space: nowrap;
+            text-transform: uppercase;
+        }
+        .sv-world--live {
+            color: #fff; background: var(--accent-red);
+            border-color: var(--accent-red);
+            box-shadow: 0 0 8px color-mix(in srgb, var(--accent-red) 45%, transparent);
+        }
+        .sv-world--demo {
+            color: var(--accent-gold-ink); border-color: var(--accent-gold-ink);
+            background: transparent;
+        }
+        .sv-world--paper {
+            color: var(--text-muted); border-color: var(--text-muted);
+            background: transparent;
+        }
+        td .sv-world, .ip-pos-meta .sv-world, .ph-trade-row .sv-world,
+        .sv-act-meta .sv-world { margin-left: 4px; }
+        tr.sv-row--live > td:first-child,
+        div.sv-row--live, li.sv-row--live {
+            box-shadow: inset 3px 0 0 var(--accent-red);
+        }
+        /* THE ARMED PILL: on every page while a live config is enabled. */
+        .sv-armed-pill {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 3px 10px; border-radius: 999px; text-decoration: none;
+            font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+            letter-spacing: .1em; text-transform: uppercase; white-space: nowrap;
+            color: #fff; background: var(--accent-red);
+            box-shadow: 0 0 12px color-mix(in srgb, var(--accent-red) 50%, transparent);
+        }
+        .sv-armed-pill:hover { color: #fff; filter: brightness(1.1); }
+        .sv-armed-dot {
+            width: 7px; height: 7px; border-radius: 50%; background: #fff;
+            animation: sv-armed-beat 1.6s ease-in-out infinite;
+        }
+        @keyframes sv-armed-beat { 50% { opacity: .35; } }
+        @media (prefers-reduced-motion: reduce) { .sv-armed-dot { animation: none; } }
+        @media (max-width: 768px) { .sv-armed-pill .sv-armed-words { display: none; } }
         /* Gold, and therefore --accent-gold-ink, not --accent-gold: this
            chip prints on a white card in light mode, where the neon gold
            has almost no contrast. */

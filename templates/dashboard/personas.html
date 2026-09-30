@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load sauron_tags %}
 {% block title %}Trader Personalities — Sauron Vision{% endblock %}
 {# ◨ is the sidebar's Personalities mark (U+25E8, used nowhere else) — title and nav row agree. #}
 {% block page_title %}◨ TRADER PERSONALITIES · scalp · swing · position{% endblock %}
@@ -147,7 +148,7 @@
               <div style="border-top: 1px solid var(--border, rgba(127,127,127,.25)); padding: 8px 0;">
                 <div style="font-size: 12px;">[{{ c.pk }}] {{ c.name }}
                     <span class="badge badge-medium">{{ c.asset_class }}</span>
-                    <span class="badge badge-{% if c.mode == 'live' %}bearish{% else %}bullish{% endif %}">{{ c.mode }}</span>
+                    {% money_world c.mode %}
                     {% if not c.enabled %}<span style="font-size: 10px; color: var(--text-muted);">off</span>{% endif %}
                 </div>
                 <div style="font-size: 11px; color: var(--text-muted);">{{ c.live_sentence }}</div>
@@ -190,7 +191,7 @@
       {% for c in unworn %}
         <tr>
           <td class="sv-ident" data-label="Config">[{{ c.pk }}] {{ c.name }}</td>
-          <td data-label="Class / Mode"><span class="badge badge-medium">{{ c.asset_class }}</span> <span class="badge badge-{% if c.mode == 'live' %}bearish{% else %}bullish{% endif %}">{{ c.mode }}</span></td>
+          <td data-label="Class / Mode"><span class="badge badge-medium">{{ c.asset_class }}</span> {% money_world c.mode %}</td>
           <td class="num" data-label="Timeframe">{{ c.timeframe }}</td>
           <td class="num" data-label="Concurrent">{{ c.max_concurrent_positions }}</td>
           <td class="num" data-label="Hold ceiling">{% if c.max_hold_hours is not None %}{{ c.max_hold_hours|floatformat:0 }}h{% else %}<span style="color: var(--text-muted);" title="Inherits the asset-class default">class default</span>{% endif %}</td>

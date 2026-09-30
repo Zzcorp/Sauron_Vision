@@ -43,9 +43,15 @@ def keyed_venue_count(user) -> int:
     keyed — the same reading `broker_vision._keyed` takes.
     """
     from bot_program.broker_vision import BROKER_ROWS, _keyed
+    from bot_program.capital_truth import ibkr_in_use
     n = 0
     for kind, attr, _name in BROKER_ROWS:
         acct = getattr(user, attr, None)
+        # A retired IBKR row (capital_truth.ibkr_in_use) holds nothing the
+        # platform knows of and routes nothing: not a second venue a
+        # missing position could be hiding at (2026-09-30).
+        if kind == "ibkr" and acct is not None and not ibkr_in_use(acct):
+            continue
         if acct is not None and _keyed(kind, acct):
             n += 1
     return n
@@ -719,6 +725,13 @@ def reconcile_unknown_positions(user) -> dict:
              if r is not None and (getattr(r, "app_key_enc", "")
                                    or getattr(r, "api_key_enc", "")
                                    or getattr(r, "account_id_enc", ""))]
+    # A retired IBKR row is not swept (2026-09-30): the operator left IBKR,
+    # nothing routes there, no open row claims it, and its Gateway is down,
+    # so every pass logged it unreadable. capital_truth.ibkr_in_use brings
+    # it back the moment any of that changes.
+    from .capital_truth import ibkr_in_use
+    _rows = [r for r in _rows
+             if broker_kind(r) != "ibkr" or ibkr_in_use(r)]
     # The book first: an error later in the walk must not cost it its pass.
     _rows.sort(key=lambda r: 0 if (_book is not None
                                    and type(r) is type(_book)

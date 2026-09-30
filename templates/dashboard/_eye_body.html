@@ -1,3 +1,4 @@
+{% load sauron_tags %}
 {# Sauron's Eye body partial — fetched via HTMX every 10s. #}
 
 {# ── Top stat strip ───────────────────────────────── #}
@@ -122,7 +123,7 @@
                     <td>{{ p.entry_price|floatformat:4 }}</td>
                     <td style="color:var(--text-muted);">{{ p.stop_loss|floatformat:4|default:"—" }}</td>
                     <td style="color:var(--text-muted);">{{ p.take_profit|floatformat:4|default:"—" }}</td>
-                    <td>{% if p.paper %}<span style="color:var(--text-muted);">paper</span>{% else %}<span style="color:var(--accent-gold);">LIVE</span>{% endif %}</td>
+                    <td>{% money_world p %}</td>
                     {# Until this column existed a position could only leave the book by stop, target, or the kill switch flattening everything. #}
                     <td class="nowrap">
                         {% if p.kind == 'asset' %}

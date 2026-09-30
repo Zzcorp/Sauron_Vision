@@ -618,6 +618,13 @@
                         {% endfor %}
                     </div>
                 </div>
+                {% comment %}THE ARMED PILL (2026-09-30): on every page while a LIVE config is enabled — the one indicator that real money is in play. The "LIVE" pill beside it is the data feeds, and said nothing about money.{% endcomment %}
+                {% if panel_bot and panel_bot.live %}
+                <a href="{% url 'asset_bots_dashboard' %}" class="sv-armed-pill" title="{{ panel_bot.live }} bot{{ panel_bot.live|pluralize }} armed on real money — open the bots page">
+                  <span class="sv-armed-dot" aria-hidden="true"></span>
+                  <span>REAL MONEY</span><span class="sv-armed-words">&middot; {{ panel_bot.live }} bot{{ panel_bot.live|pluralize }} armed</span>
+                </a>
+                {% endif %}
                 <!-- UPGRADE-8: Live status pill -->
                 <div class="live-status-pill" id="liveStatusPill" title="Live data sources">
                   <span class="lsp-dot lsp-flat"></span>
@@ -934,7 +941,7 @@
                         a column of positions scans down rather than jitters.
                         {% endcomment %}
                         {% for t in panel_open_rows %}
-                        <div class="ip-pos ip-pos--{{ t.side|lower }}{% if t.status == 'CLOSE_PENDING' %} is-closing{% endif %}">
+                        <div class="ip-pos ip-pos--{{ t.side|lower }}{% if t.status == 'CLOSE_PENDING' %} is-closing{% endif %}{% if t.world == 'live' %} sv-row--live{% endif %}">
                             <div class="ip-pos-id">
                                 <span class="ipr-sym">{{ t.symbol }}</span>
                                 <span class="ipr-side ipr-side--{{ t.side|lower }}">{{ t.side }}</span>
@@ -947,7 +954,7 @@
                             <div class="ip-pos-meta">
                                 <span class="ipr-qty">{{ t.qty|floatformat:"-4" }}</span>
                                 {% if t.status == "CLOSE_PENDING" %}<span class="sv-chip sv-chip--warn" title="The broker refused the close — this is still open there">closing</span>{% endif %}
-                                {% if t.paper %}<span class="sv-chip sv-chip--muted">paper</span>{% endif %}
+                                {% money_world t compact="1" %}
                                 {% if not t.id %}
                                 {# Legacy book row: no trade id, and no close path exists for one. #}
                                 <span class="sv-chip sv-chip--muted" title="Manual book — the platform has no close control for these">manual</span>

@@ -1,3 +1,4 @@
+{% load sauron_tags %}
 {# BOTS tab — per-AssetBotConfig overview with health + cooldown. #}
 
 {# ── 1. Top stat strip ────────────────────────────────────────────── #}
@@ -68,9 +69,7 @@
                 <td><span class="badge badge-medium">{{ r.config.get_asset_class_display }}</span></td>
                 <td><strong>{{ r.config.name }}</strong></td>
                 <td>
-                    <span class="badge badge-{% if r.config.mode == 'live' %}bearish{% else %}bullish{% endif %}">
-                        {{ r.config.mode }}
-                    </span>
+                    {% money_world r.config.mode %}
                 </td>
                 <td>{{ r.open_count }}</td>
                 <td>{{ r.opens_24h }}</td>

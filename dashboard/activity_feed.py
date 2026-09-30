@@ -208,6 +208,8 @@ def _event(source, key, at, now, *, kind, level, title, detail="", url=""):
         "title": _clip(title, TITLE_MAX),
         "detail": _clip(detail, DETAIL_MAX),
         "url": safe_link(url),
+        # "live" / "demo" / "paper" on a fill, "" on anything else.
+        "world": "",
     }
 
 
@@ -351,10 +353,29 @@ def _audit(user, since, n, now):
         if line is None:
             continue
         kind, level, title, detail, url = line
-        out.append(_event("audit", row["id"], row["created_at"], now,
-                          kind=kind, level=level, title=title,
-                          detail=detail, url=url))
+        ev = _event("audit", row["id"], row["created_at"], now,
+                    kind=kind, level=level, title=title,
+                    detail=detail, url=url)
+        world = _audit_world(row)
+        if world:
+            ev["world"] = world
+        out.append(ev)
     return out
+
+
+def _audit_world(row) -> str:
+    """The money world of a fill's audit row (2026-09-30): the row's own
+    "world" (written since then, from position_summary.world_of, so a demo
+    fill says demo), else its older "mode". "" for anything not a fill; the
+    drawer then prints no marker."""
+    if row.get("kind") not in ("trade_open", "trade_close"):
+        return ""
+    d = row["data"] if isinstance(row.get("data"), dict) else {}
+    w = str(d.get("world") or "").strip().lower()
+    if w in ("live", "demo", "paper"):
+        return w
+    mode = str(d.get("mode") or "").strip().lower()
+    return mode if mode in ("live", "paper") else ""
 
 
 def _gates(user, since, n, now):

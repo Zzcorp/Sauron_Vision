@@ -173,6 +173,17 @@
     when.title = utc(ev.at);
     when.textContent = ev.ago || ago(ev.at);
     meta.appendChild(k);
+    /* The money world of a fill (2026-09-30): the platform's one marker,
+     * REAL MONEY solid red, DEMO gold, PAPER grey; a real-money row also
+     * carries the red edge. Nothing for a row that is not a fill. */
+    var WORLD_WORDS = { live: 'REAL MONEY', demo: 'DEMO', paper: 'PAPER' };
+    if (WORLD_WORDS[ev.world]) {
+      var w = document.createElement('span');
+      w.className = 'sv-world sv-world--' + ev.world;
+      w.textContent = WORLD_WORDS[ev.world];
+      meta.appendChild(w);
+      if (ev.world === 'live') li.className += ' sv-row--live';
+    }
     meta.appendChild(when);
     main.appendChild(meta);
     var href = safeLink(ev.url);

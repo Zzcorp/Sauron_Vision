@@ -419,6 +419,28 @@ def level(value, trade) -> str:
                        getattr(trade, "symbol", "") or "") or DASH
 
 
+#: The money world in a line (2026-09-30): REAL MONEY in capitals, so it
+#: is never read past on a phone; a broker's demo fill says "demo", never
+#: the "live" its paper flag alone implied. Reader: position_summary.world_of.
+WORLD_LINE_WORDS = {"live": "REAL MONEY", "demo": "demo", "paper": "paper"}
+
+
+def mode_word(mode) -> str:
+    """A bot's mode in a line: a live config trades REAL MONEY."""
+    return "REAL MONEY" if mode == "live" else str(mode or "")
+
+
+def _is_real_money(trade) -> bool:
+    from dashboard.position_summary import world_of
+    return world_of(trade) == "live"
+
+
+def world_word(trade) -> str:
+    from dashboard.position_summary import world_of
+    return WORLD_LINE_WORDS.get(world_of(trade),
+                                "paper" if trade.paper else "REAL MONEY")
+
+
 def position_line(trade, *, now=None, detailed: bool = False,
                   bullet: bool = True) -> str:
     """AAPL long 0.04 @ 336.10 · stop 326.02 · paper.
@@ -443,7 +465,7 @@ def position_line(trade, *, now=None, detailed: bool = False,
              stop]
     if detailed:
         parts.append(f"target {level(trade.take_profit, trade)}")
-    parts.append("paper" if trade.paper else "live")
+    parts.append(world_word(trade))
     if trade.status == "CLOSE_PENDING":
         parts.append("closing")
     if detailed:
@@ -641,7 +663,7 @@ def _bot_lines(user) -> list:
     if not rows:
         out.append("No bot is running")
     for cfg in rows[:MAX_BOTS_LISTED]:
-        out.append(f"{BULLET}{config_label(cfg)} — {cfg.mode}")
+        out.append(f"{BULLET}{config_label(cfg)} — {mode_word(cfg.mode)}")
     if len(rows) > MAX_BOTS_LISTED:
         out.append(f"+{len(rows) - MAX_BOTS_LISTED} more on the platform")
     return out
@@ -716,7 +738,11 @@ def build_status(user, *, now=None) -> Reply:
     lines.append(_guards_line(now))
     lines.append(f"Proofs pinned: {_proof_words()}")
     trades = list(_open_trades(user))
-    lines.append(heading(f"Open on the platform ({len(trades)})"))
+    real = sum(1 for t in trades if _is_real_money(t))
+    lines.append(heading(
+        f"Open on the platform ({len(trades)})"
+        + (f" · {real} real money, {len(trades) - real} simulated"
+           if trades else "")))
     if not trades:
         lines.append("No open position")
     # As many as the line cap leaves room for (ten at most), and the rest
@@ -737,10 +763,10 @@ def build_positions(user, *, now=None) -> Reply:
     from bot_program.models import EtoroAccount
     now = now or timezone.now()
     trades = list(_open_trades(user))
-    live = sum(1 for t in trades if not t.paper)
+    real = sum(1 for t in trades if _is_real_money(t))
     head = f"Open on the platform: {len(trades)}"
     if trades:
-        head += f" ({live} live · {len(trades) - live} paper)"
+        head += f" ({real} real money · {len(trades) - real} simulated)"
     lines = [head]
     for trade in trades[:MAX_POSITIONS_LISTED]:
         lines.append(position_line(trade, now=now, detailed=True))
@@ -802,7 +828,7 @@ def build_why(user, symbol: str, *, now=None) -> Reply:
         lines.append("Symbols are set per bot on the platform.")
     for cfg, last in rows[:MAX_WHY_BOTS]:
         state = "running" if cfg.enabled else "stopped"
-        lines.append(heading(f"{config_label(cfg)} — {state} · {cfg.mode}"))
+        lines.append(heading(f"{config_label(cfg)} — {state} · {mode_word(cfg.mode)}"))
         if last is None:
             lines.append("Last reason: none recorded yet")
         else:
@@ -942,7 +968,7 @@ def apply_brake(user, ids=(), *, everything: bool = False,
     head = []
     if stopped:
         head.append(heading(f"Stopped ({len(stopped)})"))
-        head.extend(f"{BULLET}{config_label(c)} — {c.mode}"
+        head.extend(f"{BULLET}{config_label(c)} — {mode_word(c.mode)}"
                     for c in stopped)
     if already:
         head.append(heading("Already stopped"))

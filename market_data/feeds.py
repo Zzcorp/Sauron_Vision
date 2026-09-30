@@ -84,8 +84,17 @@ FEEDS = (
     # unconditionally true and the feed read as "switched on and never
     # delivered" on every deployment that has never set IBKR up — the
     # loudest state on the panel, for a thing nobody asked for.
+    #
+    # And a row is not enough (2026-09-30): the writer
+    # (bot_program.ibkr_data_feed) reads only the classes a row is PRIMARY
+    # for, so a row with every flag unticked — the operator's, after
+    # leaving IBKR for eToro — has nothing to deliver. Counted as
+    # configured, it read NEVER on /health/, held the top-bar pill at
+    # degraded and told the alarm chat "IBKR is not delivering quotes"
+    # daily. `row_counts` names the writer's own test.
     {"key": "ibkr", "label": "IBKR", "kind": "stream",
      "requires": (), "requires_row": ("bot_program", "IBKRAccount"),
+     "row_counts": "bot_program.ibkr_data_feed._primary_classes",
      "window": Window.ALWAYS, "ages": _WS,
      "note": "Broker feed, when a gateway is connected"},
 
@@ -168,6 +177,13 @@ def _missing_row(feed: dict) -> str:
     try:
         from django.apps import apps
         model = apps.get_model(app_label, model_name)
+        counts = feed.get("row_counts")
+        if counts:
+            # Only a row the feed's own writer would read counts.
+            from django.utils.module_loading import import_string
+            test = import_string(counts)
+            return "" if any(test(r) for r in model.objects.all()) \
+                else model_name
         return "" if model.objects.exists() else model_name
     except Exception:  # noqa: BLE001 — a health panel must never raise. An
         # unreadable table is not evidence the feed is off, so say nothing.

@@ -532,3 +532,55 @@ def px_decimals(value, asset_class="", symbol=""):
     """
     from core.price_format import price_decimals
     return price_decimals(value, asset_class, symbol)
+
+
+# ── The money world (2026-09-30) ─────────────────────────────────────────
+# One marker for "is this real money", everywhere. The operator: live and
+# paper were "still light" for him and his father — no marker on the
+# positions table, four colour schemes, demo rows printed LIVE, paper
+# painted green. REAL MONEY is the only solid red fill on the platform;
+# DEMO is gold, PAPER grey. The reader is dashboard.position_summary.
+# world_of; CSS .sv-world in sauron.css.
+
+_WORLD_TITLES = {
+    "live": "Real money: this is an order at the broker",
+    "demo": "A broker's demo account: simulated money",
+    "paper": "Simulated by the platform: no money moves",
+}
+
+
+def _world_key(value) -> str:
+    """A world key from a key or a config mode ("live"/"paper"/"demo"),
+    or from a row (a trade, an object or a dict with paper/metadata, or a
+    dict that already carries "world")."""
+    if isinstance(value, str):
+        v = value.strip().lower()
+        return v if v in _WORLD_TITLES else ""
+    if isinstance(value, dict) and "world" in value:
+        return _world_key(value.get("world") or "")
+    if value is None:
+        return ""
+    from dashboard.position_summary import world_of
+    return world_of(value)
+
+
+@register.filter
+def world(value) -> str:
+    """The world key, for a row class: `{% if t|world == "live" %}`."""
+    return _world_key(value)
+
+
+@register.simple_tag
+def money_world(value, compact=""):
+    """The marker: `{% money_world trade %}` or `{% money_world cfg.mode %}`.
+    Renders nothing for a row that states no venue."""
+    from django.utils.html import format_html
+    from dashboard.position_summary import WORLD_WORDS
+    key = _world_key(value)
+    if not key:
+        return ""
+    words = WORLD_WORDS[key]
+    if compact and key == "live":
+        words = "REAL"
+    return format_html('<span class="sv-world sv-world--{}" title="{}">{}</span>',
+                       key, _WORLD_TITLES[key], words)

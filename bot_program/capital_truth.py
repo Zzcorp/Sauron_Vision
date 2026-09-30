@@ -231,6 +231,51 @@ def broker_backed(user):
     return acct if account_id else None
 
 
+def ibkr_in_use(acct) -> bool:
+    """Does this IBKR row still concern the platform? (2026-09-30)
+
+    The operator left IBKR: "remove any IBKR problems please, it's no more
+    a concern for us". The book is eToro, every IBKR routing flag is
+    unticked and the Gateway is down, yet the row was still attempted by
+    the sync every 15 minutes, swept, counted as a quote feed and raised
+    to the alarm chat ("IBKR account has not answered", "IBKR is not
+    delivering quotes") — noise for a father keeping the house.
+
+    The row itself stays: its equity history hangs off it (CASCADE), and
+    deploy/IBKR_RETIREMENT.md keeps deletion for last. But a row that is
+    NOT the book, routes NO class, has no enabled live options or CFD
+    config (the router's forced IBKR route) and holds NO open real-money
+    row the platform knows of is retired: not read, not swept, not
+    alarmed on, not counted as a feed. Any one of the four brings it back
+    at the next pass — tick a flag, open a position there — with no
+    deploy. A row this cannot read counts as IN USE: silence is never
+    the answer to a failure.
+    """
+    try:
+        user = acct.user
+        book = broker_backed(user)
+        if book is not None and type(book) is type(acct) and book.pk == acct.pk:
+            return True
+        flags = ("is_primary_for_stocks", "is_primary_for_forex",
+                 "is_primary_for_options", "is_primary_for_commodity",
+                 "is_primary_for_cfd")
+        if any(getattr(acct, f, False) for f in flags):
+            return True
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+        if AssetBotConfig.objects.filter(
+                user=user, enabled=True, mode="live",
+                asset_class__in=("options", "cfd")).exists():
+            return True
+        return AssetBotTrade.objects.filter(
+            config__user=user, paper=False,
+            status__in=("OPEN", "CLOSE_PENDING"),
+            metadata__broker="ibkr").exists()
+    except Exception:  # noqa: BLE001 — unreadable is in use, never silenced
+        logger.warning("ibkr_in_use: row unreadable; treated as in use",
+                       exc_info=True)
+        return True
+
+
 def broker_env(acct) -> str:
     """"live", "paper", or "" when the row cannot say.
 
