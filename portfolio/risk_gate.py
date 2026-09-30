@@ -917,7 +917,8 @@ def exposure_state(user, *, portfolio=None, adding: float = 0.0,
 def single_position_state(portfolio, *, asset_class: str, user=None,
                           notional: float, capital_base: float = None,
                           base_label: str = "book", leverage=None,
-                          carrier: str = "") -> dict:
+                          carrier: str = "",
+                          lane_limit_pct: float | None = None) -> dict:
     """Whether one proposed position clears MAX SINGLE POSITION.
 
     Judged on capital AT WORK, the same margin-aware basis `exposure_state`
@@ -944,8 +945,15 @@ def single_position_state(portfolio, *, asset_class: str, user=None,
     the manual path its manual config's, and a portfolio-book caller passes
     nothing and keeps the book. `base_label` is what the refusal calls it,
     so the operator reads a sentence about the pool that actually refused.
+
+    `lane_limit_pct` is a manual lane's own ceiling (2026-09-30,
+    manual_trade.lane_single_position_pct): it replaces the book's
+    percentage for that lane's tickets only, so a forex ticket that must
+    reach eToro's 1,000 USD floor at 1x can be taken by hand without
+    raising the ceiling every bot sizes under. None keeps the book's.
     """
-    limit_pct = _limit_pct(portfolio, "max_single_position_pct")
+    limit_pct = (lane_limit_pct if lane_limit_pct is not None
+                 else _limit_pct(portfolio, "max_single_position_pct"))
     base = (capital_base if capital_base is not None
             else gate_book_value(user, portfolio))
     at_work = capital_at_work(asset_class, notional, leverage=leverage,
@@ -1050,7 +1058,8 @@ def symbol_side_exposure(user, symbol: str, side: str, *, portfolio=None) -> dic
 def concentration_state(user, *, symbol: str, side: str, asset_class: str,
                         notional: float, capital_base: float = None,
                         base_label: str = "book", portfolio=None,
-                        leverage=None, carrier: str = "") -> dict:
+                        leverage=None, carrier: str = "",
+                        lane_limit_pct: float | None = None) -> dict:
     """Would this ticket put too much of one bet on one instrument?
 
     The SAME `max_single_position_pct` the card already carries, applied to
@@ -1069,7 +1078,10 @@ def concentration_state(user, *, symbol: str, side: str, asset_class: str,
     is ADDED off the multiplier this ticket would carry.
     """
     pf = portfolio if portfolio is not None else limits_book()
-    limit_pct = _limit_pct(pf, "max_single_position_pct")
+    # A manual lane's own ceiling replaces the book's, as in
+    # single_position_state: the two are the same percentage by design.
+    limit_pct = (lane_limit_pct if lane_limit_pct is not None
+                 else _limit_pct(pf, "max_single_position_pct"))
     base = (capital_base if capital_base is not None
             else gate_book_value(user, pf))
     held = symbol_side_exposure(user, symbol, side, portfolio=pf)
