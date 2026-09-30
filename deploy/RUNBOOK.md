@@ -944,6 +944,53 @@ an outage — `/stopall` never. If the group is ever upgraded to a supergroup
 its id changes: the worker log names the new one, which goes in
 `TELEGRAM_ALARM_CHAT_ID`.
 
+## When the box itself goes silent (the dead man's switch)
+
+2026-09-30: the hosting month ran out, the VPS stopped, and nobody heard.
+Every alarm above lives ON the box: the alarm bot, the Eye, Morgul, the
+digest. A dead box sends nothing, and its silence reads exactly like "all
+is well". Only something OFF the box can notice it. Three layers, cheapest
+first:
+
+1. **Pay the box automatically.** At the host (Hostinger → Billing →
+   the VPS → auto-renewal ON, with a card that does not expire before the
+   next term). This is what failed on 2026-09-30.
+2. **The dead man's switch** (`core/dead_man_switch.py`). The box pings an
+   outside watcher after every 5-minute bot tick. When the pings stop,
+   whether the box is down, Docker is dead, beat is dead, the default
+   worker is stuck or the database is gone, the WATCHER raises the alarm.
+   A tick that raises pings `/fail` at once (the exception's type only,
+   never an amount). A paused platform still pings: the pause is the alarm
+   bot's to report.
+   - On <https://healthchecks.io> (free tier), **Add Check**: name
+     "Sauron box", Schedule **Simple**, Period **5 minutes**, Grace
+     **15 minutes**. Copy its ping URL (`https://hc-ping.com/<uuid>`).
+   - **Integrations**: add e-mail, Telegram (the operator's own chat, or
+     the alarm group) and/or the phone app, and tick them on the check.
+   - Put the URL in `.env` as `DEAD_MAN_SWITCH_URL=` (https only; it is a
+     secret: never paste it in a chat or a commit), then:
+
+     ```bash
+     ./deploy/dc up -d                                          # up re-reads .env
+     ./deploy/dc exec web python manage.py dead_man_switch --ping   # the check turns green
+     ```
+
+   - Within 5 minutes the check reads "up" from the ticks themselves.
+     To prove the alarm, stop the beat (`./deploy/dc stop beat`), wait for
+     the period plus the grace, receive the alert, then `./deploy/dc up -d`.
+3. **An outside uptime monitor on the site.** On <https://uptimerobot.com>
+   (free tier): a monitor of type **HTTP(s)** on `https://<DOMAIN>/healthz/`,
+   every 5 minutes, alerting the same people. `/healthz/` needs no login
+   and answers 503 when the database is down, so a dead site, a dead
+   Caddy or a dead database all read as down. The two layers see different
+   deaths: the site can answer while beat is dead, and beat can tick while
+   Caddy is down.
+
+`DEAD_MAN_SWITCH_URL` empty means the switch is off and nothing is sent;
+`manage.py dead_man_switch` says which, and names the watcher's host but
+never the URL. A ping that cannot land is a WARNING in the worker log
+(`grep "dead man's switch"`) and never delays a tick more than 5 seconds.
+
 ---
 
 ## Why a setup never fires (/setups/)

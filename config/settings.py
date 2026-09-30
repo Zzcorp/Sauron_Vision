@@ -61,6 +61,13 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 
 # ============================================================
+# The dead man's switch (2026-09-30, core/dead_man_switch.py): the ping
+# URL of an outside watcher (healthchecks.io) that raises the alarm when
+# the box stops pinging. Off when unset. A secret: never logged.
+# ============================================================
+DEAD_MAN_SWITCH_URL = os.getenv("DEAD_MAN_SWITCH_URL", "").strip()
+
+# ============================================================
 # Phase 33 — Sentry error tracking (no-op when SENTRY_DSN unset)
 # ============================================================
 SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()

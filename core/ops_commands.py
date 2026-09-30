@@ -260,6 +260,21 @@ COMMANDS = [
         "run_args": [],
         "category": "decide",
     },
+    # The dead man's switch sends to a watcher off the box with --ping, so
+    # the Run lane refuses it like the alarm bot's --test.
+    {
+        "name": "dead_man_switch",
+        "title": "Dead man's switch",
+        "purpose": "Say whether the box pings its outside watcher (healthchecks.io) after every bot tick, naming the watcher's host and never the URL. Bare, it sends nothing; --ping sends one ok ping now.",
+        "usage": [
+            "python manage.py dead_man_switch",
+            "python manage.py dead_man_switch --ping",
+        ],
+        "mirrors": "/health/",
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
     # ── read: the diagnostics ───────────────────────────────────────────
     {
         "name": "open_trades",

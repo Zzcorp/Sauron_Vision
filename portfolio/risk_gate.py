@@ -647,7 +647,8 @@ def realized_since(user, portfolio, *, hours: int = DAILY_LOSS_WINDOW_HOURS,
     }
 
 
-def daily_loss_state(user, *, portfolio=None, now=None) -> dict:
+def daily_loss_state(user, *, portfolio=None, now=None,
+                     venue: str = "") -> dict:
     """Where the book stands against MAX DAILY LOSS. Never raises on data.
 
     {"ok", "reason", "limit_pct", "limit_money", "realized", "book_value",
@@ -661,6 +662,11 @@ def daily_loss_state(user, *, portfolio=None, now=None) -> dict:
     the reason names both whenever both closed something, because "you are
     down 2,400 of real money" and "your paper experiment is down 2,400" are
     the same refusal wearing very different consequences.
+
+    `venue` ("live" / "paper") judges THAT venue's realized alone, as
+    exposure_state does (2026-09-30): a bot is refused by its own venue's
+    day, never by the other's. Unnamed, the worse of the two, as before —
+    what the cards read.
     """
     portfolio = portfolio if portfolio is not None else limits_book()
     limit_pct = _limit_pct(portfolio, "max_daily_loss_pct")
@@ -679,6 +685,14 @@ def daily_loss_state(user, *, portfolio=None, now=None) -> dict:
         return state
 
     window = realized_since(user, portfolio, now=now)
+    if venue in ("live", "paper"):
+        # The named venue's own day. A venue that closed nothing had a flat
+        # day (0.0), never an unknown one, unless nothing at all was
+        # measured — then its figure is None and the branch below says so.
+        realized = (window.get(f"{venue}_realized")
+                    if window["realized"] is not None else None)
+        window = {**window, "realized": realized}
+        state["venue"] = venue
     limit_money = -book * limit_pct / 100.0
     state["limit_money"] = round(limit_money, 2)
     state["realized"] = window["realized"]
@@ -1439,8 +1453,17 @@ def correlation_state(user, instrument, *, portfolio=None,
     return state
 
 
-def preflight(user, *, portfolio=None, now=None) -> dict:
+def preflight(user, *, portfolio=None, now=None, venue: str = "") -> dict:
     """The book-level limits, checked before any new position anywhere.
+
+    `venue` ("live" / "paper") judges both limits on that venue alone
+    (2026-09-30). `AssetBot.can_open_new` names its config's venue: unnamed,
+    the exposure ceiling read "whichever binds", and four paper positions
+    holding 11,102.76 against a 9,398.99 ceiling refused every LIVE bot of
+    the account with nothing live open — the one thing the venue split in
+    open_capital_at_work was written to prevent ("neither venue can spend
+    the other's room"). Unnamed (the cards, the manual preview) it reads
+    both, as before.
 
     Returns {"ok": bool, "failed_open": bool, "reason": str, "checks": {...}}.
     Only the two limits that need no candidate — daily loss and total exposure
@@ -1467,8 +1490,9 @@ def preflight(user, *, portfolio=None, now=None) -> dict:
     try:
         portfolio = portfolio if portfolio is not None else limits_book()
         checks["daily_loss"] = daily_loss_state(user, portfolio=portfolio,
-                                                now=now)
-        checks["exposure"] = exposure_state(user, portfolio=portfolio)
+                                                now=now, venue=venue)
+        checks["exposure"] = exposure_state(user, portfolio=portfolio,
+                                            venue=venue)
     except Exception as e:  # noqa: BLE001 — see the fail-open note above
         logger.error("[risk_gate] book limits unreadable, entries NOT gated "
                      "this pass: %s", e, exc_info=True)

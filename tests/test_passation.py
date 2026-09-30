@@ -84,7 +84,8 @@ class TheLetterTests(TestCase):
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
         for words in ("À GANDALF", "Papa, si tu lis ces lignes", "trois",
-                      "Tiens la maison, Gandalf", "TON FILS",
+                      "Tiens la maison, Gandalf", "TON FILS, FIER DE L'ÊTRE",
+                      "Et merci pour ce qui est venu avant", "Merci, papa.",
                       "LA GARDE, EN PRATIQUE", "/status", "/stopall",
                       "LE SECOND BOT", "@BotFather"):
             self.assertIn(words, body, words)

@@ -36,6 +36,10 @@ _BEARER = re.compile(r"(?i)\b(Bearer|Basic|Token)\s+([A-Za-z0-9._~+/=-]{8,})")
 # somewhere this module cannot recognise structurally.
 _SECRET_ENV_SUFFIXES = ("_API_KEY", "_SECRET", "_TOKEN", "_PASSWORD",
                         "_CLIENT_SECRET", "_DSN", "_KEY")
+# Secrets whose names carry none of those suffixes. The dead man's switch
+# URL is one: its path is the check's key, and anyone holding it can ping
+# in the box's name (core/dead_man_switch.py).
+_SECRET_ENV_NAMES = ("SECRET_KEY", "DEAD_MAN_SWITCH_URL")
 
 REDACTION = "***"
 
@@ -50,7 +54,7 @@ def _declared_secrets():
     for name, value in os.environ.items():
         if not value or len(value) < 8:
             continue
-        if name.endswith(_SECRET_ENV_SUFFIXES) or name == "SECRET_KEY":
+        if name.endswith(_SECRET_ENV_SUFFIXES) or name in _SECRET_ENV_NAMES:
             out.append(value)
     return sorted(set(out), key=len, reverse=True)
 

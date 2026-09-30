@@ -1175,6 +1175,34 @@ class Command(BaseCommand):
                     f"{user.username} has no trading PIN — configuring or "
                     f"arming a live bot is unreachable without one, by design")
 
+            # ── 6b. the book limits, as a live bot reads them ───────────
+            # MAX DAILY LOSS and MAX TOTAL EXPOSURE from /setup/, judged on
+            # the LIVE book, which is what AssetBot.can_open_new asks for a
+            # live config (2026-09-30). This command never read them, so on
+            # the live box it said NO BLOCKERS while every live bot's
+            # heartbeat read "total exposure limit reached". A refusal
+            # BLOCKS while a live config is armed; the paper book is
+            # printed beside it and never blocks a live bot.
+            from portfolio.risk_gate import preflight as _book_gate
+            _lb = _book_gate(user, venue="live")
+            _pb = _book_gate(user, venue="paper")
+
+            def _book_word(b):
+                if b.get("failed_open"):
+                    return "UNREADABLE (entries not gated)"
+                return "clear" if b["ok"] else "REFUSES"
+            w(f"\n6b. BOOK LIMITS — {user.username}: live "
+              f"{_book_word(_lb)}, paper {_book_word(_pb)}")
+            if not _lb["ok"]:
+                w(f"   live: {_lb['reason']}")
+                (blockers if any(c.enabled for c in live) else warnings).append(
+                    f"{user.username}: the live book limits refuse every live "
+                    f"entry — {_lb['reason']}")
+            elif _lb.get("failed_open"):
+                warnings.append(f"{user.username}: {_lb['reason']}")
+            if not _pb["ok"]:
+                w(f"   paper: {_pb['reason']} (bounds paper entries only)")
+
             # ── 7. can an alert leave the box ───────────────────────────
             # Every alert ends in notifications.dispatch_notification: the
             # bell row, then — outside the user's quiet window — ONE
