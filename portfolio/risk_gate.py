@@ -314,6 +314,51 @@ def gate_book_value(user, portfolio) -> float | None:
     return book_value(portfolio)
 
 
+#: How old the broker's equity reading may be and still size the LIVE
+#: limits (the sync runs every 15 minutes; two hours is eight missed syncs).
+LIVE_EQUITY_MAX_AGE_S = 2 * 3600
+
+
+def venue_book_value(user, portfolio, venue: str = "") -> tuple:
+    """(value, source) the limits are percentages OF, for this venue.
+
+    THE LIVE LIMITS ARE MEASURED AGAINST THE REAL ACCOUNT (2026-09-30).
+    The operator's /setup/ book read 9,420 EUR while the eToro account
+    held 2,249.65 USD, so "3% max daily loss" stopped real money at about
+    282 — 12.5% of it — and "100% max total exposure" allowed four times
+    the account. PR #8 split the two books by venue; this splits their
+    SIZE the same way: a LIVE judgement reads the broker's last equity
+    reading (capital_truth.account_equity, the sync's cached cell, never
+    a broker call), a PAPER one keeps the /setup/ book — whose research
+    pools are 100,000 each and would all be refused against 2,250.
+
+    A reading that is missing, not positive or older than
+    LIVE_EQUITY_MAX_AGE_S falls back to the /setup/ book, said in the
+    source word: the platform's old behaviour, never a guess. Unnamed
+    venue (the cards, the manual preview) keeps the book as before.
+    """
+    if venue == "live" and user is not None:
+        try:
+            from bot_program.capital_truth import account_equity
+            eq = account_equity(user)
+        except Exception:  # noqa: BLE001 — a gate never breaks on a read
+            eq = None
+        if (eq and eq.get("value") and float(eq["value"]) > 0
+                and eq.get("age_seconds") is not None
+                and eq["age_seconds"] <= LIVE_EQUITY_MAX_AGE_S):
+            return float(eq["value"]), "the broker account"
+        return gate_book_value(user, portfolio), "the /setup/ book (no fresh broker reading)"
+    return gate_book_value(user, portfolio), "the /setup/ book"
+
+
+def _book_words(book: float, source: str) -> str:
+    """"the 9,398.99 book" as ever; "2,249.65, the broker account" when the
+    live limits measured the real account (venue_book_value)."""
+    if source == "the broker account":
+        return f"{book:,.2f}, the broker account"
+    return f"the {book:,.2f} book"
+
+
 def book_value(portfolio) -> float | None:
     """The book value the limits are percentages OF, or None if unusable.
 
@@ -670,10 +715,11 @@ def daily_loss_state(user, *, portfolio=None, now=None,
     """
     portfolio = portfolio if portfolio is not None else limits_book()
     limit_pct = _limit_pct(portfolio, "max_daily_loss_pct")
-    book = gate_book_value(user, portfolio)
+    book, book_source = venue_book_value(user, portfolio, venue)
     state = {"ok": True, "limit_pct": limit_pct, "book_value": book,
              "limit_money": None, "realized": None, "unmeasured": 0,
-             "measured": False, "reason": ""}
+             "measured": False, "reason": "",
+             "book_source": book_source}
 
     if limit_pct is None:
         state["reason"] = "no daily-loss limit set on the book"
@@ -724,8 +770,8 @@ def daily_loss_state(user, *, portfolio=None, now=None,
         state["reason"] = (
             f"daily loss limit hit: {window['realized']:,.2f} realized in the "
             f"last {DAILY_LOSS_WINDOW_HOURS}h against a "
-            f"{limit_money:,.2f} floor ({limit_pct:g}% of the "
-            f"{book:,.2f} book){split}{blind}")
+            f"{limit_money:,.2f} floor ({limit_pct:g}% of "
+            f"{_book_words(book, book_source)}){split}{blind}")
         return state
 
     state["reason"] = (
@@ -768,11 +814,12 @@ def exposure_state(user, *, portfolio=None, adding: float = 0.0,
     """
     portfolio = portfolio if portfolio is not None else limits_book()
     limit_pct = _limit_pct(portfolio, "max_total_exposure_pct")
-    book = gate_book_value(user, portfolio)
+    book, book_source = venue_book_value(user, portfolio, venue)
     adding = abs(float(adding or 0.0))
     state = {"ok": True, "limit_pct": limit_pct, "book_value": book,
              "cap_money": None, "committed": None, "headroom": None,
-             "n_open": 0, "adding": round(adding, 2), "reason": ""}
+             "n_open": 0, "adding": round(adding, 2), "reason": "",
+             "book_source": book_source}
 
     if limit_pct is None:
         state["reason"] = "no total-exposure limit set on the book"
@@ -835,13 +882,13 @@ def exposure_state(user, *, portfolio=None, adding: float = 0.0,
                 f"this position would take total exposure past its ceiling: "
                 f"{open_book['n']} open position(s) tie up "
                 f"{open_book['total']:,.2f} of a {cap:,.2f} ceiling "
-                f"({limit_pct:g}% of the {book:,.2f} book) and this one adds "
+                f"({limit_pct:g}% of {_book_words(book, book_source)}) and this one adds "
                 f"{adding:,.2f}{split}")
         else:
             state["reason"] = (
                 f"total exposure limit reached: {open_book['n']} open position(s) "
                 f"tie up {open_book['total']:,.2f} against a {cap:,.2f} ceiling "
-                f"({limit_pct:g}% of the {book:,.2f} book){split}")
+                f"({limit_pct:g}% of {_book_words(book, book_source)}){split}")
         # A halt whose cause the operator cannot see is a halt they cannot
         # clear. Nothing on this platform routinely closes the legacy book,
         # so if its rows are what filled the ceiling, that is the single

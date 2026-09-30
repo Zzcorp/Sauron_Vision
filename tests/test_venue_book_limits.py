@@ -259,3 +259,84 @@ class ThePaperStageEntryTests(_Base):
         self.assertLess(src.index("if paper:"), at)
         self.assertIn("return self._skip(symbol, skips.GATE_BLOCKED, _why)",
                       src[at:at + 200])
+
+
+class TheLiveLimitsReadTheRealAccountTests(_Base):
+    """The live box, 2026-09-30: the /setup/ book read 9,420 EUR, the
+    eToro account 2,249.65 USD, so "3% max daily loss" stopped real money
+    at ~282 — 12.5% of it. A LIVE judgement now reads the account's last
+    equity reading; paper keeps the /setup/ book, whose research pools are
+    100,000 each and would all be refused against the account."""
+
+    def _account(self, equity="2249.65", age_minutes=5):
+        from datetime import timedelta as _td
+
+        from bot_program.models import EtoroAccount
+        acct = EtoroAccount.objects.create(
+            user=self.user, is_primary_for_forex=True,
+            is_primary_for_crypto=True, last_equity=Decimal(equity),
+            last_equity_currency="USD",
+            last_equity_at=timezone.now() - _td(minutes=age_minutes))
+        acct.set_credentials("the-api-key", "the-user-key")
+        acct.save()
+        return acct
+
+    def test_a_live_judgement_reads_the_account(self):
+        from portfolio.risk_gate import limits_book, venue_book_value
+        _book(value="9420")
+        self._account()
+        self.assertEqual(venue_book_value(self.user, limits_book(), "live"),
+                         (2249.65, "the broker account"))
+
+    def test_paper_and_unnamed_keep_the_setup_book(self):
+        from portfolio.risk_gate import limits_book, venue_book_value
+        _book(value="9420")
+        self._account()
+        for venue in ("paper", ""):
+            value, source = venue_book_value(self.user, limits_book(), venue)
+            self.assertEqual(value, 9420.0, venue)
+            self.assertEqual(source, "the /setup/ book", venue)
+
+    def test_a_stale_or_missing_reading_falls_back_and_says_so(self):
+        from portfolio.risk_gate import limits_book, venue_book_value
+        _book(value="9420")
+        value, source = venue_book_value(self.user, limits_book(), "live")
+        self.assertEqual(value, 9420.0)
+        self.assertIn("no fresh broker reading", source)
+        self._account(age_minutes=3 * 60)
+        value, source = venue_book_value(self.user, limits_book(), "live")
+        self.assertEqual(value, 9420.0)
+        self.assertIn("no fresh broker reading", source)
+
+    def test_the_live_daily_floor_is_a_share_of_real_money(self):
+        """8% of 2,249.65 is 179.97: the operator's chosen brake."""
+        from portfolio.risk_gate import daily_loss_state
+        _book(value="9420", daily_loss_pct=8.0)
+        self._account()
+        live = daily_loss_state(self.user, venue="live")
+        self.assertAlmostEqual(live["limit_money"], -179.97, places=2)
+        self.assertEqual(live["book_source"], "the broker account")
+        paper = daily_loss_state(self.user, venue="paper")
+        self.assertAlmostEqual(paper["limit_money"], -753.6, places=2)
+
+    def test_a_live_loss_past_the_floor_refuses_and_names_the_account(self):
+        from portfolio.risk_gate import daily_loss_state
+        _book(value="9420", daily_loss_pct=8.0)
+        self._account()
+        _closed(self.live_cfg, -200, paper=False)
+        state = daily_loss_state(self.user, venue="live")
+        self.assertFalse(state["ok"])
+        self.assertIn("2,249.65, the broker account", state["reason"])
+        # The same 200 of real money passes against the 9,420 book: the
+        # unnamed judgement (the cards) keeps the book, as before.
+        self.assertTrue(daily_loss_state(self.user)["ok"])
+
+    def test_the_live_exposure_ceiling_is_the_account(self):
+        from portfolio.risk_gate import exposure_state
+        _book(value="9420", exposure_pct=100)
+        self._account()
+        state = exposure_state(self.user, venue="live")
+        self.assertAlmostEqual(state["cap_money"], 2249.65, places=2)
+        self.assertEqual(state["book_source"], "the broker account")
+        paper = exposure_state(self.user, venue="paper")
+        self.assertAlmostEqual(paper["cap_money"], 9420.0, places=2)
