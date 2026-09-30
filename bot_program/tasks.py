@@ -1,6 +1,7 @@
 import logging
 
 from celery import shared_task
+from core.dead_man_switch import heartbeat
 from core.task_gate import guarded_task
 
 from .alarm import alarm_task
@@ -29,11 +30,16 @@ def run_scenario_task(scenario_id: int):
 # ─── Phase 13: multi-asset bot framework ─────────────────────────────────
 
 @shared_task
+@heartbeat
 @guarded_task("pipeline_asset_bots")
 def tick_all_asset_bots():
     """Phase-13: walk every enabled AssetBotConfig and run one tick.
 
     Per-bot exceptions are swallowed (already done inside run_asset_bot_tick).
+
+    The dead man's switch (2026-09-30, core/dead_man_switch.py) pings an
+    outside watcher after every pass, OUTSIDE the gate: a paused platform
+    still pings, a dead box does not, and the watcher raises the alarm.
     """
     from .asset_engine.runner import run_all_asset_bots
     return run_all_asset_bots()

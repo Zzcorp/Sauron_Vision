@@ -3206,8 +3206,15 @@ class AssetBot(ABC):
         # ones underneath. `halt_on_drawdown` governs this config's own
         # drawdown limit and deliberately does not reach here — turning off one
         # bot's drawdown halt is not consent to trade through the book's.
+        # ON THIS CONFIG'S OWN VENUE (2026-09-30): a live config is judged on
+        # the live book, a paper config on the paper book. Unnamed, the
+        # ceiling read whichever venue binds, and four PAPER positions over
+        # it refused every live bot with nothing live open. A live config's
+        # paper-stage entry meets the paper book in execute_entry, where its
+        # venue is known (_paper_book_refusal).
         from portfolio.risk_gate import preflight
-        book = preflight(self.user)
+        book = preflight(self.user, venue=("paper" if self.cfg.mode == "paper"
+                                           else "live"))
         if not book["ok"]:
             return (False, book["reason"])
         # preflight FAILS OPEN by design - halting a fleet on a
@@ -3983,6 +3990,12 @@ class AssetBot(ABC):
             if _shut:
                 return self._skip(symbol, skips.MARKET_SHUT,
                                   f"{_shut} — no paper fill")
+            if not paper_now:
+                # A LIVE config's paper-stage entry: can_open_new judged the
+                # live book; this entry is booked on the paper one.
+                _why = self._paper_book_refusal()
+                if _why:
+                    return self._skip(symbol, skips.GATE_BLOCKED, _why)
         order_id = ""
         entry_meta = dict(level_meta)
         entry_meta["cost_check"] = cost_reason
@@ -4742,6 +4755,18 @@ class AssetBot(ABC):
         if pos_id:
             stamps["broker_position_id"] = str(pos_id)
         return stamps
+
+    def _paper_book_refusal(self) -> str:
+        """The paper book's limits for a LIVE config's paper-stage entry, as
+        words when they refuse it, else "".
+
+        can_open_new judges a live config on the live book (2026-09-30); an
+        entry its promotion stage sends to the paper venue is judged here on
+        the paper book, so the paper ceiling still bounds the simulation and
+        never the real money. Fails open like preflight itself."""
+        from portfolio.risk_gate import preflight
+        book = preflight(self.user, venue="paper")
+        return "" if book["ok"] else book["reason"]
 
     def _venue_fee_refusal(self, client, symbol: str, *, qty: float,
                            price: float, target: float, stop: float,
