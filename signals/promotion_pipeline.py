@@ -329,7 +329,8 @@ class PipelineError(Exception):
 
 
 @transaction.atomic
-def _transition(rule_name: str, target_stage: str, *, user, reason: str) -> "PromotionEvent":
+def _transition(rule_name: str, target_stage: str, *, user, reason: str,
+                notes: str = "") -> "PromotionEvent":
     from signals.models import RuleControl, PromotionEvent
     if target_stage not in STAGE_ORDER:
         raise PipelineError(f"Unknown stage: {target_stage}")
@@ -364,10 +365,12 @@ def _transition(rule_name: str, target_stage: str, *, user, reason: str) -> "Pro
         reason=reason,
         expectancy_at_transition=expectancy,
         n_at_transition=s["n"],
+        notes=notes,
         triggered_by=user if (user is not None and getattr(user, "is_authenticated", False)) else None,
     )
-    logger.info("[promotion] %s: %s → %s (reason=%s)",
-                rule_name, from_stage, target_stage, reason)
+    logger.info("[promotion] %s: %s → %s (reason=%s%s)",
+                rule_name, from_stage, target_stage, reason,
+                f", {notes}" if notes else "")
     return event
 
 
@@ -436,8 +439,13 @@ def auto_evaluate_all_rules() -> dict:
                     blocked.append({"rule_name": ctrl.rule_name,
                                      "target": target, "reason": why})
                     continue
+                # The reason is one of PromotionEvent.REASON_CHOICES (a
+                # varchar(24) on Postgres): "auto_promote (<why>)" was
+                # refused there and rolled every automatic promotion back,
+                # and it skipped the baseline snapshot _transition takes on
+                # "auto_promote". The evidence gate's sentence is the note.
                 _transition(ctrl.rule_name, target, user=None,
-                            reason=f"auto_promote ({why})")
+                            reason="auto_promote", notes=why or "")
                 promoted.append(ctrl.rule_name)
         except Exception as e:
             logger.warning("[promotion] auto-evaluation failed for %s: %s",
