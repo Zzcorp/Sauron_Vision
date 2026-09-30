@@ -330,7 +330,7 @@ def sync_broker_account() -> dict:
 
     from django.utils import timezone
 
-    from .capital_truth import broker_backed
+    from .capital_truth import broker_backed, ibkr_in_use
     from .engine.ibkr_client import is_ibkr_available
     from .engine.ibkr_sessions import acquire_trader
     from .models import IBKRAccount
@@ -340,7 +340,11 @@ def sync_broker_account() -> dict:
         # No keyed account, nothing to read: the missing library costs
         # nothing, so the pass is idle, not "not configured" (2026-09-26).
         # A keyed account without the library is still the warning.
-        if not IBKRAccount.objects.exclude(account_id_enc="").exists():
+        # A keyed row the operator has retired (capital_truth.ibkr_in_use:
+        # not the book, no class, no live position) is not an account to
+        # read either (2026-09-30).
+        if not any(ibkr_in_use(a) for a in
+                   IBKRAccount.objects.exclude(account_id_enc="")):
             return {**out, "idle": "no keyed IBKR account"}
         return {**out, "skipped": "ib_insync not installed"}
 
@@ -355,6 +359,16 @@ def sync_broker_account() -> dict:
     for acct in accounts:
         user = acct.user
         if broker_backed(user) is None:
+            continue
+        # RETIRED, NOT UNREACHABLE (2026-09-30). The operator left IBKR:
+        # the book is eToro and nothing routes here, yet this row was
+        # attempted every 15 minutes, missed (the Gateway is down), graded
+        # the shared sync row a warning and, from the third miss, told the
+        # Eye and the alarm chat "broker unreachable" for ever. A row that
+        # is not in use is not read, and its miss count is cleared so a
+        # standing alert ends with it. Ticking a flag brings it back.
+        if not ibkr_in_use(acct):
+            _clear_broker_miss(acct)
             continue
         out["attempted"] += 1
         client = None

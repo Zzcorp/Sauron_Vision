@@ -673,13 +673,17 @@ def read_brokers(now) -> list:
     then frozen, not current."""
     from django.core.cache import cache
 
+    from bot_program.capital_truth import ibkr_in_use
     from bot_program.models import EtoroAccount, IBKRAccount, SaxoAccount
     from bot_program.tasks import BROKER_MISS_ALERT_AFTER, _broker_kind
     from core.platform_control import is_component_enabled
     if not is_component_enabled("broker_account_sync"):
         return []
+    # An IBKR row the operator retired (capital_truth.ibkr_in_use) is not
+    # an account that stopped answering (2026-09-30): the sync no longer
+    # reads it, and a miss count left in the cache must not ring here.
     rows = ([a for a in IBKRAccount.objects.exclude(account_id_enc="")
-             .order_by("pk") if a.env != "paper"]
+             .order_by("pk") if a.env != "paper" and ibkr_in_use(a)]
             + list(SaxoAccount.objects.exclude(app_key_enc="")
                    .filter(sim=False).order_by("pk"))
             + list(EtoroAccount.objects.exclude(api_key_enc="")

@@ -161,6 +161,7 @@ def brokers(user) -> list:
     from bot_program.capital_truth import broker_backed
 
     from bot_program.capital_truth import broker_env
+    from bot_program.capital_truth import ibkr_in_use as _ibkr_in_use
 
     book = broker_backed(user)
     out = []
@@ -194,6 +195,9 @@ def brokers(user) -> list:
             "is_book": book is not None and acct.pk == book.pk
             and type(acct) is type(book),
             "last_sync": getattr(acct, "last_sync", None),
+            # An IBKR row the operator retired (capital_truth.ibkr_in_use,
+            # 2026-09-30): no longer read, so its aging reading is not news.
+            "retired": kind == "ibkr" and not _ibkr_in_use(acct),
         })
     return out
 
@@ -383,6 +387,9 @@ def vision(user) -> dict:
             notes.append(f"{r['name']}: keyed, and its equity has NEVER been "
                          f"read — an em dash, not a zero. "
                          f"{r['session']}.")
+        elif r["equity_stale"] and r.get("retired"):
+            # Retired, not failing: the sync stopped reading it on purpose.
+            continue
         elif r["equity_stale"]:
             _age_min = r["equity"]["age_seconds"] // 60
             _live = _attributed.get(r["kind"], 0)

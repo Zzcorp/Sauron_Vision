@@ -598,7 +598,15 @@ class Command(BaseCommand):
                   f"/brokers/. The refresh token lives 40 minutes and "
                   f"rotates, so a box down longer than that always needs one")
 
-            if acct is not None:
+            from bot_program.capital_truth import ibkr_in_use
+            if acct is not None and not ibkr_in_use(acct):
+                # RETIRED (2026-09-30): the operator left IBKR. Not the book,
+                # no class, no live position — not read, not checked, one
+                # line. Ticking a flag on /brokers/ brings the block back.
+                w("   ibkr   retired — not the book, routes nothing, holds "
+                  "no live row; not read (tick a class on /brokers/ to "
+                  "bring it back)")
+            elif acct is not None:
                 w(f"   label        {acct.label}")
                 w(f"   env          {acct.env_label}")
                 w(f"   socket       {acct.host}:{acct.port}  "
