@@ -194,6 +194,30 @@ def manual_config_for(user, asset_class):
     return cfg
 
 
+def lane_single_position_pct(cfg):
+    """A manual lane's own MAX SINGLE POSITION, or None for the book's.
+
+    extras['max_single_position_pct'] on the manual config, a number in
+    (0, 100]. The operator, 2026-09-30: "I want bots on and manual too".
+    A manual forex ticket goes at 1x (the lane refuses leverage) and eToro
+    refuses one under 1,000 USD, so against a 1,100 pool the book's 20%
+    ceiling (220) refuses every ticket that could fill. Raising the book's
+    percentage would raise it for every bot as well; this raises it for
+    the one lane a present human trades with a PIN. The account's pledge
+    cap (half the account) and the daily-loss floor still apply to it.
+    Anything else in the key (text, zero, over 100) is ignored: the book's
+    percentage stands, never a guess.
+    """
+    raw = (getattr(cfg, "extras", None) or {}).get("max_single_position_pct")
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if 0 < value <= 100 else None
+
+
 def manual_config_if_any(user, asset_class):
     """The per-user manual config for this class, or None — the READ side
     of manual_config_for, for a page that only asks (2026-09-28).
@@ -336,7 +360,8 @@ def _concentration_guard(user, inst, side, cls, cfg, close_ids):
         notional=float(notional), capital_base=float(cfg.capital or 0),
         base_label="manual pool",
         leverage=AssetBot._leverage_hint_of(cfg.extras),
-        carrier=broker_name_for_symbol(user, inst.symbol, cfg))
+        carrier=broker_name_for_symbol(user, inst.symbol, cfg),
+        lane_limit_pct=lane_single_position_pct(cfg))
     if state["ok"]:
         return None
 
@@ -987,6 +1012,8 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
                                    notional=notional,
                                    capital_base=float(capital or 0),
                                    base_label="manual pool",
+                                   lane_limit_pct=lane_single_position_pct(
+                                       cfg),
                                    **ticket_stamp)
     # The concentration ceiling, reported here and enforced in `_execute`.
     # The preview must never raise the operator's own screen out from under
@@ -996,6 +1023,7 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
         user, symbol=inst.symbol, side=side, asset_class=cls,
         notional=notional, capital_base=float(capital or 0),
         base_label="manual pool",
+        lane_limit_pct=lane_single_position_pct(cfg),
         # the ticket's stamp (2026-09-26): the multiplier this config
         # would send, on the carrier that would carry it
         **ticket_stamp)
@@ -1677,6 +1705,8 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                                        notional=notional,
                                        capital_base=float(cfg.capital or 0),
                                        base_label="manual pool",
+                                       lane_limit_pct=(
+                                           lane_single_position_pct(cfg)),
                                        **ticket_stamp)
         if not single["ok"]:
             return {"error": single["reason"], "closed": closed}

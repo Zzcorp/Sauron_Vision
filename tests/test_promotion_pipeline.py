@@ -285,6 +285,38 @@ class AutoEvaluationTests(TestCase):
         self.assertEqual(result1["n_promoted"] + result1["n_demoted"], 0)
         self.assertEqual(result2["n_promoted"] + result2["n_demoted"], 0)
 
+    def test_an_auto_promotion_is_recorded_under_a_declared_reason(self):
+        """2026-09-30: the pass wrote reason="auto_promote (<why>)", at
+        least 45 characters, into PromotionEvent.reason, a varchar(24) on
+        Postgres: every automatic promotion was refused there and rolled
+        back (SQLite does not enforce the length, so the test above stayed
+        green). The reason is the declared choice; the gate's sentence is
+        the note."""
+        from signals.models import PromotionEvent
+        from signals.promotion_pipeline import auto_evaluate_all_rules
+        _set_stage("rT", "research")
+        _seed_signals("rT", [2.0] * 25 + [-1.0] * 8)
+        result = auto_evaluate_all_rules()
+        self.assertIn("rT", result["promoted"])
+        ev = PromotionEvent.objects.get(rule_name="rT")
+        self.assertEqual(ev.reason, "auto_promote")
+        self.assertIn(ev.reason, dict(PromotionEvent.REASON_CHOICES))
+        ev.full_clean()  # max_length and choices, as Postgres would judge
+        self.assertEqual(ev.notes, "no evidence required below live")
+
+    def test_an_auto_promotion_sets_the_new_stage_baseline(self):
+        """The exact "auto_promote" is what makes _transition snapshot the
+        baseline a later demotion is measured against; the long reason
+        skipped it."""
+        from signals.models import RuleControl
+        from signals.promotion_pipeline import auto_evaluate_all_rules
+        _set_stage("rU", "research", baseline=-9.0)
+        _seed_signals("rU", [2.0] * 25 + [-1.0] * 8)
+        auto_evaluate_all_rules()
+        ctrl = RuleControl.objects.get(rule_name="rU")
+        self.assertEqual(ctrl.promotion_stage, "paper")
+        self.assertGreater(ctrl.stage_baseline_expectancy, 0)
+
     def test_auto_eval_skips_admin_paused_rules(self):
         from signals.models import RuleControl
         from signals.promotion_pipeline import auto_evaluate_all_rules
