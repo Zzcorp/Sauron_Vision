@@ -350,6 +350,17 @@ class TheLiveFillIsTheBrokersTests(TestCase):
         self.assertEqual(float(trade.entry_price), 60010.0)
 
 
+def _order_posts(fake):
+    """Every POST on the fake wire EXCEPT the eligibility read. Since
+    2026-10-01 the manual preview reads the broker's minimum
+    (manual_trade._venue_min_qty) from the same cached eligibility row
+    the gate's step 2 reads — a POST to /trading/info/.../eligibility,
+    an information read, never an order. What these tests pin is that
+    nothing ELSE leaves."""
+    return [c for c in fake.calls
+            if c[0] == "POST" and "/trading/info/" not in str(c[1])]
+
+
 class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
     """The TAKE TRADE lane enters the bots' own eToro gate
     (AssetBot._etoro_entry_refusal, C0 2026-09-24) on the REAL EtoroTrader
@@ -421,7 +432,7 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         self.assertTrue(out["error"].endswith("nothing was sent"),
                         out["error"])
         spy.assert_not_called()
-        self.assertEqual([c for c in fake.calls if c[0] == "POST"], [])
+        self.assertEqual(_order_posts(fake), [])
         self.assertFalse(AssetBotTrade.objects.filter(config=self.cfg).exists())
 
     def test_a_short_needs_its_own_token(self):
@@ -441,7 +452,7 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         self.assertIn("BTCUSD (crypto, SELL)", out["error"])
         self.assertIn("['short']", out["error"])
         spy.assert_not_called()
-        self.assertEqual([c for c in fake.calls if c[0] == "POST"], [])
+        self.assertEqual(_order_posts(fake), [])
 
     def test_the_venues_own_row_refuses_the_lane_too(self):
         """"crypto" stated proven and the eligibility row answering

@@ -558,6 +558,45 @@ def _floor_to_step(qty: float, step: float) -> float:
     return math.floor(max(qty, 0.0) / step + 1e-9) * step
 
 
+def _ceil_to_step(qty: float, step: float) -> float:
+    """Round UP to the step. A minimum that rounds down is not a minimum."""
+    if step <= 0:
+        return max(qty, 0.0)
+    return math.ceil(max(qty, 0.0) / step - 1e-9) * step
+
+
+def _venue_min_qty(client, symbol: str, price: float, vpu: float,
+                   step: float) -> tuple:
+    """(units, why): the venue's OWN minimum for this order, rounded UP to
+    this platform's step, or (None, why) when the venue states none.
+
+    The operator, 2026-10-01: a manual forex or commodity ticket at 1x was
+    risk-sized at ~180 USD and sent to eToro, which refuses anything under
+    its minPositionExposure (1,000 USD on forex, indices and commodities,
+    10 on stocks, ETFs and crypto; measured 2026-09-23) — "the broker
+    refused the order", every time, unless the size was typed by hand.
+    The bot lane already asks this (AssetBot._venue_size_floor, the same
+    cached eligibility read); this lane now asks it too. Unmeasured is
+    None, never 0: an unknown minimum refuses nothing here, as on the bots.
+    """
+    from bot_program.asset_engine.base import AssetBot
+    try:
+        floor, why = AssetBot._venue_size_floor(
+            client, symbol, price=price, min_notional=0.0,
+            value_per_unit=vpu)
+    except Exception as e:  # noqa: BLE001 — unread is an answer, said
+        return None, f"venue minimum unreadable ({type(e).__name__}: {e})"
+    if floor is None:
+        return None, why
+    try:
+        floor = float(floor)
+    except (TypeError, ValueError):
+        return None, f"venue minimum {floor!r} is not a number"
+    if floor <= 0:
+        return None, f"venue minimum {floor:g} is not a measurement"
+    return _ceil_to_step(floor, step), ""
+
+
 def judge_qty(cfg, *, asset_class, qty, entry, stop, value_per_unit,
               available, leverage=None, carrier: str = ""):
     """Why this size may not be sent, or None.
@@ -981,6 +1020,43 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
         return {"error": "Sized to zero — the risk budget does not cover "
                          "one tradeable unit at this stop distance"}
 
+    # THE VENUE'S OWN MINIMUM (2026-10-01, _venue_min_qty). On a live
+    # ticket the default size is raised to it when the risk cap allows —
+    # a human confirms this ticket with a PIN and sees why it is larger —
+    # and refused here when it does not: an order eToro will refuse is
+    # not a size to offer. The bots refuse rather than resize (nobody is
+    # there to agree); this lane says it and asks.
+    venue_min_qty, venue_min_note = None, ""
+    if live:
+        venue_min_qty, _vwhy = _venue_min_qty(
+            _client, inst.symbol, float(price), vpu, _qty_step(bot, price))
+        if venue_min_qty is not None and qty < venue_min_qty - 1e-9:
+            from bot_program.asset_engine.sizing import (
+                MAX_RISK_FRACTION as _MAX_RISK)
+            _dist = abs(float(price) - float(sizing["stop"])) * vpu
+            _risk = round(venue_min_qty * _dist, 6)
+            _cap = float(cfg.capital) * _MAX_RISK
+            _money = venue_min_qty * float(price) * vpu
+            if _risk > _cap + 1e-9:
+                return {"error": (
+                    f"The broker's minimum for {inst.symbol} is "
+                    f"{venue_min_qty:g} units (about {_money:,.0f} "
+                    f"{cfg.base_currency}); at this stop that risks "
+                    f"{_risk:,.2f}, past the {_cap:,.2f} a ticket may risk "
+                    f"from this {float(cfg.capital):,.2f} pool — widen the "
+                    f"pool or tighten the stop. Nothing was sent")}
+            venue_min_note = (
+                f"Raised from {qty:g} to {venue_min_qty:g} units: the "
+                f"broker refuses a {inst.symbol} order under "
+                f"{venue_min_qty:g} (about {_money:,.0f} "
+                f"{cfg.base_currency}). It risks {_risk:,.2f} at the stop "
+                f"instead of {float(sizing['risk_dollars']):,.2f}.")
+            qty = venue_min_qty
+            sizing = {**sizing, "qty": qty, "risk_dollars": _risk,
+                      "notional_fraction": (
+                          round(_money / float(cfg.capital), 6)
+                          if float(cfg.capital) else 0.0)}
+
     capital = float(cfg.capital)
     notional = round(sizing["notional_fraction"] * capital, 2)
     # THE TICKET'S STAMP (2026-09-26), one pair for every number below —
@@ -1115,6 +1191,14 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
     if capital_use_per_unit > 0 and single["cap_money"] is not None:
         caps.append(single["cap_money"] / capital_use_per_unit)
     max_qty = _floor_to_step(min(caps), step) if caps else 0.0
+    if venue_min_qty is not None and max_qty < venue_min_qty - 1e-9:
+        return {"error": (
+            f"The broker's minimum for {inst.symbol} is {venue_min_qty:g} "
+            f"units (about {venue_min_qty * notional_per_unit:,.0f} "
+            f"{cfg.base_currency}), and this lane can carry at most "
+            f"{max_qty:g} now (its pool, its single-position ceiling and "
+            f"the risk cap) — free some of the pool or raise its ceiling. "
+            f"Nothing was sent")}
 
     # ── What the funding choice is allowed to be ────────────────────────
     # EVERY open position in this pool, with the proposal's picks flagged —
@@ -1244,6 +1328,10 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
         "capital_use_per_unit": capital_use_per_unit,
         "pool_free": pool_free,
         "max_qty": max_qty,
+        # The broker's own minimum (None: unstated or a paper ticket) and,
+        # when the default was raised to it, the sentence that says so.
+        "venue_min_qty": venue_min_qty,
+        "venue_min_note": venue_min_note,
         "max_risk_dollars": round(capital * MAX_RISK_FRACTION, 2),
         "max_notional": max_notional,
         # The book's ceilings, so the popup can name the one that is binding
@@ -1638,12 +1726,25 @@ def _execute(user, inst, side, close_ids=None, signal=None,
 
         dist = abs(fill - stop) * vpu
         overridden = qty_override is not None
+        # The broker's minimum the preview read (_venue_min_qty): the
+        # automatic size re-derived at the fill must not slip under it.
+        vmin = preview.get("venue_min_qty")
+        floor_raised = False
         if not overridden:
             qty = bot._round_qty(preview["risk_dollars"] / dist, fill) \
                 if dist > 0 else 0
             if qty <= 0:
                 return {"error": "Sized to zero at the adjusted fill price",
                         "closed": closed}
+            if vmin and qty < float(vmin) - 1e-9:
+                qty = float(vmin)
+                floor_raised = True
+                why = judge_qty(cfg, asset_class=cls, qty=qty, entry=fill,
+                                stop=stop, value_per_unit=vpu,
+                                available=preview["available"],
+                                **ticket_stamp)
+                if why:
+                    return {"error": why, "closed": closed}
             if stop_override is not None:
                 # A hand-placed stop re-denominates the risk budget, so the
                 # size it derives is not the size the preview was judged
@@ -1669,6 +1770,13 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                 round_qty=bot._round_qty, **ticket_stamp)
             if why:
                 return {"error": why, "closed": closed}
+            if vmin and qty < float(vmin) - 1e-9:
+                return {"error": (
+                    f"The broker's minimum for {inst.symbol} is {vmin:g} "
+                    f"units (about {float(vmin) * fill * vpu:,.0f} "
+                    f"{cfg.base_currency}); this ticket is {qty:g}. Raise "
+                    f"the size to at least {vmin:g} — nothing was sent"),
+                    "closed": closed}
             logger.info("[take-trade] %s sized %s %s by hand: %s units "
                         "(automatic size was %s)", user.username, side,
                         inst.symbol, qty,
@@ -1684,7 +1792,7 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         # With nothing overridden every one of them is the preview's
         # verbatim, so an untouched trade is byte-for-byte what it was
         # before any of this existed.
-        resized = overridden or stop_override is not None
+        resized = overridden or stop_override is not None or floor_raised
         if resized:
             notional = qty * fill * vpu
             capital = float(preview["capital"])
