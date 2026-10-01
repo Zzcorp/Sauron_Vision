@@ -103,6 +103,8 @@ LIVE_MONEY_SWITCHES = (
     "fractional_units_live",        # the stock bot sends fractions to eToro
     "etoro_leverage_live",          # a typed leverage goes to eToro
     "shared_capital_live",          # every follower draws on the whole account
+    "steward",                      # benches/promotes pairs, closes positions
+    "crisis_mode",                  # the market posture binds real money
 )
 
 #: Switches a category's "all on" button never turns on (2026-09-26,
@@ -257,6 +259,15 @@ DEFAULT_COMPONENTS = [
      "category": "pipeline"},
     {"key": "share_allocator_mode_live", "name": "Share Allocator Live Mode",
      "description": "Off (default) = shadow: plans are proposed and graded, apply is refused. On = an admin can apply a plan (PIN on /shares/, --yes on the shell), writing each follower's account_share_pct and re-sizing pools via the sync. Rollback restores exactly. Caps and the governor hold in both modes.",
+     "category": "system"},
+    # THE STEWARD AND THE CRISIS MODE (2026-10-02, bot_program/steward.py,
+    # position_care.py, market_stress.py, posture.py). Both LIVE money,
+    # neither armed by "all on". Descriptions measured at 242 chars each.
+    {"key": "steward", "name": "Steward (pair lifecycle + position care)",
+     "description": "Off (default). On: every 4h a losing rule/class pair goes to paper, a proven one comes to real money on probation; every tick open positions get break-even, trailing and no-progress exits. manage.py steward shows and overrides every decision.",
+     "category": "system"},
+    {"key": "crisis_mode", "name": "Crisis Mode (market posture)",
+     "description": "Off (default). On: indices, volatility, VIX and credit set a posture every 15 min - calm, stressed, crisis, recovery - that sizes real-money entries, caps leverage, sends risk-on longs to paper in a crisis and keeps shorts and havens trading.",
      "category": "system"},
     # THE TRADE DEBATE (2026-10-01, ai_agents/agents/trade_debate.py): the
     # Executioner and the Champion argue every live bot entry before its

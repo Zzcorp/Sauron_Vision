@@ -395,6 +395,21 @@ app.conf.beat_schedule = {
         "task": "bot_program.tasks.tick_all_asset_bots",
         "schedule": 300.0,  # every 5 minutes
     },
+    # THE CRISIS MODE AND THE STEWARD (2026-10-02, bot_program/
+    # market_stress.py, steward.py): the posture every 15 min, the pair
+    # pass every 4 h, the daily report at 07:10 UTC.
+    "read-market-stress": {
+        "task": "bot_program.tasks.read_market_stress",
+        "schedule": 900.0,
+    },
+    "run-steward": {
+        "task": "bot_program.tasks.run_steward",
+        "schedule": crontab(minute=20, hour="*/4"),
+    },
+    "steward-daily-report": {
+        "task": "bot_program.tasks.steward_daily_report",
+        "schedule": crontab(hour=7, minute=10),
+    },
 
     # ── Phase 14.1 — refresh OptionContract chains (Greeks + bid/ask) for
     #              all users running an enabled options AssetBotConfig.

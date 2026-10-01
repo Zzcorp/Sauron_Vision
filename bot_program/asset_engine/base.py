@@ -1115,6 +1115,17 @@ class AssetBot(ABC):
                         self._protection_vanished(trade, client):
                     protected = False
 
+                # THE POSITION CARE (2026-10-02, bot_program/position_care):
+                # the platform's own soft stop (break-even, trail, the
+                # posture, the weekend) and the no-progress exit — for
+                # protected rows too: closing an eToro position by its id
+                # takes its stop and target with it, exactly as the time
+                # stop above does. The steward switch OFF: nothing here.
+                from bot_program.position_care import care as _care
+                if _care(self, trade, price, client):
+                    closed += 1
+                    continue
+
                 # Past here the broker owns SL/TP for protected trades
                 # (bracket or on-fill orders). Managing those here too would
                 # double-close — our market order flattens, then the broker's
@@ -3726,6 +3737,16 @@ class AssetBot(ABC):
                             symbol, stage["reason"])
                 return self._skip(symbol, skips.STAGE_BLOCKED, stage["reason"])
 
+        # ── THE STEWARD AND THE POSTURE (2026-10-02) ─────────────────────
+        # Both decide the VENUE or the SIZE of a real-money entry, never
+        # its existence: a benched pair (bot_program/steward.py) and a
+        # risk-on long in a crisis (bot_program/posture.py) go to PAPER —
+        # the evidence keeps coming, nothing is sent — and a pair on
+        # probation, a stressed market, a drawdown or a losing streak take
+        # less. Both read OFF as "nothing changes".
+        stage, _care_meta = self._steward_and_posture(symbol, decision, stage)
+        level_meta = dict(level_meta or {}, **_care_meta)
+
         # ── Size by RISK, not by notional ────────────────────────────────
         sizing = self._size_for_entry(symbol, price, sl, decision)
         qty = sizing["qty"]
@@ -3856,6 +3877,91 @@ class AssetBot(ABC):
             elite=dict(elite),
             horizon_hours=horizon,
         )
+
+    def _steward_and_posture(self, symbol, decision, stage) -> tuple:
+        """(stage, metadata) after the steward's pair verdict and the
+        market posture: `force_paper` set with the reason when the entry
+        may not use real money, `live_size_factor` multiplied when it is
+        smaller. Paper configs and stages already forced to paper pass
+        untouched. Never raises: a failed read changes nothing and says so
+        in the log."""
+        meta = {}
+        stage = dict(stage)
+        rule = getattr(decision, "rule_name", "") or ""
+        if self.cfg.mode == "paper" or stage.get("force_paper"):
+            return stage, meta
+        try:
+            from bot_program import steward as _steward
+            pol = _steward.pair_policy(rule, self.asset_class)
+            if pol["state"] != "live":
+                meta["steward"] = {"state": pol["state"],
+                                   "size": pol["size"]}
+            if pol["force_paper"]:
+                stage.update(force_paper=True, reason=pol["reason"])
+                logger.info("[%s_bot] %s: %s", self.asset_class, symbol,
+                            pol["reason"])
+                return stage, meta
+            if pol["size"] < 1.0:
+                stage["live_size_factor"] = (
+                    float(stage.get("live_size_factor", 1.0)) * pol["size"])
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] %s: steward unread (%s) — no change",
+                           self.asset_class, symbol, e)
+        try:
+            from bot_program import posture as _posture
+            if not _posture.crisis_mode_on():
+                return stage, meta
+            pz = _posture.entry_posture(
+                self.user, symbol, self._instrument_class(symbol) or
+                self.asset_class, getattr(decision, "direction", "BUY"))
+            meta["posture"] = {k: pz[k] for k in
+                               ("level", "kind", "size", "live", "why")}
+            if not pz["live"]:
+                stage.update(force_paper=True,
+                             reason=f"crisis mode: {pz['why']} — paper only")
+                logger.info("[%s_bot] %s: %s", self.asset_class, symbol,
+                            stage["reason"])
+            elif pz["size"] < 1.0:
+                stage["live_size_factor"] = (
+                    float(stage.get("live_size_factor", 1.0)) * pz["size"])
+                logger.info("[%s_bot] %s posture x%g: %s", self.asset_class,
+                            symbol, pz["size"], pz["why"])
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] %s: posture unread (%s) — no change",
+                           self.asset_class, symbol, e)
+        return stage, meta
+
+    def _posture_leverage(self, symbol, side, lev):
+        """THE POSTURE'S LEVERAGE CAP (2026-10-02, the operator's "mix
+        vraiment smart"): the multiplier an entry may carry in this market
+        (bot_program/posture.leverage_cap) — the class ceiling in calm,
+        half in stress, 1-2x for a position fighting a crisis and half the
+        ceiling for one riding it. Lowers, never raises; 1 and None pass;
+        crisis mode OFF passes. (lev, note)."""
+        if lev is None or int(lev) <= 1:
+            return lev, ""
+        try:
+            from bot_program import market_stress
+            from bot_program import posture as _posture
+            if not _posture.crisis_mode_on():
+                return lev, ""
+            icls = self._instrument_class(symbol) or self.asset_class
+            cur = market_stress.current()
+            rdays = (market_stress.recovery_days()
+                     if cur["level"] == "recovery" else 0.0)
+            kind = _posture.classify(symbol, icls, side)
+            cap = _posture.leverage_cap(
+                cur["level"], kind, ORDER_LEVERAGE_CEILING.get(icls, 1),
+                recovery_days=rdays)
+            if cap is not None and int(lev) > cap:
+                note = (f"posture {cur['level']}: {kind.replace('_', ' ')} "
+                        f"capped at {cap}x (asked {lev}x)")
+                logger.info("[%s_bot] %s %s", self.asset_class, symbol, note)
+                return cap, note
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] %s: posture leverage unread (%s)",
+                           self.asset_class, symbol, e)
+        return lev, ""
 
     def _judge_final_size(self, symbol: str, *, qty: float, price: float,
                           sl: float, decision, sizing: dict,
@@ -5231,6 +5337,13 @@ class AssetBot(ABC):
                                         adapter_key(client), pick=pick)
         if why:
             return lev, why
+        # THE POSTURE CAP (2026-10-02): judged before the instrument's own
+        # entry below, so the lowered multiplier is the one checked.
+        lev, _pnote = self._posture_leverage(symbol, side, lev)
+        if _pnote:
+            if not isinstance(getattr(self, "_posture_lev_note", None), dict):
+                self._posture_lev_note = {}
+            self._posture_lev_note[symbol] = _pnote
         eff = int(lev or 1)   # no key / typed 1 -> 1: the check runs at 1 too
         inst_why = self._instrument_leverage_check(client, symbol, side, eff,
                                                    price, stop)
