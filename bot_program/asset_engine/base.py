@@ -3292,10 +3292,15 @@ class AssetBot(ABC):
             return (False,
                     f"max {self.cfg.max_concurrent_positions} concurrent positions reached")
 
-        # 24h realized P&L vs daily-loss limit
+        # 24h realized P&L vs daily-loss limit — on THIS config's venue only
+        # (2026-10-01): research_forex_1, armed live at 18:23, was halted at
+        # 18:40 on 110.65 of PAPER losses from its morning, against 2% of a
+        # real account. A live config's day is its real closes; a paper
+        # config's, its simulated ones.
         since = timezone.now() - timedelta(hours=24)
         closed = list(AssetBotTrade.objects.filter(
-            config=self.cfg, status="CLOSED", closed_at__gte=since))
+            config=self.cfg, status="CLOSED", closed_at__gte=since,
+            paper=(self.cfg.mode == "paper")))
         # An exit reconciliation could not price carries pnl=None, and
         # summing it raised TypeError right here — in the daily-loss gate,
         # so one unpriceable close took the whole entry preflight down.

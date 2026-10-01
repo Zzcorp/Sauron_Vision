@@ -246,8 +246,12 @@ class TheLeverageHintTests(TestCase):
         self.assertIsNone(AssetBot._leverage_hint_of({}))
         manual = (Path(settings.BASE_DIR) / "bot_program"
                   / "manual_trade.py").read_text(encoding="utf-8")
+        # The live ticket's own multiplier first (2026-10-01,
+        # _ticket_leverage), the config's hint by the same rule otherwise.
         self.assertEqual(
-            manual.count("leverage_hint=AssetBot._leverage_hint_of(cfg.extras)"),
+            manual.count("leverage_hint=(ticket_l if ticket_l > 1 else\n"
+                         "                               "
+                         "AssetBot._leverage_hint_of(cfg.extras))"),
             1)
 
 

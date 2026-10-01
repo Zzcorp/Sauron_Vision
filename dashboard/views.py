@@ -4347,11 +4347,38 @@ def take_trade_preview(request, signal_id):
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     signal = get_object_or_404(Signal, pk=signal_id, is_active=True)
-    body, err = _parse_trade_body(request)
+    leverage, err = _preview_leverage(request)
     if err:
         return JsonResponse({"error": err}, status=400)
     return JsonResponse(preview_take_trade(request.user, signal,
-                                           leverage=body["leverage"]))
+                                           leverage=leverage))
+
+
+def _preview_leverage(request):
+    """(leverage, error) off a TAKE TRADE preview body (2026-10-01). The
+    body is optional here — the popup posts {} and older callers nothing —
+    so an absent or unreadable body is the platform's answer (None, the
+    highest open); only a `leverage` that is present and not a whole
+    number >= 1 is refused."""
+    import json as _json
+    try:
+        body = _json.loads(request.body.decode() or "{}")
+    except (ValueError, UnicodeDecodeError):
+        return None, None
+    if not isinstance(body, dict):
+        return None, None
+    raw = body.get("leverage")
+    if raw is None or raw == "":
+        return None, None
+    if isinstance(raw, bool):
+        return None, "leverage must be a whole number >= 1"
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return None, "leverage must be a whole number >= 1"
+    if val != val or val < 1 or val != int(val):
+        return None, "leverage must be a whole number >= 1"
+    return int(val), None
 
 
 @login_required

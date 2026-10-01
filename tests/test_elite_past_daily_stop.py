@@ -176,6 +176,17 @@ class TheOneStopTests(TestCase):
         ok, reason = bot.can_open_new()
         self.assertTrue(ok, reason)
 
+    def test_a_bots_own_floor_counts_only_its_own_venue(self):
+        """research_forex_1, armed live at 18:23, was halted at 18:40 on
+        its PAPER losses of the morning against 2% of a real account."""
+        _book(current_value=Decimal("0"), max_daily_loss_pct=3.0)
+        bot = self._bot()
+        bot.cfg.mode = "live"
+        bot.cfg.save(update_fields=["mode"])
+        _closed_trade(bot.cfg, -250)          # a paper close (the default)
+        ok, reason = bot.can_open_new()
+        self.assertNotIn("daily loss limit hit (", reason)
+
     def test_without_a_measurable_book_the_bots_own_applies(self):
         _book(current_value=Decimal("0"), max_daily_loss_pct=3.0)
         bot = self._bot()
