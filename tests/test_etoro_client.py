@@ -1390,6 +1390,24 @@ CLASS_SHORT_PROOFS = {
         "fill_404s": 1, "close_500s": 3, "cash_after_open": 331112.3,
         "cash_after_close": 332429.12,
     },
+    # MEASURED 2026-10-01 21:17 UTC, the second short sitting: EURUSD 1000
+    # SELL at 1x FILLED (the 21:01:59 one was rejected 749 inside New
+    # York's 17:00 rollover); SPX500 and NSDQ100 rejected 749 again at 1x
+    # and 2x (21:16:53-21:17:05); USDJPY never sent (/search answered 429).
+    "forex": {
+        "symbol": "EURUSD", "venue": "EURUSD", "iid": 1, "units": 1000.0,
+        "order_side": "SELL", "transaction": "sell", "side": "short",
+        "sent": (1.1573, 1.08988), "held": (1.1573, 1.08988),
+        "order": 385673393, "position": 3608631633, "close_order": 385717862,
+        "avg": 1.12453, "settlement": "CFD", "requested": 1124.53,
+        "frozen": 1124.53, "total_costs": 0.0, "margin": 1124.53,
+        "exposure": 1124.53, "spread": 0.22, "markup": 0.03, "fees": 0.0,
+        "times": ("2026-10-01T21:17:11.82Z", "2026-10-01T21:17:11.9Z",
+                  "2026-10-01T21:17:11.857Z", "2026-10-01T21:17:11.947Z",
+                  "2026-10-01T21:17:13.2111637Z"),
+        "fill_404s": 0, "close_500s": 3, "cash_after_open": 331304.59,
+        "cash_after_close": 332428.9,
+    },
 }
 
 
@@ -1826,6 +1844,28 @@ class TheMeasuredWireTests(SimpleTestCase):
         self.assertLess(target, float(r["avgPrice"]))
         self.assertEqual(lk["totalCosts"], 1.98, "the short paid its fee")
 
+    def test_proof_short_forex(self):
+        """MEASURED ON THE DEMO SEGMENT, 2026-10-01 21:17:11 UTC: EURUSD 1000
+        units SELL at 1x, stop 1.1573 ABOVE / target 1.08988 BELOW sent (the
+        last 1.12359 x 1.03 / x 0.97, five decimals). FILLED in ~80 ms —
+        order 385673393, position 3608631633, avgPrice 1.12453,
+        settlementType CFD, side "short", requestedAmount 1124.53 = the
+        whole notional at 1x, no fee (totalCosts 0.0, markup 0.03,
+        marketSpread 0.22), used margin 0.0 -> 1124.53. The legs HELD as
+        sent. CLOSED by position id (orderForClose {orderID 385717862,
+        orderType 19, statusID 1}), proven "closed" through three 500s;
+        used margin 0.0, available 332428.9. The eligibility row: LIVE short
+        CFD leverage [1, 2, 5, 10, 20, 30], floor 1000 USD, open True.
+        "forex" joins ETORO_SHORT_PROVEN in the commit that pins this."""
+        r, lk = self._class_round_trip("forex", CLASS_SHORT_PROOFS)
+        self.assertEqual((lk["transaction"], lk["asset"]["side"]),
+                         ("sell", "short"))
+        self.assertGreater(CLASS_SHORT_PROOFS["forex"]["held"][0],
+                           float(r["avgPrice"]))
+        self.assertEqual(lk["requestedAmount"],
+                         lk["positionExecutions"][0]["marginAccountCurrency"],
+                         "at 1x the whole notional is locked")
+
     def test_a_short_rejected_with_749_is_read_as_rejected_with_its_words(self):
         """MEASURED 2026-10-01 21:01:38 UTC, demo: SPX500 1 unit SELL at 1x,
         stop 7902.74 / target 7442.38 sent. The order POST was accepted
@@ -1834,7 +1874,9 @@ class TheMeasuredWireTests(SimpleTestCase):
         for instrument(27)"}, no positionExecutions, nothing locked. The
         adapter reads it REJECTED with eToro's words and no position — the
         engine books nothing. EURUSD's SELL 21 s later read the same with
-        instrument(1). "index" and "forex" stay out of
+        instrument(1) inside New York's 17:00 rollover — and filled at
+        21:17 (test_proof_short_forex). SPX500 and NSDQ100 were rejected
+        749 again at 1x and 2x at 21:17: "index" stays out of
         ETORO_SHORT_PROVEN."""
         rejected = {
             "accountId": 15153738, "gcid": 13883661, "portfolioId": 0,

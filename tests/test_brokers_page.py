@@ -1179,8 +1179,8 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
         forex (the demo EURUSD round trips), the stocks box's three tokens
         (GLDM for etf, AAPL for stock, SPX500 for index) and commodity
         (WHEAT.FUT) — so no box reads "no proof pinned — entries refused";
-        since 2026-10-01 a stock SELL is measured (the demo AAPL short) and
-        no other, so the stocks box says shorts are proven on stock only."""
+        since 2026-10-01 a stock and a forex SELL are measured (the demo
+        AAPL and EURUSD shorts), so the box says where shorts are proven."""
         form = self._form()
         for name in ("primary_crypto", "primary_forex", "primary_commodity",
                      "primary_stocks"):
@@ -1189,7 +1189,7 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
             self.assertNotIn("no proof pinned", label, name)
         self.assertEqual(form.count("no proof pinned — entries refused"), 0)
         self.assertNotIn("entries refused", self._label(form, "primary_stocks"))
-        self.assertIn("shorts proven on stock only",
+        self.assertIn("shorts proven on forex, stock only",
                       self._label(form, "primary_stocks"))
         with mock.patch(self.SHORTS, frozenset()):
             self.assertIn("no short proven",

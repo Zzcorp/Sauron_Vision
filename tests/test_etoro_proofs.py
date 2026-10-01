@@ -71,10 +71,11 @@ class TheSetAsShippedTests(SimpleTestCase):
             "commodity", "crypto", "etf", "forex", "index", "stock"}))
         self.assertNotIn("short", ETORO_PROVEN)
         from bot_program.asset_engine.base import ETORO_SHORT_PROVEN
-        self.assertEqual(ETORO_SHORT_PROVEN, frozenset({"stock"}),
-                         "the AAPL SELL filled on demo 2026-10-01 "
-                         "(test_proof_short_stock); SPX500 and EURUSD were "
-                         "rejected (749) the same minute")
+        self.assertEqual(ETORO_SHORT_PROVEN, frozenset({"forex", "stock"}),
+                         "the AAPL and EURUSD SELLs filled on demo "
+                         "2026-10-01 (test_proof_short_stock, "
+                         "test_proof_short_forex); SPX500 and NSDQ100 were "
+                         "rejected (749)")
         self.assertEqual(ETORO_PROVEN_LEVERAGE, {"forex": 5},
                          "forex is proven at 5x (test_proof_forex_at_5x); "
                          "crypto and etf at 1x: the attack mode's chooser "
@@ -211,9 +212,9 @@ class TheGateTests(SimpleTestCase):
         self.assertEqual(_gate(t), ("", ""))
         self.assertEqual(_gate(t, side="SELL"), ("", ""),
                          "a stock short is proven as shipped")
-        self.assertNotEqual(_gate(t, symbol="EURUSD", side="SELL",
-                                  icls="forex"), ("", ""),
-                            "no forex short is proven as shipped")
+        self.assertNotEqual(_gate(t, symbol="SPX500", side="SELL",
+                                  icls="index"), ("", ""),
+                            "no index short is proven as shipped")
 
     def test_the_words_fit_the_skip_record_and_start_with_the_verdict(self):
         """skips.record keeps 200 characters; the verdict and both names

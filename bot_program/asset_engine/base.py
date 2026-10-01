@@ -483,9 +483,13 @@ ETORO_PROVEN = frozenset({"commodity", "crypto", "etf", "forex", "index",
 #: position 3608630747, settlementType CFD, fees 1.98, the legs held as
 #: sent (stop above, target below), closed by position id. The same
 #: sitting's SPX500 and EURUSD SELLs were REJECTED by eToro (errorCode 749
-#: "disallowed for instrument") at 21:01 UTC, New York's 17:00 rollover:
-#: "index" and "forex" stay out until their own SELL fills.
-ETORO_SHORT_PROVEN = frozenset({"stock"})
+#: "disallowed for instrument") at 21:01 UTC, New York's 17:00 rollover.
+#: "forex" since 2026-10-01 (test_proof_short_forex): EURUSD 1000 SELL at
+#: 1x filled at 21:17 UTC, order 385673393, position 3608631633, CFD, no
+#: fee, the legs held as sent, closed by position id. SPX500 and NSDQ100
+#: were rejected 749 again at 1x and 2x at 21:17: "index" stays out until
+#: its own SELL fills.
+ETORO_SHORT_PROVEN = frozenset({"forex", "stock"})
 
 
 def missing_proofs(icls, side) -> list:
