@@ -4277,49 +4277,8 @@ class AssetBot(ABC):
                 if _why:
                     return self._skip(symbol, skips.GATE_BLOCKED, _why)
 
-        # THE TRADE DEBATE (2026-10-01, ai_agents/agents/trade_debate.py):
-        # the Executioner argues why this real-money entry fails, the
-        # Champion why it works. Recorded on the row from the first trade;
-        # it BINDS only once DEBATE_SHADOW_N debated live trades are graded
-        # — then the Executioner may cut (never below DEBATE_MIN_SCALE) or
-        # veto, and an elite entry past the day's loss limit needs the
-        # Champion to win. A debate that could not run changes nothing and
-        # keeps the elite door shut. Paper entries are never debated.
-        debate = None
-        if not paper:
-            from ai_agents.agents.trade_debate import debate_candidate
-            debate = debate_candidate(self, cand, qty)
-            if debate.get("binding"):
-                ex = debate.get("executioner") or {}
-                if debate.get("veto"):
-                    return self._skip(
-                        symbol, skips.GATE_BLOCKED,
-                        f"the Executioner vetoed it "
-                        f"({float(ex.get('conviction') or 0):.2f}): "
-                        f"{ex.get('killer') or 'no reason given'}")
-                _scale = float(debate.get("scale") or 1.0)
-                if _scale < 1.0:
-                    qty = self._round_qty(qty * _scale, price, fractional=_fr)
-                    if qty <= 0:
-                        return self._skip(
-                            symbol, skips.SIZED_TO_ZERO,
-                            f"the Executioner cut it to {_scale:g}x, below "
-                            f"one tradeable unit")
-                if (isinstance(_elite, dict) and _elite.get("elite")
-                        and not debate.get("champion_wins")):
-                    return self._skip(
-                        symbol, skips.GATE_BLOCKED,
-                        "past the daily loss limit, an elite entry needs "
-                        "the Champion to win the debate"
-                        + (f" ({debate.get('why')})" if debate.get("why")
-                           else ""))
         order_id = ""
         entry_meta = dict(level_meta)
-        if debate is not None:
-            entry_meta["debate"] = {
-                k: debate.get(k) for k in (
-                    "ran", "binding", "graded", "why", "executioner",
-                    "champion", "champion_wins")}
         entry_meta["cost_check"] = cost_reason
         # WHAT WAS CHARGED AND WHO MEASURED IT, on every entry and not only
         # the paper ones — `paper_fill_price`'s docstring gives the reason
@@ -4583,6 +4542,58 @@ class AssetBot(ABC):
                 return self._skip(symbol, skips.GATE_BLOCKED,
                                   "config was disarmed mid-tick — refusing "
                                   "to submit")
+            # THE TRADE DEBATE (2026-10-01; moved here 2026-10-02, after
+            # every deterministic refusal, so only an order about to be SENT
+            # is argued and billed): the Executioner argues why this
+            # real-money entry fails, the Champion why it works
+            # (ai_agents/agents/trade_debate.py). Recorded on the row while
+            # the switch is on; BINDING once DEBATE_SHADOW_N debated live
+            # trades are graded — then the Executioner may cut (never below
+            # DEBATE_MIN_SCALE; a cut under the venue floor sends nothing)
+            # or veto, an elite entry past the day's loss limit needs the
+            # Champion to win, and a binding refusal is held
+            # DEBATE_HOLD_HOURS (no re-roll every tick). A debate that could
+            # not run changes nothing and keeps the elite door shut.
+            from ai_agents.agents.trade_debate import (debate_candidate,
+                                                       remember_refusal)
+            debate = debate_candidate(self, cand, qty)
+            if debate.get("on"):
+                entry_meta["debate"] = {
+                    k: debate.get(k) for k in (
+                        "ran", "binding", "graded", "why", "executioner",
+                        "champion", "champion_wins")}
+            if debate.get("held"):
+                return self._skip(symbol, skips.GATE_BLOCKED,
+                                  f"the debate refused it: {debate['why']}")
+            if debate.get("binding"):
+                ex = debate.get("executioner") or {}
+                if debate.get("veto"):
+                    _veto = (f"the Executioner vetoed it "
+                             f"({float(ex.get('conviction') or 0):.2f}): "
+                             f"{ex.get('killer') or 'no reason given'}")
+                    remember_refusal(self, cand, _veto)
+                    return self._skip(symbol, skips.GATE_BLOCKED, _veto)
+                if (isinstance(_elite, dict) and _elite.get("elite")
+                        and not debate.get("champion_wins")):
+                    _no = ("past the daily loss limit, an elite entry needs "
+                           "the Champion to win the debate"
+                           + (f" ({debate.get('why')})" if debate.get("why")
+                              else ""))
+                    if debate.get("ran"):
+                        remember_refusal(self, cand, _no)
+                    return self._skip(symbol, skips.GATE_BLOCKED, _no)
+                _scale = float(debate.get("scale") or 1.0)
+                if _scale < 1.0:
+                    qty = self._round_qty(qty * _scale, price, fractional=_fr)
+                    if qty <= 0 or (_floor is not None
+                                    and float(qty) < _floor - 1e-9):
+                        return self._skip(
+                            symbol, skips.SIZED_TO_ZERO,
+                            f"the Executioner cut it to {_scale:g}x: "
+                            f"{float(qty):g} units, under "
+                            + (f"the venue minimum {_floor:g}"
+                               if _floor is not None else "one unit")
+                            + " — nothing sent")
             try:
                 # The LAST read before real units move. can_open_new ran
                 # before this symbol's scan; a disarm landing between then

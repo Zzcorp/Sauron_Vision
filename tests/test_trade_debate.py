@@ -26,7 +26,7 @@ def _switch(on=True):
     from core.platform_control import PlatformComponent
     PlatformComponent.objects.update_or_create(
         key="trade_debate", defaults={"name": "Trade Debate",
-                                      "category": "pipeline",
+                                      "category": "system",
                                       "is_enabled": on})
 
 
@@ -73,6 +73,17 @@ class TheParsersTests(SimpleTestCase):
             self._ex().parse_response("no json here")
         with self.assertRaises(ValueError):
             self._ch().parse_response('{"verdict": "love it"}')
+
+    def test_prose_braces_drafts_and_percent_are_read(self):
+        ex = self._ex()
+        out = ex.parse_response(
+            'Thinking: the {regime} matters. Draft {"verdict": "pass"} -> '
+            'final: {"verdict": " Veto ", "conviction": 0.8} note {x}')
+        self.assertEqual(out["verdict"], "veto", "the LAST verdict object")
+        out = ex.parse_response('{"verdict": "cut", "size_scale": "50%"}')
+        self.assertEqual(out["size_scale"], 0.5)
+        self.assertEqual(out["conviction"], 1.0,
+                         "a missing prosecutor conviction reads full")
 
     def test_the_champion_is_read_and_conviction_clamped(self):
         out = self._ch().parse_response(
@@ -158,12 +169,16 @@ class TheDebateTests(TestCase):
                 side="BUY", qty=Decimal("1"), entry_price=Decimal("100"),
                 status="CLOSED", paper=False, pnl=Decimal("1"),
                 metadata={"debate": {"ran": True}})
-        # a paper row and an open row do not count
-        AssetBotTrade.objects.create(
-            config=self.bot.cfg, asset_class="crypto", symbol="BTCUSD",
-            side="BUY", qty=Decimal("1"), entry_price=Decimal("100"),
-            status="CLOSED", paper=True, pnl=Decimal("1"),
-            metadata={"debate": {"ran": True}})
+        # a paper row, an open row and a debate that did not run do not
+        # count: none of them is shadow evidence
+        for status, paper, ran in (("CLOSED", True, True),
+                                   ("OPEN", False, True),
+                                   ("CLOSED", False, False)):
+            AssetBotTrade.objects.create(
+                config=self.bot.cfg, asset_class="crypto", symbol="BTCUSD",
+                side="BUY", qty=Decimal("1"), entry_price=Decimal("100"),
+                status=status, paper=paper, pnl=Decimal("1"),
+                metadata={"debate": {"ran": ran}})
         out = self._debate(_ex("cut", 0.5, 0.5), _ch("back", 0.8))
         self.assertTrue(out["binding"])
         self.assertEqual(out["graded"], 30)
@@ -215,6 +230,34 @@ class TheDebateTests(TestCase):
         self.assertFalse(self._debate(_ex("pass", 0.1),
                                       _ch("neutral", 0.9))["champion_wins"])
 
+    def test_rows_stamped_while_off_never_shorten_the_shadow(self):
+        from ai_agents.agents.trade_debate import graded_count
+        from bot_program.models import AssetBotTrade
+        for _ in range(40):
+            AssetBotTrade.objects.create(
+                config=self.bot.cfg, asset_class="crypto", symbol="BTCUSD",
+                side="BUY", qty=Decimal("1"), entry_price=Decimal("100"),
+                status="CLOSED", paper=False, pnl=Decimal("1"),
+                metadata={"debate": {"ran": False,
+                                     "why": "trade_debate is OFF"}})
+        self.assertEqual(graded_count(), 0)
+
+    def test_a_binding_refusal_is_held_and_not_reargued(self):
+        from ai_agents.agents.trade_debate import (debate_candidate,
+                                                   remember_refusal)
+        from django.core.cache import cache
+        cache.clear()
+        _switch()
+        with patch("ai_agents.agents.trade_debate.graded_count",
+                   return_value=30):
+            remember_refusal(self.bot, self.cand, "the Executioner vetoed it")
+            with patch(EX_RUN) as ex:
+                out = debate_candidate(self.bot, self.cand, 0.01)
+        ex.assert_not_called()
+        self.assertTrue(out["held"])
+        self.assertIn("vetoed", out["why"])
+        cache.clear()
+
     def test_a_spent_ai_budget_runs_nothing(self):
         from ai_agents.agents.trade_debate import debate_candidate
         _switch()
@@ -239,13 +282,20 @@ class TheWiringTests(SimpleTestCase):
 
         from bot_program.asset_engine.base import AssetBot
         src = inspect.getsource(AssetBot.execute_entry)
-        self.assertIn("if not paper:\n            from ai_agents.agents."
-                      "trade_debate import debate_candidate", src)
+        self.assertEqual(src.count("debate_candidate(self, cand, qty)"), 1)
         self.assertIn('if debate.get("binding"):', src)
         self.assertIn('if debate.get("veto"):', src)
         self.assertIn("qty = self._round_qty(qty * _scale", src)
         self.assertIn('and not debate.get("champion_wins")', src)
         self.assertIn('entry_meta["debate"] = {', src)
-        # judged after every gate, before the order
-        self.assertLess(src.index("debate_candidate(self, cand, qty)"),
-                        src.index("order_id = \"\""))
+        self.assertIn("remember_refusal(self, cand, _veto)", src)
+        # 2026-10-02: argued after EVERY deterministic refusal — the proof
+        # gate, the fee, the floor, the multiplier, the headroom, the
+        # disarm — and right before the order: only an order about to be
+        # sent is debated (and billed)
+        at = src.index("debate_candidate(self, cand, qty)")
+        for gate in ("self._etoro_entry_refusal(", "self._venue_fee_refusal(",
+                     "self._venue_size_floor(", "self._order_leverage(",
+                     "self._leverage_headroom(", "self._still_armed()"):
+            self.assertLess(src.index(gate), at, gate)
+        self.assertLess(at, src.index("client.market_order("))

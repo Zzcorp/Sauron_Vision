@@ -103,6 +103,7 @@ LIVE_MONEY_SWITCHES = (
     "fractional_units_live",        # the stock bot sends fractions to eToro
     "etoro_leverage_live",          # a typed leverage goes to eToro
     "shared_capital_live",          # every follower draws on the whole account
+    "trade_debate",                 # binding: may veto or cut a live order
     "steward",                      # benches/promotes pairs, closes positions
     "crisis_mode",                  # the market posture binds real money
 )
@@ -275,7 +276,7 @@ DEFAULT_COMPONENTS = [
     # Description measured at 273 chars (< 300).
     {"key": "trade_debate", "name": "Trade Debate (Executioner vs Champion)",
      "description": "Off (default). On: every LIVE bot entry is argued by two AI agents before its order — why it fails, why it works — and the verdicts ride the row. Shadow for the first 30 graded live trades; then the Executioner may cut or veto, and an elite entry needs the Champion to win.",
-     "category": "pipeline"},
+     "category": "system"},
     # De-risk fast, re-risk slow (2026-09-12): the third switch. Off by
     # default; needs LIVE mode too. Description counted under 300 chars.
     {"key": "share_allocator_auto_derisk", "name": "Share Allocator Auto De-risk",
