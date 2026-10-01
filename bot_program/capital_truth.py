@@ -365,8 +365,9 @@ def pool_oversubscription(user):
 
     from bot_program.models import AssetBotConfig
 
-    groups = defaultdict(lambda: {"declared": 0.0, "configs": [],
+    groups = defaultdict(lambda: {"rows": [], "configs": [],
                                   "actual": None})
+    shared = shared_capital()
     configs = (AssetBotConfig.objects
                .filter(user=user, enabled=True)
                .exclude(mode="paper"))
@@ -387,13 +388,16 @@ def pool_oversubscription(user):
         if venue == "PaperTrader":
             continue
         g = groups[venue]
-        g["declared"] += declared
+        g["rows"].append(cfg)
         g["configs"].append(cfg.name)
         if g["actual"] is None:
             g["actual"] = broker_equity(user, cfg)
 
     out = []
     for venue, g in groups.items():
+        # With shared capital ON the followers are ONE pool by design,
+        # counted once (combined_capital): that is not oversubscription.
+        g["declared"] = combined_capital(g["rows"], shared=shared)
         actual = g["actual"]
         if actual is None or len(g["configs"]) < 2:
             # One config per venue is already covered by
@@ -491,7 +495,32 @@ def broker_view(user):
 # because three pools sized against the same 500 are sized against 1,500
 # that does not exist — the state this deployment was in on 2026-09-10,
 # with 1,000 of hand-typed pools over a 500 account.
+#
+# ONE ACCOUNT, ONE POOL (2026-10-01). The operator: "votre système
+# d'allocation de capitaux par bot est restrictif ... il devrait être 100%
+# mobile". With the shared_capital_live switch ON, every follower may draw
+# on the WHOLE account, first come first served: an explicit share is that
+# pool's own CEILING (a fraction of the account it may size from), not a
+# slice, so shares no longer have to fit in 100%, and a follower with no
+# number sizes from the whole account. What binds then is the account
+# itself, every order: the cash and MAX ACCOUNT PLEDGED read off the
+# sync's cells plus what was pledged since (AssetBot._leverage_headroom),
+# the book's daily loss (risk_gate.preflight), the single-position cap.
+# Off, the slices above, unchanged.
 SHARE_SLACK = 1e-6
+SHARED_CAPITAL_SWITCH = "shared_capital_live"
+
+
+def shared_capital() -> bool:
+    """Is the account ONE pool every follower draws on? Off when unreadable:
+    the slices are the stricter rule."""
+    try:
+        from core.platform_control import is_component_enabled
+        return bool(is_component_enabled(SHARED_CAPITAL_SWITCH))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("capital_truth: shared-capital switch unreadable "
+                       "(%s) — the slices apply", e)
+        return False
 
 
 def account_share_pct(cfg):
@@ -524,14 +553,19 @@ def followers_of(user, *, include=None):
     return out
 
 
-def allocate_shares(followers, *, shares=None) -> dict:
-    """{"ok", "reason", "plan": {pk: fraction}} for one account's followers.
+def allocate_shares(followers, *, shares=None, shared=None) -> dict:
+    """{"ok", "reason", "plan": {pk: fraction}, "shared"} for one account's
+    followers.
 
     `shares` overrides a pool's share for the question "what if": a number
-    is an explicit percentage, None means automatic. Pure arithmetic — no
-    reads, no writes — so the arming path, the sync and the preflight all
-    answer from the same rule.
+    is an explicit percentage, None means automatic. `shared` is the
+    shared_capital_live switch, read when not given: True makes every
+    follower's fraction its explicit share or 1.0 (the whole account), and
+    never refuses. Otherwise pure arithmetic — no writes — so the arming
+    path, the sync and the preflight all answer from the same rule.
     """
+    if shared is None:
+        shared = shared_capital()
     shares = dict(shares or {})
     explicit, auto = {}, []
     for cfg in followers:
@@ -540,25 +574,50 @@ def allocate_shares(followers, *, shares=None) -> dict:
             auto.append(cfg)
         else:
             explicit[cfg.pk] = float(pct)
+    if shared:
+        plan = {pk: pct / 100.0 for pk, pct in explicit.items()}
+        for cfg in auto:
+            plan[cfg.pk] = 1.0
+        return {"ok": True, "plan": plan, "reason": "", "shared": True}
     names = {cfg.pk: f"{cfg.name} ({cfg.asset_class})" for cfg in followers}
     total = sum(explicit.values())
     if total > 100.0 + SHARE_SLACK:
         listed = ", ".join(f"{names[pk]} {pct:.0f}%"
                            for pk, pct in explicit.items())
-        return {"ok": False, "plan": {},
+        return {"ok": False, "plan": {}, "shared": False,
                 "reason": f"explicit shares sum to {total:.0f}% of the "
                           f"account: {listed}"}
     rest = 100.0 - total
     if auto and rest <= SHARE_SLACK:
         listed = ", ".join(names[c.pk] for c in auto)
-        return {"ok": False, "plan": {},
+        return {"ok": False, "plan": {}, "shared": False,
                 "reason": f"explicit shares take the whole account "
                           f"({total:.0f}%) and {len(auto)} follower(s) "
                           f"without a share would get nothing: {listed}"}
     plan = {pk: pct / 100.0 for pk, pct in explicit.items()}
     for cfg in auto:
         plan[cfg.pk] = rest / 100.0 / len(auto)
-    return {"ok": True, "plan": plan, "reason": ""}
+    return {"ok": True, "plan": plan, "reason": "", "shared": False}
+
+
+def combined_capital(cfgs, *, shared=None) -> float:
+    """The money a set of pools can deploy TOGETHER: the sum of their
+    capital — except that with shared capital ON the live followers among
+    them are ONE pool (each sizes from the same account), counted once, at
+    the largest. Summed, seven followers of a 2,240 account read 15,680,
+    and a daily stop taken as a percentage of that is seven times too
+    loose (morgul G7; the preflight's armed-total line)."""
+    if shared is None:
+        shared = shared_capital()
+    fixed, one_pool = 0.0, []
+    for cfg in cfgs:
+        value = float(getattr(cfg, "capital", 0) or 0)
+        if shared and tracks_broker(cfg) \
+                and getattr(cfg, "mode", "") != "paper":
+            one_pool.append(value)
+        else:
+            fixed += value
+    return fixed + (max(one_pool) if one_pool else 0.0)
 
 
 def foreign_venue(user, cfg, book_kind: str, venue_of=None) -> str:

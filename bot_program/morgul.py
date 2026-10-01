@@ -901,7 +901,10 @@ def check_daily_loss(ctx, g) -> list:
             realized = sum((float(p) for p in priced), 0.0)
             unpriced = len(mine) - len(priced)
             pct = min(float(c.max_daily_loss_pct) for c in carriers)
-            capital = sum(float(c.capital) for c in cfgs)
+            # The followers of one shared account are ONE pool: summed,
+            # the stop would be a multiple of the account it guards.
+            from bot_program.capital_truth import combined_capital
+            capital = combined_capital(cfgs)
             stop = capital * pct / 100.0
             if stop <= 0:
                 ctx.note(g, f"{label}: no capital to measure a daily stop "

@@ -572,7 +572,11 @@ def _follow_the_account(user, value, currency) -> None:
     split of what the explicit ones leave (capital_truth.allocate_shares).
     Shares that do not fit in one account retune NOTHING and raise one
     alert per six hours: writing them would size every pool against money
-    the others already claim.
+    the others already claim. With shared capital ON (shared_capital_live,
+    2026-10-01) every follower is written the WHOLE base, or its explicit
+    share as its own ceiling: one pool, first come first served, and the
+    account's limits at the order (cash, MAX ACCOUNT PLEDGED, the daily
+    loss) are what bind.
 
     WITHDRAWALS ASKED FOR IN ADVANCE (2026-09-28). The shares apply to the
     reading LESS what is held back for withdrawals (withdrawals.held_back:
