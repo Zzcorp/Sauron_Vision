@@ -41,6 +41,16 @@ class Portfolio(models.Model):
     # `risk_gate.theme_state`. Default 3: the number the concentration
     # briefings kept asking for while nothing bound it.
     max_theme_legs = models.IntegerField(default=3)
+    # How much of the eToro account may be pledged (margin, the full
+    # notional at 1x) once a new order is placed — refused past it, never
+    # resized. A PERCENTAGE of the broker's equity, read by
+    # asset_engine.base.pledged_ceiling (the order gate) and Morgul's G6.
+    # Default 50, the old constant MAX_PLEDGED_FRACTION. The operator,
+    # 2026-10-01: a manual 1,000 USD forex ticket at 1x already pledged
+    # 45% of a 2,240 account and refused every stock ticket after it; he
+    # chose 80. Bounds 10-95 on the card: 100 would let one gap take the
+    # whole account.
+    max_pledged_pct = models.FloatField(default=50)
 
     updated_at = models.DateTimeField(auto_now=True)
 

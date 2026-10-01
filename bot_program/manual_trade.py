@@ -361,7 +361,9 @@ def _concentration_guard(user, inst, side, cls, cfg, close_ids):
         base_label="manual pool",
         leverage=AssetBot._leverage_hint_of(cfg.extras),
         carrier=broker_name_for_symbol(user, inst.symbol, cfg),
-        lane_limit_pct=lane_single_position_pct(cfg))
+        lane_limit_pct=lane_single_position_pct(cfg),
+        # this lane's own venue's book only (2026-10-01)
+        paper=(getattr(cfg, "mode", "paper") != "live"))
     if state["ok"]:
         return None
 
@@ -495,7 +497,7 @@ def _symbol_exposure(user, symbol):
                 status__in=("OPEN", "CLOSE_PENDING")).order_by("opened_at")]
 
 
-def _correlation_note(user, inst) -> dict:
+def _correlation_note(user, inst, *, paper=None) -> dict:
     """What the book's correlation limit says about this candidate.
 
     A note on the ticket, not a gate. `scale` is what an AUTOMATED entry in
@@ -511,7 +513,7 @@ def _correlation_note(user, inst) -> dict:
     """
     try:
         from portfolio.risk_gate import correlation_state
-        state = correlation_state(user, inst)
+        state = correlation_state(user, inst, paper=paper)
     except Exception as e:  # noqa: BLE001 — a note, not a gate
         logger.warning("[take-trade] correlation read failed for %s: %s",
                        getattr(inst, "symbol", "?"), e)
@@ -1024,6 +1026,7 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
         notional=notional, capital_base=float(capital or 0),
         base_label="manual pool",
         lane_limit_pct=lane_single_position_pct(cfg),
+        paper=not live,
         # the ticket's stamp (2026-09-26): the multiplier this config
         # would send, on the carrier that would carry it
         **ticket_stamp)
@@ -1038,8 +1041,10 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
     # adding to your own expression is sizing, and the ceilings above
     # already govern it.
     from portfolio.risk_gate import duplicate_state, theme_state
+    # Judged on THIS ticket's venue's book only (2026-10-01): a paper
+    # bot's long doubles no real-money bet, and the reverse.
     dup = duplicate_state(user, symbol=inst.symbol, side=side,
-                          config_id=cfg.id)
+                          config_id=cfg.id, paper=not live)
     if not dup["ok"]:
         return {"error": dup["reason"]}
     # The currency-theme crowd, as information on this path: stacking a
@@ -1047,7 +1052,7 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
     # make, and the bots take it as a hard cap because nobody is there to
     # make it. Rides the popup next to book_advisory; recorded at entry.
     theme = theme_state(user, symbol=inst.symbol, side=side,
-                        asset_class=cls)
+                        asset_class=cls, paper=not live)
 
     open_trades = _open_manual_trades(cfg)
     # Committed counts CLOSE_PENDING too — a close that has not filled is
@@ -1288,7 +1293,7 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
         # because nobody is there to make it. Quietly shrinking a size the
         # operator is looking at would be the browser and the server
         # disagreeing about what was ordered.
-        "correlation": _correlation_note(user, inst),
+        "correlation": _correlation_note(user, inst, paper=not live),
     }
 
 
@@ -1719,11 +1724,11 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         # duplication.
         from portfolio.risk_gate import duplicate_state, theme_state
         dup = duplicate_state(user, symbol=inst.symbol, side=side,
-                              config_id=cfg.id)
+                              config_id=cfg.id, paper=not live)
         if not dup["ok"]:
             return {"error": dup["reason"], "closed": closed}
         theme_now = theme_state(user, symbol=inst.symbol, side=side,
-                                asset_class=cls)
+                                asset_class=cls, paper=not live)
 
 
         meta = {

@@ -596,6 +596,34 @@ class TheEntryPassesItThroughTests(TestCase):
         self.assertIn("pledged after", detail)
         self.assertIn("50%", detail)
 
+    def test_the_ceiling_is_the_operators_number(self):
+        """2026-10-01: MAX ACCOUNT PLEDGED on the limits book (/setup/),
+        no longer the 50% constant (tests/test_pledged_ceiling.py)."""
+        from portfolio.risk_gate import limits_book
+        book = limits_book()
+        book.max_pledged_pct = 55
+        book.save(update_fields=["max_pledged_pct", "updated_at"])
+        detail, _ = self._refused_for(cash=10 ** 6, used=60000,
+                                      equity=100000)
+        self.assertIn("pledged after", detail)
+        self.assertIn("the ceiling is 55%", detail)
+
+    def test_a_raised_ceiling_lets_the_same_order_through(self):
+        from portfolio.risk_gate import limits_book
+        _switch(True)
+        _account(self.user, cash=10 ** 6, used=60000, equity=100000)
+        self._cand()
+        t, _ = _etoro()
+        book = limits_book()
+        book.max_pledged_pct = 80
+        book.save(update_fields=["max_pledged_pct", "updated_at"])
+        self.assertIsNone(self.bot._leverage_headroom(
+            t, "AAPL", qty=1, price=100.0, leverage=1))
+        book.max_pledged_pct = 50
+        book.save(update_fields=["max_pledged_pct", "updated_at"])
+        self.assertIn("the ceiling is 50%", self.bot._leverage_headroom(
+            t, "AAPL", qty=1, price=100.0, leverage=1))
+
     def test_a_typed_one_needs_the_cells_too(self):
         """E2.2 (2026-09-26): the headroom runs before every eToro order
         the bot sends — at 1x the venue locks the FULL notional (MEASURED

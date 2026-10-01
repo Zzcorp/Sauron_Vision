@@ -172,6 +172,17 @@
                 </div>
             </div>
             <div style="margin-bottom: 16px;">
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX ACCOUNT PLEDGED (%)</label>
+                <input type="number" step="any" min="10" max="95" required name="max_pledged" value="{{ limits.max_pledged_pct }}"
+                    style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+                <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:6px;">
+                    The share of the eToro account that may be locked once a
+                    new order is placed — margin on a levered position, the
+                    whole amount at 1x. An order that would pass it is refused,
+                    never shrunk. Bots and hand-taken tickets alike; 10 to 95.
+                </div>
+            </div>
+            <div style="margin-bottom: 16px;">
                 <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">CORRELATION SIZE TAPER</label>
                 <input type="number" step="any" min="0.01" max="1" required name="max_correlation" value="{{ limits.max_correlation_threshold }}"
                     style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
