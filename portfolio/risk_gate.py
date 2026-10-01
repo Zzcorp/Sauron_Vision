@@ -882,18 +882,31 @@ def open_risk_state(user, *, portfolio=None, adding: float = 0.0,
                            f"nothing to measure it against")
         return state
     total = 0.0
+    from portfolio.services import value_per_unit
+    bot_symbols = set()
     for t in AssetBotTrade.objects.filter(
             config__user=user, status__in=("OPEN", "CLOSE_PENDING"),
             paper=(venue == "paper")):
-        meta = t.metadata or {}
+        # value_per_unit carries the options contract multiplier (review,
+        # 2026-10-02): an options row counted 1/100 of its risk
         risk, stopped = _row_risk(t.qty, t.entry_price, t.stop_loss, t.side,
-                                  meta.get("value_per_unit") or 1.0)
+                                  value_per_unit(t))
         total += risk
         state["rows"] += 1
         state["unstopped"] += 0 if stopped else 1
+        bot_symbols.add(str(t.symbol).upper())
     if venue == "live":
         from portfolio.models import Position
-        for p in Position.objects.filter(portfolio=portfolio):
+        # OPEN legacy rows only, and never one that mirrors a position a
+        # bot row already counts (the legacy eToro import button writes a
+        # Position per eToro position, in invested money, not units):
+        # review, 2026-10-02 — closed rows counted for ever, and the same
+        # broker position twice
+        for p in (Position.objects.filter(portfolio=portfolio,
+                                          closed_at__isnull=True)
+                  .select_related("instrument")):
+            if str(getattr(p.instrument, "symbol", "")).upper() in bot_symbols:
+                continue
             risk, stopped = _row_risk(
                 p.quantity, p.entry_price, getattr(p, "stop_loss", None),
                 "BUY" if str(p.direction).lower() == "long" else "SELL")

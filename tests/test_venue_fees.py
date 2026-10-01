@@ -200,7 +200,11 @@ class TheOrderOfTheLaneTests(SimpleTestCase):
         venue floor, the idempotency id, the multiplier and the POST."""
         from bot_program.asset_engine.base import AssetBot
         src = inspect.getsource(AssetBot.execute_entry)
-        self.assertEqual(src.count("self._venue_fee_refusal("), 1)
+        # once at the size sent; once more only for a size the trade
+        # debate's Executioner cut (2026-10-02), after the debate
+        self.assertEqual(src.count("self._venue_fee_refusal("), 2)
+        self.assertGreater(src.rindex("self._venue_fee_refusal("),
+                           src.index("debate_candidate(self, cand, qty)"))
         order = [src.index(n) for n in ("_etoro_entry_refusal(",
                                         "self._venue_fee_refusal(",
                                         "_venue_size_floor(",

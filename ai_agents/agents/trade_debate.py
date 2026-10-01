@@ -277,9 +277,15 @@ def graded_count() -> int:
     the switch was off, or by a debate one side never answered, is not
     shadow evidence and never shortens the shadow."""
     from bot_program.models import AssetBotTrade
+    from django.db.models import Q
+    # a demo fill (broker_env "paper") is not real money; the has_key half
+    # keeps the rows that carry no broker_env (a missing key reads NULL,
+    # and NOT (NULL = ...) would drop them)
     return AssetBotTrade.objects.filter(
         paper=False, status="CLOSED", pnl__isnull=False,
-        metadata__debate__ran=True).count()
+        metadata__debate__ran=True).exclude(
+        Q(metadata__has_key="broker_env")
+        & Q(metadata__broker_env="paper")).count()
 
 
 def _hold_key(bot, cand, kind) -> str:

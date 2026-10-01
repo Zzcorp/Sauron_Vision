@@ -117,6 +117,59 @@ class TheStateTests(TestCase):
         self.assertIn("never been set", s["reason"])
 
 
+class TheLegacyRowsTests(TestCase):
+    """Review, 2026-10-02: closed legacy Position rows were counted for
+    ever, and a Position the legacy eToro import wrote for a position a bot
+    row already counts was counted twice."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = get_user_model().objects.create_user("or_legacy",
+                                                        password="x")
+
+    def setUp(self):
+        _book(current_value=Decimal("10000"), max_open_risk_pct=15.0)
+        self.cfg = _config(self.user)
+
+    def _position(self, symbol, *, closed=False):
+        from django.utils import timezone
+
+        from instruments.models import Instrument
+        from portfolio.models import Position
+        from portfolio.risk_gate import limits_book
+        inst, _ = Instrument.objects.get_or_create(
+            symbol=symbol, defaults={"name": symbol, "asset_class": "crypto"})
+        return Position.objects.create(
+            portfolio=limits_book(), instrument=inst, direction="long",
+            quantity=Decimal("10"), entry_price=Decimal("100"),
+            current_price=Decimal("100"), stop_loss=Decimal("90"),
+            opened_at=timezone.now(),
+            closed_at=timezone.now() if closed else None)
+
+    def test_a_closed_or_mirrored_legacy_row_counts_nothing(self):
+        from portfolio.risk_gate import open_risk_state
+        _row(self.cfg, paper=False)                  # BTCUSD: 100 at risk
+        self._position("BTCUSD")                     # its legacy mirror
+        self._position("ETHUSD", closed=True)        # closed long ago
+        st = open_risk_state(self.user, venue="live")
+        self.assertEqual((st["open_risk"], st["rows"]), (100.0, 1))
+        self._position("SOLUSD")                     # an open hand-added one
+        st = open_risk_state(self.user, venue="live")
+        self.assertEqual((st["open_risk"], st["rows"]), (200.0, 2))
+
+    def test_an_options_row_counts_its_contract_multiplier(self):
+        from portfolio.risk_gate import open_risk_state
+        cfg = _config(self.user, asset_class="options")
+        from bot_program.models import AssetBotTrade
+        AssetBotTrade.objects.create(
+            config=cfg, asset_class="options", symbol="AAPL", side="BUY",
+            qty=Decimal("1"), entry_price=Decimal("5"),
+            stop_loss=Decimal("3"), status="OPEN", paper=True,
+            metadata={"multiplier": 100})
+        st = open_risk_state(self.user, venue="paper")
+        self.assertEqual(st["open_risk"], 200.0)
+
+
 class TheGateTests(TestCase):
 
     @classmethod

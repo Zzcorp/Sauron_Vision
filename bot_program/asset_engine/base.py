@@ -3956,6 +3956,43 @@ class AssetBot(ABC):
                            self.asset_class, symbol, e)
         return stage, meta
 
+    #: the share of the entry-to-stop (or entry-to-target) distance the
+    #: price may move during the trade debate before the order is refused
+    DEBATE_DRIFT_MAX = 0.5
+
+    def _drift_since_proposal(self, client, symbol, side, price, sl, tp):
+        """"" when the fresh price still fits the proposal's levels, else
+        the refusal: past the stop, or more than DEBATE_DRIFT_MAX of the
+        way to the stop or to the target. An unreadable ticker refuses
+        nothing (the venue's own stop still holds the risk)."""
+        try:
+            tk = client.ticker(symbol)
+            fresh = float((tk or {}).get("lastPrice") or (tk or {}).get("last")
+                          or (tk or {}).get("price") or 0)
+        except Exception as e:  # noqa: BLE001
+            logger.info("[%s_bot] %s: fresh price unread after the debate "
+                        "(%s)", self.asset_class, symbol, e)
+            return ""
+        if fresh <= 0:
+            return ""
+        buy = str(side).upper() == "BUY"
+        to_stop = (price - fresh) if buy else (fresh - price)
+        to_target = -to_stop
+        stop_dist, tgt_dist = abs(price - sl), abs(tp - price)
+        if (buy and fresh <= sl) or (not buy and fresh >= sl):
+            return (f"the price moved through the stop during the trade "
+                    f"debate ({price:g} -> {fresh:g}, stop {sl:g}) — "
+                    f"nothing sent")
+        if stop_dist > 0 and to_stop > self.DEBATE_DRIFT_MAX * stop_dist:
+            return (f"the price moved {to_stop / stop_dist:.0%} of the way "
+                    f"to the stop during the trade debate ({price:g} -> "
+                    f"{fresh:g}) — nothing sent")
+        if tgt_dist > 0 and to_target > self.DEBATE_DRIFT_MAX * tgt_dist:
+            return (f"the price ran {to_target / tgt_dist:.0%} of the way to "
+                    f"the target during the trade debate ({price:g} -> "
+                    f"{fresh:g}): the planned reward is gone — nothing sent")
+        return ""
+
     def _posture_leverage(self, symbol, side, lev):
         """THE POSTURE'S LEVERAGE CAP (2026-10-02, the operator's "mix
         vraiment smart"): the multiplier an entry may carry in this market
@@ -4595,7 +4632,11 @@ class AssetBot(ABC):
             # not run changes nothing and keeps the elite door shut.
             from ai_agents.agents.trade_debate import (debate_candidate,
                                                        remember_refusal)
-            debate = debate_candidate(self, cand, qty)
+            # an eToro DEMO world is not real money: never argued, never
+            # counted toward the shadow (review, 2026-10-02)
+            debate = ({"why": "the venue's demo world: not debated"}
+                      if getattr(client, "demo", False) is True
+                      else debate_candidate(self, cand, qty))
             if debate.get("on"):
                 entry_meta["debate"] = {
                     k: debate.get(k) for k in (
@@ -4678,6 +4719,15 @@ class AssetBot(ABC):
                 return self._skip(symbol, skips.GATE_BLOCKED,
                                   "config was disarmed during the trade "
                                   "debate — refusing to submit")
+            # AND THE PRICE, AGAIN: the order goes at market with stop and
+            # target set at proposal; a minute of debate may have moved the
+            # market half-way to either. Unreadable passes, said.
+            if debate.get("on"):
+                _drift = self._drift_since_proposal(
+                    client, symbol, decision.direction, float(price),
+                    float(sl), float(tp))
+                if _drift:
+                    return self._skip(symbol, skips.GATE_BLOCKED, _drift)
             try:
                 # The LAST read before real units move. can_open_new ran
                 # before this symbol's scan; a disarm landing between then

@@ -40,9 +40,33 @@ def tick_all_asset_bots():
     The dead man's switch (2026-09-30, core/dead_man_switch.py) pings an
     outside watcher after every pass, OUTSIDE the gate: a paused platform
     still pings, a dead box does not, and the watcher raises the alarm.
+
+    ONE PASS AT A TIME (2026-10-02): a pass that outlives the 5-minute beat
+    (a slow venue, the trade debate's minute) must not meet a second pass
+    judging the same book — two passes could each pass the duplicate and
+    open-risk gates and send the same order twice. A pass that finds the
+    lock held skips, said; the lock expires on its own after TICK_LOCK_S.
     """
+    from django.core.cache import cache
+
     from .asset_engine.runner import run_all_asset_bots
-    return run_all_asset_bots()
+    if not cache.add(TICK_LOCK_KEY, timezone_now_iso(), TICK_LOCK_S):
+        logger.warning("[asset bots] a pass is still running — this beat "
+                       "skips (no second pass on the same book)")
+        return {"status": "skipped", "reason": "a pass is still running"}
+    try:
+        return run_all_asset_bots()
+    finally:
+        cache.delete(TICK_LOCK_KEY)
+
+
+TICK_LOCK_KEY = "asset_bots:tick_lock"
+TICK_LOCK_S = 900
+
+
+def timezone_now_iso() -> str:
+    from django.utils import timezone
+    return timezone.now().isoformat()
 
 
 @shared_task
@@ -504,10 +528,15 @@ def _warm_etoro_names(client, user, demo: bool) -> None:
         rows = AssetBotTrade.objects.filter(
             config__user=user, paper=False,
             status__in=("OPEN", "CLOSE_PENDING"))
-        world = "demo" if demo else "live"
+        # the rows' own world word (AssetBot.VENUE_WORLDS: a demo fill is
+        # stamped "paper"), and only rows eToro carried (or unstamped
+        # legacy ones): no /search for another broker's symbol
+        world = "paper" if demo else "live"
         syms = sorted({t.symbol for t in rows
                        if str((t.metadata or {}).get("broker_env")
-                              or world) == world})
+                              or world) == world
+                       and str((t.metadata or {}).get("broker")
+                               or "etoro") == "etoro"})
         for sym in syms:
             try:
                 name_it(sym)

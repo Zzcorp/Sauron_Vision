@@ -479,6 +479,23 @@ class TheEntryWiringTests(TestCase):
         self.assertFalse(ok)
         self.assertIn("concurrent positions reached", why)
 
+    def test_the_price_is_read_again_after_the_debate(self):
+        client = MagicMock()
+        client.ticker.return_value = {"lastPrice": "99.4"}
+        why = self.bot._drift_since_proposal(client, "BTCUSD", "BUY",
+                                             100.0, 99.0, 102.0)
+        self.assertIn("of the way to the stop", why)
+        client.ticker.return_value = {"lastPrice": "101.2"}
+        self.assertIn("planned reward is gone", self.bot._drift_since_proposal(
+            client, "BTCUSD", "BUY", 100.0, 99.0, 102.0))
+        client.ticker.return_value = {"lastPrice": "100.2"}
+        self.assertEqual(self.bot._drift_since_proposal(
+            client, "BTCUSD", "BUY", 100.0, 99.0, 102.0), "")
+        client.ticker.side_effect = RuntimeError("down")
+        self.assertEqual(self.bot._drift_since_proposal(
+            client, "BTCUSD", "SELL", 100.0, 101.0, 98.0), "",
+            "an unread ticker refuses nothing")
+
     def test_the_hooks_sit_where_they_must(self):
         import inspect
 
@@ -670,6 +687,24 @@ class TheCareTests(TestCase):
 # ── the switches, the beat, the command ──────────────────────────────────
 
 class TheControlsTests(TestCase):
+
+    def test_one_fleet_pass_at_a_time(self):
+        from django.core.cache import cache
+
+        from bot_program.tasks import TICK_LOCK_KEY, tick_all_asset_bots
+        _switch("platform_master")
+        _switch("pipeline_asset_bots")
+        cache.set(TICK_LOCK_KEY, "x", 60)
+        with patch("bot_program.asset_engine.runner.run_all_asset_bots") as run:
+            out = tick_all_asset_bots()
+        run.assert_not_called()
+        self.assertEqual(out["status"], "skipped")
+        cache.delete(TICK_LOCK_KEY)
+        with patch("bot_program.asset_engine.runner.run_all_asset_bots",
+                   return_value={"ticked": 1}) as run:
+            tick_all_asset_bots()
+        run.assert_called_once()
+        self.assertIsNone(cache.get(TICK_LOCK_KEY), "released after a pass")
 
     def test_two_live_money_switches_seeded_off_and_never_bulk_armed(self):
         from core.platform_control import (BULK_ENABLE_EXEMPT,

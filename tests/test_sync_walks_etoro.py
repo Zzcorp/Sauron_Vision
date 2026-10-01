@@ -317,7 +317,11 @@ class TheSyncNamesWhatTheBookHoldsTests(TestCase):
         self._row("XAUUSD")
         self._row("GBPCAD", paper=True)            # paper: not the broker's
         self._row("USDJPY", status="CLOSED")       # closed: nothing held
-        self._row("AUDUSD", env="demo")            # the other world
+        self._row("AUDUSD", env="paper")           # the other world (a demo
+        #                                            fill is stamped "paper")
+        other = self._row("NZDUSD")
+        other.metadata = {"broker": "binance", "broker_env": "live"}
+        other.save(update_fields=["metadata"])     # another broker's row
         client = _client()
         calls = []
         client.instrument_id.side_effect = lambda s: calls.append(s) or 1

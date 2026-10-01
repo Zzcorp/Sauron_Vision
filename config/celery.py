@@ -394,6 +394,9 @@ app.conf.beat_schedule = {
     "tick-asset-bots": {
         "task": "bot_program.tasks.tick_all_asset_bots",
         "schedule": 300.0,  # every 5 minutes
+        # a pass not started within the beat is dropped, never queued
+        # behind a slow one (tick_all_asset_bots also holds a pass lock)
+        "options": {"expires": 280},
     },
     # THE CRISIS MODE AND THE STEWARD (2026-10-02, bot_program/
     # market_stress.py, steward.py): the posture every 15 min, the pair

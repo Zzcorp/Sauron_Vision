@@ -169,16 +169,17 @@ class TheDebateTests(TestCase):
                 side="BUY", qty=Decimal("1"), entry_price=Decimal("100"),
                 status="CLOSED", paper=False, pnl=Decimal("1"),
                 metadata={"debate": {"ran": True}})
-        # a paper row, an open row and a debate that did not run do not
-        # count: none of them is shadow evidence
-        for status, paper, ran in (("CLOSED", True, True),
-                                   ("OPEN", False, True),
-                                   ("CLOSED", False, False)):
+        # a paper row, an open row, a debate that did not run and a demo
+        # fill do not count: none of them is real-money shadow evidence
+        for status, paper, ran, env in (("CLOSED", True, True, "live"),
+                                        ("OPEN", False, True, "live"),
+                                        ("CLOSED", False, False, "live"),
+                                        ("CLOSED", False, True, "paper")):
             AssetBotTrade.objects.create(
                 config=self.bot.cfg, asset_class="crypto", symbol="BTCUSD",
                 side="BUY", qty=Decimal("1"), entry_price=Decimal("100"),
                 status=status, paper=paper, pnl=Decimal("1"),
-                metadata={"debate": {"ran": ran}})
+                metadata={"debate": {"ran": ran}, "broker_env": env})
         out = self._debate(_ex("cut", 0.5, 0.5), _ch("back", 0.8))
         self.assertTrue(out["binding"])
         self.assertEqual(out["graded"], 30)
