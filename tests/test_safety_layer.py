@@ -121,6 +121,41 @@ class CircuitBreakerTests(TestCase):
             user=self.user, title__startswith="⊟ Circuit breaker").count(), 1)
 
 
+class AManualLaneIsNotJudgedByTheBreakersTests(TestCase):
+    """2026-10-01: a config that scans no symbols opens nothing through
+    can_open_new — its tickets are a human's, taken with a PIN through
+    manual_trade — so the breakers do not judge it. The live forex lane
+    read "paper drawdown 48.2% from peak" off its old paper history, and
+    alerted on it, while halting nothing."""
+
+    def setUp(self):
+        self.user = _user("sf_manual")
+
+    def _history(self, cfg):
+        for i in range(3):
+            _closed(cfg, -10, timezone.now() - timedelta(minutes=i))
+
+    def test_a_manual_lane_with_a_losing_streak_is_not_halted_nor_alerted(self):
+        from alerts.models import Notification
+        from bot_program.asset_engine.stock_bot import StockBot
+        cfg = _cfg(self.user, name="manual", symbols=[],
+                   extras={"max_loss_streak": 3})
+        self._history(cfg)
+        ok, reason = StockBot(cfg).can_open_new()
+        self.assertNotIn("circuit breaker", reason)
+        self.assertEqual(Notification.objects.filter(
+            user=self.user, title__startswith="⊟ Circuit breaker").count(), 0)
+
+    def test_a_scanning_bot_with_the_same_history_still_is(self):
+        from bot_program.asset_engine.stock_bot import StockBot
+        cfg = _cfg(self.user, name="scanner",
+                   extras={"max_loss_streak": 3})
+        self._history(cfg)
+        ok, reason = StockBot(cfg).can_open_new()
+        self.assertFalse(ok)
+        self.assertIn("circuit breaker", reason)
+
+
 # ── shadow mode ─────────────────────────────────────────────────────────
 
 class ShadowModeTests(TestCase):

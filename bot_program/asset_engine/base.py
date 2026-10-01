@@ -3216,16 +3216,27 @@ class AssetBot(ABC):
         # Circuit breakers: stop opening when the recent record says
         # something is wrong. Never force-closes — an automated system that
         # starts closing on a heuristic is worse than one that just stops.
-        breakers = CircuitBreakers(self.cfg)
-        allowed, reasons = breakers.check_all()
-        if not allowed:
-            notify_circuit_breaker(self.cfg, reasons)
-            return (False, "circuit breaker: " + "; ".join(reasons))
-        # A breaker that could not run did not clear — it stood aside, for
-        # the same reason preflight does (see check_all). Carried to the
-        # heartbeat so the note the operator reads says which of the two
-        # kinds of "ok" this is.
-        self._breakers_blind = "; ".join(breakers.blind)
+        #
+        # A config that scans no symbols — a manual lane — opens nothing
+        # through this gate (2026-10-01): its tickets are a human's, taken
+        # with a PIN through manual_trade, which never asks these breakers.
+        # Judging it only alarmed: the forex lane armed live at 1,100 kept
+        # its paper history from a 10,000 pool and read "paper drawdown
+        # 48.2% from peak" every tick, with an alert to match, while
+        # halting nothing.
+        if not (self.cfg.symbols or []):
+            self._breakers_blind = ""
+        else:
+            breakers = CircuitBreakers(self.cfg)
+            allowed, reasons = breakers.check_all()
+            if not allowed:
+                notify_circuit_breaker(self.cfg, reasons)
+                return (False, "circuit breaker: " + "; ".join(reasons))
+            # A breaker that could not run did not clear — it stood aside,
+            # for the same reason preflight does (see check_all). Carried
+            # to the heartbeat so the note the operator reads says which of
+            # the two kinds of "ok" this is.
+            self._breakers_blind = "; ".join(breakers.blind)
 
         # The operator's own numbers from /setup/ — MAX DAILY LOSS and MAX
         # TOTAL EXPOSURE — measured across BOTH position books. Reported ahead
