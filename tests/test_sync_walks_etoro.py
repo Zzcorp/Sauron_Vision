@@ -288,3 +288,47 @@ class TheTwinIsWiredTests(TestCase):
         row.refresh_from_db()
         self.assertEqual((row.broker, row.account_pk, row.account_id),
                          ("etoro", et.pk, None))
+
+
+class TheSyncNamesWhatTheBookHoldsTests(TestCase):
+    """2026-10-01: the stored snapshot read "ETORO:1" for the operator's
+    EURUSD — the sync's fresh client named nothing it had not resolved.
+    Every symbol the platform holds OPEN in the account's world is
+    resolved before /portfolio is read; nothing else is asked."""
+
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user("es_names", password="x")
+        self.acct = _etoro(self.user, demo=False)
+
+    def _row(self, symbol, *, paper=False, status="OPEN", env="live"):
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+        cfg, _ = AssetBotConfig.objects.get_or_create(
+            user=self.user, asset_class="forex", name="manual",
+            defaults={"mode": "live", "symbols": [],
+                      "capital": Decimal("1000")})
+        return AssetBotTrade.objects.create(
+            config=cfg, asset_class="forex", symbol=symbol, side="BUY",
+            qty=Decimal("900"), entry_price=Decimal("1.13"), status=status,
+            paper=paper, metadata={"broker": "etoro", "broker_env": env})
+
+    def test_the_open_live_symbols_are_named_before_the_read(self):
+        self._row("EURUSD")
+        self._row("XAUUSD")
+        self._row("GBPCAD", paper=True)            # paper: not the broker's
+        self._row("USDJPY", status="CLOSED")       # closed: nothing held
+        self._row("AUDUSD", env="demo")            # the other world
+        client = _client()
+        calls = []
+        client.instrument_id.side_effect = lambda s: calls.append(s) or 1
+        client.broker_portfolio.side_effect = (
+            lambda: calls.append("PORTFOLIO") or [])
+        _sync_etoro(client)
+        self.assertEqual(calls, ["EURUSD", "XAUUSD", "PORTFOLIO"])
+
+    def test_a_name_that_cannot_be_resolved_never_stops_the_sync(self):
+        self._row("EURUSD")
+        client = _client()
+        client.instrument_id.side_effect = LookupError("no such spelling")
+        out = _sync_etoro(client)
+        self.assertEqual(out["stored"], 1)

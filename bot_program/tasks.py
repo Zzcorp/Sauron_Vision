@@ -483,6 +483,40 @@ def sync_broker_account() -> dict:
     return out
 
 
+def _warm_etoro_names(client, user, demo: bool) -> None:
+    """Name what the book holds before the sync reads it (2026-10-01).
+
+    eToro answers /portfolio with instrumentIds, and this fresh client can
+    name only what it resolved itself — so the stored snapshot read
+    "ETORO:1" for the operator's EURUSD and "ETORO:3190" beside it, on
+    /treasury/, in the operator's own diagnostics and in Morgul's drift
+    guard, which then compares by count instead of by symbol. Every symbol
+    the platform holds OPEN at this account's world is resolved first,
+    through the adapter's own instrument_id (the pinned ids answer without
+    /search). A name that cannot be resolved stays "ETORO:<id>", as before:
+    unnamed is said, never guessed. Wrapped whole: naming is beside the
+    sync, never in it."""
+    try:
+        from .models import AssetBotTrade
+        name_it = getattr(client, "instrument_id", None)
+        if not callable(name_it):
+            return
+        rows = AssetBotTrade.objects.filter(
+            config__user=user, paper=False,
+            status__in=("OPEN", "CLOSE_PENDING"))
+        world = "demo" if demo else "live"
+        syms = sorted({t.symbol for t in rows
+                       if str((t.metadata or {}).get("broker_env")
+                              or world) == world})
+        for sym in syms:
+            try:
+                name_it(sym)
+            except Exception as e:  # noqa: BLE001 — one name, not the sync
+                logger.debug("broker sync: cannot name %s (%s)", sym, e)
+    except Exception as e:  # noqa: BLE001 — naming is beside the sync
+        logger.debug("broker sync: naming skipped: %s", e)
+
+
 def _shock_trigger(user, now) -> None:
     """The fast path of the share allocator: a shock plan the moment the
     sync that saw the shock has stored its reading, not up to four hours
@@ -919,6 +953,7 @@ def sync_etoro_accounts():
             margin = None
             client = EtoroTrader(k, u, env="demo" if acct.demo else "live")
             reading = client.net_liquidation()
+            _warm_etoro_names(client, user, acct.demo)
             rows = client.broker_portfolio()
             # The margin cells, duck-typed and three-state: an adapter (or
             # a test double) that answers no dict leaves the cells alone.
