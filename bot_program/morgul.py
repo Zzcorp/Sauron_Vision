@@ -774,7 +774,7 @@ def check_margin(ctx, g) -> list:
     warnings of their own."""
     from bot_program.asset_engine import base
     from bot_program.models import EtoroAccount
-    fraction = float(getattr(base, "MAX_PLEDGED_FRACTION", 0.5))
+    fraction = float(base.pledged_ceiling())
     alarm = fraction + MARGIN_SLACK
     out = []
     for acct in (EtoroAccount.objects.exclude(api_key_enc="")

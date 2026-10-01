@@ -379,7 +379,39 @@ ORDER_LEVERAGE_CEILING = {"stock": 5, "etf": 5, "index": 20,
 #: cash locked, not what a gap past 1/L of price can take. Since
 #: 2026-09-26 it binds at 1x too (a 1x order pledges its FULL notional).
 #: Refused past it, never resized.
+#: THE DEFAULT since 2026-10-01: the operator's percentage lives on the
+#: limits book (Portfolio.max_pledged_pct, the /setup/ Risk Limits card)
+#: and pledged_ceiling() reads it; this is what an unreadable or
+#: out-of-bounds value falls back to.
 MAX_PLEDGED_FRACTION = 0.5
+#: The bounds a stored percentage must sit in to be used (the card's own).
+PLEDGED_PCT_BOUNDS = (10.0, 95.0)
+
+
+def pledged_ceiling() -> float:
+    """The share of the eToro account that may be pledged after an order,
+    as a fraction: the limits book's max_pledged_pct / 100.
+
+    The operator's number when it reads and sits inside PLEDGED_PCT_BOUNDS;
+    otherwise MAX_PLEDGED_FRACTION, the old constant, and the failure is
+    logged. Never looser than the operator set, never a guess: a book that
+    cannot be read answers the default every gate was built under."""
+    try:
+        from portfolio.risk_gate import limits_book
+        raw = getattr(limits_book(), "max_pledged_pct", None)
+        value = float(raw)
+    except Exception as e:  # noqa: BLE001 (the default answers; said)
+        logger.warning("[pledge] max_pledged_pct unreadable (%s) — the "
+                       "default %.0f%% applies", type(e).__name__,
+                       MAX_PLEDGED_FRACTION * 100)
+        return MAX_PLEDGED_FRACTION
+    low, high = PLEDGED_PCT_BOUNDS
+    if not (low <= value <= high):
+        logger.warning("[pledge] max_pledged_pct %r is outside %g-%g — the "
+                       "default %.0f%% applies", raw, low, high,
+                       MAX_PLEDGED_FRACTION * 100)
+        return MAX_PLEDGED_FRACTION
+    return value / 100.0
 
 #: The PlatformComponent that stays OFF until deploy/ETORO_DEPARTURE.md §4
 #: D2b (both sittings) is recorded in tests/test_etoro_client.py. A
@@ -5496,13 +5528,14 @@ class AssetBot(ABC):
                     f"{age / 60:.0f} min ago, less {pledged:,.2f} pledged "
                     f"since{kept}) — refused before the venue refuses it")
         after = (float(used) + pledged + need) / max(float(equity), 1e-9)
-        if after > MAX_PLEDGED_FRACTION + 1e-9:
+        ceiling = pledged_ceiling()
+        if after > ceiling + 1e-9:
             return (f"the account would be {after:.0%} pledged after "
                     f"{symbol} ({float(used):,.2f} used + {pledged:,.2f} "
                     f"since + {need:,.2f}) against {float(equity):,.2f} "
-                    f"equity; the ceiling is {MAX_PLEDGED_FRACTION:.0%} "
-                    f"(a belief: eToro's close-out rule is unmeasured) — "
-                    f"refused")
+                    f"equity; the ceiling is {ceiling:.0%} (MAX ACCOUNT "
+                    f"PLEDGED on /setup/; a belief: eToro's close-out rule "
+                    f"is unmeasured) — refused")
         return None
 
     # ── live-mode paper-fallback guard ───────────────────────────────────

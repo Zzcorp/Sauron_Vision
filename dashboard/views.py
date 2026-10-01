@@ -3322,6 +3322,11 @@ RISK_LIMIT_BOUNDS = {
     # theme gate off, where a 0 on the sibling limits would mean "refuse
     # everything" and is therefore out of their bounds.
     "max_theme_legs": (0, 20, "Max theme legs"),
+    # The share of the eToro account pledged after an order (2026-10-01,
+    # asset_engine.base.pledged_ceiling, which uses the same bounds). 100
+    # would let one gap take the whole account; under 10 refuses almost any
+    # real order.
+    "max_pledged_pct": (10.0, 95.0, "Max account pledged"),
 }
 
 # POST field -> Portfolio field. The form names are short and the model names
@@ -3333,7 +3338,13 @@ RISK_LIMIT_FIELDS = {
     "max_daily_loss": "max_daily_loss_pct",
     "max_correlation": "max_correlation_threshold",
     "max_theme_legs": "max_theme_legs",
+    "max_pledged": "max_pledged_pct",
 }
+
+# Fields a post may leave OUT (absent, not blank) and keep the stored value:
+# a card rendered before the field existed must still save the others. A
+# field that IS posted is judged like every sibling — blank is refused.
+RISK_LIMIT_OPTIONAL = {"max_pledged"}
 
 
 def _apply_risk_limits(portfolio, post) -> tuple[bool, list[str]]:
@@ -3355,6 +3366,8 @@ def _apply_risk_limits(portfolio, post) -> tuple[bool, list[str]]:
     for form_name, field in RISK_LIMIT_FIELDS.items():
         low, high, label = RISK_LIMIT_BOUNDS[field]
         raw = post.get(form_name)
+        if raw is None and form_name in RISK_LIMIT_OPTIONAL:
+            continue
         if raw is None or str(raw).strip() == "":
             rejected.append(f"{label} was left blank")
             continue
