@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load static %}
-{% block title %}Sauron Vision — Passation{% endblock %}
+{% block title %}Sauron Vision — Handover{% endblock %}
 {% block content %}
 {% comment %}
 THE HANDOVER LETTER (2026-09-28, core/passation.py). Served only after
@@ -37,9 +37,9 @@ anywhere on it: tests/test_passation.py runs the tripwire over the article.
 </style>
 <div class="pass-wrap">
 <article class="pass-letter" id="passLetter">
-    <div class="pass-kicker">Sauron Vision · passation</div>
-    <h1 class="pass-title">À GANDALF</h1>
-    <div class="pass-sub">GARDIEN DE LA MAISON · OUVERTE LE {{ opened_at|date:"j F Y" }}, 16 H, PARIS</div>
+    <div class="pass-kicker">Sauron Vision · handover</div>
+    <h1 class="pass-title">TO GANDALF</h1>
+    <div class="pass-sub">KEEPER OF THE HOUSE · OPENED {{ opened_at|date:"j F Y" }}, 4 PM, PARIS</div>
     <svg class="pass-seal" viewBox="0 0 48 30" aria-hidden="true" focusable="false">
         <path fill="currentColor" fill-rule="evenodd" d="M 2,15 Q 24,-11 46,15 Q 24,41 2,15 Z M 7,15 Q 24,-2 41,15 Q 24,32 7,15 Z"/>
         <circle cx="24" cy="15" r="7" fill="currentColor"/>
@@ -48,34 +48,34 @@ anywhere on it: tests/test_passation.py runs the tripwire over the article.
     </svg>
 
     <div class="pass-body">
-        <p class="first">Papa, si tu lis ces lignes, c'est que je suis parti et que la maison est à toi. Sauron tourne, les gardes veillent, et la seule main qui compte pendant les trois prochaines semaines, au moins, c'est la tienne.</p>
-        <p>Je veux d'abord te dire merci, et le dire au propre, ici, là où tu vas passer tes matins. Merci pour les heures déjà données : les soirs à me regarder m'énerver contre une machine, les questions qui tombaient juste quand je croyais avoir fini, la patience devant un terminal qui ne te devait rien. Une bonne partie de ce que Sauron sait <em>refuser</em>, il le sait parce que tu as demandé « et si ? » au bon moment. Ce n'est pas rien. C'est même l'essentiel.</p>
-        <p>Et merci pour ce qui est venu avant. Si j'ai pu passer des mois à bâtir une tour qui voit loin, c'est qu'une maison tenait debout derrière moi, bien avant Sauron. C'est toi qui la tenais. Ce que Sauron sait faire de plus précieux, garder la tête froide et s'arrêter à temps, je l'ai appris de toi avant de l'écrire dans une machine. On dit qu'un magicien n'arrive jamais en retard. Toi, tu as toujours été là à l'heure.</p>
-        <p>Ensuite, te dire ce que je te confie, sans détour. Pas de l'argent à faire fructifier : une maison à tenir. Le travail n'est pas de gagner, c'est de <em>ne rien casser</em>. Sauron sait s'arrêter tout seul ; les gardes de Morgul coupent les bots au premier signe sérieux ; le bot d'alarme ne te parlera que pour un vrai problème, et son silence est une bonne nouvelle. Ta vigilance vaut plus que n'importe quel geste héroïque. Si tu doutes, tu arrêtes tout d'un mot, et tu m'écris. Je ne t'en voudrai jamais d'avoir arrêté : ici, arrêter, c'est bien faire.</p>
-        <p>Enfin, te dire que je pars tranquille, et que c'est grâce à toi. Trois semaines, c'est long pour une machine et court pour un homme ; je sais que tu tiendras les deux.</p>
-        <p>Merci, papa. Pour la garde, et pour tout le reste. Tiens la maison, Gandalf. Je reviens.</p>
+        <p class="first">Dad, if you are reading this, I have left and the house is yours. Sauron is running, the guards are watching, and the only hand that counts for the next three weeks, at least, is yours.</p>
+        <p>First I want to thank you, and to say it properly, here, where you will spend your mornings. Thank you for the hours already given: the evenings watching me lose my temper with a machine, the questions that landed just when I thought I was done, the patience in front of a terminal that owed you nothing. A good part of what Sauron knows how to <em>refuse</em>, it knows because you asked "what if?" at the right moment. That is not nothing. It is the heart of it.</p>
+        <p>And thank you for what came before. If I could spend months building a tower that sees far, it is because a house stood behind me, long before Sauron. You were the one holding it up. The most precious thing Sauron knows how to do, keep a cool head and stop in time, I learned from you before I ever wrote it into a machine. They say a wizard is never late. You have always been there on time.</p>
+        <p>Then, to tell you plainly what I am leaving in your care. Not money to grow: a house to keep. The job is not to win, it is to <em>break nothing</em>. Sauron knows how to stop on its own; Morgul's guards cut the bots at the first serious sign; the alarm bot will only speak to you about a real problem, and its silence is good news. Your vigilance is worth more than any heroic move. If in doubt, you stop everything with one word, and you write to me. I will never hold it against you for stopping: here, stopping is doing it right.</p>
+        <p>Finally, to tell you I am leaving with peace of mind, and that it is thanks to you. Three weeks is long for a machine and short for a man; I know you will hold both.</p>
+        <p>Thank you, Dad. For the watch, and for everything else. Keep the house, Gandalf. I will be back.</p>
     </div>
-    <div class="pass-sign">TON FILS, FIER DE L'ÊTRE<small>Écrit la veille du départ · Sauron Vision</small></div>
+    <div class="pass-sign">YOUR SON, PROUD TO BE<small>Written the day before leaving · Sauron Vision</small></div>
 
     <div class="pass-rule"></div>
-    <h2 class="pass-h">LA GARDE, EN PRATIQUE</h2>
+    <h2 class="pass-h">THE WATCH, IN PRACTICE</h2>
     <ul class="pass-list">
-        <li><strong>Chaque matin, cinq minutes.</strong> Ouvre <a href="{% url 'system_health' %}">/health/</a> : chaque ligne verte, ou expliquée. Puis regarde le groupe Telegram d'alarme : <em>le silence est la bonne nouvelle</em>.</li>
-        <li><strong>Deux mots, et rien d'autre, dans le groupe d'alarme.</strong> <code>/status</code> dit ce qui tourne, combien de bots, combien de positions, et les problèmes critiques du moment. <code>/stopall</code> est le frein : tous les bots OFF, les ordres en attente retirés, aucune position fermée. Ils restent OFF tant que personne ne les réarme sur le serveur.</li>
-        <li><strong>Le groupe de l'Œil</strong>, c'est le bavardage du trading (signaux, fills, digests). Tu peux le mettre en sourdine sans rien manquer d'important : l'important passe par l'alarme.</li>
-        <li><strong>Quand écrire au fils :</strong> le bot d'alarme a parlé ; une ligne rouge sur /health/ depuis plus d'une heure ; un message que tu ne comprends pas. Dans le doute, <code>/stopall</code> d'abord, le message ensuite.</li>
+        <li><strong>Every morning, five minutes.</strong> Open <a href="{% url 'system_health' %}">/health/</a>: every line green, or explained. Then look at the alarm Telegram group: <em>silence is the good news</em>.</li>
+        <li><strong>Two words, and nothing else, in the alarm group.</strong> <code>/status</code> says what is running, how many bots, how many positions, and the critical problems of the moment. <code>/stopall</code> is the brake: every bot OFF, pending orders withdrawn, no position closed. They stay OFF until someone re-arms them on the server.</li>
+        <li><strong>The Eye's group</strong> is the trading chatter (signals, fills, digests). You can mute it without missing anything important: what matters goes through the alarm.</li>
+        <li><strong>When to write to your son:</strong> the alarm bot has spoken; a red line on /health/ for more than an hour; a message you do not understand. When in doubt, <code>/stopall</code> first, the message second.</li>
     </ul>
-    <div class="pass-warn">À ne jamais faire : « All on » à côté de System ; toucher aux clés sur /brokers/ ; armer une config live ; fermer une position à la main chez le courtier sans passer par la plateforme ; taper une commande dans le terminal que le fils n'a pas écrite noir sur blanc.</div>
+    <div class="pass-warn">Never do: "All on" next to System; touch the keys on /brokers/; arm a live config; close a position by hand at the broker without going through the platform; type a command in the terminal that your son has not written out in black and white.</div>
 
     <div class="pass-rule"></div>
-    <h2 class="pass-h">LE SECOND BOT, EN CINQ GESTES</h2>
-    <p style="font-size:16px;color:var(--text3,#3a6850);margin:0 0 16px">Le bot d'alarme est un second bot Telegram dans un second groupe, à trois : toi, le fils, et lui. S'il est déjà en place, cette page est un rappel. Sinon, voici comment il naît.</p>
+    <h2 class="pass-h">THE SECOND BOT, IN FIVE MOVES</h2>
+    <p style="font-size:16px;color:var(--text3,#3a6850);margin:0 0 16px">The alarm bot is a second Telegram bot in a second group of three: you, your son, and it. If it is already in place, this page is a reminder. If not, here is how it is born.</p>
     <ol class="pass-steps">
-        <li>Dans Telegram, ouvrir <strong>@BotFather</strong>, envoyer <code>/newbot</code>, lui donner un nom (« Morgul ») et un identifiant qui finit par <code>bot</code>. Il répond avec un <em>token</em> : c'est une clé, elle ne se copie jamais dans un chat.</li>
-        <li>Créer un <strong>nouveau groupe</strong> avec le fils, toi, et ce bot, et personne d'autre. Envoyer un premier message dedans (n'importe lequel).</li>
-        <li>Sur le serveur, mettre le token dans <code>.env</code> (<code>TELEGRAM_ALARM_BOT_TOKEN</code>), puis <code>./deploy/dc up -d</code>. Lire l'identifiant du groupe avec <code>manage.py alarm --chats</code> et le mettre dans <code>TELEGRAM_ALARM_CHAT_ID</code>, puis à nouveau <code>./deploy/dc up -d</code>.</li>
-        <li>Prouver la livraison : <code>manage.py alarm --test</code> envoie un seul message dans le groupe. S'il n'arrive pas, rien n'est allumé.</li>
-        <li>Allumer : <code>manage.py component on telegram_alarm</code>. Dès lors, le silence du groupe est la bonne nouvelle, et <code>/status</code> y répond.</li>
+        <li>In Telegram, open <strong>@BotFather</strong>, send <code>/newbot</code>, give it a name ("Morgul") and a username ending in <code>bot</code>. It answers with a <em>token</em>: that is a key, never to be copied into a chat.</li>
+        <li>Create a <strong>new group</strong> with your son, you, and this bot, and no one else. Send a first message in it (any message).</li>
+        <li>On the server, put the token in <code>.env</code> (<code>TELEGRAM_ALARM_BOT_TOKEN</code>), then <code>./deploy/dc up -d</code>. Read the group's id with <code>manage.py alarm --chats</code> and put it in <code>TELEGRAM_ALARM_CHAT_ID</code>, then <code>./deploy/dc up -d</code> again.</li>
+        <li>Prove delivery: <code>manage.py alarm --test</code> sends a single message to the group. If it does not arrive, nothing is switched on.</li>
+        <li>Switch on: <code>manage.py component on telegram_alarm</code>. From then on, the group's silence is the good news, and <code>/status</code> answers there.</li>
     </ol>
 </article>
 </div>

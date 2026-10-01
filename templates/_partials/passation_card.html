@@ -4,7 +4,7 @@ logged-in page while `passation_card` is true — from the hour the letter
 opens, for the length of the watch. Dismissable per browser (localStorage);
 the letter itself stays at /passation/ whatever the card does.
 {% endcomment %}
-<div class="sv-passation-card" id="svPassationCard" role="note" aria-label="Une lettre pour Gandalf">
+<div class="sv-passation-card" id="svPassationCard" role="note" aria-label="A letter for Gandalf">
     <svg class="sv-passation-eye" viewBox="0 0 48 30" width="30" height="19" aria-hidden="true" focusable="false">
         <path fill="currentColor" fill-rule="evenodd" d="M 2,15 Q 24,-11 46,15 Q 24,41 2,15 Z M 7,15 Q 24,-2 41,15 Q 24,32 7,15 Z"/>
         <circle cx="24" cy="15" r="7" fill="currentColor"/>
@@ -12,11 +12,11 @@ the letter itself stays at /passation/ whatever the card does.
         <circle cx="22.8" cy="13.8" r="1" fill="#d8ffe9" opacity="0.9"/>
     </svg>
     <div class="sv-passation-text">
-        <span class="sv-passation-kicker">UNE LETTRE T'ATTEND</span>
-        <span class="sv-passation-line">Gandalf, la maison est à toi pour trois semaines. Il y a un mot pour toi, et la garde en trois pages.</span>
+        <span class="sv-passation-kicker">A LETTER IS WAITING FOR YOU</span>
+        <span class="sv-passation-line">Gandalf, the house is yours for three weeks. There is a note for you, and the watch in three pages.</span>
     </div>
-    <a href="{% url 'passation' %}" class="sv-passation-open">LIRE LA LETTRE &rarr;</a>
-    <button type="button" class="sv-passation-dismiss" id="svPassationDismiss" aria-label="Fermer ce rappel" title="Fermer ce rappel">&times;</button>
+    <a href="{% url 'passation' %}" class="sv-passation-open">READ THE LETTER &rarr;</a>
+    <button type="button" class="sv-passation-dismiss" id="svPassationDismiss" aria-label="Close this reminder" title="Close this reminder">&times;</button>
 </div>
 <style>
     .sv-passation-card{display:flex;align-items:center;gap:16px;margin:0 0 18px;padding:14px 18px;border:1px solid var(--accent-dim,#0a5028);border-radius:10px;background:linear-gradient(135deg,rgba(0,232,104,0.08),rgba(0,232,104,0.02));box-shadow:0 0 30px rgba(0,232,104,0.08);color:var(--accent,#00e868)}

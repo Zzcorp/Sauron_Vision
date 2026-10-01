@@ -825,6 +825,101 @@ def daily_loss_state(user, *, portfolio=None, now=None,
     return state
 
 
+def _row_risk(qty, entry, stop, side, vpu=1.0) -> tuple:
+    """(risk at the stop in account money, stopped?) for one open row. A
+    stop already through the entry (trailed into profit) risks nothing; a
+    row with no stop risks its whole notional — unmeasured is not free."""
+    try:
+        q = abs(float(qty))
+        e = float(entry)
+        v = float(vpu or 1.0)
+    except (TypeError, ValueError):
+        return 0.0, False
+    try:
+        s = float(stop) if stop is not None else 0.0
+    except (TypeError, ValueError):
+        s = 0.0
+    if s <= 0:
+        return q * e * v, False
+    adverse = (e - s) if str(side).upper() in ("BUY", "LONG") else (s - e)
+    return q * max(0.0, adverse) * v, True
+
+
+def open_risk_state(user, *, portfolio=None, adding: float = 0.0,
+                    venue: str = "live") -> dict:
+    """Where one venue's open positions stand against MAX OPEN RISK
+    (2026-10-01). Never raises on data.
+
+    {"ok", "reason", "limit_pct", "limit_money", "open_risk", "adding",
+     "book_value", "rows", "unstopped", "book_source", "venue"}
+
+    The operator, with 25 live bots on one shared account: "15% de risque
+    ouvert max". Each position risks a small share at its stop, and the
+    daily stop counts only what has CLOSED; this is the sum of what the
+    open ones would lose together if every stop were hit: qty x |entry -
+    stop| x value_per_unit over every OPEN / CLOSE_PENDING bot and manual
+    row of the venue, plus the legacy portfolio.Position rows on the live
+    venue. A row without a stop counts its whole notional. `adding` is a
+    candidate's own risk at its stop, so "would THIS entry put the book
+    past it?" is asked of the final size. "venue": "live" (the default)
+    or "paper", judged apart like every other book limit.
+    """
+    from bot_program.models import AssetBotTrade
+    portfolio = portfolio if portfolio is not None else limits_book()
+    venue = "paper" if venue == "paper" else "live"
+    limit_pct = _limit_pct(portfolio, "max_open_risk_pct")
+    book, book_source = venue_book_value(user, portfolio, venue)
+    state = {"ok": True, "limit_pct": limit_pct, "limit_money": None,
+             "open_risk": 0.0, "adding": round(float(adding or 0.0), 2),
+             "book_value": book, "rows": 0, "unstopped": 0, "reason": "",
+             "book_source": book_source, "venue": venue}
+    if limit_pct is None:
+        state["reason"] = "no open-risk limit set on the book"
+        return state
+    if book is None:
+        state["reason"] = (f"open-risk limit {limit_pct:g}% is a percentage "
+                           f"of a book value that has never been set — "
+                           f"nothing to measure it against")
+        return state
+    total = 0.0
+    for t in AssetBotTrade.objects.filter(
+            config__user=user, status__in=("OPEN", "CLOSE_PENDING"),
+            paper=(venue == "paper")):
+        meta = t.metadata or {}
+        risk, stopped = _row_risk(t.qty, t.entry_price, t.stop_loss, t.side,
+                                  meta.get("value_per_unit") or 1.0)
+        total += risk
+        state["rows"] += 1
+        state["unstopped"] += 0 if stopped else 1
+    if venue == "live":
+        from portfolio.models import Position
+        for p in Position.objects.filter(portfolio=portfolio):
+            risk, stopped = _row_risk(
+                p.quantity, p.entry_price, getattr(p, "stop_loss", None),
+                "BUY" if str(p.direction).lower() == "long" else "SELL")
+            total += risk
+            state["rows"] += 1
+            state["unstopped"] += 0 if stopped else 1
+    limit_money = book * limit_pct / 100.0
+    after = total + float(adding or 0.0)
+    state["open_risk"] = round(total, 2)
+    state["limit_money"] = round(limit_money, 2)
+    unstopped = (f" ({state['unstopped']} without a stop, counted at their "
+                 f"whole notional)") if state["unstopped"] else ""
+    if after > limit_money + 1e-9:
+        state["ok"] = False
+        state["reason"] = (
+            f"open risk limit: {total:,.2f} at the stops of "
+            f"{state['rows']} open position(s)"
+            + (f" + {float(adding):,.2f} for this entry" if adding else "")
+            + f" against a {limit_money:,.2f} ceiling ({limit_pct:g}% of "
+            f"{_book_words(book, book_source)}){unstopped}")
+        return state
+    state["reason"] = (f"{total:,.2f} at the stops of {state['rows']} open "
+                       f"position(s), ceiling {limit_money:,.2f}{unstopped}")
+    return state
+
+
 def elite_entries_since(user, *, paper: bool, now=None) -> int:
     """Elite entries this user opened on one venue in the daily-loss
     window: the rows execute_entry stamped ELITE_META_KEY. Every status
@@ -1654,6 +1749,12 @@ def preflight(user, *, portfolio=None, now=None, venue: str = "") -> dict:
                                                 now=now, venue=venue)
         checks["exposure"] = exposure_state(user, portfolio=portfolio,
                                             venue=venue)
+        # MAX OPEN RISK (2026-10-01): with nothing new added — past it, no
+        # entry opens until a position closes or trails its stop. Unnamed
+        # (the cards, the manual preview) it reads the real book.
+        checks["open_risk"] = open_risk_state(
+            user, portfolio=portfolio,
+            venue=("paper" if venue == "paper" else "live"))
     except Exception as e:  # noqa: BLE001 — see the fail-open note above
         logger.error("[risk_gate] book limits unreadable, entries NOT gated "
                      "this pass: %s", e, exc_info=True)
