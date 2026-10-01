@@ -6285,14 +6285,16 @@ body.light-mode .sz-block { background: var(--bg-secondary); }
     font-family: var(--font-mono); font-size: 9px; letter-spacing: 1.2px;
     text-transform: uppercase; color: var(--text-muted);
 }
-.sz-f input {
+.sz-f input,
+.sz-f select {
     width: 100%; padding: 8px 10px;
     font-family: var(--font-mono); font-size: 14px;
     font-variant-numeric: tabular-nums;
     color: var(--text-primary); background: var(--bg-card);
     border: 1px solid var(--border); border-radius: 4px;
 }
-.sz-f input:focus { outline: none; border-color: var(--accent); }
+.sz-f input:focus,
+.sz-f select:focus { outline: none; border-color: var(--accent); }
 /* Scoped to the block that is actually wrong. An illegal stop used to
    redden the size boxes too, which sent the operator to fix a number that
    was never the problem. */

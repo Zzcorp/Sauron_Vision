@@ -4347,7 +4347,11 @@ def take_trade_preview(request, signal_id):
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     signal = get_object_or_404(Signal, pk=signal_id, is_active=True)
-    return JsonResponse(preview_take_trade(request.user, signal))
+    body, err = _parse_trade_body(request)
+    if err:
+        return JsonResponse({"error": err}, status=400)
+    return JsonResponse(preview_take_trade(request.user, signal,
+                                           leverage=body["leverage"]))
 
 
 @login_required
@@ -4382,6 +4386,7 @@ def take_trade_execute(request, signal_id):
                                            qty=body["qty"],
                                            stop=body["stop"],
                                            target=body["target"],
+                                           leverage=body["leverage"],
                                            pin_ok=_trading_pin_ok(
                                                request,
                                                {"pin": body["pin"]})))
@@ -4445,6 +4450,15 @@ def _parse_trade_body(request):
         if err:
             return None, err
         parsed[field] = val
+    # The live ticket's multiplier (2026-10-01): a whole number >= 1, or
+    # None for the platform's answer (the highest open). Whether it is
+    # open for this instrument is manual_trade's question.
+    lev, err = _number("leverage")
+    if err:
+        return None, err
+    if lev is not None and (lev < 1 or lev != int(lev)):
+        return None, "leverage must be a whole number >= 1"
+    parsed["leverage"] = None if lev is None else int(lev)
 
     return {"close_ids": close_ids,
             "side": str(body.get("side", "")).upper(),
@@ -4734,7 +4748,8 @@ def asset_trade_preview(request, symbol):
     body, err = _parse_trade_body(request)
     if err:
         return JsonResponse({"error": err}, status=400)
-    return JsonResponse(preview_asset_trade(request.user, inst, body["side"]))
+    return JsonResponse(preview_asset_trade(request.user, inst, body["side"],
+                                            leverage=body["leverage"]))
 
 
 @login_required
@@ -4759,6 +4774,7 @@ def asset_trade_execute(request, symbol):
                                             qty=body["qty"],
                                             stop=body["stop"],
                                             target=body["target"],
+                                            leverage=body["leverage"],
                                             pin_ok=_trading_pin_ok(
                                                 request,
                                                 {"pin": body["pin"]})))

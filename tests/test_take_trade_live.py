@@ -350,6 +350,15 @@ class TheLiveFillIsTheBrokersTests(TestCase):
         self.assertEqual(float(trade.entry_price), 60010.0)
 
 
+def _own_world_posts(fake):
+    """The POSTs on this (demo) client's own world. The LIVE eligibility
+    reads are the live ticket's multiplier list (2026-10-01, manual_trade.
+    _ticket_leverage): information, never an order — and on this fake the
+    live route answers nothing, so nothing is cached and each ask POSTs."""
+    return [c for c in fake.calls if c[0] == "POST"
+            and not c[1].endswith("/trading/info/eligibility")]
+
+
 def _order_posts(fake):
     """Every POST on the fake wire EXCEPT the eligibility read. Since
     2026-10-01 the manual preview reads the broker's minimum
@@ -478,7 +487,7 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         self.assertTrue(out["error"].endswith("nothing was sent"),
                         out["error"])
         spy.assert_not_called()
-        posts = [c for c in fake.calls if c[0] == "POST"]
+        posts = _own_world_posts(fake)
         self.assertEqual([c[1] for c in posts if "orders" in c[1]], [])
         self.assertEqual(len(posts), 1, [p[1] for p in posts])
 
@@ -499,7 +508,7 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         self.assertTrue(out.get("ok"), out)
         mo.assert_called_once()
         self.assertEqual(t.eligibility_state("BTCUSD"), "read")
-        posts = [c for c in fake.calls if c[0] == "POST"]
+        posts = _own_world_posts(fake)
         self.assertEqual(len(posts), 1, [p[1] for p in posts])
         self.assertTrue(posts[0][1].endswith("/info/demo/eligibility"))
         self.assertEqual(posts[0][2]["json"], {"instrumentIds": [100000]})

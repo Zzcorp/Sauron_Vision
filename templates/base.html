@@ -2104,7 +2104,14 @@
         facts.push(['Target', String(p.target)]);
       }
       facts.push(['Capital free', money(avail) + ' of ' + money(capital)]);
-      if (isFinite(Number(lever.effective))) {
+      if (lever.chosen != null) {
+        /* The live ticket's own multiplier (2026-10-01): the operator's
+           pick, the highest open by default — the control below. */
+        facts.push(['Leverage', Number(lever.chosen) > 1
+          ? Number(lever.chosen).toFixed(0) + 'x · margin = notional / ' +
+            Number(lever.chosen).toFixed(0)
+          : '1x · settles in full']);
+      } else if (isFinite(Number(lever.effective))) {
         facts.push(['Leverage', Number(lever.effective) > 1
           ? Number(lever.effective).toFixed(0) + ':1 · the broker\'s, fixed'
           : 'None · settles in full']);
@@ -2301,13 +2308,35 @@
             '<div class="sz-out" data-role="out" aria-live="polite"></div>' +
             '<button type="button" class="sz-reset" data-role="reset">' +
               'RESET TO RISK SIZE</button>' +
-            /* Leverage is stated, never offered. Nothing in the execution
-               path multiplies a manual order — FX ties up broker margin,
-               everything else settles in full — so an input here would have
-               the operator sizing against a number the order never sees. */
-            (lever.note ? '<p class="sz-note">' + esc(lever.note) + '</p>' : '') +
+            /* On a paper ticket the leverage is stated, never offered:
+               nothing multiplies a paper order. A LIVE eToro ticket offers
+               it (below, levHtml) — the order carries the pick. */
+            (lever.note && !lever.adjustable
+              ? '<p class="sz-note">' + esc(lever.note) + '</p>' : '') +
           '</fieldset>'
         : '';
+
+      /* THE LIVE TICKET'S MULTIPLIER (2026-10-01). The operator picks;
+         the highest open is the default. A change re-asks the server for
+         the whole ticket at that multiplier — the pool, the caps and the
+         size bounds all count notional / L — rather than re-deriving them
+         here. The size never moves with it: the risk is the stop's. */
+      var levChoices = (lever.choices || []).map(Number).filter(isFinite);
+      var levHtml = (lever.adjustable && levChoices.length > 1)
+        ? '<fieldset class="sz-block sz-lev"><legend>Leverage</legend>' +
+            '<label class="sz-f"><span>Multiplier</span>' +
+              '<select data-role="lev">' +
+                levChoices.map(function (c) {
+                  return '<option value="' + c + '"' +
+                    (c === Number(lever.chosen) ? ' selected' : '') + '>' +
+                    c + 'x' + (c === Number(lever.max) ? ' (max)' : '') +
+                    '</option>';
+                }).join('') +
+              '</select></label>' +
+            (lever.note ? '<p class="sz-note">' + esc(lever.note) + '</p>' : '') +
+          '</fieldset>'
+        : (lever.chosen != null && lever.note
+            ? '<p class="sz-note">' + esc(lever.note) + '</p>' : '');
 
       /* The PIN is collected HERE and verified by the SERVER — the same
          split the close dialog uses. The field only exists on a live
@@ -2344,7 +2373,7 @@
               : ' The 5-minute tick manages the stop and target from here.')) + '</p>' +
           warnHtml +
           '<div class="sv-dialog-facts">' + factsHtml + '</div>' +
-          fundHtml + lvlHtml + sizeHtml + pinHtml +
+          fundHtml + lvlHtml + levHtml + sizeHtml + pinHtml +
         '</div>' +
         '<div class="sv-dialog-foot">' +
           '<button type="button" class="sv-dialog-btn" data-role="cancel">Cancel</button>' +
@@ -2368,6 +2397,7 @@
       var reset = host.querySelector('[data-role="reset"]');
       var lvlReset = host.querySelector('[data-role="lvlreset"]');
       var pinIn = host.querySelector('[data-role="pin"]');
+      var levSel = host.querySelector('[data-role="lev"]');
       var settled = false;
 
       function render(q, lvlWhy, sizeWhy) {
@@ -2508,6 +2538,11 @@
         });
       });
       if (pinIn) pinIn.addEventListener('input', function () { recompute(); });
+      if (levSel) {
+        levSel.addEventListener('change', function () {
+          finish({ relever: Number(levSel.value) });
+        });
+      }
       recompute();
 
       function finish(v) {
@@ -2541,7 +2576,10 @@
           stop: stopMoved() ? stopVal : null,
           target: targetMoved() ? targetVal : null,
           close_ids: ids,
-          pin: pinIn ? pinIn.value : null
+          pin: pinIn ? pinIn.value : null,
+          /* the multiplier this ticket was previewed at, so the order is
+             judged at the same one */
+          leverage: lever.chosen != null ? Number(lever.chosen) : null
         });
       });
       host.querySelector('[data-role="cancel"]')
@@ -2577,7 +2615,16 @@
          about. Positions leave the book by decision now. */
       sizeDialog(p).then(function (choice) {
         if (!choice) { done(); return; }
+        if (choice.relever) {
+          /* A new multiplier: the same ticket, previewed again at it. */
+          done();
+          tradeFlow(previewUrl, executeUrl,
+                    Object.assign({}, extraBody || {}, { leverage: choice.relever }),
+                    onSuccess);
+          return;
+        }
         var body = Object.assign({ close_ids: choice.close_ids }, extraBody || {});
+        if (choice.leverage != null) body.leverage = choice.leverage;
         if (choice.qty !== null) body.qty = choice.qty;
         if (choice.stop !== null) body.stop = choice.stop;
         if (choice.target !== null) body.target = choice.target;
