@@ -170,13 +170,50 @@ class ThePassTests(TestCase):
         self.assertEqual(evaluate(apply=False), [],
                          "with 8 real closes the real record speaks")
 
-    def test_the_switch_off_reads_live_at_full_size(self):
-        from bot_program.steward import pair_policy, set_by_operator
+    def test_the_switch_off_stops_the_moves_but_the_verdicts_still_bind(self):
+        """OFF must not hand every benched loser back to full-size real
+        money (review, 2026-10-02): the verdicts bind; only the moves and
+        the care stop."""
+        from bot_program.steward import evaluate, pair_policy, set_by_operator
         set_by_operator("golden_cross", "crypto", "bench", by="t")
         _switch("steward", on=False)
-        self.assertEqual(pair_policy("golden_cross", "crypto"),
-                         {"state": "live", "force_paper": False, "size": 1.0,
-                          "reason": ""})
+        self.assertTrue(pair_policy("golden_cross", "crypto")["force_paper"])
+        self.assertEqual(pair_policy("other_rule", "crypto")["state"], "live")
+        set_by_operator("golden_cross", "crypto", "live", by="t")
+        self.assertFalse(pair_policy("golden_cross", "crypto")["force_paper"])
+
+    def test_a_graduated_pair_is_judged_on_what_it_did_since(self):
+        from bot_program.steward import evaluate, set_by_operator
+        from bot_program.steward_models import PairVerdict
+        for _ in range(8):
+            _closed(self.cfg, -0.3, days_ago=10)       # the old losses
+        set_by_operator("golden_cross", "crypto", "live", by="steward")
+        PairVerdict.objects.update(since=timezone.now() - timedelta(days=5))
+        for _ in range(10):
+            _closed(self.cfg, 0.05, days_ago=1)
+        self.assertEqual(evaluate(apply=False), [],
+                         "the losses before graduation are history")
+
+    def test_a_class_under_the_star_bench_comes_back_on_its_own_proof(self):
+        from bot_program.steward import evaluate, pair_policy
+        from bot_program.steward_models import PairVerdict
+        PairVerdict.objects.create(
+            rule_name="vol_squeeze", asset_class="*", state="bench",
+            since=timezone.now() - timedelta(days=9))
+        for i in range(21):
+            _closed(self.cfg, [1.0, -1.0, 1.5][i % 3], paper=True,
+                    rule="vol_squeeze", days_ago=2)
+        evaluate(apply=True)
+        self.assertEqual(pair_policy("vol_squeeze", "crypto")["state"],
+                         "probation")
+        self.assertTrue(pair_policy("vol_squeeze", "forex")["force_paper"])
+
+    def test_options_and_the_manual_lane_are_never_judged(self):
+        from bot_program.steward import evaluate
+        for _ in range(8):
+            _closed(self.cfg, -0.5, rule="manual_take")
+            _closed(self.cfg, -0.5, cls="options")
+        self.assertEqual(evaluate(apply=False), [])
 
 
 # ── the posture ──────────────────────────────────────────────────────────
@@ -253,6 +290,41 @@ class TheScoreTests(SimpleTestCase):
         self.assertEqual(next_level("stressed", None, "", {}, [], now)[0],
                          "stressed", "unmeasured holds the level")
 
+    def test_calm_returns_on_the_real_fifteen_minute_cadence(self):
+        """The review's latch: with readings every 15 min, 4 h of calm
+        readings stand a stressed market down; 2 h do not."""
+        from bot_program.market_stress import next_level
+        now = timezone.now()
+        calm = lambda h: [SimpleNamespace(level="stressed", raw_level="calm",  # noqa: E731
+                                          score=10, at=now - timedelta(minutes=15 * i))
+                          for i in range(1, int(h * 4) + 1)]
+        self.assertEqual(next_level("stressed", 10, "calm", {}, calm(2), now)[0],
+                         "stressed")
+        self.assertEqual(next_level("stressed", 10, "calm", {}, calm(4.25), now)[0],
+                         "calm")
+
+    def test_a_recovery_ends_and_a_crisis_eases_without_an_index(self):
+        from bot_program.market_stress import next_level
+        now = timezone.now()
+        self.assertEqual(next_level("recovery", 35, "stressed", {}, [], now,
+                                    recovery_started=now - timedelta(days=11))[0],
+                         "stressed", "ten days of recovery is enough")
+        low = [SimpleNamespace(level="crisis", raw_level="stressed", score=40,
+                               at=now - timedelta(minutes=15 * i))
+               for i in range(1, 30)]                    # 7 h under 45
+        self.assertEqual(next_level("crisis", 40, "stressed", {}, low, now)[0],
+                         "recovery", "no index return: the score alone eases it")
+
+    def test_no_crash_is_called_on_the_vix_and_a_label_alone(self):
+        from bot_program.market_stress import raw_level, score
+        comps = {"vix": 26.0, "brain": {"label": "blow_off",
+                                        "confidence": 0.9}}
+        sc, _ = score(comps)
+        self.assertGreaterEqual(sc, 55)
+        self.assertEqual(raw_level(sc, comps), "stressed")
+        comps["vix"] = 45.0
+        self.assertEqual(raw_level(score(comps)[0], comps), "crisis")
+
 
 class TheReadingTests(TestCase):
 
@@ -283,6 +355,31 @@ class TheReadingTests(TestCase):
         alarm.assert_called_once()
         self.assertIn("CRISIS", alarm.call_args.args[0])
         self.assertEqual(current()["level"], "crisis")
+
+    def test_stale_bars_are_not_the_market(self):
+        from bot_program.market_stress import read_components
+        from instruments.models import Instrument
+        from market_data.models import PriceData
+        inst = Instrument.objects.create(symbol="SPX500", name="s",
+                                         asset_class="index")
+        old = timezone.now() - timedelta(days=30)
+        PriceData.objects.bulk_create([PriceData(
+            instrument=inst, timeframe="1d",
+            timestamp=old - timedelta(days=i), open=100, high=100, low=100,
+            close=100, source="t") for i in range(100)])
+        comps, reasons = read_components()
+        self.assertNotIn("index_drawdown", comps)
+        self.assertTrue(any("SPX500" in r for r in reasons))
+
+    def test_an_override_is_never_the_state_machine_s_past(self):
+        from bot_program.market_stress import evaluate, set_override
+        from bot_program.steward_models import MarketStressReading
+        set_override("crisis", hours=1, by="drill")
+        r = evaluate()
+        self.assertNotEqual(r.level, "crisis", "unmeasured: the measured "
+                            "level is stored, not the drill")
+        self.assertEqual(r.override, "crisis")
+        self.assertEqual(MarketStressReading.objects.get().level, "calm")
 
     def test_the_operator_override_wins_until_it_expires(self):
         from bot_program.market_stress import current, set_override
@@ -361,6 +458,26 @@ class TheEntryWiringTests(TestCase):
         set_override("calm", by="t")
         self.assertEqual(self.bot._posture_leverage("BTCUSD", "BUY", 2),
                          (2, ""))
+
+    def test_paper_rows_on_a_live_config_take_no_real_slot(self):
+        """Review, 2026-10-02: three crisis-paper longs must not refuse the
+        shorts the posture keeps trading."""
+        from bot_program.models import AssetBotTrade
+        self.bot.cfg.max_concurrent_positions = 1
+        self.bot.cfg.save(update_fields=["max_concurrent_positions"])
+        AssetBotTrade.objects.create(
+            config=self.bot.cfg, asset_class="crypto", symbol="ETHUSD",
+            side="BUY", qty=Decimal("1"), entry_price=Decimal("100"),
+            status="OPEN", paper=True)
+        ok, why = self.bot.can_open_new()
+        self.assertNotIn("concurrent positions reached", why)
+        AssetBotTrade.objects.create(
+            config=self.bot.cfg, asset_class="crypto", symbol="SOLUSD",
+            side="BUY", qty=Decimal("1"), entry_price=Decimal("100"),
+            status="OPEN", paper=False)
+        ok, why = self.bot.can_open_new()
+        self.assertFalse(ok)
+        self.assertIn("concurrent positions reached", why)
 
     def test_the_hooks_sit_where_they_must(self):
         import inspect
@@ -450,12 +567,74 @@ class TheCarePlanTests(SimpleTestCase):
         self.assertEqual(plan(_row(lev=10, cls="crypto"), 99.5, now=friday,
                               live=True)["action"], "hold",
                          "crypto never shuts")
-        stale = _row(hours=130, cls="stock")
-        p = plan(stale, 100.2)
+        # cared for 130 h (on a Thursday, no weekend inside): no progress
+        thursday = datetime(2026, 10, 8, 12, 0, tzinfo=dt_tz.utc)
+        watched = (thursday - timedelta(hours=130)).isoformat()
+        stale = _row(hours=200, cls="crypto",
+                     care={"since": watched, "peak": 100.2})
+        stale.opened_at = thursday - timedelta(hours=200)
+        p = plan(stale, 100.2, now=thursday)
         self.assertEqual((p["action"], p["reason"]), ("close", "TIME"))
+
+    def test_switching_care_on_closes_nothing_old_on_its_first_tick(self):
+        """The review's mass-close: a row care never saw has no history it
+        can judge — its no-progress clock starts the first tick care sees
+        it."""
+        from bot_program.position_care import plan
+        p = plan(_row(hours=500, cls="stock"), 100.2)
+        self.assertEqual(p["action"], "hold")
+        self.assertIn("since", p["care"])
+
+    def test_the_weekend_lock_never_closes_a_loser_and_follows_new_york(self):
+        from bot_program.position_care import is_weekend_window, plan
+        friday = datetime(2026, 10, 2, 20, 0, tzinfo=dt_tz.utc)  # 16:00 NY
+        p = plan(_row(cls="forex", care={"peak": 101.0}), 98.4,
+                 now=friday)                                       # -0.8R
+        self.assertEqual(p["action"], "hold", "a past peak locks nothing")
+        p = plan(_row(cls="forex"), 101.2, now=friday)             # +0.6R
+        self.assertEqual(p["care"]["soft_why"], "weekend lock")
+        self.assertTrue(is_weekend_window(friday, "forex"))
+        self.assertFalse(is_weekend_window(friday, "stock"),
+                         "US stocks shut at 16:00 New York")
+        winter = datetime(2026, 12, 4, 20, 30, tzinfo=dt_tz.utc)  # 15:30 NY
+        self.assertTrue(is_weekend_window(winter, "stock"))
+
+    def test_market_hours_skip_the_weekend_except_crypto(self):
+        from bot_program.position_care import market_hours
+        fri = datetime(2026, 10, 2, 12, 0, tzinfo=dt_tz.utc)
+        mon = datetime(2026, 10, 5, 12, 0, tzinfo=dt_tz.utc)
+        self.assertEqual(market_hours(fri, mon, "forex"), 24.0)
+        self.assertEqual(market_hours(fri, mon, "crypto"), 72.0)
 
 
 class TheCareTests(TestCase):
+
+    def test_care_never_closes_what_the_venue_no_longer_shows(self):
+        from bot_program.models import AssetBotTrade
+        from bot_program.position_care import care
+        user = get_user_model().objects.create_user("stw_v", password="x")
+        cfg = _config(user, symbols=["BTCUSD"], mode="live")
+        t = AssetBotTrade.objects.create(
+            config=cfg, asset_class="crypto", symbol="BTCUSD", side="BUY",
+            qty=Decimal("1"), entry_price=Decimal("100"),
+            stop_loss=Decimal("98"), status="OPEN", paper=False,
+            metadata={"initial_stop_loss": 98.0, "protected": True,
+                      "protective_trade_id": "777",
+                      "care": {"peak": 104.0, "soft_stop": 102.0,
+                               "soft_why": "trail",
+                               "since": timezone.now().isoformat()}})
+        _switch("steward")
+        bot = MagicMock()
+        bot._instrument_class.return_value = "crypto"
+        bot._broker_snapshot.return_value = [{"position_id": "999"}]
+        client = MagicMock()
+        client.close_needs_position_id.return_value = True
+        self.assertEqual(care(bot, t, Decimal("101.5"), client), "")
+        bot._close_trade.assert_not_called()
+        bot._broker_snapshot.return_value = [{"position_id": "777"}]
+        bot._close_trade.return_value = False
+        self.assertEqual(care(bot, t, Decimal("101.5"), client), "attempted",
+                         "a close in flight still ends the row's tick")
 
     def test_care_is_off_with_the_steward_and_closes_through_the_bot(self):
         from bot_program.models import AssetBotTrade
@@ -468,17 +647,21 @@ class TheCareTests(TestCase):
             stop_loss=Decimal("98"), status="OPEN", paper=False,
             metadata={"initial_stop_loss": 98.0,
                       "care": {"peak": 104.0, "soft_stop": 102.0,
-                               "soft_why": "trail"}})
+                               "soft_why": "trail"},
+                      "adjusted_by": "operator"})
         bot = MagicMock()
         bot._close_trade.return_value = True
-        self.assertFalse(care(bot, t, Decimal("101.5"), None))
+        bot._instrument_class.return_value = "crypto"
+        self.assertEqual(care(bot, t, Decimal("101.5"), None), "")
         bot._close_trade.assert_not_called()
         _switch("steward")
-        self.assertTrue(care(bot, t, Decimal("101.5"), None))
+        self.assertEqual(care(bot, t, Decimal("101.5"), None), "closed")
         bot._close_trade.assert_called_once()
         self.assertEqual(bot._close_trade.call_args.kwargs["reason"], "SL")
         t.refresh_from_db()
         self.assertEqual(t.metadata["care_exit"], "trail")
+        self.assertEqual(t.metadata["adjusted_by"], "operator",
+                         "care merges its keys, never clobbers the rest")
         from bot_program.steward_models import StewardAction
         self.assertIn("REAL MONEY", StewardAction.objects.get(
             kind="care_close").detail)

@@ -525,6 +525,13 @@ def missing_proofs(icls, side) -> list:
 #: every other class still reads 1.
 ETORO_PROVEN_LEVERAGE = {"forex": 5}
 
+#: THE MULTIPLIER EACH CLASS'S SHORT HAS BEEN PROVEN AT (2026-10-02): the
+#: leverage proofs above were measured on LONGS, and the short proofs
+#: (ETORO_SHORT_PROVEN) at 1x — so the attack mode's chooser picks 1 for a
+#: short until a short round trip at L is pinned here, class -> L. Binds the
+#: chooser alone, exactly as ETORO_PROVEN_LEVERAGE does.
+ETORO_PROVEN_SHORT_LEVERAGE = {}
+
 #: THE ATTACK MODE (2026-09-26; the operator: "je veux surtout que ce mode
 #: d'attaque de leverage soit vraiment smart, qu'il soit ballsy si proba
 #: très high"). Opt-in per config: extras["leverage"] = "auto". Two
@@ -1117,13 +1124,16 @@ class AssetBot(ABC):
 
                 # THE POSITION CARE (2026-10-02, bot_program/position_care):
                 # the platform's own soft stop (break-even, trail, the
-                # posture, the weekend) and the no-progress exit — for
-                # protected rows too: closing an eToro position by its id
-                # takes its stop and target with it, exactly as the time
-                # stop above does. The steward switch OFF: nothing here.
+                # posture, the weekend) and the no-progress exit. A
+                # protected row is closed only on a venue that closes by
+                # position id (eToro: the close takes its stop and target
+                # with it) and only while the tick's position list still
+                # shows it; a close in flight ends this row's tick. The
+                # steward switch OFF: nothing here.
                 from bot_program.position_care import care as _care
-                if _care(self, trade, price, client):
-                    closed += 1
+                _cared = _care(self, trade, price, client)
+                if _cared:
+                    closed += 1 if _cared == "closed" else 0
                     continue
 
                 # Past here the broker owns SL/TP for protected trades
@@ -3328,9 +3338,15 @@ class AssetBot(ABC):
         self._book_gate_blind = (book.get("reason") or "book unreadable") \
             if book.get("failed_open") else ""
 
-        # CLOSE_PENDING still holds capital/exposure at the broker.
+        # CLOSE_PENDING still holds capital/exposure at the broker. A LIVE
+        # config's slots are its REAL positions (2026-10-02): the paper
+        # rows the steward's bench, the crisis posture or a paper stage
+        # book on it hold no money and must not crowd out the real entries
+        # (in a crisis, three paper longs would refuse the shorts the
+        # posture keeps trading). A paper config counts all its rows.
         open_count = AssetBotTrade.objects.filter(
-            config=self.cfg, status__in=("OPEN", "CLOSE_PENDING")).count()
+            config=self.cfg, status__in=("OPEN", "CLOSE_PENDING"),
+            **({"paper": False} if self.cfg.mode != "paper" else {})).count()
         if open_count >= self.cfg.max_concurrent_positions:
             return (False,
                     f"max {self.cfg.max_concurrent_positions} concurrent positions reached")
@@ -3483,11 +3499,17 @@ class AssetBot(ABC):
 
         # Skip if a trade for this symbol is already open (or awaiting a
         # retried close — the broker position is still live) under this config.
-        if AssetBotTrade.objects.filter(
-                config=self.cfg, symbol=symbol,
-                status__in=("OPEN", "CLOSE_PENDING")).exists():
+        # On a LIVE config a PAPER row (a benched pair, a crisis-paper long)
+        # blocks only another paper entry, judged once the venue is known
+        # below: it must not block the real short the posture keeps trading.
+        _open_here = AssetBotTrade.objects.filter(
+            config=self.cfg, symbol=symbol,
+            status__in=("OPEN", "CLOSE_PENDING"))
+        if self.cfg.mode == "paper" and _open_here.exists() \
+                or _open_here.filter(paper=False).exists():
             return self._skip(symbol, skips.ALREADY_OPEN,
                               "a position is already on")
+        _paper_open_here = _open_here.filter(paper=True).exists()
 
         # AND SKIP IF AN ORDER FOR IT MAY ALREADY BE LIVE. There is no row to
         # find — that is the whole problem — so the note lives on the config.
@@ -3746,6 +3768,9 @@ class AssetBot(ABC):
         # less. Both read OFF as "nothing changes".
         stage, _care_meta = self._steward_and_posture(symbol, decision, stage)
         level_meta = dict(level_meta or {}, **_care_meta)
+        if _paper_open_here and stage.get("force_paper"):
+            return self._skip(symbol, skips.ALREADY_OPEN,
+                              "a paper position is already on")
 
         # ── Size by RISK, not by notional ────────────────────────────────
         sizing = self._size_for_entry(symbol, price, sl, decision)
@@ -4501,6 +4526,20 @@ class AssetBot(ABC):
                 return self._skip(symbol, skips.LEVERAGE_REFUSED,
                                   (f"attack {_attack['tier']}: "
                                    if _attack else "") + lev_why)
+            _plnote = (getattr(self, "_posture_lev_note", None) or {}).pop(
+                symbol, "")
+            if _plnote:
+                # THE POSTURE LOWERED THE MULTIPLIER (2026-10-02): recorded
+                # on the row, and MAX SINGLE POSITION judged again at the
+                # multiplier actually sent — the proposal counted the
+                # margin at the typed one
+                entry_meta["posture_leverage"] = _plnote
+                if not self._judge_final_size(
+                        symbol, qty=qty, price=price, sl=sl,
+                        decision=decision, sizing=sizing, venue=cand.venue,
+                        leverage=int(leverage or 1),
+                        note=f"{_plnote}: at {int(leverage or 1)}x: "):
+                    return None
             if _attack is not None:
                 # THE ATTACK MODE's pick, judged again by MAX SINGLE
                 # POSITION at the multiplier actually chosen: the proposal
@@ -4571,7 +4610,7 @@ class AssetBot(ABC):
                     _veto = (f"the Executioner vetoed it "
                              f"({float(ex.get('conviction') or 0):.2f}): "
                              f"{ex.get('killer') or 'no reason given'}")
-                    remember_refusal(self, cand, _veto)
+                    remember_refusal(self, cand, _veto, kind="veto")
                     return self._skip(symbol, skips.GATE_BLOCKED, _veto)
                 if (isinstance(_elite, dict) and _elite.get("elite")
                         and not debate.get("champion_wins")):
@@ -4580,7 +4619,7 @@ class AssetBot(ABC):
                            + (f" ({debate.get('why')})" if debate.get("why")
                               else ""))
                     if debate.get("ran"):
-                        remember_refusal(self, cand, _no)
+                        remember_refusal(self, cand, _no, kind="elite")
                     return self._skip(symbol, skips.GATE_BLOCKED, _no)
                 _scale = float(debate.get("scale") or 1.0)
                 if _scale < 1.0:
@@ -4594,6 +4633,51 @@ class AssetBot(ABC):
                             + (f"the venue minimum {_floor:g}"
                                if _floor is not None else "one unit")
                             + " — nothing sent")
+                    # THE CUT SIZE meets the size-dependent judgements again:
+                    # a flat fee weighs more on a smaller ticket, and the
+                    # multiplier's minimum margin was judged at the old size
+                    _fee, _fee_why = self._venue_fee_refusal(
+                        client, symbol, qty=float(qty), price=float(price),
+                        target=float(tp), stop=float(sl), charge=charge)
+                    if _fee_why:
+                        return self._skip(symbol, skips.COST_FILTER,
+                                          f"after the Executioner's cut: "
+                                          f"{_fee_why}")
+                    if _fee:
+                        entry_meta["venue_fee_fraction"] = round(_fee, 8)
+                        if charge:
+                            entry_meta["cost_fraction_charged"] = round(
+                                float(charge["fraction"]) + _fee, 8)
+                    leverage, lev_why = self._order_leverage(
+                        client, symbol, side=decision.direction,
+                        price=float(price), stop=float(sl), qty=float(qty))
+                    if lev_why:
+                        return self._skip(symbol, skips.LEVERAGE_REFUSED,
+                                          f"after the Executioner's cut: "
+                                          f"{lev_why}")
+                    _pl2 = (getattr(self, "_posture_lev_note", None)
+                            or {}).pop(symbol, "")
+                    if _pl2:
+                        entry_meta["posture_leverage"] = _pl2
+                    if adapter_key(client) == "etoro":
+                        lev_why = self._leverage_headroom(
+                            client, symbol, qty=float(qty),
+                            price=float(price), leverage=int(leverage or 1))
+                        if lev_why:
+                            return self._skip(
+                                symbol, skips.LEVERAGE_REFUSED,
+                                f"after the Executioner's cut, at "
+                                f"{leverage or 1}x: {lev_why}")
+                    entry_meta["debate_cut"] = {"scale": _scale,
+                                                "qty": float(qty),
+                                                "leverage": leverage}
+            # THE LAST READ, AGAIN: the debate can take a minute, and a
+            # kill switch or a disarm landing inside it must still stop the
+            # order (the check above ran before it).
+            if debate.get("on") and not self._still_armed():
+                return self._skip(symbol, skips.GATE_BLOCKED,
+                                  "config was disarmed during the trade "
+                                  "debate — refusing to submit")
             try:
                 # The LAST read before real units move. can_open_new ran
                 # before this symbol's scan; a disarm landing between then
@@ -5415,8 +5499,11 @@ class AssetBot(ABC):
         icls = self._instrument_class(symbol)
         ceiling = min(int(MAX_ORDER_LEVERAGE),
                       int(ORDER_LEVERAGE_CEILING.get(icls, 1)))
-        proven = proven_leverage(icls)
         direction = "long" if str(side or "BUY").upper() == "BUY" else "short"
+        # the multiplier proofs were measured on LONGS; a short's are in
+        # ETORO_PROVEN_SHORT_LEVERAGE (empty: the short proofs were at 1x)
+        proven = (proven_leverage(icls) if direction == "long" else
+                  max(1, int(ETORO_PROVEN_SHORT_LEVERAGE.get(icls, 1) or 1)))
         try:
             _elig = getattr(client, "eligibility", None)
             row = _elig(symbol) if callable(_elig) else None

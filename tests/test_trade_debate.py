@@ -288,7 +288,17 @@ class TheWiringTests(SimpleTestCase):
         self.assertIn("qty = self._round_qty(qty * _scale", src)
         self.assertIn('and not debate.get("champion_wins")', src)
         self.assertIn('entry_meta["debate"] = {', src)
-        self.assertIn("remember_refusal(self, cand, _veto)", src)
+        self.assertIn('remember_refusal(self, cand, _veto, kind="veto")', src)
+        # the kill switch / disarm is read AGAIN after the debate
+        self.assertLess(src.index("debate_candidate(self, cand, qty)"),
+                        src.rindex("self._still_armed()"))
+        self.assertLess(src.rindex("self._still_armed()"),
+                        src.index("client.market_order("))
+        # a cut size meets the fee, the multiplier and the headroom again
+        cut = src.index("THE CUT SIZE meets")
+        for again in ("self._venue_fee_refusal(", "self._order_leverage(",
+                      "self._leverage_headroom("):
+            self.assertGreater(src.index(again, cut), cut, again)
         # 2026-10-02: argued after EVERY deterministic refusal — the proof
         # gate, the fee, the floor, the multiplier, the headroom, the
         # disarm — and right before the order: only an order about to be
@@ -297,5 +307,5 @@ class TheWiringTests(SimpleTestCase):
         for gate in ("self._etoro_entry_refusal(", "self._venue_fee_refusal(",
                      "self._venue_size_floor(", "self._order_leverage(",
                      "self._leverage_headroom(", "self._still_armed()"):
-            self.assertLess(src.index(gate), at, gate)
+            self.assertLess(src.index(gate), at, gate)   # first occurrence
         self.assertLess(at, src.index("client.market_order("))

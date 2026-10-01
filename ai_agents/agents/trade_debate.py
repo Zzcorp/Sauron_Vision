@@ -282,30 +282,42 @@ def graded_count() -> int:
         metadata__debate__ran=True).count()
 
 
-def _hold_key(bot, cand) -> str:
+def _hold_key(bot, cand, kind) -> str:
     d = getattr(cand, "decision", None)
-    return (f"debate:hold:{getattr(bot.cfg, 'id', '')}:{cand.symbol}:"
+    return (f"debate:hold:{kind}:{getattr(bot.cfg, 'id', '')}:{cand.symbol}:"
             f"{getattr(d, 'direction', '')}:{getattr(d, 'rule_name', '')}")
 
 
+def _is_elite(cand) -> bool:
+    elite = getattr(cand, "elite", None)
+    return isinstance(elite, dict) and bool(elite.get("elite"))
+
+
 def remembered_refusal(bot, cand):
-    """A binding refusal still held for this candidate, or None."""
+    """A binding refusal still held for this candidate, or None: a veto
+    holds every entry of it; an elite refusal holds only an ELITE entry
+    (once the day's loss window resets, the ordinary entry is free)."""
     try:
         from django.core.cache import cache
-        held = cache.get(_hold_key(bot, cand))
-        return held if isinstance(held, dict) else None
+        for kind in ("veto",) + (("elite",) if _is_elite(cand) else ()):
+            held = cache.get(_hold_key(bot, cand, kind))
+            if isinstance(held, dict):
+                return held
+        return None
     except Exception:  # noqa: BLE001 — a cache down forgets
         return None
 
 
-def remember_refusal(bot, cand, why: str) -> None:
+def remember_refusal(bot, cand, why: str, *, kind: str = "veto") -> None:
     """Hold a binding refusal DEBATE_HOLD_HOURS: the same candidate is not
-    re-argued (and re-billed) every tick until a re-roll lets it through."""
+    re-argued (and re-billed) every tick until a re-roll lets it through.
+    kind: "veto" or "elite"."""
     try:
         from django.core.cache import cache
         from django.utils import timezone
-        cache.set(_hold_key(bot, cand),
-                  {"why": why[:200], "at": timezone.now().isoformat()},
+        cache.set(_hold_key(bot, cand, kind),
+                  {"why": why[:200], "at": timezone.now().isoformat(),
+                   "kind": kind},
                   int(DEBATE_HOLD_HOURS * 3600))
     except Exception as e:  # noqa: BLE001
         logger.info("[debate] refusal not remembered: %s", e)

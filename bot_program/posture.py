@@ -25,7 +25,8 @@ back in steps by days since the crisis eased (RECOVERY_STEPS).
 Two dark-water scales sit beside it and bind in every level:
   drawdown_scale  the account under its 90-day high-water mark ->
                   share_allocator.governor_for (1.0 down to 0.4 between 5%
-                  and 20%)
+                  and 20%), unless the share allocator or the desk live
+                  mode already applies it
   streak_scale    the last STREAK_N real-money closes all losses ->
                   STREAK_SCALE until a win
 
@@ -149,7 +150,16 @@ def leverage_cap(level, kind, class_ceiling, *, recovery_days=0.0):
 
 
 def drawdown_scale(user) -> tuple:
-    """(scale, why) from the account's drawdown under its high-water mark."""
+    """(scale, why) from the account's drawdown under its high-water mark —
+    unless the share allocator or the capital desk already applies the
+    same governor (their live modes), which would square it."""
+    try:
+        from core.platform_control import is_component_enabled
+        for key in ("share_allocator_mode_live", "capital_desk_mode_live"):
+            if is_component_enabled(key):
+                return 1.0, ""
+    except Exception:  # noqa: BLE001
+        pass
     try:
         from bot_program.capital_truth import equity_drawdown
         from bot_program.share_allocator import governor_for

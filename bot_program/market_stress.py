@@ -57,6 +57,15 @@ STALE_HOURS = 2.0
 HOLD_HOURS = 24.0
 
 INDEX_SYMBOLS = ("SPX500", "NSDQ100")
+#: a daily bar older than this is not the market: the index inputs are
+#: left out and said (a dead feed must not hold a crisis on old prices)
+INDEX_FRESH_DAYS = 5
+#: with no index read, a crisis is declared only on a VIX this high (the
+#: VIX and an LLM label alone call stress, not a crash)
+CRISIS_VIX_WITHOUT_INDEX = 35.0
+#: with no 5-day index return to read, a crisis eases on the score alone
+#: once it has stayed under RECOVERY_BELOW this long
+RECOVERY_SCORE_HOURS = 6.0
 VIX_SERIES = "VIXCLS"
 HY_SERIES = "BAMLH0A0HYM2"
 MACRO_FRESH_DAYS = 5
@@ -93,6 +102,8 @@ def _daily_closes(symbol, n=260):
         return []
     bars = list(PriceData.objects.filter(instrument=inst, timeframe="1d")
                 .order_by("-timestamp").values_list("timestamp", "close")[:n])
+    if bars and (timezone.now() - bars[0][0]) > timedelta(days=INDEX_FRESH_DAYS):
+        return []
     closes = [float(c) for _t, c in reversed(bars)]
     q = LiveQuote.objects.filter(instrument=inst).first()
     if q is not None and q.last and bars:
@@ -107,7 +118,9 @@ def _index_components(out, reasons):
     for sym in INDEX_SYMBOLS:
         closes = _daily_closes(sym)
         if len(closes) < 61:
-            reasons.append(f"{sym}: {len(closes)} daily closes, 61 needed")
+            reasons.append(f"{sym}: {len(closes)} fresh daily closes, 61 "
+                           f"needed (a last bar older than "
+                           f"{INDEX_FRESH_DAYS} days reads as none)")
             continue
         last = closes[-1]
         high60 = max(closes[-61:])
@@ -202,48 +215,67 @@ def score(components: dict) -> tuple:
     return round(total / weights, 1) if weights else None, subs
 
 
-def raw_level(sc) -> str:
+def raw_level(sc, components=None) -> str:
     if sc is None:
         return ""
     if sc >= SCORE_CRISIS:
+        comps = components or {}
+        if components is not None and "index_drawdown" not in comps \
+                and float(comps.get("vix") or 0.0) < CRISIS_VIX_WITHOUT_INDEX:
+            return STRESSED
         return CRISIS
     if sc >= SCORE_STRESSED:
         return STRESSED
     return CALM
 
 
-def next_level(prev, sc, raw, components, history, now) -> tuple:
-    """(level, why) from the previous level, this reading and the recent
-    readings (newest first): up at once, down slowly, a crisis ends in a
-    recovery."""
+def next_level(prev, sc, raw, components, history, now, *,
+               recovery_started=None) -> tuple:
+    """(level, why) from the previous MEASURED level, this reading and the
+    readings of the last day (newest first): up at once, down slowly, a
+    crisis ends in a recovery. `recovery_started` is when the current
+    recovery began (recovery_since)."""
     if not raw:
         return (prev or CALM), "score unmeasured: the last level holds"
     prev = prev or CALM
 
+    def _run(test):
+        """The run of readings, newest first, that pass `test`; returns
+        (count including this reading, oldest time in the run)."""
+        oldest, count = now, 1
+        for r in history:
+            if not test(r):
+                break
+            oldest, count = r.at, count + 1
+        return count, oldest
+
     def _calm_confirmed():
-        calm_run = [r for r in history[:CALM_CONFIRM - 1]
-                    if r.raw_level == CALM]
-        if len(calm_run) < CALM_CONFIRM - 1:
-            return False
-        oldest = calm_run[-1].at if calm_run else now
-        return (now - oldest) >= timedelta(hours=CALM_CONFIRM_HOURS)
+        count, oldest = _run(lambda r: r.raw_level == CALM)
+        return (count >= CALM_CONFIRM
+                and (now - oldest) >= timedelta(hours=CALM_CONFIRM_HOURS))
 
     if raw == CRISIS:
         return CRISIS, f"score {sc:g} >= {SCORE_CRISIS:g}"
     if prev == CRISIS:
-        up5 = (components.get("index_5d") or 0.0) > 0
-        if sc < RECOVERY_BELOW and up5:
-            return RECOVERY, (f"score {sc:g} under {RECOVERY_BELOW:g} and "
-                              f"the index up over 5 days: the crisis eases")
-        return CRISIS, f"crisis holds until the score is under {RECOVERY_BELOW:g} with the index rising"
+        if sc < RECOVERY_BELOW:
+            i5 = components.get("index_5d")
+            if i5 is not None and i5 > 0:
+                return RECOVERY, (f"score {sc:g} under {RECOVERY_BELOW:g} and "
+                                  f"the index up over 5 days: the crisis eases")
+            if i5 is None:
+                _c, oldest = _run(lambda r: r.score is not None
+                                  and r.score < RECOVERY_BELOW)
+                if (now - oldest) >= timedelta(hours=RECOVERY_SCORE_HOURS):
+                    return RECOVERY, (f"score under {RECOVERY_BELOW:g} for "
+                                      f"{RECOVERY_SCORE_HOURS:g}h (no index "
+                                      f"return to read): the crisis eases")
+        return CRISIS, (f"crisis holds until the score is under "
+                        f"{RECOVERY_BELOW:g} with the index rising")
     if prev == RECOVERY:
-        started = None
-        for r in history:
-            if r.level != RECOVERY:
-                break
-            started = r.at
-        if started and (now - started) > timedelta(days=RECOVERY_MAX_DAYS):
-            return raw, f"recovery ran {RECOVERY_MAX_DAYS} days: {raw} by the score"
+        if recovery_started and \
+                (now - recovery_started) > timedelta(days=RECOVERY_MAX_DAYS):
+            return raw, (f"recovery ran {RECOVERY_MAX_DAYS} days: {raw} by "
+                         f"the score")
         if raw == CALM and _calm_confirmed():
             return CALM, "calm confirmed after the recovery"
         return RECOVERY, "recovering: risk-on longs come back in steps"
@@ -254,6 +286,24 @@ def next_level(prev, sc, raw, components, history, now) -> tuple:
         return STRESSED, (f"calm reading; {CALM_CONFIRM} in a row over "
                           f"{CALM_CONFIRM_HOURS:g}h needed to stand down")
     return CALM, f"score {sc:g} under {SCORE_STRESSED:g}"
+
+
+def recovery_since(now=None):
+    """When the current recovery began (the first RECOVERY reading after the
+    last reading that was not one), or None when not recovering. Two
+    indexed queries, never a scan."""
+    from bot_program.steward_models import MarketStressReading
+    now = now or timezone.now()
+    latest = MarketStressReading.objects.filter(at__lte=now).order_by("-at").first()
+    if latest is None or latest.level != RECOVERY:
+        return None
+    before = (MarketStressReading.objects.filter(at__lte=now)
+              .exclude(level=RECOVERY).order_by("-at").first())
+    first = MarketStressReading.objects.filter(level=RECOVERY, at__lte=now)
+    if before is not None:
+        first = first.filter(at__gt=before.at)
+    first = first.order_by("at").first()
+    return first.at if first else None
 
 
 def override(now=None):
@@ -304,13 +354,19 @@ def evaluate(now=None, *, save=True):
     now = now or timezone.now()
     components, reasons = read_components(now)
     sc, subs = score(components)
-    raw = raw_level(sc)
-    history = list(MarketStressReading.objects.order_by("-at")[:12])
-    prev = history[0].level if history else None
-    level, why = next_level(prev, sc, raw, components, history, now)
+    raw = raw_level(sc, components)
+    history = list(MarketStressReading.objects.filter(
+        at__gte=now - timedelta(hours=24), at__lt=now).order_by("-at")[:200])
+    prev = history[0].level if history else (
+        MarketStressReading.objects.filter(at__lt=now).order_by("-at")
+        .values_list("level", flat=True).first())
+    level, why = next_level(prev, sc, raw, components, history, now,
+                            recovery_started=recovery_since(now))
+    # THE MEASURED LEVEL is stored; an operator override is applied in
+    # current() only, so a drill never becomes the state machine's past.
     ov = override(now)
     reading = MarketStressReading(
-        at=now, score=sc, raw_level=raw, level=(ov["level"] if ov else level),
+        at=now, score=sc, raw_level=raw, level=level,
         components={"raw": components, "sub": subs},
         reasons=[why] + reasons + ([f"operator override until {ov['until'][:16]}"]
                                    if ov else []),
@@ -387,11 +443,9 @@ def current(now=None) -> dict:
 
 def recovery_days(now=None) -> float:
     """Days since the current recovery began (0 when not recovering)."""
-    from bot_program.steward_models import MarketStressReading
     now = now or timezone.now()
-    started = None
-    for r in MarketStressReading.objects.order_by("-at")[:2000]:
-        if r.level != RECOVERY:
-            break
-        started = r.at
+    try:
+        started = recovery_since(now)
+    except Exception:  # noqa: BLE001
+        started = None
     return ((now - started).total_seconds() / 86400.0) if started else 0.0

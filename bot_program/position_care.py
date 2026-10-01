@@ -42,6 +42,8 @@ row to the rest of manage_positions, exactly as before.
 """
 import logging
 from datetime import time as dtime
+from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 from django.utils import timezone
 
@@ -55,7 +57,13 @@ TRAIL_WIDE_FROM_R = 3.0
 TRAIL_GAP_WIDE_R = 0.75
 STRESSED_FLOOR_R = -0.75
 CRISIS_FLOOR_R = -0.5
-WEEKEND_FROM_UTC = dtime(19, 30)
+#: Friday, New York time (DST follows): the window before each market
+#: shuts for the weekend, by class
+NY = ZoneInfo("America/New_York")
+WEEKEND_WINDOW_NY = {"stock": (dtime(15, 0), dtime(16, 0)),
+                     "etf": (dtime(15, 0), dtime(16, 0)),
+                     "options": (dtime(15, 0), dtime(16, 0))}
+WEEKEND_WINDOW_NY_DEFAULT = (dtime(15, 30), dtime(17, 0))
 WEEKEND_LOCK_AT_R = 0.5
 WEEKEND_CUT_LEVERAGE = 5
 NO_PROGRESS_HOURS = {"forex": 96, "index": 96, "commodity": 120,
@@ -73,9 +81,33 @@ def _f(x):
 
 
 def is_weekend_window(now, asset_class) -> bool:
+    """Friday, the hour before this class's market shuts (New York time,
+    so daylight saving follows)."""
     if str(asset_class) in NEVER_SHUTS:
         return False
-    return now.weekday() == 4 and now.time() >= WEEKEND_FROM_UTC
+    ny = now.astimezone(NY)
+    start, end = WEEKEND_WINDOW_NY.get(str(asset_class),
+                                       WEEKEND_WINDOW_NY_DEFAULT)
+    return ny.weekday() == 4 and start <= ny.time() < end
+
+
+def market_hours(start, now, asset_class) -> float:
+    """Hours between start and now, less the Saturdays and Sundays (New
+    York) of a market that shuts: a thesis is not "doing nothing" while
+    its market is closed."""
+    if start is None or now <= start:
+        return 0.0
+    total = (now - start).total_seconds() / 3600.0
+    if str(asset_class) in NEVER_SHUTS:
+        return total
+    day = start.astimezone(NY).date()
+    last = now.astimezone(NY).date()
+    shut = 0
+    while day <= last and shut < 400:
+        if day.weekday() >= 5:
+            shut += 1
+        day += timedelta(days=1)
+    return max(0.0, total - 24.0 * shut)
 
 
 def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
@@ -120,7 +152,8 @@ def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
     if live and fights and posture_level == "crisis":
         cands.append((lvl(CRISIS_FLOOR_R), "crisis"))
     weekend = is_weekend_window(now, trade.asset_class)
-    if weekend and mfe >= WEEKEND_LOCK_AT_R:
+    if weekend and r_now >= WEEKEND_LOCK_AT_R:
+        # a winner NOW locks break-even; a past peak never closes a loser
         cands.append((lvl(BREAKEVEN_LOCK_R), "weekend lock"))
 
     soft = _f(care.get("soft_stop"))
@@ -131,12 +164,16 @@ def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
             soft, soft_why = level, why
     new_care = {"peak": round(new_peak, 8), "worst": round(new_worst, 8),
                 "mfe_r": round(mfe, 3), "mae_r": round(mae, 3),
-                "r_now": round(r_now, 3)}
+                "r_now": round(r_now, 3),
+                # the first tick care saw this row: its MFE is only known
+                # from here, and the no-progress clock starts here
+                "since": care.get("since") or now.isoformat()}
     if soft is not None:
         new_care["soft_stop"] = round(soft, 8)
         new_care["soft_why"] = soft_why
     out["changed"] = any(care.get(k) != new_care.get(k)
-                         for k in ("peak", "worst", "soft_stop", "soft_why"))
+                         for k in ("peak", "worst", "soft_stop", "soft_why",
+                                   "since"))
     out["care"] = {**care, **new_care}
 
     if soft is not None and ((d > 0 and p <= soft) or (d < 0 and p >= soft)):
@@ -156,32 +193,75 @@ def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
                        f"carried through the weekend gap")
         out["care"]["exit"] = "weekend cut"
         return out
-    hours = (now - trade.opened_at).total_seconds() / 3600.0 \
-        if trade.opened_at else 0.0
+    from django.utils.dateparse import parse_datetime
+    care_since = parse_datetime(new_care["since"]) if new_care.get("since") \
+        else None
+    start = max([t for t in (trade.opened_at, care_since) if t is not None],
+                default=None)
+    hours = market_hours(start, now, trade.asset_class)
     limit = NO_PROGRESS_HOURS.get(str(trade.asset_class),
                                   NO_PROGRESS_DEFAULT_HOURS)
     if hours >= limit and mfe < BREAKEVEN_AT_R and r_now < NO_PROGRESS_MAX_R:
         out.update(action="close", reason="TIME",
-                   why=f"no progress: {hours:.0f}h open, best {mfe:+.2f}R, "
-                       f"now {r_now:+.2f}R")
+                   why=f"no progress: {hours:.0f} market hours watched, best "
+                       f"{mfe:+.2f}R, now {r_now:+.2f}R")
         out["care"]["exit"] = "no progress"
         return out
     return out
 
 
-def care(bot, trade, price, client, *, now=None) -> bool:
-    """Run the care on one row inside manage_positions. True when it closed
-    the row (the caller counts it and moves on)."""
+def _save_care(trade, care_value, care_exit=None):
+    """Merge ONLY care's keys into the row's metadata, read fresh under a
+    row lock: other writers (adjust_levels, a manual close's in-doubt
+    marker) are never clobbered by this tick's stale copy."""
+    from django.db import transaction
+
+    from bot_program.asset_models import AssetBotTrade
+    with transaction.atomic():
+        row = AssetBotTrade.objects.select_for_update().get(pk=trade.pk)
+        meta = dict(row.metadata or {})
+        meta["care"] = care_value
+        if care_exit is not None:
+            meta["care_exit"] = care_exit
+        row.metadata = meta
+        row.save(update_fields=["metadata"])
+    trade.metadata = meta
+
+
+def _venue_still_holds(bot, trade, client) -> bool:
+    """A protected real-money row may be closed by care only when its venue
+    closes by position id (eToro: the close takes the stop and target with
+    it) AND this tick's position list still shows its position — a stop or
+    target eToro already filled is reconciliation's to book, at its real
+    price, never care's to close again."""
+    from bot_program.engine.venue_close import venue_needs_position_id
+    if not venue_needs_position_id(client):
+        return False
+    pid = str((trade.metadata or {}).get("protective_trade_id") or "")
+    if not pid:
+        return False
+    positions = bot._broker_snapshot(client, "positions")
+    if positions is None:
+        return False
+    return any(str(p.get("position_id") or "") == pid for p in positions)
+
+
+def care(bot, trade, price, client, *, now=None) -> str:
+    """Run the care on one row inside manage_positions. "" when it left the
+    row to the rest of the tick; "closed" or "attempted" when it sent a
+    close — the caller then moves on either way (a close in flight must
+    never meet the SL/TP check below it the same tick)."""
     from bot_program import steward
     if not steward.is_on():
-        return False
+        return ""
     now = now or timezone.now()
     try:
         level, kind = "calm", "neutral"
         from bot_program import market_stress, posture
         if not trade.paper and posture.crisis_mode_on():
             level = market_stress.current(now)["level"]
-            kind = posture.classify(trade.symbol, trade.asset_class, trade.side)
+            icls = bot._instrument_class(trade.symbol) or trade.asset_class
+            kind = posture.classify(trade.symbol, icls, trade.side)
         manual = False
         try:
             from bot_program.share_allocator import _is_manual_lane
@@ -193,16 +273,31 @@ def care(bot, trade, price, client, *, now=None) -> bool:
     except Exception as e:  # noqa: BLE001 — care that fails changes nothing
         logger.warning("[care] %s #%s not cared for: %s", trade.symbol,
                        trade.id, e)
-        return False
-    if decision["changed"] or decision["action"] == "close":
-        meta = dict(trade.metadata or {})
-        meta["care"] = decision["care"]
-        if decision["action"] == "close":
-            meta["care_exit"] = decision["care"].get("exit", "")
-        trade.metadata = meta
-        trade.save(update_fields=["metadata"])
+        return ""
+    if decision["action"] == "close" and not trade.paper \
+            and (trade.metadata or {}).get("protected"):
+        try:
+            held = _venue_still_holds(bot, trade, client)
+        except Exception as e:  # noqa: BLE001
+            logger.info("[care] %s #%s: holding unread (%s)", trade.symbol,
+                        trade.id, e)
+            held = False
+        if not held:
+            logger.info("[care] %s #%s: %s — not sent: the venue does not "
+                        "show the position (or closes by order), "
+                        "reconciliation books it", trade.symbol, trade.id,
+                        decision["why"])
+            decision["action"] = "hold"
+    try:
+        if decision["changed"] or decision["action"] == "close":
+            _save_care(trade, decision["care"],
+                       decision["care"].get("exit", "")
+                       if decision["action"] == "close" else None)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[care] %s #%s: care not saved: %s", trade.symbol,
+                       trade.id, e)
     if decision["action"] != "close":
-        return False
+        return ""
     closed = bot._close_trade(trade, price, client, reason=decision["reason"])
     try:
         from bot_program.steward_models import StewardAction
@@ -217,4 +312,4 @@ def care(bot, trade, price, client, *, now=None) -> bool:
         logger.info("[care] journal not written: %s", e)
     logger.info("[care] %s #%s %s: %s", trade.symbol, trade.id,
                 "closed" if closed else "close pending", decision["why"])
-    return bool(closed)
+    return "closed" if closed else "attempted"

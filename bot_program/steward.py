@@ -81,6 +81,14 @@ PROMOTE_EXPECTANCY = 0.15
 PROMOTE_Z = 1.2816          # one-sided 80%
 PROMOTE_PROFIT_FACTOR = 1.3
 PROMOTE_LAST = 10
+#: classes and rules the steward does not judge: options (the options bot
+#: has its own entry path, which reads no verdict) and the operator's own
+#: TAKE TRADE lane
+SKIP_CLASSES = frozenset({"options"})
+SKIP_RULES = frozenset({"manual_take", ""})
+#: a research rule demoted (or entered) this recently is not sent back to
+#: paper: no daily research <-> paper churn with the 04:30 ladder
+RESEARCH_DWELL_DAYS = 14
 
 
 def is_on() -> bool:
@@ -210,10 +218,14 @@ def verdict_for(rule, cls):
 
 
 def pair_policy(rule, cls) -> dict:
-    """{state, force_paper, size, reason} for one entry. The steward OFF,
-    or no rule, reads live at full size."""
+    """{state, force_paper, size, reason} for one entry; no rule, or no
+    verdict, reads live at full size. THE VERDICTS BIND WHATEVER THE
+    SWITCH SAYS: switching the steward OFF stops its moves and its
+    position care, it does not hand every benched loser (and every class
+    of a rule it promoted for one) back to full-size real money. An
+    operator frees a pair with `manage.py steward live RULE CLASS`."""
     out = {"state": "live", "force_paper": False, "size": 1.0, "reason": ""}
-    if not rule or not is_on():
+    if not rule:
         return out
     try:
         v = verdict_for(rule, cls)
@@ -263,7 +275,8 @@ def evaluate(*, apply=False, now=None) -> list:
     # 1 — pairs trading real money: bench or graduate
     live_pairs = set(AssetBotTrade.objects.filter(
         paper=False, status="CLOSED", closed_at__gte=since)
-        .exclude(rule_name="").values_list("rule_name", "asset_class"))
+        .exclude(rule_name__in=SKIP_RULES).exclude(asset_class__in=SKIP_CLASSES)
+        .values_list("rule_name", "asset_class"))
     for rule, cls in sorted(live_pairs):
         try:
             v = verdict_for(rule, cls)
@@ -271,8 +284,13 @@ def evaluate(*, apply=False, now=None) -> list:
                 continue
             state = v.state if v is not None else "live"
             if state == "live":
-                s = stats(_closes(rule, cls, paper=False, limit=LIVE_WINDOW,
-                                  now=now))
+                # a pair with its OWN live row (graduated, or freed by the
+                # operator) is judged on what it did since: the closes that
+                # benched it before are history, not evidence
+                own = (v.since if v is not None
+                       and v.asset_class == cls else None)
+                s = stats(_closes(rule, cls, paper=False, since=own,
+                                  limit=LIVE_WINDOW, now=now))
                 why = bench_reason(s)
                 if why:
                     _move("bench", rule, cls, why, s)
@@ -303,16 +321,17 @@ def evaluate(*, apply=False, now=None) -> list:
     judged = {(m["rule"], m["asset_class"]) for m in moves}
     for rule, cls in sorted(set(AssetBotTrade.objects.filter(
             paper=True, status="CLOSED", closed_at__gte=since,
-            rule_name__in=live_rules).values_list("rule_name",
-                                                  "asset_class"))):
+            rule_name__in=live_rules).exclude(asset_class__in=SKIP_CLASSES)
+            .values_list("rule_name", "asset_class"))):
         if (rule, cls) in judged:
             continue
         try:
             v = verdict_for(rule, cls)
             if v is not None and (v.pinned or v.state != "live"):
                 continue
-            n_live = len(_closes(rule, cls, paper=False, limit=LIVE_WINDOW,
-                                 now=now))
+            own = v.since if v is not None and v.asset_class == cls else None
+            n_live = len(_closes(rule, cls, paper=False, since=own,
+                                 limit=LIVE_WINDOW, now=now))
             if n_live >= BENCH_MIN_N:
                 continue
             s = stats(_closes(rule, cls, paper=True, now=now))
@@ -324,19 +343,32 @@ def evaluate(*, apply=False, now=None) -> list:
             logger.warning("[steward] %s/%s paper record not judged: %s",
                            rule, cls, e)
 
-    # 2 — benched pairs: back to real money on fresh paper proof
-    for v in PairVerdict.objects.filter(state="bench", pinned=False) \
-            .exclude(asset_class=PairVerdict.ANY_CLASS):
+    # 2 — benched pairs: back to real money on fresh paper proof. A "*"
+    # bench row covers every class of its rule without a row of its own:
+    # each such class is judged too, on its paper closes since the "*" row
+    benched = []
+    for v in PairVerdict.objects.filter(state="bench", pinned=False):
+        if v.asset_class != PairVerdict.ANY_CLASS:
+            benched.append((v.rule_name, v.asset_class, v.since))
+            continue
+        own = set(PairVerdict.objects.filter(rule_name=v.rule_name)
+                  .values_list("asset_class", flat=True))
+        for cls in sorted(set(AssetBotTrade.objects.filter(
+                rule_name=v.rule_name, paper=True, status="CLOSED",
+                closed_at__gte=v.since).exclude(asset_class__in=SKIP_CLASSES)
+                .values_list("asset_class", flat=True)) - own):
+            benched.append((v.rule_name, cls, v.since))
+    for rule, cls, bench_since in benched:
         try:
-            if now - v.since < timedelta(days=BENCH_DWELL_DAYS):
+            if now - bench_since < timedelta(days=BENCH_DWELL_DAYS):
                 continue
-            s = stats(_closes(v.rule_name, v.asset_class, paper=True,
-                              since=v.since, now=now))
+            s = stats(_closes(rule, cls, paper=True, since=bench_since,
+                              now=now))
             why = proven_reason(s)
             if why:
-                _move("probation", v.rule_name, v.asset_class, why, s)
+                _move("probation", rule, cls, why, s)
         except Exception as e:  # noqa: BLE001
-            logger.warning("[steward] bench %s not judged: %s", v, e)
+            logger.warning("[steward] bench %s/%s not judged: %s", rule, cls, e)
 
     # 3 — rules still at the paper STAGE: a proven pair takes it live
     try:
@@ -349,7 +381,8 @@ def evaluate(*, apply=False, now=None) -> list:
         logger.warning("[steward] paper rules unread: %s", e)
     paper_pairs = set(AssetBotTrade.objects.filter(
         paper=True, status="CLOSED", closed_at__gte=since,
-        rule_name__in=paper_rules).values_list("rule_name", "asset_class"))
+        rule_name__in=paper_rules).exclude(asset_class__in=SKIP_CLASSES)
+        .values_list("rule_name", "asset_class"))
     promoted_rules = set()
     for rule, cls in sorted(paper_pairs):
         if rule in promoted_rules:
@@ -370,9 +403,11 @@ def evaluate(*, apply=False, now=None) -> list:
     try:
         from signals.models_control import RuleControl
         from signals.promotion_pipeline import is_eligible_for_promotion
-        for rule in RuleControl.objects.filter(
+        for rule, entered in RuleControl.objects.filter(
                 promotion_stage="research").exclude(status="paused") \
-                .values_list("rule_name", flat=True):
+                .values_list("rule_name", "stage_entered_at"):
+            if entered and now - entered < timedelta(days=RESEARCH_DWELL_DAYS):
+                continue
             if is_eligible_for_promotion(rule) == "paper":
                 _move("rule_paper", rule, "", "the ladder's research -> "
                       "paper criterion holds (signal record)", {})
