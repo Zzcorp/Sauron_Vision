@@ -51,6 +51,14 @@ class Portfolio(models.Model):
     # chose 80. Bounds 10-95 on the card: 100 would let one gap take the
     # whole account.
     max_pledged_pct = models.FloatField(default=50)
+    # The most the open positions of one venue may lose TOGETHER at their
+    # stops — the sum over every open row of qty x |entry - stop| (a row
+    # without a stop counts its whole notional) — as a percentage of the
+    # venue's book (the broker's equity for live). risk_gate.open_risk_state;
+    # hard for the bots (preflight and the final size), stated on the
+    # manual ticket. The operator, 2026-10-01, with 25 live bots on one
+    # shared account: "15% de risque ouvert max". Bounds 1-100 on the card.
+    max_open_risk_pct = models.FloatField(default=15)
 
     updated_at = models.DateTimeField(auto_now=True)
 

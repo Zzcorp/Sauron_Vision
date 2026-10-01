@@ -3327,6 +3327,10 @@ RISK_LIMIT_BOUNDS = {
     # would let one gap take the whole account; under 10 refuses almost any
     # real order.
     "max_pledged_pct": (10.0, 95.0, "Max account pledged"),
+    # What the open positions of one venue may lose together at their
+    # stops (2026-10-01, risk_gate.open_risk_state). Under 1 refuses
+    # almost every entry; 100 is the whole account.
+    "max_open_risk_pct": (1.0, 100.0, "Max open risk"),
 }
 
 # POST field -> Portfolio field. The form names are short and the model names
@@ -3339,12 +3343,13 @@ RISK_LIMIT_FIELDS = {
     "max_correlation": "max_correlation_threshold",
     "max_theme_legs": "max_theme_legs",
     "max_pledged": "max_pledged_pct",
+    "max_open_risk": "max_open_risk_pct",
 }
 
 # Fields a post may leave OUT (absent, not blank) and keep the stored value:
 # a card rendered before the field existed must still save the others. A
 # field that IS posted is judged like every sibling — blank is refused.
-RISK_LIMIT_OPTIONAL = {"max_pledged"}
+RISK_LIMIT_OPTIONAL = {"max_pledged", "max_open_risk"}
 
 
 def _apply_risk_limits(portfolio, post) -> tuple[bool, list[str]]:
@@ -3561,6 +3566,7 @@ def setup(request):
         "etoro_key_masked": etoro_masked,
         "risk_state": risk_state,
         "risk_daily_loss": risk_state["checks"].get("daily_loss"),
+        "risk_open_risk": risk_state["checks"].get("open_risk"),
         "risk_exposure": risk_state["checks"].get("exposure"),
         "risk_single": risk_single,
         "risk_book_value": book_value(limits),

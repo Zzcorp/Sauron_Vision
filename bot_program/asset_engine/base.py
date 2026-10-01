@@ -3945,6 +3945,24 @@ class AssetBot(ABC):
             self._skip(symbol, skips.GATE_BLOCKED, note + cap["reason"])
             return False
 
+        # MAX OPEN RISK (2026-10-01), judged on THIS entry's risk at its
+        # stop added to every open row's of the venue it is filed under:
+        # the daily stop counts only what has closed, and 25 bots on one
+        # account can each stay small while together they are not.
+        # Refused, never resized, like the cap above.
+        from portfolio.risk_gate import open_risk_state
+        adding = qty * abs(float(price) - float(sl)) * self._value_per_unit(
+            symbol)
+        orisk = open_risk_state(
+            self.user, adding=adding,
+            venue=("paper" if (venue == "paper" or (
+                venue is None and self.cfg.mode == "paper")) else "live"))
+        if not orisk["ok"]:
+            logger.info("[%s_bot] %s refused by the book's open-risk limit: "
+                        "%s", self.asset_class, symbol, orisk["reason"])
+            self._skip(symbol, skips.GATE_BLOCKED, note + orisk["reason"])
+            return False
+
         # NOT a per-ticket total-exposure pre-check here, deliberately.
         #
         # `exposure_state` now accepts `adding=` so a caller can ask "would

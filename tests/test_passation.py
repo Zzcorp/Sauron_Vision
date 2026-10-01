@@ -83,11 +83,13 @@ class TheLetterTests(TestCase):
             r = self.client.get(reverse("passation"))
         self.assertEqual(r.status_code, 200)
         body = r.content.decode()
-        for words in ("À GANDALF", "Papa, si tu lis ces lignes", "trois",
-                      "Tiens la maison, Gandalf", "TON FILS, FIER DE L'ÊTRE",
-                      "Et merci pour ce qui est venu avant", "Merci, papa.",
-                      "LA GARDE, EN PRATIQUE", "/status", "/stopall",
-                      "LE SECOND BOT", "@BotFather"):
+        # In English since 2026-10-01 (the operator: never French on the
+        # platform).
+        for words in ("TO GANDALF", "Dad, if you are reading this", "three",
+                      "Keep the house, Gandalf", "YOUR SON, PROUD TO BE",
+                      "And thank you for what came before", "Thank you, Dad.",
+                      "THE WATCH, IN PRACTICE", "/status", "/stopall",
+                      "THE SECOND BOT", "@BotFather"):
             self.assertIn(words, body, words)
 
     def test_the_card_leads_to_it_on_every_page_during_the_watch(self):
