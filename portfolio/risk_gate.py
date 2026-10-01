@@ -1003,7 +1003,30 @@ def single_position_state(portfolio, *, asset_class: str, user=None,
 # is "add to a winner"; five is a different bet wearing the same name.
 CONCENTRATION_CLIP_ALLOWANCE = 2.0
 
-def symbol_side_exposure(user, symbol: str, side: str, *, portfolio=None) -> dict:
+def _one_venue(qs, paper):
+    """AssetBotTrade rows of ONE venue (2026-10-01): `paper=True` the
+    simulated book, `paper=False` the real one, None both (the reading
+    every caller had before).
+
+    The operator: "the paper and live are still on a joint brain?" A paper
+    bot's EURAUD long refused his real-money EURAUD ticket as a "second
+    ticket that doubles the bet" — but simulated money doubles no real
+    bet. The money limits already judge each venue on its own
+    (open_capital_at_work, realized_since); the expression gates below now
+    do too when the caller names its venue.
+    """
+    return qs if paper is None else qs.filter(paper=bool(paper))
+
+
+def _legacy_rows_count(paper) -> bool:
+    """Legacy portfolio.Position rows carry no venue flag and are counted
+    as LIVE (open_capital_at_work's rule): they take part in a live or an
+    unnamed judgement, never in a paper one."""
+    return paper is not True
+
+
+def symbol_side_exposure(user, symbol: str, side: str, *, portfolio=None,
+                         paper=None) -> dict:
     """Capital already at work in ONE symbol on ONE side, across both books.
 
     A "position" is a symbol and a direction, not a ticket. The single-position
@@ -1023,9 +1046,10 @@ def symbol_side_exposure(user, symbol: str, side: str, *, portfolio=None) -> dic
     want_long = str(side or "").upper() in ("BUY", "LONG")
     total, n, rules = 0.0, 0, []
 
-    for trade in AssetBotTrade.objects.filter(
+    for trade in _one_venue(AssetBotTrade.objects.filter(
             config__user=user, symbol__iexact=symbol,
-            status__in=("OPEN", "CLOSE_PENDING")).select_related("config"):
+            status__in=("OPEN", "CLOSE_PENDING")), paper).select_related(
+                "config"):
         if (str(trade.side or "").upper() in ("BUY", "LONG")) != want_long:
             continue
         notional = (float(trade.entry_price or 0) * float(trade.qty or 0)
@@ -1038,9 +1062,11 @@ def symbol_side_exposure(user, symbol: str, side: str, *, portfolio=None) -> dic
         rules.append(trade.rule_name or "—")
 
     pf = portfolio if portfolio is not None else limits_book()
-    for pos in Position.objects.filter(
-            portfolio=pf, closed_at__isnull=True,
-            instrument__symbol__iexact=symbol).select_related("instrument"):
+    legacy = (Position.objects.filter(
+        portfolio=pf, closed_at__isnull=True,
+        instrument__symbol__iexact=symbol).select_related("instrument")
+        if _legacy_rows_count(paper) else Position.objects.none())
+    for pos in legacy:
         if (str(pos.direction or "").lower() in ("long", "buy")) != want_long:
             continue
         notional = float(pos.entry_price or 0) * float(pos.quantity or 0)
@@ -1059,7 +1085,8 @@ def concentration_state(user, *, symbol: str, side: str, asset_class: str,
                         notional: float, capital_base: float = None,
                         base_label: str = "book", portfolio=None,
                         leverage=None, carrier: str = "",
-                        lane_limit_pct: float | None = None) -> dict:
+                        lane_limit_pct: float | None = None,
+                        paper=None) -> dict:
     """Would this ticket put too much of one bet on one instrument?
 
     The SAME `max_single_position_pct` the card already carries, applied to
@@ -1084,7 +1111,8 @@ def concentration_state(user, *, symbol: str, side: str, asset_class: str,
                  else _limit_pct(pf, "max_single_position_pct"))
     base = (capital_base if capital_base is not None
             else gate_book_value(user, pf))
-    held = symbol_side_exposure(user, symbol, side, portfolio=pf)
+    held = symbol_side_exposure(user, symbol, side, portfolio=pf,
+                                paper=paper)
     adding = capital_at_work(asset_class, notional, leverage=leverage,
                              carrier=carrier)
     after = held["committed"] + adding
@@ -1180,7 +1208,7 @@ def _holder_is_long(trade) -> bool:
 
 
 def duplicate_state(user, *, symbol: str, side: str,
-                    config_id=None, portfolio=None) -> dict:
+                    config_id=None, portfolio=None, paper=None) -> dict:
     """Is this exact directional bet already on, booked by someone else?
 
     A refusal, not a taper, and count-based, not money-based — which is why
@@ -1196,6 +1224,10 @@ def duplicate_state(user, *, symbol: str, side: str,
     money ceilings already govern how far that goes. Everything else —
     another bot's config, the manual config when a bot asks, the legacy
     Position book — is a second author writing the same sentence.
+
+    `paper` (2026-10-01) names the asker's venue: only that venue's
+    holders count (_one_venue; legacy Positions are live). A paper long
+    doubles no real bet, and a real one doubles no simulated one.
     """
     from bot_program.models import AssetBotTrade
     from portfolio.models import Position
@@ -1203,9 +1235,9 @@ def duplicate_state(user, *, symbol: str, side: str,
     want_long = str(side or "").upper() in ("BUY", "LONG")
     holders: list[str] = []
 
-    qs = AssetBotTrade.objects.filter(
+    qs = _one_venue(AssetBotTrade.objects.filter(
         config__user=user, symbol__iexact=symbol,
-        status__in=("OPEN", "CLOSE_PENDING")).select_related("config")
+        status__in=("OPEN", "CLOSE_PENDING")), paper).select_related("config")
     if config_id is not None:
         qs = qs.exclude(config_id=config_id)
     for trade in qs:
@@ -1213,10 +1245,11 @@ def duplicate_state(user, *, symbol: str, side: str,
             continue
         holders.append(trade.rule_name or trade.config.name or "another bot")
 
-    for pos in Position.objects.filter(
-            portfolio_id__in=_position_books(user, portfolio),
-            closed_at__isnull=True,
-            instrument__symbol__iexact=symbol):
+    legacy = (Position.objects.filter(
+        portfolio_id__in=_position_books(user, portfolio),
+        closed_at__isnull=True, instrument__symbol__iexact=symbol)
+        if _legacy_rows_count(paper) else Position.objects.none())
+    for pos in legacy:
         if (str(pos.direction or "").lower() in ("long", "buy")) != want_long:
             continue
         holders.append(getattr(pos.strategy, "name", "") or "portfolio position")
@@ -1225,8 +1258,10 @@ def duplicate_state(user, *, symbol: str, side: str,
     if holders:
         direction = "long" if want_long else "short"
         state["ok"] = False
+        book = ("" if paper is None
+                else " paper" if paper else " real-money")
         state["reason"] = (
-            f"{symbol.upper()} {direction} is already on the book via "
+            f"{symbol.upper()} {direction} is already on the{book} book via "
             f"{', '.join(sorted(set(holders)))} — a second ticket doubles "
             f"the bet, it does not diversify it; close that leg first if "
             f"this entry should replace it")
@@ -1318,7 +1353,7 @@ def _currency_legs(symbol: str, side: str) -> dict:
 
 
 def theme_state(user, *, symbol: str, side: str, asset_class: str,
-                portfolio=None) -> dict:
+                portfolio=None, paper=None) -> dict:
     """Would this ticket crowd one currency past the book's leg cap?
 
     The EUR problem, made refusable: six of twelve open positions were EUR
@@ -1381,15 +1416,20 @@ def theme_state(user, *, symbol: str, side: str, asset_class: str,
     # Scoped to the candidate's OWN class. A long EUR leg and a long
     # energy leg are not the same crowd, and counting them together would
     # refuse a perfectly diversified book.
-    for trade in AssetBotTrade.objects.filter(
+    # And to the candidate's own VENUE when it names one (2026-10-01,
+    # _one_venue): simulated legs crowd no real currency, and the reverse.
+    for trade in _one_venue(AssetBotTrade.objects.filter(
             config__user=user, asset_class=cls,
-            status__in=("OPEN", "CLOSE_PENDING")).select_related("config"):
+            status__in=("OPEN", "CLOSE_PENDING")), paper).select_related(
+                "config"):
         _tally(trade.symbol, trade.side,
                trade.rule_name or trade.config.name or "bot")
-    for pos in Position.objects.filter(
-            portfolio_id__in=_position_books(user, portfolio),
-            closed_at__isnull=True,
-            instrument__asset_class=cls).select_related("instrument"):
+    legacy = (Position.objects.filter(
+        portfolio_id__in=_position_books(user, portfolio),
+        closed_at__isnull=True,
+        instrument__asset_class=cls).select_related("instrument")
+        if _legacy_rows_count(paper) else Position.objects.none())
+    for pos in legacy:
         _tally(pos.instrument.symbol, pos.direction,
                getattr(pos.strategy, "name", "") or "position")
 
@@ -1422,7 +1462,8 @@ def theme_state(user, *, symbol: str, side: str, asset_class: str,
 
 
 def correlation_state(user, instrument, *, portfolio=None,
-                      lookback_days: int = CORRELATION_LOOKBACK_DAYS) -> dict:
+                      lookback_days: int = CORRELATION_LOOKBACK_DAYS,
+                      paper=None) -> dict:
     """How correlated a candidate is to the open book, and the size taper.
 
     {"scale", "max_corr", "peer", "threshold", "measured", "reason"}
@@ -1463,12 +1504,15 @@ def correlation_state(user, instrument, *, portfolio=None,
         blank["reason"] = "candidate has no instrument row to correlate"
         return blank
 
-    symbols = set(AssetBotTrade.objects.filter(
-        config__user=user, status__in=("OPEN", "CLOSE_PENDING")
-    ).values_list("symbol", flat=True))
-    peer_ids = set(Position.objects.filter(
+    # The candidate's own venue's book when it names one (2026-10-01,
+    # _one_venue): a real ticket is tapered against real positions only.
+    symbols = set(_one_venue(AssetBotTrade.objects.filter(
+        config__user=user, status__in=("OPEN", "CLOSE_PENDING")), paper)
+        .values_list("symbol", flat=True))
+    peer_ids = (set(Position.objects.filter(
         portfolio=portfolio, closed_at__isnull=True
     ).values_list("instrument_id", flat=True))
+        if _legacy_rows_count(paper) else set())
     if symbols:
         peer_ids |= set(Instrument.objects.filter(symbol__in=symbols)
                         .values_list("id", flat=True))

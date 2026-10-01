@@ -3691,7 +3691,12 @@ class AssetBot(ABC):
             from instruments.models import Instrument
             from portfolio.risk_gate import correlation_state
             inst = Instrument.objects.filter(symbol=symbol).first()
-            corr = correlation_state(self.user, inst)
+            # the venue this entry would be filed under (2026-10-01): a
+            # real entry is tapered against real positions only
+            corr = correlation_state(
+                self.user, inst,
+                paper=(self.cfg.mode == "paper"
+                       or bool(stage["force_paper"])))
         except Exception as e:  # noqa: BLE001 — see above
             logger.warning("[%s_bot] correlation taper unavailable for %s: "
                            "%s — sizing untapered", self.asset_class, symbol, e)
@@ -3712,8 +3717,11 @@ class AssetBot(ABC):
         # Steps M-O: the ceiling, the single-position cap, the duplicate and
         # theme gates - on the bot's own final size. execute_entry runs the
         # same judgement again on the size actually sent.
-        if not self._judge_final_size(symbol, qty=qty, price=price, sl=sl,
-                                      decision=decision, sizing=sizing):
+        if not self._judge_final_size(
+                symbol, qty=qty, price=price, sl=sl, decision=decision,
+                sizing=sizing,
+                venue=("paper" if (self.cfg.mode == "paper"
+                                   or bool(stage["force_paper"])) else "live")):
             return None
 
         # ── The candidate: everything decided, nothing sent ──────────────
@@ -3756,7 +3764,8 @@ class AssetBot(ABC):
 
     def _judge_final_size(self, symbol: str, *, qty: float, price: float,
                           sl: float, decision, sizing: dict,
-                          leverage=None, note: str = "") -> bool:
+                          leverage=None, note: str = "",
+                          venue=None) -> bool:
         """Steps M-O on a FINAL quantity: True when it may go to the book.
 
         `leverage` (2026-09-26) is the multiplier MAX SINGLE POSITION
@@ -3909,9 +3918,13 @@ class AssetBot(ABC):
         # Unguarded like the single-position cap above, for the same blast
         # radius: an exception costs this symbol this pass, not the fleet.
         from portfolio.risk_gate import duplicate_state, theme_state
+        # Each venue judged on its own book (2026-10-01): `venue` is the
+        # one this entry is filed under ("paper"/"live"); None, from a
+        # caller that names none, reads both books as before.
+        paper = None if venue is None else (venue == "paper")
         dup = duplicate_state(self.user, symbol=symbol,
                               side=decision.direction,
-                              config_id=self.cfg.id)
+                              config_id=self.cfg.id, paper=paper)
         if not dup["ok"]:
             logger.info("[%s_bot] %s refused as a duplicate expression: %s",
                         self.asset_class, symbol, dup["reason"])
@@ -3919,7 +3932,7 @@ class AssetBot(ABC):
             return False
         theme = theme_state(self.user, symbol=symbol,
                             side=decision.direction,
-                            asset_class=self.asset_class)
+                            asset_class=self.asset_class, paper=paper)
         if not theme["ok"]:
             logger.info("[%s_bot] %s refused by the theme-leg cap: %s",
                         self.asset_class, symbol, theme["reason"])
@@ -3970,7 +3983,8 @@ class AssetBot(ABC):
         qty = self._round_qty(float(cand.qty_default) * float(size_mult),
                               price, fractional=_fr)
         if not self._judge_final_size(symbol, qty=qty, price=price, sl=sl,
-                                      decision=decision, sizing=sizing):
+                                      decision=decision, sizing=sizing,
+                                      venue=cand.venue):
             return None
 
         # Shadow mode: everything is computed, nothing is submitted and no
@@ -4254,6 +4268,7 @@ class AssetBot(ABC):
                 if not self._judge_final_size(
                         symbol, qty=qty, price=price, sl=sl,
                         decision=decision, sizing=sizing,
+                        venue=cand.venue,
                         leverage=int(leverage or 1),
                         note=(f"attack {_attack['tier']}: at "
                               f"{int(leverage or 1)}x: ")):
