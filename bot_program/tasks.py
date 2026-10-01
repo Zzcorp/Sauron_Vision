@@ -1412,7 +1412,7 @@ def run_alarm_sentinel() -> dict:
     return sentinel()
 
 
-# ── THE STEWARD AND THE CRISIS MODE (2026-10-02) ───────────────────────────
+# ── ARAGORN AND THE CRISIS MODE (2026-10-02) ───────────────────────────
 
 @shared_task
 @guarded_task("crisis_mode")
@@ -1426,12 +1426,12 @@ def read_market_stress() -> dict:
 
 
 @shared_task
-@guarded_task("steward")
-def run_steward() -> dict:
-    """Every 4 h: the steward's pass (bot_program/steward.py) — bench the
+@guarded_task("aragorn")
+def run_aragorn() -> dict:
+    """Every 4 h: Aragorn's pass (bot_program/aragorn.py) — bench the
     losing pairs, graduate or bench the ones on probation, bring proven
     ones back to real money. Every move is journaled."""
-    from .steward import evaluate
+    from .aragorn import evaluate
     moves = evaluate(apply=True)
     return {"moves": len(moves),
             "kinds": sorted({m["kind"] for m in moves}),
@@ -1439,23 +1439,23 @@ def run_steward() -> dict:
 
 
 @shared_task
-@guarded_task("steward")
-def steward_daily_report() -> dict:
-    """07:10 UTC: the steward's state and its last 24 h, to every staff
+@guarded_task("aragorn")
+def aragorn_daily_report() -> dict:
+    """07:10 UTC: Aragorn's state and its last 24 h, to every staff
     login's channels (posture, pairs, moves, care closes)."""
     from django.contrib.auth import get_user_model
 
     from .notifications import dispatch_notification
-    from .steward import report_lines
+    from .aragorn import report_lines
     lines = report_lines()
     sent = 0
     for user in get_user_model().objects.filter(is_staff=True,
                                                 is_active=True):
         try:
             if dispatch_notification(user, "system_health",
-                                     title="Steward daily report",
+                                     title="Aragorn daily report",
                                      body="\n".join(lines)[:3800]):
                 sent += 1
         except Exception as e:  # noqa: BLE001 — one login, not the report
-            logger.warning("[steward] report to %s failed: %s", user, e)
+            logger.warning("[aragorn] report to %s failed: %s", user, e)
     return {"sent": sent, "lines": len(lines)}

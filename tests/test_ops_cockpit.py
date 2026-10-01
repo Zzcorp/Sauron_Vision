@@ -520,7 +520,7 @@ class BulkEnableExemptTests(_Fixture):
             "share_allocator_mode_live", "share_allocator_auto_derisk",
             "capital_desk_mode_live", "fractional_units_live",
             "etoro_leverage_live", "shared_capital_live", "trade_debate",
-            "steward", "crisis_mode")
+            "aragorn", "crisis_mode")
 
     def setUp(self):
         super().setUp()

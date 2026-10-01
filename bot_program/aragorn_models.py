@@ -1,4 +1,4 @@
-"""THE STEWARD's memory (2026-10-02).
+"""ARAGORN's memory (2026-10-02).
 
 The operator, the live book losing: "remove the strategies not working,
 promote new proven ones, make it pretty autonomous but still maintainable
@@ -8,12 +8,12 @@ coming ... make the most out of crisis". Four tables:
   PairVerdict          where one (rule, asset class) pair may trade: live,
                        probation (live at a quarter of its size) or bench
                        (paper only). A row the operator pinned is never
-                       changed by the steward.
-  StewardAction        every decision the steward or an operator took, with
+                       changed by Aragorn.
+  AragornAction        every decision Aragorn or an operator took, with
                        its numbers: the journal Gandalf reads.
   MarketStressReading  the market's stress score and the posture it set:
                        calm, stressed, crisis or recovery.
-  StewardSetting       small operator settings (the posture override).
+  AragornSetting       small operator settings (the posture override).
 """
 from django.db import models
 from django.utils import timezone
@@ -26,7 +26,7 @@ class PairVerdict(models.Model):
     STATE_CHOICES = [(STATE_LIVE, "Live"), (STATE_PROBATION, "Probation"),
                      (STATE_BENCH, "Bench")]
     #: asset_class of the row that covers every class of the rule that has
-    #: no row of its own (written when the steward promotes a paper rule
+    #: no row of its own (written when Aragorn promotes a paper rule
     #: for ONE proven class: the others stay on the bench).
     ANY_CLASS = "*"
 
@@ -37,7 +37,7 @@ class PairVerdict(models.Model):
     reason = models.TextField(blank=True)
     stats = models.JSONField(default=dict, blank=True)
     pinned = models.BooleanField(default=False)
-    changed_by = models.CharField(max_length=40, default="steward")
+    changed_by = models.CharField(max_length=40, default="aragorn")
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -48,7 +48,7 @@ class PairVerdict(models.Model):
         return f"{self.rule_name}/{self.asset_class}: {self.state}"
 
 
-class StewardAction(models.Model):
+class AragornAction(models.Model):
     at = models.DateTimeField(default=timezone.now, db_index=True)
     kind = models.CharField(max_length=24, db_index=True)
     rule_name = models.CharField(max_length=100, blank=True)
@@ -57,7 +57,7 @@ class StewardAction(models.Model):
     trade_id = models.IntegerField(null=True, blank=True)
     detail = models.TextField(blank=True)
     stats = models.JSONField(default=dict, blank=True)
-    by = models.CharField(max_length=40, default="steward")
+    by = models.CharField(max_length=40, default="aragorn")
 
     class Meta:
         ordering = ["-at"]
@@ -89,7 +89,7 @@ class MarketStressReading(models.Model):
         return f"{self.at:%Y-%m-%d %H:%M} {self.level} ({self.score})"
 
 
-class StewardSetting(models.Model):
+class AragornSetting(models.Model):
     key = models.CharField(max_length=60, unique=True)
     value = models.JSONField(default=dict, blank=True)
     updated_at = models.DateTimeField(auto_now=True)

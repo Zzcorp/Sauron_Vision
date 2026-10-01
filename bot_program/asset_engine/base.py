@@ -1129,7 +1129,7 @@ class AssetBot(ABC):
                 # position id (eToro: the close takes its stop and target
                 # with it) and only while the tick's position list still
                 # shows it; a close in flight ends this row's tick. The
-                # steward switch OFF: nothing here.
+                # aragorn switch OFF: nothing here.
                 from bot_program.position_care import care as _care
                 _cared = _care(self, trade, price, client)
                 if _cared:
@@ -3340,7 +3340,7 @@ class AssetBot(ABC):
 
         # CLOSE_PENDING still holds capital/exposure at the broker. A LIVE
         # config's slots are its REAL positions (2026-10-02): the paper
-        # rows the steward's bench, the crisis posture or a paper stage
+        # rows Aragorn's bench, the crisis posture or a paper stage
         # book on it hold no money and must not crowd out the real entries
         # (in a crisis, three paper longs would refuse the shorts the
         # posture keeps trading). A paper config counts all its rows.
@@ -3759,14 +3759,14 @@ class AssetBot(ABC):
                             symbol, stage["reason"])
                 return self._skip(symbol, skips.STAGE_BLOCKED, stage["reason"])
 
-        # ── THE STEWARD AND THE POSTURE (2026-10-02) ─────────────────────
+        # ── ARAGORN AND THE POSTURE (2026-10-02) ─────────────────────
         # Both decide the VENUE or the SIZE of a real-money entry, never
-        # its existence: a benched pair (bot_program/steward.py) and a
+        # its existence: a benched pair (bot_program/aragorn.py) and a
         # risk-on long in a crisis (bot_program/posture.py) go to PAPER —
         # the evidence keeps coming, nothing is sent — and a pair on
         # probation, a stressed market, a drawdown or a losing streak take
         # less. Both read OFF as "nothing changes".
-        stage, _care_meta = self._steward_and_posture(symbol, decision, stage)
+        stage, _care_meta = self._aragorn_and_posture(symbol, decision, stage)
         level_meta = dict(level_meta or {}, **_care_meta)
         if _paper_open_here and stage.get("force_paper"):
             return self._skip(symbol, skips.ALREADY_OPEN,
@@ -3903,8 +3903,8 @@ class AssetBot(ABC):
             horizon_hours=horizon,
         )
 
-    def _steward_and_posture(self, symbol, decision, stage) -> tuple:
-        """(stage, metadata) after the steward's pair verdict and the
+    def _aragorn_and_posture(self, symbol, decision, stage) -> tuple:
+        """(stage, metadata) after Aragorn's pair verdict and the
         market posture: `force_paper` set with the reason when the entry
         may not use real money, `live_size_factor` multiplied when it is
         smaller. Paper configs and stages already forced to paper pass
@@ -3916,10 +3916,10 @@ class AssetBot(ABC):
         if self.cfg.mode == "paper" or stage.get("force_paper"):
             return stage, meta
         try:
-            from bot_program import steward as _steward
-            pol = _steward.pair_policy(rule, self.asset_class)
+            from bot_program import aragorn as _aragorn
+            pol = _aragorn.pair_policy(rule, self.asset_class)
             if pol["state"] != "live":
-                meta["steward"] = {"state": pol["state"],
+                meta["aragorn"] = {"state": pol["state"],
                                    "size": pol["size"]}
             if pol["force_paper"]:
                 stage.update(force_paper=True, reason=pol["reason"])
@@ -3930,7 +3930,7 @@ class AssetBot(ABC):
                 stage["live_size_factor"] = (
                     float(stage.get("live_size_factor", 1.0)) * pol["size"])
         except Exception as e:  # noqa: BLE001
-            logger.warning("[%s_bot] %s: steward unread (%s) — no change",
+            logger.warning("[%s_bot] %s: aragorn unread (%s) — no change",
                            self.asset_class, symbol, e)
         try:
             from bot_program import posture as _posture

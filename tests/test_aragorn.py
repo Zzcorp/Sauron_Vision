@@ -1,12 +1,12 @@
-"""THE STEWARD, THE CRISIS MODE AND THE POSITION CARE (2026-10-02).
+"""ARAGORN, THE CRISIS MODE AND THE POSITION CARE (2026-10-02).
 
 The operator: "we are getting plundered ... remove the strategies not
 working, promote new proven ones, make it pretty autonomous but still
 maintainable by Gandalf or me", "more resilience in dark waters", "a
 crash is coming ... make the most out of crisis". He chose the balanced
-thresholds, a steward that acts on its own, and a "smart mix" leverage.
+thresholds, Aragorn that acts on its own, and a "smart mix" leverage.
 
-Run with:  python manage.py test tests.test_steward
+Run with:  python manage.py test tests.test_aragorn
 """
 from datetime import datetime, timedelta
 from datetime import timezone as dt_tz
@@ -49,7 +49,7 @@ def _closed(cfg, r, *, paper=False, rule="golden_cross", days_ago=1.0,
 class TheStatsTests(SimpleTestCase):
 
     def test_expectancy_floor_streak_and_profit_factor(self):
-        from bot_program.steward import stats
+        from bot_program.aragorn import stats
         s = stats([(-1.0, -10), (-1.0, -10), (2.0, 20), (1.0, None)])
         self.assertEqual(s["n"], 4)
         self.assertEqual(s["expectancy"], 0.25)
@@ -59,7 +59,7 @@ class TheStatsTests(SimpleTestCase):
         self.assertLess(s["lower"], s["expectancy"])
 
     def test_the_balanced_bench_and_proof(self):
-        from bot_program.steward import bench_reason, proven_reason, stats
+        from bot_program.aragorn import bench_reason, proven_reason, stats
         self.assertIn("expectancy", bench_reason(stats([(-0.3, -3)] * 8)))
         self.assertEqual(bench_reason(stats([(0.5, 5)] + [(-0.3, -3)] * 6)),
                          "", "7 closes, the newest a win: too early, no streak")
@@ -77,11 +77,11 @@ class ThePassTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user("stw_u", password="x")
         self.cfg = _config(self.user, symbols=["BTCUSD"], mode="live")
-        _switch("steward")
+        _switch("aragorn")
 
     def test_a_losing_live_pair_is_benched_and_journaled(self):
-        from bot_program.steward import evaluate, pair_policy
-        from bot_program.steward_models import PairVerdict, StewardAction
+        from bot_program.aragorn import evaluate, pair_policy
+        from bot_program.aragorn_models import PairVerdict, AragornAction
         for _ in range(8):
             _closed(self.cfg, -0.4)
         moves = evaluate(apply=False)
@@ -91,13 +91,13 @@ class ThePassTests(TestCase):
         evaluate(apply=True)
         v = PairVerdict.objects.get()
         self.assertEqual((v.state, v.asset_class), ("bench", "crypto"))
-        self.assertTrue(StewardAction.objects.filter(kind="bench").exists())
+        self.assertTrue(AragornAction.objects.filter(kind="bench").exists())
         pol = pair_policy("golden_cross", "crypto")
         self.assertTrue(pol["force_paper"])
         self.assertIn("bench", pol["reason"])
 
     def test_a_pinned_pair_is_never_moved(self):
-        from bot_program.steward import evaluate, set_by_operator
+        from bot_program.aragorn import evaluate, set_by_operator
         set_by_operator("golden_cross", "crypto", "live", by="gandalf",
                         pin=True)
         for _ in range(8):
@@ -105,8 +105,8 @@ class ThePassTests(TestCase):
         self.assertEqual(evaluate(apply=True), [])
 
     def test_probation_graduates_or_goes_back_to_the_bench(self):
-        from bot_program.steward import evaluate, set_by_operator
-        from bot_program.steward_models import PairVerdict
+        from bot_program.aragorn import evaluate, set_by_operator
+        from bot_program.aragorn_models import PairVerdict
         set_by_operator("golden_cross", "crypto", "probation", by="t")
         PairVerdict.objects.update(since=timezone.now() - timedelta(days=5))
         for _ in range(10):
@@ -121,8 +121,8 @@ class ThePassTests(TestCase):
         self.assertEqual(PairVerdict.objects.get().state, "bench")
 
     def test_the_bench_returns_on_fresh_paper_proof_after_its_dwell(self):
-        from bot_program.steward import evaluate, set_by_operator
-        from bot_program.steward_models import PairVerdict
+        from bot_program.aragorn import evaluate, set_by_operator
+        from bot_program.aragorn_models import PairVerdict
         set_by_operator("golden_cross", "crypto", "bench", by="t")
         PairVerdict.objects.update(since=timezone.now() - timedelta(days=3))
         for i in range(21):
@@ -134,8 +134,8 @@ class ThePassTests(TestCase):
         self.assertEqual(PairVerdict.objects.get().state, "probation")
 
     def test_a_proven_pair_takes_its_paper_rule_live_for_its_class_alone(self):
-        from bot_program.steward import evaluate, pair_policy
-        from bot_program.steward_models import PairVerdict
+        from bot_program.aragorn import evaluate, pair_policy
+        from bot_program.aragorn_models import PairVerdict
         from signals.models_control import RuleControl
         RuleControl.objects.create(rule_name="vol_squeeze",
                                    promotion_stage="paper")
@@ -154,7 +154,7 @@ class ThePassTests(TestCase):
                         "its other classes stay on paper")
 
     def test_a_live_pair_without_real_evidence_is_benched_on_its_paper_loss(self):
-        from bot_program.steward import evaluate
+        from bot_program.aragorn import evaluate
         from signals.models_control import RuleControl
         RuleControl.objects.create(rule_name="golden_cross",
                                    promotion_stage="live_full")
@@ -174,20 +174,20 @@ class ThePassTests(TestCase):
         """OFF must not hand every benched loser back to full-size real
         money (review, 2026-10-02): the verdicts bind; only the moves and
         the care stop."""
-        from bot_program.steward import evaluate, pair_policy, set_by_operator
+        from bot_program.aragorn import evaluate, pair_policy, set_by_operator
         set_by_operator("golden_cross", "crypto", "bench", by="t")
-        _switch("steward", on=False)
+        _switch("aragorn", on=False)
         self.assertTrue(pair_policy("golden_cross", "crypto")["force_paper"])
         self.assertEqual(pair_policy("other_rule", "crypto")["state"], "live")
         set_by_operator("golden_cross", "crypto", "live", by="t")
         self.assertFalse(pair_policy("golden_cross", "crypto")["force_paper"])
 
     def test_a_graduated_pair_is_judged_on_what_it_did_since(self):
-        from bot_program.steward import evaluate, set_by_operator
-        from bot_program.steward_models import PairVerdict
+        from bot_program.aragorn import evaluate, set_by_operator
+        from bot_program.aragorn_models import PairVerdict
         for _ in range(8):
             _closed(self.cfg, -0.3, days_ago=10)       # the old losses
-        set_by_operator("golden_cross", "crypto", "live", by="steward")
+        set_by_operator("golden_cross", "crypto", "live", by="aragorn")
         PairVerdict.objects.update(since=timezone.now() - timedelta(days=5))
         for _ in range(10):
             _closed(self.cfg, 0.05, days_ago=1)
@@ -195,8 +195,8 @@ class ThePassTests(TestCase):
                          "the losses before graduation are history")
 
     def test_a_class_under_the_star_bench_comes_back_on_its_own_proof(self):
-        from bot_program.steward import evaluate, pair_policy
-        from bot_program.steward_models import PairVerdict
+        from bot_program.aragorn import evaluate, pair_policy
+        from bot_program.aragorn_models import PairVerdict
         PairVerdict.objects.create(
             rule_name="vol_squeeze", asset_class="*", state="bench",
             since=timezone.now() - timedelta(days=9))
@@ -209,7 +209,7 @@ class ThePassTests(TestCase):
         self.assertTrue(pair_policy("vol_squeeze", "forex")["force_paper"])
 
     def test_options_and_the_manual_lane_are_never_judged(self):
-        from bot_program.steward import evaluate
+        from bot_program.aragorn import evaluate
         for _ in range(8):
             _closed(self.cfg, -0.5, rule="manual_take")
             _closed(self.cfg, -0.5, cls="options")
@@ -346,7 +346,7 @@ class TheReadingTests(TestCase):
         closes += [100 - 1.5 * i for i in range(1, 11)]      # -15% in 10 days
         self._bars("SPX500", closes)
         with patch("bot_program.alarm.send_alarm") as alarm:
-            from bot_program.steward_models import MarketStressReading
+            from bot_program.aragorn_models import MarketStressReading
             MarketStressReading.objects.create(level="calm", raw_level="calm",
                                                score=5)
             r = evaluate()
@@ -373,7 +373,7 @@ class TheReadingTests(TestCase):
 
     def test_an_override_is_never_the_state_machine_s_past(self):
         from bot_program.market_stress import evaluate, set_override
-        from bot_program.steward_models import MarketStressReading
+        from bot_program.aragorn_models import MarketStressReading
         set_override("crisis", hours=1, by="drill")
         r = evaluate()
         self.assertNotEqual(r.level, "crisis", "unmeasured: the measured "
@@ -406,15 +406,15 @@ class TheEntryWiringTests(TestCase):
         self.dec = SimpleNamespace(rule_name="golden_cross", direction="BUY")
 
     def test_a_benched_pair_goes_to_paper_and_probation_trades_a_quarter(self):
-        from bot_program.steward import set_by_operator
-        _switch("steward")
+        from bot_program.aragorn import set_by_operator
+        _switch("aragorn")
         set_by_operator("golden_cross", "crypto", "bench", by="t")
-        stage, meta = self.bot._steward_and_posture("BTCUSD", self.dec,
+        stage, meta = self.bot._aragorn_and_posture("BTCUSD", self.dec,
                                                      self.stage)
         self.assertTrue(stage["force_paper"])
-        self.assertEqual(meta["steward"]["state"], "bench")
+        self.assertEqual(meta["aragorn"]["state"], "bench")
         set_by_operator("golden_cross", "crypto", "probation", by="t")
-        stage, _ = self.bot._steward_and_posture("BTCUSD", self.dec,
+        stage, _ = self.bot._aragorn_and_posture("BTCUSD", self.dec,
                                                   self.stage)
         self.assertEqual((stage["force_paper"], stage["live_size_factor"]),
                          (False, 0.25))
@@ -423,12 +423,12 @@ class TheEntryWiringTests(TestCase):
         from bot_program.market_stress import set_override
         _switch("crisis_mode")
         set_override("crisis", by="t")
-        stage, meta = self.bot._steward_and_posture("BTCUSD", self.dec,
+        stage, meta = self.bot._aragorn_and_posture("BTCUSD", self.dec,
                                                      self.stage)
         self.assertTrue(stage["force_paper"])
         self.assertIn("crisis mode", stage["reason"])
         short = SimpleNamespace(rule_name="golden_cross", direction="SELL")
-        stage, meta = self.bot._steward_and_posture("BTCUSD", short,
+        stage, meta = self.bot._aragorn_and_posture("BTCUSD", short,
                                                      self.stage)
         self.assertFalse(stage["force_paper"])
         self.assertEqual(meta["posture"]["kind"], "risk_on_short")
@@ -436,7 +436,7 @@ class TheEntryWiringTests(TestCase):
     def test_both_switches_off_change_nothing(self):
         from bot_program.market_stress import set_override
         set_override("crisis", by="t")
-        stage, meta = self.bot._steward_and_posture("BTCUSD", self.dec,
+        stage, meta = self.bot._aragorn_and_posture("BTCUSD", self.dec,
                                                      self.stage)
         self.assertEqual((stage, meta), (self.stage, {}))
 
@@ -445,7 +445,7 @@ class TheEntryWiringTests(TestCase):
         _switch("crisis_mode")
         set_override("crisis", by="t")
         self.bot.cfg.mode = "paper"
-        stage, meta = self.bot._steward_and_posture("BTCUSD", self.dec,
+        stage, meta = self.bot._aragorn_and_posture("BTCUSD", self.dec,
                                                      self.stage)
         self.assertEqual(meta, {})
         self.assertFalse(stage["force_paper"])
@@ -502,8 +502,8 @@ class TheEntryWiringTests(TestCase):
         from bot_program.asset_engine.base import AssetBot
         src = inspect.getsource(AssetBot.propose_entry)
         self.assertLess(src.index("stage_policy(decision.rule_name)"),
-                        src.index("self._steward_and_posture("))
-        self.assertLess(src.index("self._steward_and_posture("),
+                        src.index("self._aragorn_and_posture("))
+        self.assertLess(src.index("self._aragorn_and_posture("),
                         src.index("self._size_for_entry("))
         lev = inspect.getsource(AssetBot._order_leverage)
         self.assertLess(lev.index("judge_order_leverage("),
@@ -640,7 +640,7 @@ class TheCareTests(TestCase):
                       "care": {"peak": 104.0, "soft_stop": 102.0,
                                "soft_why": "trail",
                                "since": timezone.now().isoformat()}})
-        _switch("steward")
+        _switch("aragorn")
         bot = MagicMock()
         bot._instrument_class.return_value = "crypto"
         bot._broker_snapshot.return_value = [{"position_id": "999"}]
@@ -653,7 +653,7 @@ class TheCareTests(TestCase):
         self.assertEqual(care(bot, t, Decimal("101.5"), client), "attempted",
                          "a close in flight still ends the row's tick")
 
-    def test_care_is_off_with_the_steward_and_closes_through_the_bot(self):
+    def test_care_is_off_with_the_aragorn_and_closes_through_the_bot(self):
         from bot_program.models import AssetBotTrade
         from bot_program.position_care import care
         user = get_user_model().objects.create_user("stw_c", password="x")
@@ -671,7 +671,7 @@ class TheCareTests(TestCase):
         bot._instrument_class.return_value = "crypto"
         self.assertEqual(care(bot, t, Decimal("101.5"), None), "")
         bot._close_trade.assert_not_called()
-        _switch("steward")
+        _switch("aragorn")
         self.assertEqual(care(bot, t, Decimal("101.5"), None), "closed")
         bot._close_trade.assert_called_once()
         self.assertEqual(bot._close_trade.call_args.kwargs["reason"], "SL")
@@ -679,8 +679,8 @@ class TheCareTests(TestCase):
         self.assertEqual(t.metadata["care_exit"], "trail")
         self.assertEqual(t.metadata["adjusted_by"], "operator",
                          "care merges its keys, never clobbers the rest")
-        from bot_program.steward_models import StewardAction
-        self.assertIn("REAL MONEY", StewardAction.objects.get(
+        from bot_program.aragorn_models import AragornAction
+        self.assertIn("REAL MONEY", AragornAction.objects.get(
             kind="care_close").detail)
 
 
@@ -711,7 +711,7 @@ class TheControlsTests(TestCase):
                                            DEFAULT_COMPONENTS,
                                            LIVE_MONEY_SWITCHES)
         rows = {c["key"]: c for c in DEFAULT_COMPONENTS}
-        for key in ("steward", "crisis_mode"):
+        for key in ("aragorn", "crisis_mode"):
             self.assertIn(key, rows)
             self.assertLess(len(rows[key]["description"]), 300)
             self.assertIn(key, LIVE_MONEY_SWITCHES)
@@ -720,25 +720,25 @@ class TheControlsTests(TestCase):
     def test_the_beat_runs_the_three_tasks(self):
         from config.celery import app
         tasks = {v["task"] for v in app.conf.beat_schedule.values()}
-        for name in ("read_market_stress", "run_steward",
-                     "steward_daily_report"):
+        for name in ("read_market_stress", "run_aragorn",
+                     "aragorn_daily_report"):
             self.assertIn(f"bot_program.tasks.{name}", tasks)
 
     def test_the_command_shows_plans_and_overrides(self):
         out = StringIO()
-        call_command("steward", stdout=out)
-        self.assertIn("Steward: OFF", out.getvalue())
+        call_command("aragorn", stdout=out)
+        self.assertIn("Aragorn: OFF", out.getvalue())
         out = StringIO()
-        call_command("steward", "bench", "golden_cross", "forex", "--pin",
+        call_command("aragorn", "bench", "golden_cross", "forex", "--pin",
                      "--by", "gandalf", stdout=out)
         self.assertIn("golden_cross/forex: bench (pinned)", out.getvalue())
         out = StringIO()
-        call_command("steward", "posture", "stressed", "--hours", "3",
+        call_command("aragorn", "posture", "stressed", "--hours", "3",
                      stdout=out)
         self.assertIn("stressed", out.getvalue())
         out = StringIO()
-        call_command("steward", "journal", stdout=out)
+        call_command("aragorn", "journal", stdout=out)
         self.assertIn("operator_bench", out.getvalue())
         out = StringIO()
-        call_command("steward", "run", stdout=out)
+        call_command("aragorn", "run", stdout=out)
         self.assertIn("Nothing to move.", out.getvalue())

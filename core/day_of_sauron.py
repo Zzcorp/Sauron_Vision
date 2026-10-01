@@ -93,10 +93,10 @@ STAGE_OF = {
     "run-full-signal-scan": ("think", "full universe scan"),
     # ── DECIDE: the bots, the desk, the allocators ──────────────────────
     "tick-asset-bots": ("decide", "every asset bot ticks: entries, exits, stops"),
-    # The crisis mode's eyes and the steward (2026-10-02): the posture is
-    # read before the bots decide; the steward decides which pairs may.
+    # The crisis mode's eyes and Aragorn (2026-10-02): the posture is
+    # read before the bots decide; Aragorn decides which pairs may.
     "read-market-stress": ("decide", "the market's stress sets the posture"),
-    "run-steward": ("decide", "the steward moves rule/class pairs between paper and real money"),
+    "run-aragorn": ("decide", "Aragorn moves rule/class pairs between paper and real money"),
     "propose-share-plans": ("decide", "share plans proposed"),
     # ── ACT: the venue ──────────────────────────────────────────────────
     "retry-pending-closes": ("act", "pending closes retried, confirmed by the venue"),
@@ -130,7 +130,7 @@ STAGE_OF = {
     # word in a label ("one" reads as a typed number).
     "send-due-newsletters": ("tell", "the newsletter, when an edition is due"),
     # ── LEARN: the night and the weekend ────────────────────────────────
-    "steward-daily-report": ("tell", "the steward's daily report"),
+    "aragorn-daily-report": ("tell", "Aragorn's daily report"),
     "investigate-decaying-rules": ("learn", "decaying rules investigated"),
     # The night's governance and grading, not the tick's sizing (review,
     # 2026-09-29): the actuator reads the decay investigations, the

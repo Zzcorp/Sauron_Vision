@@ -31,7 +31,7 @@ CALM_CONFIRM_HOURS. A crisis ends in RECOVERY (score under RECOVERY_BELOW
 and the index up over 5 days), which lasts until calm is confirmed, a new
 crisis, or RECOVERY_MAX_DAYS.
 
-An operator override (manage.py steward posture <level> [--hours N]) wins
+An operator override (manage.py aragorn posture <level> [--hours N]) wins
 until it expires. Never raises: a reading that fails holds the last level.
 """
 import logging
@@ -292,7 +292,7 @@ def recovery_since(now=None):
     """When the current recovery began (the first RECOVERY reading after the
     last reading that was not one), or None when not recovering. Two
     indexed queries, never a scan."""
-    from bot_program.steward_models import MarketStressReading
+    from bot_program.aragorn_models import MarketStressReading
     now = now or timezone.now()
     latest = MarketStressReading.objects.filter(at__lte=now).order_by("-at").first()
     if latest is None or latest.level != RECOVERY:
@@ -308,9 +308,9 @@ def recovery_since(now=None):
 
 def override(now=None):
     """The operator's override {level, until, by} while it lasts, else None."""
-    from bot_program.steward_models import StewardSetting
+    from bot_program.aragorn_models import AragornSetting
     now = now or timezone.now()
-    row = StewardSetting.objects.filter(key=OVERRIDE_KEY).first()
+    row = AragornSetting.objects.filter(key=OVERRIDE_KEY).first()
     if row is None or not isinstance(row.value, dict):
         return None
     level = row.value.get("level")
@@ -329,20 +329,20 @@ def override(now=None):
 
 def set_override(level, *, hours=24.0, by="operator", now=None):
     """level in LEVELS, or "auto" to clear. Returns the stored value."""
-    from bot_program.steward_models import StewardAction, StewardSetting
+    from bot_program.aragorn_models import AragornAction, AragornSetting
     now = now or timezone.now()
     if level == "auto":
-        StewardSetting.objects.filter(key=OVERRIDE_KEY).delete()
-        StewardAction.objects.create(kind="posture_override",
+        AragornSetting.objects.filter(key=OVERRIDE_KEY).delete()
+        AragornAction.objects.create(kind="posture_override",
                                      detail="override cleared: auto", by=by)
         return None
     if level not in LEVELS:
         raise ValueError(f"posture must be one of {LEVELS} or auto")
     until = (now + timedelta(hours=float(hours))).isoformat()
     value = {"level": level, "until": until}
-    StewardSetting.objects.update_or_create(
+    AragornSetting.objects.update_or_create(
         key=OVERRIDE_KEY, defaults={"value": value, "updated_by": by})
-    StewardAction.objects.create(
+    AragornAction.objects.create(
         kind="posture_override", by=by,
         detail=f"posture forced to {level} until {until[:16]}")
     return value
@@ -350,7 +350,7 @@ def set_override(level, *, hours=24.0, by="operator", now=None):
 
 def evaluate(now=None, *, save=True):
     """Read, score, step the level; store the reading. Returns it."""
-    from bot_program.steward_models import MarketStressReading
+    from bot_program.aragorn_models import MarketStressReading
     now = now or timezone.now()
     components, reasons = read_components(now)
     sc, subs = score(components)
@@ -381,11 +381,11 @@ def evaluate(now=None, *, save=True):
 def _announce(prev, reading):
     """A posture change goes to the journal and to the operator (no money
     figure in the text: the alarm house rule)."""
-    from bot_program.steward_models import StewardAction
+    from bot_program.aragorn_models import AragornAction
     text = (f"Market posture: {prev.upper()} -> {reading.level.upper()} "
             f"(stress score {reading.score if reading.score is not None else 'unmeasured'}). "
             f"{POSTURE_WORDS.get(reading.level, '')}")
-    StewardAction.objects.create(kind="posture", detail=text,
+    AragornAction.objects.create(kind="posture", detail=text,
                                  stats={"score": reading.score,
                                         "from": prev, "to": reading.level})
     # Only an ESCALATION goes to the alarm chat (critical only, never an
@@ -415,7 +415,7 @@ def current(now=None) -> dict:
     """{level, score, at, fresh, why}: the posture the platform obeys now.
     The override first; then the latest reading if fresh; a stale one
     holds its level for HOLD_HOURS; after that calm, said."""
-    from bot_program.steward_models import MarketStressReading
+    from bot_program.aragorn_models import MarketStressReading
     now = now or timezone.now()
     try:
         ov = override(now)

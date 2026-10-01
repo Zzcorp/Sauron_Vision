@@ -398,19 +398,19 @@ app.conf.beat_schedule = {
         # behind a slow one (tick_all_asset_bots also holds a pass lock)
         "options": {"expires": 280},
     },
-    # THE CRISIS MODE AND THE STEWARD (2026-10-02, bot_program/
-    # market_stress.py, steward.py): the posture every 15 min, the pair
+    # THE CRISIS MODE AND ARAGORN (2026-10-02, bot_program/
+    # market_stress.py, aragorn.py): the posture every 15 min, the pair
     # pass every 4 h, the daily report at 07:10 UTC.
     "read-market-stress": {
         "task": "bot_program.tasks.read_market_stress",
         "schedule": 900.0,
     },
-    "run-steward": {
-        "task": "bot_program.tasks.run_steward",
+    "run-aragorn": {
+        "task": "bot_program.tasks.run_aragorn",
         "schedule": crontab(minute=20, hour="*/4"),
     },
-    "steward-daily-report": {
-        "task": "bot_program.tasks.steward_daily_report",
+    "aragorn-daily-report": {
+        "task": "bot_program.tasks.aragorn_daily_report",
         "schedule": crontab(hour=7, minute=10),
     },
 

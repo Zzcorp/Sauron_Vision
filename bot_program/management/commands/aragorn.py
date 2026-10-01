@@ -1,20 +1,20 @@
-"""The steward and the crisis mode, from the shell (2026-10-02).
+"""Aragorn and the crisis mode, from the shell (2026-10-02).
 
-    python manage.py steward                       # posture, pairs, last 24 h
-    python manage.py steward run                   # what it would move now (plan)
-    python manage.py steward run --yes             # ... and move it
-    python manage.py steward stress                # the market's stress, every input
-    python manage.py steward posture crisis --hours 12   # force a posture
-    python manage.py steward posture auto          # back to the measured posture
-    python manage.py steward bench RULE CLASS --pin --why 'text'
-    python manage.py steward live RULE CLASS --pin
-    python manage.py steward unpin RULE CLASS
-    python manage.py steward journal --days 3
+    python manage.py aragorn                       # posture, pairs, last 24 h
+    python manage.py aragorn run                   # what it would move now (plan)
+    python manage.py aragorn run --yes             # ... and move it
+    python manage.py aragorn stress                # the market's stress, every input
+    python manage.py aragorn posture crisis --hours 12   # force a posture
+    python manage.py aragorn posture auto          # back to the measured posture
+    python manage.py aragorn bench RULE CLASS --pin --why 'text'
+    python manage.py aragorn live RULE CLASS --pin
+    python manage.py aragorn unpin RULE CLASS
+    python manage.py aragorn journal --days 3
 
 Postures: calm, stressed, crisis, recovery (an override lasts --hours, 24
-by default). `steward probation RULE CLASS` puts a pair on probation by
-hand. `steward stress --yes` saves the reading it prints.
-A pinned pair is the operator's: the steward never changes it. CLASS is the
+by default). `aragorn probation RULE CLASS` puts a pair on probation by
+hand. `aragorn stress --yes` saves the reading it prints.
+A pinned pair is the operator's: Aragorn never changes it. CLASS is the
 config's class (stock, forex, crypto, commodity, ...), or * for every class
 of the rule without a row of its own.
 """
@@ -25,7 +25,7 @@ from django.utils import timezone
 
 
 class Command(BaseCommand):
-    help = "The steward (pair lifecycle, position care) and the crisis mode."
+    help = "Aragorn (pair lifecycle, position care) and the crisis mode."
 
     def add_arguments(self, parser):
         parser.add_argument("action", nargs="?", default="status",
@@ -45,12 +45,12 @@ class Command(BaseCommand):
         getattr(self, f"_{action}")(o)
 
     def _status(self, o):
-        from bot_program.steward import report_lines
+        from bot_program.aragorn import report_lines
         for line in report_lines():
             self.stdout.write(line)
 
     def _run(self, o):
-        from bot_program.steward import evaluate
+        from bot_program.aragorn import evaluate
         moves = evaluate(apply=o["yes"])
         if not moves:
             self.stdout.write("Nothing to move.")
@@ -89,7 +89,7 @@ class Command(BaseCommand):
         return o["params"][0], o["params"][1]
 
     def _set(self, o, state):
-        from bot_program.steward import set_by_operator
+        from bot_program.aragorn import set_by_operator
         rule, cls = self._pair(o)
         set_by_operator(rule, cls, state, by=o["by"],
                         pin=True if o["pin"] else None, reason=o["why"])
@@ -106,19 +106,19 @@ class Command(BaseCommand):
         self._set(o, "probation")
 
     def _unpin(self, o):
-        from bot_program.steward_models import PairVerdict, StewardAction
+        from bot_program.aragorn_models import PairVerdict, AragornAction
         rule, cls = self._pair(o)
         n = PairVerdict.objects.filter(rule_name=rule, asset_class=cls) \
             .update(pinned=False)
-        StewardAction.objects.create(kind="operator_unpin", rule_name=rule,
+        AragornAction.objects.create(kind="operator_unpin", rule_name=rule,
                                      asset_class=cls, by=o["by"],
-                                     detail="unpinned: the steward decides again")
+                                     detail="unpinned: Aragorn decides again")
         self.stdout.write(f"{rule}/{cls}: unpinned ({n} row)")
 
     def _journal(self, o):
-        from bot_program.steward_models import StewardAction
+        from bot_program.aragorn_models import AragornAction
         since = timezone.now() - timedelta(days=o["days"])
-        for a in StewardAction.objects.filter(at__gte=since)[:200]:
+        for a in AragornAction.objects.filter(at__gte=since)[:200]:
             self.stdout.write(
                 f"{a.at:%Y-%m-%d %H:%M} {a.kind:<18} "
                 f"{a.rule_name}{'/' + a.asset_class if a.asset_class else ''}"

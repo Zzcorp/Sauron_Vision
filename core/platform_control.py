@@ -104,7 +104,7 @@ LIVE_MONEY_SWITCHES = (
     "etoro_leverage_live",          # a typed leverage goes to eToro
     "shared_capital_live",          # every follower draws on the whole account
     "trade_debate",                 # binding: may veto or cut a live order
-    "steward",                      # benches/promotes pairs, closes positions
+    "aragorn",                      # benches/promotes pairs, closes positions
     "crisis_mode",                  # the market posture binds real money
 )
 
@@ -261,11 +261,11 @@ DEFAULT_COMPONENTS = [
     {"key": "share_allocator_mode_live", "name": "Share Allocator Live Mode",
      "description": "Off (default) = shadow: plans are proposed and graded, apply is refused. On = an admin can apply a plan (PIN on /shares/, --yes on the shell), writing each follower's account_share_pct and re-sizing pools via the sync. Rollback restores exactly. Caps and the governor hold in both modes.",
      "category": "system"},
-    # THE STEWARD AND THE CRISIS MODE (2026-10-02, bot_program/steward.py,
+    # ARAGORN AND THE CRISIS MODE (2026-10-02, bot_program/aragorn.py,
     # position_care.py, market_stress.py, posture.py). Both LIVE money,
     # neither armed by "all on". Descriptions measured at 242 chars each.
-    {"key": "steward", "name": "Steward (pair lifecycle + position care)",
-     "description": "Off (default). On: every 4h a losing rule/class pair goes to paper, a proven one comes to real money on probation; every tick open positions get break-even, trailing and no-progress exits. manage.py steward shows and overrides every decision.",
+    {"key": "aragorn", "name": "Aragorn (pair lifecycle + position care)",
+     "description": "Off (default). On: every 4h a losing rule/class pair goes to paper, a proven one comes to real money on probation; every tick open positions get break-even, trailing and no-progress exits. manage.py aragorn shows and overrides every decision.",
      "category": "system"},
     {"key": "crisis_mode", "name": "Crisis Mode (market posture)",
      "description": "Off (default). On: indices, volatility, VIX and credit set a posture every 15 min - calm, stressed, crisis, recovery - that sizes real-money entries, caps leverage, sends risk-on longs to paper in a crisis and keeps shorts and havens trading.",

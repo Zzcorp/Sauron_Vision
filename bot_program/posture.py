@@ -31,7 +31,7 @@ Two dark-water scales sit beside it and bind in every level:
                   STREAK_SCALE until a win
 
 Paper entries are never touched: the posture protects money, and the
-paper book is the evidence the steward promotes on.
+paper book is the evidence Aragorn promotes on.
 """
 import logging
 

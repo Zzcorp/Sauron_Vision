@@ -8,8 +8,8 @@ platform's own was a 14-30 day clock. A winner could ride to +2R and come
 back to a full -1R stop, untouched.
 
 Each tick, for every open row the bot manages (paper too, so the paper
-evidence the steward promotes on is earned under the same exits), with
-the steward switch ON:
+evidence Aragorn promotes on is earned under the same exits), with
+Aragorn switch ON:
 
   THE TRACK   the best and worst price since entry, in R (MFE / MAE),
               kept on metadata["care"].
@@ -37,7 +37,7 @@ The operator's MANUAL positions (the TAKE TRADE lane) get the profit
 protections only — break-even, trail, the weekend lock — never a cut by a
 rule (posture floor, weekend cut, no progress).
 
-Every close is a StewardAction. Never raises: care that fails leaves the
+Every close is a AragornAction. Never raises: care that fails leaves the
 row to the rest of manage_positions, exactly as before.
 """
 import logging
@@ -251,8 +251,8 @@ def care(bot, trade, price, client, *, now=None) -> str:
     row to the rest of the tick; "closed" or "attempted" when it sent a
     close — the caller then moves on either way (a close in flight must
     never meet the SL/TP check below it the same tick)."""
-    from bot_program import steward
-    if not steward.is_on():
+    from bot_program import aragorn
+    if not aragorn.is_on():
         return ""
     now = now or timezone.now()
     try:
@@ -300,8 +300,8 @@ def care(bot, trade, price, client, *, now=None) -> str:
         return ""
     closed = bot._close_trade(trade, price, client, reason=decision["reason"])
     try:
-        from bot_program.steward_models import StewardAction
-        StewardAction.objects.create(
+        from bot_program.aragorn_models import AragornAction
+        AragornAction.objects.create(
             kind="care_close" if closed else "care_close_pending",
             rule_name=trade.rule_name or "", asset_class=trade.asset_class,
             symbol=trade.symbol, trade_id=trade.id,

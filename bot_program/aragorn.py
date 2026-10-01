@@ -1,20 +1,22 @@
-"""THE STEWARD (2026-10-02): what trades with real money, decided on what
+"""ARAGORN (2026-10-02): what trades with real money, decided on what
 real money and paper actually did.
 
 The operator: "we are getting plundered ... remove the strategies not
 working, promote new proven ones etc, make it pretty autonomous but still
 maintainable by Gandalf or me". He chose the BALANCED thresholds and a
-steward that acts on its own from deployment (switch `steward`).
+guardian that acts on its own from deployment (switch `aragorn`), and
+named it Aragorn: the ranger who became king — he decides who rides to
+war with real money and who stays behind on paper.
 
 The unit is a PAIR: one rule on one asset class (AssetBotTrade.rule_name,
 AssetBotTrade.asset_class — the config's class, the one the bots key
-on). Every pair is in one of three states (steward_models.PairVerdict):
+on). Every pair is in one of three states (aragorn_models.PairVerdict):
 
   live       trades real money at its normal size (a pair with no row)
   probation  trades real money at PROBATION_SIZE of its size
   bench      trades PAPER only — the evidence keeps coming
 
-THE MOVES, every EVALUATE_HOURS (and on `manage.py steward run --yes`):
+THE MOVES, every EVALUATE_HOURS (and on `manage.py aragorn run --yes`):
   live -> bench        over its last LIVE_WINDOW real-money closes (within
                        WINDOW_DAYS): n >= BENCH_MIN_N and expectancy <
                        BENCH_EXPECTANCY (R), or its last BENCH_STREAK
@@ -43,10 +45,10 @@ THE MOVES, every EVALUATE_HOURS (and on `manage.py steward run --yes`):
 of the mean R above 0, profit factor >= 1.3, and its last 10 closes not
 negative.
 
-A PINNED row is the operator's: the steward reads it, never writes it.
+A PINNED row is the operator's: Aragorn reads it, never writes it.
 Open positions of a benched pair are not closed by the bench: the position
 care (bot_program/position_care.py) manages them like any other.
-Every move is a StewardAction row with its numbers.
+Every move is a AragornAction row with its numbers.
 """
 import logging
 import math
@@ -57,7 +59,7 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-SWITCH = "steward"
+SWITCH = "aragorn"
 EVALUATE_HOURS = 4
 WINDOW_DAYS = 60
 LIVE_WINDOW = 30
@@ -81,7 +83,7 @@ PROMOTE_EXPECTANCY = 0.15
 PROMOTE_Z = 1.2816          # one-sided 80%
 PROMOTE_PROFIT_FACTOR = 1.3
 PROMOTE_LAST = 10
-#: classes and rules the steward does not judge: options (the options bot
+#: classes and rules Aragorn does not judge: options (the options bot
 #: has its own entry path, which reads no verdict) and the operator's own
 #: TAKE TRADE lane
 SKIP_CLASSES = frozenset({"options"})
@@ -209,7 +211,7 @@ def proven_reason(s) -> str:
 def verdict_for(rule, cls):
     """The PairVerdict that governs (rule, cls): its own row, else the
     rule's "*" row, else None (live)."""
-    from bot_program.steward_models import PairVerdict
+    from bot_program.aragorn_models import PairVerdict
     if not rule:
         return None
     rows = {v.asset_class: v for v in PairVerdict.objects.filter(
@@ -220,38 +222,38 @@ def verdict_for(rule, cls):
 def pair_policy(rule, cls) -> dict:
     """{state, force_paper, size, reason} for one entry; no rule, or no
     verdict, reads live at full size. THE VERDICTS BIND WHATEVER THE
-    SWITCH SAYS: switching the steward OFF stops its moves and its
+    SWITCH SAYS: switching Aragorn OFF stops its moves and its
     position care, it does not hand every benched loser (and every class
     of a rule it promoted for one) back to full-size real money. An
-    operator frees a pair with `manage.py steward live RULE CLASS`."""
+    operator frees a pair with `manage.py aragorn live RULE CLASS`."""
     out = {"state": "live", "force_paper": False, "size": 1.0, "reason": ""}
     if not rule:
         return out
     try:
         v = verdict_for(rule, cls)
     except Exception as e:  # noqa: BLE001 — an unread verdict changes nothing
-        logger.warning("[steward] verdict unread for %s/%s: %s", rule, cls, e)
+        logger.warning("[aragorn] verdict unread for %s/%s: %s", rule, cls, e)
         return out
     if v is None or v.state == "live":
         return out
     if v.state == "bench":
         return {"state": "bench", "force_paper": True, "size": 1.0,
-                "reason": f"steward: {rule} on {cls} is on the bench "
+                "reason": f"aragorn: {rule} on {cls} is on the bench "
                           f"({v.reason[:120]}) — paper only"}
     return {"state": "probation", "force_paper": False,
             "size": PROBATION_SIZE,
-            "reason": f"steward: {rule} on {cls} on probation at "
+            "reason": f"aragorn: {rule} on {cls} on probation at "
                       f"{PROBATION_SIZE:g}x"}
 
 
-def _set(rule, cls, state, reason, s, *, by="steward", now=None):
-    from bot_program.steward_models import PairVerdict, StewardAction
+def _set(rule, cls, state, reason, s, *, by="aragorn", now=None):
+    from bot_program.aragorn_models import PairVerdict, AragornAction
     now = now or timezone.now()
     PairVerdict.objects.update_or_create(
         rule_name=rule, asset_class=cls,
         defaults={"state": state, "since": now, "reason": reason,
                   "stats": s, "changed_by": by})
-    StewardAction.objects.create(
+    AragornAction.objects.create(
         at=now, kind=state, rule_name=rule, asset_class=cls,
         detail=reason, stats=s, by=by)
 
@@ -259,11 +261,11 @@ def _set(rule, cls, state, reason, s, *, by="steward", now=None):
 # ── the pass ─────────────────────────────────────────────────────────────
 
 def evaluate(*, apply=False, now=None) -> list:
-    """Every move the steward would make now, as dicts {kind, rule,
+    """Every move Aragorn would make now, as dicts {kind, rule,
     asset_class, reason, stats}; applied (verdicts written, stages moved,
     the journal kept) when `apply`. Never raises on one pair."""
     from bot_program.asset_models import AssetBotTrade
-    from bot_program.steward_models import PairVerdict
+    from bot_program.aragorn_models import PairVerdict
     now = now or timezone.now()
     moves = []
     since = now - timedelta(days=WINDOW_DAYS)
@@ -305,7 +307,7 @@ def evaluate(*, apply=False, now=None) -> list:
                     if why:
                         _move("live", rule, cls, why, s)
         except Exception as e:  # noqa: BLE001
-            logger.warning("[steward] %s/%s not judged: %s", rule, cls, e)
+            logger.warning("[aragorn] %s/%s not judged: %s", rule, cls, e)
 
     # 1b — pairs allowed real money with too few real closes to judge:
     # their paper record speaks (a rule at a live stage, no verdict or a
@@ -317,7 +319,7 @@ def evaluate(*, apply=False, now=None) -> list:
             .values_list("rule_name", flat=True))
     except Exception as e:  # noqa: BLE001
         live_rules = set()
-        logger.warning("[steward] live rules unread: %s", e)
+        logger.warning("[aragorn] live rules unread: %s", e)
     judged = {(m["rule"], m["asset_class"]) for m in moves}
     for rule, cls in sorted(set(AssetBotTrade.objects.filter(
             paper=True, status="CLOSED", closed_at__gte=since,
@@ -340,7 +342,7 @@ def evaluate(*, apply=False, now=None) -> list:
                 s["live_n"] = n_live
                 _move("bench", rule, cls, why, s)
         except Exception as e:  # noqa: BLE001
-            logger.warning("[steward] %s/%s paper record not judged: %s",
+            logger.warning("[aragorn] %s/%s paper record not judged: %s",
                            rule, cls, e)
 
     # 2 — benched pairs: back to real money on fresh paper proof. A "*"
@@ -368,7 +370,7 @@ def evaluate(*, apply=False, now=None) -> list:
             if why:
                 _move("probation", rule, cls, why, s)
         except Exception as e:  # noqa: BLE001
-            logger.warning("[steward] bench %s/%s not judged: %s", rule, cls, e)
+            logger.warning("[aragorn] bench %s/%s not judged: %s", rule, cls, e)
 
     # 3 — rules still at the paper STAGE: a proven pair takes it live
     try:
@@ -378,7 +380,7 @@ def evaluate(*, apply=False, now=None) -> list:
             .values_list("rule_name", flat=True))
     except Exception as e:  # noqa: BLE001
         paper_rules = set()
-        logger.warning("[steward] paper rules unread: %s", e)
+        logger.warning("[aragorn] paper rules unread: %s", e)
     paper_pairs = set(AssetBotTrade.objects.filter(
         paper=True, status="CLOSED", closed_at__gte=since,
         rule_name__in=paper_rules).exclude(asset_class__in=SKIP_CLASSES)
@@ -397,7 +399,7 @@ def evaluate(*, apply=False, now=None) -> list:
                 _move("rule_live", rule, cls, why, s)
                 promoted_rules.add(rule)
         except Exception as e:  # noqa: BLE001
-            logger.warning("[steward] paper %s/%s not judged: %s", rule, cls, e)
+            logger.warning("[aragorn] paper %s/%s not judged: %s", rule, cls, e)
 
     # 4 — research rules the ladder's own criterion sends to paper
     try:
@@ -412,20 +414,20 @@ def evaluate(*, apply=False, now=None) -> list:
                 _move("rule_paper", rule, "", "the ladder's research -> "
                       "paper criterion holds (signal record)", {})
     except Exception as e:  # noqa: BLE001
-        logger.warning("[steward] research rules not judged: %s", e)
+        logger.warning("[aragorn] research rules not judged: %s", e)
 
     if apply:
         for m in moves:
             try:
                 _apply(m, now=now)
             except Exception as e:  # noqa: BLE001
-                logger.error("[steward] move %s failed: %s", m, e)
+                logger.error("[aragorn] move %s failed: %s", m, e)
                 m["error"] = str(e)
     return moves
 
 
 def _apply(m, *, now):
-    from bot_program.steward_models import PairVerdict, StewardAction
+    from bot_program.aragorn_models import PairVerdict, AragornAction
     kind, rule, cls = m["kind"], m["rule"], m["asset_class"]
     if kind in ("bench", "probation", "live"):
         _set(rule, cls, kind, m["reason"], m["stats"], now=now)
@@ -434,7 +436,7 @@ def _apply(m, *, now):
     with transaction.atomic():
         if kind == "rule_live":
             _transition(rule, "live_full", user=None, reason="auto_promote",
-                        notes=f"steward: {cls} {m['reason']}"[:500])
+                        notes=f"aragorn: {cls} {m['reason']}"[:500])
             if not PairVerdict.objects.filter(
                     rule_name=rule, asset_class=PairVerdict.ANY_CLASS).exists():
                 _set(rule, PairVerdict.ANY_CLASS, "bench",
@@ -443,14 +445,14 @@ def _apply(m, *, now):
             _set(rule, cls, "probation", m["reason"], m["stats"], now=now)
         elif kind == "rule_paper":
             _transition(rule, "paper", user=None, reason="auto_promote",
-                        notes=f"steward: {m['reason']}"[:500])
-            StewardAction.objects.create(at=now, kind="rule_paper",
+                        notes=f"aragorn: {m['reason']}"[:500])
+            AragornAction.objects.create(at=now, kind="rule_paper",
                                          rule_name=rule, detail=m["reason"])
 
 
 def set_by_operator(rule, cls, state, *, by, pin=None, reason=""):
     """An operator's verdict: written, journaled, pinned when asked."""
-    from bot_program.steward_models import PairVerdict, StewardAction
+    from bot_program.aragorn_models import PairVerdict, AragornAction
     if state not in ("live", "probation", "bench"):
         raise ValueError("state must be live, probation or bench")
     now = timezone.now()
@@ -460,19 +462,19 @@ def set_by_operator(rule, cls, state, *, by, pin=None, reason=""):
         defaults["pinned"] = bool(pin)
     PairVerdict.objects.update_or_create(rule_name=rule, asset_class=cls,
                                          defaults=defaults)
-    StewardAction.objects.create(
+    AragornAction.objects.create(
         at=now, kind=f"operator_{state}", rule_name=rule, asset_class=cls,
         detail=(reason or f"set by {by}") + (" (pinned)" if pin else ""),
         by=by)
 
 
 def report_lines(now=None, *, limit=40) -> list:
-    """The steward's state in plain lines (command, daily report)."""
+    """Aragorn's state in plain lines (command, daily report)."""
     from bot_program import market_stress
-    from bot_program.steward_models import PairVerdict, StewardAction
+    from bot_program.aragorn_models import PairVerdict, AragornAction
     now = now or timezone.now()
     cur = market_stress.current(now)
-    lines = [f"Steward: {'ON' if is_on() else 'OFF'} · posture "
+    lines = [f"Aragorn: {'ON' if is_on() else 'OFF'} · posture "
              f"{cur['level'].upper()} (score "
              f"{cur['score'] if cur['score'] is not None else '—'}): "
              f"{cur['why']}"]
@@ -488,7 +490,7 @@ def report_lines(now=None, *, limit=40) -> list:
                 f" · n {s.get('n', '—')} exp "
                 f"{(f'{exp:+.2f}R' if isinstance(exp, (int, float)) else '—')}"
                 f" · {v.reason[:90]}")
-    acts = list(StewardAction.objects.filter(
+    acts = list(AragornAction.objects.filter(
         at__gte=now - timedelta(days=1))[:15])
     if acts:
         lines.append("Last 24h:")
