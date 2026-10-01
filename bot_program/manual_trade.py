@@ -177,6 +177,96 @@ def _leverage(asset_class: str, *, leverage=None,
     return (1.0 / frac) if frac > 0 else 1.0
 
 
+def _ticket_leverage(bot, cfg, client, symbol: str, side: str, price: float,
+                     stop: float, *, asked=None) -> dict:
+    """THE LIVE TICKET'S MULTIPLIER (2026-10-01). The operator: "I choose,
+    but I want the max by default" — a hand-taken ticket went at 1x
+    whatever the account, and a 900 EURUSD at 1x pledged its full 1,016.
+
+    {"choices": [1, ...ascending], "max", "chosen", "why", "error"}.
+
+    The choices are 1 and every multiplier on the instrument's LIVE list
+    for this direction that clears every gate a typed number meets: the
+    bots' own judge_order_leverage (the switch etoro_leverage_live, the
+    platform cap, the class ceiling ORDER_LEVERAGE_CEILING, the operator's
+    own book) and the instrument's own entry (_instrument_leverage_check:
+    settlement, direction, the LIVE list, the stop band at THIS stop). Not
+    the proven multiplier: that caps the bots' auto chooser alone, never a
+    typed number. Units never see it (house rule 5): the size is the
+    stop's; the multiplier moves only the cash eToro locks, notional / L.
+
+    `asked` is the operator's pick, None for the highest. A pick that is
+    not a choice is an `error` naming the choices: nothing is resized or
+    clamped behind their back. Only on an eToro carrier; a manual config
+    carrying extras['leverage'] keeps the lane's own refusal at the order.
+    """
+    from types import SimpleNamespace
+
+    from bot_program.asset_engine.base import judge_order_leverage
+    from bot_program.engine.capabilities import adapter_key, has_capability
+
+    out = {"choices": [1], "max": 1, "chosen": 1, "why": "", "error": "",
+           "control": False}
+    if adapter_key(client) != "etoro":
+        out["why"] = "this carrier takes no per-order multiplier"
+        return out
+    if "leverage" in (getattr(cfg, "extras", None) or {}):
+        out["why"] = ("this manual config carries extras['leverage'], which "
+                      "the lane refuses at the order — remove the key")
+        return out
+    out["control"] = True
+    icls = bot._instrument_class(symbol)
+    listed = []
+    if has_capability(client, "leverage_values"):
+        try:
+            settle = client.settlement_for(symbol, side, 2)
+            listed = (client.leverage_values(symbol, side, settle,
+                                             world="live")
+                      if settle else []) or []
+        except Exception as e:  # noqa: BLE001 — unread, never a number
+            logger.info("[take-trade] %s: LIVE leverage list unread (%s)",
+                        symbol, e)
+            listed = []
+    passed_over = []
+    for lev in sorted({int(v) for v in listed
+                       if not isinstance(v, bool) and isinstance(v, (int, float))
+                       and v > 1 and float(v) == int(v)}):
+        proxy = SimpleNamespace(extras={"leverage": lev},
+                                user=getattr(cfg, "user", None))
+        _ok, why = judge_order_leverage(proxy, icls, "etoro")
+        if not why:
+            why = bot._instrument_leverage_check(client, symbol, side, lev,
+                                                 price, stop)
+        if why:
+            passed_over.append(why)
+            continue
+        out["choices"].append(lev)
+    out["max"] = max(out["choices"])
+    if out["max"] == 1:
+        out["why"] = (passed_over[-1] if passed_over else
+                      f"eToro's LIVE list for {symbol} carries nothing above "
+                      f"1 today, or it could not be read")
+    if asked in (None, ""):
+        out["chosen"] = out["max"]
+        return out
+    try:
+        pick = int(asked)
+        if float(asked) != pick:
+            raise ValueError
+    except (TypeError, ValueError):
+        out["error"] = (f"leverage {asked!r} is not a whole number — choose "
+                        f"one of {out['choices']}; nothing was sent")
+        return out
+    if pick not in out["choices"]:
+        out["error"] = (f"{pick}x is not open for {symbol} {side} at this "
+                        f"stop — choose one of {out['choices']}"
+                        + (f" ({out['why']})" if out["why"] else "")
+                        + "; nothing was sent")
+        return out
+    out["chosen"] = pick
+    return out
+
+
 def manual_config_for(user, asset_class):
     """The per-user manual config for this class — created on first use.
 
@@ -850,8 +940,12 @@ def _funding_proposal(open_trades, deficit):
             for t in chosen]
 
 
-def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
+def _preview(user, inst, side, signal=None, *, gate_now=None,
+             leverage=None) -> dict:
     """Everything the confirm popup needs, or {"error": ...}.
+
+    `leverage` is the live ticket's multiplier as the operator picked it
+    (_ticket_leverage); None is the highest the instrument allows.
 
     The funding proposal ("close these to free enough") considers ONLY
     open manual trades in this class — closing a bot's position from a
@@ -1057,6 +1151,18 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
                           round(_money / float(cfg.capital), 6)
                           if float(cfg.capital) else 0.0)}
 
+    # THE LIVE TICKET'S MULTIPLIER (2026-10-01, _ticket_leverage): the
+    # operator's pick, the highest the instrument allows by default. It
+    # becomes the ticket's stamp below, so the pool, MAX SINGLE POSITION
+    # and the size bounds all count notional / L — what eToro locks.
+    ticket_lev = None
+    if live:
+        ticket_lev = _ticket_leverage(bot, cfg, _client, inst.symbol, side,
+                                      float(price), float(sizing["stop"]),
+                                      asked=leverage)
+        if ticket_lev["error"]:
+            return {"error": ticket_lev["error"]}
+
     capital = float(cfg.capital)
     notional = round(sizing["notional_fraction"] * capital, 2)
     # THE TICKET'S STAMP (2026-09-26), one pair for every number below —
@@ -1069,7 +1175,9 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
     from bot_program.asset_engine.base import AssetBot
     from bot_program.engine.broker_router import broker_name_for_symbol
     ticket_stamp = {
-        "leverage": AssetBot._leverage_hint_of(cfg.extras),
+        "leverage": (ticket_lev["chosen"]
+                     if ticket_lev and ticket_lev["chosen"] > 1
+                     else AssetBot._leverage_hint_of(cfg.extras)),
         "carrier": broker_name_for_symbol(user, inst.symbol, cfg)}
     capital_use = round(_capital_use(cls, notional, **ticket_stamp), 2)
 
@@ -1288,6 +1396,24 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
             " Attack mode (extras['leverage'] = \"auto\") is a bot "
             "decision: this hand-taken ticket goes at 1x, at the pool's own "
             "risk fraction — no tier and no multiplier.")
+    # The live ticket's control (2026-10-01): the operator picks among
+    # `choices`, the highest by default. The size stays the stop's. Not
+    # offered where the lane cannot send a multiplier (another carrier, or
+    # a config carrying its own key): the words above stand there.
+    if ticket_lev is not None and ticket_lev["control"]:
+        chosen = int(ticket_lev["chosen"])
+        leverage.update({
+            "adjustable": len(ticket_lev["choices"]) > 1,
+            "choices": list(ticket_lev["choices"]),
+            "chosen": chosen, "max": int(ticket_lev["max"]),
+            "why": ticket_lev["why"],
+            "note": (
+                f"{chosen}x — eToro locks notional / {chosen} as margin; the "
+                f"risk is the stop's, whatever the multiplier. Open for "
+                f"this ticket: {', '.join(f'{c}x' for c in ticket_lev['choices'])}."
+                + (f" Nothing above 1x: {ticket_lev['why']}"
+                   if ticket_lev["max"] == 1 and ticket_lev["why"] else "")),
+        })
 
     return {
         "symbol": inst.symbol, "side": side, "qty": qty,
@@ -1385,7 +1511,7 @@ def _preview(user, inst, side, signal=None, *, gate_now=None) -> dict:
     }
 
 
-def preview_take_trade(user, signal) -> dict:
+def preview_take_trade(user, signal, leverage=None) -> dict:
     """Preview for a signal's TAKE TRADE button."""
     if signal.direction not in ("bullish", "bearish"):
         # A neutral signal has no trade direction; "not bullish, so SELL"
@@ -1394,20 +1520,21 @@ def preview_take_trade(user, signal) -> dict:
                          f"direction — only bullish and bearish signals "
                          f"are executable"}
     side = "BUY" if signal.direction == "bullish" else "SELL"
-    return _preview(user, signal.instrument, side, signal=signal)
+    return _preview(user, signal.instrument, side, signal=signal,
+                    leverage=leverage)
 
 
-def preview_asset_trade(user, inst, side) -> dict:
+def preview_asset_trade(user, inst, side, leverage=None) -> dict:
     """Preview for a signal-less LONG/SHORT from an instrument popup —
     levels come from the engine's ATR machinery."""
     if side not in ("BUY", "SELL"):
         return {"error": f"Unknown side {side!r}"}
-    return _preview(user, inst, side)
+    return _preview(user, inst, side, leverage=leverage)
 
 
 def _execute(user, inst, side, close_ids=None, signal=None,
              qty_override=None, stop_override=None,
-             target_override=None, pin_ok=False) -> dict:
+             target_override=None, pin_ok=False, leverage=None) -> dict:
     """Close the funding positions (if any), then open the trade. Paper is
     synchronous, so the whole chain settles before this returns.
 
@@ -1570,7 +1697,8 @@ def _execute(user, inst, side, close_ids=None, signal=None,
     if close_ids:
         # Nothing may be closed for a trade that was never going to preview
         # clean — full preview first, closes second.
-        preview = _preview(user, inst, side, signal=signal)
+        preview = _preview(user, inst, side, signal=signal,
+                           leverage=leverage)
         if preview.get("error"):
             return preview
 
@@ -1641,7 +1769,8 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         # The one thing it deliberately does NOT see is this request's own
         # funding closes in the daily-loss window: `gate_now` is the instant
         # before they ran.
-        preview = _preview(user, inst, side, signal=signal, gate_now=gate_now)
+        preview = _preview(user, inst, side, signal=signal, gate_now=gate_now,
+                           leverage=leverage)
         if preview.get("error"):
             # The closes already happened — the caller must see them even
             # though the open did not follow.
@@ -1676,8 +1805,13 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         # pool and MAX SINGLE POSITION judgement below charges it.
         from bot_program.asset_engine.base import AssetBot
         from bot_program.engine.broker_router import broker_name_for_symbol
+        # The live ticket's multiplier (2026-10-01): the one the preview
+        # under this lock judged, the operator's pick or the highest.
+        ticket_l = int((preview.get("leverage") or {}).get("chosen") or 1) \
+            if live else 1
         ticket_stamp = {
-            "leverage": AssetBot._leverage_hint_of(cfg.extras),
+            "leverage": (ticket_l if ticket_l > 1
+                         else AssetBot._leverage_hint_of(cfg.extras)),
             "carrier": broker_name_for_symbol(user, inst.symbol, cfg)}
         # Fill FIRST, size from the fill — the bot entry path's ordering.
         # Sizing off the free raw mark and then filling adversely overshoots
@@ -1905,6 +2039,10 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             meta["engine_target"] = float(preview["target"])
         if not live:
             meta["paper_fill"] = True
+        elif ticket_l > 1:
+            # The row's own multiplier: capital_at_work counts notional / L
+            # off it, as it does for a bot's levered row.
+            meta["leverage"] = ticket_l
 
         def _book_row(fill_price, booked_qty, is_paper, extra_meta=None,
                       broker_order_id=""):
@@ -2017,7 +2155,8 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             _code, _why = AssetBot._etoro_entry_refusal(
                 client, inst.symbol, side, float(qty), float(fill),
                 str(inst.asset_class or cls),
-                leverage_hint=AssetBot._leverage_hint_of(cfg.extras),
+                leverage_hint=(ticket_l if ticket_l > 1 else
+                               AssetBot._leverage_hint_of(cfg.extras)),
                 horizon_hours=None)
             if _code:
                 return {"error": (f"eToro refusal ({_code}): {_why} — "
@@ -2048,25 +2187,39 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             # fresh, read in this row's world, in the pool's currency, and
             # the account under MAX_PLEDGED_FRACTION after it. A refusal
             # sends nothing; any other carrier is not asked.
+            # THE TICKET'S MULTIPLIER, judged once more on the stop actually
+            # sent (the operator may have moved it since the preview) by the
+            # instrument's own entry — the band moves with the stop. A
+            # refusal sends nothing: not at L, not at 1.
+            if ticket_l > 1:
+                _inst_why = bot._instrument_leverage_check(
+                    client, inst.symbol, side, ticket_l, float(fill),
+                    float(stop))
+                if _inst_why:
+                    return {"error": (f"at {ticket_l}x: {_inst_why} — lower "
+                                      f"the leverage or tighten the stop; "
+                                      f"nothing was sent")}
             if adapter_key(client) == "etoro":
                 from bot_program.asset_engine import skips as _skips
                 _room = bot._leverage_headroom(
                     client, inst.symbol, qty=float(qty), price=float(fill),
-                    leverage=1)
+                    leverage=ticket_l)
                 if _room:
                     return {"error": (
-                        f"eToro refusal ({_skips.LEVERAGE_REFUSED}): at 1x: "
-                        f"{_room} — nothing was sent")}
+                        f"eToro refusal ({_skips.LEVERAGE_REFUSED}): at "
+                        f"{ticket_l}x: {_room} — nothing was sent")}
             client_order_id = make_client_order_id(
                 cfg.id, inst.symbol,
                 signal_id=(str(signal.id) if signal is not None
                            else "manual"),
                 intent="ENTRY", bar_ts=_tz.now().strftime("%Y%m%d%H%M"))
             try:
+                _lev_kw = {"leverage": ticket_l} if ticket_l > 1 else {}
                 res = client.market_order(
                     inst.symbol, side, float(qty),
                     client_order_id=client_order_id,
-                    stop_loss=float(stop), take_profit=float(target))
+                    stop_loss=float(stop), take_profit=float(target),
+                    **_lev_kw)
             except Exception as e:  # noqa: BLE001
                 logger.error("[take-trade] LIVE order errored for %s %s: %s",
                              side, inst.symbol, e)
@@ -2265,7 +2418,7 @@ def _execute(user, inst, side, close_ids=None, signal=None,
 
 
 def execute_take_trade(user, signal, close_ids=None, qty=None, stop=None,
-                       target=None, pin_ok=False) -> dict:
+                       target=None, pin_ok=False, leverage=None) -> dict:
     """Execute a signal's TAKE TRADE.
 
     Every keyword None is "the platform's answer": the risk-derived size,
@@ -2281,17 +2434,17 @@ def execute_take_trade(user, signal, close_ids=None, qty=None, stop=None,
     side = "BUY" if signal.direction == "bullish" else "SELL"
     return _execute(user, signal.instrument, side, close_ids=close_ids,
                     signal=signal, qty_override=qty, stop_override=stop,
-                    target_override=target, pin_ok=pin_ok)
+                    target_override=target, pin_ok=pin_ok, leverage=leverage)
 
 
 def execute_asset_trade(user, inst, side, close_ids=None, qty=None, stop=None,
-                        target=None, pin_ok=False) -> dict:
+                        target=None, pin_ok=False, leverage=None) -> dict:
     """Execute a signal-less LONG/SHORT from an instrument popup."""
     if side not in ("BUY", "SELL"):
         return {"error": f"Unknown side {side!r}"}
     return _execute(user, inst, side, close_ids=close_ids, qty_override=qty,
                     stop_override=stop, target_override=target,
-                    pin_ok=pin_ok)
+                    pin_ok=pin_ok, leverage=leverage)
 
 
 # ── Arming — the moment a chart button can move real funds ──────────────

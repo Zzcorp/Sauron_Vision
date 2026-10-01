@@ -257,9 +257,10 @@ class TheOtherReadersOfTheColumnTests(TestCase):
     def test_the_gate_says_it_is_blind_rather_than_ok(self):
         """A confident "ok" from a gate that could not read half its input
         is the reassuring answer, which is the one that gets an operator
-        hurt."""
+        hurt. The closes are on the config's own venue (paper): since
+        2026-10-01 a config's day is its own venue's."""
         from bot_program.asset_engine.stock_bot import StockBot
-        _closed(self.cfg, None)
+        _closed(self.cfg, None, paper=True)
         ok, reason = StockBot(self.cfg).can_open_new()
         # Asserted unconditionally. `if ok:` around these would let the test
         # pass by never running them.
@@ -271,11 +272,18 @@ class TheOtherReadersOfTheColumnTests(TestCase):
         """Abstaining must not become permissiveness: what WAS measured
         still has to be able to trip the floor."""
         from bot_program.asset_engine.stock_bot import StockBot
+        from portfolio.risk_gate import limits_book
+        # The bot's own floor binds only where the book carries none (one
+        # daily stop, 2026-10-01): the book's limit off, so this floor is
+        # the one under test.
+        book = limits_book()
+        book.max_daily_loss_pct = 0
+        book.save(update_fields=["max_daily_loss_pct"])
         self.cfg.max_daily_loss_pct = 1.0       # 1% of 10_000 == 100
         self.cfg.halt_on_drawdown = True
         self.cfg.save()
-        _closed(self.cfg, Decimal("-500"))
-        _closed(self.cfg, None)
+        _closed(self.cfg, Decimal("-500"), paper=True)
+        _closed(self.cfg, None, paper=True)
         ok, reason = StockBot(self.cfg).can_open_new()
         self.assertFalse(ok)
         self.assertIn("daily loss limit", reason)

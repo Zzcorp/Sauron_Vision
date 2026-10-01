@@ -3255,11 +3255,25 @@ class AssetBot(ABC):
         # it refused every live bot with nothing live open. A live config's
         # paper-stage entry meets the paper book in execute_entry, where its
         # venue is known (_paper_book_refusal).
-        from portfolio.risk_gate import preflight
+        from portfolio.risk_gate import (ELITE_MAX_PER_WINDOW,
+                                         elite_entries_since, preflight)
         book = preflight(self.user, venue=("paper" if self.cfg.mode == "paper"
                                            else "live"))
+        # PAST THE DAILY LIMIT, ELITE ONLY (2026-10-01): above the absolute
+        # stop and with nothing else binding, the gate stays open for an
+        # elite candidate — propose_entry judges each one (_elite_verdict)
+        # and halves it; execute_entry stamps it. The allowance is the
+        # venue's, counted on the rows.
+        self._elite_only = ""
         if not book["ok"]:
-            return (False, book["reason"])
+            if not book.get("elite_only"):
+                return (False, book["reason"])
+            used = elite_entries_since(self.user,
+                                       paper=(self.cfg.mode == "paper"))
+            if used >= ELITE_MAX_PER_WINDOW:
+                return (False, f"{book['reason']}; the elite allowance is "
+                               f"spent ({used} of {ELITE_MAX_PER_WINDOW})")
+            self._elite_only = book["reason"]
         # preflight FAILS OPEN by design - halting a fleet on a
         # transient database hiccup is worse than one unenforced tick.
         # But its own docstring asks callers to read `failed_open`
@@ -3278,10 +3292,15 @@ class AssetBot(ABC):
             return (False,
                     f"max {self.cfg.max_concurrent_positions} concurrent positions reached")
 
-        # 24h realized P&L vs daily-loss limit
+        # 24h realized P&L vs daily-loss limit — on THIS config's venue only
+        # (2026-10-01): research_forex_1, armed live at 18:23, was halted at
+        # 18:40 on 110.65 of PAPER losses from its morning, against 2% of a
+        # real account. A live config's day is its real closes; a paper
+        # config's, its simulated ones.
         since = timezone.now() - timedelta(hours=24)
         closed = list(AssetBotTrade.objects.filter(
-            config=self.cfg, status="CLOSED", closed_at__gte=since))
+            config=self.cfg, status="CLOSED", closed_at__gte=since,
+            paper=(self.cfg.mode == "paper")))
         # An exit reconciliation could not price carries pnl=None, and
         # summing it raised TypeError right here — in the daily-loss gate,
         # so one unpriceable close took the whole entry preflight down.
@@ -3302,7 +3321,17 @@ class AssetBot(ABC):
             f"not be priced; realized is at least {realized:.2f}"
         ) if n_unmeasured else ""
         limit = -self.cfg.capital * Decimal(str(self.cfg.max_daily_loss_pct / 100))
-        if realized <= limit and self.cfg.halt_on_drawdown:
+        # ONE DAILY STOP (2026-10-01). The operator chose the book's MAX
+        # DAILY LOSS as the only one: with a 2% default here, every bot
+        # stopped at 2% of its pool long before the 8% he set, and no elite
+        # entry past it could ever reach the book gate. This config's own
+        # floor applies only when the book's could not be measured (no
+        # limit, no book value, a day nobody could price, an unreadable
+        # book): a stop that measures nothing is not the one stop.
+        book_daily = (book.get("checks") or {}).get("daily_loss") or {}
+        one_stop = bool(book_daily.get("measured")) \
+            and book_daily.get("limit_money") is not None
+        if realized <= limit and self.cfg.halt_on_drawdown and not one_stop:
             # Phase-20: notify drawdown limit hit. Best-effort dedupe via the
             # in-app Notification — only fire if we haven't sent one in the
             # last hour for this config (avoids spamming on every tick).
@@ -3717,6 +3746,28 @@ class AssetBot(ABC):
             logger.info("[%s_bot] %s correlation taper: %s",
                         self.asset_class, symbol, corr["reason"])
 
+        # PAST THE DAILY LOSS LIMIT, ELITE ONLY (2026-10-01). can_open_new
+        # left the gate open (`_elite_only`) because the day is past the
+        # book's MAX DAILY LOSS and above its absolute stop: this candidate
+        # opens only if it is elite, and at ELITE_SIZE_SCALE of its size —
+        # a multiplier like the others above, before the rounding and the
+        # final judgement.
+        elite = {}
+        if getattr(self, "_elite_only", ""):
+            from portfolio.risk_gate import ELITE_SIZE_SCALE
+            elite = self._elite_verdict(symbol, decision, price=price,
+                                        sl=sl, tp=tp,
+                                        cost_fraction=charge["fraction"])
+            if not elite.get("elite"):
+                return self._skip(symbol, skips.GATE_BLOCKED,
+                                  f"{self._elite_only} — not elite: "
+                                  f"{elite.get('why', '')}")
+            qty *= ELITE_SIZE_SCALE
+            elite["scale"] = ELITE_SIZE_SCALE
+            logger.info("[%s_bot] %s ELITE past the daily limit at %gx: %s",
+                        self.asset_class, symbol, ELITE_SIZE_SCALE,
+                        elite.get("why", ""))
+
         # THE VENUE'S UNIT GRANULARITY, asked of the client this pass priced
         # through — the same adapter class the order will go through, since
         # `purpose` matters to IBKR alone (broker_router:243) — and carried
@@ -3770,6 +3821,7 @@ class AssetBot(ABC):
             notional_default=float(qty) * float(price) * vpu,
             value_per_unit=vpu, corr_scale=float(corr.get("scale", 1.0)),
             fractional_units=fractional,
+            elite=dict(elite),
             horizon_hours=horizon,
         )
 
@@ -3998,6 +4050,21 @@ class AssetBot(ABC):
                                       venue=cand.venue):
             return None
 
+        # THE ELITE ALLOWANCE, counted again at the send (2026-10-01): two
+        # elite candidates proposed on one tick both read "1 of 2" at the
+        # gate; the rows written since are what count.
+        _elite = getattr(cand, "elite", None)
+        if isinstance(_elite, dict) and _elite.get("elite"):
+            from portfolio.risk_gate import (ELITE_MAX_PER_WINDOW,
+                                             elite_entries_since)
+            _used = elite_entries_since(self.user,
+                                        paper=(cand.venue == "paper"))
+            if _used >= ELITE_MAX_PER_WINDOW:
+                return self._skip(
+                    symbol, skips.GATE_BLOCKED,
+                    f"past the daily loss limit, the elite allowance is "
+                    f"spent ({_used} of {ELITE_MAX_PER_WINDOW})")
+
         # Shadow mode: everything is computed, nothing is submitted and no
         # row is written. The way to validate a change against live data
         # for 24-48h without risking money.
@@ -4113,6 +4180,14 @@ class AssetBot(ABC):
             entry_meta["attack"] = dict(_attack)
         else:
             _attack = None
+        # An ELITE entry past the daily limit (2026-10-01): stamped so the
+        # allowance counts it (risk_gate.elite_entries_since) and the row
+        # says why it opened on a day the limit was hit.
+        _elite = getattr(cand, "elite", None)
+        if isinstance(_elite, dict) and _elite.get("elite"):
+            from portfolio.risk_gate import ELITE_META_KEY
+            entry_meta[ELITE_META_KEY] = True
+            entry_meta["elite"] = dict(_elite)
         if getattr(cand, "fractional_units", None) is True and not paper:
             # Rounded by the venue's answer, not by whole shares — so a later
             # grader can select these rows and treasury can say so.
@@ -6184,6 +6259,87 @@ class AssetBot(ABC):
                           f"— {words}; HIGH needs win >= "
                           f"{ATTACK_HIGH_MIN_WIN_RATE:.0%} and avg R >= "
                           f"{ATTACK_HIGH_MIN_AVG_R:+.2f}")
+
+    def _elite_verdict(self, symbol: str, decision, *, price: float,
+                       sl: float, tp: float, cost_fraction=None) -> dict:
+        """Is this candidate ELITE — may it open on a day past the book's
+        MAX DAILY LOSS (2026-10-01)? {"elite": bool, "why", "net_rr", "n",
+        "win_rate", "avg_r"}.
+
+        The operator: "une reprise si un signal est purement intéressant et
+        profitable". Both halves measured, nothing believed:
+          - PROFITABLE: the decision's rule on the instrument's class, on
+            the venue this order goes to ONLY (no pooled record: a day
+            already past its limit is not one to size real money off
+            simulated fills) — n >= ELITE_MIN_N, win rate >=
+            ELITE_MIN_WIN_RATE, average realized R >= ELITE_MIN_AVG_R;
+          - INTERESTING: reward:risk net of the round trip, at the stop
+            that will be placed, >= ELITE_MIN_NET_RR.
+        A record that cannot be read is not elite."""
+        from portfolio.risk_gate import (ELITE_MIN_AVG_R, ELITE_MIN_N,
+                                         ELITE_MIN_NET_RR, ELITE_MIN_WIN_RATE)
+
+        out = {"elite": False, "why": "", "net_rr": None, "n": 0,
+               "win_rate": None, "avg_r": None}
+        try:
+            price, sl, tp = float(price), float(sl), float(tp)
+            cost = float(cost_fraction or 0.0)
+            risk = abs(price - sl) / price if price > 0 else 0.0
+            reward = abs(tp - price) / price if price > 0 else 0.0
+            net_rr = (max(0.0, reward - cost) / (risk + cost)
+                      if risk > 0 else 0.0)
+        except (TypeError, ValueError, ZeroDivisionError):
+            net_rr = 0.0
+        out["net_rr"] = round(net_rr, 4)
+        if net_rr < ELITE_MIN_NET_RR - 1e-12:
+            out["why"] = (f"net reward:risk {net_rr:.2f} after costs, elite "
+                          f"needs {ELITE_MIN_NET_RR:.2f}")
+            return out
+        rule = str(getattr(decision, "rule_name", "") or "")
+        if not rule:
+            out["why"] = "the decision names no rule, so no record to read"
+            return out
+        icls = self._instrument_class(symbol)
+        own = "paper" if self.cfg.mode == "paper" else "live"
+        try:
+            from bot_program.bot_grading import (VENUE_LIVE, VENUE_PAPER,
+                                                 bot_track_record_detail)
+            rec = bot_track_record_detail(
+                rule, icls, min_n=ELITE_MIN_N,
+                venue=(VENUE_PAPER if own == "paper" else VENUE_LIVE))
+        except Exception as e:  # noqa: BLE001 — never elite on an unread record
+            logger.warning("[%s_bot] %s elite: the record of %s on %s could "
+                           "not be read (%s) — not elite", self.asset_class,
+                           symbol, rule, icls, e)
+            out["why"] = f"the record of {rule} on {icls} could not be read"
+            return out
+        rec = rec if isinstance(rec, dict) else {}
+
+        def _num(v):
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                return None
+            return f if f == f else None
+
+        n = int(rec.get("n") or 0)
+        wr = _num(rec.get("win_rate"))
+        avg = _num(rec.get("expectancy"))
+        out.update(n=n, win_rate=wr, avg_r=avg)
+        words = (f"{rule} on {icls}, {own} fills: n {n}, win "
+                 f"{'—' if wr is None else format(wr, '.0%')}, avg R "
+                 f"{'—' if avg is None else format(avg, '+.2f')}, net R:R "
+                 f"{net_rr:.2f}")
+        if (n >= ELITE_MIN_N and wr is not None and avg is not None
+                and wr >= ELITE_MIN_WIN_RATE - 1e-12
+                and avg >= ELITE_MIN_AVG_R - 1e-12):
+            out["elite"] = True
+            out["why"] = words
+            return out
+        out["why"] = (f"{words}; elite needs n >= {ELITE_MIN_N}, win >= "
+                      f"{ELITE_MIN_WIN_RATE:.0%} and avg R >= "
+                      f"{ELITE_MIN_AVG_R:+.2f} on the venue the order goes to")
+        return out
 
     def _alert_stop_rewrite(self, trade, why: str) -> None:
         """The staff alert for a stop the venue rewrote at the fill

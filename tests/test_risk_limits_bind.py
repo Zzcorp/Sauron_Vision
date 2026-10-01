@@ -329,12 +329,16 @@ class BotEntryGateTests(TestCase):
                                 symbols=["BTCUSD"]))
 
     def test_can_open_new_refuses_when_the_book_limit_is_breached(self):
+        """Past the absolute stop (1.5x the limit, 2026-10-01): below it
+        the gate stays open for an elite entry only —
+        tests/test_elite_past_daily_stop.py."""
         _book(current_value=Decimal("10000"), max_daily_loss_pct=3.0)
         bot = self._bot()
-        _closed_trade(bot.cfg, -400)
+        _closed_trade(bot.cfg, -500)
         ok, reason = bot.can_open_new()
         self.assertFalse(ok)
         self.assertIn("book risk limits", reason)
+        self.assertIn("absolute stop", reason)
 
     def test_the_per_config_drawbown_toggle_does_not_disable_the_book_limit(self):
         """`halt_on_drawdown` governs THIS config's own drawdown halt. Turning
@@ -343,7 +347,7 @@ class BotEntryGateTests(TestCase):
         from bot_program.asset_engine.base import make_bot
         cfg = _config(self.user, asset_class="crypto", symbols=["BTCUSD"],
                       halt_on_drawdown=False)
-        _closed_trade(cfg, -400)
+        _closed_trade(cfg, -500)
         ok, reason = make_bot(cfg).can_open_new()
         self.assertFalse(ok)
         self.assertIn("book risk limits", reason)

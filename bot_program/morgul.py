@@ -842,6 +842,18 @@ def check_margin(ctx, g) -> list:
 
 # ── G7: the daily loss ───────────────────────────────────────────────────
 
+def _book_daily_pct():
+    """MAX DAILY LOSS off the /setup/ limits book, or None when it carries
+    none (or cannot be read: then the bots' own percentages, as before)."""
+    try:
+        from portfolio.risk_gate import _limit_pct, limits_book
+        return _limit_pct(limits_book(), "max_daily_loss_pct")
+    except Exception as e:  # noqa: BLE001 — a guard must not raise
+        logger.warning("[morgul] the book's daily-loss limit is unreadable "
+                       "(%s) — the bots' own percentages apply", e)
+        return None
+
+
 def check_daily_loss(ctx, g) -> list:
     """Realized LIVE P&L of the last 24 h, per user and currency, against
     the daily stop the configs carry: the SMALLEST max_daily_loss_pct of
@@ -890,8 +902,13 @@ def check_daily_loss(ctx, g) -> list:
                 continue
             label = (f"Live bots of account #{user.pk} · "
                      f"{ccy or 'no currency'}")
-            carriers = [c for c in cfgs if c.halt_on_drawdown
-                        and float(c.max_daily_loss_pct or 0) > 0]
+            # ONE DAILY STOP (2026-10-01): the book's MAX DAILY LOSS when
+            # it carries one, for every live bot — the number the engine's
+            # gate now stops on. The bots' own percentages only without it.
+            book_pct = _book_daily_pct()
+            carriers = ([c for c in cfgs] if book_pct is not None else
+                        [c for c in cfgs if c.halt_on_drawdown
+                         and float(c.max_daily_loss_pct or 0) > 0])
             if not carriers:
                 ctx.note(g, f"{label}: no bot carries a daily stop (each is "
                          "set never to halt on drawdown, or at 0%); not "
@@ -900,7 +917,8 @@ def check_daily_loss(ctx, g) -> list:
             priced = [t.pnl for t in mine if t.pnl is not None]
             realized = sum((float(p) for p in priced), 0.0)
             unpriced = len(mine) - len(priced)
-            pct = min(float(c.max_daily_loss_pct) for c in carriers)
+            pct = (book_pct if book_pct is not None else
+                   min(float(c.max_daily_loss_pct) for c in carriers))
             # The followers of one shared account are ONE pool: summed,
             # the stop would be a multiple of the account it guards.
             from bot_program.capital_truth import combined_capital
@@ -917,17 +935,39 @@ def check_daily_loss(ctx, g) -> list:
                      f"{_plural(len(mine), 'close')} (paper and demo excluded)",
                      f"Daily stop used: {eye.percent(pct)} of "
                      f"{eye.money(capital, ccy)} = {eye.money(stop, ccy)}"]
+            if book_pct is not None:
+                from portfolio.risk_gate import (ABSOLUTE_STOP_MULTIPLE,
+                                                 ELITE_MAX_PER_WINDOW,
+                                                 ELITE_SIZE_SCALE)
+                hard = stop * ABSOLUTE_STOP_MULTIPLE
+                facts.append("That is MAX DAILY LOSS on /setup/, the one "
+                             "daily stop of every live bot")
+                if realized > -hard:
+                    facts.append(
+                        f"Elite entries only until the absolute stop at "
+                        f"{eye.percent(pct * ABSOLUTE_STOP_MULTIPLE)} = "
+                        f"{eye.money(hard, ccy)}: a measured edge, at "
+                        f"{ELITE_SIZE_SCALE:g}x size, at most "
+                        f"{ELITE_MAX_PER_WINDOW} in 24 h")
+                else:
+                    facts.append(
+                        f"Past the absolute stop at "
+                        f"{eye.percent(pct * ABSOLUTE_STOP_MULTIPLE)} = "
+                        f"{eye.money(hard, ccy)}: nothing opens, elite "
+                        f"entries included")
+                facts.append("No bot is switched off: exits and stops keep "
+                             "running")
             left = [f"{eye.config_label(c)} ("
                     + ("never halts on drawdown" if not c.halt_on_drawdown
                        else "a daily stop of 0%") + ")"
                     for c in cfgs if c not in carriers]
-            if left:
+            if book_pct is None and left:
                 facts.append(f"That is the smallest daily stop of the "
                              f"{_plural(len(carriers), 'live bot')} that "
                              f"carry one, on the combined capital of all "
                              f"{len(cfgs)}")
                 facts.append("Left out of that number: " + ", ".join(left))
-            else:
+            elif book_pct is None:
                 facts.append(f"That is the smallest daily stop of the "
                              f"{_plural(len(cfgs), 'live bot')}, on their "
                              f"combined capital")
@@ -1237,9 +1277,11 @@ GUARDS = [
     Guard("margin", "Margin", "critical",
           "Morgul — the margin pledged is past the limit", check_margin,
           brake=True),
+    # Never a brake (2026-10-01): past the daily stop the engine's gate
+    # lets only elite entries through and stops at the absolute stop by
+    # itself; switching the bots off would stop their exits too.
     Guard("daily_loss", "Daily loss", "critical",
-          "Morgul — the daily loss is past the stop", check_daily_loss,
-          brake=True),
+          "Morgul — the daily loss is past the stop", check_daily_loss),
     Guard("duplicates", "Duplicates", "warning",
           "Morgul — duplicate live positions", check_duplicates),
     Guard("drift", "Drift", "critical",
