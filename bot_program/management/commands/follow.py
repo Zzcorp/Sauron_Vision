@@ -124,7 +124,9 @@ class Command(BaseCommand):
         if held > 0:
             self.stdout.write(f"held back for withdrawals: {float(held):.2f} {cur} — "
                               f"the pools follow {base:.2f} {cur}")
-        self.stdout.write("plan, every follower after this change:")
+        self.stdout.write("plan, every follower after this change"
+                          + (" (SHARED: each draws on the whole account):"
+                             if alloc.get("shared") else ":"))
         for f in followers:
             frac = float(alloc["plan"][f.pk])
             label = f"{share:g}%" if (f.pk == cfg.pk and share is not None) else (
@@ -188,7 +190,9 @@ class Command(BaseCommand):
                                  f" — the pools follow {base:.2f}")
                 except Exception as e:  # noqa: BLE001
                     head += f", withdrawal reserve unreadable ({e})"
-            self.stdout.write(f"{user.username}: account {head}, {len(followers)} follower(s)")
+            self.stdout.write(f"{user.username}: account {head}, {len(followers)} follower(s)"
+                              + (" — SHARED: each draws on the whole account"
+                                 if alloc.get("shared") else ""))
             for f in followers:
                 frac = alloc["plan"].get(f.pk) if alloc["ok"] else None
                 self.stdout.write(

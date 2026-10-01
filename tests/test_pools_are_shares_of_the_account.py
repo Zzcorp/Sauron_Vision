@@ -34,7 +34,10 @@ def _pool(pk, name="p", asset_class="stock", **extras):
 class TheRuleTests(SimpleTestCase):
 
     def _alloc(self, *pools, **kw):
+        # The slices: the shared-capital switch is named, not read (no
+        # database here); the shared pool is tests/test_shared_capital.py.
         from bot_program.capital_truth import allocate_shares
+        kw.setdefault("shared", False)
         return allocate_shares(list(pools), **kw)
 
     def test_one_follower_with_no_number_is_the_whole_account(self):

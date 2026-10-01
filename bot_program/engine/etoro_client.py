@@ -227,16 +227,37 @@ VENUE_SPELLING = {
     "DAX40": "GER40",         # 32, 2026-09-23 — quote currency unmeasured
     "NIKKEI225": "JPN225",    # 36, 2026-09-23 — quote currency unmeasured
     "STOXX50": "EUSTX50",     # 43, 2026-09-23 — quote currency unmeasured
+    # 2026-10-01, the eligibility read BY SYMBOLS (deploy/ETORO_DEPARTURE.md
+    # §7 bullet 0s, part 1) on the live list: each row answered its id, the
+    # commodity floor (minPositionExposure 1000), settlement cfd, open True.
+    # /search does NOT answer these spellings exactly (GOLD lists GOLD.24-7
+    # and futures, OIL lists OIL.24-7 ...), so their ids are PINNED below
+    # (VENUE_ID_PINS) and /search is never asked for them.
+    "XAUUSD": "GOLD",          # 18
+    "XAGUSD": "SILVER",        # 19
+    "WTIUSD": "OIL",           # 17
+    "NGUSD": "NATGAS",         # 22
+    "HGUSD": "COPPER.FUT",     # 21 (/search COPPER.FUT EXACT, too)
+    "XPDUSD": "PALLADIUM.FUT",  # 91
 }
-#: Platform spellings /search answered NOTHING to on 2026-09-23 with no
-#: eToro spelling known yet (GOLD, SILVER, OIL, NATGAS and COPPER were
-#: refused too). instrument_id raises for them naming the date and the
-#: reads that find the spelling (deploy/ETORO_DEPARTURE.md §7, bullet 0s:
-#: the eligibility POST by `symbols`, then the id-range read). [GAP 10]
-#: Id windows that read answered with NO metal or energy row are written
-#: here after each sitting, so nobody rescans them — "ids scanned:
-#: <lo>-<hi> on <date>: none". None scanned yet.
-VENUE_SPELLING_UNKNOWN = ("XAUUSD", "XAGUSD")
+#: PLATFORM symbol -> eToro instrumentId, pinned from the eligibility row
+#: that answered it (2026-10-01; above). instrument_id answers these
+#: without /search, which lists them only among look-alikes. Keyed on the
+#: PLATFORM spelling, never on eToro's: the catalogue's own GOLD is the
+#: Barrick Gold STOCK (instruments.services), and a pin keyed on "GOLD"
+#: would have priced and traded it as the metal. The reverse direction
+#: (a position read back by id) reads PINNED_SYMBOL when the cache is cold.
+VENUE_ID_PINS = {"XAUUSD": 18, "XAGUSD": 19, "WTIUSD": 17, "NGUSD": 22,
+                 "HGUSD": 21, "XPDUSD": 91}
+PINNED_SYMBOL = {iid: key for key, iid in VENUE_ID_PINS.items()}
+#: Platform spellings with no eToro spelling known. Gold, silver, oil, gas,
+#: copper and palladium were found on 2026-10-01 (VENUE_ID_PINS); Brent
+#: was not: /search answered nothing for BRENT, UKOIL, BRNUSD, XBRUSD,
+#: OILBRENT or BRENT.FUT, and no Brent row stood in the eligibility read.
+#: instrument_id raises for these naming the reads (deploy/
+#: ETORO_DEPARTURE.md §7, bullet 0s). [GAP 10] Id windows scanned with
+#: the eligibility read and NO Brent row: ids 1-100 on 2026-10-01.
+VENUE_SPELLING_UNKNOWN = ("BRNUSD",)
 #: QUOTE CURRENCY UNREAD (2026-09-26). These five resolve through
 #: VENUE_SPELLING (UK100 30, FRA40 31, GER40 32, JPN225 36, EUSTX50 43),
 #: and nobody has read the currency eToro quotes them in. The engine
@@ -643,6 +664,13 @@ class EtoroTrader:
         if key in self._ids:
             return self._ids[key]
         wire = VENUE_SPELLING.get(key, key)
+        pinned = VENUE_ID_PINS.get(key)
+        if pinned is not None:
+            # Measured by the eligibility read (VENUE_ID_PINS): no /search.
+            self._ids[key] = pinned
+            self._symbols[pinned] = key
+            self._venue_spelling[pinned] = wire
+            return pinned
         r = self._sess().get(f"{BASE}/api/v1/market-data/search",
                              params={"internalSymbolFull": wire},
                              headers=self._headers(), timeout=self.timeout)
@@ -658,6 +686,16 @@ class EtoroTrader:
             iid = it.get("instrumentId") or it.get("instrumentID")
             if iid and sym == wire:
                 iid = int(iid)
+                owner = next((k for k, v in VENUE_ID_PINS.items()
+                              if v == iid), None)
+                if owner is not None and owner != key:
+                    # A pinned id answering ANOTHER platform symbol: the
+                    # catalogue's GOLD (Barrick, a stock) must never be
+                    # priced or traded as eToro's GOLD (18, the metal).
+                    raise LookupError(
+                        f"eToro's {wire!r} is id {iid}, pinned to "
+                        f"{owner!r} (VENUE_ID_PINS) — refused for {key!r}: "
+                        f"two platform symbols cannot share one instrument")
                 self._ids[key] = iid
                 self._symbols[iid] = key
                 self._venue_spelling[iid] = sym
@@ -685,13 +723,17 @@ class EtoroTrader:
 
     def _symbol_for(self, instrument_id) -> str:
         """Reverse lookup for positions read back. Warm for every symbol
-        this client resolved; a cold id is reported as its number rather
-        than guessed at, and says so."""
+        this client resolved and for every pinned id (PINNED_SYMBOL), so
+        a position read back by id is never "ETORO:18" — a name every
+        reader would compare and miss, booking a live row CLOSED; any
+        other cold id is reported as its number rather than guessed at,
+        and says so."""
         try:
             iid = int(instrument_id)
         except (TypeError, ValueError):
             return str(instrument_id)
-        return self._symbols.get(iid, f"ETORO:{iid}")
+        return self._symbols.get(iid) or PINNED_SYMBOL.get(iid,
+                                                           f"ETORO:{iid}")
 
     def _named(self, instrument_id) -> bool:
         """Can THIS client put a platform symbol on that instrument id?
@@ -703,12 +745,13 @@ class EtoroTrader:
         instead of letting `ETORO:1001` travel as though it were a symbol:
         every consumer compares that name against the platform's spelling
         and reads a miss as "the position is gone", which books a live row
-        CLOSED.
+        CLOSED. A pinned id (PINNED_SYMBOL) is named from construction.
         """
         try:
-            return int(instrument_id) in self._symbols
+            iid = int(instrument_id)
         except (TypeError, ValueError):
             return False
+        return iid in self._symbols or iid in PINNED_SYMBOL
 
     # ── market data ────────────────────────────────────────────────────────
 

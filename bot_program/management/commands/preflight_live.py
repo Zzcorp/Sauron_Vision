@@ -996,10 +996,21 @@ class Command(BaseCommand):
 
             # ── shares of the account ───────────────────────────────────
             from bot_program.capital_truth import (allocate_shares,
-                                                   followers_of, share_label)
+                                                   combined_capital,
+                                                   followers_of,
+                                                   shared_capital, share_label)
+            from bot_program.asset_engine.base import pledged_ceiling
             followers = followers_of(user)
+            shared = shared_capital()
             if followers:
-                alloc = allocate_shares(followers)
+                alloc = allocate_shares(followers, shared=shared)
+                if shared:
+                    w(f"   SHARED CAPITAL (shared_capital_live ON): these "
+                      f"{len(followers)} pool(s) each draw on the whole "
+                      f"account, first come first served; what binds is "
+                      f"the account — MAX ACCOUNT PLEDGED "
+                      f"{pledged_ceiling():.0%}, the book's daily loss, the "
+                      f"single-position cap")
                 for cfg in followers:
                     w(f"   [{cfg.id}] {cfg.name:<20} follows the account · "
                       f"{share_label(cfg, alloc['plan'])}")
@@ -1010,8 +1021,8 @@ class Command(BaseCommand):
                         f"{alloc['reason']}; the sync retunes nothing "
                         f"until the shares fit in 100%")
             if reading is not None and reading["value"] > 0:
-                armed_total = sum(float(c.capital or 0)
-                                  for c in live if c.enabled)
+                armed_total = combined_capital(
+                    [c for c in live if c.enabled], shared=shared)
                 if armed_total > reading["value"] * (1 + 1e-9):
                     warnings.append(
                         f"{user.username}: the armed live pools total "

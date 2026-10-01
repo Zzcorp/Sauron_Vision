@@ -102,6 +102,7 @@ LIVE_MONEY_SWITCHES = (
     "capital_desk_mode_live",       # the fleet OBEYS the desk plan
     "fractional_units_live",        # the stock bot sends fractions to eToro
     "etoro_leverage_live",          # a typed leverage goes to eToro
+    "shared_capital_live",          # every follower draws on the whole account
 )
 
 #: Switches a category's "all on" button never turns on (2026-09-26,
@@ -261,6 +262,13 @@ DEFAULT_COMPONENTS = [
     # default; needs LIVE mode too. Description counted under 300 chars.
     {"key": "share_allocator_auto_derisk", "name": "Share Allocator Auto De-risk",
      "description": "Off (default). On + LIVE mode: a SHOCK plan that only LOWERS shares (every target <= current) is applied automatically, within the daily apply cap, with snapshot and rollback, and staff are notified. Re-risking is never automatic: a plan with any upward target waits for the PIN.",
+     "category": "system"},
+    # ONE ACCOUNT, ONE POOL (2026-10-01). The operator: "votre système
+    # d'allocation de capitaux par bot est restrictif ... il devrait être
+    # 100% mobile". On, every follower may draw on the WHOLE account; the
+    # account's own limits bind. Live money: never armed by "all on".
+    {"key": "shared_capital_live", "name": "Shared Capital (one pool)",
+     "description": "Off (default) = each follower takes a slice; the slices fit in 100%. On = every follower may draw on the WHOLE account, first come first served: a share is that pool's own ceiling, not a slice. What binds is the account: MAX ACCOUNT PLEDGED, the daily loss, the single-position cap.",
      "category": "system"},
 
     # ── The capital desk (2026-09-12) ─────────────────────────

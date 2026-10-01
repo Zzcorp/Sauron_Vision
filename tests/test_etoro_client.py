@@ -2990,8 +2990,48 @@ class TheVenueSpellingTests(SimpleTestCase):
             "BTCUSD": "BTC", "ETHUSD": "ETH", "XRPUSD": "XRP",
             "SOLUSD": "SOL", "WHEATUSD": "WHEAT.FUT", "XPTUSD": "PLATINUM",
             "FTSE100": "UK100", "CAC40": "FRA40", "DAX40": "GER40",
-            "NIKKEI225": "JPN225", "STOXX50": "EUSTX50"})
-        self.assertEqual(VENUE_SPELLING_UNKNOWN, ("XAUUSD", "XAGUSD"))
+            "NIKKEI225": "JPN225", "STOXX50": "EUSTX50",
+            # 2026-10-01, the eligibility read by symbols
+            "XAUUSD": "GOLD", "XAGUSD": "SILVER", "WTIUSD": "OIL",
+            "NGUSD": "NATGAS", "HGUSD": "COPPER.FUT",
+            "XPDUSD": "PALLADIUM.FUT"})
+        self.assertEqual(VENUE_SPELLING_UNKNOWN, ("BRNUSD",))
+
+    def test_the_pinned_ids_are_the_measured_ones(self):
+        """2026-10-01: each id the eligibility read answered for that
+        spelling (floor 1000, cfd, open). /search lists them only among
+        look-alikes, so they are pinned and /search is never asked."""
+        from bot_program.engine.etoro_client import VENUE_ID_PINS
+        self.assertEqual(VENUE_ID_PINS, {
+            "XAUUSD": 18, "XAGUSD": 19, "WTIUSD": 17, "NGUSD": 22,
+            "HGUSD": 21, "XPDUSD": 91})
+
+    def test_a_pinned_symbol_resolves_without_search_and_reads_back(self):
+        t, fake = _client([("GET", "/info/demo/portfolio", 200,
+                            {"clientPortfolio": {"positions": [
+                                dict(PORTFOLIO_ROW, instrumentID=18)]}})])
+        self.assertEqual(t.instrument_id("XAUUSD"), 18)
+        self.assertEqual(self._searches(fake), [], "asked /search for a pin")
+        self.assertEqual(t._venue_spelling[18], "GOLD")
+        rows = t.get_positions()
+        self.assertEqual(rows[0]["symbol"], "XAUUSD")
+        self.assertNotIn("symbol_unresolved", rows[0])
+
+    def test_the_catalogue_gold_stock_never_takes_the_metals_id(self):
+        """The catalogue's GOLD is Barrick Gold, a STOCK. Were /search to
+        answer GOLD exactly with id 18 — eToro's metal — it is refused,
+        never adopted."""
+        t, _ = _client([("GET", "/market-data/search", 200,
+                         [{"instrumentId": 18,
+                           "internalSymbolFull": "GOLD"}])])
+        with self.assertRaises(LookupError) as cm:
+            t.instrument_id("GOLD")
+        self.assertIn("pinned to 'XAUUSD'", str(cm.exception))
+        self.assertNotIn("GOLD", t._ids)
+
+    def test_the_order_body_carries_etoros_spelling_for_a_pin(self):
+        from bot_program.engine.etoro_client import VENUE_SPELLING
+        self.assertEqual(VENUE_SPELLING["XAUUSD"], "GOLD")
 
     def test_every_key_is_a_catalogue_spelling_and_no_value_is_one(self):
         """The LEFT column is what configs, Instrument rows and bars carry
@@ -3006,9 +3046,19 @@ class TheVenueSpellingTests(SimpleTestCase):
             "BTCUSD": "crypto", "ETHUSD": "crypto", "XRPUSD": "crypto",
             "SOLUSD": "crypto", "WHEATUSD": "commodity",
             "XPTUSD": "commodity", "FTSE100": "index", "CAC40": "index",
-            "DAX40": "index", "NIKKEI225": "index", "STOXX50": "index"})
+            "DAX40": "index", "NIKKEI225": "index", "STOXX50": "index",
+            "XAUUSD": "commodity", "XAGUSD": "commodity",
+            "WTIUSD": "commodity", "NGUSD": "commodity",
+            "HGUSD": "commodity", "XPDUSD": "commodity"})
+        # The one known collision: eToro spells the metal GOLD, and the
+        # catalogue's GOLD is Barrick Gold (a stock). Guarded in
+        # instrument_id (a pinned id answering another platform symbol is
+        # refused) and pinned by
+        # test_the_catalogue_gold_stock_never_takes_the_metals_id.
+        collisions = {v for v in VENUE_SPELLING.values() if v in cls_of}
+        self.assertEqual(collisions, {"GOLD"})
+        self.assertEqual(cls_of["GOLD"], "stock")
         for value in VENUE_SPELLING.values():
-            self.assertNotIn(value, cls_of, value)
             self.assertNotIn(value, VENUE_SPELLING, value)
         for key in VENUE_SPELLING_UNKNOWN:
             self.assertEqual(cls_of.get(key), "commodity", key)
@@ -3104,8 +3154,8 @@ class TheVenueSpellingTests(SimpleTestCase):
     def test_a_spelling_etoro_refused_raises_with_the_date(self):
         t, _ = _client([("GET", "/market-data/search", 200, [])])
         with self.assertRaises(LookupError) as cm:
-            t.instrument_id("XAUUSD")
-        self.assertIn("'XAUUSD'", str(cm.exception))
+            t.instrument_id("BRNUSD")
+        self.assertIn("'BRNUSD'", str(cm.exception))
         self.assertIn("measured 2026-09-23", str(cm.exception))
         self.assertIn("ETORO_DEPARTURE.md", str(cm.exception))
         with self.assertRaises(LookupError) as plain:
