@@ -718,12 +718,21 @@ class MarginTests(_Case):
 
 # ── G7: the daily loss ───────────────────────────────────────────────────
 
+def _book_daily(pct):
+    from portfolio.risk_gate import limits_book
+    book = limits_book()
+    book.max_daily_loss_pct = pct
+    book.save(update_fields=["max_daily_loss_pct"])
+
+
 class DailyLossTests(_Case):
     def setUp(self):
         super().setUp()
         self.now = timezone.now()
         self.live = _cfg(self.user, "Stocks live", "stock", mode="live")
         self.paper = _cfg(self.user, "Stocks paper", "stock")
+        # MAX DAILY LOSS on /setup/: the one daily stop (2026-10-01)
+        _book_daily(2.0)
 
     def _close(self, cfg, pnl, paper=False, metadata=None):
         return _trade(cfg, "AAPL", entry="336", stop="326", paper=paper,
@@ -742,8 +751,13 @@ class DailyLossTests(_Case):
             "Realized live P&L, last 24 h: -250.00 USD over 3 closes "
             "(paper and demo excluded)",
             "Daily stop used: 2.0% of 10,000.00 USD = 200.00 USD",
-            "That is the smallest daily stop of the 1 live bot, on their "
-            "combined capital"])
+            "That is MAX DAILY LOSS on /setup/, the one daily stop of every "
+            "live bot"])
+        self.assertIn("Elite entries only until the absolute stop at 3.0% = "
+                      "300.00 USD: a measured edge, at 0.5x size, at most 2 "
+                      "in 24 h", f.facts)
+        self.assertIn("No bot is switched off: exits and stops keep running",
+                      f.facts)
         self.assertIn("Closes without a price: 1 (not counted as zero)",
                       f.facts)
         self.assertEqual(f.configs, [self.live.pk])
@@ -761,7 +775,22 @@ class DailyLossTests(_Case):
         self.assertEqual(found, [])
         self.assertIn("1 demo close not counted", " ".join(ctx.notes))
 
+    def test_the_book_stop_binds_every_live_bot_whatever_their_own(self):
+        """A bot set never to halt, or at 0%, is not left out of the one
+        stop: it is the book's."""
+        _cfg(self.user, "Stocks never", "stock", mode="live", daily=0.5,
+             halt_on_drawdown=False)
+        self._close(self.live, "-700")
+        f = _check("daily_loss", self.now)[1][0]
+        self.assertIn("Daily stop used: 2.0% of 20,000.00 USD = 400.00 USD",
+                      f.facts)
+        self.assertIn("Past the absolute stop at 3.0% = 600.00 USD: nothing "
+                      "opens, elite entries included", f.facts)
+        self.assertFalse(any("Left out" in x for x in f.facts))
+
     def test_a_bot_that_never_halts_or_stops_at_zero_sets_no_number(self):
+        """Without a book limit, the bots' own percentages, as before."""
+        _book_daily(0)
         never = _cfg(self.user, "Stocks never", "stock", mode="live",
                      daily=0.5, halt_on_drawdown=False)
         zero = _cfg(self.user, "Stocks zero", "stock", mode="live", daily=0)
@@ -1186,6 +1215,16 @@ class BrakeTests(_Case):
             cfg.refresh_from_db()
         return [cfg.enabled for cfg in cfgs]
 
+    def _account_brake(self, *cfgs):
+        """A braking guard naming every live config of the user, as G6
+        (margin) does. The daily loss was this vehicle until 2026-10-01,
+        when it stopped braking (test_the_daily_loss_never_brakes)."""
+        guard, box = _scripted("account", "Account", "critical", brake=True)
+        box["subjects"] = ["account"]
+        box["user"] = self.user
+        box["configs"] = [c.pk for c in cfgs]
+        return guard
+
     def test_off_it_says_what_it_would_stop_and_stops_nothing(self):
         report, texts = self._cycle([morgul.GUARD["market_shut"]])
         self.assertEqual(len(texts), 1)
@@ -1227,7 +1266,8 @@ class BrakeTests(_Case):
         guarded = _trade(live, "MSFT", entry="420", stop="410", paper=False,
                          metadata=LIVE_ETORO, opened=self.now - timedelta(hours=2))
         _loss(live, self.now)
-        report, texts = self._cycle([morgul.GUARD["daily_loss"]], at=self.now)
+        guard = self._account_brake(self.live_other, live)
+        report, texts = self._cycle([guard], at=self.now)
         self.assertIn(f"Stopped: Forex live #{self.live_other.pk}, Stocks "
                       f"live #{live.pk} — no position was closed; the "
                       f"stops stay at the broker; to re-arm: the server",
@@ -1239,7 +1279,7 @@ class BrakeTests(_Case):
         cache.clear()
         live.enabled = True
         live.save()
-        report, texts = self._cycle([morgul.GUARD["daily_loss"]],
+        report, texts = self._cycle([guard],
                                     at=self.now + timedelta(minutes=5))
         self.assertIn(f"Stopped: Stocks live #{live.pk} — no position was "
                       f"closed; to re-arm: the server", texts[0])
@@ -1249,15 +1289,15 @@ class BrakeTests(_Case):
         guarded.refresh_from_db()
         self.assertEqual(guarded.status, "OPEN")
 
-    def test_on_the_daily_loss_stops_every_live_config_of_the_user_once(self):
+    def test_a_braking_finding_stops_every_live_config_of_the_user_once(self):
         _arm()
         now = self.now
         live = _cfg(self.user, "Stocks live", "stock", mode="live")
         live2 = self.live_other
         stranger = _cfg(_staff("stranger", chat="-1"), "Their live", "stock",
                         mode="live")
-        _loss(live, now)
-        report, texts = self._cycle([morgul.GUARD["daily_loss"]], at=now)
+        guard = self._account_brake(live2, live)
+        report, texts = self._cycle([guard], at=now)
         for cfg, enabled in ((live, False), (live2, False), (self.cfg, True),
                              (self.other, True), (stranger, True)):
             cfg.refresh_from_db()
@@ -1267,20 +1307,29 @@ class BrakeTests(_Case):
         live.enabled = live2.enabled = True
         live.save()
         live2.save()
-        report, texts = self._cycle([morgul.GUARD["daily_loss"]],
-                                    at=now + timedelta(hours=3))
+        report, texts = self._cycle([guard], at=now + timedelta(hours=3))
         live.refresh_from_db()
         self.assertTrue(live.enabled)
         self.assertIn(f"Stopped earlier by the brake: Forex live #{live2.pk}, "
                       f"Stocks live #{live.pk} — to re-arm: the server",
                       texts[0])
-        # a day on, the loss has left the window: back to normal, and the
-        # line says the brake never re-arms anything
-        report, texts = self._cycle([morgul.GUARD["daily_loss"]],
-                                    at=now + timedelta(hours=25))
-        self.assertIn("Daily loss: Live bots of account #", texts[0])
-        self.assertIn("back to normal (the bots the brake stopped stay off "
-                      "until re-armed on the server)", texts[0])
+
+    def test_the_daily_loss_never_brakes(self):
+        """2026-10-01: past MAX DAILY LOSS the engine's gate lets only
+        elite entries through and stops at the absolute stop by itself;
+        switching the bots off would stop their exits too. The finding is
+        said, critical, and nothing is stopped — past the absolute stop
+        as well."""
+        _arm()
+        live = _cfg(self.user, "Stocks live", "stock", mode="live")
+        _loss(live, self.now, pnl="-5000")
+        report, texts = self._cycle([morgul.GUARD["daily_loss"]], at=self.now)
+        self.assertEqual(self._enabled(live, self.live_other), [True, True])
+        self.assertEqual(report.result["stopped"], [])
+        self.assertIn("Past the absolute stop", texts[0])
+        self.assertIn("No bot is switched off: exits and stops keep running",
+                      texts[0])
+        self.assertNotIn("Would stop", texts[0])
 
     def test_a_stop_telegram_refused_is_announced_by_the_next_message(self):
         _arm()
@@ -1288,7 +1337,7 @@ class BrakeTests(_Case):
         self.live_other.save()
         live = _cfg(self.user, "Stocks live", "stock", mode="live")
         _loss(live, self.now)
-        guards = [morgul.GUARD["daily_loss"]]
+        guards = [self._account_brake(live)]
         _r, refused = self._cycle(guards, at=self.now, sent=False)
         self.assertEqual(self._enabled(live), [False])
         _r, texts = self._cycle(guards, at=self.now + timedelta(minutes=5))
@@ -1306,7 +1355,7 @@ class BrakeTests(_Case):
         self.live_other.save()
         live = _cfg(self.user, "Stocks live", "stock", mode="live")
         _loss(live, self.now)
-        guards = [morgul.GUARD["daily_loss"]]
+        guards = [self._account_brake(live)]
         with patch("bot_program.morgul.build_messages",
                    side_effect=RuntimeError("gone")):
             with self.assertRaises(RuntimeError):
@@ -1365,16 +1414,16 @@ class BrakeTests(_Case):
         self.assertEqual(report.result["stopped"], [])
 
     def test_armed_within_the_three_hours_a_standing_finding_is_stopped_at_once(self):
-        """A daily-loss finding said at 10:00 with the brake off is not
-        due again before 13:00; the brake armed at 10:30 does not wait for
-        the reminder."""
+        """A standing braking finding said at 10:00 with the brake off is
+        not due again before 13:00; the brake armed at 10:30 does not wait
+        for the reminder."""
         from bot_program.asset_models import AssetBotTrade
         _component(morgul.COMPONENT_KEY)
         live = _cfg(self.user, "Stocks live", "stock", mode="live")
         _loss(live, self.now)
         before = sorted(AssetBotTrade.objects.values_list(
             "pk", "status", "exit_price", "closed_at"))
-        guards = [morgul.GUARD["daily_loss"]]
+        guards = [self._account_brake(self.live_other, live)]
         _r, texts = self._cycle(guards, at=self.now)
         self.assertIn(f"Would stop: Forex live #{self.live_other.pk}, Stocks "
                       f"live #{live.pk} — the brake is off", texts[0])
@@ -1415,7 +1464,17 @@ class CommandTests(_Case):
                status="CLOSE_PENDING", metadata={"protected": True})
         _arm()
 
+    def _pledged_past_the_limit(self):
+        """A braking finding (G6) — the daily loss stopped braking on
+        2026-10-01."""
+        _etoro(self.user, demo=False, is_primary_for_stocks=True,
+               last_equity=Decimal("100"), last_equity_currency="USD",
+               last_used_margin=Decimal("90"),
+               last_margin_at=timezone.now() - timedelta(minutes=5),
+               last_margin_world="live")
+
     def test_it_prints_the_findings_and_sends_and_stops_nothing(self):
+        self._pledged_past_the_limit()
         out = StringIO()
         with patch(SEND, return_value=True) as send:
             call_command("morgul", stdout=out)
@@ -1437,6 +1496,7 @@ class CommandTests(_Case):
         self.assertIsNone(cache.get(morgul.LOCK_KEY))
 
     def test_send_runs_the_beat_cycle(self):
+        self._pledged_past_the_limit()
         out = StringIO()
         with patch(SEND, return_value=True) as send:
             call_command("morgul", "--send", stdout=out)
@@ -1695,5 +1755,7 @@ class WiringTests(TestCase):
         self.assertEqual(re.findall(r"\.save\(", src), [])
         self.assertEqual(src.count("apply_brake("), 1)
         self.assertEqual(len(morgul.GUARDS), 10)
+        # The daily loss never brakes (2026-10-01): the engine's gate lets
+        # only elite entries past the stop, and stops at the absolute one.
         self.assertEqual({g.key for g in morgul.GUARDS if g.brake},
-                         {"market_shut", "proofs", "margin", "daily_loss"})
+                         {"market_shut", "proofs", "margin"})

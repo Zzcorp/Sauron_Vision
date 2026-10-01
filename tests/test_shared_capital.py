@@ -239,6 +239,11 @@ class MorgulsDailyStopTests(TestCase):
                        capital="1000", extras={"capital_tracks_broker": True})
         self.b = _mcfg(self.user, "Stock live", "stock", mode="live",
                        capital="1000", extras={"capital_tracks_broker": True})
+        # the one daily stop, MAX DAILY LOSS on the book (2026-10-01)
+        from portfolio.risk_gate import limits_book
+        book = limits_book()
+        book.max_daily_loss_pct = 2.0
+        book.save(update_fields=["max_daily_loss_pct"])
 
     def _lose(self, pnl):
         from tests.test_morgul import _trade

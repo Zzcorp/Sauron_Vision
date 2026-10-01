@@ -226,6 +226,27 @@ def evaluate_proposed_trade(
 # happens to call midnight.
 DAILY_LOSS_WINDOW_HOURS = 24
 
+# PAST THE DAILY STOP, ELITE ONLY (2026-10-01). The operator: "je veux un
+# arrêt à 8% mais une reprise si un signal est purement intéressant et
+# profitable ... un Sauron purement résilient". He chose: past MAX DAILY
+# LOSS a bot may still open an ELITE entry — a measured edge on the venue
+# the order goes to and a net reward:risk of at least ELITE_MIN_NET_RR
+# (AssetBot._elite_verdict) — at ELITE_SIZE_SCALE of its size, at most
+# ELITE_MAX_PER_WINDOW in the trailing window, and NOTHING once the day's
+# loss reaches ABSOLUTE_STOP_MULTIPLE x the limit (12% at 8%). The cards
+# and the manual preview still read the limit as hit (`ok` False); only
+# the bot gate reads `mode` and lets an elite candidate through.
+ABSOLUTE_STOP_MULTIPLE = 1.5
+ELITE_SIZE_SCALE = 0.5
+ELITE_MAX_PER_WINDOW = 2
+ELITE_MIN_NET_RR = 2.0
+ELITE_MIN_N = 20
+ELITE_MIN_WIN_RATE = 0.55
+ELITE_MIN_AVG_R = 0.20
+#: AssetBotTrade.metadata key stamped on an elite entry; the allowance
+#: counts the rows that carry it.
+ELITE_META_KEY = "elite_past_daily_stop"
+
 # Correlation lookback and taper floor.
 #
 # Both mirror `PositionSizer.correlation_aware_scale`, deliberately: the taper
@@ -712,13 +733,20 @@ def daily_loss_state(user, *, portfolio=None, now=None,
     exposure_state does (2026-09-30): a bot is refused by its own venue's
     day, never by the other's. Unnamed, the worse of the two, as before —
     what the cards read.
+
+    `mode` (2026-10-01): "open" inside the limit; "elite" past it and above
+    the absolute stop (`hard_money`, ABSOLUTE_STOP_MULTIPLE x the floor),
+    where a bot may still open an elite entry; "shut" at or past the
+    absolute stop. `ok` is False in both of the last two: every reader that
+    is not the bot gate still reads the limit as hit.
     """
     portfolio = portfolio if portfolio is not None else limits_book()
     limit_pct = _limit_pct(portfolio, "max_daily_loss_pct")
     book, book_source = venue_book_value(user, portfolio, venue)
     state = {"ok": True, "limit_pct": limit_pct, "book_value": book,
              "limit_money": None, "realized": None, "unmeasured": 0,
-             "measured": False, "reason": "",
+             "measured": False, "reason": "", "mode": "open",
+             "hard_pct": None, "hard_money": None,
              "book_source": book_source}
 
     if limit_pct is None:
@@ -740,7 +768,10 @@ def daily_loss_state(user, *, portfolio=None, now=None,
         window = {**window, "realized": realized}
         state["venue"] = venue
     limit_money = -book * limit_pct / 100.0
+    hard_money = limit_money * ABSOLUTE_STOP_MULTIPLE
     state["limit_money"] = round(limit_money, 2)
+    state["hard_pct"] = round(limit_pct * ABSOLUTE_STOP_MULTIPLE, 4)
+    state["hard_money"] = round(hard_money, 2)
     state["realized"] = window["realized"]
     state["live_realized"] = window["live_realized"]
     state["paper_realized"] = window["paper_realized"]
@@ -767,17 +798,44 @@ def daily_loss_state(user, *, portfolio=None, now=None,
                  f"netted)")
     if window["realized"] <= limit_money:
         state["ok"] = False
+        if window["realized"] <= hard_money:
+            state["mode"] = "shut"
+            state["reason"] = (
+                f"daily loss limit hit: {window['realized']:,.2f} realized "
+                f"in the last {DAILY_LOSS_WINDOW_HOURS}h against a "
+                f"{limit_money:,.2f} floor ({limit_pct:g}% of "
+                f"{_book_words(book, book_source)}), and past the "
+                f"{hard_money:,.2f} absolute stop ({state['hard_pct']:g}%) "
+                f"— nothing opens, elite entries included{split}{blind}")
+            return state
+        state["mode"] = "elite"
         state["reason"] = (
             f"daily loss limit hit: {window['realized']:,.2f} realized in the "
             f"last {DAILY_LOSS_WINDOW_HOURS}h against a "
             f"{limit_money:,.2f} floor ({limit_pct:g}% of "
-            f"{_book_words(book, book_source)}){split}{blind}")
+            f"{_book_words(book, book_source)}) — elite entries only, at "
+            f"{ELITE_SIZE_SCALE:g}x size and at most {ELITE_MAX_PER_WINDOW} in "
+            f"{DAILY_LOSS_WINDOW_HOURS}h, until the absolute stop at "
+            f"{hard_money:,.2f}{split}{blind}")
         return state
 
     state["reason"] = (
         f"{window['realized']:,.2f} realized in the last "
         f"{DAILY_LOSS_WINDOW_HOURS}h, floor {limit_money:,.2f}{split}{blind}")
     return state
+
+
+def elite_entries_since(user, *, paper: bool, now=None) -> int:
+    """Elite entries this user opened on one venue in the daily-loss
+    window: the rows execute_entry stamped ELITE_META_KEY. Every status
+    counts — a closed elite entry still spent its allowance."""
+    from django.utils import timezone
+
+    from bot_program.models import AssetBotTrade
+    since = (now or timezone.now()) - timedelta(hours=DAILY_LOSS_WINDOW_HOURS)
+    return AssetBotTrade.objects.filter(
+        config__user=user, paper=bool(paper), opened_at__gte=since,
+        **{f"metadata__{ELITE_META_KEY}": True}).count()
 
 
 def exposure_state(user, *, portfolio=None, adding: float = 0.0,
@@ -1605,7 +1663,14 @@ def preflight(user, *, portfolio=None, now=None, venue: str = "") -> dict:
 
     blocked = [c["reason"] for c in checks.values() if not c["ok"]]
     if blocked:
+        # Past the daily limit and above the absolute stop, with nothing
+        # else binding: the bot gate may still let an ELITE entry through
+        # (AssetBot.can_open_new). `ok` stays False for every other reader.
+        elite_only = (len(blocked) == 1
+                      and not checks["daily_loss"]["ok"]
+                      and checks["daily_loss"].get("mode") == "elite")
         return {"ok": False, "failed_open": False, "checks": checks,
+                "elite_only": elite_only,
                 "reason": "book risk limits: " + "; ".join(blocked)}
     return {"ok": True, "failed_open": False, "checks": checks,
             "reason": "; ".join(c["reason"] for c in checks.values()

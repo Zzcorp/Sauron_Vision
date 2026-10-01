@@ -90,6 +90,10 @@ class EntryCandidate:
     #: by the SAME answer, so the second rounding is idempotent on the first,
     #: and then confirms it on the trade client.
     fractional_units: Optional[bool] = None
+    #: Past the daily-loss limit, the elite verdict that let this candidate
+    #: through (AssetBot._elite_verdict): {"elite": True, "why", "net_rr",
+    #: "n", "win_rate", "avg_r", "scale"}. Empty on an ordinary day.
+    elite: dict = field(default_factory=dict)
     horizon_hours: float = DEFAULT_HORIZON_HOURS
     created_at: datetime = field(default_factory=timezone.now)
 
