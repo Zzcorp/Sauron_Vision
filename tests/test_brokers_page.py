@@ -1122,6 +1122,7 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
 
     PROVEN = "bot_program.asset_engine.base.ETORO_PROVEN"
     ALL_STOCKS = frozenset({"stock", "etf", "index", "short"})
+    SHORTS = "bot_program.asset_engine.base.ETORO_SHORT_PROVEN"
 
     def setUp(self):
         self.user = User.objects.create_user("pf_u", password="x")
@@ -1178,7 +1179,8 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
         forex (the demo EURUSD round trips), the stocks box's three tokens
         (GLDM for etf, AAPL for stock, SPX500 for index) and commodity
         (WHEAT.FUT) — so no box reads "no proof pinned — entries refused";
-        no eToro SELL has been measured, so the stocks box says so."""
+        since 2026-10-01 a stock and a forex SELL are measured (the demo
+        AAPL and EURUSD shorts), so the box says where shorts are proven."""
         form = self._form()
         for name in ("primary_crypto", "primary_forex", "primary_commodity",
                      "primary_stocks"):
@@ -1187,7 +1189,11 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
             self.assertNotIn("no proof pinned", label, name)
         self.assertEqual(form.count("no proof pinned — entries refused"), 0)
         self.assertNotIn("entries refused", self._label(form, "primary_stocks"))
-        self.assertIn("no short proven", self._label(form, "primary_stocks"))
+        self.assertIn("shorts proven on forex, stock only",
+                      self._label(form, "primary_stocks"))
+        with mock.patch(self.SHORTS, frozenset()):
+            self.assertIn("no short proven",
+                          self._label(self._form(), "primary_stocks"))
 
     def test_an_unproven_box_still_says_so(self):
         """The words for a box with no proof, as commodity read until
@@ -1222,7 +1228,8 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
     BEFORE_0929 = frozenset({"crypto", "etf", "forex"})
 
     def test_a_verified_save_names_the_unproven_class_and_the_refusal(self):
-        with mock.patch(self.PROVEN, self.BEFORE_0929):
+        with mock.patch(self.PROVEN, self.BEFORE_0929), \
+                mock.patch(self.SHORTS, frozenset()):
             body = self._save(primary_stocks="on")
         self.assertIn("eToro keys saved and verified for pf_u (demo).", body)
         # etf's proof pinned, stock and index not (the 2026-09-28 set).
@@ -1251,6 +1258,17 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
                       "until its own proof lands; nothing is sent in the "
                       "meantime.", body)
 
+    def test_a_stock_short_proof_names_the_box_classes_still_refused(self):
+        """The stocks box carries stock, etf and index; a stock short
+        proven alone (2026-10-01) leaves the other two shorts refused."""
+        with mock.patch(self.PROVEN, self.ALL_STOCKS - {"short"}), \
+                mock.patch(self.SHORTS, frozenset({"stock"})):
+            body = self._save(primary_stocks="on")
+        self.assertIn("Shorts are proven on stock only: a short on etf, "
+                      "index is refused until its own proof is pinned.",
+                      body)
+        self.assertNotIn("Every short is refused", body)
+
     def test_a_proven_class_with_shorts_unproven_names_only_the_short(self):
         """Every ticked class proven, "short" not: the note names the short
         alone, with no "as well" leaning on a sentence that is not there."""
@@ -1269,7 +1287,8 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
 
     def test_a_refused_save_carries_both_notes(self):
         # commodity unproven, as it was until 2026-09-29.
-        with mock.patch(self.PROVEN, self.BEFORE_0929 | {"stock", "index"}):
+        with mock.patch(self.PROVEN, self.BEFORE_0929 | {"stock", "index"}), \
+                mock.patch(self.SHORTS, frozenset()):
             body = self._save(("refused", "401"), primary_commodity="on")
         self.assertIn("now the book", body)
         self.assertIn("No demo fill-and-close proof is pinned for commodity "

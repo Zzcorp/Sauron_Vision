@@ -103,6 +103,9 @@ LIVE_MONEY_SWITCHES = (
     "fractional_units_live",        # the stock bot sends fractions to eToro
     "etoro_leverage_live",          # a typed leverage goes to eToro
     "shared_capital_live",          # every follower draws on the whole account
+    "trade_debate",                 # binding: may veto or cut a live order
+    "aragorn",                      # benches/promotes pairs, closes positions
+    "crisis_mode",                  # the market posture binds real money
 )
 
 #: Switches a category's "all on" button never turns on (2026-09-26,
@@ -257,6 +260,22 @@ DEFAULT_COMPONENTS = [
      "category": "pipeline"},
     {"key": "share_allocator_mode_live", "name": "Share Allocator Live Mode",
      "description": "Off (default) = shadow: plans are proposed and graded, apply is refused. On = an admin can apply a plan (PIN on /shares/, --yes on the shell), writing each follower's account_share_pct and re-sizing pools via the sync. Rollback restores exactly. Caps and the governor hold in both modes.",
+     "category": "system"},
+    # ARAGORN AND THE CRISIS MODE (2026-10-02, bot_program/aragorn.py,
+    # position_care.py, market_stress.py, posture.py). Both LIVE money,
+    # neither armed by "all on". Descriptions measured at 242 chars each.
+    {"key": "aragorn", "name": "Aragorn (pair lifecycle + position care)",
+     "description": "Off (default). On: every 4h a losing rule/class pair goes to paper, a proven one comes to real money on probation; every tick open positions get break-even, trailing and no-progress exits. manage.py aragorn shows and overrides every decision.",
+     "category": "system"},
+    {"key": "crisis_mode", "name": "Crisis Mode (market posture)",
+     "description": "Off (default). On: indices, volatility, VIX and credit set a posture every 15 min - calm, stressed, crisis, recovery - that sizes real-money entries, caps leverage, sends risk-on longs to paper in a crisis and keeps shorts and havens trading.",
+     "category": "system"},
+    # THE TRADE DEBATE (2026-10-01, ai_agents/agents/trade_debate.py): the
+    # Executioner and the Champion argue every live bot entry before its
+    # order. Shadow for its first 30 graded live trades, binding after.
+    # Description measured at 273 chars (< 300).
+    {"key": "trade_debate", "name": "Trade Debate (Executioner vs Champion)",
+     "description": "Off (default). On: every LIVE bot entry is argued by two AI agents before its order — why it fails, why it works — and the verdicts ride the row. Shadow for the first 30 graded live trades; then the Executioner may cut or veto, and an elite entry needs the Champion to win.",
      "category": "system"},
     # De-risk fast, re-risk slow (2026-09-12): the third switch. Off by
     # default; needs LIVE mode too. Description counted under 300 chars.

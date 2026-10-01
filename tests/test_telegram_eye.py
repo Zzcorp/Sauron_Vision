@@ -503,9 +503,11 @@ class StatusReportTests(_EyeCase):
                 # BTC round trip), ETFs (GLDM), forex (EURUSD at 1x and
                 # 5x), stocks (AAPL), indices (SPX500) and commodities
                 # (WHEAT.FUT), all demo but crypto.
-                # tests/test_etoro_proofs.py pins it.
+                # tests/test_etoro_proofs.py pins it. Stock and forex
+                # shorts since 2026-10-01 (the demo AAPL and EURUSD SELLs,
+                # ETORO_SHORT_PROVEN).
                 "Proofs pinned: Commodities, Crypto, ETFs, Forex, Indices, "
-                "Stocks", "Open on the platform (1) · 0 real money, 1 simulated",
+                "Stocks, Short selling (forex), Short selling (stocks)", "Open on the platform (1) · 0 real money, 1 simulated",
                 "  • AAPL long 0.04 @ 336.10 · stop 326.02 · paper"):
             self.assertIn(expected, lines)
         self.assertLessEqual(len(lines), eye.MAX_LINES)

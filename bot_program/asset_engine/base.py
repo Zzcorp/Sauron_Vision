@@ -472,6 +472,38 @@ LEVERAGE_SWITCH_KEY = "etoro_leverage_live"
 ETORO_PROVEN = frozenset({"commodity", "crypto", "etf", "forex", "index",
                           "stock"})
 
+#: THE CLASSES A SHORT IS PROVEN ON (2026-10-01; the operator: "régler la
+#: vente à découvert vite", a crash expected). A SELL clears the proof gate
+#: when "short" is in ETORO_PROVEN (every class at once) OR its instrument
+#: class is named here, each class in the commit that pins
+#: test_proof_short_<class> in tests/test_etoro_client.py
+#: (tests/test_etoro_proofs.py greps for it). Read at CALL time, like
+#: ETORO_PROVEN. "stock" since 2026-10-01 (test_proof_short_stock): AAPL
+#: 4 units SELL at 1x on the DEMO segment, 21:02:19 UTC, order 385673365,
+#: position 3608630747, settlementType CFD, fees 1.98, the legs held as
+#: sent (stop above, target below), closed by position id. The same
+#: sitting's SPX500 and EURUSD SELLs were REJECTED by eToro (errorCode 749
+#: "disallowed for instrument") at 21:01 UTC, New York's 17:00 rollover.
+#: "forex" since 2026-10-01 (test_proof_short_forex): EURUSD 1000 SELL at
+#: 1x filled at 21:17 UTC, order 385673393, position 3608631633, CFD, no
+#: fee, the legs held as sent, closed by position id. SPX500 and NSDQ100
+#: were rejected 749 again at 1x and 2x at 21:17: "index" stays out until
+#: its own SELL fills.
+ETORO_SHORT_PROVEN = frozenset({"forex", "stock"})
+
+
+def missing_proofs(icls, side) -> list:
+    """The proof tokens an eToro entry of instrument class `icls` on `side`
+    still lacks, sorted; [] when the proof gate lets it go. A class
+    unproven names itself; a SELL whose class has no short proof (and no
+    global "short") names "short_<class>". Read at call time."""
+    icls = str(icls)
+    missing = [] if icls in ETORO_PROVEN else [icls]
+    if (str(side or "").upper() == "SELL" and "short" not in ETORO_PROVEN
+            and icls not in ETORO_SHORT_PROVEN):
+        missing.append(f"short_{icls}")
+    return sorted(missing)
+
 #: THE MULTIPLIER EACH eToro CLASS HAS BEEN PROVEN AT (2026-09-26): class
 #: -> the highest multiplier whose demo fill-and-close is pinned as
 #: `test_proof_<class>_at_<L>x` in tests/test_etoro_client.py
@@ -492,6 +524,13 @@ ETORO_PROVEN = frozenset({"commodity", "crypto", "etf", "forex", "index",
 #: the stop held as sent). The attack mode may pick up to 5x on forex;
 #: every other class still reads 1.
 ETORO_PROVEN_LEVERAGE = {"forex": 5}
+
+#: THE MULTIPLIER EACH CLASS'S SHORT HAS BEEN PROVEN AT (2026-10-02): the
+#: leverage proofs above were measured on LONGS, and the short proofs
+#: (ETORO_SHORT_PROVEN) at 1x — so the attack mode's chooser picks 1 for a
+#: short until a short round trip at L is pinned here, class -> L. Binds the
+#: chooser alone, exactly as ETORO_PROVEN_LEVERAGE does.
+ETORO_PROVEN_SHORT_LEVERAGE = {}
 
 #: THE ATTACK MODE (2026-09-26; the operator: "je veux surtout que ce mode
 #: d'attaque de leverage soit vraiment smart, qu'il soit ballsy si proba
@@ -1082,6 +1121,20 @@ class AssetBot(ABC):
                 if protected and not trade.paper and \
                         self._protection_vanished(trade, client):
                     protected = False
+
+                # THE POSITION CARE (2026-10-02, bot_program/position_care):
+                # the platform's own soft stop (break-even, trail, the
+                # posture, the weekend) and the no-progress exit. A
+                # protected row is closed only on a venue that closes by
+                # position id (eToro: the close takes its stop and target
+                # with it) and only while the tick's position list still
+                # shows it; a close in flight ends this row's tick. The
+                # aragorn switch OFF: nothing here.
+                from bot_program.position_care import care as _care
+                _cared = _care(self, trade, price, client)
+                if _cared:
+                    closed += 1 if _cared == "closed" else 0
+                    continue
 
                 # Past here the broker owns SL/TP for protected trades
                 # (bracket or on-fill orders). Managing those here too would
@@ -3285,9 +3338,15 @@ class AssetBot(ABC):
         self._book_gate_blind = (book.get("reason") or "book unreadable") \
             if book.get("failed_open") else ""
 
-        # CLOSE_PENDING still holds capital/exposure at the broker.
+        # CLOSE_PENDING still holds capital/exposure at the broker. A LIVE
+        # config's slots are its REAL positions (2026-10-02): the paper
+        # rows Aragorn's bench, the crisis posture or a paper stage
+        # book on it hold no money and must not crowd out the real entries
+        # (in a crisis, three paper longs would refuse the shorts the
+        # posture keeps trading). A paper config counts all its rows.
         open_count = AssetBotTrade.objects.filter(
-            config=self.cfg, status__in=("OPEN", "CLOSE_PENDING")).count()
+            config=self.cfg, status__in=("OPEN", "CLOSE_PENDING"),
+            **({"paper": False} if self.cfg.mode != "paper" else {})).count()
         if open_count >= self.cfg.max_concurrent_positions:
             return (False,
                     f"max {self.cfg.max_concurrent_positions} concurrent positions reached")
@@ -3440,11 +3499,17 @@ class AssetBot(ABC):
 
         # Skip if a trade for this symbol is already open (or awaiting a
         # retried close — the broker position is still live) under this config.
-        if AssetBotTrade.objects.filter(
-                config=self.cfg, symbol=symbol,
-                status__in=("OPEN", "CLOSE_PENDING")).exists():
+        # On a LIVE config a PAPER row (a benched pair, a crisis-paper long)
+        # blocks only another paper entry, judged once the venue is known
+        # below: it must not block the real short the posture keeps trading.
+        _open_here = AssetBotTrade.objects.filter(
+            config=self.cfg, symbol=symbol,
+            status__in=("OPEN", "CLOSE_PENDING"))
+        if self.cfg.mode == "paper" and _open_here.exists() \
+                or _open_here.filter(paper=False).exists():
             return self._skip(symbol, skips.ALREADY_OPEN,
                               "a position is already on")
+        _paper_open_here = _open_here.filter(paper=True).exists()
 
         # AND SKIP IF AN ORDER FOR IT MAY ALREADY BE LIVE. There is no row to
         # find — that is the whole problem — so the note lives on the config.
@@ -3694,6 +3759,19 @@ class AssetBot(ABC):
                             symbol, stage["reason"])
                 return self._skip(symbol, skips.STAGE_BLOCKED, stage["reason"])
 
+        # ── ARAGORN AND THE POSTURE (2026-10-02) ─────────────────────
+        # Both decide the VENUE or the SIZE of a real-money entry, never
+        # its existence: a benched pair (bot_program/aragorn.py) and a
+        # risk-on long in a crisis (bot_program/posture.py) go to PAPER —
+        # the evidence keeps coming, nothing is sent — and a pair on
+        # probation, a stressed market, a drawdown or a losing streak take
+        # less. Both read OFF as "nothing changes".
+        stage, _care_meta = self._aragorn_and_posture(symbol, decision, stage)
+        level_meta = dict(level_meta or {}, **_care_meta)
+        if _paper_open_here and stage.get("force_paper"):
+            return self._skip(symbol, skips.ALREADY_OPEN,
+                              "a paper position is already on")
+
         # ── Size by RISK, not by notional ────────────────────────────────
         sizing = self._size_for_entry(symbol, price, sl, decision)
         qty = sizing["qty"]
@@ -3824,6 +3902,128 @@ class AssetBot(ABC):
             elite=dict(elite),
             horizon_hours=horizon,
         )
+
+    def _aragorn_and_posture(self, symbol, decision, stage) -> tuple:
+        """(stage, metadata) after Aragorn's pair verdict and the
+        market posture: `force_paper` set with the reason when the entry
+        may not use real money, `live_size_factor` multiplied when it is
+        smaller. Paper configs and stages already forced to paper pass
+        untouched. Never raises: a failed read changes nothing and says so
+        in the log."""
+        meta = {}
+        stage = dict(stage)
+        rule = getattr(decision, "rule_name", "") or ""
+        if self.cfg.mode == "paper" or stage.get("force_paper"):
+            return stage, meta
+        try:
+            from bot_program import aragorn as _aragorn
+            pol = _aragorn.pair_policy(rule, self.asset_class)
+            if pol["state"] != "live":
+                meta["aragorn"] = {"state": pol["state"],
+                                   "size": pol["size"]}
+            if pol["force_paper"]:
+                stage.update(force_paper=True, reason=pol["reason"])
+                logger.info("[%s_bot] %s: %s", self.asset_class, symbol,
+                            pol["reason"])
+                return stage, meta
+            if pol["size"] < 1.0:
+                stage["live_size_factor"] = (
+                    float(stage.get("live_size_factor", 1.0)) * pol["size"])
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] %s: aragorn unread (%s) — no change",
+                           self.asset_class, symbol, e)
+        try:
+            from bot_program import posture as _posture
+            if not _posture.crisis_mode_on():
+                return stage, meta
+            pz = _posture.entry_posture(
+                self.user, symbol, self._instrument_class(symbol) or
+                self.asset_class, getattr(decision, "direction", "BUY"))
+            meta["posture"] = {k: pz[k] for k in
+                               ("level", "kind", "size", "live", "why")}
+            if not pz["live"]:
+                stage.update(force_paper=True,
+                             reason=f"crisis mode: {pz['why']} — paper only")
+                logger.info("[%s_bot] %s: %s", self.asset_class, symbol,
+                            stage["reason"])
+            elif pz["size"] < 1.0:
+                stage["live_size_factor"] = (
+                    float(stage.get("live_size_factor", 1.0)) * pz["size"])
+                logger.info("[%s_bot] %s posture x%g: %s", self.asset_class,
+                            symbol, pz["size"], pz["why"])
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] %s: posture unread (%s) — no change",
+                           self.asset_class, symbol, e)
+        return stage, meta
+
+    #: the share of the entry-to-stop (or entry-to-target) distance the
+    #: price may move during the trade debate before the order is refused
+    DEBATE_DRIFT_MAX = 0.5
+
+    def _drift_since_proposal(self, client, symbol, side, price, sl, tp):
+        """"" when the fresh price still fits the proposal's levels, else
+        the refusal: past the stop, or more than DEBATE_DRIFT_MAX of the
+        way to the stop or to the target. An unreadable ticker refuses
+        nothing (the venue's own stop still holds the risk)."""
+        try:
+            tk = client.ticker(symbol)
+            fresh = float((tk or {}).get("lastPrice") or (tk or {}).get("last")
+                          or (tk or {}).get("price") or 0)
+        except Exception as e:  # noqa: BLE001
+            logger.info("[%s_bot] %s: fresh price unread after the debate "
+                        "(%s)", self.asset_class, symbol, e)
+            return ""
+        if fresh <= 0:
+            return ""
+        buy = str(side).upper() == "BUY"
+        to_stop = (price - fresh) if buy else (fresh - price)
+        to_target = -to_stop
+        stop_dist, tgt_dist = abs(price - sl), abs(tp - price)
+        if (buy and fresh <= sl) or (not buy and fresh >= sl):
+            return (f"the price moved through the stop during the trade "
+                    f"debate ({price:g} -> {fresh:g}, stop {sl:g}) — "
+                    f"nothing sent")
+        if stop_dist > 0 and to_stop > self.DEBATE_DRIFT_MAX * stop_dist:
+            return (f"the price moved {to_stop / stop_dist:.0%} of the way "
+                    f"to the stop during the trade debate ({price:g} -> "
+                    f"{fresh:g}) — nothing sent")
+        if tgt_dist > 0 and to_target > self.DEBATE_DRIFT_MAX * tgt_dist:
+            return (f"the price ran {to_target / tgt_dist:.0%} of the way to "
+                    f"the target during the trade debate ({price:g} -> "
+                    f"{fresh:g}): the planned reward is gone — nothing sent")
+        return ""
+
+    def _posture_leverage(self, symbol, side, lev):
+        """THE POSTURE'S LEVERAGE CAP (2026-10-02, the operator's "mix
+        vraiment smart"): the multiplier an entry may carry in this market
+        (bot_program/posture.leverage_cap) — the class ceiling in calm,
+        half in stress, 1-2x for a position fighting a crisis and half the
+        ceiling for one riding it. Lowers, never raises; 1 and None pass;
+        crisis mode OFF passes. (lev, note)."""
+        if lev is None or int(lev) <= 1:
+            return lev, ""
+        try:
+            from bot_program import market_stress
+            from bot_program import posture as _posture
+            if not _posture.crisis_mode_on():
+                return lev, ""
+            icls = self._instrument_class(symbol) or self.asset_class
+            cur = market_stress.current()
+            rdays = (market_stress.recovery_days()
+                     if cur["level"] == "recovery" else 0.0)
+            kind = _posture.classify(symbol, icls, side)
+            cap = _posture.leverage_cap(
+                cur["level"], kind, ORDER_LEVERAGE_CEILING.get(icls, 1),
+                recovery_days=rdays)
+            if cap is not None and int(lev) > cap:
+                note = (f"posture {cur['level']}: {kind.replace('_', ' ')} "
+                        f"capped at {cap}x (asked {lev}x)")
+                logger.info("[%s_bot] %s %s", self.asset_class, symbol, note)
+                return cap, note
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] %s: posture leverage unread (%s)",
+                           self.asset_class, symbol, e)
+        return lev, ""
 
     def _judge_final_size(self, symbol: str, *, qty: float, price: float,
                           sl: float, decision, sizing: dict,
@@ -4138,6 +4338,7 @@ class AssetBot(ABC):
                 _why = self._paper_book_refusal()
                 if _why:
                     return self._skip(symbol, skips.GATE_BLOCKED, _why)
+
         order_id = ""
         entry_meta = dict(level_meta)
         entry_meta["cost_check"] = cost_reason
@@ -4362,6 +4563,20 @@ class AssetBot(ABC):
                 return self._skip(symbol, skips.LEVERAGE_REFUSED,
                                   (f"attack {_attack['tier']}: "
                                    if _attack else "") + lev_why)
+            _plnote = (getattr(self, "_posture_lev_note", None) or {}).pop(
+                symbol, "")
+            if _plnote:
+                # THE POSTURE LOWERED THE MULTIPLIER (2026-10-02): recorded
+                # on the row, and MAX SINGLE POSITION judged again at the
+                # multiplier actually sent — the proposal counted the
+                # margin at the typed one
+                entry_meta["posture_leverage"] = _plnote
+                if not self._judge_final_size(
+                        symbol, qty=qty, price=price, sl=sl,
+                        decision=decision, sizing=sizing, venue=cand.venue,
+                        leverage=int(leverage or 1),
+                        note=f"{_plnote}: at {int(leverage or 1)}x: "):
+                    return None
             if _attack is not None:
                 # THE ATTACK MODE's pick, judged again by MAX SINGLE
                 # POSITION at the multiplier actually chosen: the proposal
@@ -4403,6 +4618,116 @@ class AssetBot(ABC):
                 return self._skip(symbol, skips.GATE_BLOCKED,
                                   "config was disarmed mid-tick — refusing "
                                   "to submit")
+            # THE TRADE DEBATE (2026-10-01; moved here 2026-10-02, after
+            # every deterministic refusal, so only an order about to be SENT
+            # is argued and billed): the Executioner argues why this
+            # real-money entry fails, the Champion why it works
+            # (ai_agents/agents/trade_debate.py). Recorded on the row while
+            # the switch is on; BINDING once DEBATE_SHADOW_N debated live
+            # trades are graded — then the Executioner may cut (never below
+            # DEBATE_MIN_SCALE; a cut under the venue floor sends nothing)
+            # or veto, an elite entry past the day's loss limit needs the
+            # Champion to win, and a binding refusal is held
+            # DEBATE_HOLD_HOURS (no re-roll every tick). A debate that could
+            # not run changes nothing and keeps the elite door shut.
+            from ai_agents.agents.trade_debate import (debate_candidate,
+                                                       remember_refusal)
+            # an eToro DEMO world is not real money: never argued, never
+            # counted toward the shadow (review, 2026-10-02)
+            debate = ({"why": "the venue's demo world: not debated"}
+                      if getattr(client, "demo", False) is True
+                      else debate_candidate(self, cand, qty))
+            if debate.get("on"):
+                entry_meta["debate"] = {
+                    k: debate.get(k) for k in (
+                        "ran", "binding", "graded", "why", "executioner",
+                        "champion", "champion_wins")}
+            if debate.get("held"):
+                return self._skip(symbol, skips.GATE_BLOCKED,
+                                  f"the debate refused it: {debate['why']}")
+            if debate.get("binding"):
+                ex = debate.get("executioner") or {}
+                if debate.get("veto"):
+                    _veto = (f"the Executioner vetoed it "
+                             f"({float(ex.get('conviction') or 0):.2f}): "
+                             f"{ex.get('killer') or 'no reason given'}")
+                    remember_refusal(self, cand, _veto, kind="veto")
+                    return self._skip(symbol, skips.GATE_BLOCKED, _veto)
+                if (isinstance(_elite, dict) and _elite.get("elite")
+                        and not debate.get("champion_wins")):
+                    _no = ("past the daily loss limit, an elite entry needs "
+                           "the Champion to win the debate"
+                           + (f" ({debate.get('why')})" if debate.get("why")
+                              else ""))
+                    if debate.get("ran"):
+                        remember_refusal(self, cand, _no, kind="elite")
+                    return self._skip(symbol, skips.GATE_BLOCKED, _no)
+                _scale = float(debate.get("scale") or 1.0)
+                if _scale < 1.0:
+                    qty = self._round_qty(qty * _scale, price, fractional=_fr)
+                    if qty <= 0 or (_floor is not None
+                                    and float(qty) < _floor - 1e-9):
+                        return self._skip(
+                            symbol, skips.SIZED_TO_ZERO,
+                            f"the Executioner cut it to {_scale:g}x: "
+                            f"{float(qty):g} units, under "
+                            + (f"the venue minimum {_floor:g}"
+                               if _floor is not None else "one unit")
+                            + " — nothing sent")
+                    # THE CUT SIZE meets the size-dependent judgements again:
+                    # a flat fee weighs more on a smaller ticket, and the
+                    # multiplier's minimum margin was judged at the old size
+                    _fee, _fee_why = self._venue_fee_refusal(
+                        client, symbol, qty=float(qty), price=float(price),
+                        target=float(tp), stop=float(sl), charge=charge)
+                    if _fee_why:
+                        return self._skip(symbol, skips.COST_FILTER,
+                                          f"after the Executioner's cut: "
+                                          f"{_fee_why}")
+                    if _fee:
+                        entry_meta["venue_fee_fraction"] = round(_fee, 8)
+                        if charge:
+                            entry_meta["cost_fraction_charged"] = round(
+                                float(charge["fraction"]) + _fee, 8)
+                    leverage, lev_why = self._order_leverage(
+                        client, symbol, side=decision.direction,
+                        price=float(price), stop=float(sl), qty=float(qty))
+                    if lev_why:
+                        return self._skip(symbol, skips.LEVERAGE_REFUSED,
+                                          f"after the Executioner's cut: "
+                                          f"{lev_why}")
+                    _pl2 = (getattr(self, "_posture_lev_note", None)
+                            or {}).pop(symbol, "")
+                    if _pl2:
+                        entry_meta["posture_leverage"] = _pl2
+                    if adapter_key(client) == "etoro":
+                        lev_why = self._leverage_headroom(
+                            client, symbol, qty=float(qty),
+                            price=float(price), leverage=int(leverage or 1))
+                        if lev_why:
+                            return self._skip(
+                                symbol, skips.LEVERAGE_REFUSED,
+                                f"after the Executioner's cut, at "
+                                f"{leverage or 1}x: {lev_why}")
+                    entry_meta["debate_cut"] = {"scale": _scale,
+                                                "qty": float(qty),
+                                                "leverage": leverage}
+            # THE LAST READ, AGAIN: the debate can take a minute, and a
+            # kill switch or a disarm landing inside it must still stop the
+            # order (the check above ran before it).
+            if debate.get("on") and not self._still_armed():
+                return self._skip(symbol, skips.GATE_BLOCKED,
+                                  "config was disarmed during the trade "
+                                  "debate — refusing to submit")
+            # AND THE PRICE, AGAIN: the order goes at market with stop and
+            # target set at proposal; a minute of debate may have moved the
+            # market half-way to either. Unreadable passes, said.
+            if debate.get("on"):
+                _drift = self._drift_since_proposal(
+                    client, symbol, decision.direction, float(price),
+                    float(sl), float(tp))
+                if _drift:
+                    return self._skip(symbol, skips.GATE_BLOCKED, _drift)
             try:
                 # The LAST read before real units move. can_open_new ran
                 # before this symbol's scan; a disarm landing between then
@@ -5024,9 +5349,9 @@ class AssetBot(ABC):
         if _ak(client) != "etoro":
             return "", ""
         # step 1 — the proof. ETORO_PROVEN is read HERE, at call time,
-        # off the module: a test states a token by patching that name.
-        _need = {str(icls)} | ({"short"} if side == "SELL" else set())
-        _missing = sorted(_need - set(ETORO_PROVEN))
+        # off the module: a test states a token by patching that name. A
+        # SELL also needs its class's short proof (ETORO_SHORT_PROVEN).
+        _missing = missing_proofs(icls, side)
         if _missing:
             # verdict first: skips.record keeps 200 characters
             return skips.GATE_BLOCKED, (
@@ -5157,6 +5482,13 @@ class AssetBot(ABC):
                                         adapter_key(client), pick=pick)
         if why:
             return lev, why
+        # THE POSTURE CAP (2026-10-02): judged before the instrument's own
+        # entry below, so the lowered multiplier is the one checked.
+        lev, _pnote = self._posture_leverage(symbol, side, lev)
+        if _pnote:
+            if not isinstance(getattr(self, "_posture_lev_note", None), dict):
+                self._posture_lev_note = {}
+            self._posture_lev_note[symbol] = _pnote
         eff = int(lev or 1)   # no key / typed 1 -> 1: the check runs at 1 too
         inst_why = self._instrument_leverage_check(client, symbol, side, eff,
                                                    price, stop)
@@ -5217,8 +5549,11 @@ class AssetBot(ABC):
         icls = self._instrument_class(symbol)
         ceiling = min(int(MAX_ORDER_LEVERAGE),
                       int(ORDER_LEVERAGE_CEILING.get(icls, 1)))
-        proven = proven_leverage(icls)
         direction = "long" if str(side or "BUY").upper() == "BUY" else "short"
+        # the multiplier proofs were measured on LONGS; a short's are in
+        # ETORO_PROVEN_SHORT_LEVERAGE (empty: the short proofs were at 1x)
+        proven = (proven_leverage(icls) if direction == "long" else
+                  max(1, int(ETORO_PROVEN_SHORT_LEVERAGE.get(icls, 1) or 1)))
         try:
             _elig = getattr(client, "eligibility", None)
             row = _elig(symbol) if callable(_elig) else None

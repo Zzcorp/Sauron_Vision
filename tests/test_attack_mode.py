@@ -478,9 +478,18 @@ class TheChooserTests(TestCase):
         self.assertEqual((lev, "no stop was handed in" in why), (1, True))
 
     def test_a_short_reads_the_short_list(self):
+        """A short proven at a multiplier (ETORO_PROVEN_SHORT_LEVERAGE)
+        reads the short-direction LIVE list; with no short multiplier
+        pinned (as shipped: the short proofs were at 1x) the chooser picks
+        1 whatever the long proofs say."""
+        with mock.patch("bot_program.asset_engine.base."
+                        "ETORO_PROVEN_SHORT_LEVERAGE", {"index": 20}):
+            lev, _ = self._choose("SPX500", price=100.0, stop=103.5,
+                                  proven={"index": 20}, side="SELL")
+        self.assertEqual(lev, 10)
         lev, _ = self._choose("SPX500", price=100.0, stop=103.5,
                               proven={"index": 20}, side="SELL")
-        self.assertEqual(lev, 10)
+        self.assertEqual(lev, 1)
 
     def test_a_margin_under_the_venue_minimum_is_passed_over(self):
         """AAPL's LIVE cfd entries print minPositionAmount 10 (the smallest

@@ -40,9 +40,33 @@ def tick_all_asset_bots():
     The dead man's switch (2026-09-30, core/dead_man_switch.py) pings an
     outside watcher after every pass, OUTSIDE the gate: a paused platform
     still pings, a dead box does not, and the watcher raises the alarm.
+
+    ONE PASS AT A TIME (2026-10-02): a pass that outlives the 5-minute beat
+    (a slow venue, the trade debate's minute) must not meet a second pass
+    judging the same book — two passes could each pass the duplicate and
+    open-risk gates and send the same order twice. A pass that finds the
+    lock held skips, said; the lock expires on its own after TICK_LOCK_S.
     """
+    from django.core.cache import cache
+
     from .asset_engine.runner import run_all_asset_bots
-    return run_all_asset_bots()
+    if not cache.add(TICK_LOCK_KEY, timezone_now_iso(), TICK_LOCK_S):
+        logger.warning("[asset bots] a pass is still running — this beat "
+                       "skips (no second pass on the same book)")
+        return {"status": "skipped", "reason": "a pass is still running"}
+    try:
+        return run_all_asset_bots()
+    finally:
+        cache.delete(TICK_LOCK_KEY)
+
+
+TICK_LOCK_KEY = "asset_bots:tick_lock"
+TICK_LOCK_S = 900
+
+
+def timezone_now_iso() -> str:
+    from django.utils import timezone
+    return timezone.now().isoformat()
 
 
 @shared_task
@@ -483,6 +507,45 @@ def sync_broker_account() -> dict:
     return out
 
 
+def _warm_etoro_names(client, user, demo: bool) -> None:
+    """Name what the book holds before the sync reads it (2026-10-01).
+
+    eToro answers /portfolio with instrumentIds, and this fresh client can
+    name only what it resolved itself — so the stored snapshot read
+    "ETORO:1" for the operator's EURUSD and "ETORO:3190" beside it, on
+    /treasury/, in the operator's own diagnostics and in Morgul's drift
+    guard, which then compares by count instead of by symbol. Every symbol
+    the platform holds OPEN at this account's world is resolved first,
+    through the adapter's own instrument_id (the pinned ids answer without
+    /search). A name that cannot be resolved stays "ETORO:<id>", as before:
+    unnamed is said, never guessed. Wrapped whole: naming is beside the
+    sync, never in it."""
+    try:
+        from .models import AssetBotTrade
+        name_it = getattr(client, "instrument_id", None)
+        if not callable(name_it):
+            return
+        rows = AssetBotTrade.objects.filter(
+            config__user=user, paper=False,
+            status__in=("OPEN", "CLOSE_PENDING"))
+        # the rows' own world word (AssetBot.VENUE_WORLDS: a demo fill is
+        # stamped "paper"), and only rows eToro carried (or unstamped
+        # legacy ones): no /search for another broker's symbol
+        world = "paper" if demo else "live"
+        syms = sorted({t.symbol for t in rows
+                       if str((t.metadata or {}).get("broker_env")
+                              or world) == world
+                       and str((t.metadata or {}).get("broker")
+                               or "etoro") == "etoro"})
+        for sym in syms:
+            try:
+                name_it(sym)
+            except Exception as e:  # noqa: BLE001 — one name, not the sync
+                logger.debug("broker sync: cannot name %s (%s)", sym, e)
+    except Exception as e:  # noqa: BLE001 — naming is beside the sync
+        logger.debug("broker sync: naming skipped: %s", e)
+
+
 def _shock_trigger(user, now) -> None:
     """The fast path of the share allocator: a shock plan the moment the
     sync that saw the shock has stored its reading, not up to four hours
@@ -919,6 +982,7 @@ def sync_etoro_accounts():
             margin = None
             client = EtoroTrader(k, u, env="demo" if acct.demo else "live")
             reading = client.net_liquidation()
+            _warm_etoro_names(client, user, acct.demo)
             rows = client.broker_portfolio()
             # The margin cells, duck-typed and three-state: an adapter (or
             # a test double) that answers no dict leaves the cells alone.
@@ -1346,3 +1410,52 @@ def run_alarm_sentinel() -> dict:
     """
     from .alarm import sentinel
     return sentinel()
+
+
+# ── ARAGORN AND THE CRISIS MODE (2026-10-02) ───────────────────────────
+
+@shared_task
+@guarded_task("crisis_mode")
+def read_market_stress() -> dict:
+    """Every 15 min: score the market's stress and step the posture
+    (bot_program/market_stress.py). An escalation tells the alarm chat."""
+    from .market_stress import evaluate
+    r = evaluate()
+    return {"level": r.level, "score": r.score, "raw": r.raw_level,
+            "saved": 1}
+
+
+@shared_task
+@guarded_task("aragorn")
+def run_aragorn() -> dict:
+    """Every 4 h: Aragorn's pass (bot_program/aragorn.py) — bench the
+    losing pairs, graduate or bench the ones on probation, bring proven
+    ones back to real money. Every move is journaled."""
+    from .aragorn import evaluate
+    moves = evaluate(apply=True)
+    return {"moves": len(moves),
+            "kinds": sorted({m["kind"] for m in moves}),
+            "errors": sum(1 for m in moves if m.get("error"))}
+
+
+@shared_task
+@guarded_task("aragorn")
+def aragorn_daily_report() -> dict:
+    """07:10 UTC: Aragorn's state and its last 24 h, to every staff
+    login's channels (posture, pairs, moves, care closes)."""
+    from django.contrib.auth import get_user_model
+
+    from .notifications import dispatch_notification
+    from .aragorn import report_lines
+    lines = report_lines()
+    sent = 0
+    for user in get_user_model().objects.filter(is_staff=True,
+                                                is_active=True):
+        try:
+            if dispatch_notification(user, "system_health",
+                                     title="Aragorn daily report",
+                                     body="\n".join(lines)[:3800]):
+                sent += 1
+        except Exception as e:  # noqa: BLE001 — one login, not the report
+            logger.warning("[aragorn] report to %s failed: %s", user, e)
+    return {"sent": sent, "lines": len(lines)}

@@ -40,6 +40,18 @@ MODELS = {
                  "safety refusal comes back as stop_reason=refusal and the "
                  "provider re-runs the call on Opus.",
     },
+    "claude-opus-5-5": {
+        "label": "Claude Opus 5.5",
+        "tier_hint": "deep",
+        "pricing": {"input": 4.0, "output": 20.0},
+        "context": 1_000_000,
+        "thinking": True,
+        "effort": True,
+        "notes": "The current Opus, below Opus 5's price. Thinking cannot be "
+                 "disabled (the provider never sends a thinking parameter); "
+                 "effort low..max is the control. The trade debate's "
+                 "Executioner and Champion answer on it.",
+    },
     "claude-opus-5": {
         "label": "Claude Opus 5",
         "tier_hint": "deep",

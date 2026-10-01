@@ -394,6 +394,24 @@ app.conf.beat_schedule = {
     "tick-asset-bots": {
         "task": "bot_program.tasks.tick_all_asset_bots",
         "schedule": 300.0,  # every 5 minutes
+        # a pass not started within the beat is dropped, never queued
+        # behind a slow one (tick_all_asset_bots also holds a pass lock)
+        "options": {"expires": 280},
+    },
+    # THE CRISIS MODE AND ARAGORN (2026-10-02, bot_program/
+    # market_stress.py, aragorn.py): the posture every 15 min, the pair
+    # pass every 4 h, the daily report at 07:10 UTC.
+    "read-market-stress": {
+        "task": "bot_program.tasks.read_market_stress",
+        "schedule": 900.0,
+    },
+    "run-aragorn": {
+        "task": "bot_program.tasks.run_aragorn",
+        "schedule": crontab(minute=20, hour="*/4"),
+    },
+    "aragorn-daily-report": {
+        "task": "bot_program.tasks.aragorn_daily_report",
+        "schedule": crontab(hour=7, minute=10),
     },
 
     # ── Phase 14.1 — refresh OptionContract chains (Greeks + bid/ask) for

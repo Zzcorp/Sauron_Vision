@@ -446,7 +446,8 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
 
     def test_a_short_needs_its_own_token(self):
         """"crypto" stated proven, a bearish signal (SELL): the gate still
-        refuses, naming "short" alone."""
+        refuses, naming the class's short alone (short_crypto: only a
+        stock short is proven, ETORO_SHORT_PROVEN)."""
         from bot_program.manual_trade import execute_take_trade
         self._proven("crypto")
         t, fake = self._etoro()
@@ -459,7 +460,7 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         self.assertIn("error", out, out)
         self.assertIn("eToro refusal (gate_blocked)", out["error"])
         self.assertIn("BTCUSD (crypto, SELL)", out["error"])
-        self.assertIn("['short']", out["error"])
+        self.assertIn("['short_crypto']", out["error"])
         spy.assert_not_called()
         self.assertEqual(_order_posts(fake), [])
 

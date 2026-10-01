@@ -27,6 +27,10 @@ AGENT_GROUPS = [
     ]),
     ("Trading loop", [
         ("pretrade_sanity", "Pre-Trade Sanity Gate", "fast"),
+        # The trade debate (2026-10-01): both default to DEBATE_MODEL
+        # (ai_agents/agents/trade_debate.py) unless a row here says otherwise.
+        ("debate_executioner", "The Executioner (trade debate)", "fast"),
+        ("debate_champion", "The Champion (trade debate)", "fast"),
         ("signal_journal", "Signal Journal", "fast"),
         ("trade_journal", "Trade Journal", "fast"),
         # "Is it a good idea to close?" on the positions pages — one call

@@ -786,3 +786,6 @@ from .equity_models import BrokerEquityReading  # noqa: F401
 from .share_models import SharePlan  # noqa: F401
 from .desk_models import DeskPlan, DeskDecision  # noqa: F401
 from .withdrawal_models import WithdrawalRequest  # noqa: F401
+from .aragorn_models import (  # noqa: F401
+    MarketStressReading, PairVerdict, AragornAction, AragornSetting,
+)
