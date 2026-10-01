@@ -609,7 +609,7 @@ class TheCryptoProofTests(SimpleTestCase):
         code, why = gate(t, "BTCUSD", "SELL", 0.0002, 84145.8, "crypto")
         self.assertEqual(code, skips.GATE_BLOCKED)
         self.assertIn("(crypto, SELL)", why)
-        self.assertIn("['short']", why)
+        self.assertIn("['short_crypto']", why)
         with mock.patch("bot_program.asset_engine.base.ETORO_PROVEN",
                         frozenset({"crypto", "etf", "forex"})):
             code, why = gate(t, "AAPL", "BUY", 0.04, 341.0, "stock")

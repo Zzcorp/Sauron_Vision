@@ -594,9 +594,10 @@ class ProofTests(_Case):
         self.cfg = _cfg(self.user, "Stocks live", "stock", mode="live")
         self.now = timezone.now()
 
-    def _found(self, proven, levels=None):
+    def _found(self, proven, levels=None, shorts=()):
         from bot_program.asset_engine import base
         with patch.object(base, "ETORO_PROVEN", frozenset(proven)), \
+                patch.object(base, "ETORO_SHORT_PROVEN", frozenset(shorts)), \
                 patch.object(base, "ETORO_PROVEN_LEVERAGE", dict(levels or {})):
             return _check("proofs", self.now)[1]
 
@@ -613,7 +614,13 @@ class ProofTests(_Case):
                        stop="346", paper=False, metadata=LIVE_ETORO)
         self.assertEqual(_by_subject(self._found({"stock"}))[
             f"trade:{short.pk}"].facts,
-            ["No fill-and-close proof pinned for: Short selling"])
+            ["No fill-and-close proof pinned for: Short selling (stocks)"])
+        # the class's own short proof (ETORO_SHORT_PROVEN) clears it, as
+        # the global "short" token does
+        self.assertNotIn(f"trade:{short.pk}", _by_subject(
+            self._found({"stock"}, shorts={"stock"})))
+        self.assertNotIn(f"trade:{short.pk}", _by_subject(
+            self._found({"stock", "short"})))
 
     def test_a_multiplier_past_the_ceiling_or_the_attack_proof(self):
         over = _trade(self.cfg, "AAPL", entry="336.10", stop="326.02",

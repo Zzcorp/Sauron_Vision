@@ -182,6 +182,18 @@ CLASS_WORDS = {"stock": "Stocks", "etf": "ETFs", "index": "Indices",
                "forex": "Forex", "commodity": "Commodities",
                "crypto": "Crypto", "options": "Options", "cfd": "CFDs"}
 PROOF_WORDS = dict(CLASS_WORDS, short="Short selling")
+
+
+def proof_word(token) -> str:
+    """One proof token in the group's words: a class, "short" (every
+    class), or "short_<class>" (one class's short, base.ETORO_SHORT_PROVEN)."""
+    token = str(token)
+    if token in PROOF_WORDS:
+        return PROOF_WORDS[token]
+    if token.startswith("short_"):
+        cls = token[len("short_"):]
+        return f"Short selling ({CLASS_WORDS.get(cls, cls).lower()})"
+    return _sentence(token.replace("_", " "))
 SIDE_WORDS = {"BUY": "long", "SELL": "short"}
 
 #: Every skip code bot_program/asset_engine/skips.py can record, in the
@@ -708,9 +720,10 @@ def _guards_line(now) -> str:
 
 def _proof_words() -> str:
     from bot_program.asset_engine import base
-    tokens = sorted(getattr(base, "ETORO_PROVEN", ()) or ())
-    words = [PROOF_WORDS.get(t, _sentence(str(t).replace("_", " ")))
-             for t in tokens]
+    tokens = (sorted(getattr(base, "ETORO_PROVEN", ()) or ())
+              + [f"short_{c}" for c in
+                 sorted(getattr(base, "ETORO_SHORT_PROVEN", ()) or ())])
+    words = [proof_word(t) for t in tokens]
     return ", ".join(words) if words else "none yet"
 
 

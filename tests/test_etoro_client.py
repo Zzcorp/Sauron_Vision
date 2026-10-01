@@ -1367,18 +1367,46 @@ CLASS_FRACTION_PROOFS = {
 }
 
 
+# ── MEASURED 2026-10-01 21:02 UTC on the DEMO segment: the first eToro
+# SELL that ever filled (the operator: "régler la vente à découvert vite").
+# AAPL 4 units at 1x, the stop sent ABOVE and the target BELOW (last 330.01
+# x 1.03 / x 0.97, two decimals), held as sent; the fill poll met one 404,
+# the close by position id three 500s. The same sitting's SPX500 1 and
+# EURUSD 1000 SELLs were REJECTED (errorCode 749, "Error creating entry
+# order - disallowed for instrument(27)" / "(1)") at 21:01:38 / 21:01:59,
+# New York's 17:00 rollover: pinned in TheShortRejectionTests below.
+CLASS_SHORT_PROOFS = {
+    "stock": {
+        "symbol": "AAPL", "venue": "AAPL", "iid": 1001, "units": 4.0,
+        "order_side": "SELL", "transaction": "sell", "side": "short",
+        "sent": (339.91, 320.11), "held": (339.91, 320.11),
+        "order": 385673365, "position": 3608630747, "close_order": 385717837,
+        "avg": 330.01, "settlement": "CFD", "requested": 1320.04,
+        "frozen": 1322.02, "total_costs": 1.98, "margin": 1320.04,
+        "exposure": 1320.04, "spread": 1.24, "markup": 0.08, "fees": 1.98,
+        "times": ("2026-10-01T21:02:19.577Z", "2026-10-01T21:02:19.707Z",
+                  "2026-10-01T21:02:19.577Z", "2026-10-01T21:02:19.76Z",
+                  "2026-10-01T21:02:22.1944487Z"),
+        "fill_404s": 1, "close_500s": 3, "cash_after_open": 331112.3,
+        "cash_after_close": 332429.12,
+    },
+}
+
+
 def _class_lookup(p, state="open"):
     """orders:lookup?orderId= of one 2026-09-29 class proof, verbatim; after
-    the close the same body but for state "closed"."""
+    the close the same body but for state "closed". A SELL proof
+    (CLASS_SHORT_PROOFS) carries its own transaction and side words."""
     open_time, exec_time, req_time, last_update, _close_time = p["times"]
     return {
         "accountId": 15153738, "gcid": 13883661, "portfolioId": 0,
-        "orderId": p["order"], "action": "open", "transaction": "buy",
+        "orderId": p["order"], "action": "open",
+        "transaction": p.get("transaction", "buy"),
         "type": "mkt", "etoroOrderTypeId": 18,
         "status": {"id": 3, "name": "Filled", "errorCode": 0},
         "asset": {"symbol": p["venue"], "instrumentId": p["iid"],
                   "currency": "USD", "settlementType": p["settlement"],
-                  "leverage": 1, "side": "long"},
+                  "leverage": 1, "side": p.get("side", "long")},
         "orderCurrency": "usd", "requestedAmount": p["requested"],
         "requestedUnits": p["units"], "requestedContracts": p["units"],
         "frozenAmount": p["frozen"], "openStopLossRate": p["sent"][0],
@@ -1657,13 +1685,16 @@ class TheMeasuredWireTests(SimpleTestCase):
                       "accountAvailableCash": p["cash_after_close"],
                       "accountTotalUsedMargin": 0.0}})])
         with mock.patch("time.sleep"):
-            r = t.market_order(p["symbol"], "BUY", p["units"],
-                               stop_loss=p["sent"][0],
+            r = t.market_order(p["symbol"], p.get("order_side", "BUY"),
+                               p["units"], stop_loss=p["sent"][0],
                                take_profit=p["sent"][1])
         post = [c for c in fake.calls if c[0] == "POST"][0]
         self.assertEqual(post[1],
                          f"{BASE}/api/v2/trading/execution/demo/orders")
         body = post[2]["json"]
+        self.assertEqual(body["transaction"],
+                         "sellShort" if p.get("order_side") == "SELL"
+                         else "buy")
         self.assertEqual((body["symbol"], float(body["units"]),
                           body["leverage"], body["stopLossRate"],
                           body["takeProfitRate"]),
@@ -1770,6 +1801,74 @@ class TheMeasuredWireTests(SimpleTestCase):
         still have no measured eToro spelling."""
         r, lk = self._class_round_trip("commodity")
         self.assertEqual(lk["asset"]["symbol"], "WHEAT.FUT")
+
+    def test_proof_short_stock(self):
+        """MEASURED ON THE DEMO SEGMENT, 2026-10-01 21:02:19 UTC, the first
+        eToro SELL that ever filled: AAPL 4 units SELL at 1x ("sellShort"),
+        stop 339.91 ABOVE / target 320.11 BELOW sent (the last 330.01 x
+        1.03 / x 0.97). FILLED in ~130 ms after one 404 on the fill poll —
+        order 385673365, position 3608630747, avgPrice 330.01,
+        settlementType CFD (a short is never the share), side "short",
+        requestedAmount 1320.04, frozenAmount 1322.02 (the notional and the
+        1.98 fee: totalCosts 1.98, markup 0.08, marketSpread 1.24), used
+        margin 0.0 -> 1320.04. The legs HELD as sent. CLOSED by position id
+        (orderForClose {orderID 385717837, orderType 19, statusID 1}),
+        proven "closed" through three 500s; used margin 0.0, available
+        332429.12; /portfolio [] 60 s later. The eligibility row the same
+        minute: LIVE short CFD leverage [1, 2, 5], floor 10 USD, open True.
+        "stock" joins ETORO_SHORT_PROVEN in the commit that pins this."""
+        r, lk = self._class_round_trip("stock", CLASS_SHORT_PROOFS)
+        self.assertEqual((lk["transaction"], lk["asset"]["side"]),
+                         ("sell", "short"))
+        stop, target = CLASS_SHORT_PROOFS["stock"]["held"]
+        self.assertGreater(stop, float(r["avgPrice"]),
+                           "a short's stop rests ABOVE the fill")
+        self.assertLess(target, float(r["avgPrice"]))
+        self.assertEqual(lk["totalCosts"], 1.98, "the short paid its fee")
+
+    def test_a_short_rejected_with_749_is_read_as_rejected_with_its_words(self):
+        """MEASURED 2026-10-01 21:01:38 UTC, demo: SPX500 1 unit SELL at 1x,
+        stop 7902.74 / target 7442.38 sent. The order POST was accepted
+        (orderId 385673361) and the lookup answered status {id 4,
+        "Rejected", errorCode 749, "Error creating entry order - disallowed
+        for instrument(27)"}, no positionExecutions, nothing locked. The
+        adapter reads it REJECTED with eToro's words and no position — the
+        engine books nothing. EURUSD's SELL 21 s later read the same with
+        instrument(1). "index" and "forex" stay out of
+        ETORO_SHORT_PROVEN."""
+        rejected = {
+            "accountId": 15153738, "gcid": 13883661, "portfolioId": 0,
+            "orderId": 385673361, "action": "open", "transaction": "sell",
+            "type": "mkt", "etoroOrderTypeId": 18,
+            "status": {"id": 4, "name": "Rejected", "errorCode": 749,
+                       "errorMessage": "Error creating entry order - "
+                                       "disallowed for instrument(27)"},
+            "asset": {"symbol": "SPX500", "instrumentId": 27,
+                      "currency": "USD", "settlementType": "CFD",
+                      "leverage": 1, "side": "short"},
+            "orderCurrency": "usd", "requestedAmount": 0.0,
+            "requestedUnits": 1.0, "requestedContracts": 0.0,
+            "openStopLossRate": 7902.74, "openTakeProfitRate": 7442.38,
+            "stopLossType": "fixed", "totalCosts": 0.0,
+            "positionsToClose": [], "positionExecutions": [],
+            "requestTime": "2026-10-01T21:01:38.603Z",
+            "lastUpdate": "2026-10-01T21:01:38.603Z",
+            "openActionType": "customer", "requestType": "byUnits"}
+        t, fake = self._t(
+            [(200, rejected)],
+            routes=[("GET", "/market-data/search", 200,
+                     [{"instrumentId": 27, "internalSymbolFull": "SPX500"}]),
+                    ("POST", "/execution/demo/orders", 200,
+                     {"token": "<not captured>", "orderId": 385673361,
+                      "referenceId": "<not captured>"})])
+        with mock.patch("time.sleep"):
+            r = t.market_order("SPX500", "SELL", 1.0, stop_loss=7902.74,
+                               take_profit=7442.38)
+        self.assertEqual(r["status"], "REJECTED")
+        self.assertEqual(r["executedQty"], "0.0")
+        self.assertFalse(r.get("positionId"))
+        self.assertIn("749", r["refusal"])
+        self.assertIn("disallowed for instrument(27)", r["refusal"])
 
     def test_proof_stock_fraction(self):
         """MEASURED ON THE DEMO SEGMENT, 2026-09-29 12:02:23 UTC (§4 D2c-1

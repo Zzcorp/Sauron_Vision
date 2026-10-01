@@ -472,6 +472,34 @@ LEVERAGE_SWITCH_KEY = "etoro_leverage_live"
 ETORO_PROVEN = frozenset({"commodity", "crypto", "etf", "forex", "index",
                           "stock"})
 
+#: THE CLASSES A SHORT IS PROVEN ON (2026-10-01; the operator: "régler la
+#: vente à découvert vite", a crash expected). A SELL clears the proof gate
+#: when "short" is in ETORO_PROVEN (every class at once) OR its instrument
+#: class is named here, each class in the commit that pins
+#: test_proof_short_<class> in tests/test_etoro_client.py
+#: (tests/test_etoro_proofs.py greps for it). Read at CALL time, like
+#: ETORO_PROVEN. "stock" since 2026-10-01 (test_proof_short_stock): AAPL
+#: 4 units SELL at 1x on the DEMO segment, 21:02:19 UTC, order 385673365,
+#: position 3608630747, settlementType CFD, fees 1.98, the legs held as
+#: sent (stop above, target below), closed by position id. The same
+#: sitting's SPX500 and EURUSD SELLs were REJECTED by eToro (errorCode 749
+#: "disallowed for instrument") at 21:01 UTC, New York's 17:00 rollover:
+#: "index" and "forex" stay out until their own SELL fills.
+ETORO_SHORT_PROVEN = frozenset({"stock"})
+
+
+def missing_proofs(icls, side) -> list:
+    """The proof tokens an eToro entry of instrument class `icls` on `side`
+    still lacks, sorted; [] when the proof gate lets it go. A class
+    unproven names itself; a SELL whose class has no short proof (and no
+    global "short") names "short_<class>". Read at call time."""
+    icls = str(icls)
+    missing = [] if icls in ETORO_PROVEN else [icls]
+    if (str(side or "").upper() == "SELL" and "short" not in ETORO_PROVEN
+            and icls not in ETORO_SHORT_PROVEN):
+        missing.append(f"short_{icls}")
+    return sorted(missing)
+
 #: THE MULTIPLIER EACH eToro CLASS HAS BEEN PROVEN AT (2026-09-26): class
 #: -> the highest multiplier whose demo fill-and-close is pinned as
 #: `test_proof_<class>_at_<L>x` in tests/test_etoro_client.py
@@ -5066,9 +5094,9 @@ class AssetBot(ABC):
         if _ak(client) != "etoro":
             return "", ""
         # step 1 — the proof. ETORO_PROVEN is read HERE, at call time,
-        # off the module: a test states a token by patching that name.
-        _need = {str(icls)} | ({"short"} if side == "SELL" else set())
-        _missing = sorted(_need - set(ETORO_PROVEN))
+        # off the module: a test states a token by patching that name. A
+        # SELL also needs its class's short proof (ETORO_SHORT_PROVEN).
+        _missing = missing_proofs(icls, side)
         if _missing:
             # verdict first: skips.record keeps 200 characters
             return skips.GATE_BLOCKED, (

@@ -711,15 +711,14 @@ def check_price_sanity(ctx, g) -> list:
 
 def check_proofs(ctx, g) -> list:
     """A live row eToro carried (metadata broker "etoro"), open or opened
-    in the last 24 h, whose instrument class -- or "short" for a SELL -- is
-    not in base.ETORO_PROVEN, whose recorded multiplier is above
+    in the last 24 h, whose instrument class -- or, for a SELL, its short
+    -- is not proven (base.missing_proofs), whose recorded multiplier is above
     base.ORDER_LEVERAGE_CEILING for its class, or, for a multiplier the
     attack mode picked, above base.proven_leverage (the proven multiplier
     binds the attack mode only; a typed one answers to the ceiling)."""
     from django.db.models import Q
     from bot_program.asset_engine import base
     from bot_program.asset_models import AssetBotTrade
-    proven = set(getattr(base, "ETORO_PROVEN", ()) or ())
     ceilings = dict(getattr(base, "ORDER_LEVERAGE_CEILING", {}) or {})
     proven_at = getattr(base, "proven_leverage", None)
     since = ctx.now - timedelta(hours=WINDOW_H)
@@ -733,12 +732,11 @@ def check_proofs(ctx, g) -> list:
         if meta.get("broker") != "etoro":
             continue
         cls, _exchange, _pk = ctx.instrument(trade.symbol, trade.asset_class)
-        need = {cls} | ({"short"} if trade.side == "SELL" else set())
-        missing = sorted(need - proven)
+        missing = base.missing_proofs(cls, trade.side)
         facts = []
         if missing:
             facts.append("No fill-and-close proof pinned for: " + ", ".join(
-                eye.PROOF_WORDS.get(m, _class_word(m)) for m in missing))
+                eye.proof_word(m) for m in missing))
         lev = _leverage(meta)
         try:
             ceiling = int(ceilings.get(cls, 1))

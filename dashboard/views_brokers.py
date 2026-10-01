@@ -488,6 +488,15 @@ def _etoro_proven() -> frozenset:
     return frozenset(base.ETORO_PROVEN)
 
 
+def _short_proven_classes() -> frozenset:
+    """The classes a SELL may go on (base.ETORO_SHORT_PROVEN, read at call
+    time); every class when "short" itself is in ETORO_PROVEN."""
+    from bot_program.asset_engine import base
+    if "short" in frozenset(base.ETORO_PROVEN):
+        return frozenset(t for _box, ts in ETORO_BOX_TOKENS for t in ts)
+    return frozenset(base.ETORO_SHORT_PROVEN)
+
+
 def etoro_proof_states() -> dict:
     """What the page prints beside each eToro box: box -> words, and
     "short". Three states per box: every token pinned ("proof pinned"),
@@ -505,8 +514,13 @@ def etoro_proof_states() -> dict:
         else:
             out[box] = (f"proof pinned for {', '.join(pinned)} only — "
                         f"{', '.join(missing)} entries refused")
-    out["short"] = ("shorts proven" if "short" in proven
-                    else "no short proven")
+    shorts = _short_proven_classes()
+    if "short" in proven:
+        out["short"] = "shorts proven"
+    elif shorts:
+        out["short"] = f"shorts proven on {', '.join(sorted(shorts))} only"
+    else:
+        out["short"] = "no short proven"
     return out
 
 
@@ -532,11 +546,20 @@ def unproven_note(carried) -> str:
                 f"entry of {which} is refused (gate_blocked), by the bots "
                 f"and by TAKE TRADE, {until}; nothing is sent in the "
                 f"meantime.")
-    if "short" not in proven:
+    shorts = _short_proven_classes()
+    carried_classes = [t for box, tokens in ETORO_BOX_TOKENS
+                       if box in carried for t in tokens]
+    unshorted = [t for t in carried_classes if t not in shorts]
+    if unshorted and len(unshorted) == len(carried_classes):
         note += (" Every short is refused as well until the short proof "
                  "is pinned." if missing else
                  " Every short is refused until the short proof is "
                  "pinned.")
+    elif unshorted:
+        note += (f" Shorts are proven on "
+                 f"{', '.join(t for t in carried_classes if t in shorts)} "
+                 f"only: a short on {', '.join(unshorted)} is refused until "
+                 f"its own proof is pinned.")
     return note
 
 
