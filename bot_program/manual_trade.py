@@ -908,6 +908,45 @@ def validate_levels(cfg, symbol, *, entry, stop, target):
     return f"Those levels do not clear their own costs — {why}"
 
 
+# THE REWARD:RISK WARNING (2026-10-02). The week's live book: five tickets
+# taken by hand from an instrument view, -1.98R between them, one of them
+# risking 1.7% to make 0.6%. Below this ratio a ticket risks more than it
+# can make, and has to win more than half the time just to stand still.
+REWARD_RISK_WARN = 1.0
+
+
+def reward_risk_advisory(side, entry, stop, target) -> dict:
+    """{ok, ratio, threshold, breakeven_win_rate, reason} — what the levels
+    can make against what they risk, gross of costs, measured from `entry`.
+
+    A WARNING, never a refusal: the operator asked for it that way ("just
+    warning, leaving the last choice to the user"). The popup renders it
+    live as the levels move, the button stays pressable, and `_execute`
+    records the ratio of the levels actually sent, so a review can ask
+    afterwards whether tickets taken past it paid.
+
+    Gross on purpose. The cost filter (validate_levels, cost_advisory)
+    already judges the levels net of the round trip, and only where a cost
+    model exists; this is the plainer question every ticket can answer.
+    """
+    entry, stop, target = float(entry), float(stop), float(target)
+    risk = abs(entry - stop)
+    if not (entry > 0 and risk > 0):
+        return {"ok": True, "ratio": None, "threshold": REWARD_RISK_WARN,
+                "breakeven_win_rate": None, "reason": ""}
+    reward = max((target - entry) if side == "BUY" else (entry - target), 0.0)
+    ratio = reward / risk
+    breakeven = 1.0 / (1.0 + ratio)
+    ok = ratio >= REWARD_RISK_WARN
+    reason = "" if ok else (
+        f"This ticket risks {risk / entry * 100:.2f}% to make "
+        f"{reward / entry * 100:.2f}% — reward:risk {ratio:.2f}. It has to "
+        f"win {breakeven * 100:.0f}% of the time just to break even, before "
+        f"costs.")
+    return {"ok": ok, "ratio": round(ratio, 4), "threshold": REWARD_RISK_WARN,
+            "breakeven_win_rate": round(breakeven, 4), "reason": reason}
+
+
 def _funding_proposal(open_trades, deficit):
     """The least disturbance that frees the deficit, or None if even
     closing everything falls short.
@@ -1359,6 +1398,9 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         "cost_filter": bool(extras.get("use_cost_filter", True)),
         "min_edge_ratio": _extra_num("min_edge_ratio", DEFAULT_MIN_EDGE_RATIO),
         "min_net_rr": _extra_num("min_net_rr", DEFAULT_MIN_NET_RR),
+        # The reward:risk below which the popup warns (never blocks), so
+        # the browser and reward_risk_advisory judge by one number.
+        "reward_risk_warn": REWARD_RISK_WARN,
     }
 
     # ── What the leverage control is NOT ────────────────────────────────
@@ -1483,6 +1525,11 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         # operator decide. Only computed for untouched levels — a moved
         # level is judged by `validate_levels`, which still refuses.
         "cost_advisory": cost_advisory,
+        # What these levels can make against what they risk, from the fill
+        # the popup quotes. A warning the operator reads past, never a
+        # refusal; the popup re-judges it live as the levels move.
+        "reward_risk": reward_risk_advisory(side, levels["fill"], stop_used,
+                                            target),
         # The brain's standing verdict on discretionary entries. Reported,
         # not enforced: pausing a RULE is the platform's call because nobody
         # is watching it, but a hand-taken trade has a human on the other
@@ -1971,7 +2018,11 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             return {"error": dup["reason"], "closed": closed}
         theme_now = theme_state(user, symbol=inst.symbol, side=side,
                                 asset_class=cls, paper=not live)
-
+        rr_now = reward_risk_advisory(side, fill, stop, target)
+        if not rr_now["ok"]:
+            logger.info("[take-trade] %s: %s %s goes past the reward:risk "
+                        "warning (%.2f) — the operator's call",
+                        user.username, side, inst.symbol, rr_now["ratio"])
 
         meta = {
             "manual": True,
@@ -2025,6 +2076,11 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                 "reason": (preview.get("cost_advisory") or {}).get("reason",
                                                                    ""),
             },
+            # And what the levels ACTUALLY SENT can make against what they
+            # risk, from this fill — after any stop or target the operator
+            # moved, so a warning they fixed in the popup is not recorded as
+            # one they took past. The popup warned; the operator chose.
+            "reward_risk_at_entry": rr_now,
         }
         if level_overrides:
             # Only when something moved: an untouched ticket keeps the exact
