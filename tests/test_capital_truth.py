@@ -17,6 +17,7 @@ disagree about money.
 Run with:  python manage.py test tests.test_capital_truth
 """
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase
@@ -328,3 +329,61 @@ class ForeignVenueTests(SimpleTestCase):
 
     def test_no_book_means_nothing_is_foreign(self):
         self.assertEqual(self._judge("binance", ""), "")
+
+
+class TheAccountValueIsThePoolsMeasureTests(TestCase):
+    """2026-10-02, every live bot on every tick: "pool declares 2,173
+    against 483 at the broker, so every limit here is 4.5x looser than it
+    reads". The sync sizes each follower from the account's TOTAL value;
+    the check compared that to eToro's AVAILABLE CASH (balance_usdt), which
+    shrinks with every open position. It now reads net_liquidation, the
+    sync's own measure, and falls back to balance_usdt only for an adapter
+    without it."""
+
+    class _Etoro:
+        """An eToro-shaped client: total value and free cash differ."""
+
+        def __init__(self, total=(2173.0, "USD"), cash=483.0):
+            self._total, self._cash = total, cash
+
+        def net_liquidation(self):
+            return self._total
+
+        def balance_usdt(self):
+            return self._cash
+
+    class _CashOnly:
+        def balance_usdt(self):
+            return 483.0
+
+    def _cfg(self, name):
+        from django.contrib.auth.models import User
+
+        from bot_program.models import AssetBotConfig
+        user = User.objects.create_user(f"av_{name}", password="x")
+        return user, AssetBotConfig.objects.create(
+            user=user, asset_class="stock", name=name, mode="live",
+            symbols=["AAPL"], capital=Decimal("2173"), enabled=True)
+
+    def _equity(self, name, client):
+        from bot_program.capital_truth import broker_equity
+        user, cfg = self._cfg(name)
+        with patch("bot_program.engine.broker_router.client_for_symbol",
+                   return_value=client):
+            return broker_equity(user, cfg)
+
+    def test_the_total_value_is_read_not_the_free_cash(self):
+        self.assertEqual(self._equity("tot", self._Etoro()), 2173.0)
+
+    def test_an_adapter_without_the_total_falls_back_to_its_balance(self):
+        self.assertEqual(self._equity("cash", self._CashOnly()), 483.0)
+
+    def test_an_unreadable_total_falls_back_to_the_balance(self):
+        self.assertEqual(self._equity("none", self._Etoro(total=None)), 483.0)
+
+    def test_a_matching_pool_raises_no_note(self):
+        from bot_program.capital_truth import capital_mismatches
+        user, _cfg = self._cfg("match")
+        with patch("bot_program.engine.broker_router.client_for_symbol",
+                   return_value=self._Etoro()):
+            self.assertEqual(capital_mismatches(user), [])
