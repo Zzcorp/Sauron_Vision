@@ -323,7 +323,8 @@ def evaluate(*, apply=False, now=None) -> list:
     judged = {(m["rule"], m["asset_class"]) for m in moves}
     for rule, cls in sorted(set(AssetBotTrade.objects.filter(
             paper=True, status="CLOSED", closed_at__gte=since,
-            rule_name__in=live_rules).exclude(asset_class__in=SKIP_CLASSES)
+            rule_name__in=live_rules - SKIP_RULES)
+            .exclude(asset_class__in=SKIP_CLASSES)
             .values_list("rule_name", "asset_class"))):
         if (rule, cls) in judged:
             continue
@@ -349,7 +350,8 @@ def evaluate(*, apply=False, now=None) -> list:
     # bench row covers every class of its rule without a row of its own:
     # each such class is judged too, on its paper closes since the "*" row
     benched = []
-    for v in PairVerdict.objects.filter(state="bench", pinned=False):
+    for v in PairVerdict.objects.filter(state="bench", pinned=False) \
+            .exclude(rule_name__in=SKIP_RULES):
         if v.asset_class != PairVerdict.ANY_CLASS:
             benched.append((v.rule_name, v.asset_class, v.since))
             continue
@@ -383,7 +385,8 @@ def evaluate(*, apply=False, now=None) -> list:
         logger.warning("[aragorn] paper rules unread: %s", e)
     paper_pairs = set(AssetBotTrade.objects.filter(
         paper=True, status="CLOSED", closed_at__gte=since,
-        rule_name__in=paper_rules).exclude(asset_class__in=SKIP_CLASSES)
+        rule_name__in=paper_rules - SKIP_RULES)
+        .exclude(asset_class__in=SKIP_CLASSES)
         .values_list("rule_name", "asset_class"))
     promoted_rules = set()
     for rule, cls in sorted(paper_pairs):

@@ -209,10 +209,18 @@ class ThePassTests(TestCase):
         self.assertTrue(pair_policy("vol_squeeze", "forex")["force_paper"])
 
     def test_options_and_the_manual_lane_are_never_judged(self):
+        """Every pass, the paper-record one included: on 2026-10-02 the
+        first plan on the VPS proposed benching manual_take/forex on its
+        paper record (the manual lane's RuleControl row is live_full)."""
         from bot_program.aragorn import evaluate
+        from signals.models_control import RuleControl
+        RuleControl.objects.create(rule_name="manual_take",
+                                   promotion_stage="live_full")
         for _ in range(8):
             _closed(self.cfg, -0.5, rule="manual_take")
             _closed(self.cfg, -0.5, cls="options")
+        for _ in range(22):
+            _closed(self.cfg, -0.4, rule="manual_take", paper=True)
         self.assertEqual(evaluate(apply=False), [])
 
 
