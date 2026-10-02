@@ -170,7 +170,9 @@ def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
     if crowd and not manual and any(w in CROWD_MOVABLE for _l, w in cands):
         # the read is paid for only when a lock could move
         crowd = crowd() if callable(crowd) else crowd
-        cost = _f(meta.get("cost_fraction_charged")) or 0.0
+        cost = _f(meta.get("cost_fraction_charged"))
+        if cost is None:
+            cost = float((crowd or {}).get("cost") or 0.0)
         if crowd:
             cands = [_beyond_the_crowd(level, why, d, p, entry, crowd,
                                        cost=cost)
@@ -312,8 +314,18 @@ def care(bot, trade, price, client, *, now=None) -> str:
             if smart_money.is_on():
                 def crowd():
                     try:
-                        return smart_money.care_levels(trade.symbol,
-                                                       trade.side, price)
+                        levels = smart_money.care_levels(trade.symbol,
+                                                         trade.side, price)
+                        if levels is not None:
+                            # the round trip a row opened before
+                            # cost_fraction_charged existed was charged
+                            from bot_program.asset_engine.risk_levels import (
+                                round_trip_cost_fraction,
+                            )
+                            levels = dict(levels, cost=float(
+                                round_trip_cost_fraction(bot.cfg,
+                                                         trade.symbol)))
+                        return levels
                     except Exception as e:  # noqa: BLE001 — plain care runs
                         logger.info("[care] %s #%s: crowd levels unread (%s)",
                                     trade.symbol, trade.id, e)

@@ -205,6 +205,14 @@ def apply_breakeven(trade, current_price, at_r, buffer_r=0.0, adjust=None):
 
     if not _commit(trade, candidate, price, note):
         return False
+    if note != "breakeven":
+        # A lock the adjuster moved below entry+buffer is a stand-in while
+        # the crowd's level is there: not armed, so the rule offers its own
+        # lock again on later ticks and commits it in full once the zone
+        # is gone (tighten-only keeps a trailed stop from being dragged
+        # back meanwhile). Arming here left the operator's buffer short
+        # for the life of the trade (review of PR21, 2026-10-02).
+        return True
     # Stamped only on success, so a refused move is retried next tick
     # rather than silently disarming the rule for the life of the trade.
     meta = dict(trade.metadata or {})

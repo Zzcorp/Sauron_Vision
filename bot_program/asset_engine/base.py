@@ -2315,7 +2315,9 @@ class AssetBot(ABC):
         moves.append({"to": str(resting), "asked": str(candidate),
                       "at": str(price), "why": why + ":broker"})
         meta["stop_moves"] = moves[-20:]
-        if why.startswith("breakeven"):
+        if why == "breakeven":
+            # the rule's own lock only: a lock moved beyond the crowd is a
+            # stand-in, offered again until the full one goes in
             meta["breakeven_armed"] = True
         # A leg that MOVED is proof the rules are not inert after all — and
         # the run of failures that led to the stamp is over, so the count and

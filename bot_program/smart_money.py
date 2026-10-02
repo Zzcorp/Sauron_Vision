@@ -730,6 +730,20 @@ def care_levels(symbol, side, price, *, timeframe=TIMEFRAME) -> dict:
                                    span=span)}
 
 
+#: the stop column's precision (AssetBotTrade.stop_loss: 8 places). A lock
+#: is snapped onto it, AWAY from the mark, so the value stored is the value
+#: asked: a 10-decimal lock stored at 8 read as a fresh "tighter" stop on
+#: the next tick and went back to the venue every five minutes (review of
+#: PR21, 2026-10-02).
+LOCK_QUANTUM = "1e-8"
+
+
+def _snap_away_from_mark(value, buy):
+    from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
+    return Decimal(repr(float(value))).quantize(
+        Decimal(LOCK_QUANTUM), rounding=ROUND_FLOOR if buy else ROUND_CEILING)
+
+
 def lock_beyond_the_crowd(side, price, entry, lock, crowd, *,
                           cost=0.0) -> tuple:
     """(lock, moved) — a profit lock (a break-even, a trail) moved out of
@@ -737,8 +751,15 @@ def lock_beyond_the_crowd(side, price, entry, lock, crowd, *,
     than its round-trip `cost` (a fraction): a lock stays a lock, net of
     what the trip cost. One copy for every lane that trails a stop:
     Aragorn's position care and the engine's break-even and trail, held
-    by the bot or resting at the broker (2026-10-02)."""
-    d = 1.0 if _buy(side) else -1.0
+    by the bot or resting at the broker (2026-10-02).
+
+    The crowd's levels are read around the MARK (care_levels); the round
+    numbers are also listed around the LOCK itself, because a percentage
+    trail can sit far past the mark's span on a quiet series and land on a
+    figure nobody listed. A moved lock comes back snapped to the stop
+    column's 8 places, away from the mark."""
+    buy = _buy(side)
+    d = 1.0 if buy else -1.0
     try:
         price, entry, lock = float(price), float(entry), float(lock)
     except (TypeError, ValueError):
@@ -748,12 +769,25 @@ def lock_beyond_the_crowd(side, price, entry, lock, crowd, *,
     floor = entry * (1.0 + d * max(0.0, float(cost or 0.0)))
     if d * (price - floor) <= 0:
         return lock, False
-    r = stop_beyond_the_crowd("BUY" if d > 0 else "SELL", price, lock,
-                              crowd.get("atr"), crowd.get("levels") or [],
-                              max_distance=abs(price - floor))
-    if r["moved"] and d * (r["stop"] - floor) >= 0:
-        return r["stop"], True
-    return lock, False
+    atr = float(crowd.get("atr") or 0.0)
+    levels = list(crowd.get("levels") or [])
+    step = round_step(atr)
+    if step:
+        reach = (HUNT_DEPTH_ATR + MAX_WIDEN_ATR) * atr
+        lo, hi = ((lock - reach, lock + NEAR_ATR * atr) if buy
+                  else (lock - NEAR_ATR * atr, lock + reach))
+        listed = {round(p, 10) for p, _k in levels}
+        levels += [(lvl, "round number") for lvl in round_levels(lo, hi, step)
+                   if (lvl < price if buy else lvl > price)
+                   and round(lvl, 10) not in listed]
+    r = stop_beyond_the_crowd("BUY" if buy else "SELL", price, lock, atr,
+                              levels, max_distance=abs(price - floor))
+    if not r["moved"]:
+        return lock, False
+    snapped = float(_snap_away_from_mark(r["stop"], buy))
+    if d * (snapped - floor) < 0:
+        return lock, False
+    return snapped, True
 
 
 def lock_adjuster(bot, trade, price):
@@ -761,8 +795,14 @@ def lock_adjuster(bot, trade, price):
     and trail (bot_program/engine/trailing.py), or None when the smart
     money does not apply: the switch OFF, options (a premium has no crowd
     levels), the operator's manual lane. The crowd's levels are read once,
-    on the first lock asked about, never on a tick that asks nothing.
-    Never raises: a failed read leaves the lock where the rule put it."""
+    on the first lock asked about, never on a tick that asks nothing — and
+    a read that failed is not retried in the same tick.
+
+    The floor is the round trip the row was charged; a row opened before
+    `cost_fraction_charged` existed takes the config's own round-trip
+    estimate (risk_levels.round_trip_cost_fraction), never the bare entry,
+    where a "break-even" books a loss. Never raises: a failed read leaves
+    the lock where the rule put it."""
     try:
         if "options" in (getattr(bot, "asset_class", ""),
                          getattr(trade, "asset_class", "")):
@@ -776,25 +816,36 @@ def lock_adjuster(bot, trade, price):
         return None
     seen = {}
 
+    def _crowd():
+        if "crowd" not in seen:
+            seen["crowd"] = None          # a failure is remembered too
+            seen["crowd"] = care_levels(trade.symbol, trade.side, price)
+        return seen["crowd"]
+
+    def _cost():
+        charged = (trade.metadata or {}).get("cost_fraction_charged")
+        if charged is not None:
+            return float(charged)
+        from bot_program.asset_engine.risk_levels import (
+            round_trip_cost_fraction,
+        )
+        return float(round_trip_cost_fraction(bot.cfg, trade.symbol))
+
     def adjust(lock, why):
         if lock is None:
             return lock, why
         try:
-            if "crowd" not in seen:
-                seen["crowd"] = care_levels(trade.symbol, trade.side, price)
-            cost = float((trade.metadata or {}).get("cost_fraction_charged")
-                         or 0.0)
             moved_to, moved = lock_beyond_the_crowd(
-                trade.side, price, trade.entry_price, lock, seen["crowd"],
-                cost=cost)
+                trade.side, price, trade.entry_price, lock, _crowd(),
+                cost=_cost())
         except Exception as e:  # noqa: BLE001
             logger.info("[smart money] %s: lock left (%s)",
                         getattr(trade, "symbol", "?"), e)
             return lock, why
         if not moved:
             return lock, why
-        from decimal import Decimal
-        return Decimal(str(round(moved_to, 10))), f"{why} (beyond the crowd)"
+        return (_snap_away_from_mark(moved_to, _buy(trade.side)),
+                f"{why} (beyond the crowd)")
 
     return adjust
 
