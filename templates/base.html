@@ -2231,6 +2231,17 @@
                        'recorded with the reason.') + '</div>';
       }
 
+      /* Whether a Sauron signal backs this ticket (2026-10-02): the week's
+         instrument-view tickets, taken with none, made -1.98R. A warning;
+         the button is unchanged. */
+      var backing = p.signal_backing || {};
+      if (backing.ok === false && backing.reason) {
+        warnHtml += '<div class="sz-warn sz-warn--book"><b>NO SAURON SIGNAL ' +
+          'BEHIND THIS TRADE</b>' + esc(backing.reason) +
+          '<br>' + esc('A warning, not a block: the choice is yours. Taking ' +
+                       'it is recorded as taken without a signal.') + '</div>';
+      }
+
       /* And how hard this pool is set to swing. Not a warning about THIS
          trade — a reminder that a number typed into extras once is still
          sizing every trade since. */

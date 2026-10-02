@@ -947,6 +947,76 @@ def reward_risk_advisory(side, entry, stop, target) -> dict:
             "breakeven_win_rate": round(breakeven, 4), "reason": reason}
 
 
+#: How recent an active signal must be to count as backing a hand-taken
+#: ticket opened from an instrument view.
+SIGNAL_BACKING_HOURS = 24
+#: Hand-taken closed trades needed, with and without a signal, before the
+#: warning quotes their record.
+SIGNAL_BACKING_MIN_SAMPLE = 5
+
+
+def _hand_record_by_signal(user) -> dict:
+    """{True: summary, False: summary} — the operator's own closed trades
+    taken on a Sauron signal against those taken without one, over 90
+    days (bot_program.scorecard)."""
+    from bot_program import scorecard
+    from bot_program.asset_models import AssetBotTrade
+    from datetime import timedelta as _td
+    from django.utils import timezone as _tz
+    qs = AssetBotTrade.objects.filter(
+        status="CLOSED", rule_name=MANUAL_RULE, config__user=user,
+        closed_at__gte=_tz.now() - _td(days=90))
+    out = {True: [], False: []}
+    for t in qs:
+        out[bool((t.metadata or {}).get("signal_id"))].append(
+            scorecard.row_of(t))
+    return {k: scorecard.summarize(v) for k, v in out.items()}
+
+
+def signal_backing_advisory(user, inst, side, signal=None, *,
+                            now=None) -> dict:
+    """{ok, signals, reason} — whether a Sauron signal backs this ticket
+    (2026-10-02).
+
+    The week's live book: five tickets taken from an instrument view with no
+    signal behind them made -1.98R; the hand-taken trades taken ON a signal
+    made +1.95R over nine. A WARNING, never a refusal: the operator asked
+    for the last word to stay theirs. A signal ticket is backed by
+    definition; an instrument-view ticket is backed when an active signal
+    in its direction fired on this instrument in the last
+    SIGNAL_BACKING_HOURS."""
+    if signal is not None:
+        return {"ok": True, "signals": [signal.rule_name], "reason": ""}
+    from datetime import timedelta as _td
+    from django.utils import timezone as _tz
+
+    from signals.models import Signal
+    now = now or _tz.now()
+    direction = "bullish" if side == "BUY" else "bearish"
+    rules = list(Signal.objects.filter(
+        instrument=inst, direction=direction, is_active=True,
+        created_at__gte=now - _td(hours=SIGNAL_BACKING_HOURS))
+        .order_by("-score").values_list("rule_name", flat=True)[:5])
+    if rules:
+        return {"ok": True, "signals": rules, "reason": ""}
+    reason = (f"No Sauron signal backs this ticket: no active {direction} "
+              f"signal on {inst.symbol} in the last "
+              f"{SIGNAL_BACKING_HOURS} hours.")
+    try:
+        rec = _hand_record_by_signal(user)
+    except Exception as e:  # noqa: BLE001 — the warning must not cost the ticket
+        logger.debug("[take-trade] no hand record by signal: %s", e)
+        rec = {}
+    on, off = rec.get(True), rec.get(False)
+    if (on and off and on["n"] >= SIGNAL_BACKING_MIN_SAMPLE
+            and off["n"] >= SIGNAL_BACKING_MIN_SAMPLE):
+        reason += (f" Your hand-taken trades over 90 days: "
+                   f"{on['expectancy']:+.2f}R a trade on a signal "
+                   f"({on['n']}), {off['expectancy']:+.2f}R without one "
+                   f"({off['n']}).")
+    return {"ok": False, "signals": [], "reason": reason}
+
+
 def _funding_proposal(open_trades, deficit):
     """The least disturbance that frees the deficit, or None if even
     closing everything falls short.
@@ -1530,6 +1600,9 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         # refusal; the popup re-judges it live as the levels move.
         "reward_risk": reward_risk_advisory(side, levels["fill"], stop_used,
                                             target),
+        # Whether a Sauron signal backs this ticket. A warning, never a
+        # refusal: the instrument-view ticket stays the operator's call.
+        "signal_backing": signal_backing_advisory(user, inst, side, signal),
         # The brain's standing verdict on discretionary entries. Reported,
         # not enforced: pausing a RULE is the platform's call because nobody
         # is watching it, but a hand-taken trade has a human on the other
@@ -2081,6 +2154,14 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             # moved, so a warning they fixed in the popup is not recorded as
             # one they took past. The popup warned; the operator chose.
             "reward_risk_at_entry": rr_now,
+            # And whether a Sauron signal backed it — the preview's answer,
+            # so the record is what the operator was shown.
+            "signal_backing_at_entry": {
+                "ok": bool((preview.get("signal_backing") or {}).get("ok",
+                                                                     True)),
+                "signals": (preview.get("signal_backing") or {}).get(
+                    "signals", []),
+            },
         }
         if level_overrides:
             # Only when something moved: an untouched ticket keeps the exact

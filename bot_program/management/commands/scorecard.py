@@ -8,6 +8,7 @@ Read-only: it writes nothing and touches no broker.
     python manage.py scorecard --venue live     # real money only
     python manage.py scorecard --by rule        # one block per rule
     python manage.py scorecard --by class
+    python manage.py scorecard --by signal      # with a Sauron signal or without
 """
 from django.core.management.base import BaseCommand
 
@@ -26,7 +27,8 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--days", type=int, default=30)
         parser.add_argument("--venue", choices=["live", "paper"], default=None)
-        parser.add_argument("--by", choices=["lane", "rule", "class", "venue"],
+        parser.add_argument("--by", choices=["lane", "rule", "class", "venue",
+                                     "signal"],
                             default="lane",
                             help="How to split the book (default: lane — "
                                  "your hand-taken trades against the bots).")
@@ -42,7 +44,9 @@ class Command(BaseCommand):
         self._block("ALL", sc.summarize(rows))
         keys = {"lane": lambda r: r["lane"], "rule": lambda r: r["rule"] or "—",
                 "class": lambda r: r["asset_class"],
-                "venue": lambda r: r["venue"]}
+                "venue": lambda r: r["venue"],
+                "signal": lambda r: ("on a signal" if r["backed"]
+                                     else "without a signal")}
         groups = sc.group(rows, keys[opts["by"]])
         for name, members in sorted(groups.items(),
                                     key=lambda kv: -len(kv[1])):

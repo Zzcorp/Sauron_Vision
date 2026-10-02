@@ -42,6 +42,9 @@ WHAT A GUARD IS
                                                  live rows disagree, 15 min
     G10 Heartbeat              critical          the bot tick, and the marks
                                                  of the live bots' symbols
+    G12 Stop overshoot         critical          a real-money close of the
+                                                 last 24 h past -1.2R: a stop
+                                                 that did not hold
 
   THE WORLDS. A row is paper (the simulator), demo (paper=False routed to
   eToro's virtual segment, metadata broker_env "paper") or live (real
@@ -1258,6 +1261,50 @@ def check_heartbeat(ctx, g) -> list:
     return out
 
 
+# ── G12: a stop that did not hold ────────────────────────────────────────
+
+#: A real-money close worse than this, in R against the stop the trade
+#: opened with, is a stop that did not hold -- the scorecard's own number.
+from bot_program.scorecard import OVERSHOOT_R  # noqa: E402
+
+
+def check_stop_overshoot(ctx, g) -> list:
+    """Every LIVE row closed in the last 24 h at worse than -OVERSHOOT_R
+    (2026-10-02). The week's book carried two paper stops that did not
+    hold, -8.12R and -1.84R: positions nobody watched while their market
+    moved past the stop. Said once (an event), in R and prices -- never a
+    money figure. Demo and paper rows are not real money: counted in the
+    notes, not alarmed."""
+    from bot_program.asset_models import AssetBotTrade
+    since = ctx.now - timedelta(hours=WINDOW_H)
+    rows = (AssetBotTrade.objects
+            .filter(status="CLOSED", closed_at__gte=since,
+                    realized_r__lt=-OVERSHOOT_R)
+            .select_related("config", "config__user").order_by("pk"))
+    out, simulated = [], 0
+    for trade in rows:
+        if _world(trade) != "live":
+            simulated += 1
+            continue
+        meta = _meta(trade)
+        opened_with = _float(meta.get("initial_stop_loss"))
+        facts = [f"Closed {eye.when(trade.closed_at)} at "
+                 f"{eye.price(trade.exit_price)}: "
+                 f"{float(trade.realized_r):+.2f}R, past -{OVERSHOOT_R}R"]
+        if opened_with is not None:
+            facts.append(f"It opened with its stop at {eye.price(opened_with)}")
+        facts.append("A stop that did not hold: a gap through it, a stop "
+                     "that was not resting at the broker, or a close "
+                     "booked late")
+        out.append(g.finding(
+            f"trade:{trade.pk}", label=_trade_label(trade), facts=facts,
+            event=True, user=trade.config.user))
+    if simulated:
+        ctx.note(g, f"{_plural(simulated, 'paper or demo close')} past "
+                 f"-{OVERSHOOT_R}R not alarmed: not real money")
+    return out
+
+
 GUARDS = [
     Guard("market_shut", "Market-shut booking", "critical",
           "Morgul — a booking while the market was shut", check_market_shut,
@@ -1286,6 +1333,10 @@ GUARDS = [
           "Morgul — the platform and the broker disagree", check_drift),
     Guard("heartbeat", "Heartbeat", "critical",
           "Morgul — the bot tick has stopped", check_heartbeat),
+    # Never a brake: the position is already closed; what is left to do
+    # is to find out why its stop did not hold.
+    Guard("stop_overshoot", "Stop overshoot", "critical",
+          "Morgul — a real-money stop did not hold", check_stop_overshoot),
 ]
 GUARD = {g.key: g for g in GUARDS}
 

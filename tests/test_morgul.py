@@ -1744,7 +1744,7 @@ class WiringTests(TestCase):
             cache.add(morgul.LOCK_KEY, "held", 60)
             idle = run_morgul_guards()
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["guards"], 10)
+        self.assertEqual(result["guards"], 11)
         self.assertEqual(idle["idle"], "another Morgul run is in progress")
         row = PlatformComponent.objects.get(key=morgul.COMPONENT_KEY)
         self.assertEqual(row.last_status, "success")
@@ -1761,7 +1761,8 @@ class WiringTests(TestCase):
             self.assertNotIn(needle, src)
         self.assertEqual(re.findall(r"\.save\(", src), [])
         self.assertEqual(src.count("apply_brake("), 1)
-        self.assertEqual(len(morgul.GUARDS), 10)
+        # G12 stop overshoot joined on 2026-10-02 (tests/test_morgul_overshoot.py).
+        self.assertEqual(len(morgul.GUARDS), 11)
         # The daily loss never brakes (2026-10-01): the engine's gate lets
         # only elite entries past the stop, and stops at the absolute one.
         self.assertEqual({g.key for g in morgul.GUARDS if g.brake},

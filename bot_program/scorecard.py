@@ -65,6 +65,9 @@ def row_of(trade) -> dict:
         "r": trade.realized_r,
         "outcome": trade.outcome or "",
         "by_hand": HAND_CLOSE_TAG in (trade.reason or ""),
+        # Whether a Sauron signal stood behind the entry: a bot's always
+        # does; a hand-taken one carries its signal_id when it had one.
+        "backed": rule != MANUAL_RULE or bool(meta.get("signal_id")),
         "mfe": mfe,
         "closed_at": trade.closed_at,
     }
