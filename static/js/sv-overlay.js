@@ -520,6 +520,13 @@
                 "</div>" +
                 '<div class="sv-dialog-body">' +
                   (opts.message ? '<p class="sv-dialog-msg">' + esc(opts.message) + "</p>" : "") +
+                  /* A warning the operator reads past, never a gate: the
+                   * button stays what it was (2026-10-02, the early close). */
+                  (opts.warn && opts.warn.text
+                    ? '<div class="sz-warn sz-warn--book" data-role="warn"><b>' +
+                      esc(opts.warn.title || "WARNING") + "</b>" +
+                      esc(opts.warn.text) + "</div>"
+                    : "") +
                   facts +
                   (opts.detail ? '<p class="sv-dialog-detail">' + esc(opts.detail) + "</p>" : "") +
                   typed + secretHtml +

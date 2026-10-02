@@ -2806,8 +2806,14 @@
         facts.push(['Failed closes', String(p.attempts || 0)]);
         facts.push(['At the broker', 'STILL OPEN']);
       }
+      /* Cutting a winner short of its target (2026-10-02): said above the
+         button, never a gate — the last word stays the operator's. */
+      var early = (!p.pending && p.early_close && p.early_close.warn)
+        ? p.early_close : null;
       SV.overlay.confirm({
         title: p.pending ? 'Retry this close?' : 'Close this position?',
+        warn: early ? { title: 'CLOSING A WINNER EARLY', text: early.reason }
+                    : undefined,
         message: p.pending
           ? 'The broker refused the last close, so the position is still open there. This asks the broker whether it still holds it, then resubmits.'
           : (live
@@ -2821,7 +2827,9 @@
            action — but a live close is irreversible real money, the same
            bar the kill switch sets. */
         secretLabel: live ? 'Trading PIN' : undefined,
-        confirmLabel: p.pending ? 'RETRY CLOSE' : (live ? 'CLOSE LIVE POSITION' : 'CLOSE POSITION')
+        confirmLabel: p.pending ? 'RETRY CLOSE'
+          : (live ? 'CLOSE LIVE POSITION' : 'CLOSE POSITION') +
+            (early ? ' ANYWAY' : '')
       }).then(function (ok) {
         if (!ok) { done(); return; }
         fetch('/positions/' + encodeURIComponent(id) + '/close/', {

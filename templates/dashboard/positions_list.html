@@ -1068,6 +1068,24 @@ a.ph-sym.is-neutral:hover, a.ph-sym.is-neutral:focus-visible {
     }
 
     var busy = false;
+    /* The winners a close-all would cut short of their own targets — the
+       week of 2026-10-02 closed several at +0.04R in one minute. */
+    function earlyWarn(p) {
+        var e = p.early || [];
+        if (!e.length) return null;
+        var names = e.map(function (x) {
+            return x.symbol + " " + (x.r >= 0 ? "+" : "") + Number(x.r).toFixed(2) +
+                   "R of " + (x.target_r >= 0 ? "+" : "") +
+                   Number(x.target_r).toFixed(2) + "R";
+        }).join(", ");
+        var more = (p.early_count || e.length) - e.length;
+        return {
+            title: "CLOSING " + (p.early_count || e.length) + " WINNER(S) EARLY",
+            text: names + (more > 0 ? " and " + more + " more" : "") +
+                  " — short of their targets. Position care moves a stop to " +
+                  "break-even at +1R. A warning, not a block: the choice is yours."
+        };
+    }
     btn.addEventListener("click", function () {
         if (busy) return;
         busy = true;
@@ -1110,8 +1128,12 @@ a.ph-sym.is-neutral:hover, a.ph-sym.is-neutral:focus-visible {
             if (p.pending) facts.push(["Already retrying", String(p.pending)]);
             if (p.unclosable) facts.push(["Cannot be closed here", p.unclosable + " manual-book row(s)"]);
 
+            /* Winners this would cut short of their targets (2026-10-02):
+               named above the button, never a gate. */
+            var early = earlyWarn(p);
             SV.overlay.confirm({
                 title: "Close all positions?",
+                warn: early || undefined,
                 message: p.live
                     ? "This flattens " + p.live + " LIVE position" + (p.live === 1 ? "" : "s") +
                       " at the broker. It cannot be undone, and re-entering costs the round trip again."
@@ -1126,8 +1148,9 @@ a.ph-sym.is-neutral:hover, a.ph-sym.is-neutral:focus-visible {
                    for the whole set — splitting the run would close half the
                    book and then stop to ask a question. */
                 secretLabel: p.needs_pin ? "Trading PIN" : undefined,
-                confirmLabel: p.live ? "CLOSE " + p.count + " POSITIONS LIVE"
-                                     : "CLOSE " + p.count + " POSITIONS"
+                confirmLabel: (p.live ? "CLOSE " + p.count + " POSITIONS LIVE"
+                                      : "CLOSE " + p.count + " POSITIONS") +
+                              (early ? " ANYWAY" : "")
             }).then(function (ok) {
                 if (!ok) { release(); return; }
                 btn.textContent = "Closing…";

@@ -328,6 +328,21 @@ COMMANDS = [
         "category": "read",
     },
     {
+        "name": "scorecard",
+        "title": "Scorecard",
+        "purpose": "Win rate, average win, average loss and expectancy of the closed book, split by lane, rule, class or venue — and which of the three is losing the money: winners closed by hand, losers that had been +1R, stops that did not hold.",
+        "usage": [
+            "python manage.py scorecard                  # last 30 days, every lane",
+            "python manage.py scorecard --days 90",
+            "python manage.py scorecard --venue live     # real money only",
+            "python manage.py scorecard --by rule        # one block per rule",
+        ],
+        "mirrors": "/command/",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+    },
+    {
         "name": "paper_readiness",
         "title": "Paper readiness",
         "purpose": "The mirror of preflight_live: not whether it is safe to arm money, but whether the evidence chain can produce a graded track record at all. Every link is a component, and a missing row reads as OFF while nothing raises.",
