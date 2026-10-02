@@ -2372,6 +2372,8 @@
             (p.managed === false ? ''
               : ' The 5-minute tick manages the stop and target from here.')) + '</p>' +
           warnHtml +
+          /* Filled by render(): it follows the levels as they move. */
+          '<div data-role="rrwarn" aria-live="polite"></div>' +
           '<div class="sv-dialog-facts">' + factsHtml + '</div>' +
           fundHtml + lvlHtml + levHtml + sizeHtml + pinHtml +
         '</div>' +
@@ -2398,7 +2400,24 @@
       var lvlReset = host.querySelector('[data-role="lvlreset"]');
       var pinIn = host.querySelector('[data-role="pin"]');
       var levSel = host.querySelector('[data-role="lev"]');
+      var rrWarn = host.querySelector('[data-role="rrwarn"]');
       var settled = false;
+
+      /* REWARD:RISK (2026-10-02). What the levels can make against what
+         they risk, gross of costs, from the fill — the same arithmetic as
+         manual_trade.reward_risk_advisory, which records it on the trade.
+         Below the line it WARNS and never blocks: the operator asked for
+         the last word to stay theirs, so okBtn.disabled never reads it. */
+      var rrMin = Number(L.reward_risk_warn);
+      if (!(rrMin > 0)) rrMin = 1;
+      function rewardRisk() {
+        var from = fill > 0 ? fill : entry;
+        var risk = Math.abs(from - stopVal);
+        if (!(from > 0) || !(risk > 0)) return null;
+        var reward = p.side === 'BUY' ? targetVal - from : from - targetVal;
+        return { ratio: Math.max(reward, 0) / risk,
+                 riskPct: risk / from, rewardPct: Math.max(reward, 0) / from };
+      }
 
       function render(q, lvlWhy, sizeWhy) {
         var use = q * cupu;
@@ -2469,10 +2488,27 @@
               : '<span class="sz-ok">Covered.</span>');
         }
 
+        var rr = rewardRisk();
+        var rrLow = !!rr && rr.ratio < rrMin;
+        if (rrWarn) {
+          rrWarn.innerHTML = rrLow
+            ? '<div class="sz-warn sz-warn--book"><b>YOU RISK MORE THAN YOU ' +
+                'CAN WIN</b>' + esc(
+                  'This ticket risks ' + (rr.riskPct * 100).toFixed(2) +
+                  '% to make ' + (rr.rewardPct * 100).toFixed(2) +
+                  '% — reward:risk ' + rr.ratio.toFixed(2) + '. It has to ' +
+                  'win ' + (100 / (1 + rr.ratio)).toFixed(0) + '% of the ' +
+                  'time just to break even, before costs.') +
+                '<br>' + esc('A warning, not a block: the choice is yours. ' +
+                  'Taking it is recorded with this ratio.') + '</div>'
+            : '';
+        }
+
         var n = chosenCount();
-        okBtn.textContent = n
+        okBtn.textContent = (n
           ? ('CLOSE ' + n + ' + TAKE')
-          : (live ? 'TAKE LIVE TRADE' : (held.length ? 'ADD' : 'TAKE TRADE'));
+          : (live ? 'TAKE LIVE TRADE' : (held.length ? 'ADD' : 'TAKE TRADE'))) +
+          (rrLow ? ' ANYWAY' : '');
         okBtn.classList.toggle('is-danger', n > 0 || live);
         host.classList.toggle('sv-dialog--danger', n > 0 || live);
         /* A live OK without a PIN is a refusal the server would make —
