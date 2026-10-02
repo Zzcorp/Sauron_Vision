@@ -273,6 +273,13 @@ def readiness(window_days: int = 30) -> dict:
                 f"to {worst:.1f}h old — refresh-bot-bars runs every 10 "
                 f"minutes, so the feed has stopped for them and an armed bot "
                 f"is deciding on a stale candle: {_names(syms)}")
+        elif kind == "thin_open":
+            notes.append(
+                f"{name} is open and {len(syms)} symbol(s) have a 4h bar up "
+                f"to {worst:.1f}h old, but the bar writer asked the source "
+                f"minutes ago and it had nothing newer: a thin market that "
+                f"printed nothing, not a dead feed — the bot decides on the "
+                f"last trade there is: {_names(syms)}")
         elif kind == "shut_dead":
             blockers.append(
                 f"{len(syms)} symbol(s) are missing up to {worst / 24:.1f} "

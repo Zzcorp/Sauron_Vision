@@ -64,6 +64,38 @@ BAR_DEAD_HOURS = MAX_BAR_AGE_SECONDS / 3600.0
 # period can, and 4h + a margin is the honest line.
 BAR_LATE_HOURS_WHILE_OPEN = 5.0
 
+# A THIN MARKET IS NOT A DEAD FEED (2026-10-02, CBOT oats overnight). An
+# open market whose newest 4h bar is late is excused when the bar writer
+# asked the source within ANSWER_FRESH_S and the source had nothing newer
+# than the table holds (market_data.bot_bars.last_answer): the writer
+# works, the contract printed nothing. Up to THIN_OPEN_MAX_HOURS — past
+# a day of open market with no print, the source itself is in doubt and it
+# is a blocker again.
+ANSWER_FRESH_S = 30 * 60
+THIN_OPEN_MAX_HOURS = 24.0
+
+
+def _source_had_nothing_newer(symbol, newest, now) -> "float | None":
+    """Minutes since the writer asked the source for `symbol`'s 4h bars,
+    when that answer was fresh and held nothing newer than `newest`; None
+    otherwise (no answer, an old one, or the source HAS newer bars, which
+    is the writer's fault and stays a blocker)."""
+    if not symbol or newest is None:
+        return None
+    try:
+        from market_data.bot_bars import last_answer
+        ans = last_answer(symbol, "4h")
+        if not ans:
+            return None
+        age_s = now.timestamp() - float(ans["at"])
+        if age_s < 0 or age_s > ANSWER_FRESH_S:
+            return None
+        if int(ans.get("newest_ms") or 0) > int(newest.timestamp() * 1000):
+            return None
+        return age_s / 60.0
+    except Exception:  # noqa: BLE001 — unknown reads as "not excused"
+        return None
+
 # Past this, "the market is shut" stops being an explanation. Borrowed from
 # signals/lifecycle.py, which already decided four days is too old for the
 # slowest frame this platform reads: a long weekend plus a holiday fits
@@ -171,6 +203,13 @@ def _market_note(row, newest, now) -> str:
     name = market.get("session") or market.get("code") or "?"
     if market.get("is_open"):
         if age >= BAR_LATE_HOURS_WHILE_OPEN:
+            if age < THIN_OPEN_MAX_HOURS:
+                mins = _source_had_nothing_newer(
+                    (row or {}).get("instrument__symbol"), newest, now)
+                if mins is not None:
+                    return (f"  · {name} open, no print for {age:.1f}h — the "
+                            f"source had nothing newer {mins:.0f} min ago "
+                            f"(a thin market)")
             return f"  · {name} OPEN and the bar is {age:.1f}h behind"
         return f"  · {name} open"
     if age >= BAR_SHUT_GRACE_HOURS:
@@ -189,6 +228,9 @@ def _bar_verdict(row, newest, now) -> tuple:
       "ok"          nothing to say
       "late_open"   the market is open and the bar is behind: the feed
                     stopped, and an armed bot is deciding on a stale candle
+      "thin_open"   open, the bar behind, but the writer asked the source
+                    minutes ago and it had nothing newer: a thin market
+                    (no print), not a dead feed — up to THIN_OPEN_MAX_HOURS
       "shut_stale"  shut, past the six hours every price path enforces:
                     correct and temporary, and worth reading once
       "shut_dead"   "shut" for longer than a long weekend explains
@@ -207,6 +249,10 @@ def _bar_verdict(row, newest, now) -> tuple:
     name = market.get("session") or market.get("code") or "?"
     if market.get("is_open"):
         if age >= BAR_LATE_HOURS_WHILE_OPEN:
+            if age < THIN_OPEN_MAX_HOURS and _source_had_nothing_newer(
+                    (row or {}).get("instrument__symbol"), newest,
+                    now) is not None:
+                return ("thin_open", name, age)
             return ("late_open", name, age)
         return ("ok", name, age)
     if age >= BAR_SHUT_GRACE_HOURS:
@@ -234,6 +280,13 @@ def _bar_findings(sym, row, newest, now, blockers, warnings) -> None:
             f"{sym}: {name} is OPEN and the newest 4h bar is {age:.1f}h "
             f"old — refresh-bot-bars runs every 10 minutes, so the feed "
             f"has stopped. An armed bot is deciding on a stale candle")
+        return
+    if kind == "thin_open":
+        warnings.append(
+            f"{sym}: {name} is open and the newest 4h bar is {age:.1f}h "
+            f"old, but the bar writer asked the source minutes ago and it "
+            f"had nothing newer — a thin market that printed nothing, not "
+            f"a dead feed (a blocker again past {THIN_OPEN_MAX_HOURS:.0f}h)")
         return
     if kind == "shut_dead":
         blockers.append(

@@ -74,6 +74,49 @@ def _remember_mute(source: str, symbol: str, interval: str) -> None:
         pass
 
 
+# WHAT THE SOURCE SAID, AND WHEN (2026-10-02). A 4h bar hours old while the
+# market is open reads as a dead feed — and on a thin contract it is not:
+# CBOT oats can go hours overnight without a print, and Yahoo writes no
+# hourly bar for an hour that traded nothing. The writer asked, the source
+# answered, it simply had nothing newer. Recorded per symbol and interval
+# on every answer that carried rows, so the readiness checks
+# (preflight_live._bar_verdict) can tell "the feed stopped" from "the
+# market printed nothing": the first is a blocker, the second a note.
+ANSWER_MEMO_S = 6 * 3600
+
+
+def _answer_key(symbol: str, interval: str) -> str:
+    return f"bars:answered:{symbol}:{interval}"
+
+
+def _note_answer(symbol: str, interval: str, rows) -> None:
+    """Remember that a source answered for (symbol, interval) now, and the
+    newest bar it had. An empty answer is not an answer: nothing is
+    written, and an old note runs out on its own."""
+    try:
+        newest = max(int(r[0]) for r in (rows or []) if r and len(r) >= 6)
+    except (ValueError, TypeError):
+        return
+    try:
+        prev = cache.get(_answer_key(symbol, interval)) or {}
+        if prev.get("at") and time.time() - float(prev["at"]) < 60 \
+                and int(prev.get("newest_ms") or 0) > newest:
+            newest = int(prev["newest_ms"])   # two sources in one pass
+        cache.set(_answer_key(symbol, interval),
+                  {"at": time.time(), "newest_ms": newest}, ANSWER_MEMO_S)
+    except Exception:  # noqa: BLE001 — a dead cache costs the note only
+        pass
+
+
+def last_answer(symbol: str, interval: str) -> "dict | None":
+    """{"at": epoch seconds, "newest_ms": the newest bar's open, epoch ms}
+    of the last source answer for (symbol, interval), or None."""
+    try:
+        return cache.get(_answer_key(symbol, interval)) or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _client_for(user, symbol, cfg):
     """Market-data client for a symbol, or None when only paper is available.
 
@@ -308,6 +351,7 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                                    symbol, interval, e)
                     out["errors"] += 1
                     rows = []
+                _note_answer(symbol, interval, rows)
             if getattr(client, "_sv_public_feed", False):
                 # The keyless feed IS the fallback: what it gave is written
                 # as it is, and nothing backs it up.
@@ -349,6 +393,7 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                 # as the public feed's, so a bar's provenance still says
                 # where it came from.
                 pub, pub_source = _fallback_rows(cfg, symbol, interval, limit)
+                _note_answer(symbol, interval, pub)
                 if pub:
                     out["fallback"] += 1
                     if asked:
@@ -382,6 +427,7 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                 # nothing newer either, the market is shut and nothing is
                 # said.
                 pub, pub_source = _fallback_rows(cfg, symbol, interval, limit)
+                _note_answer(symbol, interval, pub)
                 pub = _after_the_venues_last_bar(inst, interval, pub)
                 if pub:
                     w2, s2 = _upsert_rows(inst, interval, pub, pub_source)
@@ -565,6 +611,7 @@ def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
                                inst.symbol, interval, e)
                 out["errors"] += 1
                 continue
+            _note_answer(inst.symbol, interval, rows)
             written, skipped = _upsert_rows(inst, interval, rows, source)
             out["bars"] += written
             out["skipped"] += skipped
