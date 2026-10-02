@@ -42,17 +42,41 @@ def cleanup_funding():
     log.info("cleanup_funding: removed %d rows", deleted)
     return deleted
 
+#: Minute bars: high volume, read by nothing that looks back a quarter.
+MINUTE_TIMEFRAMES = ["1m", "5m", "15m", "30m"]
+#: The bars the bots and the backtests decide on. Kept for years, not days.
+DECISION_TIMEFRAMES = ["1h", "4h"]
+#: Default depth for the decision bars: three years (2026-10-02).
+RETAIN_HOURLY_DEFAULT_DAYS = 3 * 365
+
+
 @shared_task
 def cleanup_price_data():
-    """Prune intraday PriceData older than RETAIN_INTRADAY_DAYS (default 90).
-    Daily/weekly bars are preserved regardless."""
+    """Prune minute PriceData older than RETAIN_INTRADAY_DAYS (default 90)
+    and 1h/4h PriceData older than RETAIN_HOURLY_DAYS (default three years).
+    Daily/weekly bars are preserved regardless.
+
+    THE BACKTESTS WERE STARVED HERE (2026-10-02). This task used to prune
+    1h and 4h with the minute bars at 90 days, every night. The 4h bars are
+    the ones every rule and every backtest decides on, and the only
+    walk-forward evaluator (signals/evolution_rules.py) needs 300 of them
+    OLDER than 180 days to admit an instrument — so its universe was always
+    empty, every evolution leg scored on zero trades, and the live evidence
+    gate failed with "0 trades". A year of 4h bars for 200 instruments is a
+    few hundred thousand rows; keeping three years of them is cheap, and
+    without them no backtest can say anything."""
     from market_data.models import PriceData
-    cutoff = timezone.now() - timedelta(days=_days("RETAIN_INTRADAY_DAYS", 90))
+    now = timezone.now()
+    minute_cut = now - timedelta(days=_days("RETAIN_INTRADAY_DAYS", 90))
+    hourly_cut = now - timedelta(
+        days=_days("RETAIN_HOURLY_DAYS", RETAIN_HOURLY_DEFAULT_DAYS))
     deleted, _ = PriceData.objects.filter(
-        timeframe__in=["1m","5m","15m","1h","4h"],
-        timestamp__lt=cutoff).delete()
-    log.info("cleanup_price_data: removed %d intraday bars", deleted)
-    return deleted
+        timeframe__in=MINUTE_TIMEFRAMES, timestamp__lt=minute_cut).delete()
+    hourly, _ = PriceData.objects.filter(
+        timeframe__in=DECISION_TIMEFRAMES, timestamp__lt=hourly_cut).delete()
+    log.info("cleanup_price_data: removed %d minute bars, %d 1h/4h bars",
+             deleted, hourly)
+    return deleted + hourly
 
 @shared_task
 def cleanup_news_bodies():
