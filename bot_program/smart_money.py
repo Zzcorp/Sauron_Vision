@@ -254,11 +254,17 @@ def stop_beyond_the_crowd(direction, entry, stop, atr, levels, *,
                 continue
             target = price + hunt
         if abs(entry - target) > limit * (1.0 + 1e-9):
+            # in ATRs of WIDENING, both sides: "1.90 ATR" read as the
+            # widening when it was the whole stop distance (2026-10-02)
+            widen = (abs(entry - target) - abs(entry - stop)) / atr
+            room = max(0.0, (limit - abs(entry - stop)) / atr)
+            allows = (f"the plan allows {room:.2f}" if room >= 0.005
+                      else "the plan has no room to widen it")
             return dict(base, crowded=True, level=price, kind=kind,
                         why=(f"the stop sits in the crowd's zone at the "
-                             f"{kind} {price:g}; clearing it needs "
-                             f"{abs(entry - target) / atr:.2f} ATR, more "
-                             f"than the plan carries — left where it was"))
+                             f"{kind} {price:g}; clearing it means widening "
+                             f"it {widen:.2f} ATR and {allows} — left where "
+                             f"it was"))
         new = target
         crossed.append({"price": round(price, 10), "kind": kind})
     if not crossed:
@@ -691,6 +697,9 @@ def entry_read(symbol, direction, entry, stop, *, atr=None, asset_class="",
         out["why"].append(cot["why"])
     if scales:
         out["scale"], strongest = min(scales, key=lambda s: s[0])
+        # said once, at the top, with the size it set
+        if strongest in out["why"]:
+            out["why"].remove(strongest)
         out["why"].insert(0, f"size x{out['scale']:g}: {strongest}")
     return out
 
