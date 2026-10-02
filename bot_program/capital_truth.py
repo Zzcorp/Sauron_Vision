@@ -79,19 +79,42 @@ def broker_equity(user, cfg):
                      getattr(cfg, "name", "?"), e)
         return None
 
-    # A PaperTrader answers `get_balance`, not `balance_usdt`, and its
-    # answer is a simulation. Asking it would compare a real pool against
-    # an imaginary account.
-    fn = getattr(client, "balance_usdt", None)
-    if not callable(fn):
-        return None
-
-    try:
-        equity = float(fn() or 0)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("capital_truth: balance unreadable for %s: %s",
-                     getattr(cfg, "name", "?"), e)
-        return None
+    # THE ACCOUNT'S TOTAL VALUE, the number the sync sizes every follower
+    # from (tasks: base = deployable(net liquidation) x share), so the pool
+    # and this reading are the same quantity. `balance_usdt` is only the
+    # fallback for an adapter without `net_liquidation`: on eToro it is the
+    # AVAILABLE CASH (accountAvailableCash), and with positions open that
+    # read a 2,173 account as 483 — "every limit here is 4.5x looser than it
+    # reads" on every live bot, every tick (2026-10-02). Saxo's
+    # balance_usdt was already the total; the two adapters disagreed.
+    #
+    # A PaperTrader answers neither, and its answer would be a simulation:
+    # asking it would compare a real pool against an imaginary account.
+    equity = None
+    nl = getattr(client, "net_liquidation", None)
+    if callable(nl):
+        try:
+            got = nl()
+            # the (value, currency) pair every adapter documents; anything
+            # else is not a reading
+            from decimal import Decimal
+            if isinstance(got, (tuple, list)) and got \
+                    and isinstance(got[0], (int, float, Decimal)) \
+                    and not isinstance(got[0], bool):
+                equity = float(got[0])
+        except Exception as e:  # noqa: BLE001
+            logger.debug("capital_truth: net liquidation unreadable for "
+                         "%s: %s", getattr(cfg, "name", "?"), e)
+    if equity is None:
+        fn = getattr(client, "balance_usdt", None)
+        if not callable(fn):
+            return None
+        try:
+            equity = float(fn() or 0)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("capital_truth: balance unreadable for %s: %s",
+                         getattr(cfg, "name", "?"), e)
+            return None
     if equity <= 0:
         # Zero from a live broker is either an empty account or an API
         # answering badly, and this module cannot tell which. Unmeasured.
