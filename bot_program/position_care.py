@@ -170,7 +170,9 @@ def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
     if crowd and not manual and any(w in CROWD_MOVABLE for _l, w in cands):
         # the read is paid for only when a lock could move
         crowd = crowd() if callable(crowd) else crowd
-        cost = _f(meta.get("cost_fraction_charged")) or 0.0
+        cost = _f(meta.get("cost_fraction_charged"))
+        if cost is None:
+            cost = float((crowd or {}).get("cost") or 0.0)
         if crowd:
             cands = [_beyond_the_crowd(level, why, d, p, entry, crowd,
                                        cost=cost)
@@ -236,19 +238,15 @@ CROWD_MOVABLE = frozenset({"breakeven", "trail"})
 
 
 def _beyond_the_crowd(level, why, d, price, entry, crowd, *, cost=0.0):
-    """(level, why) with a profit lock moved out of the crowd's hunt zone,
-    never closer to the entry than its round-trip `cost` (a fraction):
-    a lock stays a lock, net of what the trip cost."""
-    floor = entry * (1.0 + d * max(0.0, float(cost or 0.0)))
-    if why not in CROWD_MOVABLE or d * (price - floor) <= 0:
+    """(level, why) with a profit lock moved out of the crowd's hunt zone
+    (smart_money.lock_beyond_the_crowd: never closer to the entry than its
+    round-trip `cost`). The posture floors and the weekend lock pass."""
+    if why not in CROWD_MOVABLE:
         return level, why
-    from bot_program.smart_money import stop_beyond_the_crowd
-    r = stop_beyond_the_crowd("BUY" if d > 0 else "SELL", price, level,
-                              crowd.get("atr"), crowd.get("levels") or [],
-                              max_distance=abs(price - floor))
-    if r["moved"] and d * (r["stop"] - floor) >= 0:
-        return r["stop"], f"{why} (beyond the crowd)"
-    return level, why
+    from bot_program.smart_money import lock_beyond_the_crowd
+    moved_to, moved = lock_beyond_the_crowd(
+        "BUY" if d > 0 else "SELL", price, entry, level, crowd, cost=cost)
+    return (moved_to, f"{why} (beyond the crowd)") if moved else (level, why)
 
 
 def _save_care(trade, care_value, care_exit=None):
@@ -316,8 +314,18 @@ def care(bot, trade, price, client, *, now=None) -> str:
             if smart_money.is_on():
                 def crowd():
                     try:
-                        return smart_money.care_levels(trade.symbol,
-                                                       trade.side, price)
+                        levels = smart_money.care_levels(trade.symbol,
+                                                         trade.side, price)
+                        if levels is not None:
+                            # the round trip a row opened before
+                            # cost_fraction_charged existed was charged
+                            from bot_program.asset_engine.risk_levels import (
+                                round_trip_cost_fraction,
+                            )
+                            levels = dict(levels, cost=float(
+                                round_trip_cost_fraction(bot.cfg,
+                                                         trade.symbol)))
+                        return levels
                     except Exception as e:  # noqa: BLE001 — plain care runs
                         logger.info("[care] %s #%s: crowd levels unread (%s)",
                                     trade.symbol, trade.id, e)

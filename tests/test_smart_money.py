@@ -919,3 +919,301 @@ class TheWordsTests(SimpleTestCase):
         self.assertTrue(r["why"][0].startswith("size x0.5: a fresh sweep"))
         self.assertEqual(sum(1 for w in r["why"] if "sweep of the highs" in w),
                          1)
+
+
+# ── 10. the engine's trailing stops (2026-10-02) ──────────────────────────
+# The operator: "construis la couche anti-chasse sur le stop suiveur".
+# Aragorn's care had it since PR19; the engine's own break-even and trail
+# (extras breakeven_at_r / trail_pct), held by the bot or resting at the
+# broker, get the same lock from the same function.
+
+class _Lock:
+    """Enough of an AssetBotTrade for the pure trailing rules."""
+
+    def __init__(self, side="BUY", entry="100", stop="98"):
+        self.id, self.side, self.symbol = 1, side, "X"
+        self.entry_price, self.stop_loss = Decimal(entry), Decimal(stop)
+        self.metadata = {"initial_stop_loss": float(stop)}
+
+    def save(self, update_fields=None):
+        pass
+
+
+class TheLockTests(SimpleTestCase):
+
+    def test_one_lock_function_never_past_the_entry(self):
+        from bot_program.smart_money import lock_beyond_the_crowd
+        crowd = {"atr": 2.0, "levels": [(104.0, "swing low")]}
+        self.assertEqual(lock_beyond_the_crowd("BUY", 106.0, 100.0, 103.88,
+                                               crowd), (103.0, True))
+        near = {"atr": 2.0, "levels": [(100.4, "round number")]}
+        self.assertEqual(lock_beyond_the_crowd("BUY", 102.4, 100.0, 100.2,
+                                               near), (100.2, False))
+        self.assertEqual(lock_beyond_the_crowd("SELL", 94.0, 100.0, 96.12,
+                                               {"atr": 2.0, "levels": [
+                                                   (96.0, "swing high")]}),
+                         (97.0, True))
+        self.assertEqual(lock_beyond_the_crowd("BUY", 106.0, 100.0, 103.88,
+                                               None), (103.88, False))
+
+    def test_the_trail_commits_the_lock_beyond_the_crowd(self):
+        from bot_program.engine.trailing import update_trailing_stop
+        t = _Lock()
+        moved = update_trailing_stop(
+            t, Decimal("106"), 2.0,
+            adjust=lambda c, w: (Decimal("103.0"), f"{w} (beyond the crowd)"))
+        self.assertTrue(moved)
+        self.assertEqual(t.stop_loss, Decimal("103.0"))
+        self.assertEqual(t.metadata["stop_moves"][-1]["why"],
+                         "trail (beyond the crowd)")
+
+    def test_a_failing_adjuster_changes_nothing(self):
+        from bot_program.engine.trailing import update_trailing_stop
+
+        def boom(c, w):
+            raise RuntimeError("down")
+
+        t = _Lock()
+        self.assertTrue(update_trailing_stop(t, Decimal("106"), 2.0,
+                                             adjust=boom))
+        self.assertEqual(t.stop_loss, Decimal("103.88"))
+        self.assertEqual(t.metadata["stop_moves"][-1]["why"], "trail")
+
+    def test_an_adjusted_break_even_is_a_stand_in_not_armed(self):
+        """Review of PR21: arming the moved lock left the operator's
+        buffer short for the life of the trade. The rule offers its own
+        lock again and arms it in full once the zone is gone."""
+        from bot_program.engine.trailing import apply_breakeven
+        t = _Lock()
+        self.assertTrue(apply_breakeven(
+            t, Decimal("103"), 1.0, 0.5,
+            adjust=lambda c, w: (Decimal("100.8"),
+                                 f"{w} (beyond the crowd)")))
+        self.assertEqual(t.stop_loss, Decimal("100.8"))
+        self.assertFalse(t.metadata.get("breakeven_armed"))
+        # the zone persists: the same stand-in is no improvement, nothing moves
+        self.assertFalse(apply_breakeven(
+            t, Decimal("103.5"), 1.0, 0.5,
+            adjust=lambda c, w: (Decimal("100.8"),
+                                 f"{w} (beyond the crowd)")))
+        # the zone is gone: the full lock goes in, and is armed
+        self.assertTrue(apply_breakeven(t, Decimal("104"), 1.0, 0.5,
+                                        adjust=lambda c, w: (c, w)))
+        self.assertEqual(t.stop_loss, Decimal("101.0"))
+        self.assertTrue(t.metadata["breakeven_armed"])
+
+    def test_the_tighten_only_rule_still_judges_the_moved_lock(self):
+        from bot_program.engine.trailing import update_trailing_stop
+        t = _Lock(stop="103.5")
+        self.assertFalse(update_trailing_stop(
+            t, Decimal("106"), 2.0,
+            adjust=lambda c, w: (Decimal("103.0"), w)))
+        self.assertEqual(t.stop_loss, Decimal("103.5"), "never loosened")
+
+
+class TheLockAdjusterTests(TestCase):
+
+    def _bot(self, name="T", symbols=("AAPL",), asset_class="stock"):
+        from bot_program.asset_engine.stock_bot import StockBot
+        from bot_program.models import AssetBotConfig
+        user = User.objects.create_user(f"lk_{name}", password="x")
+        cfg = AssetBotConfig.objects.create(
+            user=user, asset_class=asset_class, name=name, mode="paper",
+            symbols=list(symbols), capital=Decimal("10000"), enabled=True,
+            extras={"trail_pct": 2.0})
+        return StockBot(cfg)
+
+    def test_off_options_and_the_manual_lane_get_no_adjuster(self):
+        from bot_program.smart_money import lock_adjuster
+        trade = SimpleNamespace(symbol="AAPL", side="BUY", asset_class="stock",
+                                entry_price=Decimal("100"), metadata={})
+        bot = self._bot()
+        self.assertIsNone(lock_adjuster(bot, trade, 106))
+        _switch()
+        self.assertIsNotNone(lock_adjuster(bot, trade, 106))
+        manual = self._bot(name="manual", symbols=())
+        self.assertIsNone(lock_adjuster(manual, trade, 106))
+        trade.asset_class = "options"
+        self.assertIsNone(lock_adjuster(bot, trade, 106))
+
+    def test_the_levels_are_read_once_and_only_when_asked(self):
+        from bot_program.smart_money import lock_adjuster
+        _switch()
+        trade = SimpleNamespace(symbol="AAPL", side="BUY", asset_class="stock",
+                                entry_price=Decimal("100"), metadata={})
+        crowd = {"atr": 2.0, "levels": [(104.0, "swing low")]}
+        with patch("bot_program.smart_money.care_levels",
+                   return_value=crowd) as lv:
+            adjust = lock_adjuster(self._bot(), trade, 106)
+            lv.assert_not_called()
+            self.assertEqual(adjust(Decimal("103.88"), "trail"),
+                             (Decimal("103.0"), "trail (beyond the crowd)"))
+            adjust(Decimal("100.5"), "breakeven")
+        lv.assert_called_once_with("AAPL", "BUY", 106)
+
+
+class TheEngineTrailTests(TestCase):
+    """The two engine paths, end to end: the bot-held stop and the stop
+    resting at the broker."""
+
+    def _row(self, name, *, protected):
+        from django.utils import timezone as tz
+
+        from bot_program.asset_engine.stock_bot import StockBot
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+        user = User.objects.create_user(f"et_{name}", password="x")
+        cfg = AssetBotConfig.objects.create(
+            user=user, asset_class="stock", name=name, mode="paper",
+            symbols=["AAPL"], capital=Decimal("10000"), enabled=True,
+            extras={"trail_pct": 2.0})
+        meta = {"initial_stop_loss": 98.0}
+        if protected:
+            meta.update(protected=True, protective_order_ids=["77"])
+        trade = AssetBotTrade.objects.create(
+            config=cfg, asset_class="stock", symbol="AAPL", side="BUY",
+            qty=Decimal("10"), entry_price=Decimal("100"),
+            stop_loss=Decimal("98"), take_profit=Decimal("110"),
+            status="OPEN", paper=True, opened_at=tz.now(), metadata=meta)
+        return StockBot(cfg), trade
+
+    CROWD = {"atr": 2.0, "levels": [(104.0, "swing low")]}
+
+    def test_the_bot_held_trail_leaves_the_hunt_zone(self):
+        bot, trade = self._row("off", protected=False)
+        with patch("bot_program.smart_money.care_levels",
+                   return_value=self.CROWD):
+            self.assertTrue(bot._update_trailing_stop(trade, Decimal("106")))
+        self.assertEqual(trade.stop_loss, Decimal("103.88"), "OFF: as before")
+        _switch()
+        bot, trade = self._row("on", protected=False)
+        with patch("bot_program.smart_money.care_levels",
+                   return_value=self.CROWD):
+            self.assertTrue(bot._update_trailing_stop(trade, Decimal("106")))
+        trade.refresh_from_db()
+        self.assertEqual(trade.stop_loss, Decimal("103.0"))
+        self.assertEqual(trade.metadata["stop_moves"][-1]["why"],
+                         "trail (beyond the crowd)")
+
+    def test_the_broker_is_asked_for_the_lock_beyond_the_crowd(self):
+        from unittest.mock import MagicMock
+        bot, trade = self._row("broker", protected=True)
+        _switch()
+        client = MagicMock()
+        client.modify_protective.side_effect = (
+            lambda oid, price: {"ok": True, "price": price, "reason": ""})
+        with patch("bot_program.smart_money.care_levels",
+                   return_value=self.CROWD):
+            self.assertTrue(bot._manage_broker_stop(trade, Decimal("106"),
+                                                    client))
+        self.assertEqual(Decimal(str(client.modify_protective.call_args[0][1])),
+                         Decimal("103.0"))
+        trade.refresh_from_db()
+        self.assertEqual(trade.stop_loss, Decimal("103.0"))
+        self.assertEqual(trade.metadata["stop_moves"][-1]["why"],
+                         "trail (beyond the crowd):broker")
+
+
+
+class TheReviewOfPr21Tests(TestCase):
+    """The adversarial review of PR21 (2026-10-02): four confirmed defects,
+    each pinned here."""
+
+    NOISY = {"atr": 2.3456789123, "levels": [(104.0, "swing low")]}
+
+    def _row(self, name, *, protected, extras=None, meta=None):
+        from django.utils import timezone as tz
+
+        from bot_program.asset_engine.stock_bot import StockBot
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+        user = User.objects.create_user(f"r21_{name}", password="x")
+        cfg = AssetBotConfig.objects.create(
+            user=user, asset_class="stock", name=name, mode="paper",
+            symbols=["AAPL"], capital=Decimal("10000"), enabled=True,
+            extras=extras or {"trail_pct": 2.0})
+        m = {"initial_stop_loss": 98.0}
+        if protected:
+            m.update(protected=True, protective_order_ids=["77"])
+        m.update(meta or {})
+        trade = AssetBotTrade.objects.create(
+            config=cfg, asset_class="stock", symbol="AAPL", side="BUY",
+            qty=Decimal("10"), entry_price=Decimal("100"),
+            stop_loss=Decimal("98"), take_profit=Decimal("110"),
+            status="OPEN", paper=True, opened_at=tz.now(), metadata=m)
+        return StockBot(cfg), trade
+
+    def test_a_noisy_atr_lock_goes_to_the_venue_once(self):
+        """10 decimals asked, 8 stored: the same lock read as tighter on
+        every tick and was sent again every five minutes."""
+        from unittest.mock import MagicMock
+
+        from bot_program.models import AssetBotTrade
+        _switch()
+        bot, trade = self._row("noisy_b", protected=True)
+        client = MagicMock()
+        client.modify_protective.side_effect = (
+            lambda oid, price: {"ok": True, "price": float(price),
+                                "reason": ""})
+        moved = []
+        with patch("bot_program.smart_money.care_levels",
+                   return_value=self.NOISY):
+            for _ in range(3):
+                row = AssetBotTrade.objects.get(pk=trade.pk)
+                moved.append(bot._manage_broker_stop(row, Decimal("106"),
+                                                     client))
+        self.assertEqual(moved, [True, False, False])
+        self.assertEqual(client.modify_protective.call_count, 1)
+        sent = Decimal(str(client.modify_protective.call_args[0][1]))
+        self.assertEqual(sent, sent.quantize(Decimal("1e-8")))
+        self.assertLess(sent, Decimal("104") - Decimal("1.17"),
+                        "snapped away from the mark, still past the zone")
+
+    def test_a_noisy_atr_lock_is_committed_once_bot_held(self):
+        from bot_program.models import AssetBotTrade
+        _switch()
+        bot, trade = self._row("noisy_h", protected=False)
+        moved = []
+        with patch("bot_program.smart_money.care_levels",
+                   return_value=self.NOISY):
+            for _ in range(3):
+                row = AssetBotTrade.objects.get(pk=trade.pk)
+                moved.append(bot._update_trailing_stop(row, Decimal("106")))
+        self.assertEqual(moved, [True, False, False])
+        row = AssetBotTrade.objects.get(pk=trade.pk)
+        self.assertEqual(len(row.metadata["stop_moves"]), 1)
+
+    def test_a_failed_read_is_not_retried_in_the_same_tick(self):
+        from bot_program.smart_money import lock_adjuster
+        _switch()
+        bot, trade = self._row("fail", protected=False)
+        with patch("bot_program.smart_money.care_levels",
+                   side_effect=RuntimeError("down")) as lv:
+            adjust = lock_adjuster(bot, trade, 106)
+            self.assertEqual(adjust(Decimal("100.5"), "breakeven"),
+                             (Decimal("100.5"), "breakeven"))
+            self.assertEqual(adjust(Decimal("103.88"), "trail"),
+                             (Decimal("103.88"), "trail"))
+        self.assertEqual(lv.call_count, 1)
+
+    def test_a_row_without_its_charged_cost_floors_on_the_config_estimate(self):
+        """Rows opened before cost_fraction_charged existed floored on the
+        bare entry, where a "break-even" books a loss."""
+        from bot_program.smart_money import lock_adjuster
+        _switch()
+        bot, trade = self._row("nocost", protected=False)
+        crowd = {"atr": 2.0, "levels": [(101.0, "round number")]}
+        with patch("bot_program.smart_money.care_levels",
+                   return_value=crowd):
+            lock, why = lock_adjuster(bot, trade, 105)(Decimal("101.0"),
+                                                       "breakeven")
+        # the target 100.0 is the bare entry: under the 5 bps stock round
+        # trip, so the lock stays the rule's own
+        self.assertEqual((lock, why), (Decimal("101.0"), "breakeven"))
+
+    def test_a_percentage_trail_far_from_the_mark_sees_its_round_number(self):
+        """A quiet series (ATR 0.249) with a 2% trail lands on 98.0, eight
+        ATRs under the mark, past the span care_levels lists."""
+        from bot_program.smart_money import lock_beyond_the_crowd
+        crowd = {"atr": 0.249, "levels": []}
+        lock, moved = lock_beyond_the_crowd("BUY", 100.0, 90.0, 98.0, crowd)
+        self.assertTrue(moved)
+        self.assertAlmostEqual(lock, 98.0 - 0.5 * 0.249, places=6)
