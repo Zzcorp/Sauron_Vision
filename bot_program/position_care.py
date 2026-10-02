@@ -236,19 +236,15 @@ CROWD_MOVABLE = frozenset({"breakeven", "trail"})
 
 
 def _beyond_the_crowd(level, why, d, price, entry, crowd, *, cost=0.0):
-    """(level, why) with a profit lock moved out of the crowd's hunt zone,
-    never closer to the entry than its round-trip `cost` (a fraction):
-    a lock stays a lock, net of what the trip cost."""
-    floor = entry * (1.0 + d * max(0.0, float(cost or 0.0)))
-    if why not in CROWD_MOVABLE or d * (price - floor) <= 0:
+    """(level, why) with a profit lock moved out of the crowd's hunt zone
+    (smart_money.lock_beyond_the_crowd: never closer to the entry than its
+    round-trip `cost`). The posture floors and the weekend lock pass."""
+    if why not in CROWD_MOVABLE:
         return level, why
-    from bot_program.smart_money import stop_beyond_the_crowd
-    r = stop_beyond_the_crowd("BUY" if d > 0 else "SELL", price, level,
-                              crowd.get("atr"), crowd.get("levels") or [],
-                              max_distance=abs(price - floor))
-    if r["moved"] and d * (r["stop"] - floor) >= 0:
-        return r["stop"], f"{why} (beyond the crowd)"
-    return level, why
+    from bot_program.smart_money import lock_beyond_the_crowd
+    moved_to, moved = lock_beyond_the_crowd(
+        "BUY" if d > 0 else "SELL", price, entry, level, crowd, cost=cost)
+    return (moved_to, f"{why} (beyond the crowd)") if moved else (level, why)
 
 
 def _save_care(trade, care_value, care_exit=None):

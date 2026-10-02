@@ -14,6 +14,11 @@ bot entry does with it:
    moved stop (risk-based sizing), so the money at risk is unchanged: the
    position is smaller, not riskier. A zone that cannot be cleared within
    the cap leaves the stop where it was and takes CROWDED_STOP_SCALE.
+   The trailing locks get the same treatment (lock_beyond_the_crowd):
+   Aragorn's break-even and trail (position_care.py), and the engine's
+   own (extras breakeven_at_r / trail_pct), held by the bot or resting at
+   the broker (lock_adjuster) — never closer to the entry than the round
+   trip, never looser than the stop already in place.
 2. THE SWEEP (sweep_read). A bar that wicked through a swing level and
    closed back inside is a liquidity grab; whoever took the stops trades
    the other way. A real-money entry against a fresh sweep takes
@@ -723,6 +728,75 @@ def care_levels(symbol, side, price, *, timeframe=TIMEFRAME) -> dict:
     return {"atr": atr,
             "levels": crowd_levels(side, price, far, atr, df, swings,
                                    span=span)}
+
+
+def lock_beyond_the_crowd(side, price, entry, lock, crowd, *,
+                          cost=0.0) -> tuple:
+    """(lock, moved) — a profit lock (a break-even, a trail) moved out of
+    the crowd's hunt zone at the mark `price`, never closer to the entry
+    than its round-trip `cost` (a fraction): a lock stays a lock, net of
+    what the trip cost. One copy for every lane that trails a stop:
+    Aragorn's position care and the engine's break-even and trail, held
+    by the bot or resting at the broker (2026-10-02)."""
+    d = 1.0 if _buy(side) else -1.0
+    try:
+        price, entry, lock = float(price), float(entry), float(lock)
+    except (TypeError, ValueError):
+        return lock, False
+    if not crowd or price <= 0 or entry <= 0:
+        return lock, False
+    floor = entry * (1.0 + d * max(0.0, float(cost or 0.0)))
+    if d * (price - floor) <= 0:
+        return lock, False
+    r = stop_beyond_the_crowd("BUY" if d > 0 else "SELL", price, lock,
+                              crowd.get("atr"), crowd.get("levels") or [],
+                              max_distance=abs(price - floor))
+    if r["moved"] and d * (r["stop"] - floor) >= 0:
+        return r["stop"], True
+    return lock, False
+
+
+def lock_adjuster(bot, trade, price):
+    """A callable (lock, why) -> (lock, why) for the engine's break-even
+    and trail (bot_program/engine/trailing.py), or None when the smart
+    money does not apply: the switch OFF, options (a premium has no crowd
+    levels), the operator's manual lane. The crowd's levels are read once,
+    on the first lock asked about, never on a tick that asks nothing.
+    Never raises: a failed read leaves the lock where the rule put it."""
+    try:
+        if "options" in (getattr(bot, "asset_class", ""),
+                         getattr(trade, "asset_class", "")):
+            return None
+        if not is_on():
+            return None
+        from bot_program.share_allocator import _is_manual_lane
+        if _is_manual_lane(bot.cfg):
+            return None
+    except Exception:  # noqa: BLE001 — unknown reads as "do not touch"
+        return None
+    seen = {}
+
+    def adjust(lock, why):
+        if lock is None:
+            return lock, why
+        try:
+            if "crowd" not in seen:
+                seen["crowd"] = care_levels(trade.symbol, trade.side, price)
+            cost = float((trade.metadata or {}).get("cost_fraction_charged")
+                         or 0.0)
+            moved_to, moved = lock_beyond_the_crowd(
+                trade.side, price, trade.entry_price, lock, seen["crowd"],
+                cost=cost)
+        except Exception as e:  # noqa: BLE001
+            logger.info("[smart money] %s: lock left (%s)",
+                        getattr(trade, "symbol", "?"), e)
+            return lock, why
+        if not moved:
+            return lock, why
+        from decimal import Decimal
+        return Decimal(str(round(moved_to, 10))), f"{why} (beyond the crowd)"
+
+    return adjust
 
 
 def meta_for(read: dict, original_stop) -> dict:

@@ -2162,6 +2162,18 @@ class AssetBot(ABC):
                 options.append(("trail", trail_candidate(
                     trade, price, trail_pct,
                     self._extras_float("trail_start_r"))))
+            # The smart money (switch smart_money): a lock in the crowd's
+            # hunt zone goes beyond it BEFORE the tighten-only judgement,
+            # so the venue is only ever asked for the lock that survives.
+            from bot_program.smart_money import lock_adjuster
+            adjust = lock_adjuster(self, trade, price)
+            if adjust is not None:
+                adjusted = []
+                for w, c in options:
+                    if c is not None:
+                        c, w = adjust(c, w)
+                    adjusted.append((w, c))
+                options = adjusted
             # Asked BEFORE anything reaches a broker: a leg modified and
             # then refused by our own tighten-only rule would be a round
             # trip that changed the venue and not the row.
@@ -2303,7 +2315,7 @@ class AssetBot(ABC):
         moves.append({"to": str(resting), "asked": str(candidate),
                       "at": str(price), "why": why + ":broker"})
         meta["stop_moves"] = moves[-20:]
-        if why == "breakeven":
+        if why.startswith("breakeven"):
             meta["breakeven_armed"] = True
         # A leg that MOVED is proof the rules are not inert after all — and
         # the run of failures that led to the stamp is over, so the count and
@@ -2455,14 +2467,20 @@ class AssetBot(ABC):
             from bot_program.engine.trailing import (
                 apply_breakeven, update_trailing_stop,
             )
+            from bot_program.smart_money import lock_adjuster
+            # the smart money (switch smart_money): a lock in the crowd's
+            # hunt zone goes beyond it; None changes nothing
+            adjust = lock_adjuster(self, trade, price)
             if breakeven_at_r > 0:
                 moved = bool(apply_breakeven(
                     trade, price, breakeven_at_r,
-                    self._extras_float("breakeven_buffer_r")))
+                    self._extras_float("breakeven_buffer_r"),
+                    adjust=adjust))
             if trail_pct > 0:
                 moved = bool(update_trailing_stop(
                     trade, price, trail_pct,
-                    self._extras_float("trail_start_r"))) or moved
+                    self._extras_float("trail_start_r"),
+                    adjust=adjust)) or moved
         except Exception as e:
             # A knob typo must never take the exit block down with it: the
             # trade would then run unmanaged until reconciliation noticed.

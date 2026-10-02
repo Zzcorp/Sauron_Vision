@@ -18,6 +18,10 @@ on the wrong side of the current price. A break-even stop that lands
 past the mark closes the position at market on the next tick and books
 it as a stop-out, which reads in the history as a loss the thesis never
 took.
+
+`adjust` (2026-10-02, bot_program/smart_money.lock_adjuster) may move a
+lock out of the crowd's hunt zone before it is committed; every guard
+above still judges the lock it returns.
 """
 from decimal import Decimal
 
@@ -168,7 +172,20 @@ def is_improvement(trade, candidate, price):
             and _on_the_right_side(trade, candidate, _dec(price)))
 
 
-def apply_breakeven(trade, current_price, at_r, buffer_r=0.0):
+def _adjusted(adjust, candidate, note):
+    """(candidate, note) after `adjust` (smart_money.lock_adjuster: the
+    lock out of the crowd's hunt zone), or as they were. An adjuster that
+    fails changes nothing: the rule's own lock still goes in."""
+    if adjust is None or candidate is None:
+        return candidate, note
+    try:
+        moved, why = adjust(candidate, note)
+    except Exception:  # noqa: BLE001
+        return candidate, note
+    return (_dec(moved), why) if _dec(moved) is not None else (candidate, note)
+
+
+def apply_breakeven(trade, current_price, at_r, buffer_r=0.0, adjust=None):
     """Move the stop to entry once the trade has run `at_r` in profit.
 
     The buffer is in R and defaults to nothing. A stop exactly AT entry
@@ -184,8 +201,9 @@ def apply_breakeven(trade, current_price, at_r, buffer_r=0.0):
     price = _dec(current_price)
     if candidate is None or price is None:
         return False
+    candidate, note = _adjusted(adjust, candidate, "breakeven")
 
-    if not _commit(trade, candidate, price, "breakeven"):
+    if not _commit(trade, candidate, price, note):
         return False
     # Stamped only on success, so a refused move is retried next tick
     # rather than silently disarming the rule for the life of the trade.
@@ -196,7 +214,8 @@ def apply_breakeven(trade, current_price, at_r, buffer_r=0.0):
     return True
 
 
-def update_trailing_stop(trade, current_price, trail_pct, start_r=0.0):
+def update_trailing_stop(trade, current_price, trail_pct, start_r=0.0,
+                         adjust=None):
     """Ratchet the stop toward price. Returns True if it moved.
 
     `start_r` delays the ratchet until the trade has actually run:
@@ -233,4 +252,5 @@ def update_trailing_stop(trade, current_price, trail_pct, start_r=0.0):
     trail = Decimal(str(trail_pct)) / Decimal("100")
     candidate = (price * (Decimal("1") - trail) if trade.side == "BUY"
                  else price * (Decimal("1") + trail))
-    return _commit(trade, candidate, price, "trail")
+    candidate, note = _adjusted(adjust, candidate, "trail")
+    return _commit(trade, candidate, price, note)
