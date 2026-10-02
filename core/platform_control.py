@@ -106,6 +106,7 @@ LIVE_MONEY_SWITCHES = (
     "trade_debate",                 # binding: may veto or cut a live order
     "aragorn",                      # benches/promotes pairs, closes positions
     "crisis_mode",                  # the market posture binds real money
+    "smart_money",                  # moves stops, sizes real-money entries
 )
 
 #: Switches a category's "all on" button never turns on (2026-09-26,
@@ -269,6 +270,11 @@ DEFAULT_COMPONENTS = [
      "category": "system"},
     {"key": "crisis_mode", "name": "Crisis Mode (market posture)",
      "description": "Off (default). On: indices, volatility, VIX and credit set a posture every 15 min - calm, stressed, crisis, recovery - that sizes real-money entries, caps leverage, sends risk-on longs to paper in a crisis and keeps shorts and havens trading.",
+     "category": "system"},
+    # THE SMART MONEY (2026-10-02, bot_program/smart_money.py): LIVE
+    # money, never armed by "all on". Description measured below 300.
+    {"key": "smart_money", "name": "Smart Money (crowd stops, sweeps, COT)",
+     "description": "Off (default). On: bot stops leave the crowd's hunt zones (swings, pools, round numbers) within reward:risk; real-money entries against a sweep, the ICT bias, an FVG or order block, the volume or a COT extreme are taken smaller. manage.py smart_money.",
      "category": "system"},
     # THE TRADE DEBATE (2026-10-01, ai_agents/agents/trade_debate.py): the
     # Executioner and the Champion argue every live bot entry before its

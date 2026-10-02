@@ -114,6 +114,7 @@ FRED_SERIES = {
     "GDP": "Gross Domestic Product",
     "DEXUSEU": "USD/EUR Exchange Rate",
     "VIXCLS": "VIX Volatility Index",
+    "VXVCLS": "VIX 3-Month (VIX3M)",
     "DCOILWTICO": "WTI Crude Oil Price",
     "M2SL": "M2 Money Supply",
     "BAMLH0A0HYM2": "High Yield Bond Spread",

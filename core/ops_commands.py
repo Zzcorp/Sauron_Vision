@@ -128,6 +128,22 @@ COMMANDS = [
         "category": "decide",
     },
     {
+        "name": "smart_money",
+        "title": "Smart money",
+        "purpose": "The smart money's footprints as a command: where the crowd's stops and liquidity pools sit, fresh sweeps, the ICT read (bias, premium/discount, FVGs, order blocks, draw on liquidity), the volume, the COT positioning of every futures-mapped symbol, and the 3-year COT history download.",
+        "usage": [
+            "python manage.py smart_money                     # switch, VIX curve, what it did",
+            "python manage.py smart_money read EURUSD BUY     # what it says about an entry now",
+            "python manage.py smart_money cot                 # the COT index of every mapped symbol",
+            "python manage.py smart_money cot-backfill        # 3 years of COT history (plan)",
+            "python manage.py smart_money cot-backfill --yes  # ... download and store it",
+        ],
+        "mirrors": "/ops/",
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    {
         "name": "horizon",
         "title": "Horizon (5-10y view)",
         "purpose": "The Horizon page as a command: list the runs, show a view's sectors, tilts and graded calls, print the agent's grade, and run one synthesis (--yes: ~1.5 USD on the frontier model).",

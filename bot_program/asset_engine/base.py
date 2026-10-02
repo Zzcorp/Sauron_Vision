@@ -3730,6 +3730,19 @@ class AssetBot(ABC):
         sl, tp, level_meta = stop_and_target(
             self.cfg, symbol, price, decision.direction)
 
+        # ── THE SMART MONEY (2026-10-02, bot_program/smart_money.py) ─────
+        # The stop leaves the crowd's hunt zone BEFORE the cost filter and
+        # the sizer read it, so both judge the stop actually placed and the
+        # size keeps the money at risk where it was. The size scale binds
+        # real money only, with the stage below. OFF changes nothing.
+        sm_read = self._smart_money(symbol, decision, price, sl, tp,
+                                    level_meta, charge["fraction"])
+        if sm_read is not None:
+            from bot_program.smart_money import meta_for
+            level_meta = dict(level_meta or {},
+                              smart_money=meta_for(sm_read, sl))
+            sl = sm_read["stop"]
+
         # A planned move smaller than the round trip is negative-EV however
         # good the signal is.
         ok, cost_reason = passes_cost_filter(self.cfg, symbol, price, tp,
@@ -3768,6 +3781,7 @@ class AssetBot(ABC):
         # less. Both read OFF as "nothing changes".
         stage, _care_meta = self._aragorn_and_posture(symbol, decision, stage)
         level_meta = dict(level_meta or {}, **_care_meta)
+        stage = self._smart_money_scale(stage, sm_read)
         if _paper_open_here and stage.get("force_paper"):
             return self._skip(symbol, skips.ALREADY_OPEN,
                               "a paper position is already on")
@@ -3852,6 +3866,11 @@ class AssetBot(ABC):
         # on the candidate so execute_entry rounds by the same answer.
         # Three states; None is whole shares for stocks, as before.
         fractional = self._venue_fractional_units(client, symbol)
+        if sm_read is not None and sm_read["moved"]:
+            qty, sl, sizing, level_meta = self._smart_money_fee_check(
+                client, symbol, decision, stage, sm_read, qty=qty,
+                price=price, tp=tp, sl=sl, sizing=sizing,
+                level_meta=level_meta, charge=charge)
         qty = self._round_qty(qty, price, fractional=fractional)
 
         # Steps M-O: the ceiling, the single-position cap, the duplicate and
@@ -3902,6 +3921,91 @@ class AssetBot(ABC):
             elite=dict(elite),
             horizon_hours=horizon,
         )
+
+    def _smart_money(self, symbol, decision, price, sl, tp, level_meta,
+                     cost_fraction):
+        """The smart money's read of this entry (bot_program/
+        smart_money.entry_read): the stop out of the crowd's hunt zone,
+        within the widest stop the plan's reward:risk carries, and the size
+        a real-money entry takes. None with the switch OFF or on a failed
+        read: nothing changes, and the log says why."""
+        if self.asset_class == "options":
+            return None   # a premium has no crowd levels; the underlying's are not its stop
+        try:
+            from bot_program import smart_money as _sm
+            if not _sm.is_on():
+                return None
+            from bot_program.asset_engine.risk_levels import (
+                _extras, max_stop_distance,
+            )
+            room = max_stop_distance(self.cfg, symbol, price, tp,
+                                     cost_fraction=cost_fraction)
+            read = _sm.entry_read(
+                symbol, decision.direction, price, sl,
+                atr=(level_meta or {}).get("atr"),
+                asset_class=self.asset_class,
+                timeframe=_extras(self.cfg).get("atr_timeframe")
+                or _sm.TIMEFRAME,
+                max_distance=room)
+            if read["moved"] or read["scale"] < 1.0:
+                logger.info("[%s_bot] %s smart money: %s", self.asset_class,
+                            symbol, "; ".join(read["why"][:3]))
+            return read
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] %s: smart money unread (%s) — no change",
+                           self.asset_class, symbol, e)
+            return None
+
+    def _smart_money_fee_check(self, client, symbol, decision, stage, read, *,
+                               qty, price, tp, sl, sizing, level_meta,
+                               charge):
+        """(qty, stop, sizing, level_meta): a moved stop kept, or, when the
+        venue's own per-order fee (eToro's flat 1.00 USD a side on a stock)
+        refuses it at this final size, the stop the levels computed, the
+        size re-derived for it with the same multipliers, and the crowded
+        scale on a real-money entry. A wider stop is a smaller position,
+        and a flat fee is a bigger share of a smaller one: without this the
+        moved stop passed the proposal and was refused by execute_entry,
+        tick after tick, where the computed stop would have been sent."""
+        try:
+            _fee, why = self._venue_fee_refusal(
+                client, symbol, qty=qty, price=price, target=tp, stop=sl,
+                charge=charge)
+            if not why:
+                return qty, sl, sizing, level_meta
+            from bot_program.smart_money import CROWDED_STOP_SCALE
+            sm = dict((level_meta or {}).get("smart_money") or {})
+            original = float(sm.get("original_stop"))
+            mult = (float(qty) / float(sizing["qty"])
+                    if float(sizing.get("qty") or 0) > 0 else 0.0)
+            back = self._size_for_entry(symbol, price, original, decision)
+            real = self.cfg.mode != "paper" and not stage.get("force_paper")
+            scale = float(read.get("scale", 1.0))
+            if real and scale > CROWDED_STOP_SCALE:
+                mult *= CROWDED_STOP_SCALE / scale
+                sm["scale"] = CROWDED_STOP_SCALE
+            sm.update(stop_moved=False, crowded=True,
+                      reverted=f"the moved stop fails the venue fee: {why}"[:200])
+            logger.info("[%s_bot] %s smart money: stop back to %g — %s",
+                        self.asset_class, symbol, back["stop"], why)
+            return (float(back["qty"]) * mult, back["stop"], back,
+                    dict(level_meta or {}, smart_money=sm))
+        except Exception as e:  # noqa: BLE001 — execute_entry still judges it
+            logger.warning("[%s_bot] %s: smart money fee check failed (%s)",
+                           self.asset_class, symbol, e)
+            return qty, sl, sizing, level_meta
+
+    def _smart_money_scale(self, stage, read):
+        """`stage` with its live_size_factor times the smart money's scale
+        (bot_program/smart_money.entry_read): a real-money entry only — a
+        paper config, or an entry already sent to paper, is never cut."""
+        if read is None or float(read.get("scale", 1.0)) >= 1.0 \
+                or self.cfg.mode == "paper" or stage.get("force_paper"):
+            return stage
+        stage = dict(stage)
+        stage["live_size_factor"] = (float(stage.get("live_size_factor", 1.0))
+                                     * float(read["scale"]))
+        return stage
 
     def _aragorn_and_posture(self, symbol, decision, stage) -> tuple:
         """(stage, metadata) after Aragorn's pair verdict and the

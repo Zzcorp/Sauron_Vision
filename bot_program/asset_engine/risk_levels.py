@@ -419,6 +419,29 @@ def paper_fill_price(cfg, symbol: str, price: float, side: str,
     return price * (1 + half) if str(side).upper() == "BUY" else price * (1 - half)
 
 
+def max_stop_distance(cfg, symbol: str, price: float, target: float,
+                      *, cost_fraction: float | None = None) -> float:
+    """The widest stop distance (in price) `passes_cost_filter` still
+    passes with this target: the net reward:risk at `min_net_rr` exactly,
+    solved for the risk. With the filter off or no cost model, the gross
+    reward:risk at `min_net_rr` instead — a stop is never widened past
+    the plan's own reward:risk. 0.0 when nothing fits (bot_program/
+    smart_money.py moves no stop then)."""
+    extras = _extras(cfg)
+    if price <= 0:
+        return 0.0
+    move = abs(float(target) - float(price)) / float(price)
+    min_net_rr = float(extras.get("min_net_rr", DEFAULT_MIN_NET_RR))
+    if min_net_rr <= 0:
+        return 0.0
+    cost = 0.0
+    if extras.get("use_cost_filter", True):
+        cost = (float(cost_fraction) if cost_fraction is not None
+                else round_trip_cost_fraction(cfg, symbol))
+    risk = (move - cost) / min_net_rr - cost
+    return max(0.0, risk) * float(price)
+
+
 def passes_cost_filter(cfg, symbol: str, price: float, target: float,
                        *, stop: float | None = None,
                        cost_fraction: float | None = None) -> tuple:

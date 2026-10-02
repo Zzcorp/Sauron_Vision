@@ -37,6 +37,16 @@ The operator's MANUAL positions (the TAKE TRADE lane) get the profit
 protections only — break-even, trail, the weekend lock — never a cut by a
 rule (posture floor, weekend cut, no progress).
 
+BEYOND THE CROWD (2026-10-02, with the smart_money switch ON as well): a
+break-even or a trail that would sit in the hunt zone of a swing, the
+latest pullback's extreme or a round number is placed beyond it
+(bot_program/smart_money.stop_beyond_the_crowd), never closer to the
+entry than its round-trip cost. The posture floors are risk limits and
+the weekend lock guards a gap (no hunt): neither moves. Not on the
+manual lane, nor on options (a premium has no crowd levels). The soft
+stop stays tighten-only: a tick without the read keeps the tighter lock,
+the safe side.
+
 Every close is a AragornAction. Never raises: care that fails leaves the
 row to the rest of manage_positions, exactly as before.
 """
@@ -111,10 +121,11 @@ def market_hours(start, now, asset_class) -> float:
 
 
 def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
-         live=False, manual=False) -> dict:
+         live=False, manual=False, crowd=None) -> dict:
     """The care decision for one row at one mark — pure, no I/O:
     {action: "hold"|"close", reason: "SL"|"TIME"|"", why, care: {...},
-     changed: bool}."""
+     changed: bool}. `crowd` = {"atr", "levels"} (smart_money.care_levels)
+    places the profit locks beyond the crowd's levels."""
     now = now or timezone.now()
     meta = dict(trade.metadata or {})
     care = dict(meta.get("care") or {})
@@ -155,6 +166,15 @@ def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
     if weekend and r_now >= WEEKEND_LOCK_AT_R:
         # a winner NOW locks break-even; a past peak never closes a loser
         cands.append((lvl(BREAKEVEN_LOCK_R), "weekend lock"))
+
+    if crowd and not manual and any(w in CROWD_MOVABLE for _l, w in cands):
+        # the read is paid for only when a lock could move
+        crowd = crowd() if callable(crowd) else crowd
+        cost = _f(meta.get("cost_fraction_charged")) or 0.0
+        if crowd:
+            cands = [_beyond_the_crowd(level, why, d, p, entry, crowd,
+                                       cost=cost)
+                     for level, why in cands]
 
     soft = _f(care.get("soft_stop"))
     soft_why = care.get("soft_why", "")
@@ -208,6 +228,27 @@ def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
         out["care"]["exit"] = "no progress"
         return out
     return out
+
+
+#: the profit locks smart money may move; the posture floors (risk limits)
+#: and the weekend lock (a gap, not a hunt) never move
+CROWD_MOVABLE = frozenset({"breakeven", "trail"})
+
+
+def _beyond_the_crowd(level, why, d, price, entry, crowd, *, cost=0.0):
+    """(level, why) with a profit lock moved out of the crowd's hunt zone,
+    never closer to the entry than its round-trip `cost` (a fraction):
+    a lock stays a lock, net of what the trip cost."""
+    floor = entry * (1.0 + d * max(0.0, float(cost or 0.0)))
+    if why not in CROWD_MOVABLE or d * (price - floor) <= 0:
+        return level, why
+    from bot_program.smart_money import stop_beyond_the_crowd
+    r = stop_beyond_the_crowd("BUY" if d > 0 else "SELL", price, level,
+                              crowd.get("atr"), crowd.get("levels") or [],
+                              max_distance=abs(price - floor))
+    if r["moved"] and d * (r["stop"] - floor) >= 0:
+        return r["stop"], f"{why} (beyond the crowd)"
+    return level, why
 
 
 def _save_care(trade, care_value, care_exit=None):
@@ -268,8 +309,21 @@ def care(bot, trade, price, client, *, now=None) -> str:
             manual = bool(_is_manual_lane(bot.cfg))
         except Exception:  # noqa: BLE001 — unknown reads as a bot's own
             manual = False
+        crowd = None
+        if not manual and trade.asset_class != "options" \
+                and getattr(bot, "asset_class", "") != "options":
+            from bot_program import smart_money
+            if smart_money.is_on():
+                def crowd():
+                    try:
+                        return smart_money.care_levels(trade.symbol,
+                                                       trade.side, price)
+                    except Exception as e:  # noqa: BLE001 — plain care runs
+                        logger.info("[care] %s #%s: crowd levels unread (%s)",
+                                    trade.symbol, trade.id, e)
+                        return None
         decision = plan(trade, price, now=now, posture_level=level, kind=kind,
-                        live=not trade.paper, manual=manual)
+                        live=not trade.paper, manual=manual, crowd=crowd)
     except Exception as e:  # noqa: BLE001 — care that fails changes nothing
         logger.warning("[care] %s #%s not cared for: %s", trade.symbol,
                        trade.id, e)

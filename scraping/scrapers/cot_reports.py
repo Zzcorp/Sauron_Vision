@@ -416,3 +416,30 @@ def _persist_cot_reports(reports: list[dict]) -> dict:
     logger.debug("COT persistence: %d upserted (%d new)", upserted, created)
     return {"upserted": upserted, "created": created,
             "missing_instruments": sorted(missing)}
+
+
+def backfill_cot_history(years: int = 3, *, now=None) -> dict:
+    """The yearly legacy archives (deacot{year}.zip) of the last `years`
+    years and this one, parsed and upserted. The weekly beat stores one
+    week at a time, and the COT index (bot_program/smart_money.cot_read)
+    reads a position against three years of them. Idempotent: a re-run
+    re-asserts the same rows. Returns {years, parsed, stored, created,
+    failed, missing_instruments}."""
+    current = (now or datetime.utcnow()).year
+    out = {"years": [], "parsed": 0, "stored": 0, "created": 0,
+           "failed": [], "missing_instruments": []}
+    missing: set[str] = set()
+    for year in range(current - int(years), current + 1):
+        content = _fetch_zip(CFTC_ZIP_URL.format(year=year))
+        rows = _parse_cot_csv(content) if content else []
+        if not rows:
+            out["failed"].append(year)
+            continue
+        res = _persist_cot_reports(rows)
+        out["years"].append(year)
+        out["parsed"] += len(rows)
+        out["stored"] += res["upserted"]
+        out["created"] += res["created"]
+        missing.update(res["missing_instruments"])
+    out["missing_instruments"] = sorted(missing)
+    return out

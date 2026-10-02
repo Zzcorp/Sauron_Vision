@@ -501,4 +501,10 @@ def report_lines(now=None, *, limit=40) -> list:
             lines.append(f"  {a.at:%m-%d %H:%M} {a.kind} "
                          f"{a.rule_name}{'/' + a.asset_class if a.asset_class else ''}"
                          f"{' ' + a.symbol if a.symbol else ''}: {a.detail[:100]}")
+    try:
+        from bot_program import smart_money
+        if smart_money.is_on():
+            lines.extend(smart_money.summary_lines(now))
+    except Exception:  # noqa: BLE001 — the report never fails on a section
+        pass
     return lines
