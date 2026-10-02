@@ -96,7 +96,9 @@ class TheStopTests(SimpleTestCase):
                                       [(97.4, "swing low")], max_distance=3.2)
         self.assertFalse(tight["moved"])
         self.assertTrue(tight["crowded"])
-        self.assertIn("more than the plan carries", tight["why"])
+        # the widening in ATRs (0.30), and the room the plan allows (0.10)
+        self.assertIn("widening it 0.30 ATR and the plan allows 0.10",
+                      tight["why"])
 
     def test_a_sell_mirrors(self):
         from bot_program.smart_money import stop_beyond_the_crowd
@@ -893,7 +895,27 @@ class TheFeeCheckTests(TestCase):
         self.assertFalse(r["moved"])
         self.assertTrue(r["crowded"], "left in the zone, and said")
         self.assertEqual(r["stop"], 97.0)
+        self.assertIn("the plan has no room to widen it", r["why"])
         tiny = stop_beyond_the_crowd("BUY", 1e-5, 0.97e-5, 2e-7,
                                      [(0.974e-5, "swing low")],
                                      max_distance=0.03e-5)
         self.assertFalse(tiny["moved"], "a relative tolerance at micro prices")
+
+
+
+class TheWordsTests(SimpleTestCase):
+
+    def test_the_strongest_reason_is_said_once_with_its_size(self):
+        from bot_program.smart_money import entry_read
+        rows = _flat(30, 100.0)
+        rows[-1] = (100.0, 104.0, 99.5, 100.2)
+        df = _df(rows)
+        swings = [{"idx": 10, "type": "H", "price": 102.0}]
+        with patch("bot_program.smart_money.cot_read",
+                   return_value={"scale": 1.0, "why": ""}):
+            r = entry_read("X", "BUY", 100.2, 97.2, atr=2.0,
+                           bars=(df, swings))
+        self.assertEqual(r["scale"], 0.5)
+        self.assertTrue(r["why"][0].startswith("size x0.5: a fresh sweep"))
+        self.assertEqual(sum(1 for w in r["why"] if "sweep of the highs" in w),
+                         1)
