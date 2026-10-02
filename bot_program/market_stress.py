@@ -19,6 +19,9 @@ each mapped to 0-100 by fixed breakpoints (COMPONENTS, below):
   index_5d         SPX500's 5-day return
   realized_vol     SPX500's 20-day realized vol against its 1-year level
   vix              FRED VIXCLS, when fresh
+  vix_term         the VIX over its 3-month twin (FRED VXVCLS), same day:
+                   above 1 the curve is upside down, which is panic
+                   (read with the smart_money switch ON only)
   hy_spread        FRED BAMLH0A0HYM2 (US high yield OAS), when fresh
   brain            the brain's risk_off / blow_off label, when confident
 A component nobody can read is left out and SAID; with no index and no VIX
@@ -67,6 +70,7 @@ CRISIS_VIX_WITHOUT_INDEX = 35.0
 #: once it has stayed under RECOVERY_BELOW this long
 RECOVERY_SCORE_HOURS = 6.0
 VIX_SERIES = "VIXCLS"
+VIX3M_SERIES = "VXVCLS"
 HY_SERIES = "BAMLH0A0HYM2"
 MACRO_FRESH_DAYS = 5
 OVERRIDE_KEY = "posture_override"
@@ -78,6 +82,8 @@ COMPONENTS = {
     "index_5d": (0.15, [(0.0, 0), (0.03, 50), (0.06, 100)]),
     "realized_vol": (0.20, [(1.0, 0), (1.5, 50), (2.5, 100)]),
     "vix": (0.20, [(16.0, 0), (22.0, 40), (30.0, 75), (40.0, 100)]),
+    # VIX / VIX3M: about 0.85-0.9 in a calm market, above 1 in a panic
+    "vix_term": (0.10, [(0.90, 0), (1.0, 50), (1.10, 85), (1.20, 100)]),
     "hy_spread": (0.10, [(3.5, 0), (5.0, 50), (7.0, 100)]),
     "brain": (0.10, None),
 }
@@ -156,6 +162,28 @@ def _macro(series, now):
     return float(obs[0][1]), change
 
 
+def _vix_term(now):
+    """VIX / VIX3M on the newest day both were published, within
+    MACRO_FRESH_DAYS; None when either is missing."""
+    from market_data.models import MacroIndicator, MacroObservation
+    since = now.date() - timedelta(days=MACRO_FRESH_DAYS)
+    vals = {}
+    for series in (VIX_SERIES, VIX3M_SERIES):
+        ind = MacroIndicator.objects.filter(series_id=series).first()
+        if ind is None:
+            return None
+        vals[series] = dict(MacroObservation.objects.filter(
+            indicator=ind, date__gte=since).values_list("date", "value"))
+    common = sorted(set(vals[VIX_SERIES]) & set(vals[VIX3M_SERIES]),
+                    reverse=True)
+    if not common:
+        return None
+    v3 = float(vals[VIX3M_SERIES][common[0]])
+    if v3 <= 0:
+        return None
+    return round(float(vals[VIX_SERIES][common[0]]) / v3, 3)
+
+
 def read_components(now=None) -> tuple:
     """({component: raw value}, [reasons]) — every input that could be read,
     and why each one that could not was left out."""
@@ -176,6 +204,18 @@ def read_components(now=None) -> tuple:
                     out["hy_change"] = round(change, 3)
         except Exception as e:  # noqa: BLE001
             reasons.append(f"{series} unreadable: {type(e).__name__}")
+    try:
+        from bot_program import smart_money
+        # the smart money's input: OFF, the crisis score is what it was
+        if smart_money.is_on():
+            term = _vix_term(now)
+            if term is None:
+                reasons.append(f"{VIX3M_SERIES}: no fresh observation on a "
+                               f"VIX day (FRED): the VIX curve is left out")
+            else:
+                out["vix_term"] = term
+    except Exception as e:  # noqa: BLE001
+        reasons.append(f"VIX curve unreadable: {type(e).__name__}")
     try:
         from brain.context import get_brain_context
         ctx = get_brain_context() or {}
