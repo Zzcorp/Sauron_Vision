@@ -49,3 +49,26 @@ class ProvingVerdict(models.Model):
     def __str__(self):
         return (f"{self.family}/{self.direction}/{self.filter} "
                 f"{self.asset_class}: {self.verdict}")
+
+
+class ProvingTrade(models.Model):
+    """One simulated trade behind a saved verdict — the setup memory
+    (backtester/proving/memory.py) reads the newest ones back. 2026-10-03."""
+
+    verdict = models.ForeignKey(ProvingVerdict, on_delete=models.CASCADE,
+                                related_name="trades")
+    symbol = models.CharField(max_length=40)
+    entry_ts = models.DateTimeField()
+    exit_ts = models.DateTimeField()
+    #: Net of the round trip, in R against the stop the trade opened with.
+    r = models.FloatField()
+    #: The best R seen while open.
+    mfe = models.FloatField(default=0.0)
+    regime = models.CharField(max_length=16, default="")
+    reason = models.CharField(max_length=24, default="")
+    bars = models.IntegerField(default=0)
+
+    class Meta:
+        app_label = "backtester"
+        indexes = [models.Index(fields=["verdict", "-entry_ts"]),
+                   models.Index(fields=["verdict", "regime", "-entry_ts"])]

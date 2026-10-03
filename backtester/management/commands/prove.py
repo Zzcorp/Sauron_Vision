@@ -8,6 +8,7 @@
     python manage.py prove generate --families tsmom,rsi2_pullback --save
     python manage.py prove exits --class crypto    # every exit policy on the live rules' signals
     python manage.py prove exits --families tsmom --policies care,chandelier3,scale_half_1r
+    python manage.py prove memory rsi_bull_divergence --class forex --symbols EURUSD
     python manage.py prove show                    # the saved verdicts, newest run first
     python manage.py prove show --run gen-ab12cd34ef
 
@@ -31,7 +32,9 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("action",
                             choices=["data", "rules", "generate", "exits",
-                                     "show"])
+                                     "memory", "show"])
+        parser.add_argument("rule", nargs="?", default="",
+                            help="memory: the live rule name.")
         parser.add_argument("--class", dest="asset_class", default=None)
         parser.add_argument("--symbols", default="",
                             help="Comma-separated, platform spelling.")
@@ -51,6 +54,16 @@ class Command(BaseCommand):
               "timeframe": opts["timeframe"], "symbols": symbols or None}
         if opts["action"] == "data":
             return self._data(pr.data_report(**kw))
+        if opts["action"] == "memory":
+            from backtester.proving.memory import memory_for
+            if not opts["rule"] or not opts["asset_class"]:
+                raise CommandError("prove memory RULE --class CLASS "
+                                   "[--symbols SYMBOL]")
+            sym = (symbols or [""])[0]
+            mem = memory_for(opts["rule"], sym, opts["asset_class"],
+                             timeframe=opts["timeframe"])
+            self.stdout.write(mem["words"] or mem.get("reason", ""))
+            return
         if opts["action"] == "rules":
             rows = pr.prove_live_rules(save=opts["save"], **kw)
             return self._rows(rows, "LIVE RULES AND THEIR MIRRORS",

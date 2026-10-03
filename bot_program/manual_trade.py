@@ -1017,6 +1017,21 @@ def signal_backing_advisory(user, inst, side, signal=None, *,
     return {"ok": False, "signals": [], "reason": reason}
 
 
+def _setup_memory(signal, symbol, asset_class) -> dict:
+    """The proving ground's memory of this signal's rule, or an honest
+    'none'. Never raises: a ticket is not refused for want of a memory."""
+    rule = getattr(signal, "rule_name", "") if signal is not None else ""
+    if not rule:
+        return {"ok": False, "words": "", "reason": "no rule behind this "
+                                                    "ticket"}
+    try:
+        from backtester.proving.memory import memory_for
+        return memory_for(rule, symbol, asset_class)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[take-trade] no setup memory for %s: %s", rule, e)
+        return {"ok": False, "words": "", "reason": str(e)[:160]}
+
+
 def _funding_proposal(open_trades, deficit):
     """The least disturbance that frees the deficit, or None if even
     closing everything falls short.
@@ -1603,6 +1618,11 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         # Whether a Sauron signal backs this ticket. A warning, never a
         # refusal: the instrument-view ticket stays the operator's call.
         "signal_backing": signal_backing_advisory(user, inst, side, signal),
+        # THE SETUP MEMORY (2026-10-03, backtester/proving/memory.py): what
+        # followed, the last times this rule fired on this class in this
+        # kind of tape. Information, never a gate; "" when nobody replayed
+        # the rule.
+        "setup_memory": _setup_memory(signal, inst.symbol, cls),
         # The brain's standing verdict on discretionary entries. Reported,
         # not enforced: pausing a RULE is the platform's call because nobody
         # is watching it, but a hand-taken trade has a human on the other

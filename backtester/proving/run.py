@@ -32,6 +32,10 @@ from backtester.proving.simulate import regimes, simulate
 CLASSES = ("crypto", "forex", "stock", "etf", "index", "commodity")
 #: How many in-sample leaders of a class go to the final judgement.
 SHORTLIST = 5
+#: Simulated trades kept per saved verdict (the newest), for the setup
+#: memory; and how many runs' trades are kept before the oldest go.
+TRADES_KEPT = 400
+RUNS_KEPT = 3
 
 
 def universe(asset_class=None, timeframe="4h", symbols=None) -> dict:
@@ -121,6 +125,10 @@ def _verdict_row(run_id, family, direction, params, flt, asset_class,
             "split": judged["split"].isoformat() if data["start"] else None,
             "excluded": [list(x) for x in data["excluded"][:50]],
         },
+        # Transient: the newest simulated trades, kept by _save for the
+        # setup memory and never part of the verdict row itself.
+        "_trades": sorted(judged.get("trades") or [],
+                          key=lambda t: t["entry_ts"])[-TRADES_KEPT:],
     }
 
 
@@ -250,8 +258,25 @@ def compare_exits(*, asset_class=None, timeframe="4h", symbols=None,
 
 
 def _save(rows):
-    from backtester.models_proving import ProvingVerdict
-    ProvingVerdict.objects.bulk_create([ProvingVerdict(**r) for r in rows])
+    """Verdict rows, each with its newest trades (ProvingTrade); the
+    trades of runs older than the RUNS_KEPT newest go."""
+    from backtester.models_proving import ProvingTrade, ProvingVerdict
+    for r in rows:
+        trades = r.pop("_trades", None) or []
+        verdict = ProvingVerdict.objects.create(**r)
+        ProvingTrade.objects.bulk_create([
+            ProvingTrade(verdict=verdict, symbol=str(t.get("symbol") or ""),
+                         entry_ts=t["entry_ts"], exit_ts=t["exit_ts"],
+                         r=float(t["r"]), mfe=float(t.get("mfe") or 0.0),
+                         regime=str(t.get("regime") or ""),
+                         reason=str(t.get("reason") or ""),
+                         bars=int(t.get("bars") or 0))
+            for t in trades], batch_size=500)
+    from django.db.models import Max
+    runs = list(ProvingVerdict.objects.values("run_id")
+                .annotate(newest=Max("created_at")).order_by("-newest")
+                .values_list("run_id", flat=True)[:RUNS_KEPT])
+    ProvingTrade.objects.exclude(verdict__run_id__in=runs).delete()
 
 
 def data_report(*, asset_class=None, timeframe="4h", symbols=None) -> dict:

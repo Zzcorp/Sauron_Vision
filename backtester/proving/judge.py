@@ -117,6 +117,7 @@ def judge(trades, *, start, end, n_candidates: int = 1,
         "regimes": {k: stats(v) for k, v in sorted(regimes.items())},
         "exits": reasons,
         "split": split,
+        "trades": trades,
     }
     e, oe = out["all"]["expectancy"], out["holdout"]["expectancy"]
     if not data_ok:

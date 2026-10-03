@@ -2231,6 +2231,15 @@
                        'recorded with the reason.') + '</div>';
       }
 
+      /* THE SETUP MEMORY (2026-10-03): what followed, the last times this
+         rule fired on this class in this kind of tape — the proving
+         ground's own trades. A note, never a gate. */
+      var memory = p.setup_memory || {};
+      if (memory.words) {
+        warnHtml += '<div class="sz-note sz-memory"><b>SETUP MEMORY</b> ' +
+          esc(memory.words) + '</div>';
+      }
+
       /* Whether a Sauron signal backs this ticket (2026-10-02): the week's
          instrument-view tickets, taken with none, made -1.98R. A warning;
          the button is unchanged. */
