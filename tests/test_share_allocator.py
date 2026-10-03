@@ -1555,7 +1555,10 @@ class ResponsiveTests(TestCase):
     def test_the_sync_trigger_proposes_once_per_hour_on_a_shock(self):
         """2,100 twelve hours ago; the sync stores 2,000 → −4.8% → a
         shock plan at once, staff told; the next sync inside the hour
-        writes no second plan. A sync that stores no shock never fires."""
+        writes no second plan — and neither does the next one after the
+        hour while that plan is still PROPOSED (2026-10-03: one plan per
+        shock, tests/test_shock_plan_once.py). Answered, the next shock
+        fires again. A sync that stores no shock never fires."""
         from bot_program.share_models import SharePlan
         _enable("pipeline_share_allocator", "broker_account_sync")
         _reading(self.acct, 2100, days_ago=0.5)
@@ -1582,8 +1585,19 @@ class ResponsiveTests(TestCase):
         self.assertEqual(out["stored"], 1)
         self.assertEqual(SharePlan.objects.filter(user=self.user).count(), 1)
         notify.assert_not_called()
-        # The cooldown key is the gate: cleared, the next shock fires again.
+        # Past the cooldown, the first plan still unanswered: no second
+        # plan, nothing said again — the hourly "Shock plan proposed"
+        # the operator saw all night (2026-10-03).
         from django.core.cache import cache
+        cache.delete(f"shares:shock:{self.user.pk}")
+        with patch("bot_program.notifications.notify_staff") as notify:
+            _run_sync((1985.0, "EUR"))
+        self.assertEqual(SharePlan.objects.filter(user=self.user).count(), 1)
+        notify.assert_not_called()
+        # Answered (applied here; rejected or expired are the same), the
+        # next shock fires again.
+        SharePlan.objects.filter(user=self.user).update(
+            state=SharePlan.STATE_APPLIED)
         cache.delete(f"shares:shock:{self.user.pk}")
         with patch("bot_program.notifications.notify_staff") as notify:
             _run_sync((1980.0, "EUR"))
