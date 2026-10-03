@@ -452,7 +452,15 @@ def _fallback_rows(cfg, symbol, interval, limit) -> "tuple[list, str]":
     if feed is None:
         return [], ""
     try:
-        rows = feed.klines(symbol, interval=interval, limit=limit) or []
+        # In the FEED's spelling (2026-10-03): the fallback asked Binance
+        # for AAVEUSD, which answers nothing for a symbol it does not list,
+        # so every crypto pair the venue (eToro) would not serve candles
+        # for — AAVE, ADA, ATOM, AVAX, DOGE, DOT, MATIC, NEAR, UNI — sat on
+        # a 4h bar four days old while the primary path, one branch up,
+        # translated correctly. paper_readiness: "an armed bot is deciding
+        # on a stale candle".
+        rows = feed.klines(_venue_symbol(feed, symbol), interval=interval,
+                           limit=limit) or []
     except Exception as e:  # noqa: BLE001 — the fallback must not raise
         logger.warning("[bars] public feed klines(%s, %s) failed: %s",
                        symbol, interval, e)

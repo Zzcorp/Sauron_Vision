@@ -405,7 +405,7 @@ class TheSurfacesTests(TestCase):
         self.assertIn("json.positioning_error", src)
         i = src.find("function applyPositioning(map) {")
         self.assertGreater(i, 0)
-        self.assertIn("posLegendEl.hidden = !words", src[i:i + 600])
+        self.assertIn("posLegendEl.hidden = !words", src[i:i + 1500])
 
     def test_the_review_reads_it_and_the_model_sees_it(self):
         from brain.position_review import bot_position, measure

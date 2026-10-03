@@ -404,6 +404,8 @@ Optional page data (json_script blocks the widget picks up when present):
 .sv-sig-card.is-pinned .sv-sig-close { pointer-events: auto; }
 .sv-sig-card--bull { --sv-sig-tone: var(--accent, #00e868); }
 .sv-sig-card--bear { --sv-sig-tone: var(--accent-red, #e83030); }
+/* A living level's card takes the pools' gold (2026-10-03). */
+.sv-sig-card--level { --sv-sig-tone: var(--accent-gold-ink, var(--accent-gold, #d8b020)); }
 .sv-sig-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
 .sv-sig-side {
     flex: 0 0 auto;
@@ -1050,6 +1052,122 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         sameBar: sameBar, hitTest: hitTest, cycle: cycle, prefer: prefer,
         card: card, cardClass: cardClass, place: place, esc: esc
     };
+
+    /* ── THE LEVEL AND POSITION CARDS (2026-10-03) ─────────────────────
+       The operator: "small hover details for the new content on the
+       graphs, without it being too messy; also for the trade entries".
+       One card, the signal dot's, re-used: the pointer resting on a
+       living level or on a position's line fills it with three to five
+       facts. The pure half is here (a node test drives it); the widget
+       does the hit test with the chart's own price-to-pixel. */
+    function nearestLine(items, y, toY, tol) {
+        if (!items || !items.length || typeof y !== 'number' || !isFinite(y)) return null;
+        var best = null, bestDist = Infinity;
+        items.forEach(function (it) {
+            if (!it || typeof it.price !== 'number' || !isFinite(it.price)) return;
+            var cy = null;
+            try { cy = toY(it.price); } catch (e) { cy = null; }
+            if (typeof cy !== 'number' || !isFinite(cy)) return;
+            var d = Math.abs(cy - y);
+            if (d <= tol && d < bestDist) { best = it; bestDist = d; }
+        });
+        return best;
+    }
+    function ageWords(seconds) {
+        if (typeof seconds !== 'number' || !isFinite(seconds) || seconds < 0) return DASH;
+        var h = seconds / 3600;
+        if (h < 1) return Math.round(seconds / 60) + ' min';
+        if (h < 48) return (Math.round(h * 10) / 10) + ' h';
+        return (Math.round(h / 24 * 10) / 10) + ' d';
+    }
+    function rWords(r) {
+        if (typeof r !== 'number' || !isFinite(r)) return DASH;
+        return (r >= 0 ? '+' : '') + r.toFixed(2) + 'R';
+    }
+    function pctWords(p) {
+        if (typeof p !== 'number' || !isFinite(p)) return '';
+        return (p >= 0 ? '+' : '') + p.toFixed(2) + '%';
+    }
+    /* "equal lows (2 touches)" -> "equal lows"; the touches are a fact. */
+    function levelKind(l) {
+        return String((l && l.kind) || '').replace(/\s*\(\d+ touches\)/, '');
+    }
+    function levelTouches(l) {
+        var m = /\((\d+) touches\)/.exec(String((l && l.kind) || ''));
+        return m ? parseInt(m[1], 10) : null;
+    }
+    /* The hunt or the draw of the positioning map, when this level is it. */
+    function levelRole(l, map) {
+        var path = (map && map.path) || [];
+        for (var i = 0; i < path.length; i++) {
+            var leg = path[i];
+            if (!leg || typeof leg.price !== 'number' || !l) continue;
+            if (Math.abs(leg.price - l.price) <= 1e-9 * Math.max(1, Math.abs(l.price))) {
+                return (leg.leg === 'hunt' ? 'The hunt runs here first'
+                                           : 'The draw after the hunt')
+                     + (leg.why ? ' — ' + leg.why : '');
+            }
+        }
+        return '';
+    }
+    function levelCard(l, map) {
+        l = l || {};
+        var h = [], touches = levelTouches(l);
+        h.push('<div class="sv-sig-head">'
+            + '<span class="sv-sig-side">' + (l.pool ? 'POOL' : 'LEVEL') + '</span>'
+            + '<span class="sv-sig-rule">' + text(levelKind(l)) + '</span></div>');
+        h.push('<dl class="sv-sig-facts">'
+            + fact('Price', l.text || l.price)
+            + fact('Distance', (typeof l.atr_away === 'number')
+                ? l.atr_away + ' ATR ' + (l.side === 'below' ? 'under' : 'over') + ' the mark'
+                : null)
+            + (touches !== null ? fact('Touches', touches) : '')
+            + '</dl>');
+        var what = l.pool ? 'Where the stops pile up'
+                 : l.kind === 'round number' ? 'A round number the crowd watches'
+                 : 'The last swing still held';
+        var role = levelRole(l, map);
+        h.push('<div class="sv-sig-status"><span class="sv-sig-chip">' + esc(what) + '</span>'
+            + (role ? '<span class="sv-sig-chip sv-sig-chip--live">' + esc(role) + '</span>' : '')
+            + '</div>');
+        h.push('<div class="sv-sig-foot">Recomputed every minute · gone once the price trades through it</div>');
+        return h.join('');
+    }
+    function positionCard(p) {
+        p = p || {};
+        var tn = tone(p.side), h = [];
+        h.push('<div class="sv-sig-head">'
+            + '<span class="sv-sig-side">' + (tn === 'bull' ? 'LONG' : tn === 'bear' ? 'SHORT' : 'POSITION') + '</span>'
+            + '<span class="sv-sig-rule">' + text(p.rule || p.via || p.label) + '</span></div>');
+        h.push('<div class="sv-sig-levels">'
+            + level('entry', 'Entry', p.entry_text || p.entry)
+            + level('stop', 'Stop', p.stop_text || p.stop)
+            + level('target', 'Target', p.tp_text || p.tp)
+            + '</div>');
+        var now = rWords(p.r_now), pct = pctWords(p.pnl_pct);
+        h.push('<dl class="sv-sig-facts">'
+            + fact('Now', now + (pct ? ' · ' + pct : ''))
+            + fact('Open for', ageWords(p.age_s))
+            + (p.leverage ? fact('Leverage', String(p.leverage) + 'x') : '')
+            + (typeof p.soft_stop === 'number' ? fact('Soft stop', p.soft_stop_text || p.soft_stop) : '')
+            + '</dl>');
+        var chips = '<span class="sv-sig-chip' + (p.paper ? '' : ' sv-sig-chip--live') + '">'
+            + (p.paper ? 'Simulated' : 'REAL MONEY') + '</span>';
+        if (p.protected) chips += '<span class="sv-sig-chip">Stop at the broker</span>';
+        var th = p.thesis || {};
+        if (th.verdict && th.verdict !== 'unread' && th.verdict !== 'watch') {
+            chips += '<span class="sv-sig-chip sv-sig-chip--' + (th.verdict === 'exit' ? 'loss' : 'win')
+                + '">Thesis ' + esc(th.verdict) + '</span>';
+        }
+        h.push('<div class="sv-sig-status">' + chips + '</div>');
+        if (th.words) h.push('<div class="sv-sig-foot">' + text(th.words) + '</div>');
+        return h.join('');
+    }
+
+    window.svHoverCards = {
+        nearestLine: nearestLine, levelCard: levelCard, positionCard: positionCard,
+        levelRole: levelRole, ageWords: ageWords, rWords: rWords
+    };
 })();
 </script>
 
@@ -1104,11 +1222,22 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
        stops sit, the hunt and the draw, in the server's own words. A map
        that cannot be read ({ok:false}) hides the line; a reply without
        the key leaves it as it was. */
+    var POSMAP = null;   /* the map the level cards read their role from */
     function applyPositioning(map) {
+        POSMAP = (map && map.ok) ? map : null;
         if (!posLegendEl) return;
         var words = (map && map.ok && map.words) ? String(map.words) : '';
         var slot = posLegendEl.querySelector('[data-role="words"]');
         if (slot) slot.textContent = words;
+        /* The components behind the crowd's label, on hover (a native
+           tooltip: nothing more to draw). */
+        var comps = (map && map.ok && map.components) ? map.components : {};
+        var said = Object.keys(comps).map(function (k) {
+            var c = comps[k] || {};
+            return k.replace(/_/g, ' ') + ': ' + (c.words || '—')
+                + (typeof c.score === 'number' ? ' (' + (c.score >= 0 ? '+' : '') + c.score + ')' : '');
+        });
+        posLegendEl.title = said.join('\n');
         posLegendEl.hidden = !words;
     }
 
@@ -2557,7 +2686,74 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             if (hit && api) hit = api.prefer(sigDots, hit, sigPin ? sigPin.id : null);
             sigHover = hit ? { hit: hit, y: param.point.y } : null;
             refreshSignalCard();
+            /* No dot and nothing pinned: a position's line or a living
+               level under the pointer gets the same card (2026-10-03). */
+            if (!sigHover && !sigPin) {
+                var lh = lineHit(param);
+                if (lh) showLineCard(lh, param.point.x, param.point.y);
+            }
         } catch (e) { sigHover = null; }
+    }
+
+    // ── The level and position cards (2026-10-03) ────────────────────────
+    /* The operator: "small hover details for the new content on the
+       graphs, without it being too messy; also for the trade entries".
+       The dot's card, re-used: the hit test is the pointer's height
+       against each line's pixel row (LINE_HIT_PX), positions first (the
+       operator's money), then the living levels; the markup is
+       window.svHoverCards, pure and node-tested. Nothing is pinned and
+       nothing is drawn: moving off the line hides the card. */
+    var LINE_HIT_PX = 6;
+    function hoverApi() { return window.svHoverCards || null; }
+
+    function lineHit(param) {
+        var api = hoverApi();
+        if (!api || !mainSeries || !param || !param.point) return null;
+        var y = param.point.y;
+        function toY(price) { return mainSeries.priceToCoordinate(price); }
+        if (activeInds.positions) {
+            var posItems = [];
+            POSITIONS.forEach(function (p) {
+                [['entry', p.entry], ['stop', p.stop], ['target', p.tp],
+                 ['soft stop', p.soft_stop]].forEach(function (pair) {
+                    if (typeof pair[1] === 'number' && isFinite(pair[1])) {
+                        posItems.push({ price: pair[1], part: pair[0], pos: p });
+                    }
+                });
+            });
+            var ph = api.nearestLine(posItems, y, toY, LINE_HIT_PX);
+            if (ph) return { kind: 'pos', item: ph.pos, part: ph.part, price: ph.price };
+        }
+        if (activeInds.levels) {
+            var lv = api.nearestLine(LEVELS, y, toY, LINE_HIT_PX);
+            if (lv) return { kind: 'level', item: lv, price: lv.price };
+        }
+        return null;
+    }
+
+    function showLineCard(hit, x, y) {
+        var api = hoverApi(), dots = sigApi();
+        if (!sigCardEl || !api || !dots || !hit) return;
+        var key = 'line|' + hit.kind + '|' + (hit.item.id || '') + '|' + hit.price + '|' + (hit.part || '');
+        if (key !== sigCardKey) {
+            if (hit.kind === 'pos') {
+                sigCardEl.className = 'sv-sig-card sv-sig-card--' + dots.tone(hit.item.side);
+                sigCardEl.innerHTML = api.positionCard(hit.item);
+            } else {
+                sigCardEl.className = 'sv-sig-card sv-sig-card--level';
+                sigCardEl.innerHTML = api.levelCard(hit.item, POSMAP);
+            }
+            sigCardKey = key;
+        }
+        sigCardEl.hidden = false;
+        var pos = dots.place(
+            { width: container.clientWidth, height: container.clientHeight,
+              top: canvasEl.offsetTop },
+            { x: x + canvasEl.offsetLeft, y: y + canvasEl.offsetTop },
+            { w: sigCardEl.offsetWidth, h: sigCardEl.offsetHeight });
+        sigCardEl.style.left = pos.left + 'px';
+        sigCardEl.style.top = pos.top + 'px';
+        sigCardEl.classList.add('on');
     }
 
     function unpinSignal() {
