@@ -123,6 +123,8 @@ from .views_withdrawals import (  # noqa: E402 — 2026-09-28
     withdrawal_cancel, withdrawal_correct, withdrawal_create,
     withdrawal_mark_paid, withdrawals_page)
 
+from dashboard.views_next_steps import next_step_approve, next_step_reject  # noqa: E402
+
 urlpatterns = [
     # ── Command Center (unified Dashboard + Eye merge) ───────
     path("command/", command_center, name="command_center"),
@@ -577,6 +579,9 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     # ── Phase 40: Strategist Briefing ──────────────────────────────────────────
     path("briefing/", briefing_dashboard, name="briefing_dashboard"),
     path("briefing/run/", briefing_run_now, name="briefing_run_now"),
+    # The next steps Sauron read in its reports (2026-10-03): the operator's yes or no.
+    path("briefing/next-steps/<int:pk>/approve/", next_step_approve, name="next_step_approve"),
+    path("briefing/next-steps/<int:pk>/reject/", next_step_reject, name="next_step_reject"),
 
     # ── Phase 41: Strategy Generator ───────────────────────────────────────────
     path("generated/", generated_dashboard, name="generated_dashboard"),

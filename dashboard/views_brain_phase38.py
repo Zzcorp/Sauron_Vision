@@ -369,6 +369,10 @@ def briefing_dashboard(request):
     # cannot be read leaves the section saying there is none yet.
     from ai_agents.monday_plan import plans_for_page
     plans = plans_for_page()
+    # THE NEXT STEPS (2026-10-03, ai_agents/next_steps.py): what Sauron
+    # read in its own reports, waiting for the operator's yes or no.
+    from ai_agents.next_steps import for_page as next_steps_for_page
+    next_steps = next_steps_for_page()
 
     return render(request, "dashboard/briefing.html", {
         "page_id": "briefing",
@@ -390,6 +394,7 @@ def briefing_dashboard(request):
         "latest_ok": latest_ok,
         "monday_plan": plans["latest"],
         "older_plans": plans["older"],
+        "next_steps": next_steps,
     })
 
 
