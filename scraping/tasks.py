@@ -338,17 +338,34 @@ def fetch_tradingview_ideas():
     from scraping.models import SentimentSnapshot
 
     before = SentimentSnapshot.objects.count()
-    parsed = 0
+    calls = answered = 0
 
+    # `parsed` counts the symbols TradingView ANSWERED, not the requests
+    # made (2026-10-03). The scraper returns a neutral placeholder on every
+    # failure — blocked, timed out, a symbol it does not know — and this
+    # loop counted each placeholder as a row handled, so a scanner that
+    # answered nothing for all twenty symbols read "handled 20 rows and
+    # stored none", a dedupe's verdict, instead of the fault it was.
     for inst in _scan_universe(limit=20):
+        calls += 1
         try:
-            fetch_technical_analysis(inst.symbol)
-            parsed += 1
+            res = fetch_technical_analysis(
+                inst.symbol, asset_class=getattr(inst, "asset_class", ""))
         except Exception as e:
             logger.warning("TradingView technicals failed for %s: %s", inst.symbol, e)
+            continue
+        if (res or {}).get("recommendation_value") is not None:
+            answered += 1
 
-    return {"status": "success", "symbols": parsed, "parsed": parsed,
-            "stored": SentimentSnapshot.objects.count() - before}
+    stored = SentimentSnapshot.objects.count() - before
+    if calls and not answered:
+        return {"status": "error", "symbols": calls, "parsed": 0,
+                "stored": stored,
+                "error": (f"TradingView's scanner answered no data for "
+                          f"{calls}/{calls} symbols — blocked from this host, "
+                          f"or none of them in its spelling (see the log)")}
+    return {"status": "success", "symbols": calls, "answered": answered,
+            "parsed": answered, "stored": stored}
 
 
 @shared_task

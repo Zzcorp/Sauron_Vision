@@ -57,6 +57,13 @@ class Command(BaseCommand):
         self.stdout.write(f"  bias: {pmap['bias'] or 'none'}"
                           + (f" ({pmap['bias_confidence']:.2f})"
                              if pmap.get("bias_confidence") is not None else ""))
+        po3 = pmap.get("po3") or {}
+        self.stdout.write(f"  day: {po3.get('phase', 'unread')}"
+                          + (f" pointing {po3['direction']}" if po3.get("direction")
+                             else "")
+                          + f" ({po3.get('session', '—')} session"
+                          + (f", {po3['timeframe']} bars" if po3.get("timeframe")
+                             else "") + ")")
         for leg in pmap["path"]:
             self.stdout.write(
                 f"  {leg['leg']:<5} {leg.get('side', '—'):<6}"

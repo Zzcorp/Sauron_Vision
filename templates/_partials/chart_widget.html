@@ -1112,25 +1112,30 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
     }
     function levelCard(l, map) {
         l = l || {};
-        var h = [], touches = levelTouches(l);
+        var h = [], touches = levelTouches(l), day = l.po3 || null;
         h.push('<div class="sv-sig-head">'
-            + '<span class="sv-sig-side">' + (l.pool ? 'POOL' : 'LEVEL') + '</span>'
+            + '<span class="sv-sig-side">' + (day ? 'RANGE' : l.pool ? 'POOL' : 'LEVEL') + '</span>'
             + '<span class="sv-sig-rule">' + text(levelKind(l)) + '</span></div>');
         h.push('<dl class="sv-sig-facts">'
             + fact('Price', l.text || l.price)
-            + fact('Distance', (typeof l.atr_away === 'number')
-                ? l.atr_away + ' ATR ' + (l.side === 'below' ? 'under' : 'over') + ' the mark'
-                : null)
+            + (day ? fact('Day', (day.phase || '') + (day.direction ? ', pointing ' + day.direction : ''))
+                   : fact('Distance', (typeof l.atr_away === 'number')
+                        ? l.atr_away + ' ATR ' + (l.side === 'below' ? 'under' : 'over') + ' the mark'
+                        : null))
             + (touches !== null ? fact('Touches', touches) : '')
             + '</dl>');
-        var what = l.pool ? 'Where the stops pile up'
+        var what = day ? 'The accumulation: the stops build on both sides'
+                 : l.pool ? 'Where the stops pile up'
                  : l.kind === 'round number' ? 'A round number the crowd watches'
                  : 'The last swing still held';
-        var role = levelRole(l, map);
+        var role = day ? String(day.words || '') : levelRole(l, map);
         h.push('<div class="sv-sig-status"><span class="sv-sig-chip">' + esc(what) + '</span>'
-            + (role ? '<span class="sv-sig-chip sv-sig-chip--live">' + esc(role) + '</span>' : '')
+            + (role && !day ? '<span class="sv-sig-chip sv-sig-chip--live">' + esc(role) + '</span>' : '')
             + '</div>');
-        h.push('<div class="sv-sig-foot">Recomputed every minute · gone once the price trades through it</div>');
+        if (day && role) h.push('<div class="sv-sig-foot">' + esc(role) + '</div>');
+        h.push('<div class="sv-sig-foot">' + (day
+            ? 'Asia 20:00 to midnight New York · London runs one side, New York leaves it'
+            : 'Recomputed every minute · gone once the price trades through it') + '</div>');
         return h.join('');
     }
     function positionCard(p) {
@@ -1223,8 +1228,38 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
        that cannot be read ({ok:false}) hides the line; a reply without
        the key leaves it as it was. */
     var POSMAP = null;   /* the map the level cards read their role from */
+    var amdLines = [];   /* the Asian range: the day's accumulation */
+    var ASIA = null;     /* {high, low, phase, words} while drawn */
+
+    /* THE POWER OF THREE on the tape (2026-10-03): the day's Asian range,
+       the accumulation whose two sides London runs and New York leaves,
+       as two long-dashed gold lines — drawn with the levels layer, hover
+       for the phase the day is in. Redrawn from the map on every paint
+       like every other line here. */
+    function applyAsianRange(po3) {
+        amdLines.forEach(function (pl) { try { mainSeries.removePriceLine(pl); } catch (e) {} });
+        amdLines = [];
+        ASIA = null;
+        if (!mainSeries || !activeInds.levels || !po3 || !po3.ok || !po3.asia) return;
+        var a = po3.asia;
+        if (typeof a.high !== 'number' || typeof a.low !== 'number') return;
+        ASIA = { high: a.high, low: a.low, phase: po3.phase, words: po3.words,
+                 session: po3.session, direction: po3.direction };
+        var c = getThemeColors();
+        [[a.high, 'ASIA HIGH'], [a.low, 'ASIA LOW']].forEach(function (pair) {
+            try {
+                amdLines.push(mainSeries.createPriceLine({
+                    price: pair[0], color: c.alpha(c.gold, 0.55), lineWidth: 1,
+                    lineStyle: LightweightCharts.LineStyle.LargeDashed,
+                    axisLabelVisible: false, title: pair[1],
+                }));
+            } catch (e) {}
+        });
+    }
+
     function applyPositioning(map) {
         POSMAP = (map && map.ok) ? map : null;
+        applyAsianRange(POSMAP ? POSMAP.po3 : null);
         if (!posLegendEl) return;
         var words = (map && map.ok && map.words) ? String(map.words) : '';
         var slot = posLegendEl.querySelector('[data-role="words"]');
@@ -2132,6 +2167,7 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             mainSeries = null;
             posLines = []; /* they died with the series */
             lvlLines = [];
+            amdLines = [];
         }
         chartType = type;
         if (type === 'candlestick' || type === 'heikin') {
@@ -2727,6 +2763,18 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         if (activeInds.levels) {
             var lv = api.nearestLine(LEVELS, y, toY, LINE_HIT_PX);
             if (lv) return { kind: 'level', item: lv, price: lv.price };
+            if (ASIA) {
+                /* The Asian range's two lines: the day's accumulation. */
+                var close = lastBars.length ? lastBars[lastBars.length - 1].close : null;
+                var items = [
+                    { price: ASIA.high, kind: 'Asian range high', pool: false, po3: ASIA,
+                      side: (typeof close === 'number' && ASIA.high < close) ? 'below' : 'above' },
+                    { price: ASIA.low, kind: 'Asian range low', pool: false, po3: ASIA,
+                      side: (typeof close === 'number' && ASIA.low > close) ? 'above' : 'below' }
+                ];
+                var ah = api.nearestLine(items, y, toY, LINE_HIT_PX);
+                if (ah) return { kind: 'level', item: ah, price: ah.price };
+            }
         }
         return null;
     }
@@ -2827,6 +2875,7 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         applyIndicators(bars);
         applyPositions(bars);
         applyLevels();
+        applyAsianRange(POSMAP ? POSMAP.po3 : null);
         /* After lastBars is set: the trendline restore asks the loaded
            range whether its anchors are still on the chart. */
         restoreDrawings();

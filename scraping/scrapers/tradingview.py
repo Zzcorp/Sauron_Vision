@@ -68,14 +68,29 @@ HEADERS = {
 }
 
 
-def _resolve_tv_symbol(symbol: str) -> str:
+def _resolve_tv_symbol(symbol: str, asset_class: str = "") -> str:
     """Convert a plain ticker to a TradingView exchange:symbol format.
 
-    Tries common US exchanges; falls back to NASDAQ prefix.
+    The asset class decides the venue (2026-10-03): a forex pair is `FX:`,
+    a crypto pair is Binance's USDT spelling. Before that every symbol the
+    map did not know became `NASDAQ:<symbol>` — `NASDAQ:GBPCHF`,
+    `NASDAQ:ADAUSD` — which the scanner answers with no data, so a universe
+    of forex and crypto earned "handled 20 rows and stored none" every six
+    hours. Stocks still fall back to the NASDAQ prefix.
     """
     symbol = symbol.upper().strip()
     if ":" in symbol:
         return symbol
+    cls = (asset_class or "").lower()
+    if cls == "forex" and len(symbol) == 6 and symbol.isalpha():
+        return f"FX:{symbol}"
+    if cls == "crypto":
+        base = symbol
+        for quote in ("USDT", "USDC", "BUSD", "USD"):
+            if base.endswith(quote) and len(base) > len(quote):
+                base = base[:-len(quote)]
+                break
+        return f"BINANCE:{base}USDT"
     # Common mappings for indices / crypto
     prefix_map = {
         "SPX": "SP:SPX",
@@ -98,16 +113,20 @@ def _resolve_tv_symbol(symbol: str) -> str:
     return f"NASDAQ:{symbol}"
 
 
-def fetch_technical_analysis(symbol: str) -> dict:
+def fetch_technical_analysis(symbol: str, asset_class: str = "") -> dict:
     """Fetch technical analysis summary for a symbol from TradingView scanner.
 
     Args:
         symbol: Ticker symbol (e.g. "AAPL", "NASDAQ:AAPL", "FX:EURUSD").
+        asset_class: the catalogue's class, which picks the venue spelling
+            (see `_resolve_tv_symbol`).
 
     Returns:
         Dict with keys: symbol, recommendation, oscillators_summary,
         moving_averages_summary, indicators (dict of raw values).
-        Returns a neutral/empty structure on any error.
+        Returns a neutral/empty structure on any error — one whose
+        `recommendation_value` is absent, which is how a caller tells an
+        answer from a placeholder.
     """
     try:
         from core.rate_limiter import rate_limiter
@@ -115,7 +134,7 @@ def fetch_technical_analysis(symbol: str) -> dict:
     except Exception:
         pass
 
-    tv_symbol = _resolve_tv_symbol(symbol)
+    tv_symbol = _resolve_tv_symbol(symbol, asset_class)
     empty = {
         "symbol": symbol.upper(),
         "tv_symbol": tv_symbol,

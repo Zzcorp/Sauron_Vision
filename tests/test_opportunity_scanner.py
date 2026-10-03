@@ -371,5 +371,8 @@ class ResolutionTests(TestCase):
             horizon_days=10,
         )
         result = resolve_pending_flags()
-        self.assertEqual(result["skipped"], 1)
+        self.assertEqual(result["not_due"], 1)
         self.assertEqual(result["hit"], 0)
+        # Not under `skipped`: the gate grades that word as a missing
+        # credential, and the digest read "not configured: 132".
+        self.assertNotIn("skipped", result)

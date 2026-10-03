@@ -269,8 +269,8 @@ class TheMapTests(TestCase):
     def test_compact_carries_what_the_surfaces_need(self):
         c = P.compact(_canned_map(side=P.side_read(_canned_map(), "BUY")))
         self.assertEqual(sorted(c), ["bias", "bias_confidence", "components",
-                                     "label", "odds", "ok", "path", "score",
-                                     "side", "stops", "words"])
+                                     "label", "odds", "ok", "path", "po3",
+                                     "score", "side", "stops", "words"])
         self.assertEqual(c["components"]["cot_speculators"],
                          {"score": 0.7, "words": "COT 85"})
 

@@ -382,11 +382,27 @@ def feed_states(now=None) -> list:
             seen[key] = row["latest"]
 
     def _fresh(key):
-        """Is the feed named by `key` delivering right now?"""
+        """Is the feed named by `key` delivering right now — or, its market
+        being shut, was it delivering when the market closed?
+
+        The second clause (2026-10-03): all weekend the digest said
+        "Alpha Vantage — never delivered". It never has, by design — OANDA
+        outranks it on every pair while the market is open — but OANDA's
+        last print was Friday 20:58, so on Saturday it was no longer
+        "fresh", `superseder_ok` fell to False, and the feed it had been
+        covering for read `never` instead of `yielding`. A superseder alive
+        at the close is still the reason the other feed wrote nothing.
+        """
         spec, stamp = BY_KEY.get(key), seen.get(key)
         if not spec or stamp is None:
             return False
-        return (now - stamp).total_seconds() < spec["ages"][0]
+        if (now - stamp).total_seconds() < spec["ages"][0]:
+            return True
+        if window_is_open(spec["window"], now):
+            return False
+        closed_at = window_last_closed(spec["window"], now)
+        return (closed_at is not None
+                and stamp >= closed_at - timedelta(seconds=spec["ages"][1]))
 
     out = []
     for feed in FEEDS:

@@ -16,7 +16,10 @@ breakout, RSI reversion, EMA pullback, and two ICT reads — the fair value
 gap retest and the liquidity sweep reversal — plus the pool sweep
 (2026-10-03): the first bar through equal lows or highs of two swings or
 more that closes back inside, the claim the positioning map makes
-(bot_program/positioning.py) put to the judge.
+(bot_program/positioning.py) put to the judge; and the Power of Three
+(po3, 2026-10-03): the day's Asian range run through one side and the
+first bar back inside, the distribution's start the session read names
+(bot_program/power_of_three.py).
 
 FILTERS, applied on top of any family (the operator's question "and ICT,
 fair value gaps?" answered with numbers):
@@ -326,6 +329,46 @@ def pool_sweep(df, direction, *, touches=2, left=3, right=3, lookback=120,
     return out
 
 
+def po3(df, direction, *, session="asia"):
+    """The Power of Three (bot_program/power_of_three.py): the day's Asian
+    range (accumulation), a run through ONE side of it (the manipulation),
+    and the first bar back inside — the distribution's start, the fire,
+    in the direction away from the run: long after the lows were run,
+    short after the highs. One fire per day at most; a day whose range
+    both sides were run never fires. Needs a New-York-anchored session
+    read (signals/smc/sessions.session_windows): no tz database, no
+    fires. Honest on 1h bars; on 4h the range is one bar."""
+    from signals.smc.sessions import session_windows
+    n = len(df)
+    out = np.zeros(n, dtype=bool)
+    windows = session_windows(df, session)
+    if not windows:
+        return out
+    lows = df["low"].to_numpy(dtype=float)
+    highs = df["high"].to_numpy(dtype=float)
+    closes = df["close"].to_numpy(dtype=float)
+    for k, w in enumerate(windows):
+        pos = w["positions"]
+        lo, hi = float(lows[pos].min()), float(highs[pos].max())
+        start = pos[-1] + 1
+        stop = windows[k + 1]["positions"][0] if k + 1 < len(windows) else n
+        ran_low = ran_high = False
+        for j in range(start, stop):
+            if lows[j] < lo:
+                ran_low = True
+            if highs[j] > hi:
+                ran_high = True
+            if ran_low and ran_high:
+                break
+            if direction == LONG and ran_low and closes[j] > lo:
+                out[j] = True
+                break
+            if direction == SHORT and ran_high and closes[j] < hi:
+                out[j] = True
+                break
+    return out
+
+
 def sweep_reversal(df, direction, *, n=20):
     """ICT liquidity sweep: the bar runs the stops under the last `n` bars'
     low and closes back above it (long) — or over the high and back under
@@ -443,6 +486,7 @@ FAMILIES = {f.key: f for f in (
            [{"n": 20}, {"n": 50}]),
     Family("pool_sweep", pool_sweep, {"touches": 2},
            [{"touches": 2}, {"touches": 3}]),
+    Family("po3", po3, {"session": "asia"}, [{"session": "asia"}]),
     Family("tsmom", tsmom, {"n": 1000, "trigger": 20},
            [{"n": 500}, {"n": 1000}, {"n": 1500}, {"n": 1000, "trigger": 55}]),
     Family("rsi2_pullback", rsi2_pullback,
