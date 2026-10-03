@@ -7,10 +7,10 @@ ECONOMIC CALENDAR over a table that structurally could not contain FOMC or
 CPI made an operator conclude the platform was broken rather than that it
 had never covered macro at all.
 
-scraping/scrapers/macro_calendar.py now writes the macro half under
-source="fmp_macro". That makes the old note false — but "we cover macro"
-would be equally false until the scraper has actually delivered, because it
-needs a working FMP key and the endpoint may refuse a legacy plan.
+scraping/scrapers/macro_calendar.py now writes the macro half — from Forex
+Factory's free weekly feed (source="forexfactory"), FMP's paid endpoint as
+the fallback (source="fmp_macro"). That makes the old note false — but "we
+cover macro" would be equally false until a source has actually delivered.
 
 So the claim follows the DATA. `macro_delivered` is a row check, not a
 feature flag, and the note below says whichever of the two things is
@@ -21,14 +21,14 @@ currently true.
 {% block content %}
 <p class="cal-scope-note">
     {% if calendar_source.macro_delivered %}
-        US issuer earnings dates and macro releases — FOMC, CPI, NFP —
-        from FMP.
+        US issuer earnings dates from FMP, and macro releases — FOMC, CPI,
+        NFP — from Forex Factory's calendar.
     {% else %}
         US issuer earnings dates, from FMP. The macro source has never
         delivered a row, so releases like FOMC, CPI and NFP do not appear
         here yet — run <code>python manage.py fetch_macro_calendar</code>,
-        which will say whether the key is missing, the plan refuses the
-        endpoint, or the fortnight is genuinely quiet.
+        which will say whether Forex Factory answered, FMP had to stand in,
+        or the fortnight is genuinely quiet.
     {% endif %}
 </p>
 <div class="oc-strip" style="margin-bottom:18px;">

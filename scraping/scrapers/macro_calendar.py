@@ -22,6 +22,19 @@ Low/Medium/High; the position review only reacts to `high`, and quietly
 mapping "Medium" up to it would put a permanent event flag on every FX
 position and train the operator to ignore the one that matters.
 
+TWO SOURCES, ONE TABLE (2026-10-03). FMP's economic calendar is a paid
+endpoint: this account's key answered 402 Payment Required every thirty
+minutes for a month, and every forex position read "NO MACRO CALENDAR
+COVERS THE NEXT 24H" through NFP, CPI and FOMC. The operator chose the
+free source: Forex Factory publishes its calendar as two keyless JSON
+files, this week and next (nfs.faireconomy.media, the feed most home-built
+systems read). `fetch_macro_calendar` asks Forex Factory first and FMP
+only when Forex Factory failed, so a working free feed never pays for a
+402 it does not need. The two write under different `source` values
+(`forexfactory`, `fmp_macro`); every reader of the macro half lists both
+(`MACRO_SOURCES`). Forex Factory's "Holiday" rows are not stored: a bank
+holiday is not a print, and the review only reacts to `high` anyway.
+
 Run with:
     python manage.py fetch_macro_calendar
 """
@@ -44,20 +57,61 @@ FMP_MACRO_ENDPOINTS = (
     ("v3", "https://financialmodelingprep.com/api/v3/economic_calendar"),
 )
 
+#: Forex Factory's weekly calendar, as two keyless JSON files. Each row:
+#: {"title", "country" (a currency code), "date" (ISO 8601 with the New
+#: York offset), "impact" (High/Medium/Low/Holiday), "forecast",
+#: "previous", "url"}. Read every thirty minutes by the beat; the feed's
+#: owner asks for no more than one read a minute.
+FF_FEEDS = (
+    ("thisweek", "https://nfs.faireconomy.media/ff_calendar_thisweek.json"),
+    ("nextweek", "https://nfs.faireconomy.media/ff_calendar_nextweek.json"),
+)
+#: The feed sits behind a CDN that has refused the default python
+#: user-agent; a browser's is what every other reader sends.
+FF_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                   "Chrome/124.0.0.0 Safari/537.36"),
+    "Accept": "application/json",
+}
+FF_TIMEOUT_S = 15
+
 #: The currencies the fleet actually trades. A calendar row for a currency
 #: no bot holds is noise in a table the position review scans per position.
 TRADED_CURRENCIES = {"USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"}
 
 SOURCE = "fmp_macro"
+FF_SOURCE = "forexfactory"
+#: Every writer of the MACRO half, for the readers (position review's
+#: blind marker, news risk's leg C, the calendar page). `source="fmp"` is
+#: the earnings half and stores a ticker, never a currency.
+MACRO_SOURCES = (FF_SOURCE, SOURCE)
 
 
 def _event_datetime(raw):
-    """FMP sends "2026-09-05 12:30:00" — naive, and documented as UTC."""
-    if not raw:
+    """An event's instant in UTC, from what either source sends.
+
+    FMP sends "2026-09-05 12:30:00" — naive, and documented as UTC. Forex
+    Factory sends "2026-10-05T08:30:00-04:00" — New York wall time with
+    its offset, so the offset is applied, never dropped: dropping it would
+    file NFP four hours early and clear the window the print lands in.
+    """
+    if raw is None or raw == "":
         return None
+    if isinstance(raw, datetime):
+        return (raw.astimezone(dt_timezone.utc) if raw.tzinfo
+                else raw.replace(tzinfo=dt_timezone.utc))
+    text = str(raw).strip()
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        parsed = None
+    if parsed is not None:
+        return (parsed.astimezone(dt_timezone.utc) if parsed.tzinfo
+                else parsed.replace(tzinfo=dt_timezone.utc))
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
         try:
-            naive = datetime.strptime(str(raw)[:19], fmt)
+            naive = datetime.strptime(text[:19], fmt)
         except (TypeError, ValueError):
             continue
         # `django.utils.timezone.utc` was removed in Django 5; the
@@ -77,7 +131,7 @@ def _impact(raw) -> str:
     return "high" if str(raw or "").strip().lower() == "high" else "low"
 
 
-def _persist(rows) -> int:
+def _persist(rows, source: str = SOURCE) -> int:
     from market_data.models import EconomicEvent
 
     stored = 0
@@ -103,7 +157,7 @@ def _persist(rows) -> int:
         # Keyed on source+title+day so a re-run updates rather than
         # duplicates, and so this scraper can never touch an earnings row.
         existing = EconomicEvent.objects.filter(
-            source=SOURCE, title=title, currency_affected=currency,
+            source=source, title=title, currency_affected=currency,
             datetime__date=when.date()).first()
         try:
             if existing:
@@ -112,12 +166,102 @@ def _persist(rows) -> int:
                 existing.save(update_fields=list(defaults.keys()))
             else:
                 EconomicEvent.objects.create(
-                    source=SOURCE, title=title, **defaults)
+                    source=source, title=title, **defaults)
             stored += 1
         except Exception as exc:  # noqa: BLE001 — loud, and keep going
             logger.error("macro persist failed for %s %s: %s",
                          currency, title, exc)
     return stored
+
+
+# ── Forex Factory ────────────────────────────────────────────────────────
+
+def _ff_rows(payload) -> list:
+    """Forex Factory's rows in the shape `_persist` reads. The currency IS
+    the country here (the feed carries no country name), and a Holiday is
+    not a print."""
+    rows = []
+    for item in payload if isinstance(payload, list) else []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("impact") or "").strip().lower() == "holiday":
+            continue
+        currency = str(item.get("country") or "").strip().upper()
+        rows.append({
+            "date": item.get("date"),
+            "country": currency,
+            "event": item.get("title"),
+            "currency": currency,
+            "impact": item.get("impact"),
+            "estimate": item.get("forecast"),
+            "previous": item.get("previous"),
+            "actual": item.get("actual"),
+        })
+    return rows
+
+
+def fetch_macro_calendar_ff() -> dict:
+    """This week's and next week's prints from Forex Factory, stored under
+    `forexfactory`. Returns {"parsed", "stored", "source", "weeks"} plus
+    "failures" when one file failed and "error" when both did. Keyless:
+    there is no `skipped`."""
+    rows, weeks, failures = [], [], []
+    for label, url in FF_FEEDS:
+        try:
+            resp = requests.get(url, headers=FF_HEADERS, timeout=FF_TIMEOUT_S)
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception as e:  # noqa: BLE001 — the other file still counts
+            failures.append(f"{label}: {e}")
+            continue
+        if not isinstance(payload, list):
+            failures.append(f"{label}: unexpected payload")
+            continue
+        rows.extend(_ff_rows(payload))
+        weeks.append(label)
+    if not weeks:
+        from core.secret_scrub import scrub
+        detail = scrub(" | ".join(failures) or "no feed answered")
+        logger.error("Forex Factory calendar error: %s", detail)
+        return {"parsed": 0, "stored": 0, "source": FF_SOURCE,
+                "error": detail}
+    stored = _persist(rows, source=FF_SOURCE)
+    out = {"parsed": len(rows), "stored": stored, "source": FF_SOURCE,
+           "weeks": weeks}
+    if failures:
+        out["failures"] = failures
+        logger.warning("Forex Factory calendar: %s answered, %s did not (%s)",
+                       ", ".join(weeks), "; ".join(failures), "partial week")
+    logger.info("Forex Factory macro: parsed=%s stored=%s (%s)",
+                len(rows), stored, ", ".join(weeks))
+    return out
+
+
+def fetch_macro_calendar(days_ahead: int = 14) -> dict:
+    """The macro half: Forex Factory, then FMP only when it failed.
+
+    Returns the winning source's dict. When both fail the error names both,
+    so an operator reading the component row sees "forexfactory: … |
+    fmp: …" and not one source's excuse for the other's silence. A missing
+    FMP key is not a `skipped` here: with a free primary source, the paid
+    fallback being unconfigured is a detail of the error, not the verdict.
+    """
+    ff = fetch_macro_calendar_ff()
+    if not ff.get("error"):
+        return ff
+    fmp = fetch_macro_calendar_fmp(days_ahead=days_ahead)
+    if not fmp.get("error") and not fmp.get("skipped"):
+        fmp["source"] = SOURCE
+        fmp["fallback_after"] = ff["error"]
+        logger.warning("macro calendar: Forex Factory failed (%s); FMP "
+                       "answered instead", ff["error"])
+        return fmp
+    detail = f"forexfactory: {ff['error']}"
+    if fmp.get("error"):
+        detail += f" | fmp: {fmp['error']}"
+    elif fmp.get("skipped"):
+        detail += f" | fmp: skipped ({fmp['skipped']})"
+    return {"parsed": 0, "stored": 0, "source": "", "error": detail}
 
 
 def fetch_macro_calendar_fmp(days_ahead: int = 14) -> dict:

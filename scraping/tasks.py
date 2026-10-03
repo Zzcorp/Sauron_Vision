@@ -212,7 +212,8 @@ def fetch_social_sentiment():
 @shared_task
 @guarded_task("scraper_calendar")
 def check_economic_calendar():
-    """Tier 2: Fetch the earnings AND macro calendars from FMP.
+    """Tier 2: Fetch the earnings calendar (FMP) AND the macro calendar
+    (Forex Factory, FMP as the fallback — see macro_calendar).
 
     Both, under one component, because both ARE the economic calendar and
     a second component would need its own registry entry, topology node,
@@ -230,14 +231,15 @@ def check_economic_calendar():
     averaged away into a green run.
     """
     from scraping.scrapers.earnings_calendar import fetch_earnings_calendar_fmp
-    from scraping.scrapers.macro_calendar import fetch_macro_calendar_fmp
+    from scraping.scrapers.macro_calendar import fetch_macro_calendar
 
     result = fetch_earnings_calendar_fmp(days_ahead=14)
-    macro = fetch_macro_calendar_fmp(days_ahead=14)
+    macro = fetch_macro_calendar(days_ahead=14)
     result = {
         **result,
         "macro_parsed": macro.get("parsed", 0),
         "macro_stored": macro.get("stored", 0),
+        "macro_source": macro.get("source", ""),
     }
     # The macro half's verdict is carried, not merged: an `error` from
     # either has to reach task_gate as an error, and a `skipped` from

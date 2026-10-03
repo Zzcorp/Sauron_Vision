@@ -251,11 +251,17 @@ class OneRunOneVerdictTests(TestCase):
                 key=key, defaults={"name": key, "category": "system",
                                    "is_enabled": True})
 
+    # The macro half is keyless since 2026-10-03 (Forex Factory), so it
+    # has to be mocked too or a real HTTP call decides an earnings test.
+    QUIET_MACRO = {"parsed": 0, "stored": 0, "source": "forexfactory"}
+
     def test_a_skipped_run_does_not_report_success(self):
         from scraping.tasks import check_economic_calendar
         with patch("scraping.scrapers.earnings_calendar.fetch_earnings_calendar_fmp",
                    return_value={"parsed": 0, "stored": 0,
-                                 "skipped": "no_api_key"}):
+                                 "skipped": "no_api_key"}), \
+                patch("scraping.scrapers.macro_calendar.fetch_macro_calendar",
+                      return_value=dict(self.QUIET_MACRO)):
             out = check_economic_calendar()
         self.assertEqual(out["status"], "warning")
 
@@ -263,7 +269,9 @@ class OneRunOneVerdictTests(TestCase):
         from scraping.tasks import check_economic_calendar
         with patch("scraping.scrapers.earnings_calendar.fetch_earnings_calendar_fmp",
                    return_value={"parsed": 0, "stored": 0,
-                                 "error": "HTTP 403"}):
+                                 "error": "HTTP 403"}), \
+                patch("scraping.scrapers.macro_calendar.fetch_macro_calendar",
+                      return_value=dict(self.QUIET_MACRO)):
             out = check_economic_calendar()
         self.assertEqual(out["status"], "error")
 
@@ -273,10 +281,12 @@ class OneRunOneVerdictTests(TestCase):
                    "fetch_earnings_calendar_fmp",
                    return_value={"parsed": 12, "stored": 12}), \
                 patch("scraping.scrapers.macro_calendar."
-                      "fetch_macro_calendar_fmp",
-                      return_value={"parsed": 3, "stored": 3}):
+                      "fetch_macro_calendar",
+                      return_value={"parsed": 3, "stored": 3,
+                                    "source": "forexfactory"}):
             out = check_economic_calendar()
         self.assertEqual(out["status"], "success")
+        self.assertEqual(out["macro_source"], "forexfactory")
 
 
 class TheScraperStillRefusesToInventTests(TestCase):

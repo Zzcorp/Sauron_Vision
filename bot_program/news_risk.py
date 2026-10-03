@@ -8,7 +8,7 @@ Rows the analyst could not parse (`ai_summary == 'Failed to parse AI
 response'`) are excluded: the parser's fallback stamps a sentiment of
 0.0 and a low urgency, which would drag every class's average toward
 neutral and hide a bad tape. Leg C is the macro calendar: high-impact
-`fmp_macro` events in the NEXT 24h, per currency — forex is exposed when
+macro events (`MACRO_SOURCES`) in the NEXT 24h, per currency — forex is exposed when
 the currency is a leg of any active pair, everything else to USD events.
 
 Leg A goes BLIND when the analyst is idle: `Max(ai_processed_at)` None
@@ -28,7 +28,9 @@ FAILED_PARSE_SUMMARY = "Failed to parse AI response"
 # not a quiet news day.
 ANALYST_IDLE_SECONDS = 2 * 3600
 URGENT_LEVELS = ("critical", "high")
-MACRO_SOURCE = "fmp_macro"
+#: The macro half's writers (Forex Factory first since 2026-10-03, FMP as
+#: the fallback); `source="fmp"` is the earnings half and stores a ticker.
+MACRO_SOURCES = ("forexfactory", "fmp_macro")
 
 
 def _classes():
@@ -101,7 +103,7 @@ def news_risk_by_class(now=None, window_hours=24, min_articles=3) -> dict:
 
     # ── Leg C: the macro calendar, next 24h, per currency ───────────────
     events = (EconomicEvent.objects
-              .filter(source=MACRO_SOURCE, impact__iexact="high",
+              .filter(source__in=MACRO_SOURCES, impact__iexact="high",
                       datetime__gte=now, datetime__lte=now + timedelta(hours=24))
               .values_list("currency_affected", flat=True))
     by_ccy: dict = {}

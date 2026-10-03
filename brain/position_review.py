@@ -571,8 +571,10 @@ def _rule_state(pos: dict) -> dict:
 #: The macro writers. `source="fmp"` is the EARNINGS half, which stores an
 #: equity TICKER in `currency_affected` and can never match a forex leg; only
 #: these sources store a real currency. A new macro scraper (FRED releases,
-#: BLS) belongs in this tuple and nowhere else.
-MACRO_SOURCES = ("fmp_macro",)
+#: BLS) belongs in this tuple and nowhere else. Forex Factory joined FMP on
+#: 2026-10-03 (scraping.scrapers.macro_calendar.MACRO_SOURCES is the same
+#: tuple; spelled out here so this module imports nothing from scraping).
+MACRO_SOURCES = ("forexfactory", "fmp_macro")
 
 
 def _macro_calendar_covers_the_horizon() -> bool:
