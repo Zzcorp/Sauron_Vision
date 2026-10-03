@@ -538,6 +538,20 @@ COMMANDS = [
     },
     # ── ops: one-off writes ─────────────────────────────────────────────
     {
+        "name": "announce",
+        "title": "Announce a release",
+        "purpose": "Send a release announcement to the platform's Telegram group, in the house style and the lore (core/announcements.py): the title, the subtitle, one summary, the facts as lines, the who-is-who folded. Once per chat; --dry-run prints it, --force sends it again.",
+        "usage": [
+            "python manage.py announce list                        # what can be sent",
+            "python manage.py announce october_turn --dry-run      # print it, send nothing",
+            "python manage.py announce october_turn                # send it to the platform chat",
+        ],
+        "mirrors": "/ops/",
+        "read_only": False,
+        "run_args": [],
+        "category": "ops",
+    },
+    {
         "name": "seed_components",
         "title": "Seed components",
         "purpose": "Register all platform components — every switch the code knows, created OFF where it does not yet exist in the database.",
