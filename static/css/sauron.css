@@ -6397,6 +6397,13 @@ body.light-mode .sz-block { background: var(--bg-secondary); }
     font-size: 9px; letter-spacing: 1.4px; color: var(--sr-taken);
 }
 
+/* The leverage column on /positions/ and /portfolio/ (2026-10-03): 1x is
+   the quiet default; anything above it is the one number that explains a
+   4,800 exposure on a 160 margin, so it carries the same gold as the
+   "margin" word under Capital. */
+.pos-lev { font-family: var(--font-mono); font-weight: 600; }
+.pos-lev.is-levered { color: var(--accent-gold-ink); }
+
 /* ═══════════════════════════════════════════════════════════════════════
    CHART SURFACES
    ───────────────────────────────────────────────────────────────────────

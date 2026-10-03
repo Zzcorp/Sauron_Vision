@@ -1652,7 +1652,40 @@ def _initial_stop_map(rows):
     return out
 
 
-def _live_row(row, stops):
+def _leverage_map(rows):
+    """{row key: the leverage this position carries, as _pos_leverage prints
+    it} — the broker's multiplier on an eToro row, the class's margin model
+    otherwise, "" when unknown (2026-10-03, the operator: "add leverage used
+    by position on the line of cells in positions page and portfolio too").
+    One query over the bot rows' metadata, beside _initial_stop_map's."""
+    out = {}
+    bots = {r.trade_id: r for r in rows
+            if getattr(r, "source", "") == "bot"
+            and getattr(r, "trade_id", None)}
+    for r in rows:
+        if getattr(r, "source", "") != "bot":
+            inst = getattr(r, "instrument", None)
+            cls = getattr(inst, "asset_class", "") or ""
+            out[f"pos-{getattr(r, 'pk', None)}"] = _pos_leverage(cls)
+    if not bots:
+        return out
+    try:
+        from bot_program.models import AssetBotTrade
+        for trade in AssetBotTrade.objects.filter(id__in=list(bots)).only(
+                "id", "asset_class", "metadata", "entry_price", "qty"):
+            meta = trade.metadata or {}
+            entry = _as_float(trade.entry_price) or 0.0
+            qty = abs(_as_float(trade.qty) or 0.0)
+            vpu = _pos_value_per_unit(trade)
+            notional = qty * entry * vpu if (entry and qty) else None
+            out[f"bot-{trade.id}"] = _pos_leverage(
+                trade.asset_class or "", meta=meta, notional=notional)
+    except Exception as e:  # noqa: BLE001 — a dash, never a wrong number
+        logger.debug("[positions] leverage map failed: %s", e)
+    return out
+
+
+def _live_row(row, stops, levs=None):
     """One open position, shaped the way the tables already read it, plus R.
 
     A dict and not the model instance: UnifiedPosition declares __slots__, so
@@ -1739,6 +1772,8 @@ def _live_row(row, stops):
         "status": getattr(row, "status", ""),
         "paper": getattr(row, "paper", True),
         "source": source,
+        # The leverage this position carries (_leverage_map): "" unknown.
+        "leverage": (levs or {}).get(key, ""),
     }
 
 
@@ -1759,7 +1794,8 @@ def _live_open_book(user, portfolio):
     from .views_command import _open_book
     objects, n_priced, unrealized, deployed = _open_book(user, portfolio)
     stops = _initial_stop_map(objects)
-    return (objects, [_live_row(r, stops) for r in objects],
+    levs = _leverage_map(objects)
+    return (objects, [_live_row(r, stops, levs) for r in objects],
             n_priced, unrealized, deployed)
 
 

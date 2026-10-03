@@ -224,7 +224,7 @@ honest freshness claim.{% endcomment %}
 {# position is a rounding error or half the pool. Every price cell carries #}
 {# its own percentage underneath — a distance for the levels, the move #}
 {# since entry for the mark — so no cell asks the operator to divide. #}
-<thead><tr><th class="sv-sel-cell" scope="col"><input type="checkbox" class="sv-sel-box" data-sv-select-all aria-label="Select every position shown" title="Select all visible"></th><th>Symbol</th><th>Direction</th><th class="num">Qty</th><th class="num">Capital</th><th class="num">Entry</th><th class="num">Current</th><th class="num">Stop</th><th class="num">Target</th><th class="num">P&L</th><th class="num">P&L %</th><th class="num">R</th><th>Strategy</th><th class="nowrap">Opened</th><th class="nowrap">Action</th></tr></thead>
+<thead><tr><th class="sv-sel-cell" scope="col"><input type="checkbox" class="sv-sel-box" data-sv-select-all aria-label="Select every position shown" title="Select all visible"></th><th>Symbol</th><th>Direction</th><th class="num">Qty</th><th class="num">Capital</th><th class="num" title="How many times its own capital this position carries: the broker's multiplier on an eToro row, the class's margin model otherwise. 1x settles in full.">Lev</th><th class="num">Entry</th><th class="num">Current</th><th class="num">Stop</th><th class="num">Target</th><th class="num">P&L</th><th class="num">P&L %</th><th class="num">R</th><th>Strategy</th><th class="nowrap">Opened</th><th class="nowrap">Action</th></tr></thead>
         <tbody>
         {# ── The row's own numbers are unchanged; the data-pos-* set feeds the ── #}
         {# ── dwell card (static/js/sv-position-card.js), which answers what   ── #}
@@ -244,7 +244,7 @@ honest freshness claim.{% endcomment %}
         {% for g in open_view.groups %}{% if not forloop.first %}
         </tbody>
         <tbody>{% endif %}
-        {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=15 scope="pos" %}{% endif %}
+        {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=16 scope="pos" %}{% endif %}
         {% for p, d in g.pairs %}
         {% if p.instrument.has_page %}{% url 'instrument_detail' p.instrument.symbol as instrument_url%}{% endif %}
         {# The money world (2026-09-30): REAL MONEY rows carry a red edge and the solid marker in the symbol cell. #}
@@ -315,6 +315,8 @@ honest freshness claim.{% endcomment %}
                 {% if d.committed %}<span class="pos-cap-money">{{ d.committed }}</span>{% if d.committed_pct %}<span class="pos-cap-share">{{ d.committed_pct }}% of pool</span>{% endif %}{% if d.committed_kind == 'margin' %}<span class="pos-cap-kind">margin</span>{% endif %}
                 {% else %}<span class="sv-unknown">&mdash;</span>{% endif %}
             </td>
+            {# LEVERAGE (2026-10-03, the operator: "add leverage used by position on the line"). The same fact the dwell card carries (d.leverage, views._pos_leverage): the broker's multiplier on an eToro row, the class's margin model otherwise; "" is unknown and prints as a dash, never as 1. #}
+            <td data-label="Lev" class="num pos-lev-cell" style="font-family: var(--font-mono);">{% if d.leverage %}<span class="pos-lev{% if d.leverage != '1' %} is-levered{% endif %}">{{ d.leverage }}x</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
             <td data-label="Entry" class="num pos-price-cell" style="font-family: var(--font-mono);">
                 <span class="pos-price">{{ p.entry_price }}</span><span class="pos-price-pct is-ref">entry</span>
             </td>

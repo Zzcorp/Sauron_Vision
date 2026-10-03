@@ -564,8 +564,9 @@ class RenderedPhoneMarkupTests(TestCase):
         # Fifteen since the 2026-09-28 merge: the tick column ("Should I
         # close?", tests/test_close_advice.py) comes first. Its header is
         # the select-all box and has no words, so its cells carry the one
-        # label the header cannot: "Select".
-        self.assertEqual(len(heads), 15)
+        # label the header cannot: "Select". Sixteen since 2026-10-03: the
+        # leverage column (tests/test_leverage_column.py) after Capital.
+        self.assertEqual(len(heads), 16)
         self.assertEqual(heads[0], "")
         row = re.search(r"<tr data-sv-position-row.*?</tr>", table, re.S)
         self.assertIsNotNone(row, "no open row rendered")
@@ -576,7 +577,7 @@ class RenderedPhoneMarkupTests(TestCase):
         self.assertIn("sv-cell-action", tds[-1].get("class", "").split())
         self.assertEqual(
             [i for i, td in enumerate(tds)
-             if "sv-cell-action" in td.get("class", "").split()], [14])
+             if "sv-cell-action" in td.get("class", "").split()], [15])
         self.assertIn('data-sv-close-trade="%d"' % self.trade.id,
                       row.group(0).split('data-label="Action"', 1)[1])
 
