@@ -2213,12 +2213,18 @@ def resolve_pending_flags(*, now: Optional[datetime] = None,
     now = now or timezone.now()
     qs = OpportunityFlag.objects.filter(outcome="").select_related("instrument", "signal")
 
-    resolved = {"hit": 0, "miss": 0, "neutral": 0, "expired": 0, "skipped": 0}
+    # `not_due`, NOT `skipped` (2026-10-03). This task shares the
+    # Opportunity Scanner's component row, and core.task_gate.judge_result
+    # reads a truthy top-level `skipped` as a starved credential: the digest
+    # said "Opportunity Scanner — not configured: 132" about 132 flags whose
+    # horizon simply had not passed yet — the healthiest thing a flag can be
+    # the day after it was raised.
+    resolved = {"hit": 0, "miss": 0, "neutral": 0, "expired": 0, "not_due": 0}
 
     for flag in qs:
         deadline = flag.scanned_at + timedelta(days=flag.horizon_days)
         if now < deadline:
-            resolved["skipped"] += 1
+            resolved["not_due"] += 1
             continue
 
         last = _last_price(flag.instrument, now, as_of=as_of)

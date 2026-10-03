@@ -516,11 +516,20 @@ def fetch_crypto_quotes():
     from market_data.quotes import write_quote
 
     feed = public_feed_for("crypto")
-    fetched, failed = 0, []
+    fetched, attempted, failed = 0, 0, []
+    universe = list(Instrument.objects.filter(asset_class="crypto",
+                                              is_active=True))
+    # Skip what the websocket stream already owns (2026-10-03). With
+    # binance_ws up, SOURCE_PRIORITY refused every one of this poller's
+    # writes, so every two minutes it was graded "ran and produced
+    # nothing" — the same skip-before-the-request fetch_forex_quotes does.
+    held = _held_symbols(universe, "binance_public")
     if feed is not None:
         from market_data.management.commands.backfill_bars import venue_symbol
-        for inst in Instrument.objects.filter(asset_class="crypto",
-                                              is_active=True):
+        for inst in universe:
+            if inst.symbol in held:
+                continue
+            attempted += 1
             try:
                 tk = feed.ticker(venue_symbol(inst.symbol)) or {}
                 last = float(tk.get("lastPrice", 0) or 0)
@@ -546,8 +555,12 @@ def fetch_crypto_quotes():
         except Exception as e:
             logger.warning("[crypto quotes] CoinGecko fallback failed: %s", e)
 
-    return {"status": "success", "fetched": fetched,
-            "not_on_binance": len(failed)}
+    if attempted == 0 and fetched == 0 and held:
+        return {"status": "skipped",
+                "reason": f"{len(held)} symbol(s) held by fresher "
+                          f"higher-priority sources"}
+    return {"status": "success", "fetched": fetched, "attempted": attempted,
+            "held": len(held), "not_on_binance": len(failed)}
 
 
 @shared_task
@@ -577,10 +590,22 @@ def fetch_crypto_news_task():
     # three of the five feeds are URLs fetch_rss_news already polls — no new
     # rows is the normal outcome, and "the feeds answered" is what actually
     # separates a quiet beat from a dead one.
-    return {"status": "success", "articles": count,
-            "parsed": int(result.get("parsed") or 0),
-            "feeds_ok": int(result.get("feeds_ok") or 0),
-            "feeds_dead": result.get("feeds_dead", [])}
+    parsed = int(result.get("parsed") or 0)
+    feeds_ok = int(result.get("feeds_ok") or 0)
+    out = {"status": "success", "articles": count, "parsed": parsed,
+           "feeds_ok": feeds_ok, "feeds_dead": result.get("feeds_dead", [])}
+    if count == 0 and parsed > 0 and feeds_ok > 0:
+        # The feeds answered and every headline was already on file: the
+        # beat did its job and found nothing new. Said as a skip with its
+        # reason, the way fetch_forex_quotes says "held by fresher sources",
+        # because judge_result cannot read feeds_ok and graded this
+        # "handled 25 rows and stored none" every ten minutes (2026-10-03).
+        # Dead feeds stay the warning they are: parsed 0 reads "ran and
+        # produced nothing".
+        out["status"] = "skipped"
+        out["reason"] = (f"{feeds_ok} feed(s) answered; all {parsed} "
+                         f"headlines already stored")
+    return out
 
 
 @shared_task
