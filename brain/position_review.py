@@ -131,6 +131,15 @@ OVERLAP_MIN_RULES = 2
 # spreads — was visible to nothing. It was live in the book when this was
 # written: USDCHF held BUY by one rule and SELL by another at the same time.
 
+# T13 thesis_dead / the T3 damping — the thesis check's answer (2026-10-03).
+# 0.8 sits above every judgement-call trigger and below only the mark
+# through the stop: a broken structure is a reason to act, not to look. The
+# damping halves adverse_excursion when the structure says the excursion
+# was the crowd's stops being taken, so the model budget ranks the dead
+# theses first; the trigger still fires, because the fact is the fact.
+THESIS_DEAD_SEVERITY = 0.8
+THESIS_ALIVE_DAMP = 0.5
+
 # Bars for the excursion window. 1h first, then 4h, then 1d — the finest
 # timeframe that actually has rows since entry, because a daily bar hides the
 # intraday spike that took a position to -0.9R and back.
@@ -848,7 +857,25 @@ def measure(pos: dict, cache: Optional[dict] = None) -> dict:
     facts["concentration"] = _concentration(pos, cache)
     facts["self_hedge"] = _self_hedge(pos, cache)
     facts["origin_signal"] = _origin_signal(pos)
+    facts["thesis"] = _thesis(pos, facts)
     return facts
+
+
+def _thesis(pos: dict, facts: dict) -> dict:
+    """The thesis check (brain/thesis_check.py, 2026-10-03): is the reason
+    for this trade still alive — the structure, the sweep, the bias, the
+    odds of coming back. Read AFTER every other fact because it reads
+    them. A check that fails is `unread`, said, never a verdict."""
+    try:
+        from .thesis_check import thesis_check
+        return thesis_check(pos, facts)
+    except Exception as e:  # noqa: BLE001 — one read must not blind the pass
+        logger.info("[position-review] thesis unread for %s: %s",
+                    facts.get("symbol"), e)
+        return {"verdict": "unread", "alive": None,
+                "why": [f"thesis check failed: {e}"[:200]],
+                "words": "", "structure": None, "odds": None,
+                "adjust": None}
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -901,12 +928,25 @@ def evaluate_triggers(facts: dict) -> list[dict]:
             r_to_stop=r_stop, r_to_target=r_target))
 
     # T3 — deep adverse excursion with nothing to show for it.
+    # The thesis check (facts["thesis"], brain/thesis_check.py) answers
+    # this one: a sweep that reversed in the trade's favour, a reclaimed
+    # entry or good odds of coming back say the excursion was the crowd's
+    # stops being taken, not the thesis failing. The trigger still fires
+    # (the fact is the fact) but damped, with the structure's answer in its
+    # text, so the model budget goes to the dead theses first.
+    th = facts.get("thesis") or {}
+    thesis_alive = th.get("verdict") in ("hold", "adjust")
     if mae is not None and mae <= ADVERSE_EXCURSION_R and (ur is None or ur <= 0):
-        fired.append(_t(
+        t = _t(
             "adverse_excursion", min(1.0, 0.4 + abs(mae) * 0.4),
             f"Has been {mae:.2f}R against entry since it opened and is still "
             f"{'—' if ur is None else f'{ur:+.2f}R'} — the thesis has paid nothing.",
-            mae_r=mae, unrealized_r=ur))
+            mae_r=mae, unrealized_r=ur)
+        if thesis_alive and th.get("why"):
+            t["severity"] = round(t["severity"] * THESIS_ALIVE_DAMP, 3)
+            t["text"] += f" The structure says otherwise: {th['why'][0]}."
+            t["values"]["thesis"] = th.get("verdict")
+        fired.append(t)
 
     # T4 — the stop is about to decide this, or already should have.
     # A NEGATIVE r_to_stop means the mark is through the stop and the position
@@ -1045,6 +1085,17 @@ def evaluate_triggers(facts: dict) -> list[dict]:
             f"flat and paying both spreads to stay that way.",
             opposing=hedges))
 
+    # T13 — the thesis is dead (brain/thesis_check.py, 2026-10-03): the
+    # structure broke against the position with displacement, a confident
+    # bias runs against it with no sweep in its favour, or the proving
+    # ground's analogs this deep almost never came back. Fires whatever
+    # the R arithmetic says: a position can be flat and already lost.
+    if th.get("verdict") == "exit":
+        fired.append(_t(
+            "thesis_dead", THESIS_DEAD_SEVERITY,
+            "The thesis is dead: " + "; ".join(th.get("why") or [])[:300] + ".",
+            verdict="exit", why=th.get("why")))
+
     return fired
 
 
@@ -1086,6 +1137,8 @@ def facts_fingerprint(facts: dict, triggers: list[dict]) -> str:
         "overlap": len(conc.get("overlap_rules") or []),
         "hedge": len(facts.get("self_hedge") or []),
         "theme": _bucket(conc.get("dominant_exposure"), 1.0),
+        # A thesis that turns is a new question, whatever the R did.
+        "thesis": (facts.get("thesis") or {}).get("verdict"),
     }
     blob = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -1112,6 +1165,11 @@ def deterministic_pass() -> list[dict]:
             logger.warning("[position-review] measuring %s:%s failed: %s",
                            pos.get("book"), pos.get("position_id"), e)
             continue
+        if pos.get("book") == BOOK_BOT and facts.get("thesis"):
+            # The verdict on the row, for the position care: an `adjust`
+            # carries the structure stop Aragorn applies (tighten-only).
+            from .thesis_check import write_on_row
+            write_on_row(pos["position_id"], facts["thesis"])
         severity = max((float(t.get("severity") or 0) for t in triggers),
                        default=0.0)
         verdicts.append({

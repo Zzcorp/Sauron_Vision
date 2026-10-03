@@ -143,6 +143,12 @@ def build_snapshot(verdict: dict) -> dict:
             # removes cost rather than taking risk off.
             "opposing_positions": facts.get("self_hedge"),
         },
+        # The thesis check (brain/thesis_check.py, 2026-10-03): the
+        # structure read on the bars — a sweep with or against the
+        # position, the bias, a break and whether it displaced or was
+        # reclaimed — and the proving ground's odds of coming back from
+        # this deep. The model reads it BEFORE the R arithmetic.
+        "thesis_check": facts.get("thesis"),
         "triggers_that_fired": verdict["triggers"],
     }
 
@@ -185,6 +191,20 @@ class PositionReviewerAgent(BaseAgent):
             "  take_part — bank a portion and let the rest run. Give the "
             "percentage of the position to close in take_part_pct.\n"
             "  exit      — the reason the trade was taken no longer holds.\n\n"
+            "Read the STRUCTURE before the R arithmetic. `thesis_check` is "
+            "the platform's own read of the bars: a fresh sweep in the "
+            "trade's favour (the stops under a long were taken and the bar "
+            "closed back above them) with the entry reclaimed is the "
+            "strongest reason to HOLD — that excursion was the crowd's stops "
+            "being taken, not the thesis failing; the place for the stop is "
+            "beyond that sweep. A displaced break against the position that "
+            "was not reclaimed, or a confident bias against it with no sweep "
+            "in its favour, is a dead thesis whatever the R says. When "
+            "thesis_check says `adjust`, 'tighten' with its stop is the "
+            "natural answer; when it says `exit`, say which structure broke; "
+            "when it is `unread` or `watch`, the triggers decide as before. "
+            "Its `odds` are the proving ground's analogs that were this deep: "
+            "quote them when they exist, never invent them.\n\n"
             "Rules you must follow:\n"
             "- Reason in R, not in dollars or percentages. R is denominated "
             "by the stop the trade OPENED with. A number given to you as "
@@ -453,8 +473,12 @@ def _notify(review) -> bool:
         logger.warning("[position-review] notification dedupe failed: %s", e)
 
     reasons = "; ".join(t.get("text", "") for t in (review.triggers or [])[:2])
+    # The structure's answer, in one line, before the model's prose: the
+    # operator reads what the bars say about the thesis first.
+    thesis_words = ((review.facts or {}).get("thesis") or {}).get("words") or ""
     body = (f"{r_text} open. {reasons}\n\n"
-            f"{(review.reasoning_md or '').strip()[:600]}\n\n"
+            + (f"{thesis_words[:300]}\n\n" if thesis_words else "")
+            + f"{(review.reasoning_md or '').strip()[:600]}\n\n"
             f"This is a proposal — nothing has been closed. Use CLOSE on the "
             f"position card if you agree.")
 

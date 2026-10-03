@@ -47,6 +47,16 @@ manual lane, nor on options (a premium has no crowd levels). The soft
 stop stays tighten-only: a tick without the read keeps the tighter lock,
 the safe side.
 
+THE STRUCTURE STOP (2026-10-03, the thesis check, brain/thesis_check.py):
+the open-position review reads the structure every half hour and, when
+the thesis is alive and a stop beyond the swept extreme or the held swing
+would TIGHTEN the stop in place, writes it on the row
+(metadata["thesis"], verdict "adjust"). The care takes it as one more
+tighten-only candidate ("structure"), fresh within THESIS_STOP_TTL_HOURS,
+never on the manual lane. It is already beyond the crowd, so the crowd
+read does not move it. The operator: "can the price come back... if yes
+adjust" — the adjustment is the stop under the sweep, never a wider one.
+
 Every close is a AragornAction. Never raises: care that fails leaves the
 row to the rest of manage_positions, exactly as before.
 """
@@ -166,6 +176,14 @@ def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
     if weekend and r_now >= WEEKEND_LOCK_AT_R:
         # a winner NOW locks break-even; a past peak never closes a loser
         cands.append((lvl(BREAKEVEN_LOCK_R), "weekend lock"))
+    if not manual:
+        # the thesis check's structure stop, written on the row by the
+        # open-position review (brain/thesis_check.care_stop): tighten-only
+        # like every candidate here, and already beyond the crowd
+        from brain.thesis_check import care_stop
+        structure = care_stop(meta, now)
+        if structure:
+            cands.append(structure)
 
     if crowd and not manual and any(w in CROWD_MOVABLE for _l, w in cands):
         # the read is paid for only when a lock could move

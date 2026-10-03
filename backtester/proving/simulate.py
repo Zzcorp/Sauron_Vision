@@ -158,7 +158,9 @@ def simulate(df: pd.DataFrame, fires, direction: str, *, asset_class: str,
     is the no_care policy).
 
     Each trade: {symbol, entry_ts, exit_ts, entry, exit, r (net of costs),
-    gross_r, cost_r, mfe, reason, bars, regime, scaled}."""
+    gross_r, cost_r, mfe, mae, reason, bars, regime, scaled}. `mae` is the
+    worst R seen while open (the thesis check reads "the trades that were
+    this deep and came back", brain/thesis_check.py)."""
     if isinstance(policy, str):
         policy = EXIT_POLICIES[policy]
     if not care:
@@ -205,6 +207,7 @@ def simulate(df: pd.DataFrame, fires, direction: str, *, asset_class: str,
         target = entry + d * ratio * risk if ratio else None
         soft, soft_why = stop, "stop"
         mfe = 0.0
+        mae = 0.0
         extreme = entry
         booked_r, left = 0.0, 1.0          # a scaled-out part, and what remains
         scaled = False
@@ -213,6 +216,7 @@ def simulate(df: pd.DataFrame, fires, direction: str, *, asset_class: str,
         for j in range(e_i, n):
             if j > e_i:
                 if d * (o[j] - soft) <= 0:
+                    mae = min(mae, d * (o[j] - entry) / risk)
                     exit_px, exit_j, reason = o[j], j, f"gap {soft_why}"
                     break
                 if target is not None and d * (o[j] - target) >= 0:
@@ -221,8 +225,10 @@ def simulate(df: pd.DataFrame, fires, direction: str, *, asset_class: str,
             adverse = l[j] if d > 0 else h[j]
             favour = h[j] if d > 0 else l[j]
             if d * (adverse - soft) <= 0:
+                mae = min(mae, d * (soft - entry) / risk)
                 exit_px, exit_j, reason = soft, j, soft_why
                 break
+            mae = min(mae, d * (adverse - entry) / risk)
             if scale and not scaled:
                 level_r, part = scale
                 lvl = entry + d * level_r * risk
@@ -264,7 +270,8 @@ def simulate(df: pd.DataFrame, fires, direction: str, *, asset_class: str,
             "symbol": symbol, "entry_ts": idx[e_i], "exit_ts": idx[exit_j],
             "entry": float(entry), "exit": float(exit_px),
             "r": float(gross - cost_r), "gross_r": float(gross),
-            "cost_r": float(cost_r), "mfe": float(mfe), "reason": reason,
+            "cost_r": float(cost_r), "mfe": float(mfe), "mae": float(mae),
+            "reason": reason,
             "bars": int(exit_j - e_i + 1), "regime": labels[t],
             "scaled": scaled,
         })

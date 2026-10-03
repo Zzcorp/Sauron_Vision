@@ -343,6 +343,20 @@ COMMANDS = [
         "category": "read",
     },
     {
+        "name": "thesis",
+        "title": "Thesis check",
+        "purpose": "Is the reason for each open trade still alive: the structure on the bars (a sweep with or against it, the bias, a displaced break), the proving ground's odds of coming back from this deep, and the verdict — hold, adjust (the stop under the sweep, applied by the position care), exit (a proposal) — plus how the past verdicts graded.",
+        "usage": [
+            "python manage.py thesis                     # every open position: verdict and why",
+            "python manage.py thesis show GBPCHF         # one symbol, the full read",
+            "python manage.py thesis record --days 30    # how the past verdicts graded",
+        ],
+        "mirrors": "/positions/",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+    },
+    {
         "name": "paper_readiness",
         "title": "Paper readiness",
         "purpose": "The mirror of preflight_live: not whether it is safe to arm money, but whether the evidence chain can produce a graded track record at all. Every link is a component, and a missing row reads as OFF while nothing raises.",
