@@ -578,6 +578,7 @@ Optional page data (json_script blocks the widget picks up when present):
             <button class="sv-ind-btn" data-ind="macd" title="MACD 12/26/9 in its own pane">MACD</button>
             <button class="sv-ind-btn" data-ind="volume" title="Volume histogram">VOL</button>
             <button class="sv-ind-btn active" data-ind="positions" title="Open positions, stops, targets and signal entries on the tape">POSITIONS</button>
+            <button class="sv-ind-btn active" data-ind="levels" title="Where the crowd keeps its stops, read off the 4h bars: unswept swing highs and lows, equal highs and lows (liquidity pools, drawn heavier), the latest extreme and the round numbers within reach. Recomputed every minute — a level the price trades through disappears">LEVELS</button>
         </div>
 
         <!-- View controls -->
@@ -1070,6 +1071,11 @@ without signals carries no key for nothing.{% endcomment %}
        local copy taken anywhere would freeze the tape at page load again. */
     var POSITIONS = pageJson('-positions');
     var SIGNALS   = pageJson('-signals');
+    /* The living levels (2026-10-03) have no page copy: the first paint
+       draws none and the first overlay reply, seconds later, brings them.
+       A level is a reading of the bars, not a fact about the operator's
+       book, so a few seconds without one costs nothing. */
+    var LEVELS    = [];
 
     // ── Theme colours ────────────────────────────────────────────────────
     function getThemeColors() {
@@ -1141,7 +1147,7 @@ without signals carries no key for nothing.{% endcomment %}
         return { sma20: c.gold, sma50: c.blue, ema20: c.purple,
                  bb: c.alpha(c.blue, 0.7), vwap: c.gold, rsi: c.purple,
                  macd: c.blue, signal: c.gold,
-                 volume: c.accentDim }[key] || c.accent;
+                 volume: c.accentDim, levels: c.gold }[key] || c.accent;
     }
 
     // ── Persisted preferences (per instrument) ──────────────────────────
@@ -1233,6 +1239,10 @@ without signals carries no key for nothing.{% endcomment %}
     var activeInds   = (prefs.indicators && typeof prefs.indicators === 'object')
                        ? prefs.indicators : { positions: true, volume: true };
     if (activeInds.positions === undefined) activeInds.positions = true;
+    /* The living levels default ON for the same reason volume does below:
+       `undefined` is an operator who never had the button, not one who
+       switched it off. */
+    if (activeInds.levels === undefined) activeInds.levels = true;
     /* Volume was always drawn and had no button. An operator reading a
        thin forex tape wants it gone; one reading equities wants it. It
        defaults ON so nothing changes for anyone who never touches it —
@@ -1247,6 +1257,7 @@ without signals carries no key for nothing.{% endcomment %}
     var lastBars     = [];     // the bars the overlays are computed from
     var indSeries    = {};     // key -> [line series] on the main chart
     var posLines     = [];     // price lines belonging to positions
+    var lvlLines     = [];     // price lines belonging to the living levels
     var syncing      = false;  // guard against range ping-pong between panes
     var countdownTimer = null;
     /* The signal layer (2026-09-27): the dots drawn on this paint, the dot
@@ -1956,6 +1967,7 @@ without signals carries no key for nothing.{% endcomment %}
             try { chart.removeSeries(mainSeries); } catch(e) {}
             mainSeries = null;
             posLines = []; /* they died with the series */
+            lvlLines = [];
         }
         chartType = type;
         if (type === 'candlestick' || type === 'heikin') {
@@ -2323,6 +2335,60 @@ without signals carries no key for nothing.{% endcomment %}
         syncSignalFocus();
     }
 
+    // ── The living levels ────────────────────────────────────────────────
+    /* (2026-10-03) The operator: "identify the liquidity pools too... and
+       give them a visual like the pivot points and reaction prices,
+       removing or changing them as you go".
+
+       LEVELS is smart_money.living_levels, served with every overlay
+       reply: the SAME crowd levels the position care moves a stop beyond,
+       on both sides of the mark. Redrawn from scratch on every paint like
+       the position lines, so a swing a bar trades through is gone on the
+       next paint and a new pullback extreme appears on its own — nothing
+       here remembers a level the server stopped sending.
+
+       Pools (equal highs/lows, two touches or more) take the gold and the
+       heavier stroke: that is where the stops pile up and where the
+       market is pulled. Swings and the latest extreme are the muted blue;
+       round numbers the faintest sparse dots. No axis labels: eight
+       levels with labels would bury the position's SL and TP, which are
+       the numbers the operator must be able to read. */
+    function levelTitle(l) {
+        var k = String(l.kind || '');
+        if (l.pool) {
+            var m = /\((\d+) touches\)/.exec(k);
+            return 'POOL ' + (k.indexOf('highs') !== -1 ? 'EQH' : 'EQL')
+                   + (m ? ' ×' + m[1] : '');
+        }
+        if (k === 'round number') return 'ROUND';
+        return k.toUpperCase();   /* SWING LOW · RECENT HIGH … */
+    }
+
+    function applyLevels() {
+        if (!mainSeries) return;
+        lvlLines.forEach(function (pl) { try { mainSeries.removePriceLine(pl); } catch (e) {} });
+        lvlLines = [];
+        if (!activeInds.levels) return;
+        var c = getThemeColors();
+        LEVELS.forEach(function (l) {
+            if (!l || typeof l.price !== 'number' || !isFinite(l.price)) return;
+            var pool = !!l.pool;
+            var round = l.kind === 'round number';
+            var tone = pool ? c.gold
+                     : (round ? c.alpha(c.text, 0.7) : c.alpha(c.blue, 0.8));
+            try {
+                lvlLines.push(mainSeries.createPriceLine({
+                    price: l.price, color: tone,
+                    lineWidth: pool ? 2 : 1,
+                    lineStyle: round ? LightweightCharts.LineStyle.SparseDotted
+                                     : LightweightCharts.LineStyle.Dotted,
+                    axisLabelVisible: false,
+                    title: levelTitle(l),
+                }));
+            } catch (e) {}
+        });
+    }
+
     // ── Signal dots: the card on hover, the levels on a click ────────────
     /* (2026-09-27) The operator: "the assets details pages graphs need a
        lifting too, for the signals appearance, maybe add a dot with some
@@ -2529,6 +2595,7 @@ without signals carries no key for nothing.{% endcomment %}
         lastBars = bars;
         applyIndicators(bars);
         applyPositions(bars);
+        applyLevels();
         /* After lastBars is set: the trendline restore asks the loaded
            range whether its anchors are still on the chart. */
         restoreDrawings();
@@ -2884,16 +2951,28 @@ without signals carries no key for nothing.{% endcomment %}
                     if (Array.isArray(json.signals)) {
                         SIGNALS = json.signals; overlayFresh = true;
                     }
+                    /* The living levels: the same three readings. An
+                       array (empty included) is adopted, a missing key
+                       leaves the lines alone, and a levels_error says in
+                       the console that the lines on screen are of
+                       unknown age — the positions in the same reply are
+                       still fresh and still adopted. */
+                    if (Array.isArray(json.levels)) {
+                        LEVELS = json.levels; overlayFresh = true;
+                    } else if (json.levels_error && window.console && console.warn) {
+                        console.warn('[sv-chart] levels not refreshed: '
+                                     + json.levels_error);
+                    }
                 }
 
                 if (json.error) {
-                    if (overlayFresh && hasData) applyPositions(lastBars);
+                    if (overlayFresh && hasData) { applyPositions(lastBars); applyLevels(); }
                     if (!quiet || !hasData) showError(json.error);
                     return;
                 }
                 var bars = json.bars || [];
                 if (!bars.length) {
-                    if (overlayFresh && hasData) applyPositions(lastBars);
+                    if (overlayFresh && hasData) { applyPositions(lastBars); applyLevels(); }
                     if (!quiet || !hasData) showError('No data available for ' + SYMBOL);
                     return;
                 }

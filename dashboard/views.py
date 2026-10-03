@@ -4171,6 +4171,49 @@ def _chart_decimals(instrument):
                           instrument.asset_class, instrument.symbol)
 
 
+#: How long one symbol's living levels are kept between the chart's polls.
+#: The widget asks every sixty seconds; the 4h swings do not move faster
+#: than that, and two charts of one symbol on one screen need one read.
+LEVELS_TTL = 60
+
+
+def _chart_levels(instrument):
+    """The living levels (bot_program.smart_money.living_levels) as the
+    chart draws them: price, kind, side (below/above the mark), pool,
+    atr_away and the price as text at the page's one decimal count
+    (_chart_decimals), sorted by price. At the live mark when there is
+    one, else at the newest 4h close.
+
+    An EMPTY list without bars — which the widget reads as "no level to
+    draw" and clears the lines on — never a missing key, which it reads
+    as "not asked for" and leaves the screen alone on. A failure raises:
+    the caller says so in the response (levels_error), as the overlay
+    does, so a line of unknown age never passes for a fresh one.
+    """
+    from django.core.cache import cache
+
+    from bot_program.smart_money import living_levels
+
+    key = "chart:levels:" + instrument.symbol
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+    mark = None
+    try:
+        lq = getattr(instrument, "live_quote", None)
+        mark = float(lq.last) if lq and lq.last else None
+    except Exception:  # noqa: BLE001 - a quote that cannot be read is no mark
+        mark = None
+    read = living_levels(instrument.symbol, mark)
+    rows = []
+    if read:
+        dec = _chart_decimals(instrument)
+        rows = [dict(lvl, text=f"{lvl['price']:.{dec}f}")
+                for lvl in read["levels"]]
+    cache.set(key, rows, LEVELS_TTL)
+    return rows
+
+
 def _chart_signal_marks(signals, decimals=None):
     """The signals as the chart's dots, with what each dot's card says.
 
@@ -5845,6 +5888,16 @@ def chart_data_api(request):
             extra = {"positions": _chart_positions(request.user, instrument),
                      "signals": _chart_signal_marks(
                          sigs, _chart_decimals(instrument))}
+            # The living levels (2026-10-03) ride the same reply, with
+            # their own failure word: a level read that fails must not
+            # cost the operator the stop line of a position they are
+            # managing, and must not pass for "no level" either.
+            try:
+                extra["levels"] = _chart_levels(instrument)
+            except Exception as e:  # noqa: BLE001 — informational layer
+                logger.warning("[chart_data_api] levels failed for %s: %s",
+                               symbol, e)
+                extra["levels_error"] = str(e)[:200]
         except Exception as e:  # noqa: BLE001 — the BARS are the payload;
             # an overlay that cannot be built must not cost the operator
             # their chart.

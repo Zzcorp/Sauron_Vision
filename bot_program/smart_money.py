@@ -730,6 +730,65 @@ def care_levels(symbol, side, price, *, timeframe=TIMEFRAME) -> dict:
                                    span=span)}
 
 
+# ── THE LIVING LEVELS (2026-10-03) ─────────────────────────────────────────
+#: how far either side of the mark the chart's levels reach, in ATRs: the
+#: position care's whole range (care_levels), so a level the care can move
+#: a stop beyond is a level the operator can see.
+LIVING_REACH_ATR = 3.0 + HUNT_DEPTH_ATR + MAX_WIDEN_ATR
+
+
+def living_levels(symbol, price=None, *, timeframe=TIMEFRAME):
+    """{"price", "atr", "timeframe", "levels": [{price, kind, side, pool,
+    atr_away}]} — the crowd's levels on BOTH sides of `price` (the newest
+    close when None), for a chart to draw. None without bars or an ATR.
+
+    The operator (2026-10-03): "identify the liquidity pools too... and
+    give them a visual like the pivot points and reaction prices, removing
+    or changing them as you go". These are the SAME crowd_levels the
+    position care and the ticket read — under the mark as a long's care
+    sees them, over it as a short's — so the line on the tape IS the level
+    a stop is moved beyond, never a second opinion drawn in a second
+    colour. `pool` marks the equal highs/lows (POOL_MIN_TOUCHES or more):
+    where the stops pile up, and where the market is pulled.
+
+    Living, because nothing is stored: every call reads the bars again.
+    A swing a bar has since traded through is not a level any more
+    (_untaken drops it), the latest pullback's extreme moves with the
+    tape, the round numbers follow the price. The chart asks every minute
+    and redraws from scratch, so a swept level simply is not there on the
+    next paint.
+    """
+    df, swings = _bars(symbol, timeframe)
+    if df is None or len(df) <= 15:
+        return None
+    from signals.smc.pivots import atr as _atr
+    atr = float(_atr(df)[-1] or 0)
+    if atr <= 0:
+        return None
+    try:
+        px = float(price) if price else float(df["close"].values[-1])
+    except (TypeError, ValueError):
+        px = float(df["close"].values[-1])
+    if not px or px <= 0:
+        return None
+    reach = LIVING_REACH_ATR * atr
+    out, seen = [], set()
+    for side, direction, span, far in (
+            ("below", "BUY", (px - reach, px), px - 3.0 * atr),
+            ("above", "SELL", (px, px + reach), px + 3.0 * atr)):
+        for lvl, kind in crowd_levels(direction, px, far, atr, df, swings,
+                                      span=span):
+            key = (round(float(lvl), 10), kind)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"price": float(lvl), "kind": kind, "side": side,
+                        "pool": kind.startswith("equal "),
+                        "atr_away": round(abs(float(lvl) - px) / atr, 2)})
+    out.sort(key=lambda r: r["price"])
+    return {"price": px, "atr": atr, "timeframe": timeframe, "levels": out}
+
+
 #: the stop column's precision (AssetBotTrade.stop_loss: 8 places). A lock
 #: is snapped onto it, AWAY from the mark, so the value stored is the value
 #: asked: a 10-decimal lock stored at 8 read as a fresh "tighter" stop on
