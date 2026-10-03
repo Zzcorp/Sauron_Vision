@@ -1079,9 +1079,16 @@ class WeeklyReviewTests(_Base):
         read a review a week older. The latest row the review WROTE is
         read, whatever became of its email."""
         from alerts.models import Newsletter
-        _edition(title="Old", content_markdown="OLDER REVIEW TEXT",
-                 status="sent", sent_at=timezone.now(),
-                 origin="weekly_review")
+        # The review runs on the test clock (SATURDAY, 2026-10-03 10:00 UTC),
+        # so its row is created THEN. The older review must be older than
+        # that on the same clock: created at the real now, it read as the
+        # newest row from the moment the real clock passed SATURDAY (CI went
+        # red at 10:58 UTC that day), and the plan rightly read it.
+        a_week_before = SATURDAY - timedelta(days=7)
+        old = _edition(title="Old", content_markdown="OLDER REVIEW TEXT",
+                       status="sent", sent_at=a_week_before,
+                       origin="weekly_review")
+        Newsletter.objects.filter(pk=old.pk).update(created_at=a_week_before)
         result, _post = self.review()
         Newsletter.objects.filter(pk=result["newsletter_id"]).update(
             status="cancelled", scheduled_for=None)

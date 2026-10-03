@@ -459,11 +459,12 @@ def economic_calendar(request):
     source_state = calendar_source_state()
     # Whether the MACRO half has ever delivered. A page that promises FOMC
     # coverage because a scraper now exists would replace one false claim
-    # with another: the scraper needs a working FMP key, and until it has
-    # written a row the honest answer is still "macro does not appear
-    # here". Asked of the data, not of the code.
+    # with another: until a macro source has written a row the honest
+    # answer is still "macro does not appear here". Asked of the data, not
+    # of the code — and of both macro writers (Forex Factory, FMP).
+    from scraping.scrapers.macro_calendar import MACRO_SOURCES
     source_state["macro_delivered"] = EconomicEvent.objects.filter(
-        source="fmp_macro").exists()
+        source__in=MACRO_SOURCES).exists()
 
     # Countries with most events
     country_counts = defaultdict(int)

@@ -161,7 +161,7 @@ class CalendarTaskStatusTests(TestCase):
                    "fetch_earnings_calendar_fmp",
                    return_value=scraper_result), \
                 patch("scraping.scrapers.macro_calendar."
-                      "fetch_macro_calendar_fmp",
+                      "fetch_macro_calendar",
                       return_value=macro_result or {"parsed": 3, "stored": 3}):
             return check_economic_calendar()
 
@@ -420,7 +420,7 @@ class TheMacroHalfCanLowerTheGradeTests(TestCase):
         with patch("scraping.scrapers.earnings_calendar."
                    "fetch_earnings_calendar_fmp", return_value=earnings), \
              patch("scraping.scrapers.macro_calendar."
-                   "fetch_macro_calendar_fmp", return_value=macro):
+                   "fetch_macro_calendar", return_value=macro):
             return tasks.check_economic_calendar.__wrapped__.__wrapped__()
 
     def test_parsed_rows_that_stored_none_is_a_warning(self):
