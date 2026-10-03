@@ -44,6 +44,7 @@ states below carry the distinction the old three could not:
 """
 from __future__ import annotations
 
+from datetime import timedelta
 import os
 
 # Freshness tolerances, per feed, replacing one global 60s/600s pair that
@@ -99,8 +100,11 @@ FEEDS = (
      "note": "Broker feed, when a gateway is connected"},
 
     # ── pollers ──────────────────────────────────────────────────────
+    # Window.FOREX (2026-10-03): every class it marks shuts for the weekend
+    # — stocks at 20:00, forex and the CME at 21:00 UTC Friday — so on a
+    # Saturday it is idle, not "slower than expected" and then "stale".
     {"key": "yfinance", "label": "Yahoo Finance", "kind": "poller",
-     "requires": (), "window": Window.ALWAYS, "ages": _SLOW_POLL,
+     "requires": (), "window": Window.FOREX, "ages": _SLOW_POLL,
      "note": "Keyless marks for stocks, indices, commodities and forex"},
 
     {"key": "binance_public", "label": "Binance (REST)", "kind": "poller",
@@ -323,8 +327,14 @@ def state_for(feed: dict, *, latest, age_seconds, superseder_ok=False,
         # whose newest quote predates the last close stopped delivering
         # during a session, which is a fault the closed market is merely
         # hiding.
+        # WITH THE FEED'S OWN GRACE (2026-10-03): OANDA's last forex print
+        # of the week landed at 20:58 UTC Friday, two minutes before the
+        # 21:00 bell, and read RED all weekend. A feed is alive at the close
+        # when its last quote is within its dead age of it — the same grace
+        # the bars check gives (dashboard.views_system_health).
         closed_at = window_last_closed(feed["window"], now)
-        if closed_at is not None and latest is not None and latest < closed_at:
+        if closed_at is not None and latest is not None \
+                and latest < closed_at - timedelta(seconds=dead_age):
             return "red", ("silent since before its market closed — it "
                            "stopped during the session, not because of it")
         return "idle", "quiet — its market is closed"

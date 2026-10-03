@@ -525,10 +525,18 @@ def check_live_mode_readiness(user) -> dict:
                       "no bot is in live mode — nothing to verify yet",
                       configured=False)
 
-    broken, expected, symbolless, gated = [], [], [], []
+    from bot_program.manual_trade import MANUAL_CONFIG_NAME
+    broken, expected, symbolless, gated, manual = [], [], [], [], []
     for cfg in live_cfgs:
         if cfg.asset_class in PAPER_BY_DESIGN:
             expected.append(cfg.name)
+            continue
+        # THE MANUAL LANE (2026-10-03): the TAKE TRADE config scans nothing
+        # by design — it manages what the operator opens and never opens a
+        # position on its own — so an empty symbol list is its shape, not
+        # a fault. Counted, named, never warned about.
+        if cfg.name == MANUAL_CONFIG_NAME and not (cfg.symbols or []):
+            manual.append(cfg.asset_class)
             continue
         # A live config with an EMPTY symbol list never enters this loop,
         # so it used to pass as verified while being incapable of opening
@@ -574,10 +582,13 @@ def check_live_mode_readiness(user) -> dict:
                       "These configs are armed for live and carry no "
                       "symbols, so they can never open a position — give "
                       "them a universe or take them out of live mode")
-    detail = f"{len(live_cfgs) - len(expected)} live bot(s) have a real "
-    detail += "broker route"
+    detail = (f"{len(live_cfgs) - len(expected) - len(manual)} live bot(s) "
+              f"have a real broker route")
     if expected:
         detail += f" ({len(expected)} paper-only by asset class)"
+    if manual:
+        detail += (f"; {len(manual)} manual TAKE TRADE lane(s) "
+                   f"({', '.join(sorted(manual))}) carry no symbols by design")
     return _check("live_ready", "Live broker credentials", "ok", detail)
 
 

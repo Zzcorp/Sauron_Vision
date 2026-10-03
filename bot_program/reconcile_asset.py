@@ -202,13 +202,24 @@ def _broker_open_symbols(client, *, asset_class: str, warm=()) -> dict:
         return None
     symbols, opt_underlyings, has_sec_types = set(), set(), False
     unnamed = 0
+    # THE HANDLES, NAMED OR NOT (2026-10-03). eToro lists a position id
+    # beside every holding, including the ones this client could not name;
+    # a row that carries its own handle (venue_close.position_id_for) can
+    # be judged by it, and an unnamed book stops being a reason to keep a
+    # closed position open for twelve hours (GBPCHF #130).
+    position_ids: set = set()
     for p in positions:
         if isinstance(p, dict):
             sym, sec = p.get("symbol"), p.get("sec_type")
             unresolved = p.get("symbol_unresolved") is True
+            pid = p.get("position_id")
         else:
             sym, sec = getattr(p, "symbol", None), getattr(p, "sec_type", None)
             unresolved = getattr(p, "symbol_unresolved", None) is True
+            pid = getattr(p, "position_id", None)
+        if isinstance(pid, (str, int)) and not isinstance(pid, bool) \
+                and str(pid).strip():
+            position_ids.add(str(pid).strip())
         # `is True` and not a truth test: a MagicMock answers any attribute
         # with a truthy object, and a reader that believed it would report
         # every position in every test as unnameable.
@@ -222,7 +233,8 @@ def _broker_open_symbols(client, *, asset_class: str, warm=()) -> dict:
             if str(sec).upper() == "OPT":
                 opt_underlyings.add(sym)
     return {"symbols": symbols, "opt_underlyings": opt_underlyings,
-            "has_sec_types": has_sec_types, "unnamed": unnamed}
+            "has_sec_types": has_sec_types, "unnamed": unnamed,
+            "position_ids": position_ids}
 
 
 def _options_row_open_at_broker(trade, state: dict):
@@ -272,6 +284,12 @@ def reconcile_user(user) -> dict:
     for _row in qs:
         if _row.symbol:
             by_class.setdefault(_row.asset_class, set()).add(_row.symbol)
+    # EVERY open row's symbol, whatever its class (2026-10-03): eToro holds
+    # one book, and a forex pass that warmed only forex names read the
+    # account's GLDM as "ETORO:3190" — one unnamed position, and no miss in
+    # any class could be trusted again. The holdings sync warms the same
+    # way (tasks._warm_etoro_names).
+    all_warm = sorted({sym for syms in by_class.values() for sym in syms})
 
     # Counted ONCE per walk, not per row: it cannot change mid-pass and the
     # credential read decrypts.
@@ -293,8 +311,7 @@ def reconcile_user(user) -> dict:
             cache_key = (trade.asset_class, type(client).__name__)
             if cache_key not in cache:
                 cache[cache_key] = _broker_open_symbols(
-                    client, asset_class=trade.asset_class,
-                    warm=by_class.get(trade.asset_class, ()))
+                    client, asset_class=trade.asset_class, warm=all_warm)
             state = cache[cache_key]
             if state is None:
                 # Broker doesn't expose state — can't reconcile this row.
@@ -308,6 +325,16 @@ def reconcile_user(user) -> dict:
                     continue
             else:
                 open_at_broker = trade.symbol.upper() in state["symbols"]
+            # THE ROW'S OWN HANDLE BEATS ITS NAME (2026-10-03). A row that
+            # carries the venue's position id is judged by it when the
+            # venue listed ids: present is open, whatever the name; absent
+            # is an absence, even beside positions nobody could name.
+            from .engine.venue_close import position_id_for
+            by_id = False
+            _pid = position_id_for(trade)
+            _ids = state.get("position_ids") or set()
+            if _pid and _ids and trade.asset_class != "options":
+                open_at_broker, by_id = _pid in _ids, True
 
             # THE VENUE THAT CARRIED THIS ROW IS NOT ALWAYS THE VENUE
             # THE ROUTER ANSWERS TODAY. `execute_entry` stamps
@@ -335,7 +362,7 @@ def reconcile_user(user) -> dict:
                     trade.id, trade.symbol, _why)
                 continue
 
-            if not open_at_broker and state.get("unnamed"):
+            if not open_at_broker and state.get("unnamed") and not by_id:
                 # A MISS AGAINST A BOOK WE COULD NOT READ IS NOT AN ABSENCE.
                 # The venue listed positions this client could not name, so
                 # one of them may be this row. Orphan-closing here books a
