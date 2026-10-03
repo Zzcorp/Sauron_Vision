@@ -6,6 +6,8 @@
     python manage.py prove rules --class crypto --save
     python manage.py prove generate --class forex  # the generator's shortlist for a class
     python manage.py prove generate --families tsmom,rsi2_pullback --save
+    python manage.py prove exits --class crypto    # every exit policy on the live rules' signals
+    python manage.py prove exits --families tsmom --policies care,chandelier3,scale_half_1r
     python manage.py prove show                    # the saved verdicts, newest run first
     python manage.py prove show --run gen-ab12cd34ef
 
@@ -28,7 +30,8 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("action",
-                            choices=["data", "rules", "generate", "show"])
+                            choices=["data", "rules", "generate", "exits",
+                                     "show"])
         parser.add_argument("--class", dest="asset_class", default=None)
         parser.add_argument("--symbols", default="",
                             help="Comma-separated, platform spelling.")
@@ -36,6 +39,8 @@ class Command(BaseCommand):
                             choices=["1h", "4h", "1d"])
         parser.add_argument("--families", default="",
                             help="generate: comma-separated family keys.")
+        parser.add_argument("--policies", default="",
+                            help="exits: comma-separated exit policies.")
         parser.add_argument("--save", action="store_true")
         parser.add_argument("--run", default="", help="show: one run id.")
 
@@ -50,17 +55,29 @@ class Command(BaseCommand):
             rows = pr.prove_live_rules(save=opts["save"], **kw)
             return self._rows(rows, "LIVE RULES AND THEIR MIRRORS",
                               opts["save"])
+        from backtester.proving.families import FAMILIES
+        fams = [f.strip() for f in opts["families"].split(",") if f.strip()]
+        unknown = [f for f in fams if f not in FAMILIES]
+        if unknown:
+            raise CommandError(f"unknown families {unknown}; known: "
+                               f"{', '.join(FAMILIES)}")
         if opts["action"] == "generate":
-            from backtester.proving.families import FAMILIES
-            fams = [f.strip() for f in opts["families"].split(",")
-                    if f.strip()]
-            unknown = [f for f in fams if f not in FAMILIES]
-            if unknown:
-                raise CommandError(f"unknown families {unknown}; known: "
-                                   f"{', '.join(FAMILIES)}")
             rows = pr.generate(families=fams or None, save=opts["save"],
                                **kw)
             return self._rows(rows, "GENERATED CANDIDATES", opts["save"])
+        if opts["action"] == "exits":
+            from backtester.proving.simulate import EXIT_POLICIES
+            pols = [x.strip() for x in opts["policies"].split(",")
+                    if x.strip()]
+            bad = [x for x in pols if x not in EXIT_POLICIES]
+            if bad:
+                raise CommandError(f"unknown exit policies {bad}; known: "
+                                   f"{', '.join(EXIT_POLICIES)}")
+            rows = pr.compare_exits(families=fams or None,
+                                    policies=pols or None,
+                                    save=opts["save"], **kw)
+            return self._rows(rows, "EXIT POLICIES ON THE SAME SIGNALS",
+                              opts["save"])
         return self._show(opts["run"])
 
     def _data(self, report):
@@ -94,7 +111,8 @@ class Command(BaseCommand):
         w = self.stdout.write
         name = r["live_rule"] or f"{r['family']} {r['params']}"
         w(f"  {r['verdict'].upper():12} {r['asset_class']:9} {name} · "
-          f"{r['direction']} · filter {r['filter']}")
+          f"{r['direction']} · filter {r['filter']} · exit "
+          f"{r.get('policy') or 'care'}")
         payoff = "—" if r["payoff"] is None else f"{r['payoff']:.2f}"
         w(f"               {r['trades_n']} trades over {r['symbols_n']} "
           f"symbol(s), {r['holdout_n']} in the holdout · win "
@@ -132,7 +150,8 @@ class Command(BaseCommand):
                 "live_rule": v.live_rule, "family": v.family,
                 "params": v.params, "verdict": v.verdict,
                 "asset_class": v.asset_class, "direction": v.direction,
-                "filter": v.filter, "trades_n": v.trades_n,
+                "filter": v.filter, "policy": v.policy,
+                "trades_n": v.trades_n,
                 "symbols_n": v.symbols_n, "holdout_n": v.holdout_n,
                 "win_rate": v.win_rate, "payoff": v.payoff,
                 "expectancy": v.expectancy,

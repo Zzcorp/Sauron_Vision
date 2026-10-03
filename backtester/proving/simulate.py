@@ -22,11 +22,31 @@ and the backtester's own discipline:
   gaps      a bar opening beyond the stop fills at its open (worse than the
             stop); one opening beyond the target fills at its open
   ties      a bar touching both stop and target is a stop (the safe side)
-  care      a lock moves at a bar's close and binds from the next bar: the
+  locks     a lock moves at a bar's close and binds from the next bar: the
             bar that made the new high is not assumed to have done so
             before it touched the old stop
   one at a time per rule and symbol; a position still open at the end of
             the data is reported, not counted
+
+THE EXIT POLICIES (2026-10-02, the operator: "improve much more the
+trailing stop loss system... and TP"). The same signals can be run under
+each, and judged — the trailing stop is chosen on history, not by taste:
+
+  care            today's position care (above)
+  no_care         the venue bracket alone: stop and target, nothing moves
+  chandelier{k}   the stop follows the best price since entry less k ATR,
+                  from the entry on, tighten-only
+  structure       under the lowest low (over the highest high) of the last
+                  STRUCTURE_BARS bars less a tenth of an ATR, once the trade
+                  has seen +0.5R, tighten-only
+  staged          +1R locks +0.1R, +2R locks +1R, past +3R keeps half of the
+                  best R seen
+  scale_half_1r   half the position booked at +1R, the stop to the entry,
+                  the rest under today's care
+  trail_only      no target: chandelier 3 ATR until it is hit
+  tp_1_5r/tp_3r   today's care with the target at 1.5R / 3R instead of 2R
+
+Every policy but no_care keeps the no-progress clock: it is the engine's.
 """
 from __future__ import annotations
 
@@ -41,6 +61,23 @@ TREND_ADX = 25.0
 #: ATR% over this multiple of its trailing median is a high-volatility tape.
 HIGH_VOL = 1.25
 VOL_LOOKBACK = 250
+#: The structure trail's lookback, and the R a trade must have seen first.
+STRUCTURE_BARS = 10
+STRUCTURE_FROM_R = 0.5
+
+EXIT_POLICIES = {
+    "care": {"tp": "engine", "trail": "care"},
+    "no_care": {"tp": "engine", "trail": "none"},
+    "chandelier2": {"tp": "engine", "trail": "chandelier", "k": 2.0},
+    "chandelier3": {"tp": "engine", "trail": "chandelier", "k": 3.0},
+    "structure": {"tp": "engine", "trail": "structure"},
+    "staged": {"tp": "engine", "trail": "staged"},
+    "scale_half_1r": {"tp": "engine", "trail": "care",
+                      "scale_out": (1.0, 0.5)},
+    "trail_only": {"tp": None, "trail": "chandelier", "k": 3.0},
+    "tp_1_5r": {"tp": 1.5, "trail": "care"},
+    "tp_3r": {"tp": 3.0, "trail": "care"},
+}
 
 
 def _engine_constants(asset_class):
@@ -83,24 +120,72 @@ def regimes(df: pd.DataFrame) -> list:
     return out
 
 
+def _locks(policy, k, d, entry, risk, mfe, a_j, extreme, struct_level):
+    """The stop levels a policy's trail proposes at a bar's close, as
+    [(level, why)]; the tightest wins, tighten-only, from the next bar."""
+    trail = policy.get("trail", "care")
+    cands = []
+    if trail == "care":
+        if mfe >= k["be_at"]:
+            cands.append((entry + d * k["be_lock"] * risk, "breakeven"))
+        if mfe >= k["trail_at"]:
+            gap = (k["trail_gap_wide"] if mfe >= k["trail_wide_from"]
+                   else k["trail_gap"])
+            cands.append((entry + d * (mfe - gap) * risk, "trail"))
+    elif trail == "chandelier":
+        if np.isfinite(a_j) and a_j > 0:
+            cands.append((extreme - d * policy.get("k", 3.0) * a_j,
+                          "chandelier"))
+    elif trail == "structure":
+        if mfe >= STRUCTURE_FROM_R and struct_level is not None:
+            cands.append((struct_level, "structure"))
+    elif trail == "staged":
+        if mfe >= 3.0:
+            cands.append((entry + d * (mfe / 2.0) * risk, "half kept"))
+        elif mfe >= 2.0:
+            cands.append((entry + d * 1.0 * risk, "+1R locked"))
+        elif mfe >= 1.0:
+            cands.append((entry + d * k["be_lock"] * risk, "breakeven"))
+    return cands
+
+
 def simulate(df: pd.DataFrame, fires, direction: str, *, asset_class: str,
-             timeframe: str = "4h", care: bool = True,
+             timeframe: str = "4h", care: bool = True, policy="care",
              cost_mult: float = 1.0, max_hold_bars: int | None = None,
              labels=None, symbol: str = "") -> dict:
-    """{trades, open} for one symbol and one signal array.
+    """{trades, open} for one symbol and one signal array under one exit
+    policy (a key of EXIT_POLICIES or a dict of its shape; `care=False`
+    is the no_care policy).
 
     Each trade: {symbol, entry_ts, exit_ts, entry, exit, r (net of costs),
-    gross_r, cost_r, mfe, reason, bars, regime}."""
+    gross_r, cost_r, mfe, reason, bars, regime, scaled}."""
+    if isinstance(policy, str):
+        policy = EXIT_POLICIES[policy]
+    if not care:
+        policy = EXIT_POLICIES["no_care"]
     k = _engine_constants(asset_class)
     d = 1.0 if direction == LONG else -1.0
     o, h, l, c = (df[x].to_numpy(dtype=float)
                   for x in ("open", "high", "low", "close"))
     a = atr(df).to_numpy()
+    if policy.get("trail") == "structure":
+        if d > 0:
+            struct = (df["low"].rolling(STRUCTURE_BARS).min().shift(1)
+                      - 0.1 * atr(df)).to_numpy()
+        else:
+            struct = (df["high"].rolling(STRUCTURE_BARS).max().shift(1)
+                      + 0.1 * atr(df)).to_numpy()
+    else:
+        struct = None
     idx = df.index
     n = len(df)
     labels = labels if labels is not None else regimes(df)
     lo, hi = k["band"]
-    ratio = k["target_mult"] / k["stop_mult"]
+    tp = policy.get("tp", "engine")
+    ratio = (k["target_mult"] / k["stop_mult"] if tp == "engine"
+             else (float(tp) if tp else None))
+    scale = policy.get("scale_out")
+    clock = policy.get("trail", "care") != "none"
     bar_h = BAR_HOURS.get(timeframe, 4.0)
     cost = k["cost"] * cost_mult
     trades, still_open = [], None
@@ -117,9 +202,12 @@ def simulate(df: pd.DataFrame, fires, direction: str, *, asset_class: str,
         frac = min(max(dist / entry, lo), hi)
         risk = frac * entry
         stop = entry - d * risk
-        target = entry + d * ratio * risk
+        target = entry + d * ratio * risk if ratio else None
         soft, soft_why = stop, "stop"
         mfe = 0.0
+        extreme = entry
+        booked_r, left = 0.0, 1.0          # a scaled-out part, and what remains
+        scaled = False
         exit_px = exit_j = None
         reason = ""
         for j in range(e_i, n):
@@ -127,7 +215,7 @@ def simulate(df: pd.DataFrame, fires, direction: str, *, asset_class: str,
                 if d * (o[j] - soft) <= 0:
                     exit_px, exit_j, reason = o[j], j, f"gap {soft_why}"
                     break
-                if d * (o[j] - target) >= 0:
+                if target is not None and d * (o[j] - target) >= 0:
                     exit_px, exit_j, reason = o[j], j, "gap target"
                     break
             adverse = l[j] if d > 0 else h[j]
@@ -135,26 +223,30 @@ def simulate(df: pd.DataFrame, fires, direction: str, *, asset_class: str,
             if d * (adverse - soft) <= 0:
                 exit_px, exit_j, reason = soft, j, soft_why
                 break
-            if d * (favour - target) >= 0:
+            if scale and not scaled:
+                level_r, part = scale
+                lvl = entry + d * level_r * risk
+                if d * (favour - lvl) >= 0:
+                    booked_r, left, scaled = level_r * part, 1.0 - part, True
+                    # the rest is free of risk: the stop goes to the entry
+                    if d * (entry - soft) > 0:
+                        soft, soft_why = entry, "scale-out lock"
+            if target is not None and d * (favour - target) >= 0:
                 exit_px, exit_j, reason = target, j, "target"
                 break
             mfe = max(mfe, d * (favour - entry) / risk)
+            extreme = max(extreme, favour) if d > 0 else min(extreme, favour)
             held = j - e_i + 1
-            if care:
+            if clock:
                 r_now = d * (c[j] - entry) / risk
                 if held * bar_h >= k["no_progress_h"] \
                         and mfe < k["be_at"] and r_now < k["no_progress_max"]:
                     exit_px, exit_j, reason = c[j], j, "no progress"
                     break
-                cands = []
-                if mfe >= k["be_at"]:
-                    cands.append((entry + d * k["be_lock"] * risk,
-                                  "breakeven"))
-                if mfe >= k["trail_at"]:
-                    gap = (k["trail_gap_wide"] if mfe >= k["trail_wide_from"]
-                           else k["trail_gap"])
-                    cands.append((entry + d * (mfe - gap) * risk, "trail"))
-                for lvl, why in cands:
+                for lvl, why in _locks(policy, k, d, entry, risk, mfe, a[j],
+                                       extreme,
+                                       struct[j] if struct is not None
+                                       else None):
                     if d * (lvl - soft) > 0:
                         soft, soft_why = lvl, why
             if max_hold_bars and held >= max_hold_bars:
@@ -165,7 +257,8 @@ def simulate(df: pd.DataFrame, fires, direction: str, *, asset_class: str,
                           "entry": entry,
                           "r_now": d * (c[-1] - entry) / risk}
             break
-        gross = d * (exit_px - entry) / risk
+        rest = d * (exit_px - entry) / risk
+        gross = booked_r + left * rest
         cost_r = cost * entry / risk
         trades.append({
             "symbol": symbol, "entry_ts": idx[e_i], "exit_ts": idx[exit_j],
@@ -173,6 +266,7 @@ def simulate(df: pd.DataFrame, fires, direction: str, *, asset_class: str,
             "r": float(gross - cost_r), "gross_r": float(gross),
             "cost_r": float(cost_r), "mfe": float(mfe), "reason": reason,
             "bars": int(exit_j - e_i + 1), "regime": labels[t],
+            "scaled": scaled,
         })
         free_from = exit_j + 1
     return {"trades": trades, "open": still_open}

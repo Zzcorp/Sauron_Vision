@@ -73,7 +73,7 @@ def load_class(symbols, timeframe="4h") -> dict:
 
 
 def _pool(family, direction, params, flt, data, asset_class, timeframe,
-          base_cache=None):
+          base_cache=None, policy="care"):
     trades, open_n = [], 0
     for sym, df, labels in data["included"]:
         key = (family.key, direction, tuple(sorted(params.items())), sym)
@@ -85,18 +85,21 @@ def _pool(family, direction, params, flt, data, asset_class, timeframe,
                 base_cache[key] = base
         fires = apply_filter(df, base, direction, flt, timeframe)
         res = simulate(df, fires, direction, asset_class=asset_class,
-                       timeframe=timeframe, labels=labels, symbol=sym)
+                       timeframe=timeframe, labels=labels, symbol=sym,
+                       policy=policy)
         trades.extend(res["trades"])
         open_n += 1 if res["open"] else 0
     return trades, open_n
 
 
 def _verdict_row(run_id, family, direction, params, flt, asset_class,
-                 timeframe, data, judged, *, generated, live_rule=""):
+                 timeframe, data, judged, *, generated, live_rule="",
+                 policy="care"):
     return {
         "run_id": run_id, "family": family.key, "live_rule": live_rule,
         "params": dict(family.defaults, **params), "direction": direction,
-        "filter": flt, "asset_class": asset_class, "timeframe": timeframe,
+        "filter": flt, "policy": policy,
+        "asset_class": asset_class, "timeframe": timeframe,
         "generated": generated, "n_candidates": judged["n_candidates"],
         "symbols_n": len(data["included"]),
         "trades_n": judged["all"]["n"], "holdout_n": judged["holdout"]["n"],
@@ -200,6 +203,47 @@ def generate(*, asset_class=None, timeframe="4h", symbols=None,
             rows.append(_verdict_row(run_id, fam, direction, params, flt,
                                      cls, timeframe, data, judged,
                                      generated=True))
+    if save:
+        _save(rows)
+    return rows
+
+
+def compare_exits(*, asset_class=None, timeframe="4h", symbols=None,
+                  families=None, policies=None, save=False,
+                  run_id=None) -> list:
+    """Every exit policy on the SAME signals, per class (2026-10-03): the
+    live rules and their mirrors by default, or the given families at
+    their defaults, both directions. The trailing stop and the target are
+    chosen on history, not by taste; the correction counts the policies
+    compared."""
+    from backtester.proving.simulate import EXIT_POLICIES
+    run_id = run_id or f"exits-{uuid.uuid4().hex[:10]}"
+    keys = list(policies or EXIT_POLICIES)
+    unknown = [k for k in keys if k not in EXIT_POLICIES]
+    if unknown:
+        raise ValueError(f"unknown exit policies {unknown}")
+    if families:
+        cases = [(FAMILIES[f], d) for f in families
+                 for d in FAMILIES[f].directions]
+    else:
+        cases = live_rule_cases()
+    rows = []
+    for cls, syms in universe(asset_class, timeframe, symbols).items():
+        data = load_class(syms, timeframe)
+        cache = {}
+        for fam, direction in cases:
+            if fam.live_rules:
+                live = fam.live_rules.get(direction) \
+                    or f"{fam.key} (short mirror)"
+            else:
+                live = fam.key
+            for key in keys:
+                trades, _open = _pool(fam, direction, {}, "none", data, cls,
+                                      timeframe, cache, policy=key)
+                judged = _judge_pool(trades, data, len(keys))
+                rows.append(_verdict_row(
+                    run_id, fam, direction, {}, "none", cls, timeframe, data,
+                    judged, generated=False, live_rule=live, policy=key))
     if save:
         _save(rows)
     return rows

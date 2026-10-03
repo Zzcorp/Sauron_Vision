@@ -132,6 +132,58 @@ class SimulatorTests(SimpleTestCase):
         self.assertIsNotNone(res["open"])
 
 
+class ExitPolicyTests(SimpleTestCase):
+    """The trailing stops and targets the proving ground can compare."""
+
+    def _one(self, df, policy, fire_at=20):
+        fires = np.zeros(len(df), dtype=bool)
+        fires[fire_at] = True
+        return S.simulate(df, fires, F.LONG, asset_class="stock",
+                          policy=policy)["trades"][0]
+
+    def test_chandelier_follows_the_best_price_less_k_atr(self):
+        df = flat()
+        df.loc[df.index[22], ["high", "close"]] = [110.0, 110.0]
+        df.loc[df.index[23], ["open", "high", "low", "close"]] = \
+            [105.0, 105.0, 101.0, 103.0]
+        t = self._one(df, "trail_only")
+        self.assertEqual(t["reason"], "chandelier")
+        self.assertAlmostEqual(t["exit"], 110.0 - 3 * F.atr(df).iloc[22])
+
+    def test_half_booked_at_one_r_and_the_rest_under_care(self):
+        df = flat()
+        df.loc[df.index[22], "high"] = 103.6          # +1.2R: half at +1R
+        df.loc[df.index[23], ["open", "low"]] = [101.0, 100.0]
+        t = self._one(df, "scale_half_1r")
+        self.assertTrue(t["scaled"])
+        self.assertEqual(t["reason"], "breakeven")
+        self.assertAlmostEqual(t["gross_r"], 0.5 * 1.0 + 0.5 * 0.1)
+
+    def test_staged_locks_one_r_after_two(self):
+        df = flat()
+        df.loc[df.index[22], ["high", "close"]] = [106.6, 105.0]
+        df.loc[df.index[23], ["open", "low"]] = [104.0, 102.0]
+        t = self._one(df, {"tp": None, "trail": "staged"})
+        self.assertEqual(t["reason"], "+1R locked")
+        self.assertAlmostEqual(t["gross_r"], 1.0)
+
+    def test_structure_sits_under_the_recent_lows(self):
+        df = flat()
+        df.loc[df.index[22], ["high", "close"]] = [103.6, 103.0]
+        df.loc[df.index[23], ["open", "low"]] = [102.0, 98.0]
+        t = self._one(df, "structure")
+        self.assertEqual(t["reason"], "structure")
+        self.assertAlmostEqual(t["exit"], 99.0 - 0.1 * F.atr(df).iloc[22])
+
+    def test_no_care_is_the_bracket_alone(self):
+        df = flat()
+        df.loc[df.index[22], "high"] = 103.6
+        df.loc[df.index[25], "low"] = 96.0
+        t = self._one(df, "no_care")
+        self.assertEqual(t["reason"], "stop")
+        self.assertAlmostEqual(t["gross_r"], -1.0)
+
+
 class JudgeTests(SimpleTestCase):
 
     def test_sidak_raises_the_bar_with_the_candidates(self):
@@ -250,6 +302,18 @@ class TheDoorTests(TestCase):
         grid = (len(F.FAMILIES["tsmom"].grid) + len(F.FAMILIES["donchian"].grid)) \
             * 2 * len(F.FILTERS)
         self.assertEqual({r.n_candidates for r in rows}, {grid})
+
+    def test_exits_compares_the_policies_on_the_same_signals(self):
+        from backtester.models_proving import ProvingVerdict
+        out = StringIO()
+        call_command("prove", "exits", "--class", "crypto", "--families",
+                     "donchian", "--policies", "care,chandelier3", "--save",
+                     stdout=out)
+        self.assertIn("exit chandelier3", out.getvalue())
+        rows = list(ProvingVerdict.objects.all())
+        self.assertEqual({r.policy for r in rows}, {"care", "chandelier3"})
+        self.assertEqual({r.n_candidates for r in rows}, {2})
+        self.assertEqual({r.live_rule for r in rows}, {"donchian"})
 
     def test_the_task_runs_only_while_its_component_is_on(self):
         from backtester.models_proving import ProvingVerdict

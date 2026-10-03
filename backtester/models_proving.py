@@ -18,6 +18,8 @@ class ProvingVerdict(models.Model):
     params = models.JSONField(default=dict)
     direction = models.CharField(max_length=5)
     filter = models.CharField(max_length=12, default="none")
+    #: The exit policy the trades were run under (simulate.EXIT_POLICIES).
+    policy = models.CharField(max_length=20, default="care")
     asset_class = models.CharField(max_length=20, db_index=True)
     timeframe = models.CharField(max_length=4, default="4h")
     generated = models.BooleanField(default=False)
