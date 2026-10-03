@@ -64,6 +64,9 @@ class ProvingTrade(models.Model):
     r = models.FloatField()
     #: The best R seen while open.
     mfe = models.FloatField(default=0.0)
+    #: The worst R seen while open (the thesis check's "this deep and
+    #: came back" analogs, brain/thesis_check.py).
+    mae = models.FloatField(default=0.0)
     regime = models.CharField(max_length=16, default="")
     reason = models.CharField(max_length=24, default="")
     bars = models.IntegerField(default=0)
@@ -71,4 +74,5 @@ class ProvingTrade(models.Model):
     class Meta:
         app_label = "backtester"
         indexes = [models.Index(fields=["verdict", "-entry_ts"]),
-                   models.Index(fields=["verdict", "regime", "-entry_ts"])]
+                   models.Index(fields=["verdict", "regime", "-entry_ts"]),
+                   models.Index(fields=["verdict", "mae"])]

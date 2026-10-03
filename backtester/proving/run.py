@@ -268,6 +268,7 @@ def _save(rows):
             ProvingTrade(verdict=verdict, symbol=str(t.get("symbol") or ""),
                          entry_ts=t["entry_ts"], exit_ts=t["exit_ts"],
                          r=float(t["r"]), mfe=float(t.get("mfe") or 0.0),
+                         mae=float(t.get("mae") or 0.0),
                          regime=str(t.get("regime") or ""),
                          reason=str(t.get("reason") or ""),
                          bars=int(t.get("bars") or 0))

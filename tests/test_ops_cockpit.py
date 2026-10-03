@@ -164,7 +164,11 @@ class RegistryTests(TestCase):
                           "probe_routes",
                           # 2026-10-02: reads closed rows, writes nothing,
                           # no broker call; prints R and counts, no money.
-                          "scorecard"})
+                          "scorecard",
+                          # 2026-10-03: reads the bars and the proving
+                          # ground's trades, writes nothing, no broker
+                          # call; prints R and verdicts, no money.
+                          "thesis"})
         self.assertIsNone(ops_commands.get("nope"))
         self.assertEqual([k for k, _l, _r in ops_commands.by_category()],
                          ["read", "decide", "ops"])
