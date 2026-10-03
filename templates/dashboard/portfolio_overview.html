@@ -197,13 +197,13 @@ trade and this page would go on showing nothing until they reloaded it.
     {% if open_positions %}
     <div class="table-wrapper">
     <table class="sv-perf-table">
-        <thead><tr><th class="sv-sel-cell" scope="col"><input type="checkbox" class="sv-sel-box" data-sv-select-all aria-label="Select every position shown" title="Select all visible"></th><th>symbol</th><th>side</th><th class="num">qty</th><th class="num">entry</th><th class="num">last</th><th class="num">unreal P&amp;L</th><th class="num">%</th><th class="num">R</th><th class="nowrap">action</th></tr></thead>
+        <thead><tr><th class="sv-sel-cell" scope="col"><input type="checkbox" class="sv-sel-box" data-sv-select-all aria-label="Select every position shown" title="Select all visible"></th><th>symbol</th><th>side</th><th class="num">qty</th><th class="num" title="How many times its own capital this position carries: the broker's multiplier on an eToro row, the class's margin model otherwise. 1x settles in full.">lev</th><th class="num">entry</th><th class="num">last</th><th class="num">unreal P&amp;L</th><th class="num">%</th><th class="num">R</th><th class="nowrap">action</th></tr></thead>
         <tbody>
             {# One tbody per group, as on /positions/: the header's scope="rowgroup" covers its own rows only. #}
             {% for g in open_view.groups %}{% if not forloop.first %}
         </tbody>
         <tbody>{% endif %}
-            {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=10 scope="pf" %}{% endif %}
+            {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=11 scope="pf" %}{% endif %}
             {% for p in g.rows %}
             <tr data-sv-position-row>
                 {# Ticked for "Should I close?" / "Close selected" — bot trades only, as on /positions/. #}
@@ -211,6 +211,8 @@ trade and this page would go on showing nothing until they reloaded it.
                 <td class="nowrap"><strong>{{ p.symbol }}</strong></td>
                 <td><span class="oc-mini-side {{ p.direction }}">{{ p.direction|upper }}</span></td>
                 <td class="num">{{ p.quantity|floatformat:4 }}</td>
+                {# LEVERAGE (2026-10-03): the same fact as /positions/' Lev column (views._leverage_map); "" is unknown and prints as a dash, never as 1. #}
+                <td class="num pos-lev-cell">{% if p.leverage %}<span class="pos-lev{% if p.leverage != '1' %} is-levered{% endif %}">{{ p.leverage }}x</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
                 <td class="num">{{ p.entry_price|floatformat:4 }}</td>
                 {# An unquoted symbol, or an option with no premium feed, is a #}
                 {# real state — the muted em-dash, never "None" or a zero. #}

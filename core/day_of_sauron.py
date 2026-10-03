@@ -131,6 +131,8 @@ STAGE_OF = {
     "send-due-newsletters": ("tell", "the newsletter, when an edition is due"),
     # ── LEARN: the night and the weekend ────────────────────────────────
     "aragorn-daily-report": ("tell", "Aragorn's daily report"),
+    "proving-ground-rules": ("think", "The proving ground judges every live rule and its mirror on all history"),
+    "proving-ground-generate": ("think", "The proving ground judges the generator's shortlist"),
     "investigate-decaying-rules": ("learn", "decaying rules investigated"),
     # The night's governance and grading, not the tick's sizing (review,
     # 2026-09-29): the actuator reads the decay investigations, the

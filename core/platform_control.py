@@ -154,6 +154,11 @@ DEFAULT_COMPONENTS = [
     {"key": "agent_strategy", "name": "Strategy Advisor", "description": "Portfolio-aware strategy proposals (every 4 hours)", "category": "agent"},
     {"key": "agent_daily_briefing", "name": "Daily Briefing", "description": "Morning briefing generation (daily 06:00 UTC)", "category": "agent"},
     {"key": "agent_weekly_review", "name": "Weekly Review", "description": "Deep weekly analysis (Saturday 10:00 UTC)", "category": "agent"},
+    # THE NEXT STEPS (2026-10-03, ai_agents/next_steps.py): Sauron reads its
+    # own reports; proposals only. Description measured under 300 chars.
+    {"key": "agent_next_steps", "name": "Next Steps (Sauron reads its reports)",
+     "description": "Off (default). On: after the morning briefing, the weekly review, the Monday plan and the end-of-day digest, a fast pass extracts their next steps (pause a rule, trade smaller, watch an instrument, note) as proposals on /briefing/#next-steps. Nothing applies until approved.",
+     "category": "agent"},
     {"key": "agent_optimization", "name": "Strategy Optimization", "description": "Strategy parameter tuning (Saturday 14:00 UTC)", "category": "agent"},
     {"key": "agent_monday_plan", "name": "Monday Planner", "description": "Monday game plan generation (Sunday 18:00 UTC)", "category": "agent"},
 
@@ -282,6 +287,12 @@ DEFAULT_COMPONENTS = [
     # Description measured at 273 chars (< 300).
     {"key": "trade_debate", "name": "Trade Debate (Executioner vs Champion)",
      "description": "Off (default). On: every LIVE bot entry is argued by two AI agents before its order — why it fails, why it works — and the verdicts ride the row. Shadow for the first 30 graded live trades; then the Executioner may cut or veto, and an elite entry needs the Champion to win.",
+     "category": "system"},
+    # THE PROVING GROUND (2026-10-02, backtester/proving): backtests that
+    # can say no. Writes verdicts only; moves no money. Description
+    # measured at 287 chars (< 300).
+    {"key": "proving_ground", "name": "Proving Ground (backtests that say no)",
+     "description": "Off (default). On: every live rule and its short mirror is judged nightly, and a generated shortlist weekly, on all stored 4h history — next-bar fills, ATR levels, costs, position care, a 30% holdout, a bootstrap bound corrected for the candidates tried. Verdicts only; nothing trades.",
      "category": "system"},
     # De-risk fast, re-risk slow (2026-09-12): the third switch. Off by
     # default; needs LIVE mode too. Description counted under 300 chars.

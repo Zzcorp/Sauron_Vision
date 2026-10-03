@@ -702,6 +702,11 @@ def generate_daily_briefing():
     # The views it stated become calls the calibration grades.
     calls_registered = register_calls("daily_briefing",
                                       extract_calls(briefing_text))
+    # Sauron reads its own report (ai_agents/next_steps.py, 2026-10-03):
+    # the steps it recommends become proposals on /briefing/#next-steps.
+    # Never raises; a reader that fails does not fail the report.
+    from ai_agents.next_steps import extract as _extract_steps
+    _extract_steps("daily_briefing", briefing_text)
 
     Notification.create_for_all(
         notification_type="system",
@@ -802,6 +807,11 @@ def generate_weekly_review():
     review_text = result.get("review", "")
     calls_registered = register_calls("weekly_reviewer",
                                       extract_calls(review_text))
+    # Sauron reads its own report (ai_agents/next_steps.py, 2026-10-03):
+    # the steps it recommends become proposals on /briefing/#next-steps.
+    # Never raises; a reader that fails does not fail the report.
+    from ai_agents.next_steps import extract as _extract_steps
+    _extract_steps("weekly_review", review_text)
     week_label = now.strftime("Week of %d %b %Y")
 
     # THE REVIEW IS THE WEEK'S LETTER (2026-09-29). It used to land as an
@@ -1123,6 +1133,11 @@ def generate_monday_plan():
     result = MondayPlanAgent().run(context=context, week=week)
     plan_text = result.get("plan", "")
     calls_registered = register_calls("monday_plan", extract_calls(plan_text))
+    # Sauron reads its own report (ai_agents/next_steps.py, 2026-10-03):
+    # the steps it recommends become proposals on /briefing/#next-steps.
+    # Never raises; a reader that fails does not fail the report.
+    from ai_agents.next_steps import extract as _extract_steps
+    _extract_steps("monday_plan", plan_text)
     announced = mp.announce(plan_text, week)
 
     return {

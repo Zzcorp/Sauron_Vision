@@ -2231,6 +2231,26 @@
                        'recorded with the reason.') + '</div>';
       }
 
+      /* THE SETUP MEMORY (2026-10-03): what followed, the last times this
+         rule fired on this class in this kind of tape — the proving
+         ground's own trades. A note, never a gate. */
+      var memory = p.setup_memory || {};
+      if (memory.words) {
+        warnHtml += '<div class="sz-note sz-memory"><b>SETUP MEMORY</b> ' +
+          esc(memory.words) + '</div>';
+      }
+
+      /* Whether a Sauron signal backs this ticket (2026-10-02): the week's
+         instrument-view tickets, taken with none, made -1.98R. A warning;
+         the button is unchanged. */
+      var backing = p.signal_backing || {};
+      if (backing.ok === false && backing.reason) {
+        warnHtml += '<div class="sz-warn sz-warn--book"><b>NO SAURON SIGNAL ' +
+          'BEHIND THIS TRADE</b>' + esc(backing.reason) +
+          '<br>' + esc('A warning, not a block: the choice is yours. Taking ' +
+                       'it is recorded as taken without a signal.') + '</div>';
+      }
+
       /* And how hard this pool is set to swing. Not a warning about THIS
          trade — a reminder that a number typed into extras once is still
          sizing every trade since. */
@@ -2806,8 +2826,14 @@
         facts.push(['Failed closes', String(p.attempts || 0)]);
         facts.push(['At the broker', 'STILL OPEN']);
       }
+      /* Cutting a winner short of its target (2026-10-02): said above the
+         button, never a gate — the last word stays the operator's. */
+      var early = (!p.pending && p.early_close && p.early_close.warn)
+        ? p.early_close : null;
       SV.overlay.confirm({
         title: p.pending ? 'Retry this close?' : 'Close this position?',
+        warn: early ? { title: 'CLOSING A WINNER EARLY', text: early.reason }
+                    : undefined,
         message: p.pending
           ? 'The broker refused the last close, so the position is still open there. This asks the broker whether it still holds it, then resubmits.'
           : (live
@@ -2821,7 +2847,9 @@
            action — but a live close is irreversible real money, the same
            bar the kill switch sets. */
         secretLabel: live ? 'Trading PIN' : undefined,
-        confirmLabel: p.pending ? 'RETRY CLOSE' : (live ? 'CLOSE LIVE POSITION' : 'CLOSE POSITION')
+        confirmLabel: p.pending ? 'RETRY CLOSE'
+          : (live ? 'CLOSE LIVE POSITION' : 'CLOSE POSITION') +
+            (early ? ' ANYWAY' : '')
       }).then(function (ok) {
         if (!ok) { done(); return; }
         fetch('/positions/' + encodeURIComponent(id) + '/close/', {

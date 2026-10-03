@@ -414,6 +414,21 @@ app.conf.beat_schedule = {
         "schedule": crontab(hour=7, minute=10),
     },
 
+    # ── The proving ground (2026-10-02, backtester/proving): the live
+    #    rules and their mirrors judged nightly on all stored 4h history,
+    #    the generator's shortlist weekly, before the Sunday 04:00
+    #    generator. Component proving_ground; verdicts only.
+    "proving-ground-rules": {
+        "task": "backtester.tasks.run_proving_ground",
+        "schedule": crontab(hour=3, minute=40),
+        "kwargs": {"mode": "rules"},
+    },
+    "proving-ground-generate": {
+        "task": "backtester.tasks.run_proving_ground",
+        "schedule": crontab(hour=3, minute=50, day_of_week="sunday"),
+        "kwargs": {"mode": "generate"},
+    },
+
     # ── Phase 14.1 — refresh OptionContract chains (Greeks + bid/ask) for
     #              all users running an enabled options AssetBotConfig.
     #              Hourly during the NYSE active window — chains don't shift

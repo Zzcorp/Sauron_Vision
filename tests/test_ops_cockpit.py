@@ -161,7 +161,10 @@ class RegistryTests(TestCase):
                           "why_no_trade", "signals", "treasury",
                           # 2026-09-23: GET-only, no external service,
                           # prints route names and status codes.
-                          "probe_routes"})
+                          "probe_routes",
+                          # 2026-10-02: reads closed rows, writes nothing,
+                          # no broker call; prints R and counts, no money.
+                          "scorecard"})
         self.assertIsNone(ops_commands.get("nope"))
         self.assertEqual([k for k, _l, _r in ops_commands.by_category()],
                          ["read", "decide", "ops"])

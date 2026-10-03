@@ -255,3 +255,44 @@ class AIModelSetting(models.Model):
 
     def __str__(self):
         return f"{self.scope}:{self.key} → {self.model_id or '(default)'}"
+
+
+class ReportNextStep(models.Model):
+    """One next step Sauron read in one of its own reports
+    (ai_agents/next_steps.py): a proposal the operator approves, never an
+    action. 2026-10-03."""
+
+    PENDING, APPROVED, REJECTED, EXPIRED = ("pending", "approved",
+                                            "rejected", "expired")
+    STATUS_CHOICES = [(PENDING, "Pending"), (APPROVED, "Approved"),
+                      (REJECTED, "Rejected"), (EXPIRED, "Expired")]
+    KIND_CHOICES = [("pause_rule", "Pause the rule"),
+                    ("reduce_size", "Trade smaller"),
+                    ("watch", "Watch the instrument"), ("note", "Note")]
+
+    report_kind = models.CharField(max_length=20, db_index=True)
+    #: The report's own stamp (its date or week), for the record.
+    source_ref = models.CharField(max_length=64, blank=True, default="")
+    kind = models.CharField(max_length=12, choices=KIND_CHOICES)
+    #: A rule name, an instrument symbol, or "" for a note.
+    ref = models.CharField(max_length=100, blank=True, default="",
+                           db_index=True)
+    why = models.TextField()
+    confidence = models.FloatField(default=0.0)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES,
+                              default=PENDING, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey("auth.User", null=True, blank=True,
+                                    on_delete=models.SET_NULL,
+                                    related_name="+")
+    #: The RuleAction an approved pause or size cut became (HQ applies it).
+    rule_action = models.ForeignKey("signals.RuleAction", null=True,
+                                    blank=True, on_delete=models.SET_NULL,
+                                    related_name="+")
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"[{self.status}] {self.kind} {self.ref} ({self.report_kind})"

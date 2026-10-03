@@ -1,0 +1,37 @@
+{% comment %}
+THE NEXT STEPS (2026-10-03): /briefing/#next-steps — what Sauron read in
+its own reports (ai_agents/next_steps.py) and proposes for the operator to
+approve. Nothing here is applied: approving a pause or a size cut creates a
+RuleAction proposal for HQ, approving a watch stars the instrument, a note
+is acknowledged. Model text is escaped by the template engine; nothing is
+marked safe.
+{% endcomment %}<section class="card mp-card" id="next-steps" aria-labelledby="nsTitle">
+    <div class="card-header mp-head">
+        <h2 class="card-title mp-title" id="nsTitle">Next steps Sauron read in its reports</h2>
+        {% if next_steps %}<span class="mp-week">{{ next_steps|length }} to decide</span>{% endif %}
+    </div>
+    <p class="mp-meta">Read from the morning briefing, the weekly review, the Monday plan and the end-of-day digest. Nothing is applied until you say so.</p>
+    {% if next_steps %}
+    <ul class="ns-list">
+        {% for s in next_steps %}
+        <li class="ns-item ns-{{ s.kind }}" id="next-step-{{ s.id }}">
+            <div class="ns-head">
+                <span class="ns-kind">{{ s.kind_words }}</span>
+                {% if s.ref %}<strong class="ns-ref">{{ s.ref }}</strong>{% endif %}
+                <span class="ns-meta">from {{ s.report_words }} · {{ s.age_words }} · confidence {{ s.confidence_pct }}%</span>
+            </div>
+            <p class="ns-why">{{ s.why }}</p>
+            <p class="ns-consequence">Approving {{ s.consequence }}.</p>
+            {% if request.user.is_staff %}
+            <div class="ns-actions">
+                <form method="post" action="{% url 'next_step_approve' s.id %}">{% csrf_token %}<button type="submit" class="btn btn-sm">APPROVE</button></form>
+                <form method="post" action="{% url 'next_step_reject' s.id %}">{% csrf_token %}<button type="submit" class="btn btn-sm btn-ghost">REJECT</button></form>
+            </div>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="mp-empty">Nothing to decide — the next report that proposes a step lands here.</p>
+    {% endif %}
+</section>

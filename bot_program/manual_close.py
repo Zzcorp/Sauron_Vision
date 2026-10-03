@@ -154,6 +154,93 @@ def _risk_dollars(trade) -> float:
     return risk
 
 
+#: The window and the minimum sample behind the lane's payoff sentence.
+EARLY_CLOSE_LOOKBACK_DAYS = 90
+EARLY_CLOSE_MIN_SAMPLE = 10
+#: How long one lane's payoff is reused: a close-all previews every row.
+EARLY_CLOSE_STATS_TTL = 300
+
+
+def _lane_payoff(trade):
+    """(lane, scorecard summary) of this trade's lane — the operator's own
+    hand-taken trades or the bots — over EARLY_CLOSE_LOOKBACK_DAYS, for its
+    owner, cached EARLY_CLOSE_STATS_TTL so a close-all reads it once."""
+    from django.core.cache import cache
+
+    from bot_program import scorecard
+    from bot_program.manual_trade import MANUAL_RULE
+    lane = "manual" if trade.rule_name == MANUAL_RULE else "bots"
+    user = getattr(trade.config, "user", None)
+    key = (f"scorecard:lane:{getattr(user, 'pk', 0)}:{lane}:"
+           f"{EARLY_CLOSE_LOOKBACK_DAYS}")
+    summary = cache.get(key)
+    if summary is None:
+        summary = scorecard.summarize(
+            [r for r in scorecard.rows(days=EARLY_CLOSE_LOOKBACK_DAYS,
+                                       user=user) if r["lane"] == lane])
+        cache.set(key, summary, EARLY_CLOSE_STATS_TTL)
+    return lane, summary
+
+
+def early_close_advisory(trade, r_now) -> dict:
+    """{warn, r, target_r, mfe, reason} — whether this close cuts a winner
+    short of its own target (2026-10-02).
+
+    The week's book: 12 of 15 winners closed by hand at +0.28R on average,
+    several in one minute, against losers that ran their full -1R. A
+    WARNING, never a refusal: the operator asked for the last word to stay
+    theirs. It says what the position is worth now against what it was
+    planned for, what it has already seen, whether it is protected, and —
+    with enough closed trades behind it — what this lane's winners must
+    average to pay for its losers."""
+    out = {"warn": False, "r": r_now, "target_r": None, "mfe": None,
+           "reason": ""}
+    if r_now is None or r_now <= 0 or trade.take_profit is None:
+        return out
+    entry = float(trade.entry_price or 0)
+    init = _initial_stop(trade)
+    if not init or entry <= 0 or abs(entry - init) <= 0:
+        return out
+    d = 1.0 if str(trade.side).upper() == "BUY" else -1.0
+    target_r = d * (float(trade.take_profit) - entry) / abs(entry - init)
+    out["target_r"] = round(target_r, 2)
+    care = (trade.metadata or {}).get("care") or {}
+    try:
+        mfe = float(care["mfe_r"]) if care.get("mfe_r") is not None else None
+    except (TypeError, ValueError):
+        mfe = None
+    out["mfe"] = mfe
+    if target_r <= r_now:
+        return out
+    parts = [f"Closing a winner early: {r_now:+.2f}R now, its target is "
+             f"{target_r:+.2f}R."]
+    if mfe is not None and mfe > r_now + 0.05:
+        parts.append(f"It has already been {mfe:+.2f}R.")
+    if care.get("soft_why"):
+        parts.append(f"It is already protected: the platform's stop sits at "
+                     f"its {care['soft_why']} level.")
+    elif r_now < 1.0:
+        parts.append("Position care moves its stop to break-even once it "
+                     "reaches +1R.")
+    try:
+        lane, s = _lane_payoff(trade)
+    except Exception as e:  # noqa: BLE001 — the warning must not cost the close
+        logger.debug("[manual-close] no lane payoff for #%s: %s", trade.pk, e)
+        lane, s = None, None
+    if (s and s.get("n", 0) >= EARLY_CLOSE_MIN_SAMPLE
+            and s.get("avg_win") is not None
+            and s.get("needed_avg_win") is not None):
+        who = "your hand-taken" if lane == "manual" else "the bots'"
+        parts.append(
+            f"Over {EARLY_CLOSE_LOOKBACK_DAYS} days {who} winners averaged "
+            f"{s['avg_win']:+.2f}R; at a {s['win_rate'] * 100:.0f}% win rate "
+            f"they must average {s['needed_avg_win']:+.2f}R to pay for the "
+            f"losers.")
+    parts.append("A warning, not a block: the choice is yours.")
+    out.update(warn=True, reason=" ".join(parts))
+    return out
+
+
 def _exit_fill(trade, price: float) -> float:
     """The price the close will actually book at.
 
@@ -279,6 +366,7 @@ def preview_close(user, trade) -> dict:
     fill = _exit_fill(trade, float(mark))
     pnl = float(bot._trade_pnl(trade, Decimal(str(fill))))
     risk = _risk_dollars(trade)
+    r_now = round(pnl / risk, 2) if risk > 0 else None
     return {
         "trade_id": trade.id, "symbol": trade.symbol, "side": trade.side,
         "qty": float(trade.qty), "asset_class": trade.asset_class,
@@ -291,11 +379,14 @@ def preview_close(user, trade) -> dict:
         # An unmeasurable R renders as an em-dash upstream, never as 0.0 —
         # a legacy row with no initial stop has no risk denominator, and
         # "0.0R" would read as a scratch trade.
-        "r": round(pnl / risk, 2) if risk > 0 else None,
+        "r": r_now,
         "venue": "paper" if trade.paper else "live",
         "requires_pin": requires_pin(trade),
         "pending": False,
         "action": "close",
+        # Whether this cuts a winner short of its target — a warning the
+        # dialog shows above the button, never a refusal.
+        "early_close": early_close_advisory(trade, r_now),
     }
 
 

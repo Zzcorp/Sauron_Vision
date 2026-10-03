@@ -224,7 +224,7 @@ honest freshness claim.{% endcomment %}
 {# position is a rounding error or half the pool. Every price cell carries #}
 {# its own percentage underneath — a distance for the levels, the move #}
 {# since entry for the mark — so no cell asks the operator to divide. #}
-<thead><tr><th class="sv-sel-cell" scope="col"><input type="checkbox" class="sv-sel-box" data-sv-select-all aria-label="Select every position shown" title="Select all visible"></th><th>Symbol</th><th>Direction</th><th class="num">Qty</th><th class="num">Capital</th><th class="num">Entry</th><th class="num">Current</th><th class="num">Stop</th><th class="num">Target</th><th class="num">P&L</th><th class="num">P&L %</th><th class="num">R</th><th>Strategy</th><th class="nowrap">Opened</th><th class="nowrap">Action</th></tr></thead>
+<thead><tr><th class="sv-sel-cell" scope="col"><input type="checkbox" class="sv-sel-box" data-sv-select-all aria-label="Select every position shown" title="Select all visible"></th><th>Symbol</th><th>Direction</th><th class="num">Qty</th><th class="num">Capital</th><th class="num" title="How many times its own capital this position carries: the broker's multiplier on an eToro row, the class's margin model otherwise. 1x settles in full.">Lev</th><th class="num">Entry</th><th class="num">Current</th><th class="num">Stop</th><th class="num">Target</th><th class="num">P&L</th><th class="num">P&L %</th><th class="num">R</th><th>Strategy</th><th class="nowrap">Opened</th><th class="nowrap">Action</th></tr></thead>
         <tbody>
         {# ── The row's own numbers are unchanged; the data-pos-* set feeds the ── #}
         {# ── dwell card (static/js/sv-position-card.js), which answers what   ── #}
@@ -244,7 +244,7 @@ honest freshness claim.{% endcomment %}
         {% for g in open_view.groups %}{% if not forloop.first %}
         </tbody>
         <tbody>{% endif %}
-        {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=15 scope="pos" %}{% endif %}
+        {% if g.header %}{% include "_partials/position_group_row.html" with g=g cols=16 scope="pos" %}{% endif %}
         {% for p, d in g.pairs %}
         {% if p.instrument.has_page %}{% url 'instrument_detail' p.instrument.symbol as instrument_url%}{% endif %}
         {# The money world (2026-09-30): REAL MONEY rows carry a red edge and the solid marker in the symbol cell. #}
@@ -315,6 +315,8 @@ honest freshness claim.{% endcomment %}
                 {% if d.committed %}<span class="pos-cap-money">{{ d.committed }}</span>{% if d.committed_pct %}<span class="pos-cap-share">{{ d.committed_pct }}% of pool</span>{% endif %}{% if d.committed_kind == 'margin' %}<span class="pos-cap-kind">margin</span>{% endif %}
                 {% else %}<span class="sv-unknown">&mdash;</span>{% endif %}
             </td>
+            {# LEVERAGE (2026-10-03, the operator: "add leverage used by position on the line"). The same fact the dwell card carries (d.leverage, views._pos_leverage): the broker's multiplier on an eToro row, the class's margin model otherwise; "" is unknown and prints as a dash, never as 1. #}
+            <td data-label="Lev" class="num pos-lev-cell" style="font-family: var(--font-mono);">{% if d.leverage %}<span class="pos-lev{% if d.leverage != '1' %} is-levered{% endif %}">{{ d.leverage }}x</span>{% else %}<span class="sv-unknown">&mdash;</span>{% endif %}</td>
             <td data-label="Entry" class="num pos-price-cell" style="font-family: var(--font-mono);">
                 <span class="pos-price">{{ p.entry_price }}</span><span class="pos-price-pct is-ref">entry</span>
             </td>
@@ -1068,6 +1070,24 @@ a.ph-sym.is-neutral:hover, a.ph-sym.is-neutral:focus-visible {
     }
 
     var busy = false;
+    /* The winners a close-all would cut short of their own targets — the
+       week of 2026-10-02 closed several at +0.04R in one minute. */
+    function earlyWarn(p) {
+        var e = p.early || [];
+        if (!e.length) return null;
+        var names = e.map(function (x) {
+            return x.symbol + " " + (x.r >= 0 ? "+" : "") + Number(x.r).toFixed(2) +
+                   "R of " + (x.target_r >= 0 ? "+" : "") +
+                   Number(x.target_r).toFixed(2) + "R";
+        }).join(", ");
+        var more = (p.early_count || e.length) - e.length;
+        return {
+            title: "CLOSING " + (p.early_count || e.length) + " WINNER(S) EARLY",
+            text: names + (more > 0 ? " and " + more + " more" : "") +
+                  " — short of their targets. Position care moves a stop to " +
+                  "break-even at +1R. A warning, not a block: the choice is yours."
+        };
+    }
     btn.addEventListener("click", function () {
         if (busy) return;
         busy = true;
@@ -1110,8 +1130,12 @@ a.ph-sym.is-neutral:hover, a.ph-sym.is-neutral:focus-visible {
             if (p.pending) facts.push(["Already retrying", String(p.pending)]);
             if (p.unclosable) facts.push(["Cannot be closed here", p.unclosable + " manual-book row(s)"]);
 
+            /* Winners this would cut short of their targets (2026-10-02):
+               named above the button, never a gate. */
+            var early = earlyWarn(p);
             SV.overlay.confirm({
                 title: "Close all positions?",
+                warn: early || undefined,
                 message: p.live
                     ? "This flattens " + p.live + " LIVE position" + (p.live === 1 ? "" : "s") +
                       " at the broker. It cannot be undone, and re-entering costs the round trip again."
@@ -1126,8 +1150,9 @@ a.ph-sym.is-neutral:hover, a.ph-sym.is-neutral:focus-visible {
                    for the whole set — splitting the run would close half the
                    book and then stop to ask a question. */
                 secretLabel: p.needs_pin ? "Trading PIN" : undefined,
-                confirmLabel: p.live ? "CLOSE " + p.count + " POSITIONS LIVE"
-                                     : "CLOSE " + p.count + " POSITIONS"
+                confirmLabel: (p.live ? "CLOSE " + p.count + " POSITIONS LIVE"
+                                      : "CLOSE " + p.count + " POSITIONS") +
+                              (early ? " ANYWAY" : "")
             }).then(function (ok) {
                 if (!ok) { release(); return; }
                 btn.textContent = "Closing…";

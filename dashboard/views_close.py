@@ -152,6 +152,15 @@ def _unclosable_count(user):
     return Position.objects.filter(portfolio=book, closed_at__isnull=True).count()
 
 
+def _note_early(early, trade, preview):
+    """Append one winner the close would cut short of its target
+    (manual_close.early_close_advisory) to `early`."""
+    ec = preview.get("early_close") or {}
+    if ec.get("warn"):
+        early.append({"id": trade.pk, "symbol": trade.symbol,
+                      "r": ec.get("r"), "target_r": ec.get("target_r")})
+
+
 @login_required
 def close_all_preview(request):
     """POST — what closing everything would do, before it is done."""
@@ -161,7 +170,7 @@ def close_all_preview(request):
         return HttpResponseNotAllowed(["POST"])
 
     trades = _open_closable(request.user)
-    rows, live_n, pending_n = [], 0, 0
+    rows, live_n, pending_n, early = [], 0, 0, []
     pnl_total, pnl_measured = 0.0, True
     for trade in trades:
         try:
@@ -190,9 +199,14 @@ def close_all_preview(request):
             "qty": str(trade.qty), "venue": venue,
             "pending": bool(p.get("pending")),
         })
+        _note_early(early, trade, p)
 
     return JsonResponse({
         "count": len(rows),
+        # Winners this would cut short of their targets — a warning above
+        # the button, never a gate (2026-10-02).
+        "early": early[:12],
+        "early_count": len(early),
         "live": live_n,
         "paper": len(rows) - live_n,
         "pending": pending_n,
@@ -438,7 +452,7 @@ def close_selected_preview(request):
         return JsonResponse({"error": err}, status=400)
 
     trades, missing, abandoned = _selected_closable(request.user, ids)
-    rows, pending_n = [], 0
+    rows, pending_n, early = [], 0, []
     worlds = {"live": 0, "demo": 0, "paper": 0}
     pnl_total, pnl_measured = 0.0, True
     for trade in trades:
@@ -471,6 +485,7 @@ def close_selected_preview(request):
             "pending": bool(p.get("pending")),
             "error": str(p.get("error") or "")[:160],
         })
+        _note_early(early, trade, p)
 
     # Summed only inside one currency: 12 USD and 900 JPY is not a total,
     # and printing one would state a realised figure nobody will receive.
@@ -479,6 +494,8 @@ def close_selected_preview(request):
            if pnl_measured and trades and len(ccys) == 1 else None)
     return JsonResponse({
         "count": len(rows),
+        "early": early[:12],
+        "early_count": len(early),
         # close_all_preview's keys, but counted by WORLD: `live` is real
         # money only, and a demo row is `demo`, never `live` and never
         # folded into `paper` — whoever reads this JSON (this page, Gandalf,

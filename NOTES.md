@@ -34,9 +34,12 @@ arming anything that costs real money.
 - **FundingRate** is throttled to one row per symbol every 30s by
   the streamer, so even running 24/7 it produces ~2880 rows/day
   per symbol. Retention default: 60 days.
-- **PriceData intraday bars** (1m/5m/15m/1h/4h) are pruned to the
-  last 90 days by `cleanup_price_data`. Daily and weekly bars are
-  preserved regardless — don't delete your backtest data.
+- **PriceData minute bars** (1m/5m/15m/30m) are pruned to the last 90
+  days (`RETAIN_INTRADAY_DAYS`) by `cleanup_price_data`. **1h and 4h bars
+  are kept three years** (`RETAIN_HOURLY_DAYS`, since 2026-10-02: they are
+  what every rule and backtest decides on, and pruning them at 90 days
+  starved every backtest). Daily and weekly bars are preserved regardless
+  — don't delete your backtest data.
 
 ## Channels / Redis
 

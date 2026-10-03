@@ -541,7 +541,25 @@
             });
             if (p.more) names.push("and " + p.more + " more");
 
+            /* Winners this would cut short of their targets (2026-10-02):
+               named above the button, never a gate. */
+            var early = (p.early || []).map(function (x) {
+                return x.symbol + " " + (x.r >= 0 ? "+" : "") +
+                       Number(x.r).toFixed(2) + "R of " +
+                       (x.target_r >= 0 ? "+" : "") +
+                       Number(x.target_r).toFixed(2) + "R";
+            });
+            var earlyN = p.early_count || early.length;
             w.SV.overlay.confirm({
+                warn: earlyN ? {
+                    title: "CLOSING " + earlyN + " WINNER(S) EARLY",
+                    text: early.join(", ") +
+                          (earlyN > early.length ? " and " + (earlyN - early.length) +
+                           " more" : "") +
+                          " — short of their targets. Position care moves a stop " +
+                          "to break-even at +1R. A warning, not a block: the " +
+                          "choice is yours."
+                } : undefined,
                 title: p.count === 1 ? "Close the selected position?"
                                      : "Close the " + p.count + " selected positions?",
                 message: worlds.live
@@ -561,7 +579,8 @@
                 /* Held at a broker — real or demo — needs the PIN; the
                    server refuses the WHOLE batch on a wrong one. */
                 secretLabel: p.needs_pin ? "Trading PIN" : undefined,
-                confirmLabel: "CLOSE " + plural(p.count, "POSITION").toUpperCase()
+                confirmLabel: "CLOSE " + plural(p.count, "POSITION").toUpperCase() +
+                              (earlyN ? " ANYWAY" : "")
             }).then(function (ok) {
                 if (!ok) { release(); return; }
                 return post(CLOSE_URL, { ids: p.ids, pin: (ok === true ? "" : ok) })

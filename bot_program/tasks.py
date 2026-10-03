@@ -567,6 +567,28 @@ def _shock_trigger(user, now) -> None:
             return
         if not share_allocator.shock_detected(user, now=now):
             return
+        # ONE PLAN PER SHOCK (2026-10-03). The shock reads true for the
+        # whole 24 h the drop stays in the window, and the hourly cooldown
+        # above let this path propose a NEW plan — and say "Shock plan
+        # proposed" again — every hour while the first one sat unanswered
+        # on /shares/ (the operator: "this message keeps popping up"). A
+        # shock plan still PROPOSED inside the hold is the answer already
+        # given: nothing new is proposed, nothing is said again. A plan the
+        # admin applied, rejected or that expired no longer holds the door.
+        from datetime import timedelta as _td
+
+        from .share_models import SharePlan
+        pending = (SharePlan.objects
+                   .filter(user=user, mode=SharePlan.MODE_SHOCK,
+                           state=SharePlan.STATE_PROPOSED,
+                           proposed_at__gte=now - _td(
+                               hours=share_allocator.SHOCK_HOLD_HOURS))
+                   .order_by("-proposed_at").first())
+        if pending is not None:
+            logger.info("[shares] shock still on for %s; plan #%s is "
+                        "proposed and unanswered — nothing new proposed",
+                        user.username, pending.pk)
+            return
         if not cache.add(f"shares:shock:{user.pk}", "1",
                          timeout=share_allocator.SHOCK_TRIGGER_COOLDOWN_S):
             return

@@ -479,3 +479,24 @@ def run_backtest(run_id):
         "note": ("completed with no trades — the strategy never triggered "
                  "on this window" if run.total_trades == 0 else ""),
     }
+
+
+# ── The proving ground (2026-10-02, backtester/proving) ─────────────────────
+
+from core.task_gate import guarded_task  # noqa: E402
+
+
+@shared_task
+@guarded_task("proving_ground")
+def run_proving_ground(mode="rules"):
+    """Judge the live rules and their short mirrors (`rules`, nightly) or
+    the generator's shortlist per class (`generate`, weekly) on every
+    stored 4h bar, and save the verdicts (ProvingVerdict). Writes nothing
+    else; touches no broker. Read with `manage.py prove show`."""
+    from backtester.proving import run as pr
+    rows = pr.generate(save=True) if mode == "generate" \
+        else pr.prove_live_rules(save=True)
+    by = {}
+    for r in rows:
+        by[r["verdict"]] = by.get(r["verdict"], 0) + 1
+    return {"mode": mode, "verdicts": len(rows), "by_verdict": by}

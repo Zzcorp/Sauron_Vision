@@ -6397,6 +6397,30 @@ body.light-mode .sz-block { background: var(--bg-secondary); }
     font-size: 9px; letter-spacing: 1.4px; color: var(--sr-taken);
 }
 
+/* The leverage column on /positions/ and /portfolio/ (2026-10-03): 1x is
+   the quiet default; anything above it is the one number that explains a
+   4,800 exposure on a 160 margin, so it carries the same gold as the
+   "margin" word under Capital. */
+.pos-lev { font-family: var(--font-mono); font-weight: 600; }
+.pos-lev.is-levered { color: var(--accent-gold-ink); }
+
+/* The next steps on /briefing/ (2026-10-03, ai_agents/next_steps.py). */
+.ns-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 10px; }
+.ns-item { padding: 10px 12px; border: 1px solid var(--border); border-radius: 4px; }
+.ns-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.ns-kind {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 1.2px;
+    text-transform: uppercase; color: var(--accent-gold-ink);
+}
+.ns-pause_rule .ns-kind, .ns-reduce_size .ns-kind { color: var(--accent-red); }
+.ns-ref { font-family: var(--font-mono); }
+.ns-meta, .ns-consequence {
+    font-family: var(--font-mono); font-size: 10px; color: var(--text-muted);
+    margin: 4px 0 0;
+}
+.ns-why { margin: 6px 0 0; color: var(--text-secondary); }
+.ns-actions { display: flex; gap: 8px; margin-top: 8px; }
+
 /* ═══════════════════════════════════════════════════════════════════════
    CHART SURFACES
    ───────────────────────────────────────────────────────────────────────

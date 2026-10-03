@@ -140,4 +140,17 @@ def send_eod_digest():
         except Exception as e:
             logger.error(f"EOD digest failed for {user.username}: {e}")
 
+    # Sauron reads the platform-wide digest too (ai_agents/next_steps.py,
+    # 2026-10-03): once, not per user. Never fails the digest.
+    try:
+        from django.utils import timezone
+
+        from ai_agents.next_steps import extract as _extract_steps
+        from alerts.scheduled_digests import digest_lines
+        _extract_steps("eod_digest",
+                       "\n".join(digest_lines(generate_eod_digest(user=None))),
+                       source_ref=timezone.now().date().isoformat())
+    except Exception as e:  # noqa: BLE001
+        logger.warning("EOD next steps failed: %s", e)
+
     return {"status": "ok"}
