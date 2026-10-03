@@ -4214,6 +4214,35 @@ def _chart_levels(instrument):
     return rows
 
 
+def _chart_positioning(instrument, levels=None):
+    """The positioning map (bot_program/positioning.py), compact, cached a
+    minute per symbol like the levels: the crowd's label and score, the
+    nearest pool each side, the hunt and the draw, the proving ground's
+    verdict on pool sweeps. `levels` is the reply's own living-levels read
+    (_chart_levels), so the lines and the caption come from ONE read.
+    {ok: False, why} without bars — a dict, never a missing key, so the
+    widget clears its caption."""
+    from django.core.cache import cache
+
+    from bot_program.positioning import compact, positioning_map
+
+    key = "chart:positioning:" + instrument.symbol
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+    mark = None
+    try:
+        lq = getattr(instrument, "live_quote", None)
+        mark = float(lq.last) if lq and lq.last else None
+    except Exception:  # noqa: BLE001 - a quote that cannot be read is no mark
+        mark = None
+    out = compact(positioning_map(instrument.symbol,
+                                  asset_class=instrument.asset_class or "",
+                                  mark=mark, levels=levels))
+    cache.set(key, out, LEVELS_TTL)
+    return out
+
+
 def _chart_signal_marks(signals, decimals=None):
     """The signals as the chart's dots, with what each dot's card says.
 
@@ -5898,6 +5927,15 @@ def chart_data_api(request):
                 logger.warning("[chart_data_api] levels failed for %s: %s",
                                symbol, e)
                 extra["levels_error"] = str(e)[:200]
+            # The positioning map's caption (2026-10-03): the crowd, where
+            # its stops sit, the hunt and the draw — under the chart.
+            try:
+                extra["positioning"] = _chart_positioning(
+                    instrument, levels=extra.get("levels"))
+            except Exception as e:  # noqa: BLE001 — informational layer
+                logger.warning("[chart_data_api] positioning failed for %s: "
+                               "%s", symbol, e)
+                extra["positioning_error"] = str(e)[:200]
         except Exception as e:  # noqa: BLE001 — the BARS are the payload;
             # an overlay that cannot be built must not cost the operator
             # their chart.

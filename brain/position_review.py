@@ -320,8 +320,53 @@ def usable_mark(symbol: str) -> tuple[Optional[float], str]:
         return None, f"mark lookup failed: {e}"
     price = _f(tick.get("lastPrice"))
     if price is None or price <= 0:
+        shut = _shut_market_close(sym)
+        if shut is not None:
+            return shut
         return None, "no fresh quote and no recent bar"
     return price, str(tick.get("source") or "quote")
+
+
+#: A shut market's last close is its mark for this long; past it the bars
+#: themselves have stopped (a feed down since before the close).
+SHUT_MARK_MAX_AGE_DAYS = 3
+
+
+def _shut_market_close(symbol: str):
+    """(last close, "last close (market shut)") while the symbol's market is
+    SHUT and its newest bar is inside SHUT_MARK_MAX_AGE_DAYS; else None.
+
+    2026-10-03, a Saturday: every forex and stock position read "no usable
+    mark" from the Friday bell to the Sunday open, so the review — and the
+    thesis check riding it — went blind for the whole weekend. A shut
+    market has exactly one price, the last one before it shut, and the
+    paper venue says the same (PaperTrader.ticker's docstring). Nothing
+    books on this mark: the review proposes, the paper venue's own clock
+    still decides what paper may fill.
+    """
+    try:
+        from core.exchange_status import market_clock
+        from instruments.models import Instrument
+        from market_data.models import PriceData
+        inst = Instrument.objects.filter(symbol=symbol).first()
+        if inst is None:
+            return None
+        clock = market_clock(inst.asset_class or "", inst.exchange or "",
+                             symbol=symbol)
+        if clock.get("is_open", True):
+            return None
+        bar = (PriceData.objects
+               .filter(instrument=inst, timeframe__in=("1h", "4h", "1d"),
+                       timestamp__gte=timezone.now()
+                       - timedelta(days=SHUT_MARK_MAX_AGE_DAYS))
+               .order_by("-timestamp").first())
+        if bar is None or _f(bar.close) in (None, 0.0):
+            return None
+        return _f(bar.close), "last close (market shut)"
+    except Exception as e:  # noqa: BLE001 — no mark is the safe answer
+        logger.info("[position-review] shut-market mark unread for %s: %s",
+                    symbol, e)
+        return None
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -858,7 +903,26 @@ def measure(pos: dict, cache: Optional[dict] = None) -> dict:
     facts["self_hedge"] = _self_hedge(pos, cache)
     facts["origin_signal"] = _origin_signal(pos)
     facts["thesis"] = _thesis(pos, facts)
+    facts["positioning"] = _positioning(pos, facts)
     return facts
+
+
+def _positioning(pos: dict, facts: dict) -> dict:
+    """The positioning map (bot_program/positioning.py, 2026-10-03): who is
+    placed, where their stops are, where the market is pulled — compact,
+    for this position's side. Unread, said, when it fails."""
+    try:
+        from bot_program.positioning import compact, positioning_map
+        return compact(positioning_map(
+            facts.get("symbol") or pos.get("symbol") or "",
+            asset_class=facts.get("asset_class") or pos.get("asset_class") or "",
+            direction=facts.get("side") or pos.get("side"),
+            mark=facts.get("mark")))
+    except Exception as e:  # noqa: BLE001 — one read must not blind the pass
+        logger.info("[position-review] positioning unread for %s: %s",
+                    facts.get("symbol"), e)
+        return {"ok": False, "words": "",
+                "why": f"positioning unread: {e}"[:200]}
 
 
 def _thesis(pos: dict, facts: dict) -> dict:

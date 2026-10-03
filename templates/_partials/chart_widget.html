@@ -331,6 +331,19 @@ Optional page data (json_script blocks the widget picks up when present):
 }
 .sv-sig-legend[hidden] { display: none; }
 .sv-sig-legend-title { color: var(--text-primary, #daf0e6); }
+/* The positioning caption (2026-10-03): one line of prose under the chart,
+   the same voice as the signal key. */
+.sv-pos-legend {
+    margin-top: 4px;
+    padding: 0 2px;
+    font-family: var(--font-mono, monospace);
+    font-size: 10px;
+    letter-spacing: .02em;
+    line-height: 1.5;
+    color: var(--text-secondary, #7aaa8a);
+}
+.sv-pos-legend[hidden] { display: none; }
+.sv-pos-legend-title { color: var(--accent-gold-ink, var(--accent-gold, #d8b020)); }
 .sv-sig-key { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
 .sv-sig-sep { color: var(--text-muted, #3a6850); }
 .sv-sig-sw {
@@ -689,6 +702,15 @@ without signals carries no key for nothing.{% endcomment %}
     <span class="sv-sig-sep" aria-hidden="true">·</span>
     <span class="sv-sig-key"><i class="sv-sig-sw sv-sig-s3" aria-hidden="true"></i><i class="sv-sig-sw sv-sig-sw--bear sv-sig-s3" aria-hidden="true"></i> very strong</span>
     <span class="sv-sig-legend-dir"><span class="sv-sig-up">▲ green buy</span> · <span class="sv-sig-down">▼ red sell</span> · hover or tap a dot for its details</span>
+</div>
+
+{% comment %}The positioning map's caption (2026-10-03, bot_program/positioning.py):
+who is placed, where their stops sit (the gold pools above), the hunt and
+the draw. Filled from the overlay reply with the levels; hidden until the
+first one arrives and whenever the map cannot be read.{% endcomment %}
+<div class="sv-pos-legend" id="{{ chart_id }}-pos-legend" hidden>
+    <span class="sv-pos-legend-title">Positioning:</span>
+    <span class="sv-pos-legend-words" data-role="words"></span>
 </div>
 
 <!-- Lightweight Charts library (loaded once globally) -->
@@ -1052,6 +1074,7 @@ without signals carries no key for nothing.{% endcomment %}
     var errorEl     = document.getElementById(CHART_ID + '-error');
     var sigCardEl   = document.getElementById(CHART_ID + '-sig-card');
     var sigLegendEl = document.getElementById(CHART_ID + '-sig-legend');
+    var posLegendEl = document.getElementById(CHART_ID + '-pos-legend');
 
     if (!container || !canvasEl) return;
 
@@ -1076,6 +1099,18 @@ without signals carries no key for nothing.{% endcomment %}
        A level is a reading of the bars, not a fact about the operator's
        book, so a few seconds without one costs nothing. */
     var LEVELS    = [];
+
+    /* The positioning map's caption (2026-10-03): the crowd, where its
+       stops sit, the hunt and the draw, in the server's own words. A map
+       that cannot be read ({ok:false}) hides the line; a reply without
+       the key leaves it as it was. */
+    function applyPositioning(map) {
+        if (!posLegendEl) return;
+        var words = (map && map.ok && map.words) ? String(map.words) : '';
+        var slot = posLegendEl.querySelector('[data-role="words"]');
+        if (slot) slot.textContent = words;
+        posLegendEl.hidden = !words;
+    }
 
     // ── Theme colours ────────────────────────────────────────────────────
     function getThemeColors() {
@@ -2962,6 +2997,12 @@ without signals carries no key for nothing.{% endcomment %}
                     } else if (json.levels_error && window.console && console.warn) {
                         console.warn('[sv-chart] levels not refreshed: '
                                      + json.levels_error);
+                    }
+                    if (json.positioning && typeof json.positioning === 'object') {
+                        applyPositioning(json.positioning);
+                    } else if (json.positioning_error && window.console && console.warn) {
+                        console.warn('[sv-chart] positioning not refreshed: '
+                                     + json.positioning_error);
                     }
                 }
 
