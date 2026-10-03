@@ -2240,6 +2240,18 @@
           esc(memory.words) + '</div>';
       }
 
+      /* THE POSITIONING MAP (2026-10-03): who is already placed, where
+         their stops sit, the hunt and the draw, and what that means for
+         this side. A note, never a gate; nothing in it is a probability
+         that other desks take this trade. */
+      var posmap = p.positioning || {};
+      if (posmap.ok && posmap.words) {
+        warnHtml += '<div class="sz-note sz-positioning"><b>POSITIONING</b> ' +
+          esc(posmap.words) +
+          (posmap.side && posmap.side.words ? ' ' + esc(posmap.side.words) : '') +
+          '</div>';
+      }
+
       /* Whether a Sauron signal backs this ticket (2026-10-02): the week's
          instrument-view tickets, taken with none, made -1.98R. A warning;
          the button is unchanged. */

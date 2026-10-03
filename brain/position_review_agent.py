@@ -149,6 +149,10 @@ def build_snapshot(verdict: dict) -> dict:
         # reclaimed — and the proving ground's odds of coming back from
         # this deep. The model reads it BEFORE the R arithmetic.
         "thesis_check": facts.get("thesis"),
+        # The positioning map (bot_program/positioning.py): the crowd's
+        # score and label, the pools above and below, the hunt and the
+        # draw, and what that means for this position's side.
+        "positioning": facts.get("positioning"),
         "triggers_that_fired": verdict["triggers"],
     }
 
@@ -204,7 +208,12 @@ class PositionReviewerAgent(BaseAgent):
             "natural answer; when it says `exit`, say which structure broke; "
             "when it is `unread` or `watch`, the triggers decide as before. "
             "Its `odds` are the proving ground's analogs that were this deep: "
-            "quote them when they exist, never invent them.\n\n"
+            "quote them when they exist, never invent them. `positioning` is "
+            "the crowd map: who is placed (COT, funding, flow), the pools "
+            "where their stops sit, the hunt the market runs first and the "
+            "draw after it, and whether this position rides with the crowd "
+            "(its stop is where the hunt goes) or fades it. No field in it is "
+            "a probability that other desks take this trade.\n\n"
             "Rules you must follow:\n"
             "- Reason in R, not in dollars or percentages. R is denominated "
             "by the stop the trade OPENED with. A number given to you as "

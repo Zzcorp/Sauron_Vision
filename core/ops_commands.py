@@ -357,6 +357,22 @@ COMMANDS = [
         "category": "read",
     },
     {
+        "name": "positioning",
+        "title": "Positioning map",
+        "purpose": "Who is already placed on a symbol (COT, funding, flow, sentiment, one score), where their stops sit (the pools above and below), the hunt the market runs first and the draw after it, the proving ground's word on pool sweeps — and what that means for a buy or a sell. Nothing in it is a probability that other desks take a trade.",
+        "usage": [
+            "python manage.py positioning EURUSD              # the map",
+            "python manage.py positioning EURUSD --side SELL  # and what it means for a sell",
+            "python manage.py positioning BTCUSD --json       # the whole dict",
+        ],
+        "mirrors": "/positions/",
+        "read_only": True,
+        "run_args": [],
+        # Takes a symbol: the page's Run lane passes no argument.
+        "runnable": False,
+        "category": "read",
+    },
+    {
         "name": "paper_readiness",
         "title": "Paper readiness",
         "purpose": "The mirror of preflight_live: not whether it is safe to arm money, but whether the evidence chain can produce a graded track record at all. Every link is a component, and a missing row reads as OFF while nothing raises.",
@@ -521,6 +537,20 @@ COMMANDS = [
         "runnable_reason": "runs on the host, needs docker",
     },
     # ── ops: one-off writes ─────────────────────────────────────────────
+    {
+        "name": "announce",
+        "title": "Announce a release",
+        "purpose": "Send a release announcement to the platform's Telegram group, in the house style and the lore (core/announcements.py): the title, the subtitle, one summary, the facts as lines, the who-is-who folded. Once per chat; --dry-run prints it, --force sends it again.",
+        "usage": [
+            "python manage.py announce list                        # what can be sent",
+            "python manage.py announce october_turn --dry-run      # print it, send nothing",
+            "python manage.py announce october_turn                # send it to the platform chat",
+        ],
+        "mirrors": "/ops/",
+        "read_only": False,
+        "run_args": [],
+        "category": "ops",
+    },
     {
         "name": "seed_components",
         "title": "Seed components",

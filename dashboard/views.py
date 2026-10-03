@@ -4114,6 +4114,26 @@ def _chart_positions(user, instrument):
         move = (mark - entry) if side == "long" else (entry - mark)
         return move * qty * per_unit, (move / entry * 100.0)
 
+    # The hover card's facts (2026-10-03, the operator: "small hover
+    # details ... also for the trade entries"): the levels as text at the
+    # page's one decimal count, R now against the stop the trade OPENED
+    # with, the age, the leverage the positions page prints, the care's
+    # soft stop and the thesis check's verdict. None where unknown.
+    now = timezone.now()
+    dec = _chart_decimals(instrument)
+
+    def _txt(v):
+        return f"{v:.{dec}f}" if isinstance(v, (int, float)) else None
+
+    def _r_now(side, entry, stop):
+        if mark is None or not entry or not stop or entry == stop:
+            return None
+        move = (mark - entry) if side == "long" else (entry - mark)
+        return round(move / abs(entry - stop), 2)
+
+    def _age(dt):
+        return int((now - dt).total_seconds()) if dt else None
+
     out = []
     for pos in (Position.objects
                 .filter(portfolio_id__in=_position_books(user),
@@ -4126,35 +4146,58 @@ def _chart_positions(user, instrument):
         # writes it and every other surface reads it, so recomputing here
         # is how this page ends up disagreeing with the positions list.
         pnl = _f(pos.unrealized_pnl)
+        entry, stop, tp = _f(pos.entry_price), _f(pos.stop_loss), _f(pos.take_profit)
         out.append({
             "id": f"book-{pos.pk}", "source": "book", "side": side,
-            "entry": _f(pos.entry_price), "stop": _f(pos.stop_loss),
-            "tp": _f(pos.take_profit), "qty": _f(pos.quantity),
+            "entry": entry, "stop": stop, "tp": tp, "qty": _f(pos.quantity),
             "opened_at": _epoch(pos.opened_at),
             "label": f"{side.upper()} {via}",
             "via": via, "paper": False, "protected": False,
             "pnl": pnl, "pnl_pct": _f(pos.unrealized_pnl_pct),
             "mark": mark,
+            "rule": via, "entry_text": _txt(entry), "stop_text": _txt(stop),
+            "tp_text": _txt(tp), "r_now": _r_now(side, entry, stop),
+            "age_s": _age(pos.opened_at),
+            "leverage": _pos_leverage(instrument.asset_class or ""),
+            "soft_stop": None, "soft_stop_text": None, "thesis": None,
         })
     for t in AssetBotTrade.objects.filter(
             config__user=user, symbol=instrument.symbol,
             status__in=("OPEN", "CLOSE_PENDING")):
         side = "long" if t.side == "BUY" else "short"
         tag = t.rule_name or "bot"
+        meta = t.metadata or {}
         # value_per_unit is the platform's ONE derivation of money per
         # price point — an options row without it is denominated 100x
         # away from the same number printed elsewhere on the screen.
-        pnl, pnl_pct = _pnl(side, _f(t.entry_price), _f(t.qty),
-                            value_per_unit(t))
+        vpu = value_per_unit(t)
+        entry, stop, tp = _f(t.entry_price), _f(t.stop_loss), _f(t.take_profit)
+        qty = _f(t.qty)
+        pnl, pnl_pct = _pnl(side, entry, qty, vpu)
+        initial = _f(meta.get("initial_stop_loss")) or stop
+        soft = _f((meta.get("care") or {}).get("soft_stop"))
+        th = meta.get("thesis") or {}
+        try:
+            lev = _pos_leverage(t.asset_class or "", meta=meta,
+                                notional=(abs(qty) * entry * float(vpu or 1)
+                                          if entry and qty else None))
+        except Exception:  # noqa: BLE001 — a dash, never a wrong number
+            lev = ""
         out.append({
             "id": f"bot-{t.pk}", "source": "bot", "side": side,
-            "entry": _f(t.entry_price), "stop": _f(t.stop_loss),
-            "tp": _f(t.take_profit), "qty": _f(t.qty),
+            "entry": entry, "stop": stop, "tp": tp, "qty": qty,
             "opened_at": _epoch(t.opened_at),
             "label": f"{side.upper()} {tag}" + ("" if t.paper else " LIVE"),
             "via": tag, "paper": bool(t.paper),
-            "protected": bool((t.metadata or {}).get("protected")),
+            "protected": bool(meta.get("protected")),
             "pnl": pnl, "pnl_pct": pnl_pct, "mark": mark,
+            "rule": tag, "entry_text": _txt(entry), "stop_text": _txt(stop),
+            "tp_text": _txt(tp), "r_now": _r_now(side, entry, initial),
+            "age_s": _age(t.opened_at), "leverage": lev,
+            "soft_stop": soft, "soft_stop_text": _txt(soft),
+            "thesis": ({"verdict": th.get("verdict"),
+                        "words": str(th.get("words") or "")[:200]}
+                       if th.get("verdict") else None),
         })
     return out
 
@@ -4212,6 +4255,35 @@ def _chart_levels(instrument):
                 for lvl in read["levels"]]
     cache.set(key, rows, LEVELS_TTL)
     return rows
+
+
+def _chart_positioning(instrument, levels=None):
+    """The positioning map (bot_program/positioning.py), compact, cached a
+    minute per symbol like the levels: the crowd's label and score, the
+    nearest pool each side, the hunt and the draw, the proving ground's
+    verdict on pool sweeps. `levels` is the reply's own living-levels read
+    (_chart_levels), so the lines and the caption come from ONE read.
+    {ok: False, why} without bars — a dict, never a missing key, so the
+    widget clears its caption."""
+    from django.core.cache import cache
+
+    from bot_program.positioning import compact, positioning_map
+
+    key = "chart:positioning:" + instrument.symbol
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+    mark = None
+    try:
+        lq = getattr(instrument, "live_quote", None)
+        mark = float(lq.last) if lq and lq.last else None
+    except Exception:  # noqa: BLE001 - a quote that cannot be read is no mark
+        mark = None
+    out = compact(positioning_map(instrument.symbol,
+                                  asset_class=instrument.asset_class or "",
+                                  mark=mark, levels=levels))
+    cache.set(key, out, LEVELS_TTL)
+    return out
 
 
 def _chart_signal_marks(signals, decimals=None):
@@ -5898,6 +5970,15 @@ def chart_data_api(request):
                 logger.warning("[chart_data_api] levels failed for %s: %s",
                                symbol, e)
                 extra["levels_error"] = str(e)[:200]
+            # The positioning map's caption (2026-10-03): the crowd, where
+            # its stops sit, the hunt and the draw — under the chart.
+            try:
+                extra["positioning"] = _chart_positioning(
+                    instrument, levels=extra.get("levels"))
+            except Exception as e:  # noqa: BLE001 — informational layer
+                logger.warning("[chart_data_api] positioning failed for %s: "
+                               "%s", symbol, e)
+                extra["positioning_error"] = str(e)[:200]
         except Exception as e:  # noqa: BLE001 — the BARS are the payload;
             # an overlay that cannot be built must not cost the operator
             # their chart.

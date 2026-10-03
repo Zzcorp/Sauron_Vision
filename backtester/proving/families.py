@@ -13,7 +13,10 @@ the rule set able to take the other side.
 
 The rest are base techniques for the generator to search: Donchian
 breakout, RSI reversion, EMA pullback, and two ICT reads — the fair value
-gap retest and the liquidity sweep reversal.
+gap retest and the liquidity sweep reversal — plus the pool sweep
+(2026-10-03): the first bar through equal lows or highs of two swings or
+more that closes back inside, the claim the positioning map makes
+(bot_program/positioning.py) put to the judge.
 
 FILTERS, applied on top of any family (the operator's question "and ICT,
 fair value gaps?" answered with numbers):
@@ -283,6 +286,46 @@ def fvg_retest(df, direction, *, max_age=20, min_gap_atr=0.1):
     return out
 
 
+def pool_sweep(df, direction, *, touches=2, left=3, right=3, lookback=120,
+               tolerance_pct=0.001):
+    """The liquidity-pool sweep (the positioning map's path, bot_program/
+    positioning.py): equal lows (long) or equal highs (short) of `touches`
+    swings or more within `tolerance_pct`, and the FIRST bar to trade
+    through the pool closes back inside it — the stops under it were
+    taken and the market turned. A bar that closes through it is a break,
+    not a sweep; the pool is spent either way, one fire at most. The pool
+    counts from the bar its last swing is confirmed on (`right` bars
+    later), never before, and only for `lookback` bars: an old pool is not
+    where today's stops are."""
+    from signals.smc.liquidity import find_equal_levels
+    from signals.smc.pivots import get_swings
+    n = len(df)
+    out = np.zeros(n, dtype=bool)
+    if n < left + right + 2:
+        return out
+    want = "L" if direction == LONG else "H"
+    swings = [s for s in get_swings(df, left, right) if s["type"] == want]
+    if len(swings) < touches:
+        return out
+    lows = df["low"].to_numpy(dtype=float)
+    highs = df["high"].to_numpy(dtype=float)
+    closes = df["close"].to_numpy(dtype=float)
+    for c in find_equal_levels(swings, tolerance_pct=tolerance_pct):
+        if c["count"] < touches:
+            continue
+        formed = max(swings[i]["idx"] for i in c["swing_indices"]) + right
+        level = float(c["price"])
+        for j in range(formed + 1, min(n, formed + 1 + lookback)):
+            if direction == LONG:
+                if lows[j] < level:
+                    out[j] = closes[j] > level
+                    break
+            elif highs[j] > level:
+                out[j] = closes[j] < level
+                break
+    return out
+
+
 def sweep_reversal(df, direction, *, n=20):
     """ICT liquidity sweep: the bar runs the stops under the last `n` bars'
     low and closes back above it (long) — or over the high and back under
@@ -398,6 +441,8 @@ FAMILIES = {f.key: f for f in (
            [{"max_age": 10}, {}, {"min_gap_atr": 0.3}]),
     Family("sweep_reversal", sweep_reversal, {"n": 20},
            [{"n": 20}, {"n": 50}]),
+    Family("pool_sweep", pool_sweep, {"touches": 2},
+           [{"touches": 2}, {"touches": 3}]),
     Family("tsmom", tsmom, {"n": 1000, "trigger": 20},
            [{"n": 500}, {"n": 1000}, {"n": 1500}, {"n": 1000, "trigger": 55}]),
     Family("rsi2_pullback", rsi2_pullback,

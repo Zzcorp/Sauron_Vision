@@ -1017,6 +1017,18 @@ def signal_backing_advisory(user, inst, side, signal=None, *,
     return {"ok": False, "signals": [], "reason": reason}
 
 
+def _positioning(symbol, asset_class, side, mark=None) -> dict:
+    """The positioning map for the ticket, compact; {ok: False} said when
+    it cannot be read — a ticket is never refused for it."""
+    try:
+        from bot_program.positioning import compact, positioning_map
+        return compact(positioning_map(symbol, asset_class=asset_class,
+                                       direction=side, mark=mark))
+    except Exception as e:  # noqa: BLE001 — information, never a gate
+        logger.info("[manual] positioning unread for %s: %s", symbol, e)
+        return {"ok": False, "words": "", "why": f"unread: {e}"[:200]}
+
+
 def _setup_memory(signal, symbol, asset_class) -> dict:
     """The proving ground's memory of this signal's rule, or an honest
     'none'. Never raises: a ticket is not refused for want of a memory."""
@@ -1623,6 +1635,12 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         # kind of tape. Information, never a gate; "" when nobody replayed
         # the rule.
         "setup_memory": _setup_memory(signal, inst.symbol, cls),
+        # THE POSITIONING MAP (2026-10-03, bot_program/positioning.py): who
+        # is already placed, where their stops are, where the market is
+        # pulled, and what that means for this side. Information, never a
+        # gate; unread, said, without bars.
+        "positioning": _positioning(inst.symbol, cls, side,
+                                    levels.get("fill")),
         # The brain's standing verdict on discretionary entries. Reported,
         # not enforced: pausing a RULE is the platform's call because nobody
         # is watching it, but a hand-taken trade has a human on the other
