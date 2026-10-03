@@ -223,25 +223,47 @@ def _nearest(levels, side, mark):
             "atr_away": best.get("atr_away")}
 
 
-def _pool_sweep_odds(asset_class, direction, timeframe=TIMEFRAME) -> dict:
-    """The proving ground's newest verdict on `pool_sweep` for this class
-    and direction, or unjudged."""
+def _family_odds(family, asset_class, direction, timeframes=(TIMEFRAME,)) -> dict:
+    """The proving ground's newest verdict on `family` for this class and
+    direction, at the first of `timeframes` that has one, or unjudged."""
     try:
         from backtester.models_proving import ProvingVerdict
-        v = (ProvingVerdict.objects
-             .filter(family="pool_sweep", direction=direction,
-                     asset_class=asset_class, timeframe=timeframe,
-                     policy="care", filter="none")
-             .order_by("-created_at").first())
+        v = None
+        for tf in timeframes:
+            v = (ProvingVerdict.objects
+                 .filter(family=family, direction=direction,
+                         asset_class=asset_class, timeframe=tf,
+                         policy="care", filter="none")
+                 .order_by("-created_at").first())
+            if v is not None:
+                break
     except Exception as e:  # noqa: BLE001
         return {"verdict": "unjudged", "why": f"unread: {e}"[:120]}
     if v is None:
         return {"verdict": "unjudged",
-                "why": (f"no pool_sweep verdict on {asset_class or '—'} yet "
-                        f"— manage.py prove generate --families pool_sweep")}
+                "why": (f"no {family} verdict on {asset_class or '—'} yet "
+                        f"— manage.py prove generate --families {family}"
+                        + (f" --timeframe {timeframes[0]}"
+                           if timeframes[0] != TIMEFRAME else ""))}
     return {"verdict": v.verdict, "expectancy": v.expectancy,
             "win_rate": v.win_rate, "n": v.trades_n, "why": v.why,
-            "run_id": v.run_id}
+            "run_id": v.run_id, "timeframe": v.timeframe}
+
+
+def _pool_sweep_odds(asset_class, direction, timeframe=TIMEFRAME) -> dict:
+    """The proving ground's newest verdict on `pool_sweep` for this class
+    and direction, or unjudged."""
+    return _family_odds("pool_sweep", asset_class, direction, (timeframe,))
+
+
+def _odds_words(odds, what, asset_class) -> str:
+    if odds.get("verdict") in (None, "unjudged"):
+        return f" {what} on this class: not yet judged."
+    s = f" {what} on {asset_class}: {odds['verdict'].upper()}"
+    if odds.get("expectancy") is not None and odds.get("win_rate") is not None:
+        s += (f" ({odds['expectancy']:+.2f}R a trade, "
+              f"{odds['win_rate'] * 100:.0f}% won)")
+    return s + "."
 
 
 def _leg_words(leg) -> str:
@@ -327,6 +349,22 @@ def positioning_map(symbol, *, asset_class="", direction=None,
                             "long" if hunt_side == "below" else "short",
                             timeframe)
 
+    # THE POWER OF THREE (bot_program/power_of_three.py): the day's three
+    # parts by its sessions — accumulation, manipulation, distribution —
+    # and the proving ground's word on the distribution's start.
+    from bot_program.power_of_three import power_of_three
+    day = power_of_three(symbol, now=now)
+    po3_odds = (_family_odds("po3", asset_class,
+                             "long" if day.get("direction") == "up" else "short",
+                             ("1h", TIMEFRAME))
+                if day.get("direction") else {"verdict": "unjudged",
+                                              "why": "no direction yet"})
+    po3 = {"ok": day["ok"], "phase": day["phase"], "direction": day["direction"],
+           "session": day["session"], "asia": day.get("asia"),
+           "run": day.get("run"), "judas": day.get("judas"),
+           "timeframe": day.get("timeframe"), "odds": po3_odds,
+           "words": day["words"]}
+
     words = f"Crowd {crowd['label']}"
     said = [c["words"] for c in crowd["components"].values()
             if c.get("score") is not None]
@@ -342,19 +380,21 @@ def positioning_map(symbol, *, asset_class="", direction=None,
         words += (f" After it, the draw is the {_leg_words(draw)}"
                   + (f" — the bias is {bias} at {conf:.2f}."
                      if bias and conf is not None else "."))
-    if odds.get("verdict") not in (None, "unjudged"):
-        words += (f" Pool sweeps on {asset_class}: {odds['verdict'].upper()}"
-                  + (f" ({odds['expectancy']:+.2f}R a trade, "
-                     f"{odds['win_rate'] * 100:.0f}% won)"
-                     if odds.get("expectancy") is not None
-                     and odds.get("win_rate") is not None else "") + ".")
-    else:
-        words += " Pool sweeps on this class: not yet judged."
+    words += _odds_words(odds, "Pool sweeps", asset_class)
+    words += " " + po3["words"]
+    if day.get("direction") and draw:
+        agree = (day["direction"] == "up") == (draw_side == "above")
+        words += (" The day's distribution and the draw agree."
+                  if agree else
+                  " The day's distribution points the other way from the "
+                  "draw: wait for them to agree.")
+    if day.get("direction"):
+        words += _odds_words(po3_odds, "The Power of Three", asset_class)
 
     out.update({"ok": True, "mark": px, "atr": atr, "crowd": crowd,
                 "stops": {"below": below, "above": above},
                 "bias": bias, "bias_confidence": conf,
-                "path": path, "odds": odds, "words": words,
+                "path": path, "odds": odds, "po3": po3, "words": words,
                 "levels_n": len(levels)})
     if direction:
         out["side"] = side_read(out, direction)
@@ -382,6 +422,7 @@ def side_read(pmap: dict, direction) -> dict:
             out["words"] += (f" {'Yours would sit' if out['hunt_hits_you'] else 'The hunt runs'}"
                              f" {'under' if hunt_side == 'below' else 'over'} "
                              f"{hunt['price']:g}.")
+        out["words"] += _day_words_for_side(pmap.get("po3") or {}, buy)
         return out
     out["share_on_your_side"] = round((score + 1) / 2 if buy
                                       else (1 - score) / 2, 2)
@@ -406,7 +447,26 @@ def side_read(pmap: dict, direction) -> dict:
     else:
         out["words"] = (f"The crowd is balanced ({pct} on your side): the "
                         f"pools decide, not the positioning.")
+    out["words"] += _day_words_for_side(pmap.get("po3") or {}, buy)
     return out
+
+
+def _day_words_for_side(po3: dict, buy: bool) -> str:
+    """What the day's phase means for a buy or a sell."""
+    phase, direction = po3.get("phase"), po3.get("direction")
+    if phase == "distribution" and direction:
+        with_day = (direction == "up") == buy
+        return (" The day's distribution is with you." if with_day else
+                " The day's distribution points against you: the manipulation "
+                "already ran your way and turned.")
+    if phase == "accumulation":
+        return (" The day is still accumulating: London's first run usually "
+                "goes against the real direction — wait for it, or keep the "
+                "stop beyond the Asian range.")
+    if phase == "manipulation":
+        return (" One side of the Asian range is being run right now: the "
+                "manipulation or a true break — a close back inside tells.")
+    return ""
 
 
 def compact(pmap: dict) -> dict:
@@ -420,5 +480,5 @@ def compact(pmap: dict) -> dict:
                            for k, v in crowd["components"].items()},
             "stops": pmap["stops"], "bias": pmap["bias"],
             "bias_confidence": pmap["bias_confidence"], "path": pmap["path"],
-            "odds": pmap["odds"], "words": pmap["words"],
-            "side": pmap.get("side")}
+            "odds": pmap["odds"], "po3": pmap.get("po3"),
+            "words": pmap["words"], "side": pmap.get("side")}
