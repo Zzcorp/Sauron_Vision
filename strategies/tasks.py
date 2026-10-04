@@ -29,9 +29,13 @@ def suggest_rebalancing():
     portfolio_value = float(portfolio.current_value) if portfolio.current_value else 0.0
     exposure_by_asset_class: dict[str, float] = {}
     if portfolio_value > 0:
+        from portfolio.services import notional_usd
         for pos in open_positions:
             asset_class = getattr(pos.instrument, "asset_class", "unknown") or "unknown"
-            position_value = float(pos.current_price) * float(pos.quantity)
+            # In USD (2026-10-04): a yen-quoted row's price x quantity is yen.
+            position_value = notional_usd(pos)
+            if position_value is None:
+                continue
             exposure_by_asset_class[asset_class] = (
                 exposure_by_asset_class.get(asset_class, 0.0) + position_value
             )
