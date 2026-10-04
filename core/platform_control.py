@@ -130,7 +130,7 @@ DEFAULT_COMPONENTS = [
     {"key": "scraper_commodities", "name": "Commodity Quotes", "description": "Commodity prices from the catalogue via yfinance (every 5 min)", "category": "scraper"},
     {"key": "scraper_indices", "name": "Index Quotes", "description": "Index levels via yfinance — feeds the headband, no bot reads these (every 5 min)", "category": "scraper"},
     {"key": "scraper_news", "name": "Breaking News", "description": "Fetch news from APIs and RSS (every 3 min)", "category": "scraper"},
-    {"key": "scraper_sentiment", "name": "Social Sentiment", "description": "Reddit, StockTwits sentiment (every 30 min)", "category": "scraper"},
+    {"key": "scraper_sentiment", "name": "Social Sentiment", "description": "StockTwits sentiment, Reddit when its keys exist (every 30 min)", "category": "scraper"},
     {"key": "scraper_calendar", "name": "Economic Calendar", "description": "Check upcoming economic events (every 30 min)", "category": "scraper"},
     {"key": "scraper_tradingview", "name": "TradingView Ideas", "description": "Community ideas and technicals (every 6 hours)", "category": "scraper"},
     {"key": "scraper_fred", "name": "FRED Macro Data", "description": "Federal Reserve economic data (every 4 hours)", "category": "scraper"},

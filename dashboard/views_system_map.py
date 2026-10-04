@@ -217,8 +217,9 @@ def collect_system_map(user):
         sources = sorted(set(SentimentSnapshot.objects.values_list("source", flat=True)))
         st, why = _store_state(total, r24, newest)
         if total == 0:
-            why = ("No sentiment has ever been stored. Reddit needs "
-                   "REDDIT_CLIENT_ID/SECRET; StockTwits and TradingView need no key.")
+            why = ("No sentiment has ever been stored. StockTwits and "
+                   "TradingView need no key; Reddit joins only with "
+                   "REDDIT_CLIENT_ID/SECRET.")
             st = "unconfigured"
         else:
             why += f" Sources: {', '.join(sources)}."

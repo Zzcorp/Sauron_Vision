@@ -156,7 +156,8 @@ def fetch_news_bodies(*, limit: int = BODY_FETCH_BATCH,
 @shared_task
 @guarded_task("scraper_sentiment")
 def fetch_social_sentiment():
-    """Tier 2: Fetch sentiment from Reddit + StockTwits."""
+    """Tier 2: Fetch sentiment from StockTwits, and Reddit when its keys
+    exist (Reddit off is the normal state since 2026-10-04)."""
     from scraping.scrapers.reddit_sentiment import (fetch_reddit_sentiment,
                                                     reddit_unavailable_reason)
     from scraping.scrapers.stocktwits import fetch_trending
@@ -172,11 +173,21 @@ def fetch_social_sentiment():
 
     # An unconfigured Reddit returned [] exactly like a quiet hour on
     # r/wallstreetbets, so a source that has never once run looked like a
-    # source with nothing to say. Naming the reason puts the task in
-    # judge_result's not-configured branch, which is the only verdict that
-    # tells the operator there is something to DO about it.
-    reddit_skipped = reddit_unavailable_reason()
-    if reddit_skipped:
+    # source with nothing to say. Naming the reason used to put the task
+    # in judge_result's not-configured branch, "the only verdict that
+    # tells the operator there is something to DO about it" — and there
+    # was, until Reddit closed self-service app creation (November 2025;
+    # the operator hit the wall on 2026-10-04 and chose to run without).
+    # No keys is now Reddit OFF: said on the result, never graded as a
+    # warning. A missing library with keys present is still the fault it
+    # always was (`skipped`).
+    reddit_reason = reddit_unavailable_reason()
+    reddit_skipped = ""
+    if reddit_reason == "reddit_no_credentials":
+        results["reddit_off"] = ("no credentials — Reddit closed self-service "
+                                 "app creation; StockTwits runs alone")
+    elif reddit_reason:
+        reddit_skipped = reddit_reason
         results["reddit_skipped"] = reddit_skipped
     else:
         try:

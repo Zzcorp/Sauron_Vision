@@ -321,7 +321,10 @@ class StockTwitsUniverse(TestCase):
 
 
 class RedditNotConfigured(TestCase):
-    """Missing credentials must not look like a quiet news day."""
+    """Missing credentials must not look like a quiet news day — and, since
+    Reddit closed self-service app creation (the operator hit the wall on
+    2026-10-04 and chose to run without), must not read as a fault either:
+    no keys is Reddit OFF, said on the result and never graded."""
 
     def setUp(self):
         from core.platform_control import PlatformComponent, seed_components
@@ -338,19 +341,52 @@ class RedditNotConfigured(TestCase):
             from scraping.tasks import fetch_social_sentiment
             return fetch_social_sentiment()
 
-    def test_missing_credentials_produce_the_skipped_marker(self):
+    def test_missing_credentials_are_reddit_off_not_a_missing_credential(self):
         with patch.dict(os.environ, {"REDDIT_CLIENT_ID": "",
                                      "REDDIT_CLIENT_SECRET": ""}):
             out = self._run_social()
 
-        self.assertEqual(out["skipped"], "reddit_no_credentials")
-        self.assertEqual(out["reddit_skipped"], "reddit_no_credentials")
+        self.assertNotIn("skipped", out)
+        self.assertNotIn("reddit_skipped", out)
+        self.assertTrue(out["reddit_off"].startswith("no credentials"))
+        self.assertEqual(out["reddit"], 0)
 
         from core.task_gate import judge_result
+        _status, message = judge_result(out)
+        self.assertNotIn("not configured", message)
+        self.assertNotIn("reddit", message.lower())
+
+    def test_a_missing_library_with_keys_present_is_still_the_fault(self):
+        """The operator has the keys and the library is not there: that is
+        something to DO, and it keeps the gate's not-configured verdict."""
+        with patch.dict(os.environ, {"REDDIT_CLIENT_ID": "id",
+                                     "REDDIT_CLIENT_SECRET": "secret"}), \
+             patch("scraping.scrapers.reddit_sentiment.reddit_unavailable_reason",
+                   return_value="reddit_praw_missing"):
+            out = self._run_social()
+        self.assertEqual(out["skipped"], "reddit_praw_missing")
+        from core.task_gate import judge_result
         status, message = judge_result(out)
-        self.assertEqual(status, "warning")
-        self.assertIn("not configured", message)
-        self.assertIn("reddit_no_credentials", message)
+        self.assertEqual((status, message),
+                         ("warning", "not configured: reddit_praw_missing"))
+
+    def test_keys_are_checked_before_the_library(self):
+        """No keys, no library: Reddit is off, not broken — a missing
+        library is never reported when there is nothing it would serve."""
+        from scraping.scrapers.reddit_sentiment import reddit_unavailable_reason
+        import builtins
+        real_import = builtins.__import__
+
+        def no_praw(name, *a, **kw):
+            if name == "praw":
+                raise ImportError("no praw")
+            return real_import(name, *a, **kw)
+
+        with patch.dict(os.environ, {"REDDIT_CLIENT_ID": "",
+                                     "REDDIT_CLIENT_SECRET": ""}), \
+             patch("builtins.__import__", side_effect=no_praw):
+            self.assertEqual(reddit_unavailable_reason(),
+                             "reddit_no_credentials")
 
     def test_the_reddit_path_survives_for_an_approved_operator(self):
         """The credentials may still be granted — the scraper is skipped,
