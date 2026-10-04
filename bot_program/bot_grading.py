@@ -136,6 +136,16 @@ def grade_bot_trade(trade) -> bool:
             pass
     tp = float(trade.take_profit) if trade.take_profit is not None else 0.0
     qty = float(trade.qty or 0)
+    # A SCALED-OUT row (position_care, 2026-10-04) closes its remainder
+    # while its pnl carries the banked half too: the risk it was taken
+    # with is the ORIGINAL size, or the half that stayed would grade at
+    # twice its R.
+    _so = (trade.metadata or {}).get("scale_out") or {}
+    if _so.get("original_qty") is not None:
+        try:
+            qty = float(_so["original_qty"]) or qty
+        except (TypeError, ValueError):
+            pass
 
     # ── duration ─────────────────────────────────────────────────
     if trade.opened_at and trade.closed_at:

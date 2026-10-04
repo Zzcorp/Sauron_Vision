@@ -281,6 +281,12 @@ DEFAULT_COMPONENTS = [
     {"key": "smart_money", "name": "Smart Money (crowd stops, sweeps, COT)",
      "description": "Off (default). On: bot stops leave the crowd's hunt zones (swings, pools, round numbers) within reward:risk; real-money entries against a sweep, the ICT bias, an FVG or order block, the volume or a COT extreme are taken smaller. manage.py smart_money.",
      "category": "system"},
+    # THE SCALE-OUT (2026-10-04, bot_program/position_care.py): paper rows
+    # only — eToro closes a position whole — beside Aragorn's own switch.
+    # Description measured below 300.
+    {"key": "aragorn_scale_out", "name": "Aragorn Scale-Out (half at +1R, paper)",
+     "description": "Off (default). On, with Aragorn on: a PAPER bot position whose mark reaches +1R banks half its size at the modelled fill, once; the rest rides break-even and the trail. One trade in the ledger, its R blended on the original size. Never a real-money row (eToro closes whole), never the manual lane.",
+     "category": "system"},
     # THE TRADE DEBATE (2026-10-01, ai_agents/agents/trade_debate.py): the
     # Executioner and the Champion argue every live bot entry before its
     # order. Shadow for its first 30 graded live trades, binding after.
