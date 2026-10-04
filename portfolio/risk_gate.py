@@ -1189,6 +1189,41 @@ def notional_state(user, *, portfolio=None, adding: float = 0.0,
     return state
 
 
+def declared_book(user, portfolio) -> float | None:
+    """What the owner SET for their book, not what it is marked at.
+
+    The /setup/ capital form writes `cash_available` on the owner's own
+    row, and a paper book's value is that cash plus its P&L. A pool is a
+    declaration too, so the two are compared as declarations: a 10,000
+    pool on a 10,000 book is a fit whatever yesterday's paper P&L did to
+    the marked value, and a 10,000 pool on a 500 book is not. The owner's
+    row when it exists, the passed book otherwise; None when neither
+    carries a positive cash figure.
+    """
+    from portfolio.models import Portfolio
+    from portfolio.services import PER_USER_SUFFIX
+    rows = []
+    username = getattr(user, "username", "") if user is not None else ""
+    if username and getattr(user, "is_authenticated", True):
+        try:
+            own = Portfolio.objects.filter(
+                name=f"{username}{PER_USER_SUFFIX}").first()
+        except Exception:  # pragma: no cover - never break a gate on lookup
+            own = None
+        if own is not None:
+            rows.append(own)
+    if portfolio is not None:
+        rows.append(portfolio)
+    for row in rows:
+        try:
+            cash = float(row.cash_available)
+        except (TypeError, ValueError, AttributeError):
+            cash = 0.0
+        if cash > 0:
+            return cash
+    return None
+
+
 def pool_vs_book(cfg, *, portfolio=None) -> dict:
     """Whether a PAPER pool fits the book of the user who owns it
     (2026-10-04). {"ok", "reason", "pool", "book", "research", "mode"}.
@@ -1196,12 +1231,14 @@ def pool_vs_book(cfg, *, portfolio=None) -> dict:
     A bot sizes from AssetBotConfig.capital and the owner's book is a
     different number: a 10,000 manual pool on a 500 book sizes positions
     that book cannot carry, and the book's drawdown then reads a loss the
-    pool never felt. A paper pool larger than its owner's book is refused
-    at arming (bot on, the HQ and map toggles) and at can_open_new, and
-    said on the manual ticket. Two exceptions, named: a research-fleet
-    pool measures rules, not an account (extras.research_fleet); a live
-    pool is judged against the broker account (capital_truth), not here.
-    A book never set measures nothing — ok, said.
+    pool never felt. A paper pool larger than its owner's book — the cash
+    they SET at /setup/ (declared_book), never the marked value a paper
+    loss moves — is refused at arming (bot on, the HQ and map toggles)
+    and at can_open_new, and said on the manual ticket. Two exceptions,
+    named: a research-fleet pool measures rules, not an account
+    (extras.research_fleet); a live pool is judged against the broker
+    account (capital_truth), not here. A book never set measures nothing
+    — ok, said.
     """
     research = _is_research(cfg)
     pool = float(getattr(cfg, "capital", 0) or 0)
@@ -1216,7 +1253,7 @@ def pool_vs_book(cfg, *, portfolio=None) -> dict:
                            "not the /setup/ book")
         return state
     portfolio = portfolio if portfolio is not None else limits_book()
-    book = gate_book_value(getattr(cfg, "user", None), portfolio)
+    book = declared_book(getattr(cfg, "user", None), portfolio)
     state["book"] = book
     if book is None:
         state["reason"] = ("the owner's book has never been set — nothing "
@@ -1237,7 +1274,8 @@ def pool_vs_book(cfg, *, portfolio=None) -> dict:
 def sizing_gap(user, portfolio=None) -> dict:
     """What sized this user's paper positions against what the book
     measures (2026-10-04). {"book", "pools", "research_pools", "configs",
-    "text"} — `text` is "" when the pools fit the book.
+    "text"} — `text` is "" when the pools fit the book, the cash its
+    owner set at /setup/ (declared_book, as pool_vs_book reads it).
 
     The weekly review of 2026-10-02 graded a 500 book "critical, -97.6%
     drawdown" on positions a 10,000 manual pool had sized: a ratio
@@ -1247,7 +1285,7 @@ def sizing_gap(user, portfolio=None) -> dict:
     """
     from bot_program.models import AssetBotConfig
     portfolio = portfolio if portfolio is not None else limits_book()
-    book = gate_book_value(user, portfolio)
+    book = declared_book(user, portfolio)
     pools = research = 0.0
     n = 0
     if user is not None:

@@ -196,7 +196,8 @@ class ThePoolVsBookTests(TestCase):
                                                         password="x")
 
     def setUp(self):
-        _book(current_value=Decimal("500"))
+        # The book its owner SET: the cash (/setup/), not the marked value.
+        _book(current_value=Decimal("273.07"), cash_available=Decimal("500"))
 
     def test_a_paper_pool_larger_than_the_book_is_refused(self):
         from portfolio.risk_gate import pool_vs_book
@@ -212,6 +213,25 @@ class ThePoolVsBookTests(TestCase):
         s = pool_vs_book(cfg)
         self.assertTrue(s["ok"])
         self.assertEqual(s["reason"], "pool 500.00 inside the 500.00 book")
+
+    def test_the_declaration_is_judged_not_the_marked_value(self):
+        """A 10,000 pool on a 10,000 book stays a fit after a paper loss
+        marks the book at 9,900 — the family books are seeded equal to
+        their starter pools, and a bad day must not freeze their fleet."""
+        from portfolio.risk_gate import declared_book, pool_vs_book
+        _book(current_value=Decimal("9900"), cash_available=Decimal("10000"))
+        cfg = _config(self.user, capital=Decimal("10000"))
+        self.assertTrue(pool_vs_book(cfg)["ok"])
+        self.assertEqual(declared_book(self.user, None), None)
+        from portfolio.risk_gate import limits_book
+        self.assertEqual(declared_book(self.user, limits_book()), 10000.0)
+        # the owner's own row wins when it exists
+        from portfolio.services import get_or_create_default_portfolio
+        own = get_or_create_default_portfolio(user=self.user)
+        own.cash_available = Decimal("500")
+        own.save()
+        self.assertEqual(declared_book(self.user, limits_book()), 500.0)
+        self.assertFalse(pool_vs_book(cfg)["ok"])
 
     def test_research_and_live_pools_are_exempt_and_say_so(self):
         from portfolio.risk_gate import pool_vs_book
@@ -229,7 +249,7 @@ class ThePoolVsBookTests(TestCase):
 
     def test_a_book_never_set_measures_nothing(self):
         from portfolio.risk_gate import pool_vs_book
-        _book(current_value=Decimal("0"))
+        _book(current_value=Decimal("0"), cash_available=Decimal("0"))
         s = pool_vs_book(_config(self.user, capital=Decimal("10000")))
         self.assertTrue(s["ok"])
         self.assertIn("never been set", s["reason"])
@@ -285,7 +305,7 @@ class TheSizingGapTests(TestCase):
 
     def test_the_sentence_when_the_pools_exceed_the_book(self):
         from portfolio.risk_gate import sizing_gap
-        _book(current_value=Decimal("500"))
+        _book(current_value=Decimal("273.07"), cash_available=Decimal("500"))
         _config(self.user, name="manual", asset_class="forex",
                 capital=Decimal("10000"))
         _config(self.user, name="starter", asset_class="stock",
@@ -307,7 +327,7 @@ class TheSizingGapTests(TestCase):
 
     def test_silent_when_they_fit(self):
         from portfolio.risk_gate import sizing_gap
-        _book(current_value=Decimal("50000"))
+        _book(current_value=Decimal("50000"), cash_available=Decimal("50000"))
         _config(self.user, name="manual", capital=Decimal("10000"))
         gap = sizing_gap(self.user)
         self.assertEqual(gap["text"], "")
@@ -321,7 +341,8 @@ class TheReviewTests(TestCase):
         from portfolio.services import get_or_create_default_portfolio
         user = get_user_model().objects.create_user("nc_review", password="x")
         own = get_or_create_default_portfolio(user=user)
-        own.current_value = Decimal("500")
+        own.current_value = Decimal("273.07")
+        own.cash_available = Decimal("500")
         own.save()
         _config(user, name="manual", capital=Decimal("10000"))
         notes = _sizing_notes({own.name, "Main", "nobody_main"})
