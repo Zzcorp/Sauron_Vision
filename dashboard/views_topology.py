@@ -84,7 +84,7 @@ WIRING = {
     "scraper_news":         {"task": "scraping.tasks.fetch_breaking_news", "layer": "ingest", "writes": ["NewsArticle"], "feeds": ["agent_news_analyst"]},
     "scraper_crypto_news":  {"task": "market_data.tasks.fetch_crypto_news_task", "layer": "ingest", "writes": ["NewsArticle"], "feeds": ["agent_news_analyst"]},
     "scraper_sentiment":    {"task": "scraping.tasks.fetch_social_sentiment", "layer": "ingest", "writes": ["SentimentSnapshot"], "feeds": ["pipeline_sentiment_agg", "pipeline_opportunity_scanner"],
-                             "note": "Reddit half needs REDDIT_CLIENT_ID/SECRET; the StockTwits half is keyless and now wired."},
+                             "note": "StockTwits is keyless and wired; Reddit joins only with REDDIT_CLIENT_ID/SECRET, which Reddit no longer hands out on request (2025)."},
     "scraper_tradingview":  {"task": "scraping.tasks.fetch_tradingview_ideas", "layer": "ingest", "writes": ["SentimentSnapshot"], "feeds": ["pipeline_sentiment_agg", "pipeline_opportunity_scanner"]},
     "scraper_calendar":     {"task": "scraping.tasks.check_economic_calendar", "layer": "ingest", "writes": ["EconomicEvent"], "feeds": ["execute_bots", "pipeline_opportunity_scanner"],
                              "note": "Needs FMP_API_KEY. While this table is empty the bot's earnings blackout cannot fire."},

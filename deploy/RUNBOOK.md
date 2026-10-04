@@ -158,11 +158,14 @@ Leave OFF for now: `actuator_mode_live`, `meta_allocator_mode_live`,
 - `scraper_crypto_news` — the dedicated crypto RSS pass every 10 min
   (CoinDesk, Cointelegraph, The Block, Decrypt). Overlaps the above
   harmlessly — articles dedupe by URL.
-- `scraper_sentiment` — Reddit + StockTwits every 30 min. Reddit REQUIRES
-  `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` in `.env` (create a free
-  "script" app at reddit.com/prefs/apps); without them it silently stores
-  nothing. Covers r/wallstreetbets, r/investing, r/stocks,
-  r/CryptoCurrency, r/Bitcoin.
+- `scraper_sentiment` — StockTwits every 30 min (trending plus the
+  starred instruments), keyless. Reddit joins only when
+  `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` are in `.env`; without them
+  the task reports "Reddit off" and runs on StockTwits alone — not a
+  warning. Reddit closed self-service app creation in November 2025
+  (reddit.com/prefs/apps no longer creates one; access is a manual
+  request), so no keys is the expected state. With keys it covers
+  r/wallstreetbets, r/investing, r/stocks, r/CryptoCurrency, r/Bitcoin.
 - `pipeline_sentiment_agg` — hourly aggregation into per-instrument scores.
 - `agent_news_analyst` — AI turns headlines into structured sentiment.
   Needs `ANTHROPIC_API_KEY` and spends tokens; enable deliberately.

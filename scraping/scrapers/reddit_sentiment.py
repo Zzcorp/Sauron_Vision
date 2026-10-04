@@ -56,18 +56,25 @@ def reddit_unavailable_reason() -> str | None:
 
     Without this the caller could not tell a quiet hour on r/wallstreetbets
     from an integration that has never once been configured: both came back
-    as an empty list and the task reported success. The strings are the
-    `skipped` vocabulary core.task_gate.judge_result grades, so an
-    unconfigured source lands in its not-configured branch and the health
-    page names the missing credential instead of shrugging.
+    as an empty list and the task reported success.
+
+    Two reasons, two verdicts (2026-10-04). "reddit_no_credentials" is
+    Reddit OFF: Reddit closed self-service app creation in November 2025
+    (its "Responsible Builder Policy" — prefs/apps no longer creates an
+    app, access is a manual request that small projects rarely get), so
+    for this platform no keys is the normal state, not a thing to do, and
+    the task says "Reddit off" rather than "not configured" every thirty
+    minutes. "reddit_praw_missing" is a fault: the operator has the keys
+    and the library is not installed. Keys are checked first so a missing
+    library is never reported when there is nothing it would have served.
     """
+    if not os.getenv("REDDIT_CLIENT_ID", "") or not os.getenv(
+            "REDDIT_CLIENT_SECRET", ""):
+        return "reddit_no_credentials"
     try:
         import praw  # noqa: F401
     except ImportError:
         return "reddit_praw_missing"
-    if not os.getenv("REDDIT_CLIENT_ID", "") or not os.getenv(
-            "REDDIT_CLIENT_SECRET", ""):
-        return "reddit_no_credentials"
     return None
 
 
@@ -110,8 +117,10 @@ def fetch_reddit_sentiment(subreddits: list[str] | None = None, limit: int = 50)
                        "Install with: pip install praw")
         return []
     if reason:
-        logger.warning("REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET not set — "
-                       "reddit_sentiment scraper returning empty list.")
+        # INFO, not WARNING: Reddit off is the normal state (see
+        # reddit_unavailable_reason), not a fault to log every half hour.
+        logger.info("REDDIT_CLIENT_ID / REDDIT_CLIENT_SECRET not set — "
+                    "Reddit is off; the StockTwits half runs alone.")
         return []
 
     import praw
