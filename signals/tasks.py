@@ -18,13 +18,23 @@ def _create_signals_and_notify(results):
     All imports are lazy to avoid circular-import issues at module load time.
     """
     from signals.models import Signal
-    from signals.rule_actuator import is_rule_active, rule_size_multiplier
-
+    from signals.rule_actuator import (_control_for, is_rule_active,
+                                       rule_size_multiplier)
     from signals.rule_adapter import flatten, normalise
+    from signals.rule_scope import (capped, cooldown_hours, cooldown_reason,
+                                    exclusion_reason, record_sentence,
+                                    rule_records, urgency_cap)
 
     new_count = 0
     blocked_paused = 0
+    blocked_scope = 0
+    blocked_cooldown = 0
+    capped_urgency = 0
     unstorable = 0
+    # One RuleControl read per rule per run, and the ledger read once —
+    # a scan hands this loop hundreds of rows.
+    controls: dict = {}
+    records = None
 
     # flatten() first: SmcCompositeRule returns a LIST of setups while every
     # other rule returns a dict, and scan_instrument appends whichever it got.
@@ -50,6 +60,19 @@ def _create_signals_and_notify(results):
             blocked_paused += 1
             continue
 
+        # THE RULE'S REACH (2026-10-04, signals/rule_scope): a rule kept
+        # off a class, a sector, a symbol or the miners does not fire
+        # there. The weekly review's ask — the RSI divergence off
+        # commodities and miners — is the code default; the row decides.
+        if rule_name not in controls:
+            controls[rule_name] = _control_for(rule_name)
+        ctrl = controls[rule_name]
+        why = exclusion_reason(rule_name, instrument, ctrl)
+        if why:
+            logger.info("Signal dropped — %s.", why)
+            blocked_scope += 1
+            continue
+
         # Deduplicate: skip if an active signal for this rule+instrument already exists.
         already_exists = Signal.objects.filter(
             instrument=instrument,
@@ -65,11 +88,46 @@ def _create_signals_and_notify(results):
             )
             continue
 
+        # THE COOLDOWN (2026-10-04): the condition that fired a rule is
+        # usually still true the scan after its signal closed, and the
+        # engine re-announced it — 151 signals in a week, 58 resolved.
+        # No second signal for (rule, symbol) within the rule's cooldown
+        # of the last one's close.
+        why = cooldown_reason(rule_name, instrument,
+                              hours=cooldown_hours(rule_name, ctrl))
+        if why:
+            logger.info("Signal dropped — %s.", why)
+            blocked_cooldown += 1
+            continue
+
         # Attach the actuator multiplier — sizing layer reads this via sub_scores.
         sub_scores = dict(result.get("sub_scores") or {})
         rule_mult = rule_size_multiplier(rule_name)
         if rule_mult < 1.0:
             sub_scores["actuator_multiplier"] = rule_mult
+
+        # THE RECORD CAPS THE URGENCY (2026-10-04): a rule that has hit
+        # 17% of the time over 58 graded signals does not get to call
+        # its next one HIGH. Past RECORD_MIN_RESOLVED graded signals the
+        # ledger's hit rate caps the word, and the signal says so.
+        if records is None:
+            records = rule_records()
+        record = records.get(rule_name) or {}
+        cap = urgency_cap(record)
+        if record.get("n"):
+            sub_scores["rule_graded"] = int(record["n"])
+            if record.get("hit_rate") is not None:
+                sub_scores["rule_hit_rate"] = round(float(record["hit_rate"]), 3)
+        if cap:
+            before = fields["urgency"]
+            after = capped(before, cap)
+            if after != before:
+                capped_urgency += 1
+                sub_scores["urgency_uncapped"] = before
+                fields = {**fields, "urgency": after,
+                          "description": (f"{fields['description']} "
+                                          f"{record_sentence(record, cap)}"
+                                          ).strip()}
         result = {**result, "sub_scores": sub_scores}
 
         signal = Signal.objects.create(is_active=True, **{
@@ -96,6 +154,10 @@ def _create_signals_and_notify(results):
 
     if blocked_paused:
         logger.info("Actuator blocked %d signal(s) for paused rules.", blocked_paused)
+    if blocked_scope or blocked_cooldown or capped_urgency:
+        logger.info("Rule scope: %d signal(s) off their rule's reach, %d inside "
+                    "a cooldown, %d urgency word(s) capped by the record.",
+                    blocked_scope, blocked_cooldown, capped_urgency)
     return new_count
 
 
