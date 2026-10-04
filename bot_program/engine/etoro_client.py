@@ -239,16 +239,44 @@ VENUE_SPELLING = {
     "NGUSD": "NATGAS",         # 22
     "HGUSD": "COPPER.FUT",     # 21 (/search COPPER.FUT EXACT, too)
     "XPDUSD": "PALLADIUM.FUT",  # 91
+    # 2026-10-04, the eligibility read BY SYMBOLS on the live world (the
+    # same POST as 2026-10-01), 200 with fifteen rows, each (id, symbol,
+    # minPositionExposure 10.0, fractional); BTC 100000 was the control.
+    # The eleven cryptos the catalogue carries beyond BTC/ETH/XRP/SOL
+    # (instruments.services INSTRUMENTS_DATA["crypto"]) had no spelling
+    # here, so instrument_id raised on every one of them: the live
+    # research_crypto configs skipped them NO_PRICE and the TAKE TRADE
+    # ticket said "the quote feeds have nothing fresh" while binance_ws
+    # was fresh to the minute. eToro spells Polygon POL (MATIC renamed;
+    # no MATIC row answered). Their ids are PINNED below.
+    "LTCUSD": "LTC",           # 100005
+    "ADAUSD": "ADA",           # 100017
+    "DOTUSD": "DOT",           # 100037
+    "LINKUSD": "LINK",         # 100040
+    "UNIUSD": "UNI",           # 100041
+    "DOGEUSD": "DOGE",         # 100043
+    "AAVEUSD": "AAVE",         # 100044
+    "ATOMUSD": "ATOM",         # 100047
+    "MATICUSD": "POL",         # 100056
+    "AVAXUSD": "AVAX",         # 100085
+    "NEARUSD": "NEAR",         # 100337
 }
 #: PLATFORM symbol -> eToro instrumentId, pinned from the eligibility row
-#: that answered it (2026-10-01; above). instrument_id answers these
-#: without /search, which lists them only among look-alikes. Keyed on the
-#: PLATFORM spelling, never on eToro's: the catalogue's own GOLD is the
-#: Barrick Gold STOCK (instruments.services), and a pin keyed on "GOLD"
-#: would have priced and traded it as the metal. The reverse direction
-#: (a position read back by id) reads PINNED_SYMBOL when the cache is cold.
+#: that answered it (2026-10-01 for the metals and energies; 2026-10-04
+#: for the eleven cryptos, above). instrument_id answers these without
+#: /search, which lists the metals only among look-alikes and, for a
+#: whole config of cryptos, answers HTTP 429 after a few dozen asks
+#: (etoro_smoke, 2026-10-04). Keyed on the PLATFORM spelling, never on
+#: eToro's: the catalogue's own GOLD is the Barrick Gold STOCK
+#: (instruments.services), and a pin keyed on "GOLD" would have priced
+#: and traded it as the metal. The reverse direction (a position read
+#: back by id) reads PINNED_SYMBOL when the cache is cold.
 VENUE_ID_PINS = {"XAUUSD": 18, "XAGUSD": 19, "WTIUSD": 17, "NGUSD": 22,
-                 "HGUSD": 21, "XPDUSD": 91}
+                 "HGUSD": 21, "XPDUSD": 91,
+                 "LTCUSD": 100005, "ADAUSD": 100017, "DOTUSD": 100037,
+                 "LINKUSD": 100040, "UNIUSD": 100041, "DOGEUSD": 100043,
+                 "AAVEUSD": 100044, "ATOMUSD": 100047, "MATICUSD": 100056,
+                 "AVAXUSD": 100085, "NEARUSD": 100337}
 PINNED_SYMBOL = {iid: key for key, iid in VENUE_ID_PINS.items()}
 #: Platform spellings with no eToro spelling known. Gold, silver, oil, gas,
 #: copper and palladium were found on 2026-10-01 (VENUE_ID_PINS); Brent

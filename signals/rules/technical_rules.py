@@ -56,6 +56,29 @@ def _bb_width(close, period=20, k=2.0):
     return (upper - lower) / mid.replace(0, 1e-9)
 
 
+#: RSI divergence conviction (2026-10-04). The rule scored every firing a
+#: constant 0.7, which rule_adapter reads as HIGH urgency — the weekly
+#: review found it hitting 17% and calling each one high. The score now
+#: reads the setup: RSI_SCORE_FLOOR at the 35 threshold (medium), rising
+#: to RSI_SCORE_CEILING (high) as the RSI reaches RSI_DEEP; the rule's
+#: own record (signals/rule_scope) caps the word again when it has earned
+#: that.
+RSI_THRESHOLD = 35.0
+RSI_DEEP = 20.0
+RSI_SCORE_FLOOR = 0.55
+RSI_SCORE_CEILING = 0.70
+
+
+def rsi_divergence_score(last_rsi: float) -> float:
+    """RSI_SCORE_FLOOR at RSI_THRESHOLD, RSI_SCORE_CEILING at or below
+    RSI_DEEP, linear between — a deeper oversold reading is a stronger
+    exhaustion claim; a divergence at 34 is a shallow one."""
+    span = RSI_THRESHOLD - RSI_DEEP
+    depth = (RSI_THRESHOLD - float(last_rsi)) / span if span > 0 else 1.0
+    depth = min(1.0, max(0.0, depth))
+    return round(RSI_SCORE_FLOOR + (RSI_SCORE_CEILING - RSI_SCORE_FLOOR) * depth, 3)
+
+
 class RSIDivergenceRule(BaseRule):
     """RSI bullish divergence: price lower-low, RSI higher-low, RSI < 35."""
     name = "rsi_bull_divergence"
@@ -66,7 +89,7 @@ class RSIDivergenceRule(BaseRule):
             return None
         rsi = _rsi(df["close"])
         last_rsi = float(rsi.iloc[-1])
-        if last_rsi >= 35:
+        if last_rsi >= RSI_THRESHOLD:
             return None
         recent_low_idx = df["low"].iloc[-30:].idxmin()
         prior_low_idx = df["low"].iloc[-60:-30].idxmin()
@@ -77,7 +100,8 @@ class RSIDivergenceRule(BaseRule):
                 "symbol": symbol,
                 "rule": self.name,
                 "direction": "LONG",
-                "score": 0.7,
+                "score": rsi_divergence_score(last_rsi),
+                "sub_scores": {"rsi": round(last_rsi, 1)},
                 "headline": f"{symbol} LONG · RSI bullish divergence",
                 "thesis": (
                     f"Price made a lower low while RSI made a higher low "

@@ -109,13 +109,17 @@ class TheDialogIsToldTests(SimpleTestCase):
     derived from the mark — so the payload is where the fact has to arrive."""
 
     def test_the_mark_resolver_reports_it(self):
+        """The resolver is `_mark_for_detail` since 2026-10-04 (it also
+        carries the venue's reason for a missing price); `_mark_for` is
+        its first three elements, the shape every caller unpacks."""
         import inspect
 
         from bot_program import manual_trade
-        src = inspect.getsource(manual_trade._mark_for)
+        src = inspect.getsource(manual_trade._mark_for_detail)
         self.assertIn('tk.get("delayed")', src)
-        self.assertIn("return (price if price > 0 else None), client, delayed",
-                      src)
+        self.assertIn('return price, client, delayed, ""', src)
+        self.assertIn("return _mark_for_detail(user, cfg, symbol)[:3]",
+                      inspect.getsource(manual_trade._mark_for))
 
     def test_the_preview_payload_carries_it(self):
         import inspect

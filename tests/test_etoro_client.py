@@ -3135,17 +3135,52 @@ class TheVenueSpellingTests(SimpleTestCase):
             # 2026-10-01, the eligibility read by symbols
             "XAUUSD": "GOLD", "XAGUSD": "SILVER", "WTIUSD": "OIL",
             "NGUSD": "NATGAS", "HGUSD": "COPPER.FUT",
-            "XPDUSD": "PALLADIUM.FUT"})
+            "XPDUSD": "PALLADIUM.FUT",
+            # 2026-10-04, the eligibility read by symbols, live world:
+            # the eleven other catalogue cryptos; Polygon is POL at eToro
+            "LTCUSD": "LTC", "ADAUSD": "ADA", "DOTUSD": "DOT",
+            "LINKUSD": "LINK", "UNIUSD": "UNI", "DOGEUSD": "DOGE",
+            "AAVEUSD": "AAVE", "ATOMUSD": "ATOM", "MATICUSD": "POL",
+            "AVAXUSD": "AVAX", "NEARUSD": "NEAR"})
         self.assertEqual(VENUE_SPELLING_UNKNOWN, ("BRNUSD",))
 
     def test_the_pinned_ids_are_the_measured_ones(self):
         """2026-10-01: each id the eligibility read answered for that
         spelling (floor 1000, cfd, open). /search lists them only among
-        look-alikes, so they are pinned and /search is never asked."""
+        look-alikes, so they are pinned and /search is never asked.
+        2026-10-04: the eleven cryptos the same read answered (floor 10,
+        fractional), pinned so a config of them never asks /search a
+        dozen times a tick (HTTP 429 on the smoke)."""
         from bot_program.engine.etoro_client import VENUE_ID_PINS
         self.assertEqual(VENUE_ID_PINS, {
             "XAUUSD": 18, "XAGUSD": 19, "WTIUSD": 17, "NGUSD": 22,
-            "HGUSD": 21, "XPDUSD": 91})
+            "HGUSD": 21, "XPDUSD": 91,
+            "LTCUSD": 100005, "ADAUSD": 100017, "DOTUSD": 100037,
+            "LINKUSD": 100040, "UNIUSD": 100041, "DOGEUSD": 100043,
+            "AAVEUSD": 100044, "ATOMUSD": 100047, "MATICUSD": 100056,
+            "AVAXUSD": 100085, "NEARUSD": 100337})
+
+    def test_every_catalogue_crypto_resolves_without_search(self):
+        """Every INSTRUMENTS_DATA crypto reaches eToro: the four /search
+        answered on 2026-09-23 keep their /search, the eleven pinned on
+        2026-10-04 resolve to their id with no request at all, and each
+        reads back under its platform spelling."""
+        from bot_program.engine.etoro_client import (VENUE_ID_PINS,
+                                                     VENUE_SPELLING)
+        from instruments.services import INSTRUMENTS_DATA
+        cryptos = set(INSTRUMENTS_DATA["crypto"])
+        self.assertEqual(len(cryptos), 15)
+        self.assertTrue(cryptos.issubset(VENUE_SPELLING))
+        pinned = {s for s in cryptos if s in VENUE_ID_PINS}
+        self.assertEqual(cryptos - pinned,
+                         {"BTCUSD", "ETHUSD", "XRPUSD", "SOLUSD"})
+        t, fake = _client([])
+        for symbol in sorted(pinned):
+            self.assertEqual(t.instrument_id(symbol), VENUE_ID_PINS[symbol])
+            self.assertEqual(t._symbol_for(VENUE_ID_PINS[symbol]), symbol)
+            self.assertEqual(t._venue_spelling[VENUE_ID_PINS[symbol]],
+                             VENUE_SPELLING[symbol])
+        self.assertEqual(self._searches(fake), [], "asked /search for a pin")
 
     def test_a_pinned_symbol_resolves_without_search_and_reads_back(self):
         t, fake = _client([("GET", "/info/demo/portfolio", 200,
@@ -3190,7 +3225,11 @@ class TheVenueSpellingTests(SimpleTestCase):
             "DAX40": "index", "NIKKEI225": "index", "STOXX50": "index",
             "XAUUSD": "commodity", "XAGUSD": "commodity",
             "WTIUSD": "commodity", "NGUSD": "commodity",
-            "HGUSD": "commodity", "XPDUSD": "commodity"})
+            "HGUSD": "commodity", "XPDUSD": "commodity",
+            "LTCUSD": "crypto", "ADAUSD": "crypto", "DOTUSD": "crypto",
+            "LINKUSD": "crypto", "UNIUSD": "crypto", "DOGEUSD": "crypto",
+            "AAVEUSD": "crypto", "ATOMUSD": "crypto", "MATICUSD": "crypto",
+            "AVAXUSD": "crypto", "NEARUSD": "crypto"})
         # The one known collision: eToro spells the metal GOLD, and the
         # catalogue's GOLD is Barrick Gold (a stock). Guarded in
         # instrument_id (a pinned id answering another platform symbol is

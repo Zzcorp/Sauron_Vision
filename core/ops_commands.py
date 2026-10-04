@@ -88,6 +88,23 @@ COMMANDS = [
         "category": "decide",
     },
     {
+        "name": "rule_scope",
+        "title": "Rule scope",
+        "purpose": "Where each signal rule may fire and how often: the classes, sectors, symbols and groups (the miners) it is kept off, and its cooldown between two signals on one symbol — the code defaults (the RSI divergence off commodities and miners, 24h) read, overridden per rule, lifted or cleared.",
+        "usage": [
+            "python manage.py rule_scope",
+            "python manage.py rule_scope show rsi_bull_divergence",
+            "python manage.py rule_scope set rsi_bull_divergence --exclude-class commodity --exclude-group miners",
+            "python manage.py rule_scope set rsi_bull_divergence --cooldown 12",
+            "python manage.py rule_scope set rsi_bull_divergence --lift",
+            "python manage.py rule_scope clear rsi_bull_divergence",
+        ],
+        "mirrors": "/rule-control/",
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    {
         "name": "shares",
         "title": "Share allocator",
         "purpose": "The share allocator's page as a command: propose, apply (LIVE mode, --yes), reject, rollback and grade the plans that size each live follower pool.",

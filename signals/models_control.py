@@ -83,6 +83,18 @@ class RuleControl(models.Model):
         default=dict, blank=True,
         help_text="Phase-9 parameter dict for parameter-aware rules. Empty for hand-coded rules.",
     )
+    # Where the rule may fire and how often (2026-10-04, signals/rule_scope):
+    # {"exclude": {"asset_classes": [], "sectors": [], "symbols": [],
+    # "groups": []}, "cooldown_hours": 24}. {} means the code defaults —
+    # rsi_bull_divergence off commodities and the miners, 24h between
+    # signals on one symbol — and an explicit empty list lifts one.
+    scope = models.JSONField(
+        blank=True, default=dict,
+        help_text='Where the rule may fire and how often: '
+                  '{"exclude": {"asset_classes": [], "sectors": [], '
+                  '"symbols": [], "groups": []}, "cooldown_hours": 24}. '
+                  'Empty means the code defaults (signals.rule_scope).',
+    )
     notes = models.TextField(blank=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)

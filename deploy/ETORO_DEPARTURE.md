@@ -765,7 +765,16 @@ Crypto (2026-09-26). The config keeps the platform spelling — BTCUSD, ETHUSD,
 XRPUSD, SOLUSD — and the adapter asks eToro for BTC, ETH, XRP, SOL
 (VENUE_SPELLING in bot_program/engine/etoro_client.py; ids 100000, 100001,
 100003, 100063, measured 2026-09-23; /search answers nothing to BTCUSD or
-ETHUSD). With the crypto box ticked the router sends crypto to eToro (a Saxo
+ETHUSD). 2026-10-04: the eligibility read BY SYMBOLS on the live world
+(bullet 0s part 1, with the crypto spellings and BTC as the control) answered
+200 with fifteen rows, floor 10 USD and fractional on each; the eleven other
+catalogue cryptos are now in VENUE_SPELLING and PINNED by id (LTC 100005,
+ADA 100017, DOT 100037, LINK 100040, UNI 100041, DOGE 100043, AAVE 100044,
+ATOM 100047, POL 100056 — Polygon's MATIC renamed, no MATIC row answered —
+AVAX 100085, NEAR 100337). Until then every one of them raised in
+instrument_id: the live research_crypto configs skipped them NO_PRICE and the
+TAKE TRADE ticket blamed the quote feeds while binance_ws was fresh to the
+minute. With the crypto box ticked the router sends crypto to eToro (a Saxo
 crypto flag would win); unticked, crypto goes to Binance, and to paper
 without Binance keys — which a live config refuses to trade against. Whether
 Sauron holds a BinanceAccount row is unread. A symbol with no Instrument row

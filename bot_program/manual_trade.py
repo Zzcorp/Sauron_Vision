@@ -371,6 +371,20 @@ def _mark_for(user, cfg, symbol):
     be born on the wrong side of the market. The operator has to see that
     before they commit, not read it in a post-mortem.
     """
+    return _mark_for_detail(user, cfg, symbol)[:3]
+
+
+def _mark_for_detail(user, cfg, symbol):
+    """(price, client, delayed, reason) — `_mark_for` with the venue's own
+    words when there is no price.
+
+    2026-10-04: a LIVE crypto ticket on ADAUSD answered "No usable price
+    mark — the quote feeds have nothing fresh" while binance_ws was fresh
+    to the minute. The quote feeds were not asked: a live ticket is priced
+    by the client that will fill it, and eToro's adapter had raised
+    "eToro knows no instrument spelled 'ADAUSD'". The preview blamed the
+    wrong thing. `reason` carries the exception's text (a raise), or
+    "answered no rate" (a 0 the venue returned), or "" with a price."""
     from bot_program.engine.broker_router import client_for_symbol
 
     client = client_for_symbol(user, symbol, cfg)
@@ -380,8 +394,45 @@ def _mark_for(user, cfg, symbol):
         delayed = bool(tk.get("delayed"))
     except Exception as e:  # noqa: BLE001
         logger.warning("[take-trade] ticker(%s) failed: %s", symbol, e)
-        return None, client, False
-    return (price if price > 0 else None), client, delayed
+        return None, client, False, (str(e) or type(e).__name__)
+    if price > 0:
+        return price, client, delayed, ""
+    reason = ("the market is shut" if tk.get("market_shut")
+              else "answered no rate")
+    if tk.get("reason"):
+        reason = str(tk["reason"])
+    return None, client, delayed, reason
+
+
+#: The venue's name on the ticket, from broker_router's route names.
+_VENUE_LABELS = {"etoro": "eToro", "binance": "Binance",
+                 "binance_futures": "Binance Futures", "oanda": "OANDA",
+                 "alpaca": "Alpaca", "ibkr": "IBKR", "saxo": "Saxo",
+                 "paper": "the paper venue"}
+
+
+def _no_mark_message(user, cfg, symbol, client, reason) -> str:
+    """Why the ticket has no price, naming who was asked.
+
+    A PAPER ticket is priced from the platform's own quotes and bars, so
+    "the quote feeds have nothing fresh" is the truth there. A LIVE ticket
+    is priced by the venue that fills it — its answer, in its words, and
+    the platform's own quote cannot stand in for it."""
+    from bot_program.asset_engine.base import AssetBot
+    from bot_program.engine.broker_router import broker_name_for_symbol
+    if AssetBot._is_paper_client(client):
+        why = f" ({reason})" if reason and reason != "answered no rate" else ""
+        return (f"No usable price mark for {symbol} — the quote feeds have "
+                f"nothing fresh{why}")
+    try:
+        route = broker_name_for_symbol(user, symbol, cfg)
+    except Exception:  # noqa: BLE001
+        route = ""
+    venue = _VENUE_LABELS.get(route) or type(client).__name__
+    return (f"No price mark for {symbol} from {venue}: "
+            f"{reason or 'the venue answered no rate'}. A LIVE ticket is "
+            f"priced by the venue that fills it, so the platform's own "
+            f"quote cannot stand in — nothing was sent")
 
 
 def _trade_notional_usd(trade) -> float:
@@ -1155,10 +1206,14 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
             return {"error": f"{inst.symbol}: {shut} — no paper fill. "
                              f"Nothing was booked", "market_shut": True}
 
-    price, _client, mark_delayed = _mark_for(user, cfg, inst.symbol)
+    price, _client, mark_delayed, no_mark = _mark_for_detail(
+        user, cfg, inst.symbol)
     if price is None:
-        return {"error": f"No usable price mark for {inst.symbol} — the "
-                         f"quote feeds have nothing fresh"}
+        # Said by whoever was asked (2026-10-04): the paper venue reads the
+        # platform's quotes; a live venue answers in its own words, and
+        # "eToro knows no instrument spelled 'ADAUSD'" is not a stale feed.
+        return {"error": _no_mark_message(user, cfg, inst.symbol, _client,
+                                          no_mark)}
 
     # A LIVE ticket must route to a live broker or not exist. The router
     # never returns None — it substitutes PaperTrader for every missing
