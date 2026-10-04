@@ -61,15 +61,30 @@ def _get_by_url(answers):
     return get
 
 
+#: Two files, to pin the machinery that reads several and survives one
+#: failing. Production reads one: Forex Factory publishes the current week
+#: only (its "nextweek" answered 404 on the VPS, 2026-10-04).
+TWO_FEEDS = (("thisweek", "https://nfs.faireconomy.media/ff_calendar_thisweek.json"),
+             ("nextweek", "https://nfs.faireconomy.media/ff_calendar_nextweek.json"))
+
+
 class TheParseTests(TestCase):
 
     def _run(self, this=THIS_WEEK, nxt=NEXT_WEEK):
         from scraping.scrapers import macro_calendar as M
-        with patch.object(M.requests, "get",
+        with patch.object(M, "FF_FEEDS", TWO_FEEDS), \
+             patch.object(M.requests, "get",
                           side_effect=_get_by_url({"thisweek": this,
                                                    "nextweek": nxt})) as g:
             out = M.fetch_macro_calendar_ff()
         return out, g
+
+    def test_production_reads_the_current_week_only(self):
+        """Measured 2026-10-04 03:20 UTC on the VPS: thisweek 139 rows,
+        nextweek 404. A file that does not exist must not be asked every
+        thirty minutes and logged as a failure every time."""
+        from scraping.scrapers.macro_calendar import FF_FEEDS
+        self.assertEqual([label for label, _url in FF_FEEDS], ["thisweek"])
 
     def test_the_currency_is_the_country_and_the_offset_is_applied(self):
         from market_data.models import EconomicEvent

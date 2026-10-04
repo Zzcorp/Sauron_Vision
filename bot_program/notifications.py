@@ -1265,13 +1265,29 @@ def fill_close_message(*, asset_class, symbol, side, qty, exit_price, pnl,
     # the row's currency; without a row, the one the caller knows
     # (2026-09-27: a close without a row printed "+17.84")
     ccy = _row_ccy(row) or str(currency or "").strip()
+    # AN ESTIMATE IS SAID TO BE ONE (2026-10-04). GBPCHF #130: eToro closed
+    # it on Friday 12:37; the platform found the row a day later, booked it
+    # at the last mark (eToro publishes no closing fill) and stamped the
+    # moment it booked it. The message then read "+0.52 USD · 0.02 times
+    # the risk ... after 1 day 18 hours ... Closed: Saturday 13:00" as
+    # facts. The operator, rightly: "closed on saturday.... why????".
+    # `exit_price_inferred` (reconcile) says the price is a mark, so the
+    # money and the R are "about"; "reconciled-orphan" says the close time
+    # is when the platform RECORDED it, so no duration is claimed and the
+    # stamp says what it is.
+    meta = (getattr(row, "metadata", None) or {}) if row is not None else {}
+    estimated = bool(meta.get("exit_price_inferred"))
+    recorded = ("reconciled-orphan"
+                in str(getattr(row, "reason", "") or "")) if row is not None \
+        else False
+    about = "about " if estimated else ""
     n = _number(pnl)
     if n is None:
         mark, result = CLOSE_MARKS["flat"], "result unknown"
     else:
         n = round(n, 2)
         mark = CLOSE_MARKS["gain" if n > 0 else "loss" if n < 0 else "flat"]
-        result = money_words(n, ccy, signed=True)
+        result = about + money_words(n, ccy, signed=True)
 
     said = ("Sold" if _is_long(side) else "Bought back")
     size = units_words(qty, asset_class)
@@ -1279,10 +1295,10 @@ def fill_close_message(*, asset_class, symbol, side, qty, exit_price, pnl,
         said += f" {size}"
     exit_words = price_words(exit_price, asset_class, symbol)
     if exit_words:
-        said += f" at {exit_words}"
+        said += f" at {about}{exit_words}"
     opened = getattr(row, "opened_at", None) if row is not None else None
     closed = getattr(row, "closed_at", None) if row is not None else None
-    if opened and closed:
+    if opened and closed and not recorded:
         said += f" after {duration_words((closed - opened).total_seconds())}"
     summary = said + "."
     if not exit_words:
@@ -1298,9 +1314,12 @@ def fill_close_message(*, asset_class, symbol, side, qty, exit_price, pnl,
             # rounded first, as the money is: a result that reads 0.00
             # is never "a loss of 0.00 times the risk"
             r = round(r, 2) or 0.0
-            r_words = ("{:.2f} times the risk".format(r) if r >= 0 else
-                       "a loss of {:.2f} times the risk".format(abs(r)))
+            r_words = about + (
+                "{:.2f} times the risk".format(r) if r >= 0 else
+                "a loss of {:.2f} times the risk".format(abs(r)))
         lines = [f"Result: {result}" + (f" · {r_words}" if r_words else "")]
+    if estimated:
+        lines.append("Priced from the last mark, not from a broker fill.")
     ending = (ending_words(row) if row is not None
               else ENDINGS.get(str(outcome or ""), "Closed"))
     lines.append("How it ended: " + ending[:1].lower() + ending[1:])
@@ -1318,7 +1337,11 @@ def fill_close_message(*, asset_class, symbol, side, qty, exit_price, pnl,
             details.append(f"Entry price: {entry}")
         if opened:
             details.append(f"Opened: {utc_clock(opened, True)}")
-        if closed:
+        if closed and recorded:
+            details.append(f"Recorded closed: {utc_clock(closed, True)} — "
+                           f"the broker had closed it before; the exact "
+                           f"moment is not readable")
+        elif closed:
             details.append(f"Closed: {utc_clock(closed, True)}")
     return {"title": f"Closed {symbol} · {result}", "mark": mark,
             "subtitle": "", "summary": summary, "lines": lines,

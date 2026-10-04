@@ -26,8 +26,8 @@ TWO SOURCES, ONE TABLE (2026-10-03). FMP's economic calendar is a paid
 endpoint: this account's key answered 402 Payment Required every thirty
 minutes for a month, and every forex position read "NO MACRO CALENDAR
 COVERS THE NEXT 24H" through NFP, CPI and FOMC. The operator chose the
-free source: Forex Factory publishes its calendar as two keyless JSON
-files, this week and next (nfs.faireconomy.media, the feed most home-built
+free source: Forex Factory publishes its calendar for the week in progress
+as a keyless JSON file (nfs.faireconomy.media, the feed most home-built
 systems read). `fetch_macro_calendar` asks Forex Factory first and FMP
 only when Forex Factory failed, so a working free feed never pays for a
 402 it does not need. The two write under different `source` values
@@ -57,14 +57,21 @@ FMP_MACRO_ENDPOINTS = (
     ("v3", "https://financialmodelingprep.com/api/v3/economic_calendar"),
 )
 
-#: Forex Factory's weekly calendar, as two keyless JSON files. Each row:
+#: Forex Factory's weekly calendar, one keyless JSON file. Each row:
 #: {"title", "country" (a currency code), "date" (ISO 8601 with the New
 #: York offset), "impact" (High/Medium/Low/Holiday), "forecast",
 #: "previous", "url"}. Read every thirty minutes by the beat; the feed's
 #: owner asks for no more than one read a minute.
+#:
+#: THE CURRENT WEEK ONLY (measured on the VPS, 2026-10-04 03:20 UTC: this
+#: week answered 139 rows, 135 stored; a "nextweek" file answered 404).
+#: Forex Factory publishes the week in progress, Sunday to Saturday, and
+#: rolls it over on Sunday — so late on a Friday the horizon ahead is a day
+#: or two, and the position review's blind marker can honestly read
+#: UNCHECKED over a weekend, when nothing trades. The tuple stays a tuple:
+#: a second file, should one appear, is one line here.
 FF_FEEDS = (
     ("thisweek", "https://nfs.faireconomy.media/ff_calendar_thisweek.json"),
-    ("nextweek", "https://nfs.faireconomy.media/ff_calendar_nextweek.json"),
 )
 #: The feed sits behind a CDN that has refused the default python
 #: user-agent; a browser's is what every other reader sends.
@@ -201,10 +208,10 @@ def _ff_rows(payload) -> list:
 
 
 def fetch_macro_calendar_ff() -> dict:
-    """This week's and next week's prints from Forex Factory, stored under
-    `forexfactory`. Returns {"parsed", "stored", "source", "weeks"} plus
-    "failures" when one file failed and "error" when both did. Keyless:
-    there is no `skipped`."""
+    """This week's prints from Forex Factory (every file in FF_FEEDS),
+    stored under `forexfactory`. Returns {"parsed", "stored", "source",
+    "weeks"} plus "failures" when a file failed and "error" when none
+    answered. Keyless: there is no `skipped`."""
     rows, weeks, failures = [], [], []
     for label, url in FF_FEEDS:
         try:

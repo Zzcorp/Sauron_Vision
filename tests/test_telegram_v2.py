@@ -351,6 +351,49 @@ class TheFillMessagesTests(_Base):
             "Opened: 2026-09-25 13:40 UTC",
             "Closed: 2026-09-25 19:10 UTC</blockquote>"]))
 
+    def test_a_close_the_platform_only_recorded_says_so(self):
+        """GBPCHF #130, 2026-10-03: eToro closed it on Friday 12:37, the
+        platform found the row a day later, booked it at the last mark and
+        stamped the booking. The message read a mark as a fill and a
+        Saturday as the close. An estimate is said to be one, and the
+        stamp says what it is."""
+        from bot_program.notifications import notify_bot_fill_close
+        cfg = _cfg(self.user, "forex", "fx_majors_live", mode="live")
+        row = _trade(cfg, 130, symbol="GBPCHF", side="BUY",
+                     qty=Decimal("3600"), entry_price=Decimal("1.09716"),
+                     stop_loss=Decimal("1.09000"),
+                     take_profit=Decimal("1.11000"),
+                     exit_price=Decimal("1.09728"), pnl=Decimal("0.52"),
+                     realized_r=0.02, outcome="manual_close",
+                     status="CLOSED", paper=False,
+                     rule_name="starter_forex_breakout",
+                     reason="breakout | reconciled-orphan",
+                     metadata={"broker": "etoro", "broker_env": "live",
+                               "value_per_unit": 1.0,
+                               "exit_price_inferred": True,
+                               "exit_fill_source": "mark"},
+                     opened_at=datetime(2026, 10, 1, 18, 26, tzinfo=UTC),
+                     closed_at=datetime(2026, 10, 3, 13, 0, tzinfo=UTC))
+        p = self._send(lambda: notify_bot_fill_close(
+            self.user, asset_class="forex", symbol="GBPCHF", side="BUY",
+            qty=row.qty, exit_price=row.exit_price, pnl=row.pnl,
+            outcome=row.outcome, trade_id=row.id, trade=row))
+        self.assertEqual(p["text"], "\n".join([
+            f"<b>{GAIN} Closed GBPCHF · about +0.52 USD</b>",
+            "Sold 3,600 units at about 1.09728.",
+            "",
+            "Result: about +0.52 USD · about 0.02 times the risk",
+            "Priced from the last mark, not from a broker fill.",
+            "How it ended: closed at the broker",
+            "Real money · eToro",
+            "<blockquote expandable>Trade: #130",
+            "Rule key: <code>starter_forex_breakout</code>",
+            "Config: fx_majors_live",
+            "Entry price: 1.09716",
+            "Opened: 2026-10-01 18:26 UTC",
+            "Recorded closed: 2026-10-03 13:00 UTC — the broker had closed "
+            "it before; the exact moment is not readable</blockquote>"]))
+
     def test_a_close_at_zero_and_one_nobody_could_price(self):
         from bot_program.notifications import notify_bot_fill_close
         row = _eurcad(_cfg(self.user, "forex", "FX trend"), status="CLOSED",
