@@ -3276,6 +3276,15 @@ class AssetBot(ABC):
             return (False, "config was disarmed mid-tick (kill switch or "
                            "operator) — no entries this pass")
 
+        # A PAPER pool larger than its owner's book opens nothing
+        # (2026-10-04, risk_gate.pool_vs_book): it sizes positions the
+        # book cannot carry, and the book then reads a drawdown the pool
+        # never felt. Research pools and live pools are exempt, said.
+        from portfolio.risk_gate import pool_vs_book
+        pool = pool_vs_book(self.cfg)
+        if not pool["ok"]:
+            return (False, pool["reason"])
+
         # A pool that follows the broker's account must not open on a
         # stale reading of it. The operator asked for "the available
         # funds" — funds nobody has read for an hour are not available,
@@ -3330,8 +3339,10 @@ class AssetBot(ABC):
         # venue is known (_paper_book_refusal).
         from portfolio.risk_gate import (ELITE_MAX_PER_WINDOW,
                                          elite_entries_since, preflight)
+        # `config` (2026-10-04): the notional cap measures a research pool
+        # against itself, every other config against the venue's book.
         book = preflight(self.user, venue=("paper" if self.cfg.mode == "paper"
-                                           else "live"))
+                                           else "live"), config=self.cfg)
         # PAST THE DAILY LIMIT, ELITE ONLY (2026-10-01): above the absolute
         # stop and with nothing else binding, the gate stays open for an
         # elite candidate — propose_entry judges each one (_elite_verdict)
@@ -4285,6 +4296,24 @@ class AssetBot(ABC):
             logger.info("[%s_bot] %s refused by the book's open-risk limit: "
                         "%s", self.asset_class, symbol, orisk["reason"])
             self._skip(symbol, skips.GATE_BLOCKED, note + orisk["reason"])
+            return False
+
+        # MAX NOTIONAL MULTIPLE (2026-10-04), judged on THIS entry's
+        # notional added to the venue's open notional: the exposure limit
+        # counts a forex row at its margin (1/30), and a 500 book carried
+        # 14,800 of yen crosses inside it. A research pool is measured
+        # against its own pool (the comment below explains why a bot's
+        # size must never meet a book it was not sized from); every other
+        # config meets the venue's book. Refused, never resized.
+        from portfolio.risk_gate import notional_state
+        ncap = notional_state(
+            self.user, adding=notional, config=self.cfg,
+            venue=("paper" if (venue == "paper" or (
+                venue is None and self.cfg.mode == "paper")) else "live"))
+        if not ncap["ok"]:
+            logger.info("[%s_bot] %s refused by the book's notional cap: %s",
+                        self.asset_class, symbol, ncap["reason"])
+            self._skip(symbol, skips.GATE_BLOCKED, note + ncap["reason"])
             return False
 
         # NOT a per-ticket total-exposure pre-check here, deliberately.
@@ -5365,7 +5394,7 @@ class AssetBot(ABC):
         the paper book, so the paper ceiling still bounds the simulation and
         never the real money. Fails open like preflight itself."""
         from portfolio.risk_gate import preflight
-        book = preflight(self.user, venue="paper")
+        book = preflight(self.user, venue="paper", config=self.cfg)
         return "" if book["ok"] else book["reason"]
 
     def _venue_fee_refusal(self, client, symbol: str, *, qty: float,

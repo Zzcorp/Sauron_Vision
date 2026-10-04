@@ -570,8 +570,12 @@ class VenueCapitalTests(TestCase):
         budget consumed in the other unit and could report 30 of 78 spent on
         a tick the chooser had stopped at the budget's own edge."""
         from bot_program.capital_desk import plan_for
+        # A 100,000 paper pool on a 10,000 book is a research pool or it is
+        # refused at can_open_new (risk_gate.pool_vs_book, 2026-10-04); the
+        # arithmetic under test is the desk's, so the pool says what it is.
         cfg = _config(self.user, name="MarginalCfg", mode="paper",
-                      capital=Decimal("100000"))
+                      capital=Decimal("100000"),
+                      extras={"research_fleet": True})
         bot = _bot(cfg)
         cands = [_cand(bot, "MG1", qty=10.0, rule="mg_a"),
                  _cand(bot, "MG2", qty=10.0, rule="mg_b")]

@@ -1429,6 +1429,27 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
     theme = theme_state(user, symbol=inst.symbol, side=side,
                         asset_class=cls, paper=not live)
 
+    # THE BOOK'S NOTIONAL CAP, with this ticket added, and the pool against
+    # the book (2026-10-04). A 500 book took two yen crosses of 14,800 by
+    # hand on 2026-09-07: the exposure limit counts forex at its margin,
+    # so 494 "at work" fitted 100% of the book, and the manual pool that
+    # sized them declared 10,000 nobody had. Both ride the book advisory
+    # — appetite, like the limits already in it: the ticket is told and
+    # recorded (book_limit_at_entry), never refused on this path.
+    from portfolio.risk_gate import notional_state, pool_vs_book
+    notional_gate = notional_state(user, portfolio=risk_book,
+                                   adding=float(notional or 0),
+                                   venue=("live" if live else "paper"))
+    pool_gate = pool_vs_book(cfg, portfolio=risk_book)
+    book_advisory["checks"] = {**(book_advisory.get("checks") or {}),
+                               "notional": notional_gate, "pool": pool_gate}
+    for gate in (notional_gate, pool_gate):
+        if not gate["ok"]:
+            book_advisory["ok"] = False
+            book_advisory["reason"] = "; ".join(
+                part for part in (book_advisory["reason"], gate["reason"])
+                if part)
+
     open_trades = _open_manual_trades(cfg)
     # Committed counts CLOSE_PENDING too — a close that has not filled is
     # still capital at the broker, exactly as every gate and the capital

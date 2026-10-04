@@ -63,8 +63,14 @@ class StopOvershootTests(TestCase):
         self.assertIn("-8.12R, past -1.2R", text)
         self.assertIn("1.3469", text)
         self.assertIn("did not hold", text)
-        # no money figure: the -20 pnl never reaches the words
-        self.assertNotIn("20", text.replace("2026", ""))
+        # no money figure: the -20 pnl never reaches the words. The close's
+        # own stamp ("2026-10-04 16:20 UTC") is scrubbed first — at twenty
+        # past the hour, on the 20th, or in 2027 this read "20" in the
+        # clock and failed the suite (2026-10-04, 18:20 UTC).
+        import re
+        scrubbed = re.sub(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC", "", text)
+        self.assertNotEqual(scrubbed, text, "the close stamp was not found")
+        self.assertNotIn("20", scrubbed)
 
     def test_a_full_stop_is_not_an_overshoot(self):
         cfg = _cfg(self.user)
