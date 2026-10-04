@@ -2193,7 +2193,17 @@ class AssetBot(ABC):
             logger.warning("[%s_bot] stop rules failed for %s: %s",
                            self.asset_class, trade.symbol, e)
             return False
+        return self._move_broker_stop(trade, price, client, candidate, why)
 
+    def _move_broker_stop(self, trade, price, client, candidate,
+                          why: str) -> bool:
+        """Move the stop that RESTS AT THE BROKER to `candidate`, then write
+        the row — the one mover for every rule that wants a venue stop moved
+        (2026-10-04): the config knobs above (`_manage_broker_stop`) and the
+        position care's mirror (position_care._mirror_to_venue), which copies
+        a tightened soft stop onto the venue so the lock survives a platform
+        outage. The caller has already judged the candidate an improvement
+        (trailing.is_improvement). True when the venue accepted it."""
         mover = getattr(client, "modify_protective", None)
         if not callable(mover):
             # This broker cannot move a resting order. Say so once and

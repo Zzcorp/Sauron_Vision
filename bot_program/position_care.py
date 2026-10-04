@@ -71,7 +71,29 @@ measured 2026-09-23), so a real-money half cannot be sold — those rows keep
 break-even and trail. Never on the manual lane, never on options, never
 on a stock or ETF row too small to split into whole shares.
 
-Every close and every scale-out is a AragornAction. Never raises: care
+THE MIRROR (2026-10-04, the operator asked for more resilience on open
+positions): the soft stop lived on the platform only. With Celery down or
+the VPS gone, the venue knew the disaster stop sent at entry and nothing
+else — a winner at +2R could ride back to its -1R stop. Now a REAL row
+whose stop rests at the venue (metadata["protected"], a protective_trade_id)
+gets every TIGHTER soft stop copied onto the venue's own stop, through the
+engine's one mover (AssetBot._move_broker_stop -> client.modify_protective:
+eToro PATCH stopLossRate, accepted 2026-09-23), tighten-only
+(trailing.is_improvement), at the instrument's printed precision
+(core.price_format.price_decimals). The level the venue took is written on
+the row (care["venue_stop"], the row's stop_loss, a stop_moves entry) and
+journaled (AragornAction "care_mirror"); a refusal is written too
+(care["venue_stop_refusal"], the venue's own words) and asked again when
+the soft stop moves or after MIRROR_RETRY_MINUTES, never every tick. A
+venue stop already tighter than the lock (the operator's own hand) is left
+alone and remembered. The manual lane's rows are mirrored as well: the
+profit locks are the only locks they get, and the care already closes at
+them. Never with a close, never a paper row, never without the venue's
+handle. The risk denominator (metadata["initial_stop_loss"]) is stamped
+from the sent stop before the first move on a row that lacks it, so R
+keeps its meaning after the venue stop has moved.
+
+Every close, scale-out and mirror is a AragornAction. Never raises: care
 that fails leaves the row to the rest of manage_positions, exactly as
 before.
 """
@@ -112,6 +134,9 @@ SCALE_OUT_AT_R = 1.0
 SCALE_OUT_FRACTION = 0.5
 WHOLE_UNIT_CLASSES = frozenset({"stock", "etf"})
 SCALE_OUT_SWITCH = "aragorn_scale_out"
+#: THE MIRROR: a venue that refused the soft stop is asked again when the
+#: lock moves, else no sooner than this.
+MIRROR_RETRY_MINUTES = 30
 
 
 def scale_out_on() -> bool:
@@ -446,6 +471,9 @@ def care(bot, trade, price, client, *, now=None) -> str:
         logger.warning("[care] %s #%s: care not saved: %s", trade.symbol,
                        trade.id, e)
     if decision["action"] != "close":
+        if not trade.paper:
+            # THE MIRROR: the lock goes to the venue so it outlives us
+            _mirror_to_venue(bot, trade, price, client, decision)
         if decision.get("scale_out"):
             _scale_out(bot, trade, price, decision)
         return ""
@@ -498,3 +526,100 @@ def _scale_out(bot, trade, price, decision) -> bool:
                 trade.symbol, trade.id, so.get("qty"), so.get("price"),
                 trade.qty)
     return True
+
+
+def _mirror_to_venue(bot, trade, price, client, decision) -> bool:
+    """Copy a REAL row's soft stop onto the venue's stop (the docstring: THE
+    MIRROR). True when the venue took it this tick. Never raises; a mirror
+    that fails leaves the platform's soft stop exactly where it was."""
+    try:
+        care = dict(decision.get("care") or {})
+        soft = _f(care.get("soft_stop"))
+        if trade.paper or soft is None or soft <= 0:
+            return False
+        meta = trade.metadata or {}
+        if not meta.get("protected"):
+            return False
+        if not callable(getattr(client, "modify_protective", None)):
+            return False
+        d = 1.0 if str(trade.side).upper() == "BUY" else -1.0
+        venue = _f(care.get("venue_stop"))
+        if venue is not None and d * (venue - soft) >= -1e-12:
+            return False                    # the venue holds it, or tighter
+        now = timezone.now()
+        asked_for = _f(care.get("venue_asked_for"))
+        asked_at = care.get("venue_asked_at")
+        if asked_for is not None and abs(asked_for - soft) < 1e-12 and asked_at:
+            from django.utils.dateparse import parse_datetime
+            last = parse_datetime(str(asked_at))
+            if last is not None and (now - last) < timedelta(
+                    minutes=MIRROR_RETRY_MINUTES):
+                return False                # the same ask, too soon
+        from decimal import Decimal
+
+        from core.price_format import price_decimals
+        from bot_program.engine.trailing import is_improvement
+        places = price_decimals(soft, trade.asset_class, trade.symbol)
+        candidate = Decimal(str(round(soft, places)))
+        care["venue_asked_at"] = now.isoformat()
+        care["venue_asked_for"] = soft
+        if not is_improvement(trade, candidate, price):
+            held = _f(trade.stop_loss)
+            if held is not None and d * (held - soft) >= -1e-12:
+                # the venue's stop is already tighter (the operator's own
+                # hand, or the config knobs): remembered, nothing sent
+                care["venue_stop"] = held
+                care.pop("venue_stop_refusal", None)
+            else:
+                care["venue_stop_refusal"] = ("not sent: the level is not "
+                                              "on the right side of the mark")
+            _save_care(trade, care)
+            return False
+        if meta.get("initial_stop_loss") is None and trade.stop_loss is not None:
+            # the risk denominator is the SENT stop; stamp it before the
+            # row's stop_loss moves (the mover persists the metadata)
+            trade.metadata = {**meta,
+                              "initial_stop_loss": float(trade.stop_loss)}
+        why = f"care {care.get('soft_why') or 'lock'}"
+        note = ""
+        try:
+            ok = bool(bot._move_broker_stop(trade, price, client, candidate,
+                                            why))
+        except Exception as e:  # noqa: BLE001 — the venue's refusal is a fact
+            ok, note = False, str(e)
+        if ok:
+            taken = _f(trade.stop_loss)
+            care["venue_stop"] = taken if taken is not None else float(candidate)
+            care.pop("venue_stop_refusal", None)
+        else:
+            care["venue_stop_refusal"] = str(
+                (trade.metadata or {}).get("stop_move_last_error")
+                or note or "refused")[:160]
+        _save_care(trade, care)
+        if not ok:
+            logger.info("[care] %s #%s: the venue did not take the %s at %s "
+                        "(%s) — the platform's soft stop stands",
+                        trade.symbol, trade.id, why, candidate,
+                        care["venue_stop_refusal"])
+            return False
+        try:
+            from bot_program.aragorn_models import AragornAction
+            AragornAction.objects.create(
+                kind="care_mirror", rule_name=trade.rule_name or "",
+                asset_class=trade.asset_class, symbol=trade.symbol,
+                trade_id=trade.id,
+                detail=(f"REAL MONEY: the venue stop follows the "
+                        f"{care.get('soft_why') or 'lock'} to "
+                        f"{care['venue_stop']:g} — the lock outlives the "
+                        f"platform"),
+                stats={"soft_stop": soft, "venue_stop": care["venue_stop"],
+                       "mfe_r": care.get("mfe_r"), "r_now": care.get("r_now")})
+        except Exception as e:  # noqa: BLE001
+            logger.info("[care] mirror journal not written: %s", e)
+        logger.info("[care] %s #%s: the venue stop follows the %s to %s",
+                    trade.symbol, trade.id, why, care["venue_stop"])
+        return True
+    except Exception as e:  # noqa: BLE001 — a mirror that fails moves nothing
+        logger.warning("[care] %s #%s: soft stop not mirrored: %s",
+                       trade.symbol, getattr(trade, "id", "?"), e)
+        return False
