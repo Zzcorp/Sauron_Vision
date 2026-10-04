@@ -98,7 +98,8 @@ def _open_book(user, portfolio):
     unknown, not flat.
     """
     from market_data.models import LiveQuote
-    from portfolio.services import unified_open_positions
+    from portfolio.services import (notional_usd, unified_open_positions,
+                                    usd_per_unit)
 
     rows = unified_open_positions(user, portfolio)
     if not rows:
@@ -138,11 +139,23 @@ def _open_book(user, portfolio):
             r.unrealized_pnl = None
             r.unrealized_pnl_pct = None
             continue
+        # The quote currency's worth in USD (2026-10-04): a legacy USDJPY
+        # row's (mark - entry) x qty is YEN. Without a readable rate the
+        # row is unpriced — a number this book cannot measure is left out,
+        # never counted at 1.
+        mult = usd_per_unit(r)
+        if mult is None:
+            r.mark_source = None
+            r.current_price = None
+            r.unrealized_pnl = None
+            r.unrealized_pnl_pct = None
+            continue
+        r.value_per_unit = mult
         entry = float(r.entry_price or 0)
         qty = float(r.quantity or 0)
         sign = -1 if (r.direction or "").lower() in ("short", "sell") else 1
         r.current_price = mark
-        r.unrealized_pnl = round((mark - entry) * qty * sign, 2)
+        r.unrealized_pnl = round((mark - entry) * qty * sign * mult, 2)
         r.unrealized_pnl_pct = (round((mark - entry) / entry * 100 * sign, 2)
                                 if entry else None)
 
@@ -152,8 +165,13 @@ def _open_book(user, portfolio):
     for r in rows:
         if r.unrealized_pnl is None or r.current_price is None:
             continue
+        # notional_usd: price x quantity x the row's USD-per-unit, so a
+        # yen-quoted row is deployed dollars, not deployed yen.
+        notional = notional_usd(r)
+        if notional is None:
+            continue
         unrealized += float(r.unrealized_pnl)
-        deployed += abs(float(r.current_price) * float(r.quantity or 0))
+        deployed += notional
         n_priced += 1
 
     if n_priced == 0:

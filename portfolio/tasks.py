@@ -90,7 +90,7 @@ def value_and_exposure(portfolio):
     live surfaces follow — the returned BookValue carries `n_unpriced` so the
     caller can refuse to write a total that measured nothing at all.
     """
-    from portfolio.services import live_book_value, portfolio_owner
+    from portfolio.services import live_book_value, notional_usd, portfolio_owner
 
     book = live_book_value(portfolio_owner(portfolio), portfolio)
 
@@ -101,7 +101,11 @@ def value_and_exposure(portfolio):
         # abs(), and the same product `_open_book` sums into `marked`, so the
         # breakdowns add up to the total printed beside them. A short position
         # is exposure of the same size as a long one, not negative exposure.
-        value = abs(float(row.current_price) * float(row.quantity or 0))
+        # In USD (2026-10-04): the snapshot that read "$10.84M of forex" on
+        # a 10,000 book was summing yen, forint and koruna as dollars.
+        value = notional_usd(row)
+        if value is None:
+            continue
         inst = getattr(row, "instrument", None)
         # A bot row whose symbol matches no Instrument arrives on a shim that
         # carries asset_class and nothing else, so sector and currency fall
@@ -238,6 +242,37 @@ def recalculate_exposure():
     return out
 
 
+#: Daily returns a Sharpe ratio needs before it is said. Below this it is
+#: None, not a number from three days.
+SHARPE_MIN_RETURNS = 10
+TRADING_DAYS = 252
+
+
+def sharpe_of(values) -> "float | None":
+    """Annualised Sharpe of a value series (daily points, oldest first),
+    risk-free rate zero, or None when there are too few returns or no
+    variance.
+
+    The snapshot wrote `sharpe_ratio: None` on every row since the column
+    was created, and the weekly review of 2026-10-02 said so: "Sharpe ratio
+    is null on every snapshot, so risk-adjusted performance is not being
+    computed anywhere." It is computed here, from the series the snapshot
+    already walks for the drawdown, and from nothing else.
+    """
+    try:
+        pts = [float(v) for v in values if v is not None and float(v) > 0]
+    except (TypeError, ValueError):
+        return None
+    rets = [pts[i] / pts[i - 1] - 1.0 for i in range(1, len(pts))]
+    if len(rets) < SHARPE_MIN_RETURNS:
+        return None
+    mean = sum(rets) / len(rets)
+    var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
+    if var <= 0:
+        return None
+    return round(mean / (var ** 0.5) * (TRADING_DAYS ** 0.5), 4)
+
+
 def _snapshot_book(portfolio, today, yesterday):
     """Take today's snapshot of ONE book, or return None if it cannot be.
 
@@ -303,6 +338,8 @@ def _snapshot_book(portfolio, today, yesterday):
             if dd < max_drawdown:
                 max_drawdown = dd
 
+    sharpe = sharpe_of(all_values_f)
+
     # Phase-2 addition: compute the correlation matrix across open positions.
     # Best-effort: a degenerate matrix never blocks the snapshot from being written.
     try:
@@ -324,7 +361,7 @@ def _snapshot_book(portfolio, today, yesterday):
             "daily_pnl_pct": round(daily_pnl_pct, 4),
             "cumulative_pnl_pct": round(cumulative_pnl_pct, 4),
             "max_drawdown": round(max_drawdown, 4),
-            "sharpe_ratio": None,
+            "sharpe_ratio": sharpe,
             "exposure_by_asset_class": by_class,
             "exposure_by_sector": by_sector,
             "exposure_by_currency": by_currency,

@@ -166,7 +166,13 @@ class UnifiedPosition:
                  # multiplier execute_entry recorded, so the book's
                  # ALLOCATED (services._capital_at_work) charges an eToro
                  # row what the gates charge it. Position rows have neither.
-                 "carrier", "stamped_leverage")
+                 "carrier", "stamped_leverage",
+                 # USD per price point per unit (2026-10-04): the sizing
+                 # stamp for a bot row, the live quote-currency rate for a
+                 # legacy forex row. Every notional the book sums is
+                 # price x quantity x THIS, or a USDJPY row counts its yen
+                 # as dollars (see usd_per_unit).
+                 "value_per_unit")
 
 
 def is_option_row(trade) -> bool:
@@ -214,6 +220,59 @@ def value_per_unit(trade) -> float:
         except (TypeError, ValueError):
             vpu *= 100
     return vpu
+
+
+def usd_per_unit(row):
+    """USD one price point of one unit of this row is worth, or None when
+    it cannot be known.
+
+    THE UNIT ERROR (2026-10-04). Every notional the book summed was
+    price x quantity: right for a dollar-quoted row, and 150 times too big
+    for a USDJPY row whose price is yen. The weekly review read a 10,000
+    book carrying "$10.84M of forex exposure" (746x), a +194% day, a value
+    of 42,834 — and the risk gates, which scale every ceiling as a
+    percentage of that value, loosened to match. The P&L had been converted
+    for a month (value_per_unit, the sizing stamp); the NOTIONAL had not.
+
+    A bot row carries the stamp. A legacy forex row (the eToro sync's
+    Position) has no stamp, so its quote currency is converted at the live
+    rate the forex engine already uses for its own P&L
+    (quote_ccy_usd_rate: the direct or inverse major, LiveQuote then the
+    newest bar). Everything else is 1. None — never a silent 1 — when a
+    forex rate cannot be read: the caller leaves the row unpriced, which
+    is the module's rule for a number it cannot measure.
+    """
+    stamped = getattr(row, "value_per_unit", None)
+    if stamped:
+        try:
+            return float(stamped)
+        except (TypeError, ValueError):
+            pass
+    inst = getattr(row, "instrument", None)
+    cls = (getattr(row, "asset_class", "")
+           or getattr(inst, "asset_class", "") or "").lower()
+    if cls != "forex":
+        return 1.0
+    symbol = (getattr(inst, "symbol", "") or "").upper().replace("/", "")
+    if len(symbol) != 6 or not symbol.isalpha():
+        return 1.0
+    try:
+        from bot_program.asset_engine.forex_bot import quote_ccy_usd_rate
+        rate = quote_ccy_usd_rate(symbol[3:])
+    except Exception:  # noqa: BLE001 — an unreadable rate is "unknown"
+        rate = None
+    return float(rate) if rate and rate > 0 else None
+
+
+def notional_usd(row):
+    """abs(price x quantity x usd_per_unit) for a priced row, else None."""
+    price = getattr(row, "current_price", None)
+    if price is None:
+        return None
+    mult = usd_per_unit(row)
+    if mult is None:
+        return None
+    return abs(float(price) * float(getattr(row, "quantity", 0) or 0) * mult)
 
 
 def pnl_on_capital_pct(pnl, asset_class, notional, *, leverage=None,
@@ -403,6 +462,7 @@ def _trade_to_position(trade, instruments, quotes):
     entry = float(trade.entry_price or 0)
     qty = float(trade.qty or 0)
     vpu = value_per_unit(trade)
+    up.value_per_unit = vpu
     is_option = is_option_row(trade)
 
     if trade.status == "CLOSED":
@@ -802,7 +862,11 @@ def live_book_value(user, portfolio=None, book=None) -> BookValue:
         if getattr(row, "current_price", None) is None \
                 or getattr(row, "unrealized_pnl", None) is None:
             continue
-        row_notional = abs(float(row.current_price) * float(row.quantity or 0))
+        # In USD (notional_usd), never raw price x quantity: a yen-quoted
+        # row's notional is yen, and this sum is the book's money.
+        row_notional = notional_usd(row)
+        if row_notional is None:
+            continue
         allocated += _capital_at_work(row, row_notional)
         if getattr(row, "paper", False):
             simulated_pnl += float(row.unrealized_pnl)
