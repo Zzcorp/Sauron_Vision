@@ -726,6 +726,33 @@ def generate_daily_briefing():
     }
 
 
+def _sizing_notes(portfolio_names) -> dict:
+    """{portfolio name: sizing_gap text} for the books the review reads —
+    "" for a book whose paper pools fit it, or whose owner cannot be
+    named (the shared "Main" book has no owner). Never raises: a note
+    that cannot be read is an empty note, not a missing review."""
+    from django.contrib.auth import get_user_model
+    from portfolio.models import Portfolio
+    from portfolio.risk_gate import sizing_gap
+    from portfolio.services import PER_USER_SUFFIX
+    out = {}
+    for name in portfolio_names:
+        text = ""
+        try:
+            if name and name.endswith(PER_USER_SUFFIX):
+                username = name[: -len(PER_USER_SUFFIX)]
+                user = get_user_model().objects.filter(
+                    username=username).first()
+                book = Portfolio.objects.filter(name=name).first()
+                if user is not None and book is not None:
+                    text = sizing_gap(user, book)["text"]
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[weekly review] sizing note for %s unreadable: %s",
+                           name, e)
+        out[name] = text
+    return out
+
+
 @shared_task
 @guarded_task("agent_weekly_review")
 def generate_weekly_review():
@@ -745,16 +772,26 @@ def generate_weekly_review():
     now = timezone.now()
     week_ago = now - timedelta(days=7)
 
-    # Portfolio snapshots for the last 7 days
+    # Portfolio snapshots for the last 7 days — NAMED (2026-10-04): the
+    # review of 2026-10-02 had to call two unnamed series "Portfolio A"
+    # and "Portfolio B", and graded B "critical, -97.6% drawdown" on a 500
+    # book whose positions a 10,000 manual pool had sized. Each row says
+    # which book it is and, when that book's paper pools exceed it, that
+    # its percentages measure the book and not the money that sized the
+    # positions (risk_gate.sizing_gap).
     snapshots = list(
         PortfolioSnapshot.objects.filter(date__gte=week_ago.date())
-        .order_by("date")
+        .order_by("portfolio__name", "date")
         .values(
-            "date", "total_value", "cash", "daily_pnl", "daily_pnl_pct",
-            "cumulative_pnl_pct", "max_drawdown", "sharpe_ratio",
-            "exposure_by_asset_class", "exposure_by_sector",
+            "portfolio__name", "date", "total_value", "cash", "daily_pnl",
+            "daily_pnl_pct", "cumulative_pnl_pct", "max_drawdown",
+            "sharpe_ratio", "exposure_by_asset_class", "exposure_by_sector",
         )
     )
+    notes = _sizing_notes({s["portfolio__name"] for s in snapshots})
+    for s in snapshots:
+        s["portfolio"] = s.pop("portfolio__name")
+        s["sizing_note"] = notes.get(s["portfolio"], "")
 
     # Active + completed strategies this week
     strategies = list(

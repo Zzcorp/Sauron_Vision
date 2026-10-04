@@ -3368,6 +3368,10 @@ RISK_LIMIT_BOUNDS = {
     # stops (2026-10-01, risk_gate.open_risk_state). Under 1 refuses
     # almost every entry; 100 is the whole account.
     "max_open_risk_pct": (1.0, 100.0, "Max open risk"),
+    # The most notional one venue may carry together, as a MULTIPLE of its
+    # book (2026-10-04, risk_gate.notional_state). 1 is "no leverage at
+    # all"; 50 is past anything a retail venue margins.
+    "max_notional_multiple": (1.0, 50.0, "Max notional multiple"),
 }
 
 # POST field -> Portfolio field. The form names are short and the model names
@@ -3381,12 +3385,13 @@ RISK_LIMIT_FIELDS = {
     "max_theme_legs": "max_theme_legs",
     "max_pledged": "max_pledged_pct",
     "max_open_risk": "max_open_risk_pct",
+    "max_notional": "max_notional_multiple",
 }
 
 # Fields a post may leave OUT (absent, not blank) and keep the stored value:
 # a card rendered before the field existed must still save the others. A
 # field that IS posted is judged like every sibling — blank is refused.
-RISK_LIMIT_OPTIONAL = {"max_pledged", "max_open_risk"}
+RISK_LIMIT_OPTIONAL = {"max_pledged", "max_open_risk", "max_notional"}
 
 
 def _apply_risk_limits(portfolio, post) -> tuple[bool, list[str]]:
@@ -3572,8 +3577,15 @@ def setup(request):
     # so what the card shows is what a bot would decide this second.
     from portfolio.risk_gate import (
         DAILY_LOSS_WINDOW_HOURS, book_value, preflight, single_position_state,
+        sizing_gap,
     )
     risk_state = preflight(request.user, portfolio=limits)
+    # What sized this operator's paper positions against what their book
+    # measures (2026-10-04): said on the card when the pools exceed it.
+    try:
+        risk_sizing_gap = sizing_gap(request.user, limits)
+    except Exception as e:  # noqa: BLE001 — a card never breaks on a read
+        risk_sizing_gap = {"text": "", "error": str(e)}
     # The single-position ceiling in money, so the operator can compare it with
     # the pool capital they armed a bot with. The two are configured on
     # different pages and nothing reconciles them: a 10% ceiling on a 10,000
@@ -3604,6 +3616,8 @@ def setup(request):
         "risk_state": risk_state,
         "risk_daily_loss": risk_state["checks"].get("daily_loss"),
         "risk_open_risk": risk_state["checks"].get("open_risk"),
+        "risk_notional": risk_state["checks"].get("notional"),
+        "risk_sizing_gap": risk_sizing_gap,
         "risk_exposure": risk_state["checks"].get("exposure"),
         "risk_single": risk_single,
         "risk_book_value": book_value(limits),

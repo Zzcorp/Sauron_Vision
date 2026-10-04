@@ -23,6 +23,11 @@ Your review must cover:
 6. NEXT WEEK OUTLOOK: Key events, levels to watch, potential setups.
 7. RISK ASSESSMENT: Portfolio health, concentration risks, correlation concerns.
 
+Every snapshot names its book ("portfolio"). A snapshot whose "sizing_note" is set
+was produced by paper pools larger than the book: its drawdown and percentages
+measure the book, not the money that sized the positions — say so, and never
+grade it as a loss of capital.
+
 Be thorough, analytical, and specific. Reference actual numbers and events.""" + _calls_instruction()
 
     def build_context(self, **kwargs) -> str:

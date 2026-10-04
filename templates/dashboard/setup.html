@@ -196,6 +196,23 @@
                 </div>
             </div>
             <div style="margin-bottom: 16px;">
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX NOTIONAL MULTIPLE (x)</label>
+                <input type="number" step="any" min="1" max="50" required name="max_notional" value="{{ limits.max_notional_multiple }}"
+                    style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+                <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:6px;">
+                    The most notional every open position of one venue may
+                    carry together, as a multiple of that venue&#x27;s book. The
+                    exposure limit above counts a forex position at its margin
+                    (one thirtieth), so a 500 book could carry 14,800 of yen
+                    crosses inside &quot;100% exposure&quot;; this caps the notional
+                    itself. A bot entry that would pass it is refused, never
+                    shrunk; a hand-taken ticket is told. A research pool is
+                    measured against its own pool. 1 to 50.
+                    <br>Now: {% if risk_notional and risk_notional.limit_money is not None %}{{ risk_notional.open_notional|floatformat:2 }} of notional open against a ceiling of {{ risk_notional.limit_money|floatformat:2 }} ({{ risk_notional.multiple|floatformat:"-1" }}x the {{ risk_notional.base|floatformat:2 }} book){% else %}— {{ risk_notional.reason }}{% endif %}
+                    {% if risk_sizing_gap and risk_sizing_gap.text %}<br><span style="color:var(--warn, #d9a441);">{{ risk_sizing_gap.text }}</span>{% endif %}
+                </div>
+            </div>
+            <div style="margin-bottom: 16px;">
                 <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">CORRELATION SIZE TAPER</label>
                 <input type="number" step="any" min="0.01" max="1" required name="max_correlation" value="{{ limits.max_correlation_threshold }}"
                     style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">

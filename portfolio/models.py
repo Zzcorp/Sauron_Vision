@@ -59,6 +59,17 @@ class Portfolio(models.Model):
     # manual ticket. The operator, 2026-10-01, with 25 live bots on one
     # shared account: "15% de risque ouvert max". Bounds 1-100 on the card.
     max_open_risk_pct = models.FloatField(default=15)
+    # The most NOTIONAL one venue's open positions may carry together, as a
+    # MULTIPLE of the venue's book (2026-10-04, risk_gate.notional_state).
+    # The exposure limit above counts a forex row at its margin (1/30), so
+    # "100% max total exposure" let a 500 book carry 14,800 of yen crosses
+    # — 494 at work — and a 3.3% move against it was the whole book. This
+    # caps what the margin model lets through: 4x by default, the same
+    # multiple sizing already allows one forex trade against its pool.
+    # Hard for the bots (preflight and the final size), stated on the
+    # manual ticket; a research pool is measured against itself. 0 reads
+    # as "not set" and switches the gate off. Bounds 1-50 on the card.
+    max_notional_multiple = models.FloatField(default=4.0)
 
     updated_at = models.DateTimeField(auto_now=True)
 

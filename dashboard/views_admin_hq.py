@@ -899,6 +899,15 @@ def hq_toggle_asset_bot(request):
     if arming_live and not _pin_ok(request):
         messages.error(request, "PIN required to arm a LIVE asset bot.")
         return redirect("admin_dashboard")
+    if not cfg.enabled:
+        # A PAPER pool larger than its owner's book is not armed
+        # (2026-10-04, risk_gate.pool_vs_book); disabling never asks.
+        from portfolio.risk_gate import pool_vs_book
+        pool = pool_vs_book(cfg)
+        if not pool["ok"]:
+            messages.error(request, f"AssetBot '{cfg.name}' not armed — "
+                                    f"{pool['reason']}.")
+            return redirect("admin_dashboard")
     cfg.enabled = not cfg.enabled
     cfg.save(update_fields=["enabled", "updated_at"])
     messages.success(

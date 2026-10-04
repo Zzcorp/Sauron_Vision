@@ -1080,6 +1080,198 @@ def exposure_state(user, *, portfolio=None, adding: float = 0.0,
     return state
 
 
+def _is_research(cfg) -> bool:
+    """A research-fleet pool: it measures rules, not an account
+    (seed_research_fleet, extras.research_fleet)."""
+    return bool((getattr(cfg, "extras", None) or {}).get("research_fleet"))
+
+
+def open_notional(user, portfolio, *, venue: str = "live", config=None) -> dict:
+    """{"total", "rows"}: the ENTRY notional, in account money, of one
+    venue's open positions (2026-10-04).
+
+    Every OPEN / CLOSE_PENDING bot and manual row of the venue at
+    qty x entry x value_per_unit, plus the legacy portfolio.Position rows
+    on the live venue that no bot row mirrors (the same two populations
+    open_risk_state reads). Rows of a research-fleet config are left out
+    of a user's book count — a research pool is measured against ITSELF:
+    with `config` naming one, only that config's rows are summed.
+    """
+    from bot_program.models import AssetBotTrade
+    from portfolio.services import value_per_unit
+    venue = "paper" if venue == "paper" else "live"
+    total, rows = 0.0, 0
+    symbols = set()
+    qs = AssetBotTrade.objects.filter(
+        status__in=("OPEN", "CLOSE_PENDING"), paper=(venue == "paper"))
+    if config is not None:
+        qs = qs.filter(config=config)
+    else:
+        qs = qs.filter(config__user=user).select_related("config")
+    for t in qs:
+        if config is None and _is_research(t.config):
+            continue
+        total += (float(t.entry_price or 0) * float(t.qty or 0)
+                  * value_per_unit(t))
+        rows += 1
+        symbols.add(str(t.symbol).upper())
+    if config is None and venue == "live":
+        from portfolio.models import Position
+        for p in (Position.objects.filter(portfolio=portfolio,
+                                          closed_at__isnull=True)
+                  .select_related("instrument")):
+            if str(getattr(p.instrument, "symbol", "")).upper() in symbols:
+                continue
+            total += float(p.entry_price or 0) * float(p.quantity or 0)
+            rows += 1
+    return {"total": round(total, 2), "rows": rows}
+
+
+def notional_state(user, *, portfolio=None, adding: float = 0.0,
+                   venue: str = "live", config=None) -> dict:
+    """Where one venue's open NOTIONAL stands against MAX NOTIONAL MULTIPLE
+    (2026-10-04). Never raises on data.
+
+    {"ok", "reason", "multiple", "limit_money", "open_notional", "adding",
+     "base", "base_label", "book_source", "venue", "rows", "research"}
+
+    A 500 book carried two yen crosses of 14,800 — twenty-nine times
+    itself — inside "100% max total exposure", because that limit counts a
+    forex row at its margin (1/30): 494 at work. The margin model is right
+    about what the broker pledges and silent about what a 3.3% move does
+    to a book thirty times smaller than its positions. This is the cap on
+    the notional itself: the venue's open notional plus `adding` (a
+    candidate's own) may not pass `max_notional_multiple` x the venue's
+    book — the broker's equity for live (venue_book_value), the owner's
+    /setup/ book for paper. A research-fleet config is measured against
+    its OWN pool, with its own rows only: its pool was sized to measure
+    rules, not to fit an account (`config` names it; any other config
+    reads the book). Hard for the bots, stated on the manual ticket.
+    """
+    portfolio = portfolio if portfolio is not None else limits_book()
+    venue = "paper" if venue == "paper" else "live"
+    multiple = _limit_pct(portfolio, "max_notional_multiple")
+    research = config is not None and _is_research(config)
+    if research:
+        base = float(getattr(config, "capital", 0) or 0) or None
+        base_label, book_source = "research pool", "its own pool"
+    else:
+        base, book_source = venue_book_value(user, portfolio, venue)
+        base_label = "book"
+    state = {"ok": True, "multiple": multiple, "limit_money": None,
+             "open_notional": 0.0, "adding": round(float(adding or 0.0), 2),
+             "base": base, "base_label": base_label, "book_source": book_source,
+             "venue": venue, "rows": 0, "research": research, "reason": ""}
+    if multiple is None:
+        state["reason"] = "no notional multiple set on the book"
+        return state
+    if base is None:
+        state["reason"] = (f"notional cap {multiple:g}x is a multiple of a "
+                           f"{base_label} that has never been set — nothing "
+                           f"to measure it against")
+        return state
+    held = open_notional(user, portfolio, venue=venue,
+                         config=config if research else None)
+    state["open_notional"] = held["total"]
+    state["rows"] = held["rows"]
+    limit_money = base * multiple
+    state["limit_money"] = round(limit_money, 2)
+    after = held["total"] + float(adding or 0.0)
+    if after > limit_money + 1e-9:
+        state["ok"] = False
+        state["reason"] = (
+            f"{after:,.2f} of notional open{' with this entry' if adding else ''}"
+            f" — {after / base:.1f}x the {base:,.2f} {base_label}; the cap is "
+            f"{multiple:g}x ({limit_money:,.2f})")
+        return state
+    state["reason"] = (f"{after:,.2f} of {limit_money:,.2f} notional ceiling "
+                       f"({multiple:g}x the {base_label})")
+    return state
+
+
+def pool_vs_book(cfg, *, portfolio=None) -> dict:
+    """Whether a PAPER pool fits the book of the user who owns it
+    (2026-10-04). {"ok", "reason", "pool", "book", "research", "mode"}.
+
+    A bot sizes from AssetBotConfig.capital and the owner's book is a
+    different number: a 10,000 manual pool on a 500 book sizes positions
+    that book cannot carry, and the book's drawdown then reads a loss the
+    pool never felt. A paper pool larger than its owner's book is refused
+    at arming (bot on, the HQ and map toggles) and at can_open_new, and
+    said on the manual ticket. Two exceptions, named: a research-fleet
+    pool measures rules, not an account (extras.research_fleet); a live
+    pool is judged against the broker account (capital_truth), not here.
+    A book never set measures nothing — ok, said.
+    """
+    research = _is_research(cfg)
+    pool = float(getattr(cfg, "capital", 0) or 0)
+    mode = str(getattr(cfg, "mode", "paper") or "paper")
+    state = {"ok": True, "reason": "", "pool": pool, "book": None,
+             "research": research, "mode": mode}
+    if research:
+        state["reason"] = "research pool — measures rules, not an account"
+        return state
+    if mode == "live":
+        state["reason"] = ("live pool — judged against the broker account, "
+                           "not the /setup/ book")
+        return state
+    portfolio = portfolio if portfolio is not None else limits_book()
+    book = gate_book_value(getattr(cfg, "user", None), portfolio)
+    state["book"] = book
+    if book is None:
+        state["reason"] = ("the owner's book has never been set — nothing "
+                           "to measure the pool against")
+        return state
+    if pool > book + 1e-9:
+        state["ok"] = False
+        state["reason"] = (
+            f"pool {pool:,.2f} declares more than the {book:,.2f} book its "
+            f"owner set at /setup/ ({pool / book:.1f}x) — a paper pool sizes "
+            f"what the book cannot carry; size the pool to the book, raise "
+            f"the book, or mark the config research")
+        return state
+    state["reason"] = f"pool {pool:,.2f} inside the {book:,.2f} book"
+    return state
+
+
+def sizing_gap(user, portfolio=None) -> dict:
+    """What sized this user's paper positions against what the book
+    measures (2026-10-04). {"book", "pools", "research_pools", "configs",
+    "text"} — `text` is "" when the pools fit the book.
+
+    The weekly review of 2026-10-02 graded a 500 book "critical, -97.6%
+    drawdown" on positions a 10,000 manual pool had sized: a ratio
+    between two numbers that do not know each other. When the enabled
+    paper pools (research pools counted apart) exceed the book, the book
+    says so wherever its percentages are read.
+    """
+    from bot_program.models import AssetBotConfig
+    portfolio = portfolio if portfolio is not None else limits_book()
+    book = gate_book_value(user, portfolio)
+    pools = research = 0.0
+    n = 0
+    if user is not None:
+        for cfg in AssetBotConfig.objects.filter(user=user, enabled=True,
+                                                 mode="paper"):
+            cap = float(cfg.capital or 0)
+            if _is_research(cfg):
+                research += cap
+                continue
+            pools += cap
+            n += 1
+    out = {"book": book, "pools": round(pools, 2),
+           "research_pools": round(research, 2), "configs": n, "text": ""}
+    if book is not None and pools > book + 1e-9:
+        extra = (f" (and {research:,.2f} of research pools)" if research
+                 else "")
+        out["text"] = (
+            f"Sized by {n} paper pool{'' if n == 1 else 's'} totalling "
+            f"{pools:,.2f}{extra} against a {book:,.2f} book — the "
+            f"percentages and the drawdown measure the book, not the money "
+            f"that sized the positions.")
+    return out
+
+
 def single_position_state(portfolio, *, asset_class: str, user=None,
                           notional: float, capital_base: float = None,
                           base_label: str = "book", leverage=None,
@@ -1722,8 +1914,13 @@ def correlation_state(user, instrument, *, portfolio=None,
     return state
 
 
-def preflight(user, *, portfolio=None, now=None, venue: str = "") -> dict:
+def preflight(user, *, portfolio=None, now=None, venue: str = "",
+              config=None) -> dict:
     """The book-level limits, checked before any new position anywhere.
+
+    `config` (2026-10-04) is the bot config asking, for the notional cap
+    alone: a research-fleet pool is measured against itself, every other
+    caller against the venue's book (notional_state).
 
     `venue` ("live" / "paper") judges both limits on that venue alone
     (2026-09-30). `AssetBot.can_open_new` names its config's venue: unnamed,
@@ -1767,6 +1964,13 @@ def preflight(user, *, portfolio=None, now=None, venue: str = "") -> dict:
         # (the cards, the manual preview) it reads the real book.
         checks["open_risk"] = open_risk_state(
             user, portfolio=portfolio,
+            venue=("paper" if venue == "paper" else "live"))
+        # MAX NOTIONAL MULTIPLE (2026-10-04): what the margin model lets
+        # through, capped on the notional itself — a 500 book carried
+        # 14,800 of yen crosses at 494 of margin. Nothing added here;
+        # the final size asks again with the candidate's own.
+        checks["notional"] = notional_state(
+            user, portfolio=portfolio, config=config,
             venue=("paper" if venue == "paper" else "live"))
     except Exception as e:  # noqa: BLE001 — see the fail-open note above
         logger.error("[risk_gate] book limits unreadable, entries NOT gated "

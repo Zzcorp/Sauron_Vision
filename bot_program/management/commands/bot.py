@@ -4,7 +4,9 @@ admin page, with the page's own rule.
 The page asks the trading PIN to ARM a live bot and nothing to stop
 one: stopping must stay frictionless. Here `--yes` plays the PIN's
 role for arming a live config; `bot off` never asks. Read-only until
-told otherwise; never touches the broker.
+told otherwise; never touches the broker. A PAPER pool larger than the
+book its owner set at /setup/ is not armed (2026-10-04,
+risk_gate.pool_vs_book — research pools and live pools are exempt).
 
 `bot off` is not a pause of entries alone: the runner skips a disabled
 config whole, so its open positions lose their time stop, trailing and
@@ -63,6 +65,16 @@ class Command(BaseCommand):
                     f"{cfg.base_currency}, {len(cfg.symbols or [])} symbols): arming it "
                     f"puts real money in play — the page asks the PIN here. Add --yes."))
                 continue
+            if enable:
+                # A PAPER pool larger than its owner's book is not armed
+                # (2026-10-04, risk_gate.pool_vs_book) — the page's toggles
+                # refuse it the same way; stopping never asks.
+                from portfolio.risk_gate import pool_vs_book
+                pool = pool_vs_book(cfg)
+                if not pool["ok"]:
+                    self.stdout.write(self.style.ERROR(
+                        f"[{pk}] {cfg.name}: not armed — {pool['reason']}"))
+                    continue
             cfg.enabled = enable
             cfg.save(update_fields=["enabled", "updated_at"])
             self.stdout.write(self.style.SUCCESS(

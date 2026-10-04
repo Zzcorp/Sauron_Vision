@@ -698,6 +698,15 @@ def system_map_toggle(request):
         cfg = AssetBotConfig.objects.filter(pk=key, user=request.user).first()
         if cfg is None:
             return JsonResponse({"ok": False, "error": "bot not found"}, status=404)
+        if not cfg.enabled:
+            # A PAPER pool larger than its owner's book is not armed
+            # (2026-10-04, risk_gate.pool_vs_book); disabling never asks.
+            from portfolio.risk_gate import pool_vs_book
+            pool = pool_vs_book(cfg)
+            if not pool["ok"]:
+                return JsonResponse({"ok": False, "enabled": False,
+                                     "error": f"not armed — {pool['reason']}"},
+                                    status=409)
         cfg.enabled = not cfg.enabled
         cfg.save(update_fields=["enabled"])
         return JsonResponse({"ok": True, "enabled": cfg.enabled,
