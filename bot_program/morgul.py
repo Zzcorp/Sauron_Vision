@@ -763,6 +763,17 @@ def check_proofs(ctx, g) -> list:
 
 # ── G6: the margin ───────────────────────────────────────────────────────
 
+def margin_alarm_fraction(ceiling: float) -> float:
+    """Where G6 sounds: the ceiling plus MARGIN_SLACK, never above the
+    whole account (2026-10-05: the operator set the ceiling to 100%, and
+    an alarm at 105% of equity would never sound — at 100% it sounds the
+    moment the margin used exceeds the equity)."""
+    try:
+        return min(float(ceiling) + MARGIN_SLACK, 1.0)
+    except (TypeError, ValueError):
+        return 1.0
+
+
 def check_margin(ctx, g) -> list:
     """The eToro sync's cells (last_used_margin, last_equity, their age
     last_margin_at and world last_margin_world): pledged past
@@ -776,7 +787,7 @@ def check_margin(ctx, g) -> list:
     from bot_program.asset_engine import base
     from bot_program.models import EtoroAccount
     fraction = float(base.pledged_ceiling())
-    alarm = fraction + MARGIN_SLACK
+    alarm = margin_alarm_fraction(fraction)
     out = []
     for acct in (EtoroAccount.objects.exclude(api_key_enc="")
                  .select_related("user").order_by("pk")):

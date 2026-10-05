@@ -51,10 +51,28 @@ class TheReaderTests(TestCase):
 
     def test_out_of_bounds_falls_back_to_the_default(self):
         from bot_program.asset_engine.base import pledged_ceiling
-        for pct in (0, 5, 9.9, 95.1, 100, 150, -10):
+        for pct in (0, 5, 9.9, 100.1, 150, -10):
             _set(pct)
             with self.assertLogs("bot_program.asset_engine.base", "WARNING"):
                 self.assertEqual(pledged_ceiling(), 0.5, pct)
+
+    def test_the_whole_account_may_be_pledged_since_the_operator_asked(self):
+        """2026-10-05: "même 100% de cap". 95 was the ceiling of the card
+        and of the reader; 100 now reads as the whole account, and Morgul's
+        alarm, the ceiling plus its slack, is clamped at the whole account
+        so it still sounds — the moment the margin used exceeds the equity."""
+        from bot_program.asset_engine.base import (PLEDGED_PCT_BOUNDS,
+                                                   pledged_ceiling)
+        from bot_program.morgul import MARGIN_SLACK, margin_alarm_fraction
+        self.assertEqual(PLEDGED_PCT_BOUNDS, (10.0, 100.0))
+        _set(100)
+        self.assertEqual(pledged_ceiling(), 1.0)
+        _set(95.1)
+        self.assertAlmostEqual(pledged_ceiling(), 0.951)
+        self.assertAlmostEqual(margin_alarm_fraction(0.8), 0.8 + MARGIN_SLACK)
+        self.assertEqual(margin_alarm_fraction(1.0), 1.0)
+        self.assertEqual(margin_alarm_fraction(0.97), 1.0)
+        self.assertEqual(margin_alarm_fraction("x"), 1.0)
 
     def test_an_unreadable_book_falls_back_to_the_default(self):
         from bot_program.asset_engine.base import pledged_ceiling
@@ -94,6 +112,21 @@ class MorgulFollowsTheCeilingTests(_Case):
         self.assertIn("Pledged: 90.0% of equity; the limit is 80.0%, the "
                       "alarm 85.0%", f.facts)
 
+    def test_at_the_whole_account_the_alarm_sounds_past_the_equity_not_never(self):
+        """A ceiling of 100 plus five points would put the alarm at 105%
+        of equity, which never comes: the alarm is clamped at the whole
+        account, quiet at 99%, critical the moment the margin exceeds it."""
+        _set(100)
+        acct = self._acct(99)
+        self.assertEqual(_check("margin", self.now)[1], [])
+        acct.last_used_margin = Decimal("101")
+        acct.save(update_fields=["last_used_margin"])
+        f = _by_subject(_check("margin", self.now)[1])[
+            f"account:{acct.pk}:pledged"]
+        self.assertEqual(f.severity, "critical")
+        self.assertIn("Pledged: 101.0% of equity; the limit is 100.0%, the "
+                      "alarm 100.0%", f.facts)
+
 
 class TheCardTests(TestCase):
 
@@ -126,12 +159,25 @@ class TheCardTests(TestCase):
     def test_blank_or_out_of_bounds_is_refused_and_nothing_is_saved(self):
         from portfolio.risk_gate import limits_book
         _set(70)
-        for raw in ("", "5", "99", "abc"):
+        for raw in ("", "5", "101", "abc"):
             r = self._post(max_pledged=raw, max_daily_loss="4")
             self.assertContains(r, "NOT saved")
             book = limits_book()
             self.assertAlmostEqual(book.max_pledged_pct, 70.0, msg=raw)
             self.assertNotAlmostEqual(book.max_daily_loss_pct, 4.0, msg=raw)
+
+    def test_the_card_takes_the_whole_account_since_the_operator_asked(self):
+        """2026-10-05, "même 100% de cap": 100 saves (95 was the card's
+        ceiling), 100.1 does not, and the card says what 100 means."""
+        from portfolio.risk_gate import limits_book
+        self._post(max_pledged="100")
+        self.assertAlmostEqual(limits_book().max_pledged_pct, 100.0)
+        r = self.client.get("/setup/")
+        self.assertContains(r, 'max="100"')
+        self.assertContains(r, "one gap can take the whole account")
+        r = self._post(max_pledged="100.1")
+        self.assertContains(r, "NOT saved")
+        self.assertAlmostEqual(limits_book().max_pledged_pct, 100.0)
 
     def test_a_form_without_the_field_keeps_it_and_saves_the_rest(self):
         """A card rendered before the field existed still saves."""

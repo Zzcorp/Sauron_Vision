@@ -3375,9 +3375,9 @@ RISK_LIMIT_BOUNDS = {
     "max_theme_legs": (0, 20, "Max theme legs"),
     # The share of the eToro account pledged after an order (2026-10-01,
     # asset_engine.base.pledged_ceiling, which uses the same bounds). 100
-    # would let one gap take the whole account; under 10 refuses almost any
-    # real order.
-    "max_pledged_pct": (10.0, 95.0, "Max account pledged"),
+    # lets one gap take the whole account — the operator asked for it
+    # (2026-10-05) knowing that; under 10 refuses almost any real order.
+    "max_pledged_pct": (10.0, 100.0, "Max account pledged"),
     # What the open positions of one venue may lose together at their
     # stops (2026-10-01, risk_gate.open_risk_state). Under 1 refuses
     # almost every entry; 100 is the whole account.
