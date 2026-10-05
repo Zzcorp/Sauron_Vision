@@ -385,7 +385,9 @@ ORDER_LEVERAGE_CEILING = {"stock": 5, "etf": 5, "index": 20,
 #: out-of-bounds value falls back to.
 MAX_PLEDGED_FRACTION = 0.5
 #: The bounds a stored percentage must sit in to be used (the card's own).
-PLEDGED_PCT_BOUNDS = (10.0, 95.0)
+#: 100 since 2026-10-05: the operator asked for the whole account ("même
+#: 100% de cap"), told that one gap can then take all of it, and kept it.
+PLEDGED_PCT_BOUNDS = (10.0, 100.0)
 
 
 def pledged_ceiling() -> float:
