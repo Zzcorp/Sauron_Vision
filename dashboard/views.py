@@ -1750,6 +1750,20 @@ def _live_row(row, stops, levs=None):
         "protected": bool(getattr(row, "protected", False)),
         "unrealized_pnl": pnl,
         "unrealized_pnl_pct": pct,
+        # Which price marked the row (portfolio.services, venue_mark):
+        # "venue" is the real row's own venue rate, "quote" the platform's
+        # feed. Printed beside the price so a CFD's entry against a futures
+        # feed is never read as money.
+        "mark_source": getattr(row, "mark_source", None),
+        "mark_word": {"venue": "venue", "quote": "feed"}.get(
+            getattr(row, "mark_source", None) or "", ""),
+        "mark_title": {
+            "venue": "Marked at the venue's own rate, read by the manage "
+                     "tick within the last 15 minutes.",
+            "quote": "Marked at the platform's quote feed" + (
+                " — the venue's own rate has not been read in the last 15 "
+                "minutes." if not getattr(row, "paper", True) else "."),
+        }.get(getattr(row, "mark_source", None) or "", ""),
         "last_text": _live_num(mark, "{:,.4f}"),
         "pnl_text": _live_num(pnl),
         "pnl_tone": _live_tone(pnl),
