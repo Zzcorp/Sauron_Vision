@@ -625,6 +625,13 @@ def _close_asset_trade(trade, now):
             pnl *= float(forex_usd_multiplier(trade))
         except Exception:  # noqa: BLE001
             pass
+    # What a scale-out banked (position_care, 2026-10-04): already in base
+    # currency, added outside the multipliers, as AssetBot._realised_pnl does.
+    try:
+        from bot_program.asset_engine.base import AssetBot
+        pnl += float(AssetBot.banked_pnl(trade))
+    except Exception:  # noqa: BLE001
+        pass
 
     trade.exit_price = exit_price
     trade.closed_at = now

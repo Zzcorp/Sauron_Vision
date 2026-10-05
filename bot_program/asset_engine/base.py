@@ -2584,10 +2584,119 @@ class AssetBot(ABC):
         return price if price > 0 else None
 
     def _trade_pnl(self, trade, price: Decimal) -> Decimal:
-        """Realised pnl for closing `trade` at `price` (config base_currency)."""
+        """Realised pnl for closing `trade` at `price` (config base_currency)
+        — the row's CURRENT size; the forex and options bots multiply this.
+        What a scale-out already banked is added by `_realised_pnl`, outside
+        every multiplier (the banked figure is already in base currency)."""
         if trade.side == "BUY":
             return (price - trade.entry_price) * trade.qty
         return (trade.entry_price - price) * trade.qty
+
+    @staticmethod
+    def banked_pnl(trade) -> Decimal:
+        """What a scale-out banked on this row (metadata["scale_out"]["pnl"],
+        base currency), or 0."""
+        so = (getattr(trade, "metadata", None) or {}).get("scale_out") or {}
+        try:
+            return Decimal(str(so.get("pnl") or 0))
+        except (InvalidOperation, TypeError, ValueError):
+            return Decimal(0)
+
+    def _realised_pnl(self, trade, price: Decimal) -> Decimal:
+        """The whole row's realised pnl at `price`: the remaining size at
+        this price plus what the scale-out banked (2026-10-04). Every path
+        that books a close reads this one; `_trade_pnl` stays the per-size
+        step the subclasses multiply."""
+        return self._trade_pnl(trade, price) + self.banked_pnl(trade)
+
+    def _scale_out_paper(self, trade, price, fraction: float, *,
+                         why: str = "scale-out") -> bool:
+        """Bank `fraction` of a PAPER row at the modelled fill, once
+        (2026-10-04, position_care). True when booked.
+
+        The row keeps its identity — one trade, one ledger line — and
+        shrinks: `qty` becomes the remainder, metadata["scale_out"] carries
+        the banked size, its fill, its pnl (base currency, through this
+        bot's own `_trade_pnl` so a forex or options row converts as its
+        close would), its R and the ORIGINAL size (grading divides by it),
+        and care["scaled_out"] stops a second one. Refused — nothing
+        written — on a live row (eToro closes whole; measured 2026-09-23),
+        on a shut market (the paper venue's own rule), on a size that
+        cannot be split (position_care.scale_out_qty) and on a row already
+        banked or no longer OPEN, read fresh under a row lock.
+        """
+        import copy
+
+        from django.db import transaction
+
+        from bot_program.asset_models import AssetBotTrade
+        from bot_program.asset_engine.risk_levels import paper_fill_price
+        from bot_program.engine.paper_trader import paper_market_shut
+        from bot_program.position_care import scale_out_qty
+
+        if not trade.paper:
+            return False
+        if paper_market_shut(trade.symbol, trade.asset_class):
+            return False
+        banked_qty = scale_out_qty(trade, fraction)
+        if banked_qty <= 0:
+            return False
+        exit_side = "SELL" if trade.side == "BUY" else "BUY"
+        fill = Decimal(str(paper_fill_price(self.cfg, trade.symbol,
+                                            float(price), exit_side)))
+        if fill <= 0:
+            return False
+        part = copy.copy(trade)
+        part.qty = banked_qty
+        part.metadata = {k: v for k, v in (trade.metadata or {}).items()
+                         if k != "scale_out"}
+        banked_pnl = self._trade_pnl(part, fill)
+        entry = Decimal(str(trade.entry_price))
+        init = (trade.metadata or {}).get("initial_stop_loss")
+        try:
+            risk = abs(entry - Decimal(str(init if init is not None
+                                          else trade.stop_loss)))
+        except (InvalidOperation, TypeError, ValueError):
+            risk = Decimal(0)
+        d = Decimal(1) if trade.side == "BUY" else Decimal(-1)
+        r_at = float(d * (fill - entry) / risk) if risk > 0 else None
+        now = timezone.now()
+        with transaction.atomic():
+            row = AssetBotTrade.objects.select_for_update().get(pk=trade.pk)
+            if row.status != "OPEN" or (row.metadata or {}).get("scale_out"):
+                return False
+            original = Decimal(str(row.qty))
+            if banked_qty >= original:
+                return False
+            meta = dict(row.metadata or {})
+            meta["scale_out"] = {
+                "qty": str(banked_qty), "price": str(fill),
+                "pnl": str(banked_pnl.quantize(Decimal("0.00000001"))),
+                "r": None if r_at is None else round(r_at, 3),
+                "at": now.isoformat(), "original_qty": str(original),
+                "fraction": float(banked_qty / original), "why": why,
+            }
+            care = dict(meta.get("care") or {})
+            care["scaled_out"] = True
+            meta["care"] = care
+            row.qty = original - banked_qty
+            row.metadata = meta
+            row.save(update_fields=["qty", "metadata"])
+        trade.qty = row.qty
+        trade.metadata = meta
+        logger.info("[%s_bot] %s #%s scaled out: %s of %s banked at %s "
+                    "(%s), %s left", self.asset_class, trade.symbol, trade.id,
+                    banked_qty, original, fill, why, row.qty)
+        try:
+            from dashboard.consumers import push_eye_event
+            push_eye_event(self.user, "scale_out", {
+                "trade_id": trade.id, "asset_class": self.asset_class,
+                "symbol": trade.symbol, "banked_qty": str(banked_qty),
+                "remaining_qty": str(row.qty), "price": str(fill)})
+        except Exception as e:  # noqa: BLE001 — a WS hiccup banks nothing less
+            logger.warning("[%s_bot] WS push (scale_out) failed: %s",
+                           self.asset_class, e)
+        return True
 
     def _submit_close_order(self, trade, client, client_order_id: str):
         """Submit the broker order that flattens `trade`. Raise on failure.
@@ -3065,7 +3174,8 @@ class AssetBot(ABC):
 
         price = fill["price"]
         trade.metadata = {**(trade.metadata or {}), **fill["metadata"]}
-        pnl = self._trade_pnl(trade, price)
+        # the remaining size at this fill, plus what a scale-out banked
+        pnl = self._realised_pnl(trade, price)
         trade.exit_price = price
         trade.pnl = pnl
         trade.status = "CLOSED"

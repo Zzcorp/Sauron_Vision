@@ -364,7 +364,8 @@ def preview_close(user, trade) -> dict:
                          f"now would book the exit at a price nobody quoted"}
 
     fill = _exit_fill(trade, float(mark))
-    pnl = float(bot._trade_pnl(trade, Decimal(str(fill))))
+    # the remainder at this fill plus what a scale-out banked (2026-10-04)
+    pnl = float(bot._realised_pnl(trade, Decimal(str(fill))))
     risk = _risk_dollars(trade)
     r_now = round(pnl / risk, 2) if risk > 0 else None
     return {

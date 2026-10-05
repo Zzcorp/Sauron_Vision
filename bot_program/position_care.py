@@ -57,8 +57,23 @@ never on the manual lane. It is already beyond the crowd, so the crowd
 read does not move it. The operator: "can the price come back... if yes
 adjust" — the adjustment is the stop under the sweep, never a wider one.
 
-Every close is a AragornAction. Never raises: care that fails leaves the
-row to the rest of manage_positions, exactly as before.
+THE SCALE-OUT (2026-10-04, the operator's list: "half at +1R, the rest to
+break-even and trailed"): a PAPER bot row whose mark reaches +SCALE_OUT_AT_R
+banks SCALE_OUT_FRACTION of its size at the modelled fill, once; the rest
+rides the break-even and the trail above. The banked half is written on
+the row (metadata["scale_out"]: qty, price, pnl, R, the original size),
+the row's qty shrinks, and the final close adds the banked money back
+(AssetBot._realised_pnl) while grading divides by the ORIGINAL size
+(bot_grading), so the ledger keeps ONE trade with its blended R. Under the
+aragorn_scale_out switch, beside Aragorn's own. Never on a LIVE row: eToro
+closes a position whole (UnitsToDeduct is accepted and never executes,
+measured 2026-09-23), so a real-money half cannot be sold — those rows keep
+break-even and trail. Never on the manual lane, never on options, never
+on a stock or ETF row too small to split into whole shares.
+
+Every close and every scale-out is a AragornAction. Never raises: care
+that fails leaves the row to the rest of manage_positions, exactly as
+before.
 """
 import logging
 from datetime import time as dtime
@@ -91,6 +106,41 @@ NO_PROGRESS_HOURS = {"forex": 96, "index": 96, "commodity": 120,
 NO_PROGRESS_DEFAULT_HOURS = 120
 NO_PROGRESS_MAX_R = 0.3
 NEVER_SHUTS = frozenset({"crypto"})
+#: THE SCALE-OUT: at +SCALE_OUT_AT_R on the mark, SCALE_OUT_FRACTION of a
+#: paper bot row is banked, once. Stock and ETF rows split in whole shares.
+SCALE_OUT_AT_R = 1.0
+SCALE_OUT_FRACTION = 0.5
+WHOLE_UNIT_CLASSES = frozenset({"stock", "etf"})
+SCALE_OUT_SWITCH = "aragorn_scale_out"
+
+
+def scale_out_on() -> bool:
+    """The aragorn_scale_out switch, read like every component (a missing
+    row reads OFF; `manage.py component on aragorn_scale_out`)."""
+    try:
+        from core.platform_control import is_component_enabled
+        return bool(is_component_enabled(SCALE_OUT_SWITCH))
+    except Exception:  # noqa: BLE001 — an unreadable switch scales nothing
+        return False
+
+
+def scale_out_qty(trade, fraction: float = SCALE_OUT_FRACTION):
+    """The size to bank, as a Decimal, or 0 when the row cannot be split:
+    a stock or ETF row banks whole shares and keeps at least one; any
+    other class banks the exact fraction."""
+    from decimal import Decimal
+    try:
+        qty = Decimal(str(trade.qty))
+    except Exception:  # noqa: BLE001
+        return Decimal(0)
+    if qty <= 0 or not 0 < float(fraction) < 1:
+        return Decimal(0)
+    if str(trade.asset_class) in WHOLE_UNIT_CLASSES:
+        part = int(qty * Decimal(str(fraction)))
+        if part < 1 or qty - part < 1:
+            return Decimal(0)
+        return Decimal(part)
+    return (qty * Decimal(str(fraction))).quantize(Decimal("0.00000001"))
 
 
 def _f(x):
@@ -131,11 +181,15 @@ def market_hours(start, now, asset_class) -> float:
 
 
 def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
-         live=False, manual=False, crowd=None) -> dict:
+         live=False, manual=False, crowd=None, scale=False) -> dict:
     """The care decision for one row at one mark — pure, no I/O:
     {action: "hold"|"close", reason: "SL"|"TIME"|"", why, care: {...},
-     changed: bool}. `crowd` = {"atr", "levels"} (smart_money.care_levels)
-    places the profit locks beyond the crowd's levels."""
+     changed: bool[, scale_out: {fraction, r_now}]}. `crowd` = {"atr",
+    "levels"} (smart_money.care_levels) places the profit locks beyond the
+    crowd's levels. `scale` (2026-10-04): the row may bank a fraction at
+    +SCALE_OUT_AT_R — a paper bot row with the switch on; `scale_out` is
+    set on a HOLD whose mark stands at or past it and that has not banked
+    yet (care["scaled_out"]). Never with a close, never on the manual lane."""
     now = now or timezone.now()
     meta = dict(trade.metadata or {})
     care = dict(meta.get("care") or {})
@@ -222,6 +276,17 @@ def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
                        f"({r_now:+.2f}R, best {mfe:+.2f}R)")
         out["care"]["exit"] = soft_why
         return out
+    if scale and not manual and not care.get("scaled_out") \
+            and str(trade.asset_class) != "options" \
+            and r_now >= SCALE_OUT_AT_R:
+        # THE SCALE-OUT: the mark stands at +1R NOW (not the peak — a
+        # half banked at a price the market left would be a fiction);
+        # the caller books the fraction and marks care["scaled_out"].
+        out["scale_out"] = {"fraction": SCALE_OUT_FRACTION,
+                            "r_now": round(r_now, 3),
+                            "why": f"scale-out: {r_now:+.2f}R reached, "
+                                   f"{SCALE_OUT_FRACTION:.0%} banked, the "
+                                   f"rest to break-even and the trail"}
     if manual:
         # THE OPERATOR'S OWN POSITION: profits are protected (break-even,
         # trail, the weekend lock above); nothing cuts it on a rule.
@@ -348,8 +413,12 @@ def care(bot, trade, price, client, *, now=None) -> str:
                         logger.info("[care] %s #%s: crowd levels unread (%s)",
                                     trade.symbol, trade.id, e)
                         return None
+        # The scale-out is asked of a PAPER bot row only (the docstring:
+        # eToro closes whole; the manual lane is the operator's).
+        scale = bool(trade.paper) and not manual and scale_out_on()
         decision = plan(trade, price, now=now, posture_level=level, kind=kind,
-                        live=not trade.paper, manual=manual, crowd=crowd)
+                        live=not trade.paper, manual=manual, crowd=crowd,
+                        scale=scale)
     except Exception as e:  # noqa: BLE001 — care that fails changes nothing
         logger.warning("[care] %s #%s not cared for: %s", trade.symbol,
                        trade.id, e)
@@ -377,6 +446,8 @@ def care(bot, trade, price, client, *, now=None) -> str:
         logger.warning("[care] %s #%s: care not saved: %s", trade.symbol,
                        trade.id, e)
     if decision["action"] != "close":
+        if decision.get("scale_out"):
+            _scale_out(bot, trade, price, decision)
         return ""
     closed = bot._close_trade(trade, price, client, reason=decision["reason"])
     try:
@@ -393,3 +464,37 @@ def care(bot, trade, price, client, *, now=None) -> str:
     logger.info("[care] %s #%s %s: %s", trade.symbol, trade.id,
                 "closed" if closed else "close pending", decision["why"])
     return "closed" if closed else "attempted"
+
+
+def _scale_out(bot, trade, price, decision) -> bool:
+    """Bank the fraction `plan` asked for on a paper row, journal it. The
+    row stays with the rest of the tick either way (the soft stop and the
+    SL/TP check below it read the reduced size). Never raises."""
+    ask = decision.get("scale_out") or {}
+    try:
+        banked = bot._scale_out_paper(trade, price, float(ask.get("fraction")
+                                                           or SCALE_OUT_FRACTION),
+                                      why=str(ask.get("why") or "scale-out"))
+    except Exception as e:  # noqa: BLE001 — a scale-out that fails banks nothing
+        logger.warning("[care] %s #%s: scale-out not booked: %s", trade.symbol,
+                       trade.id, e)
+        return False
+    if not banked:
+        return False
+    so = (trade.metadata or {}).get("scale_out") or {}
+    try:
+        from bot_program.aragorn_models import AragornAction
+        AragornAction.objects.create(
+            kind="scale_out", rule_name=trade.rule_name or "",
+            asset_class=trade.asset_class, symbol=trade.symbol,
+            trade_id=trade.id, detail=str(ask.get("why") or "scale-out"),
+            stats={"banked_qty": so.get("qty"), "banked_r": so.get("r"),
+                   "remaining_qty": str(trade.qty),
+                   "mfe_r": decision["care"].get("mfe_r"),
+                   "r_now": decision["care"].get("r_now")})
+    except Exception as e:  # noqa: BLE001
+        logger.info("[care] scale-out journal not written: %s", e)
+    logger.info("[care] %s #%s scaled out: %s banked at %s, %s left",
+                trade.symbol, trade.id, so.get("qty"), so.get("price"),
+                trade.qty)
+    return True
