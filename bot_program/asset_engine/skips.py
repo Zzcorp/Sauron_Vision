@@ -98,6 +98,13 @@ ELIGIBILITY_REFUSED = "eligibility_refused"
 # weekend of refusals reads as the clock, never as a dead feed (no_price).
 MARKET_SHUT = "market_shut"
 
+# 2026-10-05. An OPEN row left alone for one tick because its mark was
+# suspect (a jump past the class's bar without a second print or the
+# platform's quote behind it) or frozen (the same print for FROZEN_MINUTES
+# in an open market) — bot_program/mark_sanity. Its own code so a glitchy
+# or dead feed reads as such, never as a quiet market or a stopped bot.
+SUSPECT_MARK = "suspect_mark"
+
 MAX_SYMBOLS_TRACKED = 200
 
 
@@ -221,6 +228,12 @@ def diagnose(cfg) -> str:
                      "15 minutes ago, so the paper venue fills nothing — "
                      "nothing is wrong with the feed; paper fills resume "
                      "at the hour the detail names",
+        SUSPECT_MARK: "an open position was left alone for a tick because "
+                      "its mark was suspect (one print far from the last "
+                      "accepted one, or from the platform's own quote) or "
+                      "frozen (the same print for 45 minutes in an open "
+                      "market) — read the detail; the next sane print "
+                      "manages the row again",
     }.get(top, "")
     return (f"{top} accounts for {share:.0%} of {total} skips"
             + (f" — {advice}" if advice else ""))

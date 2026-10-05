@@ -222,6 +222,8 @@ SKIP_WORDS = {
     "leverage_refused": "a levered order was refused before it left",
     "eligibility_refused": "eToro's eligibility rules refused the entry",
     "market_shut": "the market was shut, so no paper fill",
+    "suspect_mark": "an open position was left alone for a tick: its mark "
+                    "was suspect or frozen",
 }
 
 
