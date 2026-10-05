@@ -399,9 +399,13 @@ def _attack_lines(w, cfg, kind, venue, now, blockers, warnings) -> None:
         ceiling = min(int(MAX_ORDER_LEVERAGE),
                       int(ORDER_LEVERAGE_CEILING.get(icls, 1)))
         proven = proven_leverage(icls)
-        most = min(ceiling, proven) if on else 1
-        w(f"          {icls}: ceiling {ceiling}x, proven {proven}x — the "
-          f"chooser picks at most {most}x"
+        # 2026-10-05 ("pas de limite à l'attaque"): the proven multiplier
+        # is a record, not a bound — the chooser picks on the LIVE list,
+        # the ceiling and the stop band with its headroom
+        most = ceiling if on else 1
+        w(f"          {icls}: ceiling {ceiling}x (the venue's class "
+          f"maximum), measured at {proven}x — the chooser picks at most "
+          f"{most}x, on eToro's LIVE list and inside the stop band"
           + ("" if on else f" ({LEVERAGE_SWITCH_KEY} is OFF: every order "
                            f"goes at 1x)"))
         if most <= 1:
@@ -1040,7 +1044,8 @@ class Command(BaseCommand):
                                     f"only — no demo fill-and-close at "
                                     f"{_lev}x is pinned; a typed multiplier "
                                     f"is not held to the proven multipliers "
-                                    f"(the attack mode is)")
+                                    f"(nor is the attack mode, since "
+                                    f"2026-10-05)")
                 if cfg.enabled and not list(cfg.symbols or []):
                     from bot_program.manual_trade import MANUAL_CONFIG_NAME
                     if cfg.name != MANUAL_CONFIG_NAME:

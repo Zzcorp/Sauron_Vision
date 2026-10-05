@@ -622,7 +622,12 @@ class ProofTests(_Case):
         self.assertNotIn(f"trade:{short.pk}", _by_subject(
             self._found({"stock", "short"})))
 
-    def test_a_multiplier_past_the_ceiling_or_the_attack_proof(self):
+    def test_a_multiplier_past_the_ceiling_the_attack_answers_to_it_too(self):
+        """A typed 10 on a stock is above the 5x ceiling. The attack mode's
+        pick answered to the PROVEN multiplier until 2026-10-05; the
+        operator lifted that bound ("pas de limite à l'attaque"), so a 2x
+        attack pick on crypto (ceiling 2, nothing proven) is no finding,
+        and an attack pick above the ceiling is judged like a typed one."""
         over = _trade(self.cfg, "AAPL", entry="336.10", stop="326.02",
                       paper=False, metadata=dict(LIVE_ETORO, leverage=10))
         crypto = _cfg(self.user, "Crypto live", "crypto", mode="live")
@@ -632,11 +637,13 @@ class ProofTests(_Case):
         by = _by_subject(self._found({"stock", "crypto"}))
         self.assertEqual(by[f"trade:{over.pk}"].facts,
                          ["Multiplier 10x is above the Stocks ceiling of 5x"])
-        self.assertEqual(by[f"trade:{auto.pk}"].facts,
-                         ["The attack mode picked 2x, above the 1x proven "
-                          "for Crypto"])
-        self.assertNotIn(f"trade:{auto.pk}", _by_subject(
-            self._found({"stock", "crypto"}, {"crypto": 2})))
+        self.assertNotIn(f"trade:{auto.pk}", by)
+        high = _trade(crypto, "BTC", entry="60000", stop="58000",
+                      paper=False, metadata=dict(
+                          LIVE_ETORO, leverage=5, attack={"leverage": 5}))
+        self.assertEqual(_by_subject(self._found({"stock", "crypto"}))[
+            f"trade:{high.pk}"].facts,
+            ["Multiplier 5x is above the Crypto ceiling of 2x"])
 
     def test_a_paper_row_and_another_broker_are_not_judged(self):
         _trade(self.cfg, "AAPL", entry="336.10", stop="326", paper=True,

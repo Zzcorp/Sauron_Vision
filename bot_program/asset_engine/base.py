@@ -333,8 +333,12 @@ class SmcVote:
 #: stop fits that band at 10x and not at 20x: the attack mode picks 10
 #: there (_choose_auto_leverage), and a typed 20 is refused by
 #: _instrument_leverage_check wherever eToro prints the band. Restated as
-#: etoro_client.LEVERAGE_MAX, pinned equal.
-MAX_ORDER_LEVERAGE = 20
+#: etoro_client.LEVERAGE_MAX, pinned equal. 30 since 2026-10-05 (the
+#: operator: "pas de limite à l'attaque"): the highest multiplier on any
+#: LIVE list eToro printed (forex majors 30) — the platform no longer
+#: holds a number under the venue's own; the instrument's LIVE list, the
+#: stop band, the pledge cap and the cash headroom are the limits.
+MAX_ORDER_LEVERAGE = 30
 
 #: THE CLASS CEILINGS (2a, 2026-09-26; forex, index and commodity raised
 #: the same day to the operator's written numbers — "forex max x20", "cfd
@@ -355,10 +359,12 @@ MAX_ORDER_LEVERAGE = 20
 #: the full notional at 1, measured). options and cfd have no eToro path
 #: (broker_router); the keys stay so a typed multiplier on such a config
 #: is refused by the table, not by silence. An unknown class reads 1.
-#: tests/test_etoro_leverage.py MeasuredLiveListsTests pins each value
-#: under the class's smallest LIVE long maximum.
+#: tests/test_etoro_leverage.py MeasuredLiveListsTests pins each value at
+#: the class's LARGEST measured LIVE long maximum (2026-10-05, "pas de
+#: limite à l'attaque": forex 30, the majors' list; AUD/NZD pairs stop at
+#: 20 and the instrument's own LIVE list refuses 30 there, on the client).
 ORDER_LEVERAGE_CEILING = {"stock": 5, "etf": 5, "index": 20,
-                          "commodity": 10, "crypto": 2, "forex": 20,
+                          "commodity": 10, "crypto": 2, "forex": 30,
                           "options": 1, "cfd": 1}
 
 #: THE MOST OF THE ACCOUNT THE FLEET MAY HAVE PLEDGED after an order:
@@ -515,12 +521,15 @@ def missing_proofs(icls, side) -> list:
 #: WHEAT at 10x, AAPL at 5x, BTC at 2x) each add ONE entry, in the commit
 #: that pins its test — {"forex": 20, "index": 20, "commodity": 10,
 #: "stock": 5, "crypto": 2} is the shape, never a value before its proof.
-#: It binds the attack mode's chooser ONLY (_choose_auto_leverage): a
-#: TYPED multiplier above it is judged as before — the switch, the class
-#: token (ETORO_PROVEN), the class ceiling, the instrument's LIVE list and
-#: its stop band — and preflight_live §4 says so under WORTH READING. Read
-#: at CALL time; a test states a value by patching this name. Not a
-#: PlatformComponent: nothing on /health/ can prove a multiplier.
+#: Until 2026-10-05 it bound the attack mode's chooser (_choose_auto_
+#: leverage picked no higher). THE OPERATOR LIFTED THAT BOUND ("pas de
+#: limite à l'attaque"): the chooser now reads eToro's own LIVE list, the
+#: stop band (with ATTACK_BAND_HEADROOM) and the class ceiling (the venue's
+#: class maximum), and this table is the RECORD of what was measured, read
+#: by preflight_live §4 under WORTH READING for a typed multiplier above
+#: it. A TYPED multiplier was never held to it. Read at CALL time; a test
+#: states a value by patching this name. Not a PlatformComponent: nothing
+#: on /health/ can prove a multiplier.
 #: forex 5 since 2026-09-28: test_proof_forex_at_5x, the EURUSD round
 #: trip at 5x on the demo segment (requestedAmount 227.43 = notional / 5,
 #: the stop held as sent). The attack mode may pick up to 5x on forex;
@@ -548,9 +557,11 @@ ETORO_PROVEN_SHORT_LEVERAGE = {}
 #:         config's own fraction (itself clamped by MAX_RISK_FRACTION).
 #:   CASH  (AssetBot._choose_auto_leverage, in _order_leverage): the
 #:         highest multiplier on the instrument's LIVE list inside the class
-#:         ceiling, the proven multiplier and the stop band — the least
-#:         cash the stop allows — then judged by every gate a typed number
-#:         meets. The chooser picks; it never bypasses a gate.
+#:         ceiling (the venue's class maximum since 2026-10-05, "pas de
+#:         limite à l'attaque": no proven-multiplier bound any more) and
+#:         the stop band with its headroom — the least cash the stop
+#:         allows — then judged by every gate a typed number meets. The
+#:         chooser picks; it never bypasses a gate.
 AUTO_LEVERAGE = "auto"
 
 #: The tier multipliers of the config's risk fraction. Overridable per
@@ -579,6 +590,16 @@ ATTACK_HIGH_MIN_AVG_R = 0.20
 #: demo, maxStopLossPercentage 50). An assumption, said so in every line
 #: that uses it; a printed band always wins.
 ASSUMED_STOP_BAND_PCT = 50.0
+
+#: THE BAND HEADROOM (2026-10-05, with the attack unbound): eToro CLAMPS a
+#: stop past its band rather than refusing the order (measured, doc §14
+#: N2), so a multiplier whose stop sits right at the band gets a closer
+#: stop than the one sized — a stop-out the thesis never priced. The
+#: chooser passes over an L whose stop share of the margin exceeds this
+#: fraction of the band: 85% of a PRINTED band, 70% of the ASSUMED one (a
+#: belief deserves the wider margin).
+ATTACK_BAND_HEADROOM = 0.85
+ATTACK_BAND_HEADROOM_ASSUMED = 0.70
 
 
 def proven_leverage(asset_class: str) -> int:
@@ -1248,15 +1269,15 @@ class AssetBot(ABC):
 
     def _auto_leverage_bound(self, icls: str) -> int:
         """The most the attack mode could pick for an instrument of class
-        `icls`: 1 while etoro_leverage_live is OFF, else the lowest of the
-        platform cap, the class ceiling and the proven multiplier. The
-        chooser may pick less (the LIVE list, the stop band)."""
+        `icls`: 1 while etoro_leverage_live is OFF, else the lower of the
+        platform cap and the class ceiling (2026-10-05: the proven
+        multiplier no longer bounds the chooser). The chooser may pick
+        less (the LIVE list, the stop band and its headroom)."""
         from core.platform_control import is_component_enabled
         if not is_component_enabled(LEVERAGE_SWITCH_KEY):
             return 1
         return max(1, min(int(MAX_ORDER_LEVERAGE),
-                          int(ORDER_LEVERAGE_CEILING.get(icls, 1)),
-                          proven_leverage(icls)))
+                          int(ORDER_LEVERAGE_CEILING.get(icls, 1))))
 
     def _margin_leverage_hint(self, symbol: str):
         """The multiplier MAX SINGLE POSITION counts a ticket at before the
@@ -5809,12 +5830,16 @@ class AssetBot(ABC):
         The HIGHEST L on the instrument's LIVE list for this direction (the
         union _instrument_leverage_check reads, at the settlement a levered
         order lands on) such that ALL hold: L <= ORDER_LEVERAGE_CEILING[the
-        instrument's class] (and the platform cap); L <= proven_leverage
-        (ETORO_PROVEN_LEVERAGE, empty on arrival: 1 until a demo
-        fill-and-close at L is pinned); the stop, as a fraction of price
-        times L, inside the band — maxStopLossPercentage / 100 of the entry
-        carrying L where eToro prints it, else ASSUMED_STOP_BAND_PCT, the
-        one measured band, and the words say "assumed"; the margin at L
+        instrument's class] (the venue's class maximum, and the platform
+        cap); the stop, as a fraction of price times L, inside the band
+        WITH ITS HEADROOM (2026-10-05) — ATTACK_BAND_HEADROOM of
+        maxStopLossPercentage / 100 of the entry carrying L where eToro
+        prints it, else ATTACK_BAND_HEADROOM_ASSUMED of
+        ASSUMED_STOP_BAND_PCT, the one measured band, and the words say
+        "assumed" (eToro clamps a stop past the band: the headroom keeps
+        the stop sized the stop held); NO proven-multiplier bound since
+        2026-10-05 (the operator: "pas de limite à l'attaque" — ETORO_
+        PROVEN_LEVERAGE is a record now, not a limit); the margin at L
         (qty x price x value_per_unit / L) not under the entry's printed
         minPositionAmount — the smallest MARGIN eToro takes, whose
         refusal would quiet the symbol for LEVERAGE_QUIET_HOURS, at 1x
@@ -5847,10 +5872,9 @@ class AssetBot(ABC):
         ceiling = min(int(MAX_ORDER_LEVERAGE),
                       int(ORDER_LEVERAGE_CEILING.get(icls, 1)))
         direction = "long" if str(side or "BUY").upper() == "BUY" else "short"
-        # the multiplier proofs were measured on LONGS; a short's are in
-        # ETORO_PROVEN_SHORT_LEVERAGE (empty: the short proofs were at 1x)
-        proven = (proven_leverage(icls) if direction == "long" else
-                  max(1, int(ETORO_PROVEN_SHORT_LEVERAGE.get(icls, 1) or 1)))
+        # 2026-10-05: no proven-multiplier bound (ETORO_PROVEN_LEVERAGE and
+        # ETORO_PROVEN_SHORT_LEVERAGE are records); the LIVE list, the
+        # ceiling and the stop band with its headroom decide
         try:
             _elig = getattr(client, "eligibility", None)
             row = _elig(symbol) if callable(_elig) else None
@@ -5907,7 +5931,7 @@ class AssetBot(ABC):
         listed = sorted(v for v in (up_vals or []) if v > 1)
         passed_over = []
         for lev in sorted(listed, reverse=True):
-            if lev > ceiling or lev > proven:
+            if lev > ceiling:
                 continue
             if frac is None:
                 passed_over.append("no stop was handed in, so the band "
@@ -5916,10 +5940,12 @@ class AssetBot(ABC):
             max_sl = _band("max_stop_loss_pct", settle_up, lev)
             assumed = max_sl is None
             band = ASSUMED_STOP_BAND_PCT if assumed else max_sl
-            if frac * lev > band / 100.0 + 1e-12:
+            headroom = (ATTACK_BAND_HEADROOM_ASSUMED if assumed
+                        else ATTACK_BAND_HEADROOM)
+            if frac * lev > band / 100.0 * headroom + 1e-12:
                 passed_over.append(
                     f"{lev}x puts the stop at {frac * lev:.1%} of the margin, "
-                    f"past the {band:g}% band"
+                    f"past {headroom:.0%} of the {band:g}% band"
                     + (" (assumed)" if assumed else ""))
                 continue
             min_sl = _band("min_stop_loss_pct", settle_up, lev)
@@ -5938,8 +5964,8 @@ class AssetBot(ABC):
             return lev, (
                 f"auto: {lev}x — the highest on {symbol}'s LIVE "
                 f"{direction}/{settle_up} list {listed} inside the {icls} "
-                f"ceiling ({ceiling}x) and the proven {proven}x; the stop is "
-                f"{frac * lev:.1%} of the margin, inside the {band:g}% band"
+                f"ceiling ({ceiling}x); the stop is {frac * lev:.1%} of the "
+                f"margin, inside {headroom:.0%} of the {band:g}% band"
                 + (" (assumed from the one measured band)" if assumed
                    else " (printed)")
                 + (f"; passed over: {'; '.join(passed_over)}"
@@ -5965,13 +5991,9 @@ class AssetBot(ABC):
         elif not listed:
             reason = (f"eToro's LIVE {direction} list for {symbol} carries "
                       f"nothing above 1")
-        elif proven <= 1:
-            reason = (f"no multiplier is proven for {icls} yet "
-                      f"(ETORO_PROVEN_LEVERAGE)")
-        elif not [v for v in listed if v <= min(ceiling, proven)]:
+        elif not [v for v in listed if v <= ceiling]:
             reason = (f"nothing on the LIVE list {listed} sits inside the "
-                      f"{icls} ceiling ({ceiling}x) and the proven "
-                      f"{proven}x")
+                      f"{icls} ceiling ({ceiling}x)")
         else:
             reason = "; ".join(passed_over) or "no multiplier passed"
         try:

@@ -418,23 +418,46 @@ class TheChooserTests(TestCase):
         self.assertIn("assumed from the one measured band", why)
 
     def test_an_index_at_a_three_and_a_half_percent_stop_picks_ten(self):
-        """3.5% x 20 = 70% > 50%: 20 is passed over, 10 (35%) is picked."""
+        """3.5% x 20 = 70% > 70% of the 50% assumed band (35%): 20 is passed
+        over, 10 (35%, at the headroom) is picked."""
         lev, why = self._choose("SPX500", price=100.0, stop=96.5,
                                 proven={"index": 20})
         self.assertEqual(lev, 10)
         self.assertIn("auto: 10x", why)
+        self.assertIn("inside 70% of the 50% band (assumed", why)
         self.assertIn("passed over: 20x puts the stop at 70.0% of the "
-                      "margin, past the 50% band (assumed)", why)
+                      "margin, past 70% of the 50% band (assumed)", why)
 
     def test_a_commodity_never_goes_above_ten(self):
         lev, _ = self._choose("WHEAT", price=100.0, stop=99.9,
                               proven={"commodity": 50})
         self.assertEqual(lev, 10)
 
-    def test_nothing_proven_is_one(self):
+    def test_nothing_proven_still_picks_the_live_highest(self):
+        """2026-10-05, "pas de limite à l'attaque": the proven table is a
+        record, not a bound — with nothing proven the chooser still reads
+        eToro's LIVE list, the ceiling and the band."""
         lev, why = self._choose("EURUSD", price=1.0, stop=0.9825, proven={})
-        self.assertEqual(lev, 1)
-        self.assertIn("no multiplier is proven for forex yet", why)
+        self.assertEqual(lev, 20)
+        self.assertNotIn("proven", why)
+        self.assertIn("inside the forex ceiling (30x)", why)
+
+    def test_the_band_headroom_keeps_the_stop_off_etoros_clamp(self):
+        """A 2% stop on a stock whose LIVE list is [2, 5] and whose band is
+        printed at 50: 5x puts the stop at 10% of the margin (fits); a 9%
+        stop puts it at 45% — inside the band, past 85% of it (42.5%), so
+        eToro's clamp would bite: 5x is passed over and 2x (18%) picked."""
+        from bot_program.asset_engine.base import (
+            ATTACK_BAND_HEADROOM, ATTACK_BAND_HEADROOM_ASSUMED)
+        self.assertEqual((ATTACK_BAND_HEADROOM, ATTACK_BAND_HEADROOM_ASSUMED),
+                         (0.85, 0.70))
+        lev, why = self._choose("AAPL", price=100.0, stop=98.0, proven={})
+        self.assertEqual(lev, 5)
+        self.assertIn("inside 85% of the 50% band (printed)", why)
+        lev, why = self._choose("AAPL", price=100.0, stop=91.0, proven={})
+        self.assertEqual(lev, 2)
+        self.assertIn("5x puts the stop at 45.0% of the margin, past 85% "
+                      "of the 50% band", why)
 
     def test_the_switch_off_is_one_and_the_words_name_it(self):
         _switch(False)
@@ -452,7 +475,10 @@ class TheChooserTests(TestCase):
         self.assertIn("(printed)", why)
 
     def test_a_side_with_no_one_and_no_fitting_multiplier_is_refused(self):
-        lev, why = self._choose("AAPL", price=100.0, stop=98.0, proven={},
+        """A 30% stop puts the margin share past the band at 2x (60%) and
+        at 5x (150%); 1 is not on the list: nothing fits, nothing is
+        sent, the size is not clamped and the stop not widened."""
+        lev, why = self._choose("AAPL", price=100.0, stop=70.0, proven={},
                                 rows={"AAPL": ROW_NO_ONE})
         self.assertIsNone(lev)
         self.assertIn("auto: no multiplier fits AAPL long", why)
@@ -461,7 +487,7 @@ class TheChooserTests(TestCase):
         with mock.patch(PROVEN_LEV, {}):
             lev, why2 = self.bot._order_leverage(
                 _wire({"AAPL": ROW_NO_ONE}), "AAPL", side="BUY",
-                price=100.0, stop=98.0)
+                price=100.0, stop=70.0)
         self.assertIsNone(lev)
         self.assertEqual(why2, why)
 
@@ -478,18 +504,20 @@ class TheChooserTests(TestCase):
         self.assertEqual((lev, "no stop was handed in" in why), (1, True))
 
     def test_a_short_reads_the_short_list(self):
-        """A short proven at a multiplier (ETORO_PROVEN_SHORT_LEVERAGE)
-        reads the short-direction LIVE list; with no short multiplier
-        pinned (as shipped: the short proofs were at 1x) the chooser picks
-        1 whatever the long proofs say."""
+        """A short reads the short-direction LIVE list. Until 2026-10-05 a
+        short with no multiplier pinned in ETORO_PROVEN_SHORT_LEVERAGE was
+        held to 1x; the operator lifted the bound, so the short's pick
+        follows the list, the ceiling and the band like a long's, whatever
+        the proof tables say."""
         with mock.patch("bot_program.asset_engine.base."
                         "ETORO_PROVEN_SHORT_LEVERAGE", {"index": 20}):
             lev, _ = self._choose("SPX500", price=100.0, stop=103.5,
                                   proven={"index": 20}, side="SELL")
         self.assertEqual(lev, 10)
-        lev, _ = self._choose("SPX500", price=100.0, stop=103.5,
-                              proven={"index": 20}, side="SELL")
-        self.assertEqual(lev, 1)
+        lev, why = self._choose("SPX500", price=100.0, stop=103.5,
+                                proven={}, side="SELL")
+        self.assertEqual(lev, 10)
+        self.assertIn("LIVE short/", why)
 
     def test_a_margin_under_the_venue_minimum_is_passed_over(self):
         """AAPL's LIVE cfd entries print minPositionAmount 10 (the smallest
@@ -585,11 +613,11 @@ class ThePickMeetsEveryGateTests(TestCase):
                 self.assertEqual(judge_order_leverage(
                     self.cfg, "forex", "etoro", pick=1), (1, ""))
                 self.assertEqual(judge_order_leverage(
-                    self.cfg, "forex", "etoro", pick=20), (20, ""))
+                    self.cfg, "forex", "etoro", pick=30), (30, ""))
                 lev, why = judge_order_leverage(self.cfg, "forex", "etoro",
-                                                pick=21)
+                                                pick=31)
                 self.assertIsNone(lev)
-                self.assertIn("platform cap of 20x", why)
+                self.assertIn("platform cap of 30x", why)
         self.cfg.extras = {"leverage": "autox"}
         lev, why = judge_order_leverage(self.cfg, "forex", "etoro", pick=5)
         self.assertIsNone(lev)
@@ -602,16 +630,17 @@ class ThePickMeetsEveryGateTests(TestCase):
     def test_the_proposal_counts_the_most_the_chooser_could_pick(self):
         """MAX SINGLE POSITION before the order (_margin_leverage_hint):
         under auto, the most the chooser could pick for the INSTRUMENT —
-        1 while the switch is OFF, else the lowest of the platform cap, the
-        class ceiling and the proven multiplier; a typed config keeps its
-        typed hint, and no key keeps None (the adapter's 1)."""
+        1 while the switch is OFF, else the lower of the platform cap and
+        the class ceiling (2026-10-05: the proven multiplier no longer
+        bounds it); a typed config keeps its typed hint, and no key keeps
+        None (the adapter's 1)."""
         with mock.patch(PROVEN_LEV, {"forex": 20, "stock": 5}):
-            self.assertEqual(self.bot._margin_leverage_hint("EURUSD"), 20)
+            self.assertEqual(self.bot._margin_leverage_hint("EURUSD"), 30)
             self.assertEqual(self.bot._margin_leverage_hint("AAPL"), 5)
         with mock.patch(PROVEN_LEV, {"forex": 50}):
-            self.assertEqual(self.bot._margin_leverage_hint("EURUSD"), 20)
+            self.assertEqual(self.bot._margin_leverage_hint("EURUSD"), 30)
         with mock.patch(PROVEN_LEV, {}):
-            self.assertEqual(self.bot._margin_leverage_hint("EURUSD"), 1)
+            self.assertEqual(self.bot._margin_leverage_hint("EURUSD"), 30)
         _switch(False)
         with mock.patch(PROVEN_LEV, {"forex": 20}):
             self.assertEqual(self.bot._margin_leverage_hint("EURUSD"), 1)
@@ -677,7 +706,11 @@ class TheEntryLaneTests(TestCase):
         return cand, res, fake, note
 
     def test_the_same_units_at_one_and_at_five(self):
+        """1x with the switch OFF, 5x with it ON (2026-10-05: the proven
+        table no longer holds the chooser, the switch and the LIVE list
+        do): the units are the same either way."""
         from bot_program.models import AssetBotTrade
+        _switch(False)
         cand1, res1, fake1, _ = self._run(self._cfg("atk_one"), {})
         self.assertIsNotNone(res1)
         body1 = _order_posts(fake1)[0][2]["json"]
@@ -685,10 +718,10 @@ class TheEntryLaneTests(TestCase):
         self.assertEqual(body1["leverage"], 1)
         self.assertEqual(row1.metadata["leverage"], 1)
         self.assertEqual(row1.metadata["attack"]["leverage"], 1)
-        self.assertIn("no multiplier is proven for stock yet",
+        self.assertIn("etoro_leverage_live is OFF",
                       row1.metadata["attack"]["leverage_why"])
-        cand5, res5, fake5, _ = self._run(self._cfg("atk_five"),
-                                          {"stock": 5})
+        _switch(True)
+        cand5, res5, fake5, _ = self._run(self._cfg("atk_five"), {})
         self.assertIsNotNone(res5)
         body5 = _order_posts(fake5)[0][2]["json"]
         row5 = AssetBotTrade.objects.get(id=res5["trade_id"])
@@ -742,7 +775,13 @@ class TheEntryLaneTests(TestCase):
         cfg = self._cfg("atk_refused")
         wire = _etoro([SEARCH_AAPL, RATES, _elig_route([ROW_NO_ONE]),
                        _elig_route([ROW_NO_ONE], world="live")])
-        with mock.patch(DETAIL, return_value=_record(40, 0.60, 0.35)):
+        # no headroom at all: every L on the [2, 5] list is passed over
+        # for the band, and 1 is not on the list — nothing fits
+        with mock.patch(DETAIL, return_value=_record(40, 0.60, 0.35)), \
+                mock.patch("bot_program.asset_engine.base."
+                           "ATTACK_BAND_HEADROOM", 0.0), \
+                mock.patch("bot_program.asset_engine.base."
+                           "ATTACK_BAND_HEADROOM_ASSUMED", 0.0):
             _, res, fake, note = self._run(cfg, {}, t=wire)
         self.assertIsNone(res)
         self.assertEqual(_order_posts(fake), [])
@@ -885,19 +924,25 @@ class ThePreflightTests(TestCase):
         self.assertIn("STRONG from 0.7333 — 0.75x, risk 5.25%", out)
         self.assertIn("HIGH from 0.8667 with a measured edge (n >= 20, win "
                       ">= 55%, avg R >= +0.20) — 1.00x, risk 7.00%", out)
-        self.assertIn("stock: ceiling 5x, proven 1x — the chooser picks at "
-                      "most 1x (etoro_leverage_live is OFF: every order goes "
-                      "at 1x)", out)
+        self.assertIn("stock: ceiling 5x (the venue's class maximum), "
+                      "measured at 1x — the chooser picks at most 1x, on "
+                      "eToro's LIVE list and inside the stop band "
+                      "(etoro_leverage_live is OFF: every order goes at 1x)",
+                      out)
         self.assertNotIn("attack mode", _blockers(out))
 
-    def test_a_proven_multiplier_meets_the_engine_rule(self):
+    def test_the_ceiling_not_the_proof_is_what_the_engine_rule_judges(self):
+        """2026-10-05: the chooser picks at most the CEILING (the venue's
+        class maximum) whatever is proven; preflight judges that most by
+        the engine's own rule."""
         from tests.test_preflight_live import _blockers, _run
         self._armed(book=False)
         _switch(True)
-        with mock.patch(PROVEN_LEV, {"stock": 5}):
+        with mock.patch(PROVEN_LEV, {}):
             out = _run()
-        self.assertIn("stock: ceiling 5x, proven 5x — the chooser picks at "
-                      "most 5x", out)
+        self.assertIn("stock: ceiling 5x (the venue's class maximum), "
+                      "measured at 1x — the chooser picks at most 5x, on "
+                      "eToro's LIVE list and inside the stop band", out)
         self.assertIn("in attack mode, stock at 5x: at 5x: MAX TOTAL "
                       "EXPOSURE has no book", _blockers(out))
 
@@ -915,8 +960,8 @@ class ThePreflightTests(TestCase):
         self.assertIn("leverage 5x (extras)", out)
         line = (f"config {cfg.id} ({cfg.name}) at 5x: stock is proven at 1x "
                 f"only — no demo fill-and-close at 5x is pinned; a typed "
-                f"multiplier is not held to the proven multipliers (the "
-                f"attack mode is)")
+                f"multiplier is not held to the proven multipliers (nor is "
+                f"the attack mode, since 2026-10-05)")
         self.assertIn(line, _worth(out))
         self.assertNotIn("is proven at", _blockers(out))
         with mock.patch(PROVEN_LEV, {"stock": 5}):

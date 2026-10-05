@@ -715,15 +715,15 @@ def check_price_sanity(ctx, g) -> list:
 def check_proofs(ctx, g) -> list:
     """A live row eToro carried (metadata broker "etoro"), open or opened
     in the last 24 h, whose instrument class -- or, for a SELL, its short
-    -- is not proven (base.missing_proofs), whose recorded multiplier is above
-    base.ORDER_LEVERAGE_CEILING for its class, or, for a multiplier the
-    attack mode picked, above base.proven_leverage (the proven multiplier
-    binds the attack mode only; a typed one answers to the ceiling)."""
+    -- is not proven (base.missing_proofs), or whose recorded multiplier is
+    above base.ORDER_LEVERAGE_CEILING for its class. Until 2026-10-05 a
+    multiplier the attack mode picked above base.proven_leverage was a
+    finding too; the operator lifted that bound ("pas de limite à
+    l'attaque"), so the attack answers to the ceiling like a typed one."""
     from django.db.models import Q
     from bot_program.asset_engine import base
     from bot_program.asset_models import AssetBotTrade
     ceilings = dict(getattr(base, "ORDER_LEVERAGE_CEILING", {}) or {})
-    proven_at = getattr(base, "proven_leverage", None)
     since = ctx.now - timedelta(hours=WINDOW_H)
     rows = (AssetBotTrade.objects.filter(paper=False,
                                          status__in=BOOKED_STATUSES)
@@ -748,11 +748,6 @@ def check_proofs(ctx, g) -> list:
         if lev > ceiling:
             facts.append(f"Multiplier {lev}x is above the "
                          f"{_class_word(cls)} ceiling of {ceiling}x")
-        if isinstance(meta.get("attack"), dict) and callable(proven_at):
-            best = proven_at(cls)
-            if lev > best:
-                facts.append(f"The attack mode picked {lev}x, above the "
-                             f"{best}x proven for {_class_word(cls)}")
         if facts:
             out.append(g.finding(
                 f"trade:{trade.pk}", label=_trade_label(trade), facts=facts,

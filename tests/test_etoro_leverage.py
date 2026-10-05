@@ -187,17 +187,22 @@ class TheRuleTests(TestCase):
                                                 cls, "etoro")
                 self.assertIsNone(lev)
                 self.assertIn("x", why)
-        # 2026-09-26, the operator's numbers: forex and index 20 — the
-        # platform cap — so 21 meets the cap sentence first, and 20 is
-        # inside the ceiling (refused later, for the missing own book, not
-        # by the table); commodity 10, so 11 meets the class sentence
-        for cls in ("forex", "index"):
+        # 2026-10-05 ("pas de limite à l'attaque"): forex 30 — the
+        # platform cap, the highest LIVE multiplier eToro prints — so 31
+        # meets the cap sentence first, and 30 is inside the ceiling
+        # (refused later, for the missing own book, not by the table);
+        # index 20, so 21 meets the class sentence and 20 is inside
+        lev, why = judge_order_leverage(self._cfg(leverage=31), "forex",
+                                        "etoro")
+        self.assertIsNone(lev)
+        self.assertIn("platform cap of 30x", why)
+        lev, why = judge_order_leverage(self._cfg(leverage=21), "index",
+                                        "etoro")
+        self.assertIsNone(lev)
+        self.assertIn("past the 20x ceiling", why)
+        for cls, top in (("forex", 30), ("index", 20)):
             with self.subTest(cls=cls):
-                lev, why = judge_order_leverage(self._cfg(leverage=21), cls,
-                                                "etoro")
-                self.assertIsNone(lev)
-                self.assertIn("platform cap of 20x", why)
-                lev, why = judge_order_leverage(self._cfg(leverage=20), cls,
+                lev, why = judge_order_leverage(self._cfg(leverage=top), cls,
                                                 "etoro")
                 self.assertIsNone(lev)
                 self.assertNotIn("x ceiling", why)
@@ -271,12 +276,14 @@ class TheCapsAgreeTests(SimpleTestCase):
         for cls, cap in ORDER_LEVERAGE_CEILING.items():
             self.assertLessEqual(cap, MAX_ORDER_LEVERAGE, cls)
         # 2026-09-26, the operator's numbers: the platform cap 20; forex
-        # and index 20, commodity 10 — each inside every LIVE list of its
-        # class (MeasuredLiveListsTests); stock/etf 5 and crypto 2 as before
-        self.assertEqual(MAX_ORDER_LEVERAGE, 20)
+        # and index 20, commodity 10. 2026-10-05, "pas de limite à
+        # l'attaque": the cap and the forex ceiling at 30, the highest
+        # multiplier on any LIVE list eToro printed (MeasuredLiveListsTests);
+        # stock/etf 5, index 20, commodity 10 and crypto 2 as before
+        self.assertEqual(MAX_ORDER_LEVERAGE, 30)
         self.assertEqual(ORDER_LEVERAGE_CEILING, {
             "stock": 5, "etf": 5, "index": 20, "commodity": 10,
-            "crypto": 2, "forex": 20, "options": 1, "cfd": 1})
+            "crypto": 2, "forex": 30, "options": 1, "cfd": 1})
 
 
 class TheEntryPassesItThroughTests(TestCase):
@@ -1266,14 +1273,20 @@ class TheInstrumentCheckTests(TestCase):
 
 
 class MeasuredLiveListsTests(SimpleTestCase):
-    """E2.7 (2026-09-26): every class ceiling sits inside the LIVE list
-    eToro printed for every instrument of the class read on 2026-09-23/25
-    (doc §9-§10, §15) — the smallest LIVE long maximum per class (AUD/NZD
-    20 on forex). The DEMO lists are wider (stocks 20, forex 400, indices
-    and commodities 100) and prove nothing."""
+    """E2.7 (2026-09-26): every class ceiling sits inside the LIVE lists
+    eToro printed for the instruments of the class read on 2026-09-23/25
+    (doc §9-§10, §15). Until 2026-10-05 the SMALLEST LIVE long maximum per
+    class bound it (AUD/NZD 20 on forex); since the operator's "pas de
+    limite à l'attaque" the LARGEST does (the majors' 30 on forex) — the
+    instrument's own LIVE list is judged next, on the client
+    (_instrument_leverage_check refuses 30 on an AUD or NZD pair). The
+    DEMO lists are wider (stocks 20, forex 400, indices and commodities
+    100) and prove nothing."""
 
-    LIVE_LEVERAGE_MAX = {"stock": 5, "etf": 5, "crypto": 2, "forex": 20,
+    LIVE_LEVERAGE_MAX = {"stock": 5, "etf": 5, "crypto": 2, "forex": 30,
                          "index": 20, "commodity": 10}
+    #: the smallest LIVE maximum within the class (an AUD/NZD pair)
+    LIVE_LEVERAGE_MIN_MAX = {"forex": 20}
 
     def test_every_ceiling_is_inside_the_measured_live_list(self):
         from bot_program.asset_engine.base import ORDER_LEVERAGE_CEILING
@@ -1283,13 +1296,12 @@ class MeasuredLiveListsTests(SimpleTestCase):
 
     def test_each_ceiling_is_the_platform_cap_or_the_live_maximum(self):
         """In writing: every eToro class is held at the LOWER of the
-        platform cap (MAX_ORDER_LEVERAGE, 20 since 2026-09-26) and its
-        smallest measured LIVE long maximum — stock/etf 5, forex 20 (AUD
-        and NZD pairs stop at 20), index 20, commodity 10, crypto 2 (its
-        LIVE list is [2]); the operator's written numbers (forex 20, index
-        20, commodity 10) are exactly those maxima. options/cfd have no
-        eToro path: 1, so a typed multiplier is refused by the table and
-        nothing is sent."""
+        platform cap (MAX_ORDER_LEVERAGE, 30 since 2026-10-05) and its
+        largest measured LIVE long maximum — stock/etf 5, forex 30 (the
+        majors; AUD and NZD pairs stop at 20 and their own list refuses
+        more), index 20, commodity 10, crypto 2 (its LIVE list is [2]).
+        options/cfd have no eToro path: 1, so a typed multiplier is
+        refused by the table and nothing is sent."""
         from types import SimpleNamespace
 
         from bot_program.asset_engine.base import (MAX_ORDER_LEVERAGE,
@@ -1299,7 +1311,11 @@ class MeasuredLiveListsTests(SimpleTestCase):
             with self.subTest(cls=cls):
                 self.assertEqual(ORDER_LEVERAGE_CEILING[cls],
                                  min(MAX_ORDER_LEVERAGE, live_max))
-        self.assertEqual(ORDER_LEVERAGE_CEILING["forex"], 20)
+        self.assertEqual(ORDER_LEVERAGE_CEILING["forex"], 30)
+        self.assertGreater(ORDER_LEVERAGE_CEILING["forex"],
+                           self.LIVE_LEVERAGE_MIN_MAX["forex"],
+                           "the class ceiling is the venue's largest; the "
+                           "instrument's own list is the pair's")
         for cls in ("options", "cfd"):
             with self.subTest(cls=cls):
                 self.assertEqual(ORDER_LEVERAGE_CEILING[cls], 1)
