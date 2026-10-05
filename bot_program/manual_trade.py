@@ -375,8 +375,9 @@ def _mark_for(user, cfg, symbol):
 
 
 def _mark_for_detail(user, cfg, symbol):
-    """(price, client, delayed, reason) — `_mark_for` with the venue's own
-    words when there is no price.
+    """(price, client, delayed, reason, tick) — `_mark_for` with the
+    venue's own words when there is no price, and the raw tick read (the
+    bid/ask the quote advisory judges, 2026-10-05; {} when none).
 
     2026-10-04: a LIVE crypto ticket on ADAUSD answered "No usable price
     mark — the quote feeds have nothing fresh" while binance_ws was fresh
@@ -394,14 +395,49 @@ def _mark_for_detail(user, cfg, symbol):
         delayed = bool(tk.get("delayed"))
     except Exception as e:  # noqa: BLE001
         logger.warning("[take-trade] ticker(%s) failed: %s", symbol, e)
-        return None, client, False, (str(e) or type(e).__name__)
+        return None, client, False, (str(e) or type(e).__name__), {}
     if price > 0:
-        return price, client, delayed, ""
+        return price, client, delayed, "", (tk if isinstance(tk, dict) else {})
     reason = ("the market is shut" if tk.get("market_shut")
               else "answered no rate")
     if tk.get("reason"):
         reason = str(tk["reason"])
-    return None, client, delayed, reason
+    return None, client, delayed, reason, (tk if isinstance(tk, dict) else {})
+
+
+def quote_advisory(tick, asset_class, symbol, *, stop=None, live=True,
+                   client=None) -> dict:
+    """THE ENTRY QUOTE on the ticket (2026-10-05, mark_sanity.entry_quote):
+    {"ok", "reason", "bid", "ask", "spread_pct", "half_spread_r",
+    "budget_ok", "budget_reason"}. A WARNING, never a refusal — the
+    operator keeps the last word; the bots refuse on the same read. A
+    paper ticket (the platform's own quote) is always ok. The second
+    opinion is asked only for a real venue's quote."""
+    out = {"ok": True, "reason": "", "bid": None, "ask": None,
+           "spread_pct": None, "half_spread_r": None, "budget_ok": True,
+           "budget_reason": ""}
+    if not live or not isinstance(tick, dict):
+        return out
+    try:
+        from bot_program import mark_sanity
+        from bot_program.asset_engine.base import AssetBot
+        reference = (None if client is None or AssetBot._is_paper_client(client)
+                     else mark_sanity.second_opinion(symbol))
+        v = mark_sanity.entry_quote(tick, asset_class, symbol,
+                                    reference=reference, stop=stop)
+    except Exception as e:  # noqa: BLE001 — an unread quote warns nobody
+        logger.info("[take-trade] %s: quote advisory unread (%s)", symbol, e)
+        return out
+    out.update(ok=bool(v.get("ok", True)), reason=str(v.get("why") or ""),
+               bid=v.get("bid"), ask=v.get("ask"),
+               spread_pct=(round(float(v["spread"]) * 100, 4)
+                           if v.get("spread") is not None else None),
+               half_spread_r=(round(float(v["half_spread_r"]), 4)
+                              if v.get("half_spread_r") is not None else None))
+    words = mark_sanity.slippage_budget_words(v)
+    if words:
+        out.update(budget_ok=False, budget_reason=words)
+    return out
 
 
 #: The venue's name on the ticket, from broker_router's route names.
@@ -1223,7 +1259,7 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
             return {"error": f"{inst.symbol}: {shut} — no paper fill. "
                              f"Nothing was booked", "market_shut": True}
 
-    price, _client, mark_delayed, no_mark = _mark_for_detail(
+    price, _client, mark_delayed, no_mark, _tick = _mark_for_detail(
         user, cfg, inst.symbol)
     if price is None:
         # Said by whoever was asked (2026-10-04): the paper venue reads the
@@ -1728,6 +1764,12 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         # hold their new real entries; this lane WARNS and stays pressable.
         "venue_health": venue_health_advisory(user, ticket_stamp["carrier"],
                                               live=live),
+        # THE ENTRY QUOTE on the ticket (2026-10-05): crossed, a stale
+        # print, far from the platform's quote — and the half-spread
+        # against this ticket's stop (the slippage budget). WARNS only.
+        "quote_advisory": quote_advisory(_tick, cls, inst.symbol,
+                                         stop=stop_used, live=live,
+                                         client=_client),
         # THE SETUP MEMORY (2026-10-03, backtester/proving/memory.py): what
         # followed, the last times this rule fired on this class in this
         # kind of tape. Information, never a gate; "" when nobody replayed
@@ -2586,6 +2628,41 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                         "sent": float(stop), "held": held}
             except (TypeError, ValueError):
                 pass
+            # THE FILL AGAINST THE QUOTE IT WAS SIZED ON (2026-10-05), the
+            # bots' own rule (AssetBot.reanchor_stop_to_fill): the slip is
+            # recorded and, when adverse, eToro's stop is moved by it —
+            # tighter only — so the risk held is the risk the ticket
+            # showed. The booked stop and initial_stop_loss carry the
+            # re-anchored level; a refusal is recorded, never retried.
+            try:
+                _held = (extra.get("stop_rewritten_by_venue") or {}).get("held")
+                _re = AssetBot.reanchor_stop_to_fill(
+                    client, res, side=side, proposal=float(fill),
+                    fill=float(fill_px), stop=float(stop),
+                    asset_class=cfg.asset_class, symbol=inst.symbol,
+                    held=_held, working=working)
+                if _re.get("slippage"):
+                    extra["slippage"] = _re["slippage"]
+                if _re.get("sent") and _re.get("ok"):
+                    extra["stop_reanchored_to_fill"] = {
+                        "sent": float(stop), "held": float(_re["new_stop"]),
+                        "slip_r": _re["slippage"]["r_fraction"]}
+                    stop = float(_re["new_stop"])
+                    extra["initial_stop_loss"] = stop
+                elif _re.get("sent"):
+                    extra["stop_reanchor_refused"] = str(
+                        _re.get("reason") or "refused")[:200]
+            except Exception as e:  # noqa: BLE001 — the booking goes on
+                logger.warning("[take-trade] %s: slip unread (%s)",
+                               inst.symbol, e)
+            _qa = preview.get("quote_advisory")
+            if isinstance(_qa, dict) and (not _qa.get("ok", True)
+                                          or not _qa.get("budget_ok", True)):
+                # taken past the quote warning: recorded, as the other
+                # overridden warnings are
+                extra["quote_advisory_at_entry"] = {
+                    k: _qa.get(k) for k in ("ok", "reason", "budget_ok",
+                                            "budget_reason", "half_spread_r")}
 
             with transaction.atomic():
                 trade = _book_row(booked_px,

@@ -2276,6 +2276,25 @@
                        'to send.') + '</div>';
       }
 
+      /* The entry quote (2026-10-05): crossed, a stale print, far from the
+         platform's own quote — and the quoted half-spread against this
+         ticket's stop. The bots refuse on the same read; this lane only
+         warns — the button is unchanged. */
+      var quoteAdv = p.quote_advisory || {};
+      if (quoteAdv.ok === false && quoteAdv.reason) {
+        warnHtml += '<div class="sz-warn sz-warn--book"><b>QUOTE LOOKS OFF</b>' +
+          esc(quoteAdv.reason) +
+          '<br>' + esc('A warning, not a block: the bots refuse an entry on ' +
+                       'this quote; this ticket is yours to send.') + '</div>';
+      }
+      if (quoteAdv.budget_ok === false && quoteAdv.budget_reason) {
+        warnHtml += '<div class="sz-warn sz-warn--book"><b>WIDE SPREAD FOR THIS STOP</b>' +
+          esc(quoteAdv.budget_reason) +
+          '<br>' + esc('A warning, not a block: a market order fills a ' +
+                       'half-spread from the mid, so the risk shown is ' +
+                       'understated by that much.') + '</div>';
+      }
+
       /* And how hard this pool is set to swing. Not a warning about THIS
          trade — a reminder that a number typed into extras once is still
          sizing every trade since. */

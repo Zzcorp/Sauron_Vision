@@ -1133,7 +1133,8 @@ def _built(build, **kwargs):
 
 def fill_open_message(*, asset_class, symbol, side, qty, entry_price,
                       rule_name="", trade=None, trade_id=None, manual=False,
-                      live=None, attack="", stop_moved="") -> dict:
+                      live=None, attack="", stop_moved="",
+                      slippage="") -> dict:
     """The Telegram message of a fill that OPENED a position:
 
         🟢 Bought EURCAD                 (🔴 Sold short AAPL; ✋ … by hand)
@@ -1168,6 +1169,14 @@ def fill_open_message(*, asset_class, symbol, side, qty, entry_price,
                                           symbol)
         except Exception:  # noqa: BLE001 — the levels still say it
             stop_moved = ""
+    # the fill against the quote it was sized on (2026-10-05): a caller
+    # that hands no line (the hand lane) gets the row's own
+    if not slippage and not carried and meta.get("slippage"):
+        try:
+            from bot_program.asset_engine.base import slippage_words
+            slippage = slippage_words(meta, asset_class, symbol)
+        except Exception:  # noqa: BLE001
+            slippage = ""
 
     title = f"Bought {symbol}" if long_ else f"Sold short {symbol}"
     if manual:
@@ -1196,7 +1205,7 @@ def fill_open_message(*, asset_class, symbol, side, qty, entry_price,
                            f"signal #{sid}" if sid else "") if w]
         if why:
             lines.append("Why: " + " — ".join(why))
-    for fact in [attack, stop_moved] + carried:
+    for fact in [attack, stop_moved, slippage] + carried:
         fact = " ".join(str(fact or "").split())
         if fact:
             lines.append(fact)
@@ -1351,13 +1360,14 @@ def fill_close_message(*, asset_class, symbol, side, qty, exit_price, pnl,
 def notify_bot_fill_open(user, *, asset_class: str, symbol: str, side: str,
                           qty, entry_price, rule_name: str = "",
                           trade_id=None, trade=None, attack: str = "",
-                          stop_moved: str = "") -> bool:
+                          stop_moved: str = "", slippage: str = "") -> bool:
     """A bot's entry filled. Telegram gets the message written for people
     (fill_open_message); the bell row takes its title and summary, its
     url kept, and the e-mail and Discord copies the message (2026-09-27).
-    `trade` is the row (else `trade_id` names it); `attack` and
-    `stop_moved` are the engine's own facts (AssetBot._fill_words), their
-    own arguments since 2026-09-27 rather than lines inside rule_name."""
+    `trade` is the row (else `trade_id` names it); `attack`, `stop_moved`
+    and `slippage` (2026-10-05) are the engine's own facts
+    (AssetBot._fill_words), their own arguments since 2026-09-27 rather
+    than lines inside rule_name."""
     from alerts.links import page_url
     tid = trade_id or getattr(trade, "id", None)
     rule_key, carried = _rule_key(rule_name)
@@ -1366,7 +1376,7 @@ def notify_bot_fill_open(user, *, asset_class: str, symbol: str, side: str,
                      symbol=symbol, side=side, qty=qty,
                      entry_price=entry_price, rule_name=rule_name,
                      trade=trade, trade_id=tid, attack=attack,
-                     stop_moved=stop_moved)
+                     stop_moved=stop_moved, slippage=slippage)
     # The bell's title and body are the message's (2026-09-27: "◉ EURCAD
     # BUY opened" / "FOREX · qty 7900.00000000 @ 1.60725571 ·
     # golden_cross" before), and so are the e-mail and Discord copies

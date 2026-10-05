@@ -875,7 +875,10 @@ class TheFillWordsTests(TestCase):
         self.assertEqual(self.bot._fill_words(trade), {
             "attack": ("Attack mode: strong conviction · 1.0% of the pool "
                        "at risk · simulated, no multiplier"),
-            "stop_moved": ""})
+            "stop_moved": "",
+            # the fill against the quote it was sized on (2026-10-05):
+            # nothing recorded on this row
+            "slippage": ""})
 
     def test_a_row_with_no_stop_falls_back_to_the_sizers_fraction(self):
         trade = self._row(stop=None,

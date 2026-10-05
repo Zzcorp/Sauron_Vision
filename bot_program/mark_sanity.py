@@ -246,3 +246,117 @@ def check(bot, trade, price, client=None, *, now=None) -> dict:
                        getattr(trade, "symbol", "?"), getattr(trade, "id", "?"),
                        e)
         return {"ok": True, "why": ""}
+
+
+# ── THE ENTRY QUOTE (2026-10-05) ──────────────────────────────────────────
+# The ONLY price an entry is sized, stopped and ordered on is one read of
+# the venue's rates; until today its only guard was `price <= 0`. A crossed
+# quote only disqualified the SPREAD measurement (the entry went ahead on
+# lastPrice), a last print outside the live bid/ask was never noticed, the
+# platform's own quote was never asked at entry, and a quote frozen across
+# ticks was invisible. `entry_quote` is the pure read for a quote about to
+# be traded on (propose_entry, the last look before the order, the TAKE
+# TRADE ticket): the bars and the freeze are `judge`'s, the memory is the
+# config's (extras["entry_marks"], bounded like the skips).
+
+#: The share of the stop distance the quoted HALF-spread may take before a
+#: real entry is held: a market order fills a half-spread from the mid, so
+#: a wider one understates the risk the size was built on (and the exit
+#: pays it again). 15%: a 2% stop on a 0.6% round trip.
+ENTRY_SLIPPAGE_MAX_R = 0.15
+#: An adverse fill past this share of a stop distance is told to the staff.
+ENTRY_SLIPPAGE_ALERT_R = 0.25
+#: Entry marks kept per config (extras["entry_marks"]), as skips are.
+ENTRY_MARKS_MAX = 200
+
+
+def entry_quote(tick, asset_class, symbol, *, reference=None, last=None,
+                now=None, market_open=True, stop=None) -> dict:
+    """Whether the quote `tick` ({lastPrice[, bid, ask]}, the adapter's
+    strings) may be traded on. Pure: no I/O.
+
+    {ok, why, mid, bid, ask, last_price, spread, half_spread,
+    half_spread_r, mark}. NOT ok when: the quote is CROSSED (ask under
+    bid); the last print sits OUTSIDE the quote by more than a tick of the
+    instrument (a stale print); the mid is farther than the class's bar
+    (JUMP_PCT) from `reference`, the platform's own fresh quote
+    (second_opinion — None refuses nothing); or the mid is the same as
+    the last entry read (`last`: {"mid", "at", "same_since"}) for
+    FROZEN_MINUTES in an open market. `mark` is the memory to write back
+    ({"mid", "at", "same_since"}); `half_spread_r` is the quoted
+    half-spread as a share of the distance to `stop`, for the budget
+    (slippage_budget_words). Options are never judged; a tick with no
+    price is the no-price gate's, not this one's."""
+    now = now or timezone.now()
+    cls = str(asset_class or "").lower()
+    out = {"ok": True, "why": "", "mid": None, "bid": None, "ask": None,
+           "last_price": None, "spread": None, "half_spread": None,
+           "half_spread_r": None, "mark": None}
+    if not isinstance(tick, dict):
+        return out
+    bid, ask, lp = _f(tick.get("bid")), _f(tick.get("ask")), _f(tick.get("lastPrice"))
+    bid = bid if bid is not None and bid > 0 else None
+    ask = ask if ask is not None and ask > 0 else None
+    lp = lp if lp is not None and lp > 0 else None
+    out.update(bid=bid, ask=ask, last_price=lp)
+    if lp is None and not (bid and ask):
+        return out
+    if cls in NEVER_JUDGED:
+        return out
+    mid = (bid + ask) / 2.0 if (bid and ask) else lp
+    out["mid"] = mid
+    if bid and ask:
+        if ask < bid:
+            out.update(ok=False, why=f"crossed quote: bid {bid:g} over ask "
+                                     f"{ask:g}")
+            return out
+        half = (ask - bid) / 2.0
+        out.update(spread=(ask - bid) / mid if mid else None, half_spread=half)
+        s = _f(stop)
+        if s is not None and mid and abs(mid - s) > 0:
+            out["half_spread_r"] = half / abs(mid - s)
+        if lp is not None:
+            from core.price_format import price_decimals
+            tick_size = 10.0 ** -price_decimals(lp, cls, symbol)
+            if lp < bid - tick_size or lp > ask + tick_size:
+                out.update(ok=False,
+                           why=(f"the last print {lp:g} sits outside the "
+                                f"quote (bid {bid:g} / ask {ask:g}) — a "
+                                f"stale print"))
+                return out
+    bar = bar_for(cls)
+    ref = _f(reference)
+    if ref is not None and ref > 0 and bar > 0 and mid \
+            and abs(mid - ref) / ref > bar:
+        out.update(ok=False,
+                   why=(f"the venue's quote {mid:g} is {abs(mid - ref) / ref:.1%} "
+                        f"from the platform's {ref:g} (bar {bar:.1%})"))
+        return out
+    prev = dict(last or {}) if isinstance(last, dict) else {}
+    prev_mid = _f(prev.get("mid"))
+    since = _when(prev.get("same_since")) or _when(prev.get("at"))
+    same = (prev_mid is not None and mid is not None
+            and abs(mid - prev_mid) <= 1e-12)
+    out["mark"] = {"mid": mid, "at": now.isoformat(),
+                   "same_since": (since.isoformat() if (same and since)
+                                  else now.isoformat())}
+    if same and market_open and bar > 0 and since is not None \
+            and (now - since) >= timedelta(minutes=FROZEN_MINUTES):
+        minutes = int((now - since).total_seconds() // 60)
+        out.update(ok=False, why=(f"frozen quote: {mid:g} unchanged for "
+                                  f"{minutes} minutes in an open market"))
+    return out
+
+
+def slippage_budget_words(verdict) -> str:
+    """The refusal for a quoted half-spread past ENTRY_SLIPPAGE_MAX_R of
+    the stop distance, off an entry_quote verdict — or ""."""
+    r = _f((verdict or {}).get("half_spread_r"))
+    if r is None or r <= ENTRY_SLIPPAGE_MAX_R:
+        return ""
+    half = _f((verdict or {}).get("half_spread"))
+    return (f"the quoted half-spread"
+            + (f" {half:g}" if half is not None else "")
+            + f" is {r:.0%} of the stop distance (max "
+              f"{ENTRY_SLIPPAGE_MAX_R:.0%}) — the sized risk would be "
+              f"understated; nothing sent")
