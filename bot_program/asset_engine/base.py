@@ -1461,6 +1461,76 @@ class AssetBot(ABC):
         except Exception:  # noqa: BLE001
             return None
 
+    #: Reads of the venue's position list — each past the venue's own lag
+    #: window since the note and since the last such read — that prove an
+    #: in-doubt order left no position. Then the note is cleared and the
+    #: symbol trades again long before IN_DOUBT_QUIET_HOURS (2026-10-05).
+    IN_DOUBT_FLAT_READS = 2
+
+    def _settle_in_doubt(self, symbol: str, note: dict) -> bool:
+        """Clear the in-doubt note for `symbol` once the venue has been
+        read FLAT for it IN_DOUBT_FLAT_READS times, each read past the
+        venue's PORTFOLIO_LAG_S (the list lags both ways, MEASURED
+        2026-09-23) since the note and since the previous flat read.
+
+        True when the note was cleared this call. A venue that holds the
+        symbol (or a position it cannot name), that cannot be asked, or
+        that declares no lag number keeps the note — and a position the
+        venue holds is NEVER adopted here: reconcile and the operator own
+        that (the in-doubt alert says where to look). Never raises."""
+        try:
+            from datetime import datetime as _dt
+            from bot_program.engine.broker_router import client_for_symbol
+            client = client_for_symbol(self.user, symbol, self.cfg,
+                                       purpose="data")
+            lag = getattr(client, "PORTFOLIO_LAG_S", 0)
+            if (isinstance(lag, bool) or not isinstance(lag, (int, float))
+                    or lag <= 0):
+                return False
+            now = timezone.now()
+            at = _dt.fromisoformat(str(note.get("at")))
+            if (now - at).total_seconds() < float(lag):
+                return False
+            last = note.get("flat_read_at")
+            if last and (now - _dt.fromisoformat(str(last))).total_seconds() \
+                    < float(lag):
+                return False
+            positions = self._broker_snapshot(client, "positions")
+            if positions is None:
+                return False
+            want = str(symbol).upper()
+            for p in positions:
+                if not isinstance(p, dict):
+                    continue
+                if (p.get("symbol_unresolved")
+                        or str(p.get("symbol") or "").upper() == want):
+                    logger.warning(
+                        "[%s_bot] %s: the venue holds a position the "
+                        "in-doubt order may have opened (%s) — the note "
+                        "stands; nothing is adopted here", self.asset_class,
+                        symbol, p.get("symbol") or "unnamed")
+                    return False
+            reads = int(note.get("flat_reads") or 0) + 1
+            extras = dict(self.cfg.extras or {})
+            book = dict(extras.get("entry_in_doubt") or {})
+            if reads >= self.IN_DOUBT_FLAT_READS:
+                book.pop(want, None)
+                logger.info("[%s_bot] %s: the in-doubt order left no "
+                            "position — the venue read flat %d times, each "
+                            "past its %ss lag; the note is cleared",
+                            self.asset_class, symbol, reads, lag)
+            else:
+                book[want] = dict(note, flat_reads=reads,
+                                  flat_read_at=now.isoformat())
+            extras["entry_in_doubt"] = book
+            self.cfg.extras = extras
+            self.cfg.save(update_fields=["extras"])
+            return reads >= self.IN_DOUBT_FLAT_READS
+        except Exception as e:  # noqa: BLE001 — the note stands
+            logger.warning("[%s_bot] %s: could not settle the in-doubt note: "
+                           "%s", self.asset_class, symbol, e)
+            return False
+
     def _poll_working_entry(self, trade, client) -> None:
         """Ask the broker where a WORKING entry stands, and act on it.
 
@@ -3723,6 +3793,12 @@ class AssetBot(ABC):
                 f"{self.FRACTION_REFUSED_QUIET_HOURS}h. Type "
                 f"extras['venue_min_notional'] to refuse before the order")
         doubt = self._in_doubt_note(symbol)
+        # SETTLED EARLY when the venue reads flat for the symbol twice past
+        # its lag (2026-10-05, _settle_in_doubt): the note then clears in
+        # minutes, not IN_DOUBT_QUIET_HOURS; a venue that holds the symbol
+        # keeps it, and nothing is adopted here.
+        if doubt and self._settle_in_doubt(symbol, doubt):
+            doubt = None
         if doubt:
             return self._skip(
                 symbol, skips.ORDER_IN_DOUBT,
@@ -4771,6 +4847,20 @@ class AssetBot(ABC):
             # on the INSTRUMENT's class, the router's own key: one Instrument
             # read per live entry, every carrier, on a path that already
             # reads rows (duplicate_state, theme_state above).
+            # THE VENUE'S HEALTH (2026-10-05, bot_program/venue_health): a
+            # carrier that is SICK — a burst of 429/5xx or requests that
+            # never came back in the last minutes, or one failed order
+            # POST — takes no NEW real entry until its quiet ends. A
+            # decision with the venue's words (skips.VENUE_SICK), never an
+            # order_error; closes, stop moves and the mirror are never
+            # held, and the manual lane only warns. Keyed on the adapter,
+            # so the desk seam's MagicMock and a PaperTrader pass.
+            from bot_program import venue_health
+            _sick, _sick_why = venue_health.refusal(client, symbol)
+            if _sick:
+                logger.warning("[%s_bot] %s HELD: %s", self.asset_class,
+                               symbol, _sick_why)
+                return self._skip(symbol, _sick, _sick_why)
             _gate, _gate_why = self._etoro_entry_refusal(
                 client, symbol, decision.direction, float(qty), float(price),
                 self._instrument_class(symbol),

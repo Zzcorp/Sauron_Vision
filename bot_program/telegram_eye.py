@@ -224,6 +224,8 @@ SKIP_WORDS = {
     "market_shut": "the market was shut, so no paper fill",
     "suspect_mark": "an open position was left alone for a tick: its mark "
                     "was suspect or frozen",
+    "venue_sick": "a new real entry was held while the venue was sick "
+                  "(a burst of 429/5xx or requests that never came back)",
 }
 
 

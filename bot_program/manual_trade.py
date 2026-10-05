@@ -966,6 +966,23 @@ def validate_levels(cfg, symbol, *, entry, stop, target):
 REWARD_RISK_WARN = 1.0
 
 
+def venue_health_advisory(user, carrier: str, *, live: bool = True) -> dict:
+    """{"ok": bool, "reason": str}: whether the venue that would carry a
+    LIVE ticket is sick (bot_program/venue_health). A WARNING, never a
+    refusal — the operator keeps the last word on their own lane; the bots
+    hold their new real entries on the same memory. A paper ticket, or a
+    carrier the memory does not know, is always ok. The world is the
+    user's eToro row's (Demo ticked or not), as the router builds it."""
+    from bot_program import venue_health
+    if not live or str(carrier or "").lower() != "etoro":
+        return {"ok": True, "reason": ""}
+    try:
+        world = "demo" if user.etoro_account.demo else "live"
+    except Exception:  # noqa: BLE001 — no row: the router answers paper
+        return {"ok": True, "reason": ""}
+    return venue_health.advisory("etoro", world)
+
+
 def reward_risk_advisory(side, entry, stop, target) -> dict:
     """{ok, ratio, threshold, breakeven_win_rate, reason} — what the levels
     can make against what they risk, gross of costs, measured from `entry`.
@@ -1706,6 +1723,11 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         # Whether a Sauron signal backs this ticket. A warning, never a
         # refusal: the instrument-view ticket stays the operator's call.
         "signal_backing": signal_backing_advisory(user, inst, side, signal),
+        # Whether the carrier is SICK (2026-10-05, bot_program/venue_health:
+        # a burst of 429/5xx or requests that never came back). The bots
+        # hold their new real entries; this lane WARNS and stays pressable.
+        "venue_health": venue_health_advisory(user, ticket_stamp["carrier"],
+                                              live=live),
         # THE SETUP MEMORY (2026-10-03, backtester/proving/memory.py): what
         # followed, the last times this rule fired on this class in this
         # kind of tape. Information, never a gate; "" when nobody replayed

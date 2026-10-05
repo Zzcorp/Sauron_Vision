@@ -2529,6 +2529,13 @@ def _clear_eligibility():
     AND tearDown the cache tests pass or fail by alphabetical order."""
     from bot_program.engine import etoro_client
     etoro_client._ELIGIBILITY.clear()
+    # AND THE VENUE'S HEALTH (2026-10-05): the adapter notes every 429, 5xx
+    # and transport failure of a fake wire on the Django cache (LocMem in
+    # tests, kept across tests in one process), and three inside three
+    # minutes hold every later eToro entry in the same process with
+    # skips.VENUE_SICK.
+    from bot_program import venue_health
+    venue_health.reset()
 
 
 def _lev(settlement, direction, values, *, max_sl=None, min_amount=10):
@@ -2777,19 +2784,25 @@ class TheEligibilityReadTests(SimpleTestCase):
 
     def test_a_non_200_is_an_error_not_cached_and_asked_again(self):
         """429 included: nothing is cached, the next call asks again, and
-        every accessor is None — unmeasured, never whole and never free."""
+        every accessor is None — unmeasured, never whole and never free.
+        A 5xx is asked once more within the same call (READ_RETRIES,
+        2026-10-05); a 429 and a 403 are not."""
         from bot_program.engine import etoro_client
+        from bot_program.engine.etoro_client import READ_RETRIES
         for status in (429, 500, 403):
             with self.subTest(status=status):
                 _clear_eligibility()
                 t, fake = _client([SEARCH_AAPL,
                                    _elig_route([], status=status)])
                 with self.assertLogs("bot_program.engine.etoro_client",
-                                     level="WARNING"):
+                                     level="WARNING"), \
+                        mock.patch("time.sleep"):
                     self.assertIsNone(t.eligibility("AAPL"))
                 self.assertEqual(etoro_client._ELIGIBILITY, {})
-                self.assertEqual(t.eligibility_state("AAPL"), "error")
-                self.assertEqual(len(self._posts(fake)), 2,
+                with mock.patch("time.sleep"):
+                    self.assertEqual(t.eligibility_state("AAPL"), "error")
+                per_ask = 1 + READ_RETRIES if status >= 500 else 1
+                self.assertEqual(len(self._posts(fake)), 2 * per_ask,
                                  "the second call must ask again")
                 self.assertIsNone(t.takes_fractional_units("AAPL"))
                 self.assertIsNone(t.settlement_for("AAPL", "BUY", 1))
