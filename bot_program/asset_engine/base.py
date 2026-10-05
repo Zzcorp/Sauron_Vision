@@ -1111,6 +1111,17 @@ class AssetBot(ABC):
                                        self.asset_class, trade.symbol, e)
                     continue
 
+                # THE MARK SANITY (2026-10-05, bot_program/mark_sanity): a
+                # mark that jumps past its class's bar with no second print
+                # and no platform quote behind it, or a feed frozen in an
+                # open market, manages NOTHING on this row this tick — the
+                # vanished-stop net, the care, the trailing move and the
+                # SL/TP check all compare against it. The row waits for the
+                # next sane print; the skip and the care say why.
+                from bot_program import mark_sanity
+                if not mark_sanity.check(self, trade, price, client)["ok"]:
+                    continue
+
                 # `protected` is a claim about the BROKER, and the broker is
                 # asked whether it still holds. A stop leg that expired,
                 # was cancelled at TWS, or was never accepted leaves the row
