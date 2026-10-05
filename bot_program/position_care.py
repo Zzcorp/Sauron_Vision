@@ -93,6 +93,25 @@ handle. The risk denominator (metadata["initial_stop_loss"]) is stamped
 from the sent stop before the first move on a row that lacks it, so R
 keeps its meaning after the venue stop has moved.
 
+THE EVENT WINDOW (2026-10-05, the operator asked for more resilience on
+open positions): a high-impact calendar event is the weekend's gap in
+miniature — the print after a central bank or a payrolls number can sit
+far from the last one, through every stop. The care already locked a
+winner and cut a levered real loser before the weekend shut; it now does
+the same from EVENT_BEFORE_MINUTES before to EVENT_AFTER_MINUTES after a
+high-impact macro event (market_data.EconomicEvent, the macro sources of
+bot_program.news_risk) on the row's currency — either leg of a pair; the
+home currency (USD) for every other class — and within EARNINGS_BEFORE_HOURS
+of a held stock's or ETF's own earnings. A winner of EVENT_LOCK_AT_R locks
+break-even ("event lock", a gap, not a hunt: the crowd read never moves
+it); a REAL loser carrying EVENT_CUT_LEVERAGE or more is closed ("event
+cut") rather than carried through the print. The manual lane gets the lock
+only, never the cut, as on the weekend. Options are never read (a premium
+has its own clock). The calendar is read once per tick (the bot's per-tick
+cache) and the event the row sits in is written on its care
+(care["event"]: title, at). A calendar that cannot be read means no
+window: the care runs as before.
+
 Every close, scale-out and mirror is a AragornAction. Never raises: care
 that fails leaves the row to the rest of manage_positions, exactly as
 before.
@@ -137,6 +156,23 @@ SCALE_OUT_SWITCH = "aragorn_scale_out"
 #: THE MIRROR: a venue that refused the soft stop is asked again when the
 #: lock moves, else no sooner than this.
 MIRROR_RETRY_MINUTES = 30
+#: THE EVENT WINDOW: a high-impact calendar event on the row's currency is
+#: the weekend's gap in miniature, from EVENT_BEFORE_MINUTES before it to
+#: EVENT_AFTER_MINUTES after; a held stock's own earnings count from
+#: EARNINGS_BEFORE_HOURS out. The lock and the cut are the weekend's.
+EVENT_BEFORE_MINUTES = 60
+EVENT_AFTER_MINUTES = 15
+EARNINGS_BEFORE_HOURS = 24
+EVENT_LOCK_AT_R = WEEKEND_LOCK_AT_R
+EVENT_CUT_LEVERAGE = WEEKEND_CUT_LEVERAGE
+EVENT_IMPACT = "high"
+#: Every class but forex is exposed to this currency's events.
+EVENT_HOME_CURRENCY = "USD"
+#: The macro calendar's writers (news_risk.MACRO_SOURCES); earnings rows
+#: are read from any source by their title.
+EVENT_SOURCES = ("forexfactory", "fmp_macro")
+#: The per-tick cache key (the bot's _tick_broker_cache).
+EVENT_CACHE_KEY = "care_events"
 
 
 def scale_out_on() -> bool:
@@ -205,8 +241,109 @@ def market_hours(start, now, asset_class) -> float:
     return max(0.0, total - 24.0 * shut)
 
 
+def upcoming_events(now=None, cache=None) -> list:
+    """The calendar rows the event window can reach, as [{at, title,
+    currency, earnings}] — read once per tick when `cache` (the bot's
+    per-tick dict) is given. High-impact macro rows (EVENT_SOURCES) from
+    EVENT_AFTER_MINUTES ago to EVENT_BEFORE_MINUTES ahead; earnings rows
+    (any source, "earnings" in the title) out to EARNINGS_BEFORE_HOURS.
+    A calendar that cannot be read is an empty list."""
+    now = now or timezone.now()
+    if isinstance(cache, dict) and EVENT_CACHE_KEY in cache:
+        return cache[EVENT_CACHE_KEY]
+    rows = []
+    try:
+        from django.db.models import Q
+
+        from market_data.models import EconomicEvent
+        since = now - timedelta(minutes=EVENT_AFTER_MINUTES)
+        until = now + timedelta(hours=EARNINGS_BEFORE_HOURS)
+        qs = (EconomicEvent.objects
+              .filter(datetime__gte=since, datetime__lte=until)
+              .filter(Q(source__in=EVENT_SOURCES, impact__iexact=EVENT_IMPACT)
+                      | Q(title__icontains="earnings"))
+              .order_by("datetime")
+              .values("datetime", "title", "currency_affected"))
+        for r in qs:
+            title = str(r["title"] or "")
+            earnings = "earnings" in title.lower()
+            if not earnings and (r["datetime"] - now) > timedelta(
+                    minutes=EVENT_BEFORE_MINUTES):
+                continue
+            rows.append({"at": r["datetime"], "title": title,
+                         "currency": str(r["currency_affected"] or "").upper(),
+                         "earnings": earnings})
+    except Exception as e:  # noqa: BLE001 — an unread calendar is no window
+        logger.info("[care] calendar unread: %s", e)
+        rows = []
+    if isinstance(cache, dict):
+        cache[EVENT_CACHE_KEY] = rows
+    return rows
+
+
+def event_for(trade, now=None, events=None):
+    """The event whose window `trade` sits in now, or None: {title, at,
+    minutes (to the event; negative once past), earnings, why}. Forex:
+    either leg's currency. A stock or ETF: its own earnings (the symbol as
+    the row's ticker or a word of its title) within EARNINGS_BEFORE_HOURS,
+    else the home currency's events. Everything else: the home currency's.
+    Options: never. The nearest event wins."""
+    import re
+    now = now or timezone.now()
+    cls = str(getattr(trade, "asset_class", "") or "").lower()
+    if cls == "options":
+        return None
+    sym = str(getattr(trade, "symbol", "") or "").upper()
+    legs = (sym[:3], sym[3:6]) if len(sym) == 6 else (sym,)
+    if events is None:
+        events = upcoming_events(now)
+    best = None
+    for ev in events or []:
+        at = ev.get("at")
+        if at is None:
+            continue
+        minutes = (at - now).total_seconds() / 60.0
+        if minutes < -EVENT_AFTER_MINUTES:
+            continue
+        if ev.get("earnings"):
+            if cls not in ("stock", "etf") or not sym:
+                continue
+            if minutes > EARNINGS_BEFORE_HOURS * 60:
+                continue
+            title = str(ev.get("title") or "").upper()
+            mine = (ev.get("currency") == sym
+                    or re.search(rf"(?<![A-Z0-9]){re.escape(sym)}(?![A-Z0-9])",
+                                 title) is not None)
+            if not mine:
+                continue
+        else:
+            if minutes > EVENT_BEFORE_MINUTES:
+                continue
+            ccy = str(ev.get("currency") or "").upper()
+            if not ccy:
+                continue
+            if cls == "forex":
+                if ccy not in legs:
+                    continue
+            elif ccy != EVENT_HOME_CURRENCY:
+                continue
+        if best is None or abs(minutes) < abs(best["minutes"]):
+            best = {"title": str(ev.get("title") or "event"),
+                    "at": at.isoformat(), "minutes": round(minutes, 1),
+                    "earnings": bool(ev.get("earnings"))}
+    if best is None:
+        return None
+    m = best["minutes"]
+    when = (f"in {m:.0f} min" if m >= 0 else f"{-m:.0f} min ago")
+    if best["earnings"] and m > 120:
+        when = f"in {m / 60:.0f} h"
+    best["why"] = f"{best['title']} {when}"
+    return best
+
+
 def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
-         live=False, manual=False, crowd=None, scale=False) -> dict:
+         live=False, manual=False, crowd=None, scale=False,
+         event=None) -> dict:
     """The care decision for one row at one mark — pure, no I/O:
     {action: "hold"|"close", reason: "SL"|"TIME"|"", why, care: {...},
      changed: bool[, scale_out: {fraction, r_now}]}. `crowd` = {"atr",
@@ -214,7 +351,9 @@ def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
     crowd's levels. `scale` (2026-10-04): the row may bank a fraction at
     +SCALE_OUT_AT_R — a paper bot row with the switch on; `scale_out` is
     set on a HOLD whose mark stands at or past it and that has not banked
-    yet (care["scaled_out"]). Never with a close, never on the manual lane."""
+    yet (care["scaled_out"]). Never with a close, never on the manual lane.
+    `event` (2026-10-05, event_for): the calendar event whose window the
+    row sits in — the weekend's lock and cut apply."""
     now = now or timezone.now()
     meta = dict(trade.metadata or {})
     care = dict(meta.get("care") or {})
@@ -255,6 +394,9 @@ def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
     if weekend and r_now >= WEEKEND_LOCK_AT_R:
         # a winner NOW locks break-even; a past peak never closes a loser
         cands.append((lvl(BREAKEVEN_LOCK_R), "weekend lock"))
+    if event and r_now >= EVENT_LOCK_AT_R:
+        # THE EVENT WINDOW: the weekend's lock before a print that gaps
+        cands.append((lvl(BREAKEVEN_LOCK_R), "event lock"))
     if not manual:
         # the thesis check's structure stop, written on the row by the
         # open-position review (brain/thesis_check.care_stop): tighten-only
@@ -290,9 +432,13 @@ def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
     if soft is not None:
         new_care["soft_stop"] = round(soft, 8)
         new_care["soft_why"] = soft_why
+    if event:
+        new_care["event"] = {"title": event.get("title"), "at": event.get("at")}
+    else:
+        care.pop("event", None)
     out["changed"] = any(care.get(k) != new_care.get(k)
                          for k in ("peak", "worst", "soft_stop", "soft_why",
-                                   "since"))
+                                   "since", "event"))
     out["care"] = {**care, **new_care}
 
     if soft is not None and ((d > 0 and p <= soft) or (d < 0 and p >= soft)):
@@ -322,6 +468,13 @@ def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
                    why=f"Friday evening, a {lev}x loser ({r_now:+.2f}R) is not "
                        f"carried through the weekend gap")
         out["care"]["exit"] = "weekend cut"
+        return out
+    if live and event and r_now < 0 and lev >= EVENT_CUT_LEVERAGE:
+        out.update(action="close", reason="SL",
+                   why=f"{event.get('why') or 'a high-impact event'}: a {lev}x "
+                       f"loser ({r_now:+.2f}R) is not carried through the "
+                       f"print")
+        out["care"]["exit"] = "event cut"
         return out
     from django.utils.dateparse import parse_datetime
     care_since = parse_datetime(new_care["since"]) if new_care.get("since") \
@@ -441,9 +594,17 @@ def care(bot, trade, price, client, *, now=None) -> str:
         # The scale-out is asked of a PAPER bot row only (the docstring:
         # eToro closes whole; the manual lane is the operator's).
         scale = bool(trade.paper) and not manual and scale_out_on()
+        # THE EVENT WINDOW: the calendar once per tick, the row's event
+        event = None
+        try:
+            event = event_for(trade, now, upcoming_events(
+                now, cache=getattr(bot, "_tick_broker_cache", None)))
+        except Exception as e:  # noqa: BLE001 — no calendar, no window
+            logger.info("[care] %s #%s: calendar unread (%s)", trade.symbol,
+                        trade.id, e)
         decision = plan(trade, price, now=now, posture_level=level, kind=kind,
                         live=not trade.paper, manual=manual, crowd=crowd,
-                        scale=scale)
+                        scale=scale, event=event)
     except Exception as e:  # noqa: BLE001 — care that fails changes nothing
         logger.warning("[care] %s #%s not cared for: %s", trade.symbol,
                        trade.id, e)
