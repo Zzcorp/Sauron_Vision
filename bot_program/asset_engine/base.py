@@ -1122,6 +1122,17 @@ class AssetBot(ABC):
                 if not mark_sanity.check(self, trade, price, client)["ok"]:
                     continue
 
+                # THE VENUE MARK (2026-10-05, bot_program/venue_mark): the
+                # price the engine is about to act on is the venue's own
+                # rate for a REAL row; the book and the pages prefer it to
+                # the platform's quote while it is fresh, so a CFD's entry is
+                # never valued against a futures feed. A paper row's quote IS
+                # its venue: nothing stamped.
+                if not trade.paper:
+                    from bot_program import venue_mark
+                    from bot_program.engine.capabilities import adapter_key
+                    venue_mark.stamp(trade, price, source=adapter_key(client))
+
                 # `protected` is a claim about the BROKER, and the broker is
                 # asked whether it still holds. A stop leg that expired,
                 # was cancelled at TWS, or was never accepted leaves the row

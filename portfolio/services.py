@@ -172,7 +172,13 @@ class UnifiedPosition:
                  # legacy forex row. Every notional the book sums is
                  # price x quantity x THIS, or a USDJPY row counts its yen
                  # as dollars (see usd_per_unit).
-                 "value_per_unit")
+                 "value_per_unit",
+                 # Which price marked the row (2026-10-05, venue_mark):
+                 # "venue" (a real row's own venue rate, stamped by the
+                 # manage tick and fresh), "quote" (the platform's
+                 # LiveQuote), "exit" (a closed row's fill), None (nothing
+                 # priced it). The page prints it beside the price.
+                 "mark_source")
 
 
 def is_option_row(trade) -> bool:
@@ -458,6 +464,7 @@ def _trade_to_position(trade, instruments, quotes):
     up.protected = bool((trade.metadata or {}).get("protected"))
     up.carrier = str((trade.metadata or {}).get("broker") or "")
     up.stamped_leverage = (trade.metadata or {}).get("leverage")
+    up.mark_source = None
 
     entry = float(trade.entry_price or 0)
     qty = float(trade.qty or 0)
@@ -467,6 +474,7 @@ def _trade_to_position(trade, instruments, quotes):
 
     if trade.status == "CLOSED":
         up.current_price = trade.exit_price
+        up.mark_source = "exit"
         # Unmeasured is not flat. `or 0` printed a confident 0.00 in the
         # portfolio row for a close nothing could price; None is already how
         # these three fields say "no number" — both branches below use it.
@@ -499,6 +507,17 @@ def _trade_to_position(trade, instruments, quotes):
     quote = quotes.get(trade.symbol)
     last = float(quote.last) if quote and quote.last is not None else None
     up.current_price = quote.last if quote else None
+    up.mark_source = "quote" if last is not None else None
+    # THE VENUE MARK (2026-10-05): a REAL row is valued at its venue's own
+    # rate while the manage tick's stamp is fresh — a CFD's entry against
+    # a futures feed rendered the basis as P&L. A paper row's quote IS its
+    # venue (venue_mark.fresh answers None for it).
+    from bot_program.venue_mark import fresh as _venue_fresh
+    vm = _venue_fresh(trade)
+    if vm is not None:
+        last = float(vm["price"])
+        up.current_price = Decimal(str(vm["price"]))
+        up.mark_source = "venue"
     if last is not None and entry:
         up.unrealized_pnl = round((last - entry) * qty * vpu * sign, 2)
         up.unrealized_pnl_pct = round((last - entry) / entry * 100 * sign, 2)
