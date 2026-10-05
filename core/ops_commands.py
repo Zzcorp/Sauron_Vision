@@ -105,6 +105,19 @@ COMMANDS = [
         "category": "decide",
     },
     {
+        "name": "bar_losers",
+        "title": "Bar the measured losers",
+        "purpose": "Every rule at a live stage with its all-time graded record and the floor's verdict (LOSER: 20 graded signals and a hit rate under 35% or an expectancy at or under 0R; a hand promotion stands 7 days); --apply demotes every LOSER to paper, one PromotionEvent each. The nightly sweep applies the same floor once pipeline_promotion is ON.",
+        "usage": [
+            "python manage.py bar_losers           # the table, nothing written",
+            "python manage.py bar_losers --apply   # bar every LOSER to paper",
+        ],
+        "mirrors": "/evidence/",
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    {
         "name": "shares",
         "title": "Share allocator",
         "purpose": "The share allocator's page as a command: propose, apply (LIVE mode, --yes), reject, rollback and grade the plans that size each live follower pool.",

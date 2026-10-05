@@ -212,6 +212,31 @@ seeding, and again for any instrument you add later:
 ./deploy/dc exec web python manage.py backfill_bars --from-configs --intervals 1d,4h --bars 300
 ```
 
+### The proving run
+
+The proving ground (`backtester/proving`, the `proving_ground` component,
+off by default) judges every live rule and its short mirror on real 4h
+history — next-bar fills, costs, a 30% holdout, a bootstrap bound — and
+says no. It refuses to judge a symbol on less than **540 days / 800 bars**
+of 4h history, and neither the scheduled refresh (the newest 200 bars) nor
+the backfill above (300) ever fetched that much, so every verdict read
+INSUFFICIENT. Run it once, in this order; nothing trades and no key is
+needed:
+
+```bash
+./deploy/dc exec web python manage.py backfill_bars --proving     # every symbol the judge walks, 4h, 4000 bars deep (two years from Yahoo, more from Binance)
+./deploy/dc exec web python manage.py prove data                  # who has enough history, who is still short
+./deploy/dc exec web python manage.py component on proving_ground # the nightly judge (03:40 UTC) and the Sunday generator (03:50)
+./deploy/dc exec web python manage.py prove rules --save          # judge the live rules now; verdicts on /evidence/
+./deploy/dc exec web python manage.py bar_losers                  # the live rules' measured record; --apply bars the losers to paper
+```
+
+A rule whose verdict is PROVEN has beaten its costs out of sample; one
+that is INSUFFICIENT still has too little history (run `prove data`). The
+verdicts are read by the setup memory and the ticket's odds today; the
+proof-first gate and the edge sizer that will read them are the next
+stage.
+
 Broker credentials are for **live trading** and for real-time marks that beat
 the delayed public feeds:
 

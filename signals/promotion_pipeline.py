@@ -108,6 +108,21 @@ DEMOTE_DEGRADATION_RATIO = 0.50  # if recent < 50% of baseline → demote
 DEMOTE_MIN_N = 10
 DEMOTE_PAPER_WINDOW_DAYS = 30
 
+# THE FLOOR (2026-10-05): a MEASURED LOSER at a live stage goes to paper
+# whatever its baseline. The degradation rule above compares the recent
+# window with the stage's baseline, and returns None when the baseline is
+# None or <= 0 — so a rule promoted with no usable baseline (the bulk
+# promotion of 2026-10-01) could never be demoted by the nightly sweep, and
+# a measured loser kept the live venue until a human acted. The floor reads
+# the rule's ALL-TIME graded record: LOSER_MIN_N graded signals and either
+# a hit rate under LOSER_HIT_MAX or an expectancy at or under zero. The
+# operator's own promotion stands for MANUAL_DWELL_DAYS (the sweep never
+# overturns a fresh hand decision); `manage.py bar_losers` reads and
+# applies the same floor by hand.
+LOSER_MIN_N = 20
+LOSER_HIT_MAX = 0.35
+MANUAL_DWELL_DAYS = 7
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -284,6 +299,37 @@ def is_eligible_for_promotion(rule_name: str) -> Optional[str]:
     return None
 
 
+def measured_loser(rule_name: str) -> str:
+    """The sentence that makes `rule_name` a MEASURED LOSER on its all-time
+    graded record — LOSER_MIN_N signals and a hit rate under LOSER_HIT_MAX
+    or an expectancy at or under zero — or "" (healthy, or unmeasured).
+    Words only; nothing here moves a stage."""
+    s = _stats_since(rule_name)
+    n = int(s.get("n") or 0)
+    if n < LOSER_MIN_N:
+        return ""
+    hit = s.get("hit_rate")
+    exp = s.get("expectancy")
+    bad_hit = hit is not None and float(hit) < LOSER_HIT_MAX
+    bad_exp = exp is not None and float(exp) <= 0
+    if not (bad_hit or bad_exp):
+        return ""
+    return (f"{n} graded signals all time: hit "
+            f"{(float(hit) if hit is not None else 0):.0%} (floor "
+            f"{LOSER_HIT_MAX:.0%}), expectancy "
+            f"{(float(exp) if exp is not None else 0):+.2f}R")
+
+
+def hand_promoted_recently(rule_name: str, now=None) -> bool:
+    """True while the operator's own promotion of `rule_name` is younger
+    than MANUAL_DWELL_DAYS: their last word stands against the floor."""
+    from signals.models import PromotionEvent
+    now = now or timezone.now()
+    return PromotionEvent.objects.filter(
+        rule_name=rule_name, reason="manual_promote",
+        created_at__gte=now - timedelta(days=MANUAL_DWELL_DAYS)).exists()
+
+
 def is_due_for_demotion(rule_name: str) -> Optional[str]:
     """Return demoted stage if degradation criteria are met, else None."""
     ctrl = _control(rule_name)
@@ -297,6 +343,16 @@ def is_due_for_demotion(rule_name: str) -> Optional[str]:
     target = _prev_stage(stage)
     if target is None:
         return None
+
+    if stage in ("live_small", "live_full"):
+        # THE FLOOR (2026-10-05): a measured loser leaves real money for
+        # paper at once — not one rung a night — whatever its baseline,
+        # unless the operator promoted it by hand within the dwell.
+        why = measured_loser(rule_name)
+        if why and not hand_promoted_recently(rule_name):
+            logger.info("[promotion] %s: measured loser at %s — to paper "
+                        "(%s)", rule_name, stage, why)
+            return "paper"
 
     if stage == "paper":
         # Demote PAPER → RESEARCH if expectancy goes negative across last 30d.
@@ -390,7 +446,8 @@ def promote_rule(rule_name: str, target_stage: Optional[str] = None, *,
 
 
 def demote_rule(rule_name: str, target_stage: Optional[str] = None, *,
-                user=None, reason: str = "manual_demote") -> "PromotionEvent":
+                user=None, reason: str = "manual_demote",
+                notes: str = "") -> "PromotionEvent":
     ctrl = _control(rule_name)
     if ctrl is None:
         raise PipelineError(f"No RuleControl for '{rule_name}'")
@@ -400,7 +457,8 @@ def demote_rule(rule_name: str, target_stage: Optional[str] = None, *,
             raise PipelineError(f"Rule '{rule_name}' is already at the bottom stage.")
     if STAGE_ORDER.index(target_stage) >= STAGE_ORDER.index(ctrl.promotion_stage):
         raise PipelineError("demote_rule called with a non-backward target_stage.")
-    return _transition(rule_name, target_stage, user=user, reason=reason)
+    return _transition(rule_name, target_stage, user=user, reason=reason,
+                       notes=notes)
 
 
 # ── Bulk auto-evaluation ───────────────────────────────────────────────────
@@ -422,7 +480,14 @@ def auto_evaluate_all_rules() -> dict:
         try:
             target = is_due_for_demotion(ctrl.rule_name)
             if target is not None:
-                _transition(ctrl.rule_name, target, user=None, reason="auto_demote")
+                # the floor's sentence rides the event (2026-10-05); the
+                # degradation rule's event keeps its empty note
+                why = (measured_loser(ctrl.rule_name)
+                       if target == "paper" and ctrl.promotion_stage
+                       in ("live_small", "live_full") else "")
+                _transition(ctrl.rule_name, target, user=None,
+                            reason="auto_demote",
+                            notes=f"measured loser: {why}" if why else "")
                 demoted.append(ctrl.rule_name)
                 continue
             target = is_eligible_for_promotion(ctrl.rule_name)
