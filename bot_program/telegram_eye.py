@@ -228,6 +228,8 @@ SKIP_WORDS = {
                   "(a burst of 429/5xx or requests that never came back)",
     "wide_spread": "the quoted half-spread at the send would have eaten "
                    "too much of the stop distance",
+    "bad_timing": "the clock said no: a rollover, a market's first quarter "
+                  "hour or last minutes, or a high-impact print near",
 }
 
 

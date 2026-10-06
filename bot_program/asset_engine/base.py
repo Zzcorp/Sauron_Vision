@@ -4005,6 +4005,21 @@ class AssetBot(ABC):
                            self.asset_class, symbol, _quote["why"])
             return self._skip(symbol, skips.SUSPECT_MARK, _quote["why"])
 
+        # THE ENTRY TIMING (2026-10-06, bot_program/entry_timing): the
+        # clock, judged before the cost, the levels and the size — the
+        # 17:00 New York rollover, a market's first quarter hour, an
+        # exchange's last minutes, Friday's last hour before the weekend,
+        # a high-impact print on the instrument's currency from 60 min
+        # before to 15 min after. A skip with the hour it clears
+        # (BAD_TIMING), never an entry; a print within three hours caps
+        # the attack tier instead (_attack_tier reads the verdict). Read
+        # again on the fresh clock before the order.
+        _timing = self._entry_timing_gate(symbol)
+        if not _timing["ok"]:
+            logger.warning("[%s_bot] %s: entry refused on the clock — %s",
+                           self.asset_class, symbol, _timing["why"])
+            return self._skip(symbol, skips.BAD_TIMING, _timing["why"])
+
         # A paper entry used to be recorded at the raw ticker, because the
         # order block below sits inside `if not paper:` and PaperTrader is
         # therefore never reached. Charge the realistic fill here, before
@@ -4432,6 +4447,29 @@ class AssetBot(ABC):
                     f"the target {when} ({price:g} -> {fresh:g}): the "
                     f"planned reward is gone — nothing sent")
         return ""
+
+    def _entry_timing_gate(self, symbol: str, *, now=None) -> dict:
+        """THE ENTRY TIMING (2026-10-06, bot_program/entry_timing.verdict)
+        for `symbol` on the INSTRUMENT's class and venue (the router's own
+        key), with the calendar read once per tick (_tick_broker_cache).
+        The verdict is kept on self._timing_verdict[symbol] for
+        _attack_tier (a print within EVENT_ATTACK_HOURS caps the tier).
+        Never raises: an unreadable clock or calendar refuses nothing."""
+        from bot_program import entry_timing
+        try:
+            cls, exchange = entry_timing.instrument_key(symbol, self.asset_class)
+            verdict = entry_timing.verdict(
+                symbol, cls, exchange=exchange, now=now,
+                cache=getattr(self, "_tick_broker_cache", None))
+        except Exception as e:  # noqa: BLE001 — the clock never breaks a tick
+            logger.warning("[%s_bot] %s: entry timing unread (%s) — not "
+                           "judged", self.asset_class, symbol, e)
+            verdict = {"ok": True, "code": "", "why": "", "until": None,
+                       "attack": None}
+        if not isinstance(getattr(self, "_timing_verdict", None), dict):
+            self._timing_verdict = {}
+        self._timing_verdict[symbol] = verdict
+        return verdict
 
     def _entry_quote_gate(self, symbol: str, tk, client, *, stop=None) -> dict:
         """THE ENTRY QUOTE (2026-10-05, mark_sanity.entry_quote): whether
@@ -5420,6 +5458,18 @@ class AssetBot(ABC):
                 return self._skip(symbol, _look["skip"], _look["why"])
             if _look.get("quote"):
                 entry_meta["entry_quote"] = _look["quote"]
+            # THE CLOCK, read again at the send (2026-10-06): the desk
+            # executes minutes after it proposes, and a proposal made at
+            # 16:40 New York can reach the order at 16:55 — inside the
+            # rollover — or a print can have come into its window. The
+            # same verdict as the proposal's (entry_timing), on the fresh
+            # clock; nothing sent on a refusal.
+            _timing = self._entry_timing_gate(symbol)
+            if not _timing["ok"]:
+                logger.warning("[%s_bot] %s: the order was refused on the "
+                               "clock — %s", self.asset_class, symbol,
+                               _timing["why"])
+                return self._skip(symbol, skips.BAD_TIMING, _timing["why"])
             try:
                 # The LAST read before real units move. can_open_new ran
                 # before this symbol's scan; a disarm landing between then
@@ -7273,13 +7323,24 @@ class AssetBot(ABC):
         else:
             tier, why = "standard", (f"score {c:.4f} is below "
                                      f"{strong_from:.4f}")
+        # THE PRINT CAP (2026-10-06, bot_program/entry_timing): a
+        # high-impact print on the instrument's currency within
+        # EVENT_ATTACK_HOURS caps the tier at STANDARD — the risk is sized
+        # into a print, never raised into one. The verdict is the one
+        # _entry_timing_gate kept for this symbol on this proposal.
+        capped = False
+        _verdict = (getattr(self, "_timing_verdict", None) or {}).get(symbol)
+        _cap = _verdict.get("attack") if isinstance(_verdict, dict) else None
+        if isinstance(_cap, dict) and _cap.get("why") and tier != "standard":
+            tier, why, capped = "standard", f"{why} — {_cap['why']}", True
         base = risk_fraction(self.cfg)
         return {"tier": tier.upper(), "scale": scales[tier],
                 "score": round(c, 4),
                 "strong_from": round(strong_from, 4),
                 "high_from": round(high_from, 4),
                 "config_risk_fraction": base,
-                "risk_fraction": base * scales[tier], "why": why}
+                "risk_fraction": base * scales[tier], "why": why,
+                "capped": capped}
 
     def _attack_edge(self, symbol: str, decision, c: float) -> tuple:
         """(tier, words) for a score in the HIGH band: "high" only on a

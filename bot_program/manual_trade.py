@@ -1019,6 +1019,23 @@ def venue_health_advisory(user, carrier: str, *, live: bool = True) -> dict:
     return venue_health.advisory("etoro", world)
 
 
+def timing_advisory(inst) -> dict:
+    """THE ENTRY TIMING on the ticket (2026-10-06, bot_program/entry_timing):
+    {"ok", "reason", "attack"} — the 17:00 New York rollover, a market's
+    first quarter hour, an exchange's last minutes, Friday's last hour
+    before the weekend, a high-impact print on the instrument's currency.
+    A WARNING, never a refusal — the operator keeps the last word on their
+    own lane; the bots refuse on the same clock. A paper ticket is judged
+    too: the paper venue fills at the same hours."""
+    from bot_program import entry_timing
+    try:
+        return entry_timing.advisory(
+            inst.symbol, getattr(inst, "asset_class", "") or "",
+            exchange=getattr(inst, "exchange", "") or "")
+    except Exception:  # noqa: BLE001 — an unread clock warns of nothing
+        return {"ok": True, "reason": "", "attack": ""}
+
+
 def reward_risk_advisory(side, entry, stop, target) -> dict:
     """{ok, ratio, threshold, breakeven_win_rate, reason} — what the levels
     can make against what they risk, gross of costs, measured from `entry`.
@@ -1770,6 +1787,10 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         "quote_advisory": quote_advisory(_tick, cls, inst.symbol,
                                          stop=stop_used, live=live,
                                          client=_client),
+        # THE ENTRY TIMING on the ticket (2026-10-06): the rollover, a
+        # market's first quarter hour or last minutes, the weekend's last
+        # hour, a print near. The bots refuse on it; this lane WARNS only.
+        "timing_advisory": timing_advisory(inst),
         # THE SETUP MEMORY (2026-10-03, backtester/proving/memory.py): what
         # followed, the last times this rule fired on this class in this
         # kind of tape. Information, never a gate; "" when nobody replayed
@@ -2663,6 +2684,12 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                 extra["quote_advisory_at_entry"] = {
                     k: _qa.get(k) for k in ("ok", "reason", "budget_ok",
                                             "budget_reason", "half_spread_r")}
+            _ta = preview.get("timing_advisory")
+            if isinstance(_ta, dict) and not _ta.get("ok", True):
+                # taken past the clock's warning (2026-10-06): recorded,
+                # as the other overridden warnings are
+                extra["timing_advisory_at_entry"] = {
+                    "ok": False, "reason": str(_ta.get("reason") or "")[:200]}
 
             with transaction.atomic():
                 trade = _book_row(booked_px,
