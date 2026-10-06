@@ -458,9 +458,7 @@ app.conf.beat_schedule = {
 
     # ── Phase 33.4 — reconcile open live AssetBotTrade rows against broker
     #              state. Catches manual closes, broker liquidations, and
-    #              worker-died-mid-order drift. Every 15 min during NYSE
-    #              hours — extending to 24/7 is fine but mostly noise outside
-    #              market hours since broker positions don't change.
+    #              worker-died-mid-order drift.
     # Drain trades stuck in CLOSE_PENDING (broker close failed; the position
     # is still live at the broker). Every 5 min, all day — a stranded live
     # position is not a market-hours-only problem.
@@ -469,9 +467,16 @@ app.conf.beat_schedule = {
         "schedule": 300.0,
     },
 
+    # EVERY 15 MINUTES AROUND THE CLOCK (2026-10-06). This ran 13:00-21:45
+    # UTC only, on the IBKR-era reading that "broker positions don't change
+    # outside market hours". eToro's forex, commodity and crypto CFDs trade
+    # through the night and their stops fire at the venue: GBPNZD #135 was
+    # closed at eToro before 22:07 UTC on 2026-10-05 and stayed OPEN here
+    # until the 13:00 pass the next day — fifteen hours counted in the open
+    # risk, the pledge and /status. One portfolio read per user per pass.
     "reconcile-asset-bot-trades": {
         "task": "bot_program.tasks.reconcile_all_asset_bot_trades",
-        "schedule": crontab(minute="*/15", hour="13-21"),
+        "schedule": crontab(minute="*/15"),
     },
 
     # Every 15 min around the clock, NOT hour-gated like the reconcile

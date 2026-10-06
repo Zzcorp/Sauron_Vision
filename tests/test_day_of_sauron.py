@@ -166,7 +166,7 @@ class TheCadencesAreTheSchedulesOwnWordsTests(SimpleTestCase):
         self.assertEqual(_when(scheme, "propose-share-plans"), "every 4 h at :05")
         self.assertEqual(_when(scheme, "refresh-option-chains"), "hourly 13:15–20:15")
         self.assertEqual(_when(scheme, "reconcile-asset-bot-trades"),
-                         "every 15 min, 13:00–21:45")
+                         "every 15 min")
 
     def test_a_changed_cadence_changes_the_words(self):
         entry = dict(app.conf.beat_schedule["tick-asset-bots"])
@@ -224,14 +224,19 @@ class TheCadencesAreTheSchedulesOwnWordsTests(SimpleTestCase):
         self.assertLess(sat, sun)
 
     def test_the_widest_gap_is_what_staleness_reads(self):
-        """A 13:00–21:45 entry is silent all night by design; its widest
-        gap (the digest's own reading) is what a staleness judgement
-        must use, never its 15-minute beat."""
+        """An hourly 13:15–20:15 entry is silent all night by design; its
+        widest gap (the digest's own reading) is what a staleness
+        judgement must use, never its hourly beat. (The reconcile was the
+        example until 2026-10-06, when it began to run around the clock.)"""
         scheme = day.day_scheme()
+        chains = next(t for s in scheme["stages"] for t in s["tasks"]
+                      if t["key"] == "refresh-option-chains")
+        self.assertEqual(chains["seconds"], 3600.0)
+        self.assertEqual(chains["widest"], (24 - 20.25 + 13.25) * 3600.0)
         rec = next(t for s in scheme["stages"] for t in s["tasks"]
                    if t["key"] == "reconcile-asset-bot-trades")
-        self.assertEqual(rec["seconds"], 15 * 60.0)
-        self.assertEqual(rec["widest"], (24 - 21.75 + 13) * 3600.0)
+        self.assertEqual((rec["seconds"], rec["widest"]),
+                         (15 * 60.0, 15 * 60.0))
         eye = next(t for s in scheme["stages"] for t in s["tasks"]
                    if t["key"] == "poll-telegram-eye")
         self.assertEqual(eye["widest"], 15.0)
