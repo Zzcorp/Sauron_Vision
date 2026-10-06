@@ -21,36 +21,72 @@ HEADERS = {
     "Accept": "application/json",
 }
 
+#: What this pass's calls came to: how many were made, how many StockTwits
+#: REFUSED (a 429, any other non-200, a transport failure, a body that was
+#: not JSON) and the last refusal's words. Module-level: one worker
+#: process walks the pass, and the task resets it before walking
+#: (reset_refusals) and reads it after (refusals). A pass that stored
+#: nothing because every call was refused is a BLOCKED HOST, which the
+#: digest used to call "Social Sentiment ran and produced nothing" — a
+#: quiet market's verdict, and the operator read it as one (2026-10-06).
+_REFUSALS = {"calls": 0, "refused": 0, "last": ""}
+
+
+def reset_refusals() -> None:
+    """Forget the last pass's calls — the task calls this before walking."""
+    _REFUSALS.update(calls=0, refused=0, last="")
+
+
+def refusals() -> dict:
+    """{"calls", "refused", "last"} for the pass since reset_refusals."""
+    return dict(_REFUSALS)
+
+
+def _refused(words: str) -> None:
+    _REFUSALS["refused"] += 1
+    _REFUSALS["last"] = words
+
 
 def _get(url: str, params: dict | None = None, timeout: int = 15) -> Optional[dict]:
-    """Rate-limited GET request, returns parsed JSON or None."""
+    """Rate-limited GET request, returns parsed JSON or None.
+
+    Every refusal is counted on _REFUSALS (see there): the task reads the
+    count after the pass, so a host StockTwits blocks reads as blocked
+    rather than as a market with nothing to say.
+    """
     try:
         from core.rate_limiter import rate_limiter
         rate_limiter.wait_if_needed("stocktwits", calls_per_minute=20)
     except Exception:
         pass
 
+    _REFUSALS["calls"] += 1
     try:
         resp = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
 
         if resp.status_code == 429:
             logger.warning("StockTwits: rate limit hit (429) for %s", url)
+            _refused("HTTP 429 (rate limit)")
             return None
 
         if resp.status_code == 200:
             return resp.json()
 
         logger.warning("StockTwits: unexpected status %d for %s", resp.status_code, url)
+        _refused(f"HTTP {resp.status_code}")
         return None
 
     except requests.exceptions.Timeout:
         logger.error("StockTwits: request timed out for %s", url)
+        _refused("timed out")
         return None
     except requests.RequestException as exc:
         logger.error("StockTwits: request error for %s: %s", url, exc)
+        _refused(type(exc).__name__)
         return None
     except ValueError as exc:
         logger.error("StockTwits: JSON decode error for %s: %s", url, exc)
+        _refused("not JSON")
         return None
 
 

@@ -14,6 +14,86 @@ from asgiref.sync import sync_to_async
 
 log = logging.getLogger("stream_oanda")
 
+# A FEED THAT WRITES NOTHING MUST NOT LOOK LIKE A QUIET MARKET (2026-10-06).
+# Every LiveQuote write failure here went to `log.debug` — a deletion in
+# production, where the root logger sits at WARNING — and the write was
+# handed to `asyncio.create_task` and dropped, so a database connection
+# that died under the stream failed every write from then on, in silence,
+# while the socket kept receiving. The shape is the futures and spot
+# streamers' (stream_binance_futures, 2026-09-14): the first failed write
+# is a WARNING naming the pair and the exception, every hundredth after it
+# a footnote; a failed write closes the thread's database connection so
+# the next one reconnects; and a heartbeat on its own task says every
+# HEARTBEAT_SEC what arrived and what landed.
+
+#: How often the heartbeat speaks, in seconds (stream_finnhub's).
+HEARTBEAT_SEC = 600
+
+#: After the first, one failure report per this many.
+FAILURE_REPORT_EVERY = 100
+
+#: What this process has DONE. Module-level on purpose: one streamer per
+#: container, and the numbers outlive every reconnection.
+STATS = {"ticks": 0, "tick_errors": 0, "quotes_written": 0, "quotes_failed": 0}
+
+#: `asyncio.create_task` returns a task the event loop only weakly holds.
+#: Own it until it is done.
+_PENDING: set = set()
+
+
+def _fire(coro):
+    """Run `coro` in the background, keeping the task alive until it ends."""
+    task = asyncio.create_task(coro)
+    _PENDING.add(task)
+    task.add_done_callback(_PENDING.discard)
+    return task
+
+
+def _report_failure(where: str, symbol: str, exc: Exception, count: int):
+    """The first failure is loud. The hundredth is a footnote."""
+    if count == 1 or count % FAILURE_REPORT_EVERY == 0:
+        log.warning("oanda: %s failed for %s (failure #%d) — %s: %s",
+                    where, symbol or "?", count, type(exc).__name__, exc)
+
+
+def _reconnect_db():
+    """Close the thread's database connection after a failed write, so the
+    next write opens a fresh one instead of failing on a dead socket for
+    the life of the process (see stream_finnhub._reconnect_db)."""
+    try:
+        from django.db import close_old_connections
+        close_old_connections()
+    except Exception as e:  # noqa: BLE001 — a reconnect must not take the loop down
+        log.debug("close_old_connections: %s", e)
+
+
+def heartbeat_line() -> str:
+    """One line an operator can act on: what arrived, and what landed."""
+    return (f"{STATS['ticks']} prices · quotes "
+            f"{STATS['quotes_written']} written / "
+            f"{STATS['quotes_failed']} failed · "
+            f"{STATS['tick_errors']} unparsed")
+
+
+async def _heartbeat(stop: "asyncio.Event"):
+    """Print `heartbeat_line()` every HEARTBEAT_SEC until `stop` is set —
+    on its own task, so it still fires when no price ever arrives."""
+    last_ticks = STATS["ticks"]
+    while True:
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=HEARTBEAT_SEC)
+            return
+        except asyncio.TimeoutError:
+            pass
+        silent = STATS["ticks"] == last_ticks
+        last_ticks = STATS["ticks"]
+        log.warning(
+            "oanda: %s%s", heartbeat_line(),
+            " — no price since the last line (the forex market may be "
+            "shut; in session, the subscription is open and empty)"
+            if silent else "")
+
+
 class Command(BaseCommand):
     help = "OANDA v20 pricing HTTP streamer for forex."
     def add_arguments(self, parser):
@@ -80,8 +160,8 @@ def discover_instruments(override):
         return ["EUR_USD","GBP_USD","USD_JPY","AUD_USD"]
 
 @sync_to_async
-def update_live_quote(symbol_display, bid, ask):
-    """Through the one writer, as source 'oanda_stream'.
+def update_live_quote(symbol_display, bid, ask) -> bool:
+    """Through the one writer, as source 'oanda_stream'. True when written.
 
     This was the last streamer writing LiveQuote directly — skipping the
     source-precedence guard, the zero/NaN price refusal and the shared
@@ -89,6 +169,12 @@ def update_live_quote(symbol_display, bid, ask):
     (priority 70): a real-time broker tick that ranked below finnhub_ws
     and could itself be clobbered. 'oanda_stream' is the tier the priority
     table always reserved for it.
+
+    A failure is REPORTED (the first at WARNING, every hundredth after)
+    and closes the thread's database connection, so a connection that
+    died under the stream is reopened by the next write instead of
+    failing every write for the life of the process in silence
+    (2026-10-06).
     """
     from market_data.quotes import resolve_instrument, write_quote
     try:
@@ -98,7 +184,7 @@ def update_live_quote(symbol_display, bid, ask):
             # dashboard broadcast kept animating while LiveQuote starved.
             log.warning("update_live_quote: no Instrument for %r — tick "
                         "dropped", symbol_display)
-            return
+            return False
         mid = (bid + ask) / 2
         # NO change_pct. What this stream can compute is the move since
         # the LAST TICK, and `change_pct` is the field every reader on
@@ -112,10 +198,17 @@ def update_live_quote(symbol_display, bid, ask):
         # actually knows - keeps owning it. Binance is the shape to
         # copy: its @ticker payload carries a true 24h "P", so it has
         # something honest to write and writes it.
-        write_quote(inst.symbol, last=mid, source="oanda_stream",
-                    bid=bid, ask=ask, instrument=inst)
+        written = write_quote(inst.symbol, last=mid, source="oanda_stream",
+                              bid=bid, ask=ask, instrument=inst)
     except Exception as e:
-        log.debug("update_live_quote: %s", e)
+        STATS["quotes_failed"] += 1
+        _report_failure("update_live_quote", symbol_display, e,
+                        STATS["quotes_failed"])
+        _reconnect_db()
+        return False
+    if written:
+        STATS["quotes_written"] += 1
+    return bool(written)
 
 async def broadcast(symbol, last, change_pct, bid, ask):
     try:
@@ -218,6 +311,7 @@ async def run(api_key, account_id, env, override):
     while True:
         instruments = await discover_instruments(override)
         url = f"{base}/v3/accounts/{account_id}/pricing/stream"
+        stop = beat = None   # the heartbeat starts once the stream is open
         try:
             timeout = aiohttp.ClientTimeout(total=None, sock_read=60)
             async with aiohttp.ClientSession(headers=headers, timeout=timeout) as s:
@@ -274,6 +368,8 @@ async def run(api_key, account_id, env, override):
                         allowed = None   # re-ask on the next attempt
                     r.raise_for_status()
                     backoff = 1
+                    stop = asyncio.Event()
+                    beat = _fire(_heartbeat(stop))
                     # Named once per pair per CONNECTION: a reconnect is
                     # exactly when OANDA re-sends a shut market's snapshot.
                     not_tradeable = set()
@@ -286,14 +382,23 @@ async def run(api_key, account_id, env, override):
                             if got is None: continue
                             sym, bid, ask = got
                             mid = (bid + ask) / 2
-                            asyncio.create_task(update_live_quote(sym, bid, ask))
+                            STATS["ticks"] += 1
+                            _fire(update_live_quote(sym, bid, ask))
                             # None, not 0: a hardcoded zero painted
                             # "+0.00%" over the real day change in the
                             # headband and the rail on every tick.
                             await broadcast(sym, mid, None, bid, ask)
                         except Exception as e:
-                            log.debug("tick: %s", e)
+                            # Was log.debug, i.e. discarded in production.
+                            STATS["tick_errors"] += 1
+                            _report_failure("tick", "", e, STATS["tick_errors"])
         except Exception as e:
             log.warning("oanda disconnected: %s", e)
+        finally:
+            # The heartbeat belongs to the connection. Left running across
+            # a reconnect it would print the same counts twice a cycle.
+            if beat is not None:
+                stop.set()
+                beat.cancel()
         delay = min(60, backoff + random.random()); backoff = min(60, backoff*2)
         log.info("reconnect in %.1fs", delay); await asyncio.sleep(delay)

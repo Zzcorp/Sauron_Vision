@@ -70,6 +70,93 @@ BODY_FETCH_MAX_AGE_HOURS = 72
 # One batch. Each item is a live HTTP request to somebody else's server, so
 # this is a politeness limit as much as a runtime one.
 BODY_FETCH_BATCH = 25
+# A publisher's NO is remembered (2026-10-06). "No article tried more than a
+# handful of times", above, was true only while new stories kept pushing
+# the old ones out of the batch: newest first, with the twenty-five newest
+# behind paywalls, the SAME twenty-five were asked again every ten minutes
+# for seventy-two hours — four hundred times each — and the row read
+# "handled 25 rows and stored none" at every pass. A refusal that is the
+# publisher's (robots.txt, a 4xx, a paywall stub, a PDF) is kept in the
+# cache, one key per row, for the fetch window, and that row is not asked
+# again; a failure that is the ROAD's (unreachable, timed out, a 5xx) is
+# not remembered, so a host that was down is asked again next pass.
+BODY_REFUSED_KEY = "news_body_refused:{pk}"
+# How many newest rows are read to fill one batch past the remembered
+# refusals. Four batches deep: beyond that the stories are old enough that
+# the feed's own summary will have to do.
+BODY_CANDIDATE_FACTOR = 4
+# The reasons fetch_article_body gives that are the road's, not the
+# publisher's. Anything else — "robots", "http 403", "too short (12 chars)
+# — paywall or wall", "content-type application/pdf", "private address" —
+# is a refusal no retry will change.
+BODY_TRANSPORT_PREFIXES = ("fetch failed", "deadline", "read failed",
+                           "error:", "requests unavailable", "http 5")
+# The road is called broken when at least this many hosts never answered
+# AND they are half the batch or more: one dead link in a batch of two is
+# a dead link, not the box's network, and it is asked again next pass
+# either way (a transport failure is never remembered).
+BODY_ROAD_MIN = 3
+
+
+def _body_reason_kind(reason) -> str:
+    """"ok", "transport" or "refusal" for one of fetch_article_body's reasons."""
+    r = str(reason or "").strip().lower()
+    if r == "ok":
+        return "ok"
+    if r.startswith(BODY_TRANSPORT_PREFIXES):
+        return "transport"
+    return "refusal"
+
+
+def _body_reason_words(reasons: dict) -> str:
+    """"paywall or wall 14, http 403 8, robots 3": the batch's reasons
+    folded onto their kind — a `too short (312 chars)` and a `too short
+    (40 chars)` are one reason — largest first."""
+    folded = {}
+    for reason, n in (reasons or {}).items():
+        r = str(reason or "?").strip()
+        if r.startswith("too short"):
+            r = "paywall or wall"
+        elif r.startswith("deadline"):
+            r = "timed out"
+        elif r.startswith("fetch failed"):
+            r = "unreachable"
+        elif r.startswith("error:"):
+            r = "fetch raised"
+        folded[r] = folded.get(r, 0) + int(n or 0)
+    return ", ".join(f"{k} {v}" for k, v in
+                     sorted(folded.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def _bodies_refused(pks) -> set:
+    """The rows among `pks` whose publisher already said no. Never raises:
+    a cache that cannot be read remembers nothing, and the batch asks."""
+    from django.core.cache import cache
+    pks = [pk for pk in pks if pk is not None]
+    if not pks:
+        return set()
+    try:
+        found = cache.get_many([BODY_REFUSED_KEY.format(pk=pk) for pk in pks])
+    except Exception as e:  # noqa: BLE001
+        logger.debug("news body refusals unreadable: %s", e)
+        return set()
+    prefix = BODY_REFUSED_KEY.format(pk="")
+    out = set()
+    for key in found:
+        try:
+            out.add(int(str(key)[len(prefix):]))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _remember_refusal(pk, reason: str, hours) -> None:
+    from django.core.cache import cache
+    try:
+        cache.set(BODY_REFUSED_KEY.format(pk=pk), str(reason or "")[:80],
+                  int(max(1, float(hours or 1)) * 3600))
+    except Exception as e:  # noqa: BLE001
+        logger.debug("news body refusal not remembered: %s", e)
 
 
 @shared_task
@@ -98,6 +185,29 @@ def fetch_news_bodies(*, limit: int = BODY_FETCH_BATCH,
 
     Newest first: if the batch cannot keep up, the stories the platform is
     about to reason about are the ones that get bodies.
+
+    WHAT THE SHARED ROW SAYS AFTER A BATCH (2026-10-06). The row is the
+    news's — the feed task writes it every fifteen minutes — and this task
+    writes it only when it has something true to say about the news:
+
+      filled some    success, with the counts: the bodies landed.
+      none, the ROAD half the batch or more never answered (unreachable,
+                     timed out, a 5xx; at least BODY_ROAD_MIN of them): a
+                     warning IN THIS TASK'S WORDS — "25 article bodies
+                     tried, none kept: 18 hosts unreachable… the headlines
+                     still arrive" — which is the operator's to look at
+                     (the box's network, DNS).
+      none,          idle: the row keeps the feed's verdict. A publisher's
+      otherwise      no (robots.txt, a 4xx, a paywall stub) is the
+                     designed outcome for most of the wire, it changes
+                     nothing about the news, and it is remembered so the
+                     same rows are not asked again (BODY_REFUSED_KEY); a
+                     dead link or two is asked again next pass.
+
+    Before this the counts' sentence, "handled 25 rows and stored none",
+    went on the row every ten minutes and the digest read it under the
+    name BREAKING NEWS — the operator read that the news had stopped,
+    when the headlines were arriving and only the bodies were missing.
     """
     from datetime import timedelta
 
@@ -107,9 +217,12 @@ def fetch_news_bodies(*, limit: int = BODY_FETCH_BATCH,
     from scraping.models import NewsArticle
 
     cutoff = timezone.now() - timedelta(hours=int(max_age_hours))
-    due = list(NewsArticle.objects
-               .filter(published_at__gte=cutoff, raw_content="")
-               .order_by("-published_at")[:max(1, int(limit))])
+    want = max(1, int(limit))
+    candidates = list(NewsArticle.objects
+                      .filter(published_at__gte=cutoff, raw_content="")
+                      .order_by("-published_at")[:want * BODY_CANDIDATE_FACTOR])
+    refused = _bodies_refused([a.pk for a in candidates])
+    due = [a for a in candidates if a.pk not in refused][:want]
 
     if not due:
         # `idle`, not a verdict. A pass with nothing due is not a run of news
@@ -121,8 +234,13 @@ def fetch_news_bodies(*, limit: int = BODY_FETCH_BATCH,
         # convention for a second writer is the gate's own (the war story in
         # core.task_gate.guarded_task): say idle, and the row keeps the last
         # verdict of a pass that was a run.
-        return {"status": "success", "idle": "no article is due for a body",
-                "considered": 0, "filled": 0, "reasons": {}}
+        why = "no article is due for a body"
+        if candidates:
+            why += (f" ({len(candidates)} refused by their publishers, not "
+                    f"asked again)")
+        return {"status": "success", "idle": why,
+                "considered": 0, "filled": 0, "reasons": {},
+                "refused_remembered": len(refused)}
 
     filled, reasons = 0, {}
     for article in due:
@@ -133,6 +251,8 @@ def fetch_news_bodies(*, limit: int = BODY_FETCH_BATCH,
             logger.debug("body fetch raised for %s: %s", article.url, e)
         reasons[reason] = reasons.get(reason, 0) + 1
         if not text:
+            if _body_reason_kind(reason) == "refusal":
+                _remember_refusal(article.pk, reason, max_age_hours)
             continue
         # raw_content ONLY. content_summary is the feed's own words and the
         # retention task uses the pair to decide what is safe to strip: it
@@ -142,15 +262,48 @@ def fetch_news_bodies(*, limit: int = BODY_FETCH_BATCH,
         NewsArticle.objects.filter(pk=article.pk).update(raw_content=text)
         filled += 1
 
-    logger.info("fetch_news_bodies: %d/%d filled (%s)", filled, len(due),
-                ", ".join(f"{k}={v}" for k, v in sorted(reasons.items())))
-    # attempted/stored are the gate's words (task_gate.WORK_KEYS/DONE_KEYS),
-    # so a batch that fetched none of what it was given reads "handled N
-    # rows and stored none" on the row rather than success, and a batch
-    # that filled some earns its success. considered/filled stay: they are
-    # this task's own words, for the log and the operator.
-    return {"status": "success", "considered": len(due), "filled": filled,
-            "attempted": len(due), "stored": filled, "reasons": reasons}
+    tried = len(due)
+    words = _body_reason_words(reasons)
+    out = {"status": "success", "considered": tried, "filled": filled,
+           "reasons": reasons, "refused_remembered": len(refused)}
+    if filled:
+        logger.info("fetch_news_bodies: %d/%d filled (%s)", filled, tried, words)
+        # attempted/stored are the gate's words (task_gate.WORK_KEYS/
+        # DONE_KEYS): a batch that filled some earns its success on the
+        # row. considered/filled stay: they are this task's own words, for
+        # the log and the operator.
+        out.update(attempted=tried, stored=filled)
+        return out
+
+    transport = sum(n for r, n in reasons.items()
+                    if _body_reason_kind(r) == "transport")
+    remembered = sum(n for r, n in reasons.items()
+                     if _body_reason_kind(r) == "refusal")
+    if transport >= BODY_ROAD_MIN and transport * 2 >= tried:
+        # The road, not the publishers: said in this task's words (the
+        # gate believes a declared warning's reason, task_gate.judge_result),
+        # never as the counts' "handled N rows and stored none".
+        logger.warning("fetch_news_bodies: 0/%d filled — %d host(s) "
+                       "unreachable or timed out (%s)", tried, transport, words)
+        out["status"] = "warning"
+        out["reason"] = (f"{tried} article bodies tried, none kept: "
+                         f"{transport} host(s) unreachable or timed out "
+                         f"({words}) — the headlines still arrive; only the "
+                         f"bodies are missing")
+        return out
+
+    # The publishers refused (the designed outcome for most of the wire,
+    # remembered above so those rows are not asked again), or a dead link
+    # or two that is asked again next pass. Nothing about the NEWS
+    # changed, so the row keeps the feed's verdict (idle).
+    logger.warning("fetch_news_bodies: 0/%d filled (%s); %d refused by their "
+                   "publishers and not asked again for %sh",
+                   tried, words, remembered, max_age_hours)
+    out["idle"] = (f"{tried} article bodies tried, none kept ({words}); the "
+                   f"headlines still arrive"
+                   + (f", and the {remembered} refused are not asked again"
+                      if remembered else ""))
+    return out
 
 
 @shared_task
@@ -160,7 +313,8 @@ def fetch_social_sentiment():
     exist (Reddit off is the normal state since 2026-10-04)."""
     from scraping.scrapers.reddit_sentiment import (fetch_reddit_sentiment,
                                                     reddit_unavailable_reason)
-    from scraping.scrapers.stocktwits import fetch_trending
+    from scraping.scrapers.stocktwits import (fetch_trending, refusals,
+                                              reset_refusals)
 
     from scraping.models import SentimentSnapshot
 
@@ -169,6 +323,7 @@ def fetch_social_sentiment():
     # HTTP results rather than of anything that reached the database — and
     # SentimentSnapshot had zero rows the whole time.
     before = SentimentSnapshot.objects.count()
+    reset_refusals()
     results = {"reddit": 0, "stocktwits": 0}
 
     # An unconfigured Reddit returned [] exactly like a quiet hour on
@@ -215,6 +370,24 @@ def fetch_social_sentiment():
            "parsed": (results["reddit"] + results["stocktwits"]
                       + results["stocktwits_watchlist"]),
            "stored": stored}
+    # A BLOCKED HOST IS NOT A QUIET MARKET (2026-10-06). StockTwits answers
+    # a 403 or a 429 to this box and every call comes back None; the pass
+    # then stores nothing, and the counts' verdict for that is "ran and
+    # produced nothing" — a quiet market's words, which the digest sent
+    # under SOCIAL SENTIMENT and the operator read as one. The scraper
+    # counts its refusals (stocktwits.refusals); half the calls refused or
+    # more, and nothing stored, is the fault it is, in words that say
+    # which host to look at.
+    asked = refusals()
+    out["stocktwits_calls"] = asked["calls"]
+    out["stocktwits_refused"] = asked["refused"]
+    if (stored == 0 and asked["refused"]
+            and asked["refused"] * 2 >= asked["calls"]):
+        out["status"] = "error"
+        out["error"] = (f"StockTwits refused {asked['refused']} of "
+                        f"{asked['calls']} calls (last: {asked['last']}) — "
+                        f"blocked or rate-limited from this host; nothing "
+                        f"stored")
     if reddit_skipped:
         out["skipped"] = reddit_skipped
     return out
@@ -362,8 +535,12 @@ def fetch_tradingview_ideas():
     for inst in _scan_universe(limit=20):
         calls += 1
         try:
+            # The exchange travels with the symbol (2026-10-06): a NYSE
+            # name asked for as NASDAQ:<symbol> is a symbol the scanner
+            # does not know, and half the seeded book is on the NYSE.
             res = fetch_technical_analysis(
-                inst.symbol, asset_class=getattr(inst, "asset_class", ""))
+                inst.symbol, asset_class=getattr(inst, "asset_class", ""),
+                exchange=getattr(inst, "exchange", "") or "")
         except Exception as e:
             logger.warning("TradingView technicals failed for %s: %s", inst.symbol, e)
             continue

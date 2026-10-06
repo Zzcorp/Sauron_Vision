@@ -39,6 +39,15 @@ def judge_result(result):
 
     if result.get("skipped"):
         return "warning", f"not configured: {result['skipped']}"
+    if declared == "warning" and (result.get("reason") or result.get("message")):
+        # A task that says WHY it warns is believed in its own words
+        # (2026-10-06): "25 article bodies tried, none kept — the headlines
+        # still arrive" tells the operator what to do; "handled 25 rows and
+        # stored none", the counts' sentence, told them the news had
+        # stopped. A bare "warning" with no words still falls through to
+        # the counts, which at least say something.
+        return "warning", str(result.get("reason")
+                              or result.get("message"))[:500]
 
     # Sum across sub-results too, so a task reporting several sources
     # ({"rss": {...}, "api": {...}}) is judged on the whole run.

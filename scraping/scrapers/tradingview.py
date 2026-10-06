@@ -68,7 +68,25 @@ HEADERS = {
 }
 
 
-def _resolve_tv_symbol(symbol: str, asset_class: str = "") -> str:
+#: The catalogue's exchange (Instrument.exchange, as instruments/services.py
+#: seeds it) → the venue prefix TradingView's scanner wants. A stock the
+#: catalogue places on the NYSE — JPM, V, JNJ, XOM, half the seeded book —
+#: was sent as `NASDAQ:JPM`, which the scanner answers with no data, so a
+#: universe of NYSE names read "answered no data for 20/20 symbols" every
+#: six hours (2026-10-06). A spelling the map does not know keeps the
+#: NASDAQ fallback, as before.
+EXCHANGE_PREFIX = {
+    "NASDAQ": "NASDAQ", "NYSE": "NYSE", "AMEX": "AMEX", "NYSE ARCA": "AMEX",
+    "ARCA": "AMEX", "BATS": "BATS", "CBOE": "CBOE", "LSE": "LSE",
+    "XETRA": "XETR", "EURONEXT": "EURONEXT", "TSX": "TSX", "ASX": "ASX",
+    "HKEX": "HKEX", "SIX": "SIX", "TSE": "TSE",
+}
+#: The classes whose instruments live on a stock exchange.
+EXCHANGE_CLASSES = ("stock", "etf", "")
+
+
+def _resolve_tv_symbol(symbol: str, asset_class: str = "",
+                       exchange: str = "") -> str:
     """Convert a plain ticker to a TradingView exchange:symbol format.
 
     The asset class decides the venue (2026-10-03): a forex pair is `FX:`,
@@ -76,7 +94,9 @@ def _resolve_tv_symbol(symbol: str, asset_class: str = "") -> str:
     map did not know became `NASDAQ:<symbol>` — `NASDAQ:GBPCHF`,
     `NASDAQ:ADAUSD` — which the scanner answers with no data, so a universe
     of forex and crypto earned "handled 20 rows and stored none" every six
-    hours. Stocks still fall back to the NASDAQ prefix.
+    hours. A stock or ETF goes to the exchange the catalogue places it on
+    (EXCHANGE_PREFIX, 2026-10-06); only one the catalogue places nowhere
+    the map knows still falls back to the NASDAQ prefix.
     """
     symbol = symbol.upper().strip()
     if ":" in symbol:
@@ -110,16 +130,23 @@ def _resolve_tv_symbol(symbol: str, asset_class: str = "") -> str:
     }
     if symbol in prefix_map:
         return prefix_map[symbol]
+    if cls in EXCHANGE_CLASSES:
+        venue = EXCHANGE_PREFIX.get(str(exchange or "").upper().strip())
+        if venue:
+            return f"{venue}:{symbol}"
     return f"NASDAQ:{symbol}"
 
 
-def fetch_technical_analysis(symbol: str, asset_class: str = "") -> dict:
+def fetch_technical_analysis(symbol: str, asset_class: str = "",
+                             exchange: str = "") -> dict:
     """Fetch technical analysis summary for a symbol from TradingView scanner.
 
     Args:
         symbol: Ticker symbol (e.g. "AAPL", "NASDAQ:AAPL", "FX:EURUSD").
         asset_class: the catalogue's class, which picks the venue spelling
             (see `_resolve_tv_symbol`).
+        exchange: the catalogue's exchange for a stock or an ETF
+            (Instrument.exchange), which picks the venue prefix.
 
     Returns:
         Dict with keys: symbol, recommendation, oscillators_summary,
@@ -134,7 +161,7 @@ def fetch_technical_analysis(symbol: str, asset_class: str = "") -> dict:
     except Exception:
         pass
 
-    tv_symbol = _resolve_tv_symbol(symbol, asset_class)
+    tv_symbol = _resolve_tv_symbol(symbol, asset_class, exchange)
     empty = {
         "symbol": symbol.upper(),
         "tv_symbol": tv_symbol,
