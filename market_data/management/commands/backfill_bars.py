@@ -33,6 +33,21 @@ candles has been validated against nothing.
     python manage.py backfill_bars --symbols BTCUSD --intervals 4h --bars 800
     python manage.py backfill_bars --symbols GLDM,SLV --intervals 1d --bars 300
     python manage.py backfill_bars --from-configs        # every enabled bot
+    python manage.py backfill_bars --proving             # THE PROVING RUN's history
+
+THE PROVING RUN (2026-10-05, `--proving`). The proving ground
+(backtester/proving) refuses to judge a symbol on less than
+MIN_SPAN_DAYS / MIN_BARS of 4h history (540 days, 800 bars), and nothing
+on the platform ever fetched that much: refresh_bot_bars keeps the newest
+200 bars, and this command's default of 600 4h bars is 100 days — so
+every verdict read INSUFFICIENT and the proof-first gates had nothing to
+read. `--proving` takes every symbol the proving ground would judge (the
+enabled bots' symbols, the symbols of open positions, and every active
+instrument of a traded class that already has 4h bars), at 4h, PROVING_BARS
+deep: Yahoo answers two years of hourly bars resampled to 4h (a US stock
+~1,000 bars over 730 days, a forex pair ~3,100), Binance paginates. Retention
+for 1h/4h bars is three years, so the history stays. A hand-typed
+--intervals or --bars still wins. Nothing trades; no key is needed.
 
 Symbols are the platform's own spelling (BTCUSD), translated to the venue's
 (BTCUSDT) on the way out — the same mapping `market_data.quotes` uses, so a
@@ -57,6 +72,15 @@ INTERVAL_MINUTES = {
     "1h": 60, "2h": 120, "4h": 240, "6h": 360, "8h": 480, "12h": 720,
     "1d": 1440, "3d": 4320, "1w": 10080,
 }
+
+#: The default target bars per symbol per interval, and the proving run's
+#: (`--proving`, 4h only): 4000 4h bars is 667 calendar days — past the
+#: proving ground's MIN_SPAN_DAYS (540) with a margin, and past what Yahoo
+#: can answer (730 days of hourly), so the feed's cap is the limit there.
+DEFAULT_BARS = 600
+PROVING_BARS = 4000
+PROVING_INTERVALS = "4h"
+DEFAULT_INTERVALS = "1h,4h"
 
 
 # Renames Binance made under the platform's feet. MATIC became POL in
@@ -106,38 +130,78 @@ class Command(BaseCommand):
                             help="Comma-separated, platform spelling (BTCUSD,ETHUSD).")
         parser.add_argument("--from-configs", action="store_true",
                             help="Take symbols from every enabled AssetBotConfig.")
-        parser.add_argument("--intervals", type=str, default="1h,4h",
-                            help="Comma-separated timeframes. Default 1h,4h.")
-        parser.add_argument("--bars", type=int, default=600,
-                            help="Target bars per symbol per interval. Default 600 "
-                                 "— comfortably above the 210 an SMA200 needs.")
+        parser.add_argument("--proving", action="store_true",
+                            help="THE PROVING RUN's history: every symbol the "
+                                 "proving ground would judge (enabled bots, open "
+                                 "positions, every active instrument of a traded "
+                                 "class with 4h bars), at 4h, "
+                                 f"{PROVING_BARS} bars deep.")
+        parser.add_argument("--intervals", type=str, default=None,
+                            help=f"Comma-separated timeframes. Default "
+                                 f"{DEFAULT_INTERVALS}; {PROVING_INTERVALS} with "
+                                 f"--proving.")
+        parser.add_argument("--bars", type=int, default=None,
+                            help=f"Target bars per symbol per interval. Default "
+                                 f"{DEFAULT_BARS} — comfortably above the 210 an "
+                                 f"SMA200 needs; {PROVING_BARS} with --proving.")
         parser.add_argument("--dry-run", action="store_true",
                             help="Fetch and report, write nothing.")
+
+    @staticmethod
+    def proving_symbols() -> list:
+        """The proving run's symbols (2026-10-05): the enabled bots', the
+        open positions', and every active instrument of a traded class
+        that already has 4h bars (backtester.proving.run.universe — the
+        set the nightly judge walks). Sorted, unique, platform spelling."""
+        from backtester.proving.run import universe
+        from bot_program.models import AssetBotConfig, AssetBotTrade
+        out = set()
+        for cfg in AssetBotConfig.objects.filter(enabled=True):
+            out.update(s.upper() for s in (cfg.symbols or []))
+        out.update(s.upper() for s in AssetBotTrade.objects.filter(
+            status__in=("OPEN", "CLOSE_PENDING")).values_list("symbol",
+                                                             flat=True))
+        for syms in universe(timeframe="4h").values():
+            out.update(s.upper() for s in syms)
+        return sorted(out)
 
     def handle(self, *args, **opts):
         from instruments.models import Instrument
         from market_data.bot_bars import _upsert_rows
         from bot_program.engine.binance_client import BinanceClient
 
+        proving = bool(opts.get("proving"))
         symbols = [s.strip().upper() for s in opts["symbols"].split(",") if s.strip()]
         if opts["from_configs"]:
             from bot_program.models import AssetBotConfig
             for cfg in AssetBotConfig.objects.filter(enabled=True):
                 symbols.extend(s.upper() for s in (cfg.symbols or []))
             symbols = sorted(set(symbols))
+        if proving:
+            symbols = sorted(set(symbols) | set(self.proving_symbols()))
         if not symbols:
             raise CommandError(
-                "No symbols. Pass --symbols GLDM,EURUSD or --from-configs "
-                "(which needs an enabled bot config to read from).")
+                "No symbols. Pass --symbols GLDM,EURUSD, --from-configs "
+                "(which needs an enabled bot config to read from) or "
+                "--proving (which needs a bot, a position or an instrument "
+                "with 4h bars).")
 
-        intervals = [i.strip() for i in opts["intervals"].split(",") if i.strip()]
+        raw_intervals = opts.get("intervals") or (
+            PROVING_INTERVALS if proving else DEFAULT_INTERVALS)
+        intervals = [i.strip() for i in raw_intervals.split(",") if i.strip()]
         for iv in intervals:
             if iv not in INTERVAL_MINUTES:
                 raise CommandError(f"Unsupported interval {iv!r}. "
                                    f"Known: {', '.join(INTERVAL_MINUTES)}")
 
-        target = int(opts["bars"])
+        target = int(opts.get("bars") or (PROVING_BARS if proving
+                                          else DEFAULT_BARS))
         dry = opts["dry_run"]
+        if proving:
+            self.stdout.write(
+                f"THE PROVING RUN: {len(symbols)} symbol(s) at "
+                f"{', '.join(intervals)}, {target} bars deep"
+                + (" (dry run)" if dry else ""))
         client = BinanceClient("", "", testnet=False)
 
         grand_total = 0
@@ -163,6 +227,15 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             f"\nBackfill complete — {verb} {grand_total} bars across "
             f"{len(symbols)} symbol(s) x {len(intervals)} interval(s)."))
+        if proving:
+            from backtester.proving.data import MIN_BARS, MIN_SPAN_DAYS
+            self.stdout.write(
+                f"The proving ground needs {MIN_SPAN_DAYS['4h']} days and "
+                f"{MIN_BARS['4h']} bars at 4h per symbol. Next: "
+                f"`python manage.py prove data` says who is still short; "
+                f"`python manage.py component on proving_ground` arms the "
+                f"nightly judge (03:40 UTC); `python manage.py prove rules "
+                f"--save` judges the live rules now. Nothing trades.")
         if not dry:
             self.stdout.write(
                 "Next: python manage.py shell -c "
