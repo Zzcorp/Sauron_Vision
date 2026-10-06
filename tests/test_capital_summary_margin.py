@@ -66,31 +66,33 @@ class CapitalAtWorkTests(SimpleTestCase):
 
     def test_a_stamp_past_the_platform_cap_counts_at_the_cap(self):
         """No order here can carry more than MAX_ORDER_LEVERAGE (20 since
-        2026-09-26): a stock row stamped 100 (or 21) is counted at a
-        twentieth, never at 1% — a stamp can tighten the count, never
-        loosen it past what the platform may send on ANY class; a stamp
-        under the cap (10) counts its own tenth. The platform cap,
-        deliberately not the class ceiling: a row's class is its CONFIG's,
-        and SPX500 in a stock config goes at up to the index's 20x — a
-        stock-keyed 5 would count it at four times its measured margin.
-        forex keeps its table floor: 50 is 1/30. The cap is the refusal it
-        mirrors: an order at 21 is refused before anything is sent, not
-        clamped."""
+        2026-09-26, 30 since 2026-10-05 — "pas de limite à l'attaque", the
+        highest multiplier on any LIVE list): a stock row stamped 100 (or
+        31) is counted at a thirtieth, never at 1% — a stamp can tighten
+        the count, never loosen it past what the platform may send on ANY
+        class; a stamp under the cap (10) counts its own tenth. The
+        platform cap, deliberately not the class ceiling: a row's class is
+        its CONFIG's, and SPX500 in a stock config goes at up to the
+        index's 20x — a stock-keyed 5 would count it at four times its
+        measured margin. forex keeps its table floor: 50 is 1/30. The cap
+        is the refusal it mirrors: an order at 31 is refused before
+        anything is sent, not clamped."""
         from types import SimpleNamespace
 
         from bot_program.asset_engine.base import (MAX_ORDER_LEVERAGE,
                                                    judge_order_leverage)
         from portfolio.risk_gate import capital_at_work
-        self.assertEqual(MAX_ORDER_LEVERAGE, 20)
+        self.assertEqual(MAX_ORDER_LEVERAGE, 30)
         lev, why = judge_order_leverage(
-            SimpleNamespace(extras={"leverage": 21}), "stock", "etoro")
+            SimpleNamespace(extras={"leverage": 31}), "stock", "etoro")
         self.assertIsNone(lev)
-        self.assertIn("past the platform cap of 20x — refused, not clamped",
+        self.assertIn("past the platform cap of 30x — refused, not clamped",
                       why)
-        for lev in (21, 100, "100"):
+        for lev in (31, 100, "100"):
             with self.subTest(lev=lev):
                 self.assertAlmostEqual(capital_at_work(
-                    "stock", 1000, carrier="etoro", leverage=lev), 50.0)
+                    "stock", 1000, carrier="etoro", leverage=lev), 33.33,
+                    places=2)
         self.assertAlmostEqual(capital_at_work(
             "stock", 1000, carrier="etoro", leverage=10), 100.0)
         self.assertAlmostEqual(capital_at_work("forex", 1000, carrier="etoro",

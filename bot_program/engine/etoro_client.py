@@ -349,9 +349,11 @@ PORTFOLIO_LAG_S = 60
 #: by `leverage_values` since 2026-09-25; the engine judges every
 #: multiplier against the LIVE list since 2026-09-26 —
 #: _instrument_leverage_check). 20 since 2026-09-26: the operator's forex
-#: and index ceiling. A shell caller on the live key cannot send more than
-#: the engine could ever ask for.
-LEVERAGE_MAX = 20
+#: and index ceiling; 30 since 2026-10-05 ("pas de limite à l'attaque"):
+#: the highest multiplier on any LIVE list eToro printed (forex majors).
+#: A shell caller on the live key cannot send more than the engine could
+#: ever ask for.
+LEVERAGE_MAX = 30
 
 
 def _iso_to_ms(ts: str) -> int:

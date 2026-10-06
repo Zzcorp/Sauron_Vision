@@ -572,15 +572,17 @@ class TheLeverageIsJudgedBeforeArmingTests(TestCase):
         out = _run()
         self.assertIn(f"{cap}x", _blockers(out))
 
-    def test_forex_above_twenty_is_a_blocker(self):
-        """2026-09-26 (the operator: "forex max x20"): forex's ceiling is
-        20 == the platform cap, so 21 is caught by the platform-cap
-        sentence BEFORE the class table — this asserts that sentence."""
-        self._armed_lev(extras={"leverage": 21}, asset_class="forex",
+    def test_forex_above_thirty_is_a_blocker(self):
+        """2026-09-26 (the operator: "forex max x20"), then 2026-10-05
+        ("pas de limite à l'attaque"): forex's ceiling is 30 == the
+        platform cap, the highest multiplier on any LIVE list, so 31 is
+        caught by the platform-cap sentence BEFORE the class table — this
+        asserts that sentence."""
+        self._armed_lev(extras={"leverage": 31}, asset_class="forex",
                         symbol="EURUSD")
         self._lev_switch(True)
         out = _run()
-        self.assertIn("platform cap of 20x", _blockers(out))
+        self.assertIn("platform cap of 30x", _blockers(out))
         self.assertIn("not clamped", _blockers(out))
 
     def test_forex_at_twenty_is_inside_the_ceiling(self):
