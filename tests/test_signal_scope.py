@@ -473,8 +473,12 @@ class TheTicketTests(TestCase):
 
         with patch("bot_program.engine.broker_router.client_for_symbol",
                    return_value=Raising()):
-            price, client, delayed, why = _mark_for_detail(None, None, "ADAUSD")
+            # the fifth element is the raw tick (2026-10-05, the quote
+            # advisory): {} when the venue raised
+            price, client, delayed, why, tick = _mark_for_detail(
+                None, None, "ADAUSD")
             self.assertIsNone(price)
+            self.assertEqual(tick, {})
             self.assertEqual(why, "eToro knows no instrument spelled 'ADAUSD'")
             self.assertEqual(len(_mark_for(None, None, "ADAUSD")), 3)
         with patch("bot_program.engine.broker_router.client_for_symbol",
@@ -483,8 +487,9 @@ class TheTicketTests(TestCase):
                              "answered no rate")
         with patch("bot_program.engine.broker_router.client_for_symbol",
                    return_value=Priced()):
-            price, _c, _d, why = _mark_for_detail(None, None, "ADAUSD")
+            price, _c, _d, why, tick = _mark_for_detail(None, None, "ADAUSD")
             self.assertEqual((price, why), (1.25, ""))
+            self.assertEqual(tick["lastPrice"], "1.25")
 
     def test_a_live_ticket_names_the_venue_and_a_paper_one_the_feeds(self):
         from bot_program.manual_trade import _no_mark_message

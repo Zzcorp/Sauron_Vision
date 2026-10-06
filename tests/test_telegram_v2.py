@@ -245,7 +245,10 @@ class TheFillMessagesTests(_Base):
             "attack": ("Attack mode: high conviction · 2.0% of the pool at "
                        "risk at the stop sent · 20x · 100.00 USD of margin"),
             "stop_moved": ("Stop moved by eToro: it holds 1.14000, not the "
-                           "1.15297 sent (3.1% below the entry)")})
+                           "1.15297 sent (3.1% below the entry)"),
+            # the fill against the quote it was sized on (2026-10-05):
+            # nothing recorded on this row
+            "slippage": ""})
         p = self._send(lambda: notify_bot_fill_open(
             self.user, asset_class="forex", symbol="EURUSD", side="BUY",
             qty=row.qty, entry_price=row.entry_price,

@@ -226,6 +226,8 @@ SKIP_WORDS = {
                     "was suspect or frozen",
     "venue_sick": "a new real entry was held while the venue was sick "
                   "(a burst of 429/5xx or requests that never came back)",
+    "wide_spread": "the quoted half-spread at the send would have eaten "
+                   "too much of the stop distance",
 }
 
 

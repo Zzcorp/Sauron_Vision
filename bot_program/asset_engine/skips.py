@@ -114,6 +114,14 @@ SUSPECT_MARK = "suspect_mark"
 # held, and the manual lane only warns.
 VENUE_SICK = "venue_sick"
 
+# 2026-10-05. The quoted HALF-SPREAD at the send is past
+# mark_sanity.ENTRY_SLIPPAGE_MAX_R of the stop distance: a market order
+# fills a half-spread from the mid, so the risk the size was built on would
+# be understated (and the exit pays the spread again). A decision with both
+# numbers, never a broken connection; nothing is resized — a tighter stop
+# on a wide quote is a different trade.
+WIDE_SPREAD = "wide_spread"
+
 MAX_SYMBOLS_TRACKED = 200
 
 
@@ -237,12 +245,19 @@ def diagnose(cfg) -> str:
                      "15 minutes ago, so the paper venue fills nothing — "
                      "nothing is wrong with the feed; paper fills resume "
                      "at the hour the detail names",
-        SUSPECT_MARK: "an open position was left alone for a tick because "
-                      "its mark was suspect (one print far from the last "
-                      "accepted one, or from the platform's own quote) or "
-                      "frozen (the same print for 45 minutes in an open "
-                      "market) — read the detail; the next sane print "
-                      "manages the row again",
+        SUSPECT_MARK: "an open position was left alone for a tick, or an "
+                      "entry was refused, because the quote was suspect "
+                      "(one print far from the last accepted one or from "
+                      "the platform's own quote, a crossed quote, a last "
+                      "print outside the bid/ask) or frozen (the same "
+                      "print for 45 minutes in an open market) — read the "
+                      "detail; the next sane print manages or enters again",
+        WIDE_SPREAD: "the venue's quoted half-spread at the send was past "
+                     "15% of the stop distance, so the sized risk would "
+                     "have been understated — nothing is wrong with the "
+                     "signal or the connection; the detail carries both "
+                     "numbers. A wider stop, or a quieter hour on that "
+                     "instrument, clears it",
         VENUE_SICK: "a new real entry was held because the venue that "
                     "would carry it answered a burst of 429/5xx or "
                     "requests that never came back (or one order POST "

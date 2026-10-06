@@ -692,6 +692,43 @@ def venue_moved_stop(sent, held, asset_class="", symbol="") -> bool:
     return abs(held - sent) >= (10.0 ** -places) * (1 - 1e-6)
 
 
+#: Below this share of a stop distance a fill's slip is not worth a line.
+SLIPPAGE_WORDS_MIN_R = 0.01
+
+
+def slippage_words(meta, asset_class="", symbol="") -> str:
+    """The fill message's line for a fill away from the quote it was sized
+    on (metadata "slippage" {proposal, fill, points, r_fraction}, stamped
+    by execute_entry and the TAKE TRADE lane since 2026-10-05): "Filled
+    100.50, sized on 100.00 — 25% of a stop distance against; stop
+    re-anchored to 98.50" (or "in favour", or "; the stop stays at 98.00:
+    <why>"). "" under SLIPPAGE_WORDS_MIN_R, or for a row with no record.
+    Prices at the instrument's decimals; no money figures."""
+    from bot_program.notifications import price_pair_words, price_words
+    slip = (meta or {}).get("slippage")
+    if not isinstance(slip, dict):
+        return ""
+    try:
+        proposal = float(slip.get("proposal"))
+        fill = float(slip.get("fill"))
+        r = float(slip.get("r_fraction"))
+    except (TypeError, ValueError):
+        return ""
+    if r != r or abs(r) < SLIPPAGE_WORDS_MIN_R:
+        return ""
+    fill_words, sized_words = price_pair_words(fill, proposal, asset_class,
+                                               symbol)
+    words = (f"Filled {fill_words}, sized on {sized_words} — {abs(r):.0%} of "
+             f"a stop distance {'against' if r > 0 else 'in favour'}")
+    moved = (meta or {}).get("stop_reanchored_to_fill")
+    if isinstance(moved, dict) and moved.get("held") is not None:
+        words += (f"; stop re-anchored to "
+                  f"{price_words(moved.get('held'), asset_class, symbol)}")
+    elif r > 0 and (meta or {}).get("stop_reanchor_refused"):
+        words += f"; the stop stays: {(meta or {}).get('stop_reanchor_refused')}"
+    return words
+
+
 #: Why the staff alert for a rewritten stop went out (_alert_stop_rewrite):
 #: the one message there is, where no fill message names the stop.
 STOP_ALERT_WORKING = ("The order is still waiting at eToro, so no fill "
@@ -3954,6 +3991,20 @@ class AssetBot(ABC):
                     f"paper fill")
             return self._skip(symbol, skips.NO_PRICE, "ticker returned 0")
 
+        # THE ENTRY QUOTE (2026-10-05, mark_sanity.entry_quote): the one
+        # price everything below is built on — the cost charged, the
+        # levels, the size, the order — is judged before any of it reads
+        # it: a crossed quote, a last print outside the live bid/ask, a
+        # venue quote far from the platform's own, or a quote frozen for
+        # FROZEN_MINUTES in an open market is a skip (SUSPECT_MARK), never
+        # an entry. The same read runs again on the fresh tick before the
+        # order (_last_look).
+        _quote = self._entry_quote_gate(symbol, tk, client)
+        if not _quote["ok"]:
+            logger.warning("[%s_bot] %s: entry refused on the quote — %s",
+                           self.asset_class, symbol, _quote["why"])
+            return self._skip(symbol, skips.SUSPECT_MARK, _quote["why"])
+
         # A paper entry used to be recorded at the raw ticker, because the
         # order block below sits inside `if not paper:` and PaperTrader is
         # therefore never reached. Charge the realistic fill here, before
@@ -4333,41 +4384,261 @@ class AssetBot(ABC):
         return stage, meta
 
     #: the share of the entry-to-stop (or entry-to-target) distance the
-    #: price may move during the trade debate before the order is refused
+    #: price may move between the proposal and the order before the order
+    #: is refused (the trade debate's rule since 2026-10-02; every live
+    #: order's since 2026-10-05, the last look)
     DEBATE_DRIFT_MAX = 0.5
 
-    def _drift_since_proposal(self, client, symbol, side, price, sl, tp):
+    def _drift_since_proposal(self, client, symbol, side, price, sl, tp,
+                              *, tick=None, age_s=None):
         """"" when the fresh price still fits the proposal's levels, else
         the refusal: past the stop, or more than DEBATE_DRIFT_MAX of the
-        way to the stop or to the target. An unreadable ticker refuses
-        nothing (the venue's own stop still holds the risk)."""
+        way to the stop or to the target. `tick` is a quote already read
+        (the last look reads ONE tick for its three checks); else the
+        ticker is asked here. An unreadable ticker refuses nothing (the
+        venue's own stop still holds the risk). `age_s`, the proposal's
+        age, rides the words."""
+        if tick is None:
+            try:
+                tick = client.ticker(symbol)
+            except Exception as e:  # noqa: BLE001
+                logger.info("[%s_bot] %s: fresh price unread before the "
+                            "order (%s)", self.asset_class, symbol, e)
+                return ""
         try:
-            tk = client.ticker(symbol)
-            fresh = float((tk or {}).get("lastPrice") or (tk or {}).get("last")
-                          or (tk or {}).get("price") or 0)
-        except Exception as e:  # noqa: BLE001
-            logger.info("[%s_bot] %s: fresh price unread after the debate "
-                        "(%s)", self.asset_class, symbol, e)
+            fresh = float((tick or {}).get("lastPrice") or (tick or {}).get("last")
+                          or (tick or {}).get("price") or 0)
+        except (TypeError, ValueError):
             return ""
         if fresh <= 0:
             return ""
+        when = "since the proposal"
+        if isinstance(age_s, (int, float)) and not isinstance(age_s, bool) \
+                and age_s >= 0:
+            when += f" ({int(age_s)} s ago)"
         buy = str(side).upper() == "BUY"
         to_stop = (price - fresh) if buy else (fresh - price)
         to_target = -to_stop
         stop_dist, tgt_dist = abs(price - sl), abs(tp - price)
         if (buy and fresh <= sl) or (not buy and fresh >= sl):
-            return (f"the price moved through the stop during the trade "
-                    f"debate ({price:g} -> {fresh:g}, stop {sl:g}) — "
-                    f"nothing sent")
+            return (f"the price moved through the stop {when} "
+                    f"({price:g} -> {fresh:g}, stop {sl:g}) — nothing sent")
         if stop_dist > 0 and to_stop > self.DEBATE_DRIFT_MAX * stop_dist:
             return (f"the price moved {to_stop / stop_dist:.0%} of the way "
-                    f"to the stop during the trade debate ({price:g} -> "
-                    f"{fresh:g}) — nothing sent")
+                    f"to the stop {when} ({price:g} -> {fresh:g}) — "
+                    f"nothing sent")
         if tgt_dist > 0 and to_target > self.DEBATE_DRIFT_MAX * tgt_dist:
             return (f"the price ran {to_target / tgt_dist:.0%} of the way to "
-                    f"the target during the trade debate ({price:g} -> "
-                    f"{fresh:g}): the planned reward is gone — nothing sent")
+                    f"the target {when} ({price:g} -> {fresh:g}): the "
+                    f"planned reward is gone — nothing sent")
         return ""
+
+    def _entry_quote_gate(self, symbol: str, tk, client, *, stop=None) -> dict:
+        """THE ENTRY QUOTE (2026-10-05, mark_sanity.entry_quote): whether
+        the quote `tk` may be sized, stopped and ordered on — not crossed,
+        no stale print outside it, within the class's bar of the
+        platform's own fresh quote (a REAL venue only: the paper venue's
+        quote IS the platform's), not frozen for FROZEN_MINUTES in an open
+        market. The last entry read per symbol lives on
+        extras["entry_marks"] (bounded, written only when the mid or the
+        freeze clock moved). {ok, why, verdict}. Never raises: a read that
+        fails lets the entry run as before."""
+        try:
+            from bot_program import mark_sanity
+            from bot_program.asset_engine.safety import _extras, _save_extras
+            icls = self._instrument_class(symbol) or self.asset_class
+            reference = (None if self._is_paper_client(client)
+                         else mark_sanity.second_opinion(symbol))
+            market_open = True
+            try:
+                from bot_program.engine.paper_trader import paper_market_shut
+                market_open = not paper_market_shut(symbol, icls)
+            except Exception:  # noqa: BLE001 — an unread clock reads open
+                market_open = True
+            key = str(symbol).upper()
+            marks = dict(_extras(self.cfg).get("entry_marks") or {})
+            last = marks.get(key) if isinstance(marks.get(key), dict) else None
+            v = mark_sanity.entry_quote(tk, icls, symbol, reference=reference,
+                                        last=last, market_open=market_open,
+                                        stop=stop)
+            mark = v.get("mark")
+            if isinstance(mark, dict) and (
+                    last is None
+                    or mark.get("mid") != last.get("mid")
+                    or mark.get("same_since") != last.get("same_since")):
+                if key not in marks and len(marks) >= mark_sanity.ENTRY_MARKS_MAX:
+                    marks.pop(next(iter(marks)), None)
+                marks[key] = mark
+                _save_extras(self.cfg, entry_marks=marks)
+            return {"ok": bool(v.get("ok", True)), "why": str(v.get("why") or ""),
+                    "verdict": v}
+        except Exception as e:  # noqa: BLE001 — the read never blocks
+            logger.warning("[%s_bot] %s: entry quote unread (%s) — the entry "
+                           "runs on the quote as before", self.asset_class,
+                           symbol, e)
+            return {"ok": True, "why": "", "verdict": {}}
+
+    def _last_look(self, client, symbol, side, price, sl, tp, *,
+                   cand=None) -> dict:
+        """THE LAST LOOK before a live order (2026-10-05): ONE fresh read
+        of the venue's quote through the trade client, three reads off it
+        — the DRIFT since the proposal (_drift_since_proposal: the trade
+        debate's rule, every live order's now), the ENTRY QUOTE's sanity
+        (_entry_quote_gate) and the SLIPPAGE BUDGET (the quoted half-spread
+        against the stop distance, mark_sanity.ENTRY_SLIPPAGE_MAX_R). The
+        desk proposes for the whole fleet and executes minutes later; the
+        price the order was sized on can be stale, and a market order
+        fills a half-spread from the mid.
+
+        {"skip": a skip code or "", "why", "quote": the record for the row
+        (mid, bid, ask, last_price, age_s, half_spread_r, proposal_price)
+        or None}. An unreadable tick, or one with no price, refuses
+        nothing — as before: the venue's own stop still holds the risk.
+        Never raises."""
+        from bot_program import mark_sanity
+        from bot_program.asset_engine import skips
+        out = {"skip": "", "why": "", "quote": None}
+        try:
+            tk = client.ticker(symbol)
+        except Exception as e:  # noqa: BLE001
+            logger.info("[%s_bot] %s: the last look could not read the "
+                        "quote (%s) — the order goes on the proposal's "
+                        "price", self.asset_class, symbol, e)
+            return out
+        if not isinstance(tk, dict):
+            return out
+        try:
+            fresh = float(tk.get("lastPrice") or 0)
+        except (TypeError, ValueError):
+            fresh = 0.0
+        if fresh <= 0:
+            return out
+        age_s = None
+        created = getattr(cand, "created_at", None)
+        if created is not None:
+            try:
+                age_s = max(0.0, (timezone.now() - created).total_seconds())
+            except Exception:  # noqa: BLE001
+                age_s = None
+        try:
+            drift = self._drift_since_proposal(client, symbol, side, price,
+                                               sl, tp, tick=tk, age_s=age_s)
+        except Exception as e:  # noqa: BLE001
+            logger.info("[%s_bot] %s: drift unread (%s)", self.asset_class,
+                        symbol, e)
+            drift = ""
+        if drift:
+            out.update(skip=skips.GATE_BLOCKED, why=drift)
+            return out
+        gate = self._entry_quote_gate(symbol, tk, client, stop=sl)
+        v = gate.get("verdict") or {}
+        r = v.get("half_spread_r")
+        out["quote"] = {
+            "mid": v.get("mid"), "bid": v.get("bid"), "ask": v.get("ask"),
+            "last_price": v.get("last_price"),
+            "age_s": round(age_s, 1) if age_s is not None else None,
+            "half_spread_r": round(float(r), 6) if r is not None else None,
+            "proposal_price": float(price)}
+        if not gate.get("ok", True):
+            out.update(skip=skips.SUSPECT_MARK,
+                       why=f"at the send: {gate.get('why')}")
+            return out
+        budget = mark_sanity.slippage_budget_words(v)
+        if budget:
+            out.update(skip=skips.WIDE_SPREAD, why=budget)
+        return out
+
+    @staticmethod
+    def reanchor_stop_to_fill(client, res, *, side, proposal, fill, stop,
+                              asset_class="", symbol="", held=None,
+                              working=False) -> dict:
+        """THE FILL AGAINST THE QUOTE IT WAS SIZED ON (2026-10-05). The
+        broker's avgPrice rewrites the row's entry price but not its stop,
+        so a BUY filled above the proposal holds MORE than the sized R at
+        the SENT stop. Measured here and, when the slip is ADVERSE, the
+        stop is moved by the slip — always TIGHTER than the one sent, the
+        one direction eToro's PATCH accepts (modify_protective, MEASURED
+        2026-09-23) — so the risk held equals the risk sized: |fill -
+        new stop| == |proposal - sent stop|. ONE PATCH, never retried; a
+        refusal is recorded. Nothing moves on a favourable slip (a wider
+        stop would be a widening PATCH, never sent), on a WORKING order,
+        on a slip under a tick, where the venue already holds a tighter
+        stop (`held`, stop_rewritten_by_venue), past the fill, on a
+        carrier other than eToro, or with no position handle.
+
+        {"slippage": {proposal, fill, points, r_fraction} or None,
+        "alert": the slip is past ENTRY_SLIPPAGE_ALERT_R, "sent": a PATCH
+        went out, "ok": it was accepted, "new_stop", "reason"}. Shared
+        with the TAKE TRADE lane. Never raises."""
+        out = {"slippage": None, "alert": False, "sent": False, "ok": False,
+               "new_stop": None, "reason": ""}
+        try:
+            proposal, fill, stop = float(proposal), float(fill), float(stop)
+        except (TypeError, ValueError):
+            return out
+        if not (proposal > 0 and fill > 0 and stop > 0):
+            return out
+        buy = str(side).upper() == "BUY"
+        dist = abs(proposal - stop)
+        if dist <= 0:
+            return out
+        slip = (fill - proposal) if buy else (proposal - fill)
+        r = slip / dist
+        out["slippage"] = {"proposal": proposal, "fill": fill,
+                           "points": round(slip, 8), "r_fraction": round(r, 6)}
+        from bot_program.mark_sanity import ENTRY_SLIPPAGE_ALERT_R
+        out["alert"] = r > ENTRY_SLIPPAGE_ALERT_R
+        if slip <= 0:
+            return out
+        if working:
+            out["reason"] = "the order is still working"
+            return out
+        try:
+            from core.price_format import price_decimals
+            new_stop = stop + slip if buy else stop - slip
+            places = price_decimals(new_stop, asset_class, symbol)
+            new_stop = round(new_stop, places)
+            tick = (10.0 ** -places) * (1 - 1e-6)
+        except Exception:  # noqa: BLE001
+            return out
+        if abs(new_stop - stop) < tick:
+            out["reason"] = "the slip is under a tick"
+            return out
+        # by construction new_stop = fill -/+ dist: never past the fill
+        try:
+            held_f = float(held) if held is not None else None
+        except (TypeError, ValueError):
+            held_f = None
+        if held_f is not None and held_f > 0.0001 and (
+                (buy and held_f >= new_stop) or (not buy and held_f <= new_stop)):
+            out["reason"] = f"the venue already holds a tighter stop ({held_f:g})"
+            return out
+        from bot_program.engine.capabilities import adapter_key
+        if adapter_key(client) != "etoro":
+            out["reason"] = ("only eToro's stop is re-anchored (its PATCH is "
+                             "measured, tighter only)")
+            return out
+        handle = (res or {}).get("protectiveTradeId") or (res or {}).get("positionId")
+        if not handle:
+            out["reason"] = "the fill named no position handle"
+            return out
+        mover = getattr(client, "modify_protective", None)
+        if not callable(mover):
+            out["reason"] = "this client cannot move a stop"
+            return out
+        out["sent"] = True
+        out["new_stop"] = float(new_stop)
+        try:
+            ans = mover(str(handle), float(new_stop))
+        except Exception as e:  # noqa: BLE001 — one PATCH, never retried
+            out["reason"] = f"the PATCH raised: {str(e)[:160]}"
+            return out
+        if isinstance(ans, dict) and ans.get("ok"):
+            out["ok"] = True
+        else:
+            why = (ans.get("reason") if isinstance(ans, dict) else str(ans))
+            out["reason"] = str(why or "the venue refused the PATCH")[:200]
+        return out
 
     def _posture_leverage(self, symbol, side, lev):
         """THE POSTURE'S LEVERAGE CAP (2026-10-02, the operator's "mix
@@ -5127,15 +5398,28 @@ class AssetBot(ABC):
                 return self._skip(symbol, skips.GATE_BLOCKED,
                                   "config was disarmed during the trade "
                                   "debate — refusing to submit")
-            # AND THE PRICE, AGAIN: the order goes at market with stop and
-            # target set at proposal; a minute of debate may have moved the
-            # market half-way to either. Unreadable passes, said.
-            if debate.get("on"):
-                _drift = self._drift_since_proposal(
-                    client, symbol, decision.direction, float(price),
-                    float(sl), float(tp))
-                if _drift:
-                    return self._skip(symbol, skips.GATE_BLOCKED, _drift)
+            # AND THE PRICE, AGAIN — THE LAST LOOK (2026-10-05, every live
+            # order, not only under the debate): the order goes at market
+            # with stop and target set at proposal, and the desk executes
+            # minutes after it proposed. ONE fresh read of the venue's
+            # quote through the trade client, three reads off it: the
+            # drift since the proposal (through the stop, or half-way to
+            # the stop or the target: nothing sent), the entry quote's
+            # sanity (crossed, stale print, far from the platform's quote,
+            # frozen: SUSPECT_MARK) and the slippage budget (a half-spread
+            # past ENTRY_SLIPPAGE_MAX_R of the stop distance: WIDE_SPREAD,
+            # the sized risk would be understated). Unreadable passes,
+            # said. The quote read rides the row (entry_quote).
+            _look = self._last_look(client, symbol, decision.direction,
+                                    float(price), float(sl), float(tp),
+                                    cand=cand)
+            if _look.get("skip"):
+                logger.warning("[%s_bot] %s: the last look refused the "
+                               "order — %s", self.asset_class, symbol,
+                               _look["why"])
+                return self._skip(symbol, _look["skip"], _look["why"])
+            if _look.get("quote"):
+                entry_meta["entry_quote"] = _look["quote"]
             try:
                 # The LAST read before real units move. can_open_new ran
                 # before this symbol's scan; a disarm landing between then
@@ -5383,6 +5667,69 @@ class AssetBot(ABC):
                     stop_leg = res.get("protectiveStopId")
                     if stop_leg:
                         entry_meta["protective_stop_id"] = str(stop_leg)
+                # THE FILL AGAINST THE QUOTE IT WAS SIZED ON (2026-10-05,
+                # reanchor_stop_to_fill): the slip is measured on every
+                # real fill and, when ADVERSE, the stop is moved by it on
+                # eToro — tighter than the one sent, the one direction its
+                # PATCH accepts — so the risk held equals the risk sized.
+                # The row's stop and its initial_stop_loss then both carry
+                # the re-anchored stop: |fill - new stop| is exactly the
+                # |proposal - sent stop| the size was built on, so the R
+                # unit is unchanged by construction. A refusal is recorded,
+                # never retried; a favourable slip moves nothing. Past
+                # ENTRY_SLIPPAGE_ALERT_R the staff are told (no money).
+                if fill_px > 0 and not res.get("working"):
+                    _re = self.reanchor_stop_to_fill(
+                        client, res, side=decision.direction,
+                        proposal=float(getattr(cand, "price", 0) or 0),
+                        fill=float(fill_px), stop=float(sl),
+                        asset_class=self.asset_class, symbol=symbol,
+                        held=held)
+                    if _re.get("slippage"):
+                        entry_meta["slippage"] = _re["slippage"]
+                    if _re.get("sent") and _re.get("ok"):
+                        entry_meta["stop_reanchored_to_fill"] = {
+                            "sent": float(sl), "held": float(_re["new_stop"]),
+                            "slip_r": _re["slippage"]["r_fraction"]}
+                        sl = float(_re["new_stop"])
+                        entry_meta["initial_stop_loss"] = round(sl, 8)
+                        logger.info("[%s_bot] %s: filled %s against the %s "
+                                    "sized on — stop re-anchored to %s "
+                                    "(the risk held is the risk sized)",
+                                    self.asset_class, symbol, fill_px,
+                                    _re["slippage"]["proposal"], sl)
+                    elif _re.get("sent"):
+                        entry_meta["stop_reanchor_refused"] = str(
+                            _re.get("reason") or "refused")[:200]
+                        logger.warning("[%s_bot] %s: the stop could not be "
+                                       "re-anchored to the fill (%s) — the "
+                                       "row holds MORE than the sized R at "
+                                       "the sent stop", self.asset_class,
+                                       symbol, _re.get("reason"))
+                    if _re.get("alert"):
+                        try:
+                            from bot_program.notifications import notify_staff
+                            _slip = _re["slippage"]
+                            notify_staff(
+                                title=(f"⚠ {symbol}: filled "
+                                       f"{abs(_slip['r_fraction']):.0%} of a "
+                                       f"stop distance past the quote it was "
+                                       f"sized on"),
+                                body=(f"{self.asset_class.upper()} {symbol} "
+                                      f"{decision.direction}: sized on "
+                                      f"{_slip['proposal']:g}, filled at "
+                                      f"{_slip['fill']:g}. "
+                                      + (f"The stop was re-anchored to {sl:g}, "
+                                         f"so the risk held is the risk sized."
+                                         if entry_meta.get("stop_reanchored_to_fill")
+                                         else f"The stop stays at {float(sl):g}"
+                                              f" ({_re.get('reason') or 'nothing sent'})"
+                                              f": the row holds more than the "
+                                              f"sized R.")),
+                                url="/positions/")
+                        except Exception as e2:  # noqa: BLE001
+                            logger.warning("[%s_bot] slippage alert failed: %s",
+                                           self.asset_class, e2)
                 # What the broker did to the protection, when it did
                 # something — a preset that rewrote the legs' time-in-
                 # force, a refused leg, a partial fill. The row explains
@@ -7154,7 +7501,12 @@ class AssetBot(ABC):
             meta, getattr(trade, "entry_price", None),
             asset_class=getattr(trade, "asset_class", "") or self.asset_class,
             symbol=getattr(trade, "symbol", "") or "")
-        return {"attack": attack or "", "stop_moved": moved or ""}
+        # the fill against the quote it was sized on (2026-10-05)
+        slipped = slippage_words(
+            meta, asset_class=getattr(trade, "asset_class", "") or self.asset_class,
+            symbol=getattr(trade, "symbol", "") or "")
+        return {"attack": attack or "", "stop_moved": moved or "",
+                "slippage": slipped or ""}
 
     def _attack_line(self, att: dict, trade) -> str:
         """"Attack mode: TIER · F% of the pool at risk · Lx · M CCY of
