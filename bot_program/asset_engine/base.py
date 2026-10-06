@@ -1019,6 +1019,7 @@ class AssetBot(ABC):
                 # own handler and skip the position whole — killing the clock
                 # exit for the very reason it exists. An unreadable mark is
                 # None, which is what everything below is written for.
+                mark_err = ""
                 try:
                     price = self._mark_price(trade, client)
                 except Exception as e:  # noqa: BLE001 — unreadable is None
@@ -1026,6 +1027,9 @@ class AssetBot(ABC):
                                    "(%s: %s) — the clock exit still runs",
                                    self.asset_class, trade.symbol,
                                    type(e).__name__, e)
+                    # kept for the skip note (2026-10-06): a refused or
+                    # failed read is not "the broker priced it at 0"
+                    mark_err = f"{type(e).__name__}: {e}"[:120]
                     price = None
 
                 # The time stop runs for protected trades too — AND FOR
@@ -1162,9 +1166,18 @@ class AssetBot(ABC):
                         # the bare except below and the ledger recorded
                         # nothing: loud in the log, silent on the page.
                         from bot_program.asset_engine import skips as _skips
-                        _skips.record(self.cfg, trade.symbol, _skips.NO_PRICE,
-                                      "open position only clock-managed: the "
-                                      "broker priced it at 0")
+                        # THE CAUSE, NOT A GUESS (2026-10-06): the real
+                        # NVDA #131 read "the broker priced it at 0" at
+                        # 13:47 UTC when the read had FAILED (a refused
+                        # /search during the redeploy). A failed read and
+                        # a venue that answered no rate are two faults.
+                        _skips.record(
+                            self.cfg, trade.symbol, _skips.NO_PRICE,
+                            ("open position only clock-managed: the mark "
+                             f"could not be read ({mark_err})")
+                            if mark_err else
+                            ("open position only clock-managed: the "
+                             "broker priced it at 0"))
                     except Exception as e:  # noqa: BLE001
                         logger.warning("[%s_bot] could not record the "
                                        "unpriced skip for %s: %s",

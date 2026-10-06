@@ -10,6 +10,7 @@ off, and tests/test_paper_market_hours.py turns it back on at a fixed
 clock for every path it pins.
 """
 from bot_program import entry_timing as _entry_timing
+from bot_program.engine import etoro_client as _etoro_client
 from bot_program.engine import paper_trader as _paper_trader
 
 _paper_trader.MARKET_HOURS_GATE = False
@@ -19,3 +20,9 @@ _paper_trader.MARKET_HOURS_GATE = False
 # run at whatever instant they run. tests/test_entry_timing.py turns it
 # back on at a fixed clock.
 _entry_timing.GATE = False
+# THE /search MEMO (2026-10-06, etoro_client.SEARCH_MEMO) keeps an id for
+# the UTC day across EtoroTrader instances, and the suite's fake wires
+# answer /search with ids per test and count the calls: kept on, a test
+# would read another test's id. tests/test_etoro_search_memo.py turns it
+# back on.
+_etoro_client.SEARCH_MEMO = False
