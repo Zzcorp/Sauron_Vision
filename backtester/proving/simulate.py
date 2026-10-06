@@ -35,6 +35,11 @@ and the backtester's own discipline:
             print), that floor is a fraction of nothing and one ordinary
             bar later the trade reads hundreds of R. Under the floor the
             trade is not simulated; it is counted (`skipped`) and said.
+            On the proving run's own path data.sanitize has already
+            dropped any open more than MAX_BAR_JUMP (50% at most) from the
+            last close, which is this very threshold, so the floor never
+            fires there: it is defence in depth for a frame that skipped
+            the sanity.
 
 THE EXIT POLICIES (2026-10-02, the operator: "improve much more the
 trailing stop loss system... and TP"). The same signals can be run under
@@ -75,7 +80,8 @@ STRUCTURE_FROM_R = 0.5
 #: THE STOP FLOOR: the least stop distance, as a share of the class's
 #: stop-band floor (risk_levels.stop_band) times the signal bar's close.
 #: On clean data the band keeps every stop past it; only an entry that
-#: opened at under half the signal bar's close can fall under it.
+#: opened at under half the signal bar's close can fall under it — an open
+#: data.sanitize drops first (defence in depth).
 MIN_STOP_SHARE_OF_FLOOR = 0.5
 #: The words a skipped trade is counted under.
 SKIP_STOP_FLOOR = "stop under half the class floor"

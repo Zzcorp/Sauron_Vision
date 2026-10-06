@@ -85,6 +85,34 @@ class TheFloorTests(TestCase):
         _seed_signals("bl_hi", [1.1] * 10 + [-1.0] * 10)
         self.assertEqual(measured_loser("bl_hi"), "")
 
+    def test_the_floor_edges_are_pinned(self):
+        """Each comparison at its edge, on values exact in binary: a
+        50%-hit rule at 0.00R is barred by `exp <= 0` alone."""
+        from signals.promotion_pipeline import measured_loser
+        _seed_signals("bl_zero", [1.0] * 10 + [-1.0] * 10)
+        self.assertEqual(measured_loser("bl_zero"),
+                         "20 graded signals all time: hit 50%, expectancy "
+                         "+0.00R — expectancy at or under zero")
+        # exactly 35% hits (7 of 20) on a thin +0.05R: not a low hit rate
+        _seed_signals("bl_h35", [2.0] * 7 + [-1.0] * 13)
+        self.assertEqual(measured_loser("bl_h35"), "")
+        # exactly +0.10R (2.0 over 20) at 20% hits: not a thin edge
+        _seed_signals("bl_e10", [4.5] * 4 + [-1.0] * 16)
+        self.assertEqual(measured_loser("bl_e10"), "")
+
+    def test_a_value_under_a_floor_never_prints_as_the_floor(self):
+        """17 hits of 49 (34.69%) at +0.0963R: barred, and said so in
+        numbers that agree with the reason."""
+        from signals.promotion_pipeline import loser_numbers, measured_loser
+        _seed_signals("bl_round", [2.16] * 17 + [-1.0] * 32)
+        self.assertEqual(measured_loser("bl_round"),
+                         "49 graded signals all time: hit 34%, expectancy "
+                         "+0.09R — a thin edge under a low hit rate "
+                         "(expectancy under +0.10R, hit under 35%)")
+        self.assertEqual(loser_numbers(0.3469, 0.0951), ("34%", "+0.09R"))
+        self.assertEqual(loser_numbers(0.35, 0.10), ("35%", "+0.10R"))
+        self.assertEqual(loser_numbers(0.5, -0.004), ("50%", "-0.00R"))
+
     def test_the_floor_sends_a_live_loser_to_paper_whatever_its_baseline(self):
         from signals.promotion_pipeline import is_due_for_demotion
         _set_stage("bl_f1", "live_full", baseline=None)

@@ -17,17 +17,23 @@ paper, never on money); a non-positive expectancy or holdout is FAILED;
 too few trades or too little data is INSUFFICIENT — said as such, never
 read as a pass or a fail.
 
-THE LAST GUARD (2026-10-06): a single trade past PROVING_MAX_TRADE_R
-either way is not judged — it is excluded from every number and counted
-by symbol. The engine's target is 2R (3R at most among the exit
-policies), so a trade past 20R is a fill more than seventeen stops beyond
-its own level: a broken bar, not a market (the ETF class printed +21.829R
-a trade and a worst run of +45733R on 2026-10-06). The one honest way past
-it is the trail-only policy riding a long trend; the count is printed, so
-that case is seen. When the excluded trades are more than
-MAX_EXCLUDED_SHARE of the run, the history itself is broken and the
-verdict is INSUFFICIENT, with the words naming the symbols and the count —
-never PROVEN, PROMISING or FAILED on numbers that are not a market's.
+THE LAST GUARD (2026-10-06), ONE-SIDED so it can never flatter a rule. A
+WIN past +PROVING_MAX_TRADE_R is not judged — excluded from every number
+and counted by symbol: the engine's target is 2R (3R at most among the
+exit policies), so such a win is a fill far beyond its own level, a
+broken bar (the ETF class printed +21.829R a trade and a worst run of
++45733R on 2026-10-06); the one honest way past it, the trail-only policy
+riding a long trend, is printed in the count. A LOSS past
+-PROVING_MAX_TRADE_R is KEPT, capped at it: the simulator fills a gap
+through the stop at the open on purpose, and a gap the class's jump bar
+accepts can be worth more than twenty quiet stops (a 0.09% forex stop
+through a 2.5% Monday gap is -28R). Dropping it, as the first version
+did, cut the very tail a carry or fade rule fails on and could print a
+false PROVEN (the review of 2026-10-06). When the trades past the bound,
+either way, are more than MAX_EXCLUDED_SHARE of the run, the history
+itself is broken and the verdict is INSUFFICIENT, with the words naming
+the symbols and the count — never PROVEN, PROMISING or FAILED on numbers
+that are not a market's.
 """
 from __future__ import annotations
 
@@ -42,9 +48,10 @@ ALPHA = 0.05
 BOOTSTRAPS = 2000
 #: Fixed so the same trades always get the same verdict.
 SEED = 20261002
-#: THE LAST GUARD: a trade past this many R, either way, is excluded.
+#: THE LAST GUARD: a win past this many R is excluded, a loss capped at it.
 PROVING_MAX_TRADE_R = 20.0
-#: Past this share of a run's trades excluded, the verdict is INSUFFICIENT.
+#: Past this share of a run's trades past the bound, the verdict is
+#: INSUFFICIENT.
 MAX_EXCLUDED_SHARE = 0.02
 
 PROVEN, PROMISING, FAILED, INSUFFICIENT = (
@@ -52,13 +59,30 @@ PROVEN, PROMISING, FAILED, INSUFFICIENT = (
 
 
 def sane_trades(trades) -> tuple:
-    """(kept, excluded): the trades within PROVING_MAX_TRADE_R, and the
-    ones past it (THE LAST GUARD)."""
-    kept, excluded = [], []
+    """(kept, past) — THE LAST GUARD (module docstring). `kept` is every
+    trade the numbers read: the ones within PROVING_MAX_TRADE_R, and each
+    loss past it as a copy capped at -PROVING_MAX_TRADE_R (`capped` True,
+    the simulated R as `r_raw`). `past` is every trade past the bound
+    either way, as simulated, for the count and the share; a win in it is
+    in no number."""
+    kept, past = [], []
     for t in trades:
-        (kept if abs(float(t["r"])) <= PROVING_MAX_TRADE_R
-         else excluded).append(t)
-    return kept, excluded
+        r = float(t["r"])
+        if r > PROVING_MAX_TRADE_R:
+            past.append(t)
+        elif r < -PROVING_MAX_TRADE_R:
+            past.append(t)
+            cost = float(t.get("cost_r") or 0.0)
+            kept.append(dict(t, r=-PROVING_MAX_TRADE_R,
+                             gross_r=-PROVING_MAX_TRADE_R + cost,
+                             r_raw=r, capped=True))
+        else:
+            kept.append(t)
+    return kept, past
+
+
+def _plural(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
 
 
 def by_symbol(trades) -> dict:
@@ -132,13 +156,19 @@ def bootstrap_lower(rs, alpha: float, *, n=BOOTSTRAPS, seed=SEED):
 def judge(trades, *, start, end, n_candidates: int = 1,
           data_ok: bool = True, data_reason: str = "") -> dict:
     """The verdict and every number behind it, for trades pooled over the
-    data span [start, end] (Timestamps). A trade past PROVING_MAX_TRADE_R
-    is excluded and counted (`excluded`), THE LAST GUARD."""
-    trades, absurd = sane_trades(sorted(trades, key=lambda t: t["entry_ts"]))
-    total = len(trades) + len(absurd)
+    data span [start, end] (Timestamps). A win past PROVING_MAX_TRADE_R
+    is excluded and a loss past it capped, each counted (`excluded`), THE
+    LAST GUARD."""
+    raw = sorted(trades, key=lambda t: t["entry_ts"])
+    trades, absurd = sane_trades(raw)
+    total = len(raw)
+    wins = [t for t in absurd if float(t["r"]) > 0]
+    losses = [t for t in absurd if float(t["r"]) < 0]
     excluded = {"n": len(absurd), "of": total,
                 "share": (len(absurd) / total) if total else 0.0,
                 "by_symbol": by_symbol(absurd),
+                "wins": len(wins), "wins_by_symbol": by_symbol(wins),
+                "capped": len(losses), "capped_by_symbol": by_symbol(losses),
                 "max_trade_r": PROVING_MAX_TRADE_R}
     rs = [t["r"] for t in trades]
     split = start + (end - start) * (1.0 - HOLDOUT_FRAC)
@@ -202,9 +232,16 @@ def judge(trades, *, start, end, n_candidates: int = 1,
             why = (f"{e:+.3f}R a trade, {oe:+.3f}R on the holdout, lower "
                    f"bound {lower:+.3f}R, {positive_folds}/{FOLDS} folds")
     if absurd and data_ok:
-        said = (f"{len(absurd)} of {total} trades excluded past "
+        what = []
+        if wins:
+            what.append(_plural(len(wins), "win", "wins") + " excluded")
+        if losses:
+            what.append(_plural(len(losses), "loss", "losses")
+                        + f" capped at -{PROVING_MAX_TRADE_R:.0f}R")
+        said = (f"{len(absurd)} of {total} trades past "
                 f"{PROVING_MAX_TRADE_R:.0f}R ({excluded['share']:.1%}) on "
-                f"{named_counts(excluded['by_symbol'])}")
+                f"{named_counts(excluded['by_symbol'])}: "
+                + ", ".join(what))
         if excluded["share"] > MAX_EXCLUDED_SHARE:
             verdict = INSUFFICIENT
             why = (f"{said} — over the {MAX_EXCLUDED_SHARE:.0%} a verdict "

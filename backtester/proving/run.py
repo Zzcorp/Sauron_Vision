@@ -60,12 +60,15 @@ def universe(asset_class=None, timeframe="4h", symbols=None) -> dict:
 
 def load_class(symbols, timeframe="4h", asset_class=None) -> dict:
     """{included: [(symbol, df, labels)], excluded: [(symbol, reason)],
-    dropped: {symbol: bars}, broken: [(symbol, reason)], start, end} — the
-    class's sufficient histories after THE BAR SANITY (data.sanitize), and
-    the span they cover together. A broken series is left out of the run
-    and named; the bad bars and spikes dropped from a judged series are
-    counted per symbol."""
+    dropped: {symbol: bars}, broken: [(symbol, reason)], adjusted:
+    {symbol: [words]}, held: {symbol: moves}, start, end} — the class's
+    sufficient histories after THE BAR SANITY (data.sanitize), and the span
+    they cover together. A broken series is left out of the run and named;
+    the bad bars and spikes dropped from a judged series, the splits it was
+    adjusted for and the held moves kept as a market are named per
+    symbol."""
     included, excluded, dropped, broken = [], [], {}, []
+    adjusted, held = {}, {}
     for sym in symbols:
         df, check = pdata.sanitize(
             pdata.load_history(sym, timeframe, raw=True), asset_class)
@@ -79,24 +82,37 @@ def load_class(symbols, timeframe="4h", asset_class=None) -> dict:
             continue
         if check["dropped"]:
             dropped[sym] = check["dropped"]
+        if check.get("adjusted"):
+            adjusted[sym] = list(check["adjusted"])
+        if check.get("held"):
+            held[sym] = int(check["held"])
         included.append((sym, df, regimes(df)))
     start = min((df.index[0] for _s, df, _l in included), default=None)
     end = max((df.index[-1] for _s, df, _l in included), default=None)
     return {"included": included, "excluded": excluded,
             "dropped": dropped, "broken": broken,
+            "adjusted": adjusted, "held": held,
             "start": start, "end": end}
 
 
 def data_words(data_detail) -> str:
-    """The line a verdict prints about what was not read (2026-10-06):
-    "3 bar(s) dropped on XYZ · 41 trade(s) excluded past 20R on XYZ (38),
-    ABC (3) · QQQ left out: broken from ..." — or "" for a clean run."""
+    """The line a verdict prints about what was not read as stored
+    (2026-10-06): "3 bar(s) dropped on XYZ · SPY adjusted for a 10:1 split
+    at ... · 41 win(s) excluded past +20R on XYZ (38), ABC (3) · QQQ left
+    out: broken from ..." — or "" for a clean run."""
     d = data_detail or {}
     parts = []
     bars = d.get("bars_dropped") or {}
     if bars:
         parts.append(f"{sum(bars.values())} bar(s) dropped on "
                      f"{pj.named_counts(bars)}")
+    for sym, said in sorted((d.get("adjusted") or {}).items()):
+        parts.append(f"{sym} adjusted for " + ", ".join(said))
+    held = d.get("held") or {}
+    if held:
+        parts.append(f"{sum(held.values())} held move(s) past the class's "
+                     f"jump bar traded as a market on "
+                     f"{pj.named_counts(held)}")
     skipped = d.get("trades_skipped") or {}
     if skipped:
         from backtester.proving.simulate import SKIP_STOP_FLOOR
@@ -104,9 +120,14 @@ def data_words(data_detail) -> str:
                      f"({SKIP_STOP_FLOOR}) on {pj.named_counts(skipped)}")
     excl = d.get("trades_excluded") or {}
     if excl:
-        parts.append(f"{sum(excl.values())} trade(s) excluded past "
-                     f"{pj.PROVING_MAX_TRADE_R:.0f}R on "
+        parts.append(f"{sum(excl.values())} win(s) excluded past "
+                     f"+{pj.PROVING_MAX_TRADE_R:.0f}R on "
                      f"{pj.named_counts(excl)}")
+    capped = d.get("trades_capped") or {}
+    if capped:
+        parts.append(f"{sum(capped.values())} loss(es) capped at "
+                     f"-{pj.PROVING_MAX_TRADE_R:.0f}R on "
+                     f"{pj.named_counts(capped)}")
     for sym, why in d.get("broken") or []:
         parts.append(f"{sym} left out: {why}")
     return " · ".join(parts)
@@ -168,9 +189,16 @@ def _verdict_row(run_id, family, direction, params, flt, asset_class,
             "data": {
                 "bars_dropped": dict(data.get("dropped") or {}),
                 "broken": [list(x) for x in data.get("broken") or []],
+                "adjusted": {s: list(w) for s, w
+                             in (data.get("adjusted") or {}).items()},
+                "held": dict(data.get("held") or {}),
                 "trades_skipped": dict(skipped or {}),
                 "trades_excluded": dict(
-                    (judged.get("excluded") or {}).get("by_symbol") or {}),
+                    (judged.get("excluded") or {}).get("wins_by_symbol")
+                    or {}),
+                "trades_capped": dict(
+                    (judged.get("excluded") or {}).get("capped_by_symbol")
+                    or {}),
             },
         },
         # Transient: the newest simulated trades, kept by _save for the
@@ -243,7 +271,8 @@ def generate(*, asset_class=None, timeframe="4h", symbols=None,
             trades, _open, skipped = _pool(fam, direction, params, flt,
                                            data, cls, timeframe, cache)
             # chosen on the trades the judge will read: past the last
-            # guard, a trade is not a market's and must not pick a leader
+            # guard, a win is not a market's and must not pick a leader,
+            # and a loss is read capped
             sane, _absurd = pj.sane_trades(trades)
             ins = [t["r"] for t in sane if t["entry_ts"] < split]
             lower = pj.bootstrap_lower(ins, level) \
@@ -337,12 +366,14 @@ def _save(rows):
 
 def data_report(*, asset_class=None, timeframe="4h", symbols=None) -> dict:
     """{class: {"ok": [(sym, bars, days)], "short": [(sym, reason)],
-    "dropped": {sym: bars}, "broken": [(sym, reason)]}} — how much history
-    the proving ground actually has to judge on, read after THE BAR SANITY
-    exactly as a run reads it."""
+    "dropped": {sym: bars}, "broken": [(sym, reason)], "adjusted":
+    {sym: [words]}, "held": {sym: moves}}} — how much history the proving
+    ground actually has to judge on, read after THE BAR SANITY exactly as a
+    run reads it."""
     out = {}
     for cls, syms in universe(asset_class, timeframe, symbols).items():
         ok, short, dropped, broken = [], [], {}, []
+        adjusted, held = {}, {}
         for sym in syms:
             df, check = pdata.sanitize(
                 pdata.load_history(sym, timeframe, raw=True), cls)
@@ -351,11 +382,15 @@ def data_report(*, asset_class=None, timeframe="4h", symbols=None) -> dict:
                 continue
             if check["dropped"]:
                 dropped[sym] = check["dropped"]
+            if check.get("adjusted"):
+                adjusted[sym] = list(check["adjusted"])
+            if check.get("held"):
+                held[sym] = int(check["held"])
             v = pdata.sufficiency(df, timeframe)
             if v["ok"]:
                 ok.append((sym, v["bars"], v["span_days"]))
             else:
                 short.append((sym, v["reason"]))
         out[cls] = {"ok": ok, "short": short, "dropped": dropped,
-                    "broken": broken}
+                    "broken": broken, "adjusted": adjusted, "held": held}
     return out

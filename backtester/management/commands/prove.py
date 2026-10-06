@@ -116,6 +116,11 @@ class Command(BaseCommand):
                      if dropped.get(sym) else ""))
             for sym, why in broken:
                 w(f"  {sym:12} BROKEN: {why}")
+            for sym, said in sorted((part.get("adjusted") or {}).items()):
+                w(f"  {sym:12} ADJUSTED for " + ", ".join(said))
+            for sym, n in sorted((part.get("held") or {}).items()):
+                w(f"  {sym:12} {n} held move(s) past the jump bar, traded "
+                  f"as a market")
         w(f"Needed per symbol: {MIN_SPAN_DAYS} days, {MIN_BARS} bars.")
 
     def _rows(self, rows, title, saved):

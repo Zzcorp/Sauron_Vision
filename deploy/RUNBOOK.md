@@ -234,11 +234,14 @@ needed:
 A rule whose verdict is PROVEN has beaten its costs out of sample; one
 that is INSUFFICIENT still has too little history (run `prove data`) or
 was judged on broken bars. The proving ground reads only a market: bad
-bars and spikes are dropped, a series whose price jumps and holds (an
-unadjusted split) is left out of the run (`prove data` lists it as
-BROKEN), a broken entry is skipped, and a single trade past 20R is
-excluded; past 2% of a run excluded the verdict is INSUFFICIENT. A
-`data:` line under a verdict says what was not read. The
+bars and spikes are dropped (a broken entry bar with them, before any
+trade is simulated); a price that jumps and holds is read by its cause —
+an unadjusted split or a re-based feed is adjusted (`prove data` says
+ADJUSTED), any other move is traded as the market it was, and a feed that
+never settles on a level is left out of the run (BROKEN). A win past 20R
+is excluded and a loss past 20R is capped at -20R, never dropped; past 2%
+of a run past 20R the verdict is INSUFFICIENT. A `data:` line under a
+verdict says what was not read as stored. The
 verdicts are read by the setup memory and the ticket's odds today; the
 proof-first gate and the edge sizer that will read them are the next
 stage.

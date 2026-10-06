@@ -44,7 +44,8 @@ class Command(BaseCommand):
         from signals.models import RuleControl
         from signals.promotion_pipeline import (
             LOSER_HIT_MAX, LOSER_MIN_N, LOSER_THIN_EDGE_R, MANUAL_DWELL_DAYS,
-            _stats_since, demote_rule, hand_promoted_recently, measured_loser)
+            _stats_since, demote_rule, hand_promoted_recently, loser_numbers,
+            measured_loser)
         w = self.stdout.write
         apply = bool(opts.get("apply"))
         rows = list(RuleControl.objects.filter(
@@ -74,9 +75,11 @@ class Command(BaseCommand):
                 verdict = f"unmeasured (n {n} < {LOSER_MIN_N})"
             else:
                 verdict = "ok"
+            hit_w, exp_w = (loser_numbers(hit, exp) if exp is not None
+                            else ("", ""))
             w(f"  {ctrl.rule_name:28} {ctrl.promotion_stage:10} n {n:4}  hit "
-              f"{(f'{float(hit):.0%}' if hit is not None else '—'):>4}  exp "
-              f"{(f'{float(exp):+.2f}R' if exp is not None else '—'):>7}  "
+              f"{(hit_w if hit is not None else '—'):>4}  exp "
+              f"{(exp_w if exp is not None else '—'):>7}  "
               f"{verdict}")
             if apply and verdict == "LOSER":
                 demote_rule(ctrl.rule_name, "paper", user=None,

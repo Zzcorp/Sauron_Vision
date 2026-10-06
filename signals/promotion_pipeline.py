@@ -313,6 +313,22 @@ def is_eligible_for_promotion(rule_name: str) -> Optional[str]:
     return None
 
 
+def loser_numbers(hit, exp) -> tuple:
+    """("34%", "+0.09R") — the hit rate and the expectancy at the floor's
+    own precision, never rounded up onto a floor the raw value is under
+    (the review of 2026-10-06: 17 hits of 49 at +0.0951R read "hit 35%,
+    expectancy +0.10R — ... expectancy under +0.10R, hit under 35%", a
+    sentence that contradicts itself on a real-money demotion)."""
+    h = float(hit) if hit is not None else 0.0
+    shown_h = round(h, 2)
+    if h < LOSER_HIT_MAX <= shown_h:
+        shown_h = round(LOSER_HIT_MAX - 0.01, 2)
+    shown_e = round(float(exp), 2)
+    if float(exp) < LOSER_THIN_EDGE_R <= shown_e:
+        shown_e = round(LOSER_THIN_EDGE_R - 0.01, 2)
+    return f"{shown_h:.0%}", f"{shown_e:+.2f}R"
+
+
 def measured_loser(rule_name: str) -> str:
     """The sentence that makes `rule_name` a MEASURED LOSER on its all-time
     graded record — LOSER_MIN_N signals and an expectancy at or under zero,
@@ -331,9 +347,8 @@ def measured_loser(rule_name: str) -> str:
         return ""
     exp = float(exp)
     low_hit = hit is not None and float(hit) < LOSER_HIT_MAX
-    head = (f"{n} graded signals all time: hit "
-            f"{(float(hit) if hit is not None else 0):.0%}, expectancy "
-            f"{exp:+.2f}R")
+    hit_w, exp_w = loser_numbers(hit, exp)
+    head = f"{n} graded signals all time: hit {hit_w}, expectancy {exp_w}"
     if exp <= 0:
         return f"{head} — expectancy at or under zero"
     if low_hit and exp < LOSER_THIN_EDGE_R:
