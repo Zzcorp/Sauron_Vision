@@ -67,6 +67,9 @@ NY = ZoneInfo("America/New_York")
 ROLLOVER_NY = (dtime(16, 50), dtime(17, 10))
 #: The classes that roll over at 17:00 New York.
 ROLLOVER_CLASSES = frozenset({"forex", "commodity", "index"})
+#: The classes whose modelled session is the venue's own, so a rollover
+#: that ends inside the venue's break clears at its reopening (+ settle).
+VENUE_BREAK_CLASSES = frozenset({"commodity"})
 #: Minutes after an open before a new entry.
 OPEN_SETTLE_MINUTES = 15
 #: Minutes before an exchange close with no new entry, and the classes
@@ -109,21 +112,47 @@ def _utc_words(moment) -> str:
         return "?"
 
 
-def rollover(now, asset_class) -> dict | None:
-    """The rollover verdict for `now`, or None outside the window."""
-    if str(asset_class).lower() not in ROLLOVER_CLASSES:
+def rollover(now, asset_class, *, exchange="", symbol="") -> dict | None:
+    """The rollover verdict for `now`, or None outside the window.
+
+    Monday to Thursday only: Friday's 16:50-17:00 is the weekend window's
+    (clock_verdict), and from 17:00 every venue has shut for the week. The
+    hour it clears is the window's end — unless the instrument's own venue
+    is still shut then (CME's daily break, a grain's or a soft's midday
+    gap), when it is that venue's reopening plus its settling quarter
+    hour. The hour comes first in the words: why_no_trade prints 88
+    characters of a skip's detail."""
+    cls = str(asset_class or "").lower()
+    if cls not in ROLLOVER_CLASSES:
         return None
     ny = now.astimezone(NY)
     start, end = ROLLOVER_NY
-    if ny.weekday() >= 5 or not (start <= ny.time() < end):
+    if ny.weekday() >= 4 or not (start <= ny.time() < end):
         return None
     until = ny.replace(hour=end.hour, minute=end.minute, second=0,
                        microsecond=0).astimezone(dt_timezone.utc)
+    reopens_note = ""
+    # Commodities only: their modelled session IS the venue's (CME Globex
+    # with its 16:00-17:00 CT break, the grains' and softs' gaps). An
+    # index is modelled on its cash exchange's hours, which an index CFD
+    # outlives by most of the night, so its window's end stands.
+    if cls in VENUE_BREAK_CLASSES:
+        try:
+            from core.exchange_status import market_clock
+            later = market_clock(cls, exchange or "", symbol=symbol or "",
+                                 now_utc=until)
+            if not later.get("is_open", True) and later.get("reopens"):
+                until = later["reopens"] + timedelta(
+                    minutes=OPEN_SETTLE_MINUTES)
+                reopens_note = ", once the venue reopens and settles"
+        except Exception as e:  # noqa: BLE001 — the window's end stands
+            logger.warning("[timing] venue clock unread for %s: %s",
+                           symbol, e)
     return {"ok": False, "code": ROLLOVER,
-            "why": (f"the {_class_words(asset_class)} market rolls over at "
-                    f"17:00 New York (the daily swap; every venue re-prices "
-                    f"and the spread is at its widest) — new entries resume "
-                    f"{_utc_words(until)}"),
+            "why": (f"the {_class_words(cls)} market rolls over at 17:00 New "
+                    f"York — new entries resume {_utc_words(until)}"
+                    f"{reopens_note} (the daily swap: every venue re-prices "
+                    f"and the spread is at its widest)"),
             "until": until, "attack": None}
 
 
@@ -156,7 +185,7 @@ def clock_verdict(symbol, asset_class, *, exchange="", now=None) -> dict | None:
     cls = str(asset_class or "").strip().lower()
     if cls in NEVER_SHUTS or cls == "options":
         return None
-    got = rollover(now, cls)
+    got = rollover(now, cls, exchange=exchange, symbol=symbol)
     if got is not None:
         return got
     try:
@@ -186,9 +215,9 @@ def clock_verdict(symbol, asset_class, *, exchange="", now=None) -> dict | None:
         if now < settled:
             return {"ok": False, "code": OPEN_SETTLE,
                     "why": (f"the {_class_words(cls)} market opened at "
-                            f"{_utc_words(opened)} and its first quarter "
-                            f"hour is not a market price yet — new entries "
-                            f"resume {_utc_words(settled)}"),
+                            f"{_utc_words(opened)} — new entries resume "
+                            f"{_utc_words(settled)} (its first quarter hour "
+                            f"is not a market price yet)"),
                     "until": settled, "attack": None}
     if cls in CLOSE_GUARD_CLASSES:
         try:
@@ -295,7 +324,8 @@ def advisory(symbol, asset_class, *, exchange="", now=None) -> dict:
     never a refusal: the operator keeps the last word on their own lane."""
     try:
         v = verdict(symbol, asset_class, exchange=exchange, now=now)
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 — an unread clock warns of nothing
+        logger.warning("[timing] advisory unread for %s: %s", symbol, e)
         return {"ok": True, "reason": "", "attack": ""}
     return {"ok": bool(v["ok"]), "reason": v["why"],
             "attack": (v["attack"] or {}).get("why", "")}

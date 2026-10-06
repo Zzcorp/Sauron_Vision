@@ -86,8 +86,13 @@ class TheRolloverTests(SimpleTestCase):
                         self.assertFalse(v["ok"])
                         self.assertEqual(v["code"], et.ROLLOVER)
                         self.assertIn("rolls over at 17:00 New York", v["why"])
+                        # a commodity clears when CME reopens from its
+                        # 16:00-17:00 CT break (18:00 New York) and settles
+                        from datetime import time as dtime
+                        want = (dtime(18, 15) if cls == "commodity"
+                                else et.ROLLOVER_NY[1])
                         self.assertEqual(v["until"].astimezone(NY).time(),
-                                         et.ROLLOVER_NY[1])
+                                         want)
 
     def test_the_edges_and_the_classes_that_do_not_roll(self):
         with _on():
@@ -108,6 +113,46 @@ class TheRolloverTests(SimpleTestCase):
             self.assertTrue(et.verdict("AAPL", "stock", exchange="NASDAQ",
                                        now=_ny(*WINTER_TUE, 16, 55),
                                        events=[])["ok"])
+
+
+class TheRolloverOnAShutVenueTests(SimpleTestCase):
+    """Review 2026-10-06: the rollover answers while the venue is in its
+    own break, so the hour it clears is the venue's reopening plus its
+    settling quarter hour, never the window's end inside a shut venue."""
+
+    def test_cme_metals_clear_after_the_daily_break_and_its_settle(self):
+        # Tuesday 17:05 New York: CME is in its 16:00-17:00 CT break and
+        # reopens at 17:00 CT = 18:00 New York = 23:00 UTC in winter
+        with _on():
+            v = et.verdict("XAUUSD", "commodity", exchange="COMEX",
+                           now=_ny(*WINTER_TUE, 17, 5), events=[])
+        self.assertEqual(v["code"], et.ROLLOVER)
+        self.assertEqual(v["until"],
+                         datetime(2026, 1, 13, 23, 15, tzinfo=UTC))
+        self.assertIn("resume Tuesday 23:15 UTC, once the venue reopens "
+                      "and settles", v["why"])
+
+    def test_a_venue_open_at_the_windows_end_keeps_it(self):
+        with _on():
+            v = et.verdict("EURUSD", "forex", exchange="FOREX",
+                           now=_ny(*WINTER_TUE, 16, 55), events=[])
+        self.assertEqual(v["until"], _ny(*WINTER_TUE, 17, 10))
+        self.assertNotIn("once the venue reopens", v["why"])
+
+    def test_the_hour_comes_first_in_the_words(self):
+        """why_no_trade prints 88 characters of a skip's detail."""
+        with _on():
+            roll = et.verdict("EURUSD", "forex", exchange="FOREX",
+                              now=_ny(*WINTER_TUE, 16, 55), events=[])
+            settle = et.verdict("AAPL", "stock", exchange="NASDAQ",
+                                now=_ny(*WINTER_TUE, 9, 40), events=[])
+        self.assertIn("resume Tuesday 22:10 UTC", roll["why"][:88])
+        self.assertIn("resume Tuesday 14:45 UTC", settle["why"][:88])
+
+    def test_an_unreadable_advisory_is_logged(self):
+        with mock.patch.object(et, "verdict", side_effect=RuntimeError("x")), \
+                self.assertLogs("bot_program.entry_timing", level="WARNING"):
+            self.assertTrue(et.advisory("EURUSD", "forex")["ok"])
 
 
 class TheOpenSettleTests(SimpleTestCase):
@@ -189,10 +234,14 @@ class TheCloseGuardTests(SimpleTestCase):
                            now=_ny(*WINTER_FRI, 16, 0), events=[])
             self.assertEqual(v["code"], et.WEEKEND)
             self.assertIn("Friday's last hour before the weekend", v["why"])
-            # the rollover window comes first on Friday too
-            self.assertEqual(et.verdict("EURUSD", "forex", exchange="FOREX",
-                                        now=_ny(*WINTER_FRI, 16, 55),
-                                        events=[])["code"], et.ROLLOVER)
+            # Friday 16:50-17:00 is the weekend window's, never a rollover
+            # that would name a resume hour inside the shut weekend
+            v = et.verdict("EURUSD", "forex", exchange="FOREX",
+                           now=_ny(*WINTER_FRI, 16, 55), events=[])
+            self.assertEqual(v["code"], et.WEEKEND)
+            self.assertNotIn("resume Friday", v["why"])
+            self.assertIsNone(et.rollover(_ny(*WINTER_FRI, 16, 55), "forex"))
+            self.assertIsNone(et.rollover(_ny(2026, 7, 17, 16, 55), "index"))
             # a stock: 15:00-16:00 New York on Friday
             self.assertEqual(et.verdict("AAPL", "stock", exchange="NASDAQ",
                                         now=_ny(*WINTER_FRI, 15, 10),
@@ -456,11 +505,17 @@ class TheWiringTests(SimpleTestCase):
         self.assertLess(quote, gate)
         self.assertLess(gate, cost)
         src = inspect.getsource(AssetBot.execute_entry)
+        # before the billed debate (review 2026-10-06), and again on the
+        # fresh clock after the last look, just before the order
+        first = src.index("self._entry_timing_gate(symbol)")
+        debate = src.index("debate_candidate(self, cand, qty)")
         look = src.index("self._last_look(client, symbol, decision.direction,")
-        again = src.index("self._entry_timing_gate(symbol)")
+        again = src.rindex("self._entry_timing_gate(symbol)")
         order = src.index("order_kwargs = {")
+        self.assertLess(first, debate)
         self.assertLess(look, again)
         self.assertLess(again, order)
+        self.assertNotEqual(first, again)
 
     def test_the_skip_code_has_its_advice_and_its_words(self):
         import inspect

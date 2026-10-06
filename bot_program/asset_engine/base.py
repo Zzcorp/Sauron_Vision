@@ -4454,13 +4454,22 @@ class AssetBot(ABC):
         key), with the calendar read once per tick (_tick_broker_cache).
         The verdict is kept on self._timing_verdict[symbol] for
         _attack_tier (a print within EVENT_ATTACK_HOURS caps the tier).
-        Never raises: an unreadable clock or calendar refuses nothing."""
+        Never raises: an unreadable clock or calendar refuses nothing.
+        The instrument's (class, exchange) is read once per tick too: the
+        gate runs at the proposal and twice at the send."""
         from bot_program import entry_timing
         try:
-            cls, exchange = entry_timing.instrument_key(symbol, self.asset_class)
+            cache = getattr(self, "_tick_broker_cache", None)
+            key = ("timing_instrument_key", symbol)
+            if isinstance(cache, dict) and key in cache:
+                cls, exchange = cache[key]
+            else:
+                cls, exchange = entry_timing.instrument_key(symbol,
+                                                            self.asset_class)
+                if isinstance(cache, dict):
+                    cache[key] = (cls, exchange)
             verdict = entry_timing.verdict(
-                symbol, cls, exchange=exchange, now=now,
-                cache=getattr(self, "_tick_broker_cache", None))
+                symbol, cls, exchange=exchange, now=now, cache=cache)
         except Exception as e:  # noqa: BLE001 — the clock never breaks a tick
             logger.warning("[%s_bot] %s: entry timing unread (%s) — not "
                            "judged", self.asset_class, symbol, e)
@@ -5335,6 +5344,17 @@ class AssetBot(ABC):
                 return self._skip(symbol, skips.GATE_BLOCKED,
                                   "config was disarmed mid-tick — refusing "
                                   "to submit")
+            # THE CLOCK, before the debate (2026-10-06, review): it is a
+            # deterministic refusal, and the debate below is billed — a
+            # candidate proposed at 16:49 New York and sent at 16:51 must
+            # not be argued and then refused at the rollover. Read again on
+            # the fresh clock after the last look, just before the order.
+            _timing = self._entry_timing_gate(symbol)
+            if not _timing["ok"]:
+                logger.warning("[%s_bot] %s: the send was refused on the "
+                               "clock — %s", self.asset_class, symbol,
+                               _timing["why"])
+                return self._skip(symbol, skips.BAD_TIMING, _timing["why"])
             # THE TRADE DEBATE (2026-10-01; moved here 2026-10-02, after
             # every deterministic refusal, so only an order about to be SENT
             # is argued and billed): the Executioner argues why this

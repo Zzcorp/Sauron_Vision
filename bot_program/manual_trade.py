@@ -1032,7 +1032,9 @@ def timing_advisory(inst) -> dict:
         return entry_timing.advisory(
             inst.symbol, getattr(inst, "asset_class", "") or "",
             exchange=getattr(inst, "exchange", "") or "")
-    except Exception:  # noqa: BLE001 — an unread clock warns of nothing
+    except Exception as e:  # noqa: BLE001 — an unread clock warns of nothing
+        logger.warning("[take-trade] timing advisory unread for %s: %s",
+                       getattr(inst, "symbol", "?"), e)
         return {"ok": True, "reason": "", "attack": ""}
 
 
