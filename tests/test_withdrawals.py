@@ -145,15 +145,21 @@ class TheRequestTests(_Quiet):
         return create_request(self.user, **args)
 
     def test_a_request_reserves_the_amount_in_the_accounts_currency(self):
+        # a date in the FUTURE, relative to today: the literal "2026-10-05"
+        # this test carried became "already past" at midnight on 2026-10-06
+        # and failed every suite from then on (a wanted-by date in the past
+        # is accepted with a warning, which the last assertion refuses)
+        from datetime import date, timedelta
+        soon = (date.today() + timedelta(days=30)).isoformat()
         _ibkr_book(self.user, "1000", "EUR")
-        out = self._create(wanted_by="2026-10-05", reason="Roof repair")
+        out = self._create(wanted_by=soon, reason="Roof repair")
         self.assertTrue(out.get("ok"), out)
         wr = out["request"]
         self.assertEqual(wr.status, "reserved")
         self.assertEqual(wr.amount, Decimal("200.00"))
         self.assertEqual(wr.currency, "EUR")
         self.assertEqual(wr.requested_by, "gandalf")
-        self.assertEqual(str(wr.wanted_by), "2026-10-05")
+        self.assertEqual(str(wr.wanted_by), soon)
         self.assertEqual(out["warnings"], [])
 
     def test_no_reading_records_usd_and_says_so(self):
