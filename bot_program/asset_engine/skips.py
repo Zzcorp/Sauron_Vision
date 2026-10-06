@@ -105,6 +105,15 @@ MARKET_SHUT = "market_shut"
 # or dead feed reads as such, never as a quiet market or a stopped bot.
 SUSPECT_MARK = "suspect_mark"
 
+# 2026-10-05. A new REAL entry held because the venue that would carry it
+# is SICK (bot_program/venue_health): a burst of 429s, 5xx answers or
+# requests that never came back inside the last minutes, or one order POST
+# that failed for the venue's reason. A decision with the venue's words,
+# never a broken connection (order_error); the quiet ends by itself
+# VENUE_QUIET_MINUTES past the last failure. Closes and stop moves are not
+# held, and the manual lane only warns.
+VENUE_SICK = "venue_sick"
+
 MAX_SYMBOLS_TRACKED = 200
 
 
@@ -234,6 +243,13 @@ def diagnose(cfg) -> str:
                       "frozen (the same print for 45 minutes in an open "
                       "market) — read the detail; the next sane print "
                       "manages the row again",
+        VENUE_SICK: "a new real entry was held because the venue that "
+                    "would carry it answered a burst of 429/5xx or "
+                    "requests that never came back (or one order POST "
+                    "failed) — nothing is wrong with the signal; the "
+                    "quiet ends by itself minutes after the last failure, "
+                    "closes and stop moves were never held, and the "
+                    "detail names the last failure",
     }.get(top, "")
     return (f"{top} accounts for {share:.0%} of {total} skips"
             + (f" — {advice}" if advice else ""))

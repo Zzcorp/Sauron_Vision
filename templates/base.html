@@ -2263,6 +2263,19 @@
                        'it is recorded as taken without a signal.') + '</div>';
       }
 
+      /* The venue's health (2026-10-05): the carrier answered a burst of
+         429/5xx or requests that never came back in the last minutes. The
+         bots hold their new real entries on it; this lane only warns — the
+         button is unchanged. */
+      var vhealth = p.venue_health || {};
+      if (vhealth.ok === false && vhealth.reason) {
+        warnHtml += '<div class="sz-warn sz-warn--book"><b>THE VENUE IS SICK</b>' +
+          esc(vhealth.reason) +
+          '<br>' + esc('A warning, not a block: the bots hold their new real ' +
+                       'entries until the quiet ends; this ticket is yours ' +
+                       'to send.') + '</div>';
+      }
+
       /* And how hard this pool is set to swing. Not a warning about THIS
          trade — a reminder that a number typed into extras once is still
          sizing every trade since. */

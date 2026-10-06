@@ -440,9 +440,12 @@ class TheEntryPassesItThroughTests(TestCase):
         """The wire answers 503 on eligibility: the row is "error" today,
         the hint is 2 -> eligibility_refused naming the multiplier and the
         LIVE list, before the multiplier's own judgement and before any
-        order POST; ONE eligibility POST this tick (an error is asked
-        again next tick, not three times now)."""
+        order POST; ONE eligibility ask this tick (an error is asked
+        again next tick, not three times now) — two POSTs on the wire
+        since 2026-10-05, because a 5xx on a read is asked once more
+        (EtoroTrader._read, READ_RETRIES)."""
         from bot_program.asset_engine import skips
+        from bot_program.engine.etoro_client import READ_RETRIES
         from bot_program.models import AssetBotTrade
         _switch(True)
         _account(self.user, cash=100000)
@@ -454,7 +457,7 @@ class TheEntryPassesItThroughTests(TestCase):
         posts = [c for c in fake.calls if c[0] == "POST"]
         self.assertEqual([c[1] for c in posts if "orders" in c[1]], [],
                          "an order left the box on an unread row")
-        self.assertEqual(len(posts), 1, [p[1] for p in posts])
+        self.assertEqual(len(posts), 1 + READ_RETRIES, [p[1] for p in posts])
         note = self._skip_note()
         self.assertEqual(note["code"], skips.ELIGIBILITY_REFUSED)
         self.assertIn("2x", note["detail"])

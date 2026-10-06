@@ -355,6 +355,61 @@ PORTFOLIO_LAG_S = 60
 #: ever ask for.
 LEVERAGE_MAX = 30
 
+#: ONE bounded retry on a READ whose answer was a 5xx or never came back
+#: (2026-10-05): the orders:lookup answered 500 three times over ~6 s during
+#: a close and then 200 (MEASURED 2026-09-23), so one 5xx on a rates,
+#: search, account, portfolio or eligibility read is asked once more after
+#: READ_RETRY_DELAY_S. A 429 is NOT retried (a quota is not helped by a
+#: second ask inside the same second) and a WRITE is never retried (the
+#: POST of an order may have landed: see EtoroOrderInDoubt). The final
+#: failure — a raise, a 429 or a 5xx — is noted on the venue's health
+#: (bot_program/venue_health), which is what holds new real entries while
+#: eToro is sick.
+READ_RETRIES = 1
+READ_RETRY_DELAY_S = 0.8
+
+#: Transport failures on the order POST after which NOTHING left the box:
+#: the connection was never made (a connect timeout, a TLS handshake that
+#: failed, a proxy that refused). Everything else that raises from the POST
+#: (a read timeout, a connection reset or closed after the send) may have
+#: delivered the order and is IN DOUBT.
+NEVER_SENT = (requests.exceptions.ConnectTimeout, requests.exceptions.SSLError,
+              requests.exceptions.ProxyError)
+TRANSPORT = (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
+
+
+class EtoroOrderInDoubt(RuntimeError):
+    """A placement whose outcome is unknown: the POST left and nothing came
+    back (a read timeout, a connection reset after the send).
+
+    Distinct from a refusal on purpose — a caller that retried this would
+    double the position. The same contract as SaxoOrderInDoubt: the engine
+    reads `in_doubt` duck-typed off the raise (asset_engine/base.py
+    execute_entry), notes the symbol on the config for IN_DOUBT_QUIET_HOURS
+    and tells the staff; it never imports this class. Carries the
+    x-request-id the order was sent with (eToro echoes it as referenceId on
+    an acceptance; the lookup does NOT find it — MEASURED 2026-09-23 — so
+    the operator checks the broker's open orders and positions for the
+    symbol) and the caller's client_order_id. Until 2026-10-05 this raise
+    was a bare requests exception the engine read as a refusal.
+    """
+
+    #: Read by asset_engine/base.py without importing this module.
+    in_doubt = True
+
+    def __init__(self, reference: str, symbol: str, detail: str, *,
+                 client_order_id=None):
+        # THE VERDICT FIRST: skips.record keeps 200 characters and
+        # why_no_trade prints 88; a timeout string alone runs past both.
+        super().__init__(
+            f"{symbol}: the order request did not come back ({detail}) and "
+            f"MAY be live at eToro. Do not resend it: check the broker's "
+            f"open orders and positions for {symbol} first (reference "
+            f"{reference}).")
+        self.reference = reference
+        self.symbol = symbol
+        self.client_order_id = client_order_id
+
 
 def _iso_to_ms(ts: str) -> int:
     """'2026-09-17T08:00:00Z' -> epoch ms; 0 when unreadable."""
@@ -546,6 +601,61 @@ class EtoroTrader:
     def _headers(self, rid: Optional[str] = None) -> dict:
         return {"x-request-id": rid or self._rid()}
 
+    def _world(self) -> str:
+        return "demo" if self.demo else "live"
+
+    def _note_health(self, where: str, *, code=None, detail: str = "") -> None:
+        """Note a failure that is the VENUE's (a 429, a 5xx, a request that
+        never came back) on the platform's memory of this world's health
+        (bot_program/venue_health.note). Imported lazily so the adapter
+        stays importable without Django; never raises."""
+        try:
+            from bot_program.venue_health import note
+            note("etoro", self._world(), where, code=code, detail=detail)
+        except Exception as e:  # noqa: BLE001 — a lost note must not raise
+            log.debug("eToro health note (%s) skipped: %s", where, e)
+
+    def _read(self, method: str, url: str, *, where: str, **kw):
+        """ONE read, with ONE bounded retry (READ_RETRIES) after
+        READ_RETRY_DELAY_S when the answer was a 5xx or never came back
+        (TRANSPORT). A 429 is returned at once, not retried; a 4xx is the
+        caller's to read. Returns the last response, or raises the last
+        transport error. The FINAL failure — a raise, a 429 or a 5xx — is
+        noted on the venue's health; a retry that answered is not. Reads
+        only: the order POST never goes through here."""
+        import time
+        fn = getattr(self._sess(), method.lower())
+        last_exc = None
+        for attempt in range(1 + READ_RETRIES):
+            r = None
+            try:
+                r = fn(url, timeout=self.timeout, **kw)
+                last_exc = None
+            except TRANSPORT as e:
+                last_exc = e
+            if r is not None:
+                code = int(getattr(r, "status_code", 0) or 0)
+                if code == 429:
+                    self._note_health(where, code=code)
+                    return r
+                if code < 500:
+                    return r
+                if attempt < READ_RETRIES:
+                    log.info("eToro %s answered %s — asked once more in %.1fs",
+                             where, code, READ_RETRY_DELAY_S)
+                    time.sleep(READ_RETRY_DELAY_S)
+                    continue
+                self._note_health(where, code=code,
+                                  detail=str(getattr(r, "text", "") or "")[:80])
+                return r
+            if attempt < READ_RETRIES:
+                log.info("eToro %s raised %s — asked once more in %.1fs",
+                         where, type(last_exc).__name__, READ_RETRY_DELAY_S)
+                time.sleep(READ_RETRY_DELAY_S)
+        self._note_health(where, detail=f"{type(last_exc).__name__}: "
+                                        f"{str(last_exc)[:80]}")
+        raise last_exc
+
     #: Read off the client by reconcile_asset.venue_lag_window (and through
     #: it by pending_closes.retry_trade_close); the module constant above
     #: carries the measurement. A client that declares no NUMBER here has no
@@ -701,9 +811,9 @@ class EtoroTrader:
             self._symbols[pinned] = key
             self._venue_spelling[pinned] = wire
             return pinned
-        r = self._sess().get(f"{BASE}/api/v1/market-data/search",
-                             params={"internalSymbolFull": wire},
-                             headers=self._headers(), timeout=self.timeout)
+        r = self._read("GET", f"{BASE}/api/v1/market-data/search",
+                       params={"internalSymbolFull": wire},
+                       headers=self._headers(), where="search")
         r.raise_for_status()
         data = r.json()
         items = data if isinstance(data, list) else (
@@ -817,9 +927,9 @@ class EtoroTrader:
         key, as _V1_INFO_REAL_SEG records its status codes.
         """
         iid = self.instrument_id(symbol)
-        r = self._sess().get(f"{BASE}/api/v1/market-data/instruments/rates",
-                             params={"instrumentIds": str(iid)},
-                             headers=self._headers(), timeout=self.timeout)
+        r = self._read("GET", f"{BASE}/api/v1/market-data/instruments/rates",
+                       params={"instrumentIds": str(iid)},
+                       headers=self._headers(), where="ticker")
         r.raise_for_status()
         data = r.json()
         if not isinstance(data, dict) or "rates" not in data:
@@ -973,8 +1083,8 @@ class EtoroTrader:
     # ── account ────────────────────────────────────────────────────────────
 
     def account(self) -> dict:
-        r = self._sess().get(self._v1_info("aggregate-portfolio"),
-                             headers=self._headers(), timeout=self.timeout)
+        r = self._read("GET", self._v1_info("aggregate-portfolio"),
+                       headers=self._headers(), where="account")
         r.raise_for_status()
         return r.json() or {}
 
@@ -1074,8 +1184,8 @@ class EtoroTrader:
         return value, str(info.get("accountCurrency") or "")
 
     def _open_positions(self) -> list:
-        r = self._sess().get(self._v1_info("portfolio"),
-                             headers=self._headers(), timeout=self.timeout)
+        r = self._read("GET", self._v1_info("portfolio"),
+                       headers=self._headers(), where="portfolio")
         r.raise_for_status()
         data = r.json() or {}
         return (data.get("positions")
@@ -1232,9 +1342,12 @@ class EtoroTrader:
         if hit is not None and hit[0] == today:
             return None if hit[1] == ELIGIBILITY_ABSENT else hit[1]
         world_name, iid = key
-        r = self._sess().post(self._v2_info("eligibility", world_name),
-                              json={"instrumentIds": [iid]},
-                              headers=self._headers(), timeout=self.timeout)
+        # A READ that rides a POST: one bounded retry on a 5xx or a request
+        # that never came back, none on a 429, the final failure noted on
+        # the venue's health (_read, 2026-10-05).
+        r = self._read("POST", self._v2_info("eligibility", world_name),
+                       json={"instrumentIds": [iid]},
+                       headers=self._headers(), where="eligibility")
         status = int(getattr(r, "status_code", 0) or 0)
         if status != 200:
             log.warning("eToro eligibility for %s (id %s, %s) answered %s — "
@@ -1771,16 +1884,51 @@ class EtoroTrader:
         # path no longer leans on that. Cached per instance: a warm client
         # asks nothing again, a cold one sends one GET before the POST.
         self.instrument_id(symbol)
-        r = self._sess().post(self._v2_exec_orders(), json=body,
-                              headers=self._headers(rid),
-                              timeout=self.timeout)
+        # THE POST IS NEVER RETRIED, AND A POST THAT DID NOT COME BACK IS
+        # IN DOUBT (2026-10-05). Until then a requests exception here rode
+        # out bare and the engine read it as a refusal — a read timeout on
+        # an order eToro had filled was "live order failed", and the next
+        # tick could send the same order again under a new reference. Two
+        # transport outcomes, told apart by WHEN the wire failed: the
+        # connection never made (NEVER_SENT) is "not sent" and the engine
+        # may try again; anything after the send is EtoroOrderInDoubt,
+        # which the engine notes on the symbol and never resends blind.
+        # Both are noted on the venue's health as an ORDER failure, which
+        # on its own holds new real entries for the quiet.
+        try:
+            r = self._sess().post(self._v2_exec_orders(), json=body,
+                                  headers=self._headers(rid),
+                                  timeout=self.timeout)
+        except NEVER_SENT as e:
+            self._note_health("order", detail=f"not sent: "
+                                              f"{type(e).__name__}")
+            log.error("eToro order NOT SENT for %s %s — the connection was "
+                      "never made (%s): %s", symbol, side,
+                      type(e).__name__, e)
+            raise RuntimeError(
+                f"eToro unreachable ({type(e).__name__}): the order for "
+                f"{symbol} was not sent — {str(e)[:120]}") from e
+        except TRANSPORT as e:
+            self._note_health("order", detail=f"in doubt: "
+                                              f"{type(e).__name__}")
+            log.error("eToro order IN DOUBT for %s %s — the request did not "
+                      "come back (%s): %s; reference %s. NOT retried.",
+                      symbol, side, type(e).__name__, e, rid)
+            raise EtoroOrderInDoubt(
+                rid, symbol, f"{type(e).__name__}: {str(e)[:100]}",
+                client_order_id=kwargs.get("client_order_id")) from e
         try:
             r.raise_for_status()
         except Exception as e:  # noqa: BLE001
             # THE VENUE'S WORDS ride the raise: skips.record keeps 200 chars
             # and why_no_trade prints 88, and a bare HTTPError read as
             # "check the gateway" for a size eToro refused (the
-            # _patch_position idiom below).
+            # _patch_position idiom below). A 429 or a 5xx on the POST is
+            # the venue's failure, not the order's, and is noted as such.
+            code = int(getattr(r, "status_code", 0) or 0)
+            if code == 429 or code >= 500:
+                self._note_health("order", code=code,
+                                  detail=str(r.text)[:80])
             log.error("eToro order failed: %s", r.text)
             raise RuntimeError(f"eToro refused ({r.status_code}): "
                                f"{str(r.text)[:160]}") from e
