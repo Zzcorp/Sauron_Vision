@@ -266,11 +266,13 @@ CHAPTERS = [
                       "when the bots' messages are muted; only the shared "
                       "quiet hours, when set, hold it back.")},
             {"title": "The watch",
-             "text": ("Every 15 minutes during market hours, from 13:00 to "
-                      "21:45 UTC, Sauron compares what it holds with what "
-                      "the broker holds. That is one of two ways it learns "
-                      "that a stop or a target was hit; the five-minute turn "
-                      "also compares the price with both.")},
+             "text": ("Every 15 minutes, around the clock, Sauron compares "
+                      "what it holds with what the broker holds: forex, "
+                      "commodities and crypto trade through the night, and "
+                      "a stop the broker fires in the night is seen within "
+                      "the quarter hour. That is one of two ways it learns that "
+                      "a stop or a target was hit; the five-minute turn also "
+                      "compares the price with both.")},
             {"title": "The close",
              "text": ("Sauron first sends the closing order to the broker. "
                       "If the broker does not answer, the line waits as "

@@ -196,6 +196,26 @@ CANDLES_MAX = 1000
 #: _clear_eligibility, and every module where a real EtoroTrader reaches
 #: it: SEARCH_AAPL hands every test the same id 1001).
 _ELIGIBILITY: dict = {}
+
+#: THE /search MEMO (2026-10-06). The router builds a fresh EtoroTrader on
+#: every call, so the instance's id cache (`_ids`) is cold on every tick
+#: and every unpinned symbol (NVDA, EURUSD, USDCNH …) cost a /search GET
+#: before its /rates GET — and /search answers HTTP 429 after a few dozen
+#: asks (etoro_smoke, 2026-10-04). A refused /search made the manage tick
+#: read the real NVDA position #131 as unpriced at 13:47 UTC on 2026-10-06,
+#: and an unpriced row is managed by the clock alone. An id eToro answered
+#: with an EXACT spelling match is kept here for the life of the process,
+#: keyed (world, symbol), like _ELIGIBILITY; a lone result spelled
+#: differently, an unknown spelling and any error are never kept. The ids
+#: are immutable, so the entry never expires: a daily expiry made every
+#: process ask /search again for every symbol in the same minute after
+#: 00:00 UTC (the review of 2026-10-06), the burst this memo exists to
+#: remove. The date stored beside the id says when it was read; a restart
+#: or a deploy empties the memo. SEARCH_MEMO is read at call time:
+#: tests/__init__.py turns it off for a suite whose fake wires count
+#: /search calls, and tests/test_etoro_search_memo.py turns it on.
+SEARCH_MEMO = True
+_SEARCH_IDS: dict = {}
 ELIGIBILITY_ABSENT = "absent"
 
 #: VENUE SPELLINGS (2026-09-26). PLATFORM spelling -> the spelling eToro's
@@ -811,6 +831,16 @@ class EtoroTrader:
             self._symbols[pinned] = key
             self._venue_spelling[pinned] = wire
             return pinned
+        memo_key = (self._world(), key)
+        today = datetime.now(timezone.utc).date()
+        if SEARCH_MEMO:
+            hit = _SEARCH_IDS.get(memo_key)
+            if hit:
+                _read_on, iid, spelled = hit
+                self._ids[key] = iid
+                self._symbols[iid] = key
+                self._venue_spelling[iid] = spelled
+                return iid
         r = self._read("GET", f"{BASE}/api/v1/market-data/search",
                        params={"internalSymbolFull": wire},
                        headers=self._headers(), where="search")
@@ -839,6 +869,8 @@ class EtoroTrader:
                 self._ids[key] = iid
                 self._symbols[iid] = key
                 self._venue_spelling[iid] = sym
+                if SEARCH_MEMO:
+                    _SEARCH_IDS[memo_key] = (today, iid, sym)
                 return iid
         if len(items) == 1 and iid:
             err = LookupError(

@@ -32,7 +32,9 @@ weeks; IBKR is retired.
   IBKR refused the quote — error 10089, no market-data subscription — so the exit
   price is unavailable and the P&L is recorded **UNMEASURED, not zero**; legs
   90/91 answered "not among the open orders — already filled or cancelled"). The
-  path, in this order and outside 13:00-21:59 UTC: the eToro keys forgotten on
+  path, in this order and outside 13:00-21:59 UTC (the beat reconcile's hours
+  then; since 2026-10-06 it runs all day — pause `pipeline_asset_bots`
+  instead, as the end of §1 says): the eToro keys forgotten on
   /brokers/ (Forget eToro keys) so that `keyed_venue_count` == 1 and the carrier
   guard's no-carrier refusal (bot_program/reconcile_asset.py:70-73) no longer
   fires; then ONE shell that asserted `keyed_venue_count(u) == 1`, asserted the
@@ -132,7 +134,12 @@ If the preview answers "broker unavailable" the Gateway has dropped on 2FA:
 `./deploy/ibkr-doctor`, then the same restart-and-approve as the morning. If the
 operator closes in the IBKR app instead, the rows are settled the way #95 was
 (§0: forget the eToro keys, one process that prints the class and the book
-before `reconcile_user`, re-key), outside 13:00-21:59 UTC.
+before `reconcile_user`, re-key), with the beat reconcile paused:
+`./deploy/dc exec worker-fast python manage.py component off pipeline_asset_bots`
+first and `component on pipeline_asset_bots` after (the tick pauses with it
+for those minutes). Since 2026-10-06 the reconcile runs every 15 minutes
+around the clock, so the old "outside 13:00-21:59 UTC" window no longer
+exists.
 
 An alternative for a future row whose carrier is provable: write
 `metadata["broker"] = "ibkr"` on it, so the guard's FIRST refusal protects it

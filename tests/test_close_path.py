@@ -131,6 +131,31 @@ class TheClockExitRunsWithoutAMarkTests(TestCase):
         self.cfg.refresh_from_db()
         self.assertIn(skips.NO_PRICE, str(self.cfg.extras or {}))
 
+    def test_a_failed_read_names_its_own_error(self):
+        """NVDA #131 read "the broker priced it at 0" at 13:47 UTC on
+        2026-10-06 when the READ had failed (a refused /search). A failed
+        read and a venue that answered 0 are two faults with two remedies."""
+        from bot_program.asset_engine import skips
+        trade = _trade(self.cfg, metadata={"initial_stop_loss": 98.0})
+        _tick(self.cfg, raises=True)
+        self.cfg.refresh_from_db()
+        note = skips.last_by_symbol(self.cfg)[trade.symbol]
+        self.assertEqual(note["code"], skips.NO_PRICE)
+        self.assertEqual(note["detail"],
+                         "open position only clock-managed: the mark could "
+                         "not be read (RuntimeError: no session)")
+
+    def test_a_real_zero_keeps_the_venues_words(self):
+        from bot_program.asset_engine import skips
+        trade = _trade(self.cfg, metadata={"initial_stop_loss": 98.0})
+        _tick(self.cfg, price="0")
+        self.cfg.refresh_from_db()
+        note = skips.last_by_symbol(self.cfg)[trade.symbol]
+        self.assertEqual(note["code"], skips.NO_PRICE)
+        self.assertEqual(note["detail"],
+                         "open position only clock-managed: the broker "
+                         "priced it at 0")
+
 
 class AnInDoubtCloseIsResolvedNotRepeatedTests(TestCase):
 

@@ -10,10 +10,13 @@ So a measured loser could keep real money until a human acted.
 
 This command reads every rule at a live stage with its ALL-TIME graded
 record (signals.promotion_pipeline.measured_loser: LOSER_MIN_N graded
-signals, a hit rate under LOSER_HIT_MAX or an expectancy at or under
-zero) and the verdict the floor gives it; `--apply` demotes every LOSER
-to PAPER (one PromotionEvent each, reason auto_demote, the numbers in
-the note). A rule the operator promoted by hand within MANUAL_DWELL_DAYS
+signals and an expectancy at or under zero, or a thin edge under a low
+hit rate — a hit rate under LOSER_HIT_MAX with an expectancy under
+LOSER_THIN_EDGE_R) and the verdict the floor gives it. The floor is
+expectancy-led (2026-10-06): a low hit rate alone does not bar a rule,
+since a breakout that wins a third of the time at a large payoff has an
+edge. `--apply` demotes every LOSER to PAPER (one PromotionEvent each,
+reason auto_demote, the numbers and the arm that fired in the note). A rule the operator promoted by hand within MANUAL_DWELL_DAYS
 is listed and left alone: their last word stands. The nightly sweep
 applies the same floor once pipeline_promotion is ON.
 
@@ -40,17 +43,18 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         from signals.models import RuleControl
         from signals.promotion_pipeline import (
-            LOSER_HIT_MAX, LOSER_MIN_N, MANUAL_DWELL_DAYS, _stats_since,
-            demote_rule, hand_promoted_recently, measured_loser)
+            LOSER_HIT_MAX, LOSER_MIN_N, LOSER_THIN_EDGE_R, MANUAL_DWELL_DAYS,
+            _stats_since, demote_rule, hand_promoted_recently, loser_numbers,
+            measured_loser)
         w = self.stdout.write
         apply = bool(opts.get("apply"))
         rows = list(RuleControl.objects.filter(
             promotion_stage__in=("live_small", "live_full"))
             .order_by("rule_name"))
         w(f"BAR THE LOSERS · {len(rows)} rule(s) at a live stage · floor: "
-          f"{LOSER_MIN_N} graded signals and hit < {LOSER_HIT_MAX:.0%} or "
-          f"expectancy <= 0R · a hand promotion stands {MANUAL_DWELL_DAYS} "
-          f"days")
+          f"{LOSER_MIN_N} graded signals and expectancy <= 0R, or hit < "
+          f"{LOSER_HIT_MAX:.0%} with expectancy < {LOSER_THIN_EDGE_R:.2f}R · "
+          f"a hand promotion stands {MANUAL_DWELL_DAYS} days")
         if not rows:
             w("  no rule is at a live stage — nothing to bar")
             return
@@ -71,9 +75,11 @@ class Command(BaseCommand):
                 verdict = f"unmeasured (n {n} < {LOSER_MIN_N})"
             else:
                 verdict = "ok"
+            hit_w, exp_w = (loser_numbers(hit, exp) if exp is not None
+                            else ("", ""))
             w(f"  {ctrl.rule_name:28} {ctrl.promotion_stage:10} n {n:4}  hit "
-              f"{(f'{float(hit):.0%}' if hit is not None else '—'):>4}  exp "
-              f"{(f'{float(exp):+.2f}R' if exp is not None else '—'):>7}  "
+              f"{(hit_w if hit is not None else '—'):>4}  exp "
+              f"{(exp_w if exp is not None else '—'):>7}  "
               f"{verdict}")
             if apply and verdict == "LOSER":
                 demote_rule(ctrl.rule_name, "paper", user=None,

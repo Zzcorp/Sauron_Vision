@@ -1825,6 +1825,12 @@ def notify_protection_vanished(user, *, asset_class: str, symbol: str,
     )
 
 
+#: A standing unclaimed book is said again after this long, not on every
+#: reconcile pass — the same cadence as Morgul's own reminder
+#: (morgul.REMIND_S).
+UNCLAIMED_REMIND_S = 3 * 3600
+
+
 def notify_unclaimed_position(user, *, symbols: list, venue: str) -> bool:
     """A position the broker holds that no row in this platform claims.
 
@@ -1832,13 +1838,39 @@ def notify_unclaimed_position(user, *, symbols: list, venue: str) -> bool:
     have opened it by hand at the broker, and an automated system that
     starts flattening positions it does not recognise is far more
     dangerous than one that reports them.
+
+    ONCE PER STANDING CONDITION, AGAIN EVERY THREE HOURS (2026-10-06
+    review). The reconcile runs every 15 minutes around the clock, and one
+    position opened by hand in the eToro app rang the phone four times an
+    hour all night. The title (venue, count) and the body (every symbol,
+    sorted) are the key: a changed set is said at once; the same set is
+    said again after UNCLAIMED_REMIND_S, while it stands. Returns False
+    when the bell already says it.
     """
-    listed = ", ".join(sorted(symbols)[:6])
-    more = f" (+{len(symbols) - 6} more)" if len(symbols) > 6 else ""
+    names = sorted(str(x) for x in symbols)
+    listed = ", ".join(names[:6])
+    more = f" (+{len(names) - 6} more)" if len(names) > 6 else ""
     one = len(symbols) == 1
     title = (f"▲ {len(symbols)} "
              f"position{'' if one else 's'} at {venue} "
              f"that no row claims")
+    body = (f"{listed}{more}. These are invisible to every exposure and "
+            f"daily-loss gate, carry no bot-side stop, and the kill "
+            f"switch cannot flatten them — it walks database rows. "
+            f"Check the broker.")
+    said = f"{venue}|{','.join(names)}"
+    try:
+        from datetime import timedelta as _td
+        from django.utils import timezone as _tz
+        from alerts.models import Notification
+        recent = Notification.objects.filter(
+            user=user, title=title[:200], data__unclaimed=said,
+            created_at__gte=_tz.now() - _td(seconds=UNCLAIMED_REMIND_S),
+        ).exists()
+        if recent:
+            return False
+    except Exception as e:  # noqa: BLE001 — a dedupe failure must not mute it
+        logger.warning("unclaimed-position dedupe failed: %s", e)
     items = [f"Venue: {venue}",
              f"Symbols: {listed}{more}",
              "Invisible to every exposure and daily-loss gate",
@@ -1848,12 +1880,9 @@ def notify_unclaimed_position(user, *, symbols: list, venue: str) -> bool:
     return dispatch_notification(
         user, "unclaimed_position",
         title=title,
-        body=(f"{listed}{more}. These are invisible to every exposure and "
-              f"daily-loss gate, carry no bot-side stop, and the kill "
-              f"switch cannot flatten them — it walks database rows. "
-              f"Check the broker."),
+        body=body,
         url="/positions/",
-        row_data={"items": items,
+        row_data={"items": items, "unclaimed": said,
                   "mark": NOTIFY_MARKS["unclaimed_position"]},
         telegram=_plain_message(
             title, items, NOTIFY_MARKS["unclaimed_position"],

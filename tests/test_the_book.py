@@ -1249,3 +1249,37 @@ class TheProbeWalksIt(SimpleTestCase):
         from core.management.commands.probe_routes import MUTATING, free_routes
         self.assertIn(("the_book", "book/", True), free_routes())
         self.assertIsNone(MUTATING.search("the_book"))
+
+
+class TheWatchFollowsTheSchedule(SimpleTestCase):
+    """The Book said "every 15 minutes during market hours, from 13:00 to
+    21:45 UTC" for a week after the reconcile went around the clock
+    (2026-10-06, after GBPNZD #135 stayed open fifteen hours) — the very
+    gap that change closed, still promised to the reader. The words are
+    held to the beat entry itself."""
+
+    def _watch(self):
+        def walk(node):
+            if isinstance(node, dict):
+                if node.get("title") == "The watch":
+                    yield node["text"]
+                for v in node.values():
+                    yield from walk(v)
+            elif isinstance(node, (list, tuple)):
+                for v in node:
+                    yield from walk(v)
+        found = list(walk(book.CHAPTERS))
+        self.assertEqual(len(found), 1)
+        return found[0]
+
+    def test_the_watch_says_the_reconciles_own_cadence(self):
+        from config.celery import app
+        from core.day_of_sauron import schedule_words
+        words = schedule_words(app.conf.beat_schedule[
+            "reconcile-asset-bot-trades"]["schedule"])[0]
+        text = self._watch()
+        # The reconcile's cadence moved: rewrite "The watch" with it.
+        self.assertEqual(words, "every 15 min")
+        self.assertIn("Every 15 minutes, around the clock", text)
+        self.assertNotIn("13:00", text)
+        self.assertNotIn("market hours", text)

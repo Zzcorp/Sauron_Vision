@@ -458,9 +458,7 @@ app.conf.beat_schedule = {
 
     # ── Phase 33.4 — reconcile open live AssetBotTrade rows against broker
     #              state. Catches manual closes, broker liquidations, and
-    #              worker-died-mid-order drift. Every 15 min during NYSE
-    #              hours — extending to 24/7 is fine but mostly noise outside
-    #              market hours since broker positions don't change.
+    #              worker-died-mid-order drift.
     # Drain trades stuck in CLOSE_PENDING (broker close failed; the position
     # is still live at the broker). Every 5 min, all day — a stranded live
     # position is not a market-hours-only problem.
@@ -469,13 +467,25 @@ app.conf.beat_schedule = {
         "schedule": 300.0,
     },
 
+    # EVERY 15 MINUTES AROUND THE CLOCK (2026-10-06). This ran 13:00-21:45
+    # UTC only, on the IBKR-era reading that "broker positions don't change
+    # outside market hours". eToro's forex, commodity and crypto CFDs trade
+    # through the night and their stops fire at the venue: GBPNZD #135 was
+    # closed at eToro before 22:07 UTC on 2026-10-05 and stayed OPEN here
+    # until the 13:00 pass the next day — fifteen hours counted in the open
+    # risk, the pledge and /status. eToro's one book is read at most twice a
+    # pass per user and world, whatever the classes armed: once by the row
+    # walk (reconcile_user) and once by the unclaimed sweep — the cache key
+    # is the venue and its world, not the class (reconcile_asset._state_key).
+    # A manual reconcile_user while one venue is keyed out is run with the
+    # pipeline_asset_bots component off: there is no longer a quiet hour.
     "reconcile-asset-bot-trades": {
         "task": "bot_program.tasks.reconcile_all_asset_bot_trades",
-        "schedule": crontab(minute="*/15", hour="13-21"),
+        "schedule": crontab(minute="*/15"),
     },
 
-    # Every 15 min around the clock, NOT hour-gated like the reconcile
-    # above: an ISA does not stop existing when US equities close, and
+    # Every 15 min around the clock, like the reconcile above: an ISA
+    # does not stop existing when US equities close, and
     # the read is one socket round trip per interfaced account. Gated by
     # its own component (broker_account_sync), not pipeline_asset_bots —
     # knowing what the account holds is not a bot function.

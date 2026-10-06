@@ -287,7 +287,8 @@ def reconcile_all_asset_bot_trades():
     """Walk every user with an open live AssetBotTrade and verify the broker
     still agrees the position is open. Closes orphans + grades them.
 
-    Beat-scheduled every 15 min during market hours. Tests should call
+    Beat-scheduled every 15 min around the clock (since 2026-10-06: eToro's
+    forex, commodity and crypto stops fire at night). Tests should call
     `reconcile_all_users()` directly to bypass the guard.
     """
     from .reconcile_asset import reconcile_all_users
