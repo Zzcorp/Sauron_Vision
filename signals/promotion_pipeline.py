@@ -30,6 +30,11 @@ Auto-demotion (degradation against the *current stage's baseline*):
   LIVE_SMALL → PAPER       if recent expectancy < 0.5 × baseline AND ≥10 closed in window
   PAPER      → RESEARCH    if recent expectancy < 0R AND ≥10 closed in last 30d
 
+  THE FLOOR (expectancy-led): a live rule with ≥20 graded signals all time
+  goes straight to PAPER when its expectancy is at or under 0R, or when a
+  hit rate under 35% carries an expectancy under +0.10R (a thin edge under
+  a low hit rate). A low hit rate alone is a breakout's shape, not a loss.
+
 Sizing factors:
   RESEARCH    → 0.0  (no trade)
   PAPER       → 0.0  (paper only — `rule_size_multiplier` returns 0)
@@ -115,12 +120,21 @@ DEMOTE_PAPER_WINDOW_DAYS = 30
 # promotion of 2026-10-01) could never be demoted by the nightly sweep, and
 # a measured loser kept the live venue until a human acted. The floor reads
 # the rule's ALL-TIME graded record: LOSER_MIN_N graded signals and either
-# a hit rate under LOSER_HIT_MAX or an expectancy at or under zero. The
-# operator's own promotion stands for MANUAL_DWELL_DAYS (the sweep never
+# an expectancy at or under zero, or a THIN EDGE under a LOW HIT RATE — a
+# hit rate under LOSER_HIT_MAX with an expectancy under LOSER_THIN_EDGE_R.
+# The operator's own promotion stands for MANUAL_DWELL_DAYS (the sweep never
 # overturns a fresh hand decision); `manage.py bar_losers` reads and
 # applies the same floor by hand.
+#
+# EXPECTANCY-LED (2026-10-06): the first floor barred on a low hit rate
+# alone, and so flagged bollinger_squeeze_breakout (43 graded, hit 33%,
+# expectancy +0.26R, PROVEN by the proving ground on three classes) — the
+# one rule with a measured edge, kept live only by a hand promotion's
+# dwell. A low hit rate with a large payoff is a breakout's normal shape;
+# the hit rate only bars a rule whose edge is too thin to pay for it.
 LOSER_MIN_N = 20
 LOSER_HIT_MAX = 0.35
+LOSER_THIN_EDGE_R = 0.10
 MANUAL_DWELL_DAYS = 7
 
 
@@ -301,23 +315,32 @@ def is_eligible_for_promotion(rule_name: str) -> Optional[str]:
 
 def measured_loser(rule_name: str) -> str:
     """The sentence that makes `rule_name` a MEASURED LOSER on its all-time
-    graded record — LOSER_MIN_N signals and a hit rate under LOSER_HIT_MAX
-    or an expectancy at or under zero — or "" (healthy, or unmeasured).
-    Words only; nothing here moves a stage."""
+    graded record — LOSER_MIN_N signals and an expectancy at or under zero,
+    or a hit rate under LOSER_HIT_MAX with an expectancy under
+    LOSER_THIN_EDGE_R (a thin edge under a low hit rate) — or "" (healthy,
+    or unmeasured). The sentence names the arm that fired. A low hit rate
+    alone is not a loser: a breakout that wins a third of the time at a
+    large payoff has an edge. Words only; nothing here moves a stage."""
     s = _stats_since(rule_name)
     n = int(s.get("n") or 0)
     if n < LOSER_MIN_N:
         return ""
     hit = s.get("hit_rate")
     exp = s.get("expectancy")
-    bad_hit = hit is not None and float(hit) < LOSER_HIT_MAX
-    bad_exp = exp is not None and float(exp) <= 0
-    if not (bad_hit or bad_exp):
+    if exp is None:
         return ""
-    return (f"{n} graded signals all time: hit "
-            f"{(float(hit) if hit is not None else 0):.0%} (floor "
-            f"{LOSER_HIT_MAX:.0%}), expectancy "
-            f"{(float(exp) if exp is not None else 0):+.2f}R")
+    exp = float(exp)
+    low_hit = hit is not None and float(hit) < LOSER_HIT_MAX
+    head = (f"{n} graded signals all time: hit "
+            f"{(float(hit) if hit is not None else 0):.0%}, expectancy "
+            f"{exp:+.2f}R")
+    if exp <= 0:
+        return f"{head} — expectancy at or under zero"
+    if low_hit and exp < LOSER_THIN_EDGE_R:
+        return (f"{head} — a thin edge under a low hit rate (expectancy "
+                f"under {LOSER_THIN_EDGE_R:+.2f}R, hit under "
+                f"{LOSER_HIT_MAX:.0%})")
+    return ""
 
 
 def hand_promoted_recently(rule_name: str, now=None) -> bool:

@@ -102,12 +102,20 @@ class Command(BaseCommand):
               "backfill_bars first")
             return
         for cls, part in report.items():
+            broken = part.get("broken") or []
+            dropped = part.get("dropped") or {}
             w(f"── {cls} ─ {len(part['ok'])} judged, {len(part['short'])} "
-              f"short")
+              f"short" + (f", {len(broken)} broken" if broken else ""))
             for sym, bars, days in part["ok"]:
-                w(f"  {sym:12} {bars:6} bars  {days:7.0f} days")
+                w(f"  {sym:12} {bars:6} bars  {days:7.0f} days"
+                  + (f"  · {dropped[sym]} bar(s) dropped"
+                     if dropped.get(sym) else ""))
             for sym, why in part["short"]:
-                w(f"  {sym:12} SHORT: {why}")
+                w(f"  {sym:12} SHORT: {why}"
+                  + (f" ({dropped[sym]} bar(s) dropped)"
+                     if dropped.get(sym) else ""))
+            for sym, why in broken:
+                w(f"  {sym:12} BROKEN: {why}")
         w(f"Needed per symbol: {MIN_SPAN_DAYS} days, {MIN_BARS} bars.")
 
     def _rows(self, rows, title, saved):
@@ -140,6 +148,12 @@ class Command(BaseCommand):
             w("               regimes: " + " · ".join(
                 f"{k} {_r(v['expectancy'])} ({v['n']})"
                 for k, v in regimes.items()))
+        # what was not read (2026-10-06): bars dropped, trades skipped or
+        # excluded, symbols left out — said on the verdict, never silent
+        from backtester.proving.run import data_words
+        said = data_words((r.get("detail") or {}).get("data"))
+        if said:
+            w(f"               data: {said}")
         w(f"               → {r['why']}")
 
     def _show(self, run_id):

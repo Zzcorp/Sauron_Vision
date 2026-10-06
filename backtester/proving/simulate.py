@@ -27,6 +27,14 @@ and the backtester's own discipline:
             before it touched the old stop
   one at a time per rule and symbol; a position still open at the end of
             the data is reported, not counted
+  floor     THE STOP FLOOR (2026-10-06): the stop distance, in price, must
+            be at least MIN_STOP_SHARE_OF_FLOOR of the class's stop-band
+            floor measured on the SIGNAL bar's close — the last price the
+            order knew. The band already floors the stop at a fraction of
+            the ENTRY; when the entry is itself a broken open (a near-zero
+            print), that floor is a fraction of nothing and one ordinary
+            bar later the trade reads hundreds of R. Under the floor the
+            trade is not simulated; it is counted (`skipped`) and said.
 
 THE EXIT POLICIES (2026-10-02, the operator: "improve much more the
 trailing stop loss system... and TP"). The same signals can be run under
@@ -64,6 +72,13 @@ VOL_LOOKBACK = 250
 #: The structure trail's lookback, and the R a trade must have seen first.
 STRUCTURE_BARS = 10
 STRUCTURE_FROM_R = 0.5
+#: THE STOP FLOOR: the least stop distance, as a share of the class's
+#: stop-band floor (risk_levels.stop_band) times the signal bar's close.
+#: On clean data the band keeps every stop past it; only an entry that
+#: opened at under half the signal bar's close can fall under it.
+MIN_STOP_SHARE_OF_FLOOR = 0.5
+#: The words a skipped trade is counted under.
+SKIP_STOP_FLOOR = "stop under half the class floor"
 
 EXIT_POLICIES = {
     "care": {"tp": "engine", "trail": "care"},
@@ -153,9 +168,10 @@ def simulate(df: pd.DataFrame, fires, direction: str, *, asset_class: str,
              timeframe: str = "4h", care: bool = True, policy="care",
              cost_mult: float = 1.0, max_hold_bars: int | None = None,
              labels=None, symbol: str = "") -> dict:
-    """{trades, open} for one symbol and one signal array under one exit
-    policy (a key of EXIT_POLICIES or a dict of its shape; `care=False`
-    is the no_care policy).
+    """{trades, open, skipped} for one symbol and one signal array under
+    one exit policy (a key of EXIT_POLICIES or a dict of its shape;
+    `care=False` is the no_care policy). `skipped` counts the signals not
+    simulated under THE STOP FLOOR (SKIP_STOP_FLOOR).
 
     Each trade: {symbol, entry_ts, exit_ts, entry, exit, r (net of costs),
     gross_r, cost_r, mfe, mae, reason, bars, regime, scaled}. `mae` is the
@@ -191,6 +207,7 @@ def simulate(df: pd.DataFrame, fires, direction: str, *, asset_class: str,
     bar_h = BAR_HOURS.get(timeframe, 4.0)
     cost = k["cost"] * cost_mult
     trades, still_open = [], None
+    skipped = 0
     free_from = 0
     for t in np.flatnonzero(np.asarray(fires, dtype=bool)):
         if t < free_from or t + 1 >= n:
@@ -203,6 +220,9 @@ def simulate(df: pd.DataFrame, fires, direction: str, *, asset_class: str,
         dist = at * k["stop_mult"]
         frac = min(max(dist / entry, lo), hi)
         risk = frac * entry
+        if np.isfinite(c[t]) and risk < MIN_STOP_SHARE_OF_FLOOR * lo * c[t]:
+            skipped += 1                  # THE STOP FLOOR: a broken entry
+            continue
         stop = entry - d * risk
         target = entry + d * ratio * risk if ratio else None
         soft, soft_why = stop, "stop"
@@ -276,4 +296,4 @@ def simulate(df: pd.DataFrame, fires, direction: str, *, asset_class: str,
             "scaled": scaled,
         })
         free_from = exit_j + 1
-    return {"trades": trades, "open": still_open}
+    return {"trades": trades, "open": still_open, "skipped": skipped}

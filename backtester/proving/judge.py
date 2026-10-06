@@ -16,6 +16,18 @@ Anything positive that misses one of them is PROMISING (worth watching on
 paper, never on money); a non-positive expectancy or holdout is FAILED;
 too few trades or too little data is INSUFFICIENT — said as such, never
 read as a pass or a fail.
+
+THE LAST GUARD (2026-10-06): a single trade past PROVING_MAX_TRADE_R
+either way is not judged — it is excluded from every number and counted
+by symbol. The engine's target is 2R (3R at most among the exit
+policies), so a trade past 20R is a fill more than seventeen stops beyond
+its own level: a broken bar, not a market (the ETF class printed +21.829R
+a trade and a worst run of +45733R on 2026-10-06). The one honest way past
+it is the trail-only policy riding a long trend; the count is printed, so
+that case is seen. When the excluded trades are more than
+MAX_EXCLUDED_SHARE of the run, the history itself is broken and the
+verdict is INSUFFICIENT, with the words naming the symbols and the count —
+never PROVEN, PROMISING or FAILED on numbers that are not a market's.
 """
 from __future__ import annotations
 
@@ -30,9 +42,44 @@ ALPHA = 0.05
 BOOTSTRAPS = 2000
 #: Fixed so the same trades always get the same verdict.
 SEED = 20261002
+#: THE LAST GUARD: a trade past this many R, either way, is excluded.
+PROVING_MAX_TRADE_R = 20.0
+#: Past this share of a run's trades excluded, the verdict is INSUFFICIENT.
+MAX_EXCLUDED_SHARE = 0.02
 
 PROVEN, PROMISING, FAILED, INSUFFICIENT = (
     "proven", "promising", "failed", "insufficient")
+
+
+def sane_trades(trades) -> tuple:
+    """(kept, excluded): the trades within PROVING_MAX_TRADE_R, and the
+    ones past it (THE LAST GUARD)."""
+    kept, excluded = [], []
+    for t in trades:
+        (kept if abs(float(t["r"])) <= PROVING_MAX_TRADE_R
+         else excluded).append(t)
+    return kept, excluded
+
+
+def by_symbol(trades) -> dict:
+    """{symbol: count}, the most first, then by name."""
+    counts = {}
+    for t in trades:
+        sym = str(t.get("symbol") or "?")
+        counts[sym] = counts.get(sym, 0) + 1
+    return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def named_counts(counts: dict, limit: int = 5) -> str:
+    """"XYZ" for one symbol, "XYZ (38), ABC (3)" for several, the rest
+    counted past `limit`."""
+    items = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    if len(items) == 1:
+        return items[0][0]
+    words = ", ".join(f"{s} ({n})" for s, n in items[:limit])
+    if len(items) > limit:
+        words += f" and {len(items) - limit} more"
+    return words
 
 
 def stats(rs) -> dict:
@@ -85,8 +132,14 @@ def bootstrap_lower(rs, alpha: float, *, n=BOOTSTRAPS, seed=SEED):
 def judge(trades, *, start, end, n_candidates: int = 1,
           data_ok: bool = True, data_reason: str = "") -> dict:
     """The verdict and every number behind it, for trades pooled over the
-    data span [start, end] (Timestamps)."""
-    trades = sorted(trades, key=lambda t: t["entry_ts"])
+    data span [start, end] (Timestamps). A trade past PROVING_MAX_TRADE_R
+    is excluded and counted (`excluded`), THE LAST GUARD."""
+    trades, absurd = sane_trades(sorted(trades, key=lambda t: t["entry_ts"]))
+    total = len(trades) + len(absurd)
+    excluded = {"n": len(absurd), "of": total,
+                "share": (len(absurd) / total) if total else 0.0,
+                "by_symbol": by_symbol(absurd),
+                "max_trade_r": PROVING_MAX_TRADE_R}
     rs = [t["r"] for t in trades]
     split = start + (end - start) * (1.0 - HOLDOUT_FRAC)
     ins = [t["r"] for t in trades if t["entry_ts"] < split]
@@ -118,6 +171,7 @@ def judge(trades, *, start, end, n_candidates: int = 1,
         "exits": reasons,
         "split": split,
         "trades": trades,
+        "excluded": excluded,
     }
     e, oe = out["all"]["expectancy"], out["holdout"]["expectancy"]
     if not data_ok:
@@ -147,5 +201,15 @@ def judge(trades, *, start, end, n_candidates: int = 1,
             verdict = PROVEN
             why = (f"{e:+.3f}R a trade, {oe:+.3f}R on the holdout, lower "
                    f"bound {lower:+.3f}R, {positive_folds}/{FOLDS} folds")
+    if absurd and data_ok:
+        said = (f"{len(absurd)} of {total} trades excluded past "
+                f"{PROVING_MAX_TRADE_R:.0f}R ({excluded['share']:.1%}) on "
+                f"{named_counts(excluded['by_symbol'])}")
+        if excluded["share"] > MAX_EXCLUDED_SHARE:
+            verdict = INSUFFICIENT
+            why = (f"{said} — over the {MAX_EXCLUDED_SHARE:.0%} a verdict "
+                   f"may lose: the history is broken, not judged")
+        else:
+            why = f"{why}; {said}"
     out["verdict"], out["why"] = verdict, why
     return out

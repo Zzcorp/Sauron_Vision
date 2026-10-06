@@ -232,7 +232,13 @@ needed:
 ```
 
 A rule whose verdict is PROVEN has beaten its costs out of sample; one
-that is INSUFFICIENT still has too little history (run `prove data`). The
+that is INSUFFICIENT still has too little history (run `prove data`) or
+was judged on broken bars. The proving ground reads only a market: bad
+bars and spikes are dropped, a series whose price jumps and holds (an
+unadjusted split) is left out of the run (`prove data` lists it as
+BROKEN), a broken entry is skipped, and a single trade past 20R is
+excluded; past 2% of a run excluded the verdict is INSUFFICIENT. A
+`data:` line under a verdict says what was not read. The
 verdicts are read by the setup memory and the ticket's odds today; the
 proof-first gate and the edge sizer that will read them are the next
 stage.

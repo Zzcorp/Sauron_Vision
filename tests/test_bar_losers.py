@@ -6,10 +6,17 @@ it was promoted on and returned nothing when that baseline was None or at
 or under zero — what a bulk promotion leaves behind — so a measured loser
 kept real money until a human acted. THE FLOOR (promotion_pipeline
 .measured_loser, is_due_for_demotion): LOSER_MIN_N graded signals all time
-and a hit rate under LOSER_HIT_MAX or an expectancy at or under zero sends
-a live rule to PAPER at once, whatever its baseline; the operator's own
-promotion stands for MANUAL_DWELL_DAYS. `manage.py bar_losers` reads the
-table and, with --apply, applies the same floor by hand.
+and an expectancy at or under zero, or a hit rate under LOSER_HIT_MAX with
+an expectancy under LOSER_THIN_EDGE_R (a thin edge under a low hit rate),
+sends a live rule to PAPER at once, whatever its baseline; the operator's
+own promotion stands for MANUAL_DWELL_DAYS. `manage.py bar_losers` reads
+the table and, with --apply, applies the same floor by hand.
+
+EXPECTANCY-LED (2026-10-06): the first floor barred on a hit rate under
+35% alone and flagged bollinger_squeeze_breakout (43 graded, hit 33%,
++0.26R, PROVEN by the proving ground) — the one rule with a measured edge.
+A low hit rate with a large payoff is a breakout's normal shape; the six
+server rows of 2026-10-06 are pinned below as a table.
 
 Run with:  python manage.py test tests.test_bar_losers
 """
@@ -39,25 +46,44 @@ class TheFloorTests(TestCase):
         from signals import promotion_pipeline as pp
         self.assertEqual((pp.LOSER_MIN_N, pp.LOSER_HIT_MAX, pp.MANUAL_DWELL_DAYS),
                          (20, 0.35, 7))
+        self.assertEqual(pp.LOSER_THIN_EDGE_R, 0.10)
 
     def test_a_measured_loser_is_named_with_its_numbers(self):
         from signals.promotion_pipeline import measured_loser
         # under the floor's n: unmeasured, whatever the record
         _seed_signals("bl_few", [-1.0] * 19)
         self.assertEqual(measured_loser("bl_few"), "")
-        # 24 graded, 6 hits (25%): a loser by the hit rate
+        # 24 graded, 6 hits (25%) at -0.25R: a loser, and the arm that
+        # fires is the expectancy (it is checked first)
         _seed_signals("bl_hit", [2.0] * 6 + [-1.0] * 18)
         why = measured_loser("bl_hit")
-        self.assertEqual(why, "24 graded signals all time: hit 25% (floor "
-                              "35%), expectancy -0.25R")
+        self.assertEqual(why, "24 graded signals all time: hit 25%, "
+                              "expectancy -0.25R — expectancy at or under "
+                              "zero")
         # 40% hits but the losers are bigger: a loser by the expectancy
         _seed_signals("bl_exp", [0.5] * 8 + [-1.0] * 12)
-        self.assertIn("hit 40% (floor 35%), expectancy -0.40R",
-                      measured_loser("bl_exp"))
+        self.assertIn("hit 40%, expectancy -0.40R — expectancy at or under "
+                      "zero", measured_loser("bl_exp"))
         # healthy: 45% hits at +2R
         _seed_signals("bl_ok", [2.0] * 9 + [-1.0] * 11)
         self.assertEqual(measured_loser("bl_ok"), "")
         self.assertEqual(measured_loser("bl_none"), "")
+
+    def test_a_low_hit_rate_alone_is_not_a_loser(self):
+        from signals.promotion_pipeline import measured_loser
+        # 20 graded, 5 hits (25%) at +4R: expectancy +0.25R — a breakout's
+        # shape, healthy (the old floor barred this on the hit rate)
+        _seed_signals("bl_brk", [4.0] * 5 + [-1.0] * 15)
+        self.assertEqual(measured_loser("bl_brk"), "")
+        # the same hit rate on a thin edge (+0.05R): the second arm fires
+        _seed_signals("bl_thin", [3.2] * 5 + [-1.0] * 15)
+        self.assertEqual(measured_loser("bl_thin"),
+                         "20 graded signals all time: hit 25%, expectancy "
+                         "+0.05R — a thin edge under a low hit rate "
+                         "(expectancy under +0.10R, hit under 35%)")
+        # a thin edge at a high hit rate is not barred by the floor
+        _seed_signals("bl_hi", [1.1] * 10 + [-1.0] * 10)
+        self.assertEqual(measured_loser("bl_hi"), "")
 
     def test_the_floor_sends_a_live_loser_to_paper_whatever_its_baseline(self):
         from signals.promotion_pipeline import is_due_for_demotion
@@ -135,8 +161,9 @@ class TheCommandTests(TestCase):
         _seed_signals("bc_paper", [-1.0] * 22)
         text = self._run()
         self.assertIn("4 rule(s) at a live stage", text)
-        self.assertIn("floor: 20 graded signals and hit < 35% or expectancy "
-                      "<= 0R", text)
+        self.assertIn("floor: 20 graded signals and expectancy <= 0R, or "
+                      "hit < 35% with expectancy < 0.10R", text)
+        self.assertNotIn("hit < 35% or expectancy", text)
         lines = {l.split()[0]: l for l in text.splitlines() if l.startswith("  bc_")}
         self.assertIn("LOSER", lines["bc_loser"])
         self.assertIn("hit  20%", lines["bc_loser"])
@@ -176,6 +203,105 @@ class TheCommandTests(TestCase):
 
     def test_no_live_rule_says_so(self):
         self.assertIn("no rule is at a live stage", self._run())
+
+
+def _seed_record(rule, n, hits, exp, symbol):
+    """`n` graded signals for `rule`: `hits` winners and the rest stopped
+    out at -1R, the winners sized so the all-time expectancy is `exp`."""
+    from decimal import Decimal
+    from instruments.models import Instrument
+    from signals.models import Signal
+    inst, _ = Instrument.objects.get_or_create(
+        symbol=symbol, defaults={"name": symbol, "asset_class": "stock"})
+    losses = n - hits
+    win = (exp * n + losses) / hits
+    now = timezone.now()
+    Signal.objects.bulk_create([
+        Signal(instrument=inst, signal_type="composite", direction="bullish",
+               urgency="medium", title="t", description="t", rule_name=rule,
+               score=0.7, sub_scores={}, price_at_signal=Decimal("100"),
+               suggested_entry=Decimal("100"), suggested_stop=Decimal("95"),
+               suggested_target=Decimal("110"), risk_reward_ratio=2.0,
+               is_active=False,
+               outcome="hit_target" if i < hits else "stopped_out",
+               realized_r=win if i < hits else -1.0,
+               expired_at=now - timedelta(days=20 + i))
+        for i in range(n)])
+
+
+# The live server, 2026-10-06 (`manage.py bar_losers`): rule, n, hits,
+# expectancy, the printed hit rate, and the verdict the floor must give.
+SERVER_ROWS = [
+    ("bollinger_squeeze_breakout", 43, 14, 0.26, "33%", None),
+    ("golden_cross", 31, 4, 0.01, "13%", "thin edge"),
+    ("macd_bullish_crossover", 128, 31, -0.04, "24%", "at or under zero"),
+    ("rsi_bull_divergence", 200, 52, -0.03, "26%", "at or under zero"),
+    ("starter_stock_momentum", 21, 3, -0.57, "14%", "at or under zero"),
+    ("starter_forex_breakout", 17, 4, -0.30, "24%", "unmeasured"),
+]
+
+
+class TheServerRowsTests(TestCase):
+    """The six rows `bar_losers` printed on the live server on 2026-10-06:
+    the one rule with a measured edge stays live, the rest come out as the
+    expectancy-led floor reads them."""
+
+    def setUp(self):
+        for i, (rule, n, hits, exp, _hit, _v) in enumerate(SERVER_ROWS):
+            _set_stage(rule, "live_full", baseline=None)
+            _seed_record(rule, n, hits, exp, f"SRV{i}")
+
+    def test_the_table(self):
+        from signals.promotion_pipeline import _stats_since, measured_loser
+        for rule, n, _hits, exp, hit, verdict in SERVER_ROWS:
+            with self.subTest(rule=rule):
+                s = _stats_since(rule)
+                self.assertEqual(s["n"], n)
+                self.assertEqual(f"{s['hit_rate']:.0%}", hit)
+                self.assertAlmostEqual(s["expectancy"], exp, places=6)
+                why = measured_loser(rule)
+                if verdict is None or verdict == "unmeasured":
+                    self.assertEqual(why, "", f"{rule} must not be a loser")
+                else:
+                    self.assertTrue(why.startswith(f"{n} graded signals all "
+                                                   f"time: hit {hit}, "
+                                                   f"expectancy {exp:+.2f}R"),
+                                    why)
+                    self.assertIn(verdict, why)
+
+    def test_the_breakout_keeps_the_live_venue_when_the_dwell_ends(self):
+        from signals.promotion_pipeline import is_due_for_demotion
+        _hand_promoted("bollinger_squeeze_breakout", 8)
+        self.assertIsNone(is_due_for_demotion("bollinger_squeeze_breakout"))
+        self.assertEqual(is_due_for_demotion("golden_cross"), "paper")
+
+    def test_the_command_reads_the_rows_and_bars_the_four(self):
+        from signals.models import RuleControl
+        _hand_promoted("bollinger_squeeze_breakout", 2)
+        out = StringIO()
+        call_command("bar_losers", stdout=out)
+        lines = {l.split()[0]: l for l in out.getvalue().splitlines()
+                 if l.startswith("  ") and l.split()[0] in
+                 {r[0] for r in SERVER_ROWS}}
+        self.assertTrue(lines["bollinger_squeeze_breakout"].rstrip()
+                        .endswith("ok"), "healthy, not a loser left alone")
+        for rule in ("golden_cross", "macd_bullish_crossover",
+                     "rsi_bull_divergence", "starter_stock_momentum"):
+            self.assertTrue(lines[rule].rstrip().endswith("LOSER"), rule)
+        self.assertIn("unmeasured (n 17 < 20)",
+                      lines["starter_forex_breakout"])
+        out = StringIO()
+        call_command("bar_losers", "--apply", stdout=out)
+        self.assertIn("Barred 4 rule(s) to paper.", out.getvalue())
+        self.assertIn("a thin edge under a low hit rate", out.getvalue())
+        stages = dict(RuleControl.objects.filter(
+            rule_name__in=[r[0] for r in SERVER_ROWS])
+            .values_list("rule_name", "promotion_stage"))
+        self.assertEqual(stages["bollinger_squeeze_breakout"], "live_full")
+        self.assertEqual(stages["starter_forex_breakout"], "live_full")
+        self.assertEqual({r for r, s in stages.items() if s == "paper"},
+                         {"golden_cross", "macd_bullish_crossover",
+                          "rsi_bull_divergence", "starter_stock_momentum"})
 
 
 class TheWordsTests(SimpleTestCase):

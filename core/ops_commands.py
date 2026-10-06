@@ -107,7 +107,7 @@ COMMANDS = [
     {
         "name": "bar_losers",
         "title": "Bar the measured losers",
-        "purpose": "Every rule at a live stage with its all-time graded record and the floor's verdict (LOSER: 20 graded signals and a hit rate under 35% or an expectancy at or under 0R; a hand promotion stands 7 days); --apply demotes every LOSER to paper, one PromotionEvent each. The nightly sweep applies the same floor once pipeline_promotion is ON.",
+        "purpose": "Every rule at a live stage with its all-time graded record and the floor's verdict (LOSER: 20 graded signals and an expectancy at or under 0R, or a hit rate under 35% with an expectancy under +0.10R; a low hit rate alone does not bar a rule; a hand promotion stands 7 days); --apply demotes every LOSER to paper, one PromotionEvent each. The nightly sweep applies the same floor once pipeline_promotion is ON.",
         "usage": [
             "python manage.py bar_losers           # the table, nothing written",
             "python manage.py bar_losers --apply   # bar every LOSER to paper",

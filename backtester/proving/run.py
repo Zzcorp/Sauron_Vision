@@ -58,27 +58,65 @@ def universe(asset_class=None, timeframe="4h", symbols=None) -> dict:
     return out
 
 
-def load_class(symbols, timeframe="4h") -> dict:
+def load_class(symbols, timeframe="4h", asset_class=None) -> dict:
     """{included: [(symbol, df, labels)], excluded: [(symbol, reason)],
-    start, end} — the class's sufficient histories, and the span they
-    cover together."""
-    included, excluded = [], []
+    dropped: {symbol: bars}, broken: [(symbol, reason)], start, end} — the
+    class's sufficient histories after THE BAR SANITY (data.sanitize), and
+    the span they cover together. A broken series is left out of the run
+    and named; the bad bars and spikes dropped from a judged series are
+    counted per symbol."""
+    included, excluded, dropped, broken = [], [], {}, []
     for sym in symbols:
-        df = pdata.load_history(sym, timeframe)
+        df, check = pdata.sanitize(
+            pdata.load_history(sym, timeframe, raw=True), asset_class)
+        if check["broken"]:
+            excluded.append((sym, check["broken"]))
+            broken.append((sym, check["broken"]))
+            continue
         verdict = pdata.sufficiency(df, timeframe)
         if not verdict["ok"]:
             excluded.append((sym, verdict["reason"]))
             continue
+        if check["dropped"]:
+            dropped[sym] = check["dropped"]
         included.append((sym, df, regimes(df)))
     start = min((df.index[0] for _s, df, _l in included), default=None)
     end = max((df.index[-1] for _s, df, _l in included), default=None)
     return {"included": included, "excluded": excluded,
+            "dropped": dropped, "broken": broken,
             "start": start, "end": end}
+
+
+def data_words(data_detail) -> str:
+    """The line a verdict prints about what was not read (2026-10-06):
+    "3 bar(s) dropped on XYZ · 41 trade(s) excluded past 20R on XYZ (38),
+    ABC (3) · QQQ left out: broken from ..." — or "" for a clean run."""
+    d = data_detail or {}
+    parts = []
+    bars = d.get("bars_dropped") or {}
+    if bars:
+        parts.append(f"{sum(bars.values())} bar(s) dropped on "
+                     f"{pj.named_counts(bars)}")
+    skipped = d.get("trades_skipped") or {}
+    if skipped:
+        from backtester.proving.simulate import SKIP_STOP_FLOOR
+        parts.append(f"{sum(skipped.values())} trade(s) skipped "
+                     f"({SKIP_STOP_FLOOR}) on {pj.named_counts(skipped)}")
+    excl = d.get("trades_excluded") or {}
+    if excl:
+        parts.append(f"{sum(excl.values())} trade(s) excluded past "
+                     f"{pj.PROVING_MAX_TRADE_R:.0f}R on "
+                     f"{pj.named_counts(excl)}")
+    for sym, why in d.get("broken") or []:
+        parts.append(f"{sym} left out: {why}")
+    return " · ".join(parts)
 
 
 def _pool(family, direction, params, flt, data, asset_class, timeframe,
           base_cache=None, policy="care"):
-    trades, open_n = [], 0
+    """(trades, open positions, {symbol: trades skipped under the stop
+    floor}) pooled over the class's included symbols."""
+    trades, open_n, skipped = [], 0, {}
     for sym, df, labels in data["included"]:
         key = (family.key, direction, tuple(sorted(params.items())), sym)
         base = None if base_cache is None else base_cache.get(key)
@@ -93,12 +131,14 @@ def _pool(family, direction, params, flt, data, asset_class, timeframe,
                        policy=policy)
         trades.extend(res["trades"])
         open_n += 1 if res["open"] else 0
-    return trades, open_n
+        if res.get("skipped"):
+            skipped[sym] = skipped.get(sym, 0) + int(res["skipped"])
+    return trades, open_n, skipped
 
 
 def _verdict_row(run_id, family, direction, params, flt, asset_class,
                  timeframe, data, judged, *, generated, live_rule="",
-                 policy="care"):
+                 policy="care", skipped=None):
     return {
         "run_id": run_id, "family": family.key, "live_rule": live_rule,
         "params": dict(family.defaults, **params), "direction": direction,
@@ -124,6 +164,14 @@ def _verdict_row(run_id, family, direction, params, flt, asset_class,
             "end": data["end"].isoformat() if data["end"] else None,
             "split": judged["split"].isoformat() if data["start"] else None,
             "excluded": [list(x) for x in data["excluded"][:50]],
+            # what was not read, and why (2026-10-06; data_words)
+            "data": {
+                "bars_dropped": dict(data.get("dropped") or {}),
+                "broken": [list(x) for x in data.get("broken") or []],
+                "trades_skipped": dict(skipped or {}),
+                "trades_excluded": dict(
+                    (judged.get("excluded") or {}).get("by_symbol") or {}),
+            },
         },
         # Transient: the newest simulated trades, kept by _save for the
         # setup memory and never part of the verdict row itself.
@@ -156,17 +204,18 @@ def prove_live_rules(*, asset_class=None, timeframe="4h", symbols=None,
     run_id = run_id or f"rules-{uuid.uuid4().hex[:10]}"
     rows = []
     for cls, syms in universe(asset_class, timeframe, symbols).items():
-        data = load_class(syms, timeframe)
+        data = load_class(syms, timeframe, cls)
         cache = {}
         for fam, direction in live_rule_cases():
-            trades, _open = _pool(fam, direction, {}, "none", data, cls,
-                                  timeframe, cache)
+            trades, _open, skipped = _pool(fam, direction, {}, "none", data,
+                                           cls, timeframe, cache)
             judged = _judge_pool(trades, data, 1)
             live = fam.live_rules.get(direction, "")
             rows.append(_verdict_row(
                 run_id, fam, direction, {}, "none", cls, timeframe, data,
                 judged, generated=False,
-                live_rule=live or f"{fam.key} (short mirror)"))
+                live_rule=live or f"{fam.key} (short mirror)",
+                skipped=skipped))
     if save:
         _save(rows)
     return rows
@@ -180,7 +229,7 @@ def generate(*, asset_class=None, timeframe="4h", symbols=None,
     fams = [FAMILIES[k] for k in (families or FAMILIES)]
     rows = []
     for cls, syms in universe(asset_class, timeframe, symbols).items():
-        data = load_class(syms, timeframe)
+        data = load_class(syms, timeframe, cls)
         if not data["included"]:
             continue
         cands = [(f, d, p, flt) for f in fams for d in f.directions
@@ -191,15 +240,19 @@ def generate(*, asset_class=None, timeframe="4h", symbols=None,
             (1.0 - pj.HOLDOUT_FRAC)
         cache, scored = {}, []
         for fam, direction, params, flt in cands:
-            trades, _open = _pool(fam, direction, params, flt, data, cls,
-                                  timeframe, cache)
-            ins = [t["r"] for t in trades if t["entry_ts"] < split]
+            trades, _open, skipped = _pool(fam, direction, params, flt,
+                                           data, cls, timeframe, cache)
+            # chosen on the trades the judge will read: past the last
+            # guard, a trade is not a market's and must not pick a leader
+            sane, _absurd = pj.sane_trades(trades)
+            ins = [t["r"] for t in sane if t["entry_ts"] < split]
             lower = pj.bootstrap_lower(ins, level) \
                 if len(ins) >= pj.MIN_TRADES * (1 - pj.HOLDOUT_FRAC) else None
             scored.append((lower if lower is not None else -np.inf,
-                           fam, direction, params, flt, trades))
+                           fam, direction, params, flt, trades, skipped))
         scored.sort(key=lambda x: x[0], reverse=True)
-        for lower, fam, direction, params, flt, trades in scored[:shortlist]:
+        for lower, fam, direction, params, flt, trades, skipped \
+                in scored[:shortlist]:
             judged = _judge_pool(trades, data, k)
             if lower == -np.inf or lower <= 0:
                 judged["verdict"] = (pj.INSUFFICIENT
@@ -210,7 +263,7 @@ def generate(*, asset_class=None, timeframe="4h", symbols=None,
                                  + judged["why"])
             rows.append(_verdict_row(run_id, fam, direction, params, flt,
                                      cls, timeframe, data, judged,
-                                     generated=True))
+                                     generated=True, skipped=skipped))
     if save:
         _save(rows)
     return rows
@@ -237,7 +290,7 @@ def compare_exits(*, asset_class=None, timeframe="4h", symbols=None,
         cases = live_rule_cases()
     rows = []
     for cls, syms in universe(asset_class, timeframe, symbols).items():
-        data = load_class(syms, timeframe)
+        data = load_class(syms, timeframe, cls)
         cache = {}
         for fam, direction in cases:
             if fam.live_rules:
@@ -246,12 +299,14 @@ def compare_exits(*, asset_class=None, timeframe="4h", symbols=None,
             else:
                 live = fam.key
             for key in keys:
-                trades, _open = _pool(fam, direction, {}, "none", data, cls,
-                                      timeframe, cache, policy=key)
+                trades, _open, skipped = _pool(fam, direction, {}, "none",
+                                               data, cls, timeframe, cache,
+                                               policy=key)
                 judged = _judge_pool(trades, data, len(keys))
                 rows.append(_verdict_row(
                     run_id, fam, direction, {}, "none", cls, timeframe, data,
-                    judged, generated=False, live_rule=live, policy=key))
+                    judged, generated=False, live_rule=live, policy=key,
+                    skipped=skipped))
     if save:
         _save(rows)
     return rows
@@ -281,17 +336,26 @@ def _save(rows):
 
 
 def data_report(*, asset_class=None, timeframe="4h", symbols=None) -> dict:
-    """{class: {"ok": [(sym, bars, days)], "short": [(sym, reason)]}} — how
-    much history the proving ground actually has to judge on."""
+    """{class: {"ok": [(sym, bars, days)], "short": [(sym, reason)],
+    "dropped": {sym: bars}, "broken": [(sym, reason)]}} — how much history
+    the proving ground actually has to judge on, read after THE BAR SANITY
+    exactly as a run reads it."""
     out = {}
     for cls, syms in universe(asset_class, timeframe, symbols).items():
-        ok, short = [], []
+        ok, short, dropped, broken = [], [], {}, []
         for sym in syms:
-            df = pdata.load_history(sym, timeframe)
+            df, check = pdata.sanitize(
+                pdata.load_history(sym, timeframe, raw=True), cls)
+            if check["broken"]:
+                broken.append((sym, check["broken"]))
+                continue
+            if check["dropped"]:
+                dropped[sym] = check["dropped"]
             v = pdata.sufficiency(df, timeframe)
             if v["ok"]:
                 ok.append((sym, v["bars"], v["span_days"]))
             else:
                 short.append((sym, v["reason"]))
-        out[cls] = {"ok": ok, "short": short}
+        out[cls] = {"ok": ok, "short": short, "dropped": dropped,
+                    "broken": broken}
     return out
