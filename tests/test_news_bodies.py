@@ -472,6 +472,12 @@ class TheTaskFillsTheFieldNobodyFilledTests(TestCase):
             PlatformComponent.objects.update_or_create(
                 key=key,
                 defaults={"name": name, "category": cat, "is_enabled": True})
+        # The refusal memory (scraping.tasks.BODY_REFUSED_KEY) lives in the
+        # cache, which outlives a test's transaction while the row ids are
+        # reused: a row refused in one test must not be remembered in the
+        # next.
+        from django.core.cache import cache
+        cache.clear()
 
     def _run(self, **kw):
         from scraping.tasks import fetch_news_bodies
@@ -605,6 +611,8 @@ class TheSharedRowKeepsTheFeedsVerdictTests(TestCase):
                       "last_message": "rss: feed.example.com answered 503",
                       "last_run_at": self.then, "run_count": 9,
                       "error_count": 1})
+        from django.core.cache import cache
+        cache.clear()
 
     def _row(self):
         from core.platform_control import PlatformComponent
@@ -625,16 +633,23 @@ class TheSharedRowKeepsTheFeedsVerdictTests(TestCase):
                          ("error", "rss: feed.example.com answered 503",
                           self.then, 9))
 
-    def test_a_batch_that_filled_nothing_is_not_a_success(self):
+    def test_a_batch_the_publishers_refused_leaves_the_feeds_verdict_too(self):
+        """2026-10-06: a batch that filled nothing used to write "handled 2
+        rows and stored none" over the feed's verdict — and the digest read
+        it under BREAKING NEWS as the news having stopped. A publisher's no
+        changes nothing about the news: the pass says so in its own words
+        and the row keeps the feed's error (tests/test_health_hygiene.py
+        has the rest: the road's failures are a warning in words)."""
         _article(url="https://example.com/1")
         _article(url="https://example.com/2")
         with patch("scraping.article_body.fetch_article_body",
                    return_value=("", "too short (12 chars) — paywall or wall")):
             out = self._run()
-        self.assertFalse(out.get("idle"))
+        self.assertIn("2 article bodies tried, none kept", out.get("idle", ""))
+        self.assertNotIn("attempted", out)
         row = self._row()
-        self.assertEqual(row.last_status, "warning")
-        self.assertIn("2", row.last_message)
+        self.assertEqual((row.last_status, row.last_message),
+                         ("error", "rss: feed.example.com answered 503"))
 
     def test_a_batch_is_graded_on_what_it_stored(self):
         _article(url="https://example.com/1")
