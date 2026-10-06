@@ -122,6 +122,14 @@ VENUE_SICK = "venue_sick"
 # on a wide quote is a different trade.
 WIDE_SPREAD = "wide_spread"
 
+# 2026-10-06. The CLOCK said no (bot_program/entry_timing): the daily
+# rollover at 17:00 New York (forex, commodities, indices), the first
+# quarter hour after a market opened, the last minutes before an exchange
+# closes, Friday's last hour before the weekend, or a high-impact print on
+# the instrument's currency from 60 min before to 15 min after. A decision
+# with the hour it clears, never a broken feed; the manual lane only warns.
+BAD_TIMING = "bad_timing"
+
 MAX_SYMBOLS_TRACKED = 200
 
 
@@ -265,6 +273,13 @@ def diagnose(cfg) -> str:
                     "quiet ends by itself minutes after the last failure, "
                     "closes and stop moves were never held, and the "
                     "detail names the last failure",
+        BAD_TIMING: "the clock refused the entry: the 17:00 New York "
+                    "rollover, a market's first quarter hour, an "
+                    "exchange's last minutes, Friday's last hour before "
+                    "the weekend, or a high-impact print on the "
+                    "instrument's currency — nothing is wrong with the "
+                    "signal or the feed; the detail names the hour it "
+                    "clears, and the same signal enters when it does",
     }.get(top, "")
     return (f"{top} accounts for {share:.0%} of {total} skips"
             + (f" — {advice}" if advice else ""))

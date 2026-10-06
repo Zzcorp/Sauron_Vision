@@ -2276,6 +2276,19 @@
                        'to send.') + '</div>';
       }
 
+      /* The entry timing (2026-10-06): the 17:00 New York rollover, a
+         market's first quarter hour, an exchange's last minutes, Friday's
+         last hour before the weekend, a high-impact print near. The bots
+         refuse on the same clock; this lane only warns — the button is
+         unchanged. */
+      var timingAdv = p.timing_advisory || {};
+      if (timingAdv.ok === false && timingAdv.reason) {
+        warnHtml += '<div class="sz-warn sz-warn--book"><b>BAD TIMING FOR AN ENTRY</b>' +
+          esc(timingAdv.reason) +
+          '<br>' + esc('A warning, not a block: the bots refuse an entry at ' +
+                       'this hour; this ticket is yours to send.') + '</div>';
+      }
+
       /* The entry quote (2026-10-05): crossed, a stale print, far from the
          platform's own quote — and the quoted half-spread against this
          ticket's stop. The bots refuse on the same read; this lane only

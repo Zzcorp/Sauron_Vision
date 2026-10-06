@@ -241,16 +241,22 @@ def market_hours(start, now, asset_class) -> float:
     return max(0.0, total - 24.0 * shut)
 
 
-def upcoming_events(now=None, cache=None) -> list:
+def upcoming_events(now=None, cache=None, *,
+                    horizon_minutes=EVENT_BEFORE_MINUTES) -> list:
     """The calendar rows the event window can reach, as [{at, title,
     currency, earnings}] — read once per tick when `cache` (the bot's
     per-tick dict) is given. High-impact macro rows (EVENT_SOURCES) from
-    EVENT_AFTER_MINUTES ago to EVENT_BEFORE_MINUTES ahead; earnings rows
-    (any source, "earnings" in the title) out to EARNINGS_BEFORE_HOURS.
-    A calendar that cannot be read is an empty list."""
+    EVENT_AFTER_MINUTES ago to `horizon_minutes` ahead (EVENT_BEFORE_MINUTES
+    by default; the entry timing asks EVENT_ATTACK_HOURS deep and caches
+    under its own key); earnings rows (any source, "earnings" in the
+    title) out to EARNINGS_BEFORE_HOURS. A calendar that cannot be read
+    is an empty list."""
     now = now or timezone.now()
-    if isinstance(cache, dict) and EVENT_CACHE_KEY in cache:
-        return cache[EVENT_CACHE_KEY]
+    horizon = int(horizon_minutes or EVENT_BEFORE_MINUTES)
+    key = (EVENT_CACHE_KEY if horizon == EVENT_BEFORE_MINUTES
+           else f"{EVENT_CACHE_KEY}:{horizon}")
+    if isinstance(cache, dict) and key in cache:
+        return cache[key]
     rows = []
     try:
         from django.db.models import Q
@@ -268,7 +274,7 @@ def upcoming_events(now=None, cache=None) -> list:
             title = str(r["title"] or "")
             earnings = "earnings" in title.lower()
             if not earnings and (r["datetime"] - now) > timedelta(
-                    minutes=EVENT_BEFORE_MINUTES):
+                    minutes=horizon):
                 continue
             rows.append({"at": r["datetime"], "title": title,
                          "currency": str(r["currency_affected"] or "").upper(),
@@ -277,19 +283,23 @@ def upcoming_events(now=None, cache=None) -> list:
         logger.info("[care] calendar unread: %s", e)
         rows = []
     if isinstance(cache, dict):
-        cache[EVENT_CACHE_KEY] = rows
+        cache[key] = rows
     return rows
 
 
-def event_for(trade, now=None, events=None):
+def event_for(trade, now=None, events=None, *,
+              before_minutes=EVENT_BEFORE_MINUTES):
     """The event whose window `trade` sits in now, or None: {title, at,
     minutes (to the event; negative once past), earnings, why}. Forex:
     either leg's currency. A stock or ETF: its own earnings (the symbol as
     the row's ticker or a word of its title) within EARNINGS_BEFORE_HOURS,
     else the home currency's events. Everything else: the home currency's.
-    Options: never. The nearest event wins."""
+    Options: never. The nearest event wins. A macro row counts out to
+    `before_minutes` ahead (EVENT_BEFORE_MINUTES: the care's window; the
+    entry timing asks EVENT_ATTACK_HOURS deep for its attack cap)."""
     import re
     now = now or timezone.now()
+    before_minutes = float(before_minutes or EVENT_BEFORE_MINUTES)
     cls = str(getattr(trade, "asset_class", "") or "").lower()
     if cls == "options":
         return None
@@ -317,7 +327,7 @@ def event_for(trade, now=None, events=None):
             if not mine:
                 continue
         else:
-            if minutes > EVENT_BEFORE_MINUTES:
+            if minutes > before_minutes:
                 continue
             ccy = str(ev.get("currency") or "").upper()
             if not ccy:
