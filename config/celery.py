@@ -473,14 +473,19 @@ app.conf.beat_schedule = {
     # through the night and their stops fire at the venue: GBPNZD #135 was
     # closed at eToro before 22:07 UTC on 2026-10-05 and stayed OPEN here
     # until the 13:00 pass the next day — fifteen hours counted in the open
-    # risk, the pledge and /status. One portfolio read per user per pass.
+    # risk, the pledge and /status. eToro's one book is read at most twice a
+    # pass per user and world, whatever the classes armed: once by the row
+    # walk (reconcile_user) and once by the unclaimed sweep — the cache key
+    # is the venue and its world, not the class (reconcile_asset._state_key).
+    # A manual reconcile_user while one venue is keyed out is run with the
+    # pipeline_asset_bots component off: there is no longer a quiet hour.
     "reconcile-asset-bot-trades": {
         "task": "bot_program.tasks.reconcile_all_asset_bot_trades",
         "schedule": crontab(minute="*/15"),
     },
 
-    # Every 15 min around the clock, NOT hour-gated like the reconcile
-    # above: an ISA does not stop existing when US equities close, and
+    # Every 15 min around the clock, like the reconcile above: an ISA
+    # does not stop existing when US equities close, and
     # the read is one socket round trip per interfaced account. Gated by
     # its own component (broker_account_sync), not pipeline_asset_bots —
     # knowing what the account holds is not a bot function.

@@ -8,14 +8,17 @@ was cold on every tick and every unpinned symbol cost a /search before its
 then recorded with the words of a venue that answered no rate.
 
   * etoro_client keeps an id eToro answered with an EXACT spelling for the
-    UTC day, keyed (world, symbol), across instances (SEARCH_MEMO; off for
-    the rest of the suite, whose fake wires count /search calls).
+    life of the process, keyed (world, symbol), across instances
+    (SEARCH_MEMO; off for the rest of the suite, whose fake wires count
+    /search calls). The ids are immutable: a daily expiry made every
+    process ask again for every symbol at 00:00 UTC.
   * the manage tick's skip note names the read's own error when the read
-    failed, and keeps "the broker priced it at 0" for a real 0.
+    failed, and keeps "the broker priced it at 0" for a real 0 — pinned by
+    behaviour in tests/test_close_path.py (TheClockExitRunsWithoutAMarkTests).
 
 Run with:  python manage.py test tests.test_etoro_search_memo
 """
-from datetime import date, timedelta
+from datetime import timedelta
 from unittest import mock
 
 from django.test import SimpleTestCase
@@ -47,7 +50,7 @@ class TheMemoTests(_MemoOn, SimpleTestCase):
             encoding="utf-8")
         self.assertIn("_etoro_client.SEARCH_MEMO = False", src)
 
-    def test_a_second_instance_the_same_day_asks_no_search(self):
+    def test_a_second_instance_asks_no_search(self):
         t1, f1 = _client([SEARCH_AAPL], env="live")
         self.assertEqual(t1.instrument_id("AAPL"), 1001)
         self.assertEqual(len(_searches(f1)), 1)
@@ -64,16 +67,19 @@ class TheMemoTests(_MemoOn, SimpleTestCase):
         t2.instrument_id("AAPL")
         self.assertEqual(len(_searches(f2)), 1)
 
-    def test_a_new_utc_day_asks_again(self):
+    def test_an_id_read_yesterday_still_answers(self):
+        """The ids are immutable: no expiry at 00:00 UTC, where every
+        process used to ask /search again in the same minute."""
         t1, _f1 = _client([SEARCH_AAPL], env="live")
         t1.instrument_id("AAPL")
         key = ("live", "AAPL")
         day, iid, spelled = ec._SEARCH_IDS[key]
         ec._SEARCH_IDS[key] = (day - timedelta(days=1), iid, spelled)
         t2, f2 = _client([SEARCH_AAPL], env="live")
-        t2.instrument_id("AAPL")
-        self.assertEqual(len(_searches(f2)), 1)
-        self.assertEqual(ec._SEARCH_IDS[key][0], day)
+        self.assertEqual(t2.instrument_id("AAPL"), 1001)
+        self.assertEqual(_searches(f2), [], "the memo answered")
+        self.assertEqual(t2._symbols[1001], "AAPL")
+        self.assertEqual(t2._venue_spelling[1001], "AAPL")
 
     def test_a_failure_and_a_lone_misspelled_result_are_never_kept(self):
         refused = ("GET", "/market-data/search", 429, {"message": "slow down"})
@@ -104,16 +110,3 @@ class TheMemoTests(_MemoOn, SimpleTestCase):
         self.assertEqual(len(_searches(f2)), 1)
         self.assertEqual(ec._SEARCH_IDS, {})
 
-
-class TheUnpricedNoteNamesTheCauseTests(SimpleTestCase):
-
-    def test_a_failed_read_and_a_real_zero_read_differently(self):
-        import inspect
-        from bot_program.asset_engine.base import AssetBot
-        src = inspect.getsource(AssetBot.manage_positions)
-        self.assertIn('mark_err = f"{type(e).__name__}: {e}"[:120]', src)
-        self.assertIn('could not be read ({mark_err})', src)
-        self.assertIn("broker priced it at 0", src)
-        # the failure is kept BEFORE the gate reads it
-        self.assertLess(src.index("mark_err = \"\""),
-                        src.index("if price is None or price <= 0:"))

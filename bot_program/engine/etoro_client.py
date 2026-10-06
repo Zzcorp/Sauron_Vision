@@ -204,11 +204,16 @@ _ELIGIBILITY: dict = {}
 #: asks (etoro_smoke, 2026-10-04). A refused /search made the manage tick
 #: read the real NVDA position #131 as unpriced at 13:47 UTC on 2026-10-06,
 #: and an unpriced row is managed by the clock alone. An id eToro answered
-#: with an EXACT spelling match is kept here for the UTC day, keyed (world,
-#: symbol), like _ELIGIBILITY; a lone result spelled differently, an
-#: unknown spelling and any error are never kept. SEARCH_MEMO is read at
-#: call time: tests/__init__.py turns it off for a suite whose fake wires
-#: count /search calls, and tests/test_etoro_search_memo.py turns it on.
+#: with an EXACT spelling match is kept here for the life of the process,
+#: keyed (world, symbol), like _ELIGIBILITY; a lone result spelled
+#: differently, an unknown spelling and any error are never kept. The ids
+#: are immutable, so the entry never expires: a daily expiry made every
+#: process ask /search again for every symbol in the same minute after
+#: 00:00 UTC (the review of 2026-10-06), the burst this memo exists to
+#: remove. The date stored beside the id says when it was read; a restart
+#: or a deploy empties the memo. SEARCH_MEMO is read at call time:
+#: tests/__init__.py turns it off for a suite whose fake wires count
+#: /search calls, and tests/test_etoro_search_memo.py turns it on.
 SEARCH_MEMO = True
 _SEARCH_IDS: dict = {}
 ELIGIBILITY_ABSENT = "absent"
@@ -830,8 +835,8 @@ class EtoroTrader:
         today = datetime.now(timezone.utc).date()
         if SEARCH_MEMO:
             hit = _SEARCH_IDS.get(memo_key)
-            if hit and hit[0] == today:
-                _day, iid, spelled = hit
+            if hit:
+                _read_on, iid, spelled = hit
                 self._ids[key] = iid
                 self._symbols[iid] = key
                 self._venue_spelling[iid] = spelled

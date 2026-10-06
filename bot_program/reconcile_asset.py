@@ -187,9 +187,22 @@ def _broker_open_symbols(client, *, asset_class: str, warm=()) -> dict:
         for sym in (warm or ()):
             try:
                 name_it(sym)
-            except Exception as e:  # noqa: BLE001 — the count is the net
+            except LookupError as e:
+                # The venue answered: it does not know this spelling. The
+                # next symbol is a different question.
                 logger.debug("reconcile: %s cannot name %s (%s)",
                              type(client).__name__, sym, e)
+            except Exception as e:  # noqa: BLE001 — the count is the net
+                # A REFUSAL (a 429, a 5xx, a request that never came back)
+                # is the venue's state, not the symbol's: the next ask meets
+                # the same wall, and each one is a venue-health note — three
+                # inside 180 s mark the venue SICK and refuse every new real
+                # entry (2026-10-06 review). Stop warming; what is left
+                # unnamed is counted as `unnamed` below.
+                logger.info("reconcile: %s refused the warm at %s (%s) — "
+                            "the rest is not asked this pass",
+                            type(client).__name__, sym, e)
+                break
 
     fn = getattr(client, "get_positions", None)
     if not callable(fn):
@@ -258,6 +271,22 @@ def _options_row_open_at_broker(trade, state: dict):
     return False
 
 
+def _state_key(client, asset_class: str) -> tuple:
+    """The broker-state cache key for one reconcile pass.
+
+    ONE eToro BOOK PER WORLD (2026-10-06 review). eToro holds every class
+    in one portfolio and `_broker_open_symbols` never reads the class, so a
+    key per (class, venue) asked GET /portfolio once per class: with forex,
+    stock, commodity and crypto armed, four reads where one answers all,
+    every 15 minutes around the clock. Other venues keep the class in the
+    key (options and sec-typed books read differently per class)."""
+    venue = type(client).__name__
+    if venue == "EtoroTrader":
+        world = getattr(client, "_world", None)
+        return (venue, world() if callable(world) else "")
+    return (asset_class, venue)
+
+
 def reconcile_user(user) -> dict:
     """Reconcile one user's open AssetBotTrade rows against broker state.
 
@@ -273,8 +302,8 @@ def reconcile_user(user) -> dict:
     out = {"checked": 0, "closed_as_orphan": 0,
            "broker_unavailable": 0, "errors": 0}
 
-    # Cache broker open-symbol sets per (asset_class, broker_name) — many
-    # trades share the same broker, no need to query per row.
+    # Cache broker open-symbol sets per _state_key — many trades share the
+    # same broker, no need to query per row.
     cache: dict = {}
 
     # WHAT TO WARM BEFORE ASKING, per class, because the read below is
@@ -308,7 +337,7 @@ def reconcile_user(user) -> dict:
         out["checked"] += 1
         try:
             client = client_for_symbol(user, trade.symbol, trade.config)
-            cache_key = (trade.asset_class, type(client).__name__)
+            cache_key = _state_key(client, trade.asset_class)
             if cache_key not in cache:
                 cache[cache_key] = _broker_open_symbols(
                     client, asset_class=trade.asset_class, warm=all_warm)
@@ -398,7 +427,36 @@ def reconcile_user(user) -> dict:
                 # Don't grade: we don't know if it was manual close, stop-out,
                 # liquidation, etc. The `outcome="manual_close"` label is
                 # honest about the uncertainty.
-                _close_as_orphan(trade)
+                #
+                # THE ROW IS READ AGAIN, UNDER THE CLOSE CLAIM, FIRST
+                # (2026-10-06 review). `trade` is the snapshot this walk
+                # loaded before any /portfolio read; the five-minute tick or
+                # the CLOSE button may have closed it since, and eToro then
+                # drops the position — a miss here. Closing the snapshot
+                # wrote " | reconciled-orphan" over the real close, put the
+                # stale metadata back, graded the row a second time and
+                # sent a second close alert.
+                fresh, why_not = _claim_orphan(trade.pk)
+                if fresh is None:
+                    out["closed_elsewhere"] = out.get("closed_elsewhere", 0) + 1
+                    logger.info("reconcile: #%s (%s) NOT orphan-closed — %s",
+                                trade.id, trade.symbol, why_not)
+                    continue
+                try:
+                    _lag_why = venue_lag_window(fresh, client)
+                    if _lag_why:
+                        out["broker_unavailable"] += 1
+                        logger.warning(
+                            "reconcile: #%s (%s) NOT orphan-closed — %s",
+                            fresh.id, fresh.symbol, _lag_why)
+                        continue
+                    if not _close_as_orphan(fresh):
+                        out["closed_elsewhere"] = (
+                            out.get("closed_elsewhere", 0) + 1)
+                        continue
+                finally:
+                    from .manual_close import _release
+                    _release(fresh.pk)
                 out["closed_as_orphan"] += 1
                 logger.warning("reconcile: closed orphan AssetBotTrade #%s "
                                 "(%s/%s); broker no longer reports it.",
@@ -409,14 +467,51 @@ def reconcile_user(user) -> dict:
     return out
 
 
+def _claim_orphan(trade_pk):
+    """(fresh row, "") with the close claim taken, or (None, why not).
+
+    The SAME claim the CLOSE button and the pending-close retry take
+    (manual_close.CLAIM_KEY), re-read under a row lock the way
+    pending_closes._claim_for_retry does, so the reconcile never books a
+    row another path is closing, or has just closed."""
+    from django.db import transaction
+    from .asset_engine.base import is_entry_working
+    from .manual_close import CLAIM_KEY, _stale
+    from .models import AssetBotTrade
+
+    with transaction.atomic():
+        fresh = (AssetBotTrade.objects.select_for_update()
+                 .select_related("config", "config__user")
+                 .filter(pk=trade_pk).first())
+        if fresh is None:
+            return None, "the row is gone"
+        if fresh.status not in ("OPEN", "CLOSE_PENDING"):
+            return None, (f"it was closed elsewhere since this pass read it "
+                          f"(now {fresh.status})")
+        if is_entry_working(fresh):
+            return None, "its entry is a working order again"
+        held = (fresh.metadata or {}).get(CLAIM_KEY)
+        if held and not _stale(str(held)):
+            return None, "a close is in flight on it elsewhere"
+        meta = dict(fresh.metadata or {})
+        meta[CLAIM_KEY] = timezone.now().isoformat()
+        fresh.metadata = meta
+        fresh.save(update_fields=["metadata"])
+    return fresh, ""
+
+
 #: Set on a row that had to be closed with no price available. Its `pnl`
 #: column reads 0.00 because the field is not nullable; this says that zero
 #: is an absence of measurement, not a measurement of zero.
 UNPRICED_EXIT_KEY = "exit_price_unavailable"
 
 
-def _close_as_orphan(trade) -> None:
-    """Mark an orphan trade CLOSED at last-known price."""
+def _close_as_orphan(trade) -> bool:
+    """Mark an orphan trade CLOSED at last-known price.
+
+    False, and nothing written, when the row is no longer OPEN or
+    CLOSE_PENDING by the time the price is read: the reads below take
+    seconds, and the tick's own close may land in them."""
     # Best-effort exit price: use the broker's ticker, or fall back to
     # the trade's entry price (zero P&L) so we at least clear the row.
     from .engine.broker_router import client_for_symbol
@@ -543,8 +638,20 @@ def _close_as_orphan(trade) -> None:
     meta[EXIT_FILL_SOURCE_KEY] = (EXIT_SOURCE_BROKER if measured
                                   else EXIT_SOURCE_MARK)
     trade.metadata = meta
-    trade.save(update_fields=["exit_price", "pnl", "status", "closed_at",
-                                "reason", "metadata"])
+    # WRITTEN ONLY OVER A ROW STILL OPEN (2026-10-06 review), checked under
+    # the row lock: a close that landed while the broker was read above
+    # keeps its own words, its fill and its single grade.
+    from django.db import transaction
+    with transaction.atomic():
+        now = (type(trade).objects.select_for_update()
+               .filter(pk=trade.pk).values_list("status", flat=True).first())
+        if now not in ("OPEN", "CLOSE_PENDING"):
+            logger.info("reconcile: #%s was closed elsewhere (%s) while it "
+                        "was being reconciled — left as that close wrote it",
+                        trade.id, now)
+            return False
+        trade.save(update_fields=["exit_price", "pnl", "status", "closed_at",
+                                    "reason", "metadata"])
 
     # Grade it. The module docstring has always claimed this happened and it
     # never did: outcome was hardcoded to "manual_close" and realized_r was
@@ -610,6 +717,7 @@ def _close_as_orphan(trade) -> None:
     except Exception as e:
         logger.warning("reconcile: eye push failed for #%s: %s",
                        trade.id, e)
+    return True
 
 
 def reconcile_unknown_positions(user) -> dict:
@@ -670,6 +778,13 @@ def reconcile_unknown_positions(user) -> dict:
                .filter(user=user, enabled=True)
                .exclude(mode="paper"))
     seen_clients = set()
+    # One read per venue, not per config: several configs routinely route
+    # to the same broker. The FIRST config of each (class, venue) names
+    # what is warmed, as before; the read itself is one per _state_key, so
+    # eToro's single book is read once for all its classes (2026-10-06
+    # review: four GET /portfolio a pass where one answers), warmed with
+    # the union.
+    reads: dict = {}
     for cfg in configs:
         symbols = list(cfg.symbols or [])
         if not symbols:
@@ -683,16 +798,21 @@ def reconcile_unknown_positions(user) -> dict:
             continue
 
         venue = type(client).__name__
-        # One read per venue, not per config: several configs routinely
-        # route to the same broker.
         key = (cfg.asset_class, venue)
         if key in seen_clients:
             continue
         seen_clients.add(key)
+        read = reads.setdefault(_state_key(client, cfg.asset_class), {
+            "client": client, "venue": venue,
+            "asset_class": cfg.asset_class, "warm": []})
+        read["warm"].extend(s for s in symbols if s not in read["warm"])
+
+    for read in reads.values():
+        client, venue = read["client"], read["venue"]
         out["checked"] += 1
 
-        state = _broker_open_symbols(client, asset_class=cfg.asset_class,
-                                     warm=symbols)
+        state = _broker_open_symbols(client, asset_class=read["asset_class"],
+                                     warm=read["warm"])
         if state is None:
             # UNREADABLE is not EMPTY. Treating an unreachable broker as
             # "no positions" would report a clean sweep of a book nobody
