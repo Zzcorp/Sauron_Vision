@@ -156,9 +156,13 @@ services:
   # and sends everything else to `default`. Between these two workers every
   # queue in the beat schedule is consumed — a worker set that misses one
   # silently drops half the schedule.
+  # THREE SLOTS (2026-10-07). The bar refresh is paced against eToro's quota
+  # (market_data/bot_bars.py CANDLE_GAP_S) and holds one slot for up to
+  # CANDLE_PASS_MAX_S of every 600 s; the 5-minute bot tick, which manages
+  # every open position, must never wait behind it and the 60 s pollers.
   worker-fast:
     <<: *django
-    command: celery -A config worker -l info -Q fast,default -c 2 --without-gossip --without-mingle
+    command: celery -A config worker -l info -Q fast,default -c 3 --without-gossip --without-mingle
     healthcheck:
       test: ["CMD-SHELL", "celery -A config inspect ping -d celery@$$HOSTNAME || exit 1"]
       interval: 60s

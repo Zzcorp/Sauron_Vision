@@ -608,7 +608,17 @@ def fetch_crypto_news_task():
     return out
 
 
-@shared_task
+#: ONE BAR PASS AT A TIME (2026-10-07). A pass that outlived the 600 s
+#: beat let the next start in the other worker-fast slot; the lock makes it
+#: skip, and the hard limit ends a pass that hangs before the next beat. A
+#: hard kill runs no `finally`, so the lock lives exactly as long as the
+#: limit: it dies with a killed pass.
+BARS_LOCK_KEY = "bars:refresh_lock"
+BARS_TASK_TIME_LIMIT_S = 590
+BARS_LOCK_S = BARS_TASK_TIME_LIMIT_S
+
+
+@shared_task(time_limit=BARS_TASK_TIME_LIMIT_S)
 def refresh_bot_bars_task():
     """Write 1h/4h OHLCV bars for every symbol an enabled bot trades.
 
@@ -616,5 +626,16 @@ def refresh_bot_bars_task():
     every rule returns None, and the bots can only ever HOLD. Bars come
     from each bot's own broker so there is no feed/execution basis.
     """
+    from django.core.cache import cache
+    from django.utils import timezone
+
     from market_data.bot_bars import refresh_bot_bars
-    return refresh_bot_bars()
+    if not cache.add(BARS_LOCK_KEY, timezone.now().isoformat(), BARS_LOCK_S):
+        logger.warning("[bars] a bar refresh is still running — this beat "
+                       "skips")
+        return {"status": "skipped",
+                "reason": "a bar refresh is still running"}
+    try:
+        return refresh_bot_bars()
+    finally:
+        cache.delete(BARS_LOCK_KEY)

@@ -384,6 +384,9 @@ app.conf.beat_schedule = {
     "refresh-bot-bars": {
         "task": "market_data.tasks.refresh_bot_bars_task",
         "schedule": 600.0,
+        # expire_seconds, not expires: the database scheduler keeps only the
+        # former (django_celery_beat ModelEntry._unpack_options).
+        "options": {"expires": 540, "expire_seconds": 540},
     },
 
     # ── Phase 13.5 — multi-asset bot tick (every 5 min).
@@ -395,8 +398,10 @@ app.conf.beat_schedule = {
         "task": "bot_program.tasks.tick_all_asset_bots",
         "schedule": 300.0,  # every 5 minutes
         # a pass not started within the beat is dropped, never queued
-        # behind a slow one (tick_all_asset_bots also holds a pass lock)
-        "options": {"expires": 280},
+        # behind a slow one (tick_all_asset_bots also holds a pass lock).
+        # expire_seconds beside expires (2026-10-07): the database
+        # scheduler keeps only the former, so "expires" alone was lost.
+        "options": {"expires": 280, "expire_seconds": 280},
     },
     # THE CRISIS MODE AND ARAGORN (2026-10-02, bot_program/
     # market_stress.py, aragorn.py): the posture every 15 min, the pair
