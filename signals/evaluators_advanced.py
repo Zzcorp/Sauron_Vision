@@ -2113,8 +2113,9 @@ register_kind("funding_carry", _eval_funding_carry,
 # Phase 38 — Post-earnings-announcement drift, as a HELD position
 # ══════════════════════════════════════════════════════════════════════════
 #
-# The event family this lane already had — `earnings_surprise`, `news_volume`,
-# `calendar_event` — reads an event as a SAME-DAY reaction: something printed
+# The event family this lane already had — `news_volume`, `calendar_event`,
+# and the `earnings_surprise` rule (removed 2026-10-07: it never had a data
+# source) — reads an event as a SAME-DAY reaction: something printed
 # inside the lookback, so fire now. Post-earnings-announcement drift is the
 # opposite claim. The documented anomaly is not the gap on the print; it is
 # that prices keep moving in the direction of the surprise for weeks after it,
@@ -2167,13 +2168,11 @@ register_kind("funding_carry", _eval_funding_carry,
 # every entry a full day past it.
 
 # Minimum |actual − estimate| ÷ |estimate|, in percent, before this lane will
-# call a print a surprise. 10% is the bar `signals.rules.fundamental_rules
-# .EarningsSurpriseRule` applies to the same two numbers, and matching it is
-# deliberate: that rule imports `scraping.models.EarningsEvent`, a model this
-# install does not have, so it catches the ImportError and returns None on
-# every symbol — it is inert today. Picking a different bar would mean the two
-# lanes disagreed about what counts as a surprise on the day someone repairs
-# its data source, which is exactly when nobody would be looking here.
+# call a print a surprise. 10% was the bar of the old same-day rule
+# `earnings_surprise` (signals/rules/fundamental_rules.py), which imported a
+# model this install never had and so never fired; it was removed from the
+# signal engine on 2026-10-07. A same-day earnings rule that comes back must
+# read this constant, so the two lanes agree on what counts as a surprise.
 PEAD_MIN_SURPRISE_PCT = 10.0
 
 # How stale a print must be before this lane will enter. Twenty-four hours is

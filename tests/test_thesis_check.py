@@ -473,6 +473,29 @@ class TheCareTests(SimpleTestCase):
         self.assertIsNone(TC.care_stop({"thesis": {"verdict": "adjust",
                                                    "stop": None}}, now))
 
+    def test_a_naive_thesis_time_is_read_as_utc(self):
+        """django.utils.timezone.utc left Django in 5.0: a thesis `at` with
+        no offset raised AttributeError here. Read as UTC, pinned at the
+        TTL's edge, where any other zone would land on the wrong side."""
+        from datetime import datetime, timezone as dt_timezone
+        at = datetime(2026, 10, 7, 10, 0, tzinfo=dt_timezone.utc)
+        meta = {"thesis": {"verdict": "adjust", "stop": 98.5,
+                           "at": "2026-10-07T10:00:00"}}
+        ttl = timedelta(hours=TC.THESIS_STOP_TTL_HOURS)
+        self.assertEqual(TC.care_stop(meta, at + ttl - timedelta(minutes=1)),
+                         (98.5, "structure"))
+        self.assertIsNone(TC.care_stop(meta, at + ttl + timedelta(minutes=1)))
+
+    def test_a_naive_thesis_time_still_gets_its_care_plan(self):
+        """The raise escaped plan() into care()'s except, which logs "not
+        cared for" and skips the row's whole plan — trail, break-even,
+        weekend and event locks, the venue mirror — not just this stop."""
+        from bot_program.position_care import plan
+        naive = (timezone.now() - timedelta(hours=1)).replace(tzinfo=None)
+        p = plan(_row(thesis=_adjust() | {"at": naive.isoformat()}), 99.0)
+        self.assertEqual(p["care"]["soft_stop"], 98.5)
+        self.assertEqual(p["care"]["soft_why"], "structure")
+
     def test_the_care_takes_it_as_a_tighten_only_candidate(self):
         from bot_program.position_care import plan
         p = plan(_row(thesis=_adjust()), 99.0)
