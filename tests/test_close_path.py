@@ -857,14 +857,37 @@ class TheCloseIsProvenByTheOpenOrderTests(TestCase):
         trade.refresh_from_db()
         self.assertEqual(trade.status, "CLOSE_PENDING")
         self.assertEqual(venue.closes, [])
+        # OUTSIDE THE LAG, A FLAT LIST THE VENUE'S ORDER READ HAS NOT
+        # CONFIRMED IS NOT BOOKED EITHER (2026-10-07, PR50, venue_exit): the
+        # unanswered ask is counted, nothing is sent, nothing is booked
         AssetBotTrade.objects.filter(pk=trade.pk).update(
             opened_at=timezone.now() - timezone.timedelta(seconds=120))
+        trade.refresh_from_db()
+        with mock.patch(self.ROUTER, return_value=venue):
+            self.assertFalse(retry_trade_close(trade))
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSE_PENDING")
+        self.assertEqual(trade.metadata["venue_miss"]["asks"], 1)
+        self.assertFalse(trade.metadata.get("close_retry_attempts"))
+        self.assertEqual(venue.closes, [])
+        # ...until an hour of unanswered asks has passed: then it is booked
+        # as before, and says so
+        meta = dict(trade.metadata)
+        meta["venue_miss"] = {
+            "since": (timezone.now()
+                      - timezone.timedelta(minutes=56)).isoformat(),
+            "asks": 4,
+            "last_at": (timezone.now()
+                        - timezone.timedelta(minutes=5)).isoformat()}
+        AssetBotTrade.objects.filter(pk=trade.pk).update(metadata=meta)
         trade.refresh_from_db()
         with mock.patch(self.ROUTER, return_value=venue):
             self.assertTrue(retry_trade_close(trade))
         trade.refresh_from_db()
         self.assertEqual(trade.status, "CLOSED")
         self.assertIn("RETRY_ALREADY_FLAT", trade.reason or "")
+        self.assertTrue(trade.metadata.get("venue_unproven_close"))
+        self.assertEqual(venue.closes, [])
 
     def test_the_kill_switch_leaves_an_unproven_etoro_close_pending(self):
         from bot_program.engine.kill_switch import _close_asset_trade

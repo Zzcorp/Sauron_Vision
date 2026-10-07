@@ -74,6 +74,172 @@ def _remember_mute(source: str, symbol: str, interval: str) -> None:
         pass
 
 
+# THE eTORO CANDLE QUOTA (2026-10-07). eToro's quota is written nowhere
+# (deploy/ETORO_DEPARTURE.md:643). This pass asked it two candle GETs per
+# enabled (config, symbol), paper configs included, back to back, and kept
+# asking after the first 429: on 2026-10-06 at 23:38:31-35 UTC at least
+# seventeen refused klines in four seconds, at least ten of them /candles
+# 429s (the venue's memory keeps only seven /search notes there, and every
+# refused /search was noted). Those seven, most likely this pass's own
+# cold ids, made eToro (live) sick and held real entries until 23:48.
+# Now, for eToro only:
+#   * each (source, symbol, interval) once per pass (bars are per Instrument);
+#   * from eToro's own newest stored bar (it may have been stored while
+#     forming) instead of 200 bars every ten minutes;
+#   * real rows no enabled live config covers first, then live configs,
+#     then paper; CANDLE_GAP_S per wire request the previous call sent;
+#     none after CANDLE_PASS_MAX_S into the pass;
+#   * none for the rest of the pass after its first 429, while eToro is
+#     sick, or once the trading lane noted a 429 within
+#     YIELD_AFTER_LIVE_429_S: the public feed fills those series exactly as
+#     for a mute venue, and no series is muted for a 429;
+#   * its reads are background reads: never noted on the venue's health,
+#     never granting the adapter's 429 pause (EtoroTrader.klines).
+CANDLE_GAP_S = 1.0
+CANDLE_PASS_MAX_S = 420.0
+BARS_PASS_MAX_S = 540.0
+YIELD_AFTER_LIVE_429_S = 120.0
+INCREMENT_SPARE_BARS = 2
+
+
+def _mono() -> float:
+    return time.monotonic()
+
+
+def _candle_sleep(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+def _etoro_world(client) -> str:
+    """"live" or "demo" for an eToro client, "" for every other client."""
+    try:
+        from bot_program.engine.capabilities import adapter_key
+        if adapter_key(client) != "etoro":
+            return ""
+        from bot_program.venue_health import world_of
+        return world_of(client)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _wire_reads(client) -> int:
+    n = getattr(client, "wire_reads", 0)
+    return n if isinstance(n, int) and not isinstance(n, bool) else 0
+
+
+def _http_status(exc):
+    """The HTTP status a requests error carries, or None."""
+    try:
+        code = int(getattr(getattr(exc, "response", None), "status_code", 0)
+                   or 0)
+    except (TypeError, ValueError):
+        return None
+    return code or None
+
+
+def _etoro_refusing(world: str) -> str:
+    """Why the bars must not ask eToro now, or "": the venue is sick, or
+    the trading lane met its 429 within YIELD_AFTER_LIVE_429_S."""
+    try:
+        from bot_program import venue_health as vh
+        if vh.sick("etoro", world):
+            return f"eToro ({world}) is sick"
+        hits = vh.recent_refusals("etoro", world,
+                                  within_s=YIELD_AFTER_LIVE_429_S)
+        if hits:
+            return (f"the trading lane met eToro's HTTP 429 "
+                    f"({hits[-1].get('where') or '?'}) within the last "
+                    f"{YIELD_AFTER_LIVE_429_S:.0f}s")
+    except Exception:  # noqa: BLE001 — an unreadable memory refuses nothing
+        return ""
+    return ""
+
+
+def _etoro_window(inst, interval, source, limit, now=None) -> int:
+    """How many of the newest bars to ask eToro for: from its own newest
+    stored bar to now, plus INCREMENT_SPARE_BARS; `limit` when it has
+    stored none or the gap is wider."""
+    from market_data.models import PriceData
+    span = INTERVAL_SECONDS.get(interval)
+    if not span:
+        return limit
+    try:
+        newest = (PriceData.objects
+                  .filter(instrument=inst, timeframe=interval, source=source)
+                  .order_by("-timestamp")
+                  .values_list("timestamp", flat=True).first())
+    except Exception:  # noqa: BLE001 — unreadable: the full window
+        return limit
+    if newest is None:
+        return limit
+    now = now or datetime.now(dt_tz.utc)
+    behind = max(0.0, (now - newest).total_seconds()) / span
+    return max(1, min(int(limit), math.ceil(behind) + INCREMENT_SPARE_BARS))
+
+
+class _CandlePass:
+    """One refresh pass: what it handled, and whether it may ask eToro.
+    A stop reason ends eToro candles for that world for the REST of the
+    pass, never for a while (2026-10-07)."""
+
+    def __init__(self):
+        self.started = _mono()
+        self.seen: set = set()
+        self.last_get = None
+        self.extra = 0.0
+        self.asked = 0
+        self.left = 0
+        self.stopped: dict = {}
+        self.headers_said = False
+        # The config symbols the deadline let a config reach, and the ones
+        # it cut (2026-10-07): a cut symbol nothing reached is the
+        # watchlist's to fill (refresh_bot_bars).
+        self.reached: set = set()
+        self.cut: set = set()
+
+    def past_deadline(self) -> bool:
+        return _mono() - self.started >= BARS_PASS_MAX_S
+
+    def may_ask(self, world: str) -> bool:
+        if world in self.stopped:
+            return False
+        if self.last_get is not None:
+            wait = CANDLE_GAP_S + self.extra - (_mono() - self.last_get)
+            if wait > 0:
+                _candle_sleep(wait)
+        if _mono() - self.started >= CANDLE_PASS_MAX_S:
+            self.stopped[world] = (f"the pass reached "
+                                   f"{CANDLE_PASS_MAX_S:.0f}s")
+            return False
+        why = _etoro_refusing(world)
+        if why:
+            self.stopped[world] = why
+            return False
+        self.last_get = _mono()
+        self.extra = 0.0
+        self.asked += 1
+        return True
+
+    def spent(self, reads: int) -> None:
+        """The last klines call sent `reads` wire requests (a cold id's
+        /search, a 5xx retry): the next waits one gap per extra request."""
+        self.extra = max(0, int(reads) - 1) * CANDLE_GAP_S
+
+    def refused(self, world: str, what: str) -> None:
+        self.stopped.setdefault(world, f"eToro answered HTTP 429 at {what}")
+
+    def heard(self, client) -> None:
+        if self.headers_said:
+            return
+        self.headers_said = True
+        said = getattr(client, "last_rate_headers", None)
+        logger.info("[bars] eToro's quota headers on a candle answer: %s",
+                    said if isinstance(said, dict) and said else "none")
+
+    def words(self) -> str:
+        return "; ".join(why for _w, why in sorted(self.stopped.items()))
+
+
 # WHAT THE SOURCE SAID, AND WHEN (2026-10-02). A 4h bar hours old while the
 # market is open reads as a dead feed — and on a thin contract it is not:
 # CBOT oats can go hours overnight without a print, and Yahoo writes no
@@ -305,13 +471,26 @@ def _write_venue_window(inst, interval, rows, source) -> tuple[int, int, int]:
 
 
 def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
-                            limit=DEFAULT_LIMIT) -> dict:
-    """Fetch and persist bars for every symbol on one bot config."""
+                            limit=DEFAULT_LIMIT, pass_state=None,
+                            cut=True) -> dict:
+    """Fetch and persist bars for every symbol on one bot config.
+
+    `pass_state` (2026-10-07) is the refresh pass this config belongs to
+    (_CandlePass: the dedup, the eToro pacing and stop); a call without
+    one is a pass of its own. `cut=False` keeps every symbol past the
+    pass's deadline: the held real rows (_held_real_rows) are never cut.
+    Each symbol lands in the pass's `reached` or `cut` set."""
     from instruments.models import Instrument
 
+    state = pass_state if pass_state is not None else _CandlePass()
     out = {"symbols": 0, "bars": 0, "skipped": 0, "errors": 0, "no_client": 0,
-           "fallback": 0}
+           "fallback": 0, "deduped": 0, "not_reached": 0}
     for symbol in (cfg.symbols or []):
+        if cut and state.past_deadline():
+            out["not_reached"] += 1
+            state.cut.add(symbol)
+            continue
+        state.reached.add(symbol)
         inst = Instrument.objects.filter(symbol=symbol).first()
         if inst is None:
             logger.warning("[bars] no Instrument row for %s — skipping", symbol)
@@ -332,25 +511,61 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
             continue
 
         source = _source_tag(client)
+        world = _etoro_world(client)
         out["symbols"] += 1
         fetch_symbol = _venue_symbol(client, symbol)
+        fetched = False
         for interval in intervals:
+            # ONCE PER PASS (2026-10-07): bars are written per Instrument,
+            # so the first config to reach a series handles it, whatever
+            # the outcome, and every later one skips it.
+            key = (source, symbol, interval)
+            if key in state.seen:
+                out["deduped"] += 1
+                continue
+            state.seen.add(key)
+            fetched = True
             rows = []
             asked = False
+            refused = False
             if _venue_is_mute(source, symbol, interval):
                 logger.info("[bars] %s %s: %s gave no bars within the last "
                             "%dh — public feed directly", symbol, interval,
                             source, MUTE_VENUE_MEMO_S // 3600)
+            elif world and not state.may_ask(world):
+                # eToro is not asked for the rest of this pass: the public
+                # feed fills it below exactly as for a mute venue.
+                state.left += 1
             else:
                 asked = True
+                want = (_etoro_window(inst, interval, source, limit)
+                        if world else limit)
+                before = _wire_reads(client)
                 try:
                     rows = client.klines(fetch_symbol, interval=interval,
-                                         limit=limit)
+                                         limit=want)
                 except Exception as e:
                     logger.warning("[bars] klines(%s, %s) failed: %s",
                                    symbol, interval, e)
                     out["errors"] += 1
                     rows = []
+                    if world and _http_status(e) == 429:
+                        refused = True
+                        at = getattr(client, "last_read", "") or "candles"
+                        state.refused(world, f"/{at} in klines({symbol}, "
+                                             f"{interval})")
+                        logger.warning(
+                            "[bars] eToro answered HTTP 429 to /%s in "
+                            "klines(%s, %s) — no more eToro candles this "
+                            "pass; quota headers: %s", at, symbol, interval,
+                            getattr(client, "last_rate_headers", None)
+                            or "none")
+                else:
+                    if world:
+                        state.heard(client)
+                finally:
+                    if world:
+                        state.spent(max(1, _wire_reads(client) - before))
                 _note_answer(symbol, interval, rows)
             if getattr(client, "_sv_public_feed", False):
                 # The keyless feed IS the fallback: what it gave is written
@@ -396,7 +611,9 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                 _note_answer(symbol, interval, pub)
                 if pub:
                     out["fallback"] += 1
-                    if asked:
+                    # A quota's 429 is "not now", never "no bars here": it
+                    # mutes nothing (2026-10-07).
+                    if asked and not refused:
                         _remember_mute(source, symbol, interval)
                         logger.warning("[bars] %s %s: %s gave no usable bars "
                                        "— written from the public feed "
@@ -441,7 +658,7 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                             "newest bar is %.1f h old — the public feed fills "
                             "after it (%d bars)", symbol, interval, source,
                             stale_age / 3600, len(pub))
-        if getattr(client, "_sv_public_feed", False) is True:
+        if fetched and getattr(client, "_sv_public_feed", False) is True:
             _pace()
     return out
 
@@ -564,7 +781,8 @@ WATCHLIST_BAR_CAP = 30
 
 
 def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
-                           limit=DEFAULT_LIMIT, covered=None) -> dict:
+                           limit=DEFAULT_LIMIT, covered=None,
+                           starred=True, stop=None, unreached=None) -> dict:
     """Bars for HELD and STARRED instruments no enabled bot already covers.
 
     The star used to bring quotes and signal scans but not bars — so a
@@ -581,14 +799,24 @@ def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
     held set is the one the brain's regime probe reads
     (`brain.synthesizer._held_symbols`), so every probe on the book has a
     frame to read. The cap now counts only symbols this pass will fetch.
+
+    `starred=False` (2026-10-07) skips the starred part only: a bar pass
+    past its deadline (BARS_PASS_MAX_S) still refreshes the held part.
+    `stop` (2026-10-07), when it says True, ends the starred part before
+    the next starred symbol; the held part is never cut. `unreached` are
+    config symbols the pass's deadline cut: their venue owns the series,
+    so the keyless rows go only after the venue's newest bar, as for a
+    mute venue (_after_the_venues_last_bar).
     """
     from brain.synthesizer import _held_symbols
     from instruments.models import Instrument
     from market_data.public_feed import (SUPPORTED_ASSET_CLASSES,
                                          YF_UNAVAILABLE, public_feed_for)
 
-    out = {"symbols": 0, "bars": 0, "skipped": 0, "errors": 0, "no_client": 0}
+    out = {"symbols": 0, "bars": 0, "skipped": 0, "errors": 0, "no_client": 0,
+           "not_reached": 0}
     covered = covered or set()
+    unreached = set(unreached or ())
     classes = sorted(SUPPORTED_ASSET_CLASSES | {"crypto"})
     skip = set(covered) | set(YF_UNAVAILABLE)
     held = [i for i in (Instrument.objects
@@ -597,12 +825,21 @@ def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
                         .order_by("symbol"))
             if i.symbol not in skip]
     skip.update(i.symbol for i in held)
-    starred = [i for i in (Instrument.objects
-                           .filter(is_watchlist=True, is_active=True,
-                                   asset_class__in=classes)
-                           .order_by("symbol"))
-               if i.symbol not in skip][:WATCHLIST_BAR_CAP]
-    for inst in held + starred:
+    stars = [i for i in (Instrument.objects
+                         .filter(is_watchlist=True, is_active=True,
+                                 asset_class__in=classes)
+                         .order_by("symbol"))
+             if i.symbol not in skip][:WATCHLIST_BAR_CAP] if starred else []
+    for n, inst in enumerate(held + stars):
+        # THE STARRED PART STOPS SYMBOL BY SYMBOL (2026-10-07): read once
+        # before it, the deadline let thirty starred symbols run past the
+        # task's hard limit, which kills the pass before its last line.
+        if n >= len(held) and stop is not None and stop():
+            out["not_reached"] = len(held) + len(stars) - n
+            logger.warning("[bars] the starred watchlist stopped at the "
+                           "pass's deadline: %d starred symbol(s) not "
+                           "reached", out["not_reached"])
+            break
         client = public_feed_for(inst.asset_class)
         if client is None:
             out["no_client"] += 1
@@ -620,6 +857,8 @@ def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
                 out["errors"] += 1
                 continue
             _note_answer(inst.symbol, interval, rows)
+            if inst.symbol in unreached:
+                rows = _after_the_venues_last_bar(inst, interval, rows)
             written, skipped = _upsert_rows(inst, interval, rows, source)
             out["bars"] += written
             out["skipped"] += skipped
@@ -630,31 +869,141 @@ def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
     return out
 
 
+class _HeldRows:
+    """One REAL row's symbol that no enabled LIVE config covers (the manual
+    lane, a braked or disabled config, a paper-only config): fetched from
+    that config's own venue, first in the pass, never cut by the
+    deadline."""
+
+    def __init__(self, cfg, symbol, asset_class):
+        self._cfg = cfg
+        self.id = cfg.id
+        self.user = cfg.user
+        self.mode = "live"
+        self.asset_class = asset_class or cfg.asset_class
+        self.symbols = [symbol]
+
+    def __getattr__(self, name):          # market_type, extras, capital...
+        return getattr(self._cfg, name)
+
+
+def _held_real_rows(live_covered) -> list:
+    """_HeldRows for every OPEN or CLOSE_PENDING real row whose symbol no
+    enabled LIVE config covers, one per (config, symbol). Never raises.
+
+    REAL ROWS FROM THEIR OWN VENUE (2026-10-07). The manual lane
+    (`symbols=[]`), a braked or disabled config and a paper-only config
+    left a real row with the watchlist's keyless bars only, regular
+    session: the stop eToro filled in the extended session (NVDA #131,
+    PG #138, AMZN #140) left no bar the reconcile's pricing could read."""
+    try:
+        from bot_program.models import AssetBotTrade
+        from instruments.models import Instrument
+        out, seen = [], set()
+        rows = (AssetBotTrade.objects
+                .filter(status__in=("OPEN", "CLOSE_PENDING"), paper=False)
+                .exclude(symbol__in=list(live_covered))
+                .select_related("config__user").order_by("symbol", "id"))
+        for t in rows:
+            key = (t.config_id, t.symbol)
+            if not t.symbol or key in seen:
+                continue
+            seen.add(key)
+            inst = Instrument.objects.filter(symbol=t.symbol).first()
+            out.append(_HeldRows(t.config, t.symbol,
+                                 getattr(inst, "asset_class", "")))
+        return out
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[bars] the held real rows could not be listed: %s", e)
+        return []
+
+
 def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dict:
     """Refresh bars for every enabled AssetBotConfig, then for held and
-    starred instruments the fleet does not already cover."""
+    starred instruments the fleet does not already cover.
+
+    One pass (2026-10-07): real rows no enabled live config covers first
+    (never cut), then live configs, then paper ones, then the watchlist's
+    held part, then its starred part. Configs and the starred part stop at
+    BARS_PASS_MAX_S, symbol by symbol; the held part is never cut, and a
+    held symbol on a config the deadline cut is the watchlist's. eToro's
+    candles follow _CandlePass, and their summary is said before the
+    watchlist."""
     from bot_program.models import AssetBotConfig
 
     totals = {"configs": 0, "symbols": 0, "bars": 0, "skipped": 0, "errors": 0,
-              "no_client": 0, "fallback": 0}
-    covered: set = set()
-    for cfg in (AssetBotConfig.objects.filter(enabled=True)
-                .select_related("user")):
-        totals["configs"] += 1
-        covered.update(s for s in (cfg.symbols or []) if s)
+              "no_client": 0, "fallback": 0, "deduped": 0, "not_reached": 0}
+    state = _CandlePass()
+    # Live configs first: the eToro budget of the pass goes to the bars
+    # real money decides on before the paper fleet's.
+    configs = sorted(AssetBotConfig.objects.filter(enabled=True)
+                     .select_related("user"),
+                     key=lambda c: getattr(c, "mode", "") != "live")
+    live_covered = {s for c in configs if getattr(c, "mode", "") == "live"
+                    for s in (c.symbols or []) if s}
+    covered = {s for c in configs for s in (c.symbols or []) if s}
+    keys = ("symbols", "bars", "skipped", "errors", "no_client",
+            "fallback", "deduped", "not_reached")
+    # REAL ROWS NO ENABLED LIVE CONFIG COVERS, FIRST, AND NEVER CUT.
+    for held in _held_real_rows(live_covered):
         try:
-            res = refresh_bars_for_config(cfg, intervals=intervals, limit=limit)
+            res = refresh_bars_for_config(held, intervals=intervals,
+                                          limit=limit, pass_state=state,
+                                          cut=False)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("[bars] held %s failed: %s", held.symbols, e)
+            totals["errors"] += 1
+            continue
+        covered.update(held.symbols)
+        for k in keys:
+            totals[k] += res.get(k, 0)
+    for cfg in configs:
+        totals["configs"] += 1
+        if state.past_deadline():
+            totals["not_reached"] += len(cfg.symbols or [])
+            state.cut.update(s for s in (cfg.symbols or []) if s)
+            continue
+        try:
+            res = refresh_bars_for_config(cfg, intervals=intervals,
+                                          limit=limit, pass_state=state)
         except Exception as e:
             logger.exception("[bars] config %s failed: %s", cfg.id, e)
             totals["errors"] += 1
             continue
-        for k in ("symbols", "bars", "skipped", "errors", "no_client",
-                  "fallback"):
+        for k in keys:
             totals[k] += res.get(k, 0)
 
+    # WHAT THE DEADLINE CUT IS NOT COVERED (review, 2026-10-07). `covered`
+    # held every enabled config's symbols, reached or not, so an OPEN row
+    # on a config the deadline cut (paper, or real on a live config: no D8
+    # row) got no bar from any path in that pass, while the WARNING below
+    # said held symbols are still refreshed. A cut symbol no config or
+    # held row reached goes back to the watchlist's held part, which writes
+    # it after the venue's newest bar.
+    unreached = state.cut - state.reached
+    covered -= unreached
+    late = state.past_deadline()
+    if late:
+        logger.warning("[bars] the pass reached %.0fs: %d config symbol(s) "
+                       "not reached and the starred watchlist skipped; held "
+                       "symbols are still refreshed", BARS_PASS_MAX_S,
+                       totals["not_reached"])
+    # eToro's part of the pass is over: its summary is said BEFORE the
+    # watchlist (review, 2026-10-07), whose held part is never cut, so a
+    # hard kill there cannot drop the lines operator checks #3 and #4 read.
+    totals["etoro_asked"] = state.asked
+    totals["etoro_left"] = state.left
+    totals["etoro_stopped"] = state.words()
+    if state.stopped:
+        logger.warning("[bars] eToro was asked no more candles this pass "
+                       "(%s): %d candle read(s) not asked, sent to the public "
+                       "feed instead; %d asked", state.words(), state.left,
+                       state.asked)
     try:
         wl = refresh_watchlist_bars(intervals=intervals, limit=limit,
-                                    covered=covered)
+                                    covered=covered, starred=not late,
+                                    stop=state.past_deadline,
+                                    unreached=unreached)
         for k in ("symbols", "bars", "skipped", "errors", "no_client",
                   "fallback"):
             totals[k] += wl.get(k, 0)

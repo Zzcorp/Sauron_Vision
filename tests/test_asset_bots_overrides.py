@@ -257,3 +257,16 @@ class BeatScheduleTests(TestCase):
         sched = entry["schedule"]
         if isinstance(sched, (int, float)):
             self.assertEqual(sched, 300.0)
+
+    def test_the_tick_entry_keeps_expire_seconds_280(self):
+        """The beat runs django_celery_beat's DatabaseScheduler, whose
+        ModelEntry keeps only `expire_seconds` of an entry's options: the
+        tick's `expires: 280` alone was dropped on its way to the queue
+        (2026-10-07)."""
+        from django_celery_beat.schedulers import ModelEntry
+
+        from config.celery import app
+        options = app.conf.beat_schedule["tick-asset-bots"]["options"]
+        self.assertEqual(options["expires"], 280)
+        kept = ModelEntry._unpack_options(**options)
+        self.assertEqual(kept["expire_seconds"], 280)

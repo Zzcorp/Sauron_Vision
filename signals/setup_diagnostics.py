@@ -114,7 +114,7 @@ def _classify(res: dict) -> tuple:
     if res.get("measured") is False:
         return "unevaluable", str(details.get("reason") or "the evaluator did not measure")
     # The SAME statement, written one level down. `_eval_seasonality`,
-    # `_eval_funding_carry` (twice) and `_eval_earnings_surprise` all say
+    # `_eval_funding_carry` (twice) and `_eval_pead` all say
     # `measured: False` inside `details` rather than at the top level, where
     # `scan_setup` reads it — so the scanner scores those refusals as measured
     # zeros (that is the scanner's own bug, and it is not this module's to

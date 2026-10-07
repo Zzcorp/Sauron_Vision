@@ -63,10 +63,15 @@ class RiskEngine:
 
     def _parametric_var(self, returns, confidence, horizon):
         """Parametric (Gaussian) VaR."""
-        from scipy.stats import norm
+        # The standard library's normal quantile, not scipy's: scipy is not
+        # in requirements.txt, so `method=parametric` raised
+        # ModuleNotFoundError (a 500 on /api/risk/?action=var once the
+        # book had positions and 30 returns). Agrees with norm.ppf to
+        # ~1e-15; outside 0 < confidence < 1 it raises StatisticsError.
+        from statistics import NormalDist
         mean = np.mean(returns)
         std = np.std(returns)
-        z_score = norm.ppf(1 - confidence)
+        z_score = NormalDist().inv_cdf(1 - confidence)
         daily_var = mean + z_score * std
         return daily_var * np.sqrt(horizon)
 

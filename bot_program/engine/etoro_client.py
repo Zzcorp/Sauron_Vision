@@ -155,7 +155,9 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 import uuid
+import zlib
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -182,8 +184,11 @@ CANDLES_MAX = 1000
 #: 2026-09-23), one per (world, instrumentId), kept for the UTC day they
 #: were read. MODULE-level on purpose: the router builds a fresh
 #: EtoroTrader per call (broker_router.client_for_symbol), so an instance
-#: cache would POST on every tick; config/settings.py defines no CACHES,
-#: so Django's cache is the same per-process memo with more machinery.
+#: cache would POST on every tick. Per process, not in Django's cache: a
+#: choice, not a constraint — production's cache IS Redis
+#: (config/settings.py CACHES; LocMem only under DEBUG with no Redis).
+#: This line said "config/settings.py defines no CACHES" until 2026-10-07,
+#: when the /search ids were first shared there (SEARCH_SHARED_MEMO).
 #: Per day is a design choice — intraday drift is unmeasured. THREE
 #: STATES in the value: a row dict (read), the literal ELIGIBILITY_ABSENT
 #: (a 200 that listed no row for this id — not re-asked today), nothing
@@ -211,7 +216,8 @@ _ELIGIBILITY: dict = {}
 #: process ask /search again for every symbol in the same minute after
 #: 00:00 UTC (the review of 2026-10-06), the burst this memo exists to
 #: remove. The date stored beside the id says when it was read; a restart
-#: or a deploy empties the memo. SEARCH_MEMO is read at call time:
+#: or a deploy empties the memo (its shared copy in Redis survives both:
+#: SEARCH_SHARED_MEMO, 2026-10-07). SEARCH_MEMO is read at call time:
 #: tests/__init__.py turns it off for a suite whose fake wires count
 #: /search calls, and tests/test_etoro_search_memo.py turns it on.
 SEARCH_MEMO = True
@@ -387,6 +393,339 @@ LEVERAGE_MAX = 30
 #: eToro is sick.
 READ_RETRIES = 1
 READ_RETRY_DELAY_S = 0.8
+
+#: Header names that may carry eToro's quota (2026-10-07). Nothing in the
+#: tree has recorded one: the 429's headers and body are STILL UNMEASURED
+#: (deploy/ETORO_DEPARTURE.md:643). Kept off every answer _read receives so
+#: the bar refresh can print them once per pass and a 429 logs them.
+RATE_HEADER_WORDS = ("rate", "limit", "retry", "quota", "remaining")
+
+
+def _rate_headers(r) -> dict:
+    """{name: value[:60]} of the answer's headers whose name looks like a
+    quota's, {} when it has none or no headers at all. Never raises."""
+    try:
+        headers = getattr(r, "headers", None)
+        if not headers or not hasattr(headers, "items"):
+            return {}
+        return {str(k): str(v)[:60] for k, v in headers.items()
+                if any(w in str(k).lower() for w in RATE_HEADER_WORDS)}
+    except Exception:  # noqa: BLE001 — a header we cannot read is no header
+        return {}
+
+
+#: THE 429 PAUSE (2026-10-07). A 429 on a trading-lane market-data read
+#: (/rates, /search) is eToro's quota saying "not now", and every further
+#: ask inside the same seconds meets it again. On 2026-10-06 eToro (live)
+#: went SICK at 23:38:34 UTC on seven /search 429s in one second, most
+#: likely asked by the bar refresh (a BACKGROUND read since PR50: never
+#: noted, never paused — see klines). After a trading-lane 429 this
+#: PROCESS grants itself ONE short pause per world: the ENTRY side
+#: (propose, execute, the last look) reads it through
+#: venue_health.pause_s and does not ask while it runs. The adapter itself
+#: never refuses a read for it: the manage tick's marks, closes, the kill
+#: switch, the reconcile, the TAKE TRADE lane and etoro_smoke go to the
+#: wire as before. ONE pause per episode: a world refused again within
+#: RATE_PAUSE_STREAK_S of its last pause's END gets none, so a venue that
+#: keeps refusing is noted on every read and SICK stays reachable. Per
+#: process, keyed by world like _SEARCH_IDS; RATE_PAUSE is read at call
+#: time (tests/__init__.py turns it off).
+RATE_PAUSE = True
+#: A GUESS, said as one: eToro's 429 body and headers are unmeasured
+#: (deploy/ETORO_DEPARTURE.md §7 "STILL UNMEASURED ... the 429 body").
+#: The INFO line _on_429 writes records them; replace this with the
+#: measurement.
+RATE_PAUSE_FALLBACK_S = 30.0
+#: The most any Retry-After may buy: under half the 300 s fleet beat.
+RATE_PAUSE_MAX_S = 120.0
+#: 1.5 beats of the 300 s fleet pass, so the next pass's entry reads are
+#: noted.
+RATE_PAUSE_STREAK_S = 450.0
+#: The reads whose 429 grants the pause: trading-lane market data only.
+#: NOT the candles (a background read), the account, the portfolio or the
+#: eligibility.
+RATE_PAUSE_SITES = frozenset({"ticker", "search"})
+#: world -> _mono() at which the last pause granted ends.
+_RATE_PAUSE: dict = {}
+
+
+def _mono() -> float:
+    """The pause's clock (a seam: tests move it without moving every other
+    caller of time.monotonic)."""
+    return time.monotonic()
+
+
+def _retry_after_s(r) -> tuple:
+    """(seconds or None, the raw header or None) off a 429 response.
+    Delta-seconds only; anything else (an HTTP-date, garbage) is None with
+    the raw value kept for the note. Never raises."""
+    try:
+        headers = getattr(r, "headers", None)
+        raw = headers.get("Retry-After") if headers is not None else None
+        if not isinstance(raw, str) or not raw.strip():
+            return None, None
+        try:
+            v = float(raw.strip())
+        except ValueError:
+            return None, raw.strip()[:40]
+        if not math.isfinite(v) or v < 0:
+            return None, raw.strip()[:40]
+        return v, raw.strip()[:40]
+    except Exception:  # noqa: BLE001
+        return None, None
+
+
+def _grant_rate_pause(world: str, wait) -> str:
+    """Grant `world` its pause unless one runs or the last one ended less
+    than RATE_PAUSE_STREAK_S ago; the words say which. Never raises."""
+    try:
+        now = _mono()
+        end = _RATE_PAUSE.get(world)
+        if end is not None and now < end:
+            return f"pause running ({end - now:.0f}s left)"
+        if end is not None and now - end <= RATE_PAUSE_STREAK_S:
+            return "refused again after its pause: not paused"
+        s = RATE_PAUSE_FALLBACK_S if wait is None else min(float(wait),
+                                                           RATE_PAUSE_MAX_S)
+        if s <= 0:
+            return "Retry-After 0: not paused"
+        _RATE_PAUSE[world] = now + s
+        return f"paused {s:.0f}s"
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+#: THE /search "NO" (2026-10-07). eToro's own 200 answer that it knows
+#: no instrument by a spelling (a LookupError from instrument_id, never a
+#: refusal: a 429, a 4xx, a 5xx, a transport error or a body of an
+#: unmeasured shape is never kept) was asked again on every call: every
+#: config listing such a symbol cost one /search per pass, every pass.
+#: Kept per (world, symbol) once eToro has said it TWICE at least
+#: SEARCH_NO_CONFIRM_S apart (one empty 200 is not trusted to blind a
+#: symbol for hours), then replayed for SEARCH_NO_TTL_S from the
+#: confirming answer — the bar refresh's own mute memo length
+#: (market_data/bot_bars.MUTE_VENUE_MEMO_S). Not aligned on 00:00 UTC:
+#: an aligned expiry made every process ask again in the same minute
+#: (the review of 2026-10-06, the /search memo above). A positive answer
+#: clears it; a restart or deploy empties it; only klines replays it
+#: (instrument_id(trust_no=True)), and propose_entry reads it through
+#: venue_health.kept_no — never a mark, a close or the reconcile.
+#: SEARCH_NO_MEMO is read at call time (tests/__init__.py turns it off).
+SEARCH_NO_MEMO = True
+SEARCH_NO_CONFIRM_S = 60.0
+SEARCH_NO_TTL_S = 6 * 3600.0
+#: (world, symbol) -> {"first": _mono(), "kept": _mono() or None,
+#: "words": str, "lone_id", "lone_spelling"}
+_SEARCH_NO: dict = {}
+
+
+def _search_no_replay(memo_key) -> "LookupError | None":
+    """The kept "no" for (world, symbol) as the LookupError to raise, or
+    None (nothing kept, not yet confirmed, or expired). Never raises."""
+    try:
+        hit = _SEARCH_NO.get(memo_key)
+        if not hit or hit.get("kept") is None:
+            return None
+        left = SEARCH_NO_TTL_S - (_mono() - float(hit["kept"]))
+        if left <= 0:
+            return None
+        err = LookupError(
+            f"{hit['words']} — eToro's answer twice; not asked again for "
+            f"{left / 60:.0f} min")
+        if hit.get("lone_id") is not None:
+            err.lone_id = hit["lone_id"]
+            err.lone_spelling = hit.get("lone_spelling")
+        return err
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _search_no_note(memo_key, err) -> None:
+    """Record eToro's "no" for (world, symbol): the first is only seen;
+    one SEARCH_NO_CONFIRM_S or more after it is kept. Never raises."""
+    try:
+        now = _mono()
+        hit = _SEARCH_NO.get(memo_key)
+        words = str(err)[:160]
+        lone = (getattr(err, "lone_id", None),
+                getattr(err, "lone_spelling", None))
+        if hit is None:
+            _SEARCH_NO[memo_key] = {"first": now, "kept": None,
+                                    "words": words, "lone_id": lone[0],
+                                    "lone_spelling": lone[1]}
+            return
+        kept = hit.get("kept")
+        if kept is None and now - float(hit["first"]) < SEARCH_NO_CONFIRM_S:
+            return
+        _SEARCH_NO[memo_key] = {"first": hit["first"], "kept": now,
+                                "words": words, "lone_id": lone[0],
+                                "lone_spelling": lone[1]}
+    except Exception:  # noqa: BLE001
+        pass
+
+
+#: THE SHARED /search-ID MEMO (2026-10-07, PR50 P5). _SEARCH_IDS lives
+#: and dies with its process: right after the PR49 deploy (2026-10-07
+#: ~12:3x UTC) the first fleet pass asked /search again for every
+#: unpinned symbol, and eToro (live) went SICK on three /search 429s. The
+#: same ids are now ALSO kept in Django's cache — Redis in production
+#: (config/settings.py CACHES), so every process and every deploy reads
+#: them — under SEARCH_SHARED_KEY, keyed (world, symbol) like _SEARCH_IDS
+#: (/market-data/ carries no world segment, the key does). Read after
+#: _SEARCH_IDS and before the kept "no" and /search (instrument_id).
+#: Written ONLY where _SEARCH_IDS is: an EXACT-spelling hit (_adopt) —
+#: never a lone result, an unknown spelling, a refusal or a pinned-owner
+#: conflict. A cached id is served only while it passes the wire's own
+#: checks today: the spelling it was read under is still VENUE_SPELLING's
+#: (a remap between deploys refuses it) and no OTHER pinned symbol owns
+#: it (_adopt's owner rule); a refused one sends the call to the wire.
+#: Any cache trouble — Redis down, a value of another shape, Django not
+#: configured — is a miss: the wire is asked as before; nothing here
+#: raises. Django is imported inside the helpers, so the adapter stays
+#: importable without it.
+#: THE EXPIRY, counted from the LAST read (2026-10-07, review). The ids
+#: are immutable, so no expiry would do for a right id; but a life
+#: counted from the WIRE write alone brought the burst back: a warm
+#: process never reads Redis again (_SEARCH_IDS answers first) and a
+#: shared hit used to leave the key's life untouched, so every id one
+#: pass wrote died 20-30 days after that pass whatever the deploys did,
+#: and the first deploy after asked /search for most of them at once —
+#: the burst this memo removes. So every shared hit RE-ARMS its key
+#: (_search_shared_touch) for SEARCH_SHARED_TTL_S less a cut of up to
+#: SEARCH_SHARED_SPREAD_S fixed by the key (crc32): a key lives 20-30 days
+#: past the last cold process that read it — it outlives any deploy
+#: cadence shorter than that — and the ones left unread that long expire
+#: at their own spread minutes, each asked again once.
+#: A WRONG id (a spelling eToro gave to another instrument) is bounded by
+#: the day it was read on the wire, not by the key's life: past
+#: SEARCH_SHARED_MAX_AGE_S less the same cut (80-90 days) an entry is a
+#: miss for a BACKGROUND read only (klines: paced, never noted, never
+#: pausing), whose exact answer rewrites it. A money read is still served
+#: from it, never paying a /search, and re-arms it, but leaves it out of
+#: _SEARCH_IDS, so its own process's next klines asks again. An old id no
+#: klines reads (a symbol off the bar refresh) is kept while it is used.
+#: SEARCH_SHARED_MEMO is read at call time: tests/__init__.py turns it
+#: off, tests/test_etoro_id_memo.py turns it on.
+SEARCH_SHARED_MEMO = True
+SEARCH_SHARED_TTL_S = 30 * 86400
+SEARCH_SHARED_SPREAD_S = 10 * 86400
+SEARCH_SHARED_MAX_AGE_S = 90 * 86400
+SEARCH_SHARED_KEY = "etoro_search_id:{world}:{symbol}"
+#: The cache keys this PROCESS wrote (or a test seeded): the suite deletes
+#: them (tests/test_etoro_client._clear_eligibility) — LocMem is kept
+#: across tests in one process.
+_SEARCH_SHARED_KEYS: set = set()
+
+
+def _search_shared_key(memo_key) -> str:
+    world, symbol = memo_key
+    return SEARCH_SHARED_KEY.format(world=world, symbol=symbol)
+
+
+def _search_shared_cut_s(cache_key: str) -> int:
+    """The part of SEARCH_SHARED_SPREAD_S fixed by the key (crc32), cut
+    from both the key's life and its age cap."""
+    spread = int(SEARCH_SHARED_SPREAD_S)
+    return zlib.crc32(cache_key.encode("utf-8")) % spread if spread > 0 else 0
+
+
+def _search_shared_life_s(cache_key: str) -> int:
+    """SEARCH_SHARED_TTL_S less the key's cut, so the ids one pass wrote
+    do not all expire together."""
+    return int(SEARCH_SHARED_TTL_S) - _search_shared_cut_s(cache_key)
+
+
+def _search_shared_max_age_s(cache_key: str) -> int:
+    """SEARCH_SHARED_MAX_AGE_S less the key's cut, so the ids one pass
+    read are not all asked again on the same day."""
+    return int(SEARCH_SHARED_MAX_AGE_S) - _search_shared_cut_s(cache_key)
+
+
+def _search_shared_stale(memo_key, read_on) -> bool:
+    """True when the entry was read on the wire longer ago than its age
+    cap (from 00:00 UTC of `read_on`). A date that cannot be read counts
+    as today, as the read-through files it. Never raises."""
+    try:
+        day = datetime.fromisoformat(str(read_on)).date()
+        born = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - born).total_seconds()
+        return age > _search_shared_max_age_s(_search_shared_key(memo_key))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _search_shared_get(memo_key, key: str, wire: str, *,
+                       then: str = "asking the wire") -> "tuple | None":
+    """(iid, spelling, read_on) the shared memo holds for (world, symbol)
+    and may serve, or None: the switch off, nothing kept, a value of
+    another shape, a spelling that is no longer `wire`, an id another
+    pinned symbol owns, or a cache that could not be read. `then` is what
+    the caller does on a refusal, in the words logged (2026-10-07,
+    review: search_no asks no wire). Never raises."""
+    if not SEARCH_SHARED_MEMO:
+        return None
+    try:
+        from django.core.cache import cache
+        value = cache.get(_search_shared_key(memo_key))
+    except Exception as e:  # noqa: BLE001 — a cache down is a miss
+        log.warning("eToro shared /search memo unreadable for %s (%s) — %s",
+                    key, type(e).__name__, then)
+        return None
+    try:
+        if not isinstance(value, dict):
+            return None
+        iid, spelled = value.get("iid"), value.get("spelled")
+        if (isinstance(iid, bool) or not isinstance(iid, int) or iid <= 0
+                or not isinstance(spelled, str)):
+            return None
+        if spelled != wire:
+            log.info("eToro shared /search memo: %s was read as %r, now "
+                     "asked as %r — refused, %s", key, spelled, wire, then)
+            return None
+        owner = next((k for k, v in VENUE_ID_PINS.items() if v == iid),
+                     None)
+        if owner is not None and owner != key:
+            log.info("eToro shared /search memo: id %s for %s is pinned to "
+                     "%s (VENUE_ID_PINS) — refused, %s", iid, key, owner,
+                     then)
+            return None
+        return iid, spelled, value.get("read_on")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _search_shared_touch(memo_key) -> None:
+    """Re-arm the key of a shared hit for its full life, counted from now
+    (2026-10-07, review). Never raises: a lost touch leaves the key's
+    earlier life."""
+    if not SEARCH_SHARED_MEMO:
+        return
+    try:
+        from django.core.cache import cache
+        cache_key = _search_shared_key(memo_key)
+        cache.touch(cache_key, _search_shared_life_s(cache_key))
+    except Exception as e:  # noqa: BLE001
+        log.warning("eToro shared /search memo not re-armed for %s (%s)",
+                    memo_key, type(e).__name__)
+
+
+def _search_shared_put(memo_key, iid: int, spelled: str, today) -> None:
+    """Keep an EXACT-spelling id for (world, symbol) in the shared memo.
+    Called from _adopt only. Never raises."""
+    if not SEARCH_SHARED_MEMO:
+        return
+    try:
+        cache_key = _search_shared_key(memo_key)
+        _SEARCH_SHARED_KEYS.add(cache_key)
+        from django.core.cache import cache
+        cache.set(cache_key,
+                  {"iid": int(iid), "spelled": str(spelled),
+                   "read_on": str(today)},
+                  _search_shared_life_s(cache_key))
+    except Exception as e:  # noqa: BLE001 — a lost write is a later miss
+        log.warning("eToro shared /search memo not written for %s (%s)",
+                    memo_key, type(e).__name__)
+
 
 #: Transport failures on the order POST after which NOTHING left the box:
 #: the connection was never made (a connect timeout, a TLS handshake that
@@ -593,6 +932,16 @@ class EtoroTrader:
         # the eligibility row's `symbol`. etoro_smoke prints it beside
         # the id; nothing on the order path reads it.
         self._venue_spelling: dict = {}
+        # A BACKGROUND read (klines, for the bar refresh) notes nothing on
+        # the venue's health and grants no 429 pause: see klines.
+        self._background = False
+        # The quota-looking headers of the last answer _read received.
+        self.last_rate_headers: dict = {}
+        # Wire requests _read sent (each attempt, retries included) and the
+        # site of the last one: the bar refresh paces on the first and
+        # names the refused endpoint from the second.
+        self.wire_reads = 0
+        self.last_read = ""
 
     # ── plumbing ───────────────────────────────────────────────────────────
 
@@ -628,12 +977,80 @@ class EtoroTrader:
         """Note a failure that is the VENUE's (a 429, a 5xx, a request that
         never came back) on the platform's memory of this world's health
         (bot_program/venue_health.note). Imported lazily so the adapter
-        stays importable without Django; never raises."""
+        stays importable without Django; never raises.
+
+        Not while a BACKGROUND read runs (klines): the bar refresh's
+        refusals are its own, it stops at its first 429 and fills from the
+        public feed, and they must not hold real entries."""
+        if getattr(self, "_background", False):
+            log.info("eToro %s failed (%s) during a background read — not "
+                     "noted on the venue's health", where,
+                     code or str(detail or "")[:80] or "no answer")
+            return
         try:
             from bot_program.venue_health import note
             note("etoro", self._world(), where, code=code, detail=detail)
         except Exception as e:  # noqa: BLE001 — a lost note must not raise
             log.debug("eToro health note (%s) skipped: %s", where, e)
+
+    def _on_429(self, where: str, r) -> str:
+        """A 429 at `where`: grant the pause when `where` is a pause site
+        AND this is not a background read, log the quota headers (the
+        measurement RATE_PAUSE_FALLBACK_S waits for), and return the words
+        for the health note. Never raises."""
+        try:
+            wait, raw = _retry_after_s(r)
+            said = (_grant_rate_pause(self._world(), wait)
+                    if RATE_PAUSE and where in RATE_PAUSE_SITES
+                    and not getattr(self, "_background", False) else "")
+            log.info("eToro %s answered 429 (%s; %s) quota headers %s",
+                     where, f"Retry-After {raw}" if raw else "no Retry-After",
+                     said or "no pause", _rate_headers(r))
+            return "; ".join(x for x in (
+                f"Retry-After {raw}" if raw else "no Retry-After", said,
+                str(getattr(r, "text", "") or "")[:60]) if x)
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def rate_pause_s(self) -> float:
+        """Seconds left of this process's 429 pause for this world; 0.0
+        when RATE_PAUSE is off or none runs. ticker(), instrument_id()
+        and every write NEVER read it: the callers that may wait do
+        (bot_program/venue_health.pause_s)."""
+        if not RATE_PAUSE:
+            return 0.0
+        end = _RATE_PAUSE.get(self._world())
+        if end is None:
+            return 0.0
+        return max(0.0, float(end) - _mono())
+
+    def search_no(self, symbol: str) -> str:
+        """eToro's kept "no" for `symbol` in this world (the words), or ""
+        — read by the callers that may trust it (propose_entry through
+        venue_health.kept_no; klines through instrument_id(trust_no=True)).
+        A pinned or already resolved symbol has none, nor one the shared
+        memo holds (SEARCH_SHARED_MEMO, 2026-10-07: asked only when a "no"
+        is kept, so a symbol with none costs no cache read). Never
+        raises."""
+        try:
+            if not SEARCH_NO_MEMO:
+                return ""
+            key = str(symbol).upper()
+            if key in self._ids or key in VENUE_ID_PINS:
+                return ""
+            memo_key = (self._world(), key)
+            if SEARCH_MEMO and _SEARCH_IDS.get(memo_key):
+                return ""
+            err = _search_no_replay(memo_key)
+            if err is None:
+                return ""
+            if _search_shared_get(memo_key, key,
+                                  VENUE_SPELLING.get(key, key),
+                                  then='the kept "no" stands') is not None:
+                return ""
+            return str(err)
+        except Exception:  # noqa: BLE001
+            return ""
 
     def _read(self, method: str, url: str, *, where: str, **kw):
         """ONE read, with ONE bounded retry (READ_RETRIES) after
@@ -642,21 +1059,28 @@ class EtoroTrader:
         caller's to read. Returns the last response, or raises the last
         transport error. The FINAL failure — a raise, a 429 or a 5xx — is
         noted on the venue's health; a retry that answered is not. Reads
-        only: the order POST never goes through here."""
-        import time
+        only: the order POST never goes through here. A 429 also goes
+        through _on_429 (the pause, the quota's headers). A BACKGROUND
+        read notes nothing and grants no pause. Every attempt counts in
+        wire_reads; last_read names the site, last_rate_headers keeps the
+        last answer's quota-looking headers (2026-10-07)."""
         fn = getattr(self._sess(), method.lower())
         last_exc = None
+        self.last_read = where
         for attempt in range(1 + READ_RETRIES):
             r = None
+            self.wire_reads = getattr(self, "wire_reads", 0) + 1
             try:
                 r = fn(url, timeout=self.timeout, **kw)
                 last_exc = None
             except TRANSPORT as e:
                 last_exc = e
             if r is not None:
+                self.last_rate_headers = _rate_headers(r)
                 code = int(getattr(r, "status_code", 0) or 0)
                 if code == 429:
-                    self._note_health(where, code=code)
+                    said = self._on_429(where, r)
+                    self._note_health(where, code=code, detail=said)
                     return r
                 if code < 500:
                     return r
@@ -797,7 +1221,7 @@ class EtoroTrader:
 
     # ── instruments (fact 3) ───────────────────────────────────────────────
 
-    def instrument_id(self, symbol: str) -> int:
+    def instrument_id(self, symbol: str, *, trust_no: bool = False) -> int:
         """The immutable integer id for `symbol`, resolved once and cached.
 
         `symbol` is the PLATFORM spelling and stays the key of the three
@@ -819,6 +1243,18 @@ class EtoroTrader:
         would have been priced and traded under an id nobody named. The
         error names both spellings and the id, carries them as `lone_id`
         and `lone_spelling`, and nothing is cached.
+
+        `trust_no` (2026-10-07): replay eToro's kept "no" for this spelling
+        (_SEARCH_NO, said twice a minute or more apart) instead of asking
+        /search again. Only klines passes it; a mark, a close, an order and
+        the eligibility read always ask the wire, and a positive answer
+        clears the kept "no".
+
+        The read order (2026-10-07, P5): this instance's `_ids`, the pins,
+        this process's _SEARCH_IDS, the SHARED memo in Redis
+        (SEARCH_SHARED_MEMO; a hit re-arms its key, and one read on the
+        wire past its age cap is a miss for a background read only), the
+        kept "no" (trust_no only), then /search.
         """
         key = str(symbol).upper()
         if key in self._ids:
@@ -841,6 +1277,55 @@ class EtoroTrader:
                 self._symbols[iid] = key
                 self._venue_spelling[iid] = spelled
                 return iid
+        # THE SHARED MEMO (2026-10-07, P5): an exact-spelling id another
+        # process (or this one before a deploy) read, served only while it
+        # passes the wire's own checks; it fills this process's layers and
+        # clears a kept "no", as a positive answer from the wire does.
+        # `then` (2026-10-07, review): what a miss leads to, in the words a
+        # refused entry logs — on klines a kept "no" is replayed, no wire.
+        then = ('the kept "no" stands'
+                if SEARCH_NO_MEMO and trust_no
+                and _search_no_replay(memo_key) is not None
+                else "asking the wire")
+        shared = _search_shared_get(memo_key, key, wire, then=then)
+        stale = False
+        if shared is not None:
+            stale = _search_shared_stale(memo_key, shared[2])
+            if stale and getattr(self, "_background", False):
+                # Past its age cap (2026-10-07, review): a BACKGROUND read
+                # asks again — paced, never noted, never pausing — and the
+                # wire's exact answer rewrites the entry.
+                log.info("eToro %s (%s): the shared /search memo's id %s "
+                         "was read %s, past its age cap — %s", key,
+                         memo_key[0], shared[0], shared[2], then)
+                shared = None
+        if shared is not None:
+            iid, spelled, read_on = shared
+            self._ids[key] = iid
+            self._symbols[iid] = key
+            self._venue_spelling[iid] = spelled
+            if SEARCH_MEMO and not stale:
+                try:
+                    day = datetime.fromisoformat(str(read_on)).date()
+                except (TypeError, ValueError):
+                    day = today
+                _SEARCH_IDS[memo_key] = (day, iid, spelled)
+            _SEARCH_NO.pop(memo_key, None)
+            # Re-armed (2026-10-07, review): the key's life runs from the
+            # last read that used it, never from its wire write alone.
+            _search_shared_touch(memo_key)
+            # An old entry served to a money read stays out of _SEARCH_IDS
+            # (its process's next klines asks again) and so is read here
+            # on every call until then: its line is DEBUG.
+            log.log(logging.DEBUG if stale else logging.INFO,
+                    "eToro %s (%s): id %s from the shared /search memo "
+                    "(read %s%s) — no /search", key, memo_key[0], iid,
+                    read_on or "?", ", past its age cap" if stale else "")
+            return iid
+        if SEARCH_NO_MEMO and trust_no:
+            kept_no = _search_no_replay(memo_key)
+            if kept_no is not None:
+                raise kept_no
         r = self._read("GET", f"{BASE}/api/v1/market-data/search",
                        params={"internalSymbolFull": wire},
                        headers=self._headers(), where="search")
@@ -849,6 +1334,23 @@ class EtoroTrader:
         items = data if isinstance(data, list) else (
             data.get("items") or data.get("instruments") or data.get("data")
             or ([data] if data.get("instrumentId") else []))
+        # eToro's own "no" is kept only off a body of a MEASURED shape: a
+        # list, or a dict carrying one under a believed key, or one item.
+        answered = isinstance(data, list) or (
+            isinstance(data, dict)
+            and (any(isinstance(data.get(k), list)
+                     for k in ("items", "instruments", "data"))
+                 or bool(data.get("instrumentId"))))
+        try:
+            return self._adopt(items, key, wire, memo_key, today)
+        except LookupError as e:
+            if SEARCH_NO_MEMO and answered and type(e) is LookupError:
+                _search_no_note(memo_key, e)
+            raise
+
+    def _adopt(self, items, key: str, wire: str, memo_key, today) -> int:
+        """The id eToro answered for `wire` among /search's items, cached
+        and memoised; or the LookupError that says why none is adopted."""
         sym, iid = "", None
         for it in items:
             sym = str(it.get("internalSymbolFull") or it.get("symbol")
@@ -871,6 +1373,9 @@ class EtoroTrader:
                 self._venue_spelling[iid] = sym
                 if SEARCH_MEMO:
                     _SEARCH_IDS[memo_key] = (today, iid, sym)
+                # Its shared copy (P5, 2026-10-07): the same exact hit only.
+                _search_shared_put(memo_key, iid, sym, today)
+                _SEARCH_NO.pop(memo_key, None)
                 return iid
         if len(items) == 1 and iid:
             err = LookupError(
@@ -1040,14 +1545,27 @@ class EtoroTrader:
         closeTime, quoteVol, trades, takerBase, takerQuote, ignore].
         Oldest first, like every other adapter. The runner reads only
         o/h/l/c/v; the tail is parity padding."""
-        iid = self.instrument_id(symbol)
         enum = INTERVAL_MAP.get(interval, "FifteenMinutes")
         span_ms = INTERVAL_SECONDS.get(interval, 900) * 1000
         n = max(1, min(int(limit), CANDLES_MAX))
-        r = self._sess().get(
-            f"{BASE}/api/v1/market-data/instruments/{iid}/history/candles"
-            f"/asc/{enum}/{n}",
-            headers=self._headers(), timeout=self.timeout)
+        # A BACKGROUND read (2026-10-07, PR50): the bar refresh's candles,
+        # and the /search a cold id costs, go through _read (one retry on a
+        # 5xx, the quota's headers kept, the wire requests counted) but
+        # note nothing on the venue's health and grant no 429 pause: the
+        # bars have the public feed behind them, stop at their first 429 on
+        # their own (market_data/bot_bars) and must never hold a real
+        # entry. A kept "no" is replayed here (trust_no), never on a money
+        # read.
+        was, self._background = getattr(self, "_background", False), True
+        try:
+            iid = self.instrument_id(symbol, trust_no=True)
+            r = self._read(
+                "GET",
+                f"{BASE}/api/v1/market-data/instruments/{iid}/history/candles"
+                f"/asc/{enum}/{n}",
+                headers=self._headers(), where="candles")
+        finally:
+            self._background = was
         r.raise_for_status()
         data = r.json() or {}
         # MEASURED 2026-09-23 on the real key (GLDM, FourHours, 5):

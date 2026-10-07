@@ -447,7 +447,7 @@ class ClassifierTests(TestCase):
     """'could not evaluate' vs 'evaluated and refused' — the whole point.
 
     Four evaluators (`_eval_seasonality`, `_eval_funding_carry` twice,
-    `_eval_earnings_surprise`) write `measured: False` INSIDE `details`
+    `_eval_pead`) write `measured: False` INSIDE `details`
     instead of at the top level where `scan_setup` reads it. The scanner
     therefore scores those refusals as measured zeros — its own bug, and not
     this module's to fix — but the evaluator HAS made a machine-readable

@@ -73,20 +73,11 @@ DISCOVERY_TTL_DAYS = 30               # auto-expire stale proposed discoveries
 
 # ── Feature extractors (date-dispatching) ───────────────────────────────────
 
-# Each extractor is `(instrument, date) -> bool`. Date is a `datetime` or `date`;
-# we coerce to a tz-aware datetime at midnight UTC if needed.
+# Each extractor is `(instrument, dt) -> bool`. `dt` is a datetime; `_aware`
+# makes a naive one aware in the current time zone (UTC, settings.TIME_ZONE).
 
 FeatureFn = Callable[..., bool]
 FEATURE_EXTRACTORS: dict[str, FeatureFn] = {}
-
-
-def _to_datetime(date_or_dt):
-    if isinstance(date_or_dt, datetime):
-        return date_or_dt
-    # Treat as `date` → midnight UTC of that day.
-    from datetime import time
-    return datetime.combine(date_or_dt, time(0, 0), tzinfo=timezone.utc.utcoffset(None) and None or None) \
-        if False else datetime.combine(date_or_dt, datetime.min.time())
 
 
 def _aware(dt):

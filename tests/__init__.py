@@ -27,6 +27,12 @@ _entry_timing.GATE = False
 # would read another test's id. tests/test_etoro_search_memo.py turns it
 # back on.
 _etoro_client.SEARCH_MEMO = False
+_etoro_client.SEARCH_SHARED_MEMO = False  # its Redis copy (2026-10-07)
+# THE 429 PAUSE and THE /search "NO" (2026-10-07): per-process memories a
+# fake wire's 429 or empty answer would leak into the next test.
+# tests/test_etoro_rate_pause.py turns both back on.
+_etoro_client.RATE_PAUSE = False
+_etoro_client.SEARCH_NO_MEMO = False
 # SIZE BY PROOF (2026-10-07, backtester/proving/proof.py): the proving
 # ground's verdict would cut or refuse every live entry this suite sizes —
 # hundreds of them, on rules no proving run here ever judged, each sized

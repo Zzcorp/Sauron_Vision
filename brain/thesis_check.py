@@ -63,7 +63,7 @@ can say whether the holds paid and the exits saved anything.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import timedelta, timezone as dt_timezone
 
 from django.utils import timezone
 
@@ -450,7 +450,12 @@ def care_stop(meta: dict, now=None, *, ttl_hours=THESIS_STOP_TTL_HOURS):
     if at is None:
         return None
     if at.tzinfo is None:
-        at = at.replace(tzinfo=timezone.utc)
+        # Read a naive time as UTC (settings.TIME_ZONE). django.utils
+        # .timezone.utc left Django in 5.0: a naive `at` raised
+        # AttributeError here, which escaped plan() into care()'s except
+        # and skipped the row's whole care plan, not just this stop. No
+        # writer stores a naive time today (write_on_row: aware ISO).
+        at = at.replace(tzinfo=dt_timezone.utc)
     now = now or timezone.now()
     if now - at > timedelta(hours=ttl_hours):
         return None

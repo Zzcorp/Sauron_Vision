@@ -34,7 +34,7 @@ Never raises: a cache that cannot be read is a venue nobody can call sick,
 and a note that cannot be written is logged and lost.
 """
 import logging
-from datetime import timedelta
+from datetime import timedelta, timezone as dt_timezone
 
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -107,7 +107,7 @@ def venue_name(venue: str) -> str:
 
 def _stamp(at) -> str:
     try:
-        return at.astimezone(timezone.utc).strftime("%H:%M UTC")
+        return at.astimezone(dt_timezone.utc).strftime("%H:%M UTC")
     except Exception:  # noqa: BLE001
         return "?"
 
@@ -144,7 +144,14 @@ def note(venue: str, world: str, where: str, *, code=None, detail: str = "",
             until = now + timedelta(minutes=VENUE_QUIET_MINUTES)
             if not still:
                 state["sick_since"] = now.isoformat()
+                # THE EPISODE'S COUNT (2026-10-07): the failures inside the
+                # window that made it sick; every later one adds one.
+                state["sick_failures"] = len(recent)
+                state["sick_failures_since"] = state["sick_since"]
                 became = True
+            else:
+                state["sick_failures"] = _episode_failures(state, added=1)
+                state["sick_failures_since"] = state.get("sick_since")
             state["sick_until"] = until.isoformat()
         if not _store(key, state):
             # a memory nobody can write is a memory nobody reads: the
@@ -159,12 +166,33 @@ def note(venue: str, world: str, where: str, *, code=None, detail: str = "",
         return {"sick": False}
 
 
+def _episode_failures(state: dict, added: int = 0) -> int:
+    """The failures of the running episode: the stored count, or — for a
+    memory written before the count existed — the kept failures from
+    BURST_WINDOW_S before `sick_since` on. Never raises."""
+    try:
+        n = state.get("sick_failures")
+        if (isinstance(n, int) and not isinstance(n, bool) and n > 0
+                and state.get("sick_failures_since") == state.get("sick_since")):
+            return n + added
+        failures = [f for f in (state.get("failures") or [])
+                    if isinstance(f, dict)]
+        since = _when(state.get("sick_since"))
+        if since is None:
+            return len(failures)
+        start = since - timedelta(seconds=BURST_WINDOW_S)
+        return sum(1 for f in failures if (_when(f.get("at")) or since) >= start)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def _view(state: dict, now) -> dict:
     until = _when(state.get("sick_until"))
     sick = bool(until and until > now)
     return {"sick": sick,
             "since": state.get("sick_since") if sick else None,
             "until": state.get("sick_until") if sick else None,
+            "count": _episode_failures(state) if sick else None,
             "failures": list(state.get("failures") or [])}
 
 
@@ -184,12 +212,22 @@ def sick(venue: str, world: str, now=None):
 
 
 def words(venue: str, world: str, view: dict, now=None) -> str:
-    """One sentence for a skip, a ticket or an alert. No money figures."""
+    """One sentence for a skip, a ticket or an alert. No money figures.
+
+    THE EPISODE, NOT THE WINDOW (2026-10-07): since when the venue is
+    sick, after how many failures, the last one and the minute the hold
+    ends. "N failures in the last 3 min" read "0 failures" for most of a
+    ten-minute hold (the window passes long before the quiet does), and
+    every time printed "?" (django.utils.timezone has no `utc` on this
+    Django: _stamp now reads the stdlib's)."""
     now = _now(now)
     name = venue_name(venue)
     failures = [f for f in (view.get("failures") or []) if isinstance(f, dict)]
-    window = now - timedelta(seconds=BURST_WINDOW_S)
-    recent = [f for f in failures if (_when(f.get("at")) or window) >= window]
+    n = view.get("count")
+    if not isinstance(n, int) or isinstance(n, bool) or n <= 0:
+        window = now - timedelta(seconds=BURST_WINDOW_S)
+        n = len([f for f in failures
+                 if (_when(f.get("at")) or window) >= window])
     last = failures[-1] if failures else {}
     last_words = ""
     if last:
@@ -198,14 +236,38 @@ def words(venue: str, world: str, view: dict, now=None) -> str:
                       + (f"HTTP {code}" if code else
                          (str(last.get("detail") or "")[:40] or "failed"))
                       + f" at {_stamp(_when(last.get('at')) or now)}")
+    since = _when(view.get("since"))
     until = _when(view.get("until"))
-    return (f"{name} ({world}) is sick: {len(recent)} failure"
-            f"{'s' if len(recent) != 1 else ''} in the last "
-            f"{BURST_WINDOW_S // 60} min"
+    return (f"{name} ({world}) is sick"
+            + (f" since {_stamp(since)}" if since else "")
+            + f" after {n} failure{'s' if n != 1 else ''}"
             + (f" (last: {last_words})" if last_words else "")
             + (f" — new real entries held until {_stamp(until)}"
                if until else "")
             + "; closes and stop moves still go")
+
+
+def recent_refusals(venue: str, world: str, *, within_s: float,
+                    now=None) -> list:
+    """The HTTP 429s noted for `venue`'s `world` in the last `within_s`
+    seconds, oldest first: what a background reader (the bar refresh)
+    reads to step aside while the trading lane meets the venue's quota
+    (2026-10-07). A failure whose time cannot be read is not recent.
+    Never raises."""
+    try:
+        now = _now(now)
+        since = now - timedelta(seconds=float(within_s))
+        state = _load(_key(venue, world))
+        out = []
+        for f in state.get("failures") or []:
+            if not isinstance(f, dict) or f.get("code") != 429:
+                continue
+            at = _when(f.get("at"))
+            if at is not None and at >= since:
+                out.append(f)
+        return out
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def refusal(client, symbol: str = "", now=None) -> tuple:
@@ -226,6 +288,50 @@ def refusal(client, symbol: str = "", now=None) -> tuple:
             + " — nothing sent")
     except Exception:  # noqa: BLE001
         return "", ""
+
+
+def pause_s(client) -> float:
+    """Seconds left of the ADAPTER's own 429 pause for the client's world
+    (EtoroTrader.rate_pause_s, 2026-10-07), else 0.0. Keyed on the adapter
+    like refusal(): a MagicMock, a PaperTrader, or a test fake NAMED
+    EtoroTrader with no such method or a non-number answer reads 0.0.
+    Read by the entry side only (propose, execute, the last look); the
+    manage tick, closes, the reconcile, the TAKE TRADE lane and the bar
+    refresh never read it (the bars yield on recent_refusals instead).
+    Never raises."""
+    try:
+        import math
+        from bot_program.engine.capabilities import adapter_key
+        if adapter_key(client) != "etoro":
+            return 0.0
+        fn = getattr(client, "rate_pause_s", None)
+        if not callable(fn):
+            return 0.0
+        left = fn()
+        if (isinstance(left, bool) or not isinstance(left, (int, float))
+                or not math.isfinite(left) or left <= 0):
+            return 0.0
+        return float(left)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def kept_no(client, symbol: str) -> str:
+    """eToro's kept "no such instrument" for `symbol` (EtoroTrader.search_no,
+    the words), else "". Keyed on the adapter like pause_s; read by
+    propose_entry alone — never by a mark, a close or the reconcile.
+    Never raises."""
+    try:
+        from bot_program.engine.capabilities import adapter_key
+        if adapter_key(client) != "etoro":
+            return ""
+        fn = getattr(client, "search_no", None)
+        if not callable(fn):
+            return ""
+        said = fn(symbol)
+        return said if isinstance(said, str) else ""
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def advisory(venue: str, world: str, now=None) -> dict:
