@@ -9,6 +9,12 @@ Read-only: it writes nothing and touches no broker.
     python manage.py scorecard --by rule        # one block per rule
     python manage.py scorecard --by class
     python manage.py scorecard --by signal      # with a Sauron signal or without
+    python manage.py scorecard --venue live --by exit   # which exit closed each trade
+
+`--by exit` (2026-10-07, PR51a) adds two lines: how many exit prices are
+inferred, and how many live stock and ETF closes the venue made outside
+09:30-16:00 New York ("unmeasured" when the venue's close time is not
+recorded). `--by policy` waits for PR51b: no exit policy exists yet.
 """
 from django.core.management.base import BaseCommand
 
@@ -28,7 +34,7 @@ class Command(BaseCommand):
         parser.add_argument("--days", type=int, default=30)
         parser.add_argument("--venue", choices=["live", "paper"], default=None)
         parser.add_argument("--by", choices=["lane", "rule", "class", "venue",
-                                     "signal"],
+                                     "signal", "exit"],
                             default="lane",
                             help="How to split the book (default: lane — "
                                  "your hand-taken trades against the bots).")
@@ -42,11 +48,18 @@ class Command(BaseCommand):
         w(f"SCORECARD · last {opts['days']} days · {scope} · "
           f"{len(rows)} closed trade(s)")
         self._block("ALL", sc.summarize(rows))
+        if opts["by"] == "exit":
+            # WHICH EXIT (2026-10-07, PR51a): how far these R are estimates,
+            # and how many venue closes fell outside the regular session
+            w("")
+            w(f"  {sc.inferred_line(rows)}")
+            w(f"  {sc.outside_hours_line(rows)}")
         keys = {"lane": lambda r: r["lane"], "rule": lambda r: r["rule"] or "—",
                 "class": lambda r: r["asset_class"],
                 "venue": lambda r: r["venue"],
                 "signal": lambda r: ("on a signal" if r["backed"]
-                                     else "without a signal")}
+                                     else "without a signal"),
+                "exit": lambda r: r["exit"]}
         groups = sc.group(rows, keys[opts["by"]])
         for name, members in sorted(groups.items(),
                                     key=lambda kv: -len(kv[1])):

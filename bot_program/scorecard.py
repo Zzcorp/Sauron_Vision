@@ -28,10 +28,20 @@ Read-only and pure where it can be: `summarize` takes plain rows, so the
 scorecard command, the close dialog and a test all ask the same question
 of the same arithmetic. Unmeasured exits (realized_r NULL) are counted
 and left out — never read as zero.
+
+WHICH EXIT CLOSED IT (2026-10-07, PR51a; `scorecard --by exit`). Before any
+exit is changed, the operator reads which exit closed each live trade:
+care's own lock (break-even, trail, the weekend or event lock...), the
+venue's stop or target, the time stop, a hand. `exit_of` reads what the row
+recorded and never re-derives it from prices. Two lines go with it: how
+many exit prices are inferred (a mark or the level the venue held, not a
+broker fill), and how many live stock and ETF closes the venue made outside
+the regular session — measured only from the window the reconcile writes
+(venue_exit.CLOSED_BETWEEN_KEY), "unmeasured" without one.
 """
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, time as dtime, timedelta
 
 #: A closed loss worse than this is a stop that did not hold: a gap, a
 #: stop nobody watched, a reconciliation that booked late.
@@ -42,6 +52,149 @@ REACHED_R = 1.0
 THIN_SAMPLE = 20
 #: The tag manual_close.CLOSE_REASON leaves on a row closed by hand.
 HAND_CLOSE_TAG = "closed:MANUAL"
+#: the outcome strings bot_grading writes (bot_grading.py:167-195); never a
+#: new spelling (tests/test_scorecard_by_exit.py grades real rows to pin them)
+TIME_STOP, HIT_TARGET, STOPPED_OUT = "time_stop", "hit_target", "stopped_out"
+#: The tag the reconcile leaves on a row the venue closed and it booked
+#: (reconcile_asset._close_as_orphan).
+RECONCILED_TAG = "reconciled-orphan"
+#: The window the reconcile writes when eToro's order read said "closed"
+#: (2026-10-07, = venue_exit.CLOSED_BETWEEN_KEY): [lo_iso, hi_iso], the last
+#: venue reading that showed the position open and the first list read that
+#: did not. Not the venue's close time — eToro publishes none. The close
+#: lies in [lo - LIST_LAG_S, hi], not in [lo, hi] (2026-10-07, review): the
+#: list keeps a closed position listed for up to ~60 s, so the reading that
+#: set lo may have come after the close.
+CLOSE_WINDOW_KEY = "venue_closed_between"
+#: How long eToro's /portfolio keeps listing a position it has closed
+#: (= EtoroTrader.PORTFOLIO_LAG_S, measured 2026-09-23; copied here and
+#: pinned by a test). The window's lower bound is widened by it before the
+#: session side is read.
+LIST_LAG_S = 60
+#: The classes whose live closes eToro fills in its extended session
+#: (= morgul.VENUE_SESSION_CLASSES; morgul imports this module, so the
+#: tuple is copied here and pinned by a test).
+VENUE_SESSION_CLASSES = ("stock", "etf")
+#: The regular US session, New York time. Exchange holidays are not
+#: modelled (market_data/feeds.py says the same of its own clock): a close
+#: at 11:00 New York on a holiday reads as inside.
+REGULAR_OPEN_NY, REGULAR_CLOSE_NY = dtime(9, 30), dtime(16, 0)
+
+
+def exit_of(trade) -> str:
+    """Which exit closed the row, from what the row recorded (never re-derived from
+    prices), first match wins:
+      "by hand"            HAND_CLOSE_TAG in trade.reason
+      "care: <lock>"       metadata["care_exit"] (care's own close: trail, breakeven,
+                           weekend lock, event lock, structure, no progress, weekend cut,
+                           event cut, stressed market, crisis — "(beyond the crowd)" kept)
+      "time stop"          outcome == "time_stop"
+      "target"             outcome == "hit_target"
+      "stop at <lock>"     outcome == "stopped_out" and the venue's stop was last moved by
+                           care's mirror, to the row's stop: that lock filled at the
+                           venue; <lock> from the move (_care_lock_at_the_venue)
+      "stop"               outcome == "stopped_out" and the venue's stop was last set by
+                           anything else: the stop sent with the order, the engine's
+                           break-even or trail knobs, an operator's level
+      "other: <outcome>"   anything else ("other: ungraded" when no outcome)"""
+    meta = trade.metadata if isinstance(trade.metadata, dict) else {}
+    if HAND_CLOSE_TAG in (trade.reason or ""):
+        return "by hand"
+    lock = str(meta.get("care_exit") or "").strip()
+    if lock:
+        return f"care: {lock}"
+    outcome = trade.outcome or ""
+    if outcome == TIME_STOP:
+        return "time stop"
+    if outcome == HIT_TARGET:
+        return "target"
+    if outcome == STOPPED_OUT:
+        lock = _care_lock_at_the_venue(trade, meta)
+        return f"stop at {lock}" if lock else "stop"
+    return f"other: {outcome or 'ungraded'}"
+
+
+def _care_lock_at_the_venue(trade, meta) -> str:
+    """The care lock the venue's stop rested at, or "" (2026-10-07, review).
+
+    Read from the last stop move the VENUE accepted, never from care's
+    soft_why: soft_why names care's newest lock every tick, while the venue's
+    stop moves only when a mirror PATCH is accepted. A refused mirror (an
+    eToro 429) leaves the break-even resting under a newer "trail"; the held
+    branch of position_care._mirror_to_venue records a stop the engine's
+    knobs or the operator set. base._move_broker_stop records each accepted
+    move as {"to": the level the venue took, "why": why + ":broker"}, and the
+    mirror's why is "care <soft_why>". Care's lock only when that last move
+    is care's AND its level is still the row's stop (a later hand edit of the
+    levels moves the stop and records no stop move)."""
+    moves = meta.get("stop_moves")
+    last = (moves[-1] if isinstance(moves, list) and moves
+            and isinstance(moves[-1], dict) else {})
+    why = str(last.get("why") or "").strip()
+    if not why.startswith("care "):
+        return ""
+    to, stop = _number(last.get("to")), _number(trade.stop_loss)
+    if to is None or stop is None or round(to, 8) != round(stop, 8):
+        return ""
+    return why[len("care "):].removesuffix(":broker").strip() or "lock"
+
+
+def _number(x):
+    """A positive finite float, else None (a bool is not a level)."""
+    if x is None or isinstance(x, bool):
+        return None
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 and v != float("inf") else None
+
+
+def close_window(meta) -> tuple | None:
+    """(lo, hi) aware datetimes from the reconcile's CLOSE_WINDOW_KEY, or None
+    when it is missing, garbled, naive (not one of ours) or reversed."""
+    from django.utils import timezone
+    from django.utils.dateparse import parse_datetime
+    pair = meta.get(CLOSE_WINDOW_KEY) if isinstance(meta, dict) else None
+    if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+        return None
+    try:
+        lo, hi = (parse_datetime(str(x)) for x in pair)
+    except (TypeError, ValueError):
+        return None
+    if lo is None or hi is None or timezone.is_naive(lo) \
+            or timezone.is_naive(hi) or hi < lo:
+        return None
+    return lo, hi
+
+
+def _closed_at_the_venue(trade, meta) -> bool:
+    """The venue made the close and the platform booked it after (a stop or
+    a target struck, a hand in the broker's own app): the reconcile's tag,
+    or a booking at the level the venue held, an hour of unanswered asks,
+    or the window — the same facts notifications.fill_close_message reads
+    as a RECORDED close (2026-10-07)."""
+    return bool(RECONCILED_TAG in (trade.reason or "")
+                or meta.get("exit_priced_at")
+                or meta.get("venue_unproven_close")
+                or meta.get(CLOSE_WINDOW_KEY))
+
+
+def _inferred_exit(meta) -> bool:
+    """The exit price is an estimate, not a broker fill (2026-10-07, review):
+    flagged exit_price_inferred by whoever booked it (the reconcile, the
+    drain's venue-level or hour-late booking), or sourced at a mark or at the
+    level the venue held. A mark is every close the platform sends to eToro
+    (its close answer carries no price: resolve_exit_fill books the mark)
+    and every drain booking without a fill. Paper's modelled fill is not an
+    estimate of a broker fill: not counted."""
+    from bot_program.pending_closes import (EXIT_FILL_SOURCE_KEY,
+                                            EXIT_SOURCE_MARK,
+                                            EXIT_SOURCE_VENUE_STOP,
+                                            EXIT_SOURCE_VENUE_TARGET)
+    return bool(meta.get("exit_price_inferred")) or meta.get(
+        EXIT_FILL_SOURCE_KEY) in (EXIT_SOURCE_MARK, EXIT_SOURCE_VENUE_STOP,
+                                  EXIT_SOURCE_VENUE_TARGET)
 
 
 def row_of(trade) -> dict:
@@ -55,6 +208,7 @@ def row_of(trade) -> dict:
     except (TypeError, ValueError):
         mfe = None
     rule = trade.rule_name or ""
+    policy = meta.get("exit_policy")
     return {
         "id": trade.pk,
         "symbol": trade.symbol,
@@ -70,6 +224,18 @@ def row_of(trade) -> dict:
         "backed": rule != MANUAL_RULE or bool(meta.get("signal_id")),
         "mfe": mfe,
         "closed_at": trade.closed_at,
+        # WHICH EXIT (2026-10-07, PR51a). The exit the row was stamped with
+        # at entry: no stamp exists before PR51b, so every row reads care.
+        "exit": exit_of(trade),
+        "policy": ((policy.get("key") if isinstance(policy, dict) else None)
+                   or "care"),
+        # care's shadow arrives with PR51b; until then the row is its own
+        "shadow_r": trade.realized_r,
+        "inferred": _inferred_exit(meta),
+        "at_venue": _closed_at_the_venue(trade, meta),
+        # (lo, hi) as the reconcile wrote it: the close lies in
+        # [lo - LIST_LAG_S, hi]; None when not recorded
+        "venue_close_at": close_window(meta),
     }
 
 
@@ -179,3 +345,70 @@ def group(rows_, key) -> dict:
     for r in rows_:
         out.setdefault(key(r), []).append(r)
     return out
+
+
+def inferred_line(rows_) -> str:
+    """How many of these exit prices are inferred (2026-10-07, PR51a): their
+    R are estimates. An exit is inferred when it was booked at a mark
+    (exit_fill_source "mark": every close the platform sends to eToro, which
+    publishes no closing fill, and every drain booking without one) or at
+    the level the venue held (exit_price_inferred, venue_stop /
+    venue_target) — _inferred_exit. Not counted: a fill a venue reported
+    (exit_fill_source "broker") and paper's modelled fill."""
+    k = sum(1 for r in rows_ if r.get("inferred"))
+    return (f"inferred exit price: {k} of {len(rows_)} (these R are "
+            f"estimates: no broker fill was read)")
+
+
+def session_side(lo, hi) -> str:
+    """Where the window [lo, hi] lies against the regular New York session
+    (weekdays REGULAR_OPEN_NY-REGULAR_CLOSE_NY, both ends inside):
+    "outside" (it touches no session), "inside" (wholly within one) or
+    "spans" (it crosses a session edge: the close may be on either side)."""
+    from zoneinfo import ZoneInfo
+    ny = ZoneInfo("America/New_York")
+    a, b = lo.astimezone(ny), hi.astimezone(ny)
+    days = (b.date() - a.date()).days
+    if days > 7:
+        return "spans"          # a week always holds a session
+    for i in range(days + 1):
+        d = a.date() + timedelta(days=i)
+        if d.weekday() >= 5:
+            continue
+        s = datetime.combine(d, REGULAR_OPEN_NY, tzinfo=ny)
+        e = datetime.combine(d, REGULAR_CLOSE_NY, tzinfo=ny)
+        if a <= e and b >= s:
+            return "inside" if s <= a and b <= e else "spans"
+    return "outside"
+
+
+def outside_hours_line(rows_) -> str:
+    """Of the live stock and ETF rows the venue closed (2026-10-07, PR51a):
+    how many closed outside 09:30-16:00 New York — whether eToro triggers a
+    resting stop there, and at what fill, is unmeasured. Read only from the
+    window the reconcile writes; without one, said unmeasured. The window's
+    lower bound is moved back by LIST_LAG_S first (2026-10-07, review): a
+    stop filled at 15:59:30 and still listed at 16:00:20 reads "spans", not
+    "outside"."""
+    venue = [r for r in rows_ if r.get("venue") == "live"
+             and r.get("asset_class") in VENUE_SESSION_CLASSES
+             and r.get("at_venue")]
+    if not venue:
+        return ("outside 09:30-16:00 New York: 0 of 0 (no live stock or ETF "
+                "row closed at the venue)")
+    timed = [r["venue_close_at"] for r in venue if r.get("venue_close_at")]
+    if not timed:
+        return ("outside regular hours: unmeasured — the venue's close time "
+                "is not recorded")
+    sides = [session_side(lo - timedelta(seconds=LIST_LAG_S), hi)
+             for lo, hi in timed]
+    line = (f"outside 09:30-16:00 New York: {sides.count('outside')} of "
+            f"{len(timed)}")
+    notes = []
+    if sides.count("spans"):
+        notes.append(f"{sides.count('spans')} window(s) span the session "
+                     f"edge: either side")
+    if len(venue) - len(timed):
+        notes.append(f"{len(venue) - len(timed)} more unmeasured — the "
+                     f"venue's close time is not recorded")
+    return line + (f" ({'; '.join(notes)})" if notes else "")
