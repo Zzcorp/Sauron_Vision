@@ -26,6 +26,19 @@ applies the same floor once pipeline_promotion is ON.
 Demotion to paper gates the orders the consensus NAMES after the rule;
 its signals still vote (base.py's vote filter drops research only) — the
 next cut, not this one. Nothing here touches a position or a venue.
+
+THE PROVENANCE (2026-10-07, SIZE BY PROOF): the order of 2026-10-01 put
+36 rules at live_full by hand, most with 0 graded signals, and this table
+printed a plain "live_full" for each of them — the word a rule that
+climbed the ladder on its fills earns. The stage column now reads the
+promotion's provenance (signals.promotion_pipeline.promotion_provenance):
+"live_full (by hand, unproven)" for a hand promotion without proof and
+none since, "(by hand, proven since)" once its graded record or the
+proving ground proves it, "(no promotion recorded, unproven)" for a live
+stage no event explains. A hand promotion's words follow on their own
+indented line. The floor's verdict stays the last word of the row; the
+live entry path cuts an unproven rule to the live_small quarter
+(backtester/proving/proof.py).
 """
 from django.core.management.base import BaseCommand
 
@@ -45,7 +58,7 @@ class Command(BaseCommand):
         from signals.promotion_pipeline import (
             LOSER_HIT_MAX, LOSER_MIN_N, LOSER_THIN_EDGE_R, MANUAL_DWELL_DAYS,
             _stats_since, demote_rule, hand_promoted_recently, loser_numbers,
-            measured_loser)
+            measured_loser, promotion_provenance)
         w = self.stdout.write
         apply = bool(opts.get("apply"))
         rows = list(RuleControl.objects.filter(
@@ -54,7 +67,8 @@ class Command(BaseCommand):
         w(f"BAR THE LOSERS · {len(rows)} rule(s) at a live stage · floor: "
           f"{LOSER_MIN_N} graded signals and expectancy <= 0R, or hit < "
           f"{LOSER_HIT_MAX:.0%} with expectancy < {LOSER_THIN_EDGE_R:.2f}R · "
-          f"a hand promotion stands {MANUAL_DWELL_DAYS} days")
+          f"a hand promotion stands {MANUAL_DWELL_DAYS} days · a live stage "
+          f"set by hand without proof reads (by hand, unproven)")
         if not rows:
             w("  no rule is at a live stage — nothing to bar")
             return
@@ -77,10 +91,16 @@ class Command(BaseCommand):
                 verdict = "ok"
             hit_w, exp_w = (loser_numbers(hit, exp) if exp is not None
                             else ("", ""))
-            w(f"  {ctrl.rule_name:28} {ctrl.promotion_stage:10} n {n:4}  hit "
+            # the stage as it came to be (2026-10-07): a hand promotion
+            # without proof never reads as a plain live stage; the floor's
+            # verdict stays the row's last word
+            prov = promotion_provenance(ctrl.rule_name, ctrl=ctrl)
+            w(f"  {ctrl.rule_name:28} {prov['label']:29} n {n:4}  hit "
               f"{(hit_w if hit is not None else '—'):>4}  exp "
               f"{(exp_w if exp is not None else '—'):>7}  "
               f"{verdict}")
+            if prov["note"].startswith("by hand") and prov["words"]:
+                w(f"    {prov['words']}")
             if apply and verdict == "LOSER":
                 demote_rule(ctrl.rule_name, "paper", user=None,
                             reason="auto_demote",

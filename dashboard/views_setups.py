@@ -118,6 +118,13 @@ def setups_dashboard(request):
         diag_error = f"{type(e).__name__}: {e}"[:160]
     by_name = {r["name"]: r for r in ((diag or {}).get("setups") or [])}
 
+    # THE PROVENANCE (2026-10-07, SIZE BY PROOF): beside a live stage, how
+    # the rule came to it — "by hand, unproven" for a hand promotion
+    # without proof — on the armed and the unarmed rows alike. A rule
+    # below the live stages costs no query; never raises.
+    from signals.promotion_pipeline import provenance_notes
+    stage_notes = provenance_notes([s.name for s in setups], controls=ctrls)
+
     rows = []
     for s in setups:
         d = by_name.get(s.name)
@@ -131,6 +138,7 @@ def setups_dashboard(request):
             "name": s.name,
             "armed": s.is_active,
             "stage": getattr(ctrl, "promotion_stage", "") or "",
+            "stage_note": stage_notes.get(s.name, ""),
             "has_control": ctrl is not None,
             "threshold": thr,
             "threshold_pct": round(min(1.0, max(0.0, thr)) * 100, 1),

@@ -4,6 +4,7 @@
     python manage.py prove data --class forex
     python manage.py prove rules                   # every live rule and its short mirror
     python manage.py prove rules --class crypto --save
+    python manage.py prove rules --symbols EURUSD --save   # rulesub-…: read only, never sizes a live entry
     python manage.py prove generate --class forex  # the generator's shortlist for a class
     python manage.py prove generate --families tsmom,rsi2_pullback --save
     python manage.py prove exits --class crypto    # every exit policy on the live rules' signals
@@ -66,8 +67,17 @@ class Command(BaseCommand):
             return
         if opts["action"] == "rules":
             rows = pr.prove_live_rules(save=opts["save"], **kw)
-            return self._rows(rows, "LIVE RULES AND THEIR MIRRORS",
-                              opts["save"])
+            self._rows(rows, "LIVE RULES AND THEIR MIRRORS", opts["save"])
+            # A SUBSET RUN (2026-10-07, the review): judged on the named
+            # symbols only, saved under RULES_SUBSET_PREFIX, which the live
+            # entry path (backtester/proving/proof.py) never reads.
+            if opts["save"] and symbols and rows:
+                self.stdout.write(
+                    f"  run {rows[0]['run_id']} is judged on "
+                    f"{', '.join(symbols)} only: saved for reading, it never "
+                    f"sizes or refuses a live entry (only a whole-class "
+                    f"{pr.RULES_RUN_PREFIX}… run does)")
+            return
         from backtester.proving.families import FAMILIES
         fams = [f.strip() for f in opts["families"].split(",") if f.strip()]
         unknown = [f for f in fams if f not in FAMILIES]

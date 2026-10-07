@@ -76,7 +76,10 @@ WHAT IT OBEYS: the alarm chat, and nothing else
                                 bots OFF, never on, their unfilled live
                                 orders withdrawn (withdraw=True, the
                                 human's brake of 213c716); no position is
-                                closed, the master switch is not touched
+                                closed, the master switch is not touched;
+                                since 2026-10-07 the stop is recorded as
+                                this chat's, and what the stopped bots
+                                hold stays managed (asset_engine/disarm)
     /help  /aide  /start        the two commands
   Another chat, another bot's command (/cmd@OtherBot, against getMe),
   anything else: no reply. The Eye's order, kept whole: one batch at a
@@ -882,8 +885,10 @@ def parse(text) -> tuple:
 def build_help():
     return eye.Reply(eye.MARK_HELP, HELP_TITLE, [
         "/status — what is wrong now, in counts and names, never an amount",
+        # 2026-10-07: the brake's stop keeps the exits running
+        # (asset_engine/disarm.py), so the help says so.
         "/stopall — every bot OFF, never on; no position is closed; "
-        "re-arm on the server"])
+        "re-arm on the server; open positions stay managed"])
 
 
 def could_not_answer(name):
@@ -993,6 +998,7 @@ def stop_all(*, now=None, sent_at=None) -> list:
     from django.contrib.auth import get_user_model
     from django.db import transaction
     from django.utils import timezone
+    from bot_program.asset_engine import disarm
     now = now or timezone.now()
     users = list(get_user_model().objects
                  .filter(asset_bot_configs__enabled=True)
@@ -1004,9 +1010,16 @@ def stop_all(*, now=None, sent_at=None) -> list:
     out = []
     for user in users:
         try:
+            # The record (2026-10-07, asset_engine/disarm.py): this chat's
+            # own code, so the stop reads "the alarm chat's /stopall"
+            # wherever it is shown, and the runner keeps managing what
+            # the stopped bots hold. "who" is the chat, never a username:
+            # nothing maps this chat to a person.
             with transaction.atomic():
                 reply = eye.apply_brake(user, everything=True, now=now,
-                                        sent_at=sent_at, withdraw=True)
+                                        sent_at=sent_at, withdraw=True,
+                                        by=disarm.BY_ALARM, why="/stopall",
+                                        who="the alarm chat")
         except Exception as e:  # noqa: BLE001 (this account's; said)
             logger.warning("[telegram alarm] the brake failed on account "
                            "#%s (%s)", user.pk, type(e).__name__,

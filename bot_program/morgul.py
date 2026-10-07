@@ -80,9 +80,14 @@ THE BRAKE (G11)
   the brake's: a finding said while it was off is stopped on the first
   run after it is armed, and that run says so. G1 and G5 stop the row's
   config; G6 and G7 every enabled live config of the user. The message
-  says what the stopped bots leave open: a live position without a stop
-  at the broker is protected by nothing while its bot is stopped, and
-  paper stops pause.
+  says what the stopped bots leave open. Since 2026-10-07 the brake's stop
+  is recorded on the config (asset_engine/disarm.py, "Morgul's brake",
+  the guard and the finding), and a config a brake stopped is still
+  managed: the runner runs its exits every tick while it holds an open
+  row and never its entries. So a live position without a stop at the
+  broker, and a paper position, keep the stops the bot runs; only a
+  config stopped again since by hand or by the kill switch is not
+  managed, and the message counts those apart.
   It never acts when no staff chat could be told, and its record is kept
   before anything else can fail: a stop is always announced, at the
   latest on the next run. A bot the operator re-arms is not stopped again
@@ -183,6 +188,10 @@ MARK_STALE_S = 3600
 #: venue session, the one the paper market-hours gate of the same day
 #: reads). Crypto never shuts; anything else (cfd, an unknown class) is
 #: not judged, and said so.
+#: 2026-10-07: The bot lane refuses a live entry on this same clock for
+#: these classes less index and options (entry_timing.SHUT_CLASSES), and
+#: the options lane on its underlying's key (OPTIONS_SHUT_CLASSES);
+#: tests/test_entry_timing.py pins both.
 CLOCK_CLASSES = ("forex", "stock", "etf", "index", "commodity", "options")
 OPEN_STATUSES = ("OPEN", "CLOSE_PENDING")
 BOOKED_STATUSES = ("OPEN", "CLOSE_PENDING", "CLOSED")
@@ -470,7 +479,11 @@ def check_market_shut(ctx, g) -> list:
     noticed it (_noticed_close), and an index booked at a broker -- the
     clock keeps the cash session (SPX500 on New York) while a broker's
     index CFD trades nearly round the clock; paper index rows are judged,
-    as the paper venue's own gate judges them."""
+    as the paper venue's own gate judges them. 2026-10-07: The bot lane
+    refuses a live entry on this same clock for these classes less index
+    and options (entry_timing.SHUT_CLASSES), and the options lane on its
+    underlying's key (OPTIONS_SHUT_CLASSES); tests/test_entry_timing.py
+    pins both."""
     from core.exchange_status import market_status_for
     since, rows = _recent_rows(ctx)
     out, unmodelled, noticed, cfd = [], Counter(), 0, 0
@@ -1190,14 +1203,27 @@ def check_heartbeat(ctx, g) -> list:
     bots decide on; an eToro order is priced by eToro's own rates. A
     market shut (or open less than FEED_OPEN_FOR_S) is not judged, and
     what was said before stays open; a class with no symbols or no mark
-    stored is not judged, and said so."""
+    stored is not judged, and said so.
+
+    A BRAKED LIVE CONFIG WITH AN OPEN ROW (2026-10-07) joins the tick
+    check: the brake's words now promise that a stopped bot keeps
+    managing what is open (asset_engine/disarm.py), and that promise rides
+    the same tick. An Eye /stopall stops every live config, and without
+    this the guard would fall silent at the very moment the positions
+    depend on the tick alone. Its fact says it is stopped by a brake and
+    that its exits ride this tick -- never "still managing": the finding
+    is said exactly when nothing runs them (2026-10-07). The feeds check
+    stays on enabled configs: a braked bot scans nothing, so its symbols'
+    marks decide nothing."""
+    from bot_program.asset_engine import disarm
     from bot_program.asset_models import AssetBotConfig
     from core.exchange_status import market_status_for
     from core.platform_control import get_component, is_component_enabled
     from market_data.models import LiveQuote
     live = list(AssetBotConfig.objects.filter(enabled=True, mode="live")
                 .select_related("user").order_by("pk"))
-    if not live:
+    braked = [c for c in disarm.braked_with_open_rows() if c.mode == "live"]
+    if not live and not braked:
         return []
     out = []
     facts = []
@@ -1211,16 +1237,27 @@ def check_heartbeat(ctx, g) -> list:
         facts.append("The bot tick last ran "
                      + (eye.ago(comp.last_run_at, ctx.now)
                         if comp.last_run_at else "never"))
-    for cfg in live:
+    for cfg in live + braked:
         sign, tick = _last_sign(cfg)
         if sign is None or (ctx.now - sign).total_seconds() > TICK_STALE_S:
-            facts.append(f"{eye.config_label(cfg)}: last tick "
+            # The stop, not the management (2026-10-07): this fact is said
+            # only when the tick is down or this config's own pass has not
+            # run, so nothing manages it at that moment.
+            who = (eye.config_label(cfg) if cfg.enabled else
+                   f"{eye.config_label(cfg)} (stopped by a brake; its exits "
+                   f"ride this tick)")
+            facts.append(f"{who}: last tick "
                          + (eye.ago(tick, ctx.now) if tick else "never"))
     if facts:
         facts.append("While the tick is down, no bot manages its "
                      "positions; broker stops still hold")
-        out.append(g.finding("tick", label=f"Live bots running: {len(live)}",
-                             facts=facts))
+        # The subject stays "tick", so the finding's key (and its memory)
+        # is the same with or without braked configs in it.
+        out.append(g.finding(
+            "tick", label=(f"Live bots running: {len(live)}"
+                           + (f" · stopped by a brake, with open positions: "
+                              f"{len(braked)}" if braked else "")),
+            facts=facts))
     by_cls = OrderedDict()
     for cfg in live:
         by_cls.setdefault(str(cfg.asset_class or ""), []).append(cfg)
@@ -1433,10 +1470,18 @@ def _brake(finding) -> tuple:
     (enabled = False on the user's own configs, nothing else). Returns
     (stopped labels, already-off labels, stopped pks). Nothing running,
     nothing to call."""
+    from bot_program.asset_engine import disarm
     before = _configs(finding.configs)
     if not any(c.enabled for c in before):
         return [], [eye.config_label(c) for c in before], []
-    reply = eye.apply_brake(finding.user, [c.pk for c in before])
+    # The record (2026-10-07, asset_engine/disarm.py): Morgul's own code,
+    # and the guard and the finding as the why, so `bot list`,
+    # why_no_trade and the Eye can say who stopped the config and why,
+    # and the runner keeps managing what it holds.
+    reply = eye.apply_brake(finding.user, [c.pk for c in before],
+                            by=disarm.BY_MORGUL, who="Morgul",
+                            why=(f"{finding.guard.name}: "
+                                 f"{finding.label}")[:200])
     stopped = set(reply.meta.get("stopped") or [])
     logger.warning("[morgul] BRAKE on %s: configs %s turned off",
                    finding.key, sorted(stopped))
@@ -1445,27 +1490,143 @@ def _brake(finding) -> tuple:
             sorted(stopped))
 
 
+def _tick_runs() -> bool:
+    """Whether the bot tick that runs a braked bot's exits is on
+    (manual_trade._tick_manages: platform_master AND pipeline_asset_bots;
+    it never raises). Every "keeps managing" Morgul says rides it
+    (2026-10-07): the brake is gated by Morgul's own switches only, so it
+    can act while the tick is paused, and then nothing manages anything."""
+    from bot_program.manual_trade import _tick_manages
+    return _tick_manages()
+
+
+def _brake_state(pks) -> dict:
+    """Where the configs a brake stopped stand NOW (2026-10-07), in the
+    order given (a pk gone from the book is dropped), each in one list:
+    "braked", still stopped by a brake and managed
+    (disarm.keeps_managing); "rearmed", enabled again since, so not
+    stopped at all; "others", stopped again since by a path that is not
+    a brake (the kill switch, `bot off`, a toggle), which nothing
+    manages; "unrecorded", off with no record of who -- stopped before
+    stops were recorded, or by a path that keeps none -- which nothing
+    manages until `bot brake` records it. Morgul's memory says what the
+    brake did; only this says what holds now."""
+    from bot_program.asset_engine import disarm
+    state = {"braked": [], "rearmed": [], "others": [], "unrecorded": []}
+    for cfg in _configs(pks):
+        if cfg.enabled:
+            state["rearmed"].append(cfg)
+        elif disarm.keeps_managing(cfg):
+            state["braked"].append(cfg)
+        elif disarm.record_of(cfg):
+            state["others"].append(cfg)
+        else:
+            state["unrecorded"].append(cfg)
+    return state
+
+
 def _left_open(pks) -> dict:
     """What the stopped bots leave open, read now: positions at a broker
     (and those with no stop resting there, _bare), and paper positions.
-    A working entry is an order, not a position: not counted."""
+    A working entry is an order, not a position: not counted as one.
+
+    MANAGED OR NOT (2026-10-07). "broker", "bare" and "paper" count only
+    the rows of configs still braked (disarm.keeps_managing): their stops
+    are run by the bot every tick. Where each config stands is read now
+    (_brake_state): an "earlier" outcome is rebuilt from memory, and its
+    config may since have been re-armed or stopped again by another path.
+      - "rearmed": the labels of the configs enabled again since. They
+        are not stopped: their rows are not counted, and the words never
+        say they open nothing.
+      - "unmanaged": the open rows of the configs off by any other stop,
+        which nothing manages, named per config by who stopped it:
+        "others", (label, code, rows) for a record that is not a brake's;
+        "unrecorded", (label, pk, rows) for no record at all (stopped
+        before stops were recorded: `bot brake` puts it under
+        management).
+      - "held": (label, orders) per stopped MANUAL lane
+        (share_allocator._is_manual_lane) with a WORKING entry: the
+        operator's own order, which no pass withdraws (decision P3-i),
+        so it can still fill."""
+    from bot_program.asset_engine import disarm
     from bot_program.asset_models import AssetBotTrade
-    left = {"broker": 0, "bare": 0, "paper": 0}
+    from bot_program.share_allocator import _is_manual_lane
+    left = {"broker": 0, "bare": 0, "paper": 0, "unmanaged": 0,
+            "rearmed": [], "others": [], "unrecorded": [], "held": []}
     if not pks:
         return left
-    for trade in AssetBotTrade.objects.filter(config_id__in=list(pks),
+    state = _brake_state(pks)
+    left["rearmed"] = [eye.config_label(c) for c in state["rearmed"]]
+    off = OrderedDict((c.pk, c) for kind in ("braked", "others",
+                                             "unrecorded")
+                      for c in state[kind])
+    braked = {c.pk for c in state["braked"]}
+    unmanaged, held = Counter(), Counter()
+    for trade in AssetBotTrade.objects.filter(config_id__in=list(off),
                                               status__in=OPEN_STATUSES):
         meta = _meta(trade)
-        if trade.paper:
+        if not trade.paper and meta.get("entry_working"):
+            if _is_manual_lane(off[trade.config_id]):
+                held[trade.config_id] += 1
+            continue
+        if trade.config_id not in braked:
+            unmanaged[trade.config_id] += 1
+        elif trade.paper:
             left["paper"] += 1
-        elif not meta.get("entry_working"):
+        else:
             left["broker"] += 1
             left["bare"] += int(_bare(meta))
+    left["unmanaged"] = sum(unmanaged.values())
+    left["others"] = [(eye.config_label(c), disarm.record_of(c)["by"],
+                       unmanaged[c.pk])
+                      for c in state["others"] if unmanaged[c.pk]]
+    left["unrecorded"] = [(eye.config_label(c), c.pk, unmanaged[c.pk])
+                          for c in state["unrecorded"] if unmanaged[c.pk]]
+    left["held"] = [(eye.config_label(c), held[c.pk])
+                    for c in off.values() if held[c.pk]]
     return left
 
 
 def _join(labels) -> str:
     return ", ".join(dict.fromkeys(labels))
+
+
+def _them(n) -> str:
+    return "it" if n == 1 else "them"
+
+
+def _unmanaged_lines(total, others, unrecorded) -> list:
+    """The open rows nothing manages, by who stopped their config
+    (2026-10-07): a stop that is not a brake is named, never guessed; a
+    config with no record is said stopped before stops were recorded,
+    with the command that puts it under management."""
+    from bot_program.asset_engine import disarm
+    lines, said = [], 0
+    by_code = OrderedDict()
+    for label, code, rows in others:
+        group = by_code.setdefault(code, OrderedDict())
+        group[label] = group.get(label, 0) + int(rows or 0)
+    for code, group in by_code.items():
+        rows = sum(group.values())
+        said += rows
+        lines.append(f"Not managed: {_plural(rows, 'position')} — "
+                     f"{_join(group)}: stopped since by "
+                     f"{disarm.BY_WORDS.get(code, 'another stop')}")
+    bare = OrderedDict()
+    for label, pk, rows in unrecorded:
+        bare[label] = (pk, bare.get(label, (pk, 0))[1] + int(rows or 0))
+    if bare:
+        rows = sum(n for _pk, n in bare.values())
+        said += rows
+        ids = " ".join(str(pk) for pk, _n in bare.values())
+        lines.append(f"Not managed: {_plural(rows, 'position')} — "
+                     f"{_join(bare)}: stopped before stops were recorded — "
+                     f"`bot brake {ids}` puts {_them(len(bare))} under "
+                     f"management")
+    if total > said:
+        lines.append(f"Not managed: {_plural(total - said, 'position')} — "
+                     f"their bot was stopped again since, not by a brake")
+    return lines
 
 
 def brake_lines(outcomes) -> list:
@@ -1474,18 +1635,35 @@ def brake_lines(outcomes) -> list:
     ("would", labels), ("held", labels) or ("failed", labels, error
     name); `left` is _left_open's count, optional. "The stops stay at the
     broker" is said only when it is true: a position at the broker with no
-    stop there is protected by nothing while its bot is stopped, and a
-    paper stop is the bot's own and pauses with it."""
+    stop there, and a paper position, have only the stops the bot runs.
+
+    Since 2026-10-07 the bot runs them while it is stopped: a brake's stop
+    is recorded and managed (asset_engine/disarm.py), so the words say the
+    stopped bots open nothing and keep managing what is open. Each part of
+    that promise is said only where it holds (2026-10-07):
+      - management rides the bot tick: with it off (_tick_runs, read once
+        per message) the managing words give way to the Eye's own, "The
+        bot tick is off now: nothing manages them until it is back on.";
+      - rows whose config was stopped again since by another path, or is
+        off with no record ("unmanaged"), are named with who stopped it
+        (_unmanaged_lines) instead of promised;
+      - a config re-armed since is said re-armed, never "open nothing";
+      - a stopped MANUAL lane with a WORKING entry ("held") is said to
+        hold an order no pass withdraws, which can still fill, instead of
+        the bare "open nothing"."""
     stopped, already, would, earlier, held, failed = [], [], [], [], [], []
-    left = {"broker": 0, "bare": 0, "paper": 0}
+    left = {"broker": 0, "bare": 0, "paper": 0, "unmanaged": 0}
+    named = {"rearmed": [], "others": [], "unrecorded": [], "held": []}
     for outcome in outcomes:
         kind = outcome[0]
         if kind in ("stopped", "earlier"):
             (stopped if kind == "stopped" else earlier).extend(outcome[1])
             already += outcome[2] if kind == "stopped" else []
-            counts = outcome[3] if len(outcome) > 3 else None
+            counts = (outcome[3] if len(outcome) > 3 else None) or {}
             for k in left:
-                left[k] += int((counts or {}).get(k) or 0)
+                left[k] += int(counts.get(k) or 0)
+            for k in named:
+                named[k].extend(counts.get(k) or [])
         elif kind == "would":
             would += outcome[1]
         elif kind == "held":
@@ -1513,16 +1691,53 @@ def brake_lines(outcomes) -> list:
     if earlier:
         lines.append(f"Stopped earlier by the brake: {_join(earlier)} — to "
                      f"re-arm: the server")
+    # Where the stopped bots stand now (2026-10-07, _left_open): one
+    # re-armed since is not stopped, and only the rest are spoken for.
+    rearmed = list(dict.fromkeys(named["rearmed"]))
+    off = [label for label in dict.fromkeys(stopped + earlier)
+           if label not in rearmed]
+    waiting = OrderedDict()
+    for label, n in named["held"]:
+        waiting[label] = waiting.get(label, 0) + int(n or 0)
+    tick = (_tick_runs() if (off or left["bare"] or left["paper"])
+            else True)
+    if rearmed:
+        lines.append(f"Re-armed since: {_join(rearmed)} — not stopped now")
+    if off:
+        # A brake's stop keeps the exits running, while the bot tick runs;
+        # a config stopped again since by another path, or off with no
+        # record, does not, and its positions are named instead of
+        # promised. The manual lane's held order is the operator's own and
+        # no pass withdraws it: it can still fill.
+        managing = tick and not left["unmanaged"]
+        for label, n in waiting.items():
+            lines.append(f"{label}: {_plural(n, 'held order')} not "
+                         f"withdrawn — TAKE TRADE, the operator's own; "
+                         f"{'it' if n == 1 else 'they'} can still fill")
+        if not waiting:
+            lines.append("The stopped bots open nothing"
+                         + (" and keep managing what is open" if managing
+                            else ""))
+        else:
+            if any(label not in waiting for label in off):
+                lines.append("The other stopped bots open nothing")
+            if managing:
+                lines.append("The stopped bots keep managing what is open")
+        lines.extend(_unmanaged_lines(left["unmanaged"], named["others"],
+                                      named["unrecorded"]))
     if left["bare"]:
-        lines.append(f"At the broker without a stop: {left['bare']} — "
-                     f"while the bot is stopped, nothing protects them")
+        lines.append(f"At the broker without a stop: {left['bare']}"
+                     + (" — the stopped bot still runs their stops every "
+                        "tick" if tick else ""))
     if left["bare"] and left["broker"] > left["bare"]:
         lines.append(f"At the broker with a stop: "
                      f"{left['broker'] - left['bare']} — those stops stay")
     if left["paper"]:
-        lines.append(f"Paper positions: {left['paper']} — their stops "
-                     f"are simulated by the bot and pause while it is "
-                     f"stopped")
+        lines.append(f"Paper positions: {left['paper']}"
+                     + (" — the stopped bot still runs their simulated stops"
+                        if tick else ""))
+    if off and not tick:
+        lines.append(eye.TICK_OFF_WORDS)
     for labels, name in failed:
         lines.append(f"The brake could not stop {_join(labels)} ({name}): "
                      f"stop them on the server")
@@ -1554,15 +1769,67 @@ def build_messages(findings, outcomes, now) -> list:
     return out
 
 
+def _back_suffix(entry, tick) -> str:
+    """What a cleared finding's brake left, as the configs stand now
+    (2026-10-07, _brake_state over the stopped_pks the brake stored):
+    those still braked stay off and keep managing what is open while the
+    bot tick runs; one re-armed since is said so; one stopped since by
+    another path, or off with no record, is said not managed. A memory
+    entry that names stopped bots but no pks (stored before the pks
+    were) promises nothing about their management."""
+    from bot_program.asset_engine import disarm
+    if not entry.get("braked"):
+        return ""
+    if "stopped_pks" not in entry:
+        return (" (the bots the brake stopped stay off until re-armed on "
+                "the server)" if entry.get("stopped") else "")
+    state = _brake_state(entry.get("stopped_pks") or [])
+    parts = []
+    if state["braked"]:
+        whole = not (state["rearmed"] or state["others"]
+                     or state["unrecorded"])
+        who = ("the bots the brake stopped" if whole else
+               _join(eye.config_label(c) for c in state["braked"]))
+        verb = "stays" if not whole and len(state["braked"]) == 1 else "stay"
+        parts.append(f"{who} {verb} off, still managing what is open, until "
+                     f"re-armed on the server" if tick else
+                     f"{who} {verb} off until re-armed on the server — the "
+                     f"bot tick is off now: nothing manages them until it is "
+                     f"back on")
+    if state["rearmed"]:
+        parts.append("re-armed since: "
+                     + _join(eye.config_label(c) for c in state["rearmed"]))
+    by_code = OrderedDict()
+    for cfg in state["others"]:
+        by_code.setdefault(disarm.record_of(cfg)["by"], []).append(cfg)
+    for code, cfgs in by_code.items():
+        parts.append(f"{_join(eye.config_label(c) for c in cfgs)} stopped "
+                     f"since by {disarm.BY_WORDS[code]}, not managed")
+    if state["unrecorded"]:
+        cfgs = state["unrecorded"]
+        parts.append(f"{_join(eye.config_label(c) for c in cfgs)} stopped "
+                     f"before stops were recorded, not managed — `bot brake "
+                     f"{' '.join(str(c.pk) for c in cfgs)}` puts "
+                     f"{_them(len(cfgs))} under management")
+    return f" ({'; '.join(parts)})" if parts else ""
+
+
 def back_to_normal(entries, now):
     """One line per finding that stopped; a bot the brake turned off for
-    it stays off (the brake never re-arms), and the line says so."""
-    lines = [(f"{e.get('name')}: the guard runs again — back to normal"
-              if e.get("subject") == "error" else
-              f"{e.get('name')}: {e.get('label')} — back to normal")
-             + (" (the bots the brake stopped stay off until re-armed on "
-                "the server)" if e.get("braked") else "")
-             for e in entries]
+    it stays off (the brake never re-arms), and the line says so -- and,
+    since 2026-10-07, whether it still manages what is open meanwhile:
+    built from the configs as they stand now, never from the memory
+    alone (_back_suffix), and promised only while the bot tick runs
+    (_tick_runs, read once per message)."""
+    tick = None
+    lines = []
+    for e in entries:
+        if tick is None and e.get("braked") and e.get("stopped_pks"):
+            tick = _tick_runs()
+        lines.append((f"{e.get('name')}: the guard runs again — back to "
+                      f"normal" if e.get("subject") == "error" else
+                      f"{e.get('name')}: {e.get('label')} — back to normal")
+                     + _back_suffix(e, tick))
     return eye.Reply(MARK, BACK_TO_NORMAL,
                      eye._cap(lines, eye.MAX_LINES - 1)
                      + [f"Checked: {eye.when(now)}"], meta={"keep_tail": 1})

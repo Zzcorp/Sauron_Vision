@@ -128,6 +128,7 @@ def seed_research_fleet(user, *, budget: int = DEFAULT_BUDGET,
                         capital: Decimal = DEFAULT_CAPITAL,
                         enabled: bool = True, dry_run: bool = False) -> dict:
     """Create or refresh the research fleet for `user`. Importable."""
+    from bot_program.asset_engine import disarm
     from bot_program.models import AssetBotConfig
 
     plan = plan_configs(research_universe(user, budget=budget), chunk=chunk)
@@ -166,9 +167,15 @@ def seed_research_fleet(user, *, budget: int = DEFAULT_BUDGET,
             if not (cfg.extras or {}).get("research_fleet"):
                 continue
             if cfg.trades.exists():
-                cfg.enabled = False
+                # The symbols first, then the stop through
+                # asset_engine.disarm (2026-10-07), which records it as a
+                # seed command's: a stop by hand, not managed.
                 cfg.symbols = []
-                cfg.save(update_fields=["enabled", "symbols", "updated_at"])
+                cfg.save(update_fields=["symbols", "updated_at"])
+                disarm.disable_config(
+                    cfg, by=disarm.BY_SEED,
+                    why="seed_research_fleet: no longer in the plan",
+                    who="shell")
                 left_alone.append(f"{cfg.name} (stood down, keeps its trades)")
             else:
                 cfg.delete()
@@ -180,6 +187,7 @@ def seed_research_fleet(user, *, budget: int = DEFAULT_BUDGET,
 
 def reset_research_fleet(user) -> dict:
     """Remove the fleet — except configs that traded, which are disabled."""
+    from bot_program.asset_engine import disarm
     from bot_program.models import AssetBotConfig
 
     deleted = 0
@@ -190,8 +198,11 @@ def reset_research_fleet(user) -> dict:
             continue
         if cfg.trades.exists():
             if cfg.enabled:
-                cfg.enabled = False
-                cfg.save(update_fields=["enabled", "updated_at"])
+                # Recorded as a seed command's stop (2026-10-07,
+                # asset_engine.disarm): by hand, not managed.
+                disarm.disable_config(cfg, by=disarm.BY_SEED,
+                                      why="seed_research_fleet --reset",
+                                      who="shell")
             kept.append(cfg.name)
             continue
         cfg.delete()

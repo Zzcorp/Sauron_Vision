@@ -1256,17 +1256,26 @@ class BrakeTests(_Case):
                       f"is off", texts[0])
         self.assertEqual(self._enabled(self.cfg), [True])
 
+    def _tick(self, on=True):
+        """The bot tick that runs a braked bot's exits (2026-10-07,
+        manual_trade._tick_manages): every promise of management rides
+        it, and with neither row it reads off."""
+        _component("platform_master", on)
+        _component("pipeline_asset_bots", on)
+
     def test_on_it_stops_exactly_the_offending_config_and_closes_nothing(self):
         _arm()
+        self._tick()
         report, texts = self._cycle([morgul.GUARD["market_shut"]])
         self.assertEqual(self._enabled(self.cfg, self.other, self.live_other),
                          [False, True, True])
         # the stopped config holds an open PAPER row: its stop is the bot's
-        # own and pauses, so "the stops stay at the broker" is not said
+        # own, so "the stops stay at the broker" is not said; since
+        # 2026-10-07 the braked bot keeps running it (asset_engine/disarm.py)
         self.assertIn(f"Stopped: Forex swing #{self.cfg.pk} — no position "
                       f"was closed; to re-arm: the server", texts[0])
-        self.assertIn("Paper positions: 1 — their stops are simulated by the "
-                      "bot and pause while it is stopped", texts[0])
+        self.assertIn("Paper positions: 1 — the stopped bot still runs their "
+                      "simulated stops", texts[0])
         self.assertNotIn("the stops stay at the broker", texts[0])
         self.assertEqual(report.result["stopped"],
                          [f"Forex swing #{self.cfg.pk}"])
@@ -1276,6 +1285,7 @@ class BrakeTests(_Case):
 
     def test_the_stops_stay_at_the_broker_is_said_only_when_true(self):
         _arm()
+        self._tick()
         live = _cfg(self.user, "Stocks live", "stock", mode="live")
         guarded = _trade(live, "MSFT", entry="420", stop="410", paper=False,
                          metadata=LIVE_ETORO, opened=self.now - timedelta(hours=2))
@@ -1297,11 +1307,58 @@ class BrakeTests(_Case):
                                     at=self.now + timedelta(minutes=5))
         self.assertIn(f"Stopped: Stocks live #{live.pk} — no position was "
                       f"closed; to re-arm: the server", texts[0])
-        self.assertIn("At the broker without a stop: 1 — while the bot is "
-                      "stopped, nothing protects them", texts[0])
+        # 2026-10-07: the braked bot keeps running that stop every tick
+        self.assertIn("At the broker without a stop: 1 — the stopped bot "
+                      "still runs their stops every tick", texts[0])
         self.assertNotIn("the stops stay at the broker", texts[0])
         guarded.refresh_from_db()
         self.assertEqual(guarded.status, "OPEN")
+
+    def test_with_the_bot_tick_off_the_brake_promises_no_management(self):
+        """Review #6 (2026-10-07): the brake is gated by Morgul's own
+        switches only, so it acts while the bot tick is paused. Nothing
+        then runs the stopped bot's exits, and the words are the Eye's own
+        instead of "keep managing" or "still runs"."""
+        _arm()
+        self._tick()
+        _component("pipeline_asset_bots", on=False)
+        report, texts = self._cycle([morgul.GUARD["market_shut"]])
+        self.assertEqual(self._enabled(self.cfg), [False])
+        lines = texts[0].split("\n")
+        self.assertIn("The stopped bots open nothing", lines)
+        self.assertIn("Paper positions: 1", lines)
+        self.assertIn(eye.TICK_OFF_WORDS, lines)
+        for words in ("keep managing", "still runs", "still managing"):
+            self.assertNotIn(words, texts[0])
+
+    def test_back_to_normal_after_the_kill_switch_never_says_managing(self):
+        """Review #7 (a): a margin-style brake stops two live configs, the
+        kill switch then stops one of them for good. When the finding
+        clears, the words come from the configs as they stand, never from
+        the memory alone: the one still braked keeps managing, the other
+        is said stopped by the kill switch and not managed."""
+        from bot_program.asset_engine import disarm
+        _arm()
+        self._tick()
+        live = _cfg(self.user, "Stocks live", "stock", mode="live")
+        _trade(live, "MSFT", entry="420", stop="410", paper=False,
+               metadata=LIVE_ETORO, opened=self.now - timedelta(hours=2))
+        guard, box = _scripted("account", "Account", "critical", brake=True)
+        box.update(subjects=["account"], user=self.user,
+                   configs=[self.live_other.pk, live.pk])
+        self._cycle([guard], at=self.now)
+        self.assertEqual(self._enabled(self.live_other, live), [False, False])
+        disarm.disable_config(live, by=disarm.BY_KILL_SWITCH,
+                              why="flatten now", who="operator")
+        box["subjects"] = []
+        _report, texts = self._cycle([guard],
+                                     at=self.now + timedelta(minutes=5))
+        (back,) = [t for t in texts if morgul.BACK_TO_NORMAL in t]
+        self.assertIn(f"Subject account — back to normal (Forex live "
+                      f"#{self.live_other.pk} stays off, still managing what "
+                      f"is open, until re-armed on the server; Stocks live "
+                      f"#{live.pk} stopped since by the kill switch, not "
+                      f"managed)", back)
 
     def test_a_braking_finding_stops_every_live_config_of_the_user_once(self):
         _arm()
@@ -1327,6 +1384,11 @@ class BrakeTests(_Case):
         self.assertIn(f"Stopped earlier by the brake: Forex live #{live2.pk}, "
                       f"Stocks live #{live.pk} — to re-arm: the server",
                       texts[0])
+        # Review #7 (c): both trade again, so neither is said to open
+        # nothing; they are said re-armed
+        self.assertIn(f"Re-armed since: Forex live #{live2.pk}, Stocks live "
+                      f"#{live.pk} — not stopped now", texts[0])
+        self.assertNotIn("open nothing", texts[0])
 
     def test_the_daily_loss_never_brakes(self):
         """2026-10-01: past MAX DAILY LOSS the engine's gate lets only

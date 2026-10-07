@@ -35,7 +35,8 @@ def evidence_ledger(request):
     # own (2026-09-28).
     staff = bool(request.user.is_staff or request.user.is_superuser)
     scope = None if staff else request.user
-    rules = rule_rows()
+    # the one reader of stage_note ("by hand, unproven"; 2026-10-07)
+    rules = rule_rows(with_provenance=True)
     configs = config_rows(user=scope)
     totals = {
         "rules": len(rules),

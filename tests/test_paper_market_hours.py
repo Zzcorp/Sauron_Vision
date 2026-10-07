@@ -977,7 +977,12 @@ class TheBotsPaperEntriesWaitTests(TestCase):
 
     def test_a_live_config_on_saturday_still_reaches_the_venue(self):
         """The control on the live side: the order goes to the client (it
-        raises here, so nothing is booked either way)."""
+        raises here, so nothing is booked either way). 2026-10-07: the live
+        side reaches the venue here only because the suite runs with
+        entry_timing.GATE off; on the real clock the live bot is refused
+        MARKET_SHUT on a shut exchange (tests/test_entry_timing.py,
+        TheLiveEntryOnAShutExchangeTests). Its behaviour here is
+        unchanged."""
         from bot_program.asset_engine import StockBot
         from bot_program.models import AssetBotTrade
         from signals.models import RuleControl

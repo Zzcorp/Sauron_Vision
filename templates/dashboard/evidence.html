@@ -32,7 +32,8 @@
       {% for r in rules %}
         <tr>
           <td class="sv-ident" data-label="Rule">{{ r.rule }}</td>
-          <td data-label="Stage"><span class="badge">{{ r.stage }}</span> <span style="font-size: 10px; color: var(--text-muted);">{{ r.status }}</span></td>
+          {# 2026-10-07 (SIZE BY PROOF): the promotion provenance beside a live stage — "by hand, unproven" for a hand promotion without proof. #}
+          <td data-label="Stage"><span class="badge">{{ r.stage }}{% if r.stage_note %} · {{ r.stage_note }}{% endif %}</span> <span style="font-size: 10px; color: var(--text-muted);">{{ r.status }}</span></td>
           <td class="num" data-label="Signals">{{ r.sig_n }}</td>
           <td class="num" data-label="Hit">{% if r.sig_hit is not None %}{{ r.sig_hit|floatformat:2 }}{% else %}—{% endif %}</td>
           <td class="num" data-label="Avg R">{% if r.sig_avg is not None %}{{ r.sig_avg|floatformat:2 }}{% else %}—{% endif %}</td>

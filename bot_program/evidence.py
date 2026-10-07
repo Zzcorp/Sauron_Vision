@@ -19,18 +19,28 @@ def _blank() -> dict:
             "live_n": 0, "live_pnl": 0.0, "live_r": 0.0}
 
 
-def rule_rows() -> list:
+def rule_rows(*, with_provenance: bool = False) -> list:
     """One row per rule the platform has any evidence about.
 
     Per rule_name: stage and status; graded signals (n, hit rate,
     expectancy, cumulative R); paper fills and live fills (n, P&L, R); and
     the regret — cumulative paper R for a rule with no live fill.
+
+    `with_provenance` (2026-10-07, the review): stage_note, how a live rule
+    came to its stage ("by hand, unproven"), is read only when asked —
+    /evidence/ shows it; the signal engine's scan, /signals/, the brain's
+    horizon and the strategy generator read the numbers and never the
+    note, and stage_note is "" for them. Asked, it costs a fixed two
+    queries more whatever the rule count (provenance_notes, fed the
+    graded record read here).
     """
     from bot_program.models import AssetBotTrade
     from signals.models import Signal
     from signals.models_control import RuleControl
 
     by_rule: dict = {}
+    # the graded record in _stats_since's shape, for the provenance
+    stats: dict = {}
     graded = (Signal.objects.filter(is_active=False)
               .exclude(outcome="").exclude(realized_r__isnull=True)
               .values("rule_name")
@@ -45,6 +55,10 @@ def rule_rows() -> list:
         row["sig_r"] = float(s["r_sum"] or 0.0)
         row["sig_avg"] = (float(s["r_avg"]) if s["r_avg"] is not None
                           else None)
+        if n and s["rule_name"]:
+            stats[s["rule_name"]] = {
+                "n": n, "expectancy": row["sig_avg"],
+                "hit_rate": round(int(s["hits"] or 0) / n, 4)}
     fills = (AssetBotTrade.objects
              .filter(status="CLOSED", realized_r__isnull=False)
              .values("rule_name", "paper")
@@ -58,12 +72,24 @@ def rule_rows() -> list:
     controls = {c.rule_name: c for c in RuleControl.objects.all()}
     for name in controls:
         by_rule.setdefault(name, _blank())
+    # THE PROVENANCE (2026-10-07, SIZE BY PROOF): beside a live stage, how
+    # the rule came to it — "by hand, unproven" for a hand promotion
+    # without proof — so the ledger never reads a plain live_full for one.
+    # Only when asked (/evidence/); a fixed two queries whatever the rule
+    # count, the graded record above standing in for proven_record's;
+    # never raises.
+    notes = {}
+    if with_provenance:
+        from signals.promotion_pipeline import provenance_notes
+        notes = provenance_notes(list(by_rule), controls=controls,
+                                 stats=stats)
 
     rows = []
     for name, row in by_rule.items():
         ctrl = controls.get(name)
         row["rule"] = name
         row["stage"] = (getattr(ctrl, "promotion_stage", "") or "—") if ctrl else "—"
+        row["stage_note"] = notes.get(name, "")
         row["status"] = (getattr(ctrl, "status", "") or "") if ctrl else "no control row"
         # THE REGRET: R a rule has proven in paper while nothing took it
         # live. Zero once a single live fill exists — the question then is

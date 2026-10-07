@@ -707,8 +707,17 @@ def system_map_toggle(request):
                 return JsonResponse({"ok": False, "enabled": False,
                                      "error": f"not armed — {pool['reason']}"},
                                     status=409)
-        cfg.enabled = not cfg.enabled
-        cfg.save(update_fields=["enabled"])
+        # THE WRITE (2026-10-07, bot_program/asset_engine/disarm.py): a
+        # stop here is recorded as the system map toggle's, by the presser,
+        # and is a stop by hand (not managed); arming clears the record.
+        # The JSON the node reads is unchanged.
+        from bot_program.asset_engine import disarm
+        if cfg.enabled:
+            disarm.disable_config(cfg, by=disarm.BY_SYSTEM_MAP,
+                                  why="the system map toggle",
+                                  who=request.user.username)
+        else:
+            disarm.enable_config(cfg)
         return JsonResponse({"ok": True, "enabled": cfg.enabled,
                              "label": cfg.name or cfg.asset_class})
 

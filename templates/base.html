@@ -2283,10 +2283,46 @@
          unchanged. */
       var timingAdv = p.timing_advisory || {};
       if (timingAdv.ok === false && timingAdv.reason) {
-        warnHtml += '<div class="sz-warn sz-warn--book"><b>BAD TIMING FOR AN ENTRY</b>' +
-          esc(timingAdv.reason) +
-          '<br>' + esc('A warning, not a block: the bots refuse an entry at ' +
-                       'this hour; this ticket is yours to send.') + '</div>';
+        /* A shut exchange (2026-10-07, entry_timing.SHUT): its own heading
+           — on 2026-10-06 a bot's PG short was filled 22 minutes before
+           the NYSE open. The bots send no entry then; this lane still only
+           warns, and the button is unchanged. Review 2026-10-07: the
+           footer says only what is always true. Whether Morgul G1 would
+           flag a booking made now is in the reason (entry_timing.
+           _shut_verdict): G1 flags only past its close grace, and only
+           while the morgul_guards component is on. */
+        if (timingAdv.code === 'SHUT') {
+          warnHtml += '<div class="sz-warn sz-warn--book"><b>THE MARKET IS SHUT</b>' +
+            esc(timingAdv.reason) +
+            '<br>' + esc('A warning, not a block: the bots send no entry ' +
+                         'while its exchange is shut; this ticket is yours ' +
+                         'to send.') + '</div>';
+        } else {
+          warnHtml += '<div class="sz-warn sz-warn--book"><b>BAD TIMING FOR AN ENTRY</b>' +
+            esc(timingAdv.reason) +
+            '<br>' + esc('A warning, not a block: the bots refuse an entry at ' +
+                         'this hour; this ticket is yours to send.') + '</div>';
+        }
+      }
+
+      /* SIZE BY PROOF (2026-10-07, backtester/proving/proof.py): the
+         proving ground's verdict on the signal's rule, this class and this
+         side. The bots refuse a FAILED rule's live entry and cut an
+         unproven one; this lane only warns — no qty, stop, leverage or
+         button expression reads it. Review 2026-10-07: what the bots do
+         with the rule is the reason's own tail, read off its promotion
+         stage (manual_trade.proof_advisory: refused, paper only, no
+         orders, their live_small size, or the cut), so the footer names
+         no bot action of its own. */
+      var proofAdv = p.proof_advisory || {};
+      if (proofAdv.ok === false && proofAdv.reason) {
+        warnHtml += '<div class="sz-warn sz-warn--book"><b>' +
+          (proofAdv.tier === 'failed'
+            ? 'THE PROVING GROUND FAILED THIS RULE HERE'
+            : 'THIS RULE IS NOT PROVEN HERE') + '</b>' +
+          esc(proofAdv.reason) +
+          '<br>' + esc('A warning, not a block: this ticket is yours to ' +
+                       'send, at the size you chose.') + '</div>';
       }
 
       /* The entry quote (2026-10-05): crossed, a stale print, far from the

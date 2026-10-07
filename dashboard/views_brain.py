@@ -331,13 +331,19 @@ def brain_disable_manual(request):
                       "That manual config is not one of yours.")
         return HttpResponseRedirect(back)
 
-    if cfg.enabled:
-        cfg.enabled = False
-        cfg.save(update_fields=["enabled", "updated_at"])
+    # THE WRITE (2026-10-07, bot_program/asset_engine/disarm.py): recorded
+    # as this button's, by the presser — a stop by hand, so not managed.
+    # A press on a config already off writes nothing (a brake's stop stays
+    # a brake's, still managed) and says who stopped it.
+    from bot_program.asset_engine import disarm
+    if disarm.disable_config(cfg, by=disarm.BY_BRAIN,
+                             why="Disable manual on the brain page",
+                             who=request.user.username):
         head = (f"Manual {cfg.asset_class} is DISABLED — TAKE TRADE refuses "
                 f"this class until it is re-enabled.")
     else:
-        head = f"Manual {cfg.asset_class} was already disabled."
+        head = (f"Manual {cfg.asset_class} was already disabled — "
+                f"{disarm.record_words(cfg)}.")
     tail = (unmanaged_on_disable(cfg)
             or "It holds no open position, so nothing is left unmanaged.")
     _brain_result(request, True, f"{head} {tail}")

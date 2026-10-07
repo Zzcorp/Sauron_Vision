@@ -561,6 +561,12 @@ def evolution_dashboard(request):
         record_names.add(mut.parent_rule)
         record_names.add(mut.forked_rule)
     records = _live_records(record_names)
+    # THE PROVENANCE (2026-10-07, SIZE BY PROOF): beside a live stage, how
+    # the rule came to it — "by hand, unproven" for a hand promotion
+    # without proof. The chip class keeps the raw stage; a rule below the
+    # live stages costs no query; never raises.
+    from signals.promotion_pipeline import provenance_notes
+    stage_notes = provenance_notes(sorted(record_names), controls=controls)
 
     def _node(name):
         ctrl = controls.get(name)
@@ -568,6 +574,7 @@ def evolution_dashboard(request):
         return {
             "name": name,
             "stage": getattr(ctrl, "promotion_stage", "") or "",
+            "stage_note": stage_notes.get(name, ""),
             "status": getattr(ctrl, "status", "") or "",
             "params": getattr(ctrl, "parameters", None) or {},
             "known": ctrl is not None,

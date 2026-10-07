@@ -10,8 +10,14 @@ Manual trades live on a per-user, per-class "manual" AssetBotConfig that
 is enabled with an EMPTY symbols list: the 5-minute tick manages its open
 positions (stops, targets, trailing) every pass, but the entry scan has
 nothing to scan, so the config can never open a trade on its own.
-DISABLED, it is not ticked at all: its open positions lose that
-management until it is re-enabled (runner.unmanaged_on_disable).
+DISABLED, it depends on who disabled it (2026-10-07,
+asset_engine/disarm.py). Stopped by a BRAKE (Morgul, the Telegram group,
+the alarm chat, `bot brake`), it is still managed: the tick runs its
+exits every pass while it holds an open row, and the operator's own held
+(WORKING) order is polled and booked when it fills, never withdrawn by
+the pass. Stopped by hand or by the kill switch, it is not ticked at all:
+its open positions lose that management until it is re-enabled
+(runner.unmanaged_on_disable). Either way it takes no new TAKE TRADE.
 
 Wave 1 executed on the PAPER venue only. Wave 2 adds the LIVE ticket:
 a manual config an operator has deliberately armed to live mode routes
@@ -25,9 +31,10 @@ broker that cannot be reached is a refusal — never a silent paper
 fallback wearing a live label.
 
 Safety posture (each learned from adversarial review of the first cut):
-  * A disabled manual config is a DELIBERATE state — the kill switch or
-    the operator put it there — so this module refuses instead of
-    silently re-arming it.
+  * A disabled manual config is a DELIBERATE state — the kill switch, a
+    brake or the operator put it there, and since 2026-10-07 the refusal
+    says which (asset_engine/disarm.record_words) — so this module refuses
+    instead of silently re-arming it.
   * A pre-existing user config that happens to be named "manual" is
     refused, never adopted and rewritten.
   * Capital accounting is per asset class (each class has its own pool)
@@ -342,9 +349,14 @@ def _config_error(cfg):
                 f"mode {cfg.mode!r} — only 'paper' and 'live' exist. "
                 f"Fix the config before taking trades through it")
     if not cfg.enabled:
-        return ("The manual config for this class is disabled — the kill "
-                "switch or an operator turned it off. Re-enable it in the "
-                "bot fleet to take manual trades again")
+        # Who turned it off, from the config's own record (2026-10-07,
+        # asset_engine/disarm.py): "the kill switch or an operator" was a
+        # guess, and a brake is neither.
+        from bot_program.asset_engine import disarm
+        return ("The manual config for this class is disabled — "
+                + disarm.record_words(cfg)
+                + ". Re-enable it in the bot fleet to take manual trades "
+                  "again")
     return None
 
 
@@ -1021,12 +1033,20 @@ def venue_health_advisory(user, carrier: str, *, live: bool = True) -> dict:
 
 def timing_advisory(inst) -> dict:
     """THE ENTRY TIMING on the ticket (2026-10-06, bot_program/entry_timing):
-    {"ok", "reason", "attack"} — the 17:00 New York rollover, a market's
-    first quarter hour, an exchange's last minutes, Friday's last hour
-    before the weekend, a high-impact print on the instrument's currency.
-    A WARNING, never a refusal — the operator keeps the last word on their
-    own lane; the bots refuse on the same clock. A paper ticket is judged
-    too: the paper venue fills at the same hours."""
+    {"ok", "reason", "attack", "code"} — the 17:00 New York rollover, an
+    exchange that is shut (SHUT), a market's first quarter hour, an
+    exchange's last minutes, Friday's last hour before the weekend, a
+    high-impact print on the instrument's currency. A WARNING, never a
+    refusal — the operator keeps the last word on their own lane; the bots
+    refuse on the same clock. A paper ticket is judged too: the paper venue
+    fills at the same hours (and refuses a shut market itself, before any
+    advisory). 2026-10-07: "code" names the window ("SHUT", "ROLLOVER",
+    ...), so the popup can say THE MARKET IS SHUT, and a live ticket is
+    still only warned: never refused, never resized. Review 2026-10-07:
+    the SHUT reason names Morgul G1 only when G1 would flag a booking
+    made now — the exchange shut now AND morgul.CLOSE_GRACE_S before
+    (entry_timing.shut_verdict) — and says "would", since G1 runs only
+    while the morgul_guards component is ON."""
     from bot_program import entry_timing
     try:
         return entry_timing.advisory(
@@ -1035,7 +1055,92 @@ def timing_advisory(inst) -> dict:
     except Exception as e:  # noqa: BLE001 — an unread clock warns of nothing
         logger.warning("[take-trade] timing advisory unread for %s: %s",
                        getattr(inst, "symbol", "?"), e)
-        return {"ok": True, "reason": "", "attack": ""}
+        return {"ok": True, "reason": "", "attack": "", "code": ""}
+
+
+def proof_advisory(signal, inst, side, *, live: bool = True) -> dict:
+    """SIZE BY PROOF on the ticket (2026-10-07, backtester/proving/proof):
+    {"ok", "tier", "reason"} — whether the proving ground proves the
+    SIGNAL's rule on this instrument's class and this side. The bots refuse
+    a FAILED rule's live entry and cut an unproven one to REDUCED; this
+    lane only WARNS — never refused, never resized, the operator keeps the
+    last word on their own lane. ok for a paper ticket, a ticket with no
+    signal or no rule (signal_backing already warns of that; the manual
+    lane's own rule is never proved), the switch off, or a read that
+    fails. The class is the Instrument's own (inst.asset_class), never
+    EXECUTABLE_CLASS's, which maps etf to stock: the proving ground pools
+    etf on its own.
+
+    Review 2026-10-07: what the BOTS do with the rule is read off its
+    promotion stage (signals.rule_actuator.stage_policy, the bot lane's
+    own read) — the bots never ask the proof of a rule they trade on paper
+    (base.py: live mode and not force_paper), and the proof does not cut
+    a live_small rule twice (proof.stage_with_proof). So a FAILED verdict
+    keeps its refusal words, and otherwise the tail is "the bots send this
+    rule no orders" (research: may_trade False), "the bots trade this
+    rule on paper only" (paper, or no RuleControl: force_paper), "the bots
+    already take it at their live_small size" (live_small), or the cut
+    (live_full cut below 1). A stage that cannot be read keeps the cut's
+    words. The reason never carries proof.py's "— entered at 0.25x"
+    (_ticket_proof_words): this ticket is sized by the operator, never
+    entered at the bots' cut."""
+    fine = {"ok": True, "tier": "", "reason": ""}
+    rule = getattr(signal, "rule_name", "") if signal is not None else ""
+    if not live or not rule:
+        return fine
+    try:
+        from backtester.proving import proof
+        if not proof.GATE:
+            return fine
+        p = proof.proof_for(rule, getattr(inst, "asset_class", "") or "",
+                            side)
+        if p["tier"] in (proof.PROVEN, proof.LIVE_PROVEN):
+            return fine
+        suffix = (" — the bots send this rule no real money here"
+                  if p["tier"] == proof.FAILED
+                  else _proof_stage_words(rule, p))
+        return {"ok": False, "tier": p["tier"],
+                "reason": _ticket_proof_words(p["words"]) + suffix}
+    except Exception as e:  # noqa: BLE001 — an unread proof warns of nothing
+        logger.warning("[take-trade] proof advisory unread for %s: %s",
+                       getattr(inst, "symbol", "?"), e)
+        return fine
+
+
+def _ticket_proof_words(words) -> str:
+    """proof.py's words without their "— entered at <cut>x" clause
+    (review 2026-10-07): the UNPROVEN words end with it, and an unread
+    verdict's words carry it with their own tail. That clause is the
+    BOTS' entry; on the ticket it sat in the same box as "this ticket is
+    yours to send, at the size you chose", so the box said two sizes for
+    one ticket. proof.py keeps its words (the bot lane's skip and the
+    row's metadata["proof"] read them)."""
+    text = str(words or "")
+    cut = text.find(" — entered at ")
+    return text[:cut].rstrip() if cut >= 0 else text
+
+
+def _proof_stage_words(rule, p) -> str:
+    """The ticket's tail for a verdict that is neither proven nor FAILED,
+    by the rule's promotion stage (proof_advisory's docstring). Never
+    raises: a stage that cannot be read keeps the cut's words."""
+    from backtester.proving import proof
+    cut_words = f" — the bots take it at {proof.REDUCED:g}x of their size"
+    try:
+        from signals.rule_actuator import stage_policy
+        stage = stage_policy(rule)
+        if not stage.get("may_trade", True):
+            return " — the bots send this rule no orders"
+        if stage.get("force_paper"):
+            return " — the bots trade this rule on paper only"
+        if stage.get("stage") == "live_small":
+            return " — the bots already take it at their live_small size"
+        cut = float(proof.stage_with_proof(stage, p)["proof"]["cut"])
+        if stage.get("stage") == "live_full" and cut < 1:
+            return f" — the bots take it at {cut:g}x of their size"
+    except Exception as e:  # noqa: BLE001 — the cut's words stand
+        logger.warning("[take-trade] rule stage unread for %s: %s", rule, e)
+    return cut_words
 
 
 def reward_risk_advisory(side, entry, stop, target) -> dict:
@@ -1793,6 +1898,11 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         # market's first quarter hour or last minutes, the weekend's last
         # hour, a print near. The bots refuse on it; this lane WARNS only.
         "timing_advisory": timing_advisory(inst),
+        # SIZE BY PROOF on the ticket (2026-10-07): the proving ground's
+        # verdict on the signal's rule, this class and this side. The bots
+        # refuse a FAILED rule's live entry and cut an unproven one; this
+        # lane WARNS only — no qty, stop, leverage or button reads it.
+        "proof_advisory": proof_advisory(signal, inst, side, live=live),
         # THE SETUP MEMORY (2026-10-03, backtester/proving/memory.py): what
         # followed, the last times this rule fired on this class in this
         # kind of tape. Information, never a gate; "" when nobody replayed
@@ -2689,9 +2799,22 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             _ta = preview.get("timing_advisory")
             if isinstance(_ta, dict) and not _ta.get("ok", True):
                 # taken past the clock's warning (2026-10-06): recorded,
-                # as the other overridden warnings are
+                # as the other overridden warnings are. 2026-10-07: with
+                # the window's code, so a booking made while the exchange
+                # was shut (SHUT; G1 flags it past its close grace) reads
+                # as such on the row, apart from a bad hour.
                 extra["timing_advisory_at_entry"] = {
-                    "ok": False, "reason": str(_ta.get("reason") or "")[:200]}
+                    "ok": False, "reason": str(_ta.get("reason") or "")[:200],
+                    "code": str(_ta.get("code") or "")}
+            _pa = preview.get("proof_advisory")
+            if isinstance(_pa, dict) and not _pa.get("ok", True):
+                # taken past the proving ground's warning (2026-10-07):
+                # recorded, as the other overridden warnings are, so a
+                # review can ask whether tickets taken on a FAILED or
+                # unproven rule paid
+                extra["proof_advisory_at_entry"] = {
+                    "ok": False, "tier": str(_pa.get("tier") or ""),
+                    "reason": str(_pa.get("reason") or "")[:200]}
 
             with transaction.atomic():
                 trade = _book_row(booked_px,

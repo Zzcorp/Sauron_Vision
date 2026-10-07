@@ -9,6 +9,7 @@ fail for the hour and not for the code. So the suite runs with the gate
 off, and tests/test_paper_market_hours.py turns it back on at a fixed
 clock for every path it pins.
 """
+from backtester.proving import proof as _proof
 from bot_program import entry_timing as _entry_timing
 from bot_program.engine import etoro_client as _etoro_client
 from bot_program.engine import paper_trader as _paper_trader
@@ -26,3 +27,9 @@ _entry_timing.GATE = False
 # would read another test's id. tests/test_etoro_search_memo.py turns it
 # back on.
 _etoro_client.SEARCH_MEMO = False
+# SIZE BY PROOF (2026-10-07, backtester/proving/proof.py): the proving
+# ground's verdict would cut or refuse every live entry this suite sizes —
+# hundreds of them, on rules no proving run here ever judged, each sized
+# and asserted to the unit at full stage size. So the suite runs with the
+# proof off; tests/test_size_by_proof.py turns it back on.
+_proof.GATE = False

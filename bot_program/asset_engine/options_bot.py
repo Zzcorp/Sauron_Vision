@@ -403,6 +403,49 @@ class OptionsBot(AssetBot):
                             symbol, stage["reason"])
                 return None
 
+        # SIZE BY PROOF (2026-10-07, backtester/proving/proof.py): this lane
+        # replaces scan_symbol wholesale and never meets propose_entry, so
+        # the proving ground's verdict is asked here too, for a LIVE entry
+        # only (a paper-stage rule trades on paper and is never cut). The
+        # option is a bet on the underlying's signal, so the key is the
+        # UNDERLYING's Instrument class (the class Morgul G1 reads for an
+        # options row; "options" when it has no row, which the proving
+        # ground does not judge) and the decision's side. FAILED is
+        # refused (PROVING_FAILED); anything short of PROVEN, or of a
+        # graded record that proves the rule, is cut to REDUCED through
+        # the stage factor applied below. A verdict that cannot be read is
+        # a reduced entry, never a refusal. No live options config is known
+        # to route today: options go to IBKR, retired for this account, so
+        # such a config falls back to paper and is refused further down.
+        if self.cfg.mode == "live" and not stage["force_paper"] \
+                and decision.rule_name:
+            from backtester.proving import proof
+            if proof.GATE:
+                from bot_program import entry_timing
+                from bot_program.asset_engine import skips
+                _cls = ""
+                try:
+                    _cls = entry_timing.instrument_key(symbol, "options")[0]
+                    _p = proof.proof_for(decision.rule_name, _cls,
+                                         decision.direction)
+                except Exception as e:  # noqa: BLE001 — unread is reduced
+                    logger.warning("[options_bot] %s: the proving ground "
+                                   "unread (%s) — entered at %gx", symbol,
+                                   e, proof.REDUCED)
+                    _p = proof.unread_proof(decision.rule_name,
+                                            _cls or "options",
+                                            decision.direction, e)
+                if _p["tier"] == proof.FAILED:
+                    logger.warning("[options_bot] %s: entry refused by the "
+                                   "proving ground — %s", symbol,
+                                   _p["words"])
+                    return self._skip(symbol, skips.PROVING_FAILED,
+                                      _p["words"])
+                stage = proof.stage_with_proof(stage, _p)
+                if proof.cut_note(stage):
+                    logger.info("[options_bot] %s size by proof x%g: %s",
+                                symbol, stage["proof"]["cut"], _p["words"])
+
         # Contracts sized by RISK. entry and stop are premium per share while
         # P&L is premium x the multiplier, so the multiplier is exactly the
         # account-currency value of one point of price per contract.
@@ -483,6 +526,11 @@ class OptionsBot(AssetBot):
             per_contract = abs(premium - sl) * multiplier
             taper_note = (f" after a {corr['scale']:.0%} correlation taper"
                           if corr["scale"] < 1.0 else "")
+            # and the proof's cut (2026-10-07), when it took the count down
+            from backtester.proving import proof as _pf
+            _cn = _pf.cut_note(stage)
+            if _cn:
+                taper_note += f" ({_cn.rstrip(': ')}, size by proof)"
             logger.info(
                 "[options_bot] %s strike %s skipped: one contract risks "
                 "$%.2f (%.2f%% of $%s) but the budget is $%.2f (%.2f%%)%s. "
@@ -620,6 +668,32 @@ class OptionsBot(AssetBot):
         order_id = ""
         working_meta: dict = {}
         if not paper:
+            # THE SHUT EXCHANGE (2026-10-07, entry_timing.shut_verdict):
+            # no live contract while the underlying's exchange is shut. On
+            # 2026-10-06 a live bot shorted PG 22 minutes before the NYSE
+            # open and the venue filled it; the bot lane now refuses that
+            # on Morgul G1's own clock, and this lane, which replaces
+            # scan_symbol and never meets propose_entry's gates, sent at any
+            # hour. Morgul G1 judges an options booking on the UNDERLYING's
+            # own Instrument row (the row below carries the underlying as
+            # its symbol, and G1 reads ctx.instrument on that symbol), so
+            # the key here is the same: the underlying's (class, exchange),
+            # "options" when it has no row (OPTIONS_SHUT_CLASSES). Without
+            # this the gate and G1 disagree on exactly the booking G1
+            # flags. Only SHUT applies: the rollover, the settle, the close
+            # guard and the print are not judged on options, as before. The
+            # paper branch above keeps the paper venue's own gate. The skip
+            # is MARKET_SHUT, the one word for a shut market in every lane.
+            # GATE off (the suite's switch) answers None here too.
+            from bot_program import entry_timing
+            _cls, _ex = entry_timing.instrument_key(symbol, "options")
+            _shut = entry_timing.shut_verdict(
+                symbol, _cls, exchange=_ex,
+                classes=entry_timing.OPTIONS_SHUT_CLASSES)
+            if _shut is not None:
+                logger.warning("[options_bot] %s: live entry refused on the "
+                               "clock — %s", symbol, _shut["why"])
+                return self._skip(symbol, skips.MARKET_SHUT, _shut["why"])
             if not self._still_armed():
                 return self._skip(symbol, skips.GATE_BLOCKED,
                                   "config was disarmed mid-tick — refusing "
@@ -722,6 +796,12 @@ class OptionsBot(AssetBot):
                 logger.error("[options_bot] live order failed for %s: %s", symbol, e)
                 return None
 
+        # SIZE BY PROOF (2026-10-07): the proof this entry was sized under
+        # rides the row, as it does in the bot lane (metadata["proof"]).
+        _proof_meta = {}
+        if isinstance(stage.get("proof"), dict):
+            from backtester.proving import proof as _pf
+            _proof_meta = {"proof": _pf.meta_of(stage["proof"])}
         trade = AssetBotTrade.objects.create(
             config=self.cfg, asset_class=self.asset_class,
             symbol=symbol, side="BUY",  # always long premium
@@ -750,6 +830,7 @@ class OptionsBot(AssetBot):
                 "initial_stop_loss": round(float(sl), 8),
                 "cost_check": cost_reason,
                 **working_meta,
+                **_proof_meta,
             },
         )
         return {"trade_id": trade.id, "symbol": symbol,

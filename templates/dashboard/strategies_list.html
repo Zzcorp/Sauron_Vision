@@ -119,7 +119,8 @@
                 </header>
 
                 <div class="sc-chips">
-                    <span class="sv-chip sc-chip--{{ c.stage }}">{{ c.stage_display }}</span>
+                    {# 2026-10-07 (SIZE BY PROOF): the promotion provenance beside the stage — "by hand, unproven" for a hand promotion without proof; the class keeps the raw stage. #}
+                    <span class="sv-chip sc-chip--{{ c.stage }}">{{ c.stage_display }}{% if c.stage_note %} · {{ c.stage_note }}{% endif %}</span>
                     {% comment %} PAUSED here is the SETUP's is_active flag, not the actuator's
                        status chip beside it. Two unrelated states wearing one word is the
                        confusion the title spells out and the block below resolves. {% endcomment %}

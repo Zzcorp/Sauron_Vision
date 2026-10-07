@@ -73,17 +73,36 @@ def execute_kill_switch(user=None, reason="manual"):
         results["bots_disabled"] += 1
         logger.warning("[KILL SWITCH] Disabled BotConfig %s (user=%s)", config.id, config.user)
 
+    # THE RECORD (2026-10-07, asset_engine/disarm.py). The stop goes
+    # through disarm.disable_config, which records it as the kill switch's
+    # (who pressed it, and the reason). That record is what keeps these
+    # configs UNMANAGED: the runner manages only a config a brake stopped,
+    # and the rows this sweep cannot close are left for reconciliation by
+    # hand (step 3 below), never for a manage pass to close behind it.
+    from bot_program.asset_engine import disarm
+    who = getattr(user, "username", "") or "platform-wide"
     asset_configs = AssetBotConfig.objects.filter(enabled=True)
     if user:
         asset_configs = asset_configs.filter(user=user)
     for config in asset_configs:
-        config.enabled = False
-        config.save(update_fields=["enabled", "updated_at"])
-        results["asset_bots_disabled"] += 1
-        logger.warning(
-            "[KILL SWITCH] Disabled AssetBotConfig %s (%s, user=%s)",
-            config.id, config.asset_class, config.user,
-        )
+        if disarm.disable_config(config, by=disarm.BY_KILL_SWITCH,
+                                 why=reason, who=who):
+            results["asset_bots_disabled"] += 1
+            logger.warning(
+                "[KILL SWITCH] Disabled AssetBotConfig %s (%s, user=%s)",
+                config.id, config.asset_class, config.user,
+            )
+    # A config a BRAKE had already stopped is still managed by the runner.
+    # The kill switch's stop supersedes that record, so its open rows are
+    # left alone from here on like every other config's. It is not counted
+    # in asset_bots_disabled: it was off already.
+    braked = AssetBotConfig.objects.filter(enabled=False)
+    if user:
+        braked = braked.filter(user=user)
+    for config in braked:
+        if disarm.keeps_managing(config):
+            disarm.disable_config(config, by=disarm.BY_KILL_SWITCH,
+                                  why=reason, who=who)
 
     # ── 2. Close open legacy (crypto) trades ─────────────────────────────────
     open_legacy = BotTrade.objects.filter(status="OPEN")

@@ -934,6 +934,101 @@ class AssetBot(ABC):
             "managed": managed, "opened": opened, "gate_reason": gate_reason,
         }
 
+    def manage_only(self) -> dict:
+        """THE BRAKED PASS (2026-10-07, asset_engine/disarm.py): the exits
+        of a config a BRAKE stopped, and nothing else.
+
+        PG #138 sat OPEN on config 26 from the moment Morgul's G1 brake
+        stopped it on 2026-10-06: the runner skipped every disabled config
+        whole, so the brake that was meant to stop new entries also
+        switched off the time stop, trailing, break-even, the weekend and
+        event windows and the venue-mirrored soft stop. A stop is now
+        recorded, and a config a brake stopped is run through here every
+        tick while it holds an OPEN row (runner.manage_braked): the
+        heartbeat, manage_positions (OptionsBot's own override, where it
+        has one), then the withdrawal of any bot order still working.
+
+        It NEVER calls can_open_new, scan_symbol, propose_entry or
+        execute_entry, writes no desk plan and records no ENTRY skip.
+        manage_positions' own notes on held rows (NO_PRICE, SUSPECT_MARK)
+        are recorded as they are for an enabled config. What it can book
+        is exposure that already exists: a WORKING entry the broker has
+        filled is booked by the poll, and nothing it runs sends an opening
+        order; every other action closes or moves a stop, and a managed
+        close at eToro goes by position id or sends nothing."""
+        from bot_program.asset_engine import disarm
+        from bot_program.asset_engine.safety import write_heartbeat
+
+        rec = disarm.record_of(self.cfg)
+        by = rec.get("by", "")
+        write_heartbeat(self.cfg, status="RUNNING")
+        managed = self.manage_positions()
+        withdrawn = self._withdraw_working_while_braked(by)
+        note = (f"stopped by {disarm.BY_WORDS.get(by, 'a brake')}: "
+                f"managing only, opening nothing")[:200]
+        write_heartbeat(self.cfg, status="OK", note=note)
+        return {
+            "asset_class": self.asset_class, "config_id": self.cfg.id,
+            "braked": True, "by": by, "managed": managed,
+            "withdrawn": withdrawn, "opened": [], "gate_reason": note,
+        }
+
+    def _withdraw_working_while_braked(self, by: str) -> list:
+        """Withdraw every bot order a braked config still has working, so
+        nothing new fills after a brake (2026-10-07). Returns the ids of
+        the rows that end CANCELED.
+
+        Read AFTER manage_positions has returned: its poll may just have
+        booked the fill, and a booked position is managed, never
+        withdrawn. A row with no broker order id is skipped: the helper
+        would alert staff on every tick (cancel_working_entry), and the
+        poll's own daily alert already says it. A paper client (the live
+        row's broker unavailable) can send nothing and is skipped. A
+        refused cancel leaves the row WORKING, retried on the next tick; a
+        fill that races the cancel stays WORKING and is booked by the
+        next poll. One row's failure is logged and never stops the rest.
+
+        Never the MANUAL config (decision P3-i): Morgul brakes manual
+        configs too, and the held TAKE TRADE order is the operator's own;
+        Morgul never reaches the broker by design, so that order is polled,
+        booked on a fill and managed, never withdrawn by this pass. The
+        Eye's /stop on the manual config still withdraws it, as the
+        operator's own command. The manual config is the platform's own
+        definition, the reserved name AND no symbols
+        (share_allocator._is_manual_lane, 2026-10-07): a scanning bot that
+        merely carries the name sends bot orders, and those are withdrawn
+        like any other bot's."""
+        from bot_program.asset_engine import disarm
+        from bot_program.engine.broker_router import client_for_symbol
+        from bot_program.models import AssetBotTrade
+        from bot_program.share_allocator import _is_manual_lane
+
+        if _is_manual_lane(self.cfg):
+            return []
+        reason = (f"withdrawn while the bot is stopped by "
+                  f"{disarm.BY_WORDS.get(by, 'a brake')}: a stopped bot "
+                  f"opens nothing")
+        out = []
+        for t in AssetBotTrade.objects.filter(config=self.cfg, status="OPEN",
+                                              paper=False):
+            try:
+                if not is_entry_working(t) or not t.broker_order_id:
+                    continue
+                client = client_for_symbol(self.user, t.symbol, self.cfg)
+                if self._is_paper_client(client):
+                    continue
+                if cancel_working_entry(t, client, reason=reason,
+                                        cancel_parent=True):
+                    t.refresh_from_db(fields=["status"])
+                    if t.status == "CANCELED":
+                        out.append(t.pk)
+            except Exception as e:  # noqa: BLE001 — one row, one pass
+                logger.warning("[%s_bot] %s: withdrawing working order %s "
+                               "of a braked config failed: %s",
+                               self.asset_class, t.symbol,
+                               t.broker_order_id, e)
+        return out
+
     # ── position management ──────────────────────────────────────────────
 
     def manage_positions(self) -> int:
@@ -3528,9 +3623,13 @@ class AssetBot(ABC):
         for each remaining symbol, AFTER the flatten pass had walked past
         them.
 
-        Nothing manages what it opens, either: the runner refuses a disabled
-        config, so bot-side trailing and the time stop never run on those
-        units. Only the entry bracket protects them.
+        Nothing manages what it opens, either, when the stop was the kill
+        switch's or a hand's: the runner refuses such a config, so
+        bot-side trailing and the time stop never run on those units, and
+        only the entry bracket protects them. A config a BRAKE stopped is
+        still managed (2026-10-07, asset_engine/disarm.py), but its pass
+        opens nothing: an order sent after the brake would be exactly the
+        new exposure the brake exists to stop.
 
         Fails OPEN on a database error, deliberately and loudly: the same
         posture `preflight` takes, because halting the whole fleet on a
@@ -3808,6 +3907,8 @@ class AssetBot(ABC):
         history once rather than once per symbol. None means "compute it
         yourself", which is what a single-config tick still does.
         """
+        from backtester.proving import proof
+        from bot_program import entry_timing
         from bot_program.models import AssetBotTrade
         from bot_program.engine.broker_router import client_for_symbol
         from bot_program.asset_engine import skips
@@ -4020,18 +4121,25 @@ class AssetBot(ABC):
 
         # THE ENTRY TIMING (2026-10-06, bot_program/entry_timing): the
         # clock, judged before the cost, the levels and the size — the
-        # 17:00 New York rollover, a market's first quarter hour, an
-        # exchange's last minutes, Friday's last hour before the weekend,
-        # a high-impact print on the instrument's currency from 60 min
-        # before to 15 min after. A skip with the hour it clears
-        # (BAD_TIMING), never an entry; a print within three hours caps
-        # the attack tier instead (_attack_tier reads the verdict). Read
-        # again on the fresh clock before the order.
+        # 17:00 New York rollover, an exchange that is shut (SHUT, Morgul
+        # G1's own clock and classes, recorded as skips.MARKET_SHUT), a
+        # market's first quarter hour, an exchange's last minutes, Friday's
+        # last hour before the weekend, a high-impact print on the
+        # instrument's currency from 60 min before to 15 min after. A skip
+        # with the hour it clears (BAD_TIMING, or MARKET_SHUT for a shut
+        # exchange), never an entry; a print within three hours caps the
+        # attack tier instead (_attack_tier reads the verdict). Read again
+        # on the fresh clock before the order. 2026-10-07: the code is entry_timing.skip_code's, so a
+        # shut exchange reads as the market being shut — the word the
+        # paper venue already gives above — and never as a bad hour; on
+        # 2026-10-06 config 26 shorted PG 22 minutes before the NYSE open
+        # and eToro filled it, which is what SHUT now refuses.
         _timing = self._entry_timing_gate(symbol)
         if not _timing["ok"]:
             logger.warning("[%s_bot] %s: entry refused on the clock — %s",
                            self.asset_class, symbol, _timing["why"])
-            return self._skip(symbol, skips.BAD_TIMING, _timing["why"])
+            return self._skip(symbol, entry_timing.skip_code(_timing),
+                              _timing["why"])
 
         # A paper entry used to be recorded at the raw ticker, because the
         # order block below sits inside `if not paper:` and PaperTrader is
@@ -4137,6 +4245,40 @@ class AssetBot(ABC):
             return self._skip(symbol, skips.ALREADY_OPEN,
                               "a paper position is already on")
 
+        # ── SIZE BY PROOF (2026-10-07, backtester/proving/proof.py) ──────
+        # The order of 2026-10-01 put 36 rules at live_full by hand, most
+        # with no graded signal, and real money followed the stage alone.
+        # A LIVE entry now asks the proving ground's newest live-rules
+        # verdict for (rule, instrument class, side): FAILED is refused
+        # (PROVING_FAILED, the numbers first), PROVEN keeps full size, and
+        # anything else is cut to REDUCED (the live_small quarter) unless
+        # the rule's own graded record proves it. Here, and not earlier:
+        # the proof needs the venue settled — stage_policy, Aragorn and
+        # the posture may send this entry to paper, and a paper entry is
+        # not a live one, so it is never refused or cut. Before the sizer,
+        # so qty_default and risk_dollars_default (which the desk ranks
+        # and budgets on) already carry the cut; the stage factor below
+        # applies it once. A FAILED entry is never a candidate, so it is
+        # never billed in the debate. The verdict is not read again at the
+        # send: it changes at most nightly and the cache lives one tick.
+        _cut = 1.0
+        if self.cfg.mode == "live" and not stage.get("force_paper") \
+                and decision.rule_name:
+            _proof = self._proof_gate(symbol, decision)
+            if _proof is not None:
+                if _proof["tier"] == proof.FAILED:
+                    logger.warning("[%s_bot] %s: entry refused by the "
+                                   "proving ground — %s", self.asset_class,
+                                   symbol, _proof["words"])
+                    return self._skip(symbol, skips.PROVING_FAILED,
+                                      _proof["words"])
+                stage = proof.stage_with_proof(stage, _proof)
+                _cut = float(stage["proof"]["cut"])
+                if _cut < 1.0:
+                    logger.info("[%s_bot] %s size by proof x%g: %s",
+                                self.asset_class, symbol, _cut,
+                                _proof["words"])
+
         # ── Size by RISK, not by notional ────────────────────────────────
         sizing = self._size_for_entry(symbol, price, sl, decision)
         qty = sizing["qty"]
@@ -4226,10 +4368,12 @@ class AssetBot(ABC):
 
         # Steps M-O: the ceiling, the single-position cap, the duplicate and
         # theme gates - on the bot's own final size. execute_entry runs the
-        # same judgement again on the size actually sent.
+        # same judgement again on the size actually sent. The proof's cut
+        # note (2026-10-07) leads a refusal the cut can cause: a quarter of
+        # a size too small to trade says the cut made it so.
         if not self._judge_final_size(
                 symbol, qty=qty, price=price, sl=sl, decision=decision,
-                sizing=sizing,
+                sizing=sizing, note=proof.cut_note(stage),
                 venue=("paper" if (self.cfg.mode == "paper"
                                    or bool(stage["force_paper"])) else "live")):
             return None
@@ -4493,6 +4637,54 @@ class AssetBot(ABC):
         self._timing_verdict[symbol] = verdict
         return verdict
 
+    def _proof_gate(self, symbol: str, decision) -> dict | None:
+        """SIZE BY PROOF (2026-10-07, backtester/proving/proof.proof_for):
+        the proving ground's verdict on decision.rule_name for `symbol`'s
+        INSTRUMENT class and the decision's side, read once per tick
+        (_tick_broker_cache). The class is the one the clock gate already
+        cached under ("timing_instrument_key", symbol) — the same key as
+        _instrument_class (the router's own) — or _instrument_class when
+        no clock read ran. etf is never read as stock: the proving ground
+        pools etf on its own. None when proof.GATE is off. Never raises,
+        and never refuses on a read it could not make: a failure is an
+        UNPROVEN proof at REDUCED with the unread words."""
+        from backtester.proving import proof
+        if not proof.GATE:
+            return None
+        cls = ""
+        try:
+            cache = getattr(self, "_tick_broker_cache", None)
+            cache = cache if isinstance(cache, dict) else None
+            key = ("timing_instrument_key", symbol)
+            if cache is not None and key in cache:
+                cls = cache[key][0]
+            else:
+                cls = self._instrument_class(symbol)
+            return proof.proof_for(decision.rule_name, cls,
+                                   decision.direction, cache=cache)
+        except Exception as e:  # noqa: BLE001 — unread is reduced, not refused
+            logger.warning("[%s_bot] %s: the proving ground unread (%s) — "
+                           "entered at %gx", self.asset_class, symbol, e,
+                           proof.REDUCED)
+            return proof.unread_proof(getattr(decision, "rule_name", ""),
+                                      cls or self.asset_class,
+                                      getattr(decision, "direction", ""), e)
+
+    def _stage_label(self, rule_name: str, stage_name: str) -> str:
+        """The stage a trade row records (2026-10-07): the promotion's
+        provenance label — "live_full (by hand, unproven)" for a rule the
+        operator promoted by hand without proof — so no row reads a plain
+        live_full for it (signals.promotion_pipeline.promotion_provenance,
+        read once per tick). Falls back to the bare stage."""
+        try:
+            from signals.promotion_pipeline import promotion_provenance
+            label = promotion_provenance(
+                rule_name, cache=getattr(self, "_tick_broker_cache", None)
+            )["label"]
+            return str(label or stage_name)
+        except Exception:  # noqa: BLE001 — a label never costs an entry
+            return stage_name
+
     def _entry_quote_gate(self, symbol: str, tk, client, *, stop=None) -> dict:
         """THE ENTRY QUOTE (2026-10-05, mark_sanity.entry_quote): whether
         the quote `tk` may be sized, stopped and ordered on — not crossed,
@@ -4744,6 +4936,13 @@ class AssetBot(ABC):
         the attack mode's actual pick, and `note` ("attack HIGH: at 10x: ")
         then leads the MAX SINGLE POSITION refusal — the one check here the
         multiplier moves — so the skip names the tier and the multiplier.
+        `note` leads the open-risk and notional refusals too, and
+        (2026-10-07) the SIZED_TO_ZERO one: SIZE BY PROOF passes
+        proof.cut_note ("unproven 0.25x: ") from propose_entry and the
+        first judgement in execute_entry, so a size the proof's cut took
+        under one tradeable unit says the cut did it, not the pool alone.
+        The posture and attack callers re-judge a quantity already above
+        zero, so their note never reaches that refusal.
 
         Records the skip and returns False otherwise. Shared by
         propose_entry (on the bot's own size) and execute_entry (on that
@@ -4805,9 +5004,12 @@ class AssetBot(ABC):
                         "%s, stop %.3f%% away) — skipping", self.asset_class,
                         symbol, sizing["risk_fraction"] * 100, self.cfg.capital,
                         abs(price - sl) / price * 100 if price else 0)
+            # `note` first (2026-10-07): "unproven 0.25x: " when the proof's
+            # cut took the size under one unit; "" otherwise, so the
+            # detail is byte-identical to before.
             self._skip(
                 symbol, skips.SIZED_TO_ZERO,
-                f"risk budget {sizing['risk_fraction'] * 100:.2f}% of "
+                note + f"risk budget {sizing['risk_fraction'] * 100:.2f}% of "
                 f"{self.cfg.capital} is below one tradeable unit")
             return False
 
@@ -4965,6 +5167,8 @@ class AssetBot(ABC):
         the money-safety guard against a PaperTrader fallback runs on THIS
         client, which is the one that matters.
         """
+        from backtester.proving import proof
+        from bot_program import entry_timing
         from bot_program.engine.broker_router import client_for_symbol
         from bot_program.asset_engine import skips
 
@@ -4976,6 +5180,14 @@ class AssetBot(ABC):
         sl, tp = float(cand.stop), float(cand.target)
         level_meta, cost_reason = cand.level_meta, cand.cost_reason
         stage, sizing = cand.stage, cand.sizing
+        # SIZE BY PROOF (2026-10-07): the proposal's verdict rides the
+        # candidate (stage["proof"]) and is NOT read again here — it
+        # changes at most nightly and the cache lives one tick. Its cut
+        # note ("unproven 0.25x: ", or "") leads every refusal at the send
+        # that a cut size can cause: the size judgement, the venue's size
+        # floor and its once-a-day notification, the venue's fee and the
+        # leverage refusals. Nothing is upsized.
+        _cut_note = proof.cut_note(stage)
 
         # The multiplier lands BEFORE rounding and BEFORE the judgement, so
         # the quantity judged is the quantity sent. At 1.0 this is the
@@ -4990,7 +5202,7 @@ class AssetBot(ABC):
                               price, fractional=_fr)
         if not self._judge_final_size(symbol, qty=qty, price=price, sl=sl,
                                       decision=decision, sizing=sizing,
-                                      venue=cand.venue):
+                                      venue=cand.venue, note=_cut_note):
             return None
 
         # THE ELITE ALLOWANCE, counted again at the send (2026-10-01): two
@@ -5138,8 +5350,19 @@ class AssetBot(ABC):
             entry_meta["fractional_units"] = True
         if sizing["stop_widened"]:
             entry_meta["stop_widened"] = True
+        # The stage the row records is its provenance label under SIZE BY
+        # PROOF (2026-10-07): "live_full (by hand, unproven)" for a rule
+        # promoted by hand without proof, so no row — paper rows of a live
+        # rule included (an Aragorn bench, the crisis posture) — reads a
+        # plain live_full for it. Nothing reads the key to decide. The
+        # proof itself (tier, cut, words, the verdict's numbers) rides
+        # metadata["proof"] when the proposal read one.
         if stage.get("stage"):
-            entry_meta["promotion_stage"] = stage["stage"]
+            entry_meta["promotion_stage"] = (
+                self._stage_label(decision.rule_name, stage["stage"])
+                if proof.GATE and decision.rule_name else stage["stage"])
+        if isinstance(stage.get("proof"), dict):
+            entry_meta["proof"] = proof.meta_of(stage["proof"])
         if not paper:
             # THE GRANULARITY THE SIZE WAS ROUNDED TO, on the client the
             # order actually goes through. A non-whole size is one this
@@ -5206,10 +5429,13 @@ class AssetBot(ABC):
             # also takes 1% a side on crypto and 1.00 USD a side on a stock,
             # which no quote shows. The filter is asked again with that on
             # top; a trade the fee makes negative-edge sends nothing.
+            # 2026-10-07: a flat fee weighs four times more on a quarter
+            # size, so a refusal the proof's cut caused is led by its note.
             _fee, _fee_why = self._venue_fee_refusal(
                 client, symbol, qty=float(qty), price=float(price),
                 target=float(tp), stop=float(sl), charge=charge)
             if _fee_why:
+                _fee_why = _cut_note + _fee_why
                 logger.info("[%s_bot] skipping %s — %s", self.asset_class,
                             symbol, _fee_why)
                 return self._skip(symbol, skips.COST_FILTER, _fee_why)
@@ -5259,11 +5485,19 @@ class AssetBot(ABC):
                     "Nothing sent, nothing resized.",
                     self.asset_class, symbol, float(qty), _floor,
                     _floor / float(qty))
-                self._notify_venue_min_size(symbol, qty=float(qty),
-                                            floor=_floor, note=_why)
+                # The proof's cut note leads (2026-10-07): a quarter size
+                # under eToro's measured floor may be the cut's doing. The
+                # once-a-day notification is handed the cut itself and
+                # names it the cause only when the uncut size clears the
+                # floor (the review of 2026-10-07).
+                self._notify_venue_min_size(
+                    symbol, qty=float(qty), floor=_floor,
+                    note=(_cut_note + (_why or "")),
+                    cut=((stage or {}).get("proof") or {}).get("cut", 1.0))
                 return self._skip(
                     symbol, skips.VENUE_MIN_SIZE,
-                    (f"sized {float(qty):g} units from the stop distance; "
+                    _cut_note
+                    + (f"sized {float(qty):g} units from the stop distance; "
                      f"this venue's minimum is {_floor:g}. Refused rather "
                      f"than traded at {_floor:g}, which is "
                      f"{_floor / float(qty):.1f}x the chosen risk")
@@ -5298,10 +5532,12 @@ class AssetBot(ABC):
             if lev_why:
                 logger.error("[%s_bot] %s REFUSED: %s", self.asset_class,
                              symbol, lev_why)
-                # verdict first; an attack-mode refusal names its tier
+                # verdict first; an attack-mode refusal names its tier, and
+                # (2026-10-07) a size the proof cut names the cut first
                 return self._skip(symbol, skips.LEVERAGE_REFUSED,
-                                  (f"attack {_attack['tier']}: "
-                                   if _attack else "") + lev_why)
+                                  _cut_note
+                                  + (f"attack {_attack['tier']}: "
+                                     if _attack else "") + lev_why)
             _plnote = (getattr(self, "_posture_lev_note", None) or {}).pop(
                 symbol, "")
             if _plnote:
@@ -5349,9 +5585,11 @@ class AssetBot(ABC):
                     logger.error("[%s_bot] %s REFUSED at %sx: %s",
                                  self.asset_class, symbol,
                                  leverage or "1 (no key)", lev_why)
+                    # the proof's cut note first (2026-10-07), as above
                     return self._skip(symbol, skips.LEVERAGE_REFUSED,
-                                      (f"attack {_attack['tier']}: "
-                                       if _attack else "")
+                                      _cut_note
+                                      + (f"attack {_attack['tier']}: "
+                                         if _attack else "")
                                       + f"at {leverage or 1}x: {lev_why}")
             if not self._still_armed():
                 return self._skip(symbol, skips.GATE_BLOCKED,
@@ -5360,14 +5598,19 @@ class AssetBot(ABC):
             # THE CLOCK, before the debate (2026-10-06, review): it is a
             # deterministic refusal, and the debate below is billed — a
             # candidate proposed at 16:49 New York and sent at 16:51 must
-            # not be argued and then refused at the rollover. Read again on
-            # the fresh clock after the last look, just before the order.
+            # not be argued and then refused at the rollover, or at an
+            # exchange that is shut (SHUT, Morgul G1's own clock and
+            # classes, recorded as skips.MARKET_SHUT; 2026-10-07). Read
+            # again on the fresh clock after the last look, just before the
+            # order. The code is entry_timing.skip_code's: MARKET_SHUT for
+            # SHUT, BAD_TIMING for every other window.
             _timing = self._entry_timing_gate(symbol)
             if not _timing["ok"]:
                 logger.warning("[%s_bot] %s: the send was refused on the "
                                "clock — %s", self.asset_class, symbol,
                                _timing["why"])
-                return self._skip(symbol, skips.BAD_TIMING, _timing["why"])
+                return self._skip(symbol, entry_timing.skip_code(_timing),
+                                  _timing["why"])
             # THE TRADE DEBATE (2026-10-01; moved here 2026-10-02, after
             # every deterministic refusal, so only an order about to be SENT
             # is argued and billed): the Executioner argues why this
@@ -5415,11 +5658,19 @@ class AssetBot(ABC):
                 _scale = float(debate.get("scale") or 1.0)
                 if _scale < 1.0:
                     qty = self._round_qty(qty * _scale, price, fractional=_fr)
+                    # SIZE BY PROOF (2026-10-07): the Executioner scales a
+                    # size the proof may already have cut to a quarter, so
+                    # each refusal below that the smaller ticket causes —
+                    # under a unit or the venue's floor, the flat fee, the
+                    # leverage — is led by the proof's cut note as well as
+                    # the Executioner's; the note is "" when nothing was
+                    # cut, so those details read exactly as before.
                     if qty <= 0 or (_floor is not None
                                     and float(qty) < _floor - 1e-9):
                         return self._skip(
                             symbol, skips.SIZED_TO_ZERO,
-                            f"the Executioner cut it to {_scale:g}x: "
+                            _cut_note
+                            + f"the Executioner cut it to {_scale:g}x: "
                             f"{float(qty):g} units, under "
                             + (f"the venue minimum {_floor:g}"
                                if _floor is not None else "one unit")
@@ -5432,7 +5683,8 @@ class AssetBot(ABC):
                         target=float(tp), stop=float(sl), charge=charge)
                     if _fee_why:
                         return self._skip(symbol, skips.COST_FILTER,
-                                          f"after the Executioner's cut: "
+                                          _cut_note
+                                          + f"after the Executioner's cut: "
                                           f"{_fee_why}")
                     if _fee:
                         entry_meta["venue_fee_fraction"] = round(_fee, 8)
@@ -5444,7 +5696,8 @@ class AssetBot(ABC):
                         price=float(price), stop=float(sl), qty=float(qty))
                     if lev_why:
                         return self._skip(symbol, skips.LEVERAGE_REFUSED,
-                                          f"after the Executioner's cut: "
+                                          _cut_note
+                                          + f"after the Executioner's cut: "
                                           f"{lev_why}")
                     _pl2 = (getattr(self, "_posture_lev_note", None)
                             or {}).pop(symbol, "")
@@ -5457,7 +5710,8 @@ class AssetBot(ABC):
                         if lev_why:
                             return self._skip(
                                 symbol, skips.LEVERAGE_REFUSED,
-                                f"after the Executioner's cut, at "
+                                _cut_note
+                                + f"after the Executioner's cut, at "
                                 f"{leverage or 1}x: {lev_why}")
                     entry_meta["debate_cut"] = {"scale": _scale,
                                                 "qty": float(qty),
@@ -5494,21 +5748,29 @@ class AssetBot(ABC):
             # THE CLOCK, read again at the send (2026-10-06): the desk
             # executes minutes after it proposes, and a proposal made at
             # 16:40 New York can reach the order at 16:55 — inside the
-            # rollover — or a print can have come into its window. The
-            # same verdict as the proposal's (entry_timing), on the fresh
-            # clock; nothing sent on a refusal.
+            # rollover — or a print can have come into its window, or an
+            # exchange that is shut (SHUT, Morgul G1's own clock and
+            # classes, recorded as skips.MARKET_SHUT; 2026-10-07) can have
+            # closed since. The same verdict as the proposal's
+            # (entry_timing), on the fresh clock; nothing sent on a
+            # refusal, recorded under entry_timing.skip_code's code.
             _timing = self._entry_timing_gate(symbol)
             if not _timing["ok"]:
                 logger.warning("[%s_bot] %s: the order was refused on the "
                                "clock — %s", self.asset_class, symbol,
                                _timing["why"])
-                return self._skip(symbol, skips.BAD_TIMING, _timing["why"])
+                return self._skip(symbol, entry_timing.skip_code(_timing),
+                                  _timing["why"])
             try:
                 # The LAST read before real units move. can_open_new ran
                 # before this symbol's scan; a disarm landing between then
                 # and now would otherwise still reach the broker, and what
                 # it opened would go unmanaged — the runner refuses a
-                # disabled config, so no later tick trails or time-stops it.
+                # config stopped by hand or by the kill switch, so no later
+                # tick trails or time-stops it. (A brake's stop is managed
+                # since 2026-10-07, asset_engine/disarm.py, but a brake
+                # means "open nothing", so the order is refused all the
+                # same.)
                 # Brokers that support it attach SL/TP atomically (Alpaca
                 # bracket, OANDA on-fill, IBKR bracket) so the position is
                 # protected even when this worker is down. Clients without
@@ -7079,7 +7341,8 @@ class AssetBot(ABC):
                            "%s", self.asset_class, e)
 
     def _notify_venue_min_size(self, symbol: str, *, qty: float,
-                               floor: float, note: str = "") -> None:
+                               floor: float, note: str = "",
+                               cut: float = 1.0) -> None:
         """Say it ONCE, not once per tick.
 
         The floor is a property of the instrument at the venue, so it will
@@ -7096,6 +7359,41 @@ class AssetBot(ABC):
             from datetime import timedelta as _td
 
             from alerts.models import Notification as _N
+            # SIZE BY PROOF (2026-10-07): execute_entry passes the proof's
+            # cut note ("unproven 0.25x: ") ahead of the floor's label, so
+            # the body names the cut — the operator learns the size was a
+            # quarter because the rule is unproven on this class and side,
+            # not only that the pool or the risk is small. The note's
+            # trailing colon is dropped where it sits mid-sentence.
+            # THE CAUSE (2026-10-07, the review): `cut` is the proof's own
+            # (stage["proof"]["cut"]). The cut is named the cause only when
+            # the uncut size, qty / cut, clears the floor; when it is under
+            # the floor too, a proof would not clear it, and the body says
+            # so plainly.
+            note = str(note or "").strip()
+            if note.endswith(":"):
+                note = note[:-1].rstrip()
+            try:
+                cut = float(cut)
+            except (TypeError, ValueError):
+                cut = 1.0
+            if not 0 < cut <= 1:
+                cut = 1.0
+            if not note.startswith("unproven"):
+                why_cut = ""
+            elif qty / cut >= floor - 1e-9:
+                why_cut = ("The size is the proving ground's cut: the rule "
+                           "is not proven on this class and side, so it "
+                           "enters at a fraction of its size, and uncut it "
+                           "would clear this floor — a proof restores full "
+                           "size, and a larger pool keeps the cut "
+                           "proportional. ")
+            else:
+                why_cut = ("The proving ground cut this entry (the rule is "
+                           "not proven on this class and side), but the cut "
+                           "is not the cause: the uncut size is also under "
+                           "the venue's floor, so a proof alone would not "
+                           "clear it. ")
             title = (f"✕ {self.cfg.name} · {symbol}: the venue will not "
                      f"take this size")[:200]
             recent = _N.objects.filter(
@@ -7113,7 +7411,9 @@ class AssetBot(ABC):
                       f"{(' — ' + note) if note else ''}, so nothing "
                       f"was sent — and nothing was resized: trading "
                       f"{floor:g} would be {times:.1f}x the risk this entry "
-                      f"was sized for, which is a different trade. What "
+                      f"was sized for, which is a different trade. "
+                      + why_cut
+                      + "What "
                       f"raises the unit count is more capital, a higher "
                       f"extras['risk_per_trade_pct'], or a TIGHTER stop — "
                       f"widening the stop buys FEWER units and makes this "

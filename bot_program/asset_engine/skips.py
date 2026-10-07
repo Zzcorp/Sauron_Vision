@@ -96,6 +96,17 @@ ELIGIBILITY_REFUSED = "eligibility_refused"
 # 2026-09-26. A PAPER entry while the instrument's market is shut
 # (paper_trader.paper_market_shut): no fill, no row. Its own code so a
 # weekend of refusals reads as the clock, never as a dead feed (no_price).
+#
+# 2026-10-07. The code now also covers a LIVE entry the clock refused
+# because the instrument's exchange is shut (entry_timing.SHUT, on Morgul
+# G1's own clock and classes), in the bot lane (propose_entry and both
+# reads at the send, through entry_timing.skip_code) and on the options
+# lane's live branch. On 2026-10-06 config 26 shorted PG 22 minutes before
+# the NYSE open and eToro filled it. One code means "the market is shut" in
+# every lane: the paper venue (AssetBot.propose_entry's ticker answer and
+# execute_entry's paper gate), the options paper branch, and now a live
+# entry — so a night of refusals reads as the clock, never as a dead feed,
+# and does not swamp bad_timing's count and its advice.
 MARKET_SHUT = "market_shut"
 
 # 2026-10-05. An OPEN row left alone for one tick because its mark was
@@ -129,6 +140,20 @@ WIDE_SPREAD = "wide_spread"
 # the instrument's currency from 60 min before to 15 min after. A decision
 # with the hour it clears, never a broken feed; the manual lane only warns.
 BAD_TIMING = "bad_timing"
+
+# 2026-10-07. SIZE BY PROOF (backtester/proving/proof.py): the proving
+# ground's newest live-rules verdict for this rule on the instrument's
+# class and side is FAILED, so a LIVE entry sends no real money — in the
+# bot lane (propose_entry, after Aragorn and the posture settled the
+# venue, before the size) and on the options lane (on the underlying's
+# class). The order of 2026-10-01 put 36 rules at live_full by hand, most
+# with no graded signal; a rule the proving ground measured as losing on
+# this class and side is refused whatever its graded record says. A
+# decision with the verdict's numbers first, never a broken feed; a paper
+# config still trades the rule, and the manual lane only warns. Anything
+# short of PROVEN (or a graded record that proves it) enters at the
+# reduced size instead, and records no skip.
+PROVING_FAILED = "proving_failed"
 
 MAX_SYMBOLS_TRACKED = 200
 
@@ -249,10 +274,14 @@ def diagnose(cfg) -> str:
                              "1,000 USD). Nothing was sent and nothing was "
                              "clamped; the row is re-read once per UTC day, "
                              "an unread one on every ask",
-        MARKET_SHUT: "the instrument's market is shut, or opened less than "
-                     "15 minutes ago, so the paper venue fills nothing — "
-                     "nothing is wrong with the feed; paper fills resume "
-                     "at the hour the detail names",
+        # 2026-10-07: a live entry refused on a shut exchange
+        # (entry_timing.SHUT) is recorded here too, so the advice names
+        # both lanes and the hour entries resume, never only paper fills.
+        MARKET_SHUT: "the instrument's market is shut (or, on the paper "
+                     "venue, opened less than 15 minutes ago): the paper "
+                     "venue fills nothing and the bots send no live entry "
+                     "— nothing is wrong with the feed; entries resume at "
+                     "the hour the detail names",
         SUSPECT_MARK: "an open position was left alone for a tick, or an "
                       "entry was refused, because the quote was suspect "
                       "(one print far from the last accepted one or from "
@@ -280,6 +309,16 @@ def diagnose(cfg) -> str:
                     "instrument's currency — nothing is wrong with the "
                     "signal or the feed; the detail names the hour it "
                     "clears, and the same signal enters when it does",
+        # 2026-10-07: SIZE BY PROOF — the proving ground's FAILED verdict
+        # on the rule, the class and the side refuses a live entry.
+        PROVING_FAILED: "the proving ground FAILED this rule on this "
+                        "instrument's class and side in its newest "
+                        "live-rules run (manage.py prove show) — the bot "
+                        "lane sends it no real money; nothing is wrong "
+                        "with the signal or the feed; a paper config "
+                        "still trades it, the verdict is judged again "
+                        "every night at 03:40 UTC, and the detail names "
+                        "the numbers",
     }.get(top, "")
     return (f"{top} accounts for {share:.0%} of {total} skips"
             + (f" — {advice}" if advice else ""))
