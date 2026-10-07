@@ -934,6 +934,97 @@ class AssetBot(ABC):
             "managed": managed, "opened": opened, "gate_reason": gate_reason,
         }
 
+    def manage_only(self) -> dict:
+        """THE BRAKED PASS (2026-10-07, asset_engine/disarm.py): the exits
+        of a config a BRAKE stopped, and nothing else.
+
+        PG #138 sat OPEN on config 26 from the moment Morgul's G1 brake
+        stopped it on 2026-10-06: the runner skipped every disabled config
+        whole, so the brake that was meant to stop new entries also
+        switched off the time stop, trailing, break-even, the weekend and
+        event windows and the venue-mirrored soft stop. A stop is now
+        recorded, and a config a brake stopped is run through here every
+        tick while it holds an OPEN row (runner.manage_braked): the
+        heartbeat, manage_positions (OptionsBot's own override, where it
+        has one), then the withdrawal of any bot order still working.
+
+        It NEVER calls can_open_new, scan_symbol, propose_entry or
+        execute_entry, writes no desk plan and records no ENTRY skip.
+        manage_positions' own notes on held rows (NO_PRICE, SUSPECT_MARK)
+        are recorded as they are for an enabled config. What it can book
+        is exposure that already exists: a WORKING entry the broker has
+        filled is booked by the poll, and nothing it runs sends an opening
+        order; every other action closes or moves a stop, and a managed
+        close at eToro goes by position id or sends nothing."""
+        from bot_program.asset_engine import disarm
+        from bot_program.asset_engine.safety import write_heartbeat
+
+        rec = disarm.record_of(self.cfg)
+        by = rec.get("by", "")
+        write_heartbeat(self.cfg, status="RUNNING")
+        managed = self.manage_positions()
+        withdrawn = self._withdraw_working_while_braked(by)
+        note = (f"stopped by {disarm.BY_WORDS.get(by, 'a brake')}: "
+                f"managing only, opening nothing")[:200]
+        write_heartbeat(self.cfg, status="OK", note=note)
+        return {
+            "asset_class": self.asset_class, "config_id": self.cfg.id,
+            "braked": True, "by": by, "managed": managed,
+            "withdrawn": withdrawn, "opened": [], "gate_reason": note,
+        }
+
+    def _withdraw_working_while_braked(self, by: str) -> list:
+        """Withdraw every bot order a braked config still has working, so
+        nothing new fills after a brake (2026-10-07). Returns the ids of
+        the rows that end CANCELED.
+
+        Read AFTER manage_positions has returned: its poll may just have
+        booked the fill, and a booked position is managed, never
+        withdrawn. A row with no broker order id is skipped: the helper
+        would alert staff on every tick (cancel_working_entry), and the
+        poll's own daily alert already says it. A paper client (the live
+        row's broker unavailable) can send nothing and is skipped. A
+        refused cancel leaves the row WORKING, retried on the next tick; a
+        fill that races the cancel stays WORKING and is booked by the
+        next poll. One row's failure is logged and never stops the rest.
+
+        Never the MANUAL config (decision P3-i): Morgul brakes manual
+        configs too, and the held TAKE TRADE order is the operator's own;
+        Morgul never reaches the broker by design, so that order is polled,
+        booked on a fill and managed, never withdrawn by this pass. The
+        Eye's /stop on the manual config still withdraws it, as the
+        operator's own command."""
+        from bot_program.asset_engine import disarm
+        from bot_program.engine.broker_router import client_for_symbol
+        from bot_program.manual_trade import MANUAL_CONFIG_NAME
+        from bot_program.models import AssetBotTrade
+
+        if self.cfg.name == MANUAL_CONFIG_NAME:
+            return []
+        reason = (f"withdrawn while the bot is stopped by "
+                  f"{disarm.BY_WORDS.get(by, 'a brake')}: a stopped bot "
+                  f"opens nothing")
+        out = []
+        for t in AssetBotTrade.objects.filter(config=self.cfg, status="OPEN",
+                                              paper=False):
+            try:
+                if not is_entry_working(t) or not t.broker_order_id:
+                    continue
+                client = client_for_symbol(self.user, t.symbol, self.cfg)
+                if self._is_paper_client(client):
+                    continue
+                if cancel_working_entry(t, client, reason=reason,
+                                        cancel_parent=True):
+                    t.refresh_from_db(fields=["status"])
+                    if t.status == "CANCELED":
+                        out.append(t.pk)
+            except Exception as e:  # noqa: BLE001 — one row, one pass
+                logger.warning("[%s_bot] %s: withdrawing working order %s "
+                               "of a braked config failed: %s",
+                               self.asset_class, t.symbol,
+                               t.broker_order_id, e)
+        return out
+
     # ── position management ──────────────────────────────────────────────
 
     def manage_positions(self) -> int:
@@ -3528,9 +3619,13 @@ class AssetBot(ABC):
         for each remaining symbol, AFTER the flatten pass had walked past
         them.
 
-        Nothing manages what it opens, either: the runner refuses a disabled
-        config, so bot-side trailing and the time stop never run on those
-        units. Only the entry bracket protects them.
+        Nothing manages what it opens, either, when the stop was the kill
+        switch's or a hand's: the runner refuses such a config, so
+        bot-side trailing and the time stop never run on those units, and
+        only the entry bracket protects them. A config a BRAKE stopped is
+        still managed (2026-10-07, asset_engine/disarm.py), but its pass
+        opens nothing: an order sent after the brake would be exactly the
+        new exposure the brake exists to stop.
 
         Fails OPEN on a database error, deliberately and loudly: the same
         posture `preflight` takes, because halting the whole fleet on a
@@ -5664,7 +5759,11 @@ class AssetBot(ABC):
                 # before this symbol's scan; a disarm landing between then
                 # and now would otherwise still reach the broker, and what
                 # it opened would go unmanaged — the runner refuses a
-                # disabled config, so no later tick trails or time-stops it.
+                # config stopped by hand or by the kill switch, so no later
+                # tick trails or time-stops it. (A brake's stop is managed
+                # since 2026-10-07, asset_engine/disarm.py, but a brake
+                # means "open nothing", so the order is refused all the
+                # same.)
                 # Brokers that support it attach SL/TP atomically (Alpaca
                 # bracket, OANDA on-fill, IBKR bracket) so the position is
                 # protected even when this worker is down. Clients without

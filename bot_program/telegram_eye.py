@@ -18,7 +18,8 @@ the answer is English all the same.
     /help  /aide                        the commands
     /q QUESTION  /ask  "a quoted line"  the research agent, in English
     /stop ID  /stopall                  THE BRAKE: bots OFF, never ON;
-                                        their unfilled orders withdrawn
+                                        their unfilled orders withdrawn;
+                                        what is open stays managed
 
 WHAT IT REFUSES
   * Any chat but the configured one. A message counts only when its chat
@@ -29,13 +30,21 @@ WHAT IT REFUSES
     reply an hour): acting for the wrong account stops the wrong bots.
   * Any write to trading state but `enabled = False` on that user's own
     configs, and with it (2026-09-28) the withdrawal of every WORKING
-    live entry — an unfilled order the broker holds, which nobody polls
-    once its bot is off — of the configs the brake stops, through the
-    kill switch's own helper (asset_engine.base.cancel_working_entry;
-    the row CANCELED, nothing traded). A question writes its
-    ResearchMessage rows. No bot on, no order, no exit, no level, no
-    Demo untick, no class tick, no risk change, no PIN;
-    tests/test_telegram_eye.py greps this file.
+    live entry — an unfilled order the broker holds — of the configs the
+    brake stops, through the kill switch's own helper
+    (asset_engine.base.cancel_working_entry; the row CANCELED, nothing
+    traded). A question writes its ResearchMessage rows. No bot on, no
+    order, no exit, no level, no Demo untick, no class tick, no risk
+    change, no PIN; tests/test_telegram_eye.py greps this file.
+    Since 2026-10-07 the write is not made here: it goes through
+    asset_engine.disarm.disable_config, which also records WHO stopped
+    the config (extras["disabled_by"]: the group's /stop, the alarm
+    chat's /stopall, Morgul). A config a brake stopped is still managed:
+    the runner runs its exits every tick while it holds an open row, and
+    never its entries (asset_engine/runner.manage_braked), so the brake
+    stops new money and keeps the exits of what is open. The withdrawal
+    of the WORKING entries stays here as it was: the operator's own brake
+    takes the order down at once rather than leave it to the next pass.
   * A command older than STALE_AFTER_S, so a backlog after an outage does
     not replay itself. The brake is the exception: a stop applied late is
     still safe, a stop ignored is not; its reply then says when it was
@@ -160,6 +169,13 @@ PRIVACY_LINE = ("/q <question> always works; for bare quotes, turn the "
 BRAKE_WORDS = ("No position was closed.",
                "Stops stay at the broker.",
                "To re-arm: the server, never Telegram.")
+#: Said only when this brake stopped something (2026-10-07): a brake's
+#: stop is managed (asset_engine/disarm.py), and a reply never promises
+#: that for a config listed under "Already stopped", which may have been
+#: stopped by hand or by the kill switch and is then not managed at all.
+#: Those lines say which, config by config.
+MANAGING_WORDS = ("The bots stopped here open nothing and keep managing "
+                  "what is open.")
 
 #: Appended to a question before it reaches the research agent, whose
 #: system prompt asks for Markdown: the group reads plain English.
@@ -853,8 +869,14 @@ def build_why(user, symbol: str, *, now=None) -> Reply:
     if not rows:
         lines.append(f"No bot watches {sym}.")
         lines.append("Symbols are set per bot on the platform.")
+    from bot_program.asset_engine import disarm
     for cfg, last in rows[:MAX_WHY_BOTS]:
-        state = "running" if cfg.enabled else "stopped"
+        # A bot a brake stopped still runs its exits (2026-10-07,
+        # asset_engine/disarm.py); one stopped by hand or by the kill
+        # switch does not, and plain "stopped" is all it gets.
+        state = ("running" if cfg.enabled else
+                 ("stopped by a brake, still managing"
+                  if disarm.keeps_managing(cfg) else "stopped"))
         lines.append(heading(f"{config_label(cfg)} — {state} · {mode_word(cfg.mode)}"))
         if last is None:
             lines.append("Last reason: none recorded yet")
@@ -884,7 +906,10 @@ def build_help() -> Reply:
         f"{BULLET}/help — this list (also /aide)",
         heading("Good to know"),
         "Replies are always in English.",
-        "The brake never closes a position; stops stay at the broker.",
+        # 2026-10-07: a brake's stop keeps the exits running
+        # (asset_engine/disarm.py), and the help says the stronger fact.
+        "The brake never closes a position; a stopped bot keeps managing "
+        "what is open.",
         "A stopped bot is re-armed on the server, never here.",
         "A quoted question sent as a reply to a Sauron message works too.",
         PRIVACY_LINE,
@@ -944,25 +969,42 @@ def _withdraw(trade) -> bool:
 
 
 def apply_brake(user, ids=(), *, everything: bool = False,
-                now=None, sent_at=None, withdraw: bool = False) -> Reply:
+                now=None, sent_at=None, withdraw: bool = False, by=None,
+                why: str = "", who: str = "") -> Reply:
     """THE BRAKE, the one write in this module: `enabled = False` on this
-    user's own configs, the same write as `manage.py bot off ID`. Nothing
-    is closed or moved.
+    user's own configs. Nothing is closed or moved.
+
+    THE WRITE AND ITS RECORD (2026-10-07). The write goes through
+    asset_engine.disarm.disable_config, which turns the config off under a
+    row lock and records who did it in extras["disabled_by"]: `by` (the
+    group's /stop by default; the alarm chat and Morgul pass their own),
+    `why` ("/stop 4", "/stopall", the finding) and `who` (the username by
+    default). That record is what makes this a BRAKE rather than `bot off`:
+    the runner keeps managing a braked config's open rows every tick — the
+    time stop, trailing and break-even, the stop and target, the weekend
+    and event windows — and never scans it (asset_engine/runner
+    .manage_braked). A config already off is listed under "Already
+    stopped" with who stopped it, and whether what it holds is still
+    managed: a brake never relabels a stop it did not make, so a config
+    stopped by hand or by the kill switch stays unmanaged and the reply
+    says so.
 
     `withdraw` (2026-09-28): the operator's own /stop and /stopall pass
     True, and every WORKING live entry of the configs they stop — an
     unfilled ORDER the broker holds, booked OPEN with entry_working
     (asset_engine/base.py) — is withdrawn through the kill switch's own
     helper (_withdraw). Not an order and not a close: the row is CANCELED
-    with nothing traded. Without it, once the bot is off nobody polls the
-    order (the fleet passes walk enabled configs only, on purpose:
-    asset_engine/runner.unmanaged_on_disable), so it would fill real
-    money AFTER the brake, unpolled, unwithdrawn, unannounced. The reply
-    names the orders withdrawn apart from the positions left open, and
-    one that could not be withdrawn with its order id. Morgul's brake
-    (morgul._brake) calls without it: the watchdog never reaches the
+    with nothing traded. Until 2026-10-07 nobody polled the order once
+    the bot was off, so it would have filled real money AFTER the brake;
+    the braked config's manage pass now polls it and withdraws it
+    (base._withdraw_working_while_braked), and the operator's own brake
+    still takes it down at once rather than leave it to the next pass.
+    The reply names the orders withdrawn apart from the positions left
+    open, and one that could not be withdrawn with its order id. Morgul's
+    brake (morgul._brake) calls without it: the watchdog never reaches the
     broker, its own design, and the reply then names the held orders as
-    orders that can still fill.
+    orders that can still fill — true until the next pass withdraws them
+    (a hand-taken order on the manual config is polled, never withdrawn).
 
     `sent_at`, the message's own time: a brake older than STALE_AFTER_S
     says when it was sent, and is applied all the same. Comparing it with
@@ -971,9 +1013,18 @@ def apply_brake(user, ids=(), *, everything: bool = False,
     updated_at on every skip it records, so that test would refuse fresh
     stops."""
     from django.utils import timezone
+    from bot_program.asset_engine import disarm
     from bot_program.asset_engine.base import is_entry_working
     from bot_program.asset_models import AssetBotConfig, AssetBotTrade
+    from bot_program.manual_trade import _tick_manages
     now = now or timezone.now()
+    ids = list(ids)
+    by = by or disarm.BY_EYE
+    if not why:
+        why = ("/stopall" if everything
+               else "/stop " + " ".join(map(str, ids)))
+    if not who:
+        who = getattr(user, "username", "") or ""
     stopped, already, unknown = [], [], []
     if everything:
         targets = list(AssetBotConfig.objects
@@ -988,18 +1039,34 @@ def apply_brake(user, ids=(), *, everything: bool = False,
                 already.append(cfg)
             else:
                 targets.append(cfg)
+    # THE WRITE (2026-10-07): through disarm.disable_config, which locks
+    # the row, turns it off and records this brake on it. A config another
+    # path stopped between the read above and the lock is "already
+    # stopped", never relabelled as this brake's.
     for cfg in targets:
-        cfg.enabled = False
-        cfg.save(update_fields=["enabled", "updated_at"])
-        stopped.append(cfg)
+        (stopped if disarm.disable_config(cfg, by=by, why=why, who=who,
+                                          now=now)
+         else already).append(cfg)
     head = []
     if stopped:
         head.append(heading(f"Stopped ({len(stopped)})"))
         head.extend(f"{BULLET}{config_label(c)} — {mode_word(c.mode)}"
                     for c in stopped)
     if already:
+        # Who stopped each one, in the short words (never a username or a
+        # free-text why on the phone), and whether what it holds is still
+        # managed: a brake's stop is, a hand or kill-switch stop is not.
         head.append(heading("Already stopped"))
-        head.extend(f"{BULLET}{config_label(c)}" for c in already)
+        for c in already:
+            if disarm.keeps_managing(c):
+                managed = " — still managing"
+            elif AssetBotTrade.objects.filter(config=c,
+                                              status="OPEN").exists():
+                managed = " — not managed while off"
+            else:
+                managed = ""
+            head.append(f"{BULLET}{config_label(c)} — "
+                        f"{disarm.record_words(c, short=True)}{managed}")
     for pk in unknown:
         head.append(f"No bot #{pk} on this account.")
     if everything and not stopped:
@@ -1007,9 +1074,10 @@ def apply_brake(user, ids=(), *, everything: bool = False,
     rows = (list(AssetBotTrade.objects.filter(
         config__in=stopped, status__in=OPEN_STATUSES)) if stopped else [])
     # A WORKING live entry is an ORDER the broker holds, not a position:
-    # no stop of the bot's to lose (the legs ride the order body), and
-    # nothing left to poll it once the bot is off. Named apart, and
-    # withdrawn when this is the operator's own brake.
+    # no stop of the bot's to lose (the legs ride the order body). Named
+    # apart, and withdrawn here when this is the operator's own brake; the
+    # braked config's manage pass polls it and withdraws it otherwise
+    # (2026-10-07, base._withdraw_working_while_braked).
     held = [t for t in rows if not t.paper and is_entry_working(t)]
     trades = [t for t in rows if t.paper or not is_entry_working(t)]
     withdrawn, kept = [], []
@@ -1037,18 +1105,29 @@ def apply_brake(user, ids=(), *, everything: bool = False,
                     f"({', '.join(t.symbol for t in held)}) — they can "
                     f"still fill")
     tail.extend(BRAKE_WORDS)
+    # Only when this brake stopped something (2026-10-07): the configs it
+    # stopped carry its record and stay managed; one listed under "Already
+    # stopped" says for itself whether it is.
+    if stopped:
+        tail.append(MANAGING_WORDS)
     # "protected" is the engine's own fact that a stop RESTS at the venue
     # (asset_engine/base.py; broker_vision reads it too). A live row
-    # without it was guarded by the bot, and the bot is now stopped.
+    # without it is guarded by the bot, and since 2026-10-07 the bot a
+    # brake stopped keeps guarding it: its manage pass runs every tick.
     bare = sum(1 for t in trades
                if not t.paper and not (t.metadata or {}).get("protected"))
     if bare:
         tail.append(f"Live without a stop at the broker: {bare}")
-        tail.append("The bot managed those stops; while it is stopped, "
-                    "nothing protects them.")
+        tail.append("The stopped bot still runs those stops on every tick.")
     if any(t.paper for t in trades):
-        tail.append("Paper stops are simulated by the bot and pause "
-                    "while it is stopped.")
+        tail.append("Paper stops are simulated by the bot, which keeps "
+                    "running them.")
+    # The management above rides the bot tick. When the tick itself is
+    # switched off (platform_master or pipeline_asset_bots), nothing runs
+    # those exits, braked or not, and the reply must not promise it.
+    if trades and not _tick_manages():
+        tail.append("The bot tick is off now: nothing manages them until "
+                    "it is back on.")
     if (sent_at is not None
             and (now - sent_at).total_seconds() > STALE_AFTER_S):
         tail.append(f"Sent: {when(sent_at)} ({ago(sent_at, now)})")

@@ -354,7 +354,11 @@ class StopAllTests(_ChatCase):
                              lines)
         big = [str(ln) for ln in replies[0].lines]
         self.assertIn("Stopped (24)", big)
-        self.assertIn("+6 more on the platform", big)
+        # 2026-10-07: the brake's tail carries one more protected line
+        # when it stopped something (telegram_eye.MANAGING_WORDS), so the
+        # head lists one bot fewer and counts it in the remainder.
+        self.assertIn(eye.MANAGING_WORDS, big)
+        self.assertIn("+7 more on the platform", big)
         self.assertEqual(len(big), eye.MAX_LINES)
 
 

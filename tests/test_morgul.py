@@ -1262,11 +1262,12 @@ class BrakeTests(_Case):
         self.assertEqual(self._enabled(self.cfg, self.other, self.live_other),
                          [False, True, True])
         # the stopped config holds an open PAPER row: its stop is the bot's
-        # own and pauses, so "the stops stay at the broker" is not said
+        # own, so "the stops stay at the broker" is not said; since
+        # 2026-10-07 the braked bot keeps running it (asset_engine/disarm.py)
         self.assertIn(f"Stopped: Forex swing #{self.cfg.pk} — no position "
                       f"was closed; to re-arm: the server", texts[0])
-        self.assertIn("Paper positions: 1 — their stops are simulated by the "
-                      "bot and pause while it is stopped", texts[0])
+        self.assertIn("Paper positions: 1 — the stopped bot still runs their "
+                      "simulated stops", texts[0])
         self.assertNotIn("the stops stay at the broker", texts[0])
         self.assertEqual(report.result["stopped"],
                          [f"Forex swing #{self.cfg.pk}"])
@@ -1297,8 +1298,9 @@ class BrakeTests(_Case):
                                     at=self.now + timedelta(minutes=5))
         self.assertIn(f"Stopped: Stocks live #{live.pk} — no position was "
                       f"closed; to re-arm: the server", texts[0])
-        self.assertIn("At the broker without a stop: 1 — while the bot is "
-                      "stopped, nothing protects them", texts[0])
+        # 2026-10-07: the braked bot keeps running that stop every tick
+        self.assertIn("At the broker without a stop: 1 — the stopped bot "
+                      "still runs their stops every tick", texts[0])
         self.assertNotIn("the stops stay at the broker", texts[0])
         guarded.refresh_from_db()
         self.assertEqual(guarded.status, "OPEN")

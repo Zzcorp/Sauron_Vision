@@ -69,6 +69,7 @@ def default_owner():
 
 def seed_bots(user, *, activate: bool = False) -> dict:
     """Create or refresh the starter fleet for `user`. Importable on purpose."""
+    from bot_program.asset_engine import disarm
     from bot_program.models import AssetBotConfig
     from instruments.models import Instrument
 
@@ -100,8 +101,9 @@ def seed_bots(user, *, activate: bool = False) -> dict:
             cfg.save(update_fields=["symbols", "updated_at"])
             updated += 1
         if activate and not cfg.enabled:
-            cfg.enabled = True
-            cfg.save(update_fields=["enabled", "updated_at"])
+            # Through asset_engine.disarm (2026-10-07): arming clears any
+            # recorded stop with it, as every re-enabler does.
+            disarm.enable_config(cfg)
 
         # Reported, never written. A seeded config with no time stop is the
         # one state this command must not create silently, so the number it
@@ -125,6 +127,7 @@ def reset_bots(user) -> dict:
     has been trading — i.e. when it is enabled and on the 5-minute tick —
     and an operator running --reset is decommissioning the fleet, not
     asking for its history to keep opening positions."""
+    from bot_program.asset_engine import disarm
     from bot_program.models import AssetBotConfig
 
     deleted = 0
@@ -133,8 +136,10 @@ def reset_bots(user) -> dict:
             user=user, name__startswith=SEED_PREFIX):
         if cfg.trades.exists():
             if cfg.enabled:
-                cfg.enabled = False
-                cfg.save(update_fields=["enabled", "updated_at"])
+                # Recorded as a seed command's stop (2026-10-07,
+                # asset_engine.disarm): by hand, not managed.
+                disarm.disable_config(cfg, by=disarm.BY_SEED,
+                                      why="seed_bots --reset", who="shell")
             kept.append(cfg.name)
             continue
         cfg.delete()

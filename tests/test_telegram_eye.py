@@ -768,8 +768,10 @@ class BrakeTests(_EyeCase):
         self.assertIn("Positions left open: 2 (1 live · 1 paper)", text)
         for words in eye.BRAKE_WORDS:
             self.assertIn(words, text)
-        self.assertIn("Paper stops are simulated by the bot and pause while "
-                      "it is stopped.", text)
+        # 2026-10-07: the brake's stop keeps the exits running
+        # (asset_engine/disarm.py), and the paper words say so.
+        self.assertIn("Paper stops are simulated by the bot, which keeps "
+                      "running them.", text)
         self.assertNotIn("Live without a stop at the broker", text)
         self.assertEqual(AssetBotTrade.objects.filter(status="OPEN").count(), 2)
 
@@ -790,8 +792,9 @@ class BrakeTests(_EyeCase):
             self.said(_update(62, f"/stop {a.pk}"))
         (text,) = _texts(send)
         self.assertIn("Live without a stop at the broker: 1", text)
-        self.assertIn("The bot managed those stops; while it is stopped, "
-                      "nothing protects them.", text)
+        # 2026-10-07: the stopped bot's manage pass runs those stops.
+        self.assertIn("The stopped bot still runs those stops on every "
+                      "tick.", text)
 
     def _held(self, cfg, symbol="AAPL", order_id="1596774177"):
         """A WORKING live entry: an ORDER the broker holds, booked as the
@@ -950,8 +953,11 @@ class BrakeTests(_EyeCase):
         # the one call that reaches the broker: the withdrawal of a
         # WORKING entry, through the kill switch's own helper
         self.assertEqual(src.count("cancel_working_entry("), 1)
-        self.assertEqual(re.findall(r"\.save\([^)]*\)", src),
-                         ['.save(update_fields=["enabled", "updated_at"])'])
+        # 2026-10-07: the brake's one write goes through
+        # asset_engine.disarm, which records who stopped the config; the
+        # module itself saves nothing.
+        self.assertEqual(re.findall(r"\.save\([^)]*\)", src), [])
+        self.assertEqual(src.count("disable_config("), 1)
         self.assertEqual(re.findall(r"(\w+)\.objects\.create\(", src),
                          ["ResearchConversation"])
 

@@ -113,6 +113,7 @@ class Command(BaseCommand):
         # it would send the operator to "fix" the one config that is
         # correct, which is how a diagnostic starts costing more than it
         # saves. `_config_error` treats symbols ON that config as the fault.
+        from bot_program.asset_engine import disarm
         from bot_program.manual_trade import MANUAL_CONFIG_NAME
 
         for c in cfgs:
@@ -127,6 +128,23 @@ class Command(BaseCommand):
                   "the health page still calls it green")
                 blockers.append(f"config {c.id} ({c.name}) is enabled with "
                                 f"an empty symbol list")
+            if not c.enabled:
+                # WHO STOPPED IT, AND WHETHER WHAT IT HOLDS IS MANAGED
+                # (2026-10-07, asset_engine/disarm.py). Never a blocker: a
+                # stopped config is a decision, and the question this line
+                # answers is whether its open positions still have their
+                # exits run (a brake's stop) or not (a hand or kill-switch
+                # stop, or no record).
+                n = AssetBotTrade.objects.filter(config=c,
+                                                 status="OPEN").count()
+                if disarm.keeps_managing(c) and n:
+                    w(f"        ^ OFF — {disarm.record_words(c)}; {n} open, "
+                      f"still MANAGED every tick, opening nothing")
+                elif n:
+                    w(f"        ^ OFF — {disarm.record_words(c)}; {n} open, "
+                      f"NOT managed while it stays off")
+                elif disarm.record_of(c):
+                    w(f"        ^ OFF — {disarm.record_words(c)}")
 
         enabled = [c for c in cfgs if c.enabled]
 

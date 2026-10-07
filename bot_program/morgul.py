@@ -80,9 +80,14 @@ THE BRAKE (G11)
   the brake's: a finding said while it was off is stopped on the first
   run after it is armed, and that run says so. G1 and G5 stop the row's
   config; G6 and G7 every enabled live config of the user. The message
-  says what the stopped bots leave open: a live position without a stop
-  at the broker is protected by nothing while its bot is stopped, and
-  paper stops pause.
+  says what the stopped bots leave open. Since 2026-10-07 the brake's stop
+  is recorded on the config (asset_engine/disarm.py, "Morgul's brake",
+  the guard and the finding), and a config a brake stopped is still
+  managed: the runner runs its exits every tick while it holds an open
+  row and never its entries. So a live position without a stop at the
+  broker, and a paper position, keep the stops the bot runs; only a
+  config stopped again since by hand or by the kill switch is not
+  managed, and the message counts those apart.
   It never acts when no staff chat could be told, and its record is kept
   before anything else can fail: a stop is always announced, at the
   latest on the next run. A bot the operator re-arms is not stopped again
@@ -1198,14 +1203,25 @@ def check_heartbeat(ctx, g) -> list:
     bots decide on; an eToro order is priced by eToro's own rates. A
     market shut (or open less than FEED_OPEN_FOR_S) is not judged, and
     what was said before stays open; a class with no symbols or no mark
-    stored is not judged, and said so."""
+    stored is not judged, and said so.
+
+    A BRAKED LIVE CONFIG WITH AN OPEN ROW (2026-10-07) joins the tick
+    check: the brake's words now promise that a stopped bot keeps
+    managing what is open (asset_engine/disarm.py), and that promise rides
+    the same tick. An Eye /stopall stops every live config, and without
+    this the guard would fall silent at the very moment the positions
+    depend on the tick alone. Its fact says it is stopped and still
+    managing. The feeds check stays on enabled configs: a braked bot
+    scans nothing, so its symbols' marks decide nothing."""
+    from bot_program.asset_engine import disarm
     from bot_program.asset_models import AssetBotConfig
     from core.exchange_status import market_status_for
     from core.platform_control import get_component, is_component_enabled
     from market_data.models import LiveQuote
     live = list(AssetBotConfig.objects.filter(enabled=True, mode="live")
                 .select_related("user").order_by("pk"))
-    if not live:
+    braked = [c for c in disarm.braked_with_open_rows() if c.mode == "live"]
+    if not live and not braked:
         return []
     out = []
     facts = []
@@ -1219,16 +1235,24 @@ def check_heartbeat(ctx, g) -> list:
         facts.append("The bot tick last ran "
                      + (eye.ago(comp.last_run_at, ctx.now)
                         if comp.last_run_at else "never"))
-    for cfg in live:
+    for cfg in live + braked:
         sign, tick = _last_sign(cfg)
         if sign is None or (ctx.now - sign).total_seconds() > TICK_STALE_S:
-            facts.append(f"{eye.config_label(cfg)}: last tick "
+            who = (eye.config_label(cfg) if cfg.enabled else
+                   f"{eye.config_label(cfg)} (stopped by the brake, still "
+                   f"managing)")
+            facts.append(f"{who}: last tick "
                          + (eye.ago(tick, ctx.now) if tick else "never"))
     if facts:
         facts.append("While the tick is down, no bot manages its "
                      "positions; broker stops still hold")
-        out.append(g.finding("tick", label=f"Live bots running: {len(live)}",
-                             facts=facts))
+        # The subject stays "tick", so the finding's key (and its memory)
+        # is the same with or without braked configs in it.
+        out.append(g.finding(
+            "tick", label=(f"Live bots running: {len(live)}"
+                           + (f" · stopped, still managing: {len(braked)}"
+                              if braked else "")),
+            facts=facts))
     by_cls = OrderedDict()
     for cfg in live:
         by_cls.setdefault(str(cfg.asset_class or ""), []).append(cfg)
@@ -1441,10 +1465,18 @@ def _brake(finding) -> tuple:
     (enabled = False on the user's own configs, nothing else). Returns
     (stopped labels, already-off labels, stopped pks). Nothing running,
     nothing to call."""
+    from bot_program.asset_engine import disarm
     before = _configs(finding.configs)
     if not any(c.enabled for c in before):
         return [], [eye.config_label(c) for c in before], []
-    reply = eye.apply_brake(finding.user, [c.pk for c in before])
+    # The record (2026-10-07, asset_engine/disarm.py): Morgul's own code,
+    # and the guard and the finding as the why, so `bot list`,
+    # why_no_trade and the Eye can say who stopped the config and why,
+    # and the runner keeps managing what it holds.
+    reply = eye.apply_brake(finding.user, [c.pk for c in before],
+                            by=disarm.BY_MORGUL, who="Morgul",
+                            why=(f"{finding.guard.name}: "
+                                 f"{finding.label}")[:200])
     stopped = set(reply.meta.get("stopped") or [])
     logger.warning("[morgul] BRAKE on %s: configs %s turned off",
                    finding.key, sorted(stopped))
@@ -1456,19 +1488,40 @@ def _brake(finding) -> tuple:
 def _left_open(pks) -> dict:
     """What the stopped bots leave open, read now: positions at a broker
     (and those with no stop resting there, _bare), and paper positions.
-    A working entry is an order, not a position: not counted."""
+    A working entry is an order, not a position: not counted.
+
+    MANAGED OR NOT (2026-10-07). "broker", "bare" and "paper" count only
+    the rows of configs that are enabled or still braked
+    (disarm.keeps_managing): their stops are run by the bot every tick.
+    The open rows of a config that is neither are counted apart, as
+    "unmanaged": an "earlier" outcome is rebuilt from memory, and its
+    config may since have been re-armed and stopped again by hand or by
+    the kill switch, which nothing manages."""
+    from bot_program.asset_engine import disarm
     from bot_program.asset_models import AssetBotTrade
-    left = {"broker": 0, "bare": 0, "paper": 0}
+    left = {"broker": 0, "bare": 0, "paper": 0, "unmanaged": 0}
     if not pks:
         return left
-    for trade in AssetBotTrade.objects.filter(config_id__in=list(pks),
-                                              status__in=OPEN_STATUSES):
+    managed = {}
+    for trade in (AssetBotTrade.objects
+                  .filter(config_id__in=list(pks), status__in=OPEN_STATUSES)
+                  .select_related("config")):
         meta = _meta(trade)
+        if trade.config_id not in managed:
+            cfg = trade.config
+            managed[trade.config_id] = (cfg.enabled
+                                        or disarm.keeps_managing(cfg))
         if trade.paper:
-            left["paper"] += 1
+            if managed[trade.config_id]:
+                left["paper"] += 1
+            else:
+                left["unmanaged"] += 1
         elif not meta.get("entry_working"):
-            left["broker"] += 1
-            left["bare"] += int(_bare(meta))
+            if managed[trade.config_id]:
+                left["broker"] += 1
+                left["bare"] += int(_bare(meta))
+            else:
+                left["unmanaged"] += 1
     return left
 
 
@@ -1482,10 +1535,16 @@ def brake_lines(outcomes) -> list:
     ("would", labels), ("held", labels) or ("failed", labels, error
     name); `left` is _left_open's count, optional. "The stops stay at the
     broker" is said only when it is true: a position at the broker with no
-    stop there is protected by nothing while its bot is stopped, and a
-    paper stop is the bot's own and pauses with it."""
+    stop there, and a paper position, have only the stops the bot runs.
+
+    Since 2026-10-07 the bot runs them while it is stopped: a brake's stop
+    is recorded and managed (asset_engine/disarm.py), so the words say the
+    stopped bots open nothing and keep managing what is open -- unless
+    _left_open counted rows whose config was stopped again since by hand
+    or by the kill switch ("unmanaged"), which nothing manages, and then
+    the words name those instead of promising management."""
     stopped, already, would, earlier, held, failed = [], [], [], [], [], []
-    left = {"broker": 0, "bare": 0, "paper": 0}
+    left = {"broker": 0, "bare": 0, "paper": 0, "unmanaged": 0}
     for outcome in outcomes:
         kind = outcome[0]
         if kind in ("stopped", "earlier"):
@@ -1521,16 +1580,26 @@ def brake_lines(outcomes) -> list:
     if earlier:
         lines.append(f"Stopped earlier by the brake: {_join(earlier)} — to "
                      f"re-arm: the server")
+    if stopped or earlier:
+        # A brake's stop keeps the exits running (2026-10-07); a config
+        # stopped again since by hand or by the kill switch does not, and
+        # its positions are named instead of promised.
+        if not left["unmanaged"]:
+            lines.append("The stopped bots open nothing and keep managing "
+                         "what is open")
+        else:
+            lines.append(f"The stopped bots open nothing; not managed: "
+                         f"{left['unmanaged']} — their bot was stopped "
+                         f"again by hand or by the kill switch")
     if left["bare"]:
         lines.append(f"At the broker without a stop: {left['bare']} — "
-                     f"while the bot is stopped, nothing protects them")
+                     f"the stopped bot still runs their stops every tick")
     if left["bare"] and left["broker"] > left["bare"]:
         lines.append(f"At the broker with a stop: "
                      f"{left['broker'] - left['bare']} — those stops stay")
     if left["paper"]:
-        lines.append(f"Paper positions: {left['paper']} — their stops "
-                     f"are simulated by the bot and pause while it is "
-                     f"stopped")
+        lines.append(f"Paper positions: {left['paper']} — the stopped bot "
+                     f"still runs their simulated stops")
     for labels, name in failed:
         lines.append(f"The brake could not stop {_join(labels)} ({name}): "
                      f"stop them on the server")
@@ -1564,12 +1633,14 @@ def build_messages(findings, outcomes, now) -> list:
 
 def back_to_normal(entries, now):
     """One line per finding that stopped; a bot the brake turned off for
-    it stays off (the brake never re-arms), and the line says so."""
+    it stays off (the brake never re-arms), and the line says so -- and,
+    since 2026-10-07, that it still manages what is open meanwhile."""
     lines = [(f"{e.get('name')}: the guard runs again — back to normal"
               if e.get("subject") == "error" else
               f"{e.get('name')}: {e.get('label')} — back to normal")
-             + (" (the bots the brake stopped stay off until re-armed on "
-                "the server)" if e.get("braked") else "")
+             + (" (the bots the brake stopped stay off, still managing "
+                "what is open, until re-armed on the server)"
+                if e.get("braked") else "")
              for e in entries]
     return eye.Reply(MARK, BACK_TO_NORMAL,
                      eye._cap(lines, eye.MAX_LINES - 1)

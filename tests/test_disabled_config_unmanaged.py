@@ -1,13 +1,20 @@
-"""A disabled config is not managed — and every lever that disables one says so.
+"""A config disabled by a stop that is not a brake is not managed — and
+every lever that disables one says so.
 
 The brain page's "Disable manual" press told the operator the config
 "manages what is open and opens nothing new". The runner skips a disabled
 config whole (run_asset_bot_tick, both fleet passes), so a disabled manual
 config's open positions lose their time stop, trailing and every
 platform-checked stop, and a paper row loses its stop outright. The runner
-stays that way on purpose: the kill switch writes the same enabled=False,
-and nothing tells the two apart. These tests pin the runner's behaviour and
-the words that now state it (2026-09-26).
+stays that way on purpose for a stop that is not a brake: the kill switch
+leaves its rows for reconciliation by hand. These tests pin the runner's
+behaviour and the words that now state it (2026-09-26).
+
+Since 2026-10-07 every stop is recorded on the config
+(bot_program/asset_engine/disarm.py), and a config a BRAKE stopped is
+still managed (tests/test_brake_keeps_managing.py). The configs here carry
+no record, or a hand stop's (`bot off`, the brain's button), so every
+test below still holds as it did.
 
 Run with:  python manage.py test tests.test_disabled_config_unmanaged
 """

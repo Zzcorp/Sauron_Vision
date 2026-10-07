@@ -10,8 +10,14 @@ Manual trades live on a per-user, per-class "manual" AssetBotConfig that
 is enabled with an EMPTY symbols list: the 5-minute tick manages its open
 positions (stops, targets, trailing) every pass, but the entry scan has
 nothing to scan, so the config can never open a trade on its own.
-DISABLED, it is not ticked at all: its open positions lose that
-management until it is re-enabled (runner.unmanaged_on_disable).
+DISABLED, it depends on who disabled it (2026-10-07,
+asset_engine/disarm.py). Stopped by a BRAKE (Morgul, the Telegram group,
+the alarm chat, `bot brake`), it is still managed: the tick runs its
+exits every pass while it holds an open row, and the operator's own held
+(WORKING) order is polled and booked when it fills, never withdrawn by
+the pass. Stopped by hand or by the kill switch, it is not ticked at all:
+its open positions lose that management until it is re-enabled
+(runner.unmanaged_on_disable). Either way it takes no new TAKE TRADE.
 
 Wave 1 executed on the PAPER venue only. Wave 2 adds the LIVE ticket:
 a manual config an operator has deliberately armed to live mode routes
@@ -25,9 +31,10 @@ broker that cannot be reached is a refusal — never a silent paper
 fallback wearing a live label.
 
 Safety posture (each learned from adversarial review of the first cut):
-  * A disabled manual config is a DELIBERATE state — the kill switch or
-    the operator put it there — so this module refuses instead of
-    silently re-arming it.
+  * A disabled manual config is a DELIBERATE state — the kill switch, a
+    brake or the operator put it there, and since 2026-10-07 the refusal
+    says which (asset_engine/disarm.record_words) — so this module refuses
+    instead of silently re-arming it.
   * A pre-existing user config that happens to be named "manual" is
     refused, never adopted and rewritten.
   * Capital accounting is per asset class (each class has its own pool)
@@ -342,9 +349,14 @@ def _config_error(cfg):
                 f"mode {cfg.mode!r} — only 'paper' and 'live' exist. "
                 f"Fix the config before taking trades through it")
     if not cfg.enabled:
-        return ("The manual config for this class is disabled — the kill "
-                "switch or an operator turned it off. Re-enable it in the "
-                "bot fleet to take manual trades again")
+        # Who turned it off, from the config's own record (2026-10-07,
+        # asset_engine/disarm.py): "the kill switch or an operator" was a
+        # guess, and a brake is neither.
+        from bot_program.asset_engine import disarm
+        return ("The manual config for this class is disabled — "
+                + disarm.record_words(cfg)
+                + ". Re-enable it in the bot fleet to take manual trades "
+                  "again")
     return None
 
 

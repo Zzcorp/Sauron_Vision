@@ -19,6 +19,21 @@ which is the whole of the operator's ask.
 `run_asset_bot_tick(config_id)` is untouched by all of it: a single config's
 tick is not a fleet, there is nothing to rank it against, and HQ's "Run Now"
 must keep doing exactly what the button says.
+
+A BRAKE KEEPS MANAGING (2026-10-07, asset_engine/disarm.py). Every stop is
+now recorded on the config. A config a BRAKE stopped (Morgul, the Telegram
+group's /stop and /stopall, the alarm chat's /stopall, `bot brake`) is
+still managed while it holds an OPEN row: the fleet pass runs its exits
+FIRST, before anyone proposes (manage_braked, the bot's manage_only:
+manage_positions and the withdrawal of a bot order still working, never a
+scan, a proposal or an entry), under the same fleet lock and switches as
+every enabled config. The summaries come back as out["braked"];
+configs_ticked keeps counting enabled configs only. A config stopped by
+hand or by the kill switch, or one with no record (every stop before this
+date), is skipped whole as before: the kill switch leaves its rows for
+reconciliation by hand. run_asset_bot_tick on a braked config manages it
+the same way. PG #138, left unmanaged on config 26 after Morgul's G1 brake
+of 2026-10-06, is why.
 """
 import logging
 import uuid
@@ -30,13 +45,18 @@ logger = logging.getLogger(__name__)
 
 def run_asset_bot_tick(config_id: int) -> dict:
     """Run one tick for the given AssetBotConfig. Returns the bot's summary dict
-    (or an error dict if the config is missing / disabled)."""
+    (or an error dict if the config is missing / disabled). A config a
+    brake stopped is managed only (manage_braked, 2026-10-07); any other
+    disabled config is skipped, exactly as before."""
+    from bot_program.asset_engine import disarm
     from bot_program.models import AssetBotConfig
 
     cfg = AssetBotConfig.objects.filter(id=config_id).first()
     if cfg is None:
         return {"status": "error", "reason": "config_not_found", "config_id": config_id}
     if not cfg.enabled:
+        if disarm.keeps_managing(cfg):
+            return manage_braked(config_id)
         return {"status": "skipped", "reason": "disabled", "config_id": config_id}
 
     try:
@@ -56,26 +76,45 @@ def unmanaged_on_disable(cfg) -> str:
     """What a disabled config leaves unmanaged, as the sentence a disable
     owes the operator — empty when it holds no open position.
 
-    A disabled config is not ticked at all: run_asset_bot_tick refuses it
-    and both fleet passes read enabled=True only. Its OPEN rows therefore
-    lose every exit the platform runs itself (base.manage_positions): the
-    time stop, trailing and break-even, the SL/TP comparison, the
-    vanished-stop net. A paper row has nothing at a broker, so it loses its
-    stop outright; a live row keeps only what rests there — its bracket
-    when the entry was protected, nothing when it was not.
+    A BRAKE KEEPS MANAGING (2026-10-07, asset_engine/disarm.py). Every
+    stop is now recorded on the config, so the runner can tell them
+    apart. A config a brake stopped (Morgul, the Telegram group, the alarm
+    chat, `bot brake`) is still managed: every bot tick runs its exits
+    (manage_braked) and opens nothing, and the sentence says so, with the
+    ways to end it.
 
-    That stays so ON PURPOSE (2026-09-26). The kill switch writes the same
-    `enabled=False` as the brain's disable and `bot off`, and nothing
-    records which of them did it, so a runner that managed disabled configs
-    would go back to closing rows the kill switch left for reconciliation by
-    hand — and the management pass also books a WORKING entry that fills
+    A config stopped by the kill switch or by hand (`bot off`, the HQ and
+    system-map toggles, the brain's disable, a seed command), or one with
+    no record, is not ticked at all: run_asset_bot_tick refuses it and both
+    fleet passes skip it. Its OPEN rows therefore lose every exit the
+    platform runs itself (base.manage_positions): the time stop, trailing
+    and break-even, the SL/TP comparison, the vanished-stop net. A paper
+    row has nothing at a broker, so it loses its stop outright; a live row
+    keeps only what rests there — its bracket when the entry was
+    protected, nothing when it was not.
+
+    That stays so ON PURPOSE for those stops (2026-09-26, and for them only
+    since 2026-10-07): the kill switch leaves its rows for reconciliation
+    by hand, and a runner that managed them would go back to closing rows
+    behind it — the management pass also books a WORKING entry that fills
     into a position. The words follow the runner, not the other way round.
     """
+    from bot_program.asset_engine import disarm
     from bot_program.models import AssetBotTrade
 
     n = AssetBotTrade.objects.filter(config=cfg, status="OPEN").count()
     if not n:
         return ""
+    if disarm.keeps_managing(cfg):
+        by = disarm.record_of(cfg)["by"]
+        return (f"{'Its open position stays' if n == 1 else f'Its {n} open positions stay'} "
+                f"MANAGED: it was stopped by {disarm.BY_WORDS[by]}, a "
+                f"brake, so every bot tick still runs its exits — the time "
+                f"stop, trailing and break-even, the stop and target, the "
+                f"weekend and event windows — and it opens nothing. "
+                f"Re-enabling on the server resumes its entries; closing "
+                f"{'it' if n == 1 else 'them'} on Positions ends the "
+                f"management.")
     rows = "Its open position is" if n == 1 else f"Its {n} open positions are"
     them = "it" if n == 1 else "them"
     if cfg.symbols:
@@ -104,6 +143,53 @@ def _release_sessions():
         logger.debug("[asset_bot] releasing the trade session: %s", e)
 
 
+def manage_braked(config_id: int) -> dict:
+    """The exits of one config a BRAKE stopped, and nothing else
+    (2026-10-07, asset_engine/disarm.py; the bot's manage_only).
+
+    Re-reads the row first: a config re-armed, or stopped again by hand or
+    by the kill switch since the fleet listed it, is not managed here."""
+    from bot_program.asset_engine import disarm
+    from bot_program.models import AssetBotConfig
+
+    cfg = AssetBotConfig.objects.filter(id=config_id).first()
+    if cfg is None:
+        return {"status": "error", "reason": "config_not_found",
+                "config_id": config_id}
+    if not disarm.keeps_managing(cfg):
+        return {"status": "skipped", "reason": "no longer braked",
+                "config_id": config_id}
+    try:
+        bot = make_bot(cfg)
+    except Exception as e:
+        return {"status": "error", "reason": f"make_bot_failed: {e}",
+                "config_id": config_id}
+    try:
+        return {"status": "ok", **bot.manage_only()}
+    except Exception as e:
+        logger.exception("[asset_bot] braked manage pass raised for cfg=%s",
+                         config_id)
+        return {"status": "error", "reason": str(e), "config_id": config_id}
+
+
+def _manage_braked_pass() -> list:
+    """Every braked config that holds an OPEN row, managed once
+    (2026-10-07). A config a brake stopped with nothing open is not ticked
+    at all: there is nothing to manage and nothing it may open."""
+    from bot_program.asset_engine import disarm
+
+    try:
+        braked = disarm.braked_with_open_rows()
+    except Exception as e:  # noqa: BLE001 — never stop the enabled fleet
+        logger.warning("[asset_bot] braked configs unreadable: %s", e)
+        return []
+    out = []
+    for cfg in braked:
+        out.append(manage_braked(cfg.id))
+        _release_sessions()
+    return out
+
+
 def run_all_asset_bots() -> dict:
     """Tick every enabled AssetBotConfig. Returns aggregate summary.
 
@@ -111,16 +197,22 @@ def run_all_asset_bots() -> dict:
     component read; on is the two-phase pass the desk needs. An unreadable
     component is OFF — the fleet's normal behaviour is never gated on a
     switch nobody could read.
+
+    THE BRAKED PASS RUNS FIRST (2026-10-07): the exits of every config a
+    brake stopped that still holds an OPEN row, before anyone proposes —
+    the same order tick() keeps (manage, then entries). Its summaries are
+    out["braked"]; configs_ticked keeps counting enabled configs only.
     """
+    braked = _manage_braked_pass()
     try:
         from bot_program.capital_desk import is_desk_enabled
         desked = is_desk_enabled()
     except Exception as e:  # noqa: BLE001 — see the docstring
         logger.warning("[desk] component unreadable (%s) — legacy loop", e)
         desked = False
-    if not desked:
-        return _run_all_legacy()
-    return _run_all_desked()
+    out = _run_all_legacy() if not desked else _run_all_desked()
+    out["braked"] = braked
+    return out
 
 
 def _run_all_legacy() -> dict:

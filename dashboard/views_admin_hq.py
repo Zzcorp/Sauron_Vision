@@ -908,12 +908,25 @@ def hq_toggle_asset_bot(request):
             messages.error(request, f"AssetBot '{cfg.name}' not armed — "
                                     f"{pool['reason']}.")
             return redirect("admin_dashboard")
-    cfg.enabled = not cfg.enabled
-    cfg.save(update_fields=["enabled", "updated_at"])
+    # THE WRITE (2026-10-07, bot_program/asset_engine/disarm.py): a stop
+    # here is recorded as the HQ toggle's, by the presser, and is a stop by
+    # hand: the runner does not manage what the config holds. Arming clears
+    # whatever stop was recorded, and the message names it, so lifting a
+    # brake from this page is never silent.
+    from bot_program.asset_engine import disarm
+    cleared = {}
+    if cfg.enabled:
+        disarm.disable_config(cfg, by=disarm.BY_HQ_TOGGLE,
+                              why="the HQ toggle",
+                              who=request.user.username)
+    else:
+        cleared = disarm.enable_config(cfg)
     messages.success(
         request,
         f"AssetBot '{cfg.name}' ({cfg.asset_class}) "
         f"{'ENABLED' if cfg.enabled else 'DISABLED'}."
+        + (f" The stop by {disarm.BY_WORDS[cleared['by']]} is cleared."
+           if cleared else "")
     )
     return redirect("admin_dashboard")
 
