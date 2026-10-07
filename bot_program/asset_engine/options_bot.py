@@ -620,6 +620,32 @@ class OptionsBot(AssetBot):
         order_id = ""
         working_meta: dict = {}
         if not paper:
+            # THE SHUT EXCHANGE (2026-10-07, entry_timing.shut_verdict):
+            # no live contract while the underlying's exchange is shut. On
+            # 2026-10-06 a live bot shorted PG 22 minutes before the NYSE
+            # open and the venue filled it; the bot lane now refuses that
+            # on Morgul G1's own clock, and this lane, which replaces
+            # scan_symbol and never meets propose_entry's gates, sent at any
+            # hour. Morgul G1 judges an options booking on the UNDERLYING's
+            # own Instrument row (the row below carries the underlying as
+            # its symbol, and G1 reads ctx.instrument on that symbol), so
+            # the key here is the same: the underlying's (class, exchange),
+            # "options" when it has no row (OPTIONS_SHUT_CLASSES). Without
+            # this the gate and G1 disagree on exactly the booking G1
+            # flags. Only SHUT applies: the rollover, the settle, the close
+            # guard and the print are not judged on options, as before. The
+            # paper branch above keeps the paper venue's own gate. The skip
+            # is MARKET_SHUT, the one word for a shut market in every lane.
+            # GATE off (the suite's switch) answers None here too.
+            from bot_program import entry_timing
+            _cls, _ex = entry_timing.instrument_key(symbol, "options")
+            _shut = entry_timing.shut_verdict(
+                symbol, _cls, exchange=_ex,
+                classes=entry_timing.OPTIONS_SHUT_CLASSES)
+            if _shut is not None:
+                logger.warning("[options_bot] %s: live entry refused on the "
+                               "clock — %s", symbol, _shut["why"])
+                return self._skip(symbol, skips.MARKET_SHUT, _shut["why"])
             if not self._still_armed():
                 return self._skip(symbol, skips.GATE_BLOCKED,
                                   "config was disarmed mid-tick — refusing "

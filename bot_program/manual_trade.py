@@ -1021,12 +1021,17 @@ def venue_health_advisory(user, carrier: str, *, live: bool = True) -> dict:
 
 def timing_advisory(inst) -> dict:
     """THE ENTRY TIMING on the ticket (2026-10-06, bot_program/entry_timing):
-    {"ok", "reason", "attack"} — the 17:00 New York rollover, a market's
-    first quarter hour, an exchange's last minutes, Friday's last hour
-    before the weekend, a high-impact print on the instrument's currency.
-    A WARNING, never a refusal — the operator keeps the last word on their
-    own lane; the bots refuse on the same clock. A paper ticket is judged
-    too: the paper venue fills at the same hours."""
+    {"ok", "reason", "attack", "code"} — the 17:00 New York rollover, an
+    exchange that is shut (SHUT), a market's first quarter hour, an
+    exchange's last minutes, Friday's last hour before the weekend, a
+    high-impact print on the instrument's currency. A WARNING, never a
+    refusal — the operator keeps the last word on their own lane; the bots
+    refuse on the same clock. A paper ticket is judged too: the paper venue
+    fills at the same hours (and refuses a shut market itself, before any
+    advisory). 2026-10-07: "code" names the window ("SHUT", "ROLLOVER",
+    ...), so the popup can say THE MARKET IS SHUT — Morgul G1 flags a
+    booking made while the exchange is shut — and a live ticket is still
+    only warned: never refused, never resized."""
     from bot_program import entry_timing
     try:
         return entry_timing.advisory(
@@ -1035,7 +1040,7 @@ def timing_advisory(inst) -> dict:
     except Exception as e:  # noqa: BLE001 — an unread clock warns of nothing
         logger.warning("[take-trade] timing advisory unread for %s: %s",
                        getattr(inst, "symbol", "?"), e)
-        return {"ok": True, "reason": "", "attack": ""}
+        return {"ok": True, "reason": "", "attack": "", "code": ""}
 
 
 def reward_risk_advisory(side, entry, stop, target) -> dict:
@@ -2689,9 +2694,13 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             _ta = preview.get("timing_advisory")
             if isinstance(_ta, dict) and not _ta.get("ok", True):
                 # taken past the clock's warning (2026-10-06): recorded,
-                # as the other overridden warnings are
+                # as the other overridden warnings are. 2026-10-07: with
+                # the window's code, so a booking made while the exchange
+                # was shut (SHUT, the one Morgul G1 flags) reads as such on
+                # the row, apart from a bad hour.
                 extra["timing_advisory_at_entry"] = {
-                    "ok": False, "reason": str(_ta.get("reason") or "")[:200]}
+                    "ok": False, "reason": str(_ta.get("reason") or "")[:200],
+                    "code": str(_ta.get("code") or "")}
 
             with transaction.atomic():
                 trade = _book_row(booked_px,

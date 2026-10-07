@@ -3808,6 +3808,7 @@ class AssetBot(ABC):
         history once rather than once per symbol. None means "compute it
         yourself", which is what a single-config tick still does.
         """
+        from bot_program import entry_timing
         from bot_program.models import AssetBotTrade
         from bot_program.engine.broker_router import client_for_symbol
         from bot_program.asset_engine import skips
@@ -4020,18 +4021,25 @@ class AssetBot(ABC):
 
         # THE ENTRY TIMING (2026-10-06, bot_program/entry_timing): the
         # clock, judged before the cost, the levels and the size — the
-        # 17:00 New York rollover, a market's first quarter hour, an
-        # exchange's last minutes, Friday's last hour before the weekend,
-        # a high-impact print on the instrument's currency from 60 min
-        # before to 15 min after. A skip with the hour it clears
-        # (BAD_TIMING), never an entry; a print within three hours caps
-        # the attack tier instead (_attack_tier reads the verdict). Read
-        # again on the fresh clock before the order.
+        # 17:00 New York rollover, an exchange that is shut (SHUT, Morgul
+        # G1's own clock and classes, recorded as skips.MARKET_SHUT), a
+        # market's first quarter hour, an exchange's last minutes, Friday's
+        # last hour before the weekend, a high-impact print on the
+        # instrument's currency from 60 min before to 15 min after. A skip
+        # with the hour it clears (BAD_TIMING, or MARKET_SHUT for a shut
+        # exchange), never an entry; a print within three hours caps the
+        # attack tier instead (_attack_tier reads the verdict). Read again
+        # on the fresh clock before the order. 2026-10-07: the code is entry_timing.skip_code's, so a
+        # shut exchange reads as the market being shut — the word the
+        # paper venue already gives above — and never as a bad hour; on
+        # 2026-10-06 config 26 shorted PG 22 minutes before the NYSE open
+        # and eToro filled it, which is what SHUT now refuses.
         _timing = self._entry_timing_gate(symbol)
         if not _timing["ok"]:
             logger.warning("[%s_bot] %s: entry refused on the clock — %s",
                            self.asset_class, symbol, _timing["why"])
-            return self._skip(symbol, skips.BAD_TIMING, _timing["why"])
+            return self._skip(symbol, entry_timing.skip_code(_timing),
+                              _timing["why"])
 
         # A paper entry used to be recorded at the raw ticker, because the
         # order block below sits inside `if not paper:` and PaperTrader is
@@ -4965,6 +4973,7 @@ class AssetBot(ABC):
         the money-safety guard against a PaperTrader fallback runs on THIS
         client, which is the one that matters.
         """
+        from bot_program import entry_timing
         from bot_program.engine.broker_router import client_for_symbol
         from bot_program.asset_engine import skips
 
@@ -5360,14 +5369,19 @@ class AssetBot(ABC):
             # THE CLOCK, before the debate (2026-10-06, review): it is a
             # deterministic refusal, and the debate below is billed — a
             # candidate proposed at 16:49 New York and sent at 16:51 must
-            # not be argued and then refused at the rollover. Read again on
-            # the fresh clock after the last look, just before the order.
+            # not be argued and then refused at the rollover, or at an
+            # exchange that is shut (SHUT, Morgul G1's own clock and
+            # classes, recorded as skips.MARKET_SHUT; 2026-10-07). Read
+            # again on the fresh clock after the last look, just before the
+            # order. The code is entry_timing.skip_code's: MARKET_SHUT for
+            # SHUT, BAD_TIMING for every other window.
             _timing = self._entry_timing_gate(symbol)
             if not _timing["ok"]:
                 logger.warning("[%s_bot] %s: the send was refused on the "
                                "clock — %s", self.asset_class, symbol,
                                _timing["why"])
-                return self._skip(symbol, skips.BAD_TIMING, _timing["why"])
+                return self._skip(symbol, entry_timing.skip_code(_timing),
+                                  _timing["why"])
             # THE TRADE DEBATE (2026-10-01; moved here 2026-10-02, after
             # every deterministic refusal, so only an order about to be SENT
             # is argued and billed): the Executioner argues why this
@@ -5494,15 +5508,19 @@ class AssetBot(ABC):
             # THE CLOCK, read again at the send (2026-10-06): the desk
             # executes minutes after it proposes, and a proposal made at
             # 16:40 New York can reach the order at 16:55 — inside the
-            # rollover — or a print can have come into its window. The
-            # same verdict as the proposal's (entry_timing), on the fresh
-            # clock; nothing sent on a refusal.
+            # rollover — or a print can have come into its window, or an
+            # exchange that is shut (SHUT, Morgul G1's own clock and
+            # classes, recorded as skips.MARKET_SHUT; 2026-10-07) can have
+            # closed since. The same verdict as the proposal's
+            # (entry_timing), on the fresh clock; nothing sent on a
+            # refusal, recorded under entry_timing.skip_code's code.
             _timing = self._entry_timing_gate(symbol)
             if not _timing["ok"]:
                 logger.warning("[%s_bot] %s: the order was refused on the "
                                "clock — %s", self.asset_class, symbol,
                                _timing["why"])
-                return self._skip(symbol, skips.BAD_TIMING, _timing["why"])
+                return self._skip(symbol, entry_timing.skip_code(_timing),
+                                  _timing["why"])
             try:
                 # The LAST read before real units move. can_open_new ran
                 # before this symbol's scan; a disarm landing between then

@@ -183,6 +183,10 @@ MARK_STALE_S = 3600
 #: venue session, the one the paper market-hours gate of the same day
 #: reads). Crypto never shuts; anything else (cfd, an unknown class) is
 #: not judged, and said so.
+#: 2026-10-07: The bot lane refuses a live entry on this same clock for
+#: these classes less index and options (entry_timing.SHUT_CLASSES), and
+#: the options lane on its underlying's key (OPTIONS_SHUT_CLASSES);
+#: tests/test_entry_timing.py pins both.
 CLOCK_CLASSES = ("forex", "stock", "etf", "index", "commodity", "options")
 OPEN_STATUSES = ("OPEN", "CLOSE_PENDING")
 BOOKED_STATUSES = ("OPEN", "CLOSE_PENDING", "CLOSED")
@@ -470,7 +474,11 @@ def check_market_shut(ctx, g) -> list:
     noticed it (_noticed_close), and an index booked at a broker -- the
     clock keeps the cash session (SPX500 on New York) while a broker's
     index CFD trades nearly round the clock; paper index rows are judged,
-    as the paper venue's own gate judges them."""
+    as the paper venue's own gate judges them. 2026-10-07: The bot lane
+    refuses a live entry on this same clock for these classes less index
+    and options (entry_timing.SHUT_CLASSES), and the options lane on its
+    underlying's key (OPTIONS_SHUT_CLASSES); tests/test_entry_timing.py
+    pins both."""
     from core.exchange_status import market_status_for
     since, rows = _recent_rows(ctx)
     out, unmodelled, noticed, cfd = [], Counter(), 0, 0

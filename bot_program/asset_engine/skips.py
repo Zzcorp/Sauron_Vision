@@ -96,6 +96,17 @@ ELIGIBILITY_REFUSED = "eligibility_refused"
 # 2026-09-26. A PAPER entry while the instrument's market is shut
 # (paper_trader.paper_market_shut): no fill, no row. Its own code so a
 # weekend of refusals reads as the clock, never as a dead feed (no_price).
+#
+# 2026-10-07. The code now also covers a LIVE entry the clock refused
+# because the instrument's exchange is shut (entry_timing.SHUT, on Morgul
+# G1's own clock and classes), in the bot lane (propose_entry and both
+# reads at the send, through entry_timing.skip_code) and on the options
+# lane's live branch. On 2026-10-06 config 26 shorted PG 22 minutes before
+# the NYSE open and eToro filled it. One code means "the market is shut" in
+# every lane: the paper venue (AssetBot.propose_entry's ticker answer and
+# execute_entry's paper gate), the options paper branch, and now a live
+# entry — so a night of refusals reads as the clock, never as a dead feed,
+# and does not swamp bad_timing's count and its advice.
 MARKET_SHUT = "market_shut"
 
 # 2026-10-05. An OPEN row left alone for one tick because its mark was
@@ -249,10 +260,14 @@ def diagnose(cfg) -> str:
                              "1,000 USD). Nothing was sent and nothing was "
                              "clamped; the row is re-read once per UTC day, "
                              "an unread one on every ask",
-        MARKET_SHUT: "the instrument's market is shut, or opened less than "
-                     "15 minutes ago, so the paper venue fills nothing — "
-                     "nothing is wrong with the feed; paper fills resume "
-                     "at the hour the detail names",
+        # 2026-10-07: a live entry refused on a shut exchange
+        # (entry_timing.SHUT) is recorded here too, so the advice names
+        # both lanes and the hour entries resume, never only paper fills.
+        MARKET_SHUT: "the instrument's market is shut (or, on the paper "
+                     "venue, opened less than 15 minutes ago): the paper "
+                     "venue fills nothing and the bots send no live entry "
+                     "— nothing is wrong with the feed; entries resume at "
+                     "the hour the detail names",
         SUSPECT_MARK: "an open position was left alone for a tick, or an "
                       "entry was refused, because the quote was suspect "
                       "(one print far from the last accepted one or from "

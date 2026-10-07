@@ -2283,10 +2283,24 @@
          unchanged. */
       var timingAdv = p.timing_advisory || {};
       if (timingAdv.ok === false && timingAdv.reason) {
-        warnHtml += '<div class="sz-warn sz-warn--book"><b>BAD TIMING FOR AN ENTRY</b>' +
-          esc(timingAdv.reason) +
-          '<br>' + esc('A warning, not a block: the bots refuse an entry at ' +
-                       'this hour; this ticket is yours to send.') + '</div>';
+        /* A shut exchange (2026-10-07, entry_timing.SHUT): its own heading,
+           because a booking made while the exchange is shut is the one
+           Morgul G1 flags — on 2026-10-06 a bot's PG short was filled 22
+           minutes before the NYSE open. The bots send no entry then; this
+           lane still only warns, and the button is unchanged. */
+        if (timingAdv.code === 'SHUT') {
+          warnHtml += '<div class="sz-warn sz-warn--book"><b>THE MARKET IS SHUT</b>' +
+            esc(timingAdv.reason) +
+            '<br>' + esc('A warning, not a block: the bots send no entry ' +
+                         'while its exchange is shut, and Morgul flags a ' +
+                         'booking made now (its brake, when on, stops this lane); ' +
+                         'this ticket is yours to send.') + '</div>';
+        } else {
+          warnHtml += '<div class="sz-warn sz-warn--book"><b>BAD TIMING FOR AN ENTRY</b>' +
+            esc(timingAdv.reason) +
+            '<br>' + esc('A warning, not a block: the bots refuse an entry at ' +
+                         'this hour; this ticket is yours to send.') + '</div>';
+        }
       }
 
       /* The entry quote (2026-10-05): crossed, a stale print, far from the
