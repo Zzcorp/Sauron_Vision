@@ -58,12 +58,19 @@ def rule_rows() -> list:
     controls = {c.rule_name: c for c in RuleControl.objects.all()}
     for name in controls:
         by_rule.setdefault(name, _blank())
+    # THE PROVENANCE (2026-10-07, SIZE BY PROOF): beside a live stage, how
+    # the rule came to it — "by hand, unproven" for a hand promotion
+    # without proof — so the ledger never reads a plain live_full for one.
+    # A rule below the live stages costs no query; never raises.
+    from signals.promotion_pipeline import provenance_notes
+    notes = provenance_notes(list(by_rule), controls=controls)
 
     rows = []
     for name, row in by_rule.items():
         ctrl = controls.get(name)
         row["rule"] = name
         row["stage"] = (getattr(ctrl, "promotion_stage", "") or "—") if ctrl else "—"
+        row["stage_note"] = notes.get(name, "")
         row["status"] = (getattr(ctrl, "status", "") or "") if ctrl else "no control row"
         # THE REGRET: R a rule has proven in paper while nothing took it
         # live. Zero once a single live fill exists — the question then is

@@ -364,7 +364,8 @@
             <td>{{ rule_state.weight_multiplier }}</td>
             <td>{{ rule_state.allocator_weight }}</td>
             <td><strong>{{ rule_state.effective }}</strong></td>
-            <td>{{ rule_state.stage|default:"—" }}</td>
+            {# 2026-10-07 (SIZE BY PROOF): the promotion provenance beside a live stage — "by hand, unproven" for a hand promotion without proof. #}
+            <td>{{ rule_state.stage|default:"—" }}{% if rule_state.stage_note %} · {{ rule_state.stage_note }}{% endif %}</td>
         </tr></tbody>
     </table>
     </div>

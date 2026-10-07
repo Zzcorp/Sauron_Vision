@@ -2303,6 +2303,23 @@
         }
       }
 
+      /* SIZE BY PROOF (2026-10-07, backtester/proving/proof.py): the
+         proving ground's verdict on the signal's rule, this class and this
+         side. The bots refuse a FAILED rule's live entry and cut an
+         unproven one; this lane only warns — no qty, stop, leverage or
+         button expression reads it. */
+      var proofAdv = p.proof_advisory || {};
+      if (proofAdv.ok === false && proofAdv.reason) {
+        warnHtml += '<div class="sz-warn sz-warn--book"><b>' +
+          (proofAdv.tier === 'failed'
+            ? 'THE PROVING GROUND FAILED THIS RULE HERE'
+            : 'THIS RULE IS NOT PROVEN HERE') + '</b>' +
+          esc(proofAdv.reason) +
+          '<br>' + esc('A warning, not a block: the bots refuse or cut it; ' +
+                       'this ticket is yours to send, at the size you ' +
+                       'chose.') + '</div>';
+      }
+
       /* The entry quote (2026-10-05): crossed, a stale print, far from the
          platform's own quote — and the quoted half-spread against this
          ticket's stop. The bots refuse on the same read; this lane only

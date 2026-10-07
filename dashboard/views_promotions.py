@@ -10,9 +10,16 @@ def promotions_dashboard(request):
     from signals.models import RuleControl, PromotionEvent
     from signals.promotion_pipeline import (
         is_eligible_for_promotion, is_due_for_demotion, _stats_since,
+        provenance_notes,
     )
 
     rules = list(RuleControl.objects.all().order_by("rule_name"))
+    # THE PROVENANCE (2026-10-07, SIZE BY PROOF): a live stage set by hand
+    # without proof reads "by hand, unproven" beside the stage, so the 36
+    # rules the order of 2026-10-01 put at live_full do not read like a
+    # rule that earned it. The badge colour keeps the raw stage.
+    notes = provenance_notes([c.rule_name for c in rules],
+                             controls={c.rule_name: c for c in rules})
     rows = []
     for ctrl in rules:
         s = _stats_since(ctrl.rule_name, days_window=90)
@@ -29,6 +36,7 @@ def promotions_dashboard(request):
             "rule": ctrl.rule_name,
             "stage": ctrl.promotion_stage,
             "stage_display": ctrl.get_promotion_stage_display(),
+            "stage_note": notes.get(ctrl.rule_name, ""),
             "stage_entered": ctrl.stage_entered_at,
             "baseline": ctrl.stage_baseline_expectancy,
             "n_recent": s["n"],

@@ -127,12 +127,19 @@ def _rule_state(trade):
         return None
     weight = float(getattr(ctl, "weight_multiplier", 1) or 1)
     alloc = float(getattr(ctl, "allocator_weight", 1) or 1)
+    # THE PROVENANCE (2026-10-07, SIZE BY PROOF): beside a live stage, how
+    # the rule came to it — "by hand, unproven" for a hand promotion
+    # without proof. Never raises.
+    from signals.promotion_pipeline import provenance_notes
     return {
         "control": ctl,
         "weight_multiplier": weight,
         "allocator_weight": alloc,
         "effective": round(weight * alloc, 4),
         "stage": getattr(ctl, "promotion_stage", ""),
+        "stage_note": provenance_notes(
+            [trade.rule_name], controls={trade.rule_name: ctl}
+        ).get(trade.rule_name, ""),
     }
 
 

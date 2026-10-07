@@ -1043,6 +1043,42 @@ def timing_advisory(inst) -> dict:
         return {"ok": True, "reason": "", "attack": "", "code": ""}
 
 
+def proof_advisory(signal, inst, side, *, live: bool = True) -> dict:
+    """SIZE BY PROOF on the ticket (2026-10-07, backtester/proving/proof):
+    {"ok", "tier", "reason"} — whether the proving ground proves the
+    SIGNAL's rule on this instrument's class and this side. The bots refuse
+    a FAILED rule's live entry and cut an unproven one to REDUCED; this
+    lane only WARNS — never refused, never resized, the operator keeps the
+    last word on their own lane. ok for a paper ticket, a ticket with no
+    signal or no rule (signal_backing already warns of that; the manual
+    lane's own rule is never proved), the switch off, or a read that
+    fails. The class is the Instrument's own (inst.asset_class), never
+    EXECUTABLE_CLASS's, which maps etf to stock: the proving ground pools
+    etf on its own."""
+    fine = {"ok": True, "tier": "", "reason": ""}
+    rule = getattr(signal, "rule_name", "") if signal is not None else ""
+    if not live or not rule:
+        return fine
+    try:
+        from backtester.proving import proof
+        if not proof.GATE:
+            return fine
+        p = proof.proof_for(rule, getattr(inst, "asset_class", "") or "",
+                            side)
+        if p["tier"] in (proof.PROVEN, proof.LIVE_PROVEN):
+            return fine
+        suffix = (" — the bots send this rule no real money here"
+                  if p["tier"] == proof.FAILED
+                  else f" — the bots take it at {proof.REDUCED:g}x of "
+                       f"their size")
+        return {"ok": False, "tier": p["tier"],
+                "reason": p["words"] + suffix}
+    except Exception as e:  # noqa: BLE001 — an unread proof warns of nothing
+        logger.warning("[take-trade] proof advisory unread for %s: %s",
+                       getattr(inst, "symbol", "?"), e)
+        return fine
+
+
 def reward_risk_advisory(side, entry, stop, target) -> dict:
     """{ok, ratio, threshold, breakeven_win_rate, reason} — what the levels
     can make against what they risk, gross of costs, measured from `entry`.
@@ -1798,6 +1834,11 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         # market's first quarter hour or last minutes, the weekend's last
         # hour, a print near. The bots refuse on it; this lane WARNS only.
         "timing_advisory": timing_advisory(inst),
+        # SIZE BY PROOF on the ticket (2026-10-07): the proving ground's
+        # verdict on the signal's rule, this class and this side. The bots
+        # refuse a FAILED rule's live entry and cut an unproven one; this
+        # lane WARNS only — no qty, stop, leverage or button reads it.
+        "proof_advisory": proof_advisory(signal, inst, side, live=live),
         # THE SETUP MEMORY (2026-10-03, backtester/proving/memory.py): what
         # followed, the last times this rule fired on this class in this
         # kind of tape. Information, never a gate; "" when nobody replayed
@@ -2701,6 +2742,15 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                 extra["timing_advisory_at_entry"] = {
                     "ok": False, "reason": str(_ta.get("reason") or "")[:200],
                     "code": str(_ta.get("code") or "")}
+            _pa = preview.get("proof_advisory")
+            if isinstance(_pa, dict) and not _pa.get("ok", True):
+                # taken past the proving ground's warning (2026-10-07):
+                # recorded, as the other overridden warnings are, so a
+                # review can ask whether tickets taken on a FAILED or
+                # unproven rule paid
+                extra["proof_advisory_at_entry"] = {
+                    "ok": False, "tier": str(_pa.get("tier") or ""),
+                    "reason": str(_pa.get("reason") or "")[:200]}
 
             with transaction.atomic():
                 trade = _book_row(booked_px,

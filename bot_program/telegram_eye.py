@@ -232,6 +232,10 @@ SKIP_WORDS = {
                    "too much of the stop distance",
     "bad_timing": "the clock said no: a rollover, a market's first quarter "
                   "hour or last minutes, or a high-impact print near",
+    # 2026-10-07: SIZE BY PROOF (backtester/proving/proof.py) — a live
+    # entry on a rule the proving ground FAILED on this class and side.
+    "proving_failed": "the proving ground failed this rule on this class "
+                      "and side, so no real money",
 }
 
 

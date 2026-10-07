@@ -86,7 +86,8 @@
         <tr>
             <td class="sv-ident" data-label="Setup">{{ r.name }}</td>
             <td data-label="Armed">{% if r.armed %}<span class="badge badge-bullish">armed</span>{% else %}<span class="badge badge-medium" title="The scanner never looks at an unarmed setup">unarmed</span>{% endif %}</td>
-            <td data-label="Stage">{% if r.has_control %}<span class="badge badge-medium">{{ r.stage }}</span>{% else %}<span class="badge badge-high" title="stage_policy treats a rule with no RuleControl row as PAPER — full size on the paper venue">no control row</span>{% endif %}</td>
+            {# 2026-10-07 (SIZE BY PROOF): the promotion provenance beside a live stage — "by hand, unproven" for a hand promotion without proof — so no row reads a plain live_full for one. #}
+            <td data-label="Stage">{% if r.has_control %}<span class="badge badge-medium">{{ r.stage }}{% if r.stage_note %} · {{ r.stage_note }}{% endif %}</span>{% else %}<span class="badge badge-high" title="stage_policy treats a rule with no RuleControl row as PAPER — full size on the paper venue">no control row</span>{% endif %}</td>
             <td data-label="Verdict">{% if r.verdict %}<span class="badge badge-{% if r.verdict == 'fires' %}bullish{% elif r.verdict == 'near' %}medium{% elif r.verdict == 'blind' %}bearish{% else %}high{% endif %}">{{ r.verdict }}</span>{% else %}<span style="color:var(--text-muted);">—</span>{% endif %}</td>
             <td data-label="p90 vs threshold">
                 {% if r.p90_pct is not None %}
@@ -201,7 +202,8 @@
         {% for r in inactive_rows %}
         <tr>
             <td class="sv-ident" data-label="Setup">{{ r.name }}</td>
-            <td data-label="Stage">{% if r.has_control %}<span class="badge badge-medium">{{ r.stage }}</span>{% else %}<span class="badge badge-high">no control row — paper venue at full size</span>{% endif %}</td>
+            {# 2026-10-07 (SIZE BY PROOF): the promotion provenance beside a live stage — "by hand, unproven" for a hand promotion without proof — so no row reads a plain live_full for one. #}
+            <td data-label="Stage">{% if r.has_control %}<span class="badge badge-medium">{{ r.stage }}{% if r.stage_note %} · {{ r.stage_note }}{% endif %}</span>{% else %}<span class="badge badge-high">no control row — paper venue at full size</span>{% endif %}</td>
             <td data-label="Verdict"><span style="font-size:11px;color:var(--text-muted);">unarmed setups are not scanned, so they have no verdict</span></td>
             <td data-label="Arm">
                 <form method="post" action="{% url 'setups_arm' %}">

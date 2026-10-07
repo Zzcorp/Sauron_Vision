@@ -100,6 +100,8 @@ must not be able to pass for a card that was measured and lost.
         </div>
         <div class="ev-fam-facts">
             <span class="ev-chip ev-chip--stage-{{ fam.parent.stage|default:"unknown" }}">{{ fam.parent.stage|upper|default:"—" }}</span>
+            {# 2026-10-07 (SIZE BY PROOF): the promotion provenance after the chip — "by hand, unproven" for a hand promotion without proof; the chip class keeps the raw stage. #}
+            {% if fam.parent.stage_note %}<span class="ev-fact">{{ fam.parent.stage_note }}</span>{% endif %}
             <span class="ev-fact">
                 <em>{{ record_days }}d record</em>
                 {% if fam.parent.n_90d %}{{ fam.parent.expectancy_90d|floatformat:2 }}R · {{ fam.parent.hit_rate_90d|floatformat:0 }}%<span class="n-badge">n={{ fam.parent.n_90d }}</span>{% else %}&mdash;<span class="n-badge n-badge--thin">n=0</span>{% endif %}
@@ -116,6 +118,8 @@ must not be able to pass for a card that was measured and lost.
         <span class="ev-forkchip ev-forkchip--stage-{{ f.node.stage|default:"unknown" }}">
             <b>{{ f.node.name }}</b>
             <em>{{ f.node.stage|upper|default:"—" }}</em>
+            {# 2026-10-07 (SIZE BY PROOF): the provenance after the stage, as on the parent. #}
+            {% if f.node.stage_note %}<em>{{ f.node.stage_note }}</em>{% endif %}
             {% if f.node.n_90d %}<span>{{ f.node.expectancy_90d|floatformat:2 }}R</span><span class="n-badge">n={{ f.node.n_90d }}</span>{% else %}<span>&mdash;</span><span class="n-badge n-badge--thin">n=0</span>{% endif %}
         </span>
         {% endfor %}

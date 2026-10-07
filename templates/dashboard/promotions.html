@@ -47,7 +47,8 @@
         {% for r in rows %}
           <tr>
             <td class="sv-ident" data-label="Rule">{{ r.rule|truncatechars:40 }}</td>
-            <td data-label="Stage"><span class="badge badge-{% if r.stage == 'live_full' %}bullish{% elif r.stage == 'live_small' %}medium{% elif r.stage == 'paper' %}medium{% else %}bearish{% endif %}">{{ r.stage_display }}</span></td>
+            {# 2026-10-07 (SIZE BY PROOF): the promotion provenance beside the stage — "by hand, unproven" for a hand promotion without proof; the class keeps the raw stage. #}
+            <td data-label="Stage"><span class="badge badge-{% if r.stage == 'live_full' %}bullish{% elif r.stage == 'live_small' %}medium{% elif r.stage == 'paper' %}medium{% else %}bearish{% endif %}">{{ r.stage_display }}{% if r.stage_note %} · {{ r.stage_note }}{% endif %}</span></td>
             <td data-label="Days in stage">{% if r.stage_entered %}{{ r.stage_entered|timesince }}{% else %}—{% endif %}</td>
             <td class="num" data-label="n (90d)">{{ r.n_recent }}</td>
             <td class="num {% if r.expectancy_recent and r.expectancy_recent > 0 %}up{% elif r.expectancy_recent and r.expectancy_recent < 0 %}down{% endif %}" data-label="Expectancy">

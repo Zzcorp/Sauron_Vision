@@ -329,15 +329,19 @@ def loser_numbers(hit, exp) -> tuple:
     return f"{shown_h:.0%}", f"{shown_e:+.2f}R"
 
 
-def measured_loser(rule_name: str) -> str:
+def measured_loser(rule_name: str, stats: dict | None = None) -> str:
     """The sentence that makes `rule_name` a MEASURED LOSER on its all-time
     graded record — LOSER_MIN_N signals and an expectancy at or under zero,
     or a hit rate under LOSER_HIT_MAX with an expectancy under
     LOSER_THIN_EDGE_R (a thin edge under a low hit rate) — or "" (healthy,
     or unmeasured). The sentence names the arm that fired. A low hit rate
     alone is not a loser: a breakout that wins a third of the time at a
-    large payoff has an edge. Words only; nothing here moves a stage."""
-    s = _stats_since(rule_name)
+    large payoff has an edge. Words only; nothing here moves a stage.
+
+    `stats` (2026-10-07): the all-time _stats_since(rule_name) a caller
+    already read (proven_record reads it once for the proof and the floor);
+    None reads it here, as before."""
+    s = stats if stats is not None else _stats_since(rule_name)
     n = int(s.get("n") or 0)
     if n < LOSER_MIN_N:
         return ""
@@ -356,6 +360,167 @@ def measured_loser(rule_name: str) -> str:
                 f"under {LOSER_THIN_EDGE_R:+.2f}R, hit under "
                 f"{LOSER_HIT_MAX:.0%})")
     return ""
+
+
+def proven_record(rule_name: str, *, cache: dict | None = None) -> dict:
+    """{"proven", "n", "hit_rate", "expectancy", "loser"}: whether the
+    rule's own ALL-TIME graded record (rule level, both sides, every class)
+    proves it — SIZE BY PROOF (2026-10-07, backtester/proving/proof.py)
+    lets a live entry the proving ground has not proven keep full size on
+    it.
+
+    This is the floor's own measure read from above, not a parallel
+    statistic: LOSER_MIN_N graded signals, an expectancy at or above
+    LOSER_THIN_EDGE_R (an edge the floor calls thin under a low hit rate is
+    not proof) and not a measured loser. Read once per tick through
+    `cache` (key ("proof_record", rule)). A failed read is not proof:
+    proven False, n 0, and a warning."""
+    key = ("proof_record", rule_name)
+    if isinstance(cache, dict) and isinstance(cache.get(key), dict):
+        return dict(cache[key])
+    try:
+        s = _stats_since(rule_name)
+        n = int(s.get("n") or 0)
+        exp = s.get("expectancy")
+        exp = float(exp) if exp is not None else None
+        loser = measured_loser(rule_name, stats=s)
+        proven = (n >= LOSER_MIN_N and exp is not None
+                  and exp >= LOSER_THIN_EDGE_R and not loser)
+        out = {"proven": bool(proven), "n": n, "hit_rate": s.get("hit_rate"),
+               "expectancy": exp, "loser": loser}
+    except Exception as e:  # noqa: BLE001 — unread is unproven
+        logger.warning("[promotion] %s: graded record unread (%s) — not "
+                       "proof", rule_name, e)
+        return {"proven": False, "n": 0, "hit_rate": None,
+                "expectancy": None, "loser": ""}
+    if isinstance(cache, dict):
+        cache[key] = dict(out)
+    return out
+
+
+def promotion_provenance(rule_name: str, *, ctrl=None,
+                         cache: dict | None = None) -> dict:
+    """{"stage", "label", "note", "by_hand", "unproven", "words"}: how the
+    rule came to its live stage, and whether it was proven (2026-10-07).
+
+    The order of 2026-10-01 put 36 rules at live_full by hand, most with 0
+    graded signals, and every display then read a plain "live_full" — the
+    same word a rule that climbed the ladder on its fills earns. The label
+    says the difference wherever the stage is shown:
+
+      "by hand, unproven"               promoted by hand without proof,
+                                        and not proven since;
+      "by hand, proven since"           promoted by hand without proof,
+                                        proven since;
+      "no promotion recorded, unproven" a live stage no event explains,
+                                        and no proof;
+      ""                                an automatic promotion (Aragorn's
+                                        included), or a hand promotion
+                                        proven at the time.
+
+    The promotion read is the newest PromotionEvent that put money behind
+    the rule (manual_promote or auto_promote, to live_small or live_full):
+    a later demotion does not launder it. Proof today is the operator's own
+    two kinds: the rule's graded record (proven_record) or the proving
+    ground's newest PROVEN verdict on any class and side
+    (proof.proven_cases). A stage other than live_small/live_full is its
+    own label. Never raises: on a failed read the label is the stage.
+    Cached per tick under ("proof_provenance", rule)."""
+    key = ("proof_provenance", rule_name)
+    if isinstance(cache, dict) and isinstance(cache.get(key), dict):
+        return dict(cache[key])
+    stage = ""
+    try:
+        if ctrl is None:
+            ctrl = _control(rule_name)
+        stage = str(getattr(ctrl, "promotion_stage", "") or "")
+        out = {"stage": stage, "label": stage, "note": "", "by_hand": False,
+               "unproven": False, "words": ""}
+        if stage in ("live_small", "live_full"):
+            from signals.models import PromotionEvent
+            from backtester.proving import proof
+            ev = (PromotionEvent.objects
+                  .filter(rule_name=rule_name,
+                          reason__in=("manual_promote", "auto_promote"),
+                          to_stage__in=("live_small", "live_full"))
+                  .order_by("-created_at").first())
+            by_hand = ev is not None and ev.reason == "manual_promote"
+            # _transition's 90-DAY snapshot at the promotion; the
+            # expectancy is nullable (no graded signal in the window), and
+            # None is no proof.
+            proven_then = (
+                ev is not None
+                and int(ev.n_at_transition or 0) >= LOSER_MIN_N
+                and ev.expectancy_at_transition is not None
+                and float(ev.expectancy_at_transition) >= LOSER_THIN_EDGE_R)
+            rec = proven_record(rule_name, cache=cache)
+            cases = proof.proven_cases(rule_name, cache=cache)
+            proven_now = bool(rec.get("proven")) or bool(cases)
+            note = ""
+            if by_hand and not proven_then and not proven_now:
+                note = "by hand, unproven"
+            elif by_hand and not proven_then and proven_now:
+                note = "by hand, proven since"
+            elif ev is None and not proven_now:
+                note = "no promotion recorded, unproven"
+            words = ""
+            if by_hand:
+                words = (f"promoted to {ev.to_stage} by hand on "
+                         f"{ev.created_at:%Y-%m-%d} with "
+                         f"{ev.n_at_transition} graded signals (proof needs "
+                         f"{LOSER_MIN_N} at {LOSER_THIN_EDGE_R:+.2f}R)")
+                if not proven_now:
+                    words += "; not proven since"
+                else:
+                    if rec.get("proven"):
+                        _h, _e = loser_numbers(rec.get("hit_rate"),
+                                               rec["expectancy"])
+                        words += (f"; proven since: {rec['n']} graded "
+                                  f"signals all time, expectancy {_e}")
+                    if cases:
+                        words += (f"; the proving ground proves it on "
+                                  f"{', '.join(cases)}")
+            out.update(note=note, by_hand=by_hand,
+                       unproven=note in ("by hand, unproven",
+                                         "no promotion recorded, unproven"),
+                       label=f"{stage} ({note})" if note else stage,
+                       words=words)
+    except Exception as e:  # noqa: BLE001 — a label never breaks a page
+        logger.warning("[promotion] %s: provenance unread (%s)",
+                       rule_name, e)
+        return {"stage": stage, "label": stage, "note": "",
+                "by_hand": False, "unproven": False, "words": ""}
+    if isinstance(cache, dict):
+        cache[key] = dict(out)
+    return out
+
+
+def provenance_notes(rule_names, *, controls=None) -> dict:
+    """{rule: note} for a page (2026-10-07): the promotion_provenance note
+    of every rule, with one shared cache. `controls` is {rule:
+    RuleControl} when the page already holds them: a rule absent from it
+    has no control row and no note, and a rule below the live stages costs
+    no query. Never raises; {} on failure."""
+    try:
+        cache: dict = {}
+        out = {}
+        for name in rule_names or ():
+            if controls is not None:
+                ctrl = controls.get(name)
+                if ctrl is None:
+                    continue
+                if getattr(ctrl, "promotion_stage", "") not in (
+                        "live_small", "live_full"):
+                    out[name] = ""
+                    continue
+            else:
+                ctrl = None
+            out[name] = promotion_provenance(name, ctrl=ctrl,
+                                             cache=cache)["note"]
+        return out
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[promotion] provenance notes unread (%s)", e)
+        return {}
 
 
 def hand_promoted_recently(rule_name: str, now=None) -> bool:

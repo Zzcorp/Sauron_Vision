@@ -141,6 +141,20 @@ WIDE_SPREAD = "wide_spread"
 # with the hour it clears, never a broken feed; the manual lane only warns.
 BAD_TIMING = "bad_timing"
 
+# 2026-10-07. SIZE BY PROOF (backtester/proving/proof.py): the proving
+# ground's newest live-rules verdict for this rule on the instrument's
+# class and side is FAILED, so a LIVE entry sends no real money — in the
+# bot lane (propose_entry, after Aragorn and the posture settled the
+# venue, before the size) and on the options lane (on the underlying's
+# class). The order of 2026-10-01 put 36 rules at live_full by hand, most
+# with no graded signal; a rule the proving ground measured as losing on
+# this class and side is refused whatever its graded record says. A
+# decision with the verdict's numbers first, never a broken feed; a paper
+# config still trades the rule, and the manual lane only warns. Anything
+# short of PROVEN (or a graded record that proves it) enters at the
+# reduced size instead, and records no skip.
+PROVING_FAILED = "proving_failed"
+
 MAX_SYMBOLS_TRACKED = 200
 
 
@@ -295,6 +309,16 @@ def diagnose(cfg) -> str:
                     "instrument's currency — nothing is wrong with the "
                     "signal or the feed; the detail names the hour it "
                     "clears, and the same signal enters when it does",
+        # 2026-10-07: SIZE BY PROOF — the proving ground's FAILED verdict
+        # on the rule, the class and the side refuses a live entry.
+        PROVING_FAILED: "the proving ground FAILED this rule on this "
+                        "instrument's class and side in its newest "
+                        "live-rules run (manage.py prove show) — the bot "
+                        "lane sends it no real money; nothing is wrong "
+                        "with the signal or the feed; a paper config "
+                        "still trades it, the verdict is judged again "
+                        "every night at 03:40 UTC, and the detail names "
+                        "the numbers",
     }.get(top, "")
     return (f"{top} accounts for {share:.0%} of {total} skips"
             + (f" — {advice}" if advice else ""))

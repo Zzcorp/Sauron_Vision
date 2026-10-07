@@ -102,20 +102,28 @@ class Command(BaseCommand):
             OpportunityFlag.objects.values("setup__name")
             .annotate(last=Max("scanned_at")))}
         ctrls = {c.rule_name: c for c in RuleControl.objects.all()}
+        # THE PROVENANCE (2026-10-07, SIZE BY PROOF): a live stage reads how
+        # the rule came to it — "live_full (by hand, unproven)" for a hand
+        # promotion without proof — so the column is widened to carry the
+        # label whole; a stage below the live ones costs no query.
+        from signals.promotion_pipeline import provenance_notes
+        notes = provenance_notes([s.name for s in setups], controls=ctrls)
 
         self.stdout.write(f"{len(setups)} setup(s) · "
                           f"{sum(1 for s in setups if s.is_active)} armed")
-        self.stdout.write(f"{'setup':44} {'armed':6} {'stage':11} "
+        self.stdout.write(f"{'setup':44} {'armed':6} {'stage':44} "
                           f"{'7d':>4} {'graded':>7}  last flag")
         for s in setups:
             row = sig.get(s.name) or {}
             ctrl = ctrls.get(s.name)
             stage = getattr(ctrl, "promotion_stage", "") or "no control row"
+            if notes.get(s.name):
+                stage = f"{stage} ({notes[s.name]})"
             last = flags.get(s.name)
             last_txt = last.strftime("%Y-%m-%d") if last else "never"
             self.stdout.write(
                 f"{s.name[:44]:44} {'yes' if s.is_active else 'NO':6} "
-                f"{stage[:11]:11} {row.get('n_7d', 0):>4} "
+                f"{stage[:44]:44} {row.get('n_7d', 0):>4} "
                 f"{row.get('n_graded', 0):>7}  {last_txt}")
         self.stdout.write("\n`setups diagnose` says why the ones with no flag "
                           "have none; `setups arm <name> --yes` arms an "
@@ -240,8 +248,13 @@ class Command(BaseCommand):
                     f"rule as PAPER: it may trade, at full size, on the paper "
                     f"venue. Not research. Read that before --yes."))
             else:
+                # the label in place of the bare stage (2026-10-07, SIZE BY
+                # PROOF): a hand promotion without proof says so here too
+                from signals.promotion_pipeline import promotion_provenance
+                _label = promotion_provenance(name, ctrl=ctrl)["label"] \
+                    or stage
                 self.stdout.write(self.style.WARNING(
-                    f"{name}: stage {stage!r} — NOT research. A signal from "
+                    f"{name}: stage {_label!r} — NOT research. A signal from "
                     f"this setup may reach a venue. Read that before --yes."))
 
             proposal = (GeneratedSetupProposal.objects
