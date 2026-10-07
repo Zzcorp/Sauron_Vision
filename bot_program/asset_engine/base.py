@@ -1300,6 +1300,15 @@ class AssetBot(ABC):
                     from bot_program import venue_mark
                     from bot_program.engine.capabilities import adapter_key
                     venue_mark.stamp(trade, price, source=adapter_key(client))
+                    # THE CROSSING (2026-10-07, bot_program/venue_exit
+                    # .note_crossing): the first accepted mark beyond the
+                    # stop or target eToro holds since it last showed the
+                    # position open — the reconcile's evidence for the price
+                    # of a close nobody saw. Every live row, protected or not
+                    # (the stamp itself asks for a protected live eToro row
+                    # with its order id); never raises, never sends.
+                    from bot_program import venue_exit
+                    venue_exit.note_crossing(trade, price)
 
                 # `protected` is a claim about the BROKER, and the broker is
                 # asked whether it still holds. A stop leg that expired,
@@ -2582,8 +2591,13 @@ class AssetBot(ABC):
                 resting = candidate      # keep the request rather than none
         meta = dict(trade.metadata or {})
         moves = list(meta.get("stop_moves") or [])
+        # "at" stays the MARK the move was made at; "when" is the moment the
+        # venue accepted it (2026-10-07): venue_exit._level_changed_at reads
+        # it, so a crossing stamped at the old level is never evidence for
+        # the new one.
         moves.append({"to": str(resting), "asked": str(candidate),
-                      "at": str(price), "why": why + ":broker"})
+                      "at": str(price), "why": why + ":broker",
+                      "when": timezone.now().isoformat()})
         meta["stop_moves"] = moves[-20:]
         if why == "breakeven":
             # the rule's own lock only: a lock moved beyond the crowd is a
@@ -4084,6 +4098,29 @@ class AssetBot(ABC):
                               "process — nothing was sent" if busy else
                               "live config fell back to PaperTrader")
 
+        # NO READ WHILE THE VENUE IS SICK, AND NONE IN ITS 429 PAUSE
+        # (2026-10-07). The proposal's rate read (and the /search a cold
+        # id costs) came BEFORE the sick check, which sat in execute_entry
+        # alone: every candidate of a quiet asked eToro anyway, only to be
+        # held there, and each 429 among those asks pushed the quiet ten
+        # minutes further. Keyed on the adapter (venue_health): a
+        # PaperTrader, a MagicMock and a paper config propose as before.
+        # A symbol eToro said twice it does not know (its kept "no") is not
+        # asked again either.
+        from bot_program import venue_health
+        _sick, _sick_why = venue_health.refusal(client, symbol)
+        if _sick:
+            logger.warning("[%s_bot] %s HELD: %s", self.asset_class,
+                           symbol, _sick_why)
+            return self._skip(symbol, _sick, _sick_why)
+        _pause = venue_health.pause_s(client)
+        if _pause > 0:
+            return self._skip(symbol, skips.NO_PRICE,
+                              f"eToro rate pause after a 429, "
+                              f"{_pause:.0f}s left — not asked")
+        _no = venue_health.kept_no(client, symbol)
+        if _no:
+            return self._skip(symbol, skips.NO_PRICE, f"{symbol}: {_no}")
         try:
             tk = client.ticker(symbol)
         except Exception as e:
@@ -4745,14 +4782,39 @@ class AssetBot(ABC):
         {"skip": a skip code or "", "why", "quote": the record for the row
         (mid, bid, ask, last_price, age_s, half_spread_r, proposal_price)
         or None}. An unreadable tick, or one with no price, refuses
-        nothing — as before: the venue's own stop still holds the risk.
-        Never raises."""
+        nothing — as before: the venue's own stop still holds the risk —
+        EXCEPT a read that met eToro's 429 or failed inside this process's
+        429 pause (2026-10-07): then "refused" carries the words and the
+        caller sends nothing. Both are keyed on the adapter (eToro only):
+        another carrier's 429 refuses nothing, as before. Never raises."""
         from bot_program import mark_sanity
         from bot_program.asset_engine import skips
         out = {"skip": "", "why": "", "quote": None}
         try:
             tk = client.ticker(symbol)
         except Exception as e:  # noqa: BLE001
+            # EXCEPT a read that met eToro's 429, or failed inside this
+            # process's 429 pause (2026-10-07): "refused" — the caller sends
+            # nothing (the POST would meet the same quota). Every other
+            # unreadable look still lets the order go, as before. Keyed on
+            # the adapter like the pause (2026-10-07, review): OANDA and
+            # Alpaca raise_for_status() too, so their 429 carries the same
+            # code — it is any other unreadable look on a healthy venue
+            # (only eToro keeps a health memory), and the order goes.
+            from bot_program import venue_health
+            from bot_program.engine.capabilities import adapter_key
+            code = getattr(getattr(e, "response", None), "status_code", None)
+            if code == 429 and adapter_key(client) == "etoro":
+                out["refused"] = (f"{symbol}: the last look met eToro's 429 "
+                                  f"— nothing sent on the proposal's price")
+                return out
+            _paused = venue_health.pause_s(client)
+            if _paused > 0:
+                out["refused"] = (f"{symbol}: the last look could not read "
+                                  f"the quote inside eToro's 429 pause "
+                                  f"({_paused:.0f}s left) — nothing sent on "
+                                  f"the proposal's price")
+                return out
             logger.info("[%s_bot] %s: the last look could not read the "
                         "quote (%s) — the order goes on the proposal's "
                         "price", self.asset_class, symbol, e)
@@ -5415,6 +5477,16 @@ class AssetBot(ABC):
                 logger.warning("[%s_bot] %s HELD: %s", self.asset_class,
                                symbol, _sick_why)
                 return self._skip(symbol, _sick, _sick_why)
+            # AND NOTHING ASKED INSIDE THIS PROCESS'S 429 PAUSE (2026-10-07):
+            # the eligibility read, the last look and the POST below would
+            # meet the same quota. A decision, said; not VENUE_SICK — the
+            # venue is not sick, it asked for a breath.
+            _pause = venue_health.pause_s(client)
+            if _pause > 0:
+                return self._skip(
+                    symbol, skips.NO_PRICE,
+                    f"{symbol}: eToro rate pause after a 429, "
+                    f"{_pause:.0f}s left — nothing sent")
             _gate, _gate_why = self._etoro_entry_refusal(
                 client, symbol, decision.direction, float(qty), float(price),
                 self._instrument_class(symbol),
@@ -5743,6 +5815,24 @@ class AssetBot(ABC):
                                "order — %s", self.asset_class, symbol,
                                _look["why"])
                 return self._skip(symbol, _look["skip"], _look["why"])
+            # AN UNREADABLE LAST LOOK STILL SENDS (the venue's stop holds
+            # the risk) — EXCEPT when the read met eToro's 429 or ran inside
+            # its pause (2026-10-07): the POST would meet the same quota, and
+            # a 429 on the POST makes the venue sick at once
+            # (venue_health.WRITE_SITES) for an order never placed.
+            if _look.get("refused"):
+                logger.warning("[%s_bot] %s HELD: %s", self.asset_class,
+                               symbol, _look["refused"])
+                return self._skip(symbol, skips.NO_PRICE, _look["refused"])
+            # AND THE VENUE'S HEALTH, read again at the send: the gate above
+            # ran before the eligibility reads and the debate (a minute);
+            # an order POST that failed elsewhere meanwhile, or the last
+            # look's own failed read, made the venue sick.
+            _sick, _sick_why = venue_health.refusal(client, symbol)
+            if _sick:
+                logger.warning("[%s_bot] %s HELD: %s", self.asset_class,
+                               symbol, _sick_why)
+                return self._skip(symbol, _sick, _sick_why)
             if _look.get("quote"):
                 entry_meta["entry_quote"] = _look["quote"]
             # THE CLOCK, read again at the send (2026-10-06): the desk
