@@ -328,6 +328,38 @@ class MarketShutTests(_Case):
         self.assertIn("1 close booked by reconciliation or by the close "
                       "retry not judged", " ".join(ctx.notes))
 
+    def test_a_live_etoro_stock_close_in_the_extended_session_is_not_judged(self):
+        """NVDA #131 (2026-10-07, PR50): care moved the eToro stop to
+        break-even and eToro filled it in its extended session, 11:0x UTC
+        on a Wednesday, NYSE shut. A live eToro stock close is the venue's
+        own execution: not judged, and said so. An entry booked at the
+        same minute still is."""
+        cfg = _cfg(self.user, "Stocks live", "stock", mode="live")
+        stop_at = datetime(2026, 10, 7, 11, 7, 59, tzinfo=UTC)
+        closed = _trade(cfg, "NVDA", qty="6", entry="237.60", stop="238.03",
+                        paper=False, status="CLOSED", exit_price="238.03",
+                        pnl="2.58", metadata=dict(LIVE_ETORO),
+                        opened=stop_at - timedelta(days=2), closed=stop_at,
+                        reason="momentum | closed:SL")
+        opened = _trade(cfg, "AMZN", entry="257.39", stop="254.18",
+                        paper=False, metadata=dict(LIVE_ETORO),
+                        opened=stop_at)
+        ctx, found = _check("market_shut", stop_at + timedelta(minutes=8))
+        by = _by_subject(found)
+        self.assertNotIn(f"trade:{closed.pk}", by)
+        self.assertIn(f"trade:{opened.pk}", by)
+        self.assertIn("1 live eToro stock close not judged: eToro fills US "
+                      "stock closes in its extended session, which the "
+                      "exchange clock does not keep", " ".join(ctx.notes))
+        # a paper stock close at the same minute is still judged
+        paper = _trade(_cfg(self.user, "Stocks", "stock"), "MSFT",
+                       entry="420", stop="410", status="CLOSED",
+                       exit_price="421", opened=stop_at - timedelta(days=2),
+                       closed=stop_at, reason="momentum | closed:SL")
+        by = _by_subject(_check("market_shut",
+                                stop_at + timedelta(minutes=8))[1])
+        self.assertIn(f"trade:{paper.pk}", by)
+
     def test_the_winter_hour_is_judged_on_the_paper_venues_clock(self):
         """Sunday 2026-12-06 21:30 UTC is 16:30 New York: the strip's FOREX
         row reads open, the paper venue's market_clock shut until 22:00 --

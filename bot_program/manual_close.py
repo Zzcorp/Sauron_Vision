@@ -593,6 +593,8 @@ def _retry_pending(user, trade) -> dict:
     """
     from bot_program.pending_closes import retry_trade_close
 
+    # what THIS click's pass counts is stamped at or after this moment
+    asked_from = timezone.now()
     try:
         ok = retry_trade_close(trade)
     except Exception as e:  # noqa: BLE001
@@ -601,6 +603,16 @@ def _retry_pending(user, trade) -> dict:
                          f"The position may still be open at the broker",
                 "pending": True}
     trade.refresh_from_db()
+    if not ok and _waiting_on_the_venues_word(trade, since=asked_from):
+        # 2026-10-07 (venue_exit): nothing was refused — eToro's list no
+        # longer shows the position and its order read has not answered.
+        return {"error": f"eToro's position list no longer shows "
+                         f"{trade.symbol} and its order read has not "
+                         f"answered. Nothing was sent and nothing was "
+                         f"booked; the platform asks again every 5 minutes "
+                         f"and books it once eToro answers, or after an "
+                         f"hour without an answer",
+                "pending": True, "trade_id": trade.id}
     if not ok:
         return {"error": f"The broker still refuses to close {trade.symbol}. "
                          f"The position is STILL OPEN there; the retry task "
@@ -614,6 +626,29 @@ def _retry_pending(user, trade) -> dict:
         "r": trade.realized_r, "outcome": trade.outcome or "",
         "retried": True,
     }
+
+
+def _waiting_on_the_venues_word(trade, *, since) -> bool:
+    """THIS click's drain pass counted an unanswered ask (venue_exit.
+    after_no_answer wrote venue_miss.last_at at or after `since`, taken
+    just before the pass). A naive or unreadable stamp is no such ask.
+
+    (2026-10-07, review) Not "within the last two minutes": an ask the beat
+    counted on a flat list 60 s earlier made a click whose close was SENT
+    and refused (the list showed the position again), or whose order read
+    answered "closed", say "Nothing was sent" and "has not answered"."""
+    from django.utils import timezone
+    from django.utils.dateparse import parse_datetime
+    miss = (trade.metadata or {}).get("venue_miss")
+    if trade.status != "CLOSE_PENDING" or not isinstance(miss, dict):
+        return False
+    try:
+        at = parse_datetime(str(miss.get("last_at") or ""))
+    except (TypeError, ValueError):
+        return False
+    if at is None or timezone.is_naive(at):
+        return False
+    return at >= since
 
 
 def _notify_refused(user, trade) -> None:

@@ -193,6 +193,13 @@ MARK_STALE_S = 3600
 #: the options lane on its underlying's key (OPTIONS_SHUT_CLASSES);
 #: tests/test_entry_timing.py pins both.
 CLOCK_CLASSES = ("forex", "stock", "etf", "index", "commodity", "options")
+#: G1 (2026-10-07, PR50): eToro fills US stock closes in its extended
+#: session (NVDA #131's stop, 2026-10-07 11:0x UTC, NYSE shut). A live
+#: eToro close of these classes is the venue's execution, not a stale
+#: price: _close_trade, the kill switch and manual close book CLOSED only
+#: on the venue's positionState "closed" (the eToro adapter's close by
+#: position id); queued closes stay CLOSE_PENDING.
+VENUE_SESSION_CLASSES = ("stock", "etf")
 OPEN_STATUSES = ("OPEN", "CLOSE_PENDING")
 BOOKED_STATUSES = ("OPEN", "CLOSE_PENDING", "CLOSED")
 #: One run at a time: a worker back from an outage drains the queued runs
@@ -483,10 +490,13 @@ def check_market_shut(ctx, g) -> list:
     refuses a live entry on this same clock for these classes less index
     and options (entry_timing.SHUT_CLASSES), and the options lane on its
     underlying's key (OPTIONS_SHUT_CLASSES); tests/test_entry_timing.py
-    pins both."""
+    pins both. A live eToro stock or ETF close is not judged either
+    (2026-10-07, PR50, VENUE_SESSION_CLASSES): eToro fills it in its
+    extended session, which the exchange clock does not keep."""
     from core.exchange_status import market_status_for
     since, rows = _recent_rows(ctx)
     out, unmodelled, noticed, cfd = [], Counter(), 0, 0
+    extended = 0
     for trade in rows:
         cls, exchange, _pk = ctx.instrument(trade.symbol, trade.asset_class)
         if cls == "crypto":
@@ -504,6 +514,11 @@ def check_market_shut(ctx, g) -> list:
         for what, at, px in bookings:
             if what == "Closed" and _noticed_close(trade):
                 noticed += 1
+                continue
+            if (what == "Closed" and not trade.paper
+                    and cls in VENUE_SESSION_CLASSES
+                    and _meta(trade).get("broker") == "etoro"):
+                extended += 1
                 continue
             grace = (NOTICED_GRACE_S if what == "Opened" and not trade.paper
                      and _meta(trade).get("entry_filled_at")
@@ -536,6 +551,10 @@ def check_market_shut(ctx, g) -> list:
         ctx.note(g, f"{_plural(cfd, 'index booking')} at a broker not "
                  "judged: the clock keeps the cash session, and a broker's "
                  "index CFD trades nearly round the clock")
+    if extended:
+        ctx.note(g, f"{_plural(extended, 'live eToro stock close')} not "
+                 "judged: eToro fills US stock closes in its extended "
+                 "session, which the exchange clock does not keep")
     return out
 
 

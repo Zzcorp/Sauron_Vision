@@ -553,7 +553,14 @@ def _venue_still_holds(bot, trade, client) -> bool:
     positions = bot._broker_snapshot(client, "positions")
     if positions is None:
         return False
-    return any(str(p.get("position_id") or "") == pid for p in positions)
+    held = any(str(p.get("position_id") or "") == pid for p in positions)
+    if not held:
+        # THE FIRST TICK WHOSE LIST DID NOT SHOW IT (2026-10-07): the upper
+        # bound of the window reconciliation writes. Booking stays
+        # reconcile's.
+        from bot_program import venue_exit
+        venue_exit.note_missing(trade, client)
+    return held
 
 
 def care(bot, trade, price, client, *, now=None) -> str:

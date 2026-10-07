@@ -81,6 +81,13 @@ CLOSE_SENT_AT_KEY = "close_sent_at"
 EXIT_SOURCE_BROKER = "broker"
 EXIT_SOURCE_MARK = "mark"
 EXIT_SOURCE_PAPER = "paper"
+#   venue_stop   — the venue SAID the position closed (its order read), no
+#   venue_target   close of ours was sent, and the row's venue-held stop /
+#                  target is where the evidence points (bot_program/
+#                  venue_exit.estimate): booked AT that level. An estimate
+#                  (exit_price_inferred), never a fill.
+EXIT_SOURCE_VENUE_STOP = "venue_stop"
+EXIT_SOURCE_VENUE_TARGET = "venue_target"
 
 # AssetBotTrade.exit_price is DecimalField(decimal_places=8). A blended fill
 # price is a division and would otherwise carry 20+ digits into the column.
@@ -330,7 +337,8 @@ def paper_exit_fill(trade, price: Decimal) -> dict:
     }
 
 
-def resolve_exit_fill(trade, result, *, mark, mark_info=None) -> dict:
+def resolve_exit_fill(trade, result, *, mark, mark_info=None,
+                      mark_source=EXIT_SOURCE_MARK) -> dict:
     """What a LIVE close actually got — price AND quantity — from the broker.
 
     Mirrors the entry path: prefer what the broker reports, fall back to the
@@ -371,7 +379,7 @@ def resolve_exit_fill(trade, result, *, mark, mark_info=None) -> dict:
                      "back to the entry price", trade.id, mark)
         mark_px = _decimal(trade.entry_price) or Decimal(0)
 
-    slice_price, slice_source = mark_px, EXIT_SOURCE_MARK
+    slice_price, slice_source = mark_px, mark_source
     broker_px = broker_exit_price(result)
     if broker_px is not None:
         slice_price, slice_source = broker_px, EXIT_SOURCE_BROKER
@@ -420,6 +428,8 @@ def resolve_exit_fill(trade, result, *, mark, mark_info=None) -> dict:
         price = notional / filled
         source = (EXIT_SOURCE_BROKER
                   if all(f.get("source") == EXIT_SOURCE_BROKER for f in fills)
+                  else mark_source
+                  if all(f.get("source") == mark_source for f in fills)
                   else EXIT_SOURCE_MARK)
     else:
         # Nothing filled at all — the broker accepted the order and reported
@@ -1070,6 +1080,18 @@ def _reconcile_filled_against_broker(trade, client) -> None:
     remaining = broker_position_qty(trade, client)
     if remaining is None:
         return
+    if remaining <= 0:
+        # A FLAT LIST IS NOT A FILL THE VENUE HAS PROVEN (2026-10-07): on
+        # eToro, ask the open order first; "open" or no answer — the
+        # arithmetic stands and the caller SENDS the close (by position id;
+        # what eToro answers for an already-closed id is unmeasured).
+        from bot_program import venue_exit
+        if (venue_exit.can_ask(trade, client)
+                and venue_position_state(trade, client) != "closed"):
+            logger.warning("close retry: not revising #%s's fill off a list "
+                           "that does not show it — eToro's own order read "
+                           "does not say closed", trade.id)
+            return
     qty = _decimal(trade.qty) or Decimal(0)
     implied_filled = max(Decimal(0), qty - remaining)
     meta = dict(trade.metadata or {})
@@ -1451,7 +1473,8 @@ def _alert_unpriced(trade) -> None:
         logger.warning("unpriced-close alert failed for #%s: %s", trade.id, e)
 
 
-def _finalise_flat(trade, client, *, reason: str) -> bool:
+def _finalise_flat(trade, client, *, reason: str, venue_said: str = "",
+                   unproven: str = "") -> bool:
     """Book a position the broker no longer holds. False when we cannot.
 
     Nothing was sent on this path, so there is no fill to read: the mark IS
@@ -1472,10 +1495,25 @@ def _finalise_flat(trade, client, *, reason: str) -> bool:
     exist, and would leave the trade permanently unbooked into the bargain.
 
     It waits with a voice, not in silence — hourly, and with the truth.
+
+    THE LEVEL THE VENUE HELD (2026-10-07, venue_exit.estimate). With
+    `venue_said="closed"` (the open order's own read proved the close) and
+    no close of ours in play, the exit is booked AT the stop or target the
+    venue held when the evidence points there — flagged inferred, sourced
+    venue_stop / venue_target — and a missing mark no longer holds it up.
+    `unproven` stamps the words of an hour of unanswered asks on the row.
     """
+    from bot_program import venue_exit
     mark, mark_q = mark_with_quality(trade, client)
     mark = _decimal(mark)
-    if mark is None or mark <= 0:
+    basis = None
+    if venue_said == "closed":
+        try:
+            basis = venue_exit.estimate(trade, mark=mark)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("close retry #%s: venue-level pricing unavailable: "
+                           "%s", trade.id, e)
+    if basis is None and (mark is None or mark <= 0):
         logger.error(
             "close retry #%s: the broker is flat but no price could be read "
             "for %s — refusing to book the exit at the entry price, which "
@@ -1483,10 +1521,21 @@ def _finalise_flat(trade, client, *, reason: str) -> bool:
             trade.id, trade.symbol)
         _alert_unpriced(trade)
         return False
-    _finalise_closed(trade,
-                     fill=resolve_exit_fill(trade, None, mark=mark,
-                                            mark_info=mark_q),
-                     reason=reason)
+    if basis:
+        fill = resolve_exit_fill(trade, None, mark=Decimal(str(basis["price"])),
+                                 mark_source=basis["source"])
+        fill["metadata"].update({"exit_price_inferred": True,
+                                 venue_exit.PRICED_AT_KEY: basis})
+    else:
+        fill = resolve_exit_fill(trade, None, mark=mark, mark_info=mark_q)
+    if unproven:
+        fill["metadata"][venue_exit.UNPROVEN_KEY] = unproven
+        # (2026-10-07, review) a mark read an hour after the list went flat
+        # is an estimate: flagged as the reconcile's unproven twin is
+        # (reconcile_asset), so the message says "about" and the scorecard
+        # counts it inferred
+        fill["metadata"]["exit_price_inferred"] = True
+    _finalise_closed(trade, fill=fill, reason=reason)
     return True
 
 
@@ -1591,7 +1640,8 @@ def retry_trade_close(trade) -> bool:
                     "(%s) CLOSED by its open order %s — finalising without a "
                     "new order", trade.id, trade.symbol, trade.broker_order_id)
         return _finalise_flat(trade, client,
-                              reason="RETRY_VENUE_PROVED_CLOSED")
+                              reason="RETRY_VENUE_PROVED_CLOSED",
+                              venue_said="closed")
     if proof == "open" and (trade.metadata or {}).get(CLOSE_ORDER_WORKING_KEY):
         _note_close_blocked(
             trade, "the venue's own order read still shows the position OPEN "
@@ -1616,6 +1666,10 @@ def retry_trade_close(trade) -> bool:
                        "show it — a lagging list, not an absence; sending "
                        "NOTHING and spending no attempt",
                        trade.id, trade.symbol)
+        from bot_program.reconcile_asset import venue_lag_window
+        if not venue_lag_window(trade, client):
+            from bot_program import venue_exit
+            venue_exit.said_open(trade, client, where="close retry")
         return False
     # ...UNLESS THE BOOK WAS READ INSIDE THE VENUE'S OWN LAG WINDOW and the
     # venue could not say either way. A FLAT read seconds after the fill is
@@ -1637,7 +1691,18 @@ def retry_trade_close(trade) -> bool:
                     "finalising without a new order", trade.id, trade.symbol)
         # No order was sent, so there is no fill to read: the remainder is
         # booked at the current mark and flagged as such.
-        return _finalise_flat(trade, client, reason="RETRY_ALREADY_FLAT")
+        unproven = ""
+        from bot_program import venue_exit
+        if proof is None and venue_exit.can_ask(trade, client):
+            verdict, unproven = venue_exit.after_no_answer(trade)
+            if verdict == "wait":
+                logger.warning("close retry #%s for %s: the book does not show "
+                               "it and %s — sending NOTHING, booking nothing, "
+                               "spending no attempt", trade.id, trade.symbol,
+                               unproven)
+                return False
+        return _finalise_flat(trade, client, reason="RETRY_ALREADY_FLAT",
+                              unproven=unproven)
 
     # A CLOSE THE VENUE NEVER CONFIRMED OUTRANKS EVERY MOVE BELOW. The venue
     # answered 202 for the placement — "this order may exist" — and the
@@ -1685,8 +1750,19 @@ def retry_trade_close(trade) -> bool:
             logger.info("close retry: cancel unconfirmed on #%s but the "
                         "broker no longer holds %s — the working close "
                         "filled; finalising", trade.id, trade.symbol)
+            unproven = ""
+            from bot_program import venue_exit
+            if proof is None and venue_exit.can_ask(trade, client):
+                verdict, unproven = venue_exit.after_no_answer(trade)
+                if verdict == "wait":
+                    logger.warning("close retry #%s for %s: the book does not "
+                                   "show it and %s — sending NOTHING, booking "
+                                   "nothing, spending no attempt", trade.id,
+                                   trade.symbol, unproven)
+                    return False
             return _finalise_flat(trade, client,
-                                  reason="RETRY_WORKING_CLOSE_FILLED")
+                                  reason="RETRY_WORKING_CLOSE_FILLED",
+                                  unproven=unproven)
         msg = ("the previous close is still working at the broker and could "
                "not be cancelled — refusing to stack a second close on it")
         logger.error("close retry #%s for %s: %s", trade.id, trade.symbol, msg)
@@ -1732,7 +1808,7 @@ def _claim_for_retry(trade_pk):
     lock, and no look at the claim the CLOSE button takes. Every ingredient
     for two live closes on one position was present — `retry_pending_closes`
     is deliberately ungated, beat fires it every 300s onto the `default`
-    queue, that worker runs two slots, and one pass over a timing-out broker
+    queue, that worker runs several slots, and one pass over a timing-out broker
     takes longer than a beat. The module's only anti-stacking device,
     `_cancel_working_close`, reads a metadata key written AFTER a submit
     returns, so while the first close is in flight there is nothing in the

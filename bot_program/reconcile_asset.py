@@ -305,6 +305,7 @@ def reconcile_user(user) -> dict:
     # Cache broker open-symbol sets per _state_key — many trades share the
     # same broker, no need to query per row.
     cache: dict = {}
+    read_at: dict = {}
 
     # WHAT TO WARM BEFORE ASKING, per class, because the read below is
     # cached across rows and only the first row would otherwise warm
@@ -339,6 +340,7 @@ def reconcile_user(user) -> dict:
             client = client_for_symbol(user, trade.symbol, trade.config)
             cache_key = _state_key(client, trade.asset_class)
             if cache_key not in cache:
+                read_at[cache_key] = timezone.now()
                 cache[cache_key] = _broker_open_symbols(
                     client, asset_class=trade.asset_class, warm=all_warm)
             state = cache[cache_key]
@@ -384,6 +386,12 @@ def reconcile_user(user) -> dict:
             # client the adapter map does not know answers "" and is also
             # cannot-tell. Only two KNOWN and DIFFERENT names refuse.
             _why = unattributable(trade, client, keyed=_keyed_venues)
+            if open_at_broker and by_id and not _why:
+                # THE LAST READ THAT LISTED THIS ROW'S OWN POSITION ID
+                # (2026-10-07, venue_exit): when eToro last showed it open,
+                # and the end of any unanswered miss counted on it.
+                from . import venue_exit
+                venue_exit.note_listed(trade, client, at=read_at.get(cache_key))
             if not open_at_broker and _why:
                 out["broker_unavailable"] += 1
                 logger.error(
@@ -450,7 +458,30 @@ def reconcile_user(user) -> dict:
                             "reconcile: #%s (%s) NOT orphan-closed — %s",
                             fresh.id, fresh.symbol, _lag_why)
                         continue
-                    if not _close_as_orphan(fresh):
+                    # THE VENUE'S OWN WORD BEFORE A MISS IS BOOKED
+                    # (2026-10-07, venue_exit.word_on_miss): eToro's order
+                    # read by the OPEN order id. "" — cannot ask: today's
+                    # rule.
+                    from . import venue_exit
+                    said, words = venue_exit.word_on_miss(fresh, client)
+                    if said == "open":
+                        out["broker_unavailable"] += 1
+                        out["venue_says_open"] = out.get("venue_says_open", 0) + 1
+                        continue
+                    if said == "wait":
+                        out["broker_unavailable"] += 1
+                        out["venue_unanswered"] = (
+                            out.get("venue_unanswered", 0) + 1)
+                        logger.warning("reconcile: #%s (%s) NOT orphan-closed "
+                                       "— %s", fresh.id, fresh.symbol, words)
+                        continue
+                    if said == "unproven":
+                        logger.error("reconcile: #%s (%s) orphan-closed "
+                                     "UNPROVEN — %s", fresh.id, fresh.symbol,
+                                     words)
+                    if not _close_as_orphan(
+                            fresh, venue_said=said,
+                            unproven=words if said == "unproven" else ""):
                         out["closed_elsewhere"] = (
                             out.get("closed_elsewhere", 0) + 1)
                         continue
@@ -506,18 +537,29 @@ def _claim_orphan(trade_pk):
 UNPRICED_EXIT_KEY = "exit_price_unavailable"
 
 
-def _close_as_orphan(trade) -> bool:
+def _close_as_orphan(trade, *, venue_said: str = "",
+                     unproven: str = "") -> bool:
     """Mark an orphan trade CLOSED at last-known price.
 
     False, and nothing written, when the row is no longer OPEN or
     CLOSE_PENDING by the time the price is read: the reads below take
-    seconds, and the tick's own close may land in them."""
+    seconds, and the tick's own close may land in them.
+
+    `venue_said` (2026-10-07, venue_exit.word_on_miss): "closed" when
+    eToro's own order read said so — the exit may then be booked AT the
+    stop or target the venue held (venue_exit.estimate, an estimate and
+    flagged one) and the close window is written. Anything else — ""
+    when the venue cannot be asked (today's booking byte for byte),
+    "unproven" after an hour without an answer — books the mark; `unproven`
+    then carries the words of those unanswered asks onto the row."""
     # Best-effort exit price: use the broker's ticker, or fall back to
     # the trade's entry price (zero P&L) so we at least clear the row.
     from .engine.broker_router import client_for_symbol
     from .pending_closes import (EXIT_FILL_SOURCE_KEY,
                                  EXIT_SOURCE_BROKER, EXIT_SOURCE_MARK)
     from market_data.models import LiveQuote
+    from . import venue_exit
+    booked_at = timezone.now()
 
     exit_price = trade.entry_price
     priced = False           # did anything but the entry price answer?
@@ -575,6 +617,24 @@ def _close_as_orphan(trade) -> bool:
             except Exception:
                 pass
 
+    # THE LEVEL THE VENUE HELD (2026-10-07, venue_exit.estimate): only when
+    # the venue SAID closed and nothing here measured the fill.
+    basis = None
+    if venue_said == "closed" and not measured \
+            and trade.asset_class != "options":
+        try:
+            basis = venue_exit.estimate(
+                trade, mark=(exit_price if priced else None), now=booked_at)
+        except Exception as e:  # noqa: BLE001 — an estimate never blocks
+            logger.warning("reconcile: #%s venue-level pricing unavailable: "
+                           "%s", trade.id, e)
+        if basis:
+            logger.info("reconcile: #%s %s booked AT the %s the venue held "
+                        "(%s, evidence %s) instead of the mark %s", trade.id,
+                        trade.symbol, basis["level"], basis["price"],
+                        basis["evidence"], exit_price if priced else "none")
+            exit_price, priced = Decimal(str(basis["price"])), True
+
     if trade.side == "BUY":
         pnl = (exit_price - trade.entry_price) * trade.qty
     else:
@@ -595,8 +655,10 @@ def _close_as_orphan(trade) -> bool:
     trade.exit_price = exit_price
     trade.pnl = pnl
     trade.status = "CLOSED"
-    trade.closed_at = timezone.now()
+    trade.closed_at = booked_at
     trade.reason = (trade.reason + " | reconciled-orphan").strip()
+    if unproven:
+        trade.reason = (trade.reason + " | venue-unanswered").strip()
 
     # The exit price was INFERRED — a current ticker or a stored quote, not
     # the fill the broker actually got. Flag it, because the difference
@@ -636,7 +698,21 @@ def _close_as_orphan(trade) -> bool:
     # function actually read the fill: stamping `mark` unconditionally would
     # have thrown away the one number here that is not an estimate.
     meta[EXIT_FILL_SOURCE_KEY] = (EXIT_SOURCE_BROKER if measured
+                                  else basis["source"] if basis
                                   else EXIT_SOURCE_MARK)
+    if basis:
+        meta[venue_exit.PRICED_AT_KEY] = basis
+    else:
+        meta.pop(venue_exit.PRICED_AT_KEY, None)
+    between = (venue_exit.closed_between(trade, now=booked_at)
+               if venue_said == "closed" else None)
+    if between:
+        meta[venue_exit.CLOSED_BETWEEN_KEY] = [between[0].isoformat(),
+                                               between[1].isoformat()]
+    else:
+        meta.pop(venue_exit.CLOSED_BETWEEN_KEY, None)
+    if unproven:
+        meta[venue_exit.UNPROVEN_KEY] = unproven
     trade.metadata = meta
     # WRITTEN ONLY OVER A ROW STILL OPEN (2026-10-06 review), checked under
     # the row lock: a close that landed while the broker was read above
@@ -1031,6 +1107,9 @@ def reconcile_all_users() -> dict:
             for k in ("checked", "closed_as_orphan",
                        "broker_unavailable", "errors"):
                 totals[k] += r.get(k, 0)
+            for k in ("venue_says_open", "venue_unanswered"):
+                if r.get(k):
+                    totals[k] = totals.get(k, 0) + r[k]
         except Exception as e:
             logger.warning("reconcile_all_users: user=%s failed: %s", uid, e)
             totals["errors"] += 1

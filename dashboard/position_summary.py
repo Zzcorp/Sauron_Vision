@@ -291,6 +291,15 @@ def ending_words(trade):
     """How a closed position ended, in words the father reads."""
     reason = trade.reason or ""
     outcome = (trade.outcome or "").strip()
+    # 2026-10-07: an exit booked at the level NEAREST the price when the
+    # close was found is an estimate of the cause too — never "Stop loss
+    # hit" as a fact.
+    basis = (trade.metadata or {}).get("exit_priced_at")
+    if isinstance(basis, dict) and basis.get("evidence") == "nearest" \
+            and outcome in ("stopped_out", "hit_target"):
+        return ("Closed at the broker, most likely by its stop (an estimate)"
+                if outcome == "stopped_out" else
+                "Closed at the broker, most likely at its target (an estimate)")
     if outcome == "manual_close" or not outcome:
         if "closed:MANUAL" in reason:
             return "Closed by hand"

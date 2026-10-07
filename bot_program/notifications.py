@@ -1289,6 +1289,11 @@ def fill_close_message(*, asset_class, symbol, side, qty, exit_price, pnl,
     recorded = ("reconciled-orphan"
                 in str(getattr(row, "reason", "") or "")) if row is not None \
         else False
+    # 2026-10-07: a close the venue made at a moment nobody read — booked at
+    # the level it held, or booked after eToro's order read stayed silent
+    # for an hour — is RECORDED, whichever path booked it (the drain too).
+    recorded = recorded or bool(meta.get("exit_priced_at")
+                                or meta.get("venue_unproven_close"))
     about = "about " if estimated else ""
     n = _number(pnl)
     if n is None:
@@ -1328,7 +1333,11 @@ def fill_close_message(*, asset_class, symbol, side, qty, exit_price, pnl,
                 "a loss of {:.2f} times the risk".format(abs(r)))
         lines = [f"Result: {result}" + (f" · {r_words}" if r_words else "")]
     if estimated:
-        lines.append("Priced from the last mark, not from a broker fill.")
+        lines.append(_estimate_line(meta, asset_class, symbol))
+    if meta.get("venue_unproven_close"):
+        lines.append("eToro never confirmed this close: its order read did "
+                     "not answer for an hour, so the row was booked from its "
+                     "position list.")
     ending = (ending_words(row) if row is not None
               else ENDINGS.get(str(outcome or ""), "Closed"))
     lines.append("How it ended: " + ending[:1].lower() + ending[1:])
@@ -1348,13 +1357,51 @@ def fill_close_message(*, asset_class, symbol, side, qty, exit_price, pnl,
             details.append(f"Opened: {utc_clock(opened, True)}")
         if closed and recorded:
             details.append(f"Recorded closed: {utc_clock(closed, True)} — "
-                           f"the broker had closed it before; the exact "
-                           f"moment is not readable")
+                           + _closed_when_words(meta))
         elif closed:
             details.append(f"Closed: {utc_clock(closed, True)}")
     return {"title": f"Closed {symbol} · {result}", "mark": mark,
             "subtitle": "", "summary": summary, "lines": lines,
             "details": details, "button": _page_button(tid)}
+
+
+def _estimate_line(meta, asset_class, symbol) -> str:
+    """The estimate line of a close (2026-10-07): the venue-held level the
+    exit was booked at, when it was; the old mark line otherwise."""
+    basis = meta.get("exit_priced_at")
+    what = ({"stop": "stop", "target": "target"}.get(str(basis.get("level")))
+            if isinstance(basis, dict) else None)
+    px = price_words(basis.get("price"), asset_class, symbol) if what else ""
+    if not what or not px:
+        return "Priced from the last mark, not from a broker fill."
+    if basis.get("evidence") == "nearest":
+        return (f"Priced at the {what} the venue held ({px}), the level "
+                f"nearest the price when the close was found: an estimate; "
+                f"the venue's own fill price is not readable.")
+    return (f"Priced at the {what} the venue held ({px}): the venue's own "
+            f"fill price is not readable.")
+
+
+def _closed_when_words(meta) -> str:
+    """What is known of the moment (2026-10-07): the venue's own readings
+    that bracket it, or the old words."""
+    from django.utils import timezone as dj_tz
+    from django.utils.dateparse import parse_datetime
+    pair = meta.get("venue_closed_between")
+    try:
+        lo, hi = (parse_datetime(str(x)) for x in pair)
+    except (TypeError, ValueError):
+        lo = hi = None
+    # a naive stamp is not one of ours, and cannot be compared: old words
+    if lo is not None and dj_tz.is_naive(lo):
+        lo = None
+    if hi is not None and dj_tz.is_naive(hi):
+        hi = None
+    if lo is not None and hi is not None and hi >= lo:
+        from bot_program.venue_exit import between_words
+        return (f"{between_words(lo, hi)}; the exact moment of the close is "
+                f"not readable")
+    return "the broker had closed it before; the exact moment is not readable"
 
 
 def notify_bot_fill_open(user, *, asset_class: str, symbol: str, side: str,
