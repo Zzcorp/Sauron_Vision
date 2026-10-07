@@ -253,10 +253,11 @@ COMMANDS = [
     {
         "name": "bot",
         "title": "Asset bot on/off",
-        "purpose": "Enable or disable an asset bot — the admin page's toggle with its own rule: --yes plays the PIN's role to arm a live config, stopping never asks.",
+        "purpose": "Enable, disable or brake an asset bot: `brake` stops its entries and keeps managing what is open; `off` leaves its open positions unmanaged.",
         "usage": [
             "python manage.py bot list",
             "python manage.py bot off 1",
+            "python manage.py bot brake 26 --why \"the G1 brake of 2026-10-06\"",
             "python manage.py bot on 6            # paper: writes; live: plan only",
             "python manage.py bot on 6 --yes      # live: writes",
         ],

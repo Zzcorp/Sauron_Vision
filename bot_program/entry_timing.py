@@ -211,7 +211,16 @@ def _session_close(code, now):
         pytz.UTC)
 
 
-def _shut_verdict(cls: str, clock: dict) -> dict:
+def _utc_hour_words(moment) -> str:
+    """"22:15 UTC" for an aware datetime: the hour alone, for a resume
+    instant on the reopening's own UTC date (_shut_verdict)."""
+    try:
+        return f"{moment.astimezone(dt_timezone.utc):%H:%M} UTC"
+    except Exception:  # noqa: BLE001
+        return _utc_words(moment)
+
+
+def _shut_verdict(cls: str, clock: dict, flagged: bool = False) -> dict:
     """THE SHUT EXCHANGE (2026-10-07): the refusal for a market whose
     clock reads shut, with the hour it opens and the hour new entries
     resume first in the words (why_no_trade prints 88 characters of a
@@ -221,22 +230,38 @@ def _shut_verdict(cls: str, clock: dict) -> dict:
     OPEN_SETTLE window below clears, never the opening minute that window
     would then refuse. The session's name loses its underscores
     (CBOT_GRAINS reads "CBOT GRAINS"), so no snake_case reaches the
-    operator. The words say Morgul "flags" a fill made now, never that it
-    brakes: G1 always flags a booking while the market is shut (critical),
-    but it brakes the config only while the morgul_brake component is ON,
-    and that component is OFF on arrival (morgul.py), so "brakes" could be
-    a false promise."""
+    operator.
+
+    Review 2026-10-07: the words say only what is always true. The tail is
+    "(<SESSION> hours: out of session)"; it adds ", a fill Morgul G1 would
+    flag" only when `flagged` — shut_verdict found the clock shut at now
+    AND CLOSE_GRACE_S before it, G1's own condition (morgul.
+    check_market_shut) — so the first minutes after a close, which G1
+    lets pass, promise no flag. "Would": G1 runs only while the
+    morgul_guards component is ON, and it brakes only while morgul_brake
+    is ON, both OFF on arrival, so neither "flags" nor "brakes" is said as
+    a fact. The resume instant is "HH:MM UTC" alone when it falls on the
+    reopening's own UTC date, so the resume hour stays inside the 88
+    characters for every class and weekday; on another date it keeps its
+    day."""
     reopens = clock.get("reopens")
     settled = (reopens + timedelta(minutes=OPEN_SETTLE_MINUTES)
                if reopens else None)
     sess = str(clock.get("session") or "").replace("_", " ")
-    tail = (f"({sess} hours: a fill now is out of session, and Morgul flags "
-            f"it)" if sess else
-            "(a fill now is out of session, and Morgul flags it)")
+    state = ("out of session, a fill Morgul G1 would flag" if flagged
+             else "out of session")
+    tail = f"({sess} hours: {state})" if sess else f"({state})"
     if reopens:
+        try:
+            same_day = (settled.astimezone(dt_timezone.utc).date()
+                        == reopens.astimezone(dt_timezone.utc).date())
+        except Exception:  # noqa: BLE001 — the full words stand
+            same_day = False
+        resume = (_utc_hour_words(settled) if same_day
+                  else _utc_words(settled))
         why = (f"the {_class_words(cls)} market is shut until "
-               f"{_utc_words(reopens)} — new entries resume "
-               f"{_utc_words(settled)} {tail}")
+               f"{_utc_words(reopens)} — new entries resume {resume} "
+               f"{tail}")
     else:
         why = (f"the {_class_words(cls)} market is shut — new entries "
                f"resume once it opens and settles {tail}")
@@ -261,28 +286,60 @@ def shut_verdict(symbol, asset_class, *, exchange="", now=None,
     grace before it, so the gate is stricter than G1 by up to that grace
     after a close, and nothing G1 can flag passes it at the instant it
     sends. Never raises past its own log: a clock that cannot be read
-    refuses nothing."""
+    refuses nothing.
+
+    Review 2026-10-07: G1 flags a booking only when the market is shut at
+    it AND morgul.CLOSE_GRACE_S before it, so a refusal names G1 only
+    then: on a shut clock the clock is read a second time at
+    now - CLOSE_GRACE_S (also when `clock` was handed in), and the words
+    say "a fill Morgul G1 would flag" only when that read is shut too
+    (_shut_verdict). A second read that fails says nothing of G1; the
+    refusal itself stands."""
     if not GATE:
         return None
     cls = str(asset_class or "").strip().lower()
     if cls not in classes:
         return None
+    now = now or timezone.now()
     if clock is None:
         try:
             from core.exchange_status import market_clock
             clock = market_clock(cls, exchange or "", symbol=symbol or "",
-                                 now_utc=now or timezone.now())
+                                 now_utc=now)
         except Exception as e:  # noqa: BLE001 — an unreadable clock refuses nothing
             logger.warning("[timing] market clock unreadable for %s: %s",
                            symbol, e)
             return None
     try:
         if clock.get("modelled", True) and not clock.get("is_open", True):
-            return _shut_verdict(cls, clock)
+            return _shut_verdict(
+                cls, clock,
+                flagged=_g1_would_flag(cls, exchange, symbol, now))
     except Exception as e:  # noqa: BLE001 — never raises past its own log
         logger.warning("[timing] market clock unreadable for %s: %s",
                        symbol, e)
     return None
+
+
+def _g1_would_flag(cls, exchange, symbol, now) -> bool:
+    """Review 2026-10-07: whether Morgul G1 (morgul.check_market_shut)
+    would flag a booking made at `now` on a clock that reads shut — G1's
+    own condition, the clock shut at the booking AND CLOSE_GRACE_S before
+    it. Only the second read is made here: the caller has the first. The
+    constant is imported at call time (morgul imports telegram_eye at
+    module level). False when the import or the read fails: the words
+    then promise no flag."""
+    try:
+        from bot_program.morgul import CLOSE_GRACE_S
+        from core.exchange_status import market_clock
+        before = market_clock(cls, exchange or "", symbol=symbol or "",
+                              now_utc=now - timedelta(seconds=CLOSE_GRACE_S))
+        return bool(before.get("modelled", True)
+                    and not before.get("is_open", True))
+    except Exception as e:  # noqa: BLE001 — unread: no flag is promised
+        logger.warning("[timing] the clock a grace before %s unread for "
+                       "%s: %s", now, symbol, e)
+        return False
 
 
 def clock_verdict(symbol, asset_class, *, exchange="", now=None) -> dict | None:

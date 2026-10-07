@@ -81,7 +81,10 @@ def unmanaged_on_disable(cfg) -> str:
     apart. A config a brake stopped (Morgul, the Telegram group, the alarm
     chat, `bot brake`) is still managed: every bot tick runs its exits
     (manage_braked) and opens nothing, and the sentence says so, with the
-    ways to end it.
+    ways to end it -- while the bot tick runs (manual_trade._tick_manages:
+    platform_master AND pipeline_asset_bots). With the tick off nothing
+    runs those exits, and the sentence says the Eye's own words instead
+    (2026-10-07).
 
     A config stopped by the kill switch or by hand (`bot off`, the HQ and
     system-map toggles, the brain's disable, a seed command), or one with
@@ -106,7 +109,17 @@ def unmanaged_on_disable(cfg) -> str:
     if not n:
         return ""
     if disarm.keeps_managing(cfg):
+        from bot_program.manual_trade import _tick_manages
         by = disarm.record_of(cfg)["by"]
+        if not _tick_manages():
+            them = "it" if n == 1 else "them"
+            return (f"It was stopped by {disarm.BY_WORDS[by]}, a brake: it "
+                    f"opens nothing, and its exits ride the bot tick. The "
+                    f"bot tick is off now: nothing manages "
+                    f"{'its open position' if n == 1 else f'its {n} open positions'} "
+                    f"until it is back on. Re-enabling on the server "
+                    f"resumes its entries; closing {them} on Positions "
+                    f"takes {them} off the book.")
         return (f"{'Its open position stays' if n == 1 else f'Its {n} open positions stay'} "
                 f"MANAGED: it was stopped by {disarm.BY_WORDS[by]}, a "
                 f"brake, so every bot tick still runs its exits — the time "

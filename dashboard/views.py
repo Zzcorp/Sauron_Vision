@@ -1092,10 +1092,11 @@ def _promotion_ladder(now=None):
     Query budget is FIXED at 7 (2 when no rule exists), whatever the rule
     count: rules, setups, all-time stats, in-stage stats, signal recency, bot
     trades, mutations. Nothing in the per-card loop below touches the database.
-    2026-10-07: a rule at a LIVE stage adds its provenance read (the
-    promotion event, the graded record, the proving ground's verdicts —
-    signals.promotion_pipeline.provenance_notes), read once before the loop;
-    a rule below the live stages adds nothing.
+    2026-10-07: any rule at a LIVE stage adds the provenance read
+    (signals.promotion_pipeline.provenance_notes, once before the loop): two
+    queries in all, the promotion events and the proving ground's verdicts,
+    whatever the live rule count — 9 then; a rule below the live stages
+    adds nothing.
     The setup query runs even with no rules, because an armed setup with no
     RuleControl row still scans — see the comment on it below.
     """
@@ -1207,11 +1208,13 @@ def _promotion_ladder(now=None):
     # 2026-10-01 without proof — so a card never reads a plain live_full
     # for one. Read before the card loop, over the controls already held:
     # a rule below the live stages costs no query (the 7 above stand for
-    # a ladder without live rules); each live rule reads its promotion
-    # event, its graded record and the proving ground's verdicts once.
+    # a ladder without live rules); any live rule adds two in all, the
+    # promotion events and the proving ground's verdicts, whatever the
+    # live count — the graded record is the all-time map above (query 3).
     # The grouping key and the chip class keep the raw stage.
     stage_notes = pp.provenance_notes(names,
-                                      controls={r.rule_name: r for r in rules})
+                                      controls={r.rule_name: r for r in rules},
+                                      stats=record_by_rule)
 
     by_stage = defaultdict(list)
     ladder_n = ladder_hits = n_can_trade = 0

@@ -993,13 +993,17 @@ class AssetBot(ABC):
         Morgul never reaches the broker by design, so that order is polled,
         booked on a fill and managed, never withdrawn by this pass. The
         Eye's /stop on the manual config still withdraws it, as the
-        operator's own command."""
+        operator's own command. The manual config is the platform's own
+        definition, the reserved name AND no symbols
+        (share_allocator._is_manual_lane, 2026-10-07): a scanning bot that
+        merely carries the name sends bot orders, and those are withdrawn
+        like any other bot's."""
         from bot_program.asset_engine import disarm
         from bot_program.engine.broker_router import client_for_symbol
-        from bot_program.manual_trade import MANUAL_CONFIG_NAME
         from bot_program.models import AssetBotTrade
+        from bot_program.share_allocator import _is_manual_lane
 
-        if self.cfg.name == MANUAL_CONFIG_NAME:
+        if _is_manual_lane(self.cfg):
             return []
         reason = (f"withdrawn while the bot is stopped by "
                   f"{disarm.BY_WORDS.get(by, 'a brake')}: a stopped bot "
@@ -5482,11 +5486,14 @@ class AssetBot(ABC):
                     self.asset_class, symbol, float(qty), _floor,
                     _floor / float(qty))
                 # The proof's cut note leads (2026-10-07): a quarter size
-                # under eToro's measured floor is the cut's doing, and the
-                # once-a-day notification names it too.
-                self._notify_venue_min_size(symbol, qty=float(qty),
-                                            floor=_floor,
-                                            note=(_cut_note + (_why or "")))
+                # under eToro's measured floor may be the cut's doing. The
+                # once-a-day notification is handed the cut itself and
+                # names it the cause only when the uncut size clears the
+                # floor (the review of 2026-10-07).
+                self._notify_venue_min_size(
+                    symbol, qty=float(qty), floor=_floor,
+                    note=(_cut_note + (_why or "")),
+                    cut=((stage or {}).get("proof") or {}).get("cut", 1.0))
                 return self._skip(
                     symbol, skips.VENUE_MIN_SIZE,
                     _cut_note
@@ -7334,7 +7341,8 @@ class AssetBot(ABC):
                            "%s", self.asset_class, e)
 
     def _notify_venue_min_size(self, symbol: str, *, qty: float,
-                               floor: float, note: str = "") -> None:
+                               floor: float, note: str = "",
+                               cut: float = 1.0) -> None:
         """Say it ONCE, not once per tick.
 
         The floor is a property of the instrument at the venue, so it will
@@ -7357,9 +7365,35 @@ class AssetBot(ABC):
             # quarter because the rule is unproven on this class and side,
             # not only that the pool or the risk is small. The note's
             # trailing colon is dropped where it sits mid-sentence.
+            # THE CAUSE (2026-10-07, the review): `cut` is the proof's own
+            # (stage["proof"]["cut"]). The cut is named the cause only when
+            # the uncut size, qty / cut, clears the floor; when it is under
+            # the floor too, a proof would not clear it, and the body says
+            # so plainly.
             note = str(note or "").strip()
             if note.endswith(":"):
                 note = note[:-1].rstrip()
+            try:
+                cut = float(cut)
+            except (TypeError, ValueError):
+                cut = 1.0
+            if not 0 < cut <= 1:
+                cut = 1.0
+            if not note.startswith("unproven"):
+                why_cut = ""
+            elif qty / cut >= floor - 1e-9:
+                why_cut = ("The size is the proving ground's cut: the rule "
+                           "is not proven on this class and side, so it "
+                           "enters at a fraction of its size, and uncut it "
+                           "would clear this floor — a proof restores full "
+                           "size, and a larger pool keeps the cut "
+                           "proportional. ")
+            else:
+                why_cut = ("The proving ground cut this entry (the rule is "
+                           "not proven on this class and side), but the cut "
+                           "is not the cause: the uncut size is also under "
+                           "the venue's floor, so a proof alone would not "
+                           "clear it. ")
             title = (f"✕ {self.cfg.name} · {symbol}: the venue will not "
                      f"take this size")[:200]
             recent = _N.objects.filter(
@@ -7378,13 +7412,7 @@ class AssetBot(ABC):
                       f"was sent — and nothing was resized: trading "
                       f"{floor:g} would be {times:.1f}x the risk this entry "
                       f"was sized for, which is a different trade. "
-                      + (("The size is the proving ground's cut: the rule "
-                          "is not proven on this class and side, so it "
-                          "enters at a fraction of its size — a proof "
-                          "restores full size, and a larger pool (not a "
-                          "higher risk fraction) keeps the cut "
-                          "proportional. ")
-                         if note.startswith("unproven") else "")
+                      + why_cut
                       + "What "
                       f"raises the unit count is more capital, a higher "
                       f"extras['risk_per_trade_pct'], or a TIGHTER stop — "

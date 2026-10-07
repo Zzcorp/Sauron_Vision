@@ -176,6 +176,11 @@ BRAKE_WORDS = ("No position was closed.",
 #: Those lines say which, config by config.
 MANAGING_WORDS = ("The bots stopped here open nothing and keep managing "
                   "what is open.")
+#: Every promise of management rides the bot tick (platform_master AND
+#: pipeline_asset_bots, manual_trade._tick_manages). While it is off this
+#: is said instead, here and by Morgul (morgul.brake_lines), 2026-10-07.
+TICK_OFF_WORDS = ("The bot tick is off now: nothing manages them until it "
+                  "is back on.")
 
 #: Appended to a question before it reaches the research agent, whose
 #: system prompt asks for Markdown: the group reads plain English.
@@ -870,13 +875,23 @@ def build_why(user, symbol: str, *, now=None) -> Reply:
         lines.append(f"No bot watches {sym}.")
         lines.append("Symbols are set per bot on the platform.")
     from bot_program.asset_engine import disarm
+    from bot_program.manual_trade import _tick_manages
+    ticking = []
     for cfg, last in rows[:MAX_WHY_BOTS]:
         # A bot a brake stopped still runs its exits (2026-10-07,
-        # asset_engine/disarm.py); one stopped by hand or by the kill
-        # switch does not, and plain "stopped" is all it gets.
-        state = ("running" if cfg.enabled else
-                 ("stopped by a brake, still managing"
-                  if disarm.keeps_managing(cfg) else "stopped"))
+        # asset_engine/disarm.py) while the bot tick runs (read once per
+        # reply); one stopped by hand or by the kill switch does not, and
+        # plain "stopped" is all it gets.
+        if cfg.enabled:
+            state = "running"
+        elif not disarm.keeps_managing(cfg):
+            state = "stopped"
+        else:
+            if not ticking:
+                ticking.append(_tick_manages())
+            state = ("stopped by a brake, still managing" if ticking[0] else
+                     "stopped by a brake; the bot tick is off, nothing "
+                     "manages it now")
         lines.append(heading(f"{config_label(cfg)} — {state} · {mode_word(cfg.mode)}"))
         if last is None:
             lines.append("Last reason: none recorded yet")
@@ -1048,6 +1063,15 @@ def apply_brake(user, ids=(), *, everything: bool = False,
                                           now=now)
          else already).append(cfg)
     head = []
+    # The bot tick, read once for the whole reply (2026-10-07): every
+    # promise of management below rides it.
+    ticking = []
+
+    def tick_on() -> bool:
+        if not ticking:
+            ticking.append(_tick_manages())
+        return ticking[0]
+
     if stopped:
         head.append(heading(f"Stopped ({len(stopped)})"))
         head.extend(f"{BULLET}{config_label(c)} — {mode_word(c.mode)}"
@@ -1055,11 +1079,14 @@ def apply_brake(user, ids=(), *, everything: bool = False,
     if already:
         # Who stopped each one, in the short words (never a username or a
         # free-text why on the phone), and whether what it holds is still
-        # managed: a brake's stop is, a hand or kill-switch stop is not.
+        # managed: a brake's stop is while the bot tick runs, a hand or
+        # kill-switch stop is not.
         head.append(heading("Already stopped"))
         for c in already:
             if disarm.keeps_managing(c):
-                managed = " — still managing"
+                managed = (" — still managing" if tick_on() else
+                           " — braked; the bot tick is off, nothing manages "
+                           "it now")
             elif AssetBotTrade.objects.filter(config=c,
                                               status="OPEN").exists():
                 managed = " — not managed while off"
@@ -1125,9 +1152,8 @@ def apply_brake(user, ids=(), *, everything: bool = False,
     # The management above rides the bot tick. When the tick itself is
     # switched off (platform_master or pipeline_asset_bots), nothing runs
     # those exits, braked or not, and the reply must not promise it.
-    if trades and not _tick_manages():
-        tail.append("The bot tick is off now: nothing manages them until "
-                    "it is back on.")
+    if trades and not tick_on():
+        tail.append(TICK_OFF_WORDS)
     if (sent_at is not None
             and (now - sent_at).total_seconds() > STALE_AFTER_S):
         tail.append(f"Sent: {when(sent_at)} ({ago(sent_at, now)})")

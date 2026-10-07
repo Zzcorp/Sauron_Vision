@@ -38,7 +38,10 @@ that (live_rule, asset_class, direction) at the live rules' own timeframe,
 exit policy and filter — so a one-class `prove rules --class X --save`
 does not unjudge the other classes, the compare_exits rows (whose "care"
 rows carry the same live_rule strings) never count, and bollinger's short
-reads its own row. A verdict that cannot be read is a reduced entry:
+reads its own row. A run restricted to `--symbols` is saved under
+RULES_SUBSET_PREFIX ("rulesub-", the review of 2026-10-07) and never read
+here: a verdict on the symbols the operator named is not the class's.
+A verdict that cannot be read is a reduced entry:
 never full size, and never a refusal on a read that could not be made.
 
 This is not base.py's eToro proof (ETORO_PROVEN, the venue's measured
@@ -99,9 +102,9 @@ def side_of(direction) -> str:
 
 
 def _rules_rows(**filters):
-    """The saved live-rules verdicts: prove_live_rules' rows only (the
-    rules- prefix, generated False), at the live rules' timeframe, exit
-    policy and filter."""
+    """The saved live-rules verdicts: prove_live_rules' whole-class rows
+    only (the rules- prefix, generated False; a --symbols run's rulesub-
+    rows never), at the live rules' timeframe, exit policy and filter."""
     from backtester.models_proving import ProvingVerdict
     from backtester.proving.run import RULES_RUN_PREFIX
     return ProvingVerdict.objects.filter(
@@ -126,31 +129,49 @@ def newest_verdict(rule_name: str, asset_class: str, side: str):
 
 def proven_cases(rule_name: str, *, cache: dict | None = None) -> list:
     """Sorted ["<class> <side>"] of every (asset_class, direction) whose
-    NEWEST live-rules row for `rule_name` reads proven — one query, the
-    first row per key taken in Python (SQLite and Postgres agree on that,
-    where DISTINCT ON is Postgres only). [] on a failed read, with a
-    warning. Read once per tick through `cache`."""
+    NEWEST live-rules row for `rule_name` reads proven — proven_cases_for
+    on the one rule. [] on a failed read, with a warning. Read once per
+    tick through `cache`."""
     key = ("proof_cases", rule_name)
     if isinstance(cache, dict) and isinstance(cache.get(key), list):
         return list(cache[key])
+    return list(proven_cases_for([rule_name], cache=cache)
+                .get(rule_name) or [])
+
+
+def proven_cases_for(rule_names, *, cache: dict | None = None) -> dict:
+    """{rule: sorted ["<class> <side>"]} for every rule of `rule_names`, in
+    ONE query whatever their count (2026-10-07, the review: a page of live
+    rules read one query per rule). The newest live-rules row per (rule,
+    class, side) key is taken in Python, exactly as newest_verdict takes
+    it (SQLite and Postgres agree on that, where DISTINCT ON is Postgres
+    only); a rule with no proven case maps to []. {} on a failed read,
+    with a warning: no rule reads proven, and nothing is cached. Each
+    rule's cases land in `cache` under proven_cases' key."""
+    names = sorted({str(n or "") for n in rule_names or ()})
+    if not names:
+        return {}
     try:
-        seen, out = set(), []
-        for cls, side, verdict in (
-                _rules_rows(live_rule=rule_name)
-                .order_by("asset_class", "direction", "-created_at")
-                .values_list("asset_class", "direction", "verdict")):
-            if (cls, side) in seen:
+        seen, out = set(), {n: [] for n in names}
+        for rule, cls, side, verdict in (
+                _rules_rows(live_rule__in=names)
+                .order_by("live_rule", "asset_class", "direction",
+                          "-created_at")
+                .values_list("live_rule", "asset_class", "direction",
+                             "verdict")):
+            if (rule, cls, side) in seen:
                 continue
-            seen.add((cls, side))
+            seen.add((rule, cls, side))
             if verdict == PROVEN:
-                out.append(f"{cls} {side}")
-        out = sorted(out)
+                out[rule].append(f"{cls} {side}")
+        out = {rule: sorted(cases) for rule, cases in out.items()}
     except Exception as e:  # noqa: BLE001 — a label never breaks a page
         logger.warning("[proof] %s: the proving ground's proven cases "
-                       "unread (%s)", rule_name, e)
-        return []
+                       "unread (%s)", ", ".join(names)[:200], e)
+        return {}
     if isinstance(cache, dict):
-        cache[key] = list(out)
+        for rule, cases in out.items():
+            cache[("proof_cases", rule)] = list(cases)
     return out
 
 

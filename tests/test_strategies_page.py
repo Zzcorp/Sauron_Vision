@@ -439,6 +439,45 @@ class LadderQueryBudgetTests(TestCase):
         with self.assertNumQueries(self.LADDER_QUERIES):
             _promotion_ladder()
 
+    # THE PROVENANCE (2026-10-07, the review): any live rule adds the
+    # promotion events and the proving ground's verdicts, two queries in
+    # all whatever the live count; the graded record is the all-time stats
+    # query above. Read per rule it was about five per live rule (151 at 36
+    # live rules), which a ladder of research rules could not see.
+    LIVE_LADDER_QUERIES = LADDER_QUERIES + 2
+
+    def _live_rules(self, n, prefix):
+        """`n` live_full rules promoted by hand without proof, with graded
+        signals and a proving-ground row each (half PROVEN)."""
+        from tests.test_bar_losers import _hand_promoted
+        from tests.test_size_by_proof import _verdict
+        self._rules(n, stage="live_full", prefix=prefix)
+        for i in range(n):
+            name = f"{prefix}_{i}"
+            _hand_promoted(name, 2)
+            _closed_signals(name, [1.0, -1.0])
+            _verdict(name, "stock", "long",
+                     "proven" if i % 2 else "promising")
+
+    def test_live_rules_with_hand_promotions_do_not_grow_the_budget(self):
+        from dashboard.views import _promotion_ladder
+
+        def notes(ladder):
+            return [c["stage_note"] for g in ladder["stage_groups"]
+                    for c in g["cards"] if g["key"] == "live_full"]
+
+        self._live_rules(3, "budget_live")
+        with self.assertNumQueries(self.LIVE_LADDER_QUERIES):
+            small = _promotion_ladder()
+        self.assertEqual(sorted(notes(small)),
+                         ["by hand, proven since", "by hand, unproven",
+                          "by hand, unproven"])
+        self._live_rules(6, "budget_more")
+        with self.assertNumQueries(self.LIVE_LADDER_QUERIES):
+            large = _promotion_ladder()
+        self.assertEqual(len(notes(large)), 9)
+        self.assertTrue(all(notes(large)), notes(large))
+
     def test_the_whole_page_does_not_grow_with_the_rule_count(self):
         """Belt and braces: context processors make the absolute number
         uninteresting, but it must not MOVE when rules are added."""

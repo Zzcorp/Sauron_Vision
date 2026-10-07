@@ -51,6 +51,7 @@ class Command(BaseCommand):
         from bot_program.asset_models import AssetBotConfig
         if opts["action"] == "list":
             rows = AssetBotConfig.objects.select_related("user").order_by("user_id", "pk")
+            ticking = []
             for c in rows:
                 state = "ON " if c.enabled else "OFF"
                 self.stdout.write(
@@ -59,11 +60,17 @@ class Command(BaseCommand):
                     f"({c.user.username})")
                 if not c.enabled:
                     # Who stopped it, and whether what it holds is still
-                    # managed (2026-10-07).
-                    self.stdout.write(
-                        f"        {disarm.record_words(c)}"
-                        + ("; still managing" if disarm.keeps_managing(c)
-                           else ""))
+                    # managed (2026-10-07): a brake's stop is, while the
+                    # bot tick runs (read once per listing).
+                    managing = ""
+                    if disarm.keeps_managing(c):
+                        if not ticking:
+                            ticking.append(self._tick_manages())
+                        managing = ("; still managing" if ticking[0] else
+                                    "; braked — the bot tick is off, "
+                                    "nothing manages it now")
+                    self.stdout.write(f"        {disarm.record_words(c)}"
+                                      + managing)
             if not rows:
                 self.stdout.write("no configs")
             return
@@ -131,23 +138,43 @@ class Command(BaseCommand):
         config is stopped and recorded as braked; one already off with no
         record (stopped before the record existed) is adopted as braked;
         one off with a record is left as found — a brake never relabels a
-        stop it did not make. Never asks: stopping never does."""
+        stop it did not make. Never asks: stopping never does.
+
+        THE RACE (2026-10-07): the config is read without a lock, so
+        another stop (the kill switch, `bot off`, a toggle) can land
+        between that read and disable_config's locked re-read. Then
+        disable_config writes nothing, returns False and mirrors the
+        winner's record onto cfg: that record is printed, never a STOPPED
+        this command did not make. A brake's management rides the bot
+        tick: with it off, the words say so."""
         from bot_program.asset_engine import disarm
         from bot_program.asset_models import AssetBotConfig
         why = opts.get("why") or "bot brake"
+        promised = False
         for pk in opts["ids"]:
             cfg = AssetBotConfig.objects.filter(pk=pk).first()
             if cfg is None:
                 self.stdout.write(self.style.ERROR(f"[{pk}]: not found"))
                 continue
             if cfg.enabled:
-                disarm.disable_config(cfg, by=disarm.BY_BOT_BRAKE, why=why,
-                                      who="shell")
-                self.stdout.write(self.style.SUCCESS(
-                    f"[{pk}] {cfg.name}: STOPPED by `bot brake` on the "
-                    f"server — its open positions stay managed; it opens "
-                    f"nothing"))
+                if disarm.disable_config(cfg, by=disarm.BY_BOT_BRAKE,
+                                         why=why, who="shell"):
+                    promised = True
+                    self.stdout.write(self.style.SUCCESS(
+                        f"[{pk}] {cfg.name}: STOPPED by `bot brake` on the "
+                        f"server — its open positions stay managed; it "
+                        f"opens nothing"))
+                elif cfg.enabled:
+                    # The row is gone: disable_config re-read nothing.
+                    self.stdout.write(self.style.ERROR(f"[{pk}]: not found"))
+                else:
+                    # Lost the race: another stop landed first, and cfg
+                    # now holds its record (disarm._mirror).
+                    self.stdout.write(f"[{pk}] {cfg.name}: "
+                                      f"{disarm.record_words(cfg)}; "
+                                      f"unchanged")
             elif disarm.adopt_unrecorded(cfg, why=why, who="shell"):
+                promised = True
                 self.stdout.write(self.style.SUCCESS(
                     f"[{pk}] {cfg.name}: already OFF with no record — now "
                     f"recorded as a brake: its open positions are managed "
@@ -155,6 +182,16 @@ class Command(BaseCommand):
             else:
                 self.stdout.write(f"[{pk}] {cfg.name}: "
                                   f"{disarm.record_words(cfg)}; unchanged")
+        if promised and not self._tick_manages():
+            from bot_program.telegram_eye import TICK_OFF_WORDS
+            self.stdout.write(self.style.WARNING(TICK_OFF_WORDS))
+
+    @staticmethod
+    def _tick_manages() -> bool:
+        """Whether the bot tick that runs a braked config's exits is on
+        (manual_trade._tick_manages; it never raises)."""
+        from bot_program.manual_trade import _tick_manages
+        return _tick_manages()
 
     def _warn_unmanaged(self, pk, sentence):
         if sentence:

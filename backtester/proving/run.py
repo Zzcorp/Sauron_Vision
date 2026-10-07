@@ -37,6 +37,14 @@ CLASSES = ("crypto", "forex", "stock", "etf", "index", "commodity")
 #: its own; neither is the verdict on a live rule as it trades. One
 #: spelling here, so the writer and the reader cannot drift apart.
 RULES_RUN_PREFIX = "rules-"
+#: The run id a prove_live_rules run restricted to `symbols` starts with
+#: (2026-10-07, the review): a verdict judged on the symbols the operator
+#: named is not the class's verdict — `prove rules --symbols EURUSD --save`
+#: would otherwise be the newest forex row of every live rule and refuse,
+#: cut or full-size every live forex entry on one pair. It does not start
+#: with RULES_RUN_PREFIX, so proof.py never reads it: saved to be read
+#: (`prove show --run rulesub-…`), never to size a live entry.
+RULES_SUBSET_PREFIX = "rulesub-"
 #: How many in-sample leaders of a class go to the final judgement.
 SHORTLIST = 5
 #: Simulated trades kept per saved verdict (the newest), for the setup
@@ -237,8 +245,11 @@ def prove_live_rules(*, asset_class=None, timeframe="4h", symbols=None,
                      save=False, run_id=None) -> list:
     """Every live rule and its short mirror, per class: [row dict]."""
     # RULES_RUN_PREFIX (2026-10-07): the prefix the live entry path reads
-    # its verdicts by (backtester/proving/proof.py); the id is unchanged.
-    run_id = run_id or f"{RULES_RUN_PREFIX}{uuid.uuid4().hex[:10]}"
+    # its verdicts by (backtester/proving/proof.py) — on a whole-class run
+    # only. A run restricted to `symbols` is RULES_SUBSET_PREFIX: judged on
+    # the named symbols, it is never a class's verdict on real money.
+    prefix = RULES_SUBSET_PREFIX if symbols else RULES_RUN_PREFIX
+    run_id = run_id or f"{prefix}{uuid.uuid4().hex[:10]}"
     rows = []
     for cls, syms in universe(asset_class, timeframe, symbols).items():
         data = load_class(syms, timeframe, cls)

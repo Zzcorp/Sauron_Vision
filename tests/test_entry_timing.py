@@ -116,7 +116,7 @@ class TheRolloverTests(SimpleTestCase):
             # crypto never rolls; a stock does not roll either, and at
             # 16:55 New York its exchange is shut: since 2026-10-07 that is
             # SHUT, with the hour NASDAQ opens again and the hour entries
-            # resume (Morgul G1 flags a fill made while it is shut)
+            # resume (a fill Morgul G1 would flag: shut since 16:00)
             self.assertTrue(et.verdict("BTCUSD", "crypto",
                                        now=_ny(*WINTER_TUE, 16, 55),
                                        events=[])["ok"])
@@ -408,11 +408,15 @@ class TheShutExchangeTests(SimpleTestCase):
             self.assertEqual(v["code"], et.SHUT)
             self.assertEqual(v["until"],
                              datetime(2026, 10, 6, 13, 45, tzinfo=UTC))
-            # the hours come first: why_no_trade prints 88 characters
+            # the hours come first: why_no_trade prints 88 characters; the
+            # resume instant on the reopening's own date is its hour alone
             self.assertIn("shut until Tuesday 13:30 UTC", v["why"][:88])
-            self.assertIn("resume Tuesday 13:45 UTC", v["why"][:88])
-            # G1 always flags; it brakes only while morgul_brake is ON
-            self.assertIn("Morgul flags it", v["why"])
+            self.assertIn("resume 13:45 UTC", v["why"][:88])
+            # shut at 13:08 and a grace before: a fill G1 would flag (it
+            # runs only while morgul_guards is ON, and brakes only while
+            # morgul_brake is ON, so "would", and never "brakes")
+            self.assertIn("(NYSE hours: out of session, a fill Morgul G1 "
+                          "would flag)", v["why"])
             self.assertNotIn("brakes", v["why"])
             # the clock G1 judged the booking on, at the booking and at
             # the noticed-fill grace before it
@@ -554,6 +558,103 @@ class TheShutExchangeTests(SimpleTestCase):
         self.assertEqual(wrong, [])
         self.assertGreater(said, 1000)
 
+    def test_the_minutes_after_a_close_name_no_morgul(self):
+        """Review 2026-10-07: G1 flags a booking only when the market is
+        shut at it AND CLOSE_GRACE_S before it. PG at 20:03 UTC, three
+        minutes after the NYSE close: SHUT, and the words promise no flag
+        G1 would not raise."""
+        from bot_program import morgul
+        at = datetime(2026, 10, 7, 20, 3, tzinfo=UTC)
+        with _on():
+            v = et.verdict("PG", "stock", exchange="NYSE", now=at, events=[])
+        self.assertEqual(v["code"], et.SHUT)
+        self.assertNotIn("Morgul", v["why"])
+        self.assertTrue(v["why"].endswith("(NYSE hours: out of session)"),
+                        v["why"])
+        self.assertIn("shut until Thursday 13:30 UTC — new entries resume "
+                      "13:45 UTC", v["why"][:88])
+        # G1's own condition: shut now, open a grace before
+        self.assertTrue(morgul._shut("stock", "NYSE", "PG", at))
+        self.assertFalse(morgul._shut(
+            "stock", "NYSE", "PG",
+            at - timedelta(seconds=morgul.CLOSE_GRACE_S)))
+
+    def test_past_the_grace_the_words_say_g1_would_flag(self):
+        from bot_program import morgul
+        at = datetime(2026, 10, 7, 20, 20, tzinfo=UTC)
+        with _on():
+            v = et.verdict("PG", "stock", exchange="NYSE", now=at, events=[])
+        self.assertEqual(v["code"], et.SHUT)
+        self.assertTrue(v["why"].endswith(
+            "(NYSE hours: out of session, a fill Morgul G1 would flag)"),
+            v["why"])
+        self.assertTrue(morgul._shut(
+            "stock", "NYSE", "PG",
+            at - timedelta(seconds=morgul.CLOSE_GRACE_S)))
+        # a second read that fails promises no flag; the refusal stands
+        with _on(), mock.patch.object(et, "_g1_would_flag",
+                                      return_value=False):
+            v = et.verdict("PG", "stock", exchange="NYSE", now=at, events=[])
+        self.assertEqual(v["code"], et.SHUT)
+        self.assertNotIn("Morgul", v["why"])
+        with _on(), mock.patch("bot_program.morgul.CLOSE_GRACE_S", None), \
+                self.assertLogs("bot_program.entry_timing", level="WARNING"):
+            self.assertFalse(et._g1_would_flag("stock", "NYSE", "PG", at))
+
+    def test_the_resume_hour_survives_the_88_characters_every_weekday(self):
+        """SPLIT (review 2026-10-07): why_no_trade prints 88 characters of
+        a skip's detail. Every SHUT_CLASSES instrument, every weekday of
+        2026-10-05..10-11, every 20 minutes: whenever the verdict is SHUT
+        with a reopening, the "resume ... HH:MM UTC" token is inside the
+        88, and "would flag" is said exactly when G1's own condition
+        holds (shut now and CLOSE_GRACE_S before)."""
+        import re
+        from bot_program import morgul
+        book = (("PG", "stock", "NYSE"), ("SPY", "etf", "NYSE"),
+                ("EURUSD", "forex", "FOREX"),
+                ("XAUUSD", "commodity", "COMEX"),
+                ("CORNUSD", "commodity", "CBOT"))
+        start = datetime(2026, 10, 5, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 10, 12, 0, 0, tzinfo=UTC)
+        token = re.compile(r"new entries resume (?:[A-Z][a-z]+day )?"
+                           r"(\d\d:\d\d) UTC")
+        wrong, checked, days = [], 0, set()
+        with _on():
+            at = start
+            while at < end:
+                for sym, cls, ex in book:
+                    v = et.verdict(sym, cls, exchange=ex, now=at, events=[])
+                    if v["code"] != et.SHUT or v["until"] is None:
+                        continue
+                    checked += 1
+                    days.add(at.weekday())
+                    got = token.search(v["why"][:88])
+                    if got is None or got.group(1) != (
+                            f"{v['until'].astimezone(UTC):%H:%M}"):
+                        wrong.append(f"{sym} at {at}: {v['why'][:88]!r}")
+                    g1 = (morgul._shut(cls, ex, sym, at) and morgul._shut(
+                        cls, ex, sym,
+                        at - timedelta(seconds=morgul.CLOSE_GRACE_S)))
+                    if ("Morgul G1 would flag" in v["why"]) != g1:
+                        wrong.append(f"{sym} at {at}: G1 {g1}, words "
+                                     f"{v['why']!r}")
+                at += timedelta(minutes=20)
+        self.assertEqual(wrong, [])
+        self.assertEqual(days, set(range(7)))
+        self.assertGreater(checked, 500)
+
+    def test_a_resume_on_another_date_keeps_its_day(self):
+        reopens = datetime(2026, 1, 13, 23, 50, tzinfo=UTC)
+        v = et._shut_verdict("commodity", {"reopens": reopens,
+                                           "session": "CME"})
+        self.assertIn("resume Wednesday 00:05 UTC (CME hours: out of "
+                      "session)", v["why"])
+        v = et._shut_verdict("commodity", {"reopens": reopens - timedelta(
+            hours=1), "session": ""}, flagged=True)
+        self.assertTrue(v["why"].endswith(
+            "resume 23:05 UTC (out of session, a fill Morgul G1 would "
+            "flag)"), v["why"])
+
     def test_a_shut_exchange_with_no_known_reopening_still_refuses(self):
         clock = {"is_open": False, "modelled": True, "reopens": None,
                  "session": "NYSE", "reopens_words": "", "opened": None}
@@ -564,8 +665,9 @@ class TheShutExchangeTests(SimpleTestCase):
         self.assertEqual(v["code"], et.SHUT)
         self.assertIsNone(v["until"])
         self.assertIn("resume once it opens and settles", v["why"])
-        self.assertIn("(NYSE hours: a fill now is out of session, and "
-                      "Morgul flags it)", v["why"])
+        # the mocked clock is shut a grace before too: G1 would flag it
+        self.assertIn("(NYSE hours: out of session, a fill Morgul G1 would "
+                      "flag)", v["why"])
 
     def test_the_suite_switch_turns_shut_off_too(self):
         sat = datetime(2026, 1, 17, 12, 0, tzinfo=UTC)
@@ -711,8 +813,8 @@ class TheProposalIsRefusedOnTheClockTests(TestCase):
 
 SHUT_VERDICT = {"ok": False, "code": "SHUT",
                 "why": "the stock market is shut until Monday 13:30 UTC — new "
-                       "entries resume Monday 13:45 UTC (NYSE hours: a fill "
-                       "now is out of session, and Morgul flags it)",
+                       "entries resume 13:45 UTC (NYSE hours: out of "
+                       "session, a fill Morgul G1 would flag)",
                 "until": None, "attack": None}
 OPEN_VERDICT = {"ok": True, "code": "", "why": "", "until": None,
                 "attack": None}
@@ -761,7 +863,7 @@ class TheLiveEntryOnAShutExchangeTests(TestCase):
         self.assertEqual(skip.get("code"), "market_shut")
         self.assertTrue(skip.get("detail", "").startswith(
             "the stock market is shut until Monday 13:30 UTC — new entries "
-            "resume Monday 13:45 UTC"), skip)
+            "resume 13:45 UTC"), skip)
 
     def test_the_send_is_refused_when_the_exchange_shuts_after_the_proposal(self):
         from bot_program.asset_engine import StockBot, skips
@@ -959,10 +1061,31 @@ class TheWiringTests(SimpleTestCase):
                + inspect.getsource(AssetBot.execute_entry))
         self.assertEqual(src.count("entry_timing.skip_code(_timing)"), 3)
         self.assertNotIn("skips.BAD_TIMING, _timing", src)
-        opt = inspect.getsource(OptionsBot.scan_symbol)
-        self.assertIn("OPTIONS_SHUT_CLASSES", opt)
-        self.assertLess(opt.index("OPTIONS_SHUT_CLASSES"),
-                        opt.index("self._still_armed()"))
+        # Review 2026-10-07: the order is read off the CALLS (ast), never
+        # the first textual match, which a comment satisfies: the
+        # shut_verdict call, asked with OPTIONS_SHUT_CLASSES, comes before
+        # the re-arm check and before the order.
+        import ast
+        import textwrap
+        tree = ast.parse(textwrap.dedent(
+            inspect.getsource(OptionsBot.scan_symbol)))
+        calls = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func,
+                                                         ast.Attribute):
+                calls.setdefault(node.func.attr, []).append(node)
+        self.assertEqual(len(calls.get("shut_verdict", [])), 1)
+        shut = calls["shut_verdict"][0]
+        kw = {k.arg: k.value for k in shut.keywords}
+        self.assertIsInstance(kw.get("classes"), ast.Attribute)
+        self.assertEqual(kw["classes"].attr, "OPTIONS_SHUT_CLASSES")
+        armed = [c for c in calls.get("_still_armed", [])
+                 if isinstance(c.func.value, ast.Name)
+                 and c.func.value.id == "self"]
+        self.assertTrue(armed)
+        self.assertLess(shut.lineno, min(c.lineno for c in armed))
+        self.assertLess(shut.lineno, min(
+            c.lineno for c in calls.get("market_order_option", [])))
 
 
 # ── the manual lane ───────────────────────────────────────────────────────
@@ -1003,7 +1126,9 @@ class TheManualLaneTests(SimpleTestCase):
 
     def test_the_ticket_warns_on_a_shut_exchange_and_stays_pressable(self):
         """2026-10-07: a live ticket on a shut exchange is warned with its
-        own heading — Morgul G1 flags the booking — never refused."""
+        own heading, never refused. Review 2026-10-07: the footer says only
+        what is always true (G1 flags a booking only past its grace, and
+        only while morgul_guards is ON)."""
         from pathlib import Path
         from django.conf import settings
         from bot_program.manual_trade import timing_advisory
@@ -1019,7 +1144,12 @@ class TheManualLaneTests(SimpleTestCase):
         base = Path(settings.BASE_DIR)
         html = (base / "templates" / "base.html").read_text(encoding="utf-8")
         self.assertIn("THE MARKET IS SHUT", html)
-        self.assertIn("its brake, when on, stops this lane", html)
+        import re
+        joined = re.sub(r"'\s*\+\s*'", "", html)    # the JS literals, joined
+        self.assertIn("A warning, not a block: the bots send no entry while "
+                      "its exchange is shut; this ticket is yours to send.",
+                      joined)
+        self.assertNotIn("Morgul flags a", joined)
         expr = html.split("okBtn.disabled = ", 1)[1].split(";", 1)[0]
         self.assertNotIn("timingAdv", expr)
         manual = (base / "bot_program" / "manual_trade.py").read_text(

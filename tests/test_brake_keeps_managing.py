@@ -34,7 +34,14 @@ Pinned here (bot_program/asset_engine/disarm.py and its callers):
   - Morgul G10 watches a braked live config with an open row; feeds stay
     enabled-only;
   - `bot brake` records an enabled config and adopts only an unrecorded
-    stop.
+    stop, and says who won when another stop lands first;
+  - the review of 2026-10-07: every promise of management rides the bot
+    tick (Morgul, the alarm relay, the Eye, `bot list`, `bot brake`,
+    unmanaged_on_disable), G10 names the stop and never "still managing",
+    Morgul's words read the configs as they stand (re-armed, stopped since
+    by whom, no record and the command that fixes it), the manual lane's
+    held order is named as one that can still fill, and only the true
+    manual lane keeps its WORKING order under a brake.
 
 Run with:  python manage.py test tests.test_brake_keeps_managing
 """
@@ -135,6 +142,15 @@ def _component(key, on=True, last_run=None):
     PlatformComponent.objects.update_or_create(
         key=key, defaults={"name": key, "category": "system",
                            "is_enabled": on, "last_run_at": last_run})
+
+
+def _tick(on=True):
+    """The bot tick on (or off): platform_master AND pipeline_asset_bots,
+    the two switches manual_trade._tick_manages reads. Every promise of
+    management rides them (2026-10-07); a test with neither row reads the
+    tick off."""
+    _component("platform_master", on)
+    _component("pipeline_asset_bots", on)
 
 
 def _mark(symbol, asset_class, at, source="oanda_stream", last="1.08"):
@@ -341,6 +357,7 @@ class TheRecordTests(TestCase):
 
     def test_a_hand_stop_of_a_braked_config_leaves_it_as_found(self):
         from bot_program.manual_trade import MANUAL_CONFIG_NAME
+        _tick()
         cfg = _bot(self.op, MANUAL_CONFIG_NAME)
         _row(cfg)
         _eye_brake(self.op, cfg)
@@ -745,6 +762,62 @@ class TheWorkingEntryTests(TestCase):
         self.assertNotIn("entry_working", row.metadata)
         self.assertEqual(float(row.entry_price), 99.75)
 
+    def test_a_scanning_bot_named_manual_withdraws_its_working_entry(self):
+        """Review #8 (2026-10-07): the manual lane is the reserved name AND
+        no symbols (share_allocator._is_manual_lane). A scanning config
+        that merely carries the name sends bot orders, and a brake
+        withdraws them like any other bot's."""
+        from bot_program.manual_trade import MANUAL_CONFIG_NAME
+        from bot_program.share_allocator import _is_manual_lane
+        cfg, row = self._braked_live(MANUAL_CONFIG_NAME)
+        self.assertEqual(cfg.symbols, ["NVDA"])
+        self.assertFalse(_is_manual_lane(cfg))
+        client = _broker()
+        out = self._pass(cfg, client)
+        client.cancel_order.assert_any_call("101")
+        row.refresh_from_db()
+        self.assertEqual(row.status, "CANCELED")
+        self.assertEqual(out["withdrawn"], [row.pk])
+
+    def test_morgul_names_the_manual_lanes_held_order(self):
+        """Review #8: Morgul's brake never reaches the broker and no pass
+        withdraws the manual lane's held TAKE TRADE order, so the brake's
+        words say it can still fill instead of "open nothing" for it. A
+        scanning bot named manual gets no such line: its order is
+        withdrawn by the next pass."""
+        from bot_program import morgul
+        from bot_program.manual_trade import MANUAL_CONFIG_NAME
+        _tick()
+        manual = _bot(self.op, MANUAL_CONFIG_NAME, mode="live")
+        _working_row(manual)
+        stopped, already, pks = _morgul_brake(self.op, manual)
+        lines = morgul.brake_lines([("stopped", stopped, already,
+                                     morgul._left_open(pks))])
+        label = eye.config_label(manual)
+        self.assertIn(f"{label}: 1 held order not withdrawn — TAKE TRADE, "
+                      f"the operator's own; it can still fill", lines)
+        self.assertIn("The stopped bots keep managing what is open", lines)
+        self.assertFalse([ln for ln in lines if "open nothing" in ln], lines)
+        # with a scanning bot stopped too: "the other stopped bots"
+        scanner = _bot(self.op, MANUAL_CONFIG_NAME, "forex", mode="live",
+                       symbols=["EURUSD"])
+        _working_row(scanner, order_id="202")
+        s_stopped, s_already, s_pks = _morgul_brake(self.op, scanner)
+        lines = morgul.brake_lines([
+            ("stopped", stopped, already, morgul._left_open(pks)),
+            ("stopped", s_stopped, s_already, morgul._left_open(s_pks))])
+        self.assertIn("The other stopped bots open nothing", lines)
+        self.assertEqual(len([ln for ln in lines if "held order" in ln]), 1)
+        # the scanning bot alone: the plain words
+        lines = morgul.brake_lines([("stopped", s_stopped, s_already,
+                                     morgul._left_open(s_pks))])
+        self.assertIn("The stopped bots open nothing and keep managing what "
+                      "is open", lines)
+        self.assertFalse([ln for ln in lines if "held order" in ln])
+        text = "\n".join(lines)
+        for leak in ("USD", "NVDA"):
+            self.assertNotIn(leak, text)
+
 
 # ── the words ────────────────────────────────────────────────────────────
 
@@ -764,6 +837,7 @@ class TheWordsTests(TestCase):
 
     def test_unmanaged_on_disable_says_managed_for_a_brake(self):
         from bot_program.asset_engine.runner import unmanaged_on_disable
+        _tick()
         cfg = _bot(self.op, "Forex swing", "forex", symbols=["EURUSD"])
         _row(cfg, "EURUSD")
         _row(cfg, "GBPUSD")
@@ -789,7 +863,48 @@ class TheWordsTests(TestCase):
                                         "while it stays off"), text)
         self.assertIn("also resumes its entries", text)
 
+    def test_unmanaged_on_disable_never_promises_management_with_the_tick_off(self):
+        """Review #6 (2026-10-07): the braked config's exits ride the bot
+        tick; with platform_master or pipeline_asset_bots off nothing runs
+        them, and the sentence says the Eye's words instead."""
+        from bot_program.asset_engine.runner import unmanaged_on_disable
+        cfg = _bot(self.op, "Forex swing", "forex", symbols=["EURUSD"])
+        _row(cfg, "EURUSD")
+        _row(cfg, "GBPUSD")
+        _morgul_brake(self.op, cfg)
+        one = _bot(self.op, "Single", "forex")
+        _row(one, "EURUSD")
+        _eye_brake(self.op, one)
+        for master, fleet in ((False, False), (True, False), (False, True)):
+            with self.subTest(platform_master=master,
+                              pipeline_asset_bots=fleet):
+                _component("platform_master", master)
+                _component("pipeline_asset_bots", fleet)
+                text = unmanaged_on_disable(cfg)
+                self.assertIn("It was stopped by Morgul's brake, a brake: "
+                              "it opens nothing", text)
+                self.assertIn("The bot tick is off now: nothing manages its "
+                              "2 open positions until it is back on.", text)
+                self.assertNotIn("MANAGED", text)
+                self.assertNotIn("still runs", text)
+                self.assertIn("The bot tick is off now: nothing manages its "
+                              "open position until it is back on.",
+                              unmanaged_on_disable(one))
+        _tick()
+        self.assertIn("stay MANAGED", unmanaged_on_disable(cfg))
+
+    def test_why_no_trade_never_promises_management_with_the_tick_off(self):
+        braked = _bot(self.op, "Braked", "forex")
+        _row(braked, "EURUSD")
+        _morgul_brake(self.op, braked)
+        _tick(False)
+        out = _run("why_no_trade")
+        self.assertIn("; 1 open, opening nothing — the bot tick is off, "
+                      "nothing manages them now", out)
+        self.assertNotIn("still MANAGED", out)
+
     def test_why_no_trade_names_who_and_management(self):
+        _tick()
         braked = _bot(self.op, "Braked", "forex")
         _row(braked, "EURUSD")
         _morgul_brake(self.op, braked)
@@ -820,6 +935,7 @@ class TheWordsTests(TestCase):
             self.assertNotIn(name, verdict)
 
     def test_bot_list_prints_the_record(self):
+        _tick()
         braked = _bot(self.op, "Braked")
         _row(braked)
         _eye_brake(self.op, braked)
@@ -841,6 +957,16 @@ class TheWordsTests(TestCase):
         self.assertTrue(lines[k].startswith("  ON   ["))
         self.assertFalse(k + 1 < len(lines)
                          and lines[k + 1].startswith("        "))
+        # Review #6: the bot tick off, the braked config is said braked
+        # with nothing managing it, and "still managing" is never printed
+        _component("pipeline_asset_bots", on=False)
+        lines = _run("bot", "list").splitlines()
+        i = next(n for n, ln in enumerate(lines) if f"[{braked.pk:<3}]" in ln)
+        self.assertIn("stopped by the Telegram group's /stop", lines[i + 1])
+        self.assertTrue(lines[i + 1].endswith(
+            "; braked — the bot tick is off, nothing manages it now"),
+            lines[i + 1])
+        self.assertFalse([ln for ln in lines if "still managing" in ln])
 
     def test_the_brake_reply_says_it_keeps_managing(self):
         from bot_program.asset_engine.disarm import enable_config
@@ -860,7 +986,9 @@ class TheWordsTests(TestCase):
         line = next(ln for ln in lines
                     if ln.startswith(f"{eye.BULLET}Metals idle #{earlier.pk}"))
         self.assertIn(" — stopped by the Telegram group's /stop on ", line)
-        self.assertTrue(line.endswith(" — still managing"), line)
+        # the tick off (no component row): braked, and nothing manages it
+        self.assertTrue(line.endswith(" — braked; the bot tick is off, "
+                                      "nothing manages it now"), line)
         self.assertIn("Positions left open: 2 (1 live · 1 paper)", lines)
         self.assertIn("Live without a stop at the broker: 1", lines)
         self.assertIn("The stopped bot still runs those stops on every tick.",
@@ -869,6 +997,7 @@ class TheWordsTests(TestCase):
                       "running them.", lines)
         tick_off = ("The bot tick is off now: nothing manages them until it "
                     "is back on.")
+        self.assertEqual(eye.TICK_OFF_WORDS, tick_off)
         self.assertIn(tick_off, lines)
         self.assertFalse([ln for ln in lines if "nothing protects them" in ln
                           or "pause while" in ln], lines)
@@ -881,6 +1010,10 @@ class TheWordsTests(TestCase):
         self.assertNotIn(tick_off, _lines(again))
         self.assertIn(eye.MANAGING_WORDS, _lines(again))
         self._assert_eye_style(again)
+        line = next(ln for ln in _lines(eye.apply_brake(self.op,
+                                                        [earlier.pk]))
+                    if ln.startswith(f"{eye.BULLET}Metals idle #{earlier.pk}"))
+        self.assertTrue(line.endswith(" — still managing"), line)
         # nothing stopped: no promise of management
         none = eye.apply_brake(self.op, everything=True)
         self.assertNotIn(eye.MANAGING_WORDS, _lines(none))
@@ -888,6 +1021,7 @@ class TheWordsTests(TestCase):
 
     def test_morgul_brake_lines_say_managing(self):
         from bot_program import morgul
+        _tick()
         cfg = _bot(self.op, "Forex swing", "forex")
         _row(cfg, "EURUSD")                                     # paper
         _row(cfg, "GBPUSD", paper=False)                        # bare live
@@ -905,11 +1039,70 @@ class TheWordsTests(TestCase):
                       "simulated stops", text)
         self.assertNotIn("nothing protects them", text)
         self.assertNotIn("pause while", text)
-        back = morgul.back_to_normal(
-            [{"name": "Market-shut booking", "label": "EURCAD",
-              "braked": True}], timezone.now()).text()
-        self.assertIn("stay off, still managing what is open, until re-armed "
-                      "on the server", back)
+        self.assertNotIn(eye.TICK_OFF_WORDS, text)
+        entry = {"name": "Market-shut booking", "label": "EURCAD",
+                 "braked": True, "stopped": stopped, "stopped_pks": pks}
+        back = morgul.back_to_normal([entry], timezone.now()).text()
+        self.assertIn("EURCAD — back to normal (the bots the brake stopped "
+                      "stay off, still managing what is open, until re-armed "
+                      "on the server)", back)
+
+    def test_morgul_never_promises_management_with_the_tick_off(self):
+        """Review #6 (2026-10-07): Morgul's brake is gated by its own
+        switches only, so it can act while the bot tick is paused; then
+        nothing runs the stopped bots' exits, and the words say the Eye's
+        own instead of "keep managing" / "still runs"."""
+        from bot_program import morgul
+        cfg = _bot(self.op, "Forex swing", "forex")
+        _row(cfg, "EURUSD")                                     # paper
+        _row(cfg, "GBPUSD", paper=False)                        # bare live
+        stopped, already, pks = _morgul_brake(self.op, cfg)
+        entry = {"name": "Market-shut booking", "label": "EURCAD",
+                 "braked": True, "stopped": stopped, "stopped_pks": pks}
+        for master, fleet in ((False, False), (True, False), (False, True)):
+            with self.subTest(platform_master=master,
+                              pipeline_asset_bots=fleet):
+                _component("platform_master", master)
+                _component("pipeline_asset_bots", fleet)
+                for kind in ("stopped", "earlier"):
+                    lines = morgul.brake_lines([(kind, stopped, already,
+                                                 morgul._left_open(pks))])
+                    text = "\n".join(lines)
+                    self.assertIn("The stopped bots open nothing", lines)
+                    self.assertIn("At the broker without a stop: 1", lines)
+                    self.assertIn("Paper positions: 1", lines)
+                    self.assertEqual(lines[-1], eye.TICK_OFF_WORDS)
+                    for words in ("keep managing", "still runs",
+                                  "still managing"):
+                        self.assertNotIn(words, text)
+                back = morgul.back_to_normal([entry], timezone.now())
+                text = back.text()
+                self.assertIn("EURCAD — back to normal (the bots the brake "
+                              "stopped stay off until re-armed on the server "
+                              "— the bot tick is off now: nothing manages "
+                              "them until it is back on)", text)
+                self.assertNotIn("still managing", text)
+        # the alarm chat relays the same words
+        from types import SimpleNamespace
+        from bot_program import alarm
+        report = SimpleNamespace(
+            findings=[], ctx=SimpleNamespace(now=timezone.now()),
+            outcomes={"market_shut|trade:1": (
+                "stopped", stopped, already, morgul._left_open(pks))})
+        (relayed,) = alarm.morgul_alarms(report)
+        self.assertIn(eye.TICK_OFF_WORDS, relayed.lines)
+        self.assertFalse([ln for ln in relayed.lines
+                          if "keep managing" in ln or "still runs" in ln])
+        # one tick read per message, not one per line
+        with patch("bot_program.manual_trade._tick_manages",
+                   return_value=False) as tick:
+            morgul.brake_lines([("stopped", stopped, already,
+                                 morgul._left_open(pks)),
+                                ("earlier", stopped, [],
+                                 morgul._left_open(pks))])
+            morgul.back_to_normal([entry, dict(entry, label="GBPCAD")],
+                                  timezone.now())
+        self.assertEqual(tick.call_count, 2)
 
     def test_manual_config_error_names_who(self):
         from bot_program.manual_trade import MANUAL_CONFIG_NAME, _config_error
@@ -930,17 +1123,162 @@ class TheWordsTests(TestCase):
         _run("bot", "on", str(cfg.pk))
         _run("bot", "off", str(cfg.pk))
         self.assertEqual(_record(cfg)["by"], disarm.BY_BOT_OFF)
+        _tick()
         left = morgul._left_open(pks)
         self.assertEqual((left["paper"], left["unmanaged"]), (0, 1))
-        text = "\n".join(morgul.brake_lines([("earlier", stopped, [], left)]))
+        lines = morgul.brake_lines([("earlier", stopped, [], left)])
+        text = "\n".join(lines)
         self.assertIn(f"Stopped earlier by the brake: Forex swing #{cfg.pk}",
                       text)
-        self.assertIn("The stopped bots open nothing; not managed: 1 — their "
-                      "bot was stopped again by hand or by the kill switch",
-                      text)
+        self.assertIn("The stopped bots open nothing", lines)
+        # Review #7 (b): who stopped it is named, never guessed
+        self.assertIn(f"Not managed: 1 position — Forex swing #{cfg.pk}: "
+                      f"stopped since by `bot off` on the server", lines)
         self.assertNotIn("keep managing what is open", text)
+        self.assertNotIn("by hand or by the kill switch", text)
+
+    def test_brake_lines_name_who_stopped_an_unmanaged_config(self):
+        """Review #7 (b): an unmanaged row is said by its config's record.
+        No record (a G5/G6 brake from before stops were recorded, reminded
+        every three hours as "earlier") is never blamed on a hand or the
+        kill switch: it names the command that puts it under management."""
+        from bot_program import morgul
+        _tick()
+        old = _bot(self.op, "Old brake", "forex", enabled=False)
+        _row(old, "EURUSD")
+        _row(old, "GBPUSD")
+        old2 = _bot(self.op, "Old brake two", "forex", enabled=False)
+        _row(old2, "USDJPY")
+        killed = _bot(self.op, "Killed", "forex")
+        _row(killed, "AUDUSD")
+        disarm.disable_config(killed, by=disarm.BY_KILL_SWITCH,
+                              why="flatten", who=self.op.username)
+        braked = _bot(self.op, "Still braked", "forex")
+        _row(braked, "NZDUSD")
+        _morgul_brake(self.op, braked)
+        cfgs = (old, old2, killed, braked)
+        pks = [c.pk for c in cfgs]
+        left = morgul._left_open(pks)
+        self.assertEqual((left["paper"], left["unmanaged"]), (1, 4))
+        self.assertEqual(left["unrecorded"],
+                         [(eye.config_label(old), old.pk, 2),
+                          (eye.config_label(old2), old2.pk, 1)])
+        self.assertEqual(left["others"], [(eye.config_label(killed),
+                                           disarm.BY_KILL_SWITCH, 1)])
+        lines = morgul.brake_lines([("earlier", [eye.config_label(c)
+                                                 for c in cfgs], [], left)])
+        self.assertIn("The stopped bots open nothing", lines)
+        self.assertIn(f"Not managed: 1 position — Killed #{killed.pk}: "
+                      f"stopped since by the kill switch", lines)
+        self.assertIn(f"Not managed: 3 positions — Old brake #{old.pk}, Old "
+                      f"brake two #{old2.pk}: stopped before stops were "
+                      f"recorded — `bot brake {old.pk} {old2.pk}` puts them "
+                      f"under management", lines)
+        self.assertIn("Paper positions: 1 — the stopped bot still runs their "
+                      "simulated stops", lines)
+        text = "\n".join(lines)
+        self.assertNotIn("by hand or by the kill switch", text)
+        self.assertNotIn("keep managing", text)
+        # one unrecorded config alone: "it"
+        lines = morgul.brake_lines([("earlier", [eye.config_label(old2)], [],
+                                     morgul._left_open([old2.pk]))])
+        self.assertIn(f"Not managed: 1 position — Old brake two #{old2.pk}: "
+                      f"stopped before stops were recorded — `bot brake "
+                      f"{old2.pk}` puts it under management", lines)
+        # `bot brake` adopts it: managed, and the words say so
+        _run("bot", "brake", str(old2.pk))
+        lines = morgul.brake_lines([("earlier", [eye.config_label(old2)], [],
+                                     morgul._left_open([old2.pk]))])
+        self.assertIn("The stopped bots open nothing and keep managing what "
+                      "is open", lines)
+        self.assertFalse([ln for ln in lines if "Not managed" in ln])
+
+    def test_a_config_rearmed_since_is_never_said_to_open_nothing(self):
+        """Review #7 (c): an "earlier" outcome is rebuilt from memory; a
+        config enabled again since is counted apart, its rows are not the
+        stopped bots', and "open nothing" is said only of the rest."""
+        from bot_program import morgul
+        _tick()
+        rearmed = _bot(self.op, "Rearmed", "forex")
+        _row(rearmed, "EURUSD")                                 # paper
+        still = _bot(self.op, "Still off", "forex")
+        _row(still, "GBPUSD", paper=False)                      # bare live
+        stopped, _already, pks = _morgul_brake(self.op, rearmed, still)
+        _run("bot", "on", str(rearmed.pk))
+        left = morgul._left_open(pks)
+        self.assertEqual(left["rearmed"], [eye.config_label(rearmed)])
+        self.assertEqual((left["paper"], left["bare"], left["unmanaged"]),
+                         (0, 1, 0))
+        lines = morgul.brake_lines([("earlier", stopped, [], left)])
+        self.assertIn(f"Re-armed since: Rearmed #{rearmed.pk} — not stopped "
+                      f"now", lines)
+        self.assertIn("The stopped bots open nothing and keep managing what "
+                      "is open", lines)
+        self.assertNotIn("Paper positions: 1 — the stopped bot still runs "
+                         "their simulated stops", lines)
+        # every config re-armed: nothing is said to open nothing
+        _run("bot", "on", str(still.pk))
+        lines = morgul.brake_lines([("earlier", stopped, [],
+                                     morgul._left_open(pks))])
+        self.assertIn(f"Re-armed since: Rearmed #{rearmed.pk}, Still off "
+                      f"#{still.pk} — not stopped now", lines)
+        text = "\n".join(lines)
+        self.assertNotIn("open nothing", text)
+        self.assertNotIn("managing", text)
+        self.assertNotIn(eye.TICK_OFF_WORDS, text)
+
+    def test_back_to_normal_reads_the_configs_as_they_stand(self):
+        """Review #7 (a): the memory says what the brake did; the words say
+        what holds now. A G6-style brake on two configs, then the kill
+        switch on one: when the finding clears, only the one still braked
+        is said to keep managing."""
+        from bot_program import morgul
+        from bot_program.asset_engine.disarm import enable_config
+        _tick()
+        a = _bot(self.op, "Forex live", "forex", mode="live")
+        _row(a, "EURUSD", paper=False, metadata={"protected": True})
+        b = _bot(self.op, "Stocks live", mode="live")
+        _row(b, "AAPL", paper=False, metadata={"protected": True})
+        stopped, _already, pks = _morgul_brake(self.op, a, b)
+        entry = {"name": "Margin", "label": "eToro live account",
+                 "braked": True, "stopped": stopped, "stopped_pks": pks}
+
+        def said():
+            return morgul.back_to_normal([entry], timezone.now()).text()
+
+        disarm.disable_config(b, by=disarm.BY_KILL_SWITCH, why="flatten",
+                              who=self.op.username)
+        self.assertIn(f"eToro live account — back to normal (Forex live "
+                      f"#{a.pk} stays off, still managing what is open, "
+                      f"until re-armed on the server; Stocks live #{b.pk} "
+                      f"stopped since by the kill switch, not managed)",
+                      said())
+        disarm.disable_config(a, by=disarm.BY_KILL_SWITCH, why="flatten",
+                              who=self.op.username)
+        text = said()
+        self.assertIn(f"(Forex live #{a.pk}, Stocks live #{b.pk} stopped "
+                      f"since by the kill switch, not managed)", text)
+        self.assertNotIn("still managing", text)
+        enable_config(a)
+        text = said()
+        self.assertIn(f"(re-armed since: Forex live #{a.pk}; Stocks live "
+                      f"#{b.pk} stopped since by the kill switch, not "
+                      f"managed)", text)
+        self.assertNotIn("still managing", text)
+        # off with no record (a brake from before stops were recorded)
+        from bot_program.asset_models import AssetBotConfig
+        AssetBotConfig.objects.filter(pk=b.pk).update(extras={})
+        self.assertIn(f"Stocks live #{b.pk} stopped before stops were "
+                      f"recorded, not managed — `bot brake {b.pk}` puts it "
+                      f"under management)", said())
+        # a brake that stopped nothing promises nothing
+        nothing = dict(entry, stopped=[], stopped_pks=[])
+        self.assertIn("eToro live account — back to normal\n",
+                      morgul.back_to_normal([nothing], timezone.now()).text()
+                      + "\n")
 
     def test_the_eye_why_says_still_managing(self):
+        _tick()
         braked = _bot(self.op, "Stocks core", symbols=["AAPL"])
         _eye_brake(self.op, braked)
         hand = _bot(self.op, "Stocks spare", symbols=["MSFT"])
@@ -952,6 +1290,22 @@ class TheWordsTests(TestCase):
         self.assertTrue(any(f"Stocks spare #{hand.pk} — stopped · " in ln
                             for ln in lines), lines)
         self.assertFalse([ln for ln in lines if "still managing" in ln])
+        # Review #6: the bot tick off, nothing manages it, and /why says so
+        _component("platform_master", on=False)
+        lines = _lines(eye.build_why(self.op, "AAPL"))
+        self.assertIn(f"Stocks core #{braked.pk} — stopped by a brake; the "
+                      f"bot tick is off, nothing manages it now · paper",
+                      lines)
+        self.assertFalse([ln for ln in lines if "still managing" in ln])
+        # read once per reply, however many braked bots it lists
+        twin = _bot(self.op, "Stocks twin", symbols=["AAPL"])
+        _eye_brake(self.op, twin)
+        with patch("bot_program.manual_trade._tick_manages",
+                   return_value=False) as tick:
+            lines = _lines(eye.build_why(self.op, "AAPL"))
+        self.assertEqual(tick.call_count, 1)
+        self.assertEqual(len([ln for ln in lines
+                              if "the bot tick is off" in ln]), 2)
 
 
 # ── Morgul G10 ───────────────────────────────────────────────────────────
@@ -989,10 +1343,22 @@ class TheHeartbeatTests(TestCase):
         by = {f.subject: f for f in found}
         self.assertEqual(sorted(by), ["tick"])
         f = by["tick"]
-        self.assertIn(f"Forex live #{cfg.pk} (stopped by the brake, still "
-                      f"managing): last tick 40 min ago", f.facts)
-        self.assertEqual(f.label, "Live bots running: 0 · stopped, still "
-                                  "managing: 1")
+        # Review #5 (2026-10-07): the finding is said exactly when nothing
+        # manages the config, so it names the stop, never "still managing"
+        self.assertIn(f"Forex live #{cfg.pk} (stopped by a brake; its exits "
+                      f"ride this tick): last tick 40 min ago", f.facts)
+        self.assertEqual(f.label, "Live bots running: 0 · stopped by a "
+                                  "brake, with open positions: 1")
+        self.assertFalse([x for x in f.facts + [f.label]
+                          if "still managing" in x], f.facts)
+        # the tick switched off: the same words, never a promise
+        _component("pipeline_asset_bots", on=False)
+        f = {g.subject: g for g in self._check()[1]}["tick"]
+        self.assertIn("The bot tick is switched off", f.facts)
+        self.assertIn(f"Forex live #{cfg.pk} (stopped by a brake; its exits "
+                      f"ride this tick): last tick 40 min ago", f.facts)
+        self.assertFalse([x for x in f.facts + [f.label]
+                          if "still managing" in x], f.facts)
 
     def test_a_braked_config_without_open_rows_does_not_and_feeds_stay_enabled_only(self):
         quiet = _bot(self.op, "Forex quiet", "forex", mode="live",
@@ -1059,3 +1425,57 @@ class TheBotBrakeTests(TestCase):
         self.assertEqual(_record(hand), before)
         self.assertFalse(disarm.keeps_managing(hand))
         self.assertIn("not found", _run("bot", "brake", "999999"))
+
+    def test_bot_brake_that_loses_the_race_says_who_won(self):
+        """Review #9 (2026-10-07): `bot brake` reads the config without a
+        lock. When the kill switch lands between that read and
+        disable_config's locked re-read, disable_config writes nothing and
+        returns False: the command prints the winner's record, never a
+        STOPPED it did not make or a management the kill switch ended."""
+        from bot_program.asset_models import AssetBotConfig
+        _tick()
+        cfg = _bot(self.op, "Raced")
+        _row(cfg)
+        real = disarm.disable_config
+        calls = []
+
+        def kill_switch_first(target, **kw):
+            # the kill switch commits on its own copy of the row first
+            if not calls:
+                calls.append(kw["by"])
+                real(AssetBotConfig.objects.get(pk=target.pk),
+                     by=disarm.BY_KILL_SWITCH, why="flatten now",
+                     who=self.op.username)
+            return real(target, **kw)
+
+        with patch.object(disarm, "disable_config",
+                          side_effect=kill_switch_first):
+            out = _run("bot", "brake", str(cfg.pk))
+        self.assertEqual(calls, [disarm.BY_BOT_BRAKE])
+        self.assertIn(f"[{cfg.pk}] Raced: stopped by the kill switch "
+                      f"({self.op.username}) on ", out)
+        self.assertIn(": flatten now; unchanged", out)
+        self.assertNotIn("STOPPED", out)
+        self.assertNotIn("managed", out)
+        self.assertEqual(_record(cfg)["by"], disarm.BY_KILL_SWITCH)
+        self.assertFalse(disarm.keeps_managing(cfg))
+
+    def test_bot_brake_says_when_the_tick_is_off(self):
+        """Review #6: `bot brake` promises management; with the bot tick
+        off it says the Eye's words after it, once."""
+        running = _bot(self.op, "Running")
+        old = _bot(self.op, "Old stop", enabled=False)
+        _row(old)
+        out = _run("bot", "brake", str(running.pk), str(old.pk))
+        self.assertIn("STOPPED by `bot brake`", out)
+        self.assertIn("now recorded as a brake", out)
+        self.assertEqual(out.count(eye.TICK_OFF_WORDS), 1)
+        self.assertTrue(out.rstrip().endswith(eye.TICK_OFF_WORDS), out)
+        _tick()
+        again = _bot(self.op, "Again")
+        self.assertNotIn(eye.TICK_OFF_WORDS,
+                         _run("bot", "brake", str(again.pk)))
+        # nothing promised (left as found): nothing said about the tick
+        _tick(False)
+        self.assertNotIn(eye.TICK_OFF_WORDS,
+                         _run("bot", "brake", str(running.pk)))

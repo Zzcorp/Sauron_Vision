@@ -71,6 +71,25 @@ def _gate_on(test):
     test.addCleanup(p.stop)
 
 
+def _empty_pool():
+    """run.load_class of a class with no sufficient history: a run judges
+    it with no data and no simulation."""
+    return {"included": [], "excluded": [("EURUSD", "short")],
+            "dropped": {}, "broken": [], "adjusted": {}, "held": {},
+            "start": None, "end": None}
+
+
+def _fake_run(**kw):
+    """prove_live_rules on a fake forex universe of EURUSD, no bar read:
+    (rows, the universe mock)."""
+    from backtester.proving import run
+    with mock.patch.object(run, "universe",
+                           return_value={"forex": ["EURUSD"]}) as uni, \
+            mock.patch.object(run, "load_class",
+                              side_effect=lambda *_a, **_k: _empty_pool()):
+        return run.prove_live_rules(**kw), uni
+
+
 # ── 1. the verdict read ───────────────────────────────────────────────────
 
 class TheVerdictReaderTests(TestCase):
@@ -103,6 +122,31 @@ class TheVerdictReaderTests(TestCase):
                          proof.FAILED)
         self.assertEqual(proof.proof_for(BOLL, "crypto", "BUY")["tier"],
                          proof.PROVEN)
+
+    def test_a_symbol_subset_run_never_decides_the_class(self):
+        # the review of 2026-10-07: `prove rules --symbols EURUSD --save`
+        # judged one pair, and its newer rows refused, cut or full-sized
+        # every live forex entry of the rule. A subset run is rulesub-.
+        from backtester.models_proving import ProvingVerdict
+        _verdict(BOLL, "forex", "long", "failed", run="rules-all", age_h=48,
+                 exp=-0.1, oe=-0.1)
+        sub = _verdict(BOLL, "forex", "long", "proven", run="rulesub-eur",
+                       age_h=1)
+        ProvingVerdict.objects.filter(pk=sub.pk).update(symbols_n=1)
+        p = proof.proof_for(BOLL, "forex", "BUY")
+        self.assertEqual(p["tier"], proof.FAILED)
+        self.assertEqual(p["run_id"], "rules-all")
+        self.assertEqual(proof.proven_cases(BOLL), [])
+        # the other way: a one-symbol FAILED never refuses a class the
+        # pool proved, nor unproves it on the provenance label
+        _verdict(BOLL, "stock", "long", "proven", run="rules-all", age_h=48)
+        _verdict(BOLL, "stock", "long", "failed", run="rulesub-aapl",
+                 age_h=1, exp=-0.3, oe=-0.3)
+        self.assertEqual(proof.proof_for(BOLL, "stock", "BUY")["tier"],
+                         proof.PROVEN)
+        self.assertEqual(proof.proven_cases(BOLL), ["stock long"])
+        self.assertEqual(proof.proven_cases_for([BOLL, "sbp_none"]),
+                         {BOLL: ["stock long"], "sbp_none": []})
 
     def test_bollinger_short_reads_its_own_row(self):
         _verdict(BOLL, "etf", "long", "proven")
@@ -147,6 +191,57 @@ class TheVerdictReaderTests(TestCase):
         self.assertEqual(p["asset_class"], "etf")
         self.assertEqual(p["verdict"], "promising")
         self.assertEqual(p["tier"], proof.UNPROVEN)
+
+
+class TheSubsetRunTests(TestCase):
+    """prove_live_rules stamps RULES_RUN_PREFIX on a whole-class run only;
+    a run restricted to --symbols is RULES_SUBSET_PREFIX, saved to be read
+    and never read by the live entry path (the review of 2026-10-07)."""
+
+    def test_a_saved_subset_run_is_newer_and_never_read(self):
+        from backtester.models_proving import ProvingVerdict
+        from backtester.proving import run
+        whole, uni = _fake_run(save=True)
+        self.assertIsNone(uni.call_args.args[2])
+        whole_id = whole[0]["run_id"]
+        self.assertTrue(whole_id.startswith(run.RULES_RUN_PREFIX), whole_id)
+        ProvingVerdict.objects.filter(run_id=whole_id).update(
+            created_at=timezone.now() - timedelta(hours=1))
+        sub, uni = _fake_run(symbols=["EURUSD"], save=True)
+        self.assertEqual(uni.call_args.args[2], ["EURUSD"])
+        sub_id = sub[0]["run_id"]
+        self.assertTrue(sub_id.startswith(run.RULES_SUBSET_PREFIX), sub_id)
+        self.assertFalse(sub_id.startswith(run.RULES_RUN_PREFIX), sub_id)
+        self.assertEqual(
+            ProvingVerdict.objects.filter(run_id=sub_id).count(), len(sub))
+        # the subset is the newest row of every key, and none is read
+        for r in whole:
+            if r["live_rule"].endswith("(short mirror)"):
+                continue
+            with self.subTest(rule=r["live_rule"], side=r["direction"]):
+                p = proof.proof_for(r["live_rule"], "forex", r["direction"])
+                self.assertEqual(p["run_id"], whole_id)
+
+    def test_the_command_says_a_subset_run_never_sizes_a_live_entry(self):
+        from backtester.models_proving import ProvingVerdict
+        from backtester.proving import run
+        out = StringIO()
+        with mock.patch.object(run, "universe",
+                               return_value={"forex": ["EURUSD"]}), \
+                mock.patch.object(run, "load_class",
+                                  side_effect=lambda *_a, **_k: _empty_pool()):
+            call_command("prove", "rules", "--symbols", "EURUSD", "--save",
+                         stdout=out)
+            call_command("prove", "rules", "--save", stdout=out)
+        lines = [l for l in out.getvalue().splitlines()
+                 if "never sizes or refuses a live entry" in l]
+        self.assertEqual(len(lines), 1, out.getvalue())
+        self.assertIn("judged on EURUSD only", lines[0])
+        runs = set(ProvingVerdict.objects.values_list("run_id", flat=True))
+        self.assertEqual(len(runs), 2)
+        self.assertEqual(
+            sorted(r.split("-")[0] + "-" for r in runs),
+            [run.RULES_RUN_PREFIX, run.RULES_SUBSET_PREFIX])
 
 
 # ── 2. the tiers and their words ─────────────────────────────────────────
@@ -513,6 +608,10 @@ class TheBotLaneTests(TestCase):
         self.assertEqual(sent.count(), 1)
         self.assertIn("unproven 0.25x", sent.get().body)
         self.assertIn("the proving ground's cut", sent.get().body)
+        # the floor is exactly the uncut size: the cut is the cause
+        # (2026-10-07, the review: execute_entry hands the cut itself)
+        self.assertIn("uncut it would clear this floor", sent.get().body)
+        self.assertNotIn("not a higher risk fraction", sent.get().body)
         client.market_order.assert_not_called()
         with mock.patch.object(StockBot, "_venue_fee_refusal",
                                return_value=(0.0, "the venue's fee leaves "
@@ -537,6 +636,119 @@ class TheBotLaneTests(TestCase):
         self.assertTrue(note["detail"].startswith(
             "unproven 0.25x: the Executioner cut it to 0.5x: "), note)
         client.market_order.assert_not_called()
+
+    def test_a_floor_the_uncut_size_misses_too_does_not_blame_the_cut(self):
+        # 2026-10-07, the review: the uncut size is under the venue's floor
+        # as well, so a proof would not clear it, and the body says so
+        from alerts.models import Notification
+        from bot_program.asset_engine import skips
+        from bot_program.asset_engine.stock_bot import StockBot
+        client = self._client()
+        cand = self._propose(client)
+        self.assertEqual(cand.stage["proof"]["cut"], 0.25)
+        with mock.patch.object(StockBot, "_venue_size_floor",
+                               return_value=(cand.qty_default * 4 + 1, "")):
+            self.assertIsNone(self._execute(cand, client))
+        note = self._skip_note()
+        self.assertEqual(note["code"], skips.VENUE_MIN_SIZE)
+        self.assertTrue(note["detail"].startswith("unproven 0.25x: "), note)
+        body = Notification.objects.get(user=self.user,
+                                        notification_type="bot").body
+        self.assertIn("unproven 0.25x", body)
+        self.assertIn("the cut is not the cause: the uncut size is also "
+                      "under the venue's floor", body)
+        self.assertNotIn("The size is the proving ground's cut", body)
+        client.market_order.assert_not_called()
+
+    def test_the_venue_floor_notification_reads_the_cut(self):
+        from alerts.models import Notification
+        from bot_program.asset_engine.stock_bot import StockBot
+        bot = StockBot(self.cfg)
+        # uncut 12 clears a floor of 10; uncut 4 does not; no cut at all
+        bot._notify_venue_min_size("AAPL", qty=3, floor=10,
+                                   note="unproven 0.25x: ", cut=0.25)
+        bot._notify_venue_min_size("MSFT", qty=1, floor=10,
+                                   note="unproven 0.25x: ", cut=0.25)
+        bot._notify_venue_min_size("NVDA", qty=1, floor=10, note="", cut=1.0)
+
+        def body(sym):
+            return Notification.objects.get(
+                user=self.user, notification_type="bot",
+                title__contains=f"· {sym}:").body
+
+        cause = "The size is the proving ground's cut"
+        not_cause = "the cut is not the cause"
+        self.assertIn(cause, body("AAPL"))
+        self.assertIn("uncut it would clear this floor", body("AAPL"))
+        self.assertNotIn(not_cause, body("AAPL"))
+        self.assertIn(not_cause, body("MSFT"))
+        self.assertIn("a proof alone would not clear it", body("MSFT"))
+        self.assertNotIn(cause, body("MSFT"))
+        for sym in ("AAPL", "MSFT", "NVDA"):
+            with self.subTest(sym=sym):
+                self.assertNotIn("not a higher risk fraction", body(sym))
+                for money in ("$", "USD", "EUR"):
+                    self.assertNotIn(money, body(sym))
+        self.assertNotIn(cause, body("NVDA"))
+        self.assertNotIn(not_cause, body("NVDA"))
+
+
+class TheTickCacheLaneTests(TestCase):
+    """Production's branch of _proof_gate (2026-10-07, the review): tick()
+    and the desk's propose phase run manage_positions first, which opens
+    the tick cache (_tick_broker_cache = {}); the clock gate then caches
+    the instrument's (class, exchange) under ("timing_instrument_key",
+    symbol), and the proof gate reads the CLASS from there — never the
+    exchange, never the tuple. An etf in a stock config reads the etf
+    pool through it."""
+
+    RULE = "sbp_tick_rule"
+
+    def setUp(self):
+        from tests.test_entry_quote import (_book, _instrument, _live_cfg,
+                                            _signal, _user)
+        _gate_on(self)
+        self.user = _user("sbp_tick")
+        self.cfg = _live_cfg(self.user, name="SBP tick")
+        self.cfg.symbols = ["SPY"]
+        self.cfg.save(update_fields=["symbols"])
+        _signal(_instrument("SPY", "etf"), rule=self.RULE)
+        _book(self.user)
+
+    def _propose(self):
+        from bot_program.asset_engine.stock_bot import StockBot
+        from tests.test_entry_quote import ROUTER, _mock_client
+        client = _mock_client("100.00")
+        client.ticker.return_value = {"lastPrice": "100.00", "bid": "99.98",
+                                      "ask": "100.02", "symbol": "SPY"}
+        self.bot = StockBot(self.cfg)
+        # what manage_positions opens at the head of every tick
+        self.bot._tick_broker_cache = {}
+        with mock.patch(ROUTER, return_value=client):
+            cand = self.bot.propose_entry("SPY")
+        cache = self.bot._tick_broker_cache
+        self.assertEqual(cache[("timing_instrument_key", "SPY")][0], "etf")
+        self.assertIn(("proof", self.RULE, "etf", "long"), cache)
+        return cand
+
+    def test_failed_then_proven_through_the_tick_cache(self):
+        from bot_program.asset_engine import skips
+        _verdict(self.RULE, "etf", "long", "failed", age_h=2, exp=-0.12,
+                 oe=-0.2)
+        self.assertIsNone(self._propose())
+        self.cfg.refresh_from_db()
+        note = skips.last_by_symbol(self.cfg)["SPY"]
+        self.assertEqual(note["code"], skips.PROVING_FAILED)
+        self.assertTrue(note["detail"].startswith("FAILED etf long"), note)
+        _verdict(self.RULE, "etf", "long", "proven", run="rules-b2")
+        cand = self._propose()
+        self.assertIsNotNone(cand)
+        p = cand.stage["proof"]
+        self.assertEqual(p["tier"], proof.PROVEN)
+        self.assertEqual(p["cut"], 1.0)
+        self.assertEqual(p["asset_class"], "etf")
+        self.assertEqual(p["run_id"], "rules-b2")
+        self.assertEqual(cand.stage["live_size_factor"], 1.0)
 
 
 # ── 5. the options lane ───────────────────────────────────────────────────
@@ -664,18 +876,43 @@ class TheWiringTests(SimpleTestCase):
             self.assertNotIn(money, SKIP_WORDS["proving_failed"])
 
     def test_the_suite_switch_the_run_prefix_and_the_reduced_size(self):
-        import inspect
+        # Behaviour, not text (2026-10-07, the review): a comment naming
+        # RULES_RUN_PREFIX or SIZE_FACTORS["live_small"] satisfied the old
+        # source checks while `rules-` or `REDUCED = 0.25` was typed.
+        import ast
         from backtester.proving import run
+        from signals import promotion_pipeline
         base = Path(settings.BASE_DIR)
         self.assertIn("_proof.GATE = False",
                       (base / "tests" / "__init__.py").read_text(
                           encoding="utf-8"))
-        self.assertIn("RULES_RUN_PREFIX",
-                      inspect.getsource(run.prove_live_rules))
+        # the writer stamps what the reader filters by, read off a run
+        whole, _uni = _fake_run()
+        sub, _uni = _fake_run(symbols=["EURUSD"])
+        self.assertTrue(whole and sub)
+        for r in whole:
+            self.assertTrue(r["run_id"].startswith(run.RULES_RUN_PREFIX),
+                            r["run_id"])
+        for r in sub:
+            self.assertTrue(r["run_id"].startswith(run.RULES_SUBSET_PREFIX),
+                            r["run_id"])
+            self.assertFalse(r["run_id"].startswith(run.RULES_RUN_PREFIX),
+                             r["run_id"])
         self.assertEqual(run.RULES_RUN_PREFIX, "rules-")
-        self.assertIn('SIZE_FACTORS["live_small"]',
-                      (base / "backtester" / "proving" / "proof.py")
-                      .read_text(encoding="utf-8"))
+        # REDUCED is SIZE_FACTORS["live_small"] in the code itself
+        tree = ast.parse((base / "backtester" / "proving" / "proof.py")
+                         .read_text(encoding="utf-8"))
+        values = [n.value for n in ast.walk(tree)
+                  if isinstance(n, ast.Assign)
+                  and any(isinstance(t, ast.Name) and t.id == "REDUCED"
+                          for t in n.targets)]
+        self.assertEqual(len(values), 1)
+        self.assertIsInstance(values[0], ast.Subscript)
+        self.assertEqual(ast.unparse(values[0]),
+                         "SIZE_FACTORS['live_small']")
+        self.assertIs(proof.SIZE_FACTORS, promotion_pipeline.SIZE_FACTORS)
+        self.assertEqual(proof.REDUCED,
+                         promotion_pipeline.SIZE_FACTORS["live_small"])
         self.assertEqual(proof.REDUCED, 0.25)
 
 
@@ -688,6 +925,10 @@ class TheManualLaneTests(TestCase):
         self.inst = SimpleNamespace(symbol="AAPL", asset_class="stock",
                                     exchange="NASDAQ")
         self.sig = SimpleNamespace(rule_name=BOLL)
+        # The ticket's tail reads the rule's stage (review 2026-10-07): a
+        # rule with no RuleControl trades on paper only, so the cut's
+        # words are pinned on a live_full rule.
+        _set_stage(BOLL, "live_full")
 
     def test_the_ticket_warns_and_never_refuses_or_resizes(self):
         from bot_program.manual_trade import proof_advisory
@@ -784,8 +1025,16 @@ class TheShownStageTests(TestCase):
         out = StringIO()
         call_command("setups", "list", stdout=out, stderr=out)
         self.assertIn("live_full (by hand, unproven)", out.getvalue())
-        rows = {r["rule"]: r for r in evidence.rule_rows()}
+        rows = {r["rule"]: r
+                for r in evidence.rule_rows(with_provenance=True)}
         self.assertEqual(rows[self.RULE]["stage_note"], "by hand, unproven")
+        resp = self.client.get(reverse("evidence_ledger"),
+                               HTTP_HOST="127.0.0.1")
+        self.assertContains(resp, "by hand, unproven")
+        # asked only by /evidence/ (2026-10-07, the review): the engine's
+        # scan, /signals/, the horizon and the generator never read it
+        rows = {r["rule"]: r for r in evidence.rule_rows()}
+        self.assertEqual(rows[self.RULE]["stage_note"], "")
         cfg = AssetBotConfig.objects.create(
             user=staff, asset_class="stock", name="SBP forensics",
             mode="live", symbols=["AAPL"], capital=Decimal("10000"))
