@@ -2536,6 +2536,12 @@ def _clear_eligibility():
     # skips.VENUE_SICK.
     from bot_program import venue_health
     venue_health.reset()
+    # AND THE SHARED /search-ID MEMO (2026-10-07, P5): with
+    # SEARCH_SHARED_MEMO on, the adapter keeps exact-spelling ids in the
+    # same cache; every key this process wrote or a test seeded goes.
+    from django.core.cache import cache
+    cache.delete_many(list(etoro_client._SEARCH_SHARED_KEYS))
+    etoro_client._SEARCH_SHARED_KEYS.clear()
 
 
 def _lev(settlement, direction, values, *, max_sl=None, min_amount=10):

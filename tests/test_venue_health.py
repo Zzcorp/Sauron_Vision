@@ -21,7 +21,7 @@ Three things, one memory:
 Run with:  python manage.py test tests.test_venue_health
 """
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
 from unittest import mock
 
@@ -108,8 +108,9 @@ class TheMemoryTests(SimpleTestCase):
         self.assertEqual(s["until"],
                          (self.now + timedelta(seconds=90, minutes=10))
                          .isoformat())
-        self.assertIn("eToro (live) is sick: 3 failures in the last 3 min",
-                      s["words"])
+        self.assertIn("eToro (live) is sick since ", s["words"])
+        self.assertIn(" after 3 failures (last: ", s["words"])
+        self.assertEqual(s["count"], 3)
         self.assertIn("(last: account ReadTimeout", s["words"])
         self.assertIn("new real entries held until", s["words"])
         self.assertIn("closes and stop moves still go", s["words"])
@@ -124,6 +125,132 @@ class TheMemoryTests(SimpleTestCase):
         self.assertNotIn("USD", body)
         self.assertIn("is sick — new real entries held",
                       told.call_args.kwargs["title"])
+
+    # ── the words (2026-10-07): the real clock, and the episode ─────────
+
+    T0 = datetime(2026, 10, 6, 16, 47, 5, tzinfo=dt_timezone.utc)
+
+    def _three_429s(self):
+        with mock.patch("bot_program.notifications.notify_staff") as told:
+            for s in (0, 30, 90):
+                vh.note("etoro", "live", "ticker", code=429,
+                        now=self.T0 + timedelta(seconds=s))
+        return told
+
+    def test_the_words_carry_the_real_clock(self):
+        told = self._three_429s()
+        s = vh.sick("etoro", "live", now=self.T0 + timedelta(seconds=91))
+        self.assertEqual(
+            s["words"],
+            "eToro (live) is sick since 16:48 UTC after 3 failures (last: "
+            "ticker HTTP 429 at 16:48 UTC) — new real entries held until "
+            "16:58 UTC; closes and stop moves still go")
+        body = told.call_args.kwargs["body"]
+        self.assertIn("is sick since 16:48 UTC after 3 failures", body)
+        self.assertIn("(last: ticker HTTP 429 at 16:48 UTC)", body)
+        self.assertIn("held until 16:58 UTC", body)
+        self.assertNotIn("?", body)
+        self.assertNotIn("USD", body)
+
+    def test_the_words_keep_the_episode_once_the_window_has_passed(self):
+        """The operator's 23:42 line read "0 failures in the last 3 min"
+        while the hold ran: the window passes long before the quiet."""
+        self._three_429s()
+        s = vh.sick("etoro", "live",
+                    now=self.T0 + timedelta(seconds=90, minutes=5))
+        self.assertIn("is sick since 16:48 UTC after 3 failures", s["words"])
+        self.assertNotIn("0 failures", s["words"])
+        self.assertNotIn("in the last", s["words"])
+
+    def test_a_failure_while_sick_counts_and_moves_the_hold(self):
+        self._three_429s()
+        later = self.T0 + timedelta(minutes=6)
+        vh.note("etoro", "live", "search", code=429, now=later)
+        s = vh.sick("etoro", "live", now=later)
+        self.assertEqual(s["count"], 4)
+        self.assertIn("since 16:48 UTC after 4 failures (last: search HTTP "
+                      "429 at 16:53 UTC) — new real entries held until "
+                      "17:03 UTC", s["words"])
+
+    def test_a_memory_from_before_the_count_reads_it_off_the_list(self):
+        self._three_429s()
+        key = vh._key("etoro", "live")
+        state = vh._load(key)
+        state.pop("sick_failures")
+        state.pop("sick_failures_since")
+        vh._store(key, state)
+        s = vh.sick("etoro", "live", now=self.T0 + timedelta(minutes=4))
+        self.assertIn("after 3 failures", s["words"])
+        vh.note("etoro", "live", "ticker", code=429,
+                now=self.T0 + timedelta(minutes=4))
+        self.assertEqual(vh._load(key)["sick_failures"], 4)
+
+    def test_a_count_from_another_episode_is_not_read(self):
+        self._three_429s()
+        key = vh._key("etoro", "live")
+        state = vh._load(key)
+        state["sick_failures"] = 40
+        state["sick_failures_since"] = "2026-10-05T00:00:00+00:00"
+        vh._store(key, state)
+        s = vh.sick("etoro", "live", now=self.T0 + timedelta(minutes=4))
+        self.assertIn("after 3 failures", s["words"])
+        self.assertNotIn("40", s["words"])
+
+    def test_the_refusal_and_the_ticket_carry_the_clock(self):
+        self._three_429s()
+        at = self.T0 + timedelta(seconds=91)
+        live, _ = _client([], env="live")
+        code, why = vh.refusal(live, "EURUSD", now=at)
+        self.assertTrue(why.startswith("EURUSD: eToro (live) is sick since "
+                                       "16:48 UTC"), why)
+        self.assertIn("until 16:58 UTC", why)
+        self.assertIn("until 16:58 UTC",
+                      vh.advisory("etoro", "live", now=at)["reason"])
+
+    def test_the_stamp_never_raises(self):
+        self.assertEqual(vh._stamp(None), "?")
+        self.assertEqual(vh._stamp("x"), "?")
+        self.assertEqual(vh._stamp(self.T0), "16:47 UTC")
+
+    def test_a_429_skip_fits_the_skip_record(self):
+        with mock.patch("bot_program.notifications.notify_staff"):
+            for i in range(12):
+                vh.note("etoro", "live", "eligibility", code=429,
+                        detail="no Retry-After; refused again after its "
+                               "pause: not paused",
+                        now=self.T0 + timedelta(seconds=i))
+        _code, why = vh.refusal(_client([], env="live")[0], "NEARUSD",
+                                now=self.T0 + timedelta(seconds=12))
+        self.assertLessEqual(len(why), 200, why)
+        self.assertTrue(why.endswith("— nothing sent"), why)
+        self.assertIn("after 12 failures", why)
+
+    def test_recent_refusals_reads_only_429s_inside_the_window(self):
+        at = self.T0 + timedelta(seconds=200)
+        with mock.patch("bot_program.notifications.notify_staff"):
+            for s, code, where in ((0, 429, "ticker"),     # too old
+                                   (100, 429, "search"),   # inside
+                                   (150, 503, "ticker"),   # not a 429
+                                   (190, 429, "ticker")):  # inside
+                vh.note("etoro", "live", where, code=code,
+                        now=self.T0 + timedelta(seconds=s))
+        key = vh._key("etoro", "live")
+        state = vh._load(key)
+        state["failures"].append({"at": "not a time", "where": "search",
+                                  "code": 429, "detail": ""})
+        vh._store(key, state)
+        got = vh.recent_refusals("etoro", "live", within_s=120, now=at)
+        self.assertEqual([(f["where"], f["code"]) for f in got],
+                         [("search", 429), ("ticker", 429)],
+                         "oldest first; an unreadable time is not recent")
+        self.assertEqual(vh.recent_refusals("etoro", "demo", within_s=120,
+                                            now=at), [], "worlds apart")
+        self.assertEqual(len(vh.recent_refusals("etoro", "live",
+                                                within_s=300, now=at)), 3)
+        with mock.patch("django.core.cache.cache.get",
+                        side_effect=RuntimeError("down")):
+            self.assertEqual(vh.recent_refusals("etoro", "live",
+                                                within_s=120, now=at), [])
 
     def test_failures_spread_past_the_window_do_not_count(self):
         for i in range(3):
