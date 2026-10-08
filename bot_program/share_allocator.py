@@ -408,7 +408,7 @@ def bounds_for(cfg, *, mix=None) -> tuple:
     unmeasured: the 60% ceiling, a concentration guard written for BOTS,
     was binding on the hand-taken pool and the water-fill handed the
     excess to the only other follower. A default constant was moving ten
-    points of a 2,000 EUR account on no information. The operator's pool
+    points of a small account on no information. The operator's pool
     is the operator's; a bot that earns its way up still stops at 60%.
     An explicit extras["share_ceiling_pct"] on the manual lane is honoured.
 

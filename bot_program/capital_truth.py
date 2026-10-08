@@ -84,9 +84,9 @@ def broker_equity(user, cfg):
     # and this reading are the same quantity. `balance_usdt` is only the
     # fallback for an adapter without `net_liquidation`: on eToro it is the
     # AVAILABLE CASH (accountAvailableCash), and with positions open that
-    # read a 2,173 account as 483 — "every limit here is 4.5x looser than it
-    # reads" on every live bot, every tick (2026-10-02). Saxo's
-    # balance_usdt was already the total; the two adapters disagreed.
+    # read the account at a fraction of its total — "every limit here is
+    # 4.5x looser than it reads" on every live bot, every tick (2026-10-02).
+    # Saxo's balance_usdt was already the total; the two adapters disagreed.
     #
     # A PaperTrader answers neither, and its answer would be a simulation:
     # asking it would compare a real pool against an imaginary account.
@@ -515,9 +515,9 @@ def broker_view(user):
 # One follower with no number is the whole account, which is the original
 # contract, unchanged. The shares of one account can never sum past 100%:
 # an over-allocated fleet gets NOTHING retuned and the operator an alert,
-# because three pools sized against the same 500 are sized against 1,500
-# that does not exist — the state this deployment was in on 2026-09-10,
-# with 1,000 of hand-typed pools over a 500 account.
+# because three pools each sized against the same account are sized against
+# three times the money, which does not exist — the state this deployment
+# was in on 2026-09-10, with hand-typed pools adding up to twice the account.
 #
 # ONE ACCOUNT, ONE POOL (2026-10-01). The operator: "votre système
 # d'allocation de capitaux par bot est restrictif ... il devrait être 100%
@@ -627,8 +627,8 @@ def combined_capital(cfgs, *, shared=None) -> float:
     """The money a set of pools can deploy TOGETHER: the sum of their
     capital — except that with shared capital ON the live followers among
     them are ONE pool (each sizes from the same account), counted once, at
-    the largest. Summed, seven followers of a 2,240 account read 15,680,
-    and a daily stop taken as a percentage of that is seven times too
+    the largest. Summed, seven followers of one account read seven times
+    it, and a daily stop taken as a percentage of that is seven times too
     loose (morgul G7; the preflight's armed-total line)."""
     if shared is None:
         shared = shared_capital()

@@ -22,9 +22,11 @@ What this file pins:
     staff-only chapter is not in this repository at all (a neutral fixture
     stands in for it here): the repository is public;
   * clean English: no snake_case, no template artefact, no French;
-  * the road so far is held to the history as it stood at 3994ffc (the
-    container has no .git to ask): every hash exists, every milestone is
-    dated on its commit's day or up to three days before it;
+  * the road so far is held to the history as it stood at each edition,
+    pasted below in two blocks, the first edition's up to 3994ffc and the
+    second's from there to 65c490e (the container has no .git to ask):
+    every hash exists, every milestone is dated on its commit's day or up
+    to three days before it;
   * motion is optional: nothing is hidden unless the head script says
     motion is welcome, prefers-reduced-motion and print stop everything and
     show everything, the keyframes move only transform and opacity, no
@@ -365,8 +367,260 @@ de640cd 2026-04-06
 0214e9a 2026-04-06
 54e35ba 2026-04-05
 """
-KNOWN_COMMITS = dict(line.split() for line in HISTORY_AT_3994FFC.split("\n")
-                     if line.strip())
+#: The history since, as the same command printed it on 2026-10-08 for
+#: 3994ffc..65c490e, merges included: the second edition's road.
+HISTORY_SINCE_3994FFC = """
+65c490e 2026-10-08
+5afc234 2026-10-08
+02bbfd4 2026-10-08
+8960905 2026-10-07
+c802d17 2026-10-07
+5eb7c38 2026-10-07
+a1601e3 2026-10-07
+fc7b00d 2026-10-07
+2899df5 2026-10-07
+54eeedb 2026-10-07
+5f0edd4 2026-10-07
+94a7287 2026-10-07
+996b408 2026-10-07
+7031773 2026-10-07
+91c708d 2026-10-07
+1c5a876 2026-10-06
+32656f0 2026-10-06
+2f9fcf2 2026-10-06
+e1761df 2026-10-06
+aab7d82 2026-10-06
+ef0a147 2026-10-06
+c0db424 2026-10-06
+fa096a1 2026-10-06
+cb919bf 2026-10-06
+520d40b 2026-10-06
+cbf946b 2026-10-06
+6d48449 2026-10-05
+02fe4bb 2026-10-06
+b5c0c4e 2026-10-05
+9012554 2026-10-06
+2c3b508 2026-10-06
+0dd8c1d 2026-10-05
+f65d503 2026-10-06
+ee77e75 2026-10-05
+802baa2 2026-10-06
+a74c342 2026-10-05
+010d588 2026-10-06
+1c1b28f 2026-10-05
+738e540 2026-10-05
+ed8cb31 2026-10-05
+ef91452 2026-10-05
+7f9664d 2026-10-05
+4ffdadd 2026-10-05
+a48b298 2026-10-04
+e107d6f 2026-10-05
+0c16fcd 2026-10-04
+3290e3d 2026-10-05
+b6e7cbd 2026-10-04
+34bc134 2026-10-04
+df72157 2026-10-04
+e5abee7 2026-10-04
+0902acf 2026-10-04
+f5ccbf4 2026-10-04
+d3a96f5 2026-10-04
+8ae543d 2026-10-04
+74b9e68 2026-10-04
+66cc967 2026-10-04
+ef768db 2026-10-04
+35de0f8 2026-10-04
+6d102e6 2026-10-03
+284fc6b 2026-10-03
+8b5463a 2026-10-03
+f57a23a 2026-10-03
+e3de99e 2026-10-03
+1adde1f 2026-10-03
+d171162 2026-10-03
+384cd74 2026-10-03
+638d933 2026-10-03
+4eeb13c 2026-10-03
+9ac9280 2026-10-03
+c71a5f9 2026-10-03
+49e49a6 2026-10-03
+0ccfcde 2026-10-03
+6c8853a 2026-10-03
+f1c9f7e 2026-10-03
+0008ffd 2026-10-03
+4605e0b 2026-10-03
+abacd6a 2026-10-03
+2e1bec0 2026-10-03
+95da5dc 2026-10-03
+c86ebc4 2026-10-02
+0cd406e 2026-10-02
+c649558 2026-10-02
+359d5bd 2026-10-03
+43810a9 2026-10-02
+eaa475f 2026-10-03
+82994f6 2026-10-03
+7aee5c8 2026-10-02
+5d41b9f 2026-10-02
+2dcbd28 2026-10-02
+453f355 2026-10-02
+61317c7 2026-10-02
+05c3ea1 2026-10-02
+1fd3816 2026-10-02
+43c64e5 2026-10-02
+a329aa7 2026-10-02
+25e0c76 2026-10-02
+28c314f 2026-10-02
+39ad1eb 2026-10-02
+33e435c 2026-10-02
+77cb9ea 2026-10-01
+da170ed 2026-10-01
+e050d38 2026-10-01
+7ef41bb 2026-10-01
+f007325 2026-10-01
+a6c11d8 2026-10-01
+d80d644 2026-10-01
+f4224a9 2026-10-01
+83b3263 2026-10-01
+555e2d0 2026-10-01
+7118c14 2026-10-02
+d7082be 2026-10-01
+30ed210 2026-10-01
+b773e50 2026-10-01
+aef3687 2026-10-01
+692b263 2026-10-02
+65d33cf 2026-10-01
+a713854 2026-10-01
+b186f70 2026-10-01
+32a1e9f 2026-10-01
+a00a093 2026-10-02
+98ae882 2026-10-01
+53b8b6a 2026-10-01
+141baea 2026-10-01
+d147e91 2026-10-01
+38c301d 2026-10-01
+2cd5eac 2026-10-01
+efd1fef 2026-10-01
+3adf260 2026-10-01
+2e07ec4 2026-09-30
+349996a 2026-09-30
+8949528 2026-09-30
+0731578 2026-09-30
+b18c095 2026-09-30
+cc01072 2026-09-30
+f237940 2026-09-30
+ee7a7c8 2026-09-30
+2cc4e87 2026-09-30
+6cee455 2026-09-30
+a5f4b73 2026-09-29
+4747dcd 2026-09-29
+d684161 2026-09-29
+91d92c5 2026-09-29
+537b37d 2026-09-29
+7891d08 2026-09-29
+2cf69c9 2026-09-29
+3a16bb1 2026-09-29
+7745ba8 2026-09-29
+327b8c1 2026-09-29
+2a103b0 2026-09-29
+2f75e59 2026-09-29
+fd94ab0 2026-09-29
+9d5b791 2026-09-29
+4f36895 2026-09-29
+dbd6864 2026-09-29
+88fff97 2026-09-29
+83442a8 2026-09-29
+54280c1 2026-09-29
+fa235c1 2026-09-29
+16e2a26 2026-09-29
+28fc761 2026-09-29
+9c9f11c 2026-09-29
+8bd88a6 2026-09-29
+0831f37 2026-09-29
+d6f4a72 2026-09-29
+306269d 2026-09-29
+4a371b6 2026-09-29
+dae39e1 2026-09-29
+a3afc8a 2026-09-29
+11ea60c 2026-09-28
+92bb838 2026-09-28
+e694310 2026-09-28
+6ae6da2 2026-09-28
+1199dbf 2026-09-28
+86d49e7 2026-09-28
+3dd8f09 2026-09-28
+580b3b7 2026-09-28
+550be6e 2026-09-28
+3ea5624 2026-09-28
+bd29811 2026-09-28
+0b7878e 2026-09-28
+39d8385 2026-09-28
+a0b377c 2026-09-28
+c9b1f1f 2026-09-28
+deeb125 2026-09-28
+9eab8df 2026-09-28
+186f96b 2026-09-28
+adb508a 2026-09-28
+d864661 2026-09-28
+c2a5a1e 2026-09-28
+8fa2bfe 2026-09-28
+804c333 2026-09-29
+2db8c10 2026-09-28
+0427153 2026-09-28
+b265c08 2026-09-28
+4bd7972 2026-09-28
+b246f57 2026-09-28
+f1be35e 2026-09-28
+d95dfe2 2026-09-28
+8a936fa 2026-09-28
+8034566 2026-09-28
+8bab349 2026-09-28
+3632fe4 2026-09-28
+1ffd52b 2026-09-28
+213c716 2026-09-28
+6c17446 2026-09-28
+f34dd29 2026-09-28
+52f53b4 2026-09-28
+6065715 2026-09-28
+f6fd7bd 2026-09-28
+6afe856 2026-09-28
+b1eca9e 2026-09-28
+812a0f1 2026-09-28
+893e0e2 2026-09-28
+af91bee 2026-09-28
+73734f9 2026-09-28
+edc63dc 2026-09-28
+2cad246 2026-09-28
+4f5904e 2026-09-28
+bae435d 2026-09-28
+1ce4c5a 2026-09-28
+d82f4d2 2026-09-28
+e54ee67 2026-09-28
+e9ffb56 2026-09-28
+af26976 2026-09-28
+96e6aaf 2026-09-28
+68b5379 2026-09-28
+7a6b54a 2026-09-28
+d1b32a5 2026-09-28
+ab2ba76 2026-09-28
+21b3d6f 2026-09-28
+ef3fc45 2026-09-28
+8ab7c3e 2026-09-28
+765ee29 2026-09-28
+45a4c93 2026-09-28
+3a6938b 2026-09-28
+ca07a20 2026-09-28
+b086c88 2026-09-28
+be715d2 2026-09-28
+f44f94b 2026-09-28
+359a373 2026-09-28
+"""
+
+
+def _history(block):
+    return dict(line.split() for line in block.split("\n") if line.strip())
+
+
+#: The first edition's history, and every commit either edition knows.
+FIRST_EDITION = _history(HISTORY_AT_3994FFC)
+KNOWN_COMMITS = {**FIRST_EDITION, **_history(HISTORY_SINCE_3994FFC)}
 
 #: Generic words and phrases the public page must never carry, anywhere in
 #: the answer (compared lowercased, entities decoded). The private ones are
@@ -450,25 +704,39 @@ VISIBLE_PATTERNS = [
 #: of a date or a time: each is a dated fact of the history or a default
 #: the circuit chapter dates ("as verified on 26 September 2026").
 DATED_FIGURES = {
-    "304": "commits when this book was written (the stored history)",
-    "45": "commits in April 2026",
+    "304": "commits when this book was first written (the first edition's stored history)",
+    "45": ("commits in April 2026; and the minutes a feed may stay frozen before "
+           "nothing decides on it, mark_sanity.FROZEN_MINUTES (5 October 2026)"),
     "134": "commits in August 2026",
-    "125": "commits in September 2026, up to 3994ffc",
+    "125": "commits in September 2026, up to 3994ffc (the first edition)",
     "259": "commits co-written with Claude, every one since 9 August",
     "166": "symbols the research fleet covered, 11-15 September",
     "667": "the tests the Wall once claimed, before wall_facts",
     "7,459": "the tests that held the eToro layers right on 22 September",
     "24": "hours: the oldest signal the vote reads (default, 26 September)",
     "0.60": "the lowest signal score that votes (default)",
-    "1.5": "the stop in average moves (default)",
-    "3": "the target in average moves (default)",
+    "1.5": ("the stop in average moves (default); and the R the trail starts "
+            "from, position_care.TRAIL_AT_R (1 October 2026)"),
+    "3": ("the target in average moves (default); and the default daily stop, "
+          "per cent of the book, portfolio/models.py (1 October 2026)"),
     "0.25": "per cent of the bot's reserve risked per trade (default)",
-    "5": "per cent: how far from the price a stop was sent on 26 September (ab47af2)",
+    "5": ("per cent: how far from the price a stop was sent on 26 September "
+          "(ab47af2); and the 5x currency proof of 28 September (0b7878e)"),
     "10": "per cent, nearly: how far eToro held that stop (ab47af2)",
-    "15": "minutes between two comparisons with the broker (default)",
+    "15": ("minutes between two comparisons with the broker (default); the per "
+           "cent of the distance to the stop that half the spread may eat, "
+           "mark_sanity.ENTRY_SLIPPAGE_MAX_R (5 October 2026); and the open-risk "
+           "default, per cent of the book (1 October 2026)"),
     "0": "what the public pages show for a failed counter, deliberately",
     "1": "1R and -1R, the unit of risk",
     "2": "+2R, twice the risk",
+    # the second edition (2026-10-08)
+    "20": ("graded signals before the loser floor judges a rule, "
+           "promotion_pipeline.LOSER_MIN_N (5 October 2026)"),
+    "30": ("per cent of the history the proving ground holds out, judge.HOLDOUT_FRAC "
+           "(2 October 2026); and the debate's shadow trades, "
+           "trade_debate.DEBATE_SHADOW_N (1 October 2026)"),
+    "1.2": "R: a real-money close worse than this is said once, scorecard.OVERSHOOT_R (2 October 2026)",
 }
 
 MONTHS = ("January|February|March|April|May|June|July|August|September|"
@@ -810,7 +1078,8 @@ class TheNumbersAreCounted(TestCase):
         self.assertEqual(stray, [], "a figure with no date and no count behind it")
 
     def test_the_origin_figures_are_the_history(self):
-        days = list(KNOWN_COMMITS.values())
+        """The origin chapter's figures are the first edition's, dated so."""
+        days = list(FIRST_EDITION.values())
         self.assertEqual(len(days), 304)
         self.assertEqual(sum(d.startswith("2026-04") for d in days), 45)
         self.assertEqual(sum(d.startswith("2026-08") for d in days), 134)
@@ -1242,6 +1511,54 @@ class PhoneFirst(TestCase):
             rule = re.search(r"(?<![\w-])%s\s*\{([^}]*)\}" % re.escape(selector), self.css).group(1)
             self.assertIn("color: var(--text2)", rule, selector)
 
+    def _columns(self, selector):
+        """Every column count `selector` is given, smallest screen first."""
+        return [int(n) for n in re.findall(
+            r"(?<![\w-])%s\s*\{[^}]*grid-template-columns:\s*repeat\((\d+)," % re.escape(selector),
+            self.css)]
+
+    def test_the_road_stands_on_one_row_with_every_numeral_pulsing(self):
+        """The road grew to four steps on 8 October inside a three-column
+        grid: the fourth stood alone under the connector, its numeral the
+        only still one (measured at 1280 px)."""
+        self.assertEqual(self._columns(".golive"), [len(book.GO_LIVE)],
+                         "the road's wide row does not hold every step")
+        for n in range(1, len(book.GO_LIVE) + 1):
+            self.assertRegex(self.css, r"\.golive-step:nth-child\(%d\) \.golive-n \{ animation: pulseRing" % n)
+
+    def test_the_counted_strip_fills_its_rows(self):
+        """Eight counts since the second edition: every wide row is full."""
+        columns = self._columns(".counted-grid")
+        self.assertGreaterEqual(len(columns), 2)
+        for n in columns:
+            self.assertEqual(len(book.COUNTED) % n, 0,
+                             "%d counts leave a row of %d half empty" % (len(book.COUNTED), n))
+
+    def test_on_a_phone_the_edition_badge_keeps_its_years(self):
+        """The badge carries two dates since 8 October; at 375 px it broke
+        into three lines with a year alone on two of them."""
+        # After the badge's own rule, or that rule's letter spacing wins.
+        base = re.search(r"(?<![\w-])\.hero-badge\s*\{", self.css).start()
+        phone = re.search(r"@media \(max-width: 420px\)", self.css[base:])
+        self.assertIsNotNone(phone, "no phone rule after the badge's own")
+        block = _block(self.css[base:], r"@media \(max-width: 420px\)")
+        rule = re.search(r"\.hero-badge\s*\{([^}]*)\}", block).group(1)
+        self.assertIn("text-wrap: balance", rule)
+        self.assertIn("max-width: 100%", rule)
+        self.assertIn("letter-spacing: 2px", rule)
+
+    def test_the_stylesheets_chapter_marks_follow_the_chapters(self):
+        """A chapter was inserted on 8 October (IV, the safeguards): the
+        template's own section marks follow the rendered numbering."""
+        src = (Path(settings.BASE_DIR) / "templates" / "landing"
+               / "the_book.html").read_text(encoding="utf-8")
+        romans = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]
+        marks = re.findall(r"/\* ── ([IVX]+)\. ", src)
+        self.assertEqual(marks, sorted(marks, key=romans.index), marks)
+        self.assertEqual(marks[-1], romans[len(book.CHAPTERS) - 1])
+        self.assertIn("── VI. the road so far ──", src)
+        self.assertNotIn("the ten steps", src)
+
 
 class TheProbeWalksIt(SimpleTestCase):
 
@@ -1254,9 +1571,10 @@ class TheProbeWalksIt(SimpleTestCase):
 class TheWatchFollowsTheSchedule(SimpleTestCase):
     """The Book said "every 15 minutes during market hours, from 13:00 to
     21:45 UTC" for a week after the reconcile went around the clock
-    (2026-10-06, after GBPNZD #135 stayed open fifteen hours) — the very
-    gap that change closed, still promised to the reader. The words are
-    held to the beat entry itself."""
+    (2026-10-06, after a real trade the venue had stopped in the night
+    stayed open here fifteen hours) — the very gap that change closed,
+    still promised to the reader. The words are held to the beat entry
+    itself."""
 
     def _watch(self):
         def walk(node):
@@ -1283,3 +1601,438 @@ class TheWatchFollowsTheSchedule(SimpleTestCase):
         self.assertIn("Every 15 minutes, around the clock", text)
         self.assertNotIn("13:00", text)
         self.assertNotIn("market hours", text)
+
+
+class TheBookFollowsTheCode(SimpleTestCase):
+    """The second edition (2026-10-08) describes the safeguards: every
+    default, switch, proof and cadence it states is read back off the code
+    here, with the sentence to rewrite named in the message. A Book that
+    outlives the code it describes is the "667 tests green" failure in
+    prose."""
+
+    WALL_FORBIDS = ("proven", "outperform", "profitable since",
+                    "track record of returns", "beats the market", "667",
+                    "fully autonomous", "hands-free", "no human needed",
+                    "allocates your capital", "trades your account",
+                    "in real time across markets", "twelve evaluator")
+
+    def _text(self, chapter_id, title=None):
+        chapter = [c for c in book.CHAPTERS if c["id"] == chapter_id][0]
+        if title is None:
+            return chapter
+        return [i for i in chapter["items"] if i["title"] == title][0]["text"]
+
+    def _lexicon(self, term):
+        return [row for row in book.LEXICON if row["term"] == term][0]["plain"]
+
+    def test_the_second_history_block_continues_the_first(self):
+        second = _history(HISTORY_SINCE_3994FFC)
+        self.assertGreater(len(second), 200)
+        self.assertEqual(set(FIRST_EDITION) & set(second), set())
+        for commit, day in second.items():
+            self.assertRegex(commit, r"^[0-9a-f]{7}$")
+            self.assertGreaterEqual(day, "2026-09-28", commit)
+        self.assertEqual(len(KNOWN_COMMITS), len(FIRST_EDITION) + len(second))
+
+    def test_the_edition_days_are_written_in_words(self):
+        self.assertEqual(book.WRITTEN_WORDS, views_book.day_words(book.WRITTEN))
+        self.assertEqual(book.FIRST_WRITTEN_WORDS, views_book.day_words(book.FIRST_WRITTEN))
+        self.assertGreaterEqual(book.WRITTEN, book.FIRST_WRITTEN)
+        self.assertIn(book.FIRST_WRITTEN_WORDS, book.HERO["badge"])
+        self.assertIn(book.WRITTEN_WORDS, book.HERO["badge"])
+
+    def test_the_bench_holds_nothing_already_on_the_road(self):
+        """The first edition's three bench lines landed on 2026-09-28 and
+        stayed on the bench for ten days: a landed line is a milestone."""
+        landed = {title for _day, _era, title, _words, _commit in book.MILESTONES}
+        landed |= {"The news band keeps its cards",
+                   "Telegram messages written for people",
+                   "The Monday game plan, in full"}
+        for row in book.IN_PROGRESS:
+            self.assertNotIn(row["title"], landed, "a landed line is still on the bench")
+
+    def test_the_five_minute_turns_are_the_beats(self):
+        from config.celery import app
+        from core.day_of_sauron import schedule_words
+        for name in ("tick-asset-bots", "run-morgul-guards"):
+            words = schedule_words(app.conf.beat_schedule[name]["schedule"])[0]
+            self.assertEqual(words, "5 min", "%s moved: rewrite every 'five minutes'" % name)
+        circuit = self._text("circuit")["paragraphs"][1]
+        morgul = self._text("principles", "The guards watch the machine")
+        for words in (circuit, morgul, self._lexicon("Bot"), self._lexicon("Morgul")):
+            self.assertIn("every five minutes", words.lower(), words)
+
+    def test_the_proofs_are_the_codes(self):
+        from bot_program.asset_engine.base import ETORO_PROVEN, ETORO_SHORT_PROVEN
+        self.assertEqual(set(ETORO_PROVEN),
+                         {"commodity", "crypto", "etf", "forex", "index", "stock"},
+                         "rewrite 'One proof per family', 'A proof for every family' and the safeguards' third paragraph")
+        self.assertEqual(set(ETORO_SHORT_PROVEN), {"forex", "stock"},
+                         "rewrite 'One proof per family' and the 1 October milestone")
+        self.assertIn("shares and currencies earned theirs",
+                      self._text("principles", "One proof per family"))
+
+    def test_every_switch_called_off_on_arrival_ships_off(self):
+        from core.platform_control import (BULK_ENABLE_EXEMPT, DEFAULT_COMPONENTS,
+                                           LIVE_MONEY_SWITCHES)
+        rows = {row["key"]: row for row in DEFAULT_COMPONENTS}
+        for key in LIVE_MONEY_SWITCHES:
+            self.assertIn(key, BULK_ENABLE_EXEMPT,
+                          "%s can be bulk-enabled: rewrite 'Every switch to real money is a person's'" % key)
+        named = set(LIVE_MONEY_SWITCHES) | {
+            "morgul_guards", "morgul_brake", "aragorn_scale_out",
+            "pipeline_promotion", "proving_ground", "telegram_alarm"}
+        for key in named:
+            self.assertIn(key, rows, "%s is no longer a component: rewrite the safeguards" % key)
+            row = rows[key]
+            self.assertFalse(row.get("is_enabled") or row.get("enabled"),
+                             "%s ships on: rewrite every 'off on arrival'" % key)
+
+    def test_a_brake_is_the_four_the_words_name(self):
+        from bot_program.asset_engine import disarm
+        self.assertEqual(set(disarm.BRAKES),
+                         {disarm.BY_MORGUL, disarm.BY_EYE, disarm.BY_ALARM, disarm.BY_BOT_BRAKE},
+                         "rewrite the lexicon's 'The brake' and 'The guards and the brake'")
+        self.assertNotIn(disarm.BY_KILL_SWITCH, disarm.BRAKES)
+        self.assertNotIn(disarm.BY_BOT_OFF, disarm.BRAKES)
+
+    def _milestone(self, commit):
+        return [words for _day, _era, _title, words, c in book.MILESTONES if c == commit][0]
+
+    def test_a_ticket_placed_by_hand_is_warned_where_a_bot_is_held(self):
+        """The last look, the shut market and the sick venue hold a bot's
+        real-money entry; the ticket placed by hand is warned of each and
+        the last word is a person's (bot_program/manual_trade.py). The
+        first draft of this edition said "every real-money order" and "no
+        real-money order", which a hand-taken ticket contradicted, while
+        the Wall already said "every live bot order" (review, 2026-10-08)."""
+        import inspect
+        from bot_program import manual_trade
+        self.assertNotIn("_last_look", inspect.getsource(manual_trade),
+                         "the ticket takes the last look now: rewrite 'A price that looks "
+                         "like a market', 'The order, protected at the broker' and the "
+                         "5 October milestone")
+        for advisory in (manual_trade.quote_advisory, manual_trade.timing_advisory,
+                         manual_trade.venue_health_advisory):
+            with self.subTest(advisory=advisory.__name__):
+                self.assertIn("A WARNING, never a refusal", " ".join(advisory.__doc__.split()),
+                              "the ticket refuses now: rewrite 'The clock', 'The venue's "
+                              "health' and 'A price that looks like a market'")
+        look = self._text("safeguards", "A price that looks like a market")
+        clock = self._text("safeguards", "The clock")
+        venue = self._text("safeguards", "The venue's health")
+        order = self._text("circuit", "The order, protected at the broker")
+        self.assertIn("Every real-money bot order takes one last look", look)
+        self.assertIn("No bot opens a real-money trade in a share", clock)
+        self.assertIn("the bots' new real-money entries wait", venue)
+        self.assertIn("Just before a bot's real-money order leaves", order)
+        for words in (look, clock, venue):
+            self.assertIn("a ticket placed by hand is warned", words)
+        self.assertIn("Every real-money bot order reads the price", self._milestone("b5c0c4e"))
+        self.assertIn("A bot's live entry is refused", self._milestone("7031773"))
+        self.assertIn("No bot opens a trade in the rollover", self._milestone("fa096a1"))
+        self.assertIn("holds the bots' new real-money entries", self._milestone("0dd8c1d"))
+        self.assertIn("pauses the bots' new real-money entries", self._milestone("2899df5"))
+        for stale in ("Every real-money order", "No real-money order is sent",
+                      "A live entry is refused", "No new trade in the rollover"):
+            for _day, _era, _title, words, _commit in book.MILESTONES:
+                self.assertNotIn(stale, words, stale)
+            for chapter in book.CHAPTERS:
+                for item in chapter.get("items", []):
+                    self.assertNotIn(stale, item["text"], stale)
+
+    def test_the_care_says_the_thresholds_it_cuts_and_locks_at(self):
+        """The care cuts a real-money loser only from WEEKEND_CUT_LEVERAGE
+        times leverage (the event window's cut is the weekend's), and locks
+        a winner only from WEEKEND_LOCK_AT_R on the mark. The second edition
+        said "a levered real-money loser is cut", of any multiplier, in four
+        places on the two pages (final check, 2026-10-08): a real trade at
+        two times was promised a cut the code never makes. The Wall's card
+        is held to the same thresholds in tests/test_the_wall.py."""
+        from bot_program import position_care as care
+        rewrite = ("rewrite the circuit's 'The care', the safeguards' 'The care of "
+                   "an open trade', the 5 October milestone 'The event window' and "
+                   "the Wall's 'Care of the Open Trade' card")
+        self.assertEqual(care.WEEKEND_CUT_LEVERAGE, 5,
+                         "the weekend cut moved: %s ('five times leverage or more')" % rewrite)
+        self.assertEqual(care.EVENT_CUT_LEVERAGE, care.WEEKEND_CUT_LEVERAGE,
+                         "the event cut left the weekend's: %s" % rewrite)
+        self.assertEqual(care.WEEKEND_LOCK_AT_R, 0.5,
+                         "the weekend lock moved: %s ('half a unit of risk or more')" % rewrite)
+        self.assertEqual(care.EVENT_LOCK_AT_R, care.WEEKEND_LOCK_AT_R,
+                         "the event lock left the weekend's: %s" % rewrite)
+        cut = "a real-money loser at five times leverage or more is cut"
+        lock = "a winner up half a unit of risk or more is locked at break-even"
+        for where, words in (("circuit, 'The care'", self._text("circuit", "The care")),
+                             ("safeguards, 'The care of an open trade'",
+                              self._text("safeguards", "The care of an open trade")),
+                             ("milestone 'The event window'", self._milestone("ed8cb31"))):
+            with self.subTest(where=where):
+                self.assertIn(cut, words, "%s: %s" % (where, rewrite))
+                self.assertIn(lock, words, "%s: %s" % (where, rewrite))
+                # A hand-opened row is never cut by a rule (the care's manual
+                # branch returns before every cut), so each sentence that
+                # names a cut names the exemption too.
+                self.assertIn("opened by hand", words,
+                              "%s names a cut without the manual exemption: %s" % (where, rewrite))
+        everything = json.dumps([book.CHAPTERS, book.ERAS, book.MILESTONES,
+                                 book.IN_PROGRESS, book.GO_LIVE, book.LEXICON])
+        self.assertNotIn("levered real-money loser", everything, rewrite)
+
+    def test_the_road_says_no_proof_caps_the_multiplier(self):
+        """Since 5 October the attack mode's chooser reads the venue's own
+        list, bounded by the class ceiling, the stop band and the cash:
+        the proven multipliers are records, never a bound. The road once
+        said a class earns its proof "at the leverage it will use", which
+        the Leverage entry of the same edition contradicted; and crypto's
+        proof was measured on the real account, not in demo."""
+        import ast
+        import inspect
+        import textwrap
+        from bot_program.asset_engine.base import AssetBot
+        tree = ast.parse(textwrap.dedent(inspect.getsource(AssetBot._choose_auto_leverage)))
+        read = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        read |= {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+        self.assertEqual(sorted(name for name in read if "proven" in name.lower()), [],
+                         "a proof bounds the attack mode again: rewrite the road's first "
+                         "step and the lexicon's 'Leverage'")
+        road = book.GO_LIVE[0]["text"]
+        self.assertNotIn("at the leverage it will use", road)
+        self.assertIn("The multiplier is not part of the proof", road)
+        self.assertIn("crypto on the real one", road)
+        self.assertIn("on the real account", self._text("principles", "One proof per family"))
+        self.assertIn("no demo proof caps it", self._lexicon("Leverage"))
+
+    def test_the_switches_behind_the_ladder_and_the_brake_are_named(self):
+        """The nightly demotion runs under the ladder's own switch, and the
+        guards brake only with a second switch on (review, 2026-10-08):
+        the Wall said both, the Book said neither."""
+        from bot_program import morgul
+        from bot_program import tasks as bot_tasks
+        from signals import tasks as signal_tasks
+        self.assertEqual(signal_tasks.auto_evaluate_promotions.run.component_key,
+                         "pipeline_promotion",
+                         "the ladder's switch moved: rewrite the circuit's last paragraph "
+                         "and 'The loser floor'")
+        self.assertEqual(bot_tasks.run_morgul_guards.run.component_key, "morgul_guards")
+        self.assertEqual(morgul.BRAKE_KEY, "morgul_brake",
+                         "the brake has no switch of its own now: rewrite 'The guards and "
+                         "the brake' and the lexicon's 'Morgul'")
+        loop = self._text("circuit")["after"][0]
+        self.assertIn("With the ladder's switch on, a rule that falls apart", loop)
+        self.assertIn("Each night, with its switch on, the ladder reads",
+                      self._text("safeguards", "The loser floor"))
+        self.assertIn("With a second switch on as well, a few of them may brake",
+                      self._text("safeguards", "The guards and the brake"))
+        self.assertIn("with a second switch on as well, it may brake", self._lexicon("Morgul"))
+        self.assertIn("Both of its switches are off",
+                      self._text("principles", "The guards watch the machine"))
+
+    def test_the_shared_pool_is_said_as_a_switch_never_as_a_state(self):
+        """Whether one shared pool is switched on in production is not known
+        here (spec §7): the sentence dates the mechanism and puts the switch
+        in a condition."""
+        from core.platform_control import LIVE_MONEY_SWITCHES
+        self.assertIn("shared_capital_live", LIVE_MONEY_SWITCHES)
+        words = self._text("principles", "An error kept on the cautious side")
+        self.assertNotIn("with one shared pool switched on", words)
+        self.assertIn("can draw on the whole of it instead; with that switch on", words)
+
+    def test_the_review_s_plain_english_holds(self):
+        """Small wording the 2026-10-08 review corrected, each said once."""
+        everything = " ".join(
+            [p for c in book.CHAPTERS for p in c.get("paragraphs", []) + c.get("after", [])]
+            + [i["text"] for c in book.CHAPTERS for i in c.get("items", [])]
+            + [e["summary"] for e in book.ERAS]
+            + [t + " " + w for _d, _e, t, w, _c in book.MILESTONES])
+        for stale in ("reviewed batches", "every open trade would lose", "bursting",
+                      "in doubt and new entries"):
+            self.assertNotIn(stale, everything, stale)
+        self.assertIn("What the open trades would lose together at their stops",
+                      self._text("safeguards", "The limits of the book"))
+
+    def test_every_default_the_book_states_is_the_codes(self):
+        import datetime
+        import importlib
+        from backtester.proving import proof
+        from bot_program import aragorn
+        from ai_agents.agents import trade_debate
+        from portfolio.models import Portfolio
+        from signals.promotion_pipeline import SIZE_FACTORS
+
+        def attr(module, name):
+            return getattr(importlib.import_module(module), name)
+
+        def field(name):
+            return Portfolio._meta.get_field(name).default
+
+        table = [
+            # (what, read, expected, the Book sentence to rewrite)
+            ("judge.HOLDOUT_FRAC", lambda: attr("backtester.proving.judge", "HOLDOUT_FRAC"), 0.30,
+             "'Proof before money': the last 30% of the history"),
+            ("judge.FOLDS", lambda: attr("backtester.proving.judge", "FOLDS"), 5,
+             "'Proof before money': five slices of time"),
+            ("judge.MIN_POSITIVE_FOLDS", lambda: attr("backtester.proving.judge", "MIN_POSITIVE_FOLDS"), 3,
+             "'Proof before money' (the folds that must be positive)"),
+            ("judge.PROVING_MAX_TRADE_R", lambda: attr("backtester.proving.judge", "PROVING_MAX_TRADE_R"), 20.0,
+             "'Real tails kept': a gap through a stop is kept, capped"),
+            ("entry_timing.ROLLOVER_NY", lambda: attr("bot_program.entry_timing", "ROLLOVER_NY"),
+             (datetime.time(16, 50), datetime.time(17, 10)),
+             "'The clock': the twenty minutes around New York's five o'clock rollover"),
+            ("entry_timing.ROLLOVER_CLASSES", lambda: set(attr("bot_program.entry_timing", "ROLLOVER_CLASSES")),
+             {"forex", "commodity", "index"}, "'The clock': which families the rollover holds"),
+            ("entry_timing.OPEN_SETTLE_MINUTES", lambda: attr("bot_program.entry_timing", "OPEN_SETTLE_MINUTES"), 15,
+             "'The clock': a market's first quarter hour"),
+            ("entry_timing.CLOSE_GUARD_MINUTES", lambda: attr("bot_program.entry_timing", "CLOSE_GUARD_MINUTES"), 10,
+             "'The clock': a share's last ten minutes"),
+            ("entry_timing.EVENT_ATTACK_HOURS", lambda: attr("bot_program.entry_timing", "EVENT_ATTACK_HOURS"), 3,
+             "'The clock': the three hours before a print"),
+            ("entry_timing.SHUT_CLASSES", lambda: set(attr("bot_program.entry_timing", "SHUT_CLASSES")),
+             {"forex", "stock", "etf", "commodity"},
+             "'The clock': a share, an ETF, a currency or a commodity while its exchange is shut"),
+            ("entry_timing.NEVER_SHUTS", lambda: set(attr("bot_program.entry_timing", "NEVER_SHUTS")), {"crypto"},
+             "'The clock': crypto aside, which never shuts"),
+            ("position_care.BREAKEVEN_AT_R", lambda: attr("bot_program.position_care", "BREAKEVEN_AT_R"), 1.0,
+             "'The care': break-even at +1R"),
+            ("position_care.TRAIL_AT_R", lambda: attr("bot_program.position_care", "TRAIL_AT_R"), 1.5,
+             "'The care': trails from +1.5R"),
+            ("position_care.WEEKEND_CUT_LEVERAGE", lambda: attr("bot_program.position_care", "WEEKEND_CUT_LEVERAGE"), 5,
+             "'The care': a real-money loser at five times leverage or more is cut before a weekend"),
+            ("position_care.EVENT_CUT_LEVERAGE", lambda: attr("bot_program.position_care", "EVENT_CUT_LEVERAGE"), 5,
+             "'The event window': a real-money loser at five times leverage or more is cut before a print"),
+            ("position_care.WEEKEND_LOCK_AT_R", lambda: attr("bot_program.position_care", "WEEKEND_LOCK_AT_R"), 0.5,
+             "'The care': a winner up half a unit of risk or more is locked before a weekend"),
+            ("position_care.EVENT_LOCK_AT_R", lambda: attr("bot_program.position_care", "EVENT_LOCK_AT_R"), 0.5,
+             "'The event window': a winner up half a unit of risk or more is locked before a print"),
+            ("position_care.EVENT_BEFORE_MINUTES", lambda: attr("bot_program.position_care", "EVENT_BEFORE_MINUTES"), 60,
+             "'The event window': from an hour before a high-impact print"),
+            ("position_care.EVENT_AFTER_MINUTES", lambda: attr("bot_program.position_care", "EVENT_AFTER_MINUTES"), 15,
+             "'The event window': to a quarter hour after it"),
+            ("position_care.WEEKEND_WINDOW_NY[stock]",
+             lambda: attr("bot_program.position_care", "WEEKEND_WINDOW_NY")["stock"],
+             (datetime.time(15, 0), datetime.time(16, 0)),
+             "'The clock': a Friday in the hour or so before its market shuts"),
+            ("position_care.WEEKEND_WINDOW_NY_DEFAULT",
+             lambda: attr("bot_program.position_care", "WEEKEND_WINDOW_NY_DEFAULT"),
+             (datetime.time(15, 30), datetime.time(17, 0)),
+             "'The clock': a Friday in the hour or so before its market shuts"),
+            ("venue_health.SICK_BURST", lambda: attr("bot_program.venue_health", "SICK_BURST"), 3,
+             "'The venue's health': three failures"),
+            ("venue_health.BURST_WINDOW_S", lambda: attr("bot_program.venue_health", "BURST_WINDOW_S"), 180,
+             "'The venue's health': inside three minutes"),
+            ("venue_health.WRITE_SITES", lambda: set(attr("bot_program.venue_health", "WRITE_SITES")), {"order"},
+             "'The venue's health': or one failed order"),
+            ("venue_health.VENUE_QUIET_MINUTES", lambda: attr("bot_program.venue_health", "VENUE_QUIET_MINUTES"), 10,
+             "'The venue's health': ten quiet minutes"),
+            ("mark_sanity.FROZEN_MINUTES", lambda: attr("bot_program.mark_sanity", "FROZEN_MINUTES"), 45,
+             "'A price that looks like a market': a feed frozen for 45 minutes"),
+            ("mark_sanity.ENTRY_SLIPPAGE_MAX_R", lambda: attr("bot_program.mark_sanity", "ENTRY_SLIPPAGE_MAX_R"), 0.15,
+             "'A price that looks like a market': 15% of the distance to its stop"),
+            ("smart_money.MAX_WIDEN_ATR", lambda: attr("bot_program.smart_money", "MAX_WIDEN_ATR"), 1.0,
+             "'Beyond the crowd's stops': within one average move"),
+            ("promotion_pipeline.LOSER_MIN_N", lambda: attr("signals.promotion_pipeline", "LOSER_MIN_N"), 20,
+             "'The loser floor': 20 or more graded signals"),
+            ("promotion_pipeline.LOSER_HIT_MAX", lambda: attr("signals.promotion_pipeline", "LOSER_HIT_MAX"), 0.35,
+             "'The loser floor': a thin edge under a low hit rate"),
+            ("promotion_pipeline.MANUAL_DWELL_DAYS", lambda: attr("signals.promotion_pipeline", "MANUAL_DWELL_DAYS"), 7,
+             "'The loser floor': promoted by hand in the last seven days"),
+            ("aragorn.EVALUATE_HOURS", lambda: aragorn.EVALUATE_HOURS, 4,
+             "'Aragorn': every four hours"),
+            ("aragorn.SKIP_RULES has manual_take", lambda: "manual_take" in aragorn.SKIP_RULES, True,
+             "'Aragorn': the trades placed by hand are never his to judge"),
+            ("trade_debate.DEBATE_SHADOW_N", lambda: trade_debate.DEBATE_SHADOW_N, 30,
+             "'The trade debate': the first 30 graded trades"),
+            ("Portfolio.max_daily_loss_pct", lambda: field("max_daily_loss_pct"), 3.0,
+             "'The limits of the book': 3% of it by default"),
+            ("Portfolio.max_pledged_pct", lambda: field("max_pledged_pct"), 50,
+             "'The limits of the book': half by default"),
+            ("Portfolio.max_open_risk_pct", lambda: field("max_open_risk_pct"), 15,
+             "'The limits of the book': capped at 15% of the book"),
+            ("Portfolio.max_notional_multiple", lambda: field("max_notional_multiple"), 4.0,
+             "'The limits of the book': four times the book"),
+            ("risk_gate.ABSOLUTE_STOP_MULTIPLE", lambda: attr("portfolio.risk_gate", "ABSOLUTE_STOP_MULTIPLE"), 1.5,
+             "'The limits of the book': one and a half times the limit"),
+            ("risk_gate.ELITE_SIZE_SCALE", lambda: attr("portfolio.risk_gate", "ELITE_SIZE_SCALE"), 0.5,
+             "'The limits of the book': at half its size"),
+            ("risk_gate.ELITE_MAX_PER_WINDOW", lambda: attr("portfolio.risk_gate", "ELITE_MAX_PER_WINDOW"), 2,
+             "'The limits of the book': two a day at most"),
+            ("risk_gate.DAILY_LOSS_WINDOW_HOURS", lambda: attr("portfolio.risk_gate", "DAILY_LOSS_WINDOW_HOURS"), 24,
+             "'The limits of the book': two a DAY at most"),
+            ("risk_gate.ELITE_MIN_NET_RR", lambda: attr("portfolio.risk_gate", "ELITE_MIN_NET_RR"), 2.0,
+             "'The limits of the book': a reward at least twice its risk"),
+            ("scorecard.OVERSHOOT_R", lambda: attr("bot_program.scorecard", "OVERSHOOT_R"), 1.2,
+             "'A stop that did not hold': worse than -1.2R"),
+            ("morgul.REMIND_S", lambda: attr("bot_program.morgul", "REMIND_S"), 10800,
+             "'The alarm': said again every three hours"),
+            ("morgul brakes", lambda: {g.key for g in attr("bot_program.morgul", "GUARDS") if g.brake},
+             {"market_shut", "proofs", "margin"},
+             "'The guards and the brake': a few of them may brake"),
+            ("risk_levels.DEFAULT_ATR_STOP_MULT",
+             lambda: attr("bot_program.asset_engine.risk_levels", "DEFAULT_ATR_STOP_MULT"), 1.5,
+             "'The stop and the target': the stop at 1.5 times its average move"),
+            ("risk_levels.DEFAULT_ATR_TARGET_MULT",
+             lambda: attr("bot_program.asset_engine.risk_levels", "DEFAULT_ATR_TARGET_MULT"), 3.0,
+             "'The stop and the target': the target at 3 times"),
+            ("sizing.DEFAULT_RISK_FRACTION",
+             lambda: attr("bot_program.asset_engine.sizing", "DEFAULT_RISK_FRACTION"), 0.0025,
+             "'The size': 0.25% by default"),
+            ("AssetBotConfig.entry_score_min",
+             lambda: attr("bot_program.asset_models", "AssetBotConfig")._meta.get_field("entry_score_min").default,
+             0.60, "'The vote': scored at least 0.60"),
+            ("AssetBotConfig.min_signals_for_entry",
+             lambda: attr("bot_program.asset_models", "AssetBotConfig")._meta.get_field("min_signals_for_entry").default,
+             1, "'The vote': a single strong signal can be enough"),
+        ]
+        for what, read, expected, sentence in table:
+            with self.subTest(what=what):
+                self.assertEqual(read(), expected, "%s moved: rewrite %s" % (what, sentence))
+        # One quarter, four names: the reduced size the Book calls "a quarter".
+        self.assertEqual(proof.REDUCED, SIZE_FACTORS["live_small"])
+        self.assertEqual(SIZE_FACTORS["live_small"], aragorn.PROBATION_SIZE)
+        self.assertEqual(aragorn.PROBATION_SIZE, trade_debate.DEBATE_MIN_SCALE)
+        self.assertEqual(trade_debate.DEBATE_MIN_SCALE, 0.25,
+                         "rewrite every 'a quarter' in the circuit, the safeguards, the road, "
+                         "and the Wall's #fleet and #safeguards ('enters at a quarter')")
+
+    def test_no_milestone_title_says_what_the_wall_forbids(self):
+        """The Wall shows the latest titles (core.views_book.latest_steps),
+        and the Wall may never say these."""
+        for _day, _era, title, _words, _commit in book.MILESTONES:
+            low = title.lower()
+            for claim in self.WALL_FORBIDS:
+                self.assertNotIn(claim, low, title)
+
+
+class TheRoadHasAnchors(TestCase):
+
+    def setUp(self):
+        _clear()
+        self.body = self.client.get(BOOK).content.decode("utf-8")
+
+    def test_every_milestone_has_its_own_anchor(self):
+        anchors = [views_book.milestone_anchor(title)
+                   for _day, _era, title, _words, _commit in book.MILESTONES]
+        self.assertEqual(len(set(anchors)), len(anchors), "two milestones share an anchor")
+        hashes = [commit for _day, _era, _title, _words, commit in book.MILESTONES]
+        for anchor in anchors:
+            self.assertRegex(anchor, r"^m-[a-z0-9-]+$")
+            self.assertIn('id="%s"' % anchor, self.body)
+            for commit in hashes:
+                self.assertNotIn(commit, anchor)
+        steps = views_book.latest_steps(4)
+        self.assertEqual([s["anchor"] for s in steps], list(reversed(anchors[-4:])))
+        self.assertEqual([s["date"] for s in steps], sorted((s["date"] for s in steps), reverse=True))
+        self.assertEqual(views_book.latest_steps(0), [])
+        with mock.patch("core.views_book.book.MILESTONES", [("bad",)]):
+            with self.assertLogs("core.views_book", "WARNING") as logs:
+                self.assertEqual(views_book.latest_steps(), [])
+        self.assertNotIn("bad", " ".join(logs.output))
+
+    def test_the_bench_kicker_matches_the_bench(self):
+        kicker = [c for c in book.CHAPTERS if c["id"] == "in-progress"][0]["kicker"]
+        if book.IN_PROGRESS:
+            self.assertIn("on the bench, not yet landed", kicker)
+            self.assertNotIn("the bench was empty", kicker)
+        else:
+            self.assertIn("the bench was empty", kicker)
+        self.assertEqual(self.body.count("</i>In progress</p>"), len(book.IN_PROGRESS))

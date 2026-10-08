@@ -35,6 +35,14 @@
     <meta name="theme-color" content="#030806">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    {# The reveal switch (2026-10-08). Every section below starts visible; only a browser that can run the reveal observer, and whose reader has not asked for less motion, hides them for the fade-in, by one class on the root. The main script sets wallAwake once the observer is armed; if it never does (a script error, a blocked script), the class comes off after three seconds and the page stands as it was served. No template tag in it. #}
+    <script>
+    (function () { var root = document.documentElement;
+      if (!("IntersectionObserver" in window)) { return; }
+      if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) { return; }
+      root.classList.add("wall-js");
+      window.setTimeout(function () { if (!window.wallAwake) { root.classList.remove("wall-js"); } }, 3000); })();
+    </script>
     <style>
         /* ══════════════════════════════════════════════════════════════ */
         /* ROOT & RESET                                                  */
@@ -51,7 +59,8 @@
             --font-m: 'Share Tech Mono', monospace;
         }
         *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-        html { scroll-behavior: smooth; overflow-x: hidden; }
+        html { overflow-x: hidden; }
+        @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
         body {
             background: var(--bg); color: var(--text); font-family: var(--font-h);
             font-size: 16px; line-height: 1.6; overflow-x: hidden;
@@ -65,27 +74,31 @@
         @media (max-width: 768px) { .container { padding: 0 20px; } }
 
         /* ══════════════════════════════════════════════════════════════ */
-        /* REVEAL + FADE-OUT ANIMATION SYSTEM                            */
-        /* Elements fade in on scroll down AND fade out on scroll up     */
+        /* REVEAL SYSTEM (2026-10-08)                                    */
+        /* Each block fades in once, the first time it scrolls into view, */
+        /* and stays. Nothing is hidden unless the root carries .wall-js, */
+        /* which the head switch sets only where the observer can run and */
+        /* motion is welcome; without script, in print and under reduced  */
+        /* motion the page is read exactly as it was served.              */
         /* ══════════════════════════════════════════════════════════════ */
-        .reveal {
+        .wall-js .reveal {
             opacity: 0; transform: translateY(60px);
             transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
                         transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
         }
-        .reveal.visible { opacity: 1; transform: translateY(0); }
-        .reveal-left { opacity: 0; transform: translateX(-80px);
+        .wall-js .reveal.visible { opacity: 1; transform: translateY(0); }
+        .wall-js .reveal-left { opacity: 0; transform: translateX(-80px);
             transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
                         transform 0.9s cubic-bezier(0.16, 1, 0.3, 1); }
-        .reveal-left.visible { opacity: 1; transform: translateX(0); }
-        .reveal-right { opacity: 0; transform: translateX(80px);
+        .wall-js .reveal-left.visible { opacity: 1; transform: translateX(0); }
+        .wall-js .reveal-right { opacity: 0; transform: translateX(80px);
             transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
                         transform 0.9s cubic-bezier(0.16, 1, 0.3, 1); }
-        .reveal-right.visible { opacity: 1; transform: translateX(0); }
-        .reveal-scale { opacity: 0; transform: scale(0.85);
+        .wall-js .reveal-right.visible { opacity: 1; transform: translateX(0); }
+        .wall-js .reveal-scale { opacity: 0; transform: scale(0.85);
             transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
                         transform 0.9s cubic-bezier(0.16, 1, 0.3, 1); }
-        .reveal-scale.visible { opacity: 1; transform: scale(1); }
+        .wall-js .reveal-scale.visible { opacity: 1; transform: scale(1); }
         .delay-1 { transition-delay: 0.1s; } .delay-2 { transition-delay: 0.2s; }
         .delay-3 { transition-delay: 0.3s; } .delay-4 { transition-delay: 0.4s; }
         .delay-5 { transition-delay: 0.5s; } .delay-6 { transition-delay: 0.6s; }
@@ -493,6 +506,28 @@
             display: flex; align-items: center; justify-content: center;
             font-size: 10px; color: var(--accent); margin-top: 2px;
         }
+        /* The latest steps (2026-10-08): the same check-list, centred under
+           a section title instead of inside a split. Its own scope, since
+           the split's rules above are scoped to .split-content. */
+        .latest-steps { list-style: none; max-width: 640px; margin: 0 auto; text-align: left; }
+        .latest-steps li {
+            display: flex; align-items: flex-start; gap: 12px;
+            padding: 12px 0; font-size: 15px; color: var(--text2);
+            border-bottom: 1px solid rgba(19,48,32,0.4);
+        }
+        .latest-steps li:last-child { border-bottom: 0; }
+        .latest-steps a { color: var(--text); text-decoration: none; transition: color 0.3s; }
+        .latest-steps a:hover { color: var(--accent); }
+        .latest-steps time {
+            font-family: var(--font-m); font-size: 11px; letter-spacing: 1.5px;
+            color: var(--text3); text-transform: uppercase;
+        }
+        .latest-more {
+            margin-top: 28px; font-family: var(--font-m); font-size: 11px;
+            letter-spacing: 2px; text-transform: uppercase;
+        }
+        .latest-more a { color: var(--accent); text-decoration: none; }
+        .latest-more a:hover { text-shadow: 0 0 12px rgba(0,232,104,0.3); }
 
         /* ══════════════════════════════════════════════════════════════ */
         /* TECHNOLOGY BADGES                                             */
@@ -1793,6 +1828,16 @@
             .wall-nav { padding: 18px 24px; }
             .nav-links { gap: 18px; }
             .nav-links a:not(.btn-access) { font-size: 10px; letter-spacing: 1.5px; }
+            /* Safeguards (2026-10-08) stands down on this whole tier: with
+               it the bar ran 126 px past the Access button at 1100 px and
+               26 px at 1200, measured. The section is one scroll down. */
+            .nav-links a[href="#safeguards"] { display: none; }
+        }
+        /* Above that tier the same link ran 109 px over at 1440 and 49 at
+           1500, and fitted from 1600 (measured 2026-10-08): the gap closes
+           a little until then, the type unchanged. */
+        @media (min-width: 1421px) and (max-width: 1600px) {
+            .nav-links { gap: 20px; }
         }
         /* Four extra anchors: below this the least load-bearing ones stand
            down rather than wrapping the bar onto a second line. */
@@ -1805,8 +1850,15 @@
         }
 
         /* Motion added by the sections above respects the same preference
-           the parallax/pupil tracking already honours in JS. */
+           the parallax/pupil tracking already honours in JS. Since
+           2026-10-08 the whole page rests under it: every animation and
+           transition is off, the page scrolls without easing, and the
+           head switch never hides a block for the reveal. The login and
+           PIN overlays ride transitions, not animations, so they become
+           instant here, never invisible. */
         @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation: none !important; transition: none !important; }
+            html { scroll-behavior: auto !important; }
             .ops-pill .blip,
             .sess-pill.open::before,
             .ops-panel-title .live-pulse,
@@ -1819,12 +1871,43 @@
                visual of the desk section — permanently invisible to anyone
                who asked for less motion. The end state has to be restored
                by hand. This is why .demo-log-row, which uses the same
-               keyframe, was never added to the list above (2026-09-12). */
+               keyframe, was never added to the list above (2026-09-12);
+               with every animation off since 2026-10-08 it is restored the
+               same way. */
             .desk-row {
                 animation: none;
                 opacity: 1;
                 transform: none;
             }
+            .demo-log-row { opacity: 1 !important; transform: none !important; }
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* PRINT (2026-10-08) — dark ink on white, everything shown.      */
+        /* The page's text is var(--text), a pale green on near-black, so  */
+        /* a plain `color: #111` would still print the tokens' pale words  */
+        /* on white paper: the tokens themselves are redefined here. The   */
+        /* fixed layers, the ticker, the bar and the overlays are out; the */
+        /* reveal blocks and the two animated ladders are restored to their */
+        /* end state, since no animation runs on paper.                    */
+        /* ══════════════════════════════════════════════════════════════ */
+        @media print {
+            :root { --bg: #fff; --bg2: #fff; --bg3: #f2f2f2; --text: #111; --text2: #333; --text3: #555; --border: #bbb; --border-glow: #bbb; --accent: #0a5028; --accent-bright: #0a5028; }
+            .grid-bg, #bgCanvas, .scan-line, .eye-glow-shadow, .globe-eye-fixed, .wall-ticker, .wall-nav, .scroll-indicator, .login-overlay, .pin-overlay { display: none !important; }
+            *, *::before, *::after { animation: none !important; transition: none !important; }
+            .reveal, .reveal-left, .reveal-right, .reveal-scale, .desk-row, .demo-log-row { opacity: 1 !important; transform: none !important; }
+            body { background: #fff !important; color: #111 !important; }
+            /* The panels that paint their own dark ground (a literal rgba,
+               not a token) print on a light one, so the words in them
+               stay dark ink on something near white. */
+            .wall-section:nth-child(even) { background: transparent !important; }
+            .feature-card, .visual-label, .demo-exposure-panel, .demo-log-panel, .ops-panel, .ops-inbox-row, .ops-band-cell, .ask-term, .desk-row, .demo-log-row { background: #f4f4f4 !important; backdrop-filter: none !important; }
+            /* The pillar counts and the chain's last hash are drawn as a
+               gradient clipped to their letters, with the colour itself
+               transparent: a printer that leaves background graphics out,
+               which is the browser default, would print an empty slot
+               where the number stands. Plain ink here. */
+            .pillar-num, .hash-block .hash-shimmer { background: none !important; -webkit-background-clip: border-box !important; background-clip: border-box !important; -webkit-text-fill-color: var(--accent) !important; color: var(--accent) !important; }
         }
     </style>
     {# The ring scheme's own sheet (2026-09-29): shared with the home page, so one drawing has one style. After the inline sheet, which owns the tokens it reads. #}
@@ -1835,12 +1918,13 @@
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <!-- BACKGROUND LAYERS                                                  -->
 <!-- ═══════════════════════════════════════════════════════════════════ -->
-<div class="grid-bg"></div>
-<canvas id="bgCanvas"></canvas>
-<div class="scan-line"></div>
+<!-- Decoration, every one of them: hidden from assistive technology.  -->
+<div class="grid-bg" aria-hidden="true"></div>
+<canvas id="bgCanvas" aria-hidden="true"></canvas>
+<div class="scan-line" aria-hidden="true"></div>
 
-<div class="eye-glow-shadow"></div>
-<svg class="globe-eye-fixed" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
+<div class="eye-glow-shadow" aria-hidden="true"></div>
+<svg class="globe-eye-fixed" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <defs>
         <filter id="wallEyeGlow" x="-100%" y="-100%" width="300%" height="300%">
             <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="b1"/>
@@ -1899,6 +1983,7 @@
         <a href="#demo">Demo</a>
         <a href="#operations">Operations</a>
         <a href="#fleet">Fleet</a>
+        <a href="#safeguards">Safeguards</a>
         <a href="#desk">Desk</a>
         <a href="#mind">Mind</a>
         <a href="#horizon">Horizon</a>
@@ -1925,9 +2010,9 @@
         </h1>
         <p class="hero-subtitle reveal delay-3">The All-Seeing Trading Intelligence Platform</p>
         <p class="hero-desc reveal delay-4">
-            Autonomous, multi-asset trading across stocks, forex, commodities, options, crypto, and CFDs &mdash;
+            Automated, multi-asset trading across stocks, ETFs, forex, commodities, indices and crypto &mdash;
             unified by a closed-loop intelligence engine that generates signals, gates risk across themes,
-            executes through six brokers, grades every outcome, and feeds the result back into the next decision.
+            routes each order through one of {{ wall.broker_adapters }} broker adapters, grades every outcome, and feeds the result back into the next decision.
             Built end-to-end. <span class="hash-shimmer">{{ wall.tests_green }} tests green.</span>
         </p>
         <div class="hero-badge reveal delay-5">Institutional-Grade · Production-Hardened · Fully Auditable</div>
@@ -1957,22 +2042,22 @@
         {# Every target below is a server-side aggregate COUNT from the wall context — never a price, a symbol or an account figure. #}
         <div class="stats-bar reveal">
             <div class="stat-cell">
-                <div class="stat-number"><span class="count-up" data-target="{{ wall.asset_classes }}">0</span></div>
+                <div class="stat-number"><span class="count-up" data-target="{{ wall.asset_classes }}">{{ wall.asset_classes }}</span></div>
                 <div class="stat-label">Asset Classes</div>
                 <div class="tick-strip"><span></span><span></span><span></span><span></span><span></span></div>
             </div>
             <div class="stat-cell">
-                <div class="stat-number"><span class="count-up" data-target="{{ wall.broker_adapters }}">0</span></div>
+                <div class="stat-number"><span class="count-up" data-target="{{ wall.broker_adapters }}">{{ wall.broker_adapters }}</span></div>
                 <div class="stat-label">Broker Adapters</div>
                 <div class="tick-strip"><span></span><span></span><span></span><span></span><span></span></div>
             </div>
             <div class="stat-cell">
-                <div class="stat-number"><span class="count-up" data-target="{{ wall.evaluators }}">0</span></div>
+                <div class="stat-number"><span class="count-up" data-target="{{ wall.evaluators }}">{{ wall.evaluators }}</span></div>
                 <div class="stat-label">Signal Evaluators</div>
                 <div class="tick-strip"><span></span><span></span><span></span><span></span><span></span></div>
             </div>
             <div class="stat-cell">
-                <div class="stat-number"><span class="count-up" data-target="{{ wall.tests_green }}">0</span></div>
+                <div class="stat-number"><span class="count-up" data-target="{{ wall.tests_green }}">{{ wall.tests_green }}</span></div>
                 <div class="stat-label">Tests Passing</div>
                 <div class="tick-strip"><span></span><span></span><span></span><span></span><span></span></div>
             </div>
@@ -1984,7 +2069,8 @@
             Sauron isn't a signal feed or a bot framework &mdash; it's the synthesis of both, plus everything
             that connects them. {{ wall.evaluators }} evaluators fuse price, news, macro, COT, options flow and 13F filings
             into composite signals. A multi-dimensional risk gate prevents stacked exposure across asset classes.
-            Six broker adapters route execution. Every trade is graded, every gate decision audited, every dollar
+            {{ wall.broker_adapters }} broker adapters stand behind one interface, and the router picks one venue for each class.
+            Every trade is graded, every gate decision audited, every dollar
             tracked. Then the results feed back into how the next decision gets made.
         </p>
 
@@ -2130,7 +2216,7 @@
                 <div class="visual-dot" style="top:55%;left:70%;animation-delay:0.7s;"></div>
                 <div class="visual-dot" style="top:75%;left:40%;animation-delay:1.4s;"></div>
                 <div class="visual-dot" style="top:20%;left:65%;animation-delay:0.3s;background:var(--accent-red);box-shadow:0 0 12px var(--accent-red);"></div>
-                <div class="visual-label" style="top:28%;left:22%;">EURUSD BUY 0.87</div>
+                <div class="visual-label" style="top:28%;left:22%;">AUDCAD BUY 0.87</div>
                 <div class="visual-label" style="top:53%;left:67%;">BTCUSD STRONG 0.94</div>
                 <div class="visual-label" style="top:73%;left:37%;">XAUUSD HOLD 0.62</div>
                 <div class="visual-label" style="top:18%;left:62%;border-color:var(--accent-red);color:var(--accent-red);">SPX SELL 0.81</div>
@@ -2138,7 +2224,7 @@
             </div>
             <div class="split-content reveal-right">
                 <div class="section-label">Signal Engine</div>
-                <h2 class="section-title">12 Evaluators.<br>One Composite Score.</h2>
+                <h2 class="section-title">{{ wall.evaluators }} Evaluators.<br>One Composite Score.</h2>
                 <div class="sep sep-left"></div>
                 <p class="section-desc" style="margin-bottom:0;">
                     The opportunity scanner fuses {{ wall.evaluators }} evaluator kinds into multi-modal setups.
@@ -2207,11 +2293,13 @@
                 <p class="section-desc" style="margin-bottom:0;">
                     Specialised agents powered by Claude with multi-model consensus, RAG-augmented memory,
                     and Brier-score calibration tracking. Every agent prediction is scored against
-                    real outcomes &mdash; bad agents lose trust automatically. AI is a layer that
-                    <strong>adds confidence</strong>, never gates execution. Four autonomy levels
-                    from <em>Observe</em> to <em>Full Auto</em> &mdash; you choose.
+                    real outcomes &mdash; bad agents lose trust automatically.
+                    AI never sends an order. With one switch on, it may argue against one: before a real-money bot order leaves,
+                    the Executioner says why it fails and the Champion why it works, and after a first stretch in shadow
+                    the Executioner may cut the size or refuse the entry &mdash; never raise it.
                 </p>
                 <ul class="check-list">
+                    <li><span class="check-mark">&#x2713;</span>Executioner · Champion: the trade debate, shadow first, binding only on its graded record</li>
                     <li><span class="check-mark">&#x2713;</span>PreTradeSanity · SignalJournal · DecayInvestigator · AnomalyDetector</li>
                     <li><span class="check-mark">&#x2713;</span>StrategyAdvisor · StrategyMutator · MacroInterpreter · NewsAnalyst</li>
                     <li><span class="check-mark">&#x2713;</span>WeeklyReviewer · MarketCommentator · EarningsAnalyst · SpeechAnalyst</li>
@@ -2304,7 +2392,7 @@
                     </svg>
                 </div>
                 <div class="pipe-title">SIGNAL</div>
-                <div class="pipe-sub">12 evaluators<br>fuse → composite</div>
+                <div class="pipe-sub">{{ wall.evaluators }} evaluators<br>fuse → composite</div>
             </div>
 
             <div class="pipe-node">
@@ -2321,7 +2409,7 @@
                     </svg>
                 </div>
                 <div class="pipe-title">RISK GATE</div>
-                <div class="pipe-sub">5-dimension<br>orchestrator</div>
+                <div class="pipe-sub">every gate<br>says no first</div>
             </div>
 
             <div class="pipe-node">
@@ -2338,7 +2426,7 @@
                     </svg>
                 </div>
                 <div class="pipe-title">EXECUTE</div>
-                <div class="pipe-sub">6 broker adapters<br>idempotent orders</div>
+                <div class="pipe-sub">{{ wall.broker_adapters }} broker adapters<br>idempotent orders</div>
             </div>
 
             <div class="pipe-node">
@@ -2369,9 +2457,9 @@
         </div>
 
         <p class="section-desc reveal delay-5" style="margin: 32px auto 0; font-size: 13px; color: var(--text2); max-width: 720px;">
-            <span class="hash-shimmer">Closed-loop</span> means a rule that wins for 30 days then drifts negative
-            for 7 will fire a notification, get auto-demoted from <em>live-full</em> back to <em>live-small</em>,
-            and surface in the audit log &mdash; without anyone watching.
+            <span class="hash-shimmer">Closed-loop</span> means that, with the ladder's switch on, a real-money rule whose recent
+            expectancy falls under half of its stage's baseline drops a rung, one measured as losing drops straight to paper,
+            and every move is recorded with its reason, whether or not anyone is watching.
         </p>
     </div>
 </section>
@@ -2630,7 +2718,7 @@
         // Top sector — unipolar, fills from left
         var s = topSector();
         if (s[0]) {
-            expSecEl.textContent = s[0] + ' ' + s[1];
+            expSecEl.textContent = s[0] + ' ' + s[1].toFixed(1);
             expSecFill.style.width = Math.min(100, (s[1] / secCap) * 100) + '%';
             expSecFill.classList.toggle('over', s[1] > secCap);
             expSecEl.style.color = s[1] > secCap ? 'var(--accent-red)' : 'var(--accent)';
@@ -2644,32 +2732,32 @@
     // Asset universe — broad enough to feel real
     var sectors = ['tech', 'finance', 'energy', 'health', 'consumer', 'realestate'];
     var assetsRandom = [
-        ['stock','AAPL','BUY','tech'], ['stock','MSFT','BUY','tech'], ['stock','NVDA','BUY','tech'],
+        ['stock','AVGO','BUY','tech'], ['stock','MSFT','BUY','tech'], ['stock','ORCL','BUY','tech'],
         ['stock','JPM','BUY','finance'], ['stock','GS','SELL','finance'],
         ['stock','XOM','BUY','energy'], ['stock','CVX','BUY','energy'],
         ['stock','PFE','BUY','health'], ['stock','UNH','BUY','health'],
         ['stock','KO','SELL','consumer'], ['stock','WMT','BUY','consumer'],
-        ['forex','EURUSD','BUY',''], ['forex','USDJPY','BUY',''], ['forex','GBPUSD','SELL',''],
+        ['forex','NZDUSD','BUY',''], ['forex','USDJPY','BUY',''], ['forex','GBPUSD','SELL',''],
         ['forex','EURGBP','BUY',''], ['forex','AUDUSD','SELL',''], ['forex','USDCHF','BUY',''],
         ['commodity','GC','BUY',''], ['commodity','CL','BUY',''], ['commodity','SI','BUY',''],
-        ['options','AAPL','BUY','tech'], ['options','TSLA','BUY','consumer'],
+        ['options','AVGO','BUY','tech'], ['options','TSLA','BUY','consumer'],
     ];
     var assetsUsdLong = [
         ['forex','USDJPY','BUY',''], ['forex','USDCAD','BUY',''], ['forex','USDCHF','BUY',''],
-        ['forex','EURUSD','SELL',''], ['forex','GBPUSD','SELL',''],
+        ['forex','NZDUSD','SELL',''], ['forex','GBPUSD','SELL',''],
         ['stock','XOM','BUY','energy'], ['stock','JPM','BUY','finance'],
     ];
     var assetsEurStack = [
-        ['forex','EURUSD','BUY',''], ['forex','EURGBP','BUY',''], ['forex','EURJPY','BUY',''],
-        ['forex','EURCHF','BUY',''], ['forex','EURAUD','BUY',''], ['forex','EURCAD','BUY',''],
+        ['forex','EURSEK','BUY',''], ['forex','EURGBP','BUY',''], ['forex','EURJPY','BUY',''],
+        ['forex','EURCHF','BUY',''], ['forex','EURAUD','BUY',''], ['forex','EURNZD','BUY',''],
     ];
     var assetsTechStack = [
-        ['stock','AAPL','BUY','tech'], ['stock','MSFT','BUY','tech'], ['stock','NVDA','BUY','tech'],
-        ['stock','GOOGL','BUY','tech'], ['stock','META','BUY','tech'], ['options','AAPL','BUY','tech'],
+        ['stock','AVGO','BUY','tech'], ['stock','MSFT','BUY','tech'], ['stock','ORCL','BUY','tech'],
+        ['stock','GOOGL','BUY','tech'], ['stock','META','BUY','tech'], ['options','AVGO','BUY','tech'],
     ];
     var assetsBalanced = [
-        ['stock','AAPL','BUY','tech'], ['stock','JPM','SELL','finance'],
-        ['forex','EURUSD','BUY',''], ['forex','USDJPY','SELL',''],
+        ['stock','AVGO','BUY','tech'], ['stock','JPM','SELL','finance'],
+        ['forex','NZDUSD','BUY',''], ['forex','USDJPY','SELL',''],
         ['commodity','GC','BUY',''], ['stock','PFE','SELL','health'],
     ];
     var ASSET_POOLS = {
@@ -2689,6 +2777,8 @@
             var base = symbol.substring(0, 3), quote = symbol.substring(3);
             if (base === 'USD') c.usd = +1 * sign;
             else if (quote === 'USD') c.usd = -1 * sign;
+            // A EUR leg lands on the sector bar: without this the EUR preset could never trip a cap.
+            if (base === 'EUR' || quote === 'EUR') c.sector = 'EUR';
         } else if (assetClass === 'stock' || assetClass === 'options') {
             c.equity = +1 * sign;
             c.sector = knownSector || sectors[Math.floor(Math.random() * sectors.length)];
@@ -2739,7 +2829,7 @@
             reason = 'Equity cap |' + afterEq.toFixed(1) + '| > ' + eqCap.toFixed(1);
         } else if (contrib.sector && afterSec > secCap) {
             rejected = true;
-            reason = contrib.sector + ' sector ' + afterSec + ' > ' + secCap;
+            reason = contrib.sector + ' sector ' + afterSec.toFixed(1) + ' > ' + secCap;
         }
 
         var label = a[0].toUpperCase() + ' ' + a[1] + ' ' + a[2];
@@ -2802,8 +2892,9 @@
     // Slow exposure decay so caps stay relevant + visitor can experiment
     setInterval(function() {
         exp.usd *= 0.95; exp.equity *= 0.95;
+        // Kept to a tenth, so a refusal never reads "3.0 > 3".
         Object.keys(exp.sectors).forEach(function(k) {
-            exp.sectors[k] = Math.max(0, exp.sectors[k] - 0.4);
+            exp.sectors[k] = Math.round(Math.max(0, exp.sectors[k] - 0.4) * 10) / 10;
         });
         renderExposure();
     }, 1500);
@@ -2829,18 +2920,24 @@
     syncLabels();
 
     // Spawn rate — slower for clarity. Only run when section is visible.
+    // An engine without IntersectionObserver (Safari 12.0, IE11) cannot
+    // tell when the section is seen: the demo simply runs.
     var spawnInterval = null;
-    var io = new IntersectionObserver(function(entries) {
-        entries.forEach(function(e) {
-            if (e.isIntersecting && !spawnInterval) {
-                spawnInterval = setInterval(spawn, 1100);
-            } else if (!e.isIntersecting && spawnInterval) {
-                clearInterval(spawnInterval);
-                spawnInterval = null;
-            }
-        });
-    }, { threshold: 0.2 });
-    io.observe(document.getElementById('demo'));
+    if (typeof window.IntersectionObserver !== 'function') {
+        spawnInterval = setInterval(spawn, 1100);
+    } else {
+        var io = new IntersectionObserver(function(entries) {
+            entries.forEach(function(e) {
+                if (e.isIntersecting && !spawnInterval) {
+                    spawnInterval = setInterval(spawn, 1100);
+                } else if (!e.isIntersecting && spawnInterval) {
+                    clearInterval(spawnInterval);
+                    spawnInterval = null;
+                }
+            });
+        }, { threshold: 0.2 });
+        io.observe(document.getElementById('demo'));
+    }
 })();
 </script>
 </section>
@@ -2890,7 +2987,7 @@
 
                     <div class="ops-card">
                         <div class="ops-card-head">
-                            <span>EURUSD</span>
+                            <span>CHFJPY</span>
                             <span class="ops-side long">LONG</span>
                             <span style="color:var(--text3);">entry · stop · target</span>
                         </div>
@@ -2904,7 +3001,7 @@
 
                     <div class="ops-card">
                         <div class="ops-card-head">
-                            <span>NVDA</span>
+                            <span>ORCL</span>
                             <span class="ops-side short">SHORT</span>
                             <span style="color:var(--text3);">entry · stop · target</span>
                         </div>
@@ -2951,18 +3048,19 @@
             <div class="pillar">
                 <div class="pillar-num">1 CLICK</div>
                 <div class="pillar-lbl">Take Trade</div>
-                <div class="pillar-desc">A signal becomes a position from the rail itself &mdash; sized from your risk
+                <div class="pillar-desc">A signal becomes a trade from the rail itself &mdash; sized from your risk
                 settings, then graded, reconciled, kill-switchable and audited exactly like a bot's.
-                Executes on the paper venue: the bots are what trade live, once they have earned it.</div>
+                Paper by default; a live ticket goes to the broker as one order with its stop and target, behind the trading PIN,
+                and warns of a reward under the risk, a trade no signal backs, a shut market, a bad entry hour or a sick venue &mdash; then leaves the last word to you.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.instruments }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.instruments }}">{{ wall.instruments }}</span></div>
                 <div class="pillar-lbl">Instruments Watched</div>
                 <div class="pillar-desc">Every one clickable through to its own page &mdash; candlesticks down to
                 the minute, the signals that fired on it, and the news that moved it.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.news_24h }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.news_24h }}">{{ wall.news_24h }}</span></div>
                 <div class="pillar-lbl">Headlines · 24h</div>
                 <div class="pillar-desc">Ingested, scored and attached to the instruments they touch. A dash in
                 the headband always means &ldquo;not measured yet&rdquo; &mdash; never a zero dressed up as data.</div>
@@ -2978,13 +3076,15 @@
     <div class="container" style="text-align: center;">
         <div class="section-label reveal">Bot Fleet <span class="new-pill">TRIAL BY FIRE</span></div>
         <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
-            Nothing Reaches Live<br>Without Earning It.
+            Full Size Is Earned.<br>Never Assumed.
         </h2>
         <div class="sep reveal delay-2"></div>
         <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
             One bot per asset class, each with its own entry logic, sizing, cooldowns and skip reasons &mdash;
-            all of them starting on the paper venue. A strategy climbs the ladder only on evidence,
-            and falls back down the moment the evidence stops. Nobody has to be watching.
+            every one born switched off, on the paper venue. A rule keeps its full size on real money only once
+            the proving ground has passed it on that class and side, or its own graded record has;
+            one measured as losing there is refused, and everything else enters at a quarter.
+            A stage set by hand without that evidence is labelled as such.
         </p>
 
         <div class="broker-grid reveal delay-4">
@@ -3004,9 +3104,9 @@
                 <div class="broker-name">CRYPTO</div>
                 <div class="broker-meta">24/7 · funding + liquidation aware</div>
             </div>
-            <div class="broker-tile live">
+            <div class="broker-tile">
                 <div class="broker-name">OPTIONS</div>
-                <div class="broker-meta">flow-driven · defined risk</div>
+                <div class="broker-meta">paper only · no live venue</div>
             </div>
             <div class="broker-tile">
                 <div class="broker-name">MANUAL</div>
@@ -3032,19 +3132,19 @@
             <div class="rung r3">
                 <div class="rung-step">STAGE 03</div>
                 <div class="rung-name">LIVE · SMALL</div>
-                <div class="rung-sub">real money,<br>scaled-down sizing</div>
+                <div class="rung-sub">real money,<br>a quarter of the size</div>
                 <div class="rung-bar"></div>
             </div>
             <div class="rung r4">
                 <div class="rung-step">STAGE 04</div>
                 <div class="rung-name">LIVE · FULL</div>
-                <div class="rung-sub">full sizing,<br>still under the gate</div>
+                <div class="rung-sub">full size once<br>the evidence agrees</div>
                 <div class="rung-bar"></div>
             </div>
         </div>
         <p class="ladder-demote reveal delay-6">
-            <span class="down">▼</span> and back down again &mdash; a decayed rule is demoted automatically,
-            with <span class="count-up" data-target="{{ wall.strategies }}">0</span> strategies currently on the ladder.
+            <span class="down">▼</span> and back down again: with the ladder's switch on, a measured loser drops to paper and a decayed rule one rung.
+            <span class="count-up" data-target="{{ wall.strategies }}">{{ wall.strategies }}</span> strategies are on the ladder now.
         </p>
 
         <div class="pillar-row reveal delay-6" style="max-width: 1080px; margin: 32px auto 0;">
@@ -3063,10 +3163,156 @@
                 No archaeology across five pages.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.bots }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.bots }}">{{ wall.bots }}</span></div>
                 <div class="pillar-lbl">Configured Bots</div>
                 <div class="pillar-desc">Every one of them disabled and flattened in a single action by the
                 kill switch &mdash; which itself needs your PIN.</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- THE SAFEGUARDS (2026-10-08): what stands around a trade, counted.  -->
+<!-- Every number is a wall_facts key; every sentence is hedged the way -->
+<!-- the code is, since most of this ships off. Each sentence sits on   -->
+<!-- one source line, so a test can pin a fragment of it.               -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="safeguards">
+    <div class="container" style="text-align: center;">
+        <div class="section-label reveal">The Safeguards <span class="new-pill">EVERY SIDE</span></div>
+        <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
+            Before, During,<br>and When It Breaks.
+        </h2>
+        <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
+            A trade is surrounded on every side: checks that can stop it leaving, care while it is open, guards that watch the machine itself, and an alarm that rings when something is wrong.
+            Most of it ships switched off, and none of the {{ wall.money_switches }} switches the platform marks as real-money decisions is turned on by an all-on button.
+        </p>
+
+        <div class="features-grid" style="text-align: left; margin-top: 36px;">
+            <div class="feature-card reveal delay-1">
+                <div class="feature-icon gold">
+                    <!-- A sealed square with its check: the proof, written before the money -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <rect x="3" y="3" width="18" height="18"/>
+                        <line x1="3" y1="7.5" x2="21" y2="7.5"/>
+                        <polyline points="7,13 10.5,16.5 17,10"/>
+                    </svg>
+                </div>
+                <div class="feature-title">Proof Before Money</div>
+                <div class="feature-text">
+                    Each night, with its switch on, the proving ground replays every live rule with the engine's own costs and stops: a holdout it never chose from, slices of time judged apart, costs doubled, a bound corrected for every variant tried.
+                    A rule measured as losing on a class and a side is refused real money there; one that passed keeps its full size; every other enters at a quarter until its own graded record says more.
+                    And no class trades at eToro before one of its orders has filled and closed there &mdash; {{ wall.proof_classes }} have &mdash; and a sell needs a proof of its own: {{ wall.short_classes }} have one.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-2">
+                <div class="feature-icon blue">
+                    <!-- An octagonal clock face: the one clock the gate and the guard read -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="8,2 16,2 22,8 22,16 16,22 8,22 2,16 2,8"/>
+                        <polyline points="12,6.5 12,12 16,14.5"/>
+                        <line x1="12" y1="2" x2="12" y2="4"/>
+                        <line x1="2" y1="12" x2="4" y2="12"/>
+                        <line x1="20" y1="12" x2="22" y2="12"/>
+                    </svg>
+                </div>
+                <div class="feature-title">The Clock</div>
+                <div class="feature-text">
+                    No bot opens a real-money trade in a share, an ETF, a currency or a commodity while its exchange is shut.
+                    Crypto aside, which never shuts, no bot opens a new trade in the minutes around New York's five o'clock rollover, in a market's first quarter hour, in a share's last minutes or before a weekend, and none opens one around a high-impact print on its currency; the live ticket warns of each and leaves the last word to a person.
+                    The gate and the guard read one clock, so they cannot disagree.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-3">
+                <div class="feature-icon">
+                    <!-- A pulse inside a frame: the venue's health, read before every real entry -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <rect x="2" y="4" width="20" height="16"/>
+                        <polyline points="4,12 8,12 10,8 13,16 15,12 20,12"/>
+                    </svg>
+                </div>
+                <div class="feature-title">The Venue's Health</div>
+                <div class="feature-text">
+                    An order whose answer never came back is held in doubt and looked for at the venue, never sent twice blind.
+                    A burst of failures makes the venue sick: new real-money bot entries wait for quiet while closes and stop moves go on.
+                    No bot enters on a crossed, stale or frozen quote, every live bot order takes a last look before it leaves, and a worse fill at eToro moves the stop by the slip.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-4">
+                <div class="feature-icon purple">
+                    <!-- A shield with a stop stepping up inside it: the care, tighten-only -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="12,2 20,5 20,12 12,22 4,12 4,5"/>
+                        <polyline points="7,15 10,15 10,12 14,12 14,9 17,9"/>
+                    </svg>
+                </div>
+                <div class="feature-title">Care of the Open Trade</div>
+                <div class="feature-text">
+                    With its switch on, a trade's stop goes to break-even at one R and trails past it, a trade that has done nothing for days is let go,
+                    and before a weekend or a high-impact print a winner up half an R or more is locked at break-even and a real-money loser at five times leverage or more is cut.
+                    A trade opened by hand keeps the locks and is never cut by a rule.
+                    Every tighter stop on a real-money trade is copied onto the stop resting at eToro, so the lock outlives the platform.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-5">
+                <div class="feature-icon red">
+                    <!-- A hex frame around a square sight: the watchdog, looking for what must never happen -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent-red)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="12,2 21,7 21,17 12,22 3,17 3,7"/>
+                        <rect x="8.5" y="8.5" width="7" height="7"/>
+                        <line x1="12" y1="4.5" x2="12" y2="8.5"/>
+                        <line x1="12" y1="15.5" x2="12" y2="19.5"/>
+                        <line x1="5.5" y1="12" x2="8.5" y2="12"/>
+                        <line x1="15.5" y1="12" x2="18.5" y2="12"/>
+                    </svg>
+                </div>
+                <div class="feature-title">The Guards and the Brake</div>
+                <div class="feature-text">
+                    Every five minutes, with their switch on, {{ wall.guards }} guards look for what must never happen: a booking on a shut market, a live trade with no stop, a stuck close, a drift from the venue, a stop that did not hold.
+                    With a second switch on as well, a few of them may brake, and a brake only stops new entries: what a bot holds is still managed.
+                    Every switch-off records who, when and why.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-6">
+                <div class="feature-icon">
+                    <!-- A bell drawn in straight lines: it rings for a critical problem and for nothing else -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <polyline points="4,17 6,15 6,9 12,4 18,9 18,15 20,17 4,17"/>
+                        <line x1="10" y1="20" x2="14" y2="20"/>
+                        <line x1="12" y1="2" x2="12" y2="4"/>
+                    </svg>
+                </div>
+                <div class="feature-title">The Alarm</div>
+                <div class="feature-text">
+                    With its switch on, a second bot in a second group rings for a critical problem and for nothing else &mdash; never a heartbeat, never an amount.
+                    Once it is set up, a watcher outside the server raises the alarm when the platform goes quiet.
+                </div>
+            </div>
+        </div>
+
+        {# Every target below is a count off a registry or a table (core.wall_facts), never typed: the page follows the next guard, switch or proof the day it lands. #}
+        <div class="pillar-row reveal delay-6" style="max-width: 1080px; margin: 32px auto 0;">
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.guards }}">{{ wall.guards }}</span></div>
+                <div class="pillar-lbl">Guards in the Watchdog</div>
+                <div class="pillar-desc">With their switch on, together they read the platform and the venue every five minutes; a guard that cannot run is reported, never read as a healthy one.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.money_switches }}">{{ wall.money_switches }}</span></div>
+                <div class="pillar-lbl">Real-Money Switches</div>
+                <div class="pillar-desc">Every one ships off, none is armed by an all-on button, and each is turned on alone, by a person.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.proving_verdicts }}">{{ wall.proving_verdicts }}</span></div>
+                <div class="pillar-lbl">Proving Verdicts Written</div>
+                <div class="pillar-desc">Every verdict the proving ground has saved, whether it passed, failed or had too little to judge, counted whatever it said.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.proof_classes }}">{{ wall.proof_classes }}</span></div>
+                <div class="pillar-lbl">Classes Through the Venue</div>
+                <div class="pillar-desc">Classes with an order filled and closed at eToro, written into the code with its test; a sell needs its own.</div>
             </div>
         </div>
     </div>
@@ -3183,9 +3429,10 @@
             sets a leverage or a margin knob &mdash; the preset is timeframes, stop and target multiples,
             a hold ceiling, a concurrency limit and a risk fraction, and that is the whole list. What the
             short-term one actually gets is how much position one fixed risk budget buys when the stop is
-            tight, plus how many bets may run at once. Both are cash. Where leverage exists at all it is
-            the broker's, on the venues that are built that way, and this platform reports it back to you
-            as a fact at the confirm step instead of offering it as a dial to turn up. And a personality
+            tight, plus how many bets may run at once. Both are cash.
+            Where leverage exists at all it is the broker's: with the leverage switch on, a live ticket offers the multipliers the venue lists, the highest by default,
+            and with its switch on the attack mode picks, for each entry, the highest one the venue lists that its stop allows.
+            It changes the money the broker locks, never the loss at the stop. And a personality
             moves no capital by itself: it changes no account share, enables no config, and applying one
             to a bot that is already trading live re-sizes real risk &mdash; so that one asks for your PIN.
         </p>
@@ -3196,7 +3443,7 @@
 <!-- THE CAPITAL DESK — proposes, ranks, fills a budget. In SHADOW.     -->
 <!-- The word SHADOW is load-bearing and appears in the frame, the copy -->
 <!-- and the pillar: a visitor who reads one of the three and stops     -->
-<!-- must not come away believing this thing places orders.             -->
+<!-- must not leave believing this thing places orders.                  -->
 <!--                                                                    -->
 <!-- 2026-09-12 (review): those three were TYPED, which made them a     -->
 <!-- claim about deployment history hardcoded into a template — the     -->
@@ -3286,8 +3533,8 @@
                     </div>
                     <div style="font-family:var(--font-m);font-size:9px;color:var(--text3);letter-spacing:1px;margin-top:8px;line-height:1.5;text-align:left;">
                         The budget is a share of the venue's capital, less the risk already standing at
-                        stop in the open book, and the drawdown governor shrinks it as the curve falls
-                        away from its high-water mark. Paper and live never share a budget, a book, or a
+                        stop in the open book, and the drawdown governor shrinks it as the curve
+                        falls from its high-water mark. Paper and live never share a budget, a book, or a
                         correlation penalty.
                     </div>
                 </div>
@@ -3307,19 +3554,19 @@
             through, prices the exit it would have found, and books the R it would have paid &mdash; so
             the desk is graded against the fleet it overruled, with the tie-breaks in that counterfactual
             deliberately set <em>against</em> the desk. A correlation it could not measure enters the
-            arithmetic as zero and is written down as unmeasured, never quietly assumed away.
+            arithmetic as zero and is written down as unmeasured, never passed off as measured.
         </p>
 
         <div class="pillar-row reveal delay-6" style="max-width: 1080px; margin: 32px auto 0;">
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.desk_plans }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.desk_plans }}">{{ wall.desk_plans }}</span></div>
                 <div class="pillar-lbl">Desk Passes Recorded</div>
                 <div class="pillar-desc">One row per user, per venue, per tick &mdash; how many times the desk
                 has <em>thought</em>. Not how many times it acted: in shadow the fleet executes exactly as it
                 always has, and the plan is the counterfactual being graded beside it.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.desk_decisions_graded }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.desk_decisions_graded }}">{{ wall.desk_decisions_graded }}</span></div>
                 <div class="pillar-lbl">Decisions With an R</div>
                 <div class="pillar-desc">A taken candidate inherits its trade's realised R; a displaced one is
                 graded on the bar-walk it never got. A decision no bar could price stays ungraded rather than
@@ -3330,12 +3577,11 @@
                 <div class="pillar-lbl">Placed by the Desk</div>
                 <div class="pillar-desc">The desk sends nothing itself, in either mode: its whole power is to
                 shrink a size or skip an entry.{% if wall.desk_live_plans %}
-                Of the passes above, <span class="count-up" data-target="{{ wall.desk_live_plans }}">0</span>
+                Of the passes above, <span class="count-up" data-target="{{ wall.desk_live_plans }}">{{ wall.desk_live_plans }}</span>
                 were written with the fleet obeying the plan &mdash; because a person read the graded
                 evidence and turned that switch on.{% else %}
                 Every pass above was written in SHADOW: the switch that would let the plan be obeyed is off,
-                and it turns on the way everything else here does &mdash; on graded evidence, by a person,
-                behind the PIN.{% endif %}
+                and it is turned on alone, by a person, never by an all-on button.{% endif %}
                 <a href="#spine" style="color:var(--accent);text-decoration:none;">Why that is the point &rarr;</a></div>
             </div>
         </div>
@@ -3411,7 +3657,7 @@
 
         <div class="pillar-row reveal delay-5" style="max-width: 1080px; margin: 32px auto 0;">
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.share_plans }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.share_plans }}">{{ wall.share_plans }}</span></div>
                 <div class="pillar-lbl">Share Plans Written</div>
                 <div class="pillar-desc">Every plan, in every state &mdash; not only the applied ones. The claim
                 is that the allocator proposes on a schedule and is graded whether or not anybody clicks;
@@ -3420,10 +3666,11 @@
             <div class="pillar">
                 <div class="pillar-num">PROPOSED</div>
                 <div class="pillar-lbl">Nothing Moves</div>
-                <div class="pillar-desc">A plan is a proposal. It moves a share only when an admin applies it
-                behind the PIN, and only with the live switch on.{% if wall.share_plans_applied %}
-                <span class="count-up" data-target="{{ wall.share_plans_applied }}">0</span> have been applied
-                here &mdash; each one by a person, each one reversible.{% else %}
+                <div class="pillar-desc">A plan is a proposal. It moves a share only when an admin applies it,
+                behind the PIN on the page or with an explicit confirmation on the server, with the live switch on &mdash;
+                or, with a second switch on as well, when a shock plan that only lowers shares applies itself.{% if wall.share_plans_applied %}
+                <span class="count-up" data-target="{{ wall.share_plans_applied }}">{{ wall.share_plans_applied }}</span> have been applied
+                here, each one reversible.{% else %}
                 None has ever been applied here.{% endif %} This module never writes a pool's capital
                 and never touches the broker: the share is the only thing it decides.</div>
             </div>
@@ -3528,7 +3775,7 @@
                 </div>
                 <div class="feature-title">Brain Synthesis</div>
                 <div class="feature-text">
-                    Every thirty minutes a structured world snapshot &mdash; observations, portfolio state,
+                    Every hour a structured world snapshot &mdash; observations, portfolio state,
                     exposure, rule track records, regime probes &mdash; becomes one report with a regime
                     call, a confidence and a handful of <em>falsifiable</em> predictions. If synthesis
                     fails it says so; downstream agents degrade instead of guessing.
@@ -3753,16 +4000,26 @@
     <div class="container" style="text-align: center;">
         <div class="section-label reveal">Execution Network</div>
         <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
-            Six Brokers. One Adapter Pattern.
+            One Adapter Pattern.<br>One Venue per Class.
         </h2>
         <div class="sep reveal delay-2"></div>
         <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
             Every broker speaks the same duck-typed interface (<code>ping · ticker · klines · order_book ·
-            market_order · account · balance</code>). Routing per-symbol via the broker_router based on
-            the instrument's asset_class. Encrypted credentials at rest (Fernet). Paper-mode default.
+            market_order · account · balance</code>).
+            The router consults the flagged venues in one fixed order &mdash; Saxo, then eToro, then IBKR &mdash;
+            and a class nobody has flagged goes to its default adapter when that adapter has keys; otherwise nothing real is sent.
+            Encrypted credentials at rest (Fernet). Paper-mode default.
         </p>
 
         <div class="broker-grid reveal delay-4">
+            <div class="broker-tile live">
+                <div class="broker-name">ETORO</div>
+                <div class="broker-meta">stocks · ETFs · indices · forex · commodities · crypto</div>
+            </div>
+            <div class="broker-tile">
+                <div class="broker-name">SAXO</div>
+                <div class="broker-meta">real listings · one sign-in kept alive</div>
+            </div>
             <div class="broker-tile live">
                 <div class="broker-name">BINANCE</div>
                 <div class="broker-meta">spot · futures · crypto</div>
@@ -3773,11 +4030,11 @@
             </div>
             <div class="broker-tile live">
                 <div class="broker-name">OANDA</div>
-                <div class="broker-meta">forex · 28 pairs · practice</div>
+                <div class="broker-meta">forex · practice or live</div>
             </div>
-            <div class="broker-tile live">
+            <div class="broker-tile">
                 <div class="broker-name">IBKR</div>
-                <div class="broker-meta">options · futures · CFDs · stocks</div>
+                <div class="broker-meta">retired 23 September 2026</div>
             </div>
             <div class="broker-tile">
                 <div class="broker-name">PAPER</div>
@@ -3800,7 +4057,8 @@
                 <div class="pillar-num">SHA-256</div>
                 <div class="pillar-lbl">client_order_id</div>
                 <div class="pillar-desc">Deterministic order IDs prevent double-fills if a worker dies
-                mid-call. Binance, Alpaca and OANDA dedup server-side.</div>
+                mid-call. Binance, Alpaca and OANDA dedup server-side.
+                At eToro, an order whose answer never came back is held in doubt and looked for in the venue's own list before the instrument trades again &mdash; never sent a second time blind.</div>
             </div>
             <div class="pillar">
                 <div class="pillar-num">23:30</div>
@@ -3827,8 +4085,8 @@
                     The audit log is append-only and hash-chained. Every trade open, trade close,
                     and gate rejection produces a row whose <code>payload_hash</code> =
                     <code>sha256(prev_hash &middot; kind &middot; canonical(data))</code>. Mutating any past row breaks the
-                    chain &mdash; verify exposes the tamper. Combined with FIFO/LIFO/HIFO tax-lot bookkeeping
-                    and Form-8949 CSV export, the platform is ready for taxable-account live deployment.
+                    chain &mdash; verify exposes the tamper.
+                    It sits beside FIFO/LIFO/HIFO tax-lot bookkeeping and a Form-8949 CSV export.
                 </p>
                 <ul class="check-list">
                     <li><span class="check-mark">&#x2713;</span><code>save()</code> refuses to update existing rows; <code>delete()</code> raises</li>
@@ -3870,14 +4128,14 @@
         </h2>
         <div class="sep reveal delay-2"></div>
         <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;text-align:center;">
-            A password gets you a session. It does not get you money. Every action that can move capital
-            sits behind a second factor you hold, and a screen left unattended stops being a screen
-            anyone can use.
+            A password gets you a session. It does not get you money: unticking the demo box, arming a real bot,
+            placing or closing a real order by hand and applying a capital plan each sit behind a second factor you hold,
+            and a screen left unattended stops being a screen anyone can use.
         </p>
 
         <div class="pillar-row reveal delay-4" style="margin-top: 32px; text-align: center;">
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.chain_length }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.chain_length }}">{{ wall.chain_length }}</span></div>
                 <div class="pillar-lbl">Audit Chain</div>
                 <div class="pillar-desc">Append-only entries, each hashed onto the last. Editing any past
                 row breaks every hash after it, and verification names the break.</div>
@@ -3923,35 +4181,36 @@
         <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
             One rule runs under all of it. Every proposal is a gradable call with a deadline on it. Every
             plan is scored against the counterfactual &mdash; what actually happened, or what the trade it
-            displaced would have paid. Anything unmeasured renders as an em dash, never as a zero dressed
-            up as data. And every switch that can move money is off until a person turns it on, behind the
-            PIN, with an audit row to show for it.
+            displaced would have paid. Inside the platform, anything unmeasured renders as an em dash, never as a zero dressed
+            up as data; on this public page a counter that cannot be read shows 0, by design, so the front door never fails.
+            And every switch ships off; the {{ wall.money_switches }} switches the platform marks as real-money decisions are never turned on by an all-on button,
+            and each waits for a person to turn it on alone.
         </p>
 
         <div class="pillar-row reveal delay-4" style="max-width: 1080px; margin: 32px auto 0;">
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.agent_calls_graded }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.agent_calls_graded }}">{{ wall.agent_calls_graded }}</span></div>
                 <div class="pillar-lbl">Agent Calls Resolved</div>
                 <div class="pillar-desc">Predictions the resolver has marked right or wrong. Both directions,
                 summed &mdash; publishing only the correct ones would be a hit rate dressed up as a volume,
                 on the page whose whole pitch is that this platform grades itself in both.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.components }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.components }}">{{ wall.components }}</span></div>
                 <div class="pillar-lbl">Components on a Switch</div>
                 <div class="pillar-desc">Scrapers, engines, pipelines &mdash; each one something an admin can
                 stop from the cockpit. Counted whether it is running or paused: the number says how much of
                 the platform answers to a switch at all.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.shell_commands }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.shell_commands }}">{{ wall.shell_commands }}</span></div>
                 <div class="pillar-lbl">Commands Catalogued</div>
                 <div class="pillar-desc">Every operator command with its exact usage, held against the
-                framework's own command list by a test &mdash; so the catalogue in the cockpit cannot drift
-                away from what the shell will actually accept.</div>
+                framework's own command list by a test &mdash; so the catalogue in the cockpit cannot
+                drift from what the shell will actually accept.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.rules_governed }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.rules_governed }}">{{ wall.rules_governed }}</span></div>
                 <div class="pillar-lbl">Rules Under Control</div>
                 <div class="pillar-desc">The same rules the promotion ladder counts, seen from the other
                 side: each carries an enforcement state, and nothing sizes money without one. Two labels
@@ -3987,7 +4246,7 @@
         <div class="sep reveal delay-2"></div>
         <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
             Battle-tested OSS. Multi-stage Docker build, non-root runtime, ASGI worker
-            for Channels. <code>gunicorn</code> + <code>uvicorn</code> serving HTTP and WebSockets;
+            for Channels. <code>daphne</code> serving HTTP and WebSockets;
             Sentry-instrumented; Celery beat for the recurring tasks; Channels for the per-user Eye push;
             a <code>pg_dump</code> nightly with rolling retention. The platform looks after itself.
         </p>
@@ -3999,11 +4258,11 @@
             <span class="tech-badge">PostgreSQL</span>
             <span class="tech-badge">Redis</span>
             <span class="tech-badge">Celery + Beat</span>
-            <span class="tech-badge">gunicorn + uvicorn</span>
+            <span class="tech-badge">Daphne (ASGI)</span>
             <span class="tech-badge">Anthropic Claude</span>
             <span class="tech-badge">Fernet</span>
             <span class="tech-badge">Sentry SDK</span>
-            <span class="tech-badge">ib_insync</span>
+            <span class="tech-badge">ib_insync (retired IBKR adapter)</span>
             <span class="tech-badge">pandas / numpy</span>
             <span class="tech-badge">Docker</span>
             <span class="tech-badge">cryptography</span>
@@ -4060,17 +4319,39 @@
             </div>
             <div class="feature-card reveal delay-2" style="padding: 22px 16px; text-align: center;">
                 <div class="feature-title" style="font-size: 11px;">Economic Calendar</div>
-                <div class="feature-text" style="font-size: 12px;">earnings + central bank</div>
+                <div class="feature-text" style="font-size: 12px;">Forex Factory first, FMP behind it</div>
             </div>
             <div class="feature-card reveal delay-3" style="padding: 22px 16px; text-align: center;">
-                <div class="feature-title" style="font-size: 11px;">Reddit / StockTwits</div>
-                <div class="feature-text" style="font-size: 12px;">social sentiment snapshot</div>
+                <div class="feature-title" style="font-size: 11px;">Social Sentiment</div>
+                <div class="feature-text" style="font-size: 12px;">read when a source answers; off is said, never faked</div>
             </div>
             <div class="feature-card reveal delay-4" style="padding: 22px 16px; text-align: center;">
-                <div class="feature-title" style="font-size: 11px;">IBKR / Twelve Data</div>
-                <div class="feature-text" style="font-size: 12px;">price + volatility regime</div>
+                <div class="feature-title" style="font-size: 11px;">Price Feeds</div>
+                <div class="feature-text" style="font-size: 12px;">streams, pollers and the venue's own rate</div>
             </div>
         </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- THE LATEST STEPS (2026-10-08): the Book's newest four milestones,  -->
+<!-- read off core.views_book.latest_steps at render time, each linking -->
+<!-- to its own line in the Book. Never a hash: the anchor is built     -->
+<!-- from the title. A road that cannot be read leaves the list empty   -->
+<!-- and the door to the Book standing.                                 -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="latest">
+    <div class="container" style="text-align: center;">
+        <div class="section-label reveal">The Road So Far</div>
+        <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
+            The Latest Steps
+        </h2>
+        <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
+            The last steps the Book records, newest first. Every one is dated, and every one has its own line in the Book.
+        </p>
+        {% if latest %}<ol class="check-list latest-steps reveal delay-4">{% for m in latest %}<li><span class="check-mark">&#x2713;</span><a href="{% url 'the_book' %}#{{ m.anchor }}"><time datetime="{{ m.date }}">{{ m.day }}</time> &middot; {{ m.title }}</a></li>{% endfor %}</ol>{% endif %}
+        <p class="latest-more reveal delay-5"><a href="{% url 'the_book' %}#road">Read the whole road in the Book &rarr;</a></p>
     </div>
 </section>
 
@@ -4083,8 +4364,8 @@
         <h2 class="cta-title reveal delay-1">Ready to See<br><span style="color:var(--accent);">Everything</span>?</h2>
         <p class="cta-desc reveal delay-2">
             Sauron starts in <strong>paper mode</strong>. Wire up your brokers when you've watched
-            it run. Flip the orchestrator on when you're ready. Promote rules from research to
-            live-full when their walk-forward backtest agrees with their live track record.
+            it run. Flip the orchestrator on when you're ready.
+            A rule trades real money at full size only once the proving ground or its own graded record has earned it.
             <em>Cautious by default &mdash; aggressive when you ask.</em>
         </p>
 
@@ -4225,6 +4506,46 @@
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <script>
 (function(){
+    // ── Motion is optional (2026-10-08) ──────────────────────────────
+    // One reading of the preference for the whole script: the reveal,
+    // the count-ups, the particles, the SVG clocks, the eye and the
+    // anchor scroll all consult it.
+    var prefersReducedMotion = window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var wallJs = document.documentElement.classList.contains('wall-js');
+
+    // ── Scroll reveal: once, then it stays ───────────────────────────
+    // Armed before anything else in this script, so a block hidden by
+    // the head switch is shown the moment it scrolls into view even if
+    // a later part of this script throws. Each block is observed until
+    // its first sight and then let go: what was read stays read.
+    // An engine without IntersectionObserver (the head switch left every
+    // block visible for it) shows them at once, and the rest of this
+    // script, the ticker and the counts among it, still runs.
+    var canObserve = typeof window.IntersectionObserver === 'function';
+    var reveals = document.querySelectorAll('.reveal, .reveal-left, .reveal-right, .reveal-scale');
+    var observer = canObserve ? new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+            if (entry.isIntersecting) {
+                entry.target.classList.add('visible');
+                observer.unobserve(entry.target);
+            }
+        });
+    }, { threshold: 0.05, rootMargin: '0px 0px -40px 0px' }) : null;
+    reveals.forEach(function(el) {
+        if (observer) { observer.observe(el); } else { el.classList.add('visible'); }
+    });
+    // The head switch's failsafe reads this: the observer is armed, so
+    // the hidden blocks will be shown and the class may stay.
+    window.wallAwake = true;
+
+    // Under reduced motion CSS stops every animation it owns; the five
+    // inline SVG clocks (the agents' two, the backtest curve, #evolution
+    // and #horizon) animate through SMIL, which only the DOM can stop.
+    if (prefersReducedMotion) {
+        document.querySelectorAll('svg').forEach(function (s) { if (s.pauseAnimations) s.pauseAnimations(); });
+    }
+
     // ── Platform counters ────────────────────────────────────────────
     // Server-side aggregates only. Every value is a COUNT of rows this
     // deployment holds — never a quote, a P&L, an account or a symbol.
@@ -4252,7 +4573,7 @@
     var ctx = canvas.getContext('2d');
     var W, H;
     function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
-    resize(); window.addEventListener('resize', resize);
+    resize();
 
     var particleTags = [
         ['SIGNALS GRADED', wallNum(WALL.signals)],
@@ -4335,9 +4656,19 @@
                 ctx.fillText(p.tag[1], p.x + 10, p.y + 8);
             }
         }
-        requestAnimationFrame(drawParticles);
+        // One frame is drawn either way; the next is scheduled only
+        // where motion is welcome.
+        if (!prefersReducedMotion) { requestAnimationFrame(drawParticles); }
     }
     drawParticles();
+    // Setting the canvas size clears it, and under reduced motion no
+    // next frame is scheduled: the one frame is painted again on every
+    // resize (a phone's address bar collapsing on the first scroll is
+    // one), or the layer would stand blank after it.
+    window.addEventListener('resize', function () {
+        resize();
+        if (prefersReducedMotion) { drawParticles(); }
+    });
 
     // ── Ticker bar population ────────────────────────────────────────
     // The strip scrolls what the platform has actually done, straight
@@ -4370,20 +4701,6 @@
     }
     track.innerHTML = html;
 
-    // ── FIX #6: Scroll reveal with DISAPPEAR on scroll back up ───────
-    var reveals = document.querySelectorAll('.reveal, .reveal-left, .reveal-right, .reveal-scale');
-    var observer = new IntersectionObserver(function(entries) {
-        entries.forEach(function(entry) {
-            if (entry.isIntersecting) {
-                entry.target.classList.add('visible');
-            } else {
-                // Remove visible class when scrolling away — fade out effect
-                entry.target.classList.remove('visible');
-            }
-        });
-    }, { threshold: 0.05, rootMargin: '0px 0px -40px 0px' });
-    reveals.forEach(function(el) { observer.observe(el); });
-
     // ── Navbar scroll state ──────────────────────────────────────────
     var nav = document.getElementById('wallNav');
     window.addEventListener('scroll', function() {
@@ -4392,15 +4709,29 @@
     });
 
     // ── Count-up animation ───────────────────────────────────────────
+    // Every counter is served already printed (the same wall value as
+    // its data-target), so a reader without script, in print or with
+    // the page half loaded reads the number, not a zero. The count-up
+    // runs once, at first sight; where motion is not welcome, or where
+    // the head switch found no observer, the number is only grouped.
     var countEls = document.querySelectorAll('.count-up');
-    var countObserver = new IntersectionObserver(function(entries) {
+    if (!canObserve) {
+        countEls.forEach(function(el) {
+            el.textContent = wallNum(parseInt(el.dataset.target, 10) || 0);
+        });
+    }
+    var countObserver = canObserve && new IntersectionObserver(function(entries) {
         entries.forEach(function(entry) {
             if (entry.isIntersecting) {
-                // Re-run count-up each time it comes into view
                 var el = entry.target;
+                countObserver.unobserve(el);
                 // Counts now come from the server, so they can be six
                 // figures — group them, and never render NaN.
                 var target = parseInt(el.dataset.target, 10) || 0;
+                if (prefersReducedMotion || !wallJs) {
+                    el.textContent = wallNum(target);
+                    return;
+                }
                 var current = 0;
                 var step = Math.max(1, Math.floor(target / 40));
                 el.textContent = '0';
@@ -4412,17 +4743,16 @@
             }
         });
     }, { threshold: 0.5 });
-    countEls.forEach(function(el) { countObserver.observe(el); });
+    if (countObserver) { countEls.forEach(function(el) { countObserver.observe(el); }); }
 
     // ── Parallax + pupil-tracking on mouse move ──────────────────────
     // The globe-eye-fixed (giant Sauron eye) drifts subtly with cursor;
     // its pupil group additionally tracks toward the cursor for the
-    // "all-seeing" effect. Disabled when the user prefers reduced motion.
+    // "all-seeing" effect. Disabled when the user prefers reduced motion
+    // (prefersReducedMotion, read once at the top of this script).
     var globe = document.querySelector('.globe-eye-fixed');
     var eyeShadow = document.querySelector('.eye-glow-shadow');
     var pupilGroup = document.getElementById('wallPupilGroup');
-    var prefersReducedMotion = window.matchMedia &&
-        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     // Pupil-cursor track: max 18px in viewBox units (40-radius pupil inside
     // 60-radius iris ring leaves room without clipping).
     var PUPIL_RANGE_X = 22;
@@ -4456,13 +4786,13 @@
         }, 80);
     }
 
-    // ── Smooth scroll for anchor links ───────────────────────────────
+    // ── Smooth scroll for anchor links — plain where motion is not welcome
     document.querySelectorAll('a[href^="#"]').forEach(function(a) {
         a.addEventListener('click', function(e) {
             var target = document.querySelector(this.getAttribute('href'));
             if (target) {
                 e.preventDefault();
-                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                target.scrollIntoView({ behavior: prefersReducedMotion ? 'auto' : 'smooth', block: 'start' });
             }
         });
     });

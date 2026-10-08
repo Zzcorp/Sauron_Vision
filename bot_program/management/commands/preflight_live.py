@@ -106,7 +106,7 @@ from signals.lifecycle import (  # noqa: E402
 BAR_SHUT_GRACE_HOURS = _BAR_AGE_BY_TF["1d"] / 3600.0
 
 # IBKR's own floor, in IBKR's own words (Error 201, 2026-09-10, on the first
-# GLDM order from a 500 EUR account): "MINIMUM OF 2000 USD (OR EQUIVALENT IN
+# GLDM order from a small EUR account): "MINIMUM OF 2000 USD (OR EQUIVALENT IN
 # OTHER CURRENCIES) IS REQUIRED IN ORDER TO PURCHASE ON MARGIN, SELL SHORT,
 # TRADE CURRENCY OR FUTURE." Below it an account buys stocks and ETFs with
 # settled cash IN THE INSTRUMENT'S CURRENCY and does nothing else — and a

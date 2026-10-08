@@ -1,7 +1,7 @@
 # The book's notional cap (2026-10-04): the most notional one venue's open
 # positions may carry together, as a multiple of the venue's book. The
-# exposure limit counts forex at its margin (1/30), so a 500 book carried
-# 14,800 of yen crosses inside "100% max total exposure".
+# exposure limit counts forex at its margin (1/30), so a small book carried
+# yen crosses worth thirty times itself inside "100% max total exposure".
 
 from django.db import migrations, models
 

@@ -25,6 +25,10 @@ worth its runtime: five sections were spliced into a 4,138-line template by
 anchor, and a mis-anchored splice that swallowed a neighbouring section
 would otherwise pass every other assertion in this file.
 """
+import re
+from pathlib import Path
+
+from django.conf import settings
 from django.test import TestCase
 
 from core import wall_facts as wf
@@ -50,7 +54,7 @@ PRE_EXISTING_HEADINGS = [
     "Feel the Orchestrator",
     "One Screen. Everything Moving.",
     "Decay Is the Trigger.",
-    "Six Brokers. One Adapter Pattern.",
+    "One Adapter Pattern.<br>One Venue per Class.",
     "Interrogate Your<br>Own Machine.",
     "Production-Hardened",
 ]
@@ -655,3 +659,774 @@ class WallShadowClaimsAreCountedNotTypedTests(TestCase):
 
         self.assertEqual(self.client.get("/wall/").status_code, 200)
         self.assertIn("Every pass above was written in SHADOW", body)
+
+
+class WallClaimsFollowTheCodeTests(TestCase):
+    """The 2026-10-08 correction: every claim the page typed that the code
+    had since outgrown, pinned by the fragment that replaced it.
+
+    Each sentence a visitor reads here is held to the module that makes it
+    true: the broker count to core.wall_facts, the cadences to the beat,
+    the debate to trade_debate.py's own shadow-then-binding rule, the
+    fleet's sizing to the proving ground, the router's fallback to
+    broker_router. Every fragment asserted present or missing sits on ONE
+    source line of the template (the reflow rule), so a wrapped paragraph
+    cannot make a negative test pass by accident. A typed literal that is
+    stale is looked for in the template's source, never in the answer: the
+    answer prints the counted value, and a registry that came to hold
+    exactly 12 or 6 entries would make the right page fail.
+    """
+
+    def setUp(self):
+        _clear_cache()
+        self.response = self.client.get("/wall/")
+        self.body = self.response.content.decode("utf-8", errors="ignore")
+        self.wall = self.response.context["wall"]
+        self.src = (Path(settings.BASE_DIR) / "templates" / "landing"
+                    / "the_wall.html").read_text(encoding="utf-8")
+
+    def _section(self, anchor):
+        start = self.body.index(anchor)
+        return self.body[start:self.body.index("</section>", start)]
+
+    def test_the_broker_count_is_the_facts_never_a_word(self):
+        low = self.src.lower()
+        for stale in ("six brokers", "six broker adapters", "6 broker adapters"):
+            self.assertNotIn(stale, low, stale)
+        self.assertIn("{{ wall.broker_adapters }} broker adapters", self.src)
+        self.assertIn(f'{self.wall["broker_adapters"]} broker adapters', self.body)
+
+    def test_the_evaluator_count_is_the_facts_never_a_digit(self):
+        self.assertNotIn("12 Evaluators", self.src)
+        self.assertNotIn("12 evaluators", self.src)
+        self.assertIn(f'{self.wall["evaluators"]} Evaluators.', self.body)
+
+    def test_the_broker_grid_names_the_live_venue_and_the_retired_one(self):
+        import re
+        self.assertRegex(
+            self.body,
+            r'<div class="broker-tile live">\s*<div class="broker-name">ETORO</div>')
+        self.assertIn("SAXO", self.body)
+        self.assertRegex(
+            self.body,
+            r'<div class="broker-tile">\s*<div class="broker-name">IBKR</div>')
+        self.assertNotIn("28 pairs", self.body)
+        self.assertIsNone(re.search(r'broker-tile live">\s*<div class="broker-name">IBKR', self.body))
+
+    def test_the_debate_is_not_called_advice(self):
+        self.assertNotIn("never gates execution", self.body)
+        self.assertNotIn("Four autonomy levels", self.body)
+        agents = self._section('id="agents"')
+        self.assertIn("Executioner", agents)
+        self.assertIn("never raise it", agents)
+
+    def test_the_fleet_promises_only_what_size_by_proof_does(self):
+        self.assertNotIn("Nothing Reaches Live", self.body)
+        self.assertNotIn("still under the gate", self.body)
+        self.assertIn("Full Size Is Earned.", self.body)
+        self.assertIn("enters at a quarter", self.body)
+        # The quarter is typed twice on this page (#fleet, #safeguards):
+        # held here to the size the code gives an unproven rule.
+        from backtester.proving import proof
+        from signals.promotion_pipeline import SIZE_FACTORS
+        self.assertEqual(SIZE_FACTORS["live_small"], 0.25,
+                         "rewrite 'enters at a quarter' in #fleet and #safeguards")
+        self.assertEqual(proof.REDUCED, SIZE_FACTORS["live_small"])
+
+    def test_the_spine_says_what_this_page_shows_for_a_dead_counter(self):
+        self.assertNotIn("with an audit row to show for it", self.body)
+        self.assertIn("shows 0, by design", self.body)
+
+    def test_the_shares_pillar_names_the_shock_switch(self):
+        shares = self._section('id="shares"')
+        self.assertNotIn("each one by a person", shares)
+        self.assertIn("shock plan", shares)
+        self.assertIn("explicit confirmation", shares)
+
+    def test_the_cadences_typed_here_are_the_beats(self):
+        from config.celery import app
+        from core.day_of_sauron import schedule_words
+        beat = app.conf.beat_schedule
+        self.assertEqual(schedule_words(beat["sauron-mind-synthesize"]["schedule"])[0], "1 h")
+        self.assertIn("Every hour a structured world snapshot", self.body)
+        self.assertEqual(schedule_words(beat["reconcile-asset-bot-trades"]["schedule"])[0],
+                         "every 15 min")
+        self.assertIn("every 15 min, around the clock", self.body)
+
+    def test_no_retired_source_or_server_is_advertised(self):
+        for stale in ("Reddit / StockTwits", "IBKR / Twelve Data",
+                      "gunicorn + uvicorn", "taxable-account live deployment"):
+            self.assertNotIn(stale, self.body, stale)
+
+    def test_the_leverage_paragraph_says_what_the_ticket_offers(self):
+        """A live ticket lists the venue's multipliers only while the
+        leverage switch is on: off, every multiplier above 1 is refused
+        (judge_order_leverage) and the ticket offers 1x alone. The switch
+        ships off, so the page names it (review, 2026-10-08)."""
+        import inspect
+        from bot_program.asset_engine import base
+        from core.platform_control import DEFAULT_COMPONENTS, LIVE_MONEY_SWITCHES
+        self.assertNotIn("as a fact at the confirm step", self.body)
+        self.assertIn("the highest by default", self.body)
+        self.assertIn("with the leverage switch on, a live ticket offers the multipliers "
+                      "the venue lists, the highest by default", self.body)
+        self.assertEqual(base.LEVERAGE_SWITCH_KEY, "etoro_leverage_live")
+        self.assertIn("LEVERAGE_SWITCH_KEY", inspect.getsource(base.judge_order_leverage),
+                      "a typed multiplier no longer needs the switch: rewrite #personas")
+        self.assertIn(base.LEVERAGE_SWITCH_KEY, LIVE_MONEY_SWITCHES)
+        row = [c for c in DEFAULT_COMPONENTS if c["key"] == base.LEVERAGE_SWITCH_KEY][0]
+        self.assertFalse(row.get("is_enabled"))
+
+    def test_the_closed_loop_paragraph_is_the_demotion_rule(self):
+        self.assertNotIn("then drifts negative", self.body)
+        self.assertIn("drops straight to paper", self.body)
+        self.assertIn("with the ladder's switch on", self.body)
+
+    def test_take_trade_names_the_live_ticket(self):
+        self.assertNotIn("Executes on the paper venue", self.body)
+        self.assertIn("behind the trading PIN", self.body)
+        # It warns OF conditions, and the last word is the visitor's.
+        self.assertNotIn("warns before a reward", self.src)
+        self.assertIn("and warns of a reward under the risk, a trade no signal backs, "
+                      "a shut market, a bad entry hour or a sick venue", self.body)
+        self.assertIn("then leaves the last word to you.", self.body)
+
+    def test_the_hand_ticket_is_never_promised_a_bots_hold(self):
+        """The last look, the sick venue and the quote check hold a bot's
+        entry; the ticket placed by hand is only warned (manual_trade.py),
+        so every hold on this page names the bot (review, 2026-10-08)."""
+        self.assertNotIn("A crossed, stale or frozen quote is not traded on", self.src)
+        self.assertIn("No bot enters on a crossed, stale or frozen quote", self.body)
+        self.assertIn("every live bot order takes a last look", self.body)
+        self.assertIn("new real-money bot entries wait for quiet", self.body)
+        self.assertIn("No bot opens a real-money trade in a share", self.body)
+
+    def test_the_second_gate_names_its_gestures(self):
+        # The old sentence wrapped after "capital": the phrase below was the
+        # whole of its first source line, so this check can fail (the
+        # reflow rule).
+        self.assertNotIn("Every action that can move capital", self.src)
+        self.assertIn("unticking the demo box", self.body)
+
+    def test_the_router_says_where_an_unflagged_class_goes(self):
+        from pathlib import Path
+
+        from django.conf import settings
+        self.assertNotIn("Routing per-symbol via the broker_router", self.body)
+        self.assertIn("otherwise nothing real is sent", self.body)
+        js = (Path(settings.BASE_DIR) / "static" / "js"
+              / "sv-day-scheme.js").read_text(encoding="utf-8")
+        self.assertIn("otherwise nothing real is sent", js)
+
+    def test_the_eur_preset_still_trips_a_cap(self):
+        """Replacing the dollar pair in the EUR preset left it with no leg
+        the demo's caps could read; the classify() line below maps a EUR
+        leg onto the sector bar, so "Pile into EUR" can still be refused."""
+        self.assertIn("if (base === 'EUR' || quote === 'EUR') c.sector = 'EUR';",
+                      self.body)
+        self.assertIn('data-preset="eur-cross"', self.body)
+
+
+class WallSafeguardsSectionTests(TestCase):
+    """The safeguards section (2026-10-08): what stands around a trade,
+    counted off the registries the code runs on, every sentence hedged
+    the way the code is.
+
+    The guards, the real-money switches, the proving ground's verdicts and
+    the classes with a venue proof are wall_facts keys, never typed. The
+    section names the switch before the mechanism, because every one of
+    those mechanisms ships off (core.platform_control.DEFAULT_COMPONENTS)
+    and a page that said "the guards watch" of a watchdog nobody turned on
+    would be the overclaim this file exists to refuse. Every fragment
+    pinned here sits on ONE source line of the template (the reflow rule).
+    """
+
+    def setUp(self):
+        _clear_cache()
+        self.response = self.client.get("/wall/")
+        self.body = self.response.content.decode("utf-8", errors="ignore")
+        self.wall = self.response.context["wall"]
+
+    def _block(self, anchor):
+        start = self.body.index(anchor)
+        return self.body[start:self.body.index("</section>", start)]
+
+    def _pillar_target(self, body, label):
+        """The count-up target of the pillar labelled `label`. Served
+        already printed since 2026-10-08: the text is the target."""
+        m = re.search(
+            r'data-target="(\d+)">\1</span></div>\s*<div class="pillar-lbl">'
+            + re.escape(label), body)
+        self.assertIsNotNone(m, f"no pillar labelled {label!r}")
+        return int(m.group(1))
+
+    def test_the_section_stands_in_the_pages_shell(self):
+        idx = self.body.index('id="safeguards"')
+        self.assertIn('class="wall-section"', self.body[idx - 200:idx],
+                      "#safeguards is not a .wall-section")
+        self.assertIn("Before, During,", self.body)
+        self.assertIn('href="#safeguards"', self.body)
+        nav = re.search(r'<nav class="wall-nav" id="wallNav">(.*?)</nav>',
+                        self.body, re.S).group(1)
+        self.assertLess(nav.index('href="#fleet"'), nav.index('href="#safeguards"'))
+        self.assertLess(nav.index('href="#safeguards"'), nav.index('href="#desk"'))
+        block = self._block('id="safeguards"')
+        for marker in ("section-label", "new-pill", "section-title",
+                       "features-grid", "feature-card", "feature-icon",
+                       "pillar-row", "reveal delay-1"):
+            self.assertIn(marker, block, marker)
+        self.assertEqual(block.count('class="feature-card'), 6)
+        self.assertEqual(block.count('class="pillar"'), 4)
+
+    def test_every_count_in_it_is_the_facts(self):
+        block = self._block('id="safeguards"')
+        for key in ("guards", "money_switches", "proving_verdicts",
+                    "proof_classes"):
+            self.assertIn(f'data-target="{self.wall[key]}"', block, key)
+            self.assertIsInstance(self.wall[key], int)
+        self.assertEqual(block.count("data-target="), 4)
+        self.assertEqual(self._pillar_target(block, "Guards in the Watchdog"),
+                         self.wall["guards"])
+        self.assertEqual(self._pillar_target(block, "Real-Money Switches"),
+                         self.wall["money_switches"])
+        self.assertEqual(self._pillar_target(block, "Proving Verdicts Written"),
+                         self.wall["proving_verdicts"])
+        self.assertEqual(self._pillar_target(block, "Classes Through the Venue"),
+                         self.wall["proof_classes"])
+        # The counts the prose carries are the same keys, in the same block.
+        self.assertIn(f"none of the {self.wall['money_switches']} switches", block)
+        self.assertIn(f"&mdash; {self.wall['proof_classes']} have &mdash;", block)
+        self.assertIn(f"{self.wall['short_classes']} have one", block)
+        # The spine's closing paragraph carries the count since 2026-10-08.
+        spine = self._block('id="spine"')
+        self.assertIn(f"the {self.wall['money_switches']} switches the platform "
+                      "marks as real-money decisions", spine)
+        self.assertNotIn("the ones the platform marks", spine)
+        # Never a word or a digit typed beside the count.
+        low = block.lower()
+        for literal in ("eleven guards", "ten guards", "twelve switches",
+                        "seven switches", "six classes", "two classes"):
+            self.assertNotIn(literal, low, literal)
+
+    def test_it_names_the_switch_before_the_mechanism(self):
+        from core.platform_control import DEFAULT_COMPONENTS
+        self.assertEqual(
+            [c["key"] for c in DEFAULT_COMPONENTS if c.get("is_enabled")], [],
+            "a component now ships enabled — the section's 'with its switch "
+            "on' hedges may need to change with it")
+        block = self._block('id="safeguards"')
+        self.assertGreaterEqual(block.lower().count("with its switch on"), 2)
+        self.assertIn("with their switch on", block)
+        self.assertIn("ships switched off", block)
+        self.assertIn("Every one ships off", block)
+        # The dead man's switch pings only once a URL is set: hedged too.
+        self.assertIn("Once it is set up", block)
+        # The brake is a switch of its own, which acts only while the
+        # guards' is on (bot_program/morgul.py BRAKE_KEY).
+        from bot_program import morgul
+        self.assertEqual(morgul.BRAKE_KEY, "morgul_brake")
+        self.assertIn("With a second switch on as well, a few of them may brake", block)
+
+    def test_the_care_card_says_the_thresholds_it_cuts_and_locks_at(self):
+        """The care cuts a real-money loser only from WEEKEND_CUT_LEVERAGE
+        times leverage (the event window's cut is the weekend's), and locks
+        a winner only from WEEKEND_LOCK_AT_R on the mark. The card once said
+        "a levered real-money loser is cut", of any multiplier (final check,
+        2026-10-08). The Book's three sentences are held the same way in
+        tests/test_the_book.py."""
+        from bot_program import position_care as care
+        rewrite = ("rewrite the Wall's 'Care of the Open Trade' card, and the Book's "
+                   "'The care', 'The care of an open trade' and 'The event window'")
+        self.assertEqual(care.WEEKEND_CUT_LEVERAGE, 5,
+                         "the weekend cut moved: %s ('five times leverage or more')" % rewrite)
+        self.assertEqual(care.EVENT_CUT_LEVERAGE, care.WEEKEND_CUT_LEVERAGE,
+                         "the event cut left the weekend's: %s" % rewrite)
+        self.assertEqual(care.WEEKEND_LOCK_AT_R, 0.5,
+                         "the weekend lock moved: %s ('half an R or more')" % rewrite)
+        self.assertEqual(care.EVENT_LOCK_AT_R, care.WEEKEND_LOCK_AT_R,
+                         "the event lock left the weekend's: %s" % rewrite)
+        block = self._block('id="safeguards"')
+        start = block.index("Care of the Open Trade")
+        card = block[start:block.index("</div>", block.index('class="feature-text"', start))]
+        self.assertIn("a real-money loser at five times leverage or more is cut", card, rewrite)
+        self.assertIn("a winner up half an R or more is locked at break-even", card, rewrite)
+        # The cuts are a bot's: a hand-opened row returns before every cut
+        # (position_care: the manual branch comes before the weekend, event
+        # and no-progress cuts), so the card says so in the same breath.
+        self.assertIn("A trade opened by hand keeps the locks and is never cut by a rule.",
+                      card, "the manual lane's exemption left the card: %s" % rewrite)
+        src = (Path(settings.BASE_DIR) / "templates" / "landing"
+               / "the_wall.html").read_text(encoding="utf-8")
+        self.assertNotIn("levered real-money loser", src, rewrite)
+
+    def test_its_cadence_is_the_beats(self):
+        from config.celery import app
+        from core.day_of_sauron import schedule_words
+        beat = app.conf.beat_schedule
+        self.assertEqual(schedule_words(beat["run-morgul-guards"]["schedule"])[0],
+                         "5 min")
+        block = self._block('id="safeguards"')
+        self.assertIn("Every five minutes", block)
+        self.assertIn("every five minutes", block)
+        # "Each night": the proving ground's rules run is one cron a day.
+        words, period, kind, _minute = schedule_words(
+            beat["proving-ground-rules"]["schedule"])
+        self.assertEqual((kind, period), ("cron", 86400.0), words)
+        self.assertIn("Each night", block)
+
+    def test_it_reaches_no_external_host(self):
+        for anchor in ('id="safeguards"', 'id="latest"'):
+            block = self._block(anchor)
+            for scheme in ("http://", "https://", "//cdn", 'src="//'):
+                self.assertNotIn(scheme, block,
+                                 f"section {anchor} reaches an external host")
+
+    def test_it_moves_when_a_verdict_is_saved(self):
+        """The counted-ness of the proving verdicts, demonstrated: one
+        saved verdict, whatever it says, and the pillar moves."""
+        from backtester.models_proving import ProvingVerdict
+
+        self.assertEqual(self.wall["proving_verdicts"], 0)
+        self.assertEqual(self._pillar_target(
+            self._block('id="safeguards"'), "Proving Verdicts Written"), 0)
+        ProvingVerdict.objects.create(run_id="t", family="f", direction="long",
+                                      asset_class="forex", verdict="failed")
+        _clear_cache()
+        r = self.client.get("/wall/")
+        self.assertEqual(r.context["wall"]["proving_verdicts"], 1)
+        body = r.content.decode("utf-8", errors="ignore")
+        start = body.index('id="safeguards"')
+        block = body[start:body.index("</section>", start)]
+        self.assertEqual(self._pillar_target(block, "Proving Verdicts Written"), 1)
+
+
+class WallLatestStepsTests(TestCase):
+    """The latest steps (2026-10-08): the Book's newest four milestones on
+    the Wall, each a link to its own line in the Book, read off
+    core.views_book.latest_steps at render time — never a hash, never a
+    typed date — and a road the view cannot read leaves the Wall standing.
+    """
+
+    def setUp(self):
+        _clear_cache()
+        self.response = self.client.get("/wall/")
+        self.body = self.response.content.decode("utf-8", errors="ignore")
+
+    def _block(self, body=None):
+        body = self.body if body is None else body
+        start = body.index('id="latest"')
+        return body[start:body.index("</section>", start)]
+
+    def test_the_latest_steps_are_the_books_last(self):
+        from django.utils.html import escape
+
+        from core import book_content as book
+        from core.views_book import day_words, latest_steps
+
+        block = self._block()
+        self.assertIn("The Latest Steps", block)
+        self.assertIn("The Road So Far", block)
+        last = list(book.MILESTONES)[-4:]
+        self.assertEqual(len(last), 4)
+        at = []
+        for day, _era, title, _text, _commit in reversed(last):
+            self.assertIn(escape(title), block, title)
+            self.assertIn(day_words(day), block, day)
+            self.assertIn(f'datetime="{day}"', block)
+            at.append(block.index(escape(title)))
+        self.assertEqual(at, sorted(at), "the steps are not newest first")
+        self.assertEqual(block.count("<li>"), 4)
+        self.assertEqual(self.response.context["latest"], latest_steps(4))
+        # No commit hash reaches the Wall through the road.
+        for _day, _era, _title, _text, commit in book.MILESTONES:
+            self.assertNotRegex(block, r"(?<![0-9a-f])%s(?![0-9a-f])" % commit)
+
+    def test_each_step_links_to_its_line_in_the_book(self):
+        from core.views_book import latest_steps
+
+        block = self._block()
+        steps = latest_steps(4)
+        self.assertEqual(len(steps), 4)
+        for step in steps:
+            self.assertRegex(step["anchor"], r"^m-[a-z0-9-]+$")
+            self.assertIn(f'href="/book/#{step["anchor"]}"', block)
+        self.assertIn('href="/book/#road"', block)
+        # 'href="/book/#…"' is not 'href="/book/"': the two doors of
+        # tests/test_the_book.py and test_wall_book_link.py stay two.
+        self.assertEqual(self.body.count('href="/book/"'), 2)
+        # And every link lands: the Book carries each anchor and the road.
+        book = self.client.get("/book/").content.decode("utf-8")
+        self.assertIn('id="road"', book)
+        for step in steps:
+            self.assertIn('id="%s"' % step["anchor"], book)
+
+    def test_a_broken_road_still_serves_the_wall(self):
+        """A milestone the view cannot read (a day that is not a day) must
+        not take the front door down with it: the list is empty, the door
+        to the Book stands, and the broken row never reaches the page."""
+        from unittest.mock import patch
+
+        with patch("core.book_content.MILESTONES",
+                   [("not-a-day", "x", "t", "w.", "abcdef0")]):
+            _clear_cache()
+            r = self.client.get("/wall/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode("utf-8", errors="ignore")
+        self.assertEqual(r.context["latest"], [])
+        block = self._block(body)
+        self.assertIn('id="latest"', body)
+        self.assertIn('href="/book/#road"', block)
+        self.assertNotIn("not-a-day", body)
+        self.assertNotIn("abcdef0", body)
+        self.assertNotIn("<li>", block)
+
+
+class TheWallStaysOpenTests(TestCase):
+    """The front door after 2026-10-08: rendered without the request's
+    context processors (core/views_wall.py), every reader it calls fenced
+    on its own, and the login forms still carrying a token the middleware
+    accepts.
+
+    Through `render()` the Wall paid for every panel of the dashboard's
+    shell: forty-odd queries on a warm visit, most of them on live quotes
+    an anonymous visitor is never shown, and a dashboard panel that broke
+    broke the login page with it. The Book has rendered the other way
+    since 2026-09-27; these tests hold the Wall to the same bargain and to
+    the one thing it needs that the Book does not: the CSRF token.
+    """
+
+    def setUp(self):
+        _clear_cache()
+
+    def test_an_unreadable_schedule_still_serves_the_wall(self):
+        """A Celery app that will not read, or a beat entry these words
+        cannot describe, draws an empty ring; it does not take the front
+        door down, and the warning names the exception's class alone."""
+        from unittest.mock import patch
+
+        from tests.test_wall_day import _json_on
+
+        with patch("core.day_of_sauron.read_schedule",
+                   side_effect=RuntimeError("the beat is unreadable")), \
+             self.assertLogs("core.day_of_sauron", level="WARNING") as logs:
+            r = self.client.get("/wall/")
+        self.assertEqual(r.status_code, 200)
+        day = _json_on(r.content.decode())
+        self.assertEqual(day["total"], 0)
+        self.assertEqual(day["stages"], [])
+        self.assertEqual(r.context["day"]["total"], 0)
+        self.assertIn("RuntimeError", logs.output[0])
+        self.assertNotIn("unreadable", logs.output[0])
+
+    def test_a_broken_session_clock_still_serves_the_wall(self):
+        """The session pills are clock arithmetic and the one reader the
+        view used to call bare: a clock that throws leaves the row empty
+        and the page standing."""
+        from unittest.mock import patch
+
+        with patch("core.views_wall.market_sessions",
+                   side_effect=RuntimeError("no clock")), \
+             self.assertLogs("core.views_wall", level="WARNING") as logs:
+            r = self.client.get("/wall/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode("utf-8", errors="ignore")
+        self.assertIn('class="sess-row"', body)
+        self.assertEqual(r.context["sessions"], [])
+        row = body.split('class="sess-row"')[1].split("</div>")[0]
+        self.assertNotIn('<span class="sess-pill', row)
+        self.assertIn("RuntimeError", logs.output[0])
+        self.assertNotIn("no clock", logs.output[0])
+
+    def test_a_warm_wall_reads_nothing(self):
+        """The facts are cached, the sessions are arithmetic, the ring is
+        the beat and the road is the Book's own list: a warm visit opens
+        no connection at all. Through the context processors it opened
+        forty-three (2026-10-07, measured)."""
+        self.client.get("/wall/")  # warm
+        with self.assertNumQueries(0):
+            r = self.client.get("/wall/")
+        self.assertEqual(r.status_code, 200)
+
+    def test_the_page_pays_none_of_a_dashboards_reads(self):
+        """No context processor ran: no permissions, no messages. What the
+        login forms need is passed by name, and get_token() is what
+        makes the middleware set the cookie the token is checked against."""
+        r = self.client.get("/wall/")
+        self.assertEqual(r.status_code, 200)
+        for name in ("perms", "messages"):
+            self.assertNotIn(name, r.context)
+        for name in ("wall", "sessions", "day", "latest", "csrf_token"):
+            self.assertIn(name, r.context)
+        self.assertIn("csrftoken", r.cookies)
+        body = r.content.decode("utf-8", errors="ignore")
+        self.assertEqual(body.count('name="csrfmiddlewaretoken"'), 3)
+        self.assertNotIn('value=""', body.split('name="csrfmiddlewaretoken"')[1][:40])
+
+    def test_the_login_still_posts_from_the_wall(self):
+        """With the checks the browser meets (not the test client's
+        default, which skips them): the token the Wall printed, posted
+        back with bad credentials, is refused as bad credentials and
+        never as a missing token."""
+        from django.test import Client
+
+        from core import security
+
+        security._login_attempts.clear()
+        client = Client(enforce_csrf_checks=True)
+        page = client.get("/wall/").content.decode("utf-8", errors="ignore")
+        token = re.search(
+            r'name="csrfmiddlewaretoken" value="([^"]+)"', page).group(1)
+        r = client.post("/login/", {"csrfmiddlewaretoken": token,
+                                    "username": "nobody_on_the_wall",
+                                    "password": "not-the-password"})
+        self.assertNotEqual(r.status_code, 403)
+        self.assertIn(r.status_code, (200, 400))
+
+
+class MotionIsOptionalOnTheWallTests(TestCase):
+    """Progressive enhancement on the Wall (2026-10-08), on the Book's
+    model: the page is readable exactly as served, and the motion is laid
+    on top only where it can run and is welcome.
+
+    Before, every block began at opacity 0 and waited for a script to
+    reveal it, and left the page again when scrolled out of view; a
+    visitor without script, a script that threw, a print and a reader who
+    asked for less motion all read a blank page. Now a head switch marks
+    the root `.wall-js` only where the reveal observer exists and motion
+    is welcome, with a three-second failsafe; every counter is served
+    already printed; reduced motion stops everything and shows
+    everything; print is dark ink on white with everything shown; the
+    five decorative layers are hidden from assistive technology.
+
+    The stylesheet is parsed the way tests/test_the_book.py parses it.
+    """
+
+    #: Rules that hide something outside the reveal system, enumerated
+    #: from the page on 2026-10-08: the login and PIN overlays (shown by a
+    #: body class the login flow sets) and the two ladders that enter on
+    #: logRowIn (restored under reduced motion and in print).
+    HIDDEN_BY_DESIGN = {
+        "body.login-mode .wall-content", "body.login-mode .wall-nav",
+        ".login-overlay", ".login-anim",
+        "body.login-mode.pin-mode .login-overlay",
+        "body.login-mode.pin-mode .login-overlay .login-anim",
+        ".pin-overlay", ".pin-anim", ".demo-log-row", ".desk-row",
+    }
+
+    @classmethod
+    def setUpTestData(cls):
+        from pathlib import Path
+
+        from django.conf import settings
+        cls.src = (Path(settings.BASE_DIR) / "templates" / "landing"
+                   / "the_wall.html").read_text(encoding="utf-8")
+
+    def setUp(self):
+        _clear_cache()
+        self.body = self.client.get("/wall/").content.decode("utf-8", errors="ignore")
+
+    def _css(self):
+        from tests.test_the_book import _css
+        return _css(self.body)
+
+    def _head(self):
+        return self.body[:self.body.index("<style>")]
+
+    def _main_script(self):
+        return self.body[self.body.rindex("<script>"):]
+
+    def test_nothing_is_hidden_unless_the_reveal_can_run(self):
+        from tests.test_the_book import _drop_blocks, _rules
+
+        css = self._css()
+        css = _drop_blocks(css, r"@keyframes [\w-]+\s*")
+        css = _drop_blocks(css, r"@media \(prefers-reduced-motion: reduce\)\s*")
+        css = _drop_blocks(css, r"@media print\s*")
+        hidden = []
+        for selector, rules in _rules(css):
+            flat = re.sub(r"\s+", "", rules)
+            if re.search(r"opacity:0(?![.\d])", flat) or "visibility:hidden" in flat:
+                hidden.append(" ".join(selector.split()))
+        self.assertTrue(hidden)
+        for selector in hidden:
+            with self.subTest(selector=selector):
+                self.assertTrue(
+                    selector.startswith(".wall-js ")
+                    or "::before" in selector or "::after" in selector
+                    or selector in self.HIDDEN_BY_DESIGN,
+                    "%r is hidden before any script runs" % selector)
+        # The reveal rules are the ones behind the switch, all four of them.
+        for kind in (".reveal", ".reveal-left", ".reveal-right", ".reveal-scale"):
+            self.assertIn(".wall-js " + kind, hidden)
+            self.assertNotIn(kind, hidden)
+            self.assertIn(".wall-js %s.visible { opacity: 1;" % kind, self.body)
+
+    def test_the_head_switch_has_a_failsafe(self):
+        head = self._head()
+        for word in ("wall-js", "IntersectionObserver",
+                     "prefers-reduced-motion: reduce", "setTimeout",
+                     "wallAwake", 'classList.remove("wall-js")'):
+            self.assertIn(word, head, word)
+        # It runs before the stylesheet, so no block is ever hidden and
+        # then shown: the class is on the root before the first rule.
+        self.assertLess(head.index("wall-js"), self.body.index("<style>"))
+        self.assertIn("window.wallAwake = true", self._main_script())
+        # Plain JavaScript in the source: no template tag, so
+        # tests.test_inline_js_parses reads it.
+        src_head = self.src[:self.src.index("<style>")]
+        switch = src_head[src_head.index("<script>"):src_head.index("</script>")]
+        self.assertNotIn("{{", switch)
+        self.assertNotIn("{%", switch)
+
+    def test_reduced_motion_stops_everything_and_shows_everything(self):
+        from tests.test_the_book import _block
+
+        block = _block(self._css(), r"@media \(prefers-reduced-motion: reduce\)")
+        for rule in ("animation: none !important", "transition: none !important",
+                     "scroll-behavior: auto"):
+            self.assertIn(rule, block, rule)
+        rule_at = block.index(".desk-row {")
+        rule = block[rule_at:block.index("}", rule_at)]
+        self.assertIn("opacity: 1", rule)
+        self.assertIn("transform: none", rule)
+        self.assertIn(".demo-log-row { opacity: 1 !important; transform: none !important; }", block)
+        # And the easing of the page's own scroll is asked for only where
+        # motion is welcome.
+        self.assertIn("@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }",
+                      self.body)
+        self.assertNotIn("html { scroll-behavior: smooth; overflow-x: hidden; }", self.body)
+
+    def test_print_shows_everything_in_dark_ink(self):
+        from tests.test_the_book import _block, _rules
+
+        css = self._css()
+        self.assertIn("@media print", css)
+        block = _block(css, r"@media print")
+        rules = dict(_rules(block))
+        restore = next(v for k, v in rules.items() if ".desk-row" in k and ".demo-log-row" in k)
+        self.assertIn("opacity: 1 !important", restore)
+        for kind in (".reveal", ".reveal-left", ".reveal-right", ".reveal-scale"):
+            self.assertTrue(any(kind in k and "opacity: 1 !important" in v
+                                for k, v in rules.items()), kind)
+        self.assertIn("--text: #111", block)
+        self.assertIn("--bg: #fff", block)
+        hidden = next(v for k, v in rules.items() if "#bgCanvas" in k and ".login-overlay" in k)
+        self.assertIn("display: none !important", hidden)
+        for layer in (".grid-bg", ".scan-line", ".eye-glow-shadow",
+                      ".globe-eye-fixed", ".wall-nav", ".pin-overlay"):
+            self.assertTrue(any(layer in k and "display: none !important" in v
+                                for k, v in rules.items()), layer)
+        self.assertIn("animation: none !important", block)
+        # The gradient-clipped counts print as plain ink: with background
+        # graphics left out, the browser default, a clipped gradient paints
+        # nothing and the transparent letters printed as an empty slot (the
+        # four pillars of the safeguards among them, measured 2026-10-08).
+        for clipped in (".pillar-num", ".hash-block .hash-shimmer"):
+            with self.subTest(selector=clipped):
+                on_screen = [v for k, v in _rules(css) if k == clipped]
+                self.assertTrue(any("background-clip: text" in v and "color: transparent" in v
+                                    for v in on_screen), clipped)
+        ink = [v for k, v in rules.items()
+               if ".pillar-num" in k and ".hash-block .hash-shimmer" in k]
+        self.assertEqual(len(ink), 1, "no print rule gives the clipped counts plain ink")
+        ink = ink[0]
+        self.assertIn("background: none !important", ink)
+        self.assertIn("background-clip: border-box !important", ink)
+        self.assertIn("-webkit-text-fill-color: var(--accent) !important", ink)
+        self.assertRegex(ink, r"(?<![-\w])color: var\(--accent\) !important")
+        # The page's own :root stays the first one: the Book copies it.
+        self.assertLess(self.body.index(":root {"), self.body.index("@media print"))
+
+    def test_every_count_is_printed_before_any_script(self):
+        pairs = re.findall(r'data-target="(\d+)">([^<]*)<', self.body)
+        self.assertGreaterEqual(len(pairs), 15)
+        for target, text in pairs:
+            with self.subTest(target=target):
+                self.assertEqual(text, target)
+        # In the source too: the same wall key on both sides, never a zero.
+        self.assertNotIn('">0</span>', self.src.split("<section")[0])
+        self.assertEqual(
+            re.findall(r'data-target="\{\{ wall\.([a-z0-9_]+) \}\}">0</span>', self.src), [])
+        for key, printed in re.findall(
+                r'data-target="\{\{ wall\.([a-z0-9_]+) \}\}">\{\{ wall\.([a-z0-9_]+) \}\}</span>',
+                self.src):
+            self.assertEqual(key, printed)
+
+    def test_the_particles_and_the_svg_clocks_rest_when_motion_is_not_welcome(self):
+        script = self._main_script()
+        particles = script[script.index("function drawParticles"):script.index("drawParticles();")]
+        self.assertIn("requestAnimationFrame", particles)
+        self.assertLess(particles.index("prefersReducedMotion"),
+                        particles.index("requestAnimationFrame"))
+        self.assertIn("if (prefersReducedMotion) {", script)
+        pause = script[script.index("if (prefersReducedMotion) {"):]
+        self.assertIn("pauseAnimations", pause[:pause.index("}")])
+        # There is something to pause: the inline SMIL clocks.
+        self.assertGreaterEqual(self.body.count("<animateMotion"), 4)
+        self.assertIn("<animate ", self.body)
+        self.assertIn("prefersReducedMotion ? 'auto' : 'smooth'", script)
+
+    def test_what_was_read_stays_read_and_counts_once(self):
+        script = self._main_script()
+        self.assertNotIn("classList.remove('visible')", script)
+        self.assertIn("observer.unobserve(entry.target)", script)
+        self.assertIn("countObserver.unobserve(el)", script)
+        # The observer is armed before the counters, the ticker and the
+        # particles, so a throw further down never leaves a block hidden.
+        self.assertLess(script.index("window.wallAwake = true"), script.index("var WALL = {"))
+        self.assertLess(script.index("observer.observe(el)"), script.index("window.wallAwake = true"))
+
+    def test_the_reduced_motion_frame_survives_a_resize(self):
+        """Setting the canvas size clears it, and under reduced motion no
+        next frame is scheduled: measured on 2026-10-08, the one frame was
+        gone after the first resize (2198 painted pixels, then 0)."""
+        script = self._main_script()
+        first = script.index("drawParticles();")
+        listener = script[script.index("window.addEventListener('resize'"):]
+        listener = listener[:listener.index("});")]
+        self.assertLess(script.index("function drawParticles"), first)
+        self.assertLess(first, script.index("window.addEventListener('resize'"))
+        self.assertIn("resize();", listener)
+        self.assertIn("if (prefersReducedMotion) { drawParticles(); }", listener)
+        self.assertNotIn("window.addEventListener('resize', resize)", script)
+
+    def test_an_engine_without_the_observer_still_runs_the_page(self):
+        """The head switch leaves every block visible where there is no
+        IntersectionObserver; the scripts then built one unconditionally and
+        died at it, before the ticker, the counts, the eye and the door
+        (measured 2026-10-08). Every observer is now behind the same test,
+        and without one the counts are grouped at once."""
+        for m in re.finditer(r"new IntersectionObserver", self.body):
+            before = self.body[max(0, m.start() - 400):m.start()]
+            with self.subTest(at=m.start()):
+                self.assertTrue("canObserve" in before
+                                or "typeof window.IntersectionObserver" in before,
+                                "an observer built without asking whether the engine has one")
+        script = self._main_script()
+        self.assertLess(script.index("var canObserve = typeof window.IntersectionObserver === 'function';"),
+                        script.index("new IntersectionObserver"))
+        self.assertIn("if (observer) { observer.observe(el); } else { el.classList.add('visible'); }",
+                      script)
+        self.assertIn("if (!canObserve) {", script[script.index("var countEls"):])
+        self.assertIn("window.wallAwake = true", script)
+
+    def test_the_demo_prints_its_sector_tally_to_one_decimal(self):
+        """The sector tally decays by 0.4 every 1.5 s, so it is a float;
+        the decision log read "EUR sector 3.200000000000001 > 3" before
+        the readouts were rounded (measured 2026-10-08)."""
+        self.assertIn("reason = contrib.sector + ' sector ' + afterSec.toFixed(1) + ' > ' + secCap;",
+                      self.body)
+        self.assertIn("expSecEl.textContent = s[0] + ' ' + s[1].toFixed(1);", self.body)
+        self.assertNotIn("' sector ' + afterSec + ", self.body)
+        # The tally itself is kept to a tenth: a sum that only printed as
+        # one decimal read "EUR sector 3.0 > 3" (measured 2026-10-08).
+        self.assertIn("exp.sectors[k] = Math.round(Math.max(0, exp.sectors[k] - 0.4) * 10) / 10;",
+                      self.body)
+
+    def test_the_decorative_layers_are_hidden_from_assistive_tech(self):
+        for opener in ('<div class="grid-bg"', '<canvas id="bgCanvas"',
+                       '<div class="scan-line"', '<div class="eye-glow-shadow"',
+                       '<svg class="globe-eye-fixed"'):
+            start = self.body.index(opener)
+            tag = self.body[start:self.body.index(">", start)]
+            self.assertIn('aria-hidden="true"', tag, opener)

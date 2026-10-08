@@ -5136,8 +5136,8 @@ class AssetBot(ABC):
 
         # MAX NOTIONAL MULTIPLE (2026-10-04), judged on THIS entry's
         # notional added to the venue's open notional: the exposure limit
-        # counts a forex row at its margin (1/30), and a 500 book carried
-        # 14,800 of yen crosses inside it. A research pool is measured
+        # counts a forex row at its margin (1/30), and a small book carried
+        # yen crosses worth thirty times itself. A research pool is measured
         # against its own pool (the comment below explains why a bot's
         # size must never meet a book it was not sized from); every other
         # config meets the venue's book. Refused, never resized.
@@ -7112,11 +7112,11 @@ class AssetBot(ABC):
                     f"{TRACKING_FRESH_SECONDS / 3600:.0f}h) — refused")
         # THE CELLS' WORLD (2026-09-26): the same key pair answers both
         # worlds and EtoroAccount.demo alone picks the segment, so a row
-        # unticked demo -> live keeps the DEMO reading (332,449.10, doc §5)
-        # for up to TRACKING_FRESH_SECONDS and would pass a 13,000 USD 1x
-        # order against a 2,000 USD book. The sync stamps the world it
-        # read in; "" (never stamped) is refused too — unmeasured is not
-        # free.
+        # unticked demo -> live keeps the DEMO reading (six figures, doc §5)
+        # for up to TRACKING_FRESH_SECONDS and would pass a 1x order sized
+        # for the demo against a real book a small fraction of it. The sync
+        # stamps the world it read in; "" (never stamped) is refused too —
+        # unmeasured is not free.
         world = "demo" if acct.demo else "live"
         stamped = str(getattr(acct, "last_margin_world", "") or "")
         if stamped != world:

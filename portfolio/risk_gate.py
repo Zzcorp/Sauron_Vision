@@ -344,14 +344,14 @@ def venue_book_value(user, portfolio, venue: str = "") -> tuple:
     """(value, source) the limits are percentages OF, for this venue.
 
     THE LIVE LIMITS ARE MEASURED AGAINST THE REAL ACCOUNT (2026-09-30).
-    The operator's /setup/ book read 9,420 EUR while the eToro account
-    held 2,249.65 USD, so "3% max daily loss" stopped real money at about
-    282 — 12.5% of it — and "100% max total exposure" allowed four times
-    the account. PR #8 split the two books by venue; this splits their
+    The operator's /setup/ book read about four times what the eToro
+    account held, so "3% max daily loss" stopped real money at about an
+    eighth of it and "100% max total exposure" allowed four times the
+    account. PR #8 split the two books by venue; this splits their
     SIZE the same way: a LIVE judgement reads the broker's last equity
     reading (capital_truth.account_equity, the sync's cached cell, never
     a broker call), a PAPER one keeps the /setup/ book — whose research
-    pools are 100,000 each and would all be refused against 2,250.
+    pools are 100,000 each and would all be refused against the account.
 
     A reading that is missing, not positive or older than
     LIVE_EQUITY_MAX_AGE_S falls back to the /setup/ book, said in the
@@ -373,7 +373,7 @@ def venue_book_value(user, portfolio, venue: str = "") -> tuple:
 
 
 def _book_words(book: float, source: str) -> str:
-    """"the 9,398.99 book" as ever; "2,249.65, the broker account" when the
+    """"the 9,398.99 book" as ever; "1,234.56, the broker account" when the
     live limits measured the real account (venue_book_value)."""
     if source == "the broker account":
         return f"{book:,.2f}, the broker account"
@@ -1135,9 +1135,9 @@ def notional_state(user, *, portfolio=None, adding: float = 0.0,
     {"ok", "reason", "multiple", "limit_money", "open_notional", "adding",
      "base", "base_label", "book_source", "venue", "rows", "research"}
 
-    A 500 book carried two yen crosses of 14,800 — twenty-nine times
-    itself — inside "100% max total exposure", because that limit counts a
-    forex row at its margin (1/30): 494 at work. The margin model is right
+    A small book carried two yen crosses worth twenty-nine times itself
+    inside "100% max total exposure", because that limit counts a forex
+    row at its margin (1/30): a thirtieth at work. The margin model is right
     about what the broker pledges and silent about what a 3.3% move does
     to a book thirty times smaller than its positions. This is the cap on
     the notional itself: the venue's open notional plus `adding` (a
@@ -1196,7 +1196,7 @@ def declared_book(user, portfolio) -> float | None:
     row, and a paper book's value is that cash plus its P&L. A pool is a
     declaration too, so the two are compared as declarations: a 10,000
     pool on a 10,000 book is a fit whatever yesterday's paper P&L did to
-    the marked value, and a 10,000 pool on a 500 book is not. The owner's
+    the marked value, and a 10,000 pool on a small book is not. The owner's
     row when it exists, the passed book otherwise; None when neither
     carries a positive cash figure.
     """
@@ -1229,7 +1229,7 @@ def pool_vs_book(cfg, *, portfolio=None) -> dict:
     (2026-10-04). {"ok", "reason", "pool", "book", "research", "mode"}.
 
     A bot sizes from AssetBotConfig.capital and the owner's book is a
-    different number: a 10,000 manual pool on a 500 book sizes positions
+    different number: a 10,000 manual pool on a small book sizes positions
     that book cannot carry, and the book's drawdown then reads a loss the
     pool never felt. A paper pool larger than its owner's book — the cash
     they SET at /setup/ (declared_book), never the marked value a paper
@@ -1277,7 +1277,7 @@ def sizing_gap(user, portfolio=None) -> dict:
     "text"} — `text` is "" when the pools fit the book, the cash its
     owner set at /setup/ (declared_book, as pool_vs_book reads it).
 
-    The weekly review of 2026-10-02 graded a 500 book "critical, -97.6%
+    The weekly review of 2026-10-02 graded a small book "critical, -97.6%
     drawdown" on positions a 10,000 manual pool had sized: a ratio
     between two numbers that do not know each other. When the enabled
     paper pools (research pools counted apart) exceed the book, the book
@@ -2004,8 +2004,8 @@ def preflight(user, *, portfolio=None, now=None, venue: str = "",
             user, portfolio=portfolio,
             venue=("paper" if venue == "paper" else "live"))
         # MAX NOTIONAL MULTIPLE (2026-10-04): what the margin model lets
-        # through, capped on the notional itself — a 500 book carried
-        # 14,800 of yen crosses at 494 of margin. Nothing added here;
+        # through, capped on the notional itself — a small book carried
+        # yen crosses worth thirty times itself. Nothing added here;
         # the final size asks again with the candidate's own.
         checks["notional"] = notional_state(
             user, portfolio=portfolio, config=config,

@@ -138,7 +138,7 @@ Write the four results and the date somewhere you will still have them, because 
 
 ## Stage 2b — Move the book. Promoted 2026-09-23 from the ordering refutation; nothing after stage 2 may start until this is proved.
 
-**Goal.** Establish that somebody other than the IBKR row is the book BEFORE stage 3 edits the history writer and long before stage 5 deletes the only writer of the IBKR reading cells. broker_backed (bot_program/capital_truth.py:179-231, read at 8eddee1) returns Saxo, then eToro, when the row is keyed AND flagged primary for one of stock/forex/commodity/crypto (:196-205, :212-222), and falls to IBKR on its key alone (:224-231). Measured 2026-09-23: the eToro row is keyed, live, holds 1.40 USD and has NO class ticked — so IBKR is still the book, and stays the book until a box is ticked on /brokers/.
+**Goal.** Establish that somebody other than the IBKR row is the book BEFORE stage 3 edits the history writer and long before stage 5 deletes the only writer of the IBKR reading cells. broker_backed (bot_program/capital_truth.py:179-231, read at 8eddee1) returns Saxo, then eToro, when the row is keyed AND flagged primary for one of stock/forex/commodity/crypto (:196-205, :212-222), and falls to IBKR on its key alone (:224-231). Measured 2026-09-23: the eToro row is keyed, live, holds a token balance and has NO class ticked — so IBKR is still the book, and stays the book until a box is ticked on /brokers/.
 
 **Changes.**
 
