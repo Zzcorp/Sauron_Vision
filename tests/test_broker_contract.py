@@ -160,13 +160,11 @@ class TheFactsBehindTheTableTests(SimpleTestCase):
         """Until 2026-09-17 only IBKR could answer net_liquidation, which is
         why `sync_broker_account` walked IBKRAccount and nothing else.
         eToro joined that day and `sync_etoro_accounts` walks it since
-        eaa68da. Saxo joined with its adapter — and the sync does NOT walk
-        SaxoAccount yet, the router does not route to it, and the book
-        cannot be a Saxo row. That gap is recorded here on purpose, as the
-        eToro one was: a Saxo account's equity will not reach the pages,
-        the drawdown governor or the preflight until the wiring commit.
-        The next adapter that joins this set should make the same note,
-        or fix the sync."""
+        eaa68da. Saxo joined with its adapter on 2026-09-18 and, since
+        2026-09-19, is routed first among the flagged venues
+        (broker_router.VENUE_PRECEDENCE) and synced on the beat by
+        sync_saxo_accounts. The next adapter that joins this set should
+        say here whether the broker sync walks it, or fix the sync."""
         able = {n for n in ADAPTERS
                 if cap.has_capability(_klass(n), "account")}
         self.assertEqual(

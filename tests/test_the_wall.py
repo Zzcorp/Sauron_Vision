@@ -50,7 +50,7 @@ PRE_EXISTING_HEADINGS = [
     "Feel the Orchestrator",
     "One Screen. Everything Moving.",
     "Decay Is the Trigger.",
-    "Six Brokers. One Adapter Pattern.",
+    "One Adapter Pattern.<br>One Venue per Class.",
     "Interrogate Your<br>Own Machine.",
     "Production-Hardened",
 ]
@@ -655,3 +655,123 @@ class WallShadowClaimsAreCountedNotTypedTests(TestCase):
 
         self.assertEqual(self.client.get("/wall/").status_code, 200)
         self.assertIn("Every pass above was written in SHADOW", body)
+
+
+class WallClaimsFollowTheCodeTests(TestCase):
+    """The 2026-10-08 correction: every claim the page typed that the code
+    had since outgrown, pinned by the fragment that replaced it.
+
+    Each sentence a visitor reads here is held to the module that makes it
+    true: the broker count to core.wall_facts, the cadences to the beat,
+    the debate to trade_debate.py's own shadow-then-binding rule, the
+    fleet's sizing to the proving ground, the router's fallback to
+    broker_router. Every fragment asserted present or absent sits on ONE
+    source line of the template (the reflow rule), so a wrapped paragraph
+    cannot make an absence test pass by accident.
+    """
+
+    def setUp(self):
+        _clear_cache()
+        self.response = self.client.get("/wall/")
+        self.body = self.response.content.decode("utf-8", errors="ignore")
+        self.wall = self.response.context["wall"]
+
+    def _section(self, anchor):
+        start = self.body.index(anchor)
+        return self.body[start:self.body.index("</section>", start)]
+
+    def test_the_broker_count_is_the_facts_never_a_word(self):
+        low = self.body.lower()
+        for stale in ("six brokers", "six broker adapters", "6 broker adapters"):
+            self.assertNotIn(stale, low, stale)
+        self.assertIn(f'{self.wall["broker_adapters"]} broker adapters', self.body)
+
+    def test_the_evaluator_count_is_the_facts_never_a_digit(self):
+        self.assertNotIn("12 Evaluators", self.body)
+        self.assertNotIn("12 evaluators", self.body)
+        self.assertIn(f'{self.wall["evaluators"]} Evaluators.', self.body)
+
+    def test_the_broker_grid_names_the_live_venue_and_the_retired_one(self):
+        import re
+        self.assertRegex(
+            self.body,
+            r'<div class="broker-tile live">\s*<div class="broker-name">ETORO</div>')
+        self.assertIn("SAXO", self.body)
+        self.assertRegex(
+            self.body,
+            r'<div class="broker-tile">\s*<div class="broker-name">IBKR</div>')
+        self.assertNotIn("28 pairs", self.body)
+        self.assertIsNone(re.search(r'broker-tile live">\s*<div class="broker-name">IBKR', self.body))
+
+    def test_the_debate_is_not_called_advice(self):
+        self.assertNotIn("never gates execution", self.body)
+        self.assertNotIn("Four autonomy levels", self.body)
+        agents = self._section('id="agents"')
+        self.assertIn("Executioner", agents)
+        self.assertIn("never raise it", agents)
+
+    def test_the_fleet_promises_only_what_size_by_proof_does(self):
+        self.assertNotIn("Nothing Reaches Live", self.body)
+        self.assertNotIn("still under the gate", self.body)
+        self.assertIn("Full Size Is Earned.", self.body)
+        self.assertIn("enters at a quarter", self.body)
+
+    def test_the_spine_says_what_this_page_shows_for_a_dead_counter(self):
+        self.assertNotIn("with an audit row to show for it", self.body)
+        self.assertIn("shows 0, by design", self.body)
+
+    def test_the_shares_pillar_names_the_shock_switch(self):
+        shares = self._section('id="shares"')
+        self.assertNotIn("each one by a person", shares)
+        self.assertIn("shock plan", shares)
+        self.assertIn("explicit confirmation", shares)
+
+    def test_the_cadences_typed_here_are_the_beats(self):
+        from config.celery import app
+        from core.day_of_sauron import schedule_words
+        beat = app.conf.beat_schedule
+        self.assertEqual(schedule_words(beat["sauron-mind-synthesize"]["schedule"])[0], "1 h")
+        self.assertIn("Every hour a structured world snapshot", self.body)
+        self.assertEqual(schedule_words(beat["reconcile-asset-bot-trades"]["schedule"])[0],
+                         "every 15 min")
+        self.assertIn("every 15 min, around the clock", self.body)
+
+    def test_no_retired_source_or_server_is_advertised(self):
+        for stale in ("Reddit / StockTwits", "IBKR / Twelve Data",
+                      "gunicorn + uvicorn", "taxable-account live deployment"):
+            self.assertNotIn(stale, self.body, stale)
+
+    def test_the_leverage_paragraph_says_what_the_ticket_offers(self):
+        self.assertNotIn("as a fact at the confirm step", self.body)
+        self.assertIn("the highest by default", self.body)
+
+    def test_the_closed_loop_paragraph_is_the_demotion_rule(self):
+        self.assertNotIn("then drifts negative", self.body)
+        self.assertIn("drops straight to paper", self.body)
+        self.assertIn("with the ladder's switch on", self.body)
+
+    def test_take_trade_names_the_live_ticket(self):
+        self.assertNotIn("Executes on the paper venue", self.body)
+        self.assertIn("behind the trading PIN", self.body)
+
+    def test_the_second_gate_names_its_gestures(self):
+        self.assertNotIn("Every action that can move capital sits behind", self.body)
+        self.assertIn("unticking the demo box", self.body)
+
+    def test_the_router_says_where_an_unflagged_class_goes(self):
+        from pathlib import Path
+
+        from django.conf import settings
+        self.assertNotIn("Routing per-symbol via the broker_router", self.body)
+        self.assertIn("otherwise nothing real is sent", self.body)
+        js = (Path(settings.BASE_DIR) / "static" / "js"
+              / "sv-day-scheme.js").read_text(encoding="utf-8")
+        self.assertIn("otherwise nothing real is sent", js)
+
+    def test_the_eur_preset_still_trips_a_cap(self):
+        """Replacing the dollar pair in the EUR preset left it with no leg
+        the demo's caps could read; the classify() line below maps a EUR
+        leg onto the sector bar, so "Pile into EUR" can still be refused."""
+        self.assertIn("if (base === 'EUR' || quote === 'EUR') c.sector = 'EUR';",
+                      self.body)
+        self.assertIn('data-preset="eur-cross"', self.body)

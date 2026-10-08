@@ -160,6 +160,14 @@ class TheDayIsOnTheWallTests(TestCase):
                      "trades your account", "allocates your capital", "667"):
             self.assertNotIn(word, blob, word)
 
+    def test_the_people_cluster_names_no_command(self):
+        """The PEOPLE panel named the two Telegram commands and the health
+        page's path to every visitor (2026-10-08): the requests are said
+        in words now, and the brake says what it keeps."""
+        js = SCRIPT.read_text(encoding="utf-8")
+        for word in ("'/status'", "'/stopall'", "'/health/'"):
+            self.assertNotIn(word, js, word)
+
     def test_a_signed_in_reader_is_still_sent_home(self):
         from django.contrib.auth import get_user_model
         user = get_user_model().objects.create_user("zz_day_reader", password="x")

@@ -248,7 +248,8 @@ class WallCopyIsTrueTests(TestCase):
         self.assertNotIn("passed through the same orchestrator gate", self.body)
 
     def test_take_trade_does_not_promise_a_live_manual_path(self):
-        # manual_trade refuses any config that is not paper.
+        # a live ticket exists (Wave 2); the phrase stays forbidden because
+        # it promised a manual path not yet behind the PIN.
         self.assertNotIn("Paper venue until you arm live", self.body)
 
     def test_the_evaluator_count_is_not_spelled_out_in_prose(self):
@@ -261,14 +262,48 @@ class WallCopyIsTrueTests(TestCase):
 class MarketSessionTests(TestCase):
     """The wall used to paint LONDON and NEW YORK open in static markup, so
     a visitor at 03:00 UTC read two blinking, false market states on a page
-    whose badge says "Fully Auditable"."""
+    whose badge says "Fully Auditable".
 
-    def _at(self, hour, minute=0):
+    Since 2026-10-08 each pill follows its own city's clock and the
+    weekend (core.wall_facts.SESSION_CLOCKS): the UTC windows typed in
+    core.constants were an hour wrong in London and New York for half the
+    year, and said OPEN on a Saturday."""
+
+    def _on(self, year, month, day, hour, minute=0):
         from datetime import datetime, timezone as dt_timezone
 
         from core.wall_facts import market_sessions
         return {s["name"]: s["is_open"] for s in market_sessions(
-            datetime(2026, 8, 19, hour, minute, tzinfo=dt_timezone.utc))}
+            datetime(year, month, day, hour, minute, tzinfo=dt_timezone.utc))}
+
+    def _at(self, hour, minute=0):
+        return self._on(2026, 8, 19, hour, minute)
+
+    def test_the_weekend_closes_every_session(self):
+        """Saturday 2026-10-10 10:00 UTC: on the old UTC arithmetic London
+        read OPEN; every city is shut."""
+        state = self._on(2026, 10, 10, 10)
+        for name in ("TOKYO", "LONDON", "NEW YORK", "SYDNEY"):
+            self.assertFalse(state[name], name)
+
+    def test_new_york_follows_its_own_clock_after_the_november_shift(self):
+        """2026-11-04, New York back on standard time: 13:45 UTC is 08:45
+        there, before the bell; 14:45 UTC is after it."""
+        self.assertFalse(self._on(2026, 11, 4, 13, 45)["NEW YORK"])
+        self.assertTrue(self._on(2026, 11, 4, 14, 45)["NEW YORK"])
+
+    def test_london_follows_its_own_clock_after_the_october_shift(self):
+        """2026-11-04, London back on GMT: 07:30 UTC is 07:30 there, shut;
+        08:30 UTC is open."""
+        self.assertFalse(self._on(2026, 11, 4, 7, 30)["LONDON"])
+        self.assertTrue(self._on(2026, 11, 4, 8, 30)["LONDON"])
+
+    def test_sydney_follows_its_own_clock_in_summer_time(self):
+        """Sunday 2026-10-11 19:30 UTC is Monday 06:30 in Sydney (AEDT),
+        shut; 20:30 UTC is 07:30, open — an hour before the typed UTC
+        window would have said so."""
+        self.assertFalse(self._on(2026, 10, 11, 19, 30)["SYDNEY"])
+        self.assertTrue(self._on(2026, 10, 11, 20, 30)["SYDNEY"])
 
     def test_london_and_new_york_are_closed_in_the_middle_of_the_night(self):
         state = self._at(3)

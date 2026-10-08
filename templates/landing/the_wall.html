@@ -1925,9 +1925,9 @@
         </h1>
         <p class="hero-subtitle reveal delay-3">The All-Seeing Trading Intelligence Platform</p>
         <p class="hero-desc reveal delay-4">
-            Autonomous, multi-asset trading across stocks, forex, commodities, options, crypto, and CFDs &mdash;
+            Automated, multi-asset trading across stocks, ETFs, forex, commodities, indices and crypto &mdash;
             unified by a closed-loop intelligence engine that generates signals, gates risk across themes,
-            executes through six brokers, grades every outcome, and feeds the result back into the next decision.
+            routes each order through one of {{ wall.broker_adapters }} broker adapters, grades every outcome, and feeds the result back into the next decision.
             Built end-to-end. <span class="hash-shimmer">{{ wall.tests_green }} tests green.</span>
         </p>
         <div class="hero-badge reveal delay-5">Institutional-Grade · Production-Hardened · Fully Auditable</div>
@@ -1984,7 +1984,8 @@
             Sauron isn't a signal feed or a bot framework &mdash; it's the synthesis of both, plus everything
             that connects them. {{ wall.evaluators }} evaluators fuse price, news, macro, COT, options flow and 13F filings
             into composite signals. A multi-dimensional risk gate prevents stacked exposure across asset classes.
-            Six broker adapters route execution. Every trade is graded, every gate decision audited, every dollar
+            {{ wall.broker_adapters }} broker adapters stand behind one interface, and the router picks one venue for each class.
+            Every trade is graded, every gate decision audited, every dollar
             tracked. Then the results feed back into how the next decision gets made.
         </p>
 
@@ -2130,7 +2131,7 @@
                 <div class="visual-dot" style="top:55%;left:70%;animation-delay:0.7s;"></div>
                 <div class="visual-dot" style="top:75%;left:40%;animation-delay:1.4s;"></div>
                 <div class="visual-dot" style="top:20%;left:65%;animation-delay:0.3s;background:var(--accent-red);box-shadow:0 0 12px var(--accent-red);"></div>
-                <div class="visual-label" style="top:28%;left:22%;">EURUSD BUY 0.87</div>
+                <div class="visual-label" style="top:28%;left:22%;">AUDCAD BUY 0.87</div>
                 <div class="visual-label" style="top:53%;left:67%;">BTCUSD STRONG 0.94</div>
                 <div class="visual-label" style="top:73%;left:37%;">XAUUSD HOLD 0.62</div>
                 <div class="visual-label" style="top:18%;left:62%;border-color:var(--accent-red);color:var(--accent-red);">SPX SELL 0.81</div>
@@ -2138,7 +2139,7 @@
             </div>
             <div class="split-content reveal-right">
                 <div class="section-label">Signal Engine</div>
-                <h2 class="section-title">12 Evaluators.<br>One Composite Score.</h2>
+                <h2 class="section-title">{{ wall.evaluators }} Evaluators.<br>One Composite Score.</h2>
                 <div class="sep sep-left"></div>
                 <p class="section-desc" style="margin-bottom:0;">
                     The opportunity scanner fuses {{ wall.evaluators }} evaluator kinds into multi-modal setups.
@@ -2207,11 +2208,13 @@
                 <p class="section-desc" style="margin-bottom:0;">
                     Specialised agents powered by Claude with multi-model consensus, RAG-augmented memory,
                     and Brier-score calibration tracking. Every agent prediction is scored against
-                    real outcomes &mdash; bad agents lose trust automatically. AI is a layer that
-                    <strong>adds confidence</strong>, never gates execution. Four autonomy levels
-                    from <em>Observe</em> to <em>Full Auto</em> &mdash; you choose.
+                    real outcomes &mdash; bad agents lose trust automatically.
+                    AI never sends an order. With one switch on, it may argue against one: before a real-money bot order leaves,
+                    the Executioner says why it fails and the Champion why it works, and after a first stretch in shadow
+                    the Executioner may cut the size or refuse the entry &mdash; never raise it.
                 </p>
                 <ul class="check-list">
+                    <li><span class="check-mark">&#x2713;</span>Executioner · Champion: the trade debate, shadow first, binding only on its graded record</li>
                     <li><span class="check-mark">&#x2713;</span>PreTradeSanity · SignalJournal · DecayInvestigator · AnomalyDetector</li>
                     <li><span class="check-mark">&#x2713;</span>StrategyAdvisor · StrategyMutator · MacroInterpreter · NewsAnalyst</li>
                     <li><span class="check-mark">&#x2713;</span>WeeklyReviewer · MarketCommentator · EarningsAnalyst · SpeechAnalyst</li>
@@ -2304,7 +2307,7 @@
                     </svg>
                 </div>
                 <div class="pipe-title">SIGNAL</div>
-                <div class="pipe-sub">12 evaluators<br>fuse → composite</div>
+                <div class="pipe-sub">{{ wall.evaluators }} evaluators<br>fuse → composite</div>
             </div>
 
             <div class="pipe-node">
@@ -2321,7 +2324,7 @@
                     </svg>
                 </div>
                 <div class="pipe-title">RISK GATE</div>
-                <div class="pipe-sub">5-dimension<br>orchestrator</div>
+                <div class="pipe-sub">every gate<br>says no first</div>
             </div>
 
             <div class="pipe-node">
@@ -2338,7 +2341,7 @@
                     </svg>
                 </div>
                 <div class="pipe-title">EXECUTE</div>
-                <div class="pipe-sub">6 broker adapters<br>idempotent orders</div>
+                <div class="pipe-sub">{{ wall.broker_adapters }} broker adapters<br>idempotent orders</div>
             </div>
 
             <div class="pipe-node">
@@ -2369,9 +2372,9 @@
         </div>
 
         <p class="section-desc reveal delay-5" style="margin: 32px auto 0; font-size: 13px; color: var(--text2); max-width: 720px;">
-            <span class="hash-shimmer">Closed-loop</span> means a rule that wins for 30 days then drifts negative
-            for 7 will fire a notification, get auto-demoted from <em>live-full</em> back to <em>live-small</em>,
-            and surface in the audit log &mdash; without anyone watching.
+            <span class="hash-shimmer">Closed-loop</span> means that, with the ladder's switch on, a real-money rule whose recent
+            expectancy falls under half of its stage's baseline drops a rung, one measured as losing drops straight to paper,
+            and every move is recorded with its reason, whether or not anyone is watching.
         </p>
     </div>
 </section>
@@ -2644,32 +2647,32 @@
     // Asset universe — broad enough to feel real
     var sectors = ['tech', 'finance', 'energy', 'health', 'consumer', 'realestate'];
     var assetsRandom = [
-        ['stock','AAPL','BUY','tech'], ['stock','MSFT','BUY','tech'], ['stock','NVDA','BUY','tech'],
+        ['stock','AVGO','BUY','tech'], ['stock','MSFT','BUY','tech'], ['stock','ORCL','BUY','tech'],
         ['stock','JPM','BUY','finance'], ['stock','GS','SELL','finance'],
         ['stock','XOM','BUY','energy'], ['stock','CVX','BUY','energy'],
         ['stock','PFE','BUY','health'], ['stock','UNH','BUY','health'],
         ['stock','KO','SELL','consumer'], ['stock','WMT','BUY','consumer'],
-        ['forex','EURUSD','BUY',''], ['forex','USDJPY','BUY',''], ['forex','GBPUSD','SELL',''],
+        ['forex','NZDUSD','BUY',''], ['forex','USDJPY','BUY',''], ['forex','GBPUSD','SELL',''],
         ['forex','EURGBP','BUY',''], ['forex','AUDUSD','SELL',''], ['forex','USDCHF','BUY',''],
         ['commodity','GC','BUY',''], ['commodity','CL','BUY',''], ['commodity','SI','BUY',''],
-        ['options','AAPL','BUY','tech'], ['options','TSLA','BUY','consumer'],
+        ['options','AVGO','BUY','tech'], ['options','TSLA','BUY','consumer'],
     ];
     var assetsUsdLong = [
         ['forex','USDJPY','BUY',''], ['forex','USDCAD','BUY',''], ['forex','USDCHF','BUY',''],
-        ['forex','EURUSD','SELL',''], ['forex','GBPUSD','SELL',''],
+        ['forex','NZDUSD','SELL',''], ['forex','GBPUSD','SELL',''],
         ['stock','XOM','BUY','energy'], ['stock','JPM','BUY','finance'],
     ];
     var assetsEurStack = [
-        ['forex','EURUSD','BUY',''], ['forex','EURGBP','BUY',''], ['forex','EURJPY','BUY',''],
-        ['forex','EURCHF','BUY',''], ['forex','EURAUD','BUY',''], ['forex','EURCAD','BUY',''],
+        ['forex','EURSEK','BUY',''], ['forex','EURGBP','BUY',''], ['forex','EURJPY','BUY',''],
+        ['forex','EURCHF','BUY',''], ['forex','EURAUD','BUY',''], ['forex','EURNZD','BUY',''],
     ];
     var assetsTechStack = [
-        ['stock','AAPL','BUY','tech'], ['stock','MSFT','BUY','tech'], ['stock','NVDA','BUY','tech'],
-        ['stock','GOOGL','BUY','tech'], ['stock','META','BUY','tech'], ['options','AAPL','BUY','tech'],
+        ['stock','AVGO','BUY','tech'], ['stock','MSFT','BUY','tech'], ['stock','ORCL','BUY','tech'],
+        ['stock','GOOGL','BUY','tech'], ['stock','META','BUY','tech'], ['options','AVGO','BUY','tech'],
     ];
     var assetsBalanced = [
-        ['stock','AAPL','BUY','tech'], ['stock','JPM','SELL','finance'],
-        ['forex','EURUSD','BUY',''], ['forex','USDJPY','SELL',''],
+        ['stock','AVGO','BUY','tech'], ['stock','JPM','SELL','finance'],
+        ['forex','NZDUSD','BUY',''], ['forex','USDJPY','SELL',''],
         ['commodity','GC','BUY',''], ['stock','PFE','SELL','health'],
     ];
     var ASSET_POOLS = {
@@ -2689,6 +2692,8 @@
             var base = symbol.substring(0, 3), quote = symbol.substring(3);
             if (base === 'USD') c.usd = +1 * sign;
             else if (quote === 'USD') c.usd = -1 * sign;
+            // A EUR leg lands on the sector bar: without this the EUR preset could never trip a cap.
+            if (base === 'EUR' || quote === 'EUR') c.sector = 'EUR';
         } else if (assetClass === 'stock' || assetClass === 'options') {
             c.equity = +1 * sign;
             c.sector = knownSector || sectors[Math.floor(Math.random() * sectors.length)];
@@ -2890,7 +2895,7 @@
 
                     <div class="ops-card">
                         <div class="ops-card-head">
-                            <span>EURUSD</span>
+                            <span>CHFJPY</span>
                             <span class="ops-side long">LONG</span>
                             <span style="color:var(--text3);">entry · stop · target</span>
                         </div>
@@ -2904,7 +2909,7 @@
 
                     <div class="ops-card">
                         <div class="ops-card-head">
-                            <span>NVDA</span>
+                            <span>ORCL</span>
                             <span class="ops-side short">SHORT</span>
                             <span style="color:var(--text3);">entry · stop · target</span>
                         </div>
@@ -2951,9 +2956,10 @@
             <div class="pillar">
                 <div class="pillar-num">1 CLICK</div>
                 <div class="pillar-lbl">Take Trade</div>
-                <div class="pillar-desc">A signal becomes a position from the rail itself &mdash; sized from your risk
+                <div class="pillar-desc">A signal becomes a trade from the rail itself &mdash; sized from your risk
                 settings, then graded, reconciled, kill-switchable and audited exactly like a bot's.
-                Executes on the paper venue: the bots are what trade live, once they have earned it.</div>
+                Paper by default; a live ticket goes to the broker as one order with its stop and target, behind the trading PIN,
+                and warns before a reward under the risk, a trade no signal backs, a shut market, a bad hour or a sick venue &mdash; then lets you decide.</div>
             </div>
             <div class="pillar">
                 <div class="pillar-num"><span class="count-up" data-target="{{ wall.instruments }}">0</span></div>
@@ -2978,13 +2984,15 @@
     <div class="container" style="text-align: center;">
         <div class="section-label reveal">Bot Fleet <span class="new-pill">TRIAL BY FIRE</span></div>
         <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
-            Nothing Reaches Live<br>Without Earning It.
+            Full Size Is Earned.<br>Never Assumed.
         </h2>
         <div class="sep reveal delay-2"></div>
         <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
             One bot per asset class, each with its own entry logic, sizing, cooldowns and skip reasons &mdash;
-            all of them starting on the paper venue. A strategy climbs the ladder only on evidence,
-            and falls back down the moment the evidence stops. Nobody has to be watching.
+            every one born switched off, on the paper venue. A rule keeps its full size on real money only once
+            the proving ground has passed it on that class and side, or its own graded record has;
+            one measured as losing there is refused, and everything else enters at a quarter.
+            A stage set by hand without that evidence is labelled as such.
         </p>
 
         <div class="broker-grid reveal delay-4">
@@ -3004,9 +3012,9 @@
                 <div class="broker-name">CRYPTO</div>
                 <div class="broker-meta">24/7 · funding + liquidation aware</div>
             </div>
-            <div class="broker-tile live">
+            <div class="broker-tile">
                 <div class="broker-name">OPTIONS</div>
-                <div class="broker-meta">flow-driven · defined risk</div>
+                <div class="broker-meta">paper only · no live venue</div>
             </div>
             <div class="broker-tile">
                 <div class="broker-name">MANUAL</div>
@@ -3032,19 +3040,19 @@
             <div class="rung r3">
                 <div class="rung-step">STAGE 03</div>
                 <div class="rung-name">LIVE · SMALL</div>
-                <div class="rung-sub">real money,<br>scaled-down sizing</div>
+                <div class="rung-sub">real money,<br>a quarter of the size</div>
                 <div class="rung-bar"></div>
             </div>
             <div class="rung r4">
                 <div class="rung-step">STAGE 04</div>
                 <div class="rung-name">LIVE · FULL</div>
-                <div class="rung-sub">full sizing,<br>still under the gate</div>
+                <div class="rung-sub">full size once<br>the evidence agrees</div>
                 <div class="rung-bar"></div>
             </div>
         </div>
         <p class="ladder-demote reveal delay-6">
-            <span class="down">▼</span> and back down again &mdash; a decayed rule is demoted automatically,
-            with <span class="count-up" data-target="{{ wall.strategies }}">0</span> strategies currently on the ladder.
+            <span class="down">▼</span> and back down again: with the ladder's switch on, a measured loser drops to paper and a decayed rule one rung.
+            <span class="count-up" data-target="{{ wall.strategies }}">0</span> strategies are on the ladder now.
         </p>
 
         <div class="pillar-row reveal delay-6" style="max-width: 1080px; margin: 32px auto 0;">
@@ -3183,9 +3191,10 @@
             sets a leverage or a margin knob &mdash; the preset is timeframes, stop and target multiples,
             a hold ceiling, a concurrency limit and a risk fraction, and that is the whole list. What the
             short-term one actually gets is how much position one fixed risk budget buys when the stop is
-            tight, plus how many bets may run at once. Both are cash. Where leverage exists at all it is
-            the broker's, on the venues that are built that way, and this platform reports it back to you
-            as a fact at the confirm step instead of offering it as a dial to turn up. And a personality
+            tight, plus how many bets may run at once. Both are cash.
+            Where leverage exists at all it is the broker's: a live ticket offers the multipliers the venue lists, the highest by default,
+            and with its switch on the attack mode picks, for each entry, the highest one the venue lists that its stop allows.
+            It changes the money the broker locks, never the loss at the stop. And a personality
             moves no capital by itself: it changes no account share, enables no config, and applying one
             to a bot that is already trading live re-sizes real risk &mdash; so that one asks for your PIN.
         </p>
@@ -3196,7 +3205,7 @@
 <!-- THE CAPITAL DESK — proposes, ranks, fills a budget. In SHADOW.     -->
 <!-- The word SHADOW is load-bearing and appears in the frame, the copy -->
 <!-- and the pillar: a visitor who reads one of the three and stops     -->
-<!-- must not come away believing this thing places orders.             -->
+<!-- must not leave believing this thing places orders.                  -->
 <!--                                                                    -->
 <!-- 2026-09-12 (review): those three were TYPED, which made them a     -->
 <!-- claim about deployment history hardcoded into a template — the     -->
@@ -3286,8 +3295,8 @@
                     </div>
                     <div style="font-family:var(--font-m);font-size:9px;color:var(--text3);letter-spacing:1px;margin-top:8px;line-height:1.5;text-align:left;">
                         The budget is a share of the venue's capital, less the risk already standing at
-                        stop in the open book, and the drawdown governor shrinks it as the curve falls
-                        away from its high-water mark. Paper and live never share a budget, a book, or a
+                        stop in the open book, and the drawdown governor shrinks it as the curve
+                        falls from its high-water mark. Paper and live never share a budget, a book, or a
                         correlation penalty.
                     </div>
                 </div>
@@ -3307,7 +3316,7 @@
             through, prices the exit it would have found, and books the R it would have paid &mdash; so
             the desk is graded against the fleet it overruled, with the tie-breaks in that counterfactual
             deliberately set <em>against</em> the desk. A correlation it could not measure enters the
-            arithmetic as zero and is written down as unmeasured, never quietly assumed away.
+            arithmetic as zero and is written down as unmeasured, never passed off as measured.
         </p>
 
         <div class="pillar-row reveal delay-6" style="max-width: 1080px; margin: 32px auto 0;">
@@ -3334,8 +3343,7 @@
                 were written with the fleet obeying the plan &mdash; because a person read the graded
                 evidence and turned that switch on.{% else %}
                 Every pass above was written in SHADOW: the switch that would let the plan be obeyed is off,
-                and it turns on the way everything else here does &mdash; on graded evidence, by a person,
-                behind the PIN.{% endif %}
+                and it is turned on alone, by a person, never by an all-on button.{% endif %}
                 <a href="#spine" style="color:var(--accent);text-decoration:none;">Why that is the point &rarr;</a></div>
             </div>
         </div>
@@ -3420,10 +3428,11 @@
             <div class="pillar">
                 <div class="pillar-num">PROPOSED</div>
                 <div class="pillar-lbl">Nothing Moves</div>
-                <div class="pillar-desc">A plan is a proposal. It moves a share only when an admin applies it
-                behind the PIN, and only with the live switch on.{% if wall.share_plans_applied %}
+                <div class="pillar-desc">A plan is a proposal. It moves a share only when an admin applies it,
+                behind the PIN on the page or with an explicit confirmation on the server, with the live switch on &mdash;
+                or, with a second switch on as well, when a shock plan that only lowers shares applies itself.{% if wall.share_plans_applied %}
                 <span class="count-up" data-target="{{ wall.share_plans_applied }}">0</span> have been applied
-                here &mdash; each one by a person, each one reversible.{% else %}
+                here, each one reversible.{% else %}
                 None has ever been applied here.{% endif %} This module never writes a pool's capital
                 and never touches the broker: the share is the only thing it decides.</div>
             </div>
@@ -3528,7 +3537,7 @@
                 </div>
                 <div class="feature-title">Brain Synthesis</div>
                 <div class="feature-text">
-                    Every thirty minutes a structured world snapshot &mdash; observations, portfolio state,
+                    Every hour a structured world snapshot &mdash; observations, portfolio state,
                     exposure, rule track records, regime probes &mdash; becomes one report with a regime
                     call, a confidence and a handful of <em>falsifiable</em> predictions. If synthesis
                     fails it says so; downstream agents degrade instead of guessing.
@@ -3753,16 +3762,26 @@
     <div class="container" style="text-align: center;">
         <div class="section-label reveal">Execution Network</div>
         <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
-            Six Brokers. One Adapter Pattern.
+            One Adapter Pattern.<br>One Venue per Class.
         </h2>
         <div class="sep reveal delay-2"></div>
         <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
             Every broker speaks the same duck-typed interface (<code>ping · ticker · klines · order_book ·
-            market_order · account · balance</code>). Routing per-symbol via the broker_router based on
-            the instrument's asset_class. Encrypted credentials at rest (Fernet). Paper-mode default.
+            market_order · account · balance</code>).
+            The router consults the flagged venues in one fixed order &mdash; Saxo, then eToro, then IBKR &mdash;
+            and a class nobody has flagged goes to its default adapter when that adapter has keys; otherwise nothing real is sent.
+            Encrypted credentials at rest (Fernet). Paper-mode default.
         </p>
 
         <div class="broker-grid reveal delay-4">
+            <div class="broker-tile live">
+                <div class="broker-name">ETORO</div>
+                <div class="broker-meta">stocks · ETFs · indices · forex · commodities · crypto</div>
+            </div>
+            <div class="broker-tile">
+                <div class="broker-name">SAXO</div>
+                <div class="broker-meta">real listings · one sign-in kept alive</div>
+            </div>
             <div class="broker-tile live">
                 <div class="broker-name">BINANCE</div>
                 <div class="broker-meta">spot · futures · crypto</div>
@@ -3773,11 +3792,11 @@
             </div>
             <div class="broker-tile live">
                 <div class="broker-name">OANDA</div>
-                <div class="broker-meta">forex · 28 pairs · practice</div>
+                <div class="broker-meta">forex · practice or live</div>
             </div>
-            <div class="broker-tile live">
+            <div class="broker-tile">
                 <div class="broker-name">IBKR</div>
-                <div class="broker-meta">options · futures · CFDs · stocks</div>
+                <div class="broker-meta">retired 23 September 2026</div>
             </div>
             <div class="broker-tile">
                 <div class="broker-name">PAPER</div>
@@ -3800,7 +3819,8 @@
                 <div class="pillar-num">SHA-256</div>
                 <div class="pillar-lbl">client_order_id</div>
                 <div class="pillar-desc">Deterministic order IDs prevent double-fills if a worker dies
-                mid-call. Binance, Alpaca and OANDA dedup server-side.</div>
+                mid-call. Binance, Alpaca and OANDA dedup server-side.
+                At eToro, an order whose answer never came back is held in doubt and looked for in the venue's own list before the instrument trades again &mdash; never sent a second time blind.</div>
             </div>
             <div class="pillar">
                 <div class="pillar-num">23:30</div>
@@ -3827,8 +3847,8 @@
                     The audit log is append-only and hash-chained. Every trade open, trade close,
                     and gate rejection produces a row whose <code>payload_hash</code> =
                     <code>sha256(prev_hash &middot; kind &middot; canonical(data))</code>. Mutating any past row breaks the
-                    chain &mdash; verify exposes the tamper. Combined with FIFO/LIFO/HIFO tax-lot bookkeeping
-                    and Form-8949 CSV export, the platform is ready for taxable-account live deployment.
+                    chain &mdash; verify exposes the tamper.
+                    It sits beside FIFO/LIFO/HIFO tax-lot bookkeeping and a Form-8949 CSV export.
                 </p>
                 <ul class="check-list">
                     <li><span class="check-mark">&#x2713;</span><code>save()</code> refuses to update existing rows; <code>delete()</code> raises</li>
@@ -3870,9 +3890,9 @@
         </h2>
         <div class="sep reveal delay-2"></div>
         <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;text-align:center;">
-            A password gets you a session. It does not get you money. Every action that can move capital
-            sits behind a second factor you hold, and a screen left unattended stops being a screen
-            anyone can use.
+            A password gets you a session. It does not get you money: unticking the demo box, arming a real bot,
+            placing or closing a real order by hand and applying a capital plan each sit behind a second factor you hold,
+            and a screen left unattended stops being a screen anyone can use.
         </p>
 
         <div class="pillar-row reveal delay-4" style="margin-top: 32px; text-align: center;">
@@ -3923,9 +3943,10 @@
         <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
             One rule runs under all of it. Every proposal is a gradable call with a deadline on it. Every
             plan is scored against the counterfactual &mdash; what actually happened, or what the trade it
-            displaced would have paid. Anything unmeasured renders as an em dash, never as a zero dressed
-            up as data. And every switch that can move money is off until a person turns it on, behind the
-            PIN, with an audit row to show for it.
+            displaced would have paid. Inside the platform, anything unmeasured renders as an em dash, never as a zero dressed
+            up as data; on this public page a counter that cannot be read shows 0, by design, so the front door never fails.
+            And every switch ships off; the ones the platform marks as real-money decisions are never turned on by an all-on button,
+            and each waits for a person to turn it on alone.
         </p>
 
         <div class="pillar-row reveal delay-4" style="max-width: 1080px; margin: 32px auto 0;">
@@ -3947,8 +3968,8 @@
                 <div class="pillar-num"><span class="count-up" data-target="{{ wall.shell_commands }}">0</span></div>
                 <div class="pillar-lbl">Commands Catalogued</div>
                 <div class="pillar-desc">Every operator command with its exact usage, held against the
-                framework's own command list by a test &mdash; so the catalogue in the cockpit cannot drift
-                away from what the shell will actually accept.</div>
+                framework's own command list by a test &mdash; so the catalogue in the cockpit cannot
+                drift from what the shell will actually accept.</div>
             </div>
             <div class="pillar">
                 <div class="pillar-num"><span class="count-up" data-target="{{ wall.rules_governed }}">0</span></div>
@@ -3987,7 +4008,7 @@
         <div class="sep reveal delay-2"></div>
         <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
             Battle-tested OSS. Multi-stage Docker build, non-root runtime, ASGI worker
-            for Channels. <code>gunicorn</code> + <code>uvicorn</code> serving HTTP and WebSockets;
+            for Channels. <code>daphne</code> serving HTTP and WebSockets;
             Sentry-instrumented; Celery beat for the recurring tasks; Channels for the per-user Eye push;
             a <code>pg_dump</code> nightly with rolling retention. The platform looks after itself.
         </p>
@@ -3999,11 +4020,11 @@
             <span class="tech-badge">PostgreSQL</span>
             <span class="tech-badge">Redis</span>
             <span class="tech-badge">Celery + Beat</span>
-            <span class="tech-badge">gunicorn + uvicorn</span>
+            <span class="tech-badge">Daphne (ASGI)</span>
             <span class="tech-badge">Anthropic Claude</span>
             <span class="tech-badge">Fernet</span>
             <span class="tech-badge">Sentry SDK</span>
-            <span class="tech-badge">ib_insync</span>
+            <span class="tech-badge">ib_insync (retired IBKR adapter)</span>
             <span class="tech-badge">pandas / numpy</span>
             <span class="tech-badge">Docker</span>
             <span class="tech-badge">cryptography</span>
@@ -4060,15 +4081,15 @@
             </div>
             <div class="feature-card reveal delay-2" style="padding: 22px 16px; text-align: center;">
                 <div class="feature-title" style="font-size: 11px;">Economic Calendar</div>
-                <div class="feature-text" style="font-size: 12px;">earnings + central bank</div>
+                <div class="feature-text" style="font-size: 12px;">Forex Factory first, FMP behind it</div>
             </div>
             <div class="feature-card reveal delay-3" style="padding: 22px 16px; text-align: center;">
-                <div class="feature-title" style="font-size: 11px;">Reddit / StockTwits</div>
-                <div class="feature-text" style="font-size: 12px;">social sentiment snapshot</div>
+                <div class="feature-title" style="font-size: 11px;">Social Sentiment</div>
+                <div class="feature-text" style="font-size: 12px;">read when a source answers; off is said, never faked</div>
             </div>
             <div class="feature-card reveal delay-4" style="padding: 22px 16px; text-align: center;">
-                <div class="feature-title" style="font-size: 11px;">IBKR / Twelve Data</div>
-                <div class="feature-text" style="font-size: 12px;">price + volatility regime</div>
+                <div class="feature-title" style="font-size: 11px;">Price Feeds</div>
+                <div class="feature-text" style="font-size: 12px;">streams, pollers and the venue's own rate</div>
             </div>
         </div>
     </div>
@@ -4083,8 +4104,8 @@
         <h2 class="cta-title reveal delay-1">Ready to See<br><span style="color:var(--accent);">Everything</span>?</h2>
         <p class="cta-desc reveal delay-2">
             Sauron starts in <strong>paper mode</strong>. Wire up your brokers when you've watched
-            it run. Flip the orchestrator on when you're ready. Promote rules from research to
-            live-full when their walk-forward backtest agrees with their live track record.
+            it run. Flip the orchestrator on when you're ready.
+            A rule trades real money at full size only once the proving ground or its own graded record has earned it.
             <em>Cautious by default &mdash; aggressive when you ask.</em>
         </p>
 
