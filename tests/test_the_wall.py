@@ -25,6 +25,8 @@ worth its runtime: five sections were spliced into a 4,138-line template by
 anchor, and a mis-anchored splice that swallowed a neighbouring section
 would otherwise pass every other assertion in this file.
 """
+import re
+
 from django.test import TestCase
 
 from core import wall_facts as wf
@@ -775,3 +777,219 @@ class WallClaimsFollowTheCodeTests(TestCase):
         self.assertIn("if (base === 'EUR' || quote === 'EUR') c.sector = 'EUR';",
                       self.body)
         self.assertIn('data-preset="eur-cross"', self.body)
+
+
+class WallSafeguardsSectionTests(TestCase):
+    """The safeguards section (2026-10-08): what stands around a trade,
+    counted off the registries the code runs on, every sentence hedged
+    the way the code is.
+
+    The guards, the real-money switches, the proving ground's verdicts and
+    the classes with a venue proof are wall_facts keys, never typed. The
+    section names the switch before the mechanism, because every one of
+    those mechanisms ships off (core.platform_control.DEFAULT_COMPONENTS)
+    and a page that said "the guards watch" of a watchdog nobody turned on
+    would be the overclaim this file exists to refuse. Every fragment
+    pinned here sits on ONE source line of the template (the reflow rule).
+    """
+
+    def setUp(self):
+        _clear_cache()
+        self.response = self.client.get("/wall/")
+        self.body = self.response.content.decode("utf-8", errors="ignore")
+        self.wall = self.response.context["wall"]
+
+    def _block(self, anchor):
+        start = self.body.index(anchor)
+        return self.body[start:self.body.index("</section>", start)]
+
+    def _pillar_target(self, body, label):
+        """The count-up target of the pillar labelled `label`."""
+        m = re.search(
+            r'data-target="(\d+)">0</span></div>\s*<div class="pillar-lbl">'
+            + re.escape(label), body)
+        self.assertIsNotNone(m, f"no pillar labelled {label!r}")
+        return int(m.group(1))
+
+    def test_the_section_stands_in_the_pages_shell(self):
+        idx = self.body.index('id="safeguards"')
+        self.assertIn('class="wall-section"', self.body[idx - 200:idx],
+                      "#safeguards is not a .wall-section")
+        self.assertIn("Before, During,", self.body)
+        self.assertIn('href="#safeguards"', self.body)
+        nav = re.search(r'<nav class="wall-nav" id="wallNav">(.*?)</nav>',
+                        self.body, re.S).group(1)
+        self.assertLess(nav.index('href="#fleet"'), nav.index('href="#safeguards"'))
+        self.assertLess(nav.index('href="#safeguards"'), nav.index('href="#desk"'))
+        block = self._block('id="safeguards"')
+        for marker in ("section-label", "new-pill", "section-title",
+                       "features-grid", "feature-card", "feature-icon",
+                       "pillar-row", "reveal delay-1"):
+            self.assertIn(marker, block, marker)
+        self.assertEqual(block.count('class="feature-card'), 6)
+        self.assertEqual(block.count('class="pillar"'), 4)
+
+    def test_every_count_in_it_is_the_facts(self):
+        block = self._block('id="safeguards"')
+        for key in ("guards", "money_switches", "proving_verdicts",
+                    "proof_classes"):
+            self.assertIn(f'data-target="{self.wall[key]}"', block, key)
+            self.assertIsInstance(self.wall[key], int)
+        self.assertEqual(block.count("data-target="), 4)
+        self.assertEqual(self._pillar_target(block, "Guards in the Watchdog"),
+                         self.wall["guards"])
+        self.assertEqual(self._pillar_target(block, "Real-Money Switches"),
+                         self.wall["money_switches"])
+        self.assertEqual(self._pillar_target(block, "Proving Verdicts Written"),
+                         self.wall["proving_verdicts"])
+        self.assertEqual(self._pillar_target(block, "Classes Through the Venue"),
+                         self.wall["proof_classes"])
+        # The counts the prose carries are the same keys, in the same block.
+        self.assertIn(f"none of the {self.wall['money_switches']} switches", block)
+        self.assertIn(f"&mdash; {self.wall['proof_classes']} have &mdash;", block)
+        self.assertIn(f"{self.wall['short_classes']} have one", block)
+        # The spine's closing paragraph carries the count since 2026-10-08.
+        spine = self._block('id="spine"')
+        self.assertIn(f"the {self.wall['money_switches']} switches the platform "
+                      "marks as real-money decisions", spine)
+        self.assertNotIn("the ones the platform marks", spine)
+        # Never a word or a digit typed beside the count.
+        low = block.lower()
+        for literal in ("eleven guards", "ten guards", "twelve switches",
+                        "seven switches", "six classes", "two classes"):
+            self.assertNotIn(literal, low, literal)
+
+    def test_it_names_the_switch_before_the_mechanism(self):
+        from core.platform_control import DEFAULT_COMPONENTS
+        self.assertEqual(
+            [c["key"] for c in DEFAULT_COMPONENTS if c.get("is_enabled")], [],
+            "a component now ships enabled — the section's 'with its switch "
+            "on' hedges may need to change with it")
+        block = self._block('id="safeguards"')
+        self.assertGreaterEqual(block.lower().count("with its switch on"), 2)
+        self.assertIn("with their switch on", block)
+        self.assertIn("ships switched off", block)
+        self.assertIn("Every one ships off", block)
+        # The dead man's switch pings only once a URL is set: hedged too.
+        self.assertIn("Once it is set up", block)
+
+    def test_its_cadence_is_the_beats(self):
+        from config.celery import app
+        from core.day_of_sauron import schedule_words
+        beat = app.conf.beat_schedule
+        self.assertEqual(schedule_words(beat["run-morgul-guards"]["schedule"])[0],
+                         "5 min")
+        block = self._block('id="safeguards"')
+        self.assertIn("Every five minutes", block)
+        self.assertIn("every five minutes", block)
+        # "Each night": the proving ground's rules run is one cron a day.
+        words, period, kind, _minute = schedule_words(
+            beat["proving-ground-rules"]["schedule"])
+        self.assertEqual((kind, period), ("cron", 86400.0), words)
+        self.assertIn("Each night", block)
+
+    def test_it_reaches_no_external_host(self):
+        for anchor in ('id="safeguards"', 'id="latest"'):
+            block = self._block(anchor)
+            for scheme in ("http://", "https://", "//cdn", 'src="//'):
+                self.assertNotIn(scheme, block,
+                                 f"section {anchor} reaches an external host")
+
+    def test_it_moves_when_a_verdict_is_saved(self):
+        """The counted-ness of the proving verdicts, demonstrated: one
+        saved verdict, whatever it says, and the pillar moves."""
+        from backtester.models_proving import ProvingVerdict
+
+        self.assertEqual(self.wall["proving_verdicts"], 0)
+        self.assertEqual(self._pillar_target(
+            self._block('id="safeguards"'), "Proving Verdicts Written"), 0)
+        ProvingVerdict.objects.create(run_id="t", family="f", direction="long",
+                                      asset_class="forex", verdict="failed")
+        _clear_cache()
+        r = self.client.get("/wall/")
+        self.assertEqual(r.context["wall"]["proving_verdicts"], 1)
+        body = r.content.decode("utf-8", errors="ignore")
+        start = body.index('id="safeguards"')
+        block = body[start:body.index("</section>", start)]
+        self.assertEqual(self._pillar_target(block, "Proving Verdicts Written"), 1)
+
+
+class WallLatestStepsTests(TestCase):
+    """The latest steps (2026-10-08): the Book's newest four milestones on
+    the Wall, each a link to its own line in the Book, read off
+    core.views_book.latest_steps at render time — never a hash, never a
+    typed date — and a road the view cannot read leaves the Wall standing.
+    """
+
+    def setUp(self):
+        _clear_cache()
+        self.response = self.client.get("/wall/")
+        self.body = self.response.content.decode("utf-8", errors="ignore")
+
+    def _block(self, body=None):
+        body = self.body if body is None else body
+        start = body.index('id="latest"')
+        return body[start:body.index("</section>", start)]
+
+    def test_the_latest_steps_are_the_books_last(self):
+        from django.utils.html import escape
+
+        from core import book_content as book
+        from core.views_book import day_words, latest_steps
+
+        block = self._block()
+        self.assertIn("The Latest Steps", block)
+        self.assertIn("The Road So Far", block)
+        last = list(book.MILESTONES)[-4:]
+        self.assertEqual(len(last), 4)
+        at = []
+        for day, _era, title, _text, _commit in reversed(last):
+            self.assertIn(escape(title), block, title)
+            self.assertIn(day_words(day), block, day)
+            self.assertIn(f'datetime="{day}"', block)
+            at.append(block.index(escape(title)))
+        self.assertEqual(at, sorted(at), "the steps are not newest first")
+        self.assertEqual(block.count("<li>"), 4)
+        self.assertEqual(self.response.context["latest"], latest_steps(4))
+        # No commit hash reaches the Wall through the road.
+        for _day, _era, _title, _text, commit in book.MILESTONES:
+            self.assertNotRegex(block, r"(?<![0-9a-f])%s(?![0-9a-f])" % commit)
+
+    def test_each_step_links_to_its_line_in_the_book(self):
+        from core.views_book import latest_steps
+
+        block = self._block()
+        steps = latest_steps(4)
+        self.assertEqual(len(steps), 4)
+        for step in steps:
+            self.assertRegex(step["anchor"], r"^m-[a-z0-9-]+$")
+            self.assertIn(f'href="/book/#{step["anchor"]}"', block)
+        self.assertIn('href="/book/#road"', block)
+        # 'href="/book/#…"' is not 'href="/book/"': the two doors of
+        # tests/test_the_book.py and test_wall_book_link.py stay two.
+        self.assertEqual(self.body.count('href="/book/"'), 2)
+        # And every link lands: the Book carries each anchor and the road.
+        book = self.client.get("/book/").content.decode("utf-8")
+        self.assertIn('id="road"', book)
+        for step in steps:
+            self.assertIn('id="%s"' % step["anchor"], book)
+
+    def test_a_broken_road_still_serves_the_wall(self):
+        """A milestone the view cannot read (a day that is not a day) must
+        not take the front door down with it: the list is empty, the door
+        to the Book stands, and the broken row never reaches the page."""
+        from unittest.mock import patch
+
+        with patch("core.book_content.MILESTONES",
+                   [("not-a-day", "x", "t", "w.", "abcdef0")]):
+            _clear_cache()
+            r = self.client.get("/wall/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode("utf-8", errors="ignore")
+        self.assertEqual(r.context["latest"], [])
+        block = self._block(body)
+        self.assertIn('id="latest"', body)
+        self.assertIn('href="/book/#road"', block)
+        self.assertNotIn("not-a-day", body)
+        self.assertNotIn("abcdef0", body)
+        self.assertNotIn("<li>", block)

@@ -8,7 +8,7 @@ from dashboard.auth_views import SauronLoginView, login_pin, login_pin_forgot
 from core.health import health_check
 from core.day_of_sauron import day_scheme, page_scheme
 from core.wall_facts import market_sessions, wall_facts
-from core.views_book import the_book
+from core.views_book import latest_steps, the_book
 
 
 def the_wall(request):
@@ -33,6 +33,10 @@ def the_wall(request):
         # page_scheme: only what the drawing reads — no import paths, beat
         # keys or queues for an anonymous visitor.
         "day": page_scheme(day_scheme(wall)),
+        # The latest steps (2026-10-08): the Book's newest four milestones,
+        # read off core.book_content at render time and never raising, so
+        # the Wall points at the road without depending on it. No database.
+        "latest": latest_steps(4),
     })
 
 

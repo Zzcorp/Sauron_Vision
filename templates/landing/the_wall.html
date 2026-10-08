@@ -493,6 +493,28 @@
             display: flex; align-items: center; justify-content: center;
             font-size: 10px; color: var(--accent); margin-top: 2px;
         }
+        /* The latest steps (2026-10-08): the same check-list, centred under
+           a section title instead of inside a split. Its own scope, since
+           the split's rules above are scoped to .split-content. */
+        .latest-steps { list-style: none; max-width: 640px; margin: 0 auto; text-align: left; }
+        .latest-steps li {
+            display: flex; align-items: flex-start; gap: 12px;
+            padding: 12px 0; font-size: 15px; color: var(--text2);
+            border-bottom: 1px solid rgba(19,48,32,0.4);
+        }
+        .latest-steps li:last-child { border-bottom: 0; }
+        .latest-steps a { color: var(--text); text-decoration: none; transition: color 0.3s; }
+        .latest-steps a:hover { color: var(--accent); }
+        .latest-steps time {
+            font-family: var(--font-m); font-size: 11px; letter-spacing: 1.5px;
+            color: var(--text3); text-transform: uppercase;
+        }
+        .latest-more {
+            margin-top: 28px; font-family: var(--font-m); font-size: 11px;
+            letter-spacing: 2px; text-transform: uppercase;
+        }
+        .latest-more a { color: var(--accent); text-decoration: none; }
+        .latest-more a:hover { text-shadow: 0 0 12px rgba(0,232,104,0.3); }
 
         /* ══════════════════════════════════════════════════════════════ */
         /* TECHNOLOGY BADGES                                             */
@@ -1793,6 +1815,16 @@
             .wall-nav { padding: 18px 24px; }
             .nav-links { gap: 18px; }
             .nav-links a:not(.btn-access) { font-size: 10px; letter-spacing: 1.5px; }
+            /* Safeguards (2026-10-08) stands down on this whole tier: with
+               it the bar ran 126 px past the Access button at 1100 px and
+               26 px at 1200, measured. The section is one scroll away. */
+            .nav-links a[href="#safeguards"] { display: none; }
+        }
+        /* Above that tier the same link ran 109 px over at 1440 and 49 at
+           1500, and fitted from 1600 (measured 2026-10-08): the gap closes
+           a little until then, the type unchanged. */
+        @media (min-width: 1421px) and (max-width: 1600px) {
+            .nav-links { gap: 20px; }
         }
         /* Four extra anchors: below this the least load-bearing ones stand
            down rather than wrapping the bar onto a second line. */
@@ -1899,6 +1931,7 @@
         <a href="#demo">Demo</a>
         <a href="#operations">Operations</a>
         <a href="#fleet">Fleet</a>
+        <a href="#safeguards">Safeguards</a>
         <a href="#desk">Desk</a>
         <a href="#mind">Mind</a>
         <a href="#horizon">Horizon</a>
@@ -3081,6 +3114,150 @@
 </section>
 
 <!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- THE SAFEGUARDS (2026-10-08): what stands around a trade, counted.  -->
+<!-- Every number is a wall_facts key; every sentence is hedged the way -->
+<!-- the code is, since most of this ships off. Each sentence sits on   -->
+<!-- one source line, so a test can pin a fragment of it.               -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="safeguards">
+    <div class="container" style="text-align: center;">
+        <div class="section-label reveal">The Safeguards <span class="new-pill">EVERY SIDE</span></div>
+        <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
+            Before, During,<br>and When It Breaks.
+        </h2>
+        <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
+            A trade is surrounded on every side: checks that can stop it leaving, care while it is open, guards that watch the machine itself, and an alarm that rings when something is wrong.
+            Most of it ships switched off, and none of the {{ wall.money_switches }} switches the platform marks as real-money decisions is turned on by an all-on button.
+        </p>
+
+        <div class="features-grid" style="text-align: left; margin-top: 36px;">
+            <div class="feature-card reveal delay-1">
+                <div class="feature-icon gold">
+                    <!-- A sealed square with its check: the proof, written before the money -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <rect x="3" y="3" width="18" height="18"/>
+                        <line x1="3" y1="7.5" x2="21" y2="7.5"/>
+                        <polyline points="7,13 10.5,16.5 17,10"/>
+                    </svg>
+                </div>
+                <div class="feature-title">Proof Before Money</div>
+                <div class="feature-text">
+                    Each night, with its switch on, the proving ground replays every live rule with the engine's own costs and stops: a holdout it never chose from, slices of time judged apart, costs doubled, a bound corrected for every variant tried.
+                    A rule measured as losing on a class and a side is refused real money there; one that passed keeps its full size; every other enters at a quarter until its own graded record says more.
+                    And no class trades at eToro before one of its orders has filled and closed there &mdash; {{ wall.proof_classes }} have &mdash; and a sell needs a proof of its own: {{ wall.short_classes }} have one.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-2">
+                <div class="feature-icon blue">
+                    <!-- An octagonal clock face: the one clock the gate and the guard read -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="8,2 16,2 22,8 22,16 16,22 8,22 2,16 2,8"/>
+                        <polyline points="12,6.5 12,12 16,14.5"/>
+                        <line x1="12" y1="2" x2="12" y2="4"/>
+                        <line x1="2" y1="12" x2="4" y2="12"/>
+                        <line x1="20" y1="12" x2="22" y2="12"/>
+                    </svg>
+                </div>
+                <div class="feature-title">The Clock</div>
+                <div class="feature-text">
+                    No bot opens a real-money trade in a share, an ETF, a currency or a commodity while its exchange is shut.
+                    Crypto aside, which never shuts, no bot opens a new trade in the minutes around New York's five o'clock rollover, in a market's first quarter hour, in a share's last minutes or before a weekend, and none opens one around a high-impact print on its currency; the live ticket warns of each and leaves the last word to a person.
+                    The gate and the guard read one clock, so they cannot disagree.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-3">
+                <div class="feature-icon">
+                    <!-- A pulse inside a frame: the venue's health, read before every real entry -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <rect x="2" y="4" width="20" height="16"/>
+                        <polyline points="4,12 8,12 10,8 13,16 15,12 20,12"/>
+                    </svg>
+                </div>
+                <div class="feature-title">The Venue's Health</div>
+                <div class="feature-text">
+                    An order whose answer never came back is held in doubt and looked for at the venue, never sent twice blind.
+                    A burst of failures makes the venue sick: new real-money entries wait for quiet while closes and stop moves go on.
+                    A crossed, stale or frozen quote is not traded on, every live bot order takes a last look before it leaves, and a worse fill at eToro moves the stop by the slip.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-4">
+                <div class="feature-icon purple">
+                    <!-- A shield with a stop stepping up inside it: the care, tighten-only -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="12,2 20,5 20,12 12,22 4,12 4,5"/>
+                        <polyline points="7,15 10,15 10,12 14,12 14,9 17,9"/>
+                    </svg>
+                </div>
+                <div class="feature-title">Care of the Open Trade</div>
+                <div class="feature-text">
+                    With its switch on, a trade's stop goes to break-even at one R and trails past it, a trade that has done nothing for days is let go, and a levered real-money loser is cut before a weekend or a high-impact print.
+                    Every tighter stop on a real-money trade is copied onto the stop resting at eToro, so the lock outlives the platform.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-5">
+                <div class="feature-icon red">
+                    <!-- A hex frame around a square sight: the watchdog, looking for what must never happen -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent-red)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <polygon points="12,2 21,7 21,17 12,22 3,17 3,7"/>
+                        <rect x="8.5" y="8.5" width="7" height="7"/>
+                        <line x1="12" y1="4.5" x2="12" y2="8.5"/>
+                        <line x1="12" y1="15.5" x2="12" y2="19.5"/>
+                        <line x1="5.5" y1="12" x2="8.5" y2="12"/>
+                        <line x1="15.5" y1="12" x2="18.5" y2="12"/>
+                    </svg>
+                </div>
+                <div class="feature-title">The Guards and the Brake</div>
+                <div class="feature-text">
+                    Every five minutes, with their switch on, {{ wall.guards }} guards look for what must never happen: a booking on a shut market, a live trade with no stop, a stuck close, a drift from the venue, a stop that did not hold.
+                    A few of them may brake, and a brake only stops new entries: what a bot holds is still managed.
+                    Every switch-off records who, when and why.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-6">
+                <div class="feature-icon">
+                    <!-- A bell drawn in straight lines: it rings for a critical problem and for nothing else -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter">
+                        <polyline points="4,17 6,15 6,9 12,4 18,9 18,15 20,17 4,17"/>
+                        <line x1="10" y1="20" x2="14" y2="20"/>
+                        <line x1="12" y1="2" x2="12" y2="4"/>
+                    </svg>
+                </div>
+                <div class="feature-title">The Alarm</div>
+                <div class="feature-text">
+                    With its switch on, a second bot in a second group rings for a critical problem and for nothing else &mdash; never a heartbeat, never an amount.
+                    Once it is set up, a watcher outside the server raises the alarm when the platform goes quiet.
+                </div>
+            </div>
+        </div>
+
+        {# Every target below is a count off a registry or a table (core.wall_facts), never typed: the page follows the next guard, switch or proof the day it lands. #}
+        <div class="pillar-row reveal delay-6" style="max-width: 1080px; margin: 32px auto 0;">
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.guards }}">0</span></div>
+                <div class="pillar-lbl">Guards in the Watchdog</div>
+                <div class="pillar-desc">With their switch on, together they read the platform and the venue every five minutes; a guard that cannot run is reported, never read as a healthy one.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.money_switches }}">0</span></div>
+                <div class="pillar-lbl">Real-Money Switches</div>
+                <div class="pillar-desc">Every one ships off, none is armed by an all-on button, and each is turned on alone, by a person.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.proving_verdicts }}">0</span></div>
+                <div class="pillar-lbl">Proving Verdicts Written</div>
+                <div class="pillar-desc">Every verdict the proving ground has saved, whether it passed, failed or had too little to judge, counted whatever it said.</div>
+            </div>
+            <div class="pillar">
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.proof_classes }}">0</span></div>
+                <div class="pillar-lbl">Classes Through the Venue</div>
+                <div class="pillar-desc">Classes with an order filled and closed at eToro, written into the code with its test; a sell needs its own.</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
 <!-- THE THREE PERSONALITIES                                            -->
 <!-- No number in this section, on purpose: every knob a persona sets   -->
 <!-- lives in bot_program/personas.py, and a value typed into this      -->
@@ -3945,7 +4122,7 @@
             plan is scored against the counterfactual &mdash; what actually happened, or what the trade it
             displaced would have paid. Inside the platform, anything unmeasured renders as an em dash, never as a zero dressed
             up as data; on this public page a counter that cannot be read shows 0, by design, so the front door never fails.
-            And every switch ships off; the ones the platform marks as real-money decisions are never turned on by an all-on button,
+            And every switch ships off; the {{ wall.money_switches }} switches the platform marks as real-money decisions are never turned on by an all-on button,
             and each waits for a person to turn it on alone.
         </p>
 
@@ -4092,6 +4269,28 @@
                 <div class="feature-text" style="font-size: 12px;">streams, pollers and the venue's own rate</div>
             </div>
         </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- THE LATEST STEPS (2026-10-08): the Book's newest four milestones,  -->
+<!-- read off core.views_book.latest_steps at render time, each linking -->
+<!-- to its own line in the Book. Never a hash: the anchor is built     -->
+<!-- from the title. A road that cannot be read leaves the list empty   -->
+<!-- and the door to the Book standing.                                 -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="latest">
+    <div class="container" style="text-align: center;">
+        <div class="section-label reveal">The Road So Far</div>
+        <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
+            The Latest Steps
+        </h2>
+        <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
+            The last steps the Book records, newest first. Every one is dated, and every one has its own line in the Book.
+        </p>
+        {% if latest %}<ol class="check-list latest-steps reveal delay-4">{% for m in latest %}<li><span class="check-mark">&#x2713;</span><a href="{% url 'the_book' %}#{{ m.anchor }}"><time datetime="{{ m.date }}">{{ m.day }}</time> &middot; {{ m.title }}</a></li>{% endfor %}</ol>{% endif %}
+        <p class="latest-more reveal delay-5"><a href="{% url 'the_book' %}#road">Read the whole road in the Book &rarr;</a></p>
     </div>
 </section>
 
