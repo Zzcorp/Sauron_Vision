@@ -804,9 +804,10 @@ class WallSafeguardsSectionTests(TestCase):
         return self.body[start:self.body.index("</section>", start)]
 
     def _pillar_target(self, body, label):
-        """The count-up target of the pillar labelled `label`."""
+        """The count-up target of the pillar labelled `label`. Served
+        already printed since 2026-10-08: the text is the target."""
         m = re.search(
-            r'data-target="(\d+)">0</span></div>\s*<div class="pillar-lbl">'
+            r'data-target="(\d+)">\1</span></div>\s*<div class="pillar-lbl">'
             + re.escape(label), body)
         self.assertIsNotNone(m, f"no pillar labelled {label!r}")
         return int(m.group(1))
@@ -993,3 +994,290 @@ class WallLatestStepsTests(TestCase):
         self.assertNotIn("not-a-day", body)
         self.assertNotIn("abcdef0", body)
         self.assertNotIn("<li>", block)
+
+
+class TheWallStaysOpenTests(TestCase):
+    """The front door after 2026-10-08: rendered without the request's
+    context processors (core/views_wall.py), every reader it calls fenced
+    on its own, and the login forms still carrying a token the middleware
+    accepts.
+
+    Through `render()` the Wall paid for every panel of the dashboard's
+    shell: forty-odd queries on a warm visit, most of them on live quotes
+    an anonymous visitor is never shown, and a dashboard panel that broke
+    broke the login page with it. The Book has rendered the other way
+    since 2026-09-27; these tests hold the Wall to the same bargain and to
+    the one thing it needs that the Book does not: the CSRF token.
+    """
+
+    def setUp(self):
+        _clear_cache()
+
+    def test_an_unreadable_schedule_still_serves_the_wall(self):
+        """A Celery app that will not read, or a beat entry these words
+        cannot describe, draws an empty ring; it does not take the front
+        door down, and the warning names the exception's class alone."""
+        from unittest.mock import patch
+
+        from tests.test_wall_day import _json_on
+
+        with patch("core.day_of_sauron.read_schedule",
+                   side_effect=RuntimeError("the beat is unreadable")), \
+             self.assertLogs("core.day_of_sauron", level="WARNING") as logs:
+            r = self.client.get("/wall/")
+        self.assertEqual(r.status_code, 200)
+        day = _json_on(r.content.decode())
+        self.assertEqual(day["total"], 0)
+        self.assertEqual(day["stages"], [])
+        self.assertEqual(r.context["day"]["total"], 0)
+        self.assertIn("RuntimeError", logs.output[0])
+        self.assertNotIn("unreadable", logs.output[0])
+
+    def test_a_broken_session_clock_still_serves_the_wall(self):
+        """The session pills are clock arithmetic and the one reader the
+        view used to call bare: a clock that throws leaves the row empty
+        and the page standing."""
+        from unittest.mock import patch
+
+        with patch("core.views_wall.market_sessions",
+                   side_effect=RuntimeError("no clock")), \
+             self.assertLogs("core.views_wall", level="WARNING") as logs:
+            r = self.client.get("/wall/")
+        self.assertEqual(r.status_code, 200)
+        body = r.content.decode("utf-8", errors="ignore")
+        self.assertIn('class="sess-row"', body)
+        self.assertEqual(r.context["sessions"], [])
+        row = body.split('class="sess-row"')[1].split("</div>")[0]
+        self.assertNotIn('<span class="sess-pill', row)
+        self.assertIn("RuntimeError", logs.output[0])
+        self.assertNotIn("no clock", logs.output[0])
+
+    def test_a_warm_wall_reads_nothing(self):
+        """The facts are cached, the sessions are arithmetic, the ring is
+        the beat and the road is the Book's own list: a warm visit opens
+        no connection at all. Through the context processors it opened
+        forty-three (2026-10-07, measured)."""
+        self.client.get("/wall/")  # warm
+        with self.assertNumQueries(0):
+            r = self.client.get("/wall/")
+        self.assertEqual(r.status_code, 200)
+
+    def test_the_page_pays_none_of_a_dashboards_reads(self):
+        """No context processor ran: no permissions, no messages. What the
+        login forms need is passed by name, and get_token() is what
+        makes the middleware set the cookie the token is checked against."""
+        r = self.client.get("/wall/")
+        self.assertEqual(r.status_code, 200)
+        for name in ("perms", "messages"):
+            self.assertNotIn(name, r.context)
+        for name in ("wall", "sessions", "day", "latest", "csrf_token"):
+            self.assertIn(name, r.context)
+        self.assertIn("csrftoken", r.cookies)
+        body = r.content.decode("utf-8", errors="ignore")
+        self.assertEqual(body.count('name="csrfmiddlewaretoken"'), 3)
+        self.assertNotIn('value=""', body.split('name="csrfmiddlewaretoken"')[1][:40])
+
+    def test_the_login_still_posts_from_the_wall(self):
+        """With the checks the browser meets (not the test client's
+        default, which skips them): the token the Wall printed, posted
+        back with bad credentials, is refused as bad credentials and
+        never as a missing token."""
+        from django.test import Client
+
+        from core import security
+
+        security._login_attempts.clear()
+        client = Client(enforce_csrf_checks=True)
+        page = client.get("/wall/").content.decode("utf-8", errors="ignore")
+        token = re.search(
+            r'name="csrfmiddlewaretoken" value="([^"]+)"', page).group(1)
+        r = client.post("/login/", {"csrfmiddlewaretoken": token,
+                                    "username": "nobody_on_the_wall",
+                                    "password": "not-the-password"})
+        self.assertNotEqual(r.status_code, 403)
+        self.assertIn(r.status_code, (200, 400))
+
+
+class MotionIsOptionalOnTheWallTests(TestCase):
+    """Progressive enhancement on the Wall (2026-10-08), on the Book's
+    model: the page is readable exactly as served, and the motion is laid
+    on top only where it can run and is welcome.
+
+    Before, every block began at opacity 0 and waited for a script to
+    reveal it, and left the page again when scrolled out of view; a
+    visitor without script, a script that threw, a print and a reader who
+    asked for less motion all read a blank page. Now a head switch marks
+    the root `.wall-js` only where the reveal observer exists and motion
+    is welcome, with a three-second failsafe; every counter is served
+    already printed; reduced motion stops everything and shows
+    everything; print is dark ink on white with everything shown; the
+    five decorative layers are hidden from assistive technology.
+
+    The stylesheet is parsed the way tests/test_the_book.py parses it.
+    """
+
+    #: Rules that hide something outside the reveal system, enumerated
+    #: from the page on 2026-10-08: the login and PIN overlays (shown by a
+    #: body class the login flow sets) and the two ladders that enter on
+    #: logRowIn (restored under reduced motion and in print).
+    HIDDEN_BY_DESIGN = {
+        "body.login-mode .wall-content", "body.login-mode .wall-nav",
+        ".login-overlay", ".login-anim",
+        "body.login-mode.pin-mode .login-overlay",
+        "body.login-mode.pin-mode .login-overlay .login-anim",
+        ".pin-overlay", ".pin-anim", ".demo-log-row", ".desk-row",
+    }
+
+    @classmethod
+    def setUpTestData(cls):
+        from pathlib import Path
+
+        from django.conf import settings
+        cls.src = (Path(settings.BASE_DIR) / "templates" / "landing"
+                   / "the_wall.html").read_text(encoding="utf-8")
+
+    def setUp(self):
+        _clear_cache()
+        self.body = self.client.get("/wall/").content.decode("utf-8", errors="ignore")
+
+    def _css(self):
+        from tests.test_the_book import _css
+        return _css(self.body)
+
+    def _head(self):
+        return self.body[:self.body.index("<style>")]
+
+    def _main_script(self):
+        return self.body[self.body.rindex("<script>"):]
+
+    def test_nothing_is_hidden_unless_the_reveal_can_run(self):
+        from tests.test_the_book import _drop_blocks, _rules
+
+        css = self._css()
+        css = _drop_blocks(css, r"@keyframes [\w-]+\s*")
+        css = _drop_blocks(css, r"@media \(prefers-reduced-motion: reduce\)\s*")
+        css = _drop_blocks(css, r"@media print\s*")
+        hidden = []
+        for selector, rules in _rules(css):
+            flat = re.sub(r"\s+", "", rules)
+            if re.search(r"opacity:0(?![.\d])", flat) or "visibility:hidden" in flat:
+                hidden.append(" ".join(selector.split()))
+        self.assertTrue(hidden)
+        for selector in hidden:
+            with self.subTest(selector=selector):
+                self.assertTrue(
+                    selector.startswith(".wall-js ")
+                    or "::before" in selector or "::after" in selector
+                    or selector in self.HIDDEN_BY_DESIGN,
+                    "%r is hidden before any script runs" % selector)
+        # The reveal rules are the ones behind the switch, all four of them.
+        for kind in (".reveal", ".reveal-left", ".reveal-right", ".reveal-scale"):
+            self.assertIn(".wall-js " + kind, hidden)
+            self.assertNotIn(kind, hidden)
+            self.assertIn(".wall-js %s.visible { opacity: 1;" % kind, self.body)
+
+    def test_the_head_switch_has_a_failsafe(self):
+        head = self._head()
+        for word in ("wall-js", "IntersectionObserver",
+                     "prefers-reduced-motion: reduce", "setTimeout",
+                     "wallAwake", 'classList.remove("wall-js")'):
+            self.assertIn(word, head, word)
+        # It runs before the stylesheet, so no block is ever hidden and
+        # then shown: the class is on the root before the first rule.
+        self.assertLess(head.index("wall-js"), self.body.index("<style>"))
+        self.assertIn("window.wallAwake = true", self._main_script())
+        # Plain JavaScript in the source: no template tag, so
+        # tests.test_inline_js_parses reads it.
+        src_head = self.src[:self.src.index("<style>")]
+        switch = src_head[src_head.index("<script>"):src_head.index("</script>")]
+        self.assertNotIn("{{", switch)
+        self.assertNotIn("{%", switch)
+
+    def test_reduced_motion_stops_everything_and_shows_everything(self):
+        from tests.test_the_book import _block
+
+        block = _block(self._css(), r"@media \(prefers-reduced-motion: reduce\)")
+        for rule in ("animation: none !important", "transition: none !important",
+                     "scroll-behavior: auto"):
+            self.assertIn(rule, block, rule)
+        rule_at = block.index(".desk-row {")
+        rule = block[rule_at:block.index("}", rule_at)]
+        self.assertIn("opacity: 1", rule)
+        self.assertIn("transform: none", rule)
+        self.assertIn(".demo-log-row { opacity: 1 !important; transform: none !important; }", block)
+        # And the easing of the page's own scroll is asked for only where
+        # motion is welcome.
+        self.assertIn("@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }",
+                      self.body)
+        self.assertNotIn("html { scroll-behavior: smooth; overflow-x: hidden; }", self.body)
+
+    def test_print_shows_everything_in_dark_ink(self):
+        from tests.test_the_book import _block, _rules
+
+        css = self._css()
+        self.assertIn("@media print", css)
+        block = _block(css, r"@media print")
+        rules = dict(_rules(block))
+        restore = next(v for k, v in rules.items() if ".desk-row" in k and ".demo-log-row" in k)
+        self.assertIn("opacity: 1 !important", restore)
+        for kind in (".reveal", ".reveal-left", ".reveal-right", ".reveal-scale"):
+            self.assertTrue(any(kind in k and "opacity: 1 !important" in v
+                                for k, v in rules.items()), kind)
+        self.assertIn("--text: #111", block)
+        self.assertIn("--bg: #fff", block)
+        hidden = next(v for k, v in rules.items() if "#bgCanvas" in k and ".login-overlay" in k)
+        self.assertIn("display: none !important", hidden)
+        for layer in (".grid-bg", ".scan-line", ".eye-glow-shadow",
+                      ".globe-eye-fixed", ".wall-nav", ".pin-overlay"):
+            self.assertTrue(any(layer in k and "display: none !important" in v
+                                for k, v in rules.items()), layer)
+        self.assertIn("animation: none !important", block)
+        # The page's own :root stays the first one: the Book copies it.
+        self.assertLess(self.body.index(":root {"), self.body.index("@media print"))
+
+    def test_every_count_is_printed_before_any_script(self):
+        pairs = re.findall(r'data-target="(\d+)">([^<]*)<', self.body)
+        self.assertGreaterEqual(len(pairs), 15)
+        for target, text in pairs:
+            with self.subTest(target=target):
+                self.assertEqual(text, target)
+        # In the source too: the same wall key on both sides, never a zero.
+        self.assertNotIn('">0</span>', self.src.split("<section")[0])
+        self.assertEqual(
+            re.findall(r'data-target="\{\{ wall\.([a-z0-9_]+) \}\}">0</span>', self.src), [])
+        for key, printed in re.findall(
+                r'data-target="\{\{ wall\.([a-z0-9_]+) \}\}">\{\{ wall\.([a-z0-9_]+) \}\}</span>',
+                self.src):
+            self.assertEqual(key, printed)
+
+    def test_the_particles_and_the_svg_clocks_rest_when_motion_is_not_welcome(self):
+        script = self._main_script()
+        particles = script[script.index("function drawParticles"):script.index("drawParticles();")]
+        self.assertIn("requestAnimationFrame", particles)
+        self.assertLess(particles.index("prefersReducedMotion"),
+                        particles.index("requestAnimationFrame"))
+        self.assertIn("if (prefersReducedMotion) {", script)
+        pause = script[script.index("if (prefersReducedMotion) {"):]
+        self.assertIn("pauseAnimations", pause[:pause.index("}")])
+        # There is something to pause: the inline SMIL clocks.
+        self.assertGreaterEqual(self.body.count("<animateMotion"), 4)
+        self.assertIn("<animate ", self.body)
+        self.assertIn("prefersReducedMotion ? 'auto' : 'smooth'", script)
+
+    def test_what_was_read_stays_read_and_counts_once(self):
+        script = self._main_script()
+        self.assertNotIn("classList.remove('visible')", script)
+        self.assertIn("observer.unobserve(entry.target)", script)
+        self.assertIn("countObserver.unobserve(el)", script)
+        # The observer is armed before the counters, the ticker and the
+        # particles, so a throw further down never leaves a block hidden.
+        self.assertLess(script.index("window.wallAwake = true"), script.index("var WALL = {"))
+        self.assertLess(script.index("observer.observe(el)"), script.index("window.wallAwake = true"))
+
+    def test_the_decorative_layers_are_hidden_from_assistive_tech(self):
+        for opener in ('<div class="grid-bg"', '<canvas id="bgCanvas"',
+                       '<div class="scan-line"', '<div class="eye-glow-shadow"',
+                       '<svg class="globe-eye-fixed"'):
+            start = self.body.index(opener)
+            tag = self.body[start:self.body.index(">", start)]
+            self.assertIn('aria-hidden="true"', tag, opener)

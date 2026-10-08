@@ -864,14 +864,27 @@ class WallFactsFencingTests(TestCase):
         self.assertEqual(wall["news_24h"], 0)
 
     def test_a_dead_cache_degrades_to_a_live_computation(self):
-        """Redis going down should cost latency, not the front door."""
+        """Redis going down should cost latency, not the front door.
+
+        The module's own cache object is replaced, as DegradedCacheTests
+        does: wall_facts() calls cache.get and cache.set, and a patch on
+        an attribute the function never calls (get_or_set, until
+        2026-10-08) raised nothing, so this test passed on a cache that
+        was never dead."""
+        from unittest.mock import MagicMock
+
+        from core import wall_facts as wf
         _instrument("ZZAAA", "crypto")
 
-        with patch("core.wall_facts.cache.get_or_set",
-                   side_effect=RuntimeError("connection refused")):
+        dead = MagicMock()
+        dead.get.side_effect = RuntimeError("connection refused")
+        dead.set.side_effect = RuntimeError("connection refused")
+        with patch.object(wf, "cache", dead):
             facts = wall_facts()
 
         self.assertEqual(facts["instruments"], 1)
+        dead.get.assert_called_once()
+        dead.set.assert_called_once()
 
     def test_a_stale_cached_payload_is_backfilled_from_the_contract(self):
         """A deploy that adds a key must not render a hole for the 5 minutes
@@ -884,14 +897,22 @@ class WallFactsFencingTests(TestCase):
         self.assertEqual(facts["tests_green"], FALLBACK_FACTS["tests_green"])
 
     def test_wall_facts_never_raises_even_when_the_builder_explodes(self):
-        """Last line of defence: whatever happens, the view gets a dict."""
-        with patch("core.wall_facts.cache.get_or_set",
-                   side_effect=RuntimeError("cache down")), \
+        """Last line of defence: whatever happens, the view gets a dict.
+        The cache is dead too (the module's object replaced, its get and
+        set raising), so neither fence is the one that saves the page."""
+        from unittest.mock import MagicMock
+
+        from core import wall_facts as wf
+        dead = MagicMock()
+        dead.get.side_effect = RuntimeError("cache down")
+        dead.set.side_effect = RuntimeError("cache down")
+        with patch.object(wf, "cache", dead), \
              patch("core.wall_facts._build_facts",
                    side_effect=RuntimeError("everything is on fire")):
             facts = wall_facts()
 
         self.assertEqual(facts, FALLBACK_FACTS)
+        dead.get.assert_called_once()
 
 
 class WallFactsCachingTests(TestCase):

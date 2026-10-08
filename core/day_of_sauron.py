@@ -21,7 +21,10 @@ Nothing here reads the database. The home page's live layer
 from __future__ import annotations
 
 import fnmatch
+import logging
 from itertools import groupby
+
+logger = logging.getLogger(__name__)
 
 #: The seven stages, in the order the ring turns. Key, title, and the one
 #: sentence a hover shows first.
@@ -460,6 +463,29 @@ def page_scheme(scheme: dict) -> dict:
         "unplaced": len(scheme.get("unplaced") or []),
         "adapters": scheme.get("adapters", 0),
     }
+
+
+#: What a page is handed when the schedule cannot be read: the ring's
+#: shape with nothing on it, so the drawing finds every key it reads and
+#: draws an empty picture instead of throwing.
+EMPTY_PAGE_SCHEME = {"stages": [], "total": 0, "queues": {}, "fastest": "",
+                     "slowest": "", "unplaced": 0, "adapters": 0}
+
+
+def safe_page_scheme(wall: dict | None = None) -> dict:
+    """page_scheme(day_scheme(wall)), fenced: a beat entry with a schedule
+    these words cannot read, or a Celery app that will not import, must
+    not take a public page down with it (2026-10-08). The warning names
+    the exception's class and nothing else: the page is the Wall's, and
+    the Wall's logs are read beside the door it keeps open."""
+    try:
+        return page_scheme(day_scheme(wall))
+    except Exception as exc:  # noqa: BLE001 — the page renders either way
+        logger.warning("the day scheme could not be read (%s); the ring is "
+                       "drawn empty", type(exc).__name__)
+        return {key: (dict(value) if isinstance(value, dict) else
+                      list(value) if isinstance(value, list) else value)
+                for key, value in EMPTY_PAGE_SCHEME.items()}
 
 
 def beat_components() -> dict:

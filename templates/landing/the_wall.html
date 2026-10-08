@@ -35,6 +35,14 @@
     <meta name="theme-color" content="#030806">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;500;600;700;800;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    {# The reveal switch (2026-10-08). Every section below starts visible; only a browser that can run the reveal observer, and whose reader has not asked for less motion, hides them for the fade-in, by one class on the root. The main script sets wallAwake once the observer is armed; if it never does (a script error, a blocked script), the class comes off after three seconds and the page stands as it was served. No template tag in it. #}
+    <script>
+    (function () { var root = document.documentElement;
+      if (!("IntersectionObserver" in window)) { return; }
+      if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) { return; }
+      root.classList.add("wall-js");
+      window.setTimeout(function () { if (!window.wallAwake) { root.classList.remove("wall-js"); } }, 3000); })();
+    </script>
     <style>
         /* ══════════════════════════════════════════════════════════════ */
         /* ROOT & RESET                                                  */
@@ -51,7 +59,8 @@
             --font-m: 'Share Tech Mono', monospace;
         }
         *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-        html { scroll-behavior: smooth; overflow-x: hidden; }
+        html { overflow-x: hidden; }
+        @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
         body {
             background: var(--bg); color: var(--text); font-family: var(--font-h);
             font-size: 16px; line-height: 1.6; overflow-x: hidden;
@@ -65,27 +74,31 @@
         @media (max-width: 768px) { .container { padding: 0 20px; } }
 
         /* ══════════════════════════════════════════════════════════════ */
-        /* REVEAL + FADE-OUT ANIMATION SYSTEM                            */
-        /* Elements fade in on scroll down AND fade out on scroll up     */
+        /* REVEAL SYSTEM (2026-10-08)                                    */
+        /* Each block fades in once, the first time it scrolls into view, */
+        /* and stays. Nothing is hidden unless the root carries .wall-js, */
+        /* which the head switch sets only where the observer can run and */
+        /* motion is welcome; without script, in print and under reduced  */
+        /* motion the page is read exactly as it was served.              */
         /* ══════════════════════════════════════════════════════════════ */
-        .reveal {
+        .wall-js .reveal {
             opacity: 0; transform: translateY(60px);
             transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
                         transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
         }
-        .reveal.visible { opacity: 1; transform: translateY(0); }
-        .reveal-left { opacity: 0; transform: translateX(-80px);
+        .wall-js .reveal.visible { opacity: 1; transform: translateY(0); }
+        .wall-js .reveal-left { opacity: 0; transform: translateX(-80px);
             transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
                         transform 0.9s cubic-bezier(0.16, 1, 0.3, 1); }
-        .reveal-left.visible { opacity: 1; transform: translateX(0); }
-        .reveal-right { opacity: 0; transform: translateX(80px);
+        .wall-js .reveal-left.visible { opacity: 1; transform: translateX(0); }
+        .wall-js .reveal-right { opacity: 0; transform: translateX(80px);
             transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
                         transform 0.9s cubic-bezier(0.16, 1, 0.3, 1); }
-        .reveal-right.visible { opacity: 1; transform: translateX(0); }
-        .reveal-scale { opacity: 0; transform: scale(0.85);
+        .wall-js .reveal-right.visible { opacity: 1; transform: translateX(0); }
+        .wall-js .reveal-scale { opacity: 0; transform: scale(0.85);
             transition: opacity 0.9s cubic-bezier(0.16, 1, 0.3, 1),
                         transform 0.9s cubic-bezier(0.16, 1, 0.3, 1); }
-        .reveal-scale.visible { opacity: 1; transform: scale(1); }
+        .wall-js .reveal-scale.visible { opacity: 1; transform: scale(1); }
         .delay-1 { transition-delay: 0.1s; } .delay-2 { transition-delay: 0.2s; }
         .delay-3 { transition-delay: 0.3s; } .delay-4 { transition-delay: 0.4s; }
         .delay-5 { transition-delay: 0.5s; } .delay-6 { transition-delay: 0.6s; }
@@ -1817,7 +1830,7 @@
             .nav-links a:not(.btn-access) { font-size: 10px; letter-spacing: 1.5px; }
             /* Safeguards (2026-10-08) stands down on this whole tier: with
                it the bar ran 126 px past the Access button at 1100 px and
-               26 px at 1200, measured. The section is one scroll away. */
+               26 px at 1200, measured. The section is one scroll down. */
             .nav-links a[href="#safeguards"] { display: none; }
         }
         /* Above that tier the same link ran 109 px over at 1440 and 49 at
@@ -1837,8 +1850,15 @@
         }
 
         /* Motion added by the sections above respects the same preference
-           the parallax/pupil tracking already honours in JS. */
+           the parallax/pupil tracking already honours in JS. Since
+           2026-10-08 the whole page rests under it: every animation and
+           transition is off, the page scrolls without easing, and the
+           head switch never hides a block for the reveal. The login and
+           PIN overlays ride transitions, not animations, so they become
+           instant here, never invisible. */
         @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation: none !important; transition: none !important; }
+            html { scroll-behavior: auto !important; }
             .ops-pill .blip,
             .sess-pill.open::before,
             .ops-panel-title .live-pulse,
@@ -1851,12 +1871,37 @@
                visual of the desk section — permanently invisible to anyone
                who asked for less motion. The end state has to be restored
                by hand. This is why .demo-log-row, which uses the same
-               keyframe, was never added to the list above (2026-09-12). */
+               keyframe, was never added to the list above (2026-09-12);
+               with every animation off since 2026-10-08 it is restored the
+               same way. */
             .desk-row {
                 animation: none;
                 opacity: 1;
                 transform: none;
             }
+            .demo-log-row { opacity: 1 !important; transform: none !important; }
+        }
+
+        /* ══════════════════════════════════════════════════════════════ */
+        /* PRINT (2026-10-08) — dark ink on white, everything shown.      */
+        /* The page's text is var(--text), a pale green on near-black, so  */
+        /* a plain `color: #111` would still print the tokens' pale words  */
+        /* on white paper: the tokens themselves are redefined here. The   */
+        /* fixed layers, the ticker, the bar and the overlays are out; the */
+        /* reveal blocks and the two animated ladders are restored to their */
+        /* end state, since no animation runs on paper.                    */
+        /* ══════════════════════════════════════════════════════════════ */
+        @media print {
+            :root { --bg: #fff; --bg2: #fff; --bg3: #f2f2f2; --text: #111; --text2: #333; --text3: #555; --border: #bbb; --border-glow: #bbb; --accent: #0a5028; --accent-bright: #0a5028; }
+            .grid-bg, #bgCanvas, .scan-line, .eye-glow-shadow, .globe-eye-fixed, .wall-ticker, .wall-nav, .scroll-indicator, .login-overlay, .pin-overlay { display: none !important; }
+            *, *::before, *::after { animation: none !important; transition: none !important; }
+            .reveal, .reveal-left, .reveal-right, .reveal-scale, .desk-row, .demo-log-row { opacity: 1 !important; transform: none !important; }
+            body { background: #fff !important; color: #111 !important; }
+            /* The panels that paint their own dark ground (a literal rgba,
+               not a token) print on a light one, so the words in them
+               stay dark ink on something near white. */
+            .wall-section:nth-child(even) { background: transparent !important; }
+            .feature-card, .visual-label, .demo-exposure-panel, .demo-log-panel, .ops-panel, .ops-inbox-row, .ops-band-cell, .ask-term, .desk-row, .demo-log-row { background: #f4f4f4 !important; backdrop-filter: none !important; }
         }
     </style>
     {# The ring scheme's own sheet (2026-09-29): shared with the home page, so one drawing has one style. After the inline sheet, which owns the tokens it reads. #}
@@ -1867,12 +1912,13 @@
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <!-- BACKGROUND LAYERS                                                  -->
 <!-- ═══════════════════════════════════════════════════════════════════ -->
-<div class="grid-bg"></div>
-<canvas id="bgCanvas"></canvas>
-<div class="scan-line"></div>
+<!-- Decoration, every one of them: hidden from assistive technology.  -->
+<div class="grid-bg" aria-hidden="true"></div>
+<canvas id="bgCanvas" aria-hidden="true"></canvas>
+<div class="scan-line" aria-hidden="true"></div>
 
-<div class="eye-glow-shadow"></div>
-<svg class="globe-eye-fixed" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg">
+<div class="eye-glow-shadow" aria-hidden="true"></div>
+<svg class="globe-eye-fixed" viewBox="0 0 800 800" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <defs>
         <filter id="wallEyeGlow" x="-100%" y="-100%" width="300%" height="300%">
             <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="b1"/>
@@ -1990,22 +2036,22 @@
         {# Every target below is a server-side aggregate COUNT from the wall context — never a price, a symbol or an account figure. #}
         <div class="stats-bar reveal">
             <div class="stat-cell">
-                <div class="stat-number"><span class="count-up" data-target="{{ wall.asset_classes }}">0</span></div>
+                <div class="stat-number"><span class="count-up" data-target="{{ wall.asset_classes }}">{{ wall.asset_classes }}</span></div>
                 <div class="stat-label">Asset Classes</div>
                 <div class="tick-strip"><span></span><span></span><span></span><span></span><span></span></div>
             </div>
             <div class="stat-cell">
-                <div class="stat-number"><span class="count-up" data-target="{{ wall.broker_adapters }}">0</span></div>
+                <div class="stat-number"><span class="count-up" data-target="{{ wall.broker_adapters }}">{{ wall.broker_adapters }}</span></div>
                 <div class="stat-label">Broker Adapters</div>
                 <div class="tick-strip"><span></span><span></span><span></span><span></span><span></span></div>
             </div>
             <div class="stat-cell">
-                <div class="stat-number"><span class="count-up" data-target="{{ wall.evaluators }}">0</span></div>
+                <div class="stat-number"><span class="count-up" data-target="{{ wall.evaluators }}">{{ wall.evaluators }}</span></div>
                 <div class="stat-label">Signal Evaluators</div>
                 <div class="tick-strip"><span></span><span></span><span></span><span></span><span></span></div>
             </div>
             <div class="stat-cell">
-                <div class="stat-number"><span class="count-up" data-target="{{ wall.tests_green }}">0</span></div>
+                <div class="stat-number"><span class="count-up" data-target="{{ wall.tests_green }}">{{ wall.tests_green }}</span></div>
                 <div class="stat-label">Tests Passing</div>
                 <div class="tick-strip"><span></span><span></span><span></span><span></span><span></span></div>
             </div>
@@ -2995,13 +3041,13 @@
                 and warns before a reward under the risk, a trade no signal backs, a shut market, a bad hour or a sick venue &mdash; then lets you decide.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.instruments }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.instruments }}">{{ wall.instruments }}</span></div>
                 <div class="pillar-lbl">Instruments Watched</div>
                 <div class="pillar-desc">Every one clickable through to its own page &mdash; candlesticks down to
                 the minute, the signals that fired on it, and the news that moved it.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.news_24h }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.news_24h }}">{{ wall.news_24h }}</span></div>
                 <div class="pillar-lbl">Headlines · 24h</div>
                 <div class="pillar-desc">Ingested, scored and attached to the instruments they touch. A dash in
                 the headband always means &ldquo;not measured yet&rdquo; &mdash; never a zero dressed up as data.</div>
@@ -3085,7 +3131,7 @@
         </div>
         <p class="ladder-demote reveal delay-6">
             <span class="down">▼</span> and back down again: with the ladder's switch on, a measured loser drops to paper and a decayed rule one rung.
-            <span class="count-up" data-target="{{ wall.strategies }}">0</span> strategies are on the ladder now.
+            <span class="count-up" data-target="{{ wall.strategies }}">{{ wall.strategies }}</span> strategies are on the ladder now.
         </p>
 
         <div class="pillar-row reveal delay-6" style="max-width: 1080px; margin: 32px auto 0;">
@@ -3104,7 +3150,7 @@
                 No archaeology across five pages.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.bots }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.bots }}">{{ wall.bots }}</span></div>
                 <div class="pillar-lbl">Configured Bots</div>
                 <div class="pillar-desc">Every one of them disabled and flattened in a single action by the
                 kill switch &mdash; which itself needs your PIN.</div>
@@ -3234,22 +3280,22 @@
         {# Every target below is a count off a registry or a table (core.wall_facts), never typed: the page follows the next guard, switch or proof the day it lands. #}
         <div class="pillar-row reveal delay-6" style="max-width: 1080px; margin: 32px auto 0;">
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.guards }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.guards }}">{{ wall.guards }}</span></div>
                 <div class="pillar-lbl">Guards in the Watchdog</div>
                 <div class="pillar-desc">With their switch on, together they read the platform and the venue every five minutes; a guard that cannot run is reported, never read as a healthy one.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.money_switches }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.money_switches }}">{{ wall.money_switches }}</span></div>
                 <div class="pillar-lbl">Real-Money Switches</div>
                 <div class="pillar-desc">Every one ships off, none is armed by an all-on button, and each is turned on alone, by a person.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.proving_verdicts }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.proving_verdicts }}">{{ wall.proving_verdicts }}</span></div>
                 <div class="pillar-lbl">Proving Verdicts Written</div>
                 <div class="pillar-desc">Every verdict the proving ground has saved, whether it passed, failed or had too little to judge, counted whatever it said.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.proof_classes }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.proof_classes }}">{{ wall.proof_classes }}</span></div>
                 <div class="pillar-lbl">Classes Through the Venue</div>
                 <div class="pillar-desc">Classes with an order filled and closed at eToro, written into the code with its test; a sell needs its own.</div>
             </div>
@@ -3498,14 +3544,14 @@
 
         <div class="pillar-row reveal delay-6" style="max-width: 1080px; margin: 32px auto 0;">
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.desk_plans }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.desk_plans }}">{{ wall.desk_plans }}</span></div>
                 <div class="pillar-lbl">Desk Passes Recorded</div>
                 <div class="pillar-desc">One row per user, per venue, per tick &mdash; how many times the desk
                 has <em>thought</em>. Not how many times it acted: in shadow the fleet executes exactly as it
                 always has, and the plan is the counterfactual being graded beside it.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.desk_decisions_graded }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.desk_decisions_graded }}">{{ wall.desk_decisions_graded }}</span></div>
                 <div class="pillar-lbl">Decisions With an R</div>
                 <div class="pillar-desc">A taken candidate inherits its trade's realised R; a displaced one is
                 graded on the bar-walk it never got. A decision no bar could price stays ungraded rather than
@@ -3516,7 +3562,7 @@
                 <div class="pillar-lbl">Placed by the Desk</div>
                 <div class="pillar-desc">The desk sends nothing itself, in either mode: its whole power is to
                 shrink a size or skip an entry.{% if wall.desk_live_plans %}
-                Of the passes above, <span class="count-up" data-target="{{ wall.desk_live_plans }}">0</span>
+                Of the passes above, <span class="count-up" data-target="{{ wall.desk_live_plans }}">{{ wall.desk_live_plans }}</span>
                 were written with the fleet obeying the plan &mdash; because a person read the graded
                 evidence and turned that switch on.{% else %}
                 Every pass above was written in SHADOW: the switch that would let the plan be obeyed is off,
@@ -3596,7 +3642,7 @@
 
         <div class="pillar-row reveal delay-5" style="max-width: 1080px; margin: 32px auto 0;">
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.share_plans }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.share_plans }}">{{ wall.share_plans }}</span></div>
                 <div class="pillar-lbl">Share Plans Written</div>
                 <div class="pillar-desc">Every plan, in every state &mdash; not only the applied ones. The claim
                 is that the allocator proposes on a schedule and is graded whether or not anybody clicks;
@@ -3608,7 +3654,7 @@
                 <div class="pillar-desc">A plan is a proposal. It moves a share only when an admin applies it,
                 behind the PIN on the page or with an explicit confirmation on the server, with the live switch on &mdash;
                 or, with a second switch on as well, when a shock plan that only lowers shares applies itself.{% if wall.share_plans_applied %}
-                <span class="count-up" data-target="{{ wall.share_plans_applied }}">0</span> have been applied
+                <span class="count-up" data-target="{{ wall.share_plans_applied }}">{{ wall.share_plans_applied }}</span> have been applied
                 here, each one reversible.{% else %}
                 None has ever been applied here.{% endif %} This module never writes a pool's capital
                 and never touches the broker: the share is the only thing it decides.</div>
@@ -4074,7 +4120,7 @@
 
         <div class="pillar-row reveal delay-4" style="margin-top: 32px; text-align: center;">
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.chain_length }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.chain_length }}">{{ wall.chain_length }}</span></div>
                 <div class="pillar-lbl">Audit Chain</div>
                 <div class="pillar-desc">Append-only entries, each hashed onto the last. Editing any past
                 row breaks every hash after it, and verification names the break.</div>
@@ -4128,28 +4174,28 @@
 
         <div class="pillar-row reveal delay-4" style="max-width: 1080px; margin: 32px auto 0;">
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.agent_calls_graded }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.agent_calls_graded }}">{{ wall.agent_calls_graded }}</span></div>
                 <div class="pillar-lbl">Agent Calls Resolved</div>
                 <div class="pillar-desc">Predictions the resolver has marked right or wrong. Both directions,
                 summed &mdash; publishing only the correct ones would be a hit rate dressed up as a volume,
                 on the page whose whole pitch is that this platform grades itself in both.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.components }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.components }}">{{ wall.components }}</span></div>
                 <div class="pillar-lbl">Components on a Switch</div>
                 <div class="pillar-desc">Scrapers, engines, pipelines &mdash; each one something an admin can
                 stop from the cockpit. Counted whether it is running or paused: the number says how much of
                 the platform answers to a switch at all.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.shell_commands }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.shell_commands }}">{{ wall.shell_commands }}</span></div>
                 <div class="pillar-lbl">Commands Catalogued</div>
                 <div class="pillar-desc">Every operator command with its exact usage, held against the
                 framework's own command list by a test &mdash; so the catalogue in the cockpit cannot
                 drift from what the shell will actually accept.</div>
             </div>
             <div class="pillar">
-                <div class="pillar-num"><span class="count-up" data-target="{{ wall.rules_governed }}">0</span></div>
+                <div class="pillar-num"><span class="count-up" data-target="{{ wall.rules_governed }}">{{ wall.rules_governed }}</span></div>
                 <div class="pillar-lbl">Rules Under Control</div>
                 <div class="pillar-desc">The same rules the promotion ladder counts, seen from the other
                 side: each carries an enforcement state, and nothing sizes money without one. Two labels
@@ -4445,6 +4491,40 @@
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <script>
 (function(){
+    // ── Motion is optional (2026-10-08) ──────────────────────────────
+    // One reading of the preference for the whole script: the reveal,
+    // the count-ups, the particles, the SVG clocks, the eye and the
+    // anchor scroll all consult it.
+    var prefersReducedMotion = window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var wallJs = document.documentElement.classList.contains('wall-js');
+
+    // ── Scroll reveal: once, then it stays ───────────────────────────
+    // Armed before anything else in this script, so a block hidden by
+    // the head switch is shown the moment it scrolls into view even if
+    // a later part of this script throws. Each block is observed until
+    // its first sight and then let go: what was read stays read.
+    var reveals = document.querySelectorAll('.reveal, .reveal-left, .reveal-right, .reveal-scale');
+    var observer = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+            if (entry.isIntersecting) {
+                entry.target.classList.add('visible');
+                observer.unobserve(entry.target);
+            }
+        });
+    }, { threshold: 0.05, rootMargin: '0px 0px -40px 0px' });
+    reveals.forEach(function(el) { observer.observe(el); });
+    // The head switch's failsafe reads this: the observer is armed, so
+    // the hidden blocks will be shown and the class may stay.
+    window.wallAwake = true;
+
+    // Under reduced motion CSS stops every animation it owns; the five
+    // inline SVG clocks (the agents' two, the backtest curve, #evolution
+    // and #horizon) animate through SMIL, which only the DOM can stop.
+    if (prefersReducedMotion) {
+        document.querySelectorAll('svg').forEach(function (s) { if (s.pauseAnimations) s.pauseAnimations(); });
+    }
+
     // ── Platform counters ────────────────────────────────────────────
     // Server-side aggregates only. Every value is a COUNT of rows this
     // deployment holds — never a quote, a P&L, an account or a symbol.
@@ -4555,7 +4635,9 @@
                 ctx.fillText(p.tag[1], p.x + 10, p.y + 8);
             }
         }
-        requestAnimationFrame(drawParticles);
+        // One frame is drawn either way; the next is scheduled only
+        // where motion is welcome.
+        if (!prefersReducedMotion) { requestAnimationFrame(drawParticles); }
     }
     drawParticles();
 
@@ -4590,20 +4672,6 @@
     }
     track.innerHTML = html;
 
-    // ── FIX #6: Scroll reveal with DISAPPEAR on scroll back up ───────
-    var reveals = document.querySelectorAll('.reveal, .reveal-left, .reveal-right, .reveal-scale');
-    var observer = new IntersectionObserver(function(entries) {
-        entries.forEach(function(entry) {
-            if (entry.isIntersecting) {
-                entry.target.classList.add('visible');
-            } else {
-                // Remove visible class when scrolling away — fade out effect
-                entry.target.classList.remove('visible');
-            }
-        });
-    }, { threshold: 0.05, rootMargin: '0px 0px -40px 0px' });
-    reveals.forEach(function(el) { observer.observe(el); });
-
     // ── Navbar scroll state ──────────────────────────────────────────
     var nav = document.getElementById('wallNav');
     window.addEventListener('scroll', function() {
@@ -4612,15 +4680,24 @@
     });
 
     // ── Count-up animation ───────────────────────────────────────────
+    // Every counter is served already printed (the same wall value as
+    // its data-target), so a reader without script, in print or with
+    // the page half loaded reads the number, not a zero. The count-up
+    // runs once, at first sight; where motion is not welcome, or where
+    // the head switch found no observer, the number is only grouped.
     var countEls = document.querySelectorAll('.count-up');
     var countObserver = new IntersectionObserver(function(entries) {
         entries.forEach(function(entry) {
             if (entry.isIntersecting) {
-                // Re-run count-up each time it comes into view
                 var el = entry.target;
+                countObserver.unobserve(el);
                 // Counts now come from the server, so they can be six
                 // figures — group them, and never render NaN.
                 var target = parseInt(el.dataset.target, 10) || 0;
+                if (prefersReducedMotion || !wallJs) {
+                    el.textContent = wallNum(target);
+                    return;
+                }
                 var current = 0;
                 var step = Math.max(1, Math.floor(target / 40));
                 el.textContent = '0';
@@ -4637,12 +4714,11 @@
     // ── Parallax + pupil-tracking on mouse move ──────────────────────
     // The globe-eye-fixed (giant Sauron eye) drifts subtly with cursor;
     // its pupil group additionally tracks toward the cursor for the
-    // "all-seeing" effect. Disabled when the user prefers reduced motion.
+    // "all-seeing" effect. Disabled when the user prefers reduced motion
+    // (prefersReducedMotion, read once at the top of this script).
     var globe = document.querySelector('.globe-eye-fixed');
     var eyeShadow = document.querySelector('.eye-glow-shadow');
     var pupilGroup = document.getElementById('wallPupilGroup');
-    var prefersReducedMotion = window.matchMedia &&
-        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     // Pupil-cursor track: max 18px in viewBox units (40-radius pupil inside
     // 60-radius iris ring leaves room without clipping).
     var PUPIL_RANGE_X = 22;
@@ -4676,13 +4752,13 @@
         }, 80);
     }
 
-    // ── Smooth scroll for anchor links ───────────────────────────────
+    // ── Smooth scroll for anchor links — plain where motion is not welcome
     document.querySelectorAll('a[href^="#"]').forEach(function(a) {
         a.addEventListener('click', function(e) {
             var target = document.querySelector(this.getAttribute('href'));
             if (target) {
                 e.preventDefault();
-                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                target.scrollIntoView({ behavior: prefersReducedMotion ? 'auto' : 'smooth', block: 'start' });
             }
         });
     });
