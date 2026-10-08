@@ -192,16 +192,28 @@ class TheWiringTests(SimpleTestCase):
         self.assertIn("['soft stop', p.soft_stop]", src)
 
     def test_positions_first_then_the_levels_each_behind_its_toggle(self):
+        """A level CHIP is hit first, by its exact box (a chip never sits on
+        a money row, but a finger's 12 px reach from the SL or TP covered
+        the ①HUNT chip beside it), then the positions, then the levels'
+        shapes — each behind its toggle (2026-10-08)."""
         src = widget_source()
         i = src.find("function lineHit(param) {")
-        body = src[i:i + 1500]
+        body = src[i:src.find("\n    function ", i + 10)]
+        chip = body.find("lvApi().hitChip(lvlLayer.geom, lvlItems, param.point.x, y)")
+        self.assertGreater(chip, 0)
+        self.assertIn("(activeInds.levels && lvApi() && lvlLayer && lvlLayer.geom)", body)
+        self.assertLess(chip, body.find("if (activeInds.positions) {"))
         self.assertLess(body.find("if (activeInds.positions) {"),
                         body.find("if (activeInds.levels) {"))
 
     def test_the_level_card_takes_the_pools_gold_and_the_map_s_role(self):
         src = widget_source()
         self.assertIn(".sv-sig-card--level {", src)
-        self.assertIn("api.levelCard(hit.item, POSMAP)", src)
+        # The card gains Formed (2026-10-07): it is handed the time now.
+        self.assertIn("api.levelCard(hit.item, POSMAP, Date.now() / 1000)", src)
+        # ...and the position card says where the money meets the levels (§4.6).
+        self.assertIn("api.positionCard(hit.item, lvApi() ? lvApi().moneyFacts(hit.item, lvlItems, fmtPrice) : [])",
+                      src)
         self.assertIn("POSMAP = (map && map.ok) ? map : null;", src)
 
     def test_the_caption_s_components_are_its_tooltip(self):

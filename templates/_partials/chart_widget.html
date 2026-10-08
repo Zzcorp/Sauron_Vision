@@ -343,6 +343,56 @@ Optional page data (json_script blocks the widget picks up when present):
     color: var(--text-secondary, #7aaa8a);
 }
 .sv-pos-legend[hidden] { display: none; }
+/* The levels' key (2026-10-07): the live answer, one switch per kind. */
+.sv-lvl-legend {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
+    margin-top: 6px; padding: 0 2px;
+    font-family: var(--font-mono, monospace); font-size: 10px; letter-spacing: .04em;
+    color: var(--text-secondary, #7aaa8a);
+}
+.sv-lvl-legend[hidden] { display: none; }
+.sv-lvl-title { color: var(--text-primary, #daf0e6); }
+.sv-lvl-key {
+    display: inline-flex; align-items: center; gap: 5px; padding: 1px 6px;
+    background: none; border: 1px solid var(--border, #133020); border-radius: 3px;
+    color: inherit; font: inherit; letter-spacing: inherit; cursor: pointer;
+}
+.sv-lvl-key[hidden] { display: none; }
+.sv-lvl-key:hover, .sv-lvl-key:focus-visible { border-color: var(--text-secondary, #7aaa8a); }
+.sv-lvl-key[aria-pressed="false"] { opacity: .5; text-decoration: line-through; }
+.sv-lvl-key--master[aria-pressed="false"] { text-decoration: none; }
+.sv-lvl-key b { font-weight: 400; color: var(--text-primary, #daf0e6); }
+.sv-lvl-key--answer { color: var(--accent-gold-ink, var(--accent-gold, #d8b020)); }
+.sv-lvl-key--answer[data-kind="swing"] { color: var(--lvl-swing, var(--accent-blue, #30a0e8)); }
+.sv-lvl-key--answer[aria-pressed="true"] { border-color: currentColor; text-decoration: none; opacity: 1; }
+/* The strike and the dim say "this kind is hidden": the kind switches
+   alone. An answer chip unpressed is simply not focused (a struck HUNT
+   would read as cancelled or taken), and Show all unpressed is plainly off. */
+.sv-lvl-key--answer[aria-pressed="false"], .sv-lvl-key--all[aria-pressed="false"] { text-decoration: none; opacity: 1; }
+.sv-lvl-key--all[aria-pressed="true"] { border-color: currentColor; color: var(--text-primary, #daf0e6); }
+/* The keyboard's place, on every chip, pressed or not: a pressed chip's
+   currentColor border would otherwise hide it (WCAG 2.4.7). */
+.sv-lvl-legend .sv-lvl-key:focus-visible { outline: 2px solid var(--accent, #00e868); outline-offset: 2px; }
+.sv-lvl-count { color: var(--text-muted, #3a6850); }
+.sv-lvl-offnote { display: none; }
+.sv-lvl-money { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; }
+.sv-lvl-legend.is-off > :not(.sv-lvl-title):not(.sv-lvl-key--master):not(.sv-lvl-offnote) { display: none; }
+.sv-lvl-legend.is-off .sv-lvl-offnote { display: inline; }
+.sv-lvl-legend.is-phone .sv-lvl-money, .sv-lvl-legend.is-phone .sv-lvl-count { display: none; }
+@media (pointer: coarse) { .sv-lvl-key { min-height: 32px; } }
+.sv-lvl-sw { display: inline-block; flex: 0 0 auto; width: 16px; height: 8px; }
+.sv-lvl-sw--pool {
+    background: color-mix(in srgb, var(--accent-gold-ink, var(--accent-gold, #d8b020)) 22%, transparent);
+    border-bottom: 1px solid var(--accent-gold-ink, var(--accent-gold, #d8b020));
+}
+.sv-lvl-sw--swing { width: 14px; height: 0; border-top: 2px solid var(--lvl-swing, var(--accent-blue, #30a0e8)); }
+.sv-lvl-sw--asia {
+    background: color-mix(in srgb, var(--lvl-session, #a878f0) 16%, transparent);
+    border: 1px solid var(--lvl-session, #a878f0);
+}
+.sv-lvl-sw--round { height: 0; border-top: 1px dotted var(--text-secondary, #7aaa8a); }
+.sv-lvl-sw--money { height: 0; border-top: 2px solid var(--accent-red, #e83030); }
+.sv-lvl-sw--sig { height: 0; border-top: 1px dashed var(--accent-red, #e83030); }
 .sv-pos-legend-title { color: var(--accent-gold-ink, var(--accent-gold, #d8b020)); }
 .sv-sig-key { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
 .sv-sig-sep { color: var(--text-muted, #3a6850); }
@@ -406,6 +456,11 @@ Optional page data (json_script blocks the widget picks up when present):
 .sv-sig-card--bear { --sv-sig-tone: var(--accent-red, #e83030); }
 /* A living level's card takes the pools' gold (2026-10-03). */
 .sv-sig-card--level { --sv-sig-tone: var(--accent-gold-ink, var(--accent-gold, #d8b020)); }
+/* ...and then its kind's (2026-10-07): the same hues the chart draws in. */
+.sv-sig-card--pool { --sv-sig-tone: var(--accent-gold-ink, var(--accent-gold, #d8b020)); }
+.sv-sig-card--swing { --sv-sig-tone: var(--lvl-swing, var(--accent-blue, #30a0e8)); }
+.sv-sig-card--asia { --sv-sig-tone: var(--lvl-session, #a878f0); }
+.sv-sig-card--round { --sv-sig-tone: var(--text-secondary, #7aaa8a); }
 .sv-sig-head { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
 .sv-sig-side {
     flex: 0 0 auto;
@@ -500,7 +555,7 @@ Optional page data (json_script blocks the widget picks up when present):
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
 }
-.sv-sig-level--entry > b { color: var(--accent-gold-ink, #d8b020); }
+.sv-sig-level--entry > b { color: var(--text-primary, #daf0e6); }
 .sv-sig-level--stop > b { color: var(--accent-red, #e83030); }
 .sv-sig-level--target > b { color: var(--accent, #00e868); }
 .sv-sig-status { display: flex; flex-wrap: wrap; gap: 5px; }
@@ -593,7 +648,7 @@ Optional page data (json_script blocks the widget picks up when present):
             <button class="sv-ind-btn" data-ind="macd" title="MACD 12/26/9 in its own pane">MACD</button>
             <button class="sv-ind-btn" data-ind="volume" title="Volume histogram">VOL</button>
             <button class="sv-ind-btn active" data-ind="positions" title="Open positions, stops, targets and signal entries on the tape">POSITIONS</button>
-            <button class="sv-ind-btn active" data-ind="levels" title="Where the crowd keeps its stops, read off the 4h bars: unswept swing highs and lows, equal highs and lows (liquidity pools, drawn heavier), the latest extreme and the round numbers within reach. Recomputed every minute — a level the price trades through disappears">LEVELS</button>
+            <button class="sv-ind-btn active" data-ind="levels" title="Where the crowd keeps its stops, read off the 4h bars: liquidity pools (gold areas from their first touch), swings (blue ticks on the candle that printed them; the nearest each side runs to now), round numbers (grey dots) and the Asian range (violet box). The key under the chart names the hunt and the draw and switches each kind. Recomputed every minute: a level the price trades through disappears">LEVELS</button>
         </div>
 
         <!-- View controls -->
@@ -704,6 +759,26 @@ without signals carries no key for nothing.{% endcomment %}
     <span class="sv-sig-sep" aria-hidden="true">·</span>
     <span class="sv-sig-key"><i class="sv-sig-sw sv-sig-s3" aria-hidden="true"></i><i class="sv-sig-sw sv-sig-sw--bear sv-sig-s3" aria-hidden="true"></i> very strong</span>
     <span class="sv-sig-legend-dir"><span class="sv-sig-up">▲ green buy</span> · <span class="sv-sig-down">▼ red sell</span> · hover or tap a dot for its details</span>
+</div>
+
+{% comment %}The levels' key (2026-10-07): the nearest liquidity each side
+(the positioning map's hunt and draw when it names them), one switch per
+kind, drawn the way the chart draws them. Outside the container like the
+signal key, so it costs the canvas no rows. The LEVELS chip mirrors the
+toolbar button, which a phone pushes off-screen.{% endcomment %}
+<div class="sv-lvl-legend" id="{{ chart_id }}-lvl-legend" role="group" aria-label="Chart levels" hidden>
+    <span class="sv-lvl-title">Levels (4h):</span>
+    <button type="button" class="sv-lvl-key sv-lvl-key--master" data-lvl="levels" aria-pressed="true" title="Show or hide every level (the LEVELS button)">LEVELS</button>
+    <span class="sv-lvl-offnote">off</span>
+    <button type="button" class="sv-lvl-key sv-lvl-key--answer" data-lvl="below" aria-pressed="false" hidden></button>
+    <button type="button" class="sv-lvl-key sv-lvl-key--answer" data-lvl="above" aria-pressed="false" hidden></button>
+    <button type="button" class="sv-lvl-key" data-lvl="pool" aria-pressed="true"><i class="sv-lvl-sw sv-lvl-sw--pool" aria-hidden="true"></i>Pools <b data-count="pool"></b></button>
+    <button type="button" class="sv-lvl-key" data-lvl="swing" aria-pressed="true"><i class="sv-lvl-sw sv-lvl-sw--swing" aria-hidden="true"></i>Swings <b data-count="swing"></b></button>
+    <button type="button" class="sv-lvl-key" data-lvl="asia" aria-pressed="true"><i class="sv-lvl-sw sv-lvl-sw--asia" aria-hidden="true"></i>Asia range</button>
+    <button type="button" class="sv-lvl-key" data-lvl="round" aria-pressed="true"><i class="sv-lvl-sw sv-lvl-sw--round" aria-hidden="true"></i>Round numbers <b data-count="round"></b></button>
+    <span class="sv-lvl-count" data-role="count"></span>
+    <button type="button" class="sv-lvl-key sv-lvl-key--all" data-lvl="all" aria-pressed="false">Show all</button>
+    <span class="sv-lvl-money"><i class="sv-lvl-sw sv-lvl-sw--money" aria-hidden="true"></i>your SL / TP solid · <i class="sv-lvl-sw sv-lvl-sw--sig" aria-hidden="true"></i>signal dashed</span>
 </div>
 
 {% comment %}The positioning map's caption (2026-10-03, bot_program/positioning.py):
@@ -1110,9 +1185,14 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         }
         return '';
     }
-    function levelCard(l, map) {
+    /* `now` (epoch seconds) lets a level say how long ago it formed; the
+       digested item (window.svLevels) adds its band, its two-letter swing
+       label, its role by band containment and the hunt zone. A server row
+       without them reads exactly as it did before 2026-10-07. */
+    function levelCard(l, map, now) {
         l = l || {};
         var h = [], touches = levelTouches(l), day = l.po3 || null;
+        if (typeof l.touches === 'number') touches = l.touches;
         h.push('<div class="sv-sig-head">'
             + '<span class="sv-sig-side">' + (day ? 'RANGE' : l.pool ? 'POOL' : 'LEVEL') + '</span>'
             + '<span class="sv-sig-rule">' + text(levelKind(l)) + '</span></div>');
@@ -1123,14 +1203,29 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                         ? l.atr_away + ' ATR ' + (l.side === 'below' ? 'under' : 'over') + ' the mark'
                         : null))
             + (touches !== null ? fact('Touches', touches) : '')
+            + (l.lv === 'pool' && l.bottomText && l.topText && l.bottomText !== l.topText
+                ? fact('Band', l.bottomText + ' – ' + l.topText) : '')
+            + (l.label && l.label.length === 2 ? fact('Structure', l.label) : '')
+            + (typeof l.origin === 'number' && typeof now === 'number'
+                ? fact('Formed', ageWords(now - l.origin) + ' ago') : '')
+            + ((l.role === 'hunt' || l.role2 === 'hunt') && l.zoneText ? fact('Hunt zone', l.zoneText) : '')
             + '</dl>');
         var what = day ? 'The accumulation: the stops build on both sides'
                  : l.pool ? 'Where the stops pile up'
                  : l.kind === 'round number' ? 'A round number the crowd watches'
+                 : /^recent /.test(l.kind || '') ? 'The latest pullback\'s extreme'
                  : 'The last swing still held';
-        var role = day ? String(day.words || '') : levelRole(l, map);
+        var role = day ? String(day.words || '')
+                 : l.role ? (l.role === 'hunt' ? 'The hunt runs here first' : 'The draw after the hunt')
+                            + (l.why ? ' — ' + l.why : '')
+                 : levelRole(l, map);
+        /* the hunt and the draw on one pool: both said */
+        var role2 = (!day && l.role && l.role2)
+            ? (l.role2 === 'hunt' ? 'The hunt runs here first' : 'The draw after the hunt')
+              + (l.why2 ? ' — ' + l.why2 : '') : '';
         h.push('<div class="sv-sig-status"><span class="sv-sig-chip">' + esc(what) + '</span>'
             + (role && !day ? '<span class="sv-sig-chip sv-sig-chip--live">' + esc(role) + '</span>' : '')
+            + (role2 ? '<span class="sv-sig-chip sv-sig-chip--live">' + esc(role2) + '</span>' : '')
             + '</div>');
         if (day && role) h.push('<div class="sv-sig-foot">' + esc(role) + '</div>');
         h.push('<div class="sv-sig-foot">' + (day
@@ -1138,7 +1233,9 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             : 'Recomputed every minute · gone once the price trades through it') + '</div>');
         return h.join('');
     }
-    function positionCard(p) {
+    /* `facts`: where the money meets the levels, in words
+       (window.svLevels.moneyFacts) — display only, one chip each. */
+    function positionCard(p, facts) {
         p = p || {};
         var tn = tone(p.side), h = [];
         h.push('<div class="sv-sig-head">'
@@ -1164,6 +1261,11 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             chips += '<span class="sv-sig-chip sv-sig-chip--' + (th.verdict === 'exit' ? 'loss' : 'win')
                 + '">Thesis ' + esc(th.verdict) + '</span>';
         }
+        (facts || []).forEach(function (f) {
+            if (f && f.text) chips += '<span class="sv-sig-chip'
+                + (/^[a-z]+$/.test(f.tone || '') ? ' sv-sig-chip--' + f.tone : '')
+                + '">' + esc(f.text) + '</span>';
+        });
         h.push('<div class="sv-sig-status">' + chips + '</div>');
         if (th.words) h.push('<div class="sv-sig-foot">' + text(th.words) + '</div>');
         return h.join('');
@@ -1173,6 +1275,719 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         nearestLine: nearestLine, levelCard: levelCard, positionCard: positionCard,
         levelRole: levelRole, ageWords: ageWords, rWords: rWords
     };
+
+    /* ── THE LEVELS' VISUAL LANGUAGE (2026-10-07) ──────────────────────
+       The operator: "could we improve the visibility and design of
+       liquidity areas and pivot points etc. They are too similar and
+       messy". One encoding per kind: a pool is a gold AREA from its first
+       touch, a swing a blue tick on the candle that printed it (the
+       nearest each side keeps a ray), a round number a dotted guide, the
+       Asian range a violet box. digest() turns the server's rows into
+       items (a pool's own swings folded in by the server's membership);
+       layout() turns items into pixels with the visibility, alpha and chip
+       rules. Pure: tests/test_chart_levels_language.py drives it. */
+    var LV = {
+        PHONE_W: 560,                       /* ONE breakpoint: chips, texts, tolerance, entry title, key */
+        REACH_ATR: 4.5, POOL_REACH_ATR: 6,  /* smart_money.LIVING_REACH_ATR; a pool a little further */
+        CAP: { pool: 2, swing: 3, recent: 1, round: 2 },
+        CONFLUENCE_TOL: 0.0003,
+        FADE_NEAR: 1.5, FADE_FAR: 4.5, FADE_FLOOR: { dark: 0.5, light: 0.7 },
+        PIN_DIM: { dark: 0.55, light: 0.8 }, FOCUS_DIM: 0.2,
+        MONEY_PX: 8,
+        CHIP_H: 14, CHIP_PAD: 4, CHAR_W: 6.1, GAP_X: 4, GAP_Y: 1,
+        CHIPS: { desktop: 8, phone: 4 },
+        LANE_W: 80, LANE_TOP: 34, ROW_CLEAR: 2, MARK_PAD: 2,
+        TITLE_H: 10 * 17 / 12,              /* a title box: the chart's 10 px font + LWC's 2.5/12 of it above and below */
+        ASIA_NEAR: 8,                       /* the ASIA label sits on its box, or at most this far off it */
+        NOW_BARS: 30,                       /* the newest candles: no chip hides them, save a ray's or a role's as a late resort */
+        ROLE_GAP: 2,                        /* a non-role chip keeps this far off a role's band */
+        GRAZE: 1,                           /* a role's chip may overlap a neighbour's shape by less than this */
+        NUDGE: 3,                           /* ...or sit up to this far into its own band's edge */
+        EDGE_STEP: 8,                       /* an edge count slides left by this much to clear a dot */
+        MIN_BAND_PX: 4, TICK_W: 14, SERIF_H: 5, DOT_R: 2.5,
+        HIT: { mouse: 6, touch: 12 },
+        MARK: { hunt: '①', draw: '②', round: '◎' }
+    };
+    var RANK = { pool: 0, recent: 1, swing: 2, round: 3 };
+    var WEIGHT = { pool: 2, recent: 1, swing: 1, round: -1 };
+
+    function lvKind(l) {
+        if (l.pool) return 'pool';
+        if (l.kind === 'round number') return 'round';
+        if (l.kind === 'recent low' || l.kind === 'recent high') return 'recent';
+        if (l.kind === 'swing low' || l.kind === 'swing high') return 'swing';
+        return null;
+    }
+    function isHigh(l) { return /high/.test(String(l.kind || '')); }
+    function ok(v) { return typeof v === 'number' && isFinite(v); }
+    function num(v, dflt) { return ok(v) ? v : dflt; }
+    function samePrice(a, b) { return Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a)); }
+    function copy(o) { var r = {}; for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) r[k] = o[k]; return r; }
+    function byDistance(a, b) { return num(a.atr_away, 99) - num(b.atr_away, 99); }
+    /* The map's roles on an item: its first, and a second when the hunt
+       and the draw are the same pool. */
+    function hasRole(l, r) { return !!l && (l.role === r || l.role2 === r); }
+    function roleWords(l, phone) {
+        if (!l || !l.role) return '';
+        var sp = phone ? '' : ' ';
+        return LV.MARK[l.role] + sp + l.role.toUpperCase()
+            + (l.role2 ? sp + LV.MARK[l.role2] + sp + l.role2.toUpperCase() : '');
+    }
+    function rolesOf(l) { return l.role ? (l.role2 ? [l.role, l.role2] : [l.role]) : []; }
+
+    /* The server's rows -> the items the chart draws (§3.1-3.9 of the
+       build spec): a pool and its own swings are one item, the pullback's
+       extreme folds into its swing or band, the map's hunt and draw land
+       on the pool whose band holds them, reach and caps are FLAGS (layout
+       decides, so money can still hold a level), one ray per side, and a
+       round number inside a band is that pool's. */
+    function digest(levels, map, fmt) {
+        fmt = fmt || function (v) { return String(v); };
+        var rows = (levels || []).filter(function (l) {
+            return l && ok(l.price) && lvKind(l);
+        }).map(copy);
+        var by = { pool: [], swing: [], recent: [], round: [] };
+        rows.forEach(function (l) { l.lv = lvKind(l); by[l.lv].push(l); });
+        /* 1. A pool and its own swings are ONE item: by membership. */
+        by.pool.forEach(function (p) {
+            var high = isHigh(p);
+            p.members = (Array.isArray(p.members) ? p.members : []).filter(function (m) {
+                return m && ok(m.price); });
+            if (p.members.length) {
+                by.swing = by.swing.filter(function (s) {
+                    return !(isHigh(s) === high && p.members.some(function (m) {
+                        return samePrice(m.price, s.price); }));
+                });
+            }
+            var ps = [p.price].concat(p.members.map(function (m) { return m.price; }));
+            p.top = num(p.top, Math.max.apply(null, ps));
+            p.bottom = num(p.bottom, Math.min.apply(null, ps));
+            p.touches = num(p.touches, levelTouches(p));
+            if (!ok(p.origin)) p.origin = (p.members[0] && ok(p.members[0].origin)) ? p.members[0].origin : null;
+        });
+        /* 2. The pullback's extreme on a swing's price or in a pool's band. */
+        by.recent = by.recent.filter(function (r) {
+            var twin = by.pool.concat(by.swing).filter(function (s) {
+                return s.side === r.side && isHigh(s) === isHigh(r)
+                    && (samePrice(s.price, r.price)
+                        || (s.lv === 'pool' && r.price >= s.bottom && r.price <= s.top));
+            })[0];
+            if (twin) { twin.recent = true; return false; }
+            return true;
+        });
+        var items = by.pool.concat(by.recent, by.swing, by.round);
+        items.forEach(function (l) {
+            l.id = 'sv-lvl-' + l.lv + '-' + l.price.toPrecision(12);   /* stable across refreshes */
+        });
+        /* 3. The map's hunt and draw: the pool whose band holds the leg first.
+           Both legs on ONE pool (the crowd's hunt under the mark and a short
+           bias drawing to the same lows): the item keeps both, so the draw
+           is named too (role2) — the bias agreeing with the hunt is the read. */
+        ((map && map.path) || []).forEach(function (leg) {
+            if (!leg || !ok(leg.price)) return;
+            var on = items.filter(function (l) {
+                    return l.lv === 'pool' && leg.price >= l.bottom && leg.price <= l.top; })[0]
+                  || items.filter(function (l) {
+                    return l.lv !== 'round' && samePrice(l.price, leg.price); })[0];
+            var role = leg.leg === 'hunt' ? 'hunt' : 'draw';
+            if (on && !on.role) { on.role = role; on.why = leg.why || ''; }
+            else if (on && on.role !== role && !on.role2) { on.role2 = role; on.why2 = leg.why || ''; }
+        });
+        /* 4. Reach and caps per side, nearest first: FLAGS — layout decides. */
+        ['pool', 'recent', 'swing', 'round'].forEach(function (k) {
+            ['below', 'above'].forEach(function (side) {
+                var reach = k === 'pool' ? LV.POOL_REACH_ATR : LV.REACH_ATR, n = 0;
+                items.filter(function (l) { return l.lv === k && l.side === side; })
+                    .sort(byDistance).forEach(function (l) {
+                        l.far = ok(l.atr_away) && l.atr_away > reach;
+                        l.capped = !l.far && n >= LV.CAP[k];
+                        if (!l.far) n++;
+                    });
+            });
+        });
+        /* 5. One ray per side: the nearest swing or extreme within reach. */
+        ['below', 'above'].forEach(function (side) {
+            var s = items.filter(function (l) {
+                return l.side === side && (l.lv === 'swing' || l.lv === 'recent') && !l.far;
+            }).sort(byDistance)[0];
+            if (s) s.ray = true;
+        });
+        /* 6. A round number inside a pool's band (±0.03 %) is the pool's:
+           quiet (no chip) while that pool is drawn and carries the ◎ —
+           layout() checks the pool is on the pane (quietFor). */
+        items.forEach(function (r) {
+            if (r.lv !== 'round') return;
+            items.forEach(function (p) {
+                if (p.lv === 'pool' && r.price >= p.bottom * (1 - LV.CONFLUENCE_TOL)
+                        && r.price <= p.top * (1 + LV.CONFLUENCE_TOL)) {
+                    p.round = r.price; r.quiet = true; (r.quietFor = r.quietFor || []).push(p.id);
+                }
+            });
+        });
+        items.forEach(function (l) {
+            if (l.lv === 'pool') { l.topText = fmt(l.top); l.bottomText = fmt(l.bottom); }
+            if (Array.isArray(l.zone) && l.zone.length === 2 && ok(l.zone[0]) && ok(l.zone[1])) {
+                l.zoneText = fmt(l.zone[0]) + '–' + fmt(l.zone[1]);
+            } else { l.zone = null; }
+        });
+        items.sort(function (a, b) { return (RANK[a.lv] - RANK[b.lv]) || byDistance(a, b); });
+        return items;
+    }
+
+    /* Distance fade: 1 up to 1.5 ATR, then down to a floor at 4.5 ATR. */
+    function fade(d, theme) {
+        if (!ok(d) || d <= LV.FADE_NEAR) return 1;
+        var f = Math.min(1, (d - LV.FADE_NEAR) / (LV.FADE_FAR - LV.FADE_NEAR));
+        return 1 - f * (1 - LV.FADE_FLOOR[theme === 'light' ? 'light' : 'dark']);
+    }
+    /* (a) the band overlaps the path from the mark to an open position's
+       SL / soft stop / TP; (b) a money price sits inside its zone. */
+    function moneyHeld(l, env) {
+        var lo = l.lv === 'pool' ? l.bottom : l.price, hi = l.lv === 'pool' ? l.top : l.price;
+        return (env.money || []).some(function (m) {
+            if (!ok(m.price)) return false;
+            if (m.held && ok(env.mark)) {
+                var a = Math.min(env.mark, m.price), b = Math.max(env.mark, m.price);
+                if (hi >= a && lo <= b) return true;
+            }
+            return !!(l.zone && m.price >= l.zone[0] && m.price <= l.zone[1]);
+        });
+    }
+    function kindOff(l, env) { return !!(env.hidden && env.hidden[l.lv === 'recent' ? 'swing' : l.lv]); }
+    /* 'role' | 'held' | 'yes' | false (§3.5) */
+    function wanted(l, env) {
+        if (l.role) return 'role';
+        if (kindOff(l, env)) return false;
+        if (moneyHeld(l, env)) return 'held';
+        if (env.highTf && !(l.lv === 'pool' || l.ray)) return false;
+        if (env.showAll) return 'yes';
+        return (!l.far && !l.capped) ? 'yes' : false;
+    }
+    function inFocus(l, f) { return f === 'id:' + l.id || f === (l.lv === 'recent' ? 'swing' : l.lv); }
+    function alphaOf(l, env, theme, steady) {
+        var hot = env.hover === l.id;
+        var k = (steady || hot) ? 1 : fade(l.atr_away, theme);
+        if (env.pinned && !l.role && !hot) k *= LV.PIN_DIM[theme];
+        if (env.focus && !inFocus(l, env.focus) && !hot) k *= LV.FOCUS_DIM;
+        return k;
+    }
+
+    /* A chip's words: kind, role, price (desktop); kind and role (phone). */
+    function chipText(l, phone) {
+        var role = roleWords(l, phone);
+        var t;
+        if (l.lv === 'round') return l.text || String(l.price);
+        if (l.lv === 'pool') {
+            t = (isHigh(l) ? 'EQH' : 'EQL') + (l.touches ? (phone ? '×' : ' ×') + l.touches : '')
+                + (l.round != null ? ' ' + LV.MARK.round : '');
+        } else if (l.lv === 'recent') {
+            t = phone ? (isHigh(l) ? 'LAST H' : 'LAST L') : (isHigh(l) ? 'LAST HIGH' : 'LAST LOW');
+        } else {
+            t = (l.label && l.label.length === 2) ? l.label : (isHigh(l) ? 'SWING H' : 'SWING L');
+            if (l.recent) t += phone ? ' LAST' : ' · LAST';
+        }
+        if (role) t += phone ? ' ' + role : ' · ' + role;
+        return phone ? t : t + '  ' + (l.text || l.price);
+    }
+    function stubText(l) { return l.role ? roleWords(l, true) : null; }
+
+    /* Signal dots and the position arrow as keep-out boxes — LWC 4.1's
+       own marker geometry (size/margin, fillSizeAndY, the per-bar stack
+       offsets), rounded up, with 2 px of pad. list: [{x, yHigh, yLow,
+       position, size, text}] in pane pixels. */
+    function markerBoxes(list, barSpacing, fontSize) {
+        var base = Math.min(Math.max(barSpacing || 6, 12), 30), fs = fontSize || 10;
+        var margin = Math.max(Math.ceil(base * 0.1), 3), textH = fs * 1.2, stack = {}, out = [];
+        (list || []).forEach(function (m) {
+            if (!m || !ok(m.x) || (m.position !== 'aboveBar' && m.position !== 'belowBar')) return;
+            var key = Math.round(m.x) + '|' + m.position, off = stack[key] || margin;
+            var size = Math.ceil(base) * (ok(m.size) ? Math.max(m.size, 0) : 1);
+            var t = m.text ? textH : 0, tw = m.text ? String(m.text).length * fs * 0.62 : 0;
+            var half = Math.max(size, tw) / 2 + LV.MARK_PAD, y0, y1;
+            if (m.position === 'aboveBar') {
+                if (!ok(m.yHigh)) return;
+                y1 = m.yHigh - off + LV.MARK_PAD; y0 = y1 - size - t - 2 * LV.MARK_PAD;
+            } else {
+                if (!ok(m.yLow)) return;
+                y0 = m.yLow + off - LV.MARK_PAD; y1 = y0 + size + t + 2 * LV.MARK_PAD;
+            }
+            stack[key] = off + size + margin + t;
+            out.push({ x0: m.x - half, x1: m.x + half, y0: y0, y1: y1 });
+        });
+        return out;
+    }
+
+    /* The title boxes the library paints at the pane's right edge, one
+       per titled price line, where its axis puts them: two labels closer
+       than a label's height are pushed apart, away from the last price's
+       own label (the scale's centre; LWC 4.1.0 _fixLabelOverlap), so a
+       knot of titled rows stacks into a taller block than the rows span.
+       titles [{y, w}]: each axis label's row and its title box's width
+       (0: a label with no title box, which still takes its place in the
+       stack); center: the last price's row. -> [{x0, x1, y0, y1}], 1 px
+       of margin around each box. */
+    function titleBoxes(titles, center, W, H) {
+        var h = LV.TITLE_H, half = Math.floor(h / 2);
+        var views = (titles || []).filter(function (t) { return t && ok(t.y); })
+            .map(function (t) { return { y: t.y, w: Math.max(0, num(t.w, 0)), at: t.y }; });
+        if (ok(center)) views.push({ y: center, w: 0, at: center });
+        else center = 0;
+        var top = views.filter(function (v) { return v.y <= center; }).sort(function (a, b) { return b.y - a.y; });
+        var bottom = views.filter(function (v) { return v.y > center; });
+        if (top.length && bottom.length) bottom.push(top[0]);       /* the centre label is shared */
+        bottom.sort(function (a, b) { return a.y - b.y; });
+        views.forEach(function (v) {
+            if (v.y > -half && v.y < half) v.at = half;
+            if (v.y > H - half && v.y < H + half) v.at = H - half;
+        });
+        var i;
+        for (i = 1; i < top.length; i++) if (top[i].y > top[i - 1].at - h) top[i].at = top[i - 1].at - h;
+        for (i = 1; i < bottom.length; i++) if (bottom[i].y < bottom[i - 1].at + h) bottom[i].at = bottom[i - 1].at + h;
+        return views.filter(function (v) { return v.w > 0; }).map(function (v) {
+            return { x0: W - v.w - 1, x1: W, y0: v.at - h / 2 - 1, y1: v.at + h / 2 + 1 };
+        });
+    }
+
+    /* Items -> pixels. env: {toY(price), toX(epoch, price, high) -> x | -1
+       (before the loaded bars) | null, width, height, theme 'dark'|'light',
+       phone, highTf, showAll, hidden {pool, swing, asia, round}, hover id,
+       focus ('pool'|'swing'|'asia'|'round'|'id:<id>'|null), pinned, mark,
+       money [{price, y, held, stop}], labels (a titled price line exists),
+       laneW, titles [{y, w}] (each price line's axis label: its row and
+       its title box's width, 0 for none; absent, the ASIA label keeps off
+       the whole lane), hlines [y], lastY, boxes [{x0,x1,y0,y1}] (the marker boxes),
+       overlays [{x0,x1,y0,y1}] (the page's own boxes over the canvas: the
+       crosshair legend, the bar-close countdown), candles [{x0,x1,y0,y1}]
+       (the newest candles, high to low), asia {high, low, x0, x1} | null,
+       measure(text) -> px}. */
+    function layout(items, env) {
+        var W = env.width, H = env.height, theme = env.theme === 'light' ? 'light' : 'dark';
+        var g = { theme: theme, bands: [], hatch: null, rays: [], ticks: [], dots: [], rounds: [],
+                  asia: null, chips: [], edges: [], unplaced: [],
+                  /* what the chips kept clear of, as given (for the eye and the tests) */
+                  keep: { marks: env.boxes || [], overlays: env.overlays || [], candles: env.candles || [],
+                          lastY: ok(env.lastY) ? env.lastY : null,
+                          titles: Array.isArray(env.titles) ? titleBoxes(env.titles, env.lastY, W, H) : null },
+                  count: { shown: 0, total: 0, pool: 0, swing: 0, round: 0 } };
+        var moneyY = (env.money || []).map(function (m) { return m.y; }).filter(ok);
+        var off = { above: [], below: [] }, cands = [], drawn = {};
+        /* where a stamp lands on the pane: x, -1 before the loaded bars, or null */
+        function xOf(t, price, high) {
+            if (!ok(t)) return null;
+            var x = env.toX(t, price, high);
+            return ok(x) ? x : null;
+        }
+        (items || []).forEach(function (l) {
+            g.count.total++;
+            var y = env.toY(l.price);
+            if (!ok(y)) return;
+            var w = wanted(l, env);
+            if (!w && !kindOff(l, env) && moneyY.some(function (my) { return Math.abs(my - y) <= LV.MONEY_PX; })) w = 'held';
+            if (!w) return;
+            var steady = w === 'role' || w === 'held', hot = env.hover === l.id, high = isHigh(l);
+            /* where it formed: the pool's first touch, else its own origin */
+            var x0 = xOf(l.origin, l.price, high);
+            var mxs = (l.members || []).map(function (m) {
+                return { m: m, x: xOf(m.origin, m.price, high) }; });
+            if (l.lv === 'pool' && mxs.length) {
+                x0 = null;
+                mxs.forEach(function (o) { if (o.x !== null && (x0 === null || o.x < x0)) x0 = o.x; });
+            }
+            var clipped = x0 === null || x0 < 0, xs = clipped ? 0 : Math.min(x0, W);
+            /* formed after the visible range (scrolled back): nothing of it on
+               this pane — no zero-width shape, no chip floating over nothing.
+               A role stays named in the key's answer chip. */
+            if (!clipped && x0 > W) { g.unplaced = g.unplaced.concat(rolesOf(l)); return; }
+            var y0 = y, y1 = y;
+            if (l.lv === 'pool') {
+                var yt = env.toY(l.top), yb = env.toY(l.bottom);
+                if (!ok(yt) || !ok(yb)) return;
+                y0 = Math.min(yt, yb); y1 = Math.max(yt, yb);
+                if (y1 - y0 < LV.MIN_BAND_PX) { var mid = (y0 + y1) / 2; y0 = mid - LV.MIN_BAND_PX / 2; y1 = mid + LV.MIN_BAND_PX / 2; }
+            }
+            if (y1 < 0 || y0 > H) { (y1 < 0 ? off.above : off.below).push(l); return; }
+            var k = alphaOf(l, env, theme, steady);
+            g.count.shown++; g.count[l.lv === 'recent' ? 'swing' : l.lv]++;
+            drawn[l.id] = { x0: xs, y0: y0, y1: y1, y: y, high: high };
+            if (l.lv === 'pool') {
+                g.bands.push({ id: l.id, x0: xs, x1: W, y0: y0, y1: y1, high: high,
+                               role: l.role || null, hot: hot, clipped: clipped, k: k });
+                mxs.forEach(function (o) {
+                    var my = env.toY(o.m.price);
+                    if (o.x !== null && ok(my) && o.x >= 0 && o.x <= W) g.dots.push({ id: l.id, x: o.x, y: my, k: k });
+                });
+            } else if (l.lv === 'round') {
+                g.rounds.push({ id: l.id, y: y, hot: hot, k: k });
+            } else {
+                if ((!env.highTf || steady) && !clipped && x0 <= W) g.ticks.push({ id: l.id, x: x0, y: y, high: high,
+                                                       recent: l.lv === 'recent', hot: hot, k: k });
+                if (l.ray) g.rays.push({ id: l.id, x0: xs, x1: W, y: y, hot: hot, k: k });
+            }
+            /* a role is always named, wherever it sits (§3.7, §3.13). A round
+               number is quiet only while the pool that carries its ◎ is on
+               the pane (items run pools first, so `drawn` already knows). */
+            var quiet = l.quiet && (l.quietFor || []).some(function (id) { return !!drawn[id]; });
+            var own = l.lv === 'pool' || l.ray || l.role || (l.lv === 'round' && !quiet && !env.highTf);
+            if (own || hot) cands.push({ id: l.id, lv: l.lv, role: l.role || null, role2: l.role2 || null,
+                hot: hot, own: !!own, high: high, clipped: clipped, ray: !!l.ray,
+                y: (y0 + y1) / 2, edge0: y0, edge1: y1, origin: l.lv === 'round' ? 4 : xs,
+                text: chipText(l, env.phone), stub: stubText(l),
+                /* a ray's short words (LAST H), its last try on a desktop */
+                short: (l.ray && !l.role && !env.phone) ? chipText(l, true) : null,
+                score: (WEIGHT[l.lv] || 0) - num(l.atr_away, 9),
+                k: (env.focus && !inFocus(l, env.focus) && !hot) ? LV.FOCUS_DIM : 1 });
+        });
+        /* the hunt zone: only when asked for, or when a stop sits in it */
+        var hunt = (items || []).filter(function (l) { return hasRole(l, 'hunt') && l.zone; })[0];
+        if (hunt && drawn[hunt.id] && !env.highTf) {
+            var want = env.hover === hunt.id || env.focus === 'id:' + hunt.id
+                || (env.money || []).some(function (m) {
+                    return m.stop && ok(m.price) && m.price >= hunt.zone[0] && m.price <= hunt.zone[1]; });
+            var za = env.toY(hunt.zone[1]), zb = env.toY(hunt.zone[0]);
+            if (want && ok(za) && ok(zb)) g.hatch = { id: hunt.id, x0: drawn[hunt.id].x0, x1: W,
+                y0: Math.min(za, zb), y1: Math.max(za, zb), lv: hunt.lv };
+        }
+        /* the Asian range: intraday only, its own switch */
+        if (env.asia && !(env.hidden && env.hidden.asia) && !env.highTf) {
+            var a = env.asia, ah = env.toY(a.high), al = env.toY(a.low);
+            if (ok(ah) && ok(al)) {
+                var wash = !ok(a.x0) || !ok(a.x1);
+                g.asia = { x0: wash ? 0 : Math.max(0, a.x0), x1: wash ? W : Math.min(W, a.x1),
+                           yh: Math.min(ah, al), yl: Math.max(ah, al), wash: wash,
+                           hot: env.hover === 'sv-lvl-asia',
+                           k: (env.pinned ? LV.PIN_DIM[theme] : 1) * ((env.focus && env.focus !== 'asia') ? LV.FOCUS_DIM : 1) };
+            }
+        }
+        placeChips(cands, g, env, off);
+        return g;
+    }
+
+    /* The chips (§3.7, §3.12). Edge counts first, then the level chips
+       in priority order (HUNT, DRAW, then by score), then the ASIA label.
+       Each takes the first slot that stays inside the pane and off the
+       title-box lane, the money rows, the marker boxes, the page's own
+       boxes over the canvas (the crosshair legend, the bar-close
+       countdown), the newest candles, the other chips and every OTHER
+       level's shapes as drawn (its band, its touch dots, its ray: a chip
+       on a neighbour's band names the wrong pool); a non-role chip also
+       keeps off a role's band, so a tap there reaches the role. A chip
+       never ends left of its own shape (a band or a ray runs from its
+       origin to now) unless that shape is clipped at the left edge.
+       A role tries its full words at its origin and at the right edge,
+       then its stub there; the same slots over the newest candles; only
+       then the full words and the stub at the left edge, 900 px from its
+       band; then its stub across a money row; last of all, over a
+       neighbour's shapes. At its origin a role's chip may touch a
+       neighbour's band edge (an overlap under LV.GRAZE px is no clash)
+       or sit up to LV.NUDGE px into its own band's edge: the 4h HUNT
+       chip grazed the EQL 1.08001 band by 0.3 px and was sent to the
+       left edge, 850 px from its band. A ray's chip (LAST HIGH) sits on
+       its own ray or nowhere: at its origin or along the ray, then the
+       same over the newest candles (the latest swing nearly always sits
+       in the last 30 bars, and a ray with no chip is an anonymous blue
+       dash), then its short words (LAST H) there, clear and then loose.
+       Any other non-role chip with no clear slot is dropped: the hover
+       card still names its level. The ASIA label comes after the level
+       chips: its box is the only violet thing on the pane and the key's
+       swatch names it, while a chip carries a price the eye cannot read
+       off a ray; it sits on its box clear of the chips, or nowhere.
+       The hovered chip is NOT promoted: a hovered chip that holds a slot
+       keeps it, and so does every other chip (promoted, it jumped out
+       from under the pointer, the next move dropped the hover and it
+       jumped back — the card and the glow flickered on every move). A
+       hovered level with no slot of its own is forced in LAST, past the
+       cap, where it moves nothing else. */
+    function placeChips(cands, g, env, off) {
+        var W = env.width, H = env.height;
+        var laneW = Math.max(LV.LANE_W, env.laneW || 0), laneOpen = !env.labels, laneX = laneOpen ? W : W - laneW;
+        var rows = (env.money || []).map(function (m) { return m.y; })
+            .concat(env.hlines || [], ok(env.lastY) ? [env.lastY] : []).filter(ok);
+        var boxes = (env.boxes || []).concat(env.overlays || []), candles = env.candles || [], placed = [];
+        var measure = env.measure || function (t) { return String(t).length * LV.CHAR_W; };
+        var roleOf = {};
+        cands.forEach(function (c) { if (c.role) roleOf[c.id] = c.role; });
+        /* the roles' own shapes as drawn: a band, a ray, a tick */
+        var roleShapes = g.bands.filter(function (b) { return b.role; }).map(function (b) {
+                return { x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1 }; })
+            .concat(g.rays.filter(function (r) { return roleOf[r.id]; }).map(function (r) {
+                return { x0: r.x0, x1: r.x1, y0: r.y - 1, y1: r.y + 1 }; }))
+            .concat(g.ticks.filter(function (t) { return roleOf[t.id]; }).map(function (t) {
+                return { x0: t.x - LV.TICK_W / 2, x1: t.x + LV.TICK_W / 2, y0: t.y - 1, y1: t.y + 1 }; }));
+        /* every level's shapes as drawn, by level: a band, its touch dots, a ray */
+        var dotR = LV.DOT_R + 1;
+        var shapes = g.bands.map(function (b) { return { id: b.id, x0: b.x0, x1: b.x1, y0: b.y0, y1: b.y1 }; })
+            .concat(g.dots.map(function (d) {
+                return { id: d.id, x0: d.x - dotR, x1: d.x + dotR, y0: d.y - dotR, y1: d.y + dotR }; }))
+            .concat(g.rays.map(function (r) { return { id: r.id, x0: r.x0, x1: r.x1, y0: r.y - 1, y1: r.y + 1 }; }));
+        function meets(r, b, gx, gy) { return r.x0 < b.x1 + gx && r.x1 > b.x0 - gx && r.y0 < b.y1 + gy && r.y1 > b.y0 - gy; }
+        function any(r, list, gx, gy) {
+            for (var i = 0; i < list.length; i++) if (meets(r, list[i], gx, gy)) return true;
+            return false;
+        }
+        /* every OTHER level's shapes: a non-role chip keeps LV.ROLE_GAP off
+           them; a role's chip (own) may touch one, an overlap under
+           LV.GRAZE px being no clash */
+        function others(r, id, own) {
+            var gx = own ? -LV.GRAZE : 0, gy = own ? -LV.GRAZE : LV.ROLE_GAP;
+            for (var i = 0; i < shapes.length; i++) {
+                if (shapes[i].id !== id && meets(r, shapes[i], gx, gy)) return true;
+            }
+            return false;
+        }
+        /* the title boxes themselves, as the axis stacks them (the ASIA label's keep-out) */
+        var titleRects = g.keep.titles;
+        /* o: { cross: may cross a money row, own: a role's chip (its band
+           is its own), loose: may cover the newest candles, titles: keeps
+           off the title boxes, not the whole lane (the ASIA label), id: the
+           level the chip names (it keeps off every other level's shapes),
+           mix: may meet them all the same (the last resort) } */
+        function clash(r, o) {
+            var titles = o.titles && titleRects;
+            if (r.x0 < 0 || r.y0 < 0 || r.y1 > H || r.x1 > (titles ? W : laneX)) return true;
+            if (titles && any(r, titleRects, LV.GAP_X, LV.GAP_Y)) return true;
+            if (r.x1 > W - LV.LANE_W && r.y0 < LV.LANE_TOP) return true;          /* the bar-close countdown */
+            if (any(r, boxes, 0, 0) || any(r, placed, LV.GAP_X, LV.GAP_Y)) return true;
+            if (!o.cross) for (var i = 0; i < rows.length; i++)
+                if (rows[i] >= r.y0 - LV.ROW_CLEAR && rows[i] <= r.y1 + LV.ROW_CLEAR) return true;
+            if (!o.own && any(r, roleShapes, 0, LV.ROLE_GAP)) return true;
+            if (!o.loose && any(r, candles, 0, 0)) return true;
+            if (o.id && !o.mix && others(r, o.id, o.own)) return true;
+            return false;
+        }
+        function rect(x0, y0, words) { var w = measure(words) + 2 * LV.CHIP_PAD;
+            return { x0: x0, x1: x0 + w, y0: y0, y1: y0 + LV.CHIP_H, text: words }; }
+        /* the slots by where they sit: at the origin, at the right edge (an
+           open lane only), at the left edge. None wholly left of the
+           level's own shape; the left edge for a non-role only when its
+           shape reaches it (a ray chip 900 px from its ray, beside other
+           lines, read as theirs). At the origin a role's chip also tries
+           its outside slot nudged 1 to LV.NUDGE px into its own band's
+           edge, before the slots across the band; a ray's chip tries its
+           outside and inside slots nudged as far off the ray (the ray
+           stays whole beside its words), then onto it. */
+        function slots(c, words) {
+            var w = measure(words) + 2 * LV.CHIP_PAD, h = LV.CHIP_H, s = { origin: [], right: [], left: [] };
+            if (c.lv === 'round') { s.left = [rect(4, c.y - h - 1, words), rect(4, c.y + 1, words)]; return s; }
+            var out = c.high ? c.edge0 - h - 1 : c.edge1 + 1, inn = c.high ? c.edge1 + 1 : c.edge0 - h - 1;
+            var mid = c.y - h / 2, ox = Math.max(4, Math.min(c.origin + 8, laneX - 4 - w));
+            var to = c.high ? 1 : -1, n;                                  /* +1: down, toward a high's shape */
+            if (c.clipped || ox + w >= c.origin) {
+                s.origin = [rect(ox, out, words)];
+                if (c.role) for (n = 1; n <= LV.NUDGE; n++) s.origin.push(rect(ox, out + to * n, words));
+                else if (c.ray) for (n = 1; n <= LV.NUDGE; n++) s.origin.push(rect(ox, out - to * n, words), rect(ox, out + to * n, words));
+                s.origin.push(rect(ox, inn, words));
+                if (c.ray) for (n = 1; n <= LV.NUDGE; n++) s.origin.push(rect(ox, inn + to * n, words), rect(ox, inn - to * n, words));
+                s.origin.push(rect(ox, mid, words));
+            }
+            if (laneOpen && (c.clipped || W - 4 >= c.origin)) {
+                s.right = [rect(W - 4 - w, out, words), rect(W - 4 - w, mid, words), rect(W - 4 - w, inn, words)];
+            }
+            if (ox > 4 && (c.role || c.clipped || c.origin <= 4 + w)) s.left = [rect(4, out, words), rect(4, inn, words)];
+            return s;
+        }
+        function first(list, o) {
+            for (var i = 0; i < list.length; i++) if (!clash(list[i], o)) return list[i];
+            return null;
+        }
+        /* edge counts first; the level chips keep clear of them. Each slides
+           left from beside the lane, then one row inward — at the top, also
+           under the page's own boxes there (the crosshair legend and the
+           countdown span the whole top band of a crowded pane) — until it
+           clears a dot, the page's boxes and the newest candles. Only a
+           role's count may cross a money row, and none is ever placed blind:
+           with no slot the key's answer chip names an off-pane role. */
+        ['above', 'below'].forEach(function (side) {
+            var list = off[side]; if (!list.length) return;
+            var r0 = list.filter(function (l) { return l.role; })[0], arrow = side === 'above' ? '▲' : '▼';
+            var words = r0 ? arrow + ' ' + (env.phone ? stubText(r0) : roleWords(r0, false)
+                               + ' ' + (r0.text || r0.price)) + (list.length > 1 ? ' · +' + (list.length - 1) : '')
+                           : arrow + ' ' + list.length + (env.phone ? '' : ' ' + side);
+            var w = measure(words) + 2 * LV.CHIP_PAD, home = W - laneW - 4;
+            var ys = side === 'above' ? [2, 4 + LV.CHIP_H] : [H - 2 - LV.CHIP_H, H - 4 - 2 * LV.CHIP_H];
+            if (side === 'above') {
+                var ovB = 0;
+                (env.overlays || []).forEach(function (b) { if (b && ok(b.y0) && ok(b.y1) && b.y0 <= 2 && b.y1 > ovB) ovB = b.y1; });
+                if (ovB) ys.push(ovB + 2, ovB + 4 + LV.CHIP_H);
+            }
+            var tries = [];
+            ys.forEach(function (y0) {
+                for (var x1 = home; x1 - w >= 4; x1 -= LV.EDGE_STEP) tries.push({ x0: x1 - w, x1: x1, y0: y0, y1: y0 + LV.CHIP_H });
+            });
+            var roles = [];
+            list.forEach(function (l) { roles = roles.concat(rolesOf(l)); });
+            var at = first(tries, { own: true }) || first(tries, { own: true, loose: true })
+                  || (r0 ? first(tries, { own: true, cross: true, loose: true }) : null);
+            if (!at) { g.unplaced = g.unplaced.concat(roles); return; }
+            var e = { side: side, text: words, n: list.length, roles: roles,
+                      x0: at.x0, x1: at.x1, y0: at.y0, y1: at.y1 };
+            g.edges.push(e); placed.push(e);
+        });
+        var cap = env.phone ? LV.CHIPS.phone : LV.CHIPS.desktop, used = 0, late = [];
+        function prio(c) { return c.role === 'hunt' ? 0 : c.role === 'draw' ? 1 : 2; }
+        function put(c, s, o) {
+            placed.push(s); used++;
+            g.chips.push({ id: c.id, lv: c.lv, role: c.role, role2: c.role2 || null, text: s.text,
+                           x0: s.x0, x1: s.x1, y0: s.y0, y1: s.y1, cross: !!o.cross, k: c.k });
+        }
+        function all(s) { return [].concat(s.origin, s.right, s.left); }
+        cands.sort(function (a, b) { return (prio(a) - prio(b)) || (b.score - a.score); });
+        cands.forEach(function (c) {
+            /* a hovered level that gets no chip by the rules (a plain tick,
+               or past the cap) is forced in last */
+            if (!c.own || (!c.role && used >= cap)) { if (c.hot) late.push(c); return; }
+            var full = slots(c, c.text), passes;
+            if (c.role) {
+                var stub = slots(c, c.stub);
+                var near = [].concat(full.origin, full.right, stub.origin, stub.right);
+                var far = [].concat(full.left, stub.left);
+                var across = [].concat(stub.origin, stub.right, stub.left);
+                passes = [[near, { own: true, id: c.id }], [near, { own: true, loose: true, id: c.id }],
+                          [far, { own: true, id: c.id }], [across, { own: true, cross: true, id: c.id }],
+                          [across, { own: true, cross: true, loose: true, id: c.id, mix: true }]];
+            } else if (c.ray) {
+                var brief = c.short ? all(slots(c, c.short)) : [];
+                passes = [[all(full), { id: c.id }], [all(full), { id: c.id, loose: true }],
+                          [brief, { id: c.id }], [brief, { id: c.id, loose: true }]];
+            } else {
+                passes = [[all(full), { id: c.id }]];
+            }
+            for (var p = 0; p < passes.length; p++) {
+                var s = first(passes[p][0], passes[p][1]);
+                if (s) { put(c, s, passes[p][1]); return; }
+            }
+            if (c.role) g.unplaced = g.unplaced.concat(rolesOf(c));
+            else if (c.hot) late.push(c);
+        });
+        /* The ASIA label names its own box, or nothing. On the box: above
+           it from its left corner (overhanging a box narrower than the
+           word: four 1h bars are 16 px), else ending at its right corner,
+           else under it — over the newest candles if it must, since those
+           are its session's or their neighbours'. Today's session sits at
+           the right edge, inside the title-box lane while a position or a
+           pinned signal is up, so the label keeps off the title boxes
+           themselves (env.titles, as the axis stacks them) rather than the
+           whole lane. Nothing free on the box: the nearest slot at most
+           LV.ASIA_NEAR px off it that covers none of the newest candles.
+           Failing that, no label — never across a money row (only a
+           role's stub may cross one), and never slid further off, where
+           the word lands on another session's bars and names the wrong
+           ones: the key's 'Asia range' swatch and the hover card still
+           name the box. It comes after the level chips (which take their
+           slots without regard to it, so a chip never moves for it) and
+           before the hovered chip forced in last, so a hover moves it no
+           more than any chip. */
+        if (g.asia) {
+            var a = g.asia, lw = measure('ASIA') + 2 * LV.CHIP_PAD, titled = !!titleRects;
+            var xMax = (titled ? W : laneX) - 2 - lw;
+            var lx = function (x) { return Math.max(2, Math.min(x, xMax)); };
+            var offBox = function (r) { return Math.max(0, a.x0 - r.x1, r.x0 - a.x1); };
+            var ays = [a.yh - LV.CHIP_H - 1, a.yl + 1], onBox = [], near = [];
+            ays.forEach(function (y0) {
+                onBox.push(rect(lx(a.x0 + 2), y0, 'ASIA'), rect(lx(a.x1 - lw), y0, 'ASIA'));
+            });
+            onBox = onBox.filter(function (r) { return offBox(r) === 0; });
+            for (var d = 1; d <= LV.ASIA_NEAR; d++) {
+                for (var ai = 0; ai < ays.length; ai++) near.push(rect(a.x0 - d - lw, ays[ai], 'ASIA'), rect(a.x1 + d, ays[ai], 'ASIA'));
+            }
+            var ar = first(onBox, { own: true, titles: titled })
+                  || first(onBox, { own: true, titles: titled, loose: true })
+                  || first(near, { own: true, titles: titled });
+            if (ar) { g.asia.label = ar; placed.push(ar); }
+        }
+        late.forEach(function (c) {                               /* the hovered chip, forced in */
+            var full = slots(c, c.text), o = { own: true, loose: true, mix: true, id: c.id };
+            var s = first([].concat(full.origin, full.right, full.left), o);
+            if (s) put(c, s, o);
+        });
+    }
+
+    /* The pointer at (x, y) on the pane -> the level under it, or null:
+       the shapes as drawn — chips, bands (right of the first touch),
+       ticks, rays, the Asia box and its carried edges, round lines.
+       tol: 6 px for a mouse, 12 for a finger (LV.HIT). */
+    function findItem(items, id) {
+        for (var i = 0; i < (items || []).length; i++) if (items[i].id === id) return items[i];
+        return null;
+    }
+    /* A level chip under the pointer, by its exact box, or null. The widget
+       asks this BEFORE the position lines: a chip never sits on a money
+       row, but a finger's 12 px reach from the SL or TP covered every chip
+       beside them (a tap on ①HUNT next to the stop opened the position). */
+    function hitChip(g, items, x, y) {
+        if (!g || !g.chips) return null;
+        for (var i = 0; i < g.chips.length; i++) { var c = g.chips[i];
+            if (x >= c.x0 && x <= c.x1 && y >= c.y0 && y <= c.y1) return { id: c.id, item: findItem(items, c.id) }; }
+        return null;
+    }
+    function hit(g, items, x, y, tol) {
+        if (!g) return null;
+        items = items || [];
+        function find(id) { return findItem(items, id); }
+        var i, onChip = hitChip(g, items, x, y);
+        if (onChip) return onChip;
+        for (i = 0; i < g.bands.length; i++) { var b = g.bands[i];
+            if (x >= b.x0 - tol && y >= b.y0 - tol / 2 && y <= b.y1 + tol / 2) return { id: b.id, item: find(b.id) }; }
+        for (i = 0; i < g.ticks.length; i++) { var t = g.ticks[i];
+            if (Math.abs(x - t.x) <= LV.TICK_W / 2 + tol && Math.abs(y - t.y) <= tol) return { id: t.id, item: find(t.id) }; }
+        for (i = 0; i < g.rays.length; i++) { var r = g.rays[i];
+            if (x >= r.x0 - tol && Math.abs(y - r.y) <= tol) return { id: r.id, item: find(r.id) }; }
+        if (g.asia) { var a = g.asia;
+            var inBox = x >= a.x0 - tol && x <= a.x1 + tol && y >= a.yh - tol && y <= a.yl + tol;
+            var onRay = x > a.x1 && (Math.abs(y - a.yh) <= tol || Math.abs(y - a.yl) <= tol);
+            if (inBox || onRay) return { id: 'sv-lvl-asia', edge: Math.abs(y - a.yh) <= Math.abs(y - a.yl) ? 'high' : 'low' }; }
+        for (i = 0; i < g.rounds.length; i++) {
+            if (Math.abs(y - g.rounds[i].y) <= tol / 2) return { id: g.rounds[i].id, item: find(g.rounds[i].id) }; }
+        return null;
+    }
+
+    /* The key's live answer for one side: the role there, else the nearest pool, else the nearest swing/extreme. */
+    function keyAnswer(items, side, phone) {
+        var on = (items || []).filter(function (l) { return l.side === side && l.lv !== 'round'; });
+        var pick = on.filter(function (l) { return l.role; })[0]
+                || on.filter(function (l) { return l.lv === 'pool' && !l.far; }).sort(byDistance)[0]
+                || on.filter(function (l) { return !l.far; }).sort(byDistance)[0];
+        if (!pick) return null;
+        var what = pick.lv === 'pool' ? (isHigh(pick) ? 'EQH' : 'EQL') + '×' + (pick.touches || 2)
+                 : pick.lv === 'recent' ? (isHigh(pick) ? 'LAST H' : 'LAST L')
+                 : (pick.label && pick.label.length === 2 ? pick.label : (isHigh(pick) ? 'SWING H' : 'SWING L'));
+        return { id: pick.id, role: pick.role || null, role2: pick.role2 || null,
+                 kind: pick.lv === 'pool' ? 'pool' : 'swing',
+                 why: [pick.why, pick.why2].filter(function (w) { return !!w; }).join(' · '),
+                 text: (side === 'above' ? '▲ ' : '▼ ')
+                     + (pick.role ? roleWords(pick, false) + ' ' : '')
+                     + (pick.text || pick.price) + (phone ? '' : ' ' + what)
+                     + (ok(pick.atr_away) ? ' · ' + pick.atr_away.toFixed(2) + ' ATR' : '') };
+    }
+
+    /* Where the money meets the levels, in words, for the position card (display only). */
+    function moneyFacts(p, items, fmt) {
+        var out = [];
+        if (!p || !items || !items.length) return out;
+        fmt = fmt || String;
+        function inZone(l, v) { return !!(l.zone && ok(v) && v >= l.zone[0] && v <= l.zone[1]); }
+        var hunt = items.filter(function (l) { return hasRole(l, 'hunt'); })[0];
+        if (hunt && inZone(hunt, p.stop)) {
+            out.push({ text: 'Stop inside the hunt zone ' + hunt.zoneText, tone: 'loss' });
+        } else {
+            var z = items.filter(function (l) { return l.lv === 'pool' && inZone(l, p.stop); })[0];
+            if (z) out.push({ text: 'Stop inside the zone of the ' + levelKind(z) + ' pool ' + (z.text || fmt(z.price)), tone: 'loss' });
+        }
+        if (ok(p.tp)) {
+            /* the draw first: its band or its zone (pools under 0.75 ATR apart
+               overlap zones, and a nearer pool's must not win) */
+            var draw = items.filter(function (l) { return l.lv === 'pool' && hasRole(l, 'draw'); })[0];
+            var at = (draw && ((p.tp >= draw.bottom && p.tp <= draw.top) || inZone(draw, p.tp))) ? draw
+                  : items.filter(function (l) { return l.lv === 'pool' && p.tp >= l.bottom && p.tp <= l.top; })[0]
+                    || items.filter(function (l) { return l.lv === 'pool' && inZone(l, p.tp); })[0];
+            if (at) out.push({ text: 'TP at the ' + (hasRole(at, 'draw') ? 'draw: the ' : '') + levelKind(at)
+                                     + ' pool ' + (at.text || fmt(at.price)), tone: '' });
+        }
+        return out;
+    }
+
+    window.svLevels = { LV: LV, digest: digest, layout: layout, hit: hit, hitChip: hitChip, chipText: chipText,
+                        keyAnswer: keyAnswer, moneyFacts: moneyFacts, markerBoxes: markerBoxes,
+                        titleBoxes: titleBoxes, fade: fade };
 })();
 </script>
 
@@ -1198,6 +2013,7 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
     var sigCardEl   = document.getElementById(CHART_ID + '-sig-card');
     var sigLegendEl = document.getElementById(CHART_ID + '-sig-legend');
     var posLegendEl = document.getElementById(CHART_ID + '-pos-legend');
+    var lvlLegendEl = document.getElementById(CHART_ID + '-lvl-legend');
 
     if (!container || !canvasEl) return;
 
@@ -1232,26 +2048,35 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
     var ASIA = null;     /* {high, low, phase, words} while drawn */
 
     /* THE POWER OF THREE on the tape (2026-10-03): the day's Asian range,
-       the accumulation whose two sides London runs and New York leaves,
-       as two long-dashed gold lines — drawn with the levels layer, hover
-       for the phase the day is in. Redrawn from the map on every paint
-       like every other line here. */
+       the accumulation whose two sides London runs and New York leaves —
+       drawn with the levels layer, hover for the phase the day is in.
+       (2026-10-07) A violet BOX over the session's own bars, its high and
+       low carried on to now, painted by the level layer under the candles.
+       Without primitives (the node fake, a stale library) the two sides
+       are two faint untitled lines, intraday only: a title without its
+       axis label is never painted. Redrawn from the map on every paint. */
     function applyAsianRange(po3) {
         amdLines.forEach(function (pl) { try { mainSeries.removePriceLine(pl); } catch (e) {} });
         amdLines = [];
         ASIA = null;
-        if (!mainSeries || !activeInds.levels || !po3 || !po3.ok || !po3.asia) return;
+        var layer = ensureLevelLayer();
+        if (layer) layer.set({ asia: null });
+        if (!mainSeries || !activeInds.levels || !po3 || !po3.ok || !po3.asia) { paintLevelKey(); return; }
         var a = po3.asia;
-        if (typeof a.high !== 'number' || typeof a.low !== 'number') return;
+        if (typeof a.high !== 'number' || typeof a.low !== 'number') { paintLevelKey(); return; }
         ASIA = { high: a.high, low: a.low, phase: po3.phase, words: po3.words,
-                 session: po3.session, direction: po3.direction };
+                 session: po3.session, direction: po3.direction, opened: a.opened, closed: a.closed };
+        paintLevelKey();
+        if (layer) { layer.set({ asia: { high: a.high, low: a.low, opened: a.opened, closed: a.closed } }); return; }
+        /* No primitives: the two sides as faint lines, intraday only. */
+        if (activeInds.lvl_asia === false || INTRADAY.indexOf(currentTf) === -1) return;
         var c = getThemeColors();
-        [[a.high, 'ASIA HIGH'], [a.low, 'ASIA LOW']].forEach(function (pair) {
+        [a.high, a.low].forEach(function (price) {
             try {
                 amdLines.push(mainSeries.createPriceLine({
-                    price: pair[0], color: c.alpha(c.gold, 0.55), lineWidth: 1,
+                    price: price, color: c.alpha(c.session, 0.55), lineWidth: 1,
                     lineStyle: LightweightCharts.LineStyle.LargeDashed,
-                    axisLabelVisible: false, title: pair[1],
+                    axisLabelVisible: false, title: '',
                 }));
             } catch (e) {}
         });
@@ -1340,6 +2165,14 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             /* A neutral signal's dot: neither the buy green nor the sell
                red, and readable on both grounds. */
             neutral:      token('--text-secondary', isDark ? '#7aaa8a' : '#4a6a4a'),
+            /* The levels' language (2026-10-07): ink is a signal's idea
+               (the pinned Entry), swing the pivots' blue (an ink in the
+               light theme, where the glow blue is 2.6:1), session the
+               Asian range's violet. Within the levels, gold is the pools'
+               alone. */
+            ink:          token('--text-primary', isDark ? '#daf0e6' : '#1a2a1a'),
+            swing:        token('--lvl-swing', isDark ? '#30a0e8' : '#1f6fb2'),
+            session:      token('--lvl-session', isDark ? '#a878f0' : '#8840d0'),
         };
     }
     function indicatorTone(key, c) {
@@ -1433,6 +2266,7 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
     var panes        = {};     // key -> { el, chart, series, values }
     var mainSeries   = null;   // candlestick | heikin | line | area
     var volumeSeries = null;
+    var volHas       = false;  /* the loaded bars carry a volume: a forex tape's is all 0 */
     var chartType    = (['candlestick', 'heikin', 'line', 'area'].indexOf(prefs.type) !== -1) ? prefs.type : 'candlestick';
     var logScale     = !!prefs.log;
     var activeInds   = (prefs.indicators && typeof prefs.indicators === 'object')
@@ -1456,7 +2290,17 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
     var lastBars     = [];     // the bars the overlays are computed from
     var indSeries    = {};     // key -> [line series] on the main chart
     var posLines     = [];     // price lines belonging to positions
-    var lvlLines     = [];     // price lines belonging to the living levels
+    /* The living levels (2026-10-07) are ONE series primitive, never a
+       price line: these are its state. */
+    var lvlLayer     = null;   /* the LevelLayer on the current mainSeries */
+    var lvlItems     = [];     /* svLevels.digest(LEVELS) for this paint */
+    var lvlHover     = null;   /* the item id under the pointer */
+    var lvlFocus     = null;   /* transient focus from the key (mouse/keyboard) */
+    var lvlFocusPin  = null;   /* sticky focus from an answer chip */
+    var lvlPalette   = null;   /* getThemeColors(), cached: the layer repaints on every hover move */
+    var lvlPhone     = false;  /* container narrower than svLevels.LV.PHONE_W, set in layout() */
+    var lvlMarkers   = [];     /* the markers applyPositions set, for the chip keep-out */
+    var TOUCH_POINTER = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
     var syncing      = false;  // guard against range ping-pong between panes
     var countdownTimer = null;
     /* The signal layer (2026-09-27): the dots drawn on this paint, the dot
@@ -1549,6 +2393,17 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         return out;
     }
 
+    /* The operator's own line: neutral, so green on the axis means only TP
+       or Target (2026-10-07). Its axis label is a ghost — the chart's
+       ground with the tone as text — like a signal's: only the money's
+       labels are filled. */
+    function hlineOptions(price, c) {
+        return { price: price, color: c.alpha(c.neutral, 0.9), lineWidth: 1,
+                 lineStyle: LightweightCharts.LineStyle.Dashed,
+                 axisLabelVisible: true, title: 'H',
+                 axisLabelColor: c.bg, axisLabelTextColor: c.neutral };
+    }
+
     /* Re-drawn after every load, because setData wipes markers and a
        removed series takes its price lines with it — the same reason
        applyOverlays exists at all. Wipes first, so a background refresh
@@ -1570,11 +2425,7 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             try {
                 drawings.push({
                     type: 'hline', price: price,
-                    priceLine: mainSeries.createPriceLine({
-                        price: price, color: c.accent, lineWidth: 1,
-                        lineStyle: LightweightCharts.LineStyle.Dashed,
-                        axisLabelVisible: true, title: 'H',
-                    }),
+                    priceLine: mainSeries.createPriceLine(hlineOptions(price, c)),
                 });
             } catch (e) { /* a level this series will not take is not drawn */ }
         });
@@ -1846,6 +2697,16 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             catch (e) {}
         });
         alignPriceScales();
+        /* ONE breakpoint (svLevels.LV.PHONE_W) for the level chips, their
+           texts, the hit reach, the entry's title and the key. */
+        var lvPhone = !!(window.svLevels && container.clientWidth > 0
+                         && container.clientWidth < window.svLevels.LV.PHONE_W);
+        if (lvPhone !== lvlPhone) {           /* expand, fullscreen, rotate: re-plan */
+            lvlPhone = lvPhone;
+            if (hasData && mainSeries) applyPositions(lastBars);
+            paintLevelKey();
+        }
+        requestLevels();
     }
 
     // ── Initialise chart ─────────────────────────────────────────────────
@@ -1887,11 +2748,14 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         volumeSeries = chart.addHistogramSeries({
             color: c.accentDim,
             priceFormat: { type: 'volume' },
+            /* A forex tape's volume is 0: its last value printed "0" on
+               the price axis among the money's labels (2026-10-07). */
+            lastValueVisible: false, priceLineVisible: false,
             priceScaleId: 'volume',
             scaleMargins: { top: 0.8, bottom: 0 },
         });
         chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
-        volumeSeries.applyOptions({ visible: !!activeInds.volume });
+        volumeSeries.applyOptions({ visible: !!activeInds.volume && volHas });
 
         applyLogScale();
 
@@ -1912,6 +2776,7 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         /* The dots' click (a tap) and the scroll that moves them: their
            own subscriptions, the drawing tools keep theirs as they were. */
         chart.subscribeClick(onSignalClick);
+        if (typeof chart.subscribeDblClick === 'function') chart.subscribeDblClick(onSignalDoubleTap);
         chart.timeScale().subscribeVisibleLogicalRangeChange(onSignalRange);
 
         /* Every pane follows the main chart's viewport and vice versa:
@@ -2160,16 +3025,41 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
     }
 
     // ── Add/replace main series ──────────────────────────────────────────
+    /* The axis at the instrument's decimals: EURUSD's SL, the signal's stop
+       and the entry all printed "1.08" at the library's default of 2.
+       Without a page decimal count the loaded bars say it (priceDecimals
+       would answer 2 for anything over 1, which is the bug). */
+    function axisDecimals(bars) {
+        if (DECIMALS !== null) return DECIMALS;
+        var n = 2;
+        (bars || []).slice(-50).forEach(function (b) {
+            [b.open, b.high, b.low, b.close].forEach(function (v) {
+                var m = /\.(\d+)$/.exec(String(v));
+                if (m) n = Math.max(n, Math.min(8, m[1].length));
+            });
+        });
+        return n;
+    }
+    function seriesPriceFormat(bars) {
+        var dp = axisDecimals(bars);
+        /* 1 / 10^dp, not 10^-dp: V8's Math.pow(10, -5) is 9.999999999999999e-6. */
+        return { type: 'price', precision: dp, minMove: 1 / Math.pow(10, dp) };
+    }
+
     function addSeries(type) {
         var c = getThemeColors();
         if (mainSeries) {
+            if (lvlLayer) { try { mainSeries.detachPrimitive(lvlLayer); } catch (e) {} }
             try { chart.removeSeries(mainSeries); } catch(e) {}
             mainSeries = null;
             posLines = []; /* they died with the series */
-            lvlLines = [];
             amdLines = [];
+            lvlLayer = null; /* detached above; re-attached on the new series */
         }
+        lvlPalette = getThemeColors();
         chartType = type;
+        /* The series' own last-price line is DOTTED (2026-10-07): solid is
+           the operator's money, dashed an idea, dotted the tape's price. */
         if (type === 'candlestick' || type === 'heikin') {
             mainSeries = chart.addCandlestickSeries({
                 upColor:        c.accent,
@@ -2180,6 +3070,8 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                 wickDownColor:  c.red,
                 lastValueVisible: true,
                 priceLineVisible: true,
+                priceLineStyle: LightweightCharts.LineStyle.Dotted,
+                priceFormat: seriesPriceFormat(lastBars),
             });
         } else if (type === 'line') {
             mainSeries = chart.addLineSeries({
@@ -2187,6 +3079,8 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                 lineWidth: 2,
                 lastValueVisible: true,
                 priceLineVisible: true,
+                priceLineStyle: LightweightCharts.LineStyle.Dotted,
+                priceFormat: seriesPriceFormat(lastBars),
             });
         } else if (type === 'area') {
             mainSeries = chart.addAreaSeries({
@@ -2196,6 +3090,8 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                 lineWidth:   2,
                 lastValueVisible: true,
                 priceLineVisible: true,
+                priceLineStyle: LightweightCharts.LineStyle.Dotted,
+                priceFormat: seriesPriceFormat(lastBars),
             });
         }
     }
@@ -2390,7 +3286,7 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         if (activeInds.vwap && intraday) line('vwap', vwap(bars), 1, LightweightCharts.LineStyle.Dashed);
 
         if (volumeSeries) {
-            volumeSeries.applyOptions({ visible: !!activeInds.volume });
+            volumeSeries.applyOptions({ visible: !!activeInds.volume && volHas });
         }
 
         Object.keys(PANE_SPECS).forEach(function (key) {
@@ -2488,26 +3384,42 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             POSITIONS.forEach(function (p) {
                 var isLong = p.side === 'long';
                 var tone = isLong ? c.accent : c.red;
+                /* The money is the loudest thing on the chart (2026-10-07):
+                   the entry 3 px in its side's colour (at 2 px a short's
+                   entry would read as its own SL), SL and TP 2 px SOLID —
+                   solid is a fact, dashed is a signal's idea. A phone's
+                   entry says LONG / SHORT; the size stays in the card. */
                 if (typeof p.entry === 'number') {
                     posLines.push(mainSeries.createPriceLine({
-                        price: p.entry, color: tone, lineWidth: 2,
+                        price: p.entry, color: tone, lineWidth: 3,
                         lineStyle: LightweightCharts.LineStyle.Solid,
                         axisLabelVisible: true,
-                        title: (isLong ? 'LONG ' : 'SHORT ') + (typeof p.qty === 'number' ? +p.qty.toFixed(priceDecimals(0)) : ''),
+                        title: (isLong ? 'LONG' : 'SHORT') + (!lvlPhone && typeof p.qty === 'number' ? ' ' + (+p.qty.toFixed(priceDecimals(0))) : ''),
                     }));
                 }
                 if (typeof p.stop === 'number') {
                     posLines.push(mainSeries.createPriceLine({
-                        price: p.stop, color: c.red, lineWidth: 1,
-                        lineStyle: LightweightCharts.LineStyle.Dashed,
+                        price: p.stop, color: c.red, lineWidth: 2,
+                        lineStyle: LightweightCharts.LineStyle.Solid,
                         axisLabelVisible: true, title: 'SL',
                     }));
                 }
                 if (typeof p.tp === 'number') {
                     posLines.push(mainSeries.createPriceLine({
-                        price: p.tp, color: c.accent, lineWidth: 1,
-                        lineStyle: LightweightCharts.LineStyle.Dashed,
+                        price: p.tp, color: c.accent, lineWidth: 2,
+                        lineStyle: LightweightCharts.LineStyle.Solid,
                         axisLabelVisible: true, title: 'TP',
+                    }));
+                }
+                if (typeof p.soft_stop === 'number' && isFinite(p.soft_stop)
+                        && (typeof p.stop !== 'number'
+                            || Math.abs(p.soft_stop - p.stop) > 1e-9 * Math.max(1, Math.abs(p.stop)))) {
+                    /* The care's lock: quieter than the broker's stop, untitled (a
+                       title without its axis label is never painted), named in the card. */
+                    posLines.push(mainSeries.createPriceLine({
+                        price: p.soft_stop, color: c.alpha(c.red, c.isDark ? 0.7 : 0.8), lineWidth: 1,
+                        lineStyle: LightweightCharts.LineStyle.SparseDotted,
+                        axisLabelVisible: false, title: '',
                     }));
                 }
                 var t = nearestBarTime(bars, p.opened_at);
@@ -2531,8 +3443,10 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         /* lightweight-charts wants markers ascending by time; two on the
            same bar are fine, out-of-order ones throw. */
         markers.sort(function (a, b) { return barEpoch(a.time) - barEpoch(b.time); });
+        lvlMarkers = markers;   /* the level chips keep off the dots and the arrows */
         try { mainSeries.setMarkers(markers); } catch (e) {}
         syncSignalFocus();
+        requestLevels();
     }
 
     // ── The living levels ────────────────────────────────────────────────
@@ -2547,47 +3461,594 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
        next paint and a new pullback extreme appears on its own — nothing
        here remembers a level the server stopped sending.
 
-       Pools (equal highs/lows, two touches or more) take the gold and the
-       heavier stroke: that is where the stops pile up and where the
-       market is pulled. Swings and the latest extreme are the muted blue;
-       round numbers the faintest sparse dots. No axis labels: eight
-       levels with labels would bury the position's SL and TP, which are
-       the numbers the operator must be able to read. */
-    function levelTitle(l) {
-        var k = String(l.kind || '');
-        if (l.pool) {
-            var m = /\((\d+) touches\)/.exec(k);
-            return 'POOL ' + (k.indexOf('highs') !== -1 ? 'EQH' : 'EQL')
-                   + (m ? ' ×' + m[1] : '');
-        }
-        if (k === 'round number') return 'ROUND';
-        return k.toUpperCase();   /* SWING LOW · RECENT HIGH … */
+       (2026-10-07) "could we improve the visibility and design of
+       liquidity areas and pivot points etc. They are too similar and
+       messy at the moment." Every level is now drawn by ONE series
+       primitive, the LevelLayer, in the visual language of the pure
+       window.svLevels: a pool is a gold AREA from its first touch, a swing
+       a blue tick on the candle that printed it (the nearest each side
+       runs to now), a round number a dotted guide, the Asian range a
+       violet box. Its shapes paint in drawBackground — above the grid,
+       under the candles and under every price line — so a level can never
+       cover the position's SL or TP; only its small chips paint above
+       (draw), and svLevels.layout keeps them off the money's rows, the
+       title boxes' lane and the signal dots. No level is a price line, so
+       none takes the axis. The pinned signal's risk and reward washes ride
+       the same layer. No hitTest: a normal-layer primitive hit would beat
+       the series markers and steal the dots' object ids. */
+    function lvApi() { return window.svLevels || null; }
+    function requestLevels() { if (lvlLayer && lvlLayer.request) lvlLayer.request(); }
+    /* The layer's palette: read once per data paint (applyLevels,
+       addSeries) or after a theme change, never per frame — the library
+       repaints the pane on every hover move. */
+    function levelPalette() { return lvlPalette || (lvlPalette = getThemeColors()); }
+
+    /* The theme is server-rendered today (base.html); should the body's
+       class ever change under a live chart, the next paint re-reads it. */
+    if (typeof MutationObserver === 'function' && document.body) {
+        try {
+            new MutationObserver(function () {
+                var dark = !document.body.classList.contains('light-mode');
+                if (lvlPalette && lvlPalette.isDark === dark) return;
+                lvlPalette = null;
+                requestLevels();
+            }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+        } catch (e) { /* the palette still follows every data paint */ }
     }
+
+    /* ISeriesPrimitive (lightweight-charts 4.1): two pane views, the same
+       array on every call (the library caches by reference). The shapes:
+       zOrder 'normal', in drawBackground — after the grid, before any
+       source's foreground, so under the candles and every price line. The
+       chips: zOrder 'top', drawn on the top canvas after every series (in
+       'normal' they painted inside the candles' own source, in creation
+       order: under the volume histogram and the indicator lines until a
+       type switch re-made the candles as the newest source). The top view
+       repaints on every cursor move: it only draws the at most 8 chips
+       cached in this.geom, computing nothing. No hitTest, no
+       autoscaleInfo, no axis views. */
+    function LevelLayer() {
+        var self = this;
+        this.request = null; this.geom = null; this.data = { items: [], asia: null, box: null };
+        this.views = [{ zOrder: function () { return 'normal'; },
+            renderer: function () { return {
+                draw: function () {},
+                drawBackground: function (t) { self.paintBack(t); }    /* shapes: under candles and lines */
+            }; } },
+            { zOrder: function () { return 'top'; },
+            renderer: function () { return {
+                draw: function (t) { self.paintChips(t); }              /* chips: over every series */
+            }; } }];
+    }
+    LevelLayer.prototype.attached = function (p) { this.request = p.requestUpdate; };
+    LevelLayer.prototype.detached = function () { this.request = null; };
+    LevelLayer.prototype.paneViews = function () { return this.views; };
+    LevelLayer.prototype.updateAllViews = function () {};
+    LevelLayer.prototype.set = function (patch) {
+        for (var k in patch) this.data[k] = patch[k];
+        if (this.request) this.request();
+    };
+
+    function ensureLevelLayer() {
+        if (!mainSeries || typeof mainSeries.attachPrimitive !== 'function') return null;  /* node fake, stale library */
+        if (!lvlLayer) {
+            lvlLayer = new LevelLayer();
+            try { mainSeries.attachPrimitive(lvlLayer); } catch (e) { lvlLayer = null; }
+        }
+        return lvlLayer;
+    }
+
+    /* The bar a level formed on, as a logical index: the bar containing
+       the 4h stamp, refined to the candle inside that 4h window that
+       printed the extreme (on a 1h chart the tick lands on the wick, not
+       on the 4h bar's first hour). -1 before the loaded range. */
+    function originIndex(epoch, price, high) {
+        var bars = lastBars, n = bars.length, lo = barIndexAt(epoch);
+        if (lo === null || lo < 0) return lo;
+        var best = lo, bestD = Infinity;
+        for (var i = lo; i < n && barEpoch(bars[i].time) < epoch + 14400; i++) {
+            var d = Math.abs((high ? bars[i].high : bars[i].low) - price);
+            if (d < bestD) { bestD = d; best = i; }
+        }
+        return best;
+    }
+    function barIndexAt(epoch) {
+        var bars = lastBars, n = bars.length;
+        if (!n || typeof epoch !== 'number') return null;
+        if (epoch < barEpoch(bars[0].time)) return -1;
+        var lo = 0, hi = n - 1;
+        while (lo < hi) {
+            var mid = (lo + hi + 1) >> 1;
+            if (barEpoch(bars[mid].time) <= epoch) lo = mid; else hi = mid - 1;
+        }
+        return lo;
+    }
+    /* A bar's x by its TIME, never by its index: the time scale's logical
+       index counts every series' points (a measure line kept across a
+       background refresh starts before bars[0]), and an index into
+       lastBars then lands one bar off. */
+    function barX(i) {
+        var b = lastBars[i];
+        if (!b) return null;
+        try { var x = chart.timeScale().timeToCoordinate(b.time); return x === null ? null : x; }
+        catch (e) { return null; }
+    }
+    function epochX(epoch) {
+        var i = barIndexAt(epoch);
+        if (i === null) return null;
+        if (i < 0) return -1;
+        return barX(i);
+    }
+    function originX(epoch, price, high) {
+        var i = originIndex(epoch, price, high);
+        if (i === null) return null;
+        if (i < 0) return -1;
+        return barX(i);
+    }
+
+    /* The money's rows, which a level chip never sits on: the open
+       positions' entry, SL, soft stop and TP (`held` — the path from the
+       mark to them holds the levels on it; `stop` — a stop in the hunt
+       zone hatches it), and the pinned signal's three (an idea: neither). */
+    function moneyRows(toY) {
+        var out = [];
+        function add(v, held, stop) {
+            if (typeof v === 'number' && isFinite(v)) out.push({ price: v, y: toY(v), held: held, stop: stop });
+        }
+        if (activeInds.positions) {
+            POSITIONS.forEach(function (p) {
+                add(p.entry, false, false); add(p.stop, true, true);
+                add(p.soft_stop, true, true); add(p.tp, true, false);
+            });
+        }
+        var d = pinnedDot();
+        if (d && d.sig) { add(d.sig.entry, false, false); add(d.sig.stop, false, false); add(d.sig.target, false, false); }
+        return out;
+    }
+    function hlineCount() {
+        var n = 0;
+        drawings.forEach(function (d) { if (d.type === 'hline') n++; });
+        return n;
+    }
+    function hlineRows(toY) {
+        var out = [];
+        drawings.forEach(function (d) {
+            if (d.type !== 'hline' || typeof d.price !== 'number') return;
+            var y = toY(d.price);
+            if (typeof y === 'number' && isFinite(y)) out.push(y);
+        });
+        return out;
+    }
+    /* A titled price line prints its title in a box at the pane's right
+       edge: while one exists, that lane is closed to the level chips. */
+    function titledLines() { return posLines.length + sigLines.length + hlineCount() > 0; }
+    function laneWidth() {
+        var widest = 0;
+        posLines.concat(sigLines).forEach(function (pl) {
+            var o = null;
+            try { o = (pl && typeof pl.options === 'function') ? pl.options() : null; } catch (e) { o = null; }
+            if (o && o.title) widest = Math.max(widest, measureChip(o.title));
+        });
+        if (hlineCount()) widest = Math.max(widest, measureChip('H'));
+        return Math.max(80, widest + 16);
+    }
+    /* Each price line's axis label on the candles: its row, and the width
+       of the title box it paints at the pane's right edge (0 without a
+       title), measured as laneWidth() measures it. svLevels.titleBoxes
+       stacks them as the axis does; the ASIA label keeps off those boxes
+       instead of the whole lane. */
+    function titleRows(toY) {
+        var out = [];
+        function add(price, title) {
+            var y = (typeof price === 'number' && isFinite(price)) ? toY(price) : null;
+            if (typeof y === 'number' && isFinite(y)) out.push({ y: y, w: title ? measureChip(title) + 16 : 0 });
+        }
+        posLines.concat(sigLines).forEach(function (pl) {
+            var o = null;
+            try { o = (pl && typeof pl.options === 'function') ? pl.options() : null; } catch (e) { o = null; }
+            if (o && o.axisLabelVisible !== false) add(o.price, o.title);
+        });
+        drawings.forEach(function (d) { if (d.type === 'hline') add(d.price, 'H'); });
+        return out;
+    }
+    /* The markers applyPositions set (the signal dots and the position
+       arrows) in pane pixels, for svLevels.markerBoxes. The bars are
+       looked up by time in a map built once per load (and per series
+       type: Heikin-Ashi candles stand on their own highs and lows). */
+    /* The candles as DRAWN: Heikin-Ashi bars stand on their own highs,
+       lows and closes (16 of the last 30 on the 1h fixture reach past
+       their raw range). Built once per load and per series type. */
+    var lvlShown = [], lvlShownOf = null, lvlShownType = null;
+    function shownBars() {
+        if (lvlShownOf !== lastBars || lvlShownType !== chartType) {
+            lvlShown = chartType === 'heikin' ? heikinAshi(lastBars) : lastBars;
+            lvlShownOf = lastBars; lvlShownType = chartType;
+        }
+        return lvlShown;
+    }
+    var lvlBarMap = null, lvlBarMapOf = null;
+    function markerPoints(toY) {
+        if (!lvlMarkers.length || !chart) return [];
+        var shown = shownBars();
+        if (lvlBarMapOf !== shown) {
+            lvlBarMap = {};
+            shown.forEach(function (b) { lvlBarMap[String(b.time)] = b; });
+            lvlBarMapOf = shown;
+        }
+        var ts = chart.timeScale(), flat = chartType === 'line' || chartType === 'area', out = [];
+        lvlMarkers.forEach(function (m) {
+            var b = lvlBarMap[String(m.time)], x = null;
+            if (!b) return;
+            try { x = ts.timeToCoordinate(m.time); } catch (e) { x = null; }
+            out.push({ x: x, yHigh: toY(flat ? b.close : b.high), yLow: toY(flat ? b.close : b.low),
+                       position: m.position, size: m.size, text: m.text });
+        });
+        return out;
+    }
+    /* A chip's width at the chips' own font; the node fake has no canvas. */
+    var lvlMeasureCtx;   /* undefined: not tried yet; null: no canvas */
+    function measureChip(text) {
+        var s = String(text);
+        if (lvlMeasureCtx === undefined) {
+            lvlMeasureCtx = null;
+            try {
+                var cv = document.createElement('canvas');
+                var cx = (cv && typeof cv.getContext === 'function') ? cv.getContext('2d') : null;
+                if (cx) { cx.font = '600 10px monospace'; lvlMeasureCtx = cx; }
+            } catch (e) { lvlMeasureCtx = null; }
+        }
+        if (lvlMeasureCtx) { try { return lvlMeasureCtx.measureText(s).width; } catch (e) {} }
+        var api = lvApi();
+        return s.length * (api ? api.LV.CHAR_W : 6.1);
+    }
+    /* The newest candles, high to low and a bar's slot wide: no chip may
+       hide the price action the operator is reading (svLevels.LV.NOW_BARS
+       bars back from the last). A line or area series is its closes. */
+    function candleBoxes(toY, w, spacing) {
+        var api = lvApi(), bars = shownBars(), n = bars.length, out = [];
+        if (!api || !n || !chart) return out;
+        var ts = chart.timeScale(), half = Math.max(1, (spacing || 6) / 2);
+        var flat = chartType === 'line' || chartType === 'area';
+        for (var i = Math.max(0, n - api.LV.NOW_BARS); i < n; i++) {
+            var x = null, b = bars[i];
+            try { x = ts.timeToCoordinate(b.time); } catch (e) { x = null; }
+            if (typeof x !== 'number' || !isFinite(x) || x < -half || x > w + half) continue;
+            var yh = toY(flat ? b.close : b.high), yl = toY(flat ? b.close : b.low);
+            if (typeof yh !== 'number' || typeof yl !== 'number') continue;
+            out.push({ x0: x - half, x1: x + half, y0: Math.min(yh, yl) - (flat ? 3 : 1),
+                       y1: Math.max(yh, yl) + (flat ? 3 : 1) });
+        }
+        return out;
+    }
+    /* The page's own boxes over the canvas, which no chip may sit under:
+       the crosshair's OHLC legend at the top left (a mouse resting on the
+       chart raises it; a finger's tap does not) and the bar-close countdown
+       at the top right (intraday frames). Worked out from their CSS (the
+       legend: 8 px down, 10 px in, 18 px lines, 2+6 px padding and a 1 px
+       border; the countdown: 70 px from the container's right edge, 1 px
+       letter spacing) and from the text they print — never read off the
+       page: a layout read per paint would force a reflow, and a chip that
+       jumped the moment the legend appeared would be worse than one that
+       stays clear of where it shows. */
+    var lvlVolOf = null, lvlVolChars = 1;
+    function overlayBoxes(w) {
+        var out = [], axisW = 0;
+        try { axisW = chart.priceScale('right').width() || 0; } catch (e) { axisW = 0; }
+        var cw = Math.max(6.1, measureChip('0000000000') / 10);
+        if (!TOUCH_POINTER) {
+            var last = lastBars.length ? lastBars[lastBars.length - 1] : null, dp = priceDecimals(0);
+            var p = (last ? String(Math.floor(Math.abs(last.high))).length : 1) + (dp ? dp + 1 : 0);
+            var chars = (isIntraday(currentTf) ? 20 : 10) + (chartType === 'heikin' ? 3 : 0), px = 0;
+            chars += (chartType === 'candlestick' || chartType === 'heikin') ? 16 + 4 * p : 2 + p;
+            if (volumeSeries && activeInds.volume && volHas) {
+                if (lvlVolOf !== lastBars) {
+                    var top = 0;
+                    lastBars.forEach(function (b) { if (typeof b.volume === 'number' && b.volume > top) top = b.volume; });
+                    lvlVolChars = Number(top).toLocaleString().length; lvlVolOf = lastBars;
+                }
+                chars += 4 + lvlVolChars;
+            }
+            Object.keys(indSeries).forEach(function (key) {      /* 'SMA20 1.08412' (BB: three values) */
+                chars += key.length + (key === 'bb' ? 3 : 1) * (p + 1); px += 6;
+            });
+            Object.keys(panes).forEach(function (key) {          /* 'RSI 56.2', 'MACD … SIG …' */
+                chars += key === 'macd' ? 24 : 8; px += key === 'macd' ? 12 : 6;
+            });
+            var room = Math.max(40, w + axisW - 10), wide = chars * cw + px + 14;
+            var lines = Math.max(1, Math.ceil(wide / room));
+            out.push({ x0: 0, x1: Math.min(w, 10 + Math.min(wide, room) + 2), y0: 0, y1: 8 + 24 * lines + 2 });
+        }
+        var secs = TF_SECONDS[currentTf];
+        if (secs) {
+            var cdw = (10 + (secs >= 3600 ? 7 : 5)) * (cw + 1) + 14, cx1 = w + axisW - 70;
+            out.push({ x0: Math.max(0, cx1 - cdw - 2), x1: Math.min(w, cx1 + 2), y0: 0, y1: lvApi() ? lvApi().LV.LANE_TOP : 34 });
+        }
+        return out;
+    }
+
+    LevelLayer.prototype.computeGeom = function (w, h) {
+        var api = lvApi();
+        if (!api || !mainSeries || !chart) return null;
+        var c = levelPalette();
+        var ts = chart.timeScale(), d = this.data;
+        var toY = function (p) { var y = mainSeries.priceToCoordinate(p); return y === null ? null : y; };
+        var spacing = ((ts.options && ts.options()) || {}).barSpacing;
+        var asia = null;
+        if (d.asia) {
+            /* The box covers its session's bars, edge to edge. */
+            var half = Math.max(1, (spacing || 6) / 2);
+            var ok2 = typeof d.asia.opened === 'number' && typeof d.asia.closed === 'number';
+            var x0 = ok2 ? epochX(d.asia.opened) : null, x1 = ok2 ? epochX(d.asia.closed - 1) : null;
+            asia = { high: d.asia.high, low: d.asia.low,
+                     x0: x0 === null ? null : (x0 < 0 ? 0 : x0 - half),
+                     x1: x1 === null ? null : (x1 < 0 ? 0 : x1 + half) };
+        }
+        /* the mark (the money's path) is the tape's own last close; the
+           last-price ROW is the series' line, at the close drawn */
+        var last = lastBars.length ? lastBars[lastBars.length - 1].close : null;
+        var sb = shownBars(), lastShown = sb.length ? sb[sb.length - 1].close : null;
+        return api.layout(d.items, {
+            toY: toY, toX: originX, width: w, height: h,
+            theme: c.isDark ? 'dark' : 'light', phone: lvlPhone,
+            highTf: INTRADAY.indexOf(currentTf) === -1,
+            showAll: activeInds.lvl_all === true,
+            hidden: { pool: activeInds.lvl_pool === false, swing: activeInds.lvl_swing === false,
+                      asia: activeInds.lvl_asia === false, round: activeInds.lvl_round === false },
+            hover: lvlHover, focus: lvlFocus || lvlFocusPin, pinned: !!pinnedDot(),
+            mark: last, money: moneyRows(toY), labels: titledLines(), laneW: laneWidth(), titles: titleRows(toY),
+            hlines: hlineRows(toY), lastY: lastShown === null ? null : toY(lastShown),
+            boxes: api.markerBoxes(markerPoints(toY), spacing, 10),
+            overlays: overlayBoxes(w), candles: candleBoxes(toY, w, spacing),
+            asia: asia, measure: measureChip
+        });
+    };
+
+    /* The shapes, under the candles and every price line: the pinned
+       signal's washes, round guides, the Asia box, the hunt hatch, pool
+       bands and their touch dots, rays, ticks. Each alpha is the kind's
+       base (dark / light, T below) times the shape's k from
+       svLevels.layout (distance fade × pin dim × focus dim). */
+    LevelLayer.prototype.paintBack = function (target) {
+        var self = this;
+        target.useBitmapCoordinateSpace(function (s) {
+            var ctx = s.context, hr = s.horizontalPixelRatio, vr = s.verticalPixelRatio;
+            var w = s.mediaSize.width, h = s.mediaSize.height;
+            var g = self.geom = self.computeGeom(w, h);
+            var c = levelPalette(), api = lvApi();
+            var TICK_W = api ? api.LV.TICK_W : 14, SERIF_H = api ? api.LV.SERIF_H : 5, DOT_R = api ? api.LV.DOT_R : 2.5;
+            function T(dark, light) { return c.isDark ? dark : light; }
+            function X(v) { return Math.round(v * hr); }
+            function Y(v) { return Math.round(v * vr); }
+            function tone(color, a) { ctx.globalAlpha = Math.max(0, Math.min(1, a)); return color; }
+            /* a crisp outline inside [x, x + w] × [y, y + h]: the stroke
+               centred half its width in (an odd width on the half pixel) */
+            function frame(x, y, wd, ht, lw) {
+                var o = lw % 2 ? 0.5 : lw / 2;
+                ctx.lineWidth = lw;
+                ctx.strokeRect(x + o, y + o, Math.max(1, wd - lw), Math.max(1, ht - lw));
+            }
+            /* crisp: an odd bitmap width sits on the half pixel */
+            function hline(x0, x1, y, color, a, width, dash) {
+                var lw = Math.max(1, Math.floor(width * vr));
+                ctx.strokeStyle = tone(color, a); ctx.lineWidth = lw;
+                ctx.setLineDash((dash || []).map(function (v) { return v * hr; }));
+                var yy = Y(y) + (lw % 2 ? 0.5 : 0);
+                ctx.beginPath(); ctx.moveTo(X(x0), yy); ctx.lineTo(X(x1), yy); ctx.stroke();
+            }
+            ctx.save();
+            try {
+                /* The pinned signal's risk and reward, from its bar to now. Never dimmed. */
+                var box = self.data.box;
+                if (box && mainSeries && chart && typeof box.entry === 'number') {
+                    var bx = null, ye = mainSeries.priceToCoordinate(box.entry);
+                    try { bx = chart.timeScale().timeToCoordinate(box.time); } catch (e) { bx = null; }
+                    if (typeof bx === 'number' && isFinite(bx) && bx < w && ye !== null) {
+                        var wx0 = X(Math.max(0, bx));
+                        [[box.stop, c.red, T(0.10, 0.08)], [box.target, c.accent, 0.08]].forEach(function (pr) {
+                            if (typeof pr[0] !== 'number' || !isFinite(pr[0])) return;
+                            var yy = mainSeries.priceToCoordinate(pr[0]);
+                            if (yy === null) return;
+                            var top = Y(Math.min(ye, yy));
+                            ctx.fillStyle = tone(pr[1], pr[2]);
+                            ctx.fillRect(wx0, top, X(w) - wx0, Math.max(1, Y(Math.max(ye, yy)) - top));
+                        });
+                    }
+                }
+                if (!g) return;
+                /* Round numbers: a dotted guide, clearly over the grid. */
+                g.rounds.forEach(function (r) {
+                    hline(0, w, r.y, c.neutral, r.hot ? 1 : T(0.75, 0.85) * r.k, 1, [2, 3]);
+                });
+                /* The Asian range: a violet box over its session, its two
+                   sides carried on to now; without session times a wash. */
+                if (g.asia) {
+                    var a = g.asia, ak = a.hot ? 1 : a.k, ay0 = Y(a.yh), ay1 = Y(a.yl);
+                    ctx.setLineDash([]);
+                    if (a.wash) {
+                        ctx.fillStyle = tone(c.session, (a.hot ? T(0.09, 0.10) : T(0.05, 0.06)) * ak);
+                        ctx.fillRect(0, ay0, X(w), Math.max(1, ay1 - ay0));
+                        hline(0, w, a.yh, c.session, T(0.45, 0.6) * ak, 1, [3, 3]);
+                        hline(0, w, a.yl, c.session, T(0.45, 0.6) * ak, 1, [3, 3]);
+                    } else {
+                        var ax0 = X(a.x0), ax1 = X(a.x1);
+                        ctx.fillStyle = tone(c.session, (a.hot ? T(0.16, 0.18) : T(0.09, 0.10)) * ak);
+                        ctx.fillRect(ax0, ay0, Math.max(1, ax1 - ax0), Math.max(1, ay1 - ay0));
+                        ctx.strokeStyle = tone(c.session, T(0.75, 0.9) * ak);
+                        frame(ax0, ay0, Math.max(1, ax1 - ax0), Math.max(1, ay1 - ay0), Math.max(1, Math.floor(hr)));
+                        if (a.x1 < w) {
+                            hline(a.x1, w, a.yh, c.session, T(0.45, 0.6) * ak, 1, [3, 3]);
+                            hline(a.x1, w, a.yl, c.session, T(0.45, 0.6) * ak, 1, [3, 3]);
+                        }
+                    }
+                }
+                /* The hunt zone: a 45° hatch around the HUNT level, only
+                   while asked for or while a stop sits in it. */
+                if (g.hatch) {
+                    var hz = g.hatch, hx0 = X(hz.x0), hx1 = X(hz.x1), hy0 = Y(hz.y0), hy1 = Y(hz.y1);
+                    if (hx1 > hx0 && hy1 > hy0) {
+                        ctx.save();
+                        ctx.beginPath(); ctx.rect(hx0, hy0, hx1 - hx0, hy1 - hy0); ctx.clip();
+                        ctx.setLineDash([]);
+                        ctx.strokeStyle = tone(hz.lv === 'pool' ? c.gold : c.swing, T(0.22, 0.30));
+                        ctx.lineWidth = Math.max(1, Math.floor(hr));
+                        var step = Math.max(2, Math.round(6 * hr)), span = hy1 - hy0;
+                        ctx.beginPath();
+                        for (var xx = hx0 - span; xx < hx1; xx += step) { ctx.moveTo(xx, hy1); ctx.lineTo(xx + span, hy0); }
+                        ctx.stroke();
+                        ctx.restore();
+                    }
+                }
+                /* Pools: the area between the touches, from the first touch
+                   to now; the edge where the stops sit is the bright one
+                   (over equal highs, under equal lows), 2 px on a role. */
+                g.bands.forEach(function (b) {
+                    var bx0 = X(b.x0), by0 = Y(b.y0);
+                    ctx.fillStyle = tone(c.gold, Math.min(0.4, T(0.17, 0.18) * (b.hot ? 1.6 : 1)) * b.k);
+                    ctx.fillRect(bx0, by0, Math.max(1, X(b.x1) - bx0), Math.max(1, Y(b.y1) - by0));
+                    hline(b.x0, b.x1, b.high ? b.y1 : b.y0, c.gold, T(0.35, 0.45) * b.k, 1, []);
+                    hline(b.x0, b.x1, b.high ? b.y0 : b.y1, c.gold, T(0.95, 1) * b.k, b.role ? 2 : 1, []);
+                });
+                g.dots.forEach(function (d) {
+                    ctx.fillStyle = tone(c.gold, d.k);
+                    ctx.beginPath(); ctx.arc(X(d.x), Y(d.y), DOT_R * hr, 0, 2 * Math.PI); ctx.fill();
+                });
+                /* The nearest swing each side runs to now, thin and dashed. */
+                g.rays.forEach(function (r) {
+                    hline(r.x0, r.x1, r.y, c.swing, r.hot ? 1 : T(0.65, 0.8) * r.k, 1, [4, 3]);
+                });
+                /* Every swing is a tick on the candle that printed it, with
+                   a serif on the side where its stops sit; the pullback's
+                   extreme has a hollow one. */
+                g.ticks.forEach(function (t) {
+                    var al = t.hot ? 1 : T(0.9, 1) * t.k;
+                    hline(t.x - TICK_W / 2, t.x + TICK_W / 2, t.y, c.swing, al, 2, []);
+                    var sw = Math.max(1, Math.round((t.recent ? 4 : 2) * hr)), sh = Math.max(1, Math.round(SERIF_H * vr));
+                    var sx = X(t.x) - Math.round(sw / 2), ty = Y(t.y);
+                    var sy = t.high ? ty - Math.round(vr) - sh : ty + Math.round(vr);
+                    if (t.recent) {
+                        ctx.setLineDash([]);
+                        ctx.strokeStyle = tone(c.swing, al);
+                        frame(sx, sy, sw, sh, Math.max(1, Math.floor(hr)));
+                    } else {
+                        ctx.fillStyle = tone(c.swing, al);
+                        ctx.fillRect(sx, sy, sw, sh);
+                    }
+                });
+            } finally { ctx.restore(); }
+            updateLevelCount(g);
+        });
+    };
+
+    /* The chips, over the candles and the lines (they were placed off the
+       money's rows, the title lane and the dots): a bg box with a 1 px
+       border and the text in the kind's tone. Never pin-dimmed, so the
+       light theme's gold ink stays legible; focus mode alone dims them. */
+    LevelLayer.prototype.paintChips = function (target) {
+        var g = this.geom;
+        if (!g || !(g.chips.length || g.edges.length || (g.asia && g.asia.label))) return;
+        target.useBitmapCoordinateSpace(function (s) {
+            var ctx = s.context, hr = s.horizontalPixelRatio, vr = s.verticalPixelRatio;
+            var c = levelPalette(), api = lvApi(), pad = api ? api.LV.CHIP_PAD : 4;
+            function chip(r, text, ink, border, borderAlpha, k) {
+                var x0 = Math.round(r.x0 * hr), x1 = Math.round(r.x1 * hr);
+                var y0 = Math.round(r.y0 * vr), y1 = Math.round(r.y1 * vr);
+                ctx.globalAlpha = 0.85 * k; ctx.fillStyle = c.bg;
+                ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+                if (border) {
+                    /* 1 css px, inside the box: an even bitmap width (DPR 2)
+                       is offset by half of it, not straddled on the half pixel */
+                    var lw = Math.max(1, Math.floor(hr)), o = lw % 2 ? 0.5 : lw / 2;
+                    ctx.globalAlpha = borderAlpha * k; ctx.strokeStyle = border; ctx.lineWidth = lw;
+                    ctx.strokeRect(x0 + o, y0 + o, Math.max(1, x1 - x0 - lw), Math.max(1, y1 - y0 - lw));
+                }
+                ctx.globalAlpha = k; ctx.fillStyle = ink;
+                ctx.fillText(text, x0 + Math.round(pad * hr), Math.round((y0 + y1) / 2) + 0.5);
+            }
+            ctx.save();
+            try {
+                /* the widths were measured at 10 px and scaled by hr: the text
+                   takes the same unrounded size (13 px at DPR 1.25 overran
+                   the box by 8.7 bitmap px) */
+                ctx.font = '600 ' + (10 * hr) + 'px monospace';
+                ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+                ctx.setLineDash([]);
+                g.edges.forEach(function (e) { chip(e, e.text, c.neutral, c.neutral, 0.6, 1); });
+                g.chips.forEach(function (ch) {
+                    if (ch.lv === 'round') { chip(ch, ch.text, c.neutral, null, 0, ch.k); return; }
+                    var t = ch.lv === 'pool' ? c.gold : c.swing;
+                    chip(ch, ch.text, t, t, 1, ch.k);
+                });
+                if (g.asia && g.asia.label) {
+                    var L = g.asia.label;
+                    ctx.globalAlpha = 0.95 * (g.asia.hot ? 1 : g.asia.k); ctx.fillStyle = c.session;
+                    ctx.fillText('ASIA', Math.round(L.x0 * hr), Math.round((L.y0 + L.y1) / 2 * vr) + 0.5);
+                }
+            } finally { ctx.restore(); }
+        });
+    };
 
     function applyLevels() {
         if (!mainSeries) return;
-        lvlLines.forEach(function (pl) { try { mainSeries.removePriceLine(pl); } catch (e) {} });
-        lvlLines = [];
-        if (!activeInds.levels) return;
-        var c = getThemeColors();
-        LEVELS.forEach(function (l) {
-            if (!l || typeof l.price !== 'number' || !isFinite(l.price)) return;
-            var pool = !!l.pool;
-            var round = l.kind === 'round number';
-            var tone = pool ? c.gold
-                     : (round ? c.alpha(c.text, 0.7) : c.alpha(c.blue, 0.8));
-            try {
-                lvlLines.push(mainSeries.createPriceLine({
-                    price: l.price, color: tone,
-                    lineWidth: pool ? 2 : 1,
-                    lineStyle: round ? LightweightCharts.LineStyle.SparseDotted
-                                     : LightweightCharts.LineStyle.Dotted,
-                    axisLabelVisible: false,
-                    title: levelTitle(l),
-                }));
-            } catch (e) {}
+        lvlPalette = getThemeColors();          /* once per data paint, never per frame */
+        lvlItems = (activeInds.levels && window.svLevels)
+            ? window.svLevels.digest(LEVELS, POSMAP, fmtPrice) : [];
+        if (!activeInds.levels) { lvlHover = null; lvlFocus = null; lvlFocusPin = null; }
+        /* A sticky focus lives as long as its answer chip: a refresh that
+           names another level on that side (a new draw, a nearer pool) lets
+           it go — kept, it dimmed everything, roles included, with no
+           pressed chip in the key to say why. */
+        if (lvlFocusPin) {
+            var la = window.svLevels;
+            var still = !!la && ['below', 'above'].some(function (side) {
+                var a = la.keyAnswer(lvlItems, side, lvlPhone);
+                return !!a && 'id:' + a.id === lvlFocusPin;
+            });
+            if (!still) lvlFocusPin = null;
+        }
+        var layer = ensureLevelLayer();
+        if (layer) layer.set({ items: lvlItems });
+        paintLevelKey();
+    }
+
+    /* ── The levels' key, under the chart ─────────────────────────────
+       The live answer per side (the map's hunt and draw, else the nearest
+       pool or swing), one switch per kind with a live count, Show all,
+       and the LEVELS master — the toolbar's button is pushed off-screen on
+       a phone. It hides only when there is no level data at all. */
+    function keyBtn(k) { return lvlLegendEl ? lvlLegendEl.querySelector('[data-lvl="' + k + '"]') : null; }
+    function paintLevelKey() {
+        if (!lvlLegendEl) return;
+        var api = lvApi();
+        var has = LEVELS.length > 0 || !!(POSMAP && POSMAP.po3 && POSMAP.po3.ok && POSMAP.po3.asia);
+        lvlLegendEl.hidden = !has;
+        lvlLegendEl.classList.toggle('is-off', !activeInds.levels);
+        lvlLegendEl.classList.toggle('is-phone', lvlPhone);
+        var b = keyBtn('levels'); if (b) b.setAttribute('aria-pressed', activeInds.levels ? 'true' : 'false');
+        ['pool', 'swing', 'asia', 'round'].forEach(function (k) {
+            var kb = keyBtn(k); if (kb) kb.setAttribute('aria-pressed', activeInds['lvl_' + k] === false ? 'false' : 'true'); });
+        var ab = keyBtn('all'); if (ab) ab.setAttribute('aria-pressed', activeInds.lvl_all === true ? 'true' : 'false');
+        ['below', 'above'].forEach(function (side) {
+            var sb = keyBtn(side); if (!sb) return;
+            var a = (api && activeInds.levels) ? api.keyAnswer(lvlItems, side, lvlPhone) : null;
+            sb.hidden = !a; sb.textContent = a ? a.text : ''; sb.dataset.id = a ? a.id : '';
+            sb.dataset.kind = a ? a.kind : '';
+            sb.setAttribute('aria-pressed', a && lvlFocusPin === 'id:' + a.id ? 'true' : 'false');
+            sb.title = !a ? '' : (a.why || '') + (POSMAP && POSMAP.odds && POSMAP.odds.verdict === 'unjudged'
+                ? ' · the pool-sweep odds are not yet judged' : '');
         });
     }
+    var lvlCountSaid = '';
+    function updateLevelCount(g) {                  /* called from paintBack; DOM only on change */
+        if (!lvlLegendEl || !g) return;
+        var said = g.count.shown + '|' + g.count.total + '|' + g.count.pool + '|' + g.count.swing + '|' + g.count.round;
+        if (said === lvlCountSaid) return;
+        lvlCountSaid = said;
+        var el = lvlLegendEl.querySelector('[data-role="count"]');
+        if (el) el.textContent = g.count.shown + ' of ' + g.count.total + ' shown · nearest first';
+        ['pool', 'swing', 'round'].forEach(function (k) {
+            var n = lvlLegendEl.querySelector('[data-count="' + k + '"]'); if (n) n.textContent = String(g.count[k]); });
+    }
+    function setLevelFocus(f) { if (f === lvlFocus) return; lvlFocus = f; requestLevels(); }
 
     // ── Signal dots: the card on hover, the levels on a click ────────────
     /* (2026-09-27) The operator: "the assets details pages graphs need a
@@ -2633,15 +4094,20 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             try { mainSeries.removePriceLine(pl); } catch (e) {}
         });
         sigLines = [];
+        if (lvlLayer) lvlLayer.set({ box: null });
     }
 
     /* Dashed and titled in words, so they never read as a position's own
-       solid entry line or its SL / TP. */
+       solid entry line or its SL / TP. (2026-10-07) The Entry is INK, not
+       gold — gold is the pools' — and the three axis labels are ghosts
+       (the chart's ground, the tone as text): an idea, where the
+       position's filled labels are money. Its risk and its reward are two
+       washes on the level layer, from its bar to now. */
     function drawSignalLevels(sig) {
         clearSignalLevels();
         if (!mainSeries || !sig) return;
         var c = getThemeColors();
-        [['entry', 'Entry', c.gold], ['stop', 'Stop', c.red],
+        [['entry', 'Entry', c.ink], ['stop', 'Stop', c.red],
          ['target', 'Target', c.accent]].forEach(function (lv) {
             var p = sig[lv[0]];
             if (typeof p !== 'number' || !isFinite(p)) return;
@@ -2650,9 +4116,12 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                     price: p, color: lv[2], lineWidth: 1,
                     lineStyle: LightweightCharts.LineStyle.Dashed,
                     axisLabelVisible: true, title: lv[1],
+                    axisLabelColor: c.bg, axisLabelTextColor: lv[2],
                 }));
             } catch (e) { /* a level this series will not take is not drawn */ }
         });
+        var d = pinnedDot(), layer = ensureLevelLayer();
+        if (layer) layer.set({ box: d ? { time: d.time, entry: sig.entry, stop: sig.stop, target: sig.target } : null });
     }
 
     function hideSignalCard() {
@@ -2727,6 +4196,12 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             if (!sigHover && !sigPin) {
                 var lh = lineHit(param);
                 if (lh) showLineCard(lh, param.point.x, param.point.y);
+            } else if (sigPin && !sigHover) {
+                /* Pinned: a level under the pointer still glows and shows its chip
+                   (lineHit sets the hover); the card stays the signal's. */
+                lineHit(param);
+            } else {
+                setLevelHover(null);
             }
         } catch (e) { sigHover = null; }
     }
@@ -2738,15 +4213,32 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
        against each line's pixel row (LINE_HIT_PX), positions first (the
        operator's money), then the living levels; the markup is
        window.svHoverCards, pure and node-tested. Nothing is pinned and
-       nothing is drawn: moving off the line hides the card. */
+       nothing is drawn: moving off the line hides the card.
+       (2026-10-07) The levels are hit as DRAWN (svLevels.hit on the
+       layer's last geometry: a chip, anywhere in a pool's band right of
+       its first touch, a tick, a ray, the Asia box, a round guide); the
+       one under the pointer glows. A finger gets twice a mouse's reach. */
     var LINE_HIT_PX = 6;
     function hoverApi() { return window.svHoverCards || null; }
+    function hitTol() {
+        var LVc = window.svLevels ? window.svLevels.LV.HIT : { mouse: LINE_HIT_PX, touch: 2 * LINE_HIT_PX };
+        return (TOUCH_POINTER || lvlPhone) ? LVc.touch : LVc.mouse;
+    }
+    function setLevelHover(id) { if (id === lvlHover) return; lvlHover = id; requestLevels(); }
+    function lineKey(hit) { return 'line|' + hit.kind + '|' + (hit.item.id || '') + '|' + hit.price + '|' + (hit.part || ''); }
 
     function lineHit(param) {
         var api = hoverApi();
-        if (!api || !mainSeries || !param || !param.point) return null;
+        if (!api || !mainSeries || !param || !param.point) { setLevelHover(null); return null; }
         var y = param.point.y;
         function toY(price) { return mainSeries.priceToCoordinate(price); }
+        /* A level chip first, by its exact box: chips never sit on a money
+           row, so the money lines stay hittable everywhere else, while a
+           finger's 12 px reach from the SL or TP no longer swallows the
+           ①HUNT chip beside them. Bands and ticks keep positions first. */
+        var lc = (activeInds.levels && lvApi() && lvlLayer && lvlLayer.geom)
+            ? lvApi().hitChip(lvlLayer.geom, lvlItems, param.point.x, y) : null;
+        if (lc && lc.item) { setLevelHover(lc.id); return { kind: 'level', item: lc.item, price: lc.item.price }; }
         if (activeInds.positions) {
             var posItems = [];
             POSITIONS.forEach(function (p) {
@@ -2757,14 +4249,16 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                     }
                 });
             });
-            var ph = api.nearestLine(posItems, y, toY, LINE_HIT_PX);
-            if (ph) return { kind: 'pos', item: ph.pos, part: ph.part, price: ph.price };
+            var ph = api.nearestLine(posItems, y, toY, hitTol());
+            if (ph) { setLevelHover(null); return { kind: 'pos', item: ph.pos, part: ph.part, price: ph.price }; }
         }
         if (activeInds.levels) {
-            var lv = api.nearestLine(LEVELS, y, toY, LINE_HIT_PX);
-            if (lv) return { kind: 'level', item: lv, price: lv.price };
-            if (ASIA) {
-                /* The Asian range's two lines: the day's accumulation. */
+            var la = lvApi();
+            var lh = (la && lvlLayer) ? la.hit(lvlLayer.geom, lvlItems, param.point.x, y, hitTol()) : null;
+            setLevelHover(lh ? lh.id : null);
+            if (lh && lh.item) return { kind: 'level', item: lh.item, price: lh.item.price };
+            /* The Asian range: its box (the layer), or its two fallback lines. */
+            if (ASIA && ((lh && lh.id === 'sv-lvl-asia') || (!lvlLayer && amdLines.length))) {
                 var close = lastBars.length ? lastBars[lastBars.length - 1].close : null;
                 var items = [
                     { price: ASIA.high, kind: 'Asian range high', pool: false, po3: ASIA,
@@ -2772,24 +4266,27 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                     { price: ASIA.low, kind: 'Asian range low', pool: false, po3: ASIA,
                       side: (typeof close === 'number' && ASIA.low > close) ? 'above' : 'below' }
                 ];
-                var ah = api.nearestLine(items, y, toY, LINE_HIT_PX);
+                var ah = lh ? items[lh.edge === 'high' ? 0 : 1] : api.nearestLine(items, y, toY, hitTol());
                 if (ah) return { kind: 'level', item: ah, price: ah.price };
             }
         }
+        setLevelHover(null);
         return null;
     }
 
     function showLineCard(hit, x, y) {
         var api = hoverApi(), dots = sigApi();
         if (!sigCardEl || !api || !dots || !hit) return;
-        var key = 'line|' + hit.kind + '|' + (hit.item.id || '') + '|' + hit.price + '|' + (hit.part || '');
+        var key = lineKey(hit);
         if (key !== sigCardKey) {
             if (hit.kind === 'pos') {
                 sigCardEl.className = 'sv-sig-card sv-sig-card--' + dots.tone(hit.item.side);
-                sigCardEl.innerHTML = api.positionCard(hit.item);
+                sigCardEl.innerHTML = api.positionCard(hit.item, lvApi() ? lvApi().moneyFacts(hit.item, lvlItems, fmtPrice) : []);
             } else {
-                sigCardEl.className = 'sv-sig-card sv-sig-card--level';
-                sigCardEl.innerHTML = api.levelCard(hit.item, POSMAP);
+                /* The card wears the kind's tone: gold pool, blue swing, violet Asia, grey round. */
+                var lvk = hit.item.po3 ? 'asia' : (hit.item.lv === 'recent' ? 'swing' : (hit.item.lv || 'pool'));
+                sigCardEl.className = 'sv-sig-card sv-sig-card--level sv-sig-card--' + lvk;
+                sigCardEl.innerHTML = api.levelCard(hit.item, POSMAP, Date.now() / 1000);
             }
             sigCardKey = key;
         }
@@ -2815,7 +4312,20 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         if (activeTool !== 'crosshair') return;  /* a drawing tool owns this click */
         try {
             var hit = signalHit(param);
-            if (!hit) { unpinSignal(); return; }
+            if (!hit) {
+                var prevKey = (sigCardEl && !sigCardEl.hidden) ? sigCardKey : '';
+                unpinSignal();
+                /* A finger has no hover: a tap on a level or a position line opens
+                   its card, and a second tap on that line closes it. */
+                if (TOUCH_POINTER && param && param.point) {
+                    var lh = lineHit(param);
+                    /* the closing tap lets the glow go too: a finger sends no
+                       move that would clear it */
+                    if (lh && lineKey(lh) !== prevKey) showLineCard(lh, param.point.x, param.point.y);
+                    else setLevelHover(null);
+                }
+                return;
+            }
             if (!hit.byObject) {
                 /* No marker id (a tap, a click beside the dots): on a bar
                    with several signals, the next one after the pinned. */
@@ -2823,10 +4333,21 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                 hit = { dot: next, x: hit.x, others: hit.others, byObject: false };
             }
             sigPin = { id: hit.dot.id, y: param.point.y };
+            setLevelHover(null);   /* a level glowing from a tap would skip the pin's dim */
             drawSignalLevels(hit.dot.sig);
             sigHover = { hit: hit, y: param.point.y };
             refreshSignalCard();
         } catch (e) { /* the pin is a convenience; the chart goes on */ }
+    }
+
+    /* A finger's second tap within the library's double-tap window (500 ms
+       and 30 px, lightweight-charts 4.1) arrives as a double tap and never
+       as a click: on a touch pointer it IS that second tap, so the line
+       card the first one opened closes. A mouse's double click is left to
+       the library. */
+    function onSignalDoubleTap(param) {
+        if (!TOUCH_POINTER) return;
+        onSignalClick(param);
     }
 
     /* A zoom or a scroll moves the dots under a card that stays put: the
@@ -2850,6 +4371,9 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         else if (d) drawSignalLevels(d.sig);
         sigHover = null;
         sigCardKey = '';
+        /* the refresh hides the card a tap opened: its glow goes with it
+           (a finger sends no move that would clear it) */
+        if (TOUCH_POINTER) setLevelHover(null);
         refreshSignalCard();
     }
 
@@ -2899,7 +4423,7 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         }
         var c   = getThemeColors();
         var bar = param.seriesData.get(mainSeries);
-        var vol = (volumeSeries && activeInds.volume)
+        var vol = (volumeSeries && activeInds.volume) && volHas
             ? param.seriesData.get(volumeSeries) : null;
         if (!bar) { legendEl.textContent = ''; return; }
 
@@ -3084,13 +4608,10 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         }
 
         if (activeTool === 'hline') {
-            var pl = mainSeries.createPriceLine({
-                price: price, color: c.accent, lineWidth: 1,
-                lineStyle: LightweightCharts.LineStyle.Dashed,
-                axisLabelVisible: true, title: 'H',
-            });
+            var pl = mainSeries.createPriceLine(hlineOptions(price, c));
             drawings.push({ type: 'hline', priceLine: pl, price: price });
             savePrefs();
+            requestLevels();   /* a new row the level chips keep off */
 
         } else if (activeTool === 'trendline') {
             drawingPts.push({ time: param.time, price: price });
@@ -3150,6 +4671,7 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                 }
                 savePrefs();
                 setActiveTool('crosshair');
+                requestLevels();   /* the H-lines' rows are free for the chips again */
             } else {
                 setActiveTool(tool);
             }
@@ -3268,15 +4790,21 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                     catch (e) { keepRange = null; }
                 }
                 mainSeries.setData(seriesData(bars));
+                try { mainSeries.applyOptions({ priceFormat: seriesPriceFormat(bars) }); } catch (e) {}
                 var vc = getThemeColors();
-                volumeSeries.applyOptions({ visible: !!activeInds.volume });
-                volumeSeries.setData(bars.map(function(b) {
+                /* A tape with no volume at all (forex: every bar 0) draws no
+                   histogram: its zero-height columns still painted a red and
+                   green dashed hairline across the pane, on a pool's edge,
+                   reading like the key's "signal dashed" (2026-10-08). */
+                volHas = bars.some(function (b) { return typeof b.volume === 'number' && b.volume > 0; });
+                volumeSeries.applyOptions({ visible: !!activeInds.volume && volHas });
+                volumeSeries.setData(volHas ? bars.map(function(b) {
                     return {
                         time:  b.time,
                         value: b.volume || 0,
                         color: (b.close >= b.open) ? vc.accentDim : vc.redDim,
                     };
-                }));
+                }) : []);
                 hasData = true;
                 /* Overlays are rebuilt from these bars BEFORE the range is
                    restored: the RSI pane may have just been created and
@@ -3380,20 +4908,68 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
 
     // ── Indicator toggles ─────────────────────────────────────────────────
     /* A toggle recomputes from the bars already on screen — no refetch,
-       and the viewport stays where the operator left it. */
+       and the viewport stays where the operator left it. ONE function, so
+       the levels' key under the chart (LEVELS, which a phone's toolbar
+       pushes off-screen) and the toolbar button are the same switch. */
+    function toggleInd(key) {
+        activeInds[key] = !activeInds[key];
+        paintToolbarState();
+        savePrefs();
+        if (key === 'levels') paintLevelKey();
+        if (!chart || !hasData) return;
+        var keepRange = null;
+        try { keepRange = chart.timeScale().getVisibleLogicalRange(); } catch (e) {}
+        applyOverlays(lastBars);
+        if (keepRange) { try { chart.timeScale().setVisibleLogicalRange(keepRange); } catch (e) {} }
+    }
     container.querySelectorAll('.sv-ind-btn').forEach(function(btn) {
-        btn.addEventListener('click', function() {
-            var key = btn.dataset.ind;
-            activeInds[key] = !activeInds[key];
-            paintToolbarState();
-            savePrefs();
-            if (!chart || !hasData) return;
-            var keepRange = null;
-            try { keepRange = chart.timeScale().getVisibleLogicalRange(); } catch (e) {}
-            applyOverlays(lastBars);
-            if (keepRange) { try { chart.timeScale().setVisibleLogicalRange(keepRange); } catch (e) {} }
-        });
+        btn.addEventListener('click', function () { toggleInd(btn.dataset.ind); });
     });
+
+    // ── The levels' key: the answer per side, one switch per kind ─────────
+    /* Saved with the other toggles (`indicators`): lvl_pool / lvl_swing /
+       lvl_asia / lvl_round false = hidden (undefined is shown), lvl_all
+       true = Show all. A kind switch never hides the hunt or the draw. An
+       answer chip focuses its level (everything else at a fifth) while
+       hovered, and keeps it on a click until the next. A finger gets no
+       transient focus: a phone fires emulated mouseovers on a tap. */
+    var LVL_KINDS = ['pool', 'swing', 'asia', 'round'];
+    function keyTarget(ev) {
+        var t = ev && ev.target;
+        return (t && typeof t.closest === 'function') ? t.closest('[data-lvl]') : null;
+    }
+    if (lvlLegendEl) {
+        lvlLegendEl.addEventListener('click', function (ev) {
+            var b = keyTarget(ev);
+            if (!b) return;
+            var k = b.dataset.lvl;
+            if (k === 'levels') { toggleInd('levels'); return; }
+            if (k === 'below' || k === 'above') {
+                var f = 'id:' + (b.dataset.id || '');
+                lvlFocusPin = (lvlFocusPin === f) ? null : f;
+                paintLevelKey(); requestLevels();
+                return;
+            }
+            if (k === 'all') activeInds.lvl_all = activeInds.lvl_all !== true;
+            else if (LVL_KINDS.indexOf(k) >= 0) activeInds['lvl_' + k] = activeInds['lvl_' + k] === false;
+            else return;
+            paintLevelKey(); savePrefs();
+            if (k === 'asia') applyAsianRange(POSMAP ? POSMAP.po3 : null);   /* the no-primitive fallback */
+            requestLevels();
+        });
+        if (!TOUCH_POINTER) {
+            var keyFocus = function (ev) {
+                var b = keyTarget(ev), k = b ? b.dataset.lvl : null;
+                setLevelFocus(!b ? null : (k === 'below' || k === 'above') ? 'id:' + (b.dataset.id || '')
+                                   : (LVL_KINDS.indexOf(k) >= 0 ? k : null));
+            };
+            var keyBlur = function () { setLevelFocus(null); };
+            lvlLegendEl.addEventListener('mouseover', keyFocus);
+            lvlLegendEl.addEventListener('focusin', keyFocus);
+            lvlLegendEl.addEventListener('mouseout', keyBlur);
+            lvlLegendEl.addEventListener('focusout', keyBlur);
+        }
+    }
 
     // ── View controls ─────────────────────────────────────────────────────
     /* 'normal' | 'tall' | 'fs'. One variable, and the classes are derived
