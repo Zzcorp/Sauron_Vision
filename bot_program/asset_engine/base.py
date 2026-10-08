@@ -1299,7 +1299,11 @@ class AssetBot(ABC):
                 if not trade.paper:
                     from bot_program import venue_mark
                     from bot_program.engine.capabilities import adapter_key
-                    venue_mark.stamp(trade, price, source=adapter_key(client))
+                    _tk = (getattr(self, "_last_ticks", None) or {}).get(
+                        trade.symbol) or {}
+                    venue_mark.stamp(trade, price, source=adapter_key(client),
+                                     via="tick", bid=_tk.get("bid"),
+                                     ask=_tk.get("ask"))
                     # THE CROSSING (2026-10-07, bot_program/venue_exit
                     # .note_crossing): the first accepted mark beyond the
                     # stop or target eToro holds since it last showed the
@@ -2085,6 +2089,15 @@ class AssetBot(ABC):
                     logger.warning("[%s_bot] no-stop alert failed: %s",
                                    self.asset_class, e)
         meta["protected"] = protected
+        # THE FILL IS A VENUE PRINT (2026-10-08, venue_mark.at_fill): the
+        # broker's own fill price stamps the row's venue mark as it becomes
+        # a position. With no fill price the pre-order price stands and is
+        # NOT stamped: it may be hours old — the next tick stamps.
+        if price > 0 and not trade.paper:
+            from bot_program import venue_mark as _venue_mark
+            _vm = _venue_mark.at_fill(price, source=adapter_key(client))
+            if _vm is not None:
+                meta["venue_mark"] = _vm
         trade.metadata = meta
         trade.save(update_fields=["qty", "entry_price", "metadata"])
         logger.info("[%s_bot] %s: WORKING entry filled — qty %s @ %s (%s), "
@@ -2864,6 +2877,13 @@ class AssetBot(ABC):
         """Current mark for SL/TP checks. Default: broker ticker last price.
         Return None to skip managing this trade on this tick."""
         tk = client.ticker(trade.symbol)
+        # Kept for the venue mark's closing side (venue_mark.stamp: a long
+        # is shown at the bid, as the venue shows it). Display only.
+        try:
+            self._last_ticks = getattr(self, "_last_ticks", None) or {}
+            self._last_ticks[trade.symbol] = tk if isinstance(tk, dict) else {}
+        except Exception:  # noqa: BLE001 — a cache, never a decision
+            pass
         price = Decimal(str(tk.get("lastPrice", "0") or "0"))
         return price if price > 0 else None
 
@@ -6285,6 +6305,21 @@ class AssetBot(ABC):
                     (f"at {leverage}x: " if leverage is not None
                      and leverage > 1 else "")
                     + f"live order failed: {e}")
+
+        # THE FILL IS A VENUE PRINT (2026-10-08, venue_mark.at_fill): a real
+        # row is born with its venue mark — the broker's avgPrice, or with
+        # none the venue's own ticker read before the order — so the book
+        # never values it against the platform's quote (for a commodity
+        # Yahoo's future) in the beat before the manage tick first reaches
+        # it. A WORKING order has no fill: its stamp comes with the fill
+        # (_finish_working_entry). Display only: nothing that decides reads
+        # metadata["venue_mark"].
+        if not paper and not entry_meta.get("entry_working"):
+            from bot_program import venue_mark as _venue_mark
+            from bot_program.engine.capabilities import adapter_key
+            _vm = _venue_mark.at_fill(price, source=adapter_key(client))
+            if _vm is not None:
+                entry_meta["venue_mark"] = _vm
 
         from bot_program.models import AssetBotTrade
         trade = AssetBotTrade.objects.create(

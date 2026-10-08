@@ -489,7 +489,17 @@ def build_summary(trade, now=None):
         mark = _num(row.current_price) if row is not None else None
         pnl = _num(row.unrealized_pnl) if row is not None else None
         pnl_pct = _num(row.unrealized_pnl_pct) if row is not None else None
-        quote_at = quote.updated_at if quote is not None else None
+        # WHEN THE PRICE SHOWN WAS READ (2026-10-08): the row's own mark
+        # time (venue_mark.resolve — the venue's stamp for a real row, the
+        # quote's time for a quote), never the LiveQuote's when the price
+        # is the venue's: a fresh feed beside a two-day-old venue print
+        # said "as of" the wrong one.
+        mark_src = getattr(row, "mark_source", None) if row is not None \
+            else None
+        waiting = mark_src == "awaiting_venue"
+        quote_at = getattr(row, "mark_at", None) if row is not None else None
+        if quote_at is None and mark_src in (None, "quote"):
+            quote_at = quote.updated_at if quote is not None else None
         age = ((now - quote_at).total_seconds()
                if quote_at is not None else None)
 
@@ -497,6 +507,12 @@ def build_summary(trade, now=None):
             # The sentence below says why there is no number; said once.
             summary.update(big_label="Profit or loss", big_value=DASH,
                            big_tone="", big_sub="")
+        elif pnl is None and waiting:
+            summary.update(
+                big_label="Profit or loss now", big_value=DASH, big_tone="",
+                big_sub=("Waiting for the venue's price: the platform's "
+                         "own quote for %s is a different instrument, so it "
+                         "is not used." % sym))
         elif pnl is None:
             summary.update(big_label="Profit or loss now", big_value=DASH,
                            big_tone="",
@@ -516,7 +532,12 @@ def build_summary(trade, now=None):
             + utc_clock(held_from, True)))
         if mark is not None:
             facts.append(_fact("Price now", price(mark),
-                               "as of " + utc_clock(quote_at)))
+                               ("the venue's own rate, as of "
+                                if mark_src in ("venue", "venue_stale")
+                                else "as of ") + utc_clock(quote_at)))
+        elif waiting:
+            facts.append(_fact("Price now", DASH,
+                               "waiting for the venue's price"))
         else:
             facts.append(_fact("Price now", DASH, "no live price yet"))
 
@@ -613,7 +634,15 @@ def build_summary(trade, now=None):
                 "The market for %s is shut right now%s. The price does not "
                 "move until then." % (
                     sym, ("; it opens again in " + when) if when else ""))})
-        if age is not None and age > QUOTE_STALE_SECONDS:
+        if waiting and kind != "working":
+            notes.append({"tone": "warn", "text": (
+                "No price has come in from the venue for %s yet. The "
+                "platform's own quote for it is a different instrument (a "
+                "futures contract or a cash index), so valuing the position "
+                "against it would show the gap between the two as profit or "
+                "loss; nothing is shown until the venue's price arrives."
+                % sym)})
+        elif age is not None and age > QUOTE_STALE_SECONDS:
             if shut:
                 text = ("The last price came in %s ago, which is normal "
                         "while the market is shut." % duration_words(age))
@@ -622,7 +651,7 @@ def build_summary(trade, now=None):
                         "the profit or loss may be out of date."
                         % duration_words(age))
             notes.append({"tone": "warn", "text": text})
-        elif quote is None and kind != "working":
+        elif mark is None and not waiting and kind != "working":
             notes.append({"tone": "warn", "text": (
                 "No live price has come in for %s yet, so the profit or loss "
                 "cannot be shown." % sym)})

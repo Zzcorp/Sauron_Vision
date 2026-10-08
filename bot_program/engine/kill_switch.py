@@ -247,7 +247,7 @@ def _paper_booking_waits(trade) -> str:
     return f"{trade.symbol} #{trade.id}: {shut}"
 
 
-def _market_exit_price(symbol, fallback, client=None):
+def _market_exit_price(symbol, fallback, client=None, trade=None):
     """Best-effort current price for `symbol`; fall back to the trade entry.
 
     The broker's own tick is asked first — its print is the book the forced
@@ -257,6 +257,18 @@ def _market_exit_price(symbol, fallback, client=None):
     runs precisely when things are broken, which is when a dead poller's
     fossil is most likely to be sitting in the table — booking a forced
     close at a price from an hour ago fabricates P&L.
+
+    A REAL AssetBotTrade (`trade`, 2026-10-08) falls back through the one
+    answer, venue_mark.resolve: its fresh venue stamp first; the LiveQuote
+    only where it is the venue's own instrument (and fresh, as above);
+    never a quote of another instrument — Gold Spot booked at GC=F, the
+    future, would book the basis as P&L. A STALE venue print only where
+    venue_mark.bookable allows it (a shut market, or within an hour: the
+    ticker that failed here is what stopped the stamps, so a fresh one is
+    rare exactly when this runs); its age is written on the row
+    (`exit_mark_age_s`). With nothing bookable the row's exit is UNPRICED
+    (`exit_price_unavailable`, pnl NULL), never the entry's confident
+    zero: a forced close of a real loser is not a scratch.
     """
     from bot_program.engine.paper_trader import PaperTrader
 
@@ -273,12 +285,37 @@ def _market_exit_price(symbol, fallback, client=None):
         from django.utils import timezone as tz
         from market_data.models import LiveQuote
         quote = LiveQuote.objects.filter(instrument__symbol=symbol).first()
+        if trade is not None and not getattr(trade, "paper", True):
+            from bot_program import venue_mark
+            mk = venue_mark.resolve(trade, quote)
+            if mk.source != venue_mark.QUOTE:
+                meta = dict(getattr(trade, "metadata", None) or {})
+                if mk.source in (venue_mark.VENUE, venue_mark.VENUE_STALE) \
+                        and venue_mark.bookable(mk, trade):
+                    if mk.source == venue_mark.VENUE_STALE:
+                        meta["exit_mark_age_s"] = int(round(mk.age_s or 0))
+                        trade.metadata = meta
+                    return float(mk.price)
+                from bot_program.reconcile_asset import UNPRICED_EXIT_KEY
+                meta[UNPRICED_EXIT_KEY] = True
+                trade.metadata = meta
+                return float(fallback)
         if quote and quote.last:
             age = (tz.now() - quote.updated_at).total_seconds()
             if age <= PaperTrader.MAX_QUOTE_AGE_SECONDS:
                 return float(quote.last)
     except Exception:  # noqa: BLE001
         pass
+    if trade is not None and not getattr(trade, "paper", True):
+        # The entry stands in for a real row nothing could price: flagged,
+        # so the booking records the P&L as unmeasured, never as a scratch.
+        try:
+            from bot_program.reconcile_asset import UNPRICED_EXIT_KEY
+            meta = dict(getattr(trade, "metadata", None) or {})
+            meta[UNPRICED_EXIT_KEY] = True
+            trade.metadata = meta
+        except Exception:  # noqa: BLE001
+            pass
     return float(fallback)
 
 
@@ -487,7 +524,7 @@ def _close_asset_trade(trade, now):
         exit_price = float(current_premium_for_trade(trade) or trade.entry_price)
     else:
         exit_price = _market_exit_price(trade.symbol, trade.entry_price,
-                                        client=client)
+                                        client=client, trade=trade)
 
     # The sweep also picks up CLOSE_PENDING rows, and one of those may
     # already have had part of its close filled. Flattening `trade.qty` there
@@ -656,6 +693,21 @@ def _close_asset_trade(trade, now):
     trade.closed_at = now
     trade.status = "CLOSED"
     trade.outcome = "manual_close"
+    # A real row nothing could price (_market_exit_price flagged it, and
+    # the broker's answer carried no fill of its own): its P&L is
+    # UNMEASURED, not the entry's zero — as the reconcile books an orphan.
+    from bot_program.pending_closes import (EXIT_FILL_SOURCE_KEY,
+                                            EXIT_SOURCE_BROKER)
+    from bot_program.reconcile_asset import UNPRICED_EXIT_KEY
+    _meta = dict(trade.metadata or {})
+    if _meta.get(UNPRICED_EXIT_KEY):
+        if str(_meta.get(EXIT_FILL_SOURCE_KEY) or "") == EXIT_SOURCE_BROKER:
+            # the broker's own fill priced it after all
+            _meta.pop(UNPRICED_EXIT_KEY, None)
+            _meta.pop("exit_mark_age_s", None)
+            trade.metadata = _meta
+        else:
+            pnl = None
     trade.pnl = pnl
     trade.save(update_fields=["exit_price", "closed_at", "status", "outcome",
                               "pnl", "metadata"])

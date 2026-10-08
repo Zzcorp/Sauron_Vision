@@ -220,7 +220,11 @@ exactly what a second queryset built for a table would eventually do.
                     {% endcomment %}
                     <td class="num">
                         {% if p.pnl is None %}
+                            {% if p.mark_wait %}
+                            <span class="sv-unknown" title="{{ p.mark_title }}">&mdash; <small>{{ p.mark_wait }}</small></span>
+                            {% else %}
                             <span class="sv-unknown" title="No quote for this instrument — the P&amp;L on this row is unmeasured, not zero">&mdash;</span>
+                            {% endif %}
                         {% else %}
                             <span class="ipos-pnl {% if p.pnl >= 0 %}up{% else %}down{% endif %}">
                                 {% if p.pnl >= 0 %}+{% endif %}{{ p.pnl|floatformat:2 }}

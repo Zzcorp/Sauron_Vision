@@ -329,7 +329,7 @@ honest freshness claim.{% endcomment %}
             {# columns deliberately disagree rather than one of them lying. #}
             <td data-label="Current" class="num pos-price-cell" style="font-family: var(--font-mono); font-weight: 600;" data-sv-live-key="{{ p.key }}.last">
                 {% if p.current_price is not None %}<span class="pos-price" title="{{ p.mark_title }}">{{ p.last_text }}</span>{% if p.mark_word and not p.paper %}<span class="pos-price-src sv-muted" data-mark-source="{{ p.mark_source }}" title="{{ p.mark_title }}" style="font-size:.7em;margin-left:.35em;letter-spacing:.04em;text-transform:uppercase;">{{ p.mark_word }}</span>{% endif %}{% if d.mark_pct %}<span class="pos-price-pct sign-{{ d.mark_pct|sign_class }}">{{ d.mark_pct }}% since entry</span>{% endif %}
-                {% else %}<span class="sv-unknown">&mdash;</span>{% endif %}
+                {% else %}<span class="sv-unknown" title="{{ p.mark_title }}">&mdash;</span>{% if p.mark_wait %}<span class="pos-price-src pos-price-wait sv-muted" data-mark-source="{{ p.mark_source }}" title="{{ p.mark_title }}" style="display:block;font-size:.7em;font-weight:400;">{{ p.mark_wait }}</span>{% endif %}{% endif %}
             </td>
 {% comment %}
             Both levels are EDITABLE where they are read, rather than on a

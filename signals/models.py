@@ -164,11 +164,15 @@ class Signal(models.Model):
         }
 
     def _acted_pnl(self, trade):
-        """Unrealised money on an open trade at the current mark."""
+        """Unrealised money on an open trade at the current mark — the
+        row's own (bot_program.venue_mark.resolve, 2026-10-08): a REAL
+        Gold Spot row valued at GC=F, the future, printed the basis as P&L
+        on the rail. A dash while a real row waits for its venue's price."""
         try:
+            from bot_program.venue_mark import resolve
             from portfolio.services import value_per_unit
             quote = getattr(self.instrument, "live_quote", None)
-            mark = float(quote.last) if quote and quote.last else None
+            mark = resolve(trade, quote).price
             entry = float(trade.entry_price) if trade.entry_price else None
             qty = float(trade.qty) if trade.qty else None
             if not (mark and entry and qty):

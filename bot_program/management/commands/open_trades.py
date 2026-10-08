@@ -57,6 +57,28 @@ def unrealised(side, entry, stop, mark, qty):
     return pnl, float(move / risk)
 
 
+def _open_mark(t, legacy):
+    """An open row's mark. A REAL bot row (venue_mark.resolve, 2026-10-08):
+    its venue print when it has one; nothing where the platform's quote is
+    another instrument (Gold Spot at GC=F) and the venue's price is unknown
+    — never the basis; else, where the quote IS the venue's instrument,
+    the symbol's mark as before. A paper or legacy row: as before."""
+    from ai_agents.calibration import mark_for_symbol
+    if not legacy and not getattr(t, "paper", True):
+        try:
+            from bot_program import venue_mark
+            from market_data.models import LiveQuote
+            mk = venue_mark.resolve(t, LiveQuote.objects.filter(
+                instrument__symbol=t.symbol).first())
+        except Exception:  # noqa: BLE001 — a dash, never a wrong number
+            return None
+        if mk.source in (venue_mark.VENUE, venue_mark.VENUE_STALE):
+            return mk.price
+        if mk.source == venue_mark.AWAITING_VENUE:
+            return None
+    return mark_for_symbol(t.symbol)
+
+
 class Command(BaseCommand):
     help = "List the bots' open positions with mark, unrealised P&L and R."
 
@@ -95,7 +117,7 @@ class Command(BaseCommand):
         n_live = n_paper = 0
         for t, legacy in rows:
             is_open = t.status in OPEN_STATUSES
-            mark = mark_for_symbol(t.symbol) if is_open else (
+            mark = _open_mark(t, legacy) if is_open else (
                 float(t.exit_price) if t.exit_price is not None else None)
             pnl, r = unrealised(t.side, t.entry_price, t.stop_loss, mark,
                                 t.qty)

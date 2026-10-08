@@ -293,6 +293,46 @@ def open_positions() -> list[dict]:
 # The mark — and the refusal to work without one
 # ══════════════════════════════════════════════════════════════════════════
 
+def _venue_mark_for(pos: dict):
+    """(price, source) for a REAL bot row whose venue price must stand in
+    for the platform's quote, or None to keep `usable_mark` (2026-10-08).
+
+    For Gold Spot the platform's quote is Yahoo's GC=F, the future, above
+    spot: measured against it, a real eToro row read "+0.90R, take part
+    off" while eToro showed it at a small loss. The row is measured where
+    its stop lives — at the venue's own price (bot_program.venue_mark
+    .resolve: a fresh stamp, else its last one with its age). Where the
+    quote IS the venue's instrument (forex, crypto, shares) nothing
+    changes; where it is not and the venue's price is unknown, there is
+    no mark at all — never the basis."""
+    if pos.get("book") != BOOK_BOT or pos.get("paper", True):
+        return None
+    try:
+        from types import SimpleNamespace
+
+        from bot_program import venue_mark
+        from market_data.models import LiveQuote
+        row = SimpleNamespace(
+            paper=False, metadata=pos.get("metadata") or {},
+            symbol=pos.get("symbol") or "",
+            asset_class=pos.get("asset_class") or "",
+            side="BUY" if (pos.get("dir_sign") or 1) > 0 else "SELL")
+        quote = LiveQuote.objects.filter(
+            instrument__symbol=row.symbol).first()
+        mk = venue_mark.resolve(row, quote)
+    except Exception as e:  # noqa: BLE001 — the quote, as before
+        logger.info("[position-review] venue mark for %s unread: %s",
+                    pos.get("symbol"), e)
+        return None
+    if mk.source == venue_mark.VENUE:
+        return mk.price, "venue"
+    if mk.source == venue_mark.VENUE_STALE:
+        return mk.price, f"venue ({venue_mark.age_words(mk.age_s)} old)"
+    if mk.source == venue_mark.AWAITING_VENUE:
+        return None, "waiting for the venue's price"
+    return None    # the venue's own instrument's quote: usable_mark
+
+
 def usable_mark(symbol: str) -> tuple[Optional[float], str]:
     """(price, source) for `symbol`, or (None, reason) when nothing is usable.
 
@@ -806,6 +846,9 @@ def measure(pos: dict, cache: Optional[dict] = None) -> dict:
     now = timezone.now()
     cache = {} if cache is None else cache
     mark, mark_source = usable_mark(pos["symbol"])
+    venue = _venue_mark_for(pos)
+    if venue is not None:
+        mark, mark_source = venue
     instrument = _instrument_for(pos["symbol"])
 
     facts: dict = {

@@ -2816,6 +2816,41 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                     "ok": False, "tier": str(_pa.get("tier") or ""),
                     "reason": str(_pa.get("reason") or "")[:200]}
 
+            # THE FILL IS A VENUE PRINT (2026-10-08, venue_mark.at_fill):
+            # the row is born with its venue mark — eToro's avgPrice, or
+            # with none the venue's own ticker the preview read moments ago
+            # (_mark_for_detail) — so the portfolio reads about zero at once
+            # instead of valuing it against the platform's quote until the
+            # first manage tick (Gold Spot against GC=F, the future: +18 on
+            # the page, -0.25 at eToro). A WORKING order has no fill: its
+            # stamp comes with the fill (AssetBot._finish_working_entry).
+            if not working:
+                from bot_program import venue_mark as _venue_mark
+                from bot_program.engine.capabilities import adapter_key
+                # The closing side (review, 2026-10-08): eToro shows a new
+                # long at its bid — minus the spread — not at the fill. The
+                # ticket's quote read moments ago gives the spread; it is
+                # anchored at the fill (a buy fills at the ask, a sell at
+                # the bid), so the row reads what eToro reads at once.
+                _bid = _ask = None
+                try:
+                    _q = preview.get("quote_advisory") or {}
+                    _spread = float(_q.get("ask")) - float(_q.get("bid"))
+                    if _spread >= 0 and float(booked_px) > 0:
+                        if side == "BUY":
+                            _ask = float(booked_px)
+                            _bid = _ask - _spread
+                        else:
+                            _bid = float(booked_px)
+                            _ask = _bid + _spread
+                except (TypeError, ValueError, AttributeError):
+                    _bid = _ask = None
+                _vm = _venue_mark.at_fill(booked_px,
+                                          source=adapter_key(client),
+                                          bid=_bid, ask=_ask)
+                if _vm is not None:
+                    extra["venue_mark"] = _vm
+
             with transaction.atomic():
                 trade = _book_row(booked_px,
                                   fill_qty if fill_qty > 0 else qty,

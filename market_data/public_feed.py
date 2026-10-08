@@ -186,6 +186,25 @@ PANDAS_RULE = {"2h": "2h", "4h": "4h", "6h": "6h", "8h": "8h", "12h": "12h"}
 SUPPORTED_ASSET_CLASSES = {"stock", "etf", "index", "commodity", "forex"}
 
 
+def yf_stand_in(symbol: str) -> str:
+    """What Yahoo quotes IN PLACE of `symbol` when it is not the instrument
+    itself: "future" (a "=F" spelling: COMEX/NYMEX/CBOT front month, e.g.
+    XAUUSD -> GC=F), "cash index" (a "^" or ICE ".NYB" spelling: the cash
+    level, e.g. SPX500 -> ^GSPC), or "" when Yahoo's spelling names the
+    same instrument (an FX "=X" pair, an equity re-spelled like BRK-B).
+
+    Read off YF_SYMBOL_MAP, the one record of the platform -> Yahoo
+    spelling, so a symbol added there is judged here without a second list
+    (2026-10-08, bot_program.venue_mark.quote_stand_in). A CFD venue's gold
+    is not the future: the basis between the two is not anybody's P&L."""
+    y = YF_SYMBOL_MAP.get((symbol or "").upper(), "")
+    if y.endswith("=F"):
+        return "future"
+    if y.startswith("^") or y.endswith(".NYB"):
+        return "cash index"
+    return ""
+
+
 def yf_symbol(symbol: str, asset_class: str = "") -> str:
     """Platform symbol -> Yahoo symbol."""
     s = (symbol or "").upper()
