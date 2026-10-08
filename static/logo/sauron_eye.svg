@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="svEyeTitle" fill="none" stroke-linecap="square" stroke-linejoin="miter">
   <title id="svEyeTitle">Sauron Vision</title>
   <!--
-    THE MARK. One vector, rasterized by `manage.py build_icons` into every
+    THE MARK. One vector, rasterized by the icon build into every
     icon the platform serves, and inlined at 24px in the sidebar brand.
 
     It is the wall's globe-eye reduced, not a new drawing: the lens keeps

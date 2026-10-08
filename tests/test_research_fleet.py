@@ -2,7 +2,7 @@
 
 The learning engine grades what the fleet does, and by 2026-09-11 the
 fleet was six starter configs on 35 symbols plus three live pools on a
-500 EUR account: fourteen trades a week for a ladder whose first rung
+small EUR account: fourteen trades a week for a ladder whose first rung
 wants thirty graded signals per rule. The catalogue held 179 instruments
 with keyless bars for most of them. This command puts them to work in
 paper, chunked so the fill rate scales with the universe, within a budget

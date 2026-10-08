@@ -685,7 +685,7 @@ class TheEntryPassesItThroughTests(TestCase):
     def test_cells_read_in_the_demo_world_refuse_a_live_row_naming_both(self):
         """[FIX 9] The same key pair answers both worlds and
         EtoroAccount.demo alone picks the segment: a row unticked demo ->
-        live keeps the DEMO reading (332,449.10, doc §5) for up to the
+        live keeps the DEMO reading (six figures, doc §5) for up to the
         freshness window. The sync stamps the world it read in; the gate
         refuses cells stamped for the other world, naming both."""
         from bot_program.asset_engine import skips

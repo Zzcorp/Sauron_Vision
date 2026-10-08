@@ -143,6 +143,22 @@ class ThePageCopyTests(SimpleTestCase):
         self.assertEqual(page["unplaced"], 0)
         self.assertLess(len(blob), len(json.dumps(full)) / 2)
 
+    def test_the_public_words_name_no_command(self):
+        """The Wall hands these words to every visitor (2026-10-08): no
+        stage's job, no next line and no label names a command or a path.
+        The two requests the people make are said as requests, never as
+        the words a Telegram group answers to."""
+        import re
+        for _key, _title, job in day.STAGES:
+            self.assertIsNone(re.search(r"/[a-z]", job), job)
+        for words in day.NEXT_OF.values():
+            self.assertIsNone(re.search(r"/[a-z]", words), words)
+        for key, (_stage, label) in day.STAGE_OF.items():
+            self.assertIsNone(re.search(r"/[a-z]", label), f"{key}: {label}")
+        blob = json.dumps(day.page_scheme(day.day_scheme()))
+        self.assertNotIn("/status", blob)
+        self.assertNotIn("/stopall", blob)
+
 
 class TheCadencesAreTheSchedulesOwnWordsTests(SimpleTestCase):
     def test_interval_entries(self):

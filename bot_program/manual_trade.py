@@ -188,7 +188,7 @@ def _ticket_leverage(bot, cfg, client, symbol: str, side: str, price: float,
                      stop: float, *, asked=None) -> dict:
     """THE LIVE TICKET'S MULTIPLIER (2026-10-01). The operator: "I choose,
     but I want the max by default" — a hand-taken ticket went at 1x
-    whatever the account, and a 900 EURUSD at 1x pledged its full 1,016.
+    whatever the account, and a forex ticket at 1x pledged its full notional.
 
     {"choices": [1, ...ascending], "max", "chosen", "why", "error"}.
 
@@ -297,10 +297,10 @@ def lane_single_position_pct(cfg):
     extras['max_single_position_pct'] on the manual config, a number in
     (0, 100]. The operator, 2026-09-30: "I want bots on and manual too".
     A manual forex ticket goes at 1x (the lane refuses leverage) and eToro
-    refuses one under 1,000 USD, so against a 1,100 pool the book's 20%
-    ceiling (220) refuses every ticket that could fill. Raising the book's
-    percentage would raise it for every bot as well; this raises it for
-    the one lane a present human trades with a PIN. The account's pledge
+    refuses one under 1,000 USD, so on a small pool the book's 20% ceiling
+    sits under that floor and refuses every ticket that could fill. Raising
+    the book's percentage would raise it for every bot as well; this raises
+    it for the one lane a present human trades with a PIN. The account's pledge
     cap (half the account) and the daily-loss floor still apply to it.
     Anything else in the key (text, zero, over 100) is ignored: the book's
     percentage stands, never a guess.
@@ -1607,12 +1607,13 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
                         asset_class=cls, paper=not live)
 
     # THE BOOK'S NOTIONAL CAP, with this ticket added, and the pool against
-    # the book (2026-10-04). A 500 book took two yen crosses of 14,800 by
-    # hand on 2026-09-07: the exposure limit counts forex at its margin,
-    # so 494 "at work" fitted 100% of the book, and the manual pool that
-    # sized them declared 10,000 nobody had. Both ride the book advisory
-    # — appetite, like the limits already in it: the ticket is told and
-    # recorded (book_limit_at_entry), never refused on this path.
+    # the book (2026-10-04). A small book took two yen crosses worth thirty
+    # times itself by hand on 2026-09-07: the exposure limit counts forex
+    # at its margin, so the thirtieth "at work" fitted 100% of the book,
+    # and the manual pool that sized them declared 10,000 nobody had. Both
+    # ride the book advisory — appetite, like the limits already in it: the
+    # ticket is told and recorded (book_limit_at_entry), never refused on
+    # this path.
     from portfolio.risk_gate import notional_state, pool_vs_book
     notional_gate = notional_state(user, portfolio=risk_book,
                                    adding=float(notional or 0),
@@ -3142,8 +3143,8 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
             # automatic, and the shares must fit in 100% — one rule, in
             # capital_truth.allocate_shares, shared with the sync and the
             # preflight. This used to be "one follower, full stop", which
-            # forced every other pool to be a number typed once: 1,000 of
-            # pools over a 500 account, on this deployment, by Thursday.
+            # forced every other pool to be a number typed once: pools adding
+            # up to twice the account, on this deployment, by Thursday.
             from bot_program.capital_truth import (allocate_shares,
                                                    followers_of)
             alloc = allocate_shares(followers_of(user, include=cfg),

@@ -64,15 +64,15 @@
       },
       venues: {
         title: 'VENUES', lines: [adapters, 'paper by default', 'one venue per asset class'],
-        job: 'Where an order lands. The router picks one venue per asset class from the broker row flagged for it; with no flag, the paper book takes the order and keeps real bookkeeping.',
+        job: 'Where an order lands. The router picks one venue per asset class from the broker row flagged for it; a class with no flag goes to its default adapter when that adapter has keys, and otherwise nothing real is sent.',
         rows: [['router', 'one adapter per venue behind one interface'], ['paper', 'the default: simulated fills, real bookkeeping'], ['live', 'a keyed broker row, flagged per asset class, behind the trading PIN'], ['floor', 'the venue’s own minimum size, read before the order']],
         next: 'Answers ACT; its fills feed WATCH.'
       },
       people: {
         title: 'PEOPLE', lines: ['the operator', 'two Telegram groups', 'the dashboard · this Wall'],
         job: 'The operator arms and disarms: switches, keys, the PIN, the pools. The Eye’s group carries fills, signals and digests; the alarm group speaks only for a critical problem.',
-        rows: [['/status', 'in the alarm group: what runs and what is wrong, no figures'], ['/stopall', 'the brake: every bot off, resting orders withdrawn, no position closed'], ['/health/', 'every component and feed, green or explained'], ['the Wall', 'this page, counted from the platform’s own rows']],
-        next: 'Their two words go back into WATCH and the switches.'
+        rows: [['status', 'in the alarm group: what runs and what is wrong, no figures'], ['stop all', 'the brake for every bot: nothing new opens, resting orders withdrawn, what is open stays in its care'], ['health page', 'every component and feed, green or explained'], ['the Wall', 'this page, counted from the platform’s own rows']],
+        next: 'Their two requests go back into WATCH and the switches.'
       }
     };
   }
@@ -169,7 +169,7 @@
     flow(el('path', { d: 'M' + (tell.x + W / 2 + 4) + ',' + (tell.y + 4) + ' Q 900,545 976,500', 'class': 'day-arrow', 'marker-end': 'url(#dayAh)' }, g));
     text(g, 880, 585, 'day-tiny', 'MESSAGES');
     flow(el('path', { d: 'M976,470 Q 900,430 ' + (watch.x + 40) + ',' + (watch.y + H / 2 + 6), 'class': 'day-arrow day-soft', 'marker-end': 'url(#dayAhs)' }, g), '2.6s');
-    text(g, 905, 405, 'day-tiny', '/STOPALL · SWITCHES');
+    text(g, 905, 405, 'day-tiny', 'STOP ALL · SWITCHES');
     flow(el('path', { d: 'M' + (learn.x - 40) + ',' + (learn.y - H / 2 - 4) + ' Q 330,340 ' + (think.x - 30) + ',' + (think.y + H / 2 + 6), 'class': 'day-arrow day-soft', 'marker-end': 'url(#dayAhs)' }, g), '2.6s');
     text(g, 300, 440, 'day-tiny', 'THE NIGHT');
     text(g, 600, 690, 'day-tiny', 'ONE HEARTBEAT · MARKETS IN · ORDERS AND WORDS OUT · THE NIGHT FEEDS THE MORNING');

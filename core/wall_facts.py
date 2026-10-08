@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 # tests/test_wall_facts.py counts the suite and fails when this drifts: the
 # first version of this module shipped a number its own commit had already
 # invalidated, which is exactly the failure it was written to prevent.
-TESTS_GREEN = 11149
+TESTS_GREEN = 11227
 
 # Broker adapters implemented under bot_program/engine/ — one module and one
 # client class each, all reachable from broker_router.client_for_symbol().
@@ -63,11 +63,10 @@ BROKER_ADAPTERS = (
     "ibkr",             # engine/ibkr_client.py             IBKRTrader
     "oanda",            # engine/oanda_client.py            OANDATrader
     "paper",            # engine/paper_trader.py            PaperTrader
-    # 2026-09-18. The class exists and passes the conformance test; the
-    # ROUTER does not route to it yet and the sync does not walk its rows
-    # (tests/test_broker_contract.py records that gap by name). It is
-    # counted as an adapter because it is one — not as a venue the fleet
-    # can trade today.
+    # 2026-09-18. The class exists and passes the conformance test; routed
+    # first among the flagged venues since 2026-09-19
+    # (broker_router.VENUE_PRECEDENCE) and synced on the beat
+    # (sync-saxo-accounts). tests/test_broker_contract.py records both.
     "saxo",             # engine/saxo_client.py             SaxoTrader
 )
 
@@ -111,6 +110,14 @@ FALLBACK_FACTS = {
     # The allocator's half of the same repair: the page wore a SHADOW pill
     # that no code could ever take off it.
     "share_plans_applied": 0,
+    # 2026-10-08 — the safeguards the Book's second edition describes:
+    # four registry reads and one table count. Appended, never reordered,
+    # for the same reason as above.
+    "guards": 0,
+    "money_switches": 0,
+    "proof_classes": 0,
+    "short_classes": 0,
+    "proving_verdicts": 0,
 }
 
 
@@ -401,6 +408,67 @@ def _count_rules_governed() -> int:
     return RuleControl.objects.count()
 
 
+# ── The safeguards (2026-10-08) ─────────────────────────────────────────────
+#
+# The Book's second edition describes what stands around a trade: the
+# guards, the switches that reach real money, the proofs and the proving
+# ground. Each count below is read off the registry the code itself runs
+# on, never typed, so the page follows the next guard or proof the day it
+# lands. The morgul and base imports are heavy, but they run once per
+# process and the result sits in the five-minute cache.
+
+def _count_guards() -> int:
+    """Guards in the Morgul watchdog (bot_program.morgul.GUARDS).
+
+    The registry the guard run walks, so the number is what the watchdog
+    checks, whether or not its switch is on: the page says "in the
+    watchdog", never "on the watch".
+    """
+    from bot_program.morgul import GUARDS
+    return len(GUARDS)
+
+
+def _count_money_switches() -> int:
+    """Switches the platform marks as decisions about real money
+    (core.platform_control.LIVE_MONEY_SWITCHES).
+
+    Every key there is exempt from the bulk "all on": each is turned on
+    alone, by a person. Read off the mapping, so a switch added to it is
+    counted the day it is.
+    """
+    from core.platform_control import LIVE_MONEY_SWITCHES
+    return len(LIVE_MONEY_SWITCHES)
+
+
+def _count_proof_classes() -> int:
+    """Families of investments that have earned their eToro proof
+    (bot_program.asset_engine.base.ETORO_PROVEN).
+
+    A proof is an order filled and closed at the venue, written into the
+    code with its test; the set IS the gate, so its length is the count.
+    """
+    from bot_program.asset_engine.base import ETORO_PROVEN
+    return len(ETORO_PROVEN)
+
+
+def _count_short_classes() -> int:
+    """Families with a proof of their own for a sell
+    (bot_program.asset_engine.base.ETORO_SHORT_PROVEN)."""
+    from bot_program.asset_engine.base import ETORO_SHORT_PROVEN
+    return len(ETORO_SHORT_PROVEN)
+
+
+def _count_proving_verdicts() -> int:
+    """Verdicts the proving ground has written
+    (backtester.models_proving.ProvingVerdict rows).
+
+    Every row is one judgement of one rule on one family and side; a
+    platform whose proving ground has never run honestly reads 0.
+    """
+    from backtester.models_proving import ProvingVerdict
+    return ProvingVerdict.objects.count()
+
+
 # ── Assembly ────────────────────────────────────────────────────────────────
 
 def _safe(name: str, builder, fallback: int) -> int:
@@ -475,6 +543,53 @@ def _build_facts() -> dict:
             "desk_live_plans", _count_desk_live_plans, 0),
         "share_plans_applied": _safe(
             "share_plans_applied", _count_share_plans_applied, 0),
+        # 2026-10-08 (the Book's second edition). Four registry reads and
+        # one table count, each fenced alone like everything above.
+        "guards": _safe("guards", _count_guards, 0),
+        "money_switches": _safe("money_switches", _count_money_switches, 0),
+        "proof_classes": _safe("proof_classes", _count_proof_classes, 0),
+        "short_classes": _safe("short_classes", _count_short_classes, 0),
+        "proving_verdicts": _safe(
+            "proving_verdicts", _count_proving_verdicts, 0),
+    }
+
+
+#: Each session on its own city's clock (2026-10-08): the zone, the local
+#: open and the local close. core.constants.MARKET_SESSIONS keeps the UTC
+#: windows the rest of the platform reads (dashboard.views_day); these are
+#: what the Wall's pills follow, so the daylight-saving shifts in London,
+#: New York and Sydney move a pill with its city instead of leaving it an
+#: hour wrong for half the year. In August the two agree to the minute.
+SESSION_CLOCKS = {
+    "tokyo": ("Asia/Tokyo", "09:00", "15:00"),
+    "london": ("Europe/London", "08:00", "16:30"),
+    "new_york": ("America/New_York", "09:30", "16:00"),
+    "sydney": ("Australia/Sydney", "07:00", "15:00"),
+}
+
+
+def _city_session(key: str, clock: tuple, now) -> dict:
+    """One session on its city's clock: closed at the weekend, open from
+    the local open up to the local close, the window said in UTC for the
+    day `now` falls on there. Raises on a zone the box does not know; the
+    caller fences it."""
+    from datetime import time as dt_time
+    from datetime import timezone as dt_timezone
+    from zoneinfo import ZoneInfo
+
+    tz, open_, close = clock
+    local = now.astimezone(ZoneInfo(tz))
+    oh, om = (int(p) for p in open_.split(":"))
+    ch, cm = (int(p) for p in close.split(":"))
+    is_open = (local.weekday() < 5
+               and dt_time(oh, om) <= local.time() < dt_time(ch, cm))
+    start = local.replace(hour=oh, minute=om, second=0, microsecond=0)
+    end = local.replace(hour=ch, minute=cm, second=0, microsecond=0)
+    return {
+        "name": key.replace("_", " ").upper(),
+        "window": (f"{start.astimezone(dt_timezone.utc):%H:%M}–"
+                   f"{end.astimezone(dt_timezone.utc):%H:%M}"),
+        "is_open": is_open,
     }
 
 
@@ -487,6 +602,14 @@ def market_sessions(now=None) -> list:
     markup, which meant a visitor at 03:00 UTC read two blinking, false
     market states on the page that advertises "Fully Auditable" — the same
     species of fabrication as the invented ticker prices this module removed.
+
+    Each session follows its own city's clock (SESSION_CLOCKS) and the
+    weekend: shut on Saturday and Sunday, open between the local open and
+    the local close otherwise, with the window shown in UTC. A key
+    SESSION_CLOCKS does not carry, or a zone the box cannot load, falls
+    back to the UTC arithmetic over core.constants.MARKET_SESSIONS, one
+    fence per key. Holidays are not covered: the entry gate reads
+    core.exchange_status.market_clock, which is.
     """
     from core.constants import MARKET_SESSIONS
 
@@ -494,6 +617,13 @@ def market_sessions(now=None) -> list:
     minutes = now.hour * 60 + now.minute
     out = []
     for key, window in MARKET_SESSIONS.items():
+        clock = SESSION_CLOCKS.get(key)
+        if clock:
+            try:
+                out.append(_city_session(key, clock, now))
+                continue
+            except Exception:  # noqa: BLE001 — an unknown zone is not a 500
+                logger.debug("wall_facts: %s session clock unread — UTC", key)
         try:
             oh, om = (int(p) for p in window["open"].split(":"))
             ch, cm = (int(p) for p in window["close"].split(":"))

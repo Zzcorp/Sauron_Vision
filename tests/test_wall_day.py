@@ -160,6 +160,35 @@ class TheDayIsOnTheWallTests(TestCase):
                      "trades your account", "allocates your capital", "667"):
             self.assertNotIn(word, blob, word)
 
+    def test_the_people_cluster_names_no_command(self):
+        """The PEOPLE panel named the two Telegram commands and the health
+        page's path to every visitor (2026-10-08): the requests are said
+        in words now, and the brake says what it keeps. The ring's own
+        label said the same command in capitals, so the file is read
+        lowercased and the words are looked for unquoted."""
+        js = SCRIPT.read_text(encoding="utf-8").lower()
+        for word in ("/status", "/stopall", "/health/"):
+            self.assertFalse(word in js, "the ring script names %s" % word)
+
+    def test_the_narrow_tier_stands_the_new_anchor_down(self):
+        """Safeguards joined the nav after Fleet (2026-10-08). Measured in
+        a browser, the bar with it ran past the Access button at 1100,
+        1200, 1440 and 1500 px, so the link stands down on the whole
+        769–1420 tier (not only Day's 1080 one) and the wide tier closes
+        its gap up to 1600 px."""
+        nav = re.search(r'<nav class="wall-nav" id="wallNav">(.*?)</nav>', self.body, re.S).group(1)
+        self.assertIn('<a href="#safeguards">Safeguards</a>', nav)
+        self.assertLess(nav.index('href="#fleet"'), nav.index('href="#safeguards"'))
+        self.assertLess(nav.index('href="#safeguards"'), nav.index('href="#desk"'))
+        tier = (self.src.split("@media (min-width: 769px) and (max-width: 1420px) {")[1]
+                .split("@media")[0])
+        self.assertRegex(tier, r'\.nav-links a\[href="#safeguards"\] \{ display: none; \}')
+        wide = (self.src.split("@media (min-width: 1421px) and (max-width: 1600px) {")[1]
+                .split("@media")[0])
+        self.assertIn(".nav-links { gap: 20px; }", wide)
+        # and the phone tier's rule, which names its two exceptions, hides it too
+        self.assertIn(".nav-links a:not(.btn-access):not(.nav-book) { display: none; }", self.src)
+
     def test_a_signed_in_reader_is_still_sent_home(self):
         from django.contrib.auth import get_user_model
         user = get_user_model().objects.create_user("zz_day_reader", password="x")

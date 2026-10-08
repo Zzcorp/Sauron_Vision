@@ -57,6 +57,10 @@ CONTRACT_KEYS = (
     # 2026-09-12 (review): the two counts that replaced hardcoded sentences
     # about the desk and the allocator having only ever run in shadow.
     "desk_live_plans", "share_plans_applied",
+    # 2026-10-08: the safeguards the Book's second edition counts — four
+    # registry reads and the proving ground's table.
+    "guards", "money_switches", "proof_classes", "short_classes",
+    "proving_verdicts",
 )
 
 
@@ -248,7 +252,8 @@ class WallCopyIsTrueTests(TestCase):
         self.assertNotIn("passed through the same orchestrator gate", self.body)
 
     def test_take_trade_does_not_promise_a_live_manual_path(self):
-        # manual_trade refuses any config that is not paper.
+        # a live ticket exists (Wave 2); the phrase stays forbidden because
+        # it promised a manual path not yet behind the PIN.
         self.assertNotIn("Paper venue until you arm live", self.body)
 
     def test_the_evaluator_count_is_not_spelled_out_in_prose(self):
@@ -261,14 +266,48 @@ class WallCopyIsTrueTests(TestCase):
 class MarketSessionTests(TestCase):
     """The wall used to paint LONDON and NEW YORK open in static markup, so
     a visitor at 03:00 UTC read two blinking, false market states on a page
-    whose badge says "Fully Auditable"."""
+    whose badge says "Fully Auditable".
 
-    def _at(self, hour, minute=0):
+    Since 2026-10-08 each pill follows its own city's clock and the
+    weekend (core.wall_facts.SESSION_CLOCKS): the UTC windows typed in
+    core.constants were an hour wrong in London and New York for half the
+    year, and said OPEN on a Saturday."""
+
+    def _on(self, year, month, day, hour, minute=0):
         from datetime import datetime, timezone as dt_timezone
 
         from core.wall_facts import market_sessions
         return {s["name"]: s["is_open"] for s in market_sessions(
-            datetime(2026, 8, 19, hour, minute, tzinfo=dt_timezone.utc))}
+            datetime(year, month, day, hour, minute, tzinfo=dt_timezone.utc))}
+
+    def _at(self, hour, minute=0):
+        return self._on(2026, 8, 19, hour, minute)
+
+    def test_the_weekend_closes_every_session(self):
+        """Saturday 2026-10-10 10:00 UTC: on the old UTC arithmetic London
+        read OPEN; every city is shut."""
+        state = self._on(2026, 10, 10, 10)
+        for name in ("TOKYO", "LONDON", "NEW YORK", "SYDNEY"):
+            self.assertFalse(state[name], name)
+
+    def test_new_york_follows_its_own_clock_after_the_november_shift(self):
+        """2026-11-04, New York back on standard time: 13:45 UTC is 08:45
+        there, before the bell; 14:45 UTC is after it."""
+        self.assertFalse(self._on(2026, 11, 4, 13, 45)["NEW YORK"])
+        self.assertTrue(self._on(2026, 11, 4, 14, 45)["NEW YORK"])
+
+    def test_london_follows_its_own_clock_after_the_october_shift(self):
+        """2026-11-04, London back on GMT: 07:30 UTC is 07:30 there, shut;
+        08:30 UTC is open."""
+        self.assertFalse(self._on(2026, 11, 4, 7, 30)["LONDON"])
+        self.assertTrue(self._on(2026, 11, 4, 8, 30)["LONDON"])
+
+    def test_sydney_follows_its_own_clock_in_summer_time(self):
+        """Sunday 2026-10-11 19:30 UTC is Monday 06:30 in Sydney (AEDT),
+        shut; 20:30 UTC is 07:30, open — an hour before the typed UTC
+        window would have said so."""
+        self.assertFalse(self._on(2026, 10, 11, 19, 30)["SYDNEY"])
+        self.assertTrue(self._on(2026, 10, 11, 20, 30)["SYDNEY"])
 
     def test_london_and_new_york_are_closed_in_the_middle_of_the_night(self):
         state = self._at(3)
@@ -724,6 +763,62 @@ class NewEngineFactsOnAnEmptyPlatformTests(TestCase):
             self.assertEqual(wall[key], 0, f"{key} invented a row")
 
 
+class SafeguardFactsTests(TestCase):
+    """The five counts the Book's second edition added (2026-10-08): four
+    registry reads and the proving ground's table, each fenced alone."""
+
+    NEW = ("guards", "money_switches", "proof_classes", "short_classes",
+           "proving_verdicts")
+
+    def setUp(self):
+        cache.clear()
+
+    def test_the_registry_counts_are_the_registries(self):
+        from bot_program.asset_engine.base import ETORO_PROVEN, ETORO_SHORT_PROVEN
+        from bot_program.morgul import GUARDS
+        from core.platform_control import LIVE_MONEY_SWITCHES
+        facts = wall_facts()
+        self.assertEqual(facts["guards"], len(GUARDS))
+        self.assertEqual(facts["money_switches"], len(LIVE_MONEY_SWITCHES))
+        self.assertEqual(facts["proof_classes"], len(ETORO_PROVEN))
+        self.assertEqual(facts["short_classes"], len(ETORO_SHORT_PROVEN))
+        for key in self.NEW[:4]:
+            self.assertGreater(facts[key], 0, f"{key} read an empty registry")
+
+    def test_a_saved_verdict_moves_its_count(self):
+        from backtester.models_proving import ProvingVerdict
+        self.assertEqual(wall_facts()["proving_verdicts"], 0)
+        ProvingVerdict.objects.create(run_id="t", family="f", direction="long",
+                                      asset_class="forex", verdict="failed")
+        cache.clear()
+        self.assertEqual(wall_facts()["proving_verdicts"], 1)
+
+    def test_each_new_counter_is_fenced_alone(self):
+        """A heavy import that fails, or a table a migration has not made
+        yet, zeroes its own key and nothing else."""
+        _instrument("ZZAAA", "crypto")
+        for key in self.NEW:
+            cache.clear()
+            with self.subTest(counter=key), \
+                 patch(f"core.wall_facts._count_{key}",
+                       side_effect=RuntimeError("registry unreadable")):
+                facts = wall_facts()
+            self.assertEqual(facts[key], 0)
+            self.assertEqual(facts["tests_green"], TESTS_GREEN)
+            self.assertEqual(facts["instruments"], 1)
+            for other in self.NEW:
+                if other != key and other != "proving_verdicts":
+                    self.assertGreater(facts[other], 0, f"{key} took {other} down")
+
+    def test_an_empty_platform_has_no_verdict(self):
+        from core import wall_facts as wf
+        self.assertEqual(wf._count_proving_verdicts(), 0)
+        wall = self.client.get("/wall/").context["wall"]
+        self.assertEqual(wall["proving_verdicts"], 0)
+        for key in self.NEW[:4]:
+            self.assertGreater(wall[key], 0, f"{key} is not a database count")
+
+
 class WallFactsFencingTests(TestCase):
     """The login gateway stays open through a database or cache failure."""
 
@@ -769,14 +864,27 @@ class WallFactsFencingTests(TestCase):
         self.assertEqual(wall["news_24h"], 0)
 
     def test_a_dead_cache_degrades_to_a_live_computation(self):
-        """Redis going down should cost latency, not the front door."""
+        """Redis going down should cost latency, not the front door.
+
+        The module's own cache object is replaced, as DegradedCacheTests
+        does: wall_facts() calls cache.get and cache.set, and a patch on
+        an attribute the function never calls (get_or_set, until
+        2026-10-08) raised nothing, so this test passed on a cache that
+        was never dead."""
+        from unittest.mock import MagicMock
+
+        from core import wall_facts as wf
         _instrument("ZZAAA", "crypto")
 
-        with patch("core.wall_facts.cache.get_or_set",
-                   side_effect=RuntimeError("connection refused")):
+        dead = MagicMock()
+        dead.get.side_effect = RuntimeError("connection refused")
+        dead.set.side_effect = RuntimeError("connection refused")
+        with patch.object(wf, "cache", dead):
             facts = wall_facts()
 
         self.assertEqual(facts["instruments"], 1)
+        dead.get.assert_called_once()
+        dead.set.assert_called_once()
 
     def test_a_stale_cached_payload_is_backfilled_from_the_contract(self):
         """A deploy that adds a key must not render a hole for the 5 minutes
@@ -789,14 +897,22 @@ class WallFactsFencingTests(TestCase):
         self.assertEqual(facts["tests_green"], FALLBACK_FACTS["tests_green"])
 
     def test_wall_facts_never_raises_even_when_the_builder_explodes(self):
-        """Last line of defence: whatever happens, the view gets a dict."""
-        with patch("core.wall_facts.cache.get_or_set",
-                   side_effect=RuntimeError("cache down")), \
+        """Last line of defence: whatever happens, the view gets a dict.
+        The cache is dead too (the module's object replaced, its get and
+        set raising), so neither fence is the one that saves the page."""
+        from unittest.mock import MagicMock
+
+        from core import wall_facts as wf
+        dead = MagicMock()
+        dead.get.side_effect = RuntimeError("cache down")
+        dead.set.side_effect = RuntimeError("cache down")
+        with patch.object(wf, "cache", dead), \
              patch("core.wall_facts._build_facts",
                    side_effect=RuntimeError("everything is on fire")):
             facts = wall_facts()
 
         self.assertEqual(facts, FALLBACK_FACTS)
+        dead.get.assert_called_once()
 
 
 class WallFactsCachingTests(TestCase):

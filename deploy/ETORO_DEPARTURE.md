@@ -20,7 +20,7 @@ weeks; IBKR is retired.
   positions closed by hand in the IBKR app, the cash withdrawn, the Gateway not
   worth another IB Key push. **What the platform measured** once the Gateway was
   logged in (06:09 UTC, `sync_broker_account` → `{'attempted': 1, 'stored': 1,
-  'unreachable': 0}`): equity **2,026.53 EUR**, read 70 s earlier; **NEM SELL 1**
+  'unreachable': 0}`): the account's equity, read 70 s earlier; **NEM SELL 1**
   and **HYG BUY 3 still HELD** at IBKR; GLDM absent; and
   `IBKRTrader.resting_order_ids()` answered `set()` — **no protective leg rests
   at IBKR any more** (77/78 and 64/65 are gone; NEM's mark of 127.50 sits above
@@ -65,7 +65,7 @@ weeks; IBKR is retired.
   starter_megacaps stock 150 EUR fixed (AAPL MSFT NVDA AMZN GOOGL META TSLA).
   base_currency EUR on all four; eToro reads USD; nothing converts; the
   preflight names the mismatch a BLOCKER for every live config, enabled or not.
-- **eToro row:** keyed, live, no class ticked, 1.40 USD. Reads measured against
+- **eToro row:** keyed, live, no class ticked, a token balance. Reads measured against
   the real key on 2026-09-22 (aggregate-portfolio 200, portfolio 200, real/pnl
   200, GET market-close-orders 405). The WRITE path — the v2 order POST, the
   orders:lookup poll, the market-close POST, the PATCH stop mover — met eToro on
@@ -383,7 +383,7 @@ demo row the book and the venue in one click).
   virtual balance under env "paper" and re-sizes nothing. THE WORLD CHECK:
   every demo write snippet in this section asserts, in this order and before
   any order, `t.demo`, `t.ping()` True, and `net_liquidation` above 100,000
-  (the virtual balance measured 332,449.10 USD; the real one 1.40 USD). A
+  (the virtual balance measured in the hundreds of thousands; the real one a few dollars). A
   demo-shaped snippet on a row someone unticked would otherwise place a REAL
   order with the same pair — the assert on the balance is the one that cannot
   be fooled by the flag.
@@ -398,7 +398,7 @@ demo row the book and the venue in one click).
   assert t.demo, 'REFUSING: the row is not demo'
   assert t.ping(), 'REFUSING: the demo world did not answer'
   nl = t.net_liquidation(); print('env', t.env, 'net_liquidation', nl)
-  assert nl and nl[0] > 100000, f'REFUSING: {nl} is not the virtual balance (332,449.10 USD measured 2026-09-23; the real one 1.40 USD)'
+  assert nl and nl[0] > 100000, f'REFUSING: {nl} is not the virtual balance (hundreds of thousands measured 2026-09-23; the real one a few dollars)'
   print('GLDM instrumentId', t.instrument_id('GLDM'))
   tk = t.ticker('GLDM'); print('ticker', tk)
   last = float(tk.get('lastPrice') or 0); assert last > 0, 'REFUSING: no price'
@@ -701,10 +701,11 @@ demo row the book and the venue in one click).
     stop eToro holds). CLOSED at
     22:03:24 UTC through the adapter's close — the v1 market-close-orders
     POST with no segment, attested until then by a GET answering 405 only:
-    orderForClose {orderID 1596736969, orderType 19, statusID 1}, the open
-    order's positionExecutions[0].state 'closed'; 5 s later available cash
-    2249.65, used margin 0.0, no position, broker_portfolio []. Round trip
-    0.33 USD (2249.98 → 2249.65). This is the crypto proof (§7, bullet 0):
+    orderForClose {orderID <the close order's id>, orderType 19, statusID
+    1}, the open order's positionExecutions[0].state 'closed'; 5 s later
+    the available cash was back where it started less the round trip,
+    used margin 0.0, no position, broker_portfolio []. Round trip 0.33
+    USD. This is the crypto proof (§7, bullet 0):
     `crypto` joined ETORO_PROVEN, proven at 1x. ETORO_PROVEN_LEVERAGE stays
     empty, which binds the attack mode's chooser ALONE (it picks 1 for
     crypto): a TYPED `extras["leverage"] = 2` on a crypto config is not

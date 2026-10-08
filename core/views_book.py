@@ -48,6 +48,7 @@ from django.conf import settings
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.utils.cache import patch_cache_control, patch_vary_headers
+from django.utils.text import slugify
 
 from core import book_content as book
 from core.wall_facts import wall_facts
@@ -123,6 +124,29 @@ def _counts(rows, facts, words):
              "count": count_of(facts.get(row["key"]))} for row in rows]
 
 
+def milestone_anchor(title: str) -> str:
+    """The id a milestone's row carries, so a link can land on it:
+    "m-" and the title's slug. Built from the title alone, never from the
+    commit, so no hash reaches the page (2026-10-08)."""
+    return "m-" + slugify(title)
+
+
+def latest_steps(n=4) -> list:
+    """The last `n` milestones of the road, newest first, for a page that
+    points at the Book: [{"date", "day", "title", "anchor"}]. Read off
+    book.MILESTONES at call time, and never raising: a page that merely
+    points at the road must not fall with it."""
+    try:
+        rows = list(book.MILESTONES)[-max(0, int(n)):] if int(n) > 0 else []
+        return [{"date": day, "day": day_words(day), "title": title,
+                 "anchor": milestone_anchor(title)}
+                for day, _era, title, _text, _commit in reversed(rows)]
+    except Exception as exc:  # noqa: BLE001 — the pointing page stays up
+        logger.warning("the book's latest steps could not be read (%s)",
+                       type(exc).__name__)
+        return []
+
+
 def build(facts: dict) -> dict:
     """Everything the template draws, out of the book and the facts."""
     words = {key: shown(value) for key, value in facts.items()}
@@ -135,7 +159,8 @@ def build(facts: dict) -> dict:
     for era in book.ERAS:
         milestones = [
             {"date": day, "day": day_words(day), "title": title,
-             "text": fill(text, words), "commit": commit}
+             "text": fill(text, words), "commit": commit,
+             "anchor": milestone_anchor(title)}
             for day, era_id, title, text, commit in book.MILESTONES
             if era_id == era["id"]]
         eras.append(dict(_filled(era, words), milestones=milestones))
@@ -152,6 +177,7 @@ def build(facts: dict) -> dict:
         "lexicon": _filled(copy.deepcopy(book.LEXICON), words),
         "written": book.WRITTEN_WORDS,
         "written_iso": book.WRITTEN,
+        "first_written": book.FIRST_WRITTEN_WORDS,
     }
 
 

@@ -21,16 +21,19 @@ Nothing here reads the database. The home page's live layer
 from __future__ import annotations
 
 import fnmatch
+import logging
 from itertools import groupby
+
+logger = logging.getLogger(__name__)
 
 #: The seven stages, in the order the ring turns. Key, title, and the one
 #: sentence a hover shows first.
 STAGES = (
     ("see", "SEE", "Prices, news, the calendar and the macro tape come in."),
     ("think", "THINK", "Indicators, setups and signals; the brain reads its own market."),
-    ("decide", "DECIDE", "The bots tick; the desk and the allocators size the money."),
+    ("decide", "DECIDE", "The bots tick; the gates decide what may open, and the size follows the evidence."),
     ("act", "ACT", "An order goes to one venue, with its stop and its target."),
-    ("watch", "WATCH", "The guards read the book; the brake cuts the bots."),
+    ("watch", "WATCH", "The guards read the book; a brake stops new entries and keeps the care."),
     ("tell", "TELL", "Two Telegram voices, the dashboard, the public Wall."),
     ("learn", "LEARN", "The night grades, prunes, promotes and plans."),
 )
@@ -42,7 +45,7 @@ NEXT_OF = {
     "decide": "Feeds ACT: one order per candidate that passed, with its stop and target.",
     "act": "Feeds WATCH: fills and positions read back from the venue.",
     "watch": "Feeds TELL: findings, faults and fills become messages.",
-    "tell": "Feeds PEOPLE: the operator, and the two words back — /status, /stopall.",
+    "tell": "Feeds PEOPLE: the operator, and the two requests back: the status and the brake.",
     "learn": "Feeds THINK the next morning: the rules that survived the night.",
 }
 
@@ -72,7 +75,9 @@ STAGE_OF = {
     # klines and tickers into PriceData/LiveQuote, the chains are Greeks
     # and quotes.
     "refresh-option-chains": ("see", "option chains"),
-    "ibkr-data-feed": ("see", "IBKR market data (legacy)"),
+    # Retired 2026-09-23: the feed and the account sync go idle with no
+    # keyed IBKR row (bot_program/tasks.py), and the page says so.
+    "ibkr-data-feed": ("see", "IBKR market data (retired)"),
     # ── THINK: indicators, signals, the brain ───────────────────────────
     "ai-process-new-news": ("think", "news analysed"),
     "recalculate-technicals-watchlist": ("think", "watchlist indicators"),
@@ -96,7 +101,9 @@ STAGE_OF = {
     # The crisis mode's eyes and Aragorn (2026-10-02): the posture is
     # read before the bots decide; Aragorn decides which pairs may.
     "read-market-stress": ("decide", "the market's stress sets the posture"),
-    "run-aragorn": ("decide", "Aragorn moves rule/class pairs between paper and real money"),
+    # No slash in a label: "/x" reads as a command on the public page
+    # (tests/test_day_of_sauron.py, 2026-10-08).
+    "run-aragorn": ("decide", "Aragorn moves each rule and class between paper and real money"),
     "propose-share-plans": ("decide", "share plans proposed"),
     # ── ACT: the venue ──────────────────────────────────────────────────
     "retry-pending-closes": ("act", "pending closes retried, confirmed by the venue"),
@@ -107,7 +114,7 @@ STAGE_OF = {
     # "ten" would drift the day an eleventh guard lands.
     "run-morgul-guards": ("watch", "Morgul's guards"),
     "sauron-position-review": ("watch", "open positions reviewed"),
-    "sync-broker-account": ("watch", "IBKR account synced"),
+    "sync-broker-account": ("watch", "IBKR account (retired)"),
     "sync-etoro-accounts": ("watch", "eToro account synced"),
     "sync-saxo-accounts": ("watch", "Saxo account synced"),
     "update-portfolio-exposure": ("watch", "portfolio exposure"),
@@ -456,6 +463,29 @@ def page_scheme(scheme: dict) -> dict:
         "unplaced": len(scheme.get("unplaced") or []),
         "adapters": scheme.get("adapters", 0),
     }
+
+
+#: What a page is handed when the schedule cannot be read: the ring's
+#: shape with nothing on it, so the drawing finds every key it reads and
+#: draws an empty picture instead of throwing.
+EMPTY_PAGE_SCHEME = {"stages": [], "total": 0, "queues": {}, "fastest": "",
+                     "slowest": "", "unplaced": 0, "adapters": 0}
+
+
+def safe_page_scheme(wall: dict | None = None) -> dict:
+    """page_scheme(day_scheme(wall)), fenced: a beat entry with a schedule
+    these words cannot read, or a Celery app that will not import, must
+    not take a public page down with it (2026-10-08). The warning names
+    the exception's class and nothing else: the page is the Wall's, and
+    the Wall's logs are read beside the door it keeps open."""
+    try:
+        return page_scheme(day_scheme(wall))
+    except Exception as exc:  # noqa: BLE001 — the page renders either way
+        logger.warning("the day scheme could not be read (%s); the ring is "
+                       "drawn empty", type(exc).__name__)
+        return {key: (dict(value) if isinstance(value, dict) else
+                      list(value) if isinstance(value, list) else value)
+                for key, value in EMPTY_PAGE_SCHEME.items()}
 
 
 def beat_components() -> dict:

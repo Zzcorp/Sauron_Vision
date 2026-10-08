@@ -3,7 +3,8 @@
 
 The operator, on learning his live positions were at 1x: "I choose, but I
 want the max by default". A hand-taken ticket went at 1x whatever the
-account — a 900 EURUSD pledged its full 1,016, 45% of the account alone.
+account — one EURUSD ticket pledged its full notional, nearly half of the
+account alone.
 
 manual_trade._ticket_leverage offers 1 and every multiplier on the
 instrument's LIVE list that clears every gate a typed number meets (the
