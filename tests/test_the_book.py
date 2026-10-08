@@ -24,7 +24,7 @@ What this file pins:
   * clean English: no snake_case, no template artefact, no French;
   * the road so far is held to the history as it stood at each edition,
     pasted below in two blocks, the first edition's up to 3994ffc and the
-    second's from there to 02bbfd4 (the container has no .git to ask):
+    second's from there to 65c490e (the container has no .git to ask):
     every hash exists, every milestone is dated on its commit's day or up
     to three days before it;
   * motion is optional: nothing is hidden unless the head script says
@@ -368,8 +368,10 @@ de640cd 2026-04-06
 54e35ba 2026-04-05
 """
 #: The history since, as the same command printed it on 2026-10-08 for
-#: 3994ffc..02bbfd4, merges included: the second edition's road.
+#: 3994ffc..65c490e, merges included: the second edition's road.
 HISTORY_SINCE_3994FFC = """
+65c490e 2026-10-08
+5afc234 2026-10-08
 02bbfd4 2026-10-08
 8960905 2026-10-07
 c802d17 2026-10-07
@@ -1739,6 +1741,39 @@ class TheBookFollowsTheCode(SimpleTestCase):
                 for item in chapter.get("items", []):
                     self.assertNotIn(stale, item["text"], stale)
 
+    def test_the_care_says_the_thresholds_it_cuts_and_locks_at(self):
+        """The care cuts a real-money loser only from WEEKEND_CUT_LEVERAGE
+        times leverage (the event window's cut is the weekend's), and locks
+        a winner only from WEEKEND_LOCK_AT_R on the mark. The second edition
+        said "a levered real-money loser is cut", of any multiplier, in four
+        places on the two pages (final check, 2026-10-08): a real trade at
+        two times was promised a cut the code never makes. The Wall's card
+        is held to the same thresholds in tests/test_the_wall.py."""
+        from bot_program import position_care as care
+        rewrite = ("rewrite the circuit's 'The care', the safeguards' 'The care of "
+                   "an open trade', the 5 October milestone 'The event window' and "
+                   "the Wall's 'Care of the Open Trade' card")
+        self.assertEqual(care.WEEKEND_CUT_LEVERAGE, 5,
+                         "the weekend cut moved: %s ('five times leverage or more')" % rewrite)
+        self.assertEqual(care.EVENT_CUT_LEVERAGE, care.WEEKEND_CUT_LEVERAGE,
+                         "the event cut left the weekend's: %s" % rewrite)
+        self.assertEqual(care.WEEKEND_LOCK_AT_R, 0.5,
+                         "the weekend lock moved: %s ('half a unit of risk or more')" % rewrite)
+        self.assertEqual(care.EVENT_LOCK_AT_R, care.WEEKEND_LOCK_AT_R,
+                         "the event lock left the weekend's: %s" % rewrite)
+        cut = "a real-money loser at five times leverage or more is cut"
+        lock = "a winner up half a unit of risk or more is locked at break-even"
+        for where, words in (("circuit, 'The care'", self._text("circuit", "The care")),
+                             ("safeguards, 'The care of an open trade'",
+                              self._text("safeguards", "The care of an open trade")),
+                             ("milestone 'The event window'", self._milestone("ed8cb31"))):
+            with self.subTest(where=where):
+                self.assertIn(cut, words, "%s: %s" % (where, rewrite))
+                self.assertIn(lock, words, "%s: %s" % (where, rewrite))
+        everything = json.dumps([book.CHAPTERS, book.ERAS, book.MILESTONES,
+                                 book.IN_PROGRESS, book.GO_LIVE, book.LEXICON])
+        self.assertNotIn("levered real-money loser", everything, rewrite)
+
     def test_the_road_says_no_proof_caps_the_multiplier(self):
         """Since 5 October the attack mode's chooser reads the venue's own
         list, bounded by the class ceiling, the stop band and the cash:
@@ -1857,9 +1892,13 @@ class TheBookFollowsTheCode(SimpleTestCase):
             ("position_care.TRAIL_AT_R", lambda: attr("bot_program.position_care", "TRAIL_AT_R"), 1.5,
              "'The care': trails from +1.5R"),
             ("position_care.WEEKEND_CUT_LEVERAGE", lambda: attr("bot_program.position_care", "WEEKEND_CUT_LEVERAGE"), 5,
-             "'The care': a levered real-money loser is cut before a weekend"),
+             "'The care': a real-money loser at five times leverage or more is cut before a weekend"),
             ("position_care.EVENT_CUT_LEVERAGE", lambda: attr("bot_program.position_care", "EVENT_CUT_LEVERAGE"), 5,
-             "'The care': a levered real-money loser is cut before a print"),
+             "'The event window': a real-money loser at five times leverage or more is cut before a print"),
+            ("position_care.WEEKEND_LOCK_AT_R", lambda: attr("bot_program.position_care", "WEEKEND_LOCK_AT_R"), 0.5,
+             "'The care': a winner up half a unit of risk or more is locked before a weekend"),
+            ("position_care.EVENT_LOCK_AT_R", lambda: attr("bot_program.position_care", "EVENT_LOCK_AT_R"), 0.5,
+             "'The event window': a winner up half a unit of risk or more is locked before a print"),
             ("position_care.EVENT_BEFORE_MINUTES", lambda: attr("bot_program.position_care", "EVENT_BEFORE_MINUTES"), 60,
              "'The event window': from an hour before a high-impact print"),
             ("position_care.EVENT_AFTER_MINUTES", lambda: attr("bot_program.position_care", "EVENT_AFTER_MINUTES"), 15,

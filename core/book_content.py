@@ -313,8 +313,9 @@ CHAPTERS = [
                       "on, each turn looks after it: the stop moves to "
                       "break-even at +1R and trails behind the price from "
                       "+1.5R; a trade that has done nothing for days is let "
-                      "go; before a weekend or a high-impact print a winner "
-                      "is locked and a levered real-money loser is cut. "
+                      "go; before a weekend or a high-impact print, "
+                      "a winner up half a unit of risk or more is locked at break-even, "
+                      "and a real-money loser at five times leverage or more is cut. "
                       "Every tighter stop on a real-money trade is copied "
                       "onto the stop resting at eToro, so the lock outlives "
                       "the platform. A trade opened by hand keeps the profit "
@@ -446,9 +447,11 @@ CHAPTERS = [
              "text": ("When Aragorn's switch is on, every open trade is "
                       "looked after on each turn. Its stop goes to "
                       "break-even at +1R and trails from +1.5R; a trade that "
-                      "has gone nowhere for days is let go; a winner is "
-                      "locked and a levered real-money loser is cut before a "
-                      "weekend or a high-impact print. Every tighter stop on "
+                      "has gone nowhere for days is let go; before a weekend "
+                      "or a high-impact print, "
+                      "a winner up half a unit of risk or more is locked at break-even, "
+                      "and a real-money loser at five times leverage or more is cut. "
+                      "Every tighter stop on "
                       "a real-money trade is copied onto the stop resting at "
                       "eToro, so the lock outlives the platform if the "
                       "server stops.")},
@@ -839,7 +842,7 @@ ERAS = [
                  "next steps, and gets a free macro calendar. Signals cool "
                  "down, the book's size is capped in money, and a tighter "
                  "stop is copied onto the venue's own.")},
-    {"id": "venue-and-clock", "span": "5 – 7 October",
+    {"id": "venue-and-clock", "span": "5 – 8 October",
      "title": "The venue, the clock and the proof",
      "summary": ("The engine stops deciding on a dead or aberrant price, "
                  "values a real trade at the venue's own rate, holds an "
@@ -852,7 +855,9 @@ ERAS = [
                  "at once, the venue is asked before a missing trade is "
                  "booked closed, the price bars stop flooding it with "
                  "requests, and the "
-                 "scorecard says what closed each trade.")},
+                 "scorecard says what closed each trade. On the 8th the "
+                 "chart's levels are redrawn, each kind told apart at a "
+                 "glance.")},
 ]
 
 #: One line per milestone: (day, era id, title, one or two sentences,
@@ -1188,8 +1193,9 @@ MILESTONES = [
      "7f9664d"),
     ("2026-10-05", "venue-and-clock", "The event window",
      "From an hour before a high-impact print to a quarter hour after it, "
-     "a winner is locked and a levered real-money loser is cut, as before a "
-     "weekend.",
+     "a winner up half a unit of risk or more is locked at break-even, "
+     "and a real-money loser at five times leverage or more is cut, "
+     "as before a weekend.",
      "ed8cb31"),
     ("2026-10-05", "venue-and-clock", "In doubt, never twice",
      "An order whose answer never came back is held in doubt and looked for "
@@ -1258,6 +1264,12 @@ MILESTONES = [
      "estimates, and how many venue closes fell outside the exchange's "
      "hours.",
      "8960905"),
+    ("2026-10-08", "venue-and-clock", "The chart's levels, redrawn",
+     "On the price chart, the pools where the crowd's stops sit, the swing "
+     "points, the Asian range and the round numbers each take a look of "
+     "their own and are told apart at a glance. The lines that carry money "
+     "stay the loudest.",
+     "5afc234"),
 ]
 
 
@@ -1267,12 +1279,11 @@ MILESTONES = [
 #: progress; a line moves to MILESTONES, with its hash, the day it lands.
 #: The three lines of the first edition landed on 2026-09-28 (45a4c93).
 IN_PROGRESS = [
-    {"title": "The chart's levels, redrawn",
-     "text": ("The price chart draws its many kinds of level in lines that "
-              "look alike. They are being redrawn so that the pools where "
-              "the crowd's stops sit, the swing points, the Asian range and "
-              "the round numbers can be told apart at a glance, with the "
-              "lines that carry money always the loudest.")},
+    {"title": "A real trade valued at its venue's price",
+     "text": ("A real trade will be valued at its venue's own price from "
+              "its first minute, and never against the quote of another "
+              "instrument, such as a future's quote standing in for a spot "
+              "price.")},
 ]
 
 #: The road a class travels to real money, in order: the same for every

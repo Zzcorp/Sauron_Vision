@@ -71,8 +71,12 @@ class TheDayTests(SimpleTestCase):
         d = P3.read_day(day_frame(), [], now=OFF)
         self.assertTrue(d["ok"])
         self.assertEqual((d["phase"], d["direction"]), ("distribution", "up"))
+        # the session's span rides along (2026-10-07): 00:00 and 04:00 UTC
+        # on 2026-09-15, the New York evening of the 14th
         self.assertEqual(d["asia"], {"high": 100.5, "low": 99.5,
-                                     "date": "2026-09-14"})
+                                     "date": "2026-09-14",
+                                     "opened": 1789430400,
+                                     "closed": 1789444800})
         self.assertEqual(d["run"], {"below": True, "above": False,
                                     "low": 98.8, "high": None})
         self.assertIn("the lows of the Asian range were run (98.8)", d["why"])
@@ -114,6 +118,31 @@ class TheDayTests(SimpleTestCase):
         self.assertIn("(between sessions)", P3.words_for(d))
         self.assertIn("Power of Three unread", P3.words_for({"ok": False,
                                                               "why": "x"}))
+
+
+class TheSessionSpanTests(SimpleTestCase):
+    """The Asian range's own bars (2026-10-07): the chart draws the
+    accumulation as a box over its session, so the read says when the
+    session's first bar opened and its last bar closed."""
+
+    def test_the_asian_range_carries_its_session_bars(self):
+        a = P3.read_day(day_frame(), [], now=OFF)["asia"]
+        self.assertIsInstance(a["opened"], int)
+        self.assertIsInstance(a["closed"], int)
+        # four 1h bars, 20:00 to midnight New York: the last one closes
+        # an hour after it opens
+        self.assertEqual(a["closed"] - a["opened"], 4 * 3600)
+
+    def test_a_frame_without_times_keeps_the_two_prices(self):
+        rng = P3.asian_range(day_frame(), now=OFF)
+        self.assertEqual(P3._span(day_frame().reset_index(drop=True), rng), {})
+        # an unreadable span costs the read nothing: the high, the low and
+        # the date stay, and nothing else is guessed
+        with patch.object(P3, "_span", return_value={}):
+            d = P3.read_day(day_frame(), [], now=OFF)
+        self.assertEqual(d["asia"], {"high": 100.5, "low": 99.5,
+                                     "date": "2026-09-14"})
+        self.assertEqual((d["phase"], d["direction"]), ("distribution", "up"))
 
 
 class TheFamilyTests(SimpleTestCase):
@@ -211,8 +240,10 @@ class TheChartTests(SimpleTestCase):
     def test_the_asian_range_is_drawn_with_the_levels_and_hovered(self):
         src = widget_source()
         self.assertIn("function applyAsianRange(po3) {", src)
-        self.assertIn("'ASIA HIGH'", src)
-        self.assertIn("'ASIA LOW'", src)
+        # the box over the session's own bars (2026-10-07); without
+        # primitives the two faint untitled lines are the fallback (a title
+        # without its axis label is never painted)
+        self.assertIn("layer.set({ asia: { high: a.high", src)
         self.assertIn("LightweightCharts.LineStyle.LargeDashed", src)
         i = src.find("function applyOverlays(bars) {")
         self.assertIn("applyAsianRange(POSMAP ? POSMAP.po3 : null);", src[i:i + 500])

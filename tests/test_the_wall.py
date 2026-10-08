@@ -927,6 +927,33 @@ class WallSafeguardsSectionTests(TestCase):
         self.assertEqual(morgul.BRAKE_KEY, "morgul_brake")
         self.assertIn("With a second switch on as well, a few of them may brake", block)
 
+    def test_the_care_card_says_the_thresholds_it_cuts_and_locks_at(self):
+        """The care cuts a real-money loser only from WEEKEND_CUT_LEVERAGE
+        times leverage (the event window's cut is the weekend's), and locks
+        a winner only from WEEKEND_LOCK_AT_R on the mark. The card once said
+        "a levered real-money loser is cut", of any multiplier (final check,
+        2026-10-08). The Book's three sentences are held the same way in
+        tests/test_the_book.py."""
+        from bot_program import position_care as care
+        rewrite = ("rewrite the Wall's 'Care of the Open Trade' card, and the Book's "
+                   "'The care', 'The care of an open trade' and 'The event window'")
+        self.assertEqual(care.WEEKEND_CUT_LEVERAGE, 5,
+                         "the weekend cut moved: %s ('five times leverage or more')" % rewrite)
+        self.assertEqual(care.EVENT_CUT_LEVERAGE, care.WEEKEND_CUT_LEVERAGE,
+                         "the event cut left the weekend's: %s" % rewrite)
+        self.assertEqual(care.WEEKEND_LOCK_AT_R, 0.5,
+                         "the weekend lock moved: %s ('half an R or more')" % rewrite)
+        self.assertEqual(care.EVENT_LOCK_AT_R, care.WEEKEND_LOCK_AT_R,
+                         "the event lock left the weekend's: %s" % rewrite)
+        block = self._block('id="safeguards"')
+        start = block.index("Care of the Open Trade")
+        card = block[start:block.index("</div>", block.index('class="feature-text"', start))]
+        self.assertIn("a real-money loser at five times leverage or more is cut", card, rewrite)
+        self.assertIn("a winner up half an R or more is locked at break-even", card, rewrite)
+        src = (Path(settings.BASE_DIR) / "templates" / "landing"
+               / "the_wall.html").read_text(encoding="utf-8")
+        self.assertNotIn("levered real-money loser", src, rewrite)
+
     def test_its_cadence_is_the_beats(self):
         from config.celery import app
         from core.day_of_sauron import schedule_words
