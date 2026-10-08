@@ -701,10 +701,11 @@ demo row the book and the venue in one click).
     stop eToro holds). CLOSED at
     22:03:24 UTC through the adapter's close — the v1 market-close-orders
     POST with no segment, attested until then by a GET answering 405 only:
-    orderForClose {orderID 1596736969, orderType 19, statusID 1}, the open
-    order's positionExecutions[0].state 'closed'; 5 s later available cash
-    2249.65, used margin 0.0, no position, broker_portfolio []. Round trip
-    0.33 USD (2249.98 → 2249.65). This is the crypto proof (§7, bullet 0):
+    orderForClose {orderID <the close order's id>, orderType 19, statusID
+    1}, the open order's positionExecutions[0].state 'closed'; 5 s later
+    the available cash was back where it started less the round trip,
+    used margin 0.0, no position, broker_portfolio []. Round trip 0.33
+    USD. This is the crypto proof (§7, bullet 0):
     `crypto` joined ETORO_PROVEN, proven at 1x. ETORO_PROVEN_LEVERAGE stays
     empty, which binds the attack mode's chooser ALONE (it picks 1 for
     crypto): a TYPED `extras["leverage"] = 2` on a crypto config is not

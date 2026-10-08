@@ -4,16 +4,17 @@ The Wall is the most public page of a public repository, read by anyone
 who finds the address, and the answer a visitor receives is more than its
 visible words: the stylesheet, the scripts and every HTML comment travel
 with it. The Book has been walked this way since its second edition
-(tests/test_the_book.py); these tests walk the Wall and the two static
-files every visitor downloads with it the same way, with the Book's own
+(tests/test_the_book.py); these tests walk the Wall and the text files
+every visitor downloads with it the same way, with the Book's own
 helpers, so no term that must stay private is typed here either.
 
 Four walks:
 
   1. no private term, anywhere in the answer or in the static files;
   2. no command, host or key: the words an operator types at a shell or
-     reads off a console. The login form needs "password" and "token", so
-     the Book's whole list is not the Wall's;
+     reads off a console, in the answer and in the static files. The
+     login form needs "password" and "token", so the Book's whole list is
+     not the Wall's;
   3. no e-mail address, no IP address, no identifier-length digit run;
   4. no commit hash of the road.
 
@@ -32,9 +33,12 @@ from tests.test_the_book import (KNOWN_COMMITS, WHOLE_PATTERNS, _private_terms_i
                                  _whole)
 
 WALL = "/wall/"
-#: Downloaded by every visitor beside the page: walked with it.
+#: Downloaded by every visitor beside the page: walked with it. Every text
+#: file the two pages link, the page icon among them (an SVG's comments
+#: travel with it, and the Book links the same icon).
 STATIC = (Path(settings.BASE_DIR) / "static" / "js" / "sv-day-scheme.js",
-          Path(settings.BASE_DIR) / "static" / "css" / "sv-day-scheme.css")
+          Path(settings.BASE_DIR) / "static" / "css" / "sv-day-scheme.css",
+          Path(settings.BASE_DIR) / "static" / "logo" / "sauron_eye.svg")
 
 #: What an operator types or reads, never a visitor. "password" and
 #: "token" are left out on purpose: the login form carries both.
@@ -82,6 +86,16 @@ class TheWallCarriesNothingPrivate(TestCase):
     def test_the_wall_names_no_command_host_or_key(self):
         found = [word for word in COMMAND_HOST_OR_KEY if word in self.whole]
         self.assertEqual(found, [], "the Wall says %r" % found)
+        # The ring's labels are drawn by the script, so the page body never
+        # carries them: the static files are walked the same way. Until
+        # 2026-10-08 the ring named the alarm chat's brake by its command,
+        # in capitals, which the quoted lowercase check in
+        # tests.test_wall_day never saw.
+        for path in STATIC:
+            with self.subTest(file=path.name):
+                whole = _whole(path.read_text(encoding="utf-8"))
+                found = [word for word in COMMAND_HOST_OR_KEY if word in whole]
+                self.assertEqual(found, [], "%s says %r" % (path.name, found))
 
     def test_the_wall_shows_no_email_ip_or_identifier(self):
         facts = wf.wall_facts()

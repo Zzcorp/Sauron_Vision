@@ -163,10 +163,12 @@ class TheDayIsOnTheWallTests(TestCase):
     def test_the_people_cluster_names_no_command(self):
         """The PEOPLE panel named the two Telegram commands and the health
         page's path to every visitor (2026-10-08): the requests are said
-        in words now, and the brake says what it keeps."""
-        js = SCRIPT.read_text(encoding="utf-8")
-        for word in ("'/status'", "'/stopall'", "'/health/'"):
-            self.assertNotIn(word, js, word)
+        in words now, and the brake says what it keeps. The ring's own
+        label said the same command in capitals, so the file is read
+        lowercased and the words are looked for unquoted."""
+        js = SCRIPT.read_text(encoding="utf-8").lower()
+        for word in ("/status", "/stopall", "/health/"):
+            self.assertFalse(word in js, "the ring script names %s" % word)
 
     def test_the_narrow_tier_stands_the_new_anchor_down(self):
         """Safeguards joined the nav after Fleet (2026-10-08). Measured in

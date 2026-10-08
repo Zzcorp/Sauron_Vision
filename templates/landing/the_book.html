@@ -381,6 +381,12 @@
             width: 6px; height: 6px; border-radius: 50%; background: var(--gold);
             box-shadow: 0 0 10px var(--gold); animation: pulseDot 2.4s ease-in-out infinite;
         }
+        /* The edition badge carries two dates since 8 October: on a phone,
+           tighter letters and even lines, so no year stands alone. After
+           the rule above, which it overrides. */
+        @media (max-width: 420px) {
+            .hero-badge { max-width: 100%; letter-spacing: 2px; text-wrap: balance; }
+        }
         @keyframes pulseDot {
             0%, 100% { transform: scale(1); opacity: 1; }
             50% { transform: scale(0.55); opacity: 0.5; }
@@ -706,8 +712,8 @@
             box-shadow: 0 0 10px var(--accent); animation: pulseDot 2s ease-in-out infinite;
         }
         .counted-grid { display: grid; gap: 16px 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        @media (min-width: 720px) { .counted-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-        @media (min-width: 1100px) { .counted-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+        /* Eight counts since the second edition: two rows of four. */
+        @media (min-width: 720px) { .counted-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
         .counted-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
         .counted-n {
             display: inline-block; font-family: var(--font-d); font-weight: 800; font-size: clamp(20px, 3vw, 26px);
@@ -790,7 +796,7 @@
         .loop-spin { transform-origin: 50% 50%; }
         .circuit.is-looping .loop-spin { animation: spin 1.2s var(--ease-out); }
 
-        /* ── IV. the principles ── */
+        /* ── V. the principles (and IV, the safeguards) ── */
         .principles {
             display: grid; gap: 16px; counter-reset: pr;
             grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
@@ -834,7 +840,7 @@
         }
         .pcard p { font-size: 16px; color: var(--text2); line-height: 1.62; }
 
-        /* ── V. the road so far ── */
+        /* ── VI. the road so far ── */
         .tl { position: relative; max-width: 900px; padding-left: 44px; margin-top: 44px; }
         .tl-rail { position: absolute; left: 14px; top: 8px; bottom: 8px; width: 2px; background: var(--border); border-radius: 2px; }
         .tl-rail-fill {
@@ -911,7 +917,7 @@
             animation: pulseDot 1.8s ease-in-out infinite;
         }
 
-        /* ── VI. in progress ── */
+        /* ── VII. in progress ── */
         .bench { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); }
         .bench-card {
             position: relative; overflow: hidden; padding: 22px 20px 26px; border-radius: 14px;
@@ -948,7 +954,7 @@
         }
         .golive { list-style: none; counter-reset: go; display: grid; gap: 14px; position: relative; }
         @media (min-width: 900px) {
-            .golive { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; }
+            .golive { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
             .golive::before {
                 content: ""; position: absolute; left: 8%; right: 8%; top: 28px; height: 2px;
                 background: repeating-linear-gradient(90deg, var(--accent-dim) 0 10px, transparent 10px 20px);
@@ -971,12 +977,13 @@
         .golive-step:nth-child(2) .golive-n { animation: pulseRing 2.6s ease-in-out 0.4s infinite; }
         .golive-step:nth-child(1) .golive-n { animation: pulseRing 2.6s ease-in-out infinite; }
         .golive-step:nth-child(3) .golive-n { animation: pulseRing 2.6s ease-in-out 0.8s infinite; }
+        .golive-step:nth-child(4) .golive-n { animation: pulseRing 2.6s ease-in-out 1.2s infinite; }
         @keyframes pulseRing {
             0%, 100% { transform: scale(1); }
             50% { transform: scale(1.08); }
         }
 
-        /* ── VII. the closing ── */
+        /* ── VIII. the closing ── */
         .ch-closing { text-align: center; }
         .ch-closing .ch-head, .ch-closing .prose { margin-left: auto; margin-right: auto; }
         .ch-closing .ch-mark { justify-content: center; }
@@ -1721,7 +1728,7 @@
         }, 140);
     }
 
-    /* 9. A trade's circuit: an impulse travels the ten steps, lighting
+    /* 9. A trade's circuit: an impulse travels the steps, lighting
           each, then loops back to the first. Only while it is in view. */
     var circuit = doc.querySelector("[data-circuit]");
     if (circuit && moving && hasIO) {

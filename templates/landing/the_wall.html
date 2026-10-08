@@ -1902,6 +1902,12 @@
                stay dark ink on something near white. */
             .wall-section:nth-child(even) { background: transparent !important; }
             .feature-card, .visual-label, .demo-exposure-panel, .demo-log-panel, .ops-panel, .ops-inbox-row, .ops-band-cell, .ask-term, .desk-row, .demo-log-row { background: #f4f4f4 !important; backdrop-filter: none !important; }
+            /* The pillar counts and the chain's last hash are drawn as a
+               gradient clipped to their letters, with the colour itself
+               transparent: a printer that leaves background graphics out,
+               which is the browser default, would print an empty slot
+               where the number stands. Plain ink here. */
+            .pillar-num, .hash-block .hash-shimmer { background: none !important; -webkit-background-clip: border-box !important; background-clip: border-box !important; -webkit-text-fill-color: var(--accent) !important; color: var(--accent) !important; }
         }
     </style>
     {# The ring scheme's own sheet (2026-09-29): shared with the home page, so one drawing has one style. After the inline sheet, which owns the tokens it reads. #}
@@ -2712,7 +2718,7 @@
         // Top sector — unipolar, fills from left
         var s = topSector();
         if (s[0]) {
-            expSecEl.textContent = s[0] + ' ' + s[1];
+            expSecEl.textContent = s[0] + ' ' + s[1].toFixed(1);
             expSecFill.style.width = Math.min(100, (s[1] / secCap) * 100) + '%';
             expSecFill.classList.toggle('over', s[1] > secCap);
             expSecEl.style.color = s[1] > secCap ? 'var(--accent-red)' : 'var(--accent)';
@@ -2823,7 +2829,7 @@
             reason = 'Equity cap |' + afterEq.toFixed(1) + '| > ' + eqCap.toFixed(1);
         } else if (contrib.sector && afterSec > secCap) {
             rejected = true;
-            reason = contrib.sector + ' sector ' + afterSec + ' > ' + secCap;
+            reason = contrib.sector + ' sector ' + afterSec.toFixed(1) + ' > ' + secCap;
         }
 
         var label = a[0].toUpperCase() + ' ' + a[1] + ' ' + a[2];
@@ -2886,8 +2892,9 @@
     // Slow exposure decay so caps stay relevant + visitor can experiment
     setInterval(function() {
         exp.usd *= 0.95; exp.equity *= 0.95;
+        // Kept to a tenth, so a refusal never reads "3.0 > 3".
         Object.keys(exp.sectors).forEach(function(k) {
-            exp.sectors[k] = Math.max(0, exp.sectors[k] - 0.4);
+            exp.sectors[k] = Math.round(Math.max(0, exp.sectors[k] - 0.4) * 10) / 10;
         });
         renderExposure();
     }, 1500);
@@ -2913,18 +2920,24 @@
     syncLabels();
 
     // Spawn rate — slower for clarity. Only run when section is visible.
+    // An engine without IntersectionObserver (Safari 12.0, IE11) cannot
+    // tell when the section is seen: the demo simply runs.
     var spawnInterval = null;
-    var io = new IntersectionObserver(function(entries) {
-        entries.forEach(function(e) {
-            if (e.isIntersecting && !spawnInterval) {
-                spawnInterval = setInterval(spawn, 1100);
-            } else if (!e.isIntersecting && spawnInterval) {
-                clearInterval(spawnInterval);
-                spawnInterval = null;
-            }
-        });
-    }, { threshold: 0.2 });
-    io.observe(document.getElementById('demo'));
+    if (typeof window.IntersectionObserver !== 'function') {
+        spawnInterval = setInterval(spawn, 1100);
+    } else {
+        var io = new IntersectionObserver(function(entries) {
+            entries.forEach(function(e) {
+                if (e.isIntersecting && !spawnInterval) {
+                    spawnInterval = setInterval(spawn, 1100);
+                } else if (!e.isIntersecting && spawnInterval) {
+                    clearInterval(spawnInterval);
+                    spawnInterval = null;
+                }
+            });
+        }, { threshold: 0.2 });
+        io.observe(document.getElementById('demo'));
+    }
 })();
 </script>
 </section>
@@ -3038,7 +3051,7 @@
                 <div class="pillar-desc">A signal becomes a trade from the rail itself &mdash; sized from your risk
                 settings, then graded, reconciled, kill-switchable and audited exactly like a bot's.
                 Paper by default; a live ticket goes to the broker as one order with its stop and target, behind the trading PIN,
-                and warns before a reward under the risk, a trade no signal backs, a shut market, a bad hour or a sick venue &mdash; then lets you decide.</div>
+                and warns of a reward under the risk, a trade no signal backs, a shut market, a bad entry hour or a sick venue &mdash; then leaves the last word to you.</div>
             </div>
             <div class="pillar">
                 <div class="pillar-num"><span class="count-up" data-target="{{ wall.instruments }}">{{ wall.instruments }}</span></div>
@@ -3223,8 +3236,8 @@
                 <div class="feature-title">The Venue's Health</div>
                 <div class="feature-text">
                     An order whose answer never came back is held in doubt and looked for at the venue, never sent twice blind.
-                    A burst of failures makes the venue sick: new real-money entries wait for quiet while closes and stop moves go on.
-                    A crossed, stale or frozen quote is not traded on, every live bot order takes a last look before it leaves, and a worse fill at eToro moves the stop by the slip.
+                    A burst of failures makes the venue sick: new real-money bot entries wait for quiet while closes and stop moves go on.
+                    No bot enters on a crossed, stale or frozen quote, every live bot order takes a last look before it leaves, and a worse fill at eToro moves the stop by the slip.
                 </div>
             </div>
             <div class="feature-card reveal delay-4">
@@ -3256,7 +3269,7 @@
                 <div class="feature-title">The Guards and the Brake</div>
                 <div class="feature-text">
                     Every five minutes, with their switch on, {{ wall.guards }} guards look for what must never happen: a booking on a shut market, a live trade with no stop, a stuck close, a drift from the venue, a stop that did not hold.
-                    A few of them may brake, and a brake only stops new entries: what a bot holds is still managed.
+                    With a second switch on as well, a few of them may brake, and a brake only stops new entries: what a bot holds is still managed.
                     Every switch-off records who, when and why.
                 </div>
             </div>
@@ -3415,7 +3428,7 @@
             a hold ceiling, a concurrency limit and a risk fraction, and that is the whole list. What the
             short-term one actually gets is how much position one fixed risk budget buys when the stop is
             tight, plus how many bets may run at once. Both are cash.
-            Where leverage exists at all it is the broker's: a live ticket offers the multipliers the venue lists, the highest by default,
+            Where leverage exists at all it is the broker's: with the leverage switch on, a live ticket offers the multipliers the venue lists, the highest by default,
             and with its switch on the attack mode picks, for each entry, the highest one the venue lists that its stop allows.
             It changes the money the broker locks, never the loss at the stop. And a personality
             moves no capital by itself: it changes no account share, enables no config, and applying one
@@ -4504,16 +4517,22 @@
     // the head switch is shown the moment it scrolls into view even if
     // a later part of this script throws. Each block is observed until
     // its first sight and then let go: what was read stays read.
+    // An engine without IntersectionObserver (the head switch left every
+    // block visible for it) shows them at once, and the rest of this
+    // script, the ticker and the counts among it, still runs.
+    var canObserve = typeof window.IntersectionObserver === 'function';
     var reveals = document.querySelectorAll('.reveal, .reveal-left, .reveal-right, .reveal-scale');
-    var observer = new IntersectionObserver(function(entries) {
+    var observer = canObserve ? new IntersectionObserver(function(entries) {
         entries.forEach(function(entry) {
             if (entry.isIntersecting) {
                 entry.target.classList.add('visible');
                 observer.unobserve(entry.target);
             }
         });
-    }, { threshold: 0.05, rootMargin: '0px 0px -40px 0px' });
-    reveals.forEach(function(el) { observer.observe(el); });
+    }, { threshold: 0.05, rootMargin: '0px 0px -40px 0px' }) : null;
+    reveals.forEach(function(el) {
+        if (observer) { observer.observe(el); } else { el.classList.add('visible'); }
+    });
     // The head switch's failsafe reads this: the observer is armed, so
     // the hidden blocks will be shown and the class may stay.
     window.wallAwake = true;
@@ -4552,7 +4571,7 @@
     var ctx = canvas.getContext('2d');
     var W, H;
     function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
-    resize(); window.addEventListener('resize', resize);
+    resize();
 
     var particleTags = [
         ['SIGNALS GRADED', wallNum(WALL.signals)],
@@ -4640,6 +4659,14 @@
         if (!prefersReducedMotion) { requestAnimationFrame(drawParticles); }
     }
     drawParticles();
+    // Setting the canvas size clears it, and under reduced motion no
+    // next frame is scheduled: the one frame is painted again on every
+    // resize (a phone's address bar collapsing on the first scroll is
+    // one), or the layer would stand blank after it.
+    window.addEventListener('resize', function () {
+        resize();
+        if (prefersReducedMotion) { drawParticles(); }
+    });
 
     // ── Ticker bar population ────────────────────────────────────────
     // The strip scrolls what the platform has actually done, straight
@@ -4686,7 +4713,12 @@
     // runs once, at first sight; where motion is not welcome, or where
     // the head switch found no observer, the number is only grouped.
     var countEls = document.querySelectorAll('.count-up');
-    var countObserver = new IntersectionObserver(function(entries) {
+    if (!canObserve) {
+        countEls.forEach(function(el) {
+            el.textContent = wallNum(parseInt(el.dataset.target, 10) || 0);
+        });
+    }
+    var countObserver = canObserve && new IntersectionObserver(function(entries) {
         entries.forEach(function(entry) {
             if (entry.isIntersecting) {
                 var el = entry.target;
@@ -4709,7 +4741,7 @@
             }
         });
     }, { threshold: 0.5 });
-    countEls.forEach(function(el) { countObserver.observe(el); });
+    if (countObserver) { countEls.forEach(function(el) { countObserver.observe(el); }); }
 
     // ── Parallax + pupil-tracking on mouse move ──────────────────────
     // The globe-eye-fixed (giant Sauron eye) drifts subtly with cursor;

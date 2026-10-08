@@ -120,7 +120,7 @@ CHAPTERS = [
              "that day, each counted on the day its record carries. Since "
              "9 August every one of them had been co-written with Claude, "
              "and most of the work on real money dated from September."),
-            ("From 29 September the work arrived in reviewed batches, each "
+            ("From 29 September the work arrived in batches, each "
              "one designed, reviewed and run against the whole suite of "
              "tests before it was merged. The first week of October brought "
              "the proving ground, the care of open trades, and a clock and "
@@ -301,10 +301,11 @@ CHAPTERS = [
                       "trade ever loses its stop, an alert goes out, even "
                       "when the bots' messages are muted; only the shared "
                       "quiet hours, when set, hold it back. Just before a "
-                      "real-money order leaves, the price is read once more, "
-                      "and a fill worse than planned moves the stop closer "
-                      "by the same distance, so the loss at the stop stays "
-                      "the one chosen. An order whose answer never comes "
+                      "bot's real-money order leaves, the price is read once "
+                      "more, and a fill worse than planned, on a bot's order "
+                      "or a hand-taken one, moves the stop closer by the "
+                      "same distance, so the loss at the stop stays the one "
+                      "chosen. An order whose answer never comes "
                       "back is held in doubt and looked for at the venue, "
                       "never sent a second time blind.")},
             {"title": "The care",
@@ -347,9 +348,10 @@ CHAPTERS = [
         "after": [
             ("The last step closes the loop. A rule climbs a ladder of four "
              "rungs: research (no trades at all), simulation, small real (a "
-             "quarter of the size), full real. A rule that falls apart "
-             "climbs back down on its own, and one measured as losing on "
-             "real money drops straight back to simulation. Real money also "
+             "quarter of the size), full real. With the ladder's switch on, "
+             "a rule that falls apart climbs back down on its own, and one "
+             "measured as losing on real money drops straight back to "
+             "simulation. Real money also "
              "follows the proving ground: a rule it has not passed trades "
              "at a quarter even on the top rung, unless its own record has "
              "earned more, and a rung given by hand without that proof says "
@@ -402,9 +404,10 @@ CHAPTERS = [
                       "record has earned more. A rule set to real money by "
                       "hand without that proof is labelled so.")},
             {"title": "The clock",
-             "text": ("No real-money order is sent for a share, an ETF, a "
-                      "currency or a commodity while its exchange is shut. "
-                      "Crypto aside, which never shuts, no bot opens a trade "
+             "text": ("No bot opens a real-money trade in a share, an ETF, "
+                      "a currency or a commodity while its exchange is shut; "
+                      "a ticket placed by hand is warned and left to its "
+                      "owner. Crypto aside, which never shuts, no bot opens a trade "
                       "in the twenty minutes around New York's five o'clock "
                       "rollover, in a market's first quarter hour, in a "
                       "share's last ten minutes, or on a Friday in the hour "
@@ -421,19 +424,22 @@ CHAPTERS = [
                       "the instrument trades again; it is never sent a "
                       "second time blind. Three failures inside three "
                       "minutes, or one failed order, make the venue sick: "
-                      "new real-money entries wait for ten quiet minutes, "
-                      "while closes and stop moves go on. Since 7 October a "
-                      "burst of “too many requests” pauses new "
+                      "the bots' new real-money entries wait for ten quiet "
+                      "minutes, while closes and stop moves go on and a "
+                      "ticket placed by hand is warned. Since 7 October a "
+                      "burst of “too many requests” pauses the bots' new "
                       "real-money entries for a short while before the venue "
                       "is called sick, and the alert that says it is sick "
                       "names its times and its count.")},
             {"title": "A price that looks like a market",
-             "text": ("A quote that is crossed, stale, frozen or far from a "
-                      "second source is not traded on. Every real-money "
-                      "order takes one last look at the price just before it "
-                      "leaves, and is held back if the price has run or if "
-                      "half the spread would eat more than 15% of the "
-                      "distance to its stop. A single aberrant print, or a "
+             "text": ("No bot enters on a quote that is crossed, stale, "
+                      "frozen or far from a second source. Every real-money "
+                      "bot order takes one last look at the price just "
+                      "before it leaves, and is held back if the price has "
+                      "run or if half the spread would eat more than 15% of "
+                      "the distance to its stop; a ticket placed by hand is "
+                      "warned of such a quote, and the last word is a "
+                      "person's. A single aberrant print, or a "
                       "feed frozen for 45 minutes, can no longer close a "
                       "trade or move its stop.")},
             {"title": "The care of an open trade",
@@ -461,8 +467,8 @@ CHAPTERS = [
                       "rule returns only on fresh evidence from simulation. "
                       "The trades placed by hand are never his to judge.")},
             {"title": "The loser floor",
-             "text": ("Each night, when the ladder runs, it reads every "
-                      "rule's whole graded record: one with 20 or more "
+             "text": ("Each night, with its switch on, the ladder reads "
+                      "every rule's whole graded record: one with 20 or more "
                       "graded signals and an expectancy at or under zero, or "
                       "a thin edge under a low hit rate, leaves real money "
                       "for simulation at once, unless its owner promoted it "
@@ -497,8 +503,9 @@ CHAPTERS = [
                       "with a measured edge on that venue and a reward at "
                       "least twice its risk, at half its size and two a day "
                       "at most; at one and a half times the limit, nothing "
-                      "opens. What every open trade would lose together at "
-                      "its stop is capped at 15% of the book by default, and "
+                      "opens. What the open trades would lose together at "
+                      "their stops is capped at 15% of the book by default, "
+                      "and "
                       "an entry past that cap is refused, never shrunk; what "
                       "they carry together is capped at four times the "
                       "book, and the share of the account the broker may "
@@ -507,8 +514,9 @@ CHAPTERS = [
              "text": ("With their switch on, the Morgul guards look every "
                       "five minutes for what Sauron must never do, from a "
                       "booking on a shut market to a real-money stop that "
-                      "did not hold, and tell the group. A few of them may "
-                      "brake, and a brake means one thing: open nothing new. "
+                      "did not hold, and tell the group. With a second "
+                      "switch on as well, a few of them may brake, and a "
+                      "brake means one thing: open nothing new. "
                       "What the bot holds goes on being managed as before. A "
                       "bot switched off by hand, or by the emergency stop, "
                       "is not ticked at all, and every switch-off records "
@@ -644,9 +652,9 @@ CHAPTERS = [
                       "two, the third disarmed the automatic brake on "
                       "losses. It stays as it is: breaking a guarantee to "
                       "correct a caution is not an improvement. Since 1 "
-                      "October, with one shared pool switched on, there is "
-                      "no slice left to get wrong: every pool that follows "
-                      "the account draws on the whole of it.")},
+                      "October every pool that follows the account can draw "
+                      "on the whole of it instead; with that switch on, "
+                      "there is no slice left to get wrong.")},
         ],
     },
     {
@@ -835,14 +843,15 @@ ERAS = [
      "title": "The venue, the clock and the proof",
      "summary": ("The engine stops deciding on a dead or aberrant price, "
                  "values a real trade at the venue's own rate, holds an "
-                 "unanswered order in doubt and new entries while a venue "
-                 "is sick. A high-impact print is treated like a weekend, "
+                 "unanswered order in doubt, and holds back new entries "
+                 "while a venue is sick. A high-impact print is treated like a weekend, "
                  "the clock judges every entry, and the comparison with the "
                  "venue runs around the clock. A measured loser leaves real "
                  "money, and real money follows the proving ground's "
                  "verdict. On the 7th a busy venue is no longer called sick "
                  "at once, the venue is asked before a missing trade is "
-                 "booked closed, the price bars stop bursting it, and the "
+                 "booked closed, the price bars stop flooding it with "
+                 "requests, and the "
                  "scorecard says what closed each trade.")},
 ]
 
@@ -1184,11 +1193,11 @@ MILESTONES = [
      "ed8cb31"),
     ("2026-10-05", "venue-and-clock", "In doubt, never twice",
      "An order whose answer never came back is held in doubt and looked for "
-     "at the venue, never sent again blind, and a sick venue holds new "
-     "real-money entries.",
+     "at the venue, never sent again blind, and a sick venue holds the "
+     "bots' new real-money entries.",
      "0dd8c1d"),
     ("2026-10-05", "venue-and-clock", "A last look before leaving",
-     "Every real-money order reads the price once more just before it "
+     "Every real-money bot order reads the price once more just before it "
      "leaves, and a worse fill moves the stop by the same distance.",
      "b5c0c4e"),
     ("2026-10-05", "venue-and-clock", "A measured loser leaves real money",
@@ -1196,9 +1205,9 @@ MILESTONES = [
      "goes back to simulation at once.",
      "6d48449"),
     ("2026-10-06", "venue-and-clock", "The clock judges every entry",
-     "No new trade in the rollover, in a market's first quarter hour, in a "
-     "share's last minutes, in Friday's last hour or around a high-impact "
-     "print.",
+     "No bot opens a trade in the rollover, in a market's first quarter "
+     "hour, in a share's last minutes, in Friday's last hour or around a "
+     "high-impact print.",
      "fa096a1"),
     ("2026-10-06", "venue-and-clock", "Reconciled around the clock",
      "The comparison with the venue runs every quarter hour, day and night: "
@@ -1215,7 +1224,7 @@ MILESTONES = [
      "called insufficient.",
      "1c5a876"),
     ("2026-10-07", "venue-and-clock", "No entry on a shut market",
-     "A live entry is refused while its exchange is shut, and the gate "
+     "A bot's live entry is refused while its exchange is shut, and the gate "
      "reads the very clock the guard reads, so the two can no longer "
      "disagree.",
      "7031773"),
@@ -1230,8 +1239,8 @@ MILESTONES = [
      "why.",
      "94a7287"),
     ("2026-10-07", "venue-and-clock", "A busy venue is not a sick venue",
-     "A burst of “too many requests” from the venue now pauses new "
-     "real-money entries for a short while before the venue is called "
+     "A burst of “too many requests” from the venue now pauses the bots' "
+     "new real-money entries for a short while before the venue is called "
      "sick, and the alert that says a venue is sick names its times and "
      "its count.",
      "2899df5"),
@@ -1240,7 +1249,7 @@ MILESTONES = [
      "venue is asked about that trade; a close the venue made is booked at "
      "the stop or target it held, and said as an estimate.",
      "fc7b00d"),
-    ("2026-10-07", "venue-and-clock", "The bars stop bursting the venue",
+    ("2026-10-07", "venue-and-clock", "The bars stop flooding the venue",
      "The refresh of the price bars asks the venue one request at a time, "
      "paced, stops at the first refusal, and yields to the trading reads.",
      "5eb7c38"),
@@ -1267,13 +1276,17 @@ IN_PROGRESS = [
 ]
 
 #: The road a class travels to real money, in order: the same for every
-#: class.
+#: class, save where the text says otherwise (crypto's proof was measured
+#: on the real account). The multiplier is not part of a proof since
+#: 5 October: the attack mode reads the venue's own list.
 GO_LIVE = [
-    {"title": "A proof for every class, in demo",
-     "text": ("Each class earns its proof in the demo account, at the "
-              "leverage it will use: an order filled, then closed, and "
-              "written into the code with its test. A sell waits for a "
-              "proof of its own.")},
+    {"title": "A proof for every class, at eToro",
+     "text": ("Each class earns its proof at eToro, most of them in the "
+              "demo account and crypto on the real one: an order filled, "
+              "then closed, and written into the code with its test. A sell "
+              "waits for a proof of its own. The multiplier is not part of "
+              "the proof: with its switch on, the attack mode reads the "
+              "venue's own list.")},
     {"title": "Real money only with the PIN, in person",
      "text": ("Unticking the demo box is the switch to real money. It asks "
               "for the trading PIN, typed in person on the page and never "
@@ -1364,7 +1377,8 @@ LEXICON = [
     {"term": "Morgul",
      "plain": ("The guards: a watchdog outside the engine that, with its "
                "switch on, looks every five minutes for what must never "
-               "happen, tells the group, and may brake a bot.")},
+               "happen and tells the group; with a second switch on as "
+               "well, it may brake a bot.")},
     {"term": "Aragorn",
      "plain": ("The guardian who decides, every four hours when his switch "
                "is on, which rule may trade real money on which family of "

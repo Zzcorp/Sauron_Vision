@@ -26,7 +26,9 @@ anchor, and a mis-anchored splice that swallowed a neighbouring section
 would otherwise pass every other assertion in this file.
 """
 import re
+from pathlib import Path
 
+from django.conf import settings
 from django.test import TestCase
 
 from core import wall_facts as wf
@@ -667,9 +669,12 @@ class WallClaimsFollowTheCodeTests(TestCase):
     true: the broker count to core.wall_facts, the cadences to the beat,
     the debate to trade_debate.py's own shadow-then-binding rule, the
     fleet's sizing to the proving ground, the router's fallback to
-    broker_router. Every fragment asserted present or absent sits on ONE
+    broker_router. Every fragment asserted present or missing sits on ONE
     source line of the template (the reflow rule), so a wrapped paragraph
-    cannot make an absence test pass by accident.
+    cannot make a negative test pass by accident. A typed literal that is
+    stale is looked for in the template's source, never in the answer: the
+    answer prints the counted value, and a registry that came to hold
+    exactly 12 or 6 entries would make the right page fail.
     """
 
     def setUp(self):
@@ -677,20 +682,23 @@ class WallClaimsFollowTheCodeTests(TestCase):
         self.response = self.client.get("/wall/")
         self.body = self.response.content.decode("utf-8", errors="ignore")
         self.wall = self.response.context["wall"]
+        self.src = (Path(settings.BASE_DIR) / "templates" / "landing"
+                    / "the_wall.html").read_text(encoding="utf-8")
 
     def _section(self, anchor):
         start = self.body.index(anchor)
         return self.body[start:self.body.index("</section>", start)]
 
     def test_the_broker_count_is_the_facts_never_a_word(self):
-        low = self.body.lower()
+        low = self.src.lower()
         for stale in ("six brokers", "six broker adapters", "6 broker adapters"):
             self.assertNotIn(stale, low, stale)
+        self.assertIn("{{ wall.broker_adapters }} broker adapters", self.src)
         self.assertIn(f'{self.wall["broker_adapters"]} broker adapters', self.body)
 
     def test_the_evaluator_count_is_the_facts_never_a_digit(self):
-        self.assertNotIn("12 Evaluators", self.body)
-        self.assertNotIn("12 evaluators", self.body)
+        self.assertNotIn("12 Evaluators", self.src)
+        self.assertNotIn("12 evaluators", self.src)
         self.assertIn(f'{self.wall["evaluators"]} Evaluators.', self.body)
 
     def test_the_broker_grid_names_the_live_venue_and_the_retired_one(self):
@@ -717,6 +725,13 @@ class WallClaimsFollowTheCodeTests(TestCase):
         self.assertNotIn("still under the gate", self.body)
         self.assertIn("Full Size Is Earned.", self.body)
         self.assertIn("enters at a quarter", self.body)
+        # The quarter is typed twice on this page (#fleet, #safeguards):
+        # held here to the size the code gives an unproven rule.
+        from backtester.proving import proof
+        from signals.promotion_pipeline import SIZE_FACTORS
+        self.assertEqual(SIZE_FACTORS["live_small"], 0.25,
+                         "rewrite 'enters at a quarter' in #fleet and #safeguards")
+        self.assertEqual(proof.REDUCED, SIZE_FACTORS["live_small"])
 
     def test_the_spine_says_what_this_page_shows_for_a_dead_counter(self):
         self.assertNotIn("with an audit row to show for it", self.body)
@@ -744,8 +759,23 @@ class WallClaimsFollowTheCodeTests(TestCase):
             self.assertNotIn(stale, self.body, stale)
 
     def test_the_leverage_paragraph_says_what_the_ticket_offers(self):
+        """A live ticket lists the venue's multipliers only while the
+        leverage switch is on: off, every multiplier above 1 is refused
+        (judge_order_leverage) and the ticket offers 1x alone. The switch
+        ships off, so the page names it (review, 2026-10-08)."""
+        import inspect
+        from bot_program.asset_engine import base
+        from core.platform_control import DEFAULT_COMPONENTS, LIVE_MONEY_SWITCHES
         self.assertNotIn("as a fact at the confirm step", self.body)
         self.assertIn("the highest by default", self.body)
+        self.assertIn("with the leverage switch on, a live ticket offers the multipliers "
+                      "the venue lists, the highest by default", self.body)
+        self.assertEqual(base.LEVERAGE_SWITCH_KEY, "etoro_leverage_live")
+        self.assertIn("LEVERAGE_SWITCH_KEY", inspect.getsource(base.judge_order_leverage),
+                      "a typed multiplier no longer needs the switch: rewrite #personas")
+        self.assertIn(base.LEVERAGE_SWITCH_KEY, LIVE_MONEY_SWITCHES)
+        row = [c for c in DEFAULT_COMPONENTS if c["key"] == base.LEVERAGE_SWITCH_KEY][0]
+        self.assertFalse(row.get("is_enabled"))
 
     def test_the_closed_loop_paragraph_is_the_demotion_rule(self):
         self.assertNotIn("then drifts negative", self.body)
@@ -755,9 +785,27 @@ class WallClaimsFollowTheCodeTests(TestCase):
     def test_take_trade_names_the_live_ticket(self):
         self.assertNotIn("Executes on the paper venue", self.body)
         self.assertIn("behind the trading PIN", self.body)
+        # It warns OF conditions, and the last word is the visitor's.
+        self.assertNotIn("warns before a reward", self.src)
+        self.assertIn("and warns of a reward under the risk, a trade no signal backs, "
+                      "a shut market, a bad entry hour or a sick venue", self.body)
+        self.assertIn("then leaves the last word to you.", self.body)
+
+    def test_the_hand_ticket_is_never_promised_a_bots_hold(self):
+        """The last look, the sick venue and the quote check hold a bot's
+        entry; the ticket placed by hand is only warned (manual_trade.py),
+        so every hold on this page names the bot (review, 2026-10-08)."""
+        self.assertNotIn("A crossed, stale or frozen quote is not traded on", self.src)
+        self.assertIn("No bot enters on a crossed, stale or frozen quote", self.body)
+        self.assertIn("every live bot order takes a last look", self.body)
+        self.assertIn("new real-money bot entries wait for quiet", self.body)
+        self.assertIn("No bot opens a real-money trade in a share", self.body)
 
     def test_the_second_gate_names_its_gestures(self):
-        self.assertNotIn("Every action that can move capital sits behind", self.body)
+        # The old sentence wrapped after "capital": the phrase below was the
+        # whole of its first source line, so this check can fail (the
+        # reflow rule).
+        self.assertNotIn("Every action that can move capital", self.src)
         self.assertIn("unticking the demo box", self.body)
 
     def test_the_router_says_where_an_unflagged_class_goes(self):
@@ -873,6 +921,11 @@ class WallSafeguardsSectionTests(TestCase):
         self.assertIn("Every one ships off", block)
         # The dead man's switch pings only once a URL is set: hedged too.
         self.assertIn("Once it is set up", block)
+        # The brake is a switch of its own, which acts only while the
+        # guards' is on (bot_program/morgul.py BRAKE_KEY).
+        from bot_program import morgul
+        self.assertEqual(morgul.BRAKE_KEY, "morgul_brake")
+        self.assertIn("With a second switch on as well, a few of them may brake", block)
 
     def test_its_cadence_is_the_beats(self):
         from config.celery import app
@@ -1232,6 +1285,23 @@ class MotionIsOptionalOnTheWallTests(TestCase):
             self.assertTrue(any(layer in k and "display: none !important" in v
                                 for k, v in rules.items()), layer)
         self.assertIn("animation: none !important", block)
+        # The gradient-clipped counts print as plain ink: with background
+        # graphics left out, the browser default, a clipped gradient paints
+        # nothing and the transparent letters printed as an empty slot (the
+        # four pillars of the safeguards among them, measured 2026-10-08).
+        for clipped in (".pillar-num", ".hash-block .hash-shimmer"):
+            with self.subTest(selector=clipped):
+                on_screen = [v for k, v in _rules(css) if k == clipped]
+                self.assertTrue(any("background-clip: text" in v and "color: transparent" in v
+                                    for v in on_screen), clipped)
+        ink = [v for k, v in rules.items()
+               if ".pillar-num" in k and ".hash-block .hash-shimmer" in k]
+        self.assertEqual(len(ink), 1, "no print rule gives the clipped counts plain ink")
+        ink = ink[0]
+        self.assertIn("background: none !important", ink)
+        self.assertIn("background-clip: border-box !important", ink)
+        self.assertIn("-webkit-text-fill-color: var(--accent) !important", ink)
+        self.assertRegex(ink, r"(?<![-\w])color: var\(--accent\) !important")
         # The page's own :root stays the first one: the Book copies it.
         self.assertLess(self.body.index(":root {"), self.body.index("@media print"))
 
@@ -1273,6 +1343,53 @@ class MotionIsOptionalOnTheWallTests(TestCase):
         # particles, so a throw further down never leaves a block hidden.
         self.assertLess(script.index("window.wallAwake = true"), script.index("var WALL = {"))
         self.assertLess(script.index("observer.observe(el)"), script.index("window.wallAwake = true"))
+
+    def test_the_reduced_motion_frame_survives_a_resize(self):
+        """Setting the canvas size clears it, and under reduced motion no
+        next frame is scheduled: measured on 2026-10-08, the one frame was
+        gone after the first resize (2198 painted pixels, then 0)."""
+        script = self._main_script()
+        first = script.index("drawParticles();")
+        listener = script[script.index("window.addEventListener('resize'"):]
+        listener = listener[:listener.index("});")]
+        self.assertLess(script.index("function drawParticles"), first)
+        self.assertLess(first, script.index("window.addEventListener('resize'"))
+        self.assertIn("resize();", listener)
+        self.assertIn("if (prefersReducedMotion) { drawParticles(); }", listener)
+        self.assertNotIn("window.addEventListener('resize', resize)", script)
+
+    def test_an_engine_without_the_observer_still_runs_the_page(self):
+        """The head switch leaves every block visible where there is no
+        IntersectionObserver; the scripts then built one unconditionally and
+        died at it, before the ticker, the counts, the eye and the door
+        (measured 2026-10-08). Every observer is now behind the same test,
+        and without one the counts are grouped at once."""
+        for m in re.finditer(r"new IntersectionObserver", self.body):
+            before = self.body[max(0, m.start() - 400):m.start()]
+            with self.subTest(at=m.start()):
+                self.assertTrue("canObserve" in before
+                                or "typeof window.IntersectionObserver" in before,
+                                "an observer built without asking whether the engine has one")
+        script = self._main_script()
+        self.assertLess(script.index("var canObserve = typeof window.IntersectionObserver === 'function';"),
+                        script.index("new IntersectionObserver"))
+        self.assertIn("if (observer) { observer.observe(el); } else { el.classList.add('visible'); }",
+                      script)
+        self.assertIn("if (!canObserve) {", script[script.index("var countEls"):])
+        self.assertIn("window.wallAwake = true", script)
+
+    def test_the_demo_prints_its_sector_tally_to_one_decimal(self):
+        """The sector tally decays by 0.4 every 1.5 s, so it is a float;
+        the decision log read "EUR sector 3.200000000000001 > 3" before
+        the readouts were rounded (measured 2026-10-08)."""
+        self.assertIn("reason = contrib.sector + ' sector ' + afterSec.toFixed(1) + ' > ' + secCap;",
+                      self.body)
+        self.assertIn("expSecEl.textContent = s[0] + ' ' + s[1].toFixed(1);", self.body)
+        self.assertNotIn("' sector ' + afterSec + ", self.body)
+        # The tally itself is kept to a tenth: a sum that only printed as
+        # one decimal read "EUR sector 3.0 > 3" (measured 2026-10-08).
+        self.assertIn("exp.sectors[k] = Math.round(Math.max(0, exp.sectors[k] - 0.4) * 10) / 10;",
+                      self.body)
 
     def test_the_decorative_layers_are_hidden_from_assistive_tech(self):
         for opener in ('<div class="grid-bg"', '<canvas id="bgCanvas"',

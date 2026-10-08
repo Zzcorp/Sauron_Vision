@@ -169,7 +169,7 @@
     flow(el('path', { d: 'M' + (tell.x + W / 2 + 4) + ',' + (tell.y + 4) + ' Q 900,545 976,500', 'class': 'day-arrow', 'marker-end': 'url(#dayAh)' }, g));
     text(g, 880, 585, 'day-tiny', 'MESSAGES');
     flow(el('path', { d: 'M976,470 Q 900,430 ' + (watch.x + 40) + ',' + (watch.y + H / 2 + 6), 'class': 'day-arrow day-soft', 'marker-end': 'url(#dayAhs)' }, g), '2.6s');
-    text(g, 905, 405, 'day-tiny', '/STOPALL · SWITCHES');
+    text(g, 905, 405, 'day-tiny', 'STOP ALL · SWITCHES');
     flow(el('path', { d: 'M' + (learn.x - 40) + ',' + (learn.y - H / 2 - 4) + ' Q 330,340 ' + (think.x - 30) + ',' + (think.y + H / 2 + 6), 'class': 'day-arrow day-soft', 'marker-end': 'url(#dayAhs)' }, g), '2.6s');
     text(g, 300, 440, 'day-tiny', 'THE NIGHT');
     text(g, 600, 690, 'day-tiny', 'ONE HEARTBEAT · MARKETS IN · ORDERS AND WORDS OUT · THE NIGHT FEEDS THE MORNING');

@@ -1509,6 +1509,54 @@ class PhoneFirst(TestCase):
             rule = re.search(r"(?<![\w-])%s\s*\{([^}]*)\}" % re.escape(selector), self.css).group(1)
             self.assertIn("color: var(--text2)", rule, selector)
 
+    def _columns(self, selector):
+        """Every column count `selector` is given, smallest screen first."""
+        return [int(n) for n in re.findall(
+            r"(?<![\w-])%s\s*\{[^}]*grid-template-columns:\s*repeat\((\d+)," % re.escape(selector),
+            self.css)]
+
+    def test_the_road_stands_on_one_row_with_every_numeral_pulsing(self):
+        """The road grew to four steps on 8 October inside a three-column
+        grid: the fourth stood alone under the connector, its numeral the
+        only still one (measured at 1280 px)."""
+        self.assertEqual(self._columns(".golive"), [len(book.GO_LIVE)],
+                         "the road's wide row does not hold every step")
+        for n in range(1, len(book.GO_LIVE) + 1):
+            self.assertRegex(self.css, r"\.golive-step:nth-child\(%d\) \.golive-n \{ animation: pulseRing" % n)
+
+    def test_the_counted_strip_fills_its_rows(self):
+        """Eight counts since the second edition: every wide row is full."""
+        columns = self._columns(".counted-grid")
+        self.assertGreaterEqual(len(columns), 2)
+        for n in columns:
+            self.assertEqual(len(book.COUNTED) % n, 0,
+                             "%d counts leave a row of %d half empty" % (len(book.COUNTED), n))
+
+    def test_on_a_phone_the_edition_badge_keeps_its_years(self):
+        """The badge carries two dates since 8 October; at 375 px it broke
+        into three lines with a year alone on two of them."""
+        # After the badge's own rule, or that rule's letter spacing wins.
+        base = re.search(r"(?<![\w-])\.hero-badge\s*\{", self.css).start()
+        phone = re.search(r"@media \(max-width: 420px\)", self.css[base:])
+        self.assertIsNotNone(phone, "no phone rule after the badge's own")
+        block = _block(self.css[base:], r"@media \(max-width: 420px\)")
+        rule = re.search(r"\.hero-badge\s*\{([^}]*)\}", block).group(1)
+        self.assertIn("text-wrap: balance", rule)
+        self.assertIn("max-width: 100%", rule)
+        self.assertIn("letter-spacing: 2px", rule)
+
+    def test_the_stylesheets_chapter_marks_follow_the_chapters(self):
+        """A chapter was inserted on 8 October (IV, the safeguards): the
+        template's own section marks follow the rendered numbering."""
+        src = (Path(settings.BASE_DIR) / "templates" / "landing"
+               / "the_book.html").read_text(encoding="utf-8")
+        romans = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]
+        marks = re.findall(r"/\* ── ([IVX]+)\. ", src)
+        self.assertEqual(marks, sorted(marks, key=romans.index), marks)
+        self.assertEqual(marks[-1], romans[len(book.CHAPTERS) - 1])
+        self.assertIn("── VI. the road so far ──", src)
+        self.assertNotIn("the ten steps", src)
+
 
 class TheProbeWalksIt(SimpleTestCase):
 
@@ -1646,6 +1694,123 @@ class TheBookFollowsTheCode(SimpleTestCase):
         self.assertNotIn(disarm.BY_KILL_SWITCH, disarm.BRAKES)
         self.assertNotIn(disarm.BY_BOT_OFF, disarm.BRAKES)
 
+    def _milestone(self, commit):
+        return [words for _day, _era, _title, words, c in book.MILESTONES if c == commit][0]
+
+    def test_a_ticket_placed_by_hand_is_warned_where_a_bot_is_held(self):
+        """The last look, the shut market and the sick venue hold a bot's
+        real-money entry; the ticket placed by hand is warned of each and
+        the last word is a person's (bot_program/manual_trade.py). The
+        first draft of this edition said "every real-money order" and "no
+        real-money order", which a hand-taken ticket contradicted, while
+        the Wall already said "every live bot order" (review, 2026-10-08)."""
+        import inspect
+        from bot_program import manual_trade
+        self.assertNotIn("_last_look", inspect.getsource(manual_trade),
+                         "the ticket takes the last look now: rewrite 'A price that looks "
+                         "like a market', 'The order, protected at the broker' and the "
+                         "5 October milestone")
+        for advisory in (manual_trade.quote_advisory, manual_trade.timing_advisory,
+                         manual_trade.venue_health_advisory):
+            with self.subTest(advisory=advisory.__name__):
+                self.assertIn("A WARNING, never a refusal", " ".join(advisory.__doc__.split()),
+                              "the ticket refuses now: rewrite 'The clock', 'The venue's "
+                              "health' and 'A price that looks like a market'")
+        look = self._text("safeguards", "A price that looks like a market")
+        clock = self._text("safeguards", "The clock")
+        venue = self._text("safeguards", "The venue's health")
+        order = self._text("circuit", "The order, protected at the broker")
+        self.assertIn("Every real-money bot order takes one last look", look)
+        self.assertIn("No bot opens a real-money trade in a share", clock)
+        self.assertIn("the bots' new real-money entries wait", venue)
+        self.assertIn("Just before a bot's real-money order leaves", order)
+        for words in (look, clock, venue):
+            self.assertIn("a ticket placed by hand is warned", words)
+        self.assertIn("Every real-money bot order reads the price", self._milestone("b5c0c4e"))
+        self.assertIn("A bot's live entry is refused", self._milestone("7031773"))
+        self.assertIn("No bot opens a trade in the rollover", self._milestone("fa096a1"))
+        self.assertIn("holds the bots' new real-money entries", self._milestone("0dd8c1d"))
+        self.assertIn("pauses the bots' new real-money entries", self._milestone("2899df5"))
+        for stale in ("Every real-money order", "No real-money order is sent",
+                      "A live entry is refused", "No new trade in the rollover"):
+            for _day, _era, _title, words, _commit in book.MILESTONES:
+                self.assertNotIn(stale, words, stale)
+            for chapter in book.CHAPTERS:
+                for item in chapter.get("items", []):
+                    self.assertNotIn(stale, item["text"], stale)
+
+    def test_the_road_says_no_proof_caps_the_multiplier(self):
+        """Since 5 October the attack mode's chooser reads the venue's own
+        list, bounded by the class ceiling, the stop band and the cash:
+        the proven multipliers are records, never a bound. The road once
+        said a class earns its proof "at the leverage it will use", which
+        the Leverage entry of the same edition contradicted; and crypto's
+        proof was measured on the real account, not in demo."""
+        import ast
+        import inspect
+        import textwrap
+        from bot_program.asset_engine.base import AssetBot
+        tree = ast.parse(textwrap.dedent(inspect.getsource(AssetBot._choose_auto_leverage)))
+        read = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        read |= {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+        self.assertEqual(sorted(name for name in read if "proven" in name.lower()), [],
+                         "a proof bounds the attack mode again: rewrite the road's first "
+                         "step and the lexicon's 'Leverage'")
+        road = book.GO_LIVE[0]["text"]
+        self.assertNotIn("at the leverage it will use", road)
+        self.assertIn("The multiplier is not part of the proof", road)
+        self.assertIn("crypto on the real one", road)
+        self.assertIn("on the real account", self._text("principles", "One proof per family"))
+        self.assertIn("no demo proof caps it", self._lexicon("Leverage"))
+
+    def test_the_switches_behind_the_ladder_and_the_brake_are_named(self):
+        """The nightly demotion runs under the ladder's own switch, and the
+        guards brake only with a second switch on (review, 2026-10-08):
+        the Wall said both, the Book said neither."""
+        from bot_program import morgul
+        from bot_program import tasks as bot_tasks
+        from signals import tasks as signal_tasks
+        self.assertEqual(signal_tasks.auto_evaluate_promotions.run.component_key,
+                         "pipeline_promotion",
+                         "the ladder's switch moved: rewrite the circuit's last paragraph "
+                         "and 'The loser floor'")
+        self.assertEqual(bot_tasks.run_morgul_guards.run.component_key, "morgul_guards")
+        self.assertEqual(morgul.BRAKE_KEY, "morgul_brake",
+                         "the brake has no switch of its own now: rewrite 'The guards and "
+                         "the brake' and the lexicon's 'Morgul'")
+        loop = self._text("circuit")["after"][0]
+        self.assertIn("With the ladder's switch on, a rule that falls apart", loop)
+        self.assertIn("Each night, with its switch on, the ladder reads",
+                      self._text("safeguards", "The loser floor"))
+        self.assertIn("With a second switch on as well, a few of them may brake",
+                      self._text("safeguards", "The guards and the brake"))
+        self.assertIn("with a second switch on as well, it may brake", self._lexicon("Morgul"))
+        self.assertIn("Both of its switches are off",
+                      self._text("principles", "The guards watch the machine"))
+
+    def test_the_shared_pool_is_said_as_a_switch_never_as_a_state(self):
+        """Whether one shared pool is switched on in production is not known
+        here (spec §7): the sentence dates the mechanism and puts the switch
+        in a condition."""
+        from core.platform_control import LIVE_MONEY_SWITCHES
+        self.assertIn("shared_capital_live", LIVE_MONEY_SWITCHES)
+        words = self._text("principles", "An error kept on the cautious side")
+        self.assertNotIn("with one shared pool switched on", words)
+        self.assertIn("can draw on the whole of it instead; with that switch on", words)
+
+    def test_the_review_s_plain_english_holds(self):
+        """Small wording the 2026-10-08 review corrected, each said once."""
+        everything = " ".join(
+            [p for c in book.CHAPTERS for p in c.get("paragraphs", []) + c.get("after", [])]
+            + [i["text"] for c in book.CHAPTERS for i in c.get("items", [])]
+            + [e["summary"] for e in book.ERAS]
+            + [t + " " + w for _d, _e, t, w, _c in book.MILESTONES])
+        for stale in ("reviewed batches", "every open trade would lose", "bursting",
+                      "in doubt and new entries"):
+            self.assertNotIn(stale, everything, stale)
+        self.assertIn("What the open trades would lose together at their stops",
+                      self._text("safeguards", "The limits of the book"))
+
     def test_every_default_the_book_states_is_the_codes(self):
         import datetime
         import importlib
@@ -1782,7 +1947,8 @@ class TheBookFollowsTheCode(SimpleTestCase):
         self.assertEqual(SIZE_FACTORS["live_small"], aragorn.PROBATION_SIZE)
         self.assertEqual(aragorn.PROBATION_SIZE, trade_debate.DEBATE_MIN_SCALE)
         self.assertEqual(trade_debate.DEBATE_MIN_SCALE, 0.25,
-                         "rewrite every 'a quarter' in the circuit, the safeguards and the bench")
+                         "rewrite every 'a quarter' in the circuit, the safeguards, the road, "
+                         "and the Wall's #fleet and #safeguards ('enters at a quarter')")
 
     def test_no_milestone_title_says_what_the_wall_forbids(self):
         """The Wall shows the latest titles (core.views_book.latest_steps),
