@@ -46,8 +46,8 @@ class Portfolio(models.Model):
     # resized. A PERCENTAGE of the broker's equity, read by
     # asset_engine.base.pledged_ceiling (the order gate) and Morgul's G6.
     # Default 50, the old constant MAX_PLEDGED_FRACTION. The operator,
-    # 2026-10-01: a manual 1,000 USD forex ticket at 1x already pledged
-    # 45% of a 2,240 account and refused every stock ticket after it; he
+    # 2026-10-01: one manual forex ticket at 1x already pledged nearly
+    # half of a small account and refused every stock ticket after it; he
     # chose 80, then 90 and 100 (2026-10-05). Bounds 10-100 on the card;
     # at 100 one gap can take the whole account, and he was told so.
     max_pledged_pct = models.FloatField(default=50)
@@ -62,10 +62,11 @@ class Portfolio(models.Model):
     # The most NOTIONAL one venue's open positions may carry together, as a
     # MULTIPLE of the venue's book (2026-10-04, risk_gate.notional_state).
     # The exposure limit above counts a forex row at its margin (1/30), so
-    # "100% max total exposure" let a 500 book carry 14,800 of yen crosses
-    # — 494 at work — and a 3.3% move against it was the whole book. This
-    # caps what the margin model lets through: 4x by default, the same
-    # multiple sizing already allows one forex trade against its pool.
+    # "100% max total exposure" let a small book carry yen crosses worth
+    # thirty times itself — a thirtieth at work — and a 3.3% move against
+    # them was the whole book. This caps what the margin model lets
+    # through: 4x by default, the same multiple sizing already allows one
+    # forex trade against its pool.
     # Hard for the bots (preflight and the final size), stated on the
     # manual ticket; a research pool is measured against itself. 0 reads
     # as "not set" and switches the gate off. Bounds 1-50 on the card.

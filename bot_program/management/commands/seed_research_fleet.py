@@ -4,7 +4,7 @@ The learning engine grades what the fleet does: every closed paper trade
 carries a realized R, every Signal on a scanned instrument resolves to an
 outcome, and the promotion ladder counts both. By 2026-09-11 that engine
 was fed by six starter configs on 35 symbols and three live pools on a
-500 EUR account — fourteen trades in a week, four signals a day — while
+small EUR account — fourteen trades in a week, four signals a day — while
 the catalogue held 179 instruments with keyless bars and marks for most
 of them. The ladder was starving on a full pantry.
 

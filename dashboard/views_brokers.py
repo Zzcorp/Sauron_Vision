@@ -36,7 +36,7 @@ THE DEMO UNTICK IS THE SWITCH TO REAL MONEY (measured 2026-09-23)
 
 `etoro_smoke --user Sauron --other-world`: the pair eToro's portal calls
 "virtual", saved here with Demo ticked, answered 200 on the DEMO
-aggregate-portfolio (virtual balance 332,449.10 USD) AND 200 on the LIVE
+aggregate-portfolio (a six-figure virtual balance) AND 200 on the LIVE
 aggregate-portfolio with the SAME pair. There is no demo-only pair. The
 `demo/` URL segment alone picks the world (etoro_client._seg), that segment
 is EtoroAccount.demo, and this form is the only page that writes it. So the

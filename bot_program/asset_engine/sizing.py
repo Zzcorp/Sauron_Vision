@@ -53,8 +53,8 @@ DEFAULT_RISK_FRACTION = 0.0025   # 0.25%
 # ("7%", after 25% and 40% were refused with the arithmetic below). No
 # measurement forced it: eToro floors forex, index and commodity exposure
 # at 1,000 USD (minPositionExposure, measured 2026-09-23), and an ordinary
-# 0.5-1% stop on that floor is 5-10 USD lost — 1-2% of a 500 pool, 2-4% of
-# a 250 forex pool, both inside the old 5%. 7% is room the operator chose.
+# 0.5-1% stop on that floor is 5-10 USD lost — 0.5-1% of a 1,000 pool, 2-3%
+# of a 300 one, both inside the old 5%. 7% is room the operator chose.
 # 5% was itself raised from 1% at the operator's request so a SMALL account
 # can put enough at risk for a win to clear its own costs: on $200 the 1%
 # ceiling allowed $2 a trade, which the commission and the spread eat most
@@ -105,9 +105,9 @@ MAX_NOTIONAL_FRACTION = {
     # of exposure (minPositionExposure, measured 2026-09-23); under 0.20
     # that floor is unreachable on any pool below 5,000, and
     # apply_stop_floor widens the stop (shrinking notional) rather than
-    # raising it. 2.0 reaches the floor from a 500 pool and gives a 2:1
-    # stop window from 1,000; extras['max_notional_fraction'] narrows or
-    # widens it per config. Applied to the INSTRUMENT's class
+    # raising it. 2.0 reaches the floor from a pool of half the floor and
+    # gives a 2:1 stop window from 1,000; extras['max_notional_fraction']
+    # narrows or widens it per config. Applied to the INSTRUMENT's class
     # (size_position cap_class): SPX500 in a stock config sizes under 2.0
     # while AAPL keeps 0.20 (E2.5, 2026-09-26).
     "index": 2.0,

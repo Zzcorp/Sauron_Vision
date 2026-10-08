@@ -1,7 +1,7 @@
 """MAX ACCOUNT PLEDGED is the operator's number (2026-10-01).
 
-The operator's son took a manual EURUSD ticket at 1x (~1,016 USD of a
-2,240 USD eToro account, 45%) and every stock ticket after it was refused:
+The operator's son took a manual EURUSD ticket at 1x (nearly half of a
+small eToro account) and every stock ticket after it was refused:
 "the account would be 60% pledged after UNG ... the ceiling is 50%". The
 50% was a constant (asset_engine.base.MAX_PLEDGED_FRACTION). He chose 80.
 
