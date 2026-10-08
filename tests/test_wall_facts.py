@@ -57,6 +57,10 @@ CONTRACT_KEYS = (
     # 2026-09-12 (review): the two counts that replaced hardcoded sentences
     # about the desk and the allocator having only ever run in shadow.
     "desk_live_plans", "share_plans_applied",
+    # 2026-10-08: the safeguards the Book's second edition counts — four
+    # registry reads and the proving ground's table.
+    "guards", "money_switches", "proof_classes", "short_classes",
+    "proving_verdicts",
 )
 
 
@@ -757,6 +761,62 @@ class NewEngineFactsOnAnEmptyPlatformTests(TestCase):
                     "share_plans", "share_plans_applied",
                     "agent_calls_graded", "components", "rules_governed"):
             self.assertEqual(wall[key], 0, f"{key} invented a row")
+
+
+class SafeguardFactsTests(TestCase):
+    """The five counts the Book's second edition added (2026-10-08): four
+    registry reads and the proving ground's table, each fenced alone."""
+
+    NEW = ("guards", "money_switches", "proof_classes", "short_classes",
+           "proving_verdicts")
+
+    def setUp(self):
+        cache.clear()
+
+    def test_the_registry_counts_are_the_registries(self):
+        from bot_program.asset_engine.base import ETORO_PROVEN, ETORO_SHORT_PROVEN
+        from bot_program.morgul import GUARDS
+        from core.platform_control import LIVE_MONEY_SWITCHES
+        facts = wall_facts()
+        self.assertEqual(facts["guards"], len(GUARDS))
+        self.assertEqual(facts["money_switches"], len(LIVE_MONEY_SWITCHES))
+        self.assertEqual(facts["proof_classes"], len(ETORO_PROVEN))
+        self.assertEqual(facts["short_classes"], len(ETORO_SHORT_PROVEN))
+        for key in self.NEW[:4]:
+            self.assertGreater(facts[key], 0, f"{key} read an empty registry")
+
+    def test_a_saved_verdict_moves_its_count(self):
+        from backtester.models_proving import ProvingVerdict
+        self.assertEqual(wall_facts()["proving_verdicts"], 0)
+        ProvingVerdict.objects.create(run_id="t", family="f", direction="long",
+                                      asset_class="forex", verdict="failed")
+        cache.clear()
+        self.assertEqual(wall_facts()["proving_verdicts"], 1)
+
+    def test_each_new_counter_is_fenced_alone(self):
+        """A heavy import that fails, or a table a migration has not made
+        yet, zeroes its own key and nothing else."""
+        _instrument("ZZAAA", "crypto")
+        for key in self.NEW:
+            cache.clear()
+            with self.subTest(counter=key), \
+                 patch(f"core.wall_facts._count_{key}",
+                       side_effect=RuntimeError("registry unreadable")):
+                facts = wall_facts()
+            self.assertEqual(facts[key], 0)
+            self.assertEqual(facts["tests_green"], TESTS_GREEN)
+            self.assertEqual(facts["instruments"], 1)
+            for other in self.NEW:
+                if other != key and other != "proving_verdicts":
+                    self.assertGreater(facts[other], 0, f"{key} took {other} down")
+
+    def test_an_empty_platform_has_no_verdict(self):
+        from core import wall_facts as wf
+        self.assertEqual(wf._count_proving_verdicts(), 0)
+        wall = self.client.get("/wall/").context["wall"]
+        self.assertEqual(wall["proving_verdicts"], 0)
+        for key in self.NEW[:4]:
+            self.assertGreater(wall[key], 0, f"{key} is not a database count")
 
 
 class WallFactsFencingTests(TestCase):

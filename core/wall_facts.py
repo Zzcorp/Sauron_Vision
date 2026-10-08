@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 # tests/test_wall_facts.py counts the suite and fails when this drifts: the
 # first version of this module shipped a number its own commit had already
 # invalidated, which is exactly the failure it was written to prevent.
-TESTS_GREEN = 11013
+TESTS_GREEN = 11028
 
 # Broker adapters implemented under bot_program/engine/ — one module and one
 # client class each, all reachable from broker_router.client_for_symbol().
@@ -110,6 +110,14 @@ FALLBACK_FACTS = {
     # The allocator's half of the same repair: the page wore a SHADOW pill
     # that no code could ever take off it.
     "share_plans_applied": 0,
+    # 2026-10-08 — the safeguards the Book's second edition describes:
+    # four registry reads and one table count. Appended, never reordered,
+    # for the same reason as above.
+    "guards": 0,
+    "money_switches": 0,
+    "proof_classes": 0,
+    "short_classes": 0,
+    "proving_verdicts": 0,
 }
 
 
@@ -400,6 +408,67 @@ def _count_rules_governed() -> int:
     return RuleControl.objects.count()
 
 
+# ── The safeguards (2026-10-08) ─────────────────────────────────────────────
+#
+# The Book's second edition describes what stands around a trade: the
+# guards, the switches that reach real money, the proofs and the proving
+# ground. Each count below is read off the registry the code itself runs
+# on, never typed, so the page follows the next guard or proof the day it
+# lands. The morgul and base imports are heavy, but they run once per
+# process and the result sits in the five-minute cache.
+
+def _count_guards() -> int:
+    """Guards in the Morgul watchdog (bot_program.morgul.GUARDS).
+
+    The registry the guard run walks, so the number is what the watchdog
+    checks, whether or not its switch is on: the page says "in the
+    watchdog", never "on the watch".
+    """
+    from bot_program.morgul import GUARDS
+    return len(GUARDS)
+
+
+def _count_money_switches() -> int:
+    """Switches the platform marks as decisions about real money
+    (core.platform_control.LIVE_MONEY_SWITCHES).
+
+    Every key there is exempt from the bulk "all on": each is turned on
+    alone, by a person. Read off the mapping, so a switch added to it is
+    counted the day it is.
+    """
+    from core.platform_control import LIVE_MONEY_SWITCHES
+    return len(LIVE_MONEY_SWITCHES)
+
+
+def _count_proof_classes() -> int:
+    """Families of investments that have earned their eToro proof
+    (bot_program.asset_engine.base.ETORO_PROVEN).
+
+    A proof is an order filled and closed at the venue, written into the
+    code with its test; the set IS the gate, so its length is the count.
+    """
+    from bot_program.asset_engine.base import ETORO_PROVEN
+    return len(ETORO_PROVEN)
+
+
+def _count_short_classes() -> int:
+    """Families with a proof of their own for a sell
+    (bot_program.asset_engine.base.ETORO_SHORT_PROVEN)."""
+    from bot_program.asset_engine.base import ETORO_SHORT_PROVEN
+    return len(ETORO_SHORT_PROVEN)
+
+
+def _count_proving_verdicts() -> int:
+    """Verdicts the proving ground has written
+    (backtester.models_proving.ProvingVerdict rows).
+
+    Every row is one judgement of one rule on one family and side; a
+    platform whose proving ground has never run honestly reads 0.
+    """
+    from backtester.models_proving import ProvingVerdict
+    return ProvingVerdict.objects.count()
+
+
 # ── Assembly ────────────────────────────────────────────────────────────────
 
 def _safe(name: str, builder, fallback: int) -> int:
@@ -474,6 +543,14 @@ def _build_facts() -> dict:
             "desk_live_plans", _count_desk_live_plans, 0),
         "share_plans_applied": _safe(
             "share_plans_applied", _count_share_plans_applied, 0),
+        # 2026-10-08 (the Book's second edition). Four registry reads and
+        # one table count, each fenced alone like everything above.
+        "guards": _safe("guards", _count_guards, 0),
+        "money_switches": _safe("money_switches", _count_money_switches, 0),
+        "proof_classes": _safe("proof_classes", _count_proof_classes, 0),
+        "short_classes": _safe("short_classes", _count_short_classes, 0),
+        "proving_verdicts": _safe(
+            "proving_verdicts", _count_proving_verdicts, 0),
     }
 
 
