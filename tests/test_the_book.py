@@ -24,7 +24,7 @@ What this file pins:
   * clean English: no snake_case, no template artefact, no French;
   * the road so far is held to the history as it stood at each edition,
     pasted below in two blocks, the first edition's up to 3994ffc and the
-    second's from there to 65c490e (the container has no .git to ask):
+    second's from there to 0bf225d (the container has no .git to ask):
     every hash exists, every milestone is dated on its commit's day or up
     to three days before it;
   * motion is optional: nothing is hidden unless the head script says
@@ -368,8 +368,19 @@ de640cd 2026-04-06
 54e35ba 2026-04-05
 """
 #: The history since, as the same command printed it on 2026-10-08 for
-#: 3994ffc..65c490e, merges included: the second edition's road.
+#: 3994ffc..65c490e, merges included: the second edition's road; then the
+#: second edition's own commits and the venue-price fix (0bf225d).
 HISTORY_SINCE_3994FFC = """
+0bf225d 2026-10-08
+f0a0ade 2026-10-09
+b77ad7c 2026-10-08
+be596f2 2026-10-08
+3029dec 2026-10-08
+0e51bb0 2026-10-08
+62a3d12 2026-10-08
+f3403ff 2026-10-08
+0723707 2026-10-08
+464f314 2026-10-08
 65c490e 2026-10-08
 5afc234 2026-10-08
 02bbfd4 2026-10-08

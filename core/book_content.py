@@ -693,7 +693,8 @@ CHAPTERS = [
         "title": "What is being built now",
         # Re-dated with every edition: the bench empties as batches land,
         # and the empty bench has its own words (the test holds both).
-        "kicker": "On %s this was on the bench, not yet landed." % WRITTEN_WORDS,
+        "kicker": ("On %s the bench was empty: every batch written so far "
+                   "had landed on the road." % WRITTEN_WORDS),
         "paragraphs": [
             ("Every batch is first designed, then attacked, then checked by "
              "thousands of automated tests before it lands. Each line here "
@@ -858,7 +859,8 @@ ERAS = [
                  "requests, and the "
                  "scorecard says what closed each trade. On the 8th the "
                  "chart's levels are redrawn, each kind told apart at a "
-                 "glance.")},
+                 "glance, and a real trade is valued at its venue's own "
+                 "price from its first minute.")},
 ]
 
 #: One line per milestone: (day, era id, title, one or two sentences,
@@ -1271,6 +1273,13 @@ MILESTONES = [
      "their own and are told apart at a glance. The lines that carry money "
      "stay the loudest.",
      "5afc234"),
+    ("2026-10-08", "venue-and-clock", "A real trade valued at its venue's price",
+     "A real trade is valued at its venue's own price from its first "
+     "minute, never against the quote of another instrument, such as a "
+     "future's quote standing in for a spot price. Without the venue's "
+     "price the page says it waits, and a close is never booked at a price "
+     "too old to be the venue's.",
+     "0bf225d"),
 ]
 
 
@@ -1279,13 +1288,7 @@ MILESTONES = [
 #: Work written and reviewed but not landed on WRITTEN. Said as in
 #: progress; a line moves to MILESTONES, with its hash, the day it lands.
 #: The three lines of the first edition landed on 2026-09-28 (45a4c93).
-IN_PROGRESS = [
-    {"title": "A real trade valued at its venue's price",
-     "text": ("A real trade will be valued at its venue's own price from "
-              "its first minute, and never against the quote of another "
-              "instrument, such as a future's quote standing in for a spot "
-              "price.")},
-]
+IN_PROGRESS = []
 
 #: The road a class travels to real money, in order: the same for every
 #: class, save where the text says otherwise (crypto's proof was measured

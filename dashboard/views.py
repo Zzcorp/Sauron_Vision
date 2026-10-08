@@ -1705,6 +1705,59 @@ def _leverage_map(rows):
     return out
 
 
+#: Who read a venue stamp, in the words the mark's hover says
+#: (bot_program.venue_mark: at_fill, the tick, the bar refresh's candles,
+#: the close dialog).
+_MARK_VIA_WORDS = {"fill": "at the fill", "tick": "by the manage tick",
+                   "candle": "from the venue's latest candle",
+                   "close dialog": "by the close dialog"}
+
+
+def _mark_words(row) -> dict:
+    """The words beside a row's price (2026-10-05, 2026-10-08): which mark
+    priced it, how old it is, and — for a real row the page will not value
+    — why not. Keys: mark_word (the short tag), mark_title (the hover),
+    mark_wait (the sentence printed in place of a price, or "")."""
+    from bot_program.venue_mark import age_words
+
+    src = getattr(row, "mark_source", None) or ""
+    age = age_words(getattr(row, "mark_age_s", None))
+    via = _MARK_VIA_WORDS.get(getattr(row, "mark_via", "") or "", "")
+    via = f" {via}" if via else ""
+    paper = getattr(row, "paper", True)
+    if src == "venue":
+        return {"mark_word": "venue", "mark_wait": "",
+                "mark_title": ("Marked at the venue's own rate, read "
+                               + (f"{age} ago" if age else "recently")
+                               + f"{via}.")}
+    if src == "venue_stale":
+        return {"mark_word": f"venue · {age} old" if age else "venue · old",
+                "mark_wait": "",
+                "mark_title": (
+                    "Marked at the venue's own rate as last read"
+                    + (f", {age} ago" if age else "") + f"{via}. Nothing "
+                    "newer has come in from the venue — normal while its "
+                    "market is shut. The platform's own quote is not used "
+                    "here: for this symbol it is not the instrument the "
+                    "venue trades, or there is none.")}
+    if src == "quote":
+        return {"mark_word": "feed", "mark_wait": "",
+                "mark_title": "Marked at the platform's quote feed" + (
+                    " — the venue's own rate has not been read in the last "
+                    "15 minutes." if not paper else ".")}
+    if src == "awaiting_venue":
+        return {"mark_word": "", "mark_wait": "waiting for the venue's price",
+                "mark_title": (
+                    "No price from the venue yet"
+                    + (f" (its last one is {age} old)" if age else "")
+                    + ". The platform's quote for this symbol is a different "
+                      "instrument (a futures contract or a cash index), so "
+                      "valuing the position against it would show the gap "
+                      "between the two as profit or loss. Nothing is shown "
+                      "until the venue's price comes in.")}
+    return {"mark_word": "", "mark_wait": "", "mark_title": ""}
+
+
 def _live_row(row, stops, levs=None):
     """One open position, shaped the way the tables already read it, plus R.
 
@@ -1770,19 +1823,13 @@ def _live_row(row, stops, levs=None):
         "unrealized_pnl": pnl,
         "unrealized_pnl_pct": pct,
         # Which price marked the row (portfolio.services, venue_mark):
-        # "venue" is the real row's own venue rate, "quote" the platform's
-        # feed. Printed beside the price so a CFD's entry against a futures
-        # feed is never read as money.
+        # "venue" is the real row's own venue rate, "venue_stale" its last
+        # one (with its age), "quote" the platform's feed, and
+        # "awaiting_venue" a real row with no price at all because the feed
+        # quotes another instrument. Printed beside the price so a CFD's
+        # entry against a futures feed is never read as money.
         "mark_source": getattr(row, "mark_source", None),
-        "mark_word": {"venue": "venue", "quote": "feed"}.get(
-            getattr(row, "mark_source", None) or "", ""),
-        "mark_title": {
-            "venue": "Marked at the venue's own rate, read by the manage "
-                     "tick within the last 15 minutes.",
-            "quote": "Marked at the platform's quote feed" + (
-                " — the venue's own rate has not been read in the last 15 "
-                "minutes." if not getattr(row, "paper", True) else "."),
-        }.get(getattr(row, "mark_source", None) or "", ""),
+        **_mark_words(row),
         "last_text": _live_num(mark, "{:,.4f}"),
         "pnl_text": _live_num(pnl),
         "pnl_tone": _live_tone(pnl),
@@ -4144,22 +4191,24 @@ def _chart_positions(user, instrument):
     # sits under can never disagree about an entry or a stop — which is
     # the whole reason the table does not build its own queryset.
     mark = None
+    lq = None
     try:
         lq = getattr(instrument, "live_quote", None)
         mark = float(lq.last) if lq and lq.last else None
     except Exception:  # noqa: BLE001 - a panel must not 500 the page
         mark = None
 
-    def _pnl(side, entry, qty, per_unit=1.0):
-        """Unrealised money at the current mark, or None when unknowable.
+    def _pnl(side, entry, qty, per_unit=1.0, at=None):
+        """Unrealised money at `at` (the row's own mark), or None when
+        unknowable.
 
         None rather than 0.0: a position whose instrument has no quote has
         an UNKNOWN P&L, and a zero printed in that cell reads as "flat"
         when the truth is "nobody measured it".
         """
-        if mark is None or entry in (None, 0) or qty in (None, 0):
+        if at is None or entry in (None, 0) or qty in (None, 0):
             return None, None
-        move = (mark - entry) if side == "long" else (entry - mark)
+        move = (at - entry) if side == "long" else (entry - at)
         return move * qty * per_unit, (move / entry * 100.0)
 
     # The hover card's facts (2026-10-03, the operator: "small hover
@@ -4173,10 +4222,10 @@ def _chart_positions(user, instrument):
     def _txt(v):
         return f"{v:.{dec}f}" if isinstance(v, (int, float)) else None
 
-    def _r_now(side, entry, stop):
-        if mark is None or not entry or not stop or entry == stop:
+    def _r_now(side, entry, stop, at=None):
+        if at is None or not entry or not stop or entry == stop:
             return None
-        move = (mark - entry) if side == "long" else (entry - mark)
+        move = (at - entry) if side == "long" else (entry - at)
         return round(move / abs(entry - stop), 2)
 
     def _age(dt):
@@ -4204,7 +4253,7 @@ def _chart_positions(user, instrument):
             "pnl": pnl, "pnl_pct": _f(pos.unrealized_pnl_pct),
             "mark": mark,
             "rule": via, "entry_text": _txt(entry), "stop_text": _txt(stop),
-            "tp_text": _txt(tp), "r_now": _r_now(side, entry, stop),
+            "tp_text": _txt(tp), "r_now": _r_now(side, entry, stop, mark),
             "age_s": _age(pos.opened_at),
             "leverage": _pos_leverage(instrument.asset_class or ""),
             "soft_stop": None, "soft_stop_text": None, "thesis": None,
@@ -4221,7 +4270,19 @@ def _chart_positions(user, instrument):
         vpu = value_per_unit(t)
         entry, stop, tp = _f(t.entry_price), _f(t.stop_loss), _f(t.take_profit)
         qty = _f(t.qty)
-        pnl, pnl_pct = _pnl(side, entry, qty, vpu)
+        # THE ROW'S OWN MARK (2026-10-08, venue_mark.resolve): the panel
+        # and the price lines read what the positions page reads. A REAL
+        # Gold Spot row valued at the instrument's quote — Yahoo's GC=F,
+        # the future — drew the basis as P&L on the very page the ticket
+        # sits on. A paper row: the quote, as before.
+        from bot_program import venue_mark as _vm
+        from types import SimpleNamespace
+        mk = _vm.resolve(t, lq)
+        row_mark = mk.price
+        words = _mark_words(SimpleNamespace(
+            mark_source=mk.source, mark_age_s=mk.age_s, mark_via=mk.via,
+            paper=bool(t.paper)))
+        pnl, pnl_pct = _pnl(side, entry, qty, vpu, row_mark)
         initial = _f(meta.get("initial_stop_loss")) or stop
         soft = _f((meta.get("care") or {}).get("soft_stop"))
         th = meta.get("thesis") or {}
@@ -4238,9 +4299,12 @@ def _chart_positions(user, instrument):
             "label": f"{side.upper()} {tag}" + ("" if t.paper else " LIVE"),
             "via": tag, "paper": bool(t.paper),
             "protected": bool(meta.get("protected")),
-            "pnl": pnl, "pnl_pct": pnl_pct, "mark": mark,
+            "pnl": pnl, "pnl_pct": pnl_pct, "mark": row_mark,
+            "mark_source": mk.source, "mark_word": words.get("mark_word", ""),
+            "mark_wait": words.get("mark_wait", ""),
+            "mark_title": words.get("mark_title", ""),
             "rule": tag, "entry_text": _txt(entry), "stop_text": _txt(stop),
-            "tp_text": _txt(tp), "r_now": _r_now(side, entry, initial),
+            "tp_text": _txt(tp), "r_now": _r_now(side, entry, initial, row_mark),
             "age_s": _age(t.opened_at), "leverage": lev,
             "soft_stop": soft, "soft_stop_text": _txt(soft),
             "thesis": ({"verdict": th.get("verdict"),

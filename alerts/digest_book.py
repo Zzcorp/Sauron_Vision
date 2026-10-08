@@ -182,12 +182,23 @@ def position_item(row, trade=None) -> dict:
     pnl = None if working else _float(getattr(row, "unrealized_pnl", None))
     pct = (None if working
            else _float(getattr(row, "unrealized_pnl_pct", None)))
+    # The page's own words for the mark (2026-10-08, venue_mark.resolve): a
+    # real row whose platform quote is another instrument waits for the
+    # venue's price; one valued at an old venue print says its age.
+    src = getattr(row, "mark_source", None)
     if working:
         middle = "order waiting to fill"
+    elif pnl is None and src == "awaiting_venue":
+        middle = "waiting for the venue's price"
     elif pnl is None:
         middle = "no live price yet"
     else:
         middle = f"{ps.percent(pct)} · {ps.money(pnl, ccy, signed=True)}"
+        if src == "venue_stale":
+            from bot_program.venue_mark import age_words
+            age = age_words(getattr(row, "mark_age_s", None))
+            middle += (f" · venue price {age} old" if age
+                       else " · venue price not recent")
     if getattr(row, "status", "") == "CLOSE_PENDING":
         middle += " · closing"
     return {"symbol": symbol, "side": side, "money": words, "real": real,

@@ -50,11 +50,22 @@ def _dec(v):
 
 
 def _mark_for(trade):
-    """The live mark, or None. Never raises."""
+    """The live mark, or None. Never raises.
+
+    A REAL row is judged at its venue's own price (2026-10-08,
+    venue_mark.resolve): the stop being edited rests at the venue, and for
+    Gold Spot the platform's quote is GC=F, the future — a valid short stop
+    was refused against it, and a long stop above eToro's market passed.
+    Where the venue's price is unknown and the quote is another instrument,
+    None: the side checks are skipped, never judged against the basis."""
     try:
         from instruments.models import Instrument
         inst = Instrument.objects.filter(symbol=trade.symbol).first()
         quote = getattr(inst, "live_quote", None) if inst else None
+        if not getattr(trade, "paper", True):
+            from bot_program import venue_mark
+            mk = venue_mark.resolve(trade, quote)
+            return Decimal(str(mk.price)) if mk.price is not None else None
         return Decimal(str(quote.last)) if quote and quote.last else None
     except Exception:  # noqa: BLE001
         return None

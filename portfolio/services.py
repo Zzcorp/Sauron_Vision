@@ -174,11 +174,20 @@ class UnifiedPosition:
                  # as dollars (see usd_per_unit).
                  "value_per_unit",
                  # Which price marked the row (2026-10-05, venue_mark):
-                 # "venue" (a real row's own venue rate, stamped by the
-                 # manage tick and fresh), "quote" (the platform's
-                 # LiveQuote), "exit" (a closed row's fill), None (nothing
-                 # priced it). The page prints it beside the price.
-                 "mark_source")
+                 # "venue" (a real row's own venue rate, stamped and
+                 # fresh), "venue_stale" (its last venue rate, older than
+                 # venue_mark.MAX_AGE_S, said with its age — 2026-10-08),
+                 # "quote" (the platform's LiveQuote), "awaiting_venue" (a
+                 # real row whose quote is another instrument and whose
+                 # venue rate is unknown: no price, no P&L), "exit" (a
+                 # closed row's fill), None (nothing priced it). The page
+                 # prints it beside the price.
+                 "mark_source",
+                 # When that price was read (datetime), its age in seconds,
+                 # and the venue stamp's reader ("fill", "tick", "candle",
+                 # "close dialog"; "" for a quote). None/"" where nothing
+                 # or a closed row's exit priced it. 2026-10-08.
+                 "mark_at", "mark_age_s", "mark_via")
 
 
 def is_option_row(trade) -> bool:
@@ -465,6 +474,9 @@ def _trade_to_position(trade, instruments, quotes):
     up.carrier = str((trade.metadata or {}).get("broker") or "")
     up.stamped_leverage = (trade.metadata or {}).get("leverage")
     up.mark_source = None
+    up.mark_at = None
+    up.mark_age_s = None
+    up.mark_via = ""
 
     entry = float(trade.entry_price or 0)
     qty = float(trade.qty or 0)
@@ -505,19 +517,28 @@ def _trade_to_position(trade, instruments, quotes):
         return up
 
     quote = quotes.get(trade.symbol)
-    last = float(quote.last) if quote and quote.last is not None else None
-    up.current_price = quote.last if quote else None
-    up.mark_source = "quote" if last is not None else None
-    # THE VENUE MARK (2026-10-05): a REAL row is valued at its venue's own
-    # rate while the manage tick's stamp is fresh — a CFD's entry against
-    # a futures feed rendered the basis as P&L. A paper row's quote IS its
-    # venue (venue_mark.fresh answers None for it).
-    from bot_program.venue_mark import fresh as _venue_fresh
-    vm = _venue_fresh(trade)
-    if vm is not None:
-        last = float(vm["price"])
-        up.current_price = Decimal(str(vm["price"]))
-        up.mark_source = "venue"
+    # THE VENUE MARK (2026-10-05, 2026-10-08): the ONE answer to "what price
+    # values this row" is bot_program.venue_mark.resolve. A REAL row is
+    # valued at its venue's own rate (a fresh stamp: the fill, the manage
+    # tick, the venue's candles); with none, at the platform's quote only
+    # where that quote IS the venue's instrument; else at its last venue
+    # stamp, said stale with its age; else at nothing — a CFD's entry
+    # against a futures feed rendered the basis as P&L (Gold Spot against
+    # GC=F: +18 on the page, -0.25 at eToro). A paper row's quote IS its
+    # venue.
+    from bot_program.venue_mark import resolve as _venue_resolve
+    mk = _venue_resolve(trade, quote)
+    last = mk.price
+    up.mark_source = mk.source
+    up.mark_at = mk.at
+    up.mark_age_s = mk.age_s
+    up.mark_via = mk.via
+    if last is None:
+        up.current_price = None
+    elif mk.source == "quote":
+        up.current_price = quote.last
+    else:
+        up.current_price = Decimal(str(last))
     if last is not None and entry:
         up.unrealized_pnl = round((last - entry) * qty * vpu * sign, 2)
         up.unrealized_pnl_pct = round((last - entry) / entry * 100 * sign, 2)

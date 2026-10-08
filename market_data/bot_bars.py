@@ -470,6 +470,52 @@ def _write_venue_window(inst, interval, rows, source) -> tuple[int, int, int]:
     return written, skipped, evicted
 
 
+def _stamp_venue_rows(client, symbol, interval, rows) -> int:
+    """THE VENUE'S CANDLE IS THE VENUE'S PRICE (2026-10-08).
+
+    The venue just answered its own candles for `symbol` — for every
+    symbol a live config trades, and for every real row no enabled live
+    config covers (_held_real_rows: the manual lane, a config switched off
+    by hand or by the kill switch). The newest candle's close is stamped
+    as the venue mark (bot_program.venue_mark.stamp_rows) on the open real
+    rows of that symbol this venue carries, at the candle's end (now, for
+    the candle still forming): no request is added, and a row no manage
+    tick reaches is still valued at its own venue's rate, at most one pass
+    (600 s) old, never at the platform's quote of another instrument.
+    Whether eToro's close is a bid, a mid or a last print is unmeasured;
+    the tick's own read replaces it whenever the tick runs. A stamp newer
+    than the candle is kept. Returns how many rows were stamped. Never
+    raises, and only a venue's answer reaches it (never the public feed's,
+    never the fallback's)."""
+    try:
+        if getattr(client, "_sv_public_feed", False):
+            return 0
+        from bot_program.engine.capabilities import adapter_key
+        carrier = adapter_key(client)
+        if not carrier:
+            return 0
+        best = None
+        for row in rows or []:
+            try:
+                ts, close = int(row[0]), float(row[4])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if close > 0 and math.isfinite(close) and \
+                    (best is None or ts > best[0]):
+                best = (ts, close)
+        if best is None:
+            return 0
+        span = INTERVAL_SECONDS.get(interval, 3600)
+        at = datetime.fromtimestamp(best[0] / 1000 + span, tz=dt_tz.utc)
+        from bot_program import venue_mark
+        return venue_mark.stamp_rows(symbol, best[1], carrier=carrier,
+                                     at=at, via="candle")
+    except Exception as e:  # noqa: BLE001 — a stamp never costs a bar
+        logger.info("[bars] %s %s: the venue mark was not stamped: %s",
+                    symbol, interval, e)
+        return 0
+
+
 def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                             limit=DEFAULT_LIMIT, pass_state=None,
                             cut=True) -> dict:
@@ -586,6 +632,8 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                     inst, interval, rows, source)
                 out["bars"] += written
                 out["skipped"] += skipped
+                if written:
+                    _stamp_venue_rows(client, symbol, interval, rows)
                 if evicted:
                     logger.info("[bars] %s %s: %s answered — %d public-feed "
                                 "stand-in bars in its window gave way to "

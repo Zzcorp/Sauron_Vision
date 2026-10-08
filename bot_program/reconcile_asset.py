@@ -563,6 +563,7 @@ def _close_as_orphan(trade, *, venue_said: str = "",
 
     exit_price = trade.entry_price
     priced = False           # did anything but the entry price answer?
+    stale_mark_age = None    # the age of a stale venue print booked below
     measured = False         # ...and was it the BROKER'S OWN FILL?
 
     # The broker first, because it is the only source that knows what
@@ -612,8 +613,29 @@ def _close_as_orphan(trade, *, venue_said: str = "",
                 inst = Instrument.objects.filter(symbol=trade.symbol).first()
                 if inst:
                     lq = LiveQuote.objects.filter(instrument=inst).first()
-                    if lq and lq.last:
-                        exit_price, priced = lq.last, True
+                    # THROUGH THE ONE ANSWER (2026-10-08, venue_mark
+                    # .resolve): a REAL row is never booked at a quote of
+                    # another instrument — Gold Spot at GC=F, the future,
+                    # would book the basis as realized P&L. Its fresh venue
+                    # stamp, or the quote where it is the venue's
+                    # instrument; a STALE venue print only where
+                    # venue_mark.bookable allows it (a shut market, or
+                    # within an hour), its age written on the row; else
+                    # unpriced (flagged below), never an old price passed
+                    # off as the exit. A paper row: its quote, as before.
+                    from . import venue_mark
+                    mk = venue_mark.resolve(trade, lq)
+                    if venue_mark.bookable(mk, trade):
+                        exit_price, priced = (
+                            lq.last if mk.source == venue_mark.QUOTE
+                            else Decimal(str(mk.price))), True
+                        if mk.source != venue_mark.QUOTE:
+                            stale_mark_age = mk.age_s
+                            logger.info("reconcile: #%s %s exit at the "
+                                        "venue's last mark %s (%s, %s old)",
+                                        trade.id, trade.symbol, mk.price,
+                                        mk.source,
+                                        venue_mark.age_words(mk.age_s))
             except Exception:
                 pass
 
@@ -666,6 +688,10 @@ def _close_as_orphan(trade, *, venue_said: str = "",
     # bracket-protected stock and forex exit takes, so without the flag a
     # large share of the track record would silently be estimates.
     meta = dict(trade.metadata or {})
+    if stale_mark_age is not None:
+        # The exit was booked at the venue's last print, not a fresh one:
+        # its age rides on the row beside exit_price_inferred.
+        meta["exit_mark_age_s"] = int(round(stale_mark_age))
     # INFERRED only when it really was. A fill read from the broker is a
     # measurement, and flagging it as an estimate would understate the one
     # part of the track record that is not one.

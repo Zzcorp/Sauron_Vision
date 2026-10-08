@@ -363,6 +363,23 @@ def preview_close(user, trade) -> dict:
         return {"error": f"No usable price mark for {trade.symbol} — closing "
                          f"now would book the exit at a price nobody quoted"}
 
+    # THE DIALOG'S READ IS A VENUE PRINT (2026-10-08, venue_mark): a REAL
+    # row's close dialog just asked its venue for the rate, so the page
+    # behind it is stamped with that rate and the two cannot disagree. No
+    # request added; a paper row's quote is its venue, nothing stamped. An
+    # options row's mark is its premium, which the book never values.
+    if not trade.paper and (trade.asset_class or "") != "options":
+        try:
+            from bot_program import venue_mark
+            from bot_program.asset_engine.base import AssetBot
+            from bot_program.engine.capabilities import adapter_key
+            if not AssetBot._is_paper_client(client):
+                venue_mark.stamp(trade, mark, source=adapter_key(client),
+                                 via="close dialog")
+        except Exception as e:  # noqa: BLE001 — a stamp never blocks a close
+            logger.info("[manual-close] #%s mark not stamped: %s",
+                        trade.id, e)
+
     fill = _exit_fill(trade, float(mark))
     # the remainder at this fill plus what a scale-out banked (2026-10-04)
     pnl = float(bot._realised_pnl(trade, Decimal(str(fill))))

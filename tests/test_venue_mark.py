@@ -191,10 +191,13 @@ class TheWiringTests(SimpleTestCase):
         from portfolio import services
         self.assertIn("mark_source", services.UnifiedPosition.__slots__)
         book = inspect.getsource(services._trade_to_position)
-        self.assertIn("from bot_program.venue_mark import fresh as _venue_fresh",
-                      book)
-        self.assertIn("vm = _venue_fresh(trade)", book)
-        self.assertIn('up.mark_source = "venue"', book)
+        # 2026-10-08: through the one answer, venue_mark.resolve, which
+        # answers "venue" for a fresh stamp (tests.test_venue_mark_birth)
+        self.assertIn(
+            "from bot_program.venue_mark import resolve as _venue_resolve",
+            book)
+        self.assertIn("mk = _venue_resolve(trade, quote)", book)
+        self.assertIn("up.mark_source = mk.source", book)
         from dashboard import views
         self.assertIn('"mark_source"', inspect.getsource(views._live_row))
         tpl = Path(views.__file__).resolve().parents[1] / "templates" / \
