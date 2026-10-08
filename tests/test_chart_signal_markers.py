@@ -541,7 +541,10 @@ class TheWiringTests(SimpleTestCase):
         self.assertNotIn("color: bull ? c.accentWash : c.redDim,", self.src)
         self.assertIn("shape: isLong ? 'arrowUp' : 'arrowDown', color: tone,",
                       self.src)
-        self.assertIn("lineStyle: LightweightCharts.LineStyle.Dashed,\n"
+        # The SL is 2 px SOLID (2026-10-07): solid is the operator's money,
+        # dashed a signal's idea — it no longer reads like the pinned Stop.
+        self.assertIn("price: p.stop, color: c.red, lineWidth: 2,\n"
+                      "                        lineStyle: LightweightCharts.LineStyle.Solid,\n"
                       "                        axisLabelVisible: true, title: 'SL',",
                       self.src.replace("\r\n", "\n"))
 
@@ -864,7 +867,11 @@ class ThePureHalfUnderNodeTests(SimpleTestCase):
 
 # ═══ C2-C5. The widget's own script, against a fake chart ═════════════
 
-WIDGET_HARNESS = r"""
+# The harness in two halves (2026-10-07), split as a plain string with no
+# change in behaviour: the PRELUDE (the stub page, the fake chart and the
+# helpers) and the SCENARIO this module runs. tests/test_chart_levels_*
+# put their own patches and scenarios after the same prelude.
+WIDGET_PRELUDE = r"""
 const fs = require('fs'), vm = require('vm');
 const M = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 
@@ -1071,7 +1078,9 @@ const refresh = async function (payload) {
     for (let i = 0; i < 6; i++) await flush();
 };
 
-(async function () {
+"""
+
+WIDGET_SCENARIO = r"""(async function () {
     vm.runInContext(M.pure, sandbox, { filename: 'pure.js' });
     vm.runInContext(M.main, sandbox, { filename: 'widget.js' });
     for (let i = 0; i < 6; i++) await flush();
@@ -1171,6 +1180,8 @@ const refresh = async function (payload) {
     process.stdout.write(JSON.stringify(R));
 })().catch(function (e) { process.stderr.write(String((e && e.stack) || e)); process.exit(1); });
 """
+
+WIDGET_HARNESS = WIDGET_PRELUDE + WIDGET_SCENARIO
 
 
 def _epoch(y, m, d, hh=0, mm=0):

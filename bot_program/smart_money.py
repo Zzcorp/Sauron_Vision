@@ -62,6 +62,7 @@ Nothing here raises: a read that fails changes nothing and says why.
 """
 import logging
 import math
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -757,6 +758,10 @@ def living_levels(symbol, price=None, *, timeframe=TIMEFRAME):
     tape, the round numbers follow the price. The chart asks every minute
     and redraws from scratch, so a swept level simply is not there on the
     next paint.
+
+    The chart's anchors (2026-10-07, _anchor_levels): where each level
+    formed and the zone around it, ADDED to the rows for the drawing only;
+    the five fields above are what every other reader reads, unchanged.
     """
     df, swings = _bars(symbol, timeframe)
     if df is None or len(df) <= 15:
@@ -785,8 +790,85 @@ def living_levels(symbol, price=None, *, timeframe=TIMEFRAME):
             out.append({"price": float(lvl), "kind": kind, "side": side,
                         "pool": kind.startswith("equal "),
                         "atr_away": round(abs(float(lvl) - px) / atr, 2)})
+    try:
+        _anchor_levels(out, df, swings, atr)
+    except Exception as e:  # noqa: BLE001 - the anchors are display only
+        logger.debug("[living_levels] anchors unread: %s", e)
     out.sort(key=lambda r: r["price"])
     return {"price": px, "atr": atr, "timeframe": timeframe, "levels": out}
+
+
+def _epoch(ts):
+    """A bar stamp as epoch seconds (a naive stamp is UTC), or None."""
+    if ts is None:
+        return None
+    try:
+        import pandas as pd
+        t = pd.Timestamp(ts)
+        if t.tzinfo is None:
+            t = t.tz_localize("UTC")
+        return int(t.timestamp())
+    except Exception:  # noqa: BLE001 - an unreadable stamp anchors nothing
+        return None
+
+
+def _anchor_levels(rows, df, swings, atr):
+    """Where each living level FORMED, and the zone around it, for the chart
+    (2026-10-07). Display only: keys are ADDED to the rows, never changed,
+    and crowd_levels is not called again — `held` and the clusters are
+    rebuilt with the very filter and function crowd_levels uses, so a pool's
+    members are find_equal_levels' own swing_indices, not a distance guess.
+
+      swing row:   origin (epoch of its 4h bar), label (H/L/HH/LH/HL/LL)
+      recent row:  origin (its bar in the RECENT_EXTREME_BARS tail)
+      pool row:    touches (int), members [{price, origin}] oldest first,
+                   top, bottom (members' max/min), origin (first touch)
+      every row:   zone [lo, hi] — the stop_beyond_the_crowd zone: below the
+                   mark [lo - HUNT_DEPTH_ATR*atr, hi + NEAR_ATR*atr], above it
+                   [lo - NEAR_ATR*atr, hi + HUNT_DEPTH_ATR*atr]; lo/hi are the
+                   band for a pool (its members are crowd levels too)."""
+    from signals.smc.liquidity import find_equal_levels
+    n = len(df)
+    held = [s for s in (swings or [])
+            if s["idx"] >= n - LEVEL_LOOKBACK and _untaken(df, s, n)]
+    born = {}
+    for s in held:
+        born.setdefault((s["type"], round(float(s["price"]), 10)), s)
+    pools = {}
+    for c in find_equal_levels(held):
+        if c["count"] >= POOL_MIN_TOUCHES:
+            pools[(c["type"], round(float(c["price"]), 10))] = [
+                held[i] for i in c["swing_indices"]]
+    tail = df.iloc[-RECENT_EXTREME_BARS:] if n >= RECENT_EXTREME_BARS else None
+    hunt, near = HUNT_DEPTH_ATR * atr, NEAR_ATR * atr
+    for r in rows:
+        kind, p = r["kind"], float(r["price"])
+        lo = hi = p
+        if kind in ("swing low", "swing high"):
+            s = born.get(("L" if kind == "swing low" else "H", round(p, 10)))
+            if s is not None:
+                r["origin"] = _epoch(s.get("ts"))
+                r["label"] = s.get("label")
+        elif kind in ("recent low", "recent high"):
+            if tail is not None:
+                col = tail["low"] if kind == "recent low" else tail["high"]
+                r["origin"] = _epoch(col.idxmin() if kind == "recent low"
+                                     else col.idxmax())
+        elif r["pool"]:
+            m = re.search(r"\((\d+) touches\)", kind)
+            r["touches"] = int(m.group(1)) if m else None
+            members = pools.get(("EQH" if "highs" in kind else "EQL", round(p, 10)), [])
+            if members:
+                ms = sorted(({"price": float(s["price"]), "origin": _epoch(s.get("ts"))}
+                             for s in members),
+                            key=lambda m: (m["origin"] is None, m["origin"] or 0))
+                lo = min(m["price"] for m in ms)
+                hi = max(m["price"] for m in ms)
+                r.update(members=ms, top=hi, bottom=lo, origin=ms[0]["origin"])
+        if r["side"] == "below":
+            r["zone"] = [round(lo - hunt, 10), round(hi + near, 10)]
+        else:
+            r["zone"] = [round(lo - near, 10), round(hi + hunt, 10)]
 
 
 #: the stop column's precision (AssetBotTrade.stop_loss: 8 places). A lock

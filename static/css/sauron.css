@@ -23,6 +23,10 @@
             --accent-gold: #d8b020;
             --accent-blue: #30a0e8;
             --accent-purple: #8840d0;
+            /* The chart's levels (2026-10-07). Here with the palette: the
+               card-containment section further down takes tokens only. */
+            --lvl-swing: var(--accent-blue);   /* chart swings */
+            --lvl-session: #a878f0;            /* chart Asian range: 6.4:1 on the void; --accent-purple is 3.5:1 */
             --danger: #d03030;
             --success: #00e868;
             --warning: #d89020;
@@ -636,6 +640,10 @@
                label, a 9px chip) takes this ink instead — the glow token
                stays for borders and shadows, where contrast is not the job. */
             --accent-gold-ink: #8a6a00;
+            /* The chart's levels (2026-10-07): the swing blue as an ink and
+               the session violet at the platform's own purple. */
+            --lvl-swing: #1f6fb2;                 /* the glow #30a0e8 is 2.6:1 on this ground */
+            --lvl-session: var(--accent-purple);  /* #8840d0, 5.1:1 */
         }
         body.light-mode .sidebar {
             background: linear-gradient(180deg, #e8ece8 0%, #f0f2f0 100%);

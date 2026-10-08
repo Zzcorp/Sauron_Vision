@@ -120,6 +120,20 @@ def asian_range(df, *, now=None):
             "end": str(w["end_ts"]), "last_pos": int(w["positions"][-1])}
 
 
+def _span(df, rng):
+    """{opened, closed}: the Asian session's first bar open and last bar
+    close in epoch seconds, or {} when the stamps cannot be read."""
+    try:
+        def ep(v):
+            t = pd.Timestamp(v)
+            return int((t.tz_localize("UTC") if t.tzinfo is None else t).timestamp())
+        step = pd.Series(df.index).diff().median()
+        bar = int(step.total_seconds()) if pd.notna(step) else 0
+        return {"opened": ep(rng["start"]), "closed": ep(rng["end"]) + bar}
+    except Exception:  # noqa: BLE001 - a box is a bonus to the two prices
+        return {}
+
+
 def read_day(df, swings=None, *, now=None) -> dict:
     """The three parts of the day on one frame — pure, no I/O:
     {ok, phase, direction, session, asia, run: {below, above, low, high},
@@ -136,6 +150,10 @@ def read_day(df, swings=None, *, now=None) -> dict:
         out["why"] = "no Asian range in the frame for today"
         return out
     out["asia"] = {k: rng[k] for k in ("high", "low", "date")}
+    # The session's span as epoch seconds (2026-10-07), so the chart draws
+    # the accumulation as the box it is rather than two endless lines:
+    # the first bar's open and the last bar's close.
+    out["asia"].update(_span(df, rng))
     rest = df.iloc[rng["last_pos"] + 1:]
     mark = float(df["close"].values[-1])
     out["mark"] = mark
