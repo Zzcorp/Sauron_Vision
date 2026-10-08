@@ -451,6 +451,7 @@ CHAPTERS = [
                       "or a high-impact print, "
                       "a winner up half a unit of risk or more is locked at break-even, "
                       "and a real-money loser at five times leverage or more is cut. "
+                      "A trade opened by hand keeps the profit locks and is never cut by a rule. "
                       "Every tighter stop on "
                       "a real-money trade is copied onto the stop resting at "
                       "eToro, so the lock outlives the platform if the "
@@ -1195,7 +1196,7 @@ MILESTONES = [
      "From an hour before a high-impact print to a quarter hour after it, "
      "a winner up half a unit of risk or more is locked at break-even, "
      "and a real-money loser at five times leverage or more is cut, "
-     "as before a weekend.",
+     "as before a weekend. A trade opened by hand is never cut by a rule.",
      "ed8cb31"),
     ("2026-10-05", "venue-and-clock", "In doubt, never twice",
      "An order whose answer never came back is held in doubt and looked for "

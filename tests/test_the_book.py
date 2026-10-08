@@ -1770,6 +1770,11 @@ class TheBookFollowsTheCode(SimpleTestCase):
             with self.subTest(where=where):
                 self.assertIn(cut, words, "%s: %s" % (where, rewrite))
                 self.assertIn(lock, words, "%s: %s" % (where, rewrite))
+                # A hand-opened row is never cut by a rule (the care's manual
+                # branch returns before every cut), so each sentence that
+                # names a cut names the exemption too.
+                self.assertIn("opened by hand", words,
+                              "%s names a cut without the manual exemption: %s" % (where, rewrite))
         everything = json.dumps([book.CHAPTERS, book.ERAS, book.MILESTONES,
                                  book.IN_PROGRESS, book.GO_LIVE, book.LEXICON])
         self.assertNotIn("levered real-money loser", everything, rewrite)

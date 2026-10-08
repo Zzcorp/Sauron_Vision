@@ -950,6 +950,11 @@ class WallSafeguardsSectionTests(TestCase):
         card = block[start:block.index("</div>", block.index('class="feature-text"', start))]
         self.assertIn("a real-money loser at five times leverage or more is cut", card, rewrite)
         self.assertIn("a winner up half an R or more is locked at break-even", card, rewrite)
+        # The cuts are a bot's: a hand-opened row returns before every cut
+        # (position_care: the manual branch comes before the weekend, event
+        # and no-progress cuts), so the card says so in the same breath.
+        self.assertIn("A trade opened by hand keeps the locks and is never cut by a rule.",
+                      card, "the manual lane's exemption left the card: %s" % rewrite)
         src = (Path(settings.BASE_DIR) / "templates" / "landing"
                / "the_wall.html").read_text(encoding="utf-8")
         self.assertNotIn("levered real-money loser", src, rewrite)
