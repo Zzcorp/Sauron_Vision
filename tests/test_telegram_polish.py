@@ -35,6 +35,7 @@ from django.test import SimpleTestCase, TestCase
 from tests.test_telegram_v2 import (ENV, HOST, _Base, _button, _cfg,
                                     _eurcad, _eurusd_attack, _ok, _payloads,
                                     _trade, jargon)
+from tests.test_etoro_client import REAL_ORDER_BTC
 
 GREEN = chr(0x1F7E2)
 GAIN = chr(0x2705)
@@ -454,13 +455,13 @@ class OneMessageForAMovedStopTests(TestCase):
                                               is_staff=True)
         cfg = AssetBotConfig.objects.create(
             user=self.owner, asset_class="crypto", name="REALBTC",
-            mode="live", symbols=["BTCUSD"], capital=Decimal("2249.98"),
+            mode="live", symbols=["BTCUSD"], capital=Decimal("1000.00"),
             enabled=True)
         self.trade = AssetBotTrade.objects.create(
             config=cfg, asset_class="crypto", symbol="BTCUSD", side="BUY",
             qty=Decimal("0.0002"), entry_price=Decimal("84142.07"),
             stop_loss=Decimal("79934.97"), take_profit=Decimal("88349.17"),
-            status="OPEN", paper=False, broker_order_id="1596774178",
+            status="OPEN", paper=False, broker_order_id=str(REAL_ORDER_BTC),
             rule_name="btc_rule",
             metadata={"entry_working": True, "qty_requested": 0.0002,
                       "protective_order_ids": [], "protected": False,
@@ -475,7 +476,7 @@ class OneMessageForAMovedStopTests(TestCase):
         body["positionExecutions"][0]["stopLossRate"] = held
         t, fake = _client([], env="live")
         _lookup_router(fake, by_order=(200, body))
-        st = t.order_status("1596774178")
+        st = t.order_status(str(REAL_ORDER_BTC))
         CryptoBot(self.cfg)._finish_working_entry(
             self.trade, t, qty=st["filled"], price=st["avgPrice"],
             source="broker", venue=st)

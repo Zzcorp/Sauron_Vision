@@ -1,8 +1,8 @@
-"""THE POSITION PAGE, FOR THE FATHER (2026-09-26).
+"""THE POSITION PAGE, FOR THE KEEPER (2026-09-26).
 
 /forensics/<id>/ opened on six technical cards and a strip of raw fields —
-"too nerdy", in the operator's words, for the father who runs Sauron from
-his phone for three weeks. The page now opens on a plain summary, keeps
+"too nerdy", in the operator's words, for the keeper who runs Sauron from
+a phone. The page now opens on a plain summary, keeps
 itself live while the position is open, and puts the way out one tap away.
 What this file pins:
 
@@ -658,7 +658,7 @@ class CloseButtonTests(_Base):
 @unittest.skipUnless(NODE, "node is not installed")
 class DialogWordsTests(_Base):
     """The dialog's sentences, run under node exactly as the page ships
-    them — the preview's JSON in, the words the father reads out."""
+    them — the preview's JSON in, the words the keeper reads out."""
     username = "pp_words"
 
     def _run(self, calls):

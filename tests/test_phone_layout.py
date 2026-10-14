@@ -1,8 +1,8 @@
 """THE PHONE TIER, FIRST SLICE (2026-09-28).
 
 The operator, 2026-09-27: "Sauron needs a lifting on the responsive side,
-please... it's not adaptive at all now". The father runs Sauron from his
-phone from Monday 2026-09-28. Measured on 3994ffc at 360x780 in a
+please... it's not adaptive at all now". A second keeper runs Sauron
+from a phone. Measured on 3994ffc at 360x780 in a
 phone-emulating headless Chrome: the topbar's right cluster ran to x=685,
 so the bell and the account menu were off the screen; the ticker and the
 info panel were 56px stubs; a saved open signals rail could not be closed;

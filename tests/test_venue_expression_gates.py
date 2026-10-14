@@ -1,7 +1,7 @@
 """Paper and real money are judged on their own books (2026-10-01).
 
-The operator, on a real-money EURAUD ticket: "seriously? The paper and
-live are still on a joint brain?" It was refused with "EURAUD long is
+The operator, on a real-money forex ticket: "seriously? The paper and
+live are still on a joint brain?" It was refused with "<pair> long is
 already on the book via golden_cross — a second ticket doubles the bet":
 the holder was a PAPER bot. Simulated money doubles no real bet. The money
 limits already judged each venue apart (open_capital_at_work,
@@ -160,8 +160,8 @@ class TheCorrelationTaperTests(TestCase):
 class TheManualLaneTests(TestCase):
     """The ticket passes its own venue: a paper lane is judged on the
     paper book, so a REAL bot's long no longer refuses it — and a live
-    lane is judged on the real book (the operator's EURAUD), which the
-    gate tests above pin."""
+    lane is judged on the real book (the operator's real forex position),
+    which the gate tests above pin."""
 
     @classmethod
     def setUpTestData(cls):

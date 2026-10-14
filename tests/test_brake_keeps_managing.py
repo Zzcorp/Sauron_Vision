@@ -1,7 +1,7 @@
 """A brake keeps managing; every disable is recorded (2026-10-07).
 
-PG #138 sat OPEN on config 26 from 2026-10-06 13:12 UTC, when Morgul's G1
-brake stopped the config for a booking made while NYSE was shut. The runner
+A real short sat OPEN on a braked config from 2026-10-06 13:12 UTC, when
+Morgul's G1 brake stopped the config for a booking made while NYSE was shut. The runner
 skipped every disabled config whole, on purpose: the kill switch, `bot
 off`, the HQ toggle and the brake all wrote the same enabled=False and
 nothing recorded which of them had done it, so a runner that managed
@@ -67,7 +67,7 @@ from tests.test_disabled_config_unmanaged import (DESK, ROUTER,
                                                   _crossed_client,
                                                   _open_paper_row)
 
-GROUP = "-5337454557"
+GROUP = "-4000000001"
 NOTIFY = "bot_program.notifications.notify_staff"
 SNAKE = re.compile(r"\b[a-z]+_[a-z0-9_]+\b")
 ACCENTED = re.compile(r"[À-ÖØ-öø-ÿŒœ]")
@@ -1402,7 +1402,7 @@ class TheBotBrakeTests(TestCase):
                          (disarm.BY_BOT_BRAKE, "the operator's brake",
                           "shell"))
         self.assertTrue(disarm.keeps_managing(running))
-        # off before the record existed (config 26): adopted as a brake
+        # off before the record existed (the braked config): adopted as a brake
         old = _bot(self.op, "Old stop", enabled=False)
         _row(old)
         out = _run("bot", "brake", str(old.pk))

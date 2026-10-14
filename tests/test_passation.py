@@ -1,14 +1,13 @@
 """The handover letter opens when the operator has left, and not before.
 
-The operator, 2026-09-28, the night before leaving for three weeks at
-least: a letter of passation to Gandalf, his father, "something pretty
-fancy that will only show after 4PM tomorrow afternoon French time, when
-I'll have left and my dad will have taken my PC and duty".
+The operator, 2026-09-28: a letter of passation to Gandalf, the keeper
+of the house, "something pretty fancy that will only show after 4PM
+tomorrow afternoon" local time, once the keeper had taken over.
 
 What these tests pin (core/passation.py, dashboard/views_passation.py):
 
-  * The clock is 2026-09-29 16:00 Paris, written in UTC (14:00) so no
-    server timezone can move it.
+  * The clock is 2026-09-29 16:00 in the platform's display zone, written
+    in UTC (14:00) so no server timezone can move it.
   * Before the hour: /passation/ sends the reader to the dashboard and no
     page carries the card. Not a teaser, not a countdown — nothing. (Not
     a 404 either: probe_routes counts a 404 as a page wired to nothing.)
@@ -85,12 +84,14 @@ class TheLetterTests(TestCase):
         body = r.content.decode()
         # In English since 2026-10-01 (the operator: never French on the
         # platform).
-        for words in ("TO GANDALF", "Dad, if you are reading this", "three",
-                      "Keep the house, Gandalf", "YOUR SON, PROUD TO BE",
-                      "And thank you for what came before", "Thank you, Dad.",
+        for words in ("TO GANDALF", "KEEPER OF THE HOUSE", "the house is yours",
+                      "Keep the house, Gandalf", "And thank you for what came before",
                       "THE WATCH, IN PRACTICE", "/status", "/stopall",
                       "THE SECOND BOT", "@BotFather"):
             self.assertIn(words, body, words)
+        # no clock zone, no date of departure, no length of the watch
+        for gone in ("PARIS", "the day before leaving", "three weeks"):
+            self.assertNotIn(gone, body, gone)
 
     def test_the_card_leads_to_it_on_every_page_during_the_watch(self):
         # Any page that extends base.html: the calendar is the plainest.

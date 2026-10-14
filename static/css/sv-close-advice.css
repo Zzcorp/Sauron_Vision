@@ -1,7 +1,7 @@
 /* sv-close-advice.css — the ticks, the selection bar and the
  * "Should I close?" dialog (static/js/sv-close-advice.js).
  *
- * One sheet for three pages — /positions/, /portfolio/ and the father's
+ * One sheet for three pages — /positions/, /portfolio/ and the keeper's
  * position page — because it is one component, and a component styled in
  * three <style> blocks is how the three start disagreeing.
  *
@@ -121,7 +121,7 @@ body:has(.sv-sel-bar) .main-content { overflow-x: clip; }
 .sv-sel-btn[disabled],
 .sv-advice-launch[disabled] { opacity: .5; cursor: progress; }
 
-/* The father's page: the question sits just above the close button. */
+/* The keeper's page: the question sits just above the close button. */
 .pd-advice-row { margin: 0 0 12px; }
 .pd-advice-row .sv-advice-launch { min-height: 48px; font-size: 14px; }
 .pd-advice-row[hidden] { display: none; }

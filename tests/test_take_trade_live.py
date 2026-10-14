@@ -769,7 +769,7 @@ class ArmingTheManualLaneTests(TestCase):
         acct = IBKRAccount.objects.create(
             user=self.user, label="ISA", host="ibgateway", port=4003,
             client_id=1)
-        acct.set_credentials("U28134395")
+        acct.set_credentials("U1234567")
         if equity is not None:
             acct.last_equity = Decimal(equity)
             acct.last_equity_currency = "EUR"
@@ -835,7 +835,7 @@ class FundsTrackingTests(TestCase):
         acct = IBKRAccount.objects.create(
             user=self.user, label="ISA", host="ibgateway", port=4003,
             client_id=1)
-        acct.set_credentials("U28134395")
+        acct.set_credentials("U1234567")
         if equity is not None:
             acct.last_equity = Decimal(equity)
             acct.last_equity_currency = "EUR"

@@ -129,7 +129,7 @@ def _held_symbols() -> set:
     The regime probe is a PLATFORM read — `_build_world_snapshot` takes no
     user — so it asks both books for what is currently carried rather than
     scoping to one operator. A symbol nobody holds can wait; a symbol that
-    is 36% of somebody's book cannot.
+    is a large share of somebody's book cannot.
 
     Never raises: a probe that cannot list the book falls back to the
     watchlist ordering rather than costing the whole snapshot.
@@ -318,10 +318,10 @@ def _build_world_snapshot(*, max_obs: int = 80) -> dict:
         # which is the shipped state — "-is_watchlist, symbol" degenerates
         # to ALPHABETICAL, so the probe read AAPL, AAVEUSD, ABBV, ADAUSD,
         # AGG, ALUMUSD, AMD, AMZN out of 177 instruments and reported on
-        # none of the eight the operator was actually carrying.
+        # none of the handful the book actually carried.
         #
         # That is how the briefing came to say, three days running, that
-        # 36% of the book sat in an asset with "zero regime probe
+        # a large share of the book sat in an asset with "zero regime probe
         # coverage": the brain was measuring the alphabet. A regime read
         # that skips the positions is answering a question nobody asked.
         held = _held_symbols()

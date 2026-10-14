@@ -638,6 +638,34 @@ def check_alarm_bot() -> dict:
     return health_row(_check)
 
 
+def check_public_leak_walk() -> dict:
+    """The public leak walk (core/leak_walk.py): FAIL when the Wall or the
+    Book was withheld in the last two days (the count of terms, never a
+    term); otherwise ok, saying whether the server holds a private-term
+    list or runs with the canary alone (a choice, not a fault)."""
+    from django.core.cache import cache
+
+    from core import leak_walk
+    held = []
+    for page, name in leak_walk.PAGES.items():
+        row = cache.get(leak_walk.WITHHELD_KEY % page)
+        if row:
+            at = row.get("at")
+            when = at.strftime("%Y-%m-%d %H:%M UTC") if hasattr(at, "strftime") else "today"
+            held.append(f"{name} at {when} ({int(row.get('n') or 0)} term(s))")
+    if held:
+        return _check("public_leak_walk", "Public leak walk", "fail",
+                      "withheld: " + "; ".join(held),
+                      "A private term reached a public page. Fix the page "
+                      "text; the log line names the page and the count.")
+    if leak_walk.configured():
+        return _check("public_leak_walk", "Public leak walk", "ok",
+                      "a private-term list is configured; nothing withheld")
+    return _check("public_leak_walk", "Public leak walk", "ok",
+                  f"runs with the canary only ({leak_walk.PRIVATE_TERMS_ENV} "
+                  f"is not set); nothing withheld")
+
+
 @login_required
 def system_health(request):
     # Per-user checks are safe for anyone; the platform-wide ones expose
@@ -656,6 +684,7 @@ def system_health(request):
         (check_ai_models, False, True),
         (check_morgul_guards, False, True),
         (check_alarm_bot, False, True),
+        (check_public_leak_walk, False, True),
     ]
     checks = []
     for fn, needs_user, staff_only in plan:

@@ -25,7 +25,8 @@
     <meta property="og:image:height" content="630">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Sauron Vision">
-    <meta property="og:url" content="{{ request.build_absolute_uri }}">
+    {# The canonical path, never request.build_absolute_uri: with no argument that is the path PLUS the visitor's query string, printed into a public page. #}
+    <meta property="og:url" content="{{ canonical_url }}">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Sauron Vision — Institutional Trading Intelligence">
     <meta name="twitter:description" content="Multi-asset signals, autonomous agents, and institutional-grade analytics.">

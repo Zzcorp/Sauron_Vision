@@ -129,7 +129,7 @@ OVERLAP_MIN_RULES = 2
 # overlap audit T11 reads answers "same symbol and SAME side", so this case
 # — the more expensive one, since the pair is flat and still paying both
 # spreads — was visible to nothing. It was live in the book when this was
-# written: USDCHF held BUY by one rule and SELL by another at the same time.
+# written: one pair held BUY by one rule and SELL by another at the same time.
 
 # T13 thesis_dead / the T3 damping — the thesis check's answer (2026-10-03).
 # 0.8 sits above every judgement-call trigger and below only the mark
@@ -800,8 +800,8 @@ def _self_hedge(pos: dict, cache: Optional[dict] = None) -> list[dict]:
     two sets of costs and two stop distances to sit there. It also makes the
     risk engine count two positions where the net exposure is zero.
 
-    Found in the live book before this existed: USDCHF held BUY by one rule
-    and SELL by another, at the same time, by the same operator.
+    Found in the live book before this existed: one pair held BUY by one rule
+    and SELL by another, at the same time, by the same owner.
 
     Scoped to ONE owner's book. Two different users each running their own
     side of a pair is not a hedge, it is two people trading.

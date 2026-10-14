@@ -1,7 +1,7 @@
 """CLI: where do this user's alerts go — and does Telegram answer?
 
-    python manage.py notify_probe --user Sauron          (read-only)
-    python manage.py notify_probe --user Sauron --send   (one test push)
+    python manage.py notify_probe --user <you>          (read-only)
+    python manage.py notify_probe --user <you> --send   (one test push)
 
 Prints the channel (TraderProfile.notify_channel), the preference that
 gates every bot event (receive_bot_alerts), the quiet hours, and whether a

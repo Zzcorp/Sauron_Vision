@@ -51,7 +51,7 @@ from django.utils import timezone
 from bot_program import morgul
 from bot_program import telegram_eye as eye
 
-GROUP = "-5337454557"
+GROUP = "-4000000001"
 SEND = "bot_program.notifications._send_telegram"
 FAULTS = "core.component_digest.collect_faults"
 CLEAR = {"errors": [], "warnings": [], "silent": [], "feeds": [],
@@ -71,7 +71,7 @@ ACCENTED = re.compile(r"[À-ÖØ-öø-ÿŒœ]")
 FRENCH = (" le ", " la ", " les ", " des ", " est ", " pas ", " une ",
           " du ", " et ")
 LIVE_ETORO = {"broker": "etoro", "broker_env": "live", "protected": True,
-              "protective_trade_id": "3588477891"}
+              "protective_trade_id": "3500000001"}
 DEMO_ETORO = dict(LIVE_ETORO, broker_env="paper")
 
 
@@ -329,19 +329,19 @@ class MarketShutTests(_Case):
                       "retry not judged", " ".join(ctx.notes))
 
     def test_a_live_etoro_stock_close_in_the_extended_session_is_not_judged(self):
-        """NVDA #131 (2026-10-07, PR50): care moved the eToro stop to
-        break-even and eToro filled it in its extended session, 11:0x UTC
-        on a Wednesday, NYSE shut. A live eToro stock close is the venue's
-        own execution: not judged, and said so. An entry booked at the
-        same minute still is."""
+        """A real stock row (2026-10-07, PR50; the rows below are composed
+        in its shape): care moved the eToro stop to break-even and eToro
+        filled it in its extended session, 11:0x UTC on a Wednesday, NYSE
+        shut. A live eToro stock close is the venue's own execution: not
+        judged, and said so. An entry booked at the same minute still is."""
         cfg = _cfg(self.user, "Stocks live", "stock", mode="live")
         stop_at = datetime(2026, 10, 7, 11, 7, 59, tzinfo=UTC)
-        closed = _trade(cfg, "NVDA", qty="6", entry="237.60", stop="238.03",
-                        paper=False, status="CLOSED", exit_price="238.03",
-                        pnl="2.58", metadata=dict(LIVE_ETORO),
+        closed = _trade(cfg, "AAPL", qty="10", entry="100.00", stop="101.00",
+                        paper=False, status="CLOSED", exit_price="101.00",
+                        pnl="10.00", metadata=dict(LIVE_ETORO),
                         opened=stop_at - timedelta(days=2), closed=stop_at,
                         reason="momentum | closed:SL")
-        opened = _trade(cfg, "AMZN", entry="257.39", stop="254.18",
+        opened = _trade(cfg, "GOOG", entry="200.00", stop="196.00",
                         paper=False, metadata=dict(LIVE_ETORO),
                         opened=stop_at)
         ctx, found = _check("market_shut", stop_at + timedelta(minutes=8))

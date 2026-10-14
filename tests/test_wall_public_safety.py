@@ -5,8 +5,10 @@ who finds the address, and the answer a visitor receives is more than its
 visible words: the stylesheet, the scripts and every HTML comment travel
 with it. The Book has been walked this way since its second edition
 (tests/test_the_book.py); these tests walk the Wall and the text files
-every visitor downloads with it the same way, with the Book's own
-helpers, so no term that must stay private is typed here either.
+every visitor downloads with it the same way, with the walk the views
+themselves call at render time (core/leak_walk.py), whose private terms
+come from the server's environment, so no term that must stay private is
+typed here either.
 
 Four walks:
 
@@ -29,8 +31,8 @@ from django.test import TestCase
 
 from core import book_content as book
 from core import wall_facts as wf
-from tests.test_the_book import (KNOWN_COMMITS, WHOLE_PATTERNS, _private_terms_in,
-                                 _whole)
+from core.leak_walk import WHOLE_PATTERNS, private_terms_in, whole
+from tests.test_the_book import KNOWN_COMMITS
 
 WALL = "/wall/"
 #: Downloaded by every visitor beside the page: walked with it. Every text
@@ -74,14 +76,14 @@ class TheWallCarriesNothingPrivate(TestCase):
     def setUp(self):
         cache.delete(wf.CACHE_KEY)
         self.body = self.client.get(WALL).content.decode("utf-8")
-        self.whole = _whole(self.body)
+        self.whole = whole(self.body)
 
     def test_the_wall_carries_no_private_term(self):
-        self.assertEqual(_private_terms_in(self.whole), [])
+        self.assertEqual(private_terms_in(self.whole), [])
         for path in STATIC:
             with self.subTest(file=path.name):
                 self.assertEqual(
-                    _private_terms_in(_whole(path.read_text(encoding="utf-8"))), [])
+                    private_terms_in(whole(path.read_text(encoding="utf-8"))), [])
 
     def test_the_wall_names_no_command_host_or_key(self):
         found = [word for word in COMMAND_HOST_OR_KEY if word in self.whole]
@@ -93,8 +95,8 @@ class TheWallCarriesNothingPrivate(TestCase):
         # tests.test_wall_day never saw.
         for path in STATIC:
             with self.subTest(file=path.name):
-                whole = _whole(path.read_text(encoding="utf-8"))
-                found = [word for word in COMMAND_HOST_OR_KEY if word in whole]
+                text = whole(path.read_text(encoding="utf-8"))
+                found = [word for word in COMMAND_HOST_OR_KEY if word in text]
                 self.assertEqual(found, [], "%s says %r" % (path.name, found))
 
     def test_the_wall_shows_no_email_ip_or_identifier(self):

@@ -4,7 +4,7 @@ The operator: "remove any IBKR problems please, it's no more a concern
 for us". The book is eToro; the IBKR row ("Main") routes no class and its
 Gateway is down. Yet the sync attempted it every 15 minutes, graded the
 shared sync row a warning, and from the third miss told the Eye "broker
-unreachable"; the alarm chat, the operator's father's, would have heard
+unreachable"; the alarm chat, the keeper's, would have heard
 "IBKR account has not answered" every three hours and "IBKR is not
 delivering quotes" every day; /health/ read the IBKR feed as NEVER; the
 sweep logged it unreadable; /treasury/ noted its aging reading.

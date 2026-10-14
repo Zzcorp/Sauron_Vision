@@ -1,6 +1,6 @@
 """THE /search MEMO and THE CAUSE OF AN UNPRICED ROW (2026-10-06).
 
-The real NVDA position #131 read "open position only clock-managed: the
+A real stock position read "open position only clock-managed: the
 broker priced it at 0" at 13:47 UTC, 17 minutes into the US session. The
 router builds a fresh EtoroTrader on every call, so the instance's id cache
 was cold on every tick and every unpinned symbol cost a /search before its

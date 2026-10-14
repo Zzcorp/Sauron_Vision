@@ -1,8 +1,8 @@
 """One bet, one ticket — and a leg cap on the currency it rides.
 
-The morning brief led with the same finding four days straight: EURGBP and
-EURJPY each held TWICE, by two different rules — manual_take on one leg,
-bollinger_squeeze_breakout or golden_cross on the other — 2x the intended
+The morning brief led with the same finding four days straight: two euro
+crosses each held TWICE, by two different rules — the hand lane on one leg,
+a technical rule on the other — 2x the intended
 size of one idea, flagged by the anomaly scanner fourteen times in a day,
 refused by nothing. Every existing limit is money-scoped or symbol-scoped:
 two half-size tickets clear the concentration ceiling, the single-position

@@ -91,8 +91,8 @@ class TheRefusalAtTheSizeSentTests(TestCase):
         return t
 
     def test_a_thirty_dollar_stock_position_is_refused_for_its_fee(self):
-        """The 150 USD pool's 30 USD position: 2.00 of fees is 6.7% of it,
-        more than a 3.6% target can carry."""
+        """A small stock pool's position of a few tens of dollars: 2.00 of
+        fees is 6.7% of it, more than a 3.6% target can carry."""
         bot = self._stock_bot()
         price = 337.21
         fee, why = bot._venue_fee_refusal(

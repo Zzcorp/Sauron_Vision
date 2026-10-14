@@ -397,7 +397,7 @@ class CanThisPoolEvenPlaceAnOrderTests(TestCase):
 
     So an operator can arm a config, watch it tick forever, and never learn
     the arithmetic settled it in advance. That is the state this deployment
-    was in: a 500 EUR account against seven megacaps.
+    was in: a small EUR account against seven megacaps.
     """
 
     def _armed(self, *, capital, price, asset_class="stock", symbol="AAPL"):

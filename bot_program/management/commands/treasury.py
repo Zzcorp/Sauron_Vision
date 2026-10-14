@@ -8,7 +8,7 @@ columns only: it makes NO broker call and writes nothing.
 Run with:
 
     python manage.py treasury
-    python manage.py treasury --user mathe
+    python manage.py treasury --user <you>
 """
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError

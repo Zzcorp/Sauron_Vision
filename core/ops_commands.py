@@ -422,7 +422,7 @@ COMMANDS = [
         "purpose": "Every broker, its capital, what it says it holds, what the platform believes is open, and the divergence between the two. Cached columns only — no broker call, nothing written. An em dash is never a zero.",
         "usage": [
             "python manage.py treasury",
-            "python manage.py treasury --user mathe",
+            "python manage.py treasury --user <you>",
         ],
         "mirrors": "/treasury/",
         "read_only": True,
@@ -434,8 +434,8 @@ COMMANDS = [
         "title": "Saxo smoke",
         "purpose": "Exercise every READ of the Saxo adapter against the real SIM or LIVE for one user and report each in three states — ok, refused by Saxo, unknown — before any order exists. Places no order.",
         "usage": [
-            "python manage.py saxo_smoke --user mathe",
-            "python manage.py saxo_smoke --user mathe --symbol AAPL",
+            "python manage.py saxo_smoke --user <you>",
+            "python manage.py saxo_smoke --user <you> --symbol AAPL",
         ],
         "mirrors": "/brokers/",
         "read_only": True,
@@ -454,8 +454,8 @@ COMMANDS = [
         "title": "Notification probe",
         "purpose": "Show where one user's alerts go: the channel, the bot-alert preference, the quiet hours, whether a Telegram chat id and the platform token are present in THIS process; with --send, push ONE test message through the Telegram sender and print its answer (a refusal is logged with Telegram's own words). Nothing traded, ticked or armed.",
         "usage": [
-            "python manage.py notify_probe --user Sauron",
-            "python manage.py notify_probe --user Sauron --send",
+            "python manage.py notify_probe --user <you>",
+            "python manage.py notify_probe --user <you> --send",
         ],
         "mirrors": "/notifications/settings/",
         "read_only": True,
@@ -471,9 +471,9 @@ COMMANDS = [
         "title": "eToro smoke",
         "purpose": "Exercise the READS of the eToro adapter with one user's stored key pair — the row, its world's ping, equity and book, every live config's symbols (id, eToro's spelling, rate, bars), optionally the other world with the same pair, and which write URLs have ever been attested — as ok, refused, no-such or unknown. Places no order.",
         "usage": [
-            "python manage.py etoro_smoke --user Sauron",
-            "python manage.py etoro_smoke --user Sauron --symbol GLDM",
-            "python manage.py etoro_smoke --user Sauron --other-world",
+            "python manage.py etoro_smoke --user <you>",
+            "python manage.py etoro_smoke --user <you> --symbol GLDM",
+            "python manage.py etoro_smoke --user <you> --other-world",
         ],
         "mirrors": "/brokers/",
         "read_only": True,
@@ -493,7 +493,7 @@ COMMANDS = [
         "purpose": "Answer, in one pass, whether it is safe to arm real money right now — switches, connection, money, live configs, bars, PIN — from cached columns only.",
         "usage": [
             "python manage.py preflight_live",
-            "python manage.py preflight_live --user mathe",
+            "python manage.py preflight_live --user <you>",
         ],
         "mirrors": "/health/",
         "read_only": True,

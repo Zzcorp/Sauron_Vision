@@ -1,11 +1,11 @@
 """Reconcile judges a row by its own position id (2026-10-03).
 
-Morgul, Saturday 00:24 UTC: "Drift · GBPCHF long #130 · live — not in the
-holdings eToro reported; the platform counts it open; seen since
-2026-10-02 12:37 UTC". Twelve hours. The reconciler had seen the miss on
-every pass and refused it every time: "EtoroTrader listed 1 position(s) it
-could not name, so a miss proves nothing" — the account's other-class
-holding (GLDM) stayed "ETORO:3190" because a forex pass warmed only forex
+Morgul, Saturday 00:24 UTC: "Drift · a forex long · live — not in the
+holdings eToro reported; the platform counts it open; seen since Friday
+12:37 UTC". Twelve hours. The reconciler had seen the miss on every pass
+and refused it every time: "EtoroTrader listed 1 position(s) it could not
+name, so a miss proves nothing" — the account's other-class holding (an
+ETF) stayed a bare id because a forex pass warmed only forex
 names, and one unnamed position made every miss in every class
 untrustworthy.
 

@@ -13,7 +13,7 @@ bot_program/telegram_eye.read_live_account):
     rows are not counted; a legacy Position row counts once, its P&L with
     no currency (as the page prints it); the seeded book reads "Book
     value: not set", an entered one its value; the digest names whose
-    book it is ("User: Sauron");
+    book it is ("User: <username>");
   * B2 the end-of-day summary lists today's opens and closes from
     AssetBotTrade with the P&L and R the rows booked; yesterday's rows,
     error and canceled rows and another user's rows are not listed; a
@@ -52,19 +52,19 @@ from django.utils import timezone
 
 READ = "bot_program.telegram_eye.read_live_account"
 TRADER = "bot_program.engine.etoro_client.EtoroTrader"
-LIVE = {"equity": (2249.65, "USD"), "positions": 0,
-        "cells": {"available_cash": 2249.65, "used_margin": 0.0,
+LIVE = {"equity": (1234.56, "USD"), "positions": 0,
+        "cells": {"available_cash": 1234.56, "used_margin": 0.0,
                   "currency": "USD"}}
 DEMO_LINE = ("Sauron trades on the demo account; the real account is read, "
              "not traded.")
 UNKNOWN = "the stored reading does not say which account it came from"
-SAURON = "User: Sauron"
+SAURON = "User: Operator"
 SNAKE = re.compile(r"\b[a-z]+_[a-z0-9_]+\b")
 ACCENTED = re.compile(r"[À-ÖØ-öø-ÿŒœ]")
 FRENCH = (" le ", " la ", " les ", " des ", " du ", " une ", " est ",
           " pour ", " avec ", " sur ", " vous ", " et ")
-#: The five positions the Sauron user held on 2026-09-27 (#61, #68, #102,
-#: #111, #110), with marks: (symbol, class, side, qty, entry, mark,
+#: Five simulated positions as the brief lists them (composed), with
+#: marks: (symbol, class, side, qty, entry, mark,
 #: value_per_unit). The P&L is _trade_to_position's: (mark - entry) x qty
 #: x value_per_unit x sign; the percentage (mark - entry) / entry x 100 x
 #: sign, both rounded to 2 places.
@@ -197,7 +197,7 @@ class _BookCase(TestCase):
     book, the eToro row in demo with its demo cells stamped."""
 
     def setUp(self):
-        self.user = _user("Sauron")
+        self.user = _user("Operator")
         self.stock = _cfg(self.user, "stock")
         self.forex = _cfg(self.user, "forex")
         self.five = []
@@ -221,8 +221,8 @@ class _BookCase(TestCase):
         self.acct.last_margin_world = "live"
         self.acct.last_margin_at = at
         self.acct.last_equity_at = at
-        self.acct.last_equity = Decimal("2249.65")
-        self.acct.last_available_cash = Decimal("2200.00")
+        self.acct.last_equity = Decimal("1234.56")
+        self.acct.last_available_cash = Decimal("1200.00")
         self.acct.last_used_margin = Decimal("49.65")
         self.acct.broker_positions = []
         self.acct.broker_positions_at = at
@@ -412,12 +412,12 @@ class RealMoneyFirstTests(_BookCase):
         self.assertRegex(real[0], r"^eToro real account, read at "
                                   r"\d{4}-\d\d-\d\d \d\d:\d\d UTC$")
         self.assertEqual(real[1:], [
-            "Equity: 2,249.65 USD", "Available cash: 2,249.65 USD",
+            "Equity: 1,234.56 USD", "Available cash: 1,234.56 USD",
             "Used margin: 0.00 USD", "Held at eToro: none",
             "No real-money position on the platform.", DEMO_LINE])
         account = digest["sections"]["real_money"]["account"]
         self.assertEqual(account["source"], "live read")
-        self.assertEqual(account["equity"], 2249.65)
+        self.assertEqual(account["equity"], 1234.56)
 
     def test_a_raising_read_falls_back_to_the_cells_stamped_live(self):
         from bot_program.telegram_eye import when
@@ -427,7 +427,7 @@ class RealMoneyFirstTests(_BookCase):
         self.assertEqual(_lines(digest, "real_money"), [
             f"eToro real account, as of {when(at)} (the live read did not "
             f"answer)",
-            "Equity: 2,249.65 USD", "Available cash: 2,200.00 USD",
+            "Equity: 1,234.56 USD", "Available cash: 1,200.00 USD",
             "Used margin: 49.65 USD", "Held at eToro: none",
             "No real-money position on the platform."])
         # the row is live: no demo line, and no demo equity under Simulated
@@ -441,7 +441,7 @@ class RealMoneyFirstTests(_BookCase):
                                       "cells": None})
         real = _lines(digest, "real_money")
         self.assertIn("(the live read did not answer)", real[0])
-        self.assertIn("Equity: 2,249.65 USD", real)
+        self.assertIn("Equity: 1,234.56 USD", real)
 
     def test_no_key_reads_the_stamped_cells_and_never_calls_the_read(self):
         from bot_program.telegram_eye import when
@@ -454,7 +454,7 @@ class RealMoneyFirstTests(_BookCase):
         real = _lines(digest, "real_money")
         self.assertEqual(real[0], f"eToro real account, as of {when(at)} "
                                   f"(no key is stored for a live read)")
-        self.assertIn("Equity: 2,249.65 USD", real)
+        self.assertIn("Equity: 1,234.56 USD", real)
 
     def test_cells_stamped_in_the_demo_world_are_never_real_money(self):
         digest = _morning(self.user, requests.ConnectionError("down"))
@@ -475,7 +475,7 @@ class RealMoneyFirstTests(_BookCase):
         real account's equity can sit beside an older "demo" stamp."""
         self.acct.demo = False
         self.acct.last_margin_at = timezone.now() - timedelta(minutes=30)
-        self.acct.last_equity = Decimal("2249.65")
+        self.acct.last_equity = Decimal("1234.56")
         self.acct.last_equity_at = timezone.now() - timedelta(minutes=3)
         self.acct.save()
         digest = _morning(self.user, requests.ConnectionError("down"))
@@ -485,7 +485,7 @@ class RealMoneyFirstTests(_BookCase):
             f"{UNKNOWN}",
             "No real-money position on the platform."])
         every = "\n".join(real + _lines(digest, "simulated"))
-        self.assertNotIn("2,249.65", every)
+        self.assertNotIn("1,234.56", every)
         self.assertNotIn("eToro demo account", every)
         # while the platform trades the demo, Simulated says it too
         self.acct.demo = True
@@ -508,7 +508,7 @@ class RealMoneyFirstTests(_BookCase):
         real = _lines(digest, "real_money")
         self.assertEqual(real[0], f"eToro real account, as of {when(at)} "
                                   f"(the stored key could not be read)")
-        self.assertIn("Equity: 2,249.65 USD", real)
+        self.assertIn("Equity: 1,234.56 USD", real)
         # a reader that raises says the same, never "no key"
         with patch.object(EtoroAccount, "get_credentials",
                           side_effect=ValueError("bad token")):
@@ -549,17 +549,17 @@ class RealMoneyFirstTests(_BookCase):
         from alerts.scheduled_digests import generate_morning_digest
         from bot_program import telegram_eye as eye
         client = MagicMock()
-        client.net_liquidation.return_value = (2249.65, "USD")
+        client.net_liquidation.return_value = (1234.56, "USD")
         client.get_positions.return_value = []
         client.margin_cells.return_value = {
-            "available_cash": 2249.65, "used_margin": 0.0, "currency": "USD"}
+            "available_cash": 1234.56, "used_margin": 0.0, "currency": "USD"}
         with patch(TRADER, return_value=client) as trader:
             digest = generate_morning_digest(user=self.user)
         self.assertEqual(trader.call_args.kwargs.get("env"), "live")
         self.assertEqual({c[0] for c in client.method_calls},
                          {"net_liquidation", "get_positions",
                           "margin_cells"})
-        self.assertIn("Equity: 2,249.65 USD", _lines(digest, "real_money"))
+        self.assertIn("Equity: 1,234.56 USD", _lines(digest, "real_money"))
         # the status report keeps its two reads
         client.reset_mock()
         with patch(TRADER, return_value=client):
@@ -573,8 +573,8 @@ class RealMoneyFirstTests(_BookCase):
         payloads = {
             "aggregate-portfolio": {
                 "accountCurrency": "USD",
-                "accountTotals": {"accountTotalValue": 2249.65,
-                                  "accountAvailableCash": 2249.65,
+                "accountTotals": {"accountTotalValue": 1234.56,
+                                  "accountAvailableCash": 1234.56,
                                   "accountTotalUsedMargin": 0.0}},
             "portfolio": {"clientPortfolio": {"positions": []}},
         }
@@ -600,7 +600,7 @@ class RealMoneyFirstTests(_BookCase):
                                   r"(aggregate-portfolio|portfolio)$")
             self.assertNotIn("/demo/", url)
         self.assertEqual(_lines(digest, "real_money")[1:5], [
-            "Equity: 2,249.65 USD", "Available cash: 2,249.65 USD",
+            "Equity: 1,234.56 USD", "Available cash: 1,234.56 USD",
             "Used margin: 0.00 USD", "Held at eToro: none"])
 
     def test_the_module_carries_no_write(self):
@@ -619,7 +619,7 @@ class RealMoneyFirstTests(_BookCase):
 
 class EndOfDayTests(TestCase):
     def setUp(self):
-        self.user = _user("Father")
+        self.user = _user("Keeper")
         self.paper = _cfg(self.user, "stock")
         self.live = _cfg(self.user, "stock", mode="live")
 
@@ -655,7 +655,7 @@ class EndOfDayTests(TestCase):
                          [(-12.4, -0.62), (8.1, 0.81)])
         # the book: NFLX is still open
         self.assertEqual(digest["summary"], [
-            "User: Father", "Open positions: 1 (1 simulated · 0 real money)"])
+            "User: Keeper", "Open positions: 1 (1 simulated · 0 real money)"])
 
     def test_a_close_nothing_could_price_says_so(self):
         _trade(self.paper, "AAPL", status="CLOSED", opened_at=_yesterday(),
@@ -815,7 +815,7 @@ class PlainEnglishTests(_BookCase):
         from alerts.models import UserNotificationPrefs
         from alerts.scheduled_digests import send_digest
         prefs, _ = UserNotificationPrefs.objects.get_or_create(user=self.user)
-        prefs.telegram_chat_id = "-5337454557"
+        prefs.telegram_chat_id = "-4000000001"
         prefs.save()
         digest = _morning(self.user)
         env = {"TELEGRAM_BOT_TOKEN": "123:t", "TELEGRAM_CHAT_ID": "-1"}

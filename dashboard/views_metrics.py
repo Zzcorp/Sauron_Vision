@@ -253,8 +253,8 @@ _POSITION_BARS = 12
 # The labels say "under" and "over", not "<=" and ">=". The first bucket
 # holds r < -2.0, so a position at exactly -2.00R is in the SECOND — and a
 # label reading "<= -2R" claimed a boundary it did not hold, which showed a
-# measured zero in the tail-risk bucket while the operator was carrying a
-# position at exactly -2R. R is rounded to two places upstream, so exact
+# measured zero in the tail-risk bucket while a real position sat at
+# exactly -2R. R is rounded to two places upstream, so exact
 # boundary values are ordinary, not exotic.
 _R_BUCKETS = (
     ("under -2R", None, -2.0, "red"),

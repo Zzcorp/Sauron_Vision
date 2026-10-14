@@ -34,7 +34,7 @@ as "your keys are wrong".
 
 THE DEMO UNTICK IS THE SWITCH TO REAL MONEY (measured 2026-09-23)
 
-`etoro_smoke --user Sauron --other-world`: the pair eToro's portal calls
+`etoro_smoke --user <you> --other-world`: the pair eToro's portal calls
 "virtual", saved here with Demo ticked, answered 200 on the DEMO
 aggregate-portfolio (a six-figure virtual balance) AND 200 on the LIVE
 aggregate-portfolio with the SAME pair. There is no demo-only pair. The
@@ -436,7 +436,7 @@ def brokers_page(request):
 
 
 #: The measurement, in the words the flash prints. One eToro pair opens
-#: both worlds (etoro_smoke --user Sauron --other-world, 2026-09-23: demo
+#: both worlds (etoro_smoke --user <you> --other-world, 2026-09-23: demo
 #: aggregate-portfolio 200 AND live aggregate-portfolio 200, same pair).
 DEMO_UNTICK_MEASURED = (
     "measured 2026-09-23: the same eToro pair answered 200 on the demo AND "

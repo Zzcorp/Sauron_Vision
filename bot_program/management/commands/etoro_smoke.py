@@ -50,7 +50,7 @@ What it prints, in order:
     Then how many of the user's live platform rows are OPEN without an
     etoro stamp — rows this book says nothing about.
   * with --other-world only: a ping of the OTHER world with the SAME pair.
-    MEASURED 2026-09-23 (--user Sauron --other-world): the pair saved with
+    MEASURED 2026-09-23 (--user <you> --other-world): the pair saved with
     Demo ticked answered 200 on the live world too — one eToro pair opens
     both worlds, and the Demo tick on /brokers/ alone picks the URL
     segment. Off by default so the ordinary run touches one world; kept so
@@ -69,9 +69,9 @@ What it prints, in order:
 
 Run with:
 
-    python manage.py etoro_smoke --user Sauron
-    python manage.py etoro_smoke --user Sauron --symbol GLDM
-    python manage.py etoro_smoke --user Sauron --other-world
+    python manage.py etoro_smoke --user <you>
+    python manage.py etoro_smoke --user <you> --symbol GLDM
+    python manage.py etoro_smoke --user <you> --other-world
 
 Deliberately NOT runnable from the ops page: it presents the operator's
 eToro keys to an external service and prints the account's balance.
@@ -480,8 +480,9 @@ class Command(BaseCommand):
             close_note = ("real path attested by GET → 405 on 2026-09-22 "
                           "(_V1_EXEC_REAL_SEG); the POST itself measured on "
                           "the real account 2026-09-26 22:03:24 UTC: "
-                          "position 3588477891 answered orderForClose"
-                          "{orderID 1596736969, orderType 19, statusID 1}, "
+                          "the real BTC position answered orderForClose"
+                          "{orderID <the close order's id>, orderType 19, "
+                          "statusID 1}, "
                           "proven by the OPEN order's positionExecutions[0]"
                           ".state turning 'closed'; used margin 0.0 five "
                           "seconds later")
@@ -501,8 +502,8 @@ class Command(BaseCommand):
                         "returned to 0.0; never sent on a CLOSE order id")
                        if t.demo else
                        "measured 2026-09-26 22:03:11 UTC on the real account: "
-                       "202 {orderId 1596774177, referenceId ''} on a "
-                       "WaitingForMarket order (AAPL 0.04, frozenAmount 14.64 "
+                       "202 {orderId <the held order's id>, referenceId ''} on "
+                       "a WaitingForMarket order (AAPL 0.04, frozenAmount 14.64 "
                        "held); 3 s later the lookup read status {id 7, "
                        "Canceled} and used margin gave back the 14.64 — the "
                        "demo answer of 2026-09-23 exactly; never sent on a "
@@ -514,8 +515,9 @@ class Command(BaseCommand):
         segment_note = "measured 2026-09-23 on the demo segment"
         post_real = ("" if t.demo else
                      "measured 2026-09-26 on the real account, at 1x only: "
-                     "accepted with an orderId — 1596774177 (AAPL 0.04, "
-                     "held) and 1596774178 (BTC 0.0002, filled at once); ")
+                     "accepted with an orderId — a held AAPL 0.04 order and a "
+                     "BTC 0.0002 order filled at once (ids in the private "
+                     "deploy log); ")
         lookup_real = ("" if t.demo else
                        "measured 2026-09-26 on the real account: 200 by "
                        "?orderId=<int>; {id 11, WaitingForMarket} and {id 7, "

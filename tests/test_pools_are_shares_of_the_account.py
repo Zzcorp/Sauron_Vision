@@ -1,7 +1,7 @@
 """Pools that follow the account take SHARES of it, computed on every sync.
 
-By Thursday 2026-09-10 this deployment had 1,000 of hand-typed pools over
-a 500 EUR account: one lane followed the account (the only one allowed),
+By Thursday 2026-09-10 this deployment had hand-typed pools worth twice a
+small EUR account: one lane followed the account (the only one allowed),
 the bots carried numbers typed once, and together they could deploy twice
 the money. The operator's ask: "que Sauron calcule cela en continu" — and
 that it be intelligent about it.

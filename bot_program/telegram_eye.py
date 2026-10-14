@@ -3,13 +3,13 @@
 The operator's ask, 2026-09-26: "Sauron peut-il faire un état des lieux
 sur Telegram? Répondre quand demandé entre guillemets." The alerts
 already reach the group "Sauron Vision" (the telegram_chat_id on the
-staff user's UserNotificationPrefs). From 2026-09-28 the operator's
-father runs Sauron for three weeks from his phone; this module is what
-he can ask it.
+staff user's UserNotificationPrefs). A second keeper may run Sauron from
+a phone while the operator is unavailable; this module is what he can ask
+it.
 
 Every reply is in ENGLISH and in one house style: the operator's rule of
 2026-09-26, "messages en anglais toujours, et un style irréprochable".
-French command aliases are accepted because the father may type them;
+French command aliases are accepted because the keeper may type them;
 the answer is English all the same.
 
     /status  /etat  "état des lieux"   the status report (no LLM)

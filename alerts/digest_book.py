@@ -9,7 +9,7 @@ platform holds is an AssetBotTrade; the end-of-day "Trades today" read
 the same empty table. Neither said a word about the real account.
 
 Both digests now open with the user's whole book: the user it belongs to
-("User: Sauron" — a chat several users share gets the digest of the first
+("User: <username>" — a chat several users share gets the digest of the first
 user met, so the digest names whose book it is), a summary line, then a
 "Real money" section, then a "Simulated" one. Every figure comes from a
 reader the platform already has, so a digest cannot quote a number another
@@ -446,7 +446,7 @@ def book_sections(user, now=None) -> dict:
 
 
 def owner_line(user) -> list:
-    """["User: Sauron"]: whose book the digest reads. A chat several users
+    """["User: <username>"]: whose book the digest reads. A chat several users
     share gets the digest of the first user met (send_digest's
     chats_done), so the reader must be able to see which one. [] for the
     digest with no user."""

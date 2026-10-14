@@ -32,8 +32,8 @@ configs_ticked keeps counting enabled configs only. A config stopped by
 hand or by the kill switch, or one with no record (every stop before this
 date), is skipped whole as before: the kill switch leaves its rows for
 reconciliation by hand. run_asset_bot_tick on a braked config manages it
-the same way. PG #138, left unmanaged on config 26 after Morgul's G1 brake
-of 2026-10-06, is why.
+the same way. A real short left unmanaged on a braked config after Morgul's
+G1 brake of 2026-10-06 is why.
 """
 import logging
 import uuid

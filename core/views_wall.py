@@ -12,8 +12,11 @@ dashboard's shell: forty-odd queries per visit, most of them on live
 quotes an anonymous visitor is never shown. The Book has rendered this
 way since 2026-09-27; the Wall now does too. The template receives the
 request as a plain value, for the absolute address of its card image
-({% static_abs %}) and the og:url, and the CSRF token by name, for the
-three login forms it carries ({% csrf_token %} reads `csrf_token`, and
+({% static_abs %}), the canonical URL for its og:url (the path alone:
+the og:url once printed request.build_absolute_uri, path AND query
+string, so any visitor could put words of their choosing on the public
+page — 2026-10-14, review), and the CSRF token by name, for the three
+login forms it carries ({% csrf_token %} reads `csrf_token`, and
 get_token() is what makes the middleware set the cookie).
 
 Every reader this view calls is fenced on its own, so one of them failing
@@ -30,6 +33,7 @@ from django.middleware.csrf import get_token
 from django.shortcuts import redirect
 from django.template.loader import render_to_string
 
+from core import leak_walk
 from core.day_of_sauron import safe_page_scheme
 from core.views_book import latest_steps
 from core.wall_facts import market_sessions, wall_facts
@@ -66,9 +70,20 @@ def the_wall(request):
         # The latest steps (2026-10-08): the Book's newest four milestones,
         # read off core.book_content at render time and never raising.
         "latest": latest_steps(4),
-        # For {% static_abs %} and og:url alone: no context processor runs.
+        # For {% static_abs %} alone: no context processor runs.
         "request": request,
+        # The og:url: the page's own path, never the visitor's query string.
+        "canonical_url": request.build_absolute_uri(request.path),
         # For the three {% csrf_token %} of the login and PIN forms.
         "csrf_token": get_token(request),
     }
-    return HttpResponse(render_to_string("landing/the_wall.html", context))
+    body = render_to_string("landing/the_wall.html", context)
+    # THE LEAK WALK (2026-10-14, core/leak_walk.py): an answer that carries
+    # one of the operator's private terms is not sent; a placeholder goes
+    # out and staff is told. The request goes along so the host the visitor
+    # typed is not read as the page's. Fenced: a walk that raises publishes
+    # the page.
+    held = leak_walk.withhold_if_private("wall", body, request)
+    if held is not None:
+        return held
+    return HttpResponse(body)

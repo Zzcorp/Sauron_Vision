@@ -10,8 +10,8 @@ wrong" from "the session is gone" before a single order exists.
 
 Run with:
 
-    python manage.py saxo_smoke --user mathe
-    python manage.py saxo_smoke --user mathe --symbol AAPL
+    python manage.py saxo_smoke --user <you>
+    python manage.py saxo_smoke --user <you> --symbol AAPL
 
 Deliberately NOT runnable from the ops page: it presents the operator's
 Saxo session to an external service and prints the account's balance.

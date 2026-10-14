@@ -1,7 +1,7 @@
 """THE RECONCILE AROUND THE CLOCK (2026-10-06).
 
-GBPNZD #135 was stopped out by eToro in the night and stayed OPEN here until
-the 13:00 UTC reconcile: the pass ran 13:00-21:45 only. It now runs every
+A real forex row was stopped out by eToro in the night and stayed OPEN here
+until the 13:00 UTC reconcile: the pass ran 13:00-21:45 only. It now runs every
 15 minutes all day, and the review of that change found what an all-day
 cadence exposes:
 

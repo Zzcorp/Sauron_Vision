@@ -1,7 +1,7 @@
 """Real money is unmistakable, on every surface (2026-09-30).
 
 The operator, the morning live trading was unblocked: live and paper were
-"still light" for him and his father. The survey behind this found the
+"still light" for him and the keeper. The survey behind this found the
 /positions/ table with no per-row marker, /asset-bots/ and the heartbeat
 marking only paper rows (live marked by absence), four colour schemes
 (paper painted green), demo fills printed LIVE, no indicator anywhere that

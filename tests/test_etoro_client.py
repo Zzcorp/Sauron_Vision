@@ -1173,8 +1173,8 @@ def _polls(fake):
     return [c for c in fake.calls if c[0] == "GET" and "orders:lookup" in c[1]]
 
 
-# ── MEASURED 2026-09-28 22:42 UTC, demo segment, the operator's pair, the
-# night before leaving: EURUSD 1000 units BUY twice the same minute, at 1x
+# ── MEASURED 2026-09-28 22:42 UTC, demo segment, the operator's pair:
+# EURUSD 1000 units BUY twice the same minute, at 1x
 # (order 384690781 → position 3605812674, closed by order 384732103) and at
 # 5x (order 384647176 → position 3605812677, closed by order 384726349).
 # Every literal below was printed by the real adapter through the shell
@@ -1623,7 +1623,7 @@ class TheMeasuredWireTests(SimpleTestCase):
 
     def test_proof_forex(self):
         """MEASURED ON THE DEMO SEGMENT, 2026-09-28 22:42:46 UTC, by the
-        operator the night before leaving: EURUSD 1000 units BUY at 1x,
+        operator: EURUSD 1000 units BUY at 1x,
         stop 1.13146 / target 1.14284 sent (the last 1.13715 x 0.995 /
         x 1.005). FILLED in 100 ms (requestTime .363Z -> executionTime
         .467Z) — order 384690781, position 3605812674, avgPrice 1.13716,
@@ -1762,7 +1762,7 @@ class TheMeasuredWireTests(SimpleTestCase):
 
     def test_proof_stock(self):
         """MEASURED ON THE DEMO SEGMENT, 2026-09-29 10:57:01 UTC, by the
-        operator the day of leaving: AAPL 4 units BUY at 1x, stop 326.6184 /
+        operator: AAPL 4 units BUY at 1x, stop 326.6184 /
         target 346.8216 sent (the last 336.72 x 0.97 / x 1.03). FILLED in
         ~150 ms — order 384798829, position 3605938942, avgPrice 336.87,
         settlementType REAL (a stock at 1x is the share itself, as BTC was
@@ -2477,8 +2477,8 @@ class TheHeldOrderTests(SimpleTestCase):
         unchanged."""
         live, fake = _client([], env="live")
         self.assertEqual(EtoroTrader._V3_EXEC_REAL_SEG, {"orders": ""})
-        self.assertEqual(live._v3_exec_order("1596774177"),
-                         f"{BASE}/api/v3/trading/execution/orders/1596774177")
+        self.assertEqual(live._v3_exec_order(str(REAL_ORDER_AAPL)),
+                         f"{BASE}/api/v3/trading/execution/orders/{REAL_ORDER_AAPL}")
         self.assertEqual(fake.calls, [])
         demo, _ = _client([])
         self.assertEqual(demo._v3_exec_order("383459788"),
@@ -3440,20 +3440,32 @@ class TheVenueSpellingTests(SimpleTestCase):
 # ── THE REAL ACCOUNT, MEASURED 2026-09-26 (Saturday ~21:25-22:03 UTC, code
 # 097e72c, sent by the operator through a shell client built env='live';
 # deploy/ETORO_DEPARTURE.md §4 D5). Every literal below was printed by the
-# real adapter on the REAL account unless a docstring says "composed"; the
-# fake wire answers the real segment's own spellings — no segment on the
-# POST, the lookup, the close and the reads. ────────────────────────────────
-REAL_BTC_ACCEPTED = {"token": "<not captured>", "orderId": 1596774178,
+# real adapter on the REAL account unless a docstring says "composed", EXCEPT
+# THE IDENTIFIERS: the real order, position and close-order ids are in the
+# operator's private deploy log, and the four constants below are
+# placeholders of the same shape (this repository is public). Every test
+# compares the fixture with itself, so the verdicts do not depend on the
+# value. The fake wire answers the real segment's own spellings — no
+# segment on the POST, the lookup, the close and the reads. ─────────────────
+REAL_ORDER_AAPL = 1500000001    # the held AAPL 0.04 order, withdrawn
+REAL_ORDER_BTC = 1500000002     # the BTC 0.0002 order, filled at once
+REAL_POSITION_BTC = 3500000001  # the position the BTC fill opened
+REAL_CLOSE_ORDER = 1500000003   # the close order eToro answered with
+#: The account's cells were printed to the cent (private deploy log); a
+#: round placeholder keeps the round trip's arithmetic (0.33 USD).
+REAL_CASH_BEFORE = 1000.00
+REAL_CASH_AFTER = 999.67
+REAL_BTC_ACCEPTED = {"token": "<not captured>", "orderId": REAL_ORDER_BTC,
                      "referenceId": "<not captured>"}
 
 
 def _real_btc_lookup(state="open"):
-    """orders:lookup (no segment) of order 1596774178 — BTC 0.0002 BUY at
-    1x, FILLED at once. Printed: the adapter's FILLED; asset.settlementType
+    """orders:lookup (no segment) of the BTC order (REAL_ORDER_BTC stands
+    for its id) — BTC 0.0002 BUY at 1x, FILLED at once. Printed: the adapter's FILLED; asset.settlementType
     'REAL' at leverage 1; requestedAmount 16.83, frozenAmount 17.0,
     totalCosts 0.17; openStopLossRate 79934.97 (the SENT stop, kept on
     the top level) and the target 88349.17 kept; positionExecutions[0]:
-    positionId 3588477891, stopLossRate 75745.8 (the HELD stop); the
+    positionId (REAL_POSITION_BTC), stopLossRate 75745.8 (the HELD stop); the
     values avgPrice 84145.8, fees 0.17, marketSpread 0 and markup 0.
     Composed: the wire status {3, Filled} (the sitting printed the
     adapter's FILLED, not the id — 3 is the demo's measured Filled);
@@ -3464,14 +3476,14 @@ def _real_btc_lookup(state="open"):
     after the close: this one with state "closed" (the adapter printed
     the word)."""
     return {
-        "orderId": 1596774178,
+        "orderId": REAL_ORDER_BTC,
         "status": {"id": 3, "name": "Filled", "errorCode": 0},
         "asset": {"settlementType": "REAL", "leverage": 1},
         "requestedAmount": 16.83, "frozenAmount": 17.0,
         "openStopLossRate": 79934.97, "openTakeProfitRate": 88349.17,
         "totalCosts": 0.17,
         "positionExecutions": [{
-            "positionId": 3588477891, "state": state,
+            "positionId": REAL_POSITION_BTC, "state": state,
             "stopLossRate": 75745.8, "takeProfitRate": 88349.17,
             "openingData": {"units": 0.0002, "avgPrice": 84145.8,
                             "fees": 0.17, "marketSpread": 0,
@@ -3479,16 +3491,16 @@ def _real_btc_lookup(state="open"):
     }
 
 
-REAL_BTC_CLOSE = {"orderForClose": {"positionID": 3588477891,
+REAL_BTC_CLOSE = {"orderForClose": {"positionID": REAL_POSITION_BTC,
                                     "instrumentID": 100000,
-                                    "orderID": 1596736969, "orderType": 19,
+                                    "orderID": REAL_CLOSE_ORDER, "orderType": 19,
                                     "statusID": 1}}
-# The cells printed {available_cash 2249.65, used_margin 0.0} alone.
-# Composed: accountCurrency "USD" — the account's currency is the one the
-# same evening's net_liquidation read printed (2249.98, 'USD'), not a
-# field of this print.
+# The cells printed {available_cash <the real balance, to the cent>,
+# used_margin 0.0} alone; REAL_CASH_AFTER stands for the figure. Composed:
+# accountCurrency "USD" — the account's currency is the one the same
+# evening's net_liquidation read printed, not a field of this print.
 REAL_CELLS_AFTER_CLOSE = {"accountCurrency": "USD",
-                          "accountTotals": {"accountAvailableCash": 2249.65,
+                          "accountTotals": {"accountAvailableCash": REAL_CASH_AFTER,
                                             "accountTotalUsedMargin": 0.0}}
 
 
@@ -3503,21 +3515,25 @@ class TheRealAccountProofTests(SimpleTestCase):
     def test_proof_crypto(self):
         """MEASURED ON THE REAL ACCOUNT, 2026-09-26: BTC 0.0002 BUY at 1x,
         stop 79934.97 / target 88349.17 sent (the last 84142.07 x 0.95 /
-        x 1.05). FILLED at once — order 1596774178, position 3588477891,
-        avgPrice 84145.8, settlementType REAL, fees 0.17 (1%, one side),
-        the stop HELD at 75745.8 (eToro rewrote it: 9.98% under the fill).
-        CLOSED at 22:03:24 UTC by the market-close POST with no segment:
-        orderForClose{orderID 1596736969, orderType 19, statusID 1}, proven
-        by the open order's positionExecutions[0].state "closed"; 5 s
-        later available cash 2249.65, used margin 0.0, no position, and
-        broker_portfolio empty. Round trip 0.33 USD (2249.98 -> 2249.65).
-        "crypto" joins ETORO_PROVEN in the commit that pins this, at 1x
-        only (ETORO_PROVEN_LEVERAGE stays empty)."""
+        x 1.05). FILLED at once — an order and a position (ids in the
+        operator's private deploy log; REAL_ORDER_BTC and REAL_POSITION_BTC
+        stand for them here), avgPrice 84145.8, settlementType REAL, fees
+        0.17 (1%, one side), the stop HELD at 75745.8 (eToro rewrote it:
+        9.98% under the fill). CLOSED at 22:03:24 UTC by the market-close
+        POST with no segment: orderForClose{orderID <the close order's id>,
+        orderType 19, statusID 1}, proven by the open order's
+        positionExecutions[0].state "closed"; 5 s later the available cash
+        was back where it started less the round trip, used margin 0.0, no
+        position, and broker_portfolio empty. Round trip 0.33 USD (the
+        cells, to the cent, are in the private log; REAL_CASH_BEFORE ->
+        REAL_CASH_AFTER stand for them). "crypto" joins ETORO_PROVEN in the
+        commit that pins this, at 1x only (ETORO_PROVEN_LEVERAGE stays
+        empty)."""
         t, fake = _client([
             SEARCH_BTC,
             ("POST", "/api/v2/trading/execution/orders", 200,
              REAL_BTC_ACCEPTED),
-            ("POST", "/market-close-orders/positions/3588477891", 200,
+            ("POST", f"/market-close-orders/positions/{REAL_POSITION_BTC}", 200,
              REAL_BTC_CLOSE),
             ("GET", "/api/v1/trading/info/aggregate-portfolio", 200,
              REAL_CELLS_AFTER_CLOSE),
@@ -3539,11 +3555,11 @@ class TheRealAccountProofTests(SimpleTestCase):
         polls = _polls(fake)
         self.assertEqual(polls[0][1],
                          f"{BASE}/api/v2/trading/info/orders:lookup")
-        self.assertEqual(polls[0][2]["params"], {"orderId": "1596774178"})
+        self.assertEqual(polls[0][2]["params"], {"orderId": str(REAL_ORDER_BTC)})
         self.assertEqual((r["orderId"], r["status"], r["executedQty"],
                           r["avgPrice"], r["positionId"]),
-                         ("1596774178", "FILLED", "0.0002", "84145.8",
-                          "3588477891"))
+                         (str(REAL_ORDER_BTC), "FILLED", "0.0002", "84145.8",
+                          str(REAL_POSITION_BTC)))
         self.assertEqual((r["venueStopLoss"], r["venueTakeProfit"]),
                          (75745.8, 88349.17))
         self.assertTrue(r["protectedOnFill"])
@@ -3561,22 +3577,22 @@ class TheRealAccountProofTests(SimpleTestCase):
                                0.01, places=3)
         # the close by position id, proven by the OPEN order
         with mock.patch("time.sleep"):
-            c = t.close_position("3588477891", "BTC",
-                                 open_order_id="1596774178")
+            c = t.close_position(str(REAL_POSITION_BTC), "BTC",
+                                 open_order_id=str(REAL_ORDER_BTC))
         close_post = [x for x in fake.calls if x[0] == "POST"][1]
         self.assertEqual(close_post[1],
                          f"{BASE}/api/v1/trading/execution/"
-                         f"market-close-orders/positions/3588477891")
+                         f"market-close-orders/positions/{REAL_POSITION_BTC}")
         self.assertEqual(close_post[2]["json"], {"InstrumentID": 100000})
         self.assertEqual((c["status"], c["positionState"], c["orderId"],
                           c["openOrderId"]),
-                         ("FILLED", "closed", "1596736969", "1596774178"))
+                         ("FILLED", "closed", str(REAL_CLOSE_ORDER), str(REAL_ORDER_BTC)))
         self.assertEqual(c["raw"]["orderForClose"],
                          REAL_BTC_CLOSE["orderForClose"])
         self.assertNotIn("executedQty", c, "no units asked, none claimed")
         self.assertNotIn("avgPrice", c, "a close carries no price")
         # the cells and the book after
-        self.assertEqual(t.margin_cells(), {"available_cash": 2249.65,
+        self.assertEqual(t.margin_cells(), {"available_cash": REAL_CASH_AFTER,
                                             "used_margin": 0.0,
                                             "currency": "USD"})
         self.assertEqual(t.get_positions(), [])

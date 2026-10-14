@@ -475,8 +475,8 @@ app.conf.beat_schedule = {
     # EVERY 15 MINUTES AROUND THE CLOCK (2026-10-06). This ran 13:00-21:45
     # UTC only, on the IBKR-era reading that "broker positions don't change
     # outside market hours". eToro's forex, commodity and crypto CFDs trade
-    # through the night and their stops fire at the venue: GBPNZD #135 was
-    # closed at eToro before 22:07 UTC on 2026-10-05 and stayed OPEN here
+    # through the night and their stops fire at the venue: a real forex row
+    # was closed at eToro in the evening of 2026-10-05 and stayed OPEN here
     # until the 13:00 pass the next day — fifteen hours counted in the open
     # risk, the pledge and /status. eToro's one book is read at most twice a
     # pass per user and world, whatever the classes armed: once by the row
@@ -656,7 +656,7 @@ app.conf.beat_schedule = {
     },
 
     # ── 2026-09-28 — the alarm bot (bot_program/alarm.py): a second bot in
-    #    a second group, the operator and his father, critical problems
+    #    a second group, the operator and the keeper, critical problems
     #    only. Gated by its own switch (telegram_alarm, OFF on arrival),
     #    NEVER the master switch: the pause is one of the things it says.
     #    The poll answers /status and /stopall within a quarter minute; no

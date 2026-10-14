@@ -4,7 +4,7 @@
 {% block content %}
 {% comment %}
 THE HANDOVER LETTER (2026-09-28, core/passation.py). Served only after
-OPENS_AT (2026-09-29 16:00 Paris). Three pages: the letter to Gandalf, the
+OPENS_AT. Three pages: the letter to Gandalf, the
 watch in practice, the second bot in five moves. No figure of money
 anywhere on it: tests/test_passation.py runs the tripwire over the article.
 {% endcomment %}
@@ -39,7 +39,7 @@ anywhere on it: tests/test_passation.py runs the tripwire over the article.
 <article class="pass-letter" id="passLetter">
     <div class="pass-kicker">Sauron Vision · handover</div>
     <h1 class="pass-title">TO GANDALF</h1>
-    <div class="pass-sub">KEEPER OF THE HOUSE · OPENED {{ opened_at|date:"j F Y" }}, 4 PM, PARIS</div>
+    <div class="pass-sub">KEEPER OF THE HOUSE · OPENED {{ opened_at|date:"j F Y" }}</div>
     <svg class="pass-seal" viewBox="0 0 48 30" aria-hidden="true" focusable="false">
         <path fill="currentColor" fill-rule="evenodd" d="M 2,15 Q 24,-11 46,15 Q 24,41 2,15 Z M 7,15 Q 24,-2 41,15 Q 24,32 7,15 Z"/>
         <circle cx="24" cy="15" r="7" fill="currentColor"/>
@@ -48,14 +48,14 @@ anywhere on it: tests/test_passation.py runs the tripwire over the article.
     </svg>
 
     <div class="pass-body">
-        <p class="first">Dad, if you are reading this, I have left and the house is yours. Sauron is running, the guards are watching, and the only hand that counts for the next three weeks, at least, is yours.</p>
+        <p class="first">Dad, if you are reading this, I have left and the house is yours. Sauron is running, the guards are watching, and the only hand that counts for the weeks to come is yours.</p>
         <p>First I want to thank you, and to say it properly, here, where you will spend your mornings. Thank you for the hours already given: the evenings watching me lose my temper with a machine, the questions that landed just when I thought I was done, the patience in front of a terminal that owed you nothing. A good part of what Sauron knows how to <em>refuse</em>, it knows because you asked "what if?" at the right moment. That is not nothing. It is the heart of it.</p>
         <p>And thank you for what came before. If I could spend months building a tower that sees far, it is because a house stood behind me, long before Sauron. You were the one holding it up. The most precious thing Sauron knows how to do, keep a cool head and stop in time, I learned from you before I ever wrote it into a machine. They say a wizard is never late. You have always been there on time.</p>
         <p>Then, to tell you plainly what I am leaving in your care. Not money to grow: a house to keep. The job is not to win, it is to <em>break nothing</em>. Sauron knows how to stop on its own; Morgul's guards cut the bots at the first serious sign; the alarm bot will only speak to you about a real problem, and its silence is good news. Your vigilance is worth more than any heroic move. If in doubt, you stop everything with one word, and you write to me. I will never hold it against you for stopping: here, stopping is doing it right.</p>
-        <p>Finally, to tell you I am leaving with peace of mind, and that it is thanks to you. Three weeks is long for a machine and short for a man; I know you will hold both.</p>
+        <p>Finally, to tell you I am leaving with peace of mind, and that it is thanks to you. Weeks are long for a machine and short for a man; I know you will hold both.</p>
         <p>Thank you, Dad. For the watch, and for everything else. Keep the house, Gandalf. I will be back.</p>
     </div>
-    <div class="pass-sign">YOUR SON, PROUD TO BE<small>Written the day before leaving · Sauron Vision</small></div>
+    <div class="pass-sign">YOUR SON, PROUD TO BE<small>Written before leaving · Sauron Vision</small></div>
 
     <div class="pass-rule"></div>
     <h2 class="pass-h">THE WATCH, IN PRACTICE</h2>

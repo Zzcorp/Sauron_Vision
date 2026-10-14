@@ -1,8 +1,8 @@
 """Holding both sides of one instrument is a state nothing could see.
 
-The platform's own briefing found it in the live book: USDCHF held BUY by
-`manual_take` and SELL by `bollinger_squeeze_breakout`, at the same time, by
-the same operator. The position watcher's concentration trigger reads the
+The platform's own briefing found it in the live book: one pair held BUY
+by the hand lane and SELL by a breakout rule, at the same time, by the same
+owner. The position watcher's concentration trigger reads the
 correlation audit, which answers "how many rules hold this same symbol and
 SAME side" — the doubling-up case. The opposite case is the more expensive
 one (the pair is flat and still paying both spreads to sit there) and was

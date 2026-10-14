@@ -1,9 +1,9 @@
 """THE ENGINE'S TWO HOOKS FOR THE PRICE OF A CLOSE NOBODY SAW (2026-10-07,
 PR50; bot_program/venue_exit.py, tests/test_venue_exit.py).
 
-NVDA #131: at 11:07:59 the manage tick saw 237.9, beyond the 238.03 stop
-eToro held, and the 11:15 reconcile booked the close at the last mark
-(238.16). The reconcile can now book it AT the level, and only on
+A real stock row: at 11:07:59 the manage tick saw the price beyond the
+mirrored break-even stop eToro held, and the 11:15 reconcile booked the
+close at the last mark. The reconcile can now book it AT the level, and only on
 evidence the engine itself wrote:
   * the tick's CROSSING stamp (AssetBot.manage_positions ->
     venue_exit.note_crossing): the first accepted mark beyond the stop or
@@ -41,25 +41,25 @@ class TheTickStampTests(Base):
     def test_the_tick_stamps_the_first_crossing(self):
         from bot_program import venue_exit
         from bot_program.asset_engine.base import make_bot
-        t = self._nvda()
+        t = self._share()
         bot = make_bot(self.cfg)
         client = mock.MagicMock(spec=["ticker"])
-        # a mark short of the stop (238.03) and the target (245.50): nothing
-        client.ticker.return_value = {"lastPrice": "239.4", "symbol": "NVDA"}
+        # a mark short of the stop (101.0) and the target (110.00): nothing
+        client.ticker.return_value = {"lastPrice": "105.0", "symbol": "AAPL"}
         self._tick(bot, client)
         t.refresh_from_db()
         self.assertNotIn(venue_exit.CROSSED_KEY, t.metadata)
         # the first mark beyond the stop eToro holds is kept
-        client.ticker.return_value = {"lastPrice": "237.9", "symbol": "NVDA"}
+        client.ticker.return_value = {"lastPrice": "100.9", "symbol": "AAPL"}
         before = timezone.now()
         self._tick(bot, client)
         t.refresh_from_db()
         first = t.metadata[venue_exit.CROSSED_KEY]
         self.assertEqual((first["level"], first["price"], first["mark"]),
-                         ("stop", 238.03, 237.9))
+                         ("stop", 101.0, 100.9))
         self.assertGreaterEqual(parse_datetime(first["at"]), before)
         # a second, lower tick of the same episode keeps the first
-        client.ticker.return_value = {"lastPrice": "237.5", "symbol": "NVDA"}
+        client.ticker.return_value = {"lastPrice": "100.8", "symbol": "AAPL"}
         self._tick(bot, client)
         t.refresh_from_db()
         self.assertEqual(t.metadata[venue_exit.CROSSED_KEY], first)
@@ -114,27 +114,27 @@ class TheStopMoveTimeTests(Base):
     def test_an_accepted_stop_move_carries_its_time(self):
         from bot_program import venue_exit
         from bot_program.asset_engine.base import make_bot
-        t = self._nvda()
+        t = self._share()
         bot = make_bot(self.cfg)
         self.assertIsNone(venue_exit._level_changed_at(t))
         before = timezone.now()
-        self.assertTrue(bot._move_broker_stop(t, 240.1, self._client(),
-                                              Decimal("238.5"), "trail"))
+        self.assertTrue(bot._move_broker_stop(t, 105.1, self._client(),
+                                              Decimal("102.5"), "trail"))
         after = timezone.now()
         t.refresh_from_db()
         move = t.metadata["stop_moves"][-1]
         self.assertEqual((move["to"], move["asked"], move["at"], move["why"]),
-                         ("238.5", "238.5", "240.1", "trail:broker"),
+                         ("102.5", "102.5", "105.1", "trail:broker"),
                          "\"at\" stays the mark the move was made at")
         when = parse_datetime(move["when"])
         self.assertTrue(timezone.is_aware(when))
         self.assertTrue(before <= when <= after, (before, when, after))
-        self.assertEqual(t.stop_loss, Decimal("238.5"))
+        self.assertEqual(t.stop_loss, Decimal("102.5"))
         # the reconcile reads it: a level that changed at `when`
         self.assertEqual(venue_exit._level_changed_at(t), when)
         # a refused move writes no move and no time
-        self.assertFalse(bot._move_broker_stop(t, 241.0, self._client(False),
-                                               Decimal("239.0"), "trail"))
+        self.assertFalse(bot._move_broker_stop(t, 106.0, self._client(False),
+                                               Decimal("103.0"), "trail"))
         t.refresh_from_db()
         self.assertEqual(len(t.metadata["stop_moves"]), 1)
         self.assertEqual(t.metadata["stop_moves"][-1], move)

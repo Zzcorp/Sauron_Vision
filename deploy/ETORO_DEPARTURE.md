@@ -8,7 +8,8 @@ bot_program/reconcile_asset.py, bot_program/engine/venue_close.py and
 bot_program/manual_trade.py — treat every file:line below as read at 8eddee1 and
 re-read before editing. Every command runs on the VPS from ~/Sauron_Vision as
 `./deploy/dc exec worker-fast python manage.py ...` (deploy/dc is the compose
-wrapper). The Django username is Sauron. Companion: deploy/IBKR_RETIREMENT.md —
+wrapper). The Django username is the operator's own: `<you>` stands for it
+below. Companion: deploy/IBKR_RETIREMENT.md —
 its Stage 1 waits on §1-§2 below; its Stage 2b is §6-§7 below.
 
 The operator's goal, in their words: eToro trades every class, unattended, for
@@ -20,14 +21,14 @@ weeks; IBKR is retired.
   positions closed by hand in the IBKR app, the cash withdrawn, the Gateway not
   worth another IB Key push. **What the platform measured** once the Gateway was
   logged in (06:09 UTC, `sync_broker_account` → `{'attempted': 1, 'stored': 1,
-  'unreachable': 0}`): the account's equity, read 70 s earlier; **NEM SELL 1**
-  and **HYG BUY 3 still HELD** at IBKR; GLDM absent; and
+  'unreachable': 0}`): the account's equity, read 70 s earlier; **two positions
+  still HELD** at IBKR (a short, #94, and a long, #93); the ETF (#95) absent; and
   `IBKRTrader.resting_order_ids()` answered `set()` — **no protective leg rests
-  at IBKR any more** (77/78 and 64/65 are gone; NEM's mark of 127.50 sits above
-  its former stop of 126.45). This is the whole reason nothing in this platform
+  at IBKR any more** (the former legs are gone; the short's mark sits above its
+  former stop). This is the whole reason nothing in this platform
   writes CLOSED on a statement: the statement was wrong on two rows out of three
   and on the cash.
-- **#95 GLDM — CLOSED** at 06:20 UTC by `reconcile_user` against the live
+- **#95, the ETF — CLOSED** at 06:20 UTC by `reconcile_user` against the live
   IBKRTrader's own book (reason `reconciled-orphan`, `exit_price_inferred` True;
   IBKR refused the quote — error 10089, no market-data subscription — so the exit
   price is unavailable and the P&L is recorded **UNMEASURED, not zero**; legs
@@ -38,17 +39,17 @@ weeks; IBKR is retired.
   /brokers/ (Forget eToro keys) so that `keyed_venue_count` == 1 and the carrier
   guard's no-carrier refusal (bot_program/reconcile_asset.py:70-73) no longer
   fires; then ONE shell that asserted `keyed_venue_count(u) == 1`, asserted the
-  routed client's class name was `IBKRTrader`, printed the book (NEM and HYG
-  present, GLDM absent — a raise here means the Gateway did not answer and
+  routed client's class name was `IBKRTrader`, printed the book (the two held
+  rows present, the ETF absent — a raise here means the Gateway did not answer and
   nothing is written), printed the resting orders, and only then called
   `reconcile_user(u)` → `{'checked': 3, 'closed_as_orphan': 1,
   'broker_unavailable': 0, 'errors': 0}`; then both eToro keys re-entered on
   /brokers/, Demo unticked, **no class ticked** (`keyed 2 | etoro keys present:
   True`). Why one process: the IBKR trading session is pooled per process, so
   the class and the book printed before the walk are the client the walk uses.
-- **#94 NEM and #93 HYG — OPEN on both sides, unprotected at IBKR.** They close
+- **#94 and #93 — OPEN on both sides, unprotected at IBKR.** They close
   through the platform at the NYSE open (§1). The operator close refused at
-  06:2x UTC with "No usable price mark for HYG — closing now would book the exit
+  06:2x UTC with "No usable price mark for <symbol> — closing now would book the exit
   at a price nobody quoted" (bot_program/manual_close.py:251, the same guard at
   :415): market shut and delayed data only, no mark exists. That refusal is the
   platform working.
@@ -56,16 +57,16 @@ weeks; IBKR is retired.
   disabled and stays disabled: the bot walks only enabled configs
   (bot_program/asset_engine/base.py:381), so nothing ticks these rows; enabled,
   the 336 h clock exit (bot_program/asset_models.py:46) would fire from
-  2026-09-28 into a client with no position id. Config 14 does NOT own GLDM's
-  row — the commodity config carries no trap.
-- **Live configs, all disabled:** [1] starter_fx_majors forex 150 EUR fixed
-  (EURUSD GBPUSD USDJPY USDCHF AUDUSD USDCAD NZDUSD); [14] commodity_etf stock
-  follower 20 % 402.40 EUR (GLDM SLV USO BNO UNG CPER WEAT CORN SOYB CANE DBC);
-  [10] manual stock follower, no share, 1609.62 EUR, no symbols; [6]
-  starter_megacaps stock 150 EUR fixed (AAPL MSFT NVDA AMZN GOOGL META TSLA).
-  base_currency EUR on all four; eToro reads USD; nothing converts; the
-  preflight names the mismatch a BLOCKER for every live config, enabled or not.
-- **eToro row:** keyed, live, no class ticked, a token balance. Reads measured against
+  2026-09-28 into a client with no position id. Config 14 does NOT own the
+  ETF's row — the commodity config carries no trap.
+- **Live configs, all disabled:** [1] starter_fx_majors forex, a fixed EUR pool
+  (seven majors); [14] commodity_etf stock follower at 20 % (the commodity
+  ETFs); [10] manual stock follower, no share (no symbols); [6]
+  starter_megacaps stock, a fixed EUR pool (seven megacaps). base_currency EUR
+  on all four; eToro reads USD; nothing converts; the preflight names the
+  mismatch a BLOCKER for every live config, enabled or not. Pool amounts are in
+  the operator's private deploy log.
+- **eToro row:** keyed, live, no class ticked. Reads measured against
   the real key on 2026-09-22 (aggregate-portfolio 200, portfolio 200, real/pnl
   200, GET market-close-orders 405). The WRITE path — the v2 order POST, the
   orders:lookup poll, the market-close POST, the PATCH stop mover — met eToro on
@@ -74,10 +75,8 @@ weeks; IBKR is retired.
   POST, the lookup, the v3 DELETE and the close POST (§4 D5).
 - **Alerts:** telegram proven end to end (`_send_telegram` from worker-fast
   returned True; preflight section 7 reads token and prefs row).
-- **Backup + export:** pg_dump `sauron-20260923T053524Z.dump` (39,641,466 B) and
-  `~/ibkr_equity_road_2026-09-23.json` (17,053 B), both copied to the operator's
-  own machine by `scp` over the IP (the hostname form was refused by the VPS's
-  SSH). `BACKUP_REMOTE` is still unset: dumps are local until an rclone remote
+- **Backup + export:** a pg_dump and the IBKR equity export, both copied off
+  the box. `BACKUP_REMOTE` is still unset: dumps are local until an rclone remote
   exists (deploy/backup.sh:5, deploy/RUNBOOK.md:414-420).
 - **Since the measurement, in the tree:** 20fa370 — the eToro adapter refuses a
   stop or target that is present and not a price BEFORE the POST (`_level`) and
@@ -90,9 +89,9 @@ weeks; IBKR is retired.
   venue that did not carry the row; 976e06d — `etoro_smoke`, the read-only
   probe §3 runs.
 
-## 1. Close NEM and HYG through the platform, at the NYSE open
+## 1. Close the two held rows through the platform, at the NYSE open
 
-13:30 UTC (15:30 Paris). Test first, read-only — the shell twin of the
+13:30 UTC. Test first, read-only — the shell twin of the
 preview page asks the broker whether it still holds the position, then asks for a
 mark; nothing is sent:
 
@@ -101,7 +100,7 @@ mark; nothing is sent:
 from django.contrib.auth.models import User
 from bot_program.models import AssetBotTrade
 from bot_program.manual_close import preview_close
-u = User.objects.get(username='Sauron')
+u = User.objects.get(username='<you>')
 for i in (94, 93):
     print(i, preview_close(u, AssetBotTrade.objects.get(id=i)))
 "
@@ -120,7 +119,7 @@ Then read the venue back — the proof is the book, not the row:
 from django.contrib.auth.models import User
 from bot_program.models import AssetBotTrade
 from bot_program.engine.broker_router import client_for_symbol
-u = User.objects.get(username='Sauron'); t = AssetBotTrade.objects.get(id=94)
+u = User.objects.get(username='<you>'); t = AssetBotTrade.objects.get(id=94)
 c = client_for_symbol(u, t.symbol, t.config); print(type(c).__name__)
 print('positions', c.get_positions()); print('resting', c.resting_order_ids())
 "
@@ -191,7 +190,7 @@ not zero; #93/#94 with the broker's fill and `src broker`), `live rows []`,
   ```
   ./deploy/dc exec worker-fast python manage.py shell -c "
   from bot_program.models import IBKRAccount
-  a = IBKRAccount.objects.get(user__username='Sauron')
+  a = IBKRAccount.objects.get(user__username='<you>')
   print('before', a.is_primary_for_stocks, a.is_primary_for_forex, a.is_primary_for_commodity, a.is_primary_for_options, a.is_primary_for_cfd)
   a.is_primary_for_stocks = a.is_primary_for_forex = a.is_primary_for_commodity = a.is_primary_for_options = a.is_primary_for_cfd = False
   a.save(update_fields=['is_primary_for_stocks', 'is_primary_for_forex', 'is_primary_for_commodity', 'is_primary_for_options', 'is_primary_for_cfd'])
@@ -222,7 +221,7 @@ not zero; #93/#94 with the broker's fill and `src broker`), `live rows []`,
   ./deploy/dc exec worker-fast python manage.py shell -c "
   from bot_program.models import IBKRAccount
   from bot_program.equity_models import BrokerEquityReading
-  a = IBKRAccount.objects.get(user__username='Sauron')
+  a = IBKRAccount.objects.get(user__username='<you>')
   n_before = BrokerEquityReading.objects.filter(broker='ibkr', account_pk=a.pk).count()
   a.account_id_enc = ''
   a.connected = False
@@ -235,7 +234,7 @@ not zero; #93/#94 with the broker's fill and `src broker`), `live rows []`,
   ```
 
   ```
-  ./deploy/dc exec worker-fast python manage.py shell -c "from django.contrib.auth.models import User; from bot_program.capital_truth import broker_backed; print(broker_backed(User.objects.get(username='Sauron')))"
+  ./deploy/dc exec worker-fast python manage.py shell -c "from django.contrib.auth.models import User; from bot_program.capital_truth import broker_backed; print(broker_backed(User.objects.get(username='<you>')))"
   ```
 
   Expect `keyed False connected False`, the cells line with the last reading
@@ -282,7 +281,7 @@ not zero; #93/#94 with the broker's fill and `src broker`), `live rows []`,
   from django.contrib.auth.models import User
   from bot_program.tasks import sync_broker_account, sync_etoro_accounts
   from bot_program.reconcile_asset import reconcile_unknown_positions, keyed_venue_count
-  u = User.objects.get(username='Sauron')
+  u = User.objects.get(username='<you>')
   print('ibkr sync', sync_broker_account())
   print('etoro sync', sync_etoro_accounts())
   print('keyed venues', keyed_venue_count(u))
@@ -297,11 +296,11 @@ not zero; #93/#94 with the broker's fill and `src broker`), `live rows []`,
 - **2e. Verify the pages print the retired state honestly:**
 
   ```
-  ./deploy/dc exec worker-fast python manage.py treasury --user Sauron
+  ./deploy/dc exec worker-fast python manage.py treasury --user <you>
   ```
 
   ```
-  ./deploy/dc exec worker-fast python manage.py preflight_live --user Sauron
+  ./deploy/dc exec worker-fast python manage.py preflight_live --user <you>
   ```
 
   Treasury: section 1 reads "no row is the book"; the IBKR line stays with
@@ -328,7 +327,7 @@ not zero; #93/#94 with the broker's fill and `src broker`), `live rows []`,
   from bot_program.models import IBKRAccount, AssetBotTrade
   from bot_program.equity_models import BrokerEquityReading
   from core.models import PlatformComponent
-  a = IBKRAccount.objects.get(user__username='Sauron')
+  a = IBKRAccount.objects.get(user__username='<you>')
   print('ibkr row', a.pk, 'keyed', bool(a.account_id_enc), 'flags', a.is_primary_for_stocks, a.is_primary_for_forex, a.is_primary_for_commodity, a.is_primary_for_options, a.is_primary_for_cfd, 'connected', a.connected, 'login', a.has_login)
   print('cells', a.last_equity, a.last_equity_currency, a.last_equity_at, None if a.broker_positions is None else len(a.broker_positions), a.broker_positions_at)
   print('readings ibkr', BrokerEquityReading.objects.filter(broker='ibkr').count(), 'etoro', BrokerEquityReading.objects.filter(broker='etoro').count())
@@ -338,8 +337,8 @@ not zero; #93/#94 with the broker's fill and `src broker`), `live rows []`,
   ```
 
 What still reads IBKR afterwards, and is ended only by the coded stages of
-deploy/IBKR_RETIREMENT.md (3 → 4 → 5 → 6, none of them while the operator is
-away): the IBKR sync walk returns attempted 0 and task_gate grades it
+deploy/IBKR_RETIREMENT.md (3 → 4 → 5 → 6, none of them unattended): the IBKR
+sync walk returns attempted 0 and task_gate grades it
 "ran and produced nothing" on the SHARED `broker_account_sync` row every 15
 minutes, alternating with eToro's success — true and useless; the ibkr quote
 feed stays red for ever (the feed row exists, nothing writes it); the router
@@ -351,7 +350,7 @@ paper — never arm a live options or cfd config before Stage 4. Never untick
 ## 3. The eToro read-only probe
 
 ```
-./deploy/dc exec worker-fast python manage.py etoro_smoke --user Sauron
+./deploy/dc exec worker-fast python manage.py etoro_smoke --user <you>
 ```
 
 Four states per read — ok / refused / no-such / unknown — and no order ever.
@@ -375,7 +374,7 @@ about to trade unattended) and never with a class ticked (a tick makes the
 demo row the book and the venue in one click).
 
 - D1. On /brokers/ save the key pair from eToro's developer portal (the portal
-  calls it "virtual"; measured 2026-09-23 with `etoro_smoke --user Sauron
+  calls it "virtual"; measured 2026-09-23 with `etoro_smoke --user <you>
   --other-world`, the SAME pair answered 200 on the demo AND the live
   aggregate-portfolio — there is no demo-only pair, the Demo tick alone picks
   the world), Demo ticked (it ships ticked), all four class boxes UNTICKED.
@@ -383,7 +382,7 @@ demo row the book and the venue in one click).
   virtual balance under env "paper" and re-sizes nothing. THE WORLD CHECK:
   every demo write snippet in this section asserts, in this order and before
   any order, `t.demo`, `t.ping()` True, and `net_liquidation` above 100,000
-  (the virtual balance measured in the hundreds of thousands; the real one a few dollars). A
+  (the virtual balance measured in the hundreds of thousands; the real one far smaller). A
   demo-shaped snippet on a row someone unticked would otherwise place a REAL
   order with the same pair — the assert on the balance is the one that cannot
   be fooled by the flag.
@@ -393,12 +392,12 @@ demo row the book and the venue in one click).
   ./deploy/dc exec worker-fast python manage.py shell -c "
   from bot_program.models import EtoroAccount
   from bot_program.engine.etoro_client import EtoroTrader
-  a = EtoroAccount.objects.get(user__username='Sauron'); k, u = a.get_credentials()
+  a = EtoroAccount.objects.get(user__username='<you>'); k, u = a.get_credentials()
   t = EtoroTrader(k, u, env='demo' if a.demo else 'live')
   assert t.demo, 'REFUSING: the row is not demo'
   assert t.ping(), 'REFUSING: the demo world did not answer'
   nl = t.net_liquidation(); print('env', t.env, 'net_liquidation', nl)
-  assert nl and nl[0] > 100000, f'REFUSING: {nl} is not the virtual balance (hundreds of thousands measured 2026-09-23; the real one a few dollars)'
+  assert nl and nl[0] > 100000, f'REFUSING: {nl} is not the virtual balance (hundreds of thousands measured 2026-09-23; the real one far smaller)'
   print('GLDM instrumentId', t.instrument_id('GLDM'))
   tk = t.ticker('GLDM'); print('ticker', tk)
   last = float(tk.get('lastPrice') or 0); assert last > 0, 'REFUSING: no price'
@@ -545,7 +544,7 @@ demo row the book and the venue in one click).
     ./deploy/dc exec worker-fast python manage.py shell -c "
     from bot_program.models import EtoroAccount
     from bot_program.engine.etoro_client import EtoroTrader
-    a = EtoroAccount.objects.get(user__username='Sauron'); k, u = a.get_credentials()
+    a = EtoroAccount.objects.get(user__username='<you>'); k, u = a.get_credentials()
     t = EtoroTrader(k, u, env='demo' if a.demo else 'live')
     assert t.demo, 'REFUSING: the row is not demo'
     assert t.ping() is True, 'REFUSING: the demo world did not answer'
@@ -679,17 +678,18 @@ demo row the book and the venue in one click).
   and a balance under 100,000). Pinned in tests/test_real_account_measured.py
   and tests/test_etoro_client.py::TheRealAccountProofTests.
   - AAPL 0.04 BUY, market shut: the v2 POST with no segment ACCEPTED, order
-    1596774177; the lookup (no segment) read {11, WaitingForMarket},
-    asset.settlementType 'REAL' at leverage 1, requestedAmount 13.64,
-    frozenAmount 14.64, legs 0.0 while held. WITHDRAWN at 22:03:11 UTC:
-    `DELETE /api/v3/trading/execution/orders/1596774177` → 202
-    `{"orderId":1596774177,"referenceId":""}`; 3 s later the lookup read
+    <id in the operator's private deploy log>; the lookup (no segment) read
+    {11, WaitingForMarket}, asset.settlementType 'REAL' at leverage 1,
+    requestedAmount 13.64, frozenAmount 14.64, legs 0.0 while held.
+    WITHDRAWN at 22:03:11 UTC:
+    `DELETE /api/v3/trading/execution/orders/<orderId>` → 202
+    `{"orderId":<the same>,"referenceId":""}`; 3 s later the lookup read
     {7, Canceled} and used margin fell 31.47 → 16.83 (the held 14.64
     returned) — the demo answer exactly. `_V3_EXEC_REAL_SEG` carries
     `"orders": ""` since, and the tick withdraws a held live entry after
     ENTRY_WORKING_MAX_HOURS as it does on demo.
-  - BTC 0.0002 BUY: FILLED at once — order 1596774178, position 3588477891,
-    avgPrice 84145.8, settlementType 'REAL' at 1x, requestedAmount 16.83,
+  - BTC 0.0002 BUY: FILLED at once — order and position ids in the private
+    deploy log, avgPrice 84145.8, settlementType 'REAL' at 1x, requestedAmount 16.83,
     frozenAmount 17.0, fees 0.17 (1%, one side), marketSpread 0, markup 0.
     eToro REWROTE THE STOP: sent 79934.97 (5% under the last 84142.07),
     held 75745.8 (9.98% under the fill, on positionExecutions[0]
@@ -745,7 +745,7 @@ demo row the book and the venue in one click).
   both follow, `allocate_shares` gives 10 the remainder after 14's 20 %. Before
   §7 enables anything, decide about 10:
   `./deploy/dc exec worker-fast python manage.py follow 10 --stop --yes`, or an
-  explicit share. Away for weeks, keep 10 disabled: there is no hand to take a
+  explicit share. Unattended, keep 10 disabled: there is no hand to take a
   trade.
 - `tracking_freeze_reason` refuses every follower's entries until a reading
   younger than 3600 s exists on the book.
@@ -810,15 +810,15 @@ live:
 ./deploy/dc exec worker-fast python manage.py shell -c "
 from bot_program.models import IBKRAccount, SaxoAccount, EtoroAccount, AssetBotConfig
 for M in (IBKRAccount, SaxoAccount, EtoroAccount):
-    print(M.__name__, list(M.objects.filter(user__username='Sauron').values_list('is_primary_for_commodity', flat=True)))
-print('live commodity configs', list(AssetBotConfig.objects.filter(user__username='Sauron', asset_class='commodity', mode='live').values_list('id', 'name', 'enabled', 'symbols')))
+    print(M.__name__, list(M.objects.filter(user__username='<you>').values_list('is_primary_for_commodity', flat=True)))
+print('live commodity configs', list(AssetBotConfig.objects.filter(user__username='<you>', asset_class='commodity', mode='live').values_list('id', 'name', 'enabled', 'symbols')))
 "
 ```
 
 Expect `IBKRAccount [True]` until §2a (its `before` line) and `live
 commodity configs []`. Every True printed is a venue a live commodity
 config would be sent to, and only eToro's may carry one. `etoro_smoke
---user Sauron` prints `route=<broker>` beside every config symbol: a live
+--user <you>` prints `route=<broker>` beside every config symbol: a live
 commodity symbol reads `route=etoro` before its config is enabled.
 
 ## 7. Follow before enable — per config, in this order
@@ -869,7 +869,7 @@ commodity symbol reads `route=etoro` before its config is enabled.
     ./deploy/dc exec worker-fast python manage.py shell -c "
     from bot_program.models import EtoroAccount
     from bot_program.engine.etoro_client import EtoroTrader, BASE
-    a=EtoroAccount.objects.get(user__username='Sauron'); k,u=a.get_credentials()
+    a=EtoroAccount.objects.get(user__username='<you>'); k,u=a.get_credentials()
     t=EtoroTrader(k,u,env='demo' if a.demo else 'live')
     assert t.demo, 'WORLD CHECK: not demo'
     assert t.ping() is True, 'WORLD CHECK: no ping'
@@ -896,7 +896,7 @@ commodity symbol reads `route=etoro` before its config is enabled.
     START, STOP = 1, 401          # typed per sitting: (1,401) then (401,1201) then (3001,3401)
     from bot_program.models import EtoroAccount
     from bot_program.engine.etoro_client import EtoroTrader, BASE
-    a=EtoroAccount.objects.get(user__username='Sauron'); k,u=a.get_credentials()
+    a=EtoroAccount.objects.get(user__username='<you>'); k,u=a.get_credentials()
     t=EtoroTrader(k,u,env='demo' if a.demo else 'live')
     assert t.demo, 'WORLD CHECK: not demo'
     assert t.ping() is True, 'WORLD CHECK: no ping'
@@ -918,7 +918,7 @@ commodity symbol reads `route=etoro` before its config is enabled.
   one stopped. Unmeasured until run: whether an unknown id answers an empty
   list or a 4xx (the first batch with a gap measures it), and the order of
   the rows.
-- a. `./deploy/dc exec worker-fast python manage.py follow --user Sauron` — who
+- a. `./deploy/dc exec worker-fast python manage.py follow --user <you>` — who
   follows, at what share.
 - b. One sync after the tick:
   `./deploy/dc exec worker-fast python manage.py shell -c "from bot_program.tasks import sync_etoro_accounts; print(sync_etoro_accounts())"`
@@ -928,7 +928,7 @@ commodity symbol reads `route=etoro` before its config is enabled.
   CLI has no venue refusal (the page's Follow button does), so run it only
   after §6 made eToro the book for that class.
 - d. Relabel base_currency (§8) BEFORE enabling.
-- e. `./deploy/dc exec worker-fast python manage.py preflight_live --user Sauron`
+- e. `./deploy/dc exec worker-fast python manage.py preflight_live --user <you>`
   → NO BLOCKERS FOUND. The first eToro stock config runs with
   max_concurrent_positions = 1 until D2c's quota note exists.
 - f. `./deploy/dc exec worker-fast python manage.py bot on 14 --yes` — one
@@ -943,12 +943,12 @@ sync write `capital` only. Relabel before enabling, once per config, after its
 follow (the number is already USD):
 
 ```
-./deploy/dc exec worker-fast python manage.py shell -c "from bot_program.models import AssetBotConfig; print(AssetBotConfig.objects.filter(user__username='Sauron', mode='live', id__in=(1, 6, 10, 14)).update(base_currency='USD'))"
+./deploy/dc exec worker-fast python manage.py shell -c "from bot_program.models import AssetBotConfig; print(AssetBotConfig.objects.filter(user__username='<you>', mode='live', id__in=(1, 6, 10, 14)).update(base_currency='USD'))"
 ```
 
 Expect 4. The FIXED pools (1 and 6, "150") do not move — 150 becomes 150 USD;
 size them deliberately, ≤ the deposit. Proof:
-`./deploy/dc exec worker-fast python manage.py preflight_live --user Sauron`
+`./deploy/dc exec worker-fast python manage.py preflight_live --user <you>`
 no longer prints CURRENCY MISMATCH.
 
 ## 9. The departure picture
@@ -962,10 +962,10 @@ IBKR; preflight NO BLOCKERS; telegram proven; `BACKUP_REMOTE` set. The
 retirement then continues at deploy/IBKR_RETIREMENT.md Stage 3.
 
 ```
-./deploy/dc exec worker-fast python manage.py treasury --user Sauron
-./deploy/dc exec worker-fast python manage.py preflight_live --user Sauron
+./deploy/dc exec worker-fast python manage.py treasury --user <you>
+./deploy/dc exec worker-fast python manage.py preflight_live --user <you>
 ./deploy/dc exec worker-fast python manage.py open_trades --all
-./deploy/dc exec worker-fast python manage.py follow --user Sauron
+./deploy/dc exec worker-fast python manage.py follow --user <you>
 ```
 
 ## 10. Must-nots

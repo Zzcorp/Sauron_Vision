@@ -364,7 +364,7 @@ DEFAULT_COMPONENTS = [
 
     # ── The alarm bot (2026-09-28) ──────────────────────────────────────
     # bot_program/alarm.py: a second Telegram bot in a second group (the
-    # operator and his father), critical problems only, never an
+    # operator and the keeper), critical problems only, never an
     # all-clear, and /status and /stopall. Its two beat tasks read THIS
     # switch and never platform_master, whose pause it reports. OFF on
     # arrival: after the deploy and `manage.py alarm --test`, `manage.py

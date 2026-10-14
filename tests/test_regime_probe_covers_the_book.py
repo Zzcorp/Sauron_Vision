@@ -1,14 +1,14 @@
 """The regime probe has to measure the book, not the alphabet.
 
-The operator's briefing said it three days running: 36% of the book sat in
-XAUUSD, "an asset no regime probe covers", "you are max-long an asset you
-are not measuring".
+The operator's briefing said it three days running: a large share of the
+book sat in one asset "no regime probe covers", "you are max-long an asset
+you are not measuring".
 
 The cause was the candidate ordering. `-is_watchlist, symbol` was already
 an improvement on an arbitrary slice, but with nothing starred — the
 shipped state — it degenerates to ALPHABETICAL, so out of 177 instruments
 the probe read AAPL, AAVEUSD, ABBV, ADAUSD, AGG, ALUMUSD, AMD, AMZN and
-reported on none of the eight positions actually being carried.
+reported on none of the positions actually being carried.
 
 A regime read that skips the positions is answering a question nobody
 asked, and the brain then spent a week reporting "regime unknown" for the

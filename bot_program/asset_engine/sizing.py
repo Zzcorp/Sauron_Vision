@@ -56,9 +56,10 @@ DEFAULT_RISK_FRACTION = 0.0025   # 0.25%
 # 0.5-1% stop on that floor is 5-10 USD lost — 0.5-1% of a 1,000 pool, 2-3%
 # of a 300 one, both inside the old 5%. 7% is room the operator chose.
 # 5% was itself raised from 1% at the operator's request so a SMALL account
-# can put enough at risk for a win to clear its own costs: on $200 the 1%
-# ceiling allowed $2 a trade, which the commission and the spread eat most
-# of; the arithmetic of a small book is what this ceiling has to admit.
+# can put enough at risk for a win to clear its own costs: at that size the
+# 1% ceiling allowed a couple of dollars a trade, which the commission and
+# the spread eat most of; the arithmetic of a small book is what this
+# ceiling has to admit.
 #
 # It is a CEILING and not a target, and the default above is unchanged: an
 # operator who never touches extras['risk_per_trade_pct'] still risks 0.25%.

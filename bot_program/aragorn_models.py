@@ -1,6 +1,6 @@
 """ARAGORN's memory (2026-10-02).
 
-The operator, the live book losing: "remove the strategies not working,
+The operator, after a losing stretch on real money: "remove the strategies not working,
 promote new proven ones, make it pretty autonomous but still maintainable
 by Gandalf or me", then "more resilience in dark waters" and "a crash is
 coming ... make the most out of crisis". Four tables:

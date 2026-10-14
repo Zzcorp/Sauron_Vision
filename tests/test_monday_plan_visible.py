@@ -43,7 +43,7 @@ UTC = dt_tz.utc
 #: Sunday 2026-09-27, 18:00 UTC: the beat's hour.
 SUNDAY = datetime(2026, 9, 27, 18, 0, tzinfo=UTC)
 GROUP = "-1001234567890"
-HOST = "platform.sauron-vision.net"
+HOST = "platform.example.test"
 
 LEAD = ("The dollar starts the week on the back foot after a soft "
         "inflation print. Risk assets stay bid while yields drift lower. "
@@ -151,7 +151,7 @@ def _plan_row(text, when, *, week=None, success=True):
 
 class _Page(TestCase):
     def setUp(self):
-        self.reader = User.objects.create_user(username="father",
+        self.reader = User.objects.create_user(username="keeper",
                                                password="x")
         self.client.force_login(self.reader)
 
@@ -351,7 +351,7 @@ class TheEarlierPlansTests(_Page):
 class TheBellTests(TestCase):
 
     def setUp(self):
-        self.reader = User.objects.create_user(username="father",
+        self.reader = User.objects.create_user(username="keeper",
                                                password="x")
 
     def _row(self):
@@ -422,7 +422,7 @@ class TheStaffGroupTests(TestCase):
 
     def setUp(self):
         self.staff = _staff()
-        User.objects.create_user(username="father", password="x")
+        User.objects.create_user(username="keeper", password="x")
 
     def _sent(self, post):
         self.assertEqual(post.call_count, 1)

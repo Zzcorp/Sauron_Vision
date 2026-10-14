@@ -1,12 +1,12 @@
 """THE ALARM BOT: a second bot that rings only when Sauron is in trouble (2026-09-28).
 
-The operator, 2026-09-28: "pour éviter de spammer le grand Gandalf de
-messages de trading et ne le sonner que pour de vraies urgences". Le grand
-Gandalf is his father, who runs Sauron from his phone while the operator
-is away. The Eye's group carries every fill, signal, digest and Morgul
-warning; this bot carries none of it. It is a second bot (its own token,
-TOKEN_ENV) in a second group (CHAT_ENV: the operator, his father and this
-bot -- the Eye's bot is not in it), and it says one kind of thing.
+The operator, 2026-09-28: Gandalf must not be spammed with trading
+messages and rung only for real emergencies. Gandalf is the second keeper,
+who runs Sauron from his phone while the operator is unavailable. The
+Eye's group carries every fill, signal, digest and Morgul warning; this
+bot carries none of it. It is a second bot (its own token, TOKEN_ENV) in a
+second group (CHAT_ENV: the operator, the keeper and this bot -- the Eye's
+bot is not in it), and it says one kind of thing.
 
 WHAT HE DECIDED
   * Critical only: no warning reaches this chat.
@@ -94,7 +94,7 @@ quiet exactly when the platform does. alarm_task gates the two beat
 tasks; send_alarm reads the switch itself, because Morgul's run and the
 kill switch call it directly. config() refuses the Eye's token (two
 pollers on one bot steal each other's updates) and the Eye's chats (the
-trading messages would pour into the father's).
+trading messages would pour into the keeper's).
 
 Doors: bot_program.tasks.poll_telegram_alarm (every 15 s, fast queue) and
 run_alarm_sentinel (every 10 min); the hook in run_morgul_guards; the
@@ -986,7 +986,7 @@ def stop_all(*, now=None, sent_at=None) -> list:
     own write, for every account with a bot running -- an inactive
     account's too, since the fleet ticks every enabled config whatever
     the account's state (asset_engine/runner) -- with withdraw=True as
-    the Eye's /stopall passes it (the operator and his father share one
+    the Eye's /stopall passes it (the operator and the keeper share one
     account; nothing maps this chat to a user). Never the kill switch,
     never the master switch, never a close. One reply per account, named
     by number: a username is typed by a person and may read like code

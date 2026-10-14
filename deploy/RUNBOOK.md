@@ -921,11 +921,11 @@ fails `tests.test_ops_cockpit`, so the page and the shell cannot drift.
 
 ## The alarm bot (critical problems only)
 
-The operator, 2026-09-28: his father must not be flooded with trading
-messages, and must be woken for real emergencies only. The Eye's group
-keeps every fill, signal, digest and Morgul warning. The alarm bot
+The operator, 2026-09-28: the second keeper must not be flooded with
+trading messages, and must be woken for real emergencies only. The Eye's
+group keeps every fill, signal, digest and Morgul warning. The alarm bot
 (`bot_program/alarm.py`) is a SECOND bot in a SECOND group — the operator,
-his father and the alarm bot, **never the Eye's bot** — and it says one
+the keeper and the alarm bot, **never the Eye's bot** — and it says one
 kind of thing: a critical problem. A Morgul critical finding, a safety
 check that cannot run, the brake stopping bots, automation paused, a close
 the platform abandoned, a safety-critical task failing or stopped, a quote
@@ -938,7 +938,7 @@ Set it up once:
 
 1. In Telegram, `@BotFather` → `/newbot`; keep the token. Leave Group
    Privacy **on**: the bot then hears commands only.
-2. Create a NEW group with the operator and his father only, and add the
+2. Create a NEW group with the operator and the keeper only, and add the
    new bot. The Eye's bot must not be in it. Then `@BotFather` →
    `/setjoingroups` → Disable, so nobody can add it to another group.
 3. Put the token in `.env` as `TELEGRAM_ALARM_BOT_TOKEN=`, send `/status`
@@ -981,6 +981,32 @@ an outage — `/stopall` never. If the group is ever upgraded to a supergroup
 its id changes: the worker log names the new one, which goes in
 `TELEGRAM_ALARM_CHAT_ID`.
 
+## The private terms (the public pages' leak walk)
+
+The Wall (`/wall/`) and the Book (`/book/`) are read by anyone, and this
+repository is public. `core/leak_walk.py` walks every byte of both answers
+at render time — the visible words, the style and script blocks, the
+comments — for the handful of phrases the operator keeps private: a name,
+a town, who holds what. Those phrases live in ONE place, the server's
+`.env`, and nowhere in git:
+
+    SAURON_PRIVATE_TERMS=a name|a town|another phrase
+
+Pipe-separated, any case, any length (a five-word address is kept whole
+and found whole; a term is matched on whole words only). A page that
+carries one is NOT sent: the visitor sees a neutral placeholder ("This
+page is not published right now"), the log names the page and the count
+of terms, staff is told once a day, `/health/` and the daily digest read
+the event. Fix the page text, redeploy, and the page publishes again.
+
+Empty or unset, the walk still runs with its planted canary alone — the
+platform needs no list to start, and says so once per process at INFO
+and on `/health/`. Compose injects `.env` when a container is CREATED, so
+after editing the list: `./deploy/dc up -d --force-recreate web`. The
+tests walk the real list for free wherever it is in the environment
+(`python manage.py test tests.test_the_book tests.test_wall_public_safety`
+on the box).
+
 ## When the box itself goes silent (the dead man's switch)
 
 2026-09-30: the hosting month ran out, the VPS stopped, and nobody heard.
@@ -989,7 +1015,7 @@ digest. A dead box sends nothing, and its silence reads exactly like "all
 is well". Only something OFF the box can notice it. Three layers, cheapest
 first:
 
-1. **Pay the box automatically.** At the host (Hostinger → Billing →
+1. **Pay the box automatically.** At the hosting provider (Billing →
    the VPS → auto-renewal ON, with a card that does not expire before the
    next term). This is what failed on 2026-09-30.
 2. **The dead man's switch** (`core/dead_man_switch.py`). The box pings an

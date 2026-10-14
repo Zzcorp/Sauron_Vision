@@ -1,13 +1,13 @@
 """THE VENUE'S OWN WORD BEFORE A MISS IS BOOKED, AND THE PRICE OF A CLOSE
 NOBODY SAW (2026-10-07, PR50).
 
-NVDA #131: care moved the eToro stop to break-even (238.03); eToro filled it
-in its extended session. At 11:07:59 the tick saw 237.9 cross it and no
-position in the list; the 11:15 reconcile booked 238.16, "priced from the
-last mark". AMZN #140 (braked): stop 254.18 filled before 11:45, booked at
-the 11:45 rate 254.48 (-0.91R against -1.00R). PG #138 (short): booked at the
-01:15 rate, 0.75R short of its stop. XAGUSD #134: the 12:30 rate was already
-beyond the stop.
+Four real rows of 2026-10-07. A share whose mirrored break-even stop eToro
+filled in its extended session: at 11:07:59 the tick saw the price cross it
+and no position in the list; the 11:15 reconcile booked a later mark, "priced
+from the last mark". A braked share row whose stop filled before 11:45,
+booked at the 11:45 rate (-0.91R against -1.00R). A short booked at the 01:15
+rate, 0.75R short of its stop. A metal whose 12:30 rate was already beyond
+the stop.
 
 THE GUARD. A miss in eToro's /portfolio is booked CLOSED only after eToro's
 own order read (position_state by the row's OPEN order id) says "closed".
