@@ -1,9 +1,9 @@
 """Who turned a bot off, and whether what it holds is still managed
 (2026-10-07).
 
-WHY THIS EXISTS. On 2026-10-06 at 13:12 UTC Morgul's G1 brake stopped
-config 26 for a booking made while the exchange was shut, and PG #138 sat
-OPEN on it from then on with nothing running its exits: no time stop, no
+WHY THIS EXISTS. On 2026-10-06 at 13:12 UTC Morgul's G1 brake stopped a
+live config for a booking made while the exchange was shut, and its real
+short sat OPEN from then on with nothing running its exits: no time stop, no
 trailing, no break-even, no weekend or event window, no venue-mirrored
 soft stop. The runner skipped every disabled config whole, on purpose
 (runner.unmanaged_on_disable, 2026-09-26), because the kill switch, `bot
@@ -217,7 +217,7 @@ def enable_config(cfg) -> dict:
 
 def adopt_unrecorded(cfg, *, why: str, who: str, now=None) -> bool:
     """`bot brake` on a config already off with NO record (one switched
-    off before 2026-10-07, config 26 among them): record it as a brake, so
+    off before 2026-10-07, the braked one among them): record it as a brake, so
     the runner manages what it holds from the next tick. A config with a
     record, or one that is on, is left as found (False)."""
     from django.db import transaction

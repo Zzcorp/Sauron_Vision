@@ -2,8 +2,8 @@
 
 The operator: "I want bots on and manual too". A manual forex ticket goes
 at 1x (the lane refuses leverage) and eToro refuses one under 1,000 USD,
-so against a 1,100 USD pool the book's 20% ceiling (220) refused every
-ticket that could fill. Raising the book's percentage would have raised it
+so against a manual pool barely above eToro's floor the book's 20% ceiling
+refused every ticket that could fill. Raising the book's percentage would have raised it
 for every bot too. extras['max_single_position_pct'] on the manual config
 raises it for that lane's hand-taken tickets only.
 
@@ -42,8 +42,9 @@ class TheKeyTests(TestCase):
 
 
 class TheGatesTests(TestCase):
-    """The forex arithmetic of the live box: 900 EURUSD at ~1.137 is
-    1,023 USD at 1x against a 1,100 USD manual pool."""
+    """The forex arithmetic that refused the operator's ticket, composed:
+    1,000 EURUSD at ~1.20 is 1,200 USD at 1x (above eToro's 1,000 USD
+    floor) against a 1,500 USD manual pool, whose 20% is 300 USD."""
 
     @classmethod
     def setUpTestData(cls):
@@ -54,36 +55,36 @@ class TheGatesTests(TestCase):
         from portfolio.risk_gate import limits_book, single_position_state
         _book(current_value=Decimal("10000"), max_single_position_pct=20.0)
         state = single_position_state(
-            limits_book(), asset_class="forex", notional=1023.0,
-            capital_base=1100.0, base_label="manual pool", leverage=1,
+            limits_book(), asset_class="forex", notional=1200.0,
+            capital_base=1500.0, base_label="manual pool", leverage=1,
             carrier="etoro")
         self.assertFalse(state["ok"])
-        self.assertEqual(state["cap_money"], 220.0)
+        self.assertEqual(state["cap_money"], 300.0)
 
     def test_the_lane_ceiling_lets_it_through(self):
         from portfolio.risk_gate import limits_book, single_position_state
         _book(current_value=Decimal("10000"), max_single_position_pct=20.0)
         state = single_position_state(
-            limits_book(), asset_class="forex", notional=1023.0,
-            capital_base=1100.0, base_label="manual pool", leverage=1,
+            limits_book(), asset_class="forex", notional=1200.0,
+            capital_base=1500.0, base_label="manual pool", leverage=1,
             carrier="etoro", lane_limit_pct=100.0)
         self.assertTrue(state["ok"], state["reason"])
         self.assertEqual(state["limit_pct"], 100.0)
-        self.assertEqual(state["cap_money"], 1100.0)
+        self.assertEqual(state["cap_money"], 1500.0)
 
     def test_the_lane_ceiling_is_still_a_ceiling(self):
         from portfolio.risk_gate import limits_book, single_position_state
         _book(current_value=Decimal("10000"), max_single_position_pct=20.0)
         self.assertFalse(single_position_state(
-            limits_book(), asset_class="forex", notional=1200.0,
-            capital_base=1100.0, leverage=1, carrier="etoro",
+            limits_book(), asset_class="forex", notional=1600.0,
+            capital_base=1500.0, leverage=1, carrier="etoro",
             lane_limit_pct=100.0)["ok"])
 
     def test_concentration_follows_the_same_percentage(self):
         from portfolio.risk_gate import concentration_state
         _book(current_value=Decimal("10000"), max_single_position_pct=20.0)
         kw = dict(symbol="EURUSD", side="BUY", asset_class="forex",
-                  notional=1023.0, capital_base=1100.0,
+                  notional=1200.0, capital_base=1500.0,
                   base_label="manual pool", leverage=1, carrier="etoro")
         self.assertFalse(concentration_state(self.user, **kw)["ok"])
         lane = concentration_state(self.user, lane_limit_pct=100.0, **kw)

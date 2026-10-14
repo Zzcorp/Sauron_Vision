@@ -147,7 +147,7 @@ urlpatterns = [
 
     # ── Frontend Pages ──────────────────────────────────────
     path("", views.dashboard, name="dashboard"),
-    # The handover letter (core/passation.py): 404 until 2026-09-29 16:00 Paris.
+    # The handover letter (core/passation.py): a redirect until passation.OPENS_AT.
     path("passation/", passation_letter, name="passation"),
     path("instruments/", views.instruments_list, name="instruments_list"),
     path("instruments/<str:symbol>/", views.instrument_detail, name="instrument_detail"),

@@ -2,8 +2,8 @@
 """THE POSITION PAGE'S PLAIN SUMMARY (2026-09-26).
 
 The operator, on /forensics/<id>/: "I want the position pages detail to be
-styled in a perfect manner for the father, this is too nerdy". The father
-runs Sauron from his phone for three weeks. This builds the words and the
+styled in a perfect manner for the keeper, this is too nerdy". A second
+keeper runs Sauron from a phone. This builds the words and the
 numbers at the top of that page — for every position, open or closed,
 paper or live — out of readers the platform already has, so the summary
 can never quote a figure another page would contradict:
@@ -243,7 +243,7 @@ def venue_of(trade):
 
 #: THE THREE MONEY WORLDS (2026-09-30), one word each, read by every
 #: surface through world_of and the money_world tag. The operator: live and
-#: paper "still light" for him and his father. A demo row (paper False,
+#: paper "still light" for him and the keeper. A demo row (paper False,
 #: broker_env "paper") is simulated money and never prints as real.
 WORLD_LIVE, WORLD_DEMO, WORLD_PAPER = "live", "demo", "paper"
 WORLD_WORDS = {WORLD_LIVE: "REAL MONEY", WORLD_DEMO: "DEMO",
@@ -288,7 +288,7 @@ def _state(trade):
 
 
 def ending_words(trade):
-    """How a closed position ended, in words the father reads."""
+    """How a closed position ended, in words the keeper reads."""
     reason = trade.reason or ""
     outcome = (trade.outcome or "").strip()
     # 2026-10-07: an exit booked at the level NEAREST the price when the

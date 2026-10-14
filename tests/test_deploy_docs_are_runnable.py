@@ -20,12 +20,33 @@ BARE_STOP = re.compile(
     r"(?:$|&&|\|\||;|`|\)|\"|#)")
 
 
+def _assert_no_login_name(case, text):
+    """Every --user and username= in a deploy document is <you>, so is
+    the login that prefixes `follow`'s printed line (`<name>: account
+    ...`, bot_program/management/commands/follow.py), and the text
+    carries none of the private terms the server lists."""
+    from core.leak_walk import private_terms_in
+    for m in re.finditer(r"--user[ =]([^\s`'\",.;)]+)", text):
+        case.assertIn(m.group(1), ("<you>", "help"), m.group(0))
+    for m in re.finditer(r"username=['\"]([^'\"]+)['\"]", text):
+        case.assertEqual(m.group(1), "<you>", m.group(0))
+    for m in re.finditer(r"`(\S+): account ", text):
+        case.assertEqual(m.group(1), "<you>", m.group(0))
+    case.assertEqual(private_terms_in(text), [])
+
+
 class RetirementDocTests(SimpleTestCase):
 
-    def test_no_stale_username_and_every_command_carries_the_dc_prefix(self):
+    def test_no_login_name_and_every_command_carries_the_dc_prefix(self):
+        """The two deploy documents name no login: every --user and every
+        username= is the placeholder <you> (the operator's own name stands
+        behind it on the box), and no private term of the server's list
+        (core/leak_walk.py; the canary alone where none is configured)."""
         t = (REPO / "deploy" / "IBKR_RETIREMENT.md").read_text(encoding="utf-8")
-        self.assertNotIn("--user mathe", t)
-        self.assertNotIn("username='mathe'", t)
+        _assert_no_login_name(self, t)
+        # the proof that quotes follow's printed line keeps the placeholder
+        # where the command prints the login
+        self.assertIn("`<you>: account <value> USD, N follower(s)`", t)
         # the one bare spelling is the literal hint dashboard/views_system_health
         # prints, quoted verbatim, and it must stay bare
         hint = 'the hint "Run `python manage.py check_feeds`"'
@@ -70,9 +91,9 @@ class DepartureDocTests(SimpleTestCase):
         t = path.read_text(encoding="utf-8")
         for needle in ("#93", "#94", "#95", "config 10", 'metadata["broker"]',
                        "keyed_venue_count", "exit_price_inferred", "IBKRTrader",
-                       "--user Sauron"):
+                       "--user <you>"):
             self.assertIn(needle, t)
-        self.assertNotIn("mathe", t)
+        _assert_no_login_name(self, t)
         self.assertNotIn("x-api-key", t)
         for ln in t.splitlines():
             if "python manage.py" in ln:

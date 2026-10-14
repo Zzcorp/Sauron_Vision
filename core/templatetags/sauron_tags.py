@@ -536,7 +536,7 @@ def px_decimals(value, asset_class="", symbol=""):
 
 # ── The money world (2026-09-30) ─────────────────────────────────────────
 # One marker for "is this real money", everywhere. The operator: live and
-# paper were "still light" for him and his father — no marker on the
+# paper were "still light" for him and the keeper — no marker on the
 # positions table, four colour schemes, demo rows printed LIVE, paper
 # painted green. REAL MONEY is the only solid red fill on the platform;
 # DEMO is gold, PAPER grey. The reader is dashboard.position_summary.

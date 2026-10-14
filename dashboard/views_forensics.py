@@ -217,7 +217,7 @@ def forensics_detail(request, trade_id: int):
         "page_id": "forensics",
         "trade": trade,
         # THE PLAIN SUMMARY at the top (2026-09-26) — words and numbers
-        # for the father, from the positions page's own readers. None when
+        # for the keeper, from the positions page's own readers. None when
         # it cannot be built: the page then opens the technical record.
         "summary": _summary_or_none(trade),
         "reasons": [r.strip() for r in (trade.reason or "").split("·") if r.strip()],
@@ -239,7 +239,7 @@ def forensics_detail(request, trade_id: int):
 
 # ── The position page's plain summary (2026-09-26) ──────────────────────
 # The operator, on this page: "I want the position pages detail to be
-# styled in a perfect manner for the father, this is too nerdy", and "make
+# styled in a perfect manner for the keeper, this is too nerdy", and "make
 # it live on pnl etc and the option to close too". The summary is built by
 # dashboard/position_summary.py from the readers the positions page uses;
 # the technical record above is rendered unchanged, folded under it.

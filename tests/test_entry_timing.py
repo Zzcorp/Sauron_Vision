@@ -7,8 +7,8 @@ is not a market price, and no attack into a scheduled print.
                 clock and classes (SHUT_CLASSES; the options lane's live
                 branch on its underlying's key, OPTIONS_SHUT_CLASSES):
                 the hour it opens and the hour entries resume, recorded as
-                skips.MARKET_SHUT — after config 26's PG short filled 22
-                minutes before the NYSE open on 2026-10-06.
+                skips.MARKET_SHUT — after a live config's short on a share
+                filled 22 minutes before the NYSE open on 2026-10-06.
   OPEN SETTLE   the first OPEN_SETTLE_MINUTES after any modelled open —
                 for forex, the first quarter hour of the week.
   CLOSE GUARD   a stock or ETF in the last CLOSE_GUARD_MINUTES before its
@@ -393,8 +393,8 @@ class NothingUnreadableRefusesTests(SimpleTestCase):
 # ── the shut exchange (2026-10-07) ────────────────────────────────────────
 
 class TheShutExchangeTests(SimpleTestCase):
-    """THE SHUT EXCHANGE (2026-10-07): on 2026-10-06 research_stock_5
-    (config 26) shorted PG at 13:08 UTC, 22 minutes before the NYSE open;
+    """THE SHUT EXCHANGE (2026-10-07): on 2026-10-06 a live research stock
+    config shorted a share at 13:08 UTC, 22 minutes before the NYSE open;
     eToro filled it at once and Morgul G1 braked the config at 13:12. The
     bot lane now refuses a live entry while the instrument's exchange is
     shut, on Morgul G1's own clock and for G1's classes at a broker."""

@@ -262,7 +262,7 @@ def ibkr_in_use(acct) -> bool:
     unticked and the Gateway is down, yet the row was still attempted by
     the sync every 15 minutes, swept, counted as a quote feed and raised
     to the alarm chat ("IBKR account has not answered", "IBKR is not
-    delivering quotes") — noise for a father keeping the house.
+    delivering quotes") — noise for a keeper of the house.
 
     The row itself stays: its equity history hangs off it (CASCADE), and
     deploy/IBKR_RETIREMENT.md keeps deletion for last. But a row that is

@@ -1,47 +1,88 @@
 """Create Sauron Vision platform users.
 
-Passwords are NEVER hardcoded in source. Each user's password is read from an
-environment variable named ``SAURON_PW_<USERNAME>`` (username uppercased, with any
-non-alphanumeric character replaced by ``_``). Users whose password env var is
-unset are skipped — so running this command without configured secrets is a safe
-no-op and never leaks credentials.
+Nothing about a person is in this file: this repository is public. The
+roster is read from the environment and so is every password.
+
+  SAURON_PLATFORM_USERS   the roster: ``name[:role],name[:role],...``.
+                          A role is ``staff`` or ``superuser`` (which
+                          implies staff); no role means a plain user.
+                          Unset or empty, the command does nothing and
+                          says which variable to set.
+  SAURON_PW_<USERNAME>    the password of each listed user (username
+                          uppercased, any non-alphanumeric character
+                          replaced by ``_``). A listed user whose password
+                          variable is unset is skipped — so running this
+                          command without configured secrets is a safe
+                          no-op and never leaks credentials.
 
 Examples (PowerShell):
-    $env:SAURON_PW_EMILE_M = "..."
-    $env:SAURON_PW_ZZ      = "..."   # superuser
+    $env:SAURON_PLATFORM_USERS = "alice,bob:staff,carol:superuser"
+    $env:SAURON_PW_ALICE = "..."
+    $env:SAURON_PW_BOB   = "..."
+    $env:SAURON_PW_CAROL = "..."
     python manage.py create_users
 
-The superuser flag is the only role baked into source; it is not a secret.
+Each user created or updated gets a TraderProfile and notification
+preferences row, as before.
 """
 import os
 import re
 
-from django.core.management.base import BaseCommand
 from django.contrib.auth.models import User
+from django.core.management.base import BaseCommand, CommandError
 
-
-# (username, is_superuser, is_staff). Passwords come from env — see module docstring.
-PLATFORM_USERS = [
-    ("Emile_M", False, False),
-    ("Cesar_M", False, False),
-    ("RS_UG", False, False),
-    ("ElChaman", False, False),
-    ("Anonymous_Z", False, False),
-    ("zz", True, True),
-]
+#: The roster's environment variable, and the roles it may name.
+ROSTER_ENV = "SAURON_PLATFORM_USERS"
+#: role -> (is_superuser, is_staff)
+ROLES = {"": (False, False), "staff": (False, True), "superuser": (True, True)}
 
 
 def _env_key(username: str) -> str:
     return "SAURON_PW_" + re.sub(r"[^A-Za-z0-9]", "_", username).upper()
 
 
+def roster(raw=None) -> list:
+    """[(username, is_superuser, is_staff)] out of ``name[:role],...``.
+    Read from the environment when `raw` is None. Blanks are ignored, a
+    name listed twice is taken once (its first role), and a role nobody
+    knows raises ValueError naming the role, never a password."""
+    if raw is None:
+        raw = os.environ.get(ROSTER_ENV) or ""
+    out, seen = [], set()
+    for piece in str(raw).split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        name, _sep, role = piece.partition(":")
+        name, role = name.strip(), role.strip().lower()
+        if not name or name in seen:
+            continue
+        if role not in ROLES:
+            raise ValueError("unknown role %r for user %r (staff or superuser)"
+                             % (role, name))
+        seen.add(name)
+        is_superuser, is_staff = ROLES[role]
+        out.append((name, is_superuser, is_staff))
+    return out
+
+
 class Command(BaseCommand):
-    help = "Create/update platform users. Passwords are read from SAURON_PW_<USERNAME> env vars."
+    help = ("Create/update platform users. The roster is read from "
+            f"{ROSTER_ENV} and each password from SAURON_PW_<USERNAME>.")
 
     def handle(self, *args, **options):
-        created, updated, skipped = 0, 0, 0
+        try:
+            users = roster()
+        except ValueError as exc:
+            raise CommandError(str(exc))
+        if not users:
+            self.stdout.write(self.style.WARNING(
+                f"  Nothing to do: set {ROSTER_ENV}=name[:role],... (role: "
+                f"staff or superuser) and SAURON_PW_<USERNAME> for each."))
+            return
 
-        for username, is_superuser, is_staff in PLATFORM_USERS:
+        created, updated, skipped = 0, 0, 0
+        for username, is_superuser, is_staff in users:
             env_key = _env_key(username)
             password = os.environ.get(env_key)
             if not password:
@@ -57,7 +98,8 @@ class Command(BaseCommand):
             user.is_staff = is_staff
             user.save()
 
-            tag = " (superuser)" if is_superuser else ""
+            tag = (" (superuser)" if is_superuser
+                   else " (staff)" if is_staff else "")
             if was_created:
                 created += 1
                 self.stdout.write(self.style.SUCCESS(f"  Created: {username}{tag}"))

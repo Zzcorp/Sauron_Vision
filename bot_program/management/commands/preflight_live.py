@@ -35,7 +35,7 @@ the wrong moment. Age is reported beside every reading so a stale one cannot
 pass for a fresh one.
 
     python manage.py preflight_live
-    python manage.py preflight_live --user mathe
+    python manage.py preflight_live --user <you>
 """
 from django.core.management.base import BaseCommand
 

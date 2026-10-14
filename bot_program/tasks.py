@@ -513,7 +513,7 @@ def _warm_etoro_names(client, user, demo: bool) -> None:
 
     eToro answers /portfolio with instrumentIds, and this fresh client can
     name only what it resolved itself — so the stored snapshot read
-    "ETORO:1" for the operator's EURUSD and "ETORO:3190" beside it, on
+    "ETORO:<id>" for the operator's forex position and a bare id beside it, on
     /treasury/, in the operator's own diagnostics and in Morgul's drift
     guard, which then compares by count instead of by symbol. Every symbol
     the platform holds OPEN at this account's world is resolved first,
@@ -1397,7 +1397,7 @@ def answer_telegram_question(pending_id: int) -> dict:
 
 
 # ── The alarm bot (2026-09-28) ───────────────────────────────────────────
-# A second Telegram bot in a second group, the operator and his father:
+# A second Telegram bot in a second group, the operator and the keeper:
 # critical problems only, never an all-clear, and two commands, /status
 # and /stopall. The whole of it is bot_program/alarm.py; these are its
 # two Celery doors, both gated by the alarm bot's OWN switch (alarm_task:

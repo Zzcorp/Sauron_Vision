@@ -34,7 +34,7 @@ Three rules that outrank everything else here
 3. Never call a demo row "live". eToro's demo and Saxo's simulation are
    `paper=False` rows at a broker — simulated money that still needs the PIN
    to close. The world word comes from `position_summary.venue_of`, the
-   reader the father's page uses, never from `trade.paper` alone.
+   reader the keeper's page uses, never from `trade.paper` alone.
 
 What this adds to the watcher's facts
 -------------------------------------

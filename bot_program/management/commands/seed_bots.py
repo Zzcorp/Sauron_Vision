@@ -8,7 +8,7 @@ the configs. This command creates them.
 
     python manage.py seed_bots                  # create, DISABLED, paper
     python manage.py seed_bots --activate       # ...and switch them on
-    python manage.py seed_bots --user zz        # attach to a named user
+    python manage.py seed_bots --user <you>       # attach to a named user
     python manage.py seed_bots --reset          # remove seeded configs
 
 Everything lands in PAPER mode. A re-run re-asserts only `symbols` — never

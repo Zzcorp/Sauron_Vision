@@ -4,9 +4,9 @@ The operator, 2026-09-26/27: "we need a 'Morgul', or orcs to save Sauron
 from itself" -- "guards". The trigger: on Saturday 2026-09-26 at 13:53 UTC
 two paper forex positions (EURCAD, GBPCAD) were closed while forex was
 shut, at a Friday price the OANDA stream made look fresh, and nothing on
-the platform noticed. From 2026-09-28 the operator is away for three
-weeks and his father runs Sauron from his phone: what the book does wrong
-must reach the group without anyone asking, in English, once.
+the platform noticed. While the operator is unavailable a second keeper
+runs Sauron from a phone: what the book does wrong must reach the group
+without anyone asking, in English, once.
 
 WHAT A GUARD IS
   A key, a name in words, a severity (warning or critical), a check that
@@ -194,7 +194,7 @@ MARK_STALE_S = 3600
 #: tests/test_entry_timing.py pins both.
 CLOCK_CLASSES = ("forex", "stock", "etf", "index", "commodity", "options")
 #: G1 (2026-10-07, PR50): eToro fills US stock closes in its extended
-#: session (NVDA #131's stop, 2026-10-07 11:0x UTC, NYSE shut). A live
+#: session (a real US-share row's stop, 2026-10-07 11:0x UTC, NYSE shut). A live
 #: eToro close of these classes is the venue's execution, not a stale
 #: price: _close_trade, the kill switch and manual close book CLOSED only
 #: on the venue's positionState "closed" (the eToro adapter's close by

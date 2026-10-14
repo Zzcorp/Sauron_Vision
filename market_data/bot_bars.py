@@ -942,8 +942,8 @@ def _held_real_rows(live_covered) -> list:
     REAL ROWS FROM THEIR OWN VENUE (2026-10-07). The manual lane
     (`symbols=[]`), a braked or disabled config and a paper-only config
     left a real row with the watchlist's keyless bars only, regular
-    session: the stop eToro filled in the extended session (NVDA #131,
-    PG #138, AMZN #140) left no bar the reconcile's pricing could read."""
+    session: the stop eToro filled in the extended session on three real
+    stock rows left no bar the reconcile's pricing could read."""
     try:
         from bot_program.models import AssetBotTrade
         from instruments.models import Instrument

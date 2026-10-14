@@ -103,8 +103,8 @@ DECAY_WORDS = {
 # ── The words a person reads (2026-09-27) ────────────────────────────────
 # The operator, 2026-09-27: "the telegram messages are still basic still".
 # The fills read like a log line ("FOREX · qty 7900.00000000 @
-# 1.60725571", "Rule golden_cross") and the father reads them on a phone
-# for three weeks. ONE place decides how a number reads in a sent text,
+# 1.60725571", "Rule golden_cross") and the keeper reads them on a phone.
+# ONE place decides how a number reads in a sent text,
 # on the position page's own formatters (dashboard.position_summary) and
 # the platform's price convention (core.price_format), so the phone and
 # the page never print one figure two ways:
@@ -1274,12 +1274,13 @@ def fill_close_message(*, asset_class, symbol, side, qty, exit_price, pnl,
     # the row's currency; without a row, the one the caller knows
     # (2026-09-27: a close without a row printed "+17.84")
     ccy = _row_ccy(row) or str(currency or "").strip()
-    # AN ESTIMATE IS SAID TO BE ONE (2026-10-04). GBPCHF #130: eToro closed
-    # it on Friday 12:37; the platform found the row a day later, booked it
-    # at the last mark (eToro publishes no closing fill) and stamped the
-    # moment it booked it. The message then read "+0.52 USD · 0.02 times
-    # the risk ... after 1 day 18 hours ... Closed: Saturday 13:00" as
-    # facts. The operator, rightly: "closed on saturday.... why????".
+    # AN ESTIMATE IS SAID TO BE ONE (2026-10-04). A real forex row: eToro
+    # closed it on a Friday at midday; the platform found the row a day
+    # later, booked it at the last mark (eToro publishes no closing fill)
+    # and stamped the moment it booked it. The message then read a small
+    # gain, in money and in R, "... after 1 day 18 hours ... Closed:
+    # Saturday 13:00" as facts. The operator, rightly: "closed on
+    # saturday.... why????".
     # `exit_price_inferred` (reconcile) says the price is a mark, so the
     # money and the R are "about"; "reconciled-orphan" says the close time
     # is when the platform RECORDED it, so no duration is claimed and the

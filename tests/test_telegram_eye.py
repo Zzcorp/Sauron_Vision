@@ -59,8 +59,9 @@ from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.utils import timezone
 
 from bot_program import telegram_eye as eye
+from tests.test_etoro_client import REAL_ORDER_AAPL
 
-GROUP = "-5337454557"
+GROUP = "-4000000001"
 TOKEN = "SECRET123"
 SEND = "bot_program.notifications._send_telegram"
 TRADER = "bot_program.engine.etoro_client.EtoroTrader"
@@ -533,7 +534,7 @@ class StatusReportTests(_EyeCase):
         """After a FERNET_KEY change the stored key is there and cannot
         be read (get_credentials answers (None, None) for both cases):
         said as such, as the morning brief says it, never as "no keys
-        stored" — that sends the father to re-enter keys that exist."""
+        stored" — that sends the keeper to re-enter keys that exist."""
         self.acct.api_key_enc = "not-a-token-this-server-can-decrypt"
         self.acct.save()
         self.assertEqual(self.acct.get_credentials(), (None, None))
@@ -796,7 +797,7 @@ class BrakeTests(_EyeCase):
         self.assertIn("The stopped bot still runs those stops on every "
                       "tick.", text)
 
-    def _held(self, cfg, symbol="AAPL", order_id="1596774177"):
+    def _held(self, cfg, symbol="AAPL", order_id=str(REAL_ORDER_AAPL)):
         """A WORKING live entry: an ORDER the broker holds, booked as the
         engine books it (asset_engine/base.py: entry_working, no
         protection yet, the legs on the order body)."""
@@ -826,7 +827,7 @@ class BrakeTests(_EyeCase):
             self.assertEqual(self.said(_update(66, "/stopall")),
                              "answered:stopall")
         self.assertEqual(router.call_args.args[:2], (self.user, "AAPL"))
-        client.cancel_order.assert_called_once_with("1596774177")
+        client.cancel_order.assert_called_once_with(str(REAL_ORDER_AAPL))
         held.refresh_from_db()
         self.assertEqual(held.status, "CANCELED")
         self.assertEqual(held.metadata["entry_withdrawn_reason"],
@@ -843,7 +844,7 @@ class BrakeTests(_EyeCase):
     def test_an_order_that_could_not_be_withdrawn_is_said_with_its_id(self):
         """The broker refuses the cancel, or the live row is handed the
         simulator (no broker to send to): the row stays WORKING, and the
-        reply names the order for the father to cancel by hand."""
+        reply names the order for the keeper to cancel by hand."""
         from bot_program.engine.paper_trader import PaperTrader
         a = _cfg(self.user, "Stocks core", "stock", mode="live")
         held = self._held(a)
@@ -857,7 +858,7 @@ class BrakeTests(_EyeCase):
         self.assertTrue(held.metadata["entry_working"])
         (text,) = _texts(send)
         self.assertIn("AAPL order could not be withdrawn — at the broker: "
-                      "1596774177", text)
+                      + str(REAL_ORDER_AAPL), text)
         self.assertIn("An order not withdrawn can still fill; cancel it at "
                       "the broker.", text)
         self.assertNotIn("Orders withdrawn", text)
@@ -873,7 +874,7 @@ class BrakeTests(_EyeCase):
         held.refresh_from_db()
         self.assertEqual(held.status, "OPEN")
         self.assertIn("AAPL order could not be withdrawn — at the broker: "
-                      "1596774177", _texts(send)[0])
+                      + str(REAL_ORDER_AAPL), _texts(send)[0])
 
     def test_morguls_brake_withdraws_nothing_and_names_the_held_order(self):
         """morgul._brake calls apply_brake without `withdraw`: the

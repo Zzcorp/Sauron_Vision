@@ -132,7 +132,7 @@ class TheClockExitRunsWithoutAMarkTests(TestCase):
         self.assertIn(skips.NO_PRICE, str(self.cfg.extras or {}))
 
     def test_a_failed_read_names_its_own_error(self):
-        """NVDA #131 read "the broker priced it at 0" at 13:47 UTC on
+        """A real stock row read "the broker priced it at 0" at 13:47 UTC on
         2026-10-06 when the READ had failed (a refused /search). A failed
         read and a venue that answered 0 are two faults with two remedies."""
         from bot_program.asset_engine import skips

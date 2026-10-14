@@ -262,13 +262,13 @@ class ThePaperStageEntryTests(_Base):
 
 
 class TheLiveLimitsReadTheRealAccountTests(_Base):
-    """The live box, 2026-09-30: the /setup/ book read 9,420 EUR, the
-    eToro account 2,249.65 USD, so "3% max daily loss" stopped real money
-    at ~282 — 12.5% of it. A LIVE judgement now reads the account's last
+    """The live box, 2026-09-30: the /setup/ book read a figure several
+    times the eToro account's, so "3% max daily loss" stopped real money
+    at an eighth of it. A LIVE judgement now reads the account's last
     equity reading; paper keeps the /setup/ book, whose research pools are
     100,000 each and would all be refused against the account."""
 
-    def _account(self, equity="2249.65", age_minutes=5):
+    def _account(self, equity="2000.00", age_minutes=5):
         from datetime import timedelta as _td
 
         from bot_program.models import EtoroAccount
@@ -286,7 +286,7 @@ class TheLiveLimitsReadTheRealAccountTests(_Base):
         _book(value="9420")
         self._account()
         self.assertEqual(venue_book_value(self.user, limits_book(), "live"),
-                         (2249.65, "the broker account"))
+                         (2000.0, "the broker account"))
 
     def test_paper_and_unnamed_keep_the_setup_book(self):
         from portfolio.risk_gate import limits_book, venue_book_value
@@ -309,12 +309,12 @@ class TheLiveLimitsReadTheRealAccountTests(_Base):
         self.assertIn("no fresh broker reading", source)
 
     def test_the_live_daily_floor_is_a_share_of_real_money(self):
-        """8% of 2,249.65 is 179.97: the operator's chosen brake."""
+        """8% of the account (a composed 2,000.00 here) is 160.00: the operator's chosen brake."""
         from portfolio.risk_gate import daily_loss_state
         _book(value="9420", daily_loss_pct=8.0)
         self._account()
         live = daily_loss_state(self.user, venue="live")
-        self.assertAlmostEqual(live["limit_money"], -179.97, places=2)
+        self.assertAlmostEqual(live["limit_money"], -160.0, places=2)
         self.assertEqual(live["book_source"], "the broker account")
         paper = daily_loss_state(self.user, venue="paper")
         self.assertAlmostEqual(paper["limit_money"], -753.6, places=2)
@@ -326,7 +326,7 @@ class TheLiveLimitsReadTheRealAccountTests(_Base):
         _closed(self.live_cfg, -200, paper=False)
         state = daily_loss_state(self.user, venue="live")
         self.assertFalse(state["ok"])
-        self.assertIn("2,249.65, the broker account", state["reason"])
+        self.assertIn("2,000.00, the broker account", state["reason"])
         # The same 200 of real money passes against the 9,420 book: the
         # unnamed judgement (the cards) keeps the book, as before.
         self.assertTrue(daily_loss_state(self.user)["ok"])
@@ -336,7 +336,7 @@ class TheLiveLimitsReadTheRealAccountTests(_Base):
         _book(value="9420", exposure_pct=100)
         self._account()
         state = exposure_state(self.user, venue="live")
-        self.assertAlmostEqual(state["cap_money"], 2249.65, places=2)
+        self.assertAlmostEqual(state["cap_money"], 2000.0, places=2)
         self.assertEqual(state["book_source"], "the broker account")
         paper = exposure_state(self.user, venue="paper")
         self.assertAlmostEqual(paper["cap_money"], 9420.0, places=2)

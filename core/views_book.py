@@ -26,7 +26,12 @@ What this view adds to the words in core.book_content:
     pinned below. A file that is missing renders nothing; one that cannot
     be read, is shaped otherwise or differs by one character renders
     nothing and logs why (never a word of it). A staff answer is marked
-    private and not stored by any cache.
+    private and not stored by any cache;
+  * THE LEAK WALK (2026-10-14, core/leak_walk.py): the answer sent to
+    anyone but staff is walked for the operator's private terms, read
+    from the server's environment; a page that carries one is withheld
+    behind a neutral placeholder and staff is told. Fenced: a walk that
+    raises publishes the page as rendered.
 
 The page renders WITHOUT the request's context processors: a story page
 pays none of a dashboard's reads. The template receives the request as a
@@ -51,6 +56,7 @@ from django.utils.cache import patch_cache_control, patch_vary_headers
 from django.utils.text import slugify
 
 from core import book_content as book
+from core import leak_walk
 from core.wall_facts import wall_facts
 
 logger = logging.getLogger(__name__)
@@ -279,7 +285,20 @@ def the_book(request):
         # processors.
         "request": request,
     }
-    response = HttpResponse(render_to_string("landing/the_book.html", context))
+    body = render_to_string("landing/the_book.html", context)
+    if not staff:
+        # THE LEAK WALK (2026-10-14, core/leak_walk.py): a public answer
+        # that carries one of the operator's private terms is not sent;
+        # a placeholder goes out instead and staff is told. The staff
+        # answer is private by design (the staff-only chapter would trip
+        # the list) and is never cached, so it is not walked. The request
+        # goes along so the host the visitor typed is not read as the
+        # page's.
+        held = leak_walk.withhold_if_private("book", body, request)
+        if held is not None:
+            patch_vary_headers(held, ("Cookie",))
+            return held
+    response = HttpResponse(body)
     # The page differs for staff, and staff is decided by the session.
     patch_vary_headers(response, ("Cookie",))
     if staff:

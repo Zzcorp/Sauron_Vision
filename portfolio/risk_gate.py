@@ -1395,7 +1395,7 @@ def single_position_state(portfolio, *, asset_class: str, user=None,
 #
 # 2, because 1 bans scaling into a position outright — a legitimate thing a
 # discretionary trader does on purpose — and the failure this exists to stop
-# was FIVE clips on one instrument reaching 42% of the book. Two full clips
+# was FIVE clips on one instrument reaching nearly half the book. Two full clips
 # is "add to a winner"; five is a different bet wearing the same name.
 CONCENTRATION_CLIP_ALLOWANCE = 2.0
 
@@ -1405,7 +1405,7 @@ def _one_venue(qs, paper):
     every caller had before).
 
     The operator: "the paper and live are still on a joint brain?" A paper
-    bot's EURAUD long refused his real-money EURAUD ticket as a "second
+    bot's long refused his real-money ticket on the same pair as a "second
     ticket that doubles the bet" — but simulated money doubles no real
     bet. The money limits already judge each venue on its own
     (open_capital_at_work, realized_since); the expression gates below now
@@ -1427,7 +1427,7 @@ def symbol_side_exposure(user, symbol: str, side: str, *, portfolio=None,
 
     A "position" is a symbol and a direction, not a ticket. The single-position
     ceiling judged each ticket on its own, so five clips each comfortably under
-    it summed to 42% of the book on one instrument — five tickets wearing the
+    it summed to nearly half the book on one instrument — five tickets wearing the
     costume of five decisions when they were one bet, and one adverse print
     hits all five at once.
 

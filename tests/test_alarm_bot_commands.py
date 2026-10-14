@@ -1,6 +1,6 @@
 """The alarm bot's two commands: /status and /stopall in the alarm chat (2026-09-28).
 
-The operator, 2026-09-28: the chat he shares with his father obeys two
+The operator, 2026-09-28: the chat he shares with the keeper obeys two
 commands and nothing else. Pinned here (bot_program/alarm.py; the alarms
 themselves are pinned in tests/test_alarm_bot.py):
   - the words: /status and its French alias, /stopall and "/stop all",
@@ -371,7 +371,7 @@ class HandleTests(_ChatCase):
         cfg = _cfg(self.user)
         with patch.object(eye, "apply_brake") as brake:
             for update in (_update(1, "/stopall", chat=EYE_GROUP),
-                           _update(2, "/status", chat="-5337454557"),
+                           _update(2, "/status", chat="-4000000001"),
                            _update(3, "/stopall", chat="111",
                                    chat_type="private")):
                 verdict, said = self.said(update)

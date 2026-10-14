@@ -18,7 +18,10 @@ What this file pins:
     no IP, no commit hash; the staff-only chapter is not in the answer at
     all, for an anonymous reader or a plain signed-in user, and the file it
     lives in is never even opened for them; staff receives it word for
-    word, never cached. The private terms are stored as digests, and the
+    word, never cached. The walk is core/leak_walk.py, the module the
+    views call at render time; the private terms are read from the
+    server's environment (SAURON_PRIVATE_TERMS) and are never typed here,
+    not even as digests — one planted canary stands for them — and the
     staff-only chapter is not in this repository at all (a neutral fixture
     stands in for it here): the repository is public;
   * clean English: no snake_case, no template artefact, no French;
@@ -41,7 +44,6 @@ import json
 import os
 import re
 import tempfile
-import unicodedata
 from pathlib import Path
 from unittest import mock
 
@@ -52,6 +54,7 @@ from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
 from core import book_content as book
+from core import leak_walk as lw
 from core import views_book
 from core import wall_facts as wf
 
@@ -633,83 +636,17 @@ def _history(block):
 FIRST_EDITION = _history(HISTORY_AT_3994FFC)
 KNOWN_COMMITS = {**FIRST_EDITION, **_history(HISTORY_SINCE_3994FFC)}
 
-#: Generic words and phrases the public page must never carry, anywhere in
-#: the answer (compared lowercased, entities decoded). The private ones are
-#: PRIVATE_TERM_DIGESTS below.
-FORBIDDEN_WORDS = [
-    # the account
-    "balance", "equity", "p&l", "pnl", "profit and loss",
-    "account number", "account id", "order id", "orderid", "position id",
-    "positionid", "usd", "€", "$",
-    # identifiers, keys, hosts, commands
-    "chat id", "chat_id", "api key", "api_key", "user key", "user_key",
-    "secret", "token", "password", "vps", "ssh ", "docker", "compose",
-    "caddy", "daphne", "gunicorn", "celery", "redis", "postgres", "nginx",
-    "hostname", "localhost", "127.0.0.1", "manage.py", ".env", "sudo",
-    "systemctl", "git pull", "--yes", "/stop", "/status",
-]
-#: The stylesheet's own words that share letters with the list above.
-CODE_WORDS = ("text-wrap: balance",)
-
-#: The private terms (identity, whereabouts, who holds what, the e-mail,
-#: the instruments held), each as the sha256 of its lowercased words joined
-#: by one space. This repository is public: a list of what must stay
-#: private, typed in clear, would say it. One digest is a canary, CANARY,
-#: which the tests plant to prove the walk finds a term wherever it hides.
-PRIVATE_TERM_DIGESTS = frozenset({
-    "01fa2c6f247019ae32c4c7ab4e6c228c172d4e755cdbe49e4c6a28f604411fd9",
-    "033e8cf207eb4128b6a4f96a93635b78a0d3ef28bfa5136c765e811241956349",
-    "058e976492d47aab16c98232d93c17e00deced02a92a265f0f6430377f9694a0",
-    "070969f9c60b2378686b68e2c9d1713159b4ec871eb880d563c4b460d4fe5498",
-    "13f393891c57b11a085ba660c6a11e41e60c03c65d079f1e22606b1ee00484f5",
-    "1614ceeec50a9336ebf690886caa747d6811c45d37086a3fa7b11c9e83926c6c",
-    "1888101dae1d8fc2c5644effea1127664fa6f5244ec651cf4dfc212d5a1cb540",
-    "199dc38e1a4d3008afbe8de87653c31bd4143a501f47539022b8340ebdfecc30",
-    "19acb093f04ad04bdaff2c981d1a4f53c0978782af949b3017a1955cc77f5abc",
-    "1fed856c13a209f0ab71a7ed89c13d9f74385689fd0f3c84091fbacd27f6e476",
-    "2123abbaac7753cab5f7bf55dd765c16306c38aa5138f841029848bef4a5f207",
-    "2502770bb9c2bc900120093d00e8bc5ca4eecf4f6e348f9edf2eb879e2e9c1d0",
-    "2ef8109cfc2c927f8e416368293c3f488b44748e7f6090f9e911f276e807a1a6",
-    "378ce56a9d146d5174c89d1c0353d7f8e2244e89bb83935a5b1bdcf5e74b4e7f",
-    "45d4b5a2b736dd16e8ba2283aa3b642e665ba460f8610fb4c1e5746607a0fd64",
-    "485ef000344c201d24d44df3cf542f3b490a9fd553f03e396fe2fbd69d2324ee",
-    "50497e484ebb22c3b1c3ec1cb2d86d623be14c5bfa9f119526afc463ce2fcb2b",
-    "576ba7c2e4abb7184ca409154dbbbd5306c1a80747fbce4148ea6271fd21e776",
-    "58cc6181518fbfb49da9c50db08ce31aa92feebaecc6c46a3a8084e87b50f037",
-    "5ad38304b535c2987dbd24657c1a11b884984ff600d9f389deb0d4e634fee792",
-    "72b528f9c86487399dfdf6694732395e191628b5fecb73d3bfec59ee856e65d8",
-    "81e058fbc7c1d5c79a3ebe55f8305211d689d31e6092ccce9d789dac35f894cd",
-    "84d1d10378db821681de841abc0828e4ac4d3f593da3cbaea3f66c5af251cc88",
-    "88a1881f0025cf7117501d07aefc5d4be6696656790d765678df8bc48ca52687",
-    "8f60e4c409b48faf48d4bccdc82e4cb2b31cdf9f130e52b73695f0d954de908e",
-    "929d4b9ed70f57653b154b48e229fd7615f095b4fb9b886eb9db1a8c3987d1f4",
-    "99626eb121d1e6b56bd715fbe0710127ace02a9b3ba397246f64fb2f0748a15c",
-    "9a14f3160283d6ac09436b7c954ba9708f3a07d1ee130f19776bc4f3def4bf1b",
-    "9a7db5a31b7019d0e0714c54614ded70cdb0d15e2e96a1ed6ec43b89595fa7af",
-    "ba45de9343234cbec3676f988262f152c8815e297ffdb2adeb6ec7a5d22e4f03",
-    "bd7e190fce14ea4737d707e678b608bc5570125883c54ed63f8a874d16854665",
-    "cc2e94bebec101520d06503709c01148181f6446b9b078dd861a2dbb87237ebe",
-    "d7b44e006ff0b71a5aed38e4794bbcdb4e4eb7ffae8983ec9818bd3e596b93d7",
-    "e27d22eee452aea8bc8babb98c5830f453783ad089a5e2ac466bb2019345c516",
-    "e287b6aacc447c8468fd53380c62d8a7072fcd79bf5364f0f4c26d629ad83551",
-    "e40605e6a26268a5eb83c155ea5dd12aeb3314f6ba5d67d4b607de95156e4e12",
-    "f1522aa90652155c67df431da6f23af0d8897a677cfdd24377ad78214d3241dc",
-    "f2f457bb12d5f918db2d33ecaa409376887189728c6bd1c4c5bd584904db7fda",
-})
-PRIVATE_TERM_MAX_WORDS = 4
-CANARY = "canary private phrase"
-
-#: Searched over the whole answer, and over its visible text.
-WHOLE_PATTERNS = [
-    (re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+"), "an e-mail address"),
-    (re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b"), "an IP address"),
-    (re.compile(r"(?<![\d,.])\d{5,}(?![\d,])"), "an identifier-length digit run"),
-]
-VISIBLE_PATTERNS = [
-    (re.compile(r"\bpositions?\b"), "a position"),
-    # the brake's command ("bot off 12"), not the English "switch a bot off"
-    (re.compile(r"\bbot off \d"), "a command"),
-]
+#: The walk is core/leak_walk.py, the module the views call at render time;
+#: the names below are kept so every test here reads as it did. The
+#: generic words (FORBIDDEN_WORDS) are typed there; the private terms are
+#: read from the server's environment and never typed anywhere in this
+#: tree — one planted canary, CANARY, proves the walk finds a term
+#: wherever it hides.
+FORBIDDEN_WORDS = lw.FORBIDDEN_WORDS
+CODE_WORDS = lw.CODE_WORDS
+CANARY = lw.CANARY
+WHOLE_PATTERNS = lw.WHOLE_PATTERNS
+VISIBLE_PATTERNS = lw.VISIBLE_PATTERNS
 
 #: Every figure the page may print that is not a wall_facts count or part
 #: of a date or a time: each is a dated fact of the history or a default
@@ -788,64 +725,16 @@ def _fixture_words():
             + [item["text"] for item in chapter["items"]])
 
 
-def _tokens(text):
-    return re.findall(r"[^\W_]+", unicodedata.normalize("NFC", text).lower())
-
-
-def _private_terms_in(text):
-    """Every private term the text carries, as the text itself says it."""
-    words = _tokens(text)
-    found = set()
-    for n in range(1, PRIVATE_TERM_MAX_WORDS + 1):
-        for i in range(len(words) - n + 1):
-            gram = " ".join(words[i:i + n])
-            if hashlib.sha256(gram.encode("utf-8")).hexdigest() in PRIVATE_TERM_DIGESTS:
-                found.add(gram)
-    return sorted(found)
-
-
-def _whole(body):
-    """Every byte a visitor receives, entities decoded, lowercased: the
-    <head>, the <style> and <script> blocks and every comment included.
-    The counted numbers' own attribute is taken out (a large count is not
-    an identifier), and so are the colours (#030806 is the page's black)
-    and the stylesheet's own words (CODE_WORDS)."""
-    text = re.sub(r'data-count="\d+"', " ", html.unescape(body)).lower()
-    text = re.sub(r"#[0-9a-f]{3,8}(?![0-9a-z])", " ", text)
-    for word in CODE_WORDS:
-        text = text.replace(word, " ")
-    return text
-
-
-def _visible(body):
-    """The words a visitor reads."""
-    body = re.sub(r"<!--.*?-->", " ", body, flags=re.S)
-    body = re.sub(r"<(style|script|head)\b.*?</\1>", " ", body,
-                  flags=re.S | re.I)
-    text = html.unescape(re.sub(r"<[^>]+>", " ", body))
-    return " ".join(text.split())
+_tokens = lw.tokens
+_private_terms_in = lw.private_terms_in
+_whole = lw.whole
+_visible = lw.visible
 
 
 def _leaks(body):
-    """What an answer carries that a public page must not, in words."""
-    whole = _whole(body)
-    found = ["says %r" % word for word in FORBIDDEN_WORDS if word in whole]
-    found += ["carries the private term %r" % gram for gram in _private_terms_in(whole)]
-    for pattern, what in WHOLE_PATTERNS:
-        hit = pattern.search(whole)
-        if hit:
-            found.append("shows %s: %r" % (what, hit.group(0)))
-    for _day, _era, _title, _words, commit in book.MILESTONES:
-        if re.search(r"(?<![0-9a-f])%s(?![0-9a-f])" % commit, whole):
-            found.append("shows the commit %s" % commit)
-    visible = _visible(body)
-    for pattern, what in VISIBLE_PATTERNS:
-        hit = pattern.search(visible)
-        if hit:
-            found.append("shows %s: %r" % (what, hit.group(0)))
-    if "@" in visible:
-        found.append("shows an @")
-    return found
+    """What an answer carries that a public page must not, in words: the
+    module's walk with the road's commit hashes as this page's own."""
+    return lw.leaks(body, commits=[c for *_rest, c in book.MILESTONES])
 
 
 def _css(body):
@@ -1204,7 +1093,7 @@ class ThePublicPageKeepsItsPrivateParts(_StaffChapterOnDisk, TestCase):
         """The repository is public: the book's own files say none of the
         private terms either, in their text or in their comments."""
         for path in (REPO / "core" / "book_content.py", REPO / "core" / "views_book.py",
-                     TEMPLATE, Path(__file__)):
+                     REPO / "core" / "leak_walk.py", TEMPLATE, Path(__file__)):
             found = [gram for gram in _private_terms_in(path.read_text(encoding="utf-8"))
                      if gram != CANARY]
             self.assertEqual(found, [], path.name)

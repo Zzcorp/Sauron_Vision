@@ -1607,10 +1607,11 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
                         asset_class=cls, paper=not live)
 
     # THE BOOK'S NOTIONAL CAP, with this ticket added, and the pool against
-    # the book (2026-10-04). A small book took two yen crosses worth thirty
-    # times itself by hand on 2026-09-07: the exposure limit counts forex
-    # at its margin, so the thirtieth "at work" fitted 100% of the book,
-    # and the manual pool that sized them declared 10,000 nobody had. Both
+    # the book (2026-10-04). A small book once took two hand-taken currency
+    # positions whose notional was many times itself: the exposure limit
+    # counts forex at its margin, so the sum "at work" still fitted the
+    # book, and the manual pool that sized them declared money nobody had.
+    # Both
     # ride the book advisory — appetite, like the limits already in it: the
     # ticket is told and recorded (book_limit_at_entry), never refused on
     # this path.
@@ -2099,8 +2100,8 @@ def _execute(user, inst, side, close_ids=None, signal=None,
     # as it will stand AFTER the closes the operator picked.
     #
     # The per-ticket ceiling judges this ticket; this judges the BET. Five
-    # clips each comfortably inside the per-ticket limit summed to 42% of the
-    # book on one instrument, because nothing added them up — the operator was
+    # clips each comfortably inside the per-ticket limit summed to nearly half
+    # the book on one instrument, because nothing added them up — the operator was
     # refused nothing, a clip at a time, until one name carried nearly half
     # the book and a single adverse print hit it five times at once.
     #
@@ -2916,8 +2917,9 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         # through `order_status` and withdraws only through `cancel_order`
         # (AssetBot._poll_working_entry, cancel_working_entry); eToro has
         # both since D3b (2026-09-24), and both worlds withdraw since the
-        # real DELETE answered as the demo one did (MEASURED 2026-09-26,
-        # order 1596774177): one promise on either world.
+        # real DELETE answered as the demo one did (MEASURED 2026-09-26, a
+        # held AAPL order on the real account; id in the private deploy
+        # log): one promise on either world.
         # The else branch stays for an adapter with neither, and the
         # confirmation says what the adapter can do rather than promise.
         # `client` is the adapter that placed this order (bound above,

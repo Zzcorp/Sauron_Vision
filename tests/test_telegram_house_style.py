@@ -266,7 +266,7 @@ class SignalDispatchTests(_Base):
     def test_one_house_message_per_signal(self):
         from alerts.dispatch import dispatch_signal_alert
         from django.urls import reverse
-        _user("sig_a", chat="-5337454557", receive_signals=True)
+        _user("sig_a", chat="-4000000001", receive_signals=True)
         sig = _signal(self.inst, rule_name="rule_a<b>&c")
         with patch("requests.post", return_value=_ok()) as post:
             out = dispatch_signal_alert(sig)
@@ -274,7 +274,7 @@ class SignalDispatchTests(_Base):
                                "refused": 0})
         p = _payloads(post)[0]
         self.assertHouse(p)
-        self.assertEqual(p["chat_id"], "-5337454557")
+        self.assertEqual(p["chat_id"], "-4000000001")
         self.assertEqual(p["text"].split("\n"), [
             "<b>\U0001F4C8 Signal · MSFT · BUY</b>",
             "Sauron flags MSFT as a buy at 421.37.",
@@ -321,13 +321,13 @@ class SignalDispatchTests(_Base):
 
     def test_a_chat_shared_by_two_users_receives_the_signal_once(self):
         from alerts.dispatch import dispatch_signal_alert
-        _user("share_a", chat="-5337454557", receive_signals=True)
-        _user("share_b", chat=" -5337454557 ", receive_signals=True)
+        _user("share_a", chat="-4000000001", receive_signals=True)
+        _user("share_b", chat=" -4000000001 ", receive_signals=True)
         _user("own_c", chat="42", receive_signals=True)
         with patch("requests.post", return_value=_ok()) as post:
             out = dispatch_signal_alert(_signal(self.inst))
         chats = sorted(p["chat_id"] for p in _payloads(post))
-        self.assertEqual(chats, ["-5337454557", "42"])
+        self.assertEqual(chats, ["-4000000001", "42"])
         self.assertEqual(out["sent"], 2)
 
     def test_rules_email_and_whatsapp_are_unchanged(self):
@@ -354,7 +354,7 @@ class SignalDispatchTests(_Base):
 
     def test_receive_signals_off_sends_nothing(self):
         from alerts.dispatch import dispatch_signal_alert
-        _user("off_u", chat="-5337454557", receive_signals=False)
+        _user("off_u", chat="-4000000001", receive_signals=False)
         with patch("requests.post") as post:
             out = dispatch_signal_alert(_signal(self.inst))
         post.assert_not_called()
@@ -362,7 +362,7 @@ class SignalDispatchTests(_Base):
 
     def test_a_refused_signal_is_logged_and_counted_never_raised(self):
         from alerts.dispatch import dispatch_signal_alert
-        _user("ref_u", chat="-5337454557", receive_signals=True)
+        _user("ref_u", chat="-4000000001", receive_signals=True)
         with patch("requests.post", return_value=_refused()), \
                 self.assertLogs("alerts.channels.telegram_alert",
                                 "WARNING") as cm:
@@ -459,8 +459,8 @@ class UserChatTests(_Base):
 
     def test_a_shared_chat_gets_one_digest_per_run(self):
         from alerts.tasks import send_eod_digest, send_morning_digest
-        _user("run_a", chat="-5337454557")
-        _user("run_b", chat=" -5337454557 ")
+        _user("run_a", chat="-4000000001")
+        _user("run_b", chat=" -4000000001 ")
         _user("run_c", chat="-99")
         for task, kind in ((send_morning_digest, "morning_brief"),
                            (send_eod_digest, "end_of_day")):
@@ -473,7 +473,7 @@ class UserChatTests(_Base):
                           return_value=digest):
                 task.__wrapped__.__wrapped__()  # past the component gate
                 self.assertEqual(sorted(p["chat_id"] for p in _payloads(post)),
-                                 ["-5337454557", "-99"])
+                                 ["-4000000001", "-99"])
 
     def test_a_price_alert_that_cannot_be_built_is_said(self):
         from alerts.models import PriceAlert, check_price_alerts

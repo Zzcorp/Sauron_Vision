@@ -388,6 +388,35 @@ def collect_faults(now=None) -> dict:
             out["warnings"].append(entry)
 
     out["feeds"] = _feed_faults(now)
+    out["errors"] += _withheld_pages()
+    return out
+
+
+def _withheld_pages() -> list:
+    """A public page the leak walk withheld in the last two days
+    (core/leak_walk.py): the view sets a cache key, never a database row,
+    and this reads it. One entry per page, the count of terms, never a
+    term. An absent private-term list is NOT reported here: it is a
+    deliberate choice, said once per process at INFO and on /health/."""
+    out = []
+    try:
+        from django.core.cache import cache
+
+        from core import leak_walk
+        for page, name in leak_walk.PAGES.items():
+            row = cache.get(leak_walk.WITHHELD_KEY % page)
+            if not row:
+                continue
+            at = row.get("at")
+            when = at.strftime("%Y-%m-%d %H:%M UTC") if hasattr(at, "strftime") else "today"
+            out.append({
+                "key": "public_leak_walk", "name": "Public leak walk",
+                "message": (f"{name} was withheld at {when}: a private term "
+                            f"reached the rendered page"),
+                "last_run": at if hasattr(at, "strftime") else None,
+                "errors": int(row.get("n") or 0)})
+    except Exception as e:  # noqa: BLE001 — a digest must never break a beat
+        logger.warning("[digest] leak walk unreadable: %s", e)
     return out
 
 

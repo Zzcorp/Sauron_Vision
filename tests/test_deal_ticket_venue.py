@@ -1,9 +1,9 @@
 """The deal ticket says which venue it trades at, before the click.
 
-The manual lane is armed PER ASSET CLASS. On this deployment the stock lane
-was live while forex, commodity and crypto stayed in paper — so a LONG on
-GLDM moved real money while the byte-identical button on GBPJPY was a
-simulation, and the ticket said nothing either way. The venue appeared only
+The manual lane is armed PER ASSET CLASS. On one deployment the stock lane
+was live while the others stayed in paper — so a LONG on an ETF moved real
+money while the byte-identical button on a currency pair was a simulation,
+and the ticket said nothing either way. The venue appeared only
 in the preview payload, i.e. AFTER the click, and the operator took a forex
 position believing it was live.
 

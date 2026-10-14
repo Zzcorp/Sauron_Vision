@@ -457,7 +457,7 @@ def _etoro_rows(n=3, start_ms=RECENT_MS, close="83050.5", volume="None"):
 
 
 class AnAnswerThatWritesNothingTests(TestCase):
-    """2026-09-29, measured on the VPS. BTC config 29 armed on eToro:
+    """2026-09-29, measured on the VPS. A crypto config armed on eToro:
     eToro's klines answered 200 fresh 4h bars (27 Aug 04:00 to 29 Sep
     08:00 UTC) and 200 fresh 1h bars, yet the table held no eToro row at
     all, and no public row after 26 Aug 16:00 (4h) or 20 Sep 17:00 (1h).

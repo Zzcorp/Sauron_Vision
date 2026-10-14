@@ -97,10 +97,10 @@ WHAT IT REFUSES TO CLAIM
     only when a lookup reads 7/8/9, False on any other read after the
     DELETE, None only when a DELETE went out and no lookup answered. The
     real spelling, `/api/v3/trading/execution/orders/<id>` with no segment,
-    MEASURED 2026-09-26 22:03:11 UTC on the real account: order 1596774177
-    (AAPL 0.04, WaitingForMarket) answered 202 {orderId, referenceId ""},
-    the lookup read 7 Canceled 3 s later and the held 14.64 came back —
-    the demo answer exactly.
+    MEASURED 2026-09-26 22:03:11 UTC on the real account: a held AAPL 0.04
+    order (id in the operator's private deploy log, WaitingForMarket)
+    answered 202 {orderId, referenceId ""}, the lookup read 7 Canceled 3 s
+    later and the held margin came back — the demo answer exactly.
   * `fills` — no closed-position history is documented anywhere. The
     close-confirmation SHAPE met a real key on 2026-09-23 (`close_position`:
     orderForClose{orderID, orderType 19, statusID 1}) and so did the close
@@ -207,7 +207,7 @@ _ELIGIBILITY: dict = {}
 #: and every unpinned symbol (NVDA, EURUSD, USDCNH …) cost a /search GET
 #: before its /rates GET — and /search answers HTTP 429 after a few dozen
 #: asks (etoro_smoke, 2026-10-04). A refused /search made the manage tick
-#: read the real NVDA position #131 as unpriced at 13:47 UTC on 2026-10-06,
+#: read a real stock position as unpriced at 13:47 UTC on 2026-10-06,
 #: and an unpriced row is managed by the clock alone. An id eToro answered
 #: with an EXACT spelling match is kept here for the life of the process,
 #: keyed (world, symbol), like _ELIGIBILITY; a lone result spelled
@@ -1123,10 +1123,11 @@ class EtoroTrader:
     #:
     #: THE WRITES, MEASURED ON THE REAL ACCOUNT on 2026-09-26 (the operator's
     #: first real orders, code 097e72c): the close POST on the tail the 405
-    #: attested (22:03:24 UTC, position 3588477891 -> orderForClose{orderID
-    #: 1596736969, orderType 19, statusID 1}, proven by the open order's
-    #: positionExecutions[0].state "closed"), and the v3 order DELETE with no
-    #: segment (22:03:11 UTC, _V3_EXEC_REAL_SEG below: 202, then 7 Canceled).
+    #: attested (22:03:24 UTC, the real BTC position -> orderForClose{orderID
+    #: <the close order's id>, orderType 19, statusID 1}, proven by the open
+    #: order's positionExecutions[0].state "closed"), and the v3 order DELETE
+    #: with no segment (22:03:11 UTC, _V3_EXEC_REAL_SEG below: 202, then 7
+    #: Canceled). Ids in the operator's private deploy log.
     #:
     #: DEMO writes "demo/" for every tail measured. An unlisted tail RAISES
     #: rather than composing a URL nobody has ever seen answer: this adapter's
@@ -1141,19 +1142,20 @@ class EtoroTrader:
     _V1_EXEC_REAL_SEG = {
         # GET 405 on 2026-09-22 (the attestation, kept as history); the
         # POST itself MEASURED on the real account 2026-09-26 22:03:24 UTC:
-        # position 3588477891 closed, orderForClose{orderID 1596736969,
-        # orderType 19, statusID 1}, the open order's execution "closed",
-        # used margin 0.0 five seconds later.
+        # the real BTC position closed, orderForClose{orderID <the close
+        # order's id>, orderType 19, statusID 1}, the open order's execution
+        # "closed", used margin 0.0 five seconds later.
         "market-close-orders": "",
     }
     #: v3 execution, the order DELETE. DEMO measured 2026-09-23 20:29 UTC
     #: (/api/v3/trading/execution/demo/orders/<id> -> 202). REAL measured
     #: 2026-09-26 22:03:11 UTC on the operator's real account: DELETE
-    #: /api/v3/trading/execution/orders/1596774177 — no segment, the
+    #: /api/v3/trading/execution/orders/<orderId> — no segment, the
     #: spelling the public reference documents — answered 202
-    #: {"orderId":1596774177,"referenceId":""}; 3 s later the lookup read
-    #: {7, Canceled}, state dead, and the margin cells gave back the held
-    #: 14.64 (used 31.47 -> 16.83). Exactly the demo answer of 2026-09-23.
+    #: {"orderId":<the same id>,"referenceId":""} (id in the private deploy
+    #: log); 3 s later the lookup read {7, Canceled}, state dead, and the
+    #: margin cells gave back the held 14.64 (used 31.47 -> 16.83). Exactly
+    #: the demo answer of 2026-09-23.
     _V3_EXEC_REAL_SEG = {"orders": ""}
 
     def _seg(self, table: dict, key: str, tail: str) -> str:
@@ -1799,8 +1801,8 @@ class EtoroTrader:
                                            or p.get("instrumentId")),
                 # A CONSTANT, and wrong for a REAL position. MEASURED
                 # 2026-09-26 on the real account: this method listed the
-                # REAL BTC position 3588477891 (the lookup's
-                # asset.settlementType 'REAL', leverage 1) as sec_type
+                # REAL BTC position (id in the private deploy log; the
+                # lookup's asset.settlementType 'REAL', leverage 1) as sec_type
                 # 'CFD', market_price 0.0, currency ''. The /portfolio row
                 # carries no settlement word — only settlementTypeID,
                 # printed once, 0, on a demo GLDM CFD row (2026-09-23); a
@@ -2592,7 +2594,8 @@ class EtoroTrader:
             # WITHDRAWN by cancel_working_entry through cancel_order (DELETE
             # v3 -> 202 -> lookup 7) after ENTRY_WORKING_MAX_HOURS on the
             # demo segment and on the real one: the real DELETE answered as
-            # the demo one did (MEASURED 2026-09-26, order 1596774177). A
+            # the demo one did (MEASURED 2026-09-26 on the real account, a
+            # held AAPL order; id in the private deploy log). A
             # held order refused at the open (status 4) is booked
             # CANCELED with its errorCode words. Since the fix in
             # _await_fill this branch is reached only by a real non-filled
@@ -2651,11 +2654,12 @@ class EtoroTrader:
         DELETE /api/v3/trading/execution/demo/orders/<id> -> 202
         {orderId, referenceId ""}; the lookup then read {7, Canceled} and the
         pledged margin and frozen cash returned to 0.
-        MEASURED 2026-09-26 22:03:11 UTC on the REAL account (order
-        1596774177, AAPL 0.04, WaitingForMarket, frozenAmount 14.64):
-        DELETE /api/v3/trading/execution/orders/<id>, no segment -> 202
-        {"orderId":1596774177,"referenceId":""}; 3 s later the lookup read
-        {7, Canceled} and the held 14.64 returned. The same answer.
+        MEASURED 2026-09-26 22:03:11 UTC on the REAL account (a held AAPL
+        0.04 order, WaitingForMarket, frozenAmount 14.64; id in the private
+        deploy log): DELETE /api/v3/trading/execution/orders/<id>, no
+        segment -> 202 {"orderId":<the same>,"referenceId":""}; 3 s later
+        the lookup read {7, Canceled} and the held 14.64 returned. The same
+        answer.
 
         THREE ANSWERS. True = a lookup read Canceled (7, 8 or 9; 7 measured,
         8/9 the public table). False = nothing was cancelled: nothing sent

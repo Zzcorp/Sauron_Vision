@@ -4557,7 +4557,7 @@ def instrument_detail(request, symbol):
     # WHICH VENUE THIS TICKET TRADES AT, before the operator commits.
     #
     # The manual lane is armed PER ASSET CLASS, so on one deployment a LONG
-    # on GLDM moves real money while the identical button on GBPJPY is a
+    # on an ETF moves real money while the identical button on a currency pair is a
     # simulation — and the ticket said nothing either way. The venue only
     # appeared in the preview payload, i.e. after the click, and the operator
     # took a forex position believing it was live. That is the same argument

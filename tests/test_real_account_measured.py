@@ -6,21 +6,29 @@ client built env='live' (the eToro row stayed demo on /brokers/, no class
 ticked):
 
   AAPL 0.04 BUY, market shut   accepted and HELD {11, WaitingForMarket},
-                               order 1596774177, frozenAmount 14.64; then
-                               WITHDRAWN at 22:03:11 UTC: DELETE
-                               /api/v3/trading/execution/orders/1596774177
-                               (no segment) -> 202 {"orderId":1596774177,
+                               frozenAmount 14.64; then WITHDRAWN at
+                               22:03:11 UTC: DELETE
+                               /api/v3/trading/execution/orders/<orderId>
+                               (no segment) -> 202 {"orderId":<the same>,
                                "referenceId":""}; 3 s later {7, Canceled};
                                used margin 31.47 -> 16.83.
-  BTC 0.0002 BUY               FILLED at once: order 1596774178, position
-                               3588477891, avgPrice 84145.8, settlementType
-                               REAL at 1x, fees 0.17; the stop sent at
-                               79934.97 HELD at 75745.8; CLOSED at 22:03:24
-                               UTC by the v1 market-close POST (no segment,
-                               attested until then by a GET answering 405):
-                               orderForClose{orderID 1596736969, orderType
-                               19, statusID 1}, the open order's state
-                               "closed"; cells {2249.65, 0.0}.
+  BTC 0.0002 BUY               FILLED at once: an order and a position,
+                               avgPrice 84145.8, settlementType REAL at 1x,
+                               fees 0.17; the stop sent at 79934.97 HELD at
+                               75745.8; CLOSED at 22:03:24 UTC by the v1
+                               market-close POST (no segment, attested
+                               until then by a GET answering 405):
+                               orderForClose{orderID <the close order's
+                               id>, orderType 19, statusID 1}, the open
+                               order's state "closed"; cells {the available
+                               cash, 0.0}.
+
+The real order, position and close-order ids and the cells to the cent
+are in the operator's private deploy log (this repository is public); the
+constants imported from tests.test_etoro_client (REAL_ORDER_AAPL,
+REAL_ORDER_BTC, REAL_POSITION_BTC, REAL_CLOSE_ORDER, REAL_CASH_*) are
+placeholders of the same shape, and every test compares the fixture with
+itself.
 
 What this module pins, each with the REAL EtoroTrader over a fake wire (no
 HTTP call leaves the box):
@@ -64,31 +72,33 @@ from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from bot_program.engine.etoro_client import BASE, EtoroTrader
-from tests.test_etoro_client import (ELIG_BTC, PORTFOLIO_ROW, ROW_BTC_LIVE,
-                                     SEARCH_AAPL, SEARCH_BTC,
+from tests.test_etoro_client import (ELIG_BTC, PORTFOLIO_ROW, REAL_CASH_BEFORE,
+                                     REAL_CLOSE_ORDER, REAL_ORDER_AAPL,
+                                     REAL_ORDER_BTC, REAL_POSITION_BTC,
+                                     ROW_BTC_LIVE, SEARCH_AAPL, SEARCH_BTC,
                                      _clear_eligibility, _client,
                                      _elig_route, _lookup_router,
                                      _real_btc_lookup)
 
 ROUTER = "bot_program.engine.broker_router.client_for_symbol"
-REAL_DELETE_URL = f"{BASE}/api/v3/trading/execution/orders/1596774177"
+REAL_DELETE_URL = f"{BASE}/api/v3/trading/execution/orders/{REAL_ORDER_AAPL}"
 #: the measured answer, byte for byte
-REAL_DELETE_202 = ("DELETE", "/api/v3/trading/execution/orders/1596774177",
-                   202, {"orderId": 1596774177, "referenceId": ""})
+REAL_DELETE_202 = ("DELETE", f"/api/v3/trading/execution/orders/{REAL_ORDER_AAPL}",
+                   202, {"orderId": REAL_ORDER_AAPL, "referenceId": ""})
 DEMO_DELETE_202 = ("DELETE",
-                   "/api/v3/trading/execution/demo/orders/1596774177", 202,
-                   {"orderId": 1596774177, "referenceId": ""})
+                   f"/api/v3/trading/execution/demo/orders/{REAL_ORDER_AAPL}", 202,
+                   {"orderId": REAL_ORDER_AAPL, "referenceId": ""})
 
 
 def _aapl_held(status_id=11, name="WaitingForMarket"):
-    """orders:lookup (no segment) of order 1596774177 on the real account,
-    2026-09-26. Printed: status {11, WaitingForMarket}, asset {AAPL, 1001,
+    """orders:lookup (no segment) of the held AAPL order on the real
+    account, 2026-09-26 (REAL_ORDER_AAPL stands for its id). Printed: status {11, WaitingForMarket}, asset {AAPL, 1001,
     USD, settlementType REAL, leverage 1, long}, requestedAmount 13.64,
     frozenAmount 14.64, openStopLossRate / openTakeProfitRate 0.0.
     Composed: positionExecutions [] (the held shape the demo printed,
     D2b-i), and the body after the DELETE — this one with {7, Canceled}:
     the adapter printed the state, not the body."""
-    return {"orderId": 1596774177,
+    return {"orderId": REAL_ORDER_AAPL,
             "status": {"id": status_id, "name": name, "errorCode": 0},
             "asset": {"symbol": "AAPL", "instrumentId": 1001,
                       "currency": "USD", "settlementType": "REAL",
@@ -110,11 +120,11 @@ class TheRealDeleteTests(SimpleTestCase):
     def test_the_real_delete_url_is_the_measured_spelling(self):
         live, fake = _client([], env="live")
         self.assertEqual(EtoroTrader._V3_EXEC_REAL_SEG, {"orders": ""})
-        self.assertEqual(live._v3_exec_order("1596774177"), REAL_DELETE_URL)
+        self.assertEqual(live._v3_exec_order(str(REAL_ORDER_AAPL)), REAL_DELETE_URL)
         demo, _ = _client([])
-        self.assertEqual(demo._v3_exec_order("1596774177"),
+        self.assertEqual(demo._v3_exec_order(str(REAL_ORDER_AAPL)),
                          f"{BASE}/api/v3/trading/execution/demo/orders/"
-                         f"1596774177")
+                         f"{REAL_ORDER_AAPL}")
         self.assertEqual(fake.calls, [], "composing a URL asked the wire")
 
     def test_cancel_order_on_a_real_client_proves_canceled(self):
@@ -122,15 +132,15 @@ class TheRealDeleteTests(SimpleTestCase):
         _lookup_router(fake, by_order=[(200, _aapl_held()),
                                        (200, _aapl_held(7, "Canceled"))])
         with mock.patch("time.sleep"):
-            self.assertIs(live.cancel_order("1596774177"), True)
+            self.assertIs(live.cancel_order(str(REAL_ORDER_AAPL)), True)
         self.assertEqual([c[0] for c in fake.calls], ["GET", "DELETE", "GET"])
         first, delete, proof = fake.calls
         self.assertEqual(first[1], f"{BASE}/api/v2/trading/info/orders:lookup")
-        self.assertEqual(first[2]["params"], {"orderId": "1596774177"})
+        self.assertEqual(first[2]["params"], {"orderId": str(REAL_ORDER_AAPL)})
         self.assertEqual(delete[1], REAL_DELETE_URL)
         self.assertIn("x-request-id", delete[2]["headers"])
         self.assertNotIn("json", delete[2])
-        self.assertEqual(proof[2]["params"], {"orderId": "1596774177"})
+        self.assertEqual(proof[2]["params"], {"orderId": str(REAL_ORDER_AAPL)})
         for _m, url, _k in fake.calls:
             self.assertNotIn("/demo/", url)
             self.assertNotIn("/real/", url)
@@ -144,7 +154,7 @@ class TheRealDeleteTests(SimpleTestCase):
         with mock.patch("time.sleep"), \
                 self.assertLogs("bot_program.engine.etoro_client",
                                 level="ERROR"):
-            self.assertIs(live.cancel_order("1596774177"), False)
+            self.assertIs(live.cancel_order(str(REAL_ORDER_AAPL)), False)
         self.assertEqual([c[1] for c in _deletes(fake)], [REAL_DELETE_URL])
 
     def test_a_status_nobody_can_read_sends_nothing(self):
@@ -155,11 +165,11 @@ class TheRealDeleteTests(SimpleTestCase):
             with self.subTest(env=env):
                 t, fake = _client([REAL_DELETE_202, DEMO_DELETE_202], env=env)
                 _lookup_router(fake, by_order=(200, {
-                    "orderId": 1596774177, "positionExecutions": []}))
+                    "orderId": REAL_ORDER_AAPL, "positionExecutions": []}))
                 with mock.patch("time.sleep"), \
                         self.assertLogs("bot_program.engine.etoro_client",
                                         level="ERROR") as cm:
-                    self.assertIs(t.cancel_order("1596774177"), False)
+                    self.assertIs(t.cancel_order(str(REAL_ORDER_AAPL)), False)
                 self.assertEqual(_deletes(fake), [])
                 self.assertEqual([c[0] for c in fake.calls], ["GET"])
                 self.assertTrue(any("no readable status" in line
@@ -181,7 +191,7 @@ class TheRealDeleteTests(SimpleTestCase):
                     with mock.patch("time.sleep"), \
                             self.assertLogs("bot_program.engine.etoro_client",
                                             level="ERROR") as cm:
-                        self.assertIs(t.cancel_order("1596774177"), False)
+                        self.assertIs(t.cancel_order(str(REAL_ORDER_AAPL)), False)
                     self.assertEqual(_deletes(fake), [])
                     self.assertTrue(any("CLOSE order (type 19)" in line
                                         for line in cm.output))
@@ -190,7 +200,7 @@ class TheRealDeleteTests(SimpleTestCase):
             (200, dict(_aapl_held(), etoroOrderTypeId=18)),
             (200, dict(_aapl_held(7, "Canceled"), etoroOrderTypeId=18))])
         with mock.patch("time.sleep"):
-            self.assertIs(live.cancel_order("1596774177"), True)
+            self.assertIs(live.cancel_order(str(REAL_ORDER_AAPL)), True)
         self.assertEqual([c[1] for c in _deletes(fake)], [REAL_DELETE_URL])
 
 
@@ -212,7 +222,7 @@ class TheTickWithdrawsALiveEntryTests(TestCase):
         User.objects.create_user("real_staff", password="x", is_staff=True)
         self.cfg = AssetBotConfig.objects.create(
             user=self.user, asset_class="stock", name="REAL", mode="live",
-            symbols=["AAPL"], capital=Decimal("2249.98"), enabled=True)
+            symbols=["AAPL"], capital=Decimal(str(REAL_CASH_BEFORE)), enabled=True)
 
     def _row(self, broker_env):
         from bot_program.models import AssetBotTrade
@@ -221,7 +231,7 @@ class TheTickWithdrawsALiveEntryTests(TestCase):
             config=self.cfg, asset_class="stock", symbol="AAPL", side="BUY",
             qty=Decimal("0.04"), entry_price=Decimal("341.00"),
             stop_loss=Decimal("330.77"), take_profit=Decimal("351.23"),
-            status="OPEN", paper=False, broker_order_id="1596774177",
+            status="OPEN", paper=False, broker_order_id=str(REAL_ORDER_AAPL),
             metadata={"entry_working": True, "qty_requested": 0.04,
                       "protective_order_ids": [], "protective_stop_id": "",
                       "protected": False, "entry_working_since": since,
@@ -251,7 +261,7 @@ class TheTickWithdrawsALiveEntryTests(TestCase):
         seen = {}
         for env, broker_env, url in (
                 ("demo", "paper", f"{BASE}/api/v3/trading/execution/demo/"
-                                  f"orders/1596774177"),
+                                  f"orders/{REAL_ORDER_AAPL}"),
                 ("live", "live", REAL_DELETE_URL)):
             with self.subTest(env=env):
                 trade = self._row(broker_env)
@@ -485,7 +495,7 @@ class TheTakeTradeNoteIsRunOnBothWorldsTests(TestCase):
         elig = (ELIG_BTC if env == "demo"
                 else _elig_route([ROW_BTC_LIVE], world="live"))
         t, fake = _client([SEARCH_BTC, elig], env=env)
-        held = {"orderId": "1596774177", "symbol": "BTCUSD", "side": "BUY",
+        held = {"orderId": str(REAL_ORDER_AAPL), "symbol": "BTCUSD", "side": "BUY",
                 "executedQty": "0.0", "avgPrice": "0.0",
                 "status": "PENDING", "working": True, "raw": {}}
         with mock.patch.object(t, "ticker",
@@ -529,22 +539,26 @@ class TheSmokeLinesTests(TestCase):
                       f"positions/<positionId>", body)
         self.assertIn("real path attested by GET → 405 on 2026-09-22 "
                       "(_V1_EXEC_REAL_SEG); the POST itself measured on the "
-                      "real account 2026-09-26 22:03:24 UTC: position "
-                      "3588477891 answered orderForClose{orderID 1596736969, "
-                      "orderType 19, statusID 1}, proven by the OPEN order's "
-                      "positionExecutions[0].state turning 'closed'", body)
+                      "real account 2026-09-26 22:03:24 UTC: the real BTC "
+                      "position answered orderForClose{orderID <the close "
+                      "order's id>, orderType 19, statusID 1}, proven by the "
+                      "OPEN order's positionExecutions[0].state turning "
+                      "'closed'", body)
         self.assertNotIn("has never been sent", body)
         self.assertIn(f"{BASE}/api/v3/trading/execution/orders/<orderId>",
                       body)
         self.assertNotIn("real v3 spelling not attested", body)
         self.assertIn("measured 2026-09-26 22:03:11 UTC on the real account: "
-                      "202 {orderId 1596774177, referenceId ''}", body)
+                      "202 {orderId <the held order's id>, referenceId ''} on "
+                      "a WaitingForMarket order (AAPL 0.04, frozenAmount 14.64 "
+                      "held)", body)
         self.assertIn("status {id 7, Canceled}", body)
         # [lens 3] the POST and the lookup lead with what the REAL account
         # answered; the demo-only facts stay under the demo date
         self.assertIn("measured 2026-09-26 on the real account, at 1x only: "
-                      "accepted with an orderId — 1596774177 (AAPL 0.04, "
-                      "held) and 1596774178 (BTC 0.0002, filled at once); "
+                      "accepted with an orderId — a held AAPL 0.04 order and a "
+                      "BTC 0.0002 order filled at once (ids in the private "
+                      "deploy log); "
                       "measured 2026-09-23 on the demo segment: 2xx, body",
                       body)
         self.assertIn("measured 2026-09-26 on the real account: 200 by "
@@ -660,16 +674,16 @@ class TheTypedMultiplierIsNotHeldTests(TestCase):
 
 class TheSecTypeLabelTests(SimpleTestCase):
     """broker_portfolio labels every row 'CFD'. MEASURED 2026-09-26: the
-    REAL BTC position 3588477891 read 'CFD', market_price 0.0, currency
-    ''. The /portfolio row carries no settlement word — only
-    settlementTypeID, printed once (0, a demo GLDM CFD row) — so the code
-    stays and says why. The row below is the measured demo row's shape
-    with the real position's ids (composed)."""
+    REAL BTC position read 'CFD', market_price 0.0, currency ''. The
+    /portfolio row carries no settlement word — only settlementTypeID,
+    printed once (0, a demo GLDM CFD row) — so the code stays and says
+    why. The row below is the measured demo row's shape with the
+    placeholder ids (composed)."""
 
     def test_a_real_position_still_reads_cfd_and_the_source_says_why(self):
-        row = dict(PORTFOLIO_ROW, positionID=3588477891, instrumentID=100000,
+        row = dict(PORTFOLIO_ROW, positionID=REAL_POSITION_BTC, instrumentID=100000,
                    units=0.0002, openRate=84145.8, amount=16.83,
-                   orderID=1596774178)
+                   orderID=REAL_ORDER_BTC)
         t, fake = _client([("GET", "/api/v1/trading/info/portfolio", 200,
                             {"clientPortfolio": {"positions": [row]}})],
                           env="live")
@@ -682,7 +696,7 @@ class TheSecTypeLabelTests(SimpleTestCase):
         self.assertEqual(fake.calls[0][1],
                          f"{BASE}/api/v1/trading/info/portfolio")
         src = inspect.getsource(EtoroTrader.broker_portfolio)
-        for needle in ("3588477891", "settlementTypeID", "'REAL'",
+        for needle in ("REAL BTC position (id in the private deploy log", "settlementTypeID", "'REAL'",
                        "has never been printed", '"sec_type": "CFD"'):
             self.assertIn(needle, src, needle)
 
@@ -735,22 +749,22 @@ class TheHeldFillCarriesTheLineTests(TestCase):
         user = User.objects.create_user("real_btc", password="x")
         cfg = AssetBotConfig.objects.create(
             user=user, asset_class="crypto", name="REALBTC", mode="live",
-            symbols=["BTCUSD"], capital=Decimal("2249.98"), enabled=True)
+            symbols=["BTCUSD"], capital=Decimal(str(REAL_CASH_BEFORE)), enabled=True)
         trade = AssetBotTrade.objects.create(
             config=cfg, asset_class="crypto", symbol="BTCUSD", side="BUY",
             qty=Decimal("0.0002"), entry_price=Decimal("84142.07"),
             stop_loss=Decimal("79934.97"), take_profit=Decimal("88349.17"),
-            status="OPEN", paper=False, broker_order_id="1596774178",
+            status="OPEN", paper=False, broker_order_id=str(REAL_ORDER_BTC),
             rule_name="btc_rule",
             metadata={"entry_working": True, "qty_requested": 0.0002,
                       "protective_order_ids": [], "protected": False,
                       "initial_stop_loss": 79934.97})
         t, fake = _client([], env="live")
         _lookup_router(fake, by_order=(200, _real_btc_lookup("open")))
-        st = t.order_status("1596774178")
+        st = t.order_status(str(REAL_ORDER_BTC))
         self.assertEqual((st["state"], st["filled"], st["avgPrice"],
                           st["positionId"], st["venueStopLoss"]),
-                         ("filled", 0.0002, 84145.8, "3588477891", 75745.8))
+                         ("filled", 0.0002, 84145.8, str(REAL_POSITION_BTC), 75745.8))
         bot = CryptoBot(cfg)
         with mock.patch("bot_program.notifications.notify_bot_fill_open") \
                 as fill, \
@@ -762,7 +776,7 @@ class TheHeldFillCarriesTheLineTests(TestCase):
         self.assertEqual(trade.metadata["stop_rewritten_by_venue"],
                          {"sent": 79934.97, "held": 75745.8})
         self.assertEqual(float(trade.metadata["initial_stop_loss"]), 79934.97)
-        self.assertEqual(trade.metadata["protective_trade_id"], "3588477891")
+        self.assertEqual(trade.metadata["protective_trade_id"], str(REAL_POSITION_BTC))
         self.assertTrue(trade.metadata["protected"])
         self.assertEqual(float(trade.entry_price), 84145.8)
         self.assertEqual(fill.call_args.kwargs["rule_name"], "btc_rule")

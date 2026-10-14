@@ -134,7 +134,7 @@ class TheExitLabelTests(_Book):
         self.assertEqual(sc.exit_of(t), "target")
 
     def test_a_mirrored_soft_stop_filled_at_the_venue_names_its_lock(self):
-        """NVDA #131's shape: care's break-even copied onto the eToro stop
+        """The real stock row of 2026-10-07 (PR50): care's break-even copied onto the eToro stop
         (the move base._move_broker_stop records), filled there, booked by
         the reconcile at the level."""
         t = self.mk(exit_price="100.5", stop="100.5",
@@ -289,23 +289,24 @@ class TheRowKeysTests(_Book):
 
 
 class TheReconcileWritesItTests(ve.Base):
-    """End to end on PR50's own reconcile: the NVDA #131 booking, read back
-    by the scorecard."""
+    """End to end on PR50's own reconcile: the break-even share row of
+    tests/test_venue_exit.py (composed in the shape of the real row of
+    2026-10-07), read back by the scorecard."""
 
-    def test_nvda_131_reads_as_the_mirrored_break_even_with_its_window(self):
+    def test_the_mirrored_break_even_row_reads_with_its_window(self):
         from bot_program.models import AssetBotTrade
         listed = self.now - timedelta(minutes=15)
         crossed_at = self.now - timedelta(minutes=7)
-        t = self._nvda(venue_listed_at=ve._iso(listed),
-                       venue_level_crossed={"level": "stop", "price": 238.03,
-                                            "mark": 237.9,
+        t = self._share(venue_listed_at=ve._iso(listed),
+                       venue_level_crossed={"level": "stop", "price": 101.0,
+                                            "mark": 100.9,
                                             "at": ve._iso(crossed_at)},
                        venue_missing_at=ve._iso(crossed_at),
-                       care={"soft_stop": 238.02671429, "venue_stop": 238.03,
+                       care={"soft_stop": 100.99, "venue_stop": 101.0,
                              "soft_why": "breakeven"},
                        # the mirror's accepted move, an hour before the
                        # listing (base._move_broker_stop's record)
-                       stop_moves=[_move("238.03", "care breakeven",
+                       stop_moves=[_move("101.0", "care breakeven",
                                          when=listed - timedelta(hours=1))])
         self._run(ve.EtoroTrader(state="closed"))
         t.refresh_from_db()
@@ -407,7 +408,7 @@ class TheDrainsMarkIsAnEstimateTests(ve.Base):
     def test_a_proved_close_with_no_level_to_price_it_at(self):
         """eToro's order read says closed; the row's stop never rested at
         the venue (protected False): booked at the mark."""
-        t = self._drain(self._pending(self._nvda(protected=False)),
+        t = self._drain(self._pending(self._share(protected=False)),
                         ve.EtoroTrader(state="closed"))
         self.assertIn("RETRY_VENUE_PROVED_CLOSED", t.reason)
 
@@ -445,7 +446,8 @@ class TheOutsideHoursTests(_Book):
         class _Row:
             metadata = {venue_exit.LISTED_AT_KEY: _at(7, 10, 52).isoformat(),
                         venue_exit.MISSING_AT_KEY: _at(7, 11, 7, 59).isoformat()}
-        # NVDA #131: 06:52-07:08 New York, a Wednesday — the extended session.
+        # The real stock row of 2026-10-07 (PR50): 06:52-07:08 New York, a
+        # Wednesday — the extended session.
         # The window comes from PR50's own function, as the reconcile builds it.
         nvda = venue_exit.closed_between(_Row(), now=_at(7, 11, 15))
         self.assertEqual(nvda, (_at(7, 10, 52), _at(7, 11, 7, 59)))

@@ -1,8 +1,8 @@
 """A second identical manual order inside a minute is a second CLICK.
 
-The platform's own briefing found it in the live book: four `manual_take`
-XAUUSD BUY tickets inside eight seconds, identical qty and identical entry,
-about 42% of open exposure in one trade wearing four tickets — and every
+The platform's own briefing found it in the live book: four hand-taken BUY
+tickets on one metal inside eight seconds, identical qty and identical
+entry, a large share of open exposure in one trade wearing four tickets — and every
 risk reading downstream counting four independent bets. The signal path had
 been deduped on metadata["signal_id"] since it was written; the signal-LESS
 path (the instrument view's BUY/SELL) has no signal id, so it had no guard
@@ -24,11 +24,11 @@ from bot_program.manual_trade import (MANUAL_REPEAT_WINDOW_SECONDS,
 
 
 def _open(cfg, *, symbol="XAUUSD", side="BUY", status="OPEN"):
-    """One manual ticket, at the exact size and entry the live book showed."""
+    """One manual ticket (composed values)."""
     from bot_program.models import AssetBotTrade
     return AssetBotTrade.objects.create(
         config=cfg, asset_class=cfg.asset_class, symbol=symbol, side=side,
-        qty=Decimal("0.4191"), entry_price=Decimal("4547.118"),
+        qty=Decimal("0.4"), entry_price=Decimal("4500.0"),
         status=status, paper=True, rule_name=MANUAL_RULE,
         metadata={"manual": True, "signal_id": None})
 

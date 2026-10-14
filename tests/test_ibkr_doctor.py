@@ -243,7 +243,7 @@ class TheReauthenticationItMissedTests(SimpleTestCase):
         and the operator stops reading it."""
         quiet = (
             "\nibgateway-1  | 2026-09-12 11:53:40:001 IBC: detected dialog "
-            "entitled: U28134395 Trader Workstation Configuration; "
+            "entitled: U1234567 Trader Workstation Configuration; "
             "event=Closed"
             "\nibgateway-1  | 2026-09-12 12:10:02:114 IBC: Configuration "
             "tasks completed\n"

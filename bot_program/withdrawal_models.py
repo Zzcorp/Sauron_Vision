@@ -1,7 +1,7 @@
 """A WithdrawalRequest — money asked for IN ADVANCE, held back before it leaves.
 
-The operator and Gandalf (his father, who signs in on the SAME account and
-knows the trading PIN) asked for one thing, 2026-09-28: to be able to say
+The operator and Gandalf (the second keeper, who signs in on the SAME
+account) asked for one thing, 2026-09-28: to be able to say
 ahead of time "I will take X out of the real account", without the
 platform selling anything to find it. So a request does not touch a
 position, a share or a plan. It RESERVES an amount, and from that moment

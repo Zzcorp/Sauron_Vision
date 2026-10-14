@@ -317,7 +317,7 @@ class WebhookTests(TestCase):
 
 
 class FloodGuardTests(TestCase):
-    CHAT = "-5337454557"
+    CHAT = "-4000000001"
 
     def setUp(self):
         from alerts.models import UserNotificationPrefs

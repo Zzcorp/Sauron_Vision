@@ -101,8 +101,8 @@ ELIGIBILITY_REFUSED = "eligibility_refused"
 # because the instrument's exchange is shut (entry_timing.SHUT, on Morgul
 # G1's own clock and classes), in the bot lane (propose_entry and both
 # reads at the send, through entry_timing.skip_code) and on the options
-# lane's live branch. On 2026-10-06 config 26 shorted PG 22 minutes before
-# the NYSE open and eToro filled it. One code means "the market is shut" in
+# lane's live branch. On 2026-10-06 a live config shorted a share 22 minutes
+# before the NYSE open and eToro filled it. One code means "the market is shut" in
 # every lane: the paper venue (AssetBot.propose_entry's ticker answer and
 # execute_entry's paper gate), the options paper branch, and now a live
 # entry — so a night of refusals reads as the clock, never as a dead feed,

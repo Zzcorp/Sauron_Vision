@@ -1,8 +1,8 @@
 """One bet is a symbol and a side, not a ticket.
 
-The platform's own briefing found it three days running: five open XAUUSD
-longs, four of them hand-taken, 42% of the book on one instrument that has
-no regime probe at all. Every one of those clips was individually inside the
+The platform's own briefing found it three days running: five open longs
+on one metal, four of them hand-taken, nearly half the book on one
+instrument that has no regime probe at all. Every one of those clips was individually inside the
 single-position ceiling — nothing was adding them up, so the operator was
 refused nothing, a clip at a time, until one adverse print would hit the
 book five times at once.
@@ -267,8 +267,8 @@ class RiskCeilingTests(TestCase):
     """The per-trade risk ceiling, raised from 1% to 5% so a SMALL account
     can put enough at risk for a win to clear its own costs.
 
-    On $200 the old ceiling allowed $2 a trade, which commission and spread
-    eat most of. It is a CEILING, not a target: the default is still 0.25%,
+    On a small account the old ceiling allowed a couple of dollars a trade,
+    which commission and spread eat most of. It is a CEILING, not a target: the default is still 0.25%,
     and reaching 5% is an explicit act.
     """
 
@@ -312,8 +312,8 @@ class RiskCeilingTests(TestCase):
         self.assertAlmostEqual(risk_fraction(self._cfg_with(100.0)), 0.07)
 
     def test_a_small_book_can_now_risk_enough_to_clear_its_costs(self):
-        """The reason for the raise, in money: $200 at the old 1% ceiling
-        risked $2 a trade."""
+        """The reason for the raise, in money: a small account at the old
+        1% ceiling risked a couple of dollars a trade (a composed $200)."""
         from bot_program.asset_engine.sizing import risk_fraction
         cfg = self._cfg_with(5.0, capital="200")
         risk_dollars = float(cfg.capital) * risk_fraction(cfg)

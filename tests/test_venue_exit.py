@@ -3,17 +3,21 @@ NOBODY SAW (2026-10-07, PR50; bot_program/venue_exit.py).
 
 The four real cases of 2026-10-07, all live eToro rows the 15-minute
 reconcile found missing from /portfolio and booked "priced from the last
-mark":
-  - NVDA #131 (BUY 6 @ 237.60, venue stop 238.03 after care's break-even,
-    initial 233.40): the tick saw 237.9 cross the stop at 11:07:59 and no
-    position in the list; booked at 238.16. Now: 238.03, `crossed`, the
-    window [11:00:0x, 11:07:59];
-  - AMZN #140 (braked, unmanaged; BUY 1 @ 257.39, stop 254.18): booked at
-    254.48, -0.91R. Now: the stop, `nearest`, -1.00R, said an estimate;
-  - PG #138 (a short, SELL @ 147.95, stop 149.779125): booked at 148.41,
-    about -0.25R. Now: the stop, `nearest` (0.75R away), -1.00R;
-  - XAGUSD #134 (BUY @ 61.29, stop 59.43): the 59.21 mark was already
-    beyond the stop. Now: the stop, `mark_beyond`.
+mark". The fixtures below are composed in their SHAPE only: the symbols,
+sizes, levels, marks and order ids are round placeholders (a share at
+100 with a 95 initial stop, a share at 200 with a 196 stop, a short at
+150 with a 154 stop, a metal at 60 with a 58 stop), chosen so every case
+sits on the same side of the same threshold as the row it stands for:
+  - a share whose venue stop care had moved to break-even: the tick saw
+    the price cross the stop at 11:07:59 and no position in the list;
+    booked at a later mark. Now: the stop, `crossed`, the window
+    [11:00:0x, 11:07:59];
+  - a braked, unmanaged share row: booked at a later rate, short of -1R.
+    Now: the stop, `nearest`, -1.00R, said an estimate;
+  - a short: booked at a later rate, a fraction of -1R. Now: the stop,
+    `nearest` (0.75R away), -1.00R;
+  - a metal: the mark at the reconcile was already beyond the stop. Now:
+    the stop, `mark_beyond`.
 
 Pinned here:
   A. the guard, through reconcile_user: "closed" books, "open" books
@@ -47,7 +51,7 @@ from tests.test_exit_truth import _cfg, _trade, _user
 
 ROUTER = "bot_program.engine.broker_router.client_for_symbol"
 STAFF = "bot_program.notifications.notify_staff"
-NVDA_OID = "1601464870"
+SHARE_OID = "1600000101"
 
 
 class EtoroTrader:
@@ -55,7 +59,7 @@ class EtoroTrader:
     name. One live book; `held` is [(symbol, position_id or None)]."""
     PORTFOLIO_LAG_S = 60
 
-    def __init__(self, held=(), state="closed", last="238.16"):
+    def __init__(self, held=(), state="closed", last="101.20"):
         self.held = list(held)
         self.state = state
         self.last = last
@@ -71,7 +75,7 @@ class EtoroTrader:
         self.read_times.append(timezone.now())
         out = []
         for symbol, pid in self.held:
-            p = {"symbol": symbol, "qty": "6", "side": "BUY"}
+            p = {"symbol": symbol, "qty": "10", "side": "BUY"}
             if pid:
                 p["position_id"] = pid
             out.append(p)
@@ -137,15 +141,15 @@ class Base(TestCase):
         t.refresh_from_db()
         return t
 
-    def _nvda(self, age=timedelta(days=1), **meta):
+    def _share(self, age=timedelta(days=1), **meta):
         m = {"broker": "etoro", "broker_env": "live", "protected": True,
-             "protective_trade_id": "P131", "initial_stop_loss": 233.40,
-             "care": {"soft_stop": 238.02671429, "venue_stop": 238.03}}
+             "protective_trade_id": "P101", "initial_stop_loss": 95.00,
+             "care": {"soft_stop": 100.99, "venue_stop": 101.0}}
         m.update(meta)
-        t = _trade(self.cfg, symbol="NVDA", qty=Decimal("6"),
-                   entry_price=Decimal("237.60"), stop_loss=Decimal("238.03"),
-                   take_profit=Decimal("245.50"),
-                   broker_order_id=NVDA_OID, metadata=m)
+        t = _trade(self.cfg, symbol="AAPL", qty=Decimal("10"),
+                   entry_price=Decimal("100.00"), stop_loss=Decimal("101.0"),
+                   take_profit=Decimal("110.00"),
+                   broker_order_id=SHARE_OID, metadata=m)
         return self._aged(t, age)
 
     def _row(self, symbol, side, qty, entry, stop, tp, oid, cfg=None,
@@ -160,9 +164,9 @@ class Base(TestCase):
                    broker_order_id=oid, metadata=m)
         return self._aged(t)
 
-    def _amzn(self, **meta):
-        return self._row("AMZN", "BUY", "1", "257.39", "254.18", "263.81",
-                         "1605558483", **meta)
+    def _braked(self, **meta):
+        return self._row("MSFT", "BUY", "2", "200.00", "196.0", "212.0",
+                         "1600000102", **meta)
 
     def _listed(self, minutes=15):
         return _iso(self.now - timedelta(minutes=minutes))
@@ -191,9 +195,9 @@ class TheGuardTests(Base):
     def test_closed_is_booked_and_priced_at_the_crossed_stop_with_its_window(self):
         listed = self.now - timedelta(minutes=15)
         crossed_at = self.now - timedelta(minutes=7)
-        t = self._nvda(venue_listed_at=_iso(listed),
-                       venue_level_crossed={"level": "stop", "price": 238.03,
-                                            "mark": 237.9,
+        t = self._share(venue_listed_at=_iso(listed),
+                       venue_level_crossed={"level": "stop", "price": 101.0,
+                                            "mark": 100.9,
                                             "at": _iso(crossed_at)},
                        venue_missing_at=_iso(crossed_at))
         venue = EtoroTrader(state="closed")
@@ -201,25 +205,25 @@ class TheGuardTests(Base):
         t.refresh_from_db()
         self.assertEqual(out["closed_as_orphan"], 1, out)
         self.assertEqual(t.status, "CLOSED")
-        self.assertEqual(t.exit_price, Decimal("238.03"))
-        self.assertEqual(t.pnl, Decimal("2.58"))
+        self.assertEqual(t.exit_price, Decimal("101.0"))
+        self.assertEqual(t.pnl, Decimal("10.00"))
         self.assertEqual(t.outcome, "stopped_out")
         self.assertIn("reconciled-orphan", t.reason)
         self.assertEqual(t.metadata["exit_fill_source"], "venue_stop")
         self.assertTrue(t.metadata["exit_price_inferred"])
         basis = t.metadata["exit_priced_at"]
         self.assertEqual((basis["level"], basis["evidence"], basis["seen"]),
-                         ("stop", "crossed", 237.9))
+                         ("stop", "crossed", 100.9))
         self.assertEqual(t.metadata["venue_closed_between"],
                          [_iso(listed), _iso(crossed_at)])
         self.assertEqual(venue.proofs,
-                         [(NVDA_OID, {"attempts": 1, "delay": 0.0})])
+                         [(SHARE_OID, {"attempts": 1, "delay": 0.0})])
         self.assertEqual(venue.closes, [])
         staff.assert_not_called()
 
     def test_open_books_nothing_and_alerts_once(self):
         from bot_program.manual_close import CLAIM_KEY
-        t = self._nvda()
+        t = self._share()
         venue = EtoroTrader(state="open")
         out, staff = self._run(venue)
         out2, staff2 = self._run(venue)
@@ -238,19 +242,19 @@ class TheGuardTests(Base):
         self.assertEqual(len(venue.proofs), 2)
 
     def test_the_open_alert_carries_no_money_figure(self):
-        self._nvda()
+        self._share()
         _out, staff = self._run(EtoroTrader(state="open"))
         kw = staff.call_args.kwargs
         text = kw["title"] + " " + kw["body"]
-        for money in ("USD", "$", "237.6", "238.03", "238.16", "233.4",
-                      "245.5"):
+        for money in ("USD", "$", "100.0", "101.0", "101.20", "95.0",
+                      "110.0"):
             self.assertNotIn(money, text)
         self.assertIsNone(re.search(r"\d+\.\d+", text), text)
-        self.assertIn("NVDA", kw["title"])
+        self.assertIn("AAPL", kw["title"])
         self.assertIn("OPEN", kw["body"])
 
     def test_no_answer_waits_without_an_error_and_counts(self):
-        t = self._nvda()
+        t = self._share()
         out, staff = self._run(EtoroTrader(state=None))
         t.refresh_from_db()
         self.assertEqual(t.status, "OPEN")
@@ -266,7 +270,7 @@ class TheGuardTests(Base):
         staff.assert_not_called()
 
     def test_after_the_hour_it_books_as_before_and_says_so(self):
-        t = self._nvda(venue_miss={
+        t = self._share(venue_miss={
             "since": _iso(self.now - timedelta(minutes=56)), "asks": 4,
             "last_at": _iso(self.now - timedelta(minutes=14))})
         out, _ = self._run(EtoroTrader(state=None))
@@ -276,13 +280,13 @@ class TheGuardTests(Base):
         self.assertIn("reconciled-orphan | venue-unanswered", t.reason)
         self.assertIn("did not answer 5 asks over 56 minutes",
                       t.metadata["venue_unproven_close"])
-        self.assertEqual(t.exit_price, Decimal("238.16"))
+        self.assertEqual(t.exit_price, Decimal("101.20"))
         self.assertEqual(t.metadata["exit_fill_source"], "mark")
         self.assertNotIn("venue_closed_between", t.metadata)
 
     def test_the_hour_needs_both_the_time_and_the_asks(self):
         from bot_program.models import AssetBotTrade
-        t = self._nvda()
+        t = self._share()
         for since, asks in ((56, 2), (10, 9)):
             meta = dict(t.metadata)
             meta["venue_miss"] = {
@@ -297,7 +301,7 @@ class TheGuardTests(Base):
             self.assertEqual(t.metadata["venue_miss"]["asks"], asks + 1)
 
     def test_a_stale_counter_restarts_instead_of_booking(self):
-        t = self._nvda(venue_miss={
+        t = self._share(venue_miss={
             "since": _iso(self.now - timedelta(hours=5)), "asks": 3,
             "last_at": _iso(self.now - timedelta(hours=4))})
         self._run(EtoroTrader(state=None))
@@ -309,7 +313,7 @@ class TheGuardTests(Base):
 
     def test_an_open_answer_restarts_the_hour(self):
         from bot_program.models import AssetBotTrade
-        t = self._nvda(venue_miss={
+        t = self._share(venue_miss={
             "since": _iso(self.now - timedelta(minutes=50)), "asks": 3,
             "last_at": _iso(self.now - timedelta(minutes=5))})
         self._run(EtoroTrader(state="open"))
@@ -330,12 +334,12 @@ class TheGuardTests(Base):
 
     def test_a_listed_row_is_stamped_at_the_read_and_its_miss_forgotten(self):
         from bot_program.venue_exit import OPEN_ALERTED_KEY
-        t = self._nvda(venue_miss={"since": _iso(self.now), "asks": 2,
+        t = self._share(venue_miss={"since": _iso(self.now), "asks": 2,
                                    "last_at": _iso(self.now)},
                        venue_missing_at=_iso(self.now),
                        **{OPEN_ALERTED_KEY: _iso(self.now)})
         before = timezone.now()
-        venue = EtoroTrader(held=[("NVDA", "P131")])
+        venue = EtoroTrader(held=[("AAPL", "P101")])
         out, staff = self._run(venue)
         t.refresh_from_db()
         self.assertEqual(t.status, "OPEN")
@@ -351,15 +355,15 @@ class TheGuardTests(Base):
         staff.assert_not_called()
 
     def test_a_row_listed_only_by_symbol_is_not_stamped(self):
-        t = self._nvda()
-        venue = EtoroTrader(held=[("NVDA", None)])
+        t = self._share()
+        venue = EtoroTrader(held=[("AAPL", None)])
         self._run(venue)
         t.refresh_from_db()
         self.assertEqual(t.status, "OPEN")
         self.assertNotIn("venue_listed_at", t.metadata)
         self.assertEqual(venue.proofs, [])
 
-    def _todays_rule(self, t, venue, last="238.16"):
+    def _todays_rule(self, t, venue, last="101.20"):
         self._run(venue)
         t.refresh_from_db()
         self.assertEqual(t.status, "CLOSED")
@@ -373,20 +377,20 @@ class TheGuardTests(Base):
     def test_no_order_id_magicmock_and_cannot_ask_keep_todays_rule(self):
         from tests.test_reconcile_all_day import EtoroTrader as NoProofEtoro
         # no order id: the word cannot be asked
-        t = self._nvda(venue_listed_at=self._listed())
+        t = self._share(venue_listed_at=self._listed())
         t.broker_order_id = ""
         t.save(update_fields=["broker_order_id"])
         venue = EtoroTrader(state="open")
         self._todays_rule(t, venue)
         self.assertEqual(venue.proofs, [])
         # an eToro-named client without position_state
-        t = self._nvda(venue_listed_at=self._listed())
+        t = self._share(venue_listed_at=self._listed())
         self._todays_rule(t, NoProofEtoro(), last="101")
         # a MagicMock answers "" for the adapter and is never asked
-        t = self._nvda(venue_listed_at=self._listed())
+        t = self._share(venue_listed_at=self._listed())
         client = mock.MagicMock()
         client.get_positions.return_value = []
-        client.ticker.return_value = {"lastPrice": "238.16"}
+        client.ticker.return_value = {"lastPrice": "101.20"}
         client.closing_fill = None
         self._todays_rule(t, client)
         client.position_state.assert_not_called()
@@ -394,21 +398,21 @@ class TheGuardTests(Base):
     def test_the_real_adapter_is_asked_by_the_open_order_id(self):
         from bot_program import venue_exit
         from tests.test_etoro_client import _client, _measured_lookup
-        t = self._nvda()
+        t = self._share()
         client, fake = _client(
             [("GET", "orders:lookup", 200,
-              _measured_lookup("closed", order_id=int(NVDA_OID)))],
+              _measured_lookup("closed", order_id=int(SHARE_OID)))],
             env="live")
         self.assertTrue(venue_exit.can_ask(t, client))
         self.assertEqual(venue_exit.word_on_miss(t, client), ("closed", ""))
         lookups = [c for c in fake.calls if "orders:lookup" in c[1]]
         self.assertEqual(len(lookups), 1)
         self.assertEqual(lookups[0][0], "GET")
-        self.assertEqual(lookups[0][2]["params"], {"orderId": NVDA_OID})
+        self.assertEqual(lookups[0][2]["params"], {"orderId": SHARE_OID})
 
     def test_the_new_counters_reach_reconcile_all_users(self):
         from bot_program.reconcile_asset import reconcile_all_users
-        self._nvda()
+        self._share()
 
         def run(venue):
             with mock.patch(ROUTER, return_value=venue), \
@@ -423,7 +427,7 @@ class TheGuardTests(Base):
         totals = run(EtoroTrader(state="open"))
         self.assertEqual(totals["venue_says_open"], 1, totals)
         self.assertNotIn("venue_unanswered", totals)
-        totals = run(EtoroTrader(held=[("NVDA", "P131")]))
+        totals = run(EtoroTrader(held=[("AAPL", "P101")]))
         self.assertNotIn("venue_says_open", totals)
         self.assertNotIn("venue_unanswered", totals)
 
@@ -432,52 +436,52 @@ class TheGuardTests(Base):
 
 class ThePriceTests(Base):
 
-    def test_amzn_140_nearest_stop_is_an_estimate(self):
+    def test_a_braked_share_nearest_stop_is_an_estimate(self):
         from dashboard.position_summary import ending_words
-        t = self._amzn(venue_listed_at=self._listed())
-        self._run(EtoroTrader(state="closed", last="254.48"))
+        t = self._braked(venue_listed_at=self._listed())
+        self._run(EtoroTrader(state="closed", last="196.3"))
         t.refresh_from_db()
         self.assertEqual(t.status, "CLOSED")
-        self.assertEqual(t.exit_price, Decimal("254.18"))
-        self.assertEqual(t.pnl, Decimal("-3.21"))
+        self.assertEqual(t.exit_price, Decimal("196.0"))
+        self.assertEqual(t.pnl, Decimal("-8.00"))
         self.assertEqual(t.metadata["exit_priced_at"]["evidence"], "nearest")
-        self.assertEqual(t.metadata["exit_priced_at"]["seen"], 254.48)
+        self.assertEqual(t.metadata["exit_priced_at"]["seen"], 196.3)
         self.assertEqual(t.metadata["exit_fill_source"], "venue_stop")
         self.assertTrue(t.metadata["exit_price_inferred"])
         self.assertAlmostEqual(t.realized_r, -1.0, places=6)
         self.assertEqual(ending_words(t), "Closed at the broker, most likely "
                                           "by its stop (an estimate)")
 
-    def test_pg_138_short_nearest_stop_at_three_quarters_of_r(self):
-        t = self._row("PG", "SELL", "1", "147.95", "149.779125", "144.29",
-                      "1604803372", venue_listed_at=self._listed())
-        self._run(EtoroTrader(state="closed", last="148.41"))
+    def test_a_short_nearest_stop_at_three_quarters_of_r(self):
+        t = self._row("IBM", "SELL", "5", "150.00", "154.00", "142.00",
+                      "1600000103", venue_listed_at=self._listed())
+        self._run(EtoroTrader(state="closed", last="151.00"))
         t.refresh_from_db()
-        self.assertEqual(t.exit_price, Decimal("149.779125"))
+        self.assertEqual(t.exit_price, Decimal("154.00"))
         self.assertEqual(t.metadata["exit_priced_at"]["evidence"], "nearest")
         self.assertEqual(t.outcome, "stopped_out")
         self.assertAlmostEqual(t.realized_r, -1.0, places=6)
 
-    def test_xagusd_134_mark_beyond_the_stop(self):
+    def test_a_metal_mark_beyond_the_stop(self):
         commodity = _cfg(self.user, asset_class="commodity", name="CMD")
-        t = self._row("XAGUSD", "BUY", "16.3109", "61.29", "59.43", "65.0",
-                      "1600000134", cfg=commodity,
+        t = self._row("XAUUSD", "BUY", "20", "60.00", "58.00", "65.00",
+                      "1600000104", cfg=commodity,
                       venue_listed_at=self._listed())
-        self._run(EtoroTrader(state="closed", last="59.21"))
+        self._run(EtoroTrader(state="closed", last="57.8"))
         t.refresh_from_db()
-        self.assertEqual(t.exit_price, Decimal("59.43"))
+        self.assertEqual(t.exit_price, Decimal("58.00"))
         self.assertEqual(t.metadata["exit_priced_at"]["evidence"],
                          "mark_beyond")
-        self.assertEqual(t.metadata["exit_priced_at"]["seen"], 59.21)
+        self.assertEqual(t.metadata["exit_priced_at"]["seen"], 57.8)
         self.assertEqual(t.outcome, "stopped_out")
         self.assertAlmostEqual(t.realized_r, -1.0, places=6)
 
     def test_a_mark_far_from_both_levels_keeps_the_mark(self):
-        t = self._amzn(venue_listed_at=self._listed())
-        self._run(EtoroTrader(state="closed", last="259.0"))
+        t = self._braked(venue_listed_at=self._listed())
+        self._run(EtoroTrader(state="closed", last="206.0"))
         t.refresh_from_db()
         self.assertEqual(t.status, "CLOSED")
-        self.assertEqual(t.exit_price, Decimal("259.0"))
+        self.assertEqual(t.exit_price, Decimal("206.0"))
         self.assertEqual(t.metadata["exit_fill_source"], "mark")
         self.assertNotIn("exit_priced_at", t.metadata)
         # the venue said closed: the window is written all the same
@@ -485,11 +489,11 @@ class ThePriceTests(Base):
 
     def test_a_mark_near_the_target_within_half_r_prices_it_at_the_target(self):
         from dashboard.position_summary import ending_words
-        # R = 3.21; the target 263.81 is 1.31 (0.41R) from 262.5
-        t = self._amzn(venue_listed_at=self._listed())
-        self._run(EtoroTrader(state="closed", last="262.5"))
+        # R = 4.00; the target 212.0 is 1.60 (0.40R) from 210.4
+        t = self._braked(venue_listed_at=self._listed())
+        self._run(EtoroTrader(state="closed", last="210.4"))
         t.refresh_from_db()
-        self.assertEqual(t.exit_price, Decimal("263.81"))
+        self.assertEqual(t.exit_price, Decimal("212.0"))
         self.assertEqual(t.metadata["exit_priced_at"]["level"], "target")
         self.assertEqual(t.metadata["exit_priced_at"]["evidence"], "nearest")
         self.assertEqual(t.metadata["exit_fill_source"], "venue_target")
@@ -497,39 +501,39 @@ class ThePriceTests(Base):
         self.assertEqual(ending_words(t), "Closed at the broker, most likely "
                                           "at its target (an estimate)")
         # 0.6R from the target: the mark stands
-        t = self._amzn(venue_listed_at=self._listed())
-        self._run(EtoroTrader(state="closed", last="261.88"))
+        t = self._braked(venue_listed_at=self._listed())
+        self._run(EtoroTrader(state="closed", last="209.6"))
         t.refresh_from_db()
-        self.assertEqual(t.exit_price, Decimal("261.88"))
+        self.assertEqual(t.exit_price, Decimal("209.6"))
         self.assertEqual(t.metadata["exit_fill_source"], "mark")
 
     def test_an_hour_aligned_bar_through_the_stop_prices_it(self):
         hour = self.now.replace(minute=0, second=0, microsecond=0)
-        t = self._amzn(venue_listed_at=_iso(hour + timedelta(seconds=3)))
-        self._bar("AMZN", hour, low=254.0, high=256.5)
-        self._run(EtoroTrader(state="closed", last="258.9"))
+        t = self._braked(venue_listed_at=_iso(hour + timedelta(seconds=3)))
+        self._bar("MSFT", hour, low=195.8, high=198.0)
+        self._run(EtoroTrader(state="closed", last="206.5"))
         t.refresh_from_db()
-        self.assertEqual(t.exit_price, Decimal("254.18"))
+        self.assertEqual(t.exit_price, Decimal("196.0"))
         self.assertEqual(t.metadata["exit_priced_at"]["evidence"], "bars")
-        self.assertEqual(t.metadata["exit_priced_at"]["seen"], 254.0)
+        self.assertEqual(t.metadata["exit_priced_at"]["seen"], 195.8)
 
     def test_a_bar_that_opened_before_the_listing_is_not_evidence(self):
         hour = self.now.replace(minute=0, second=0, microsecond=0)
-        t = self._amzn(venue_listed_at=_iso(hour + timedelta(minutes=30)))
-        self._bar("AMZN", hour, low=254.0, high=256.5)
-        self._run(EtoroTrader(state="closed", last="258.9"))
+        t = self._braked(venue_listed_at=_iso(hour + timedelta(minutes=30)))
+        self._bar("MSFT", hour, low=195.8, high=198.0)
+        self._run(EtoroTrader(state="closed", last="206.5"))
         t.refresh_from_db()
-        self.assertEqual(t.exit_price, Decimal("258.9"))
+        self.assertEqual(t.exit_price, Decimal("206.5"))
         self.assertEqual(t.metadata["exit_fill_source"], "mark")
         self.assertNotIn("exit_priced_at", t.metadata)
 
     def test_one_bar_through_both_levels_is_priced_at_the_stop(self):
         hour = self.now.replace(minute=0, second=0, microsecond=0)
-        t = self._amzn(venue_listed_at=_iso(hour + timedelta(seconds=3)))
-        self._bar("AMZN", hour, low=254.0, high=264.0)
-        self._run(EtoroTrader(state="closed", last="258.9"))
+        t = self._braked(venue_listed_at=_iso(hour + timedelta(seconds=3)))
+        self._bar("MSFT", hour, low=195.8, high=213.0)
+        self._run(EtoroTrader(state="closed", last="206.5"))
         t.refresh_from_db()
-        self.assertEqual(t.exit_price, Decimal("254.18"))
+        self.assertEqual(t.exit_price, Decimal("196.0"))
         self.assertEqual(t.metadata["exit_priced_at"]["level"], "stop")
         self.assertEqual(t.metadata["exit_priced_at"]["evidence"], "bars")
 
@@ -538,68 +542,68 @@ class ThePriceTests(Base):
                                                 CLOSE_IN_DOUBT_KEY,
                                                 CLOSE_SENT_AT_KEY)
         from bot_program.venue_exit import estimate
-        crossing = {"level": "stop", "price": 254.18, "mark": 254.0,
+        crossing = {"level": "stop", "price": 196.0, "mark": 195.8,
                     "at": self._listed(5)}
         for key, val in ((CLOSE_SENT_AT_KEY, _iso(self.now)),
                          (CLOSE_FILLS_KEY, [{"qty": "1"}]),
                          (CLOSE_IN_DOUBT_KEY, {"at": "x"})):
-            t = self._amzn(venue_listed_at=self._listed(),
+            t = self._braked(venue_listed_at=self._listed(),
                            venue_level_crossed=crossing, **{key: val})
-            self.assertIsNone(estimate(t, mark=254.3), key)
+            self.assertIsNone(estimate(t, mark=196.2), key)
         # the control: the same row without a close of ours is priced
-        t = self._amzn(venue_listed_at=self._listed(),
+        t = self._braked(venue_listed_at=self._listed(),
                        venue_level_crossed=crossing)
-        self.assertEqual(estimate(t, mark=254.3)["evidence"], "crossed")
+        self.assertEqual(estimate(t, mark=196.2)["evidence"], "crossed")
 
     def test_a_crossing_before_the_last_listing_is_not_evidence(self):
         from bot_program.venue_exit import estimate
-        t = self._nvda(venue_listed_at=self._listed(10),
-                       venue_level_crossed={"level": "stop", "price": 238.03,
-                                            "mark": 237.9,
+        t = self._share(venue_listed_at=self._listed(10),
+                       venue_level_crossed={"level": "stop", "price": 101.0,
+                                            "mark": 100.9,
                                             "at": self._listed(20)})
         self.assertIsNone(estimate(t, mark=None))
-        # the mark 238.16 is 0.03R from the stop: priced, but as nearest
-        self.assertEqual(estimate(t, mark=238.16)["evidence"], "nearest")
+        # the mark 101.20 is 0.04R from the stop: priced, but as nearest
+        self.assertEqual(estimate(t, mark=101.20)["evidence"], "nearest")
 
     def test_a_crossing_at_a_level_since_moved_is_not_evidence(self):
         from bot_program.venue_exit import estimate
-        crossing = {"level": "stop", "price": 238.03, "mark": 237.9,
+        crossing = {"level": "stop", "price": 101.0, "mark": 100.9,
                     "at": self._listed(20)}
-        t = self._nvda(venue_listed_at=self._listed(30),
+        t = self._share(venue_listed_at=self._listed(30),
                        venue_level_crossed=crossing,
-                       stop_moves=[{"to": "238.03", "asked": "238.03",
-                                    "at": "241.73",
+                       stop_moves=[{"to": "101.0", "asked": "101.0",
+                                    "at": "103.5",
                                     "why": "breakeven:broker",
                                     "when": self._listed(10)}])
         self.assertIsNone(estimate(t, mark=None))
         # a crossing of the OLD level is not one of the level held now
-        t = self._nvda(venue_listed_at=self._listed(30),
-                       venue_level_crossed=dict(crossing, price=236.0,
+        t = self._share(venue_listed_at=self._listed(30),
+                       venue_level_crossed=dict(crossing, price=99.0,
                                                 at=self._listed(5)))
         self.assertIsNone(estimate(t, mark=None))
         # the control: the same crossing, level unmoved, is evidence
-        t = self._nvda(venue_listed_at=self._listed(30),
+        t = self._share(venue_listed_at=self._listed(30),
                        venue_level_crossed=crossing)
         self.assertEqual(estimate(t, mark=None)["evidence"], "crossed")
 
     def test_the_stop_eToro_rewrote_at_the_fill_is_the_level(self):
         from bot_program.venue_exit import venue_levels
-        t = self._nvda(stop_rewritten_by_venue={"sent": 238.03, "held": 237.0})
-        self.assertEqual(venue_levels(t), {"stop": 237.0, "target": 245.5})
-        t = self._nvda(stop_rewritten_by_venue={"held": 237.0},
-                       stop_moves=[{"to": "238.03", "when": self._listed(5)}])
-        self.assertEqual(venue_levels(t)["stop"], 238.03)
-        t = self._nvda(stop_rewritten_by_venue={"held": 0.0001})
-        self.assertEqual(venue_levels(t), {"target": 245.5})
-        t = self._nvda(venue_stop_unread=True)
+        t = self._share(stop_rewritten_by_venue={"sent": 101.0, "held": 100.5})
+        self.assertEqual(venue_levels(t), {"stop": 100.5, "target": 110.0})
+        t = self._share(stop_rewritten_by_venue={"held": 100.5},
+                       stop_moves=[{"to": "101.0", "when": self._listed(5)}])
+        self.assertEqual(venue_levels(t)["stop"], 101.0)
+        t = self._share(stop_rewritten_by_venue={"held": 0.0001})
+        self.assertEqual(venue_levels(t), {"target": 110.0})
+        t = self._share(venue_stop_unread=True)
         self.assertNotIn("stop", venue_levels(t))
-        t = self._nvda(protected=False)
+        t = self._share(protected=False)
         self.assertEqual(venue_levels(t), {})
 
     def test_an_unproven_booking_is_never_priced_at_a_level(self):
-        t = self._nvda(venue_listed_at=self._listed(70),
-                       venue_level_crossed={"level": "stop", "price": 238.03,
-                                            "mark": 237.9,
+        t = self._share(venue_listed_at=self._listed(70),
+                       venue_level_crossed={"level": "stop", "price": 101.0,
+                                            "mark": 100.9,
                                             "at": self._listed(65)},
                        venue_miss={
                            "since": self._listed(56), "asks": 4,
@@ -607,7 +611,7 @@ class ThePriceTests(Base):
         self._run(EtoroTrader(state=None))
         t.refresh_from_db()
         self.assertEqual(t.status, "CLOSED")
-        self.assertEqual(t.exit_price, Decimal("238.16"))
+        self.assertEqual(t.exit_price, Decimal("101.20"))
         self.assertEqual(t.metadata["exit_fill_source"], "mark")
         self.assertNotIn("exit_priced_at", t.metadata)
         self.assertNotIn("venue_closed_between", t.metadata)
@@ -666,7 +670,7 @@ class ThePriceTests(Base):
 class TheDrainAndSwitchTests(Base):
 
     def _pending(self, **meta):
-        t = self._nvda(**meta)
+        t = self._share(**meta)
         t.status = "CLOSE_PENDING"
         t.save(update_fields=["status"])
         return t
@@ -698,7 +702,7 @@ class TheDrainAndSwitchTests(Base):
         self.assertIn("RETRY_ALREADY_FLAT", t.reason)
         self.assertTrue(t.metadata["venue_unproven_close"])
         self.assertEqual(venue.closes, [])
-        msg = fill_close_message(asset_class="stock", symbol="NVDA",
+        msg = fill_close_message(asset_class="stock", symbol="AAPL",
                                  side="BUY", qty=t.qty, exit_price=t.exit_price,
                                  pnl=t.pnl, trade=t)
         self.assertTrue(any(d.startswith("Recorded closed:")
@@ -744,15 +748,15 @@ class TheDrainAndSwitchTests(Base):
         from bot_program.pending_closes import retry_trade_close
         t = self._pending(
             venue_listed_at=self._listed(15),
-            venue_level_crossed={"level": "stop", "price": 238.03,
-                                 "mark": 237.9, "at": self._listed(7)})
+            venue_level_crossed={"level": "stop", "price": 101.0,
+                                 "mark": 100.9, "at": self._listed(7)})
         venue = EtoroTrader(state="closed")
         with mock.patch(ROUTER, return_value=venue):
             self.assertTrue(retry_trade_close(t))
         t.refresh_from_db()
         self.assertEqual(t.status, "CLOSED")
         self.assertIn("RETRY_VENUE_PROVED_CLOSED", t.reason)
-        self.assertEqual(t.exit_price, Decimal("238.03"))
+        self.assertEqual(t.exit_price, Decimal("101.0"))
         self.assertEqual(t.metadata["exit_fill_source"], "venue_stop")
         self.assertTrue(t.metadata["exit_price_inferred"])
         self.assertEqual(t.metadata["exit_priced_at"]["evidence"], "crossed")
@@ -760,7 +764,7 @@ class TheDrainAndSwitchTests(Base):
 
     def test_the_kill_switch_sends_the_close_on_an_unproven_flat_list(self):
         from bot_program.engine.kill_switch import _close_asset_trade
-        t = self._nvda()
+        t = self._share()
         venue = EtoroTrader(state=None)
         with mock.patch(ROUTER, return_value=venue), \
                 self.assertRaises(RuntimeError):
@@ -768,12 +772,12 @@ class TheDrainAndSwitchTests(Base):
         t.refresh_from_db()
         self.assertEqual(t.status, "CLOSE_PENDING")
         self.assertEqual(len(venue.closes), 1)
-        self.assertEqual(venue.closes[0][0], "P131")
+        self.assertEqual(venue.closes[0][0], "P101")
         self.assertIsNone(t.exit_price)
 
     def test_the_kill_switch_still_books_a_flat_list_the_venue_proved(self):
         from bot_program.engine.kill_switch import _close_asset_trade
-        t = self._nvda()
+        t = self._share()
         venue = EtoroTrader(state="closed")
         with mock.patch(ROUTER, return_value=venue):
             _close_asset_trade(t, timezone.now())
@@ -805,14 +809,14 @@ class TheDrainAndSwitchTests(Base):
                 raise RuntimeError("eToro refused the close")
 
         # (a) the beat counted an ask 60 s ago on a flat list; at the click
-        # the list shows NVDA again and the close is SENT and refused
+        # the list shows AAPL again and the close is SENT and refused
         t = self._pending(venue_miss={
             "since": self._listed(10), "asks": 2,
             "last_at": _iso(timezone.now() - timedelta(seconds=60))})
-        venue = Refusing(held=[("NVDA", "P131")], state=None)
+        venue = Refusing(held=[("AAPL", "P101")], state=None)
         with mock.patch(ROUTER, return_value=venue), mock.patch(STAFF):
             out = _retry_pending(self.user, t)
-        self.assertEqual([c[0] for c in venue.closes], ["P131"])
+        self.assertEqual([c[0] for c in venue.closes], ["P101"])
         self.assertTrue(out["pending"])
         self.assertNotIn("Nothing was sent", out["error"])
         self.assertNotIn("has not answered", out["error"])
@@ -846,21 +850,21 @@ class TheStampTests(Base):
 
     def test_a_paper_unprotected_or_non_etoro_row_is_never_stamped(self):
         from bot_program import venue_exit
-        paper = self._nvda()
+        paper = self._share()
         paper.paper = True
         paper.save(update_fields=["paper"])
-        bare = self._nvda(protected=False)
-        oanda = self._nvda(broker="oanda")
-        no_oid = self._nvda()
+        bare = self._share(protected=False)
+        oanda = self._share(broker="oanda")
+        no_oid = self._share()
         no_oid.broker_order_id = ""
         no_oid.save(update_fields=["broker_order_id"])
         for t in (paper, bare, oanda, no_oid):
-            self.assertFalse(venue_exit.note_crossing(t, 237.0))
+            self.assertFalse(venue_exit.note_crossing(t, 100.5))
             t.refresh_from_db()
             self.assertNotIn(venue_exit.CROSSED_KEY, t.metadata)
         # the listing and the miss: only an eToro client asks
         self.assertFalse(venue_exit.note_listed(paper, EtoroTrader()))
-        live = self._nvda()
+        live = self._share()
         for client in (OANDATrader(), mock.MagicMock()):
             self.assertFalse(venue_exit.note_listed(live, client))
             self.assertFalse(venue_exit.note_missing(live, client))
@@ -868,16 +872,16 @@ class TheStampTests(Base):
         for key in (venue_exit.LISTED_AT_KEY, venue_exit.MISSING_AT_KEY):
             self.assertNotIn(key, live.metadata)
         # a mark short of every level stamps nothing either
-        self.assertFalse(venue_exit.note_crossing(live, 240.0))
+        self.assertFalse(venue_exit.note_crossing(live, 105.0))
         live.refresh_from_db()
         self.assertNotIn(venue_exit.CROSSED_KEY, live.metadata)
         # the control: the live eToro row's first crossing is kept, a
         # second one of the same level is not a new episode
-        self.assertTrue(venue_exit.note_crossing(live, 237.9))
+        self.assertTrue(venue_exit.note_crossing(live, 100.9))
         first = dict(live.metadata[venue_exit.CROSSED_KEY])
         self.assertEqual((first["level"], first["price"], first["mark"]),
-                         ("stop", 238.03, 237.9))
-        self.assertFalse(venue_exit.note_crossing(live, 237.5))
+                         ("stop", 101.0, 100.9))
+        self.assertFalse(venue_exit.note_crossing(live, 100.8))
         live.refresh_from_db()
         self.assertEqual(live.metadata[venue_exit.CROSSED_KEY], first)
 
@@ -887,41 +891,41 @@ class TheStampTests(Base):
         crossing since eToro last showed it open is kept, whichever level a
         later tick crosses."""
         from bot_program import venue_exit
-        # NVDA: the stop at T-30m, then the target at T-5m
-        t = self._nvda(venue_listed_at=self._listed(40))
+        # AAPL: the stop at T-30m, then the target at T-5m
+        t = self._share(venue_listed_at=self._listed(40))
         self.assertTrue(venue_exit.note_crossing(
-            t, 237.9, now=self.now - timedelta(minutes=30)))
+            t, 100.9, now=self.now - timedelta(minutes=30)))
         first = dict(t.metadata[venue_exit.CROSSED_KEY])
         self.assertFalse(venue_exit.note_crossing(
-            t, 245.6, now=self.now - timedelta(minutes=5)))
+            t, 110.1, now=self.now - timedelta(minutes=5)))
         t.refresh_from_db()
         self.assertEqual(t.metadata[venue_exit.CROSSED_KEY], first)
-        self._run(EtoroTrader(state="closed", last="245.6"))
+        self._run(EtoroTrader(state="closed", last="110.1"))
         t.refresh_from_db()
         self.assertEqual(t.status, "CLOSED")
-        self.assertEqual(t.exit_price, Decimal("238.03"))
-        self.assertEqual(t.pnl, Decimal("2.58"))
+        self.assertEqual(t.exit_price, Decimal("101.0"))
+        self.assertEqual(t.pnl, Decimal("10.00"))
         self.assertEqual(t.outcome, "stopped_out")
         self.assertEqual(t.metadata["exit_priced_at"]["evidence"], "crossed")
-        # AMZN, the mirror: the target at T-10m, then the stop at T-5m
-        a = self._amzn(venue_listed_at=self._listed(15))
+        # MSFT, the mirror: the target at T-10m, then the stop at T-5m
+        a = self._braked(venue_listed_at=self._listed(15))
         self.assertTrue(venue_exit.note_crossing(
-            a, 264.0, now=self.now - timedelta(minutes=10)))
+            a, 213.0, now=self.now - timedelta(minutes=10)))
         self.assertFalse(venue_exit.note_crossing(
-            a, 254.0, now=self.now - timedelta(minutes=5)))
-        self._run(EtoroTrader(state="closed", last="254.0"))
+            a, 195.8, now=self.now - timedelta(minutes=5)))
+        self._run(EtoroTrader(state="closed", last="195.8"))
         a.refresh_from_db()
-        self.assertEqual(a.exit_price, Decimal("263.81"))
-        self.assertEqual(a.pnl, Decimal("6.42"))
+        self.assertEqual(a.exit_price, Decimal("212.0"))
+        self.assertEqual(a.pnl, Decimal("24.00"))
         self.assertEqual(a.outcome, "hit_target")
         self.assertEqual(a.metadata["exit_fill_source"], "venue_target")
         # the control: a stamp from before the last listing is no evidence,
         # so a crossing of the other level replaces it
-        s = self._amzn(venue_listed_at=self._listed(15),
-                       venue_level_crossed={"level": "stop", "price": 254.18,
-                                            "mark": 254.0,
+        s = self._braked(venue_listed_at=self._listed(15),
+                       venue_level_crossed={"level": "stop", "price": 196.0,
+                                            "mark": 195.8,
                                             "at": self._listed(20)})
-        self.assertTrue(venue_exit.note_crossing(s, 264.0, now=self.now))
+        self.assertTrue(venue_exit.note_crossing(s, 213.0, now=self.now))
         self.assertEqual(s.metadata[venue_exit.CROSSED_KEY]["level"], "target")
 
     def test_a_crossing_seen_after_a_level_change_is_stamped_again(self):
@@ -932,41 +936,41 @@ class TheStampTests(Base):
         from bot_program import venue_exit
         from bot_program.asset_engine.base import make_bot
         from django.utils.dateparse import parse_datetime
-        t = self._nvda(venue_listed_at=self._listed(60))
+        t = self._share(venue_listed_at=self._listed(60))
         self.assertTrue(venue_exit.note_crossing(
-            t, 246.0, now=self.now - timedelta(seconds=5)))
+            t, 110.5, now=self.now - timedelta(seconds=5)))
         client = mock.MagicMock(spec=["modify_protective", "ticker"])
         client.modify_protective.side_effect = (
             lambda oid, price: {"ok": True, "price": price})
         self.assertTrue(make_bot(self.cfg)._move_broker_stop(
-            t, 246.0, client, Decimal("241.00"), "trail"))
+            t, 110.5, client, Decimal("105.00"), "trail"))
         t.refresh_from_db()
         moved = venue_exit._level_changed_at(t)
         self.assertIsNotNone(moved)
         later = moved + timedelta(minutes=5)
-        self.assertTrue(venue_exit.note_crossing(t, 246.2, now=later))
+        self.assertTrue(venue_exit.note_crossing(t, 110.7, now=later))
         t.refresh_from_db()
         stamp = t.metadata[venue_exit.CROSSED_KEY]
         self.assertGreater(parse_datetime(stamp["at"]), moved)
         self.assertEqual((stamp["level"], stamp["price"], stamp["mark"]),
-                         ("target", 245.5, 246.2))
-        got = venue_exit.estimate(t, mark=240.0,
+                         ("target", 110.0, 110.7))
+        got = venue_exit.estimate(t, mark=105.0,
                                   now=later + timedelta(minutes=1))
         self.assertEqual((got["level"], got["evidence"], got["price"]),
-                         ("target", "crossed", 245.5))
+                         ("target", "crossed", 110.0))
         # a further tick of the same episode keeps it
         self.assertFalse(venue_exit.note_crossing(
-            t, 246.5, now=later + timedelta(minutes=5)))
+            t, 111.0, now=later + timedelta(minutes=5)))
         t.refresh_from_db()
         self.assertEqual(t.metadata[venue_exit.CROSSED_KEY], stamp)
 
     def test_the_crossing_stamp_never_raises(self):
         from bot_program import venue_exit
-        t = self._nvda()
+        t = self._share()
         with mock.patch.object(venue_exit, "merge_meta",
                                side_effect=RuntimeError("db down")), \
                 mock.patch(STAFF) as staff:
-            self.assertFalse(venue_exit.note_crossing(t, 237.9))
+            self.assertFalse(venue_exit.note_crossing(t, 100.9))
             self.assertFalse(venue_exit.note_listed(t, EtoroTrader()))
             self.assertFalse(venue_exit.note_missing(t, EtoroTrader()))
             venue_exit.said_open(t, EtoroTrader(), where="test")
@@ -978,10 +982,10 @@ class TheStampTests(Base):
 
     def test_care_stamps_the_first_list_without_the_position(self):
         from bot_program.position_care import _venue_still_holds
-        t = self._nvda()
+        t = self._share()
         bot = mock.MagicMock()
         venue = EtoroTrader()
-        bot._broker_snapshot.return_value = [{"position_id": "P131"}]
+        bot._broker_snapshot.return_value = [{"position_id": "P101"}]
         self.assertTrue(_venue_still_holds(bot, t, venue))
         t.refresh_from_db()
         self.assertNotIn("venue_missing_at", t.metadata)
@@ -993,13 +997,13 @@ class TheStampTests(Base):
         t.refresh_from_db()
         self.assertEqual(t.metadata["venue_missing_at"], first)
         # an unreadable snapshot is no miss
-        t2 = self._nvda()
+        t2 = self._share()
         bot._broker_snapshot.return_value = None
         self.assertFalse(_venue_still_holds(bot, t2, venue))
         t2.refresh_from_db()
         self.assertNotIn("venue_missing_at", t2.metadata)
         # under the venue's 60 s lag the list has not caught up
-        t3 = self._nvda(age=timedelta(seconds=20))
+        t3 = self._share(age=timedelta(seconds=20))
         bot._broker_snapshot.return_value = []
         self.assertFalse(_venue_still_holds(bot, t3, venue))
         t3.refresh_from_db()
@@ -1012,24 +1016,24 @@ class TheWordsTests(Base):
 
     def _msg(self, **meta):
         from bot_program.notifications import fill_close_message
-        t = self._nvda(**meta)
+        t = self._share(**meta)
         t.status, t.reason = "CLOSED", "manual | reconciled-orphan"
-        t.exit_price, t.pnl = Decimal("238.03"), Decimal("2.58")
+        t.exit_price, t.pnl = Decimal("101.0"), Decimal("10.00")
         t.closed_at = datetime(2026, 10, 7, 11, 15, 0, 634564, tzinfo=dt_tz.utc)
         t.metadata["exit_price_inferred"] = True
         t.outcome = "stopped_out"
         t.save()
-        return fill_close_message(asset_class="stock", symbol="NVDA",
+        return fill_close_message(asset_class="stock", symbol="AAPL",
                                   side="BUY", qty=t.qty, exit_price=t.exit_price,
                                   pnl=t.pnl, trade=t)
 
     def test_the_stop_and_the_window(self):
         msg = self._msg(
-            exit_priced_at={"level": "stop", "price": 238.03,
+            exit_priced_at={"level": "stop", "price": 101.0,
                             "evidence": "crossed"},
             venue_closed_between=["2026-10-07T11:00:03+00:00",
                                   "2026-10-07T11:07:59+00:00"])
-        self.assertIn("Priced at the stop the venue held (238.03): the "
+        self.assertIn("Priced at the stop the venue held (101.00): the "
                       "venue's own fill price is not readable.", msg["lines"])
         self.assertIn("How it ended: stop loss hit", msg["lines"])
         self.assertEqual(msg["details"][-1],
@@ -1039,12 +1043,12 @@ class TheWordsTests(Base):
         self.assertNotIn(" after ", msg["summary"])
 
     def test_a_nearest_estimate_never_says_stop_loss_hit(self):
-        msg = self._msg(exit_priced_at={"level": "stop", "price": 238.03,
+        msg = self._msg(exit_priced_at={"level": "stop", "price": 101.0,
                                         "evidence": "nearest"})
         self.assertIn("How it ended: closed at the broker, most likely by its "
                       "stop (an estimate)", msg["lines"])
         self.assertNotIn("How it ended: stop loss hit", msg["lines"])
-        self.assertIn("Priced at the stop the venue held (238.03), the level "
+        self.assertIn("Priced at the stop the venue held (101.00), the level "
                       "nearest the price when the close was found: an "
                       "estimate; the venue's own fill price is not readable.",
                       msg["lines"])

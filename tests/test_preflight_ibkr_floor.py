@@ -1,7 +1,7 @@
 """IBKR's 2,000 USD floor is read before the order, not after.
 
-The second real order this deployment sent — a plain long on GLDM, an
-87-dollar ETF, from a 500 EUR account — came back:
+The second real order this deployment sent — a plain long on an ETF under
+a hundred dollars, from a small EUR account under the broker's floor — came back:
 
     Error 201: YOUR ORDER IS NOT ACCEPTED. MINIMUM OF 2000 USD (OR
     EQUIVALENT IN OTHER CURRENCIES) IS REQUIRED IN ORDER TO PURCHASE ON

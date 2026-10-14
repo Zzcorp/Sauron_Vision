@@ -1,6 +1,6 @@
 """The alarm bot: a second Telegram bot that rings only for a critical problem (2026-09-28).
 
-The operator, 2026-09-28: his father must not be flooded with trading
+The operator, 2026-09-28: the second keeper must not be flooded with trading
 chatter, and must be woken for real emergencies only. Pinned here
 (bot_program/alarm.py; its two commands are pinned in
 tests/test_alarm_bot_commands.py):
@@ -268,7 +268,7 @@ class _AlarmCase(TestCase):
 class ConfigTests(_AlarmCase):
     """A second bot with the Eye's token steals the Eye's updates; a
     second bot in one of the Eye's chats pours the trading messages into
-    the father's phone. Both are refused, in words, never with the token."""
+    the keeper's phone. Both are refused, in words, never with the token."""
 
     def test_both_variables_are_read_at_call_time(self):
         self.assertEqual(alarm.config(), (TOKEN, CHAT, ""))
@@ -1355,7 +1355,7 @@ class FlattenTests(_AlarmCase):
 
     def test_a_refused_flatten_is_said_by_the_next_sentinel_pass_once(self):
         """Telegram answering 5xx at the moment of the kill: the one
-        message the father must get is remembered unsent, and the next
+        message the keeper must get is remembered unsent, and the next
         sentinel pass says it — once, and never a flatten Telegram took."""
         with patch(POST, side_effect=_refused) as post, \
                 self.captureOnCommitCallbacks(execute=True):

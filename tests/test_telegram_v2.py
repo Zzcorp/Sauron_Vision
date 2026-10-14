@@ -3,7 +3,7 @@
 The operator, 2026-09-27: "the telegram messages are still basic still".
 The fills read like a log line ("FOREX · qty 7900.00000000 @ 1.60725571",
 "Rule golden_cross", "Trade #108"), with the attack mode and a stop eToro
-moved riding inside rule_name; the father reads them on a phone for three
+moved riding inside rule_name; the keeper reads them on a phone for
 weeks.
 
 Pinned here, with requests.post patched (no real HTTP):
@@ -355,18 +355,19 @@ class TheFillMessagesTests(_Base):
             "Closed: 2026-09-25 19:10 UTC</blockquote>"]))
 
     def test_a_close_the_platform_only_recorded_says_so(self):
-        """GBPCHF #130, 2026-10-03: eToro closed it on Friday 12:37, the
-        platform found the row a day later, booked it at the last mark and
-        stamped the booking. The message read a mark as a fill and a
+        """A real forex row, 2026-10-03: eToro closed it on Friday midday,
+        the platform found the row a day later, booked it at the last mark
+        and stamped the booking. The message read a mark as a fill and a
         Saturday as the close. An estimate is said to be one, and the
-        stamp says what it is."""
+        stamp says what it is. The fixture below is composed in that
+        row's shape."""
         from bot_program.notifications import notify_bot_fill_close
         cfg = _cfg(self.user, "forex", "fx_majors_live", mode="live")
-        row = _trade(cfg, 130, symbol="GBPCHF", side="BUY",
-                     qty=Decimal("3600"), entry_price=Decimal("1.09716"),
+        row = _trade(cfg, 77, symbol="GBPCHF", side="BUY",
+                     qty=Decimal("3000"), entry_price=Decimal("1.09716"),
                      stop_loss=Decimal("1.09000"),
                      take_profit=Decimal("1.11000"),
-                     exit_price=Decimal("1.09728"), pnl=Decimal("0.52"),
+                     exit_price=Decimal("1.09728"), pnl=Decimal("0.60"),
                      realized_r=0.02, outcome="manual_close",
                      status="CLOSED", paper=False,
                      rule_name="starter_forex_breakout",
@@ -382,14 +383,14 @@ class TheFillMessagesTests(_Base):
             qty=row.qty, exit_price=row.exit_price, pnl=row.pnl,
             outcome=row.outcome, trade_id=row.id, trade=row))
         self.assertEqual(p["text"], "\n".join([
-            f"<b>{GAIN} Closed GBPCHF · about +0.52 USD</b>",
-            "Sold 3,600 units at about 1.09728.",
+            f"<b>{GAIN} Closed GBPCHF · about +0.60 USD</b>",
+            "Sold 3,000 units at about 1.09728.",
             "",
-            "Result: about +0.52 USD · about 0.02 times the risk",
+            "Result: about +0.60 USD · about 0.02 times the risk",
             "Priced from the last mark, not from a broker fill.",
             "How it ended: closed at the broker",
             "Real money · eToro",
-            "<blockquote expandable>Trade: #130",
+            "<blockquote expandable>Trade: #77",
             "Rule key: <code>starter_forex_breakout</code>",
             "Config: fx_majors_live",
             "Entry price: 1.09716",

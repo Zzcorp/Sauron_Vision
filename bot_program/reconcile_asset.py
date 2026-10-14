@@ -219,7 +219,7 @@ def _broker_open_symbols(client, *, asset_class: str, warm=()) -> dict:
     # beside every holding, including the ones this client could not name;
     # a row that carries its own handle (venue_close.position_id_for) can
     # be judged by it, and an unnamed book stops being a reason to keep a
-    # closed position open for twelve hours (GBPCHF #130).
+    # closed position open for twelve hours (a real forex row, 2026-10-03).
     position_ids: set = set()
     for p in positions:
         if isinstance(p, dict):

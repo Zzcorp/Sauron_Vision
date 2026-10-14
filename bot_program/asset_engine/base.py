@@ -440,8 +440,9 @@ LEVERAGE_SWITCH_KEY = "etoro_leverage_live"
 #: can flip a proof that was never measured. Read at CALL time by the
 #: gate, never copied, so a test states a token by patching this name.
 #: "crypto" since 2026-09-26 (test_proof_crypto): BTC 0.0002 filled and
-#: closed on the REAL account (order 1596774178, position 3588477891,
-#: settlementType REAL at 1x, deploy/ETORO_DEPARTURE.md §4 D5). Proven at
+#: closed on the REAL account (order and position ids in the operator's
+#: private deploy log; settlementType REAL at 1x, deploy/ETORO_DEPARTURE.md
+#: §4 D5). Proven at
 #: 1x, and that binds the attack mode's chooser ALONE: ETORO_PROVEN_LEVERAGE
 #: stays empty, so the chooser picks 1 for crypto. This token does NOT
 #: bound a TYPED multiplier: extras["leverage"] = 2 on a crypto config
@@ -464,10 +465,10 @@ LEVERAGE_SWITCH_KEY = "etoro_leverage_live"
 #: minute, at 1x (order 384690781, position 3605812674, the full notional
 #: 1137.16 locked) and at 5x (order 384647176, position 3605812677, margin
 #: 227.42), settlementType CFD, each proven by the open order's execution
-#: state; measured by the operator the night before leaving.
+#: state; measured by the operator on 2026-09-28.
 #: "stock", "index" and "commodity" since 2026-09-29 (test_proof_stock,
 #: test_proof_index, test_proof_commodity): one BUY at 1x each on the DEMO
-#: segment the day of leaving, 10:57 UTC, filled and closed by position id,
+#: segment on 2026-09-29, 10:57 UTC, filled and closed by position id,
 #: proven by the open order's execution state through eToro's transient
 #: 500s — AAPL 4 units (order 384798829, settlementType REAL, a 1.00 fee),
 #: SPX500 1 unit (order 384769149, CFD), WHEATUSD as WHEAT.FUT 2 units
@@ -938,8 +939,8 @@ class AssetBot(ABC):
         """THE BRAKED PASS (2026-10-07, asset_engine/disarm.py): the exits
         of a config a BRAKE stopped, and nothing else.
 
-        PG #138 sat OPEN on config 26 from the moment Morgul's G1 brake
-        stopped it on 2026-10-06: the runner skipped every disabled config
+        A real short sat OPEN on a braked config from the moment Morgul's
+        G1 brake stopped it on 2026-10-06: the runner skipped every disabled config
         whole, so the brake that was meant to stop new entries also
         switched off the time stop, trailing, break-even, the weekend and
         event windows and the venue-mirrored soft stop. A stop is now
@@ -1261,8 +1262,8 @@ class AssetBot(ABC):
                         # the bare except below and the ledger recorded
                         # nothing: loud in the log, silent on the page.
                         from bot_program.asset_engine import skips as _skips
-                        # THE CAUSE, NOT A GUESS (2026-10-06): the real
-                        # NVDA #131 read "the broker priced it at 0" at
+                        # THE CAUSE, NOT A GUESS (2026-10-06): a real
+                        # stock row read "the broker priced it at 0" at
                         # 13:47 UTC when the read had FAILED (a refused
                         # /search during the redeploy). A failed read and
                         # a venue that answered no rate are two faults.
@@ -4189,8 +4190,8 @@ class AssetBot(ABC):
         # on the fresh clock before the order. 2026-10-07: the code is entry_timing.skip_code's, so a
         # shut exchange reads as the market being shut — the word the
         # paper venue already gives above — and never as a bad hour; on
-        # 2026-10-06 config 26 shorted PG 22 minutes before the NYSE open
-        # and eToro filled it, which is what SHUT now refuses.
+        # 2026-10-06 a live config shorted a share 22 minutes before the
+        # NYSE open and eToro filled it, which is what SHUT now refuses.
         _timing = self._entry_timing_gate(symbol)
         if not _timing["ok"]:
             logger.warning("[%s_bot] %s: entry refused on the clock — %s",
@@ -6214,7 +6215,8 @@ class AssetBot(ABC):
                         # Since D3b the tick polls it and withdraws it after
                         # ENTRY_WORKING_MAX_HOURS — on the real account too,
                         # since the real DELETE answered as the demo one did
-                        # (MEASURED 2026-09-26, order 1596774177). Said NOW,
+                        # (MEASURED 2026-09-26 on the real account, a held
+                        # AAPL order; id in the private deploy log). Said NOW,
                         # not when the tick withdraws it.
                         try:
                             from bot_program.notifications import notify_staff
@@ -6481,9 +6483,9 @@ class AssetBot(ABC):
         Asked in execute_entry, where the quantity is the one sent and the
         client the one that carries it: a flat fee is a fraction only once
         the notional is known, and the proposal's filter ran before sizing
-        (2026-09-29: a 150 USD stock pool sized ~30 USD positions, and the
-        1.00 USD a side made every one of them 6.7% down before the market
-        moved).
+        (2026-09-29: a small stock pool sized positions of a few tens of
+        dollars, and the 1.00 USD a side made every one of them 6.7% down
+        before the market moved).
 
         THE FEE'S OWN EFFECT, and nothing else. Sizing may widen the stop
         after the proposal's filter judged the levels (sizing.stop_widened),
