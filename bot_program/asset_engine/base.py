@@ -974,6 +974,36 @@ class AssetBot(ABC):
             "withdrawn": withdrawn, "opened": [], "gate_reason": note,
         }
 
+    def manage_paper_only(self) -> dict:
+        """THE PAPER-ONLY PASS (2026-10-08, asset_engine/disarm.py
+        manages_paper_only): the exits of the PAPER rows of a config off by
+        a stop that is not a brake (by hand, the kill switch, no record),
+        and nothing else.
+
+        A paper row has nothing resting at a broker: with its config off it
+        lost its stop outright, and a paper row was booked at -8.12R by the
+        first tick that acted after weeks unmanaged. Here the heartbeat,
+        then manage_positions(paper_only=True): the paper stop replay, the
+        time stop, the care, trailing, the SL/TP check. A REAL row is never
+        read (no route, no WORKING-entry poll, no close, no venue stamp):
+        the kill switch's reconciliation by hand stands. It NEVER calls
+        can_open_new, scan_symbol, propose_entry or execute_entry, and
+        withdraws nothing (a paper row is never a working order)."""
+        from bot_program.asset_engine import disarm
+        from bot_program.asset_engine.safety import write_heartbeat
+
+        by = disarm.record_of(self.cfg).get("by", "")
+        write_heartbeat(self.cfg, status="RUNNING")
+        managed = self.manage_positions(paper_only=True)
+        note = (f"{disarm.record_words(self.cfg, short=True)}: managing its "
+                f"paper positions only, opening nothing")[:200]
+        write_heartbeat(self.cfg, status="OK", note=note)
+        return {
+            "asset_class": self.asset_class, "config_id": self.cfg.id,
+            "paper_only": True, "by": by, "managed": managed,
+            "opened": [], "gate_reason": note,
+        }
+
     def _withdraw_working_while_braked(self, by: str) -> list:
         """Withdraw every bot order a braked config still has working, so
         nothing new fills after a brake (2026-10-07). Returns the ids of
@@ -1032,10 +1062,13 @@ class AssetBot(ABC):
 
     # ── position management ──────────────────────────────────────────────
 
-    def manage_positions(self) -> int:
+    def manage_positions(self, *, paper_only: bool = False) -> int:
         """Walk OPEN trades, close any that hit stop_loss, take_profit, or
         the config's time-stop ceiling; warn once on the ones approaching it.
         Returns number of trades closed this tick.
+
+        `paper_only` (2026-10-08, manage_paper_only) walks the PAPER rows
+        alone: a real row is never read, routed, polled or closed.
         """
         from bot_program.models import AssetBotTrade
         from bot_program.engine.broker_router import client_for_symbol
@@ -1044,7 +1077,10 @@ class AssetBot(ABC):
         # Broker snapshots (resting orders, positions) read once per tick
         # and shared across every protected row on the same client.
         self._tick_broker_cache = {}
-        for trade in AssetBotTrade.objects.filter(config=self.cfg, status="OPEN"):
+        rows = AssetBotTrade.objects.filter(config=self.cfg, status="OPEN")
+        if paper_only:
+            rows = rows.filter(paper=True)
+        for trade in rows:
             try:
                 protected = bool((trade.metadata or {}).get("protected"))
                 client = client_for_symbol(self.user, trade.symbol, self.cfg)
@@ -1102,6 +1138,25 @@ class AssetBot(ABC):
                         ts = self._time_stop_status(trade)
                         if ts["approaching"]:
                             self._warn_time_stop_near(trade, ts)
+                        # seen, not unmanaged (2026-10-15): a weekend is
+                        # never read as a stretch nobody ran the row
+                        from bot_program import paper_exits as _pe
+                        _pe.seen(trade, now=timezone.now())
+                        continue
+
+                    # THE PAPER STOP RESTS (2026-10-08, bot_program/
+                    # paper_exits): the bars since the row's last managed
+                    # tick are tested first, before the mark is read, so a
+                    # crossing the tick never saw books at the stop (or the
+                    # open of the bar that gapped through it), at the bar's
+                    # time — a paper row booked -8.12R at the far mark of the
+                    # first tick after weeks unmanaged. A row with no bars
+                    # goes on exactly as before. Paper rows only: a real
+                    # stop rests at the broker.
+                    _resting = self._paper_resting_exit(
+                        trade, client, paper_only=paper_only)
+                    if _resting is not None:
+                        closed += 1 if _resting else 0
                         continue
 
                 # THE MARK IS READ HERE, FIRST, exactly as before — only
@@ -1381,6 +1436,89 @@ class AssetBot(ABC):
                 logger.warning("[%s_bot] manage(%s) failed: %s",
                                self.asset_class, trade.symbol, e)
         return closed
+
+    def _paper_resting_exit(self, trade, client, *,
+                            paper_only: bool = False) -> Optional[bool]:
+        """The paper stop and target as resting orders over the bars since
+        the row's last managed tick (2026-10-08, bot_program/paper_exits).
+
+        None when nothing was booked (the tick goes on: the mark, the time
+        stop, the care, the SL/TP check, as before); the row's tick and bar
+        cursor are stamped then. True when the replay booked the exit, False
+        when it tried and _close_trade booked nothing. Never raises: a
+        replay that fails leaves the row to the tick as it was.
+
+        AN UNMANAGED STRETCH (2026-10-15): a row nothing ran for a day or
+        more (paper_exits.unmanaged_since; `paper_only` is the paper-only
+        pass of a stopped config, whose unstamped rows it touches for the
+        first time) whose bars could not cover that stretch is marked on
+        this instance (`_paper_unmanaged`): an exit booked from the mark
+        later in this tick closes it ungraded (_close_trade), never at a
+        far mark read into the record."""
+        from bot_program import paper_exits
+        if self.asset_class == "options" or not paper_exits.applies(trade):
+            return None
+        now = timezone.now()
+        first_touch = None
+        if paper_only:
+            from bot_program.asset_engine import disarm
+            first_touch = (paper_exits._parse(
+                disarm.record_of(self.cfg).get("at")) or trade.opened_at)
+        unmanaged = paper_exits.unmanaged_since(trade, now=now,
+                                                first_touch=first_touch)
+
+        def _flag(result):
+            if unmanaged is None or paper_exits.covered(result, now=now):
+                return
+            trade._paper_unmanaged = {
+                "since": unmanaged.isoformat(),
+                "hours": round((now - unmanaged).total_seconds() / 3600, 1),
+                "why": paper_exits.uncovered_why(result)}
+            logger.warning("[%s_bot] %s #%s: paper row unmanaged since %s "
+                           "and its bars cannot cover it (%s) — an exit "
+                           "from the mark this tick is booked ungraded",
+                           self.asset_class, trade.symbol, trade.id,
+                           unmanaged.isoformat(),
+                           trade._paper_unmanaged["why"])
+        try:
+            from bot_program import aragorn
+            care_on = bool(aragorn.is_on())
+        except Exception:  # noqa: BLE001 — unknown reads as off, as care does
+            care_on = False
+        ceiling = None
+        ts = self._time_stop_status(trade)
+        if ts.get("enabled") and ts.get("max_hold_hours"):
+            ceiling = trade.opened_at + timedelta(
+                hours=float(ts["max_hold_hours"]))
+        try:
+            result = paper_exits.replay(trade, now=now, care_on=care_on,
+                                        ceiling=ceiling)
+        except Exception as e:  # noqa: BLE001 — the tick goes on as before
+            logger.warning("[%s_bot] %s #%s: the paper bar replay failed "
+                           "(%s) — managed on the mark as before",
+                           self.asset_class, trade.symbol, trade.id, e)
+            _flag(None)
+            return None
+        if result is None:
+            return None
+        hit = result["hit"]
+        if hit is None:
+            try:
+                paper_exits.stamp(trade, result, now=now)
+            except Exception as e:  # noqa: BLE001 — a lost stamp re-tests
+                logger.warning("[%s_bot] %s #%s: the paper replay stamp "
+                               "failed: %s", self.asset_class, trade.symbol,
+                               trade.id, e)
+            _flag(result)
+            return None
+        logger.info("[%s_bot] %s #%s: paper %s in the %s bar of %s "
+                    "(%s) — booked at %s like a resting order",
+                    self.asset_class, trade.symbol, trade.id, hit["reason"],
+                    hit["tf"], hit["bar_ts"],
+                    "gapped" if hit["gapped"] else "touched", hit["level"])
+        return bool(self._close_trade(
+            trade, hit["level"], client, reason=hit["reason"],
+            paper_exit=paper_exits.exit_record(hit, now=now)))
 
     # ── exit management ──────────────────────────────────────────────────
 
@@ -3236,8 +3374,18 @@ class AssetBot(ABC):
                             "the leg may be resting and nobody has been told",
                             self.asset_class, trade.symbol, e)
 
-    def _close_trade(self, trade, price, client, *, reason: str) -> bool:
+    def _close_trade(self, trade, price, client, *, reason: str,
+                     paper_exit: Optional[dict] = None) -> bool:
         """Close a trade — pnl is realised in the config's base_currency.
+
+        `paper_exit` (2026-10-08, bot_program/paper_exits) is the bar
+        replay's record of a PAPER stop or target that crossed in a bar the
+        tick did not see: the booking is stamped at that bar's time
+        (closed_at), the level is a price the bar traded with the modelled
+        half cost on top, and the record rides on metadata["paper_exit"].
+        It is read for a paper row only; a real row's close is untouched by
+        it. A paper row marked `_paper_unmanaged` (2026-10-15) closes with
+        metadata["unmanaged_exit"] and is not graded.
 
         `price` is the FALLBACK exit price, never the order: the broker order
         is a MARKET order and a live exit books at the fill the broker
@@ -3484,22 +3632,49 @@ class AssetBot(ABC):
             # the recorded close reason, not the post-cost fill price.
             from bot_program.asset_engine.risk_levels import paper_fill_price
             exit_side = "SELL" if trade.side == "BUY" else "BUY"
-            fill = paper_exit_fill(trade, Decimal(str(paper_fill_price(
-                self.cfg, trade.symbol, float(price), exit_side))))
+            # A REPLAYED EXIT PAYS THE COST TOO (2026-10-15): the replay's
+            # level is already a price its bar traded (paper_exits._cross),
+            # and the half cost goes on top of it, a stop touched at the
+            # bar's low like one crossed deep. Holding the fill at the bar's
+            # worst price (2026-10-08) waived the cost on every touch. A
+            # target is booked at the target less the cost, never better,
+            # even when the bar gapped past it.
+            modelled = paper_fill_price(self.cfg, trade.symbol, float(price),
+                                        exit_side)
+            fill = paper_exit_fill(trade, Decimal(str(modelled)))
         else:
+            paper_exit = None  # a real close: never read
             fill = resolve_exit_fill(trade, close_result, mark=price)
+        # AN EXIT AFTER AN UNMANAGED STRETCH (2026-10-15): a paper row
+        # nothing ran for a day or more, whose bars could not cover the
+        # stretch, booked from this tick's mark (base._paper_resting_exit
+        # marked it). The row closes; its R is not graded into the record.
+        unmanaged = (getattr(trade, "_paper_unmanaged", None)
+                     if trade.paper and not paper_exit else None)
 
         if not fill["complete"]:
             return self._book_partial_close(trade, fill, reason)
 
         price = fill["price"]
         trade.metadata = {**(trade.metadata or {}), **fill["metadata"]}
+        closed_at = timezone.now()
+        if paper_exit:
+            # the crossing bar's time, not the tick that noticed it
+            from django.utils.dateparse import parse_datetime
+            at = parse_datetime(str(paper_exit.get("at") or ""))
+            if at is not None and at <= closed_at:
+                closed_at = at
+            trade.metadata = {**trade.metadata, "paper_exit": paper_exit}
+        if unmanaged:
+            from bot_program.paper_exits import UNMANAGED_KEY
+            trade.metadata = {**trade.metadata,
+                              UNMANAGED_KEY: dict(unmanaged, reason=reason)}
         # the remaining size at this fill, plus what a scale-out banked
         pnl = self._realised_pnl(trade, price)
         trade.exit_price = price
         trade.pnl = pnl
         trade.status = "CLOSED"
-        trade.closed_at = timezone.now()
+        trade.closed_at = closed_at
         trade.reason = ((trade.reason or "") + f" | closed:{reason}").strip()[:1000]
         trade.save()
 

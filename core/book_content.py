@@ -523,8 +523,10 @@ CHAPTERS = [
                       "brake means one thing: open nothing new. "
                       "What the bot holds goes on being managed as before. A "
                       "bot switched off by hand, or by the emergency stop, "
-                      "is not ticked at all, and every switch-off records "
-                      "who did it, when and why.")},
+                      "opens nothing and leaves its real trades to what "
+                      "rests at the broker; its paper trades keep their "
+                      "exits. Every switch-off records who did it, when and "
+                      "why.")},
             {"title": "The alarm",
              "text": ("With its switch on, a second bot, in a second group "
                       "of the people who keep watch, rings for a critical "
@@ -1386,9 +1388,10 @@ LEXICON = [
                "brake (the guards', the group's, the alarm group's or one "
                "typed on the server) leaves what the bot holds managed as "
                "before: its exits, its stops and its locks. A bot switched "
-               "off by hand, or by the emergency stop, is not ticked at "
-               "all: what it still holds keeps only the stop and target "
-               "resting at the broker.")},
+               "off by hand, or by the emergency stop, opens nothing: its "
+               "real trades keep only the stop and target resting at the "
+               "broker, and its paper trades, which rest nowhere, keep "
+               "their exits run by the platform (since 8 October).")},
     {"term": "Morgul",
      "plain": ("The guards: a watchdog outside the engine that, with its "
                "switch on, looks every five minutes for what must never "

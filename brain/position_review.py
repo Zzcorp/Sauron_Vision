@@ -620,8 +620,13 @@ def _rule_state(pos: dict) -> dict:
         pass
     try:
         from bot_program.track_record_models import RuleTrackRecordAlert
+        # ON THIS POSITION'S OWN VENUE (2026-10-08): a decay measured on the
+        # simulator is not a reason to review a real position, nor the
+        # reverse. "all" is an alert from before the detector split the
+        # venues, and still counts.
         state["open_decay_alert"] = RuleTrackRecordAlert.objects.filter(
-            rule_name=rule, resolved_at__isnull=True).exists()
+            rule_name=rule, resolved_at__isnull=True,
+            venue__in=(_venue_of(pos), "all")).exists()
     except Exception:  # pragma: no cover
         pass
     return state
@@ -853,6 +858,14 @@ def _self_hedge(pos: dict, cache: Optional[dict] = None) -> list[dict]:
     ]
 
 
+def _venue_of(pos: dict) -> str:
+    """The position's money world, from its own stamps
+    (position_summary.world_of): a portfolio row, which states none, is
+    paper, as its `paper` flag has always said."""
+    from dashboard.position_summary import world_of
+    return world_of(pos) or ("paper" if pos.get("paper") else "live")
+
+
 def measure(pos: dict, cache: Optional[dict] = None) -> dict:
     """Every fact the triggers read, computed once per position.
 
@@ -877,7 +890,9 @@ def measure(pos: dict, cache: Optional[dict] = None) -> dict:
         "symbol": pos["symbol"],
         "side": pos["side"],
         "asset_class": pos.get("asset_class", ""),
-        "venue": "paper" if pos.get("paper") else "live",
+        # live, demo or paper (2026-10-08): `paper` alone called every
+        # eToro demo row live (close_advice.world_of says so itself)
+        "venue": _venue_of(pos),
         "status": pos.get("status", ""),
         "qty": pos.get("qty"),
         "entry": pos.get("entry"),

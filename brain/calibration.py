@@ -54,19 +54,32 @@ def _resolve_regime_persistence(pred) -> tuple[Optional[bool], str]:
     return correct, actual
 
 
+def _split_rule_venue(value: str) -> tuple[str, str]:
+    """("rule", "venue") from a stored predicted_value (2026-10-08): the Mind
+    writes "rule@venue" for a rule prediction that names its venue
+    (synthesizer._emit_predictions); a bare rule, or an unknown suffix,
+    is the pooled record every earlier prediction was graded on."""
+    from .hypotheses import RULE_VENUES
+    rule, sep, venue = str(value or "").rpartition("@")
+    if sep and rule and venue in RULE_VENUES:
+        return rule, venue
+    return str(value or ""), ""
+
+
 def _rule_avg_r_measurement(rule_name: str) -> tuple[Optional[float], str]:
     """Shared measurement for the two rule resolvers.
 
     Returns `(avg_r, note)`; avg_r is None when there is nothing to measure —
     no grading module, no closed trades, or too thin a sample for an average
-    to say anything about the rule.
+    to say anything about the rule. `rule_name` may carry its venue,
+    "rule@live" (2026-10-08): graded on that venue's trades alone.
     """
-    from .hypotheses import MIN_TRADES_FOR_RULE_R
+    from .hypotheses import MIN_TRADES_FOR_RULE_R, rule_rows_for
+    rule_name, venue = _split_rule_venue(rule_name)
     try:
-        from bot_program.bot_grading import bot_performance_summary
-    except Exception:
+        rows = rule_rows_for(rule_name, venue=venue, days=7, min_n=1)
+    except ImportError:
         return None, "ungradeable_summary_unavailable"
-    rows = bot_performance_summary(rule_name=rule_name, days=7, min_n=1)
     if not rows:
         return None, "ungradeable_no_recent_data"
     # Pool the per-asset-class buckets n-weighted; rows[0] alone would score
@@ -76,7 +89,8 @@ def _rule_avg_r_measurement(rule_name: str) -> tuple[Optional[float], str]:
         return None, f"ungradeable_thin_sample_n={n}"
     avg_r = sum(float(r.get("avg_r") or 0) * int(r.get("n") or 0)
                 for r in rows) / n
-    return avg_r, f"avg_r={avg_r:.3f} n={n}"
+    return avg_r, (f"avg_r={avg_r:.3f} n={n}"
+                   + (f" {venue}" if venue else ""))
 
 
 def _resolve_rule_decay_continues(pred) -> tuple[Optional[bool], str]:

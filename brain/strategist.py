@@ -30,6 +30,8 @@ from django.utils import timezone
 
 from ai_agents.base_agent import BaseAgent
 
+from .synthesizer import VENUE_RULE
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,6 +72,7 @@ def _build_strategist_snapshot() -> dict:
                            .values("regime_label", "regime_confidence",
                                     "portfolio_health_score", "top_concerns",
                                     "theme_pressures", "rule_status_overlay",
+                                    "rule_status_venue",
                                     "narrative_md", "created_at"))
     # HOW OLD each one is, and how old the freshest one is. The slice above
     # carries no time floor — it is "the last 6 reports", not "the last 3
@@ -84,6 +87,17 @@ def _build_strategist_snapshot() -> dict:
         r["age_hours"] = _age_hours(r["created_at"])
         r["created_at"] = r["created_at"].isoformat()
     snap["recent_brain_reports"] = recent_reports
+    # THE TRACK RECORD, PER VENUE (2026-10-08): the rows the freshest report
+    # was written from, each naming its venue, with the legend. The brief of
+    # 2026-10-08 called a paper -8.12R "a failed stop or a sizing error":
+    # the reports' prose was all it had, and the prose had dropped the
+    # venue. Stated once, from the newest report that stored them.
+    for split, at in (BrainReport.objects.filter(error="")
+                      .order_by("-created_at")
+                      .values_list("track_records", "created_at")[:6]):
+        if isinstance(split, dict) and split:
+            snap["track_records"] = dict(split, age_hours=_age_hours(at))
+            break
     newest_age = recent_reports[0]["age_hours"] if recent_reports else None
     snap["brain_history_age_hours"] = newest_age
     snap["brain_history_stale"] = bool(
@@ -156,6 +170,7 @@ def _build_strategist_snapshot() -> dict:
                      if o != Hypothesis.OUTCOME_UNRESOLVABLE)
         basis[a] = {
             "graded_n": graded,
+            "graded_by_venue": _graded_by_venue(a),
             "unresolvable_n": unresolvable,
             "pending_n": Hypothesis.objects.filter(
                 source_agent=a, outcome=Hypothesis.OUTCOME_PENDING).count(),
@@ -169,7 +184,10 @@ def _build_strategist_snapshot() -> dict:
         "0.0 means confident MISSES on claims that did resolve — it can "
         "never mean 'unresolvable'. Read graded_n in agent_trust_basis "
         "before explaining any score, and if graded_n is small say so "
-        "instead of drawing a conclusion from it.")
+        "instead of drawing a conclusion from it. graded_by_venue says what "
+        "the score was earned on: rule claims graded on live, demo or paper "
+        "trades, on the pooled record of all three (older claims), or "
+        "claims about no venue (other).")
 
     # Active pending hypotheses (the open bets).
     pending = list(Hypothesis.objects
@@ -182,6 +200,25 @@ def _build_strategist_snapshot() -> dict:
     snap["pending_hypotheses"] = pending
 
     return snap
+
+
+def _graded_by_venue(agent: str) -> dict:
+    """{venue: n} over `agent`'s GRADED claims (2026-10-15): a rule claim by
+    the venue it was graded on (live, demo, paper, or "pooled" for one that
+    named none), any other claim as "other". Only non-zero venues."""
+    from .knowledge_models import Hypothesis
+    out: dict = {}
+    for crit in (Hypothesis.objects.filter(source_agent=agent)
+                 .exclude(outcome__in=(Hypothesis.OUTCOME_PENDING,
+                                       Hypothesis.OUTCOME_UNRESOLVABLE))
+                 .values_list("resolution_criteria", flat=True)):
+        crit = crit if isinstance(crit, dict) else {}
+        if crit.get("kind") == "rule_avg_r":
+            key = str(crit.get("venue") or "") or "pooled"
+        else:
+            key = "other"
+        out[key] = out.get(key, 0) + 1
+    return out
 
 
 # ── The agent ─────────────────────────────────────────────────────────────
@@ -198,7 +235,10 @@ STRATEGIST_SCHEMA = """{
      "horizon_hours": int,
      "confidence": 0.0..1.0,
      "hypothesis_kind": "regime_holds|rule_avg_r|null",
-     "hypothesis_payload": {}
+     "hypothesis_payload": {"regime": "for regime_holds",
+                            "rule_name": "for rule_avg_r",
+                            "comparator": ">=|<", "threshold": 0.0,
+                            "venue": "live|demo|paper (required for rule_avg_r)"}
     }
   ]
 }"""
@@ -237,6 +277,9 @@ class StrategistAgent(BaseAgent):
             "'unresolvable', because unresolvable claims are excluded and an "
             "agent with nothing graded is absent from the map entirely. Do "
             "NOT invent a cause for a number from other numbers near it.\n\n"
+            "TRACK RECORDS: `track_records` holds the per-rule rows the "
+            "freshest brain report was written from.\n"
+            f"{VENUE_RULE}\n\n"
             "Your job:\n"
             "1. Outlook — narrate the *current* read in plain English. If "
             "regime shifted, say so. If the brain has been wrong (low trust "
@@ -249,7 +292,9 @@ class StrategistAgent(BaseAgent):
             "Concrete, NOT generic ('vol' is bad; 'VIX divergence vs SPX' is good).\n"
             "4. Ideas — top 3 actionable observations. Where it's "
             "auto-gradeable (regime_holds or rule_avg_r), include hypothesis_kind "
-            "and payload so we can grade you over time. Otherwise leave them null.\n\n"
+            "and payload so we can grade you over time. Otherwise leave them null. "
+            "A rule_avg_r payload MUST name the venue it is about (live, demo "
+            "or paper): one with no venue is refused and never graded.\n\n"
             "Tone: terse, concrete, second-person ('you should…'). NO "
             "hedge-words like 'may' / 'could' / 'might' unless genuinely "
             "uncertain. NO preambles ('In today's briefing...'). Open with "

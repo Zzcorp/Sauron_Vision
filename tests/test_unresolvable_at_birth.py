@@ -83,9 +83,10 @@ class AResearchStageRuleIsStillForecastableTests(TestCase):
         from brain.hypotheses import post_hypothesis
         from signals.models_control import RuleControl
         _control(promotion_stage=RuleControl.STAGE_PAPER)
+        # a Mind rule claim names its venue (2026-10-15): paper here
         h = post_hypothesis(claim_text="golden_cross decays",
                             source_agent="sauron_mind",
-                            resolution_criteria=_criteria(),
+                            resolution_criteria=_criteria(venue="paper"),
                             horizon_hours=168)
         self.assertIsNotNone(h.pk)
 

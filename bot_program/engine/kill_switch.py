@@ -76,9 +76,12 @@ def execute_kill_switch(user=None, reason="manual"):
     # THE RECORD (2026-10-07, asset_engine/disarm.py). The stop goes
     # through disarm.disable_config, which records it as the kill switch's
     # (who pressed it, and the reason). That record is what keeps these
-    # configs UNMANAGED: the runner manages only a config a brake stopped,
-    # and the rows this sweep cannot close are left for reconciliation by
-    # hand (step 3 below), never for a manage pass to close behind it.
+    # configs' REAL rows UNMANAGED: the runner manages them only for a
+    # config a brake stopped, and the real rows this sweep cannot close are
+    # left for reconciliation by hand (step 3 below), never for a manage
+    # pass to close behind it. A PAPER row has no broker: the one this
+    # sweep cannot book (its market shut) is managed by the runner's
+    # paper-only pass, exits only (2026-10-08, runner.manage_stopped_paper).
     from bot_program.asset_engine import disarm
     who = getattr(user, "username", "") or "platform-wide"
     asset_configs = AssetBotConfig.objects.filter(enabled=True)

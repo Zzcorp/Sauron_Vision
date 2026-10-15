@@ -149,8 +149,25 @@ class Command(BaseCommand):
                          "opening nothing — the bot tick is off, nothing "
                          "manages them now"))
                 elif n:
-                    w(f"        ^ OFF — {disarm.record_words(c)}; {n} open, "
-                      f"NOT managed while it stays off")
+                    # its PAPER rows stay managed, exits only (2026-10-08,
+                    # runner.manage_stopped_paper); its real ones do not
+                    n_paper = AssetBotTrade.objects.filter(
+                        config=c, status="OPEN", paper=True).count()
+                    n_real = n - n_paper
+                    if ticking is None:
+                        ticking = _tick_manages()
+                    said = []
+                    if n_real:
+                        said.append(f"{n_real} real open, NOT managed while "
+                                    f"it stays off")
+                    if n_paper:
+                        said.append(
+                            f"{n_paper} paper open, still managed every "
+                            f"tick (exits only)" if ticking else
+                            f"{n_paper} paper open — the bot tick is off, "
+                            f"nothing manages them now")
+                    w(f"        ^ OFF — {disarm.record_words(c)}; "
+                      + "; ".join(said))
                 elif disarm.record_of(c):
                     w(f"        ^ OFF — {disarm.record_words(c)}")
 

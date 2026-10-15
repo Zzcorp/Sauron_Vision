@@ -75,6 +75,9 @@ class StrategyMutatorAgent(BaseAgent):
             f"Parameter schema (bounds + types):\n{json.dumps(schema, indent=2, default=str)}\n\n"
             f"Current parameters (parent):\n{json.dumps(current_params, indent=2, default=str)}\n\n"
             f"Recent performance (last 30d, lower is worse):\n"
+            f"  venue:      {track_record.get('venue') or 'none'} "
+            f"(live = real money, demo = eToro virtual account, paper = "
+            f"the platform simulator)\n"
             f"  trades:     {track_record.get('n', 0)}\n"
             f"  win_rate:   {track_record.get('win_rate', 0)}\n"
             f"  avg_r:      {track_record.get('avg_r', 0)}\n"
@@ -111,6 +114,20 @@ class StrategyMutatorAgent(BaseAgent):
 
 # ── Public entry point used by Phase 9 evolution ─────────────────────────
 
+def _track_record_for(rule_name: str, *, days: int = 30) -> dict:
+    """The rule's 30-day record on ONE venue, labelled (2026-10-08): live
+    when it has live closes, else demo, else paper — the venue the money
+    rests on first. The pooled row used to average a simulator stop booked
+    weeks late with real fills and print it with no venue at all. {} when
+    the rule closed nothing anywhere."""
+    from bot_program.bot_grading import performance_by_venue
+    for venue, rows in performance_by_venue(rule_name=rule_name, days=days,
+                                            min_n=1).items():
+        if rows:
+            return dict(rows[0], venue=venue)
+    return {}
+
+
 def generate_ai_mutant(rule_name: str, *, n_params_to_mutate=None,
                         rng=None) -> dict:
     """Drop-in replacement for `signals.evolution.generate_mutant`.
@@ -124,7 +141,6 @@ def generate_ai_mutant(rule_name: str, *, n_params_to_mutate=None,
     from signals.evolution import (
         generate_mutant, current_params, has_schema, SCHEMA_REGISTRY, _coerce,
     )
-    from bot_program.bot_grading import bot_performance_summary
 
     if not has_schema(rule_name):
         # No schema — nothing to mutate.
@@ -135,8 +151,7 @@ def generate_ai_mutant(rule_name: str, *, n_params_to_mutate=None,
 
     # Pull recent track record for context (best-effort).
     try:
-        rows = bot_performance_summary(rule_name=rule_name, days=30, min_n=1)
-        track_record = rows[0] if rows else {}
+        track_record = _track_record_for(rule_name)
     except Exception:
         track_record = {}
 
