@@ -24,6 +24,12 @@
             {% if budget_remaining is None %}no daily cap
             {% else %}${{ budget_remaining }} left of ${{ budget_daily }}{% endif %}
         </span>
+        {% with L=budget_lines %}
+        <span class="oc-strip-sub">
+            {% if L.orcs_enabled %}AI ${{ L.core_spent|floatformat:2 }} of ${{ L.core_budget|floatformat:2 }} ({{ L.core_formula }}) · Orcs ${{ L.orcs_spent|floatformat:2 }} of ${{ L.orcs_cap|floatformat:2 }} · total ${{ L.spent_total|floatformat:2 }} of ${{ L.total|floatformat:2 }}
+            {% else %}Orcs line off (ORC_DAILY_BUDGET_USD=0) · {% if L.no_ceiling %}no total stop{% else %}total stop ${{ L.total|floatformat:2 }}{% endif %}{% endif %}
+        </span>
+        {% endwith %}
     </div>
     <div class="oc-strip-cell">
         <span class="oc-strip-label">MODELS AVAILABLE</span>
@@ -136,12 +142,46 @@
 {% endfor %}
 
 <div class="card fade-in-up" style="margin-bottom:24px;">
+    <div class="card-header"><span class="card-title">The Orcs (read-only)</span></div>
+    <p style="padding:0 16px; color:var(--text-muted); font-size:13px;">
+        The ladder the Orcs' router will pin, one rung per model and effort:
+        an unvalidated prior; read by the router from O2; tier settings never
+        move it. Their calls bill the Orcs' own budget line, which stays off
+        until O2 (ORC_DAILY_BUDGET_USD). No Orc runs today.
+    </p>
+    <div class="table-wrapper">
+    <table class="sv-perf-table">
+        <thead><tr><th>Rung</th><th>Model</th><th>Effort</th><th>Used for</th></tr></thead>
+        <tbody>
+        {% for r in orc_ladder %}
+        <tr>
+            <td><strong>{{ r.rung }}</strong></td>
+            <td>{{ r.label }}<div style="color:var(--text-muted); font-size:11px;">{{ r.model }}</div></td>
+            <td>{{ r.effort }}</td>
+            <td style="color:var(--text-muted); font-size:12px;">{{ r.note }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p style="padding:8px 16px 0; color:var(--text-muted); font-size:12px;">
+        Agent names on the Orcs' line (no override is read for them):
+        {% for key, label in orc_agent_keys %}<code title="{{ label }}">{{ key }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
+    </p>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:24px;">
     <div class="card-header"><span class="card-title">Catalog</span></div>
+    <p style="padding:0 16px; color:var(--text-muted); font-size:12px;">
+        Prices per million tokens from <a href="{{ prices_source }}" rel="noopener">the pricing page</a>,
+        cache minimums from <a href="{{ cache_source }}" rel="noopener">the prompt-caching page</a>,
+        read {{ prices_read_on }}. Cache writes cost 1.25x the input price (5 minutes) or 2x (1 hour).
+    </p>
     <div class="table-wrapper">
     <table class="sv-perf-table">
         <thead><tr>
-            <th>Model</th><th>$/M in</th><th>$/M out</th><th>Context</th>
-            <th>Effort</th><th>Notes</th>
+            <th>Model</th><th>$/M in</th><th>$/M out</th><th>$/M cache read</th>
+            <th>min cache</th><th>Context</th><th>Effort</th><th>Notes</th>
         </tr></thead>
         <tbody>
         {% for m in catalog %}
@@ -149,6 +189,8 @@
             <td>{{ m.label }}<div style="color:var(--text-muted); font-size:11px;">{{ m.id }}</div></td>
             <td>${{ m.pricing.input }}</td>
             <td>${{ m.pricing.output }}</td>
+            <td>{% if m.cache_read is not None %}${{ m.cache_read }}{% else %}—{% endif %}</td>
+            <td>{{ m.min_cache_tokens|default:"—" }}</td>
             <td>{{ m.context }}</td>
             <td>{% if m.effort %}yes{% else %}—{% endif %}</td>
             <td style="color:var(--text-muted); font-size:12px;">{{ m.notes }}</td>

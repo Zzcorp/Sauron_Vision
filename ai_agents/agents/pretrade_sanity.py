@@ -29,6 +29,13 @@ logger = logging.getLogger(__name__)
 class PreTradeSanityAgent(BaseAgent):
     agent_name = "pretrade_sanity"
     default_tier = "fast"
+    # Exempt from BaseAgent.run's total-budget refusal (PR O0a). Its one
+    # caller, portfolio/risk_gate.py, catches ANY error from this check
+    # and records "verdict go, scale 1.0": a refusal at the total would
+    # not skip the trade, it would size it at 1.0 instead of the AI's
+    # scale — an order path changing behaviour. It keeps today's
+    # behaviour; the check stays opt-in (use_ai_check, off by default).
+    total_budget_gate = False
 
     def get_system_prompt(self) -> str:
         return """You are a pre-trade sanity reviewer for Sauron Vision.

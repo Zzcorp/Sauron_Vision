@@ -37,7 +37,8 @@ class BudgetTests(TestCase):
         self.assertAlmostEqual(spent_today(), 0.0, places=4)
 
     @override_settings(AI_CONFIG={"daily_budget_usd": 1.0, "models": {},
-                                   "default_provider": "claude"})
+                                   "default_provider": "claude",
+                                   "orc_daily_budget_usd": 0})
     def test_calls_are_blocked_once_the_budget_is_spent(self):
         from ai_agents.spend import can_spend
         _task(1.10)
@@ -46,7 +47,8 @@ class BudgetTests(TestCase):
         self.assertIn("daily AI budget spent", reason)
 
     @override_settings(AI_CONFIG={"daily_budget_usd": 1.0, "models": {},
-                                   "default_provider": "claude"})
+                                   "default_provider": "claude",
+                                   "orc_daily_budget_usd": 0})
     def test_deep_tier_is_capped_below_the_full_budget(self):
         """Cheap operational agents must still run late in the day."""
         from ai_agents.spend import can_spend
@@ -57,7 +59,8 @@ class BudgetTests(TestCase):
         self.assertTrue(fast_allowed)
 
     @override_settings(AI_CONFIG={"daily_budget_usd": 0, "models": {},
-                                   "default_provider": "claude"})
+                                   "default_provider": "claude",
+                                   "orc_daily_budget_usd": 0})
     def test_zero_budget_disables_the_ceiling(self):
         from ai_agents.spend import can_spend
         _task(999)
@@ -67,7 +70,8 @@ class BudgetTests(TestCase):
 
 class GuardedTaskTests(TestCase):
     @override_settings(AI_CONFIG={"daily_budget_usd": 1.0, "models": {},
-                                   "default_provider": "claude"})
+                                   "default_provider": "claude",
+                                   "orc_daily_budget_usd": 0})
     def test_guarded_brain_task_skips_cleanly_when_broke(self):
         from brain.tasks import run_sauron_mind
         _task(2.0)

@@ -22,9 +22,44 @@ logger = logging.getLogger(__name__)
 # Effort levels the Claude API accepts, cheapest → most thorough.
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 
+# WHERE EVERY NUMBER BELOW COMES FROM (PR O0a, 2026-10-15). A price is the
+# one figure in the ledger that cannot be derived from anything else, so
+# each is copied from Anthropic's own pages, read on PRICES_READ_ON:
+#   * `pricing`, `cache_read`, `fast_pricing`, `long_context`: the pricing
+#     page (PRICING_SOURCE) — base input/output, cache hits, fast mode,
+#     and Haiku 5.5's prompt-length card.
+#   * `min_cache_tokens`: the prompt-caching page (CACHE_SOURCE), the
+#     minimum cacheable prompt length per model; a shorter prefix silently
+#     caches nothing.
+#   * cache WRITES are not stored per model: both pages price them as a
+#     multiple of the base input price, 1.25x for the 5-minute TTL and 2x
+#     for the 1-hour TTL (CACHE_WRITE_5M_X, CACHE_WRITE_1H_X).
+#   * `default_effort`, `per_message_effort`, `task_budget`,
+#     `server_fallback`: the bundled Claude API reference (model-migration
+#     and prompt-caching notes, cached 2026-10-06; CAPABILITY_SOURCE).
+#     The provider refuses a keyword a model does not take BEFORE the
+#     call, instead of paying for a 400.
+# Not modelled: the 1.1x `inference_geo: "us"` multiplier, because the
+# platform never sends `inference_geo`. Nothing below is unsourced; a
+# price that could not be read would be written as None and said here.
+PRICING_SOURCE = "https://platform.claude.com/docs/en/about-claude/pricing"
+CACHE_SOURCE = ("https://platform.claude.com/docs/en/build-with-claude/"
+                "prompt-caching")
+CAPABILITY_SOURCE = ("the bundled Claude API reference (model-migration.md, "
+                     "prompt-caching.md), cached 2026-10-06")
+PRICES_READ_ON = "2026-10-15"
+CACHE_WRITE_5M_X = 1.25
+CACHE_WRITE_1H_X = 2.0
+# An unknown model's cache read, as a share of its (fallback) input price:
+# the pricing page's general rule, "0.1x base input price".
+CACHE_READ_FALLBACK_X = 0.1
+
 # Current roster. `pricing` is USD per million tokens.
 # `thinking` marks models where adaptive thinking is on by default, so
 # max_tokens must leave room for reasoning as well as the answer.
+# `cache_read` is USD per million cached tokens read; `server_fallback`
+# names the `fallbacks` forms a model accepts ("both": "default" and the
+# list; "default": the scalar only; None: no server-side fallback).
 MODELS = {
     "claude-fable-5-1": {
         "label": "Claude Fable 5.1",
@@ -33,6 +68,14 @@ MODELS = {
         "context": 1_000_000,
         "thinking": True,
         "effort": True,
+        "cache_read": 0.25,
+        "min_cache_tokens": 512,
+        "default_effort": "high",
+        "per_message_effort": True,
+        # The reference lists task budgets on Fable 5.1 with "confirm at
+        # launch"; the API's own 400 is the last word.
+        "task_budget": True,
+        "server_fallback": "both",
         "notes": "Anthropic's most capable widely released model. Thinking "
                  "is always on (the provider never sends a thinking "
                  "parameter), effort low..max, twice the Opus price — the "
@@ -47,6 +90,13 @@ MODELS = {
         "context": 1_000_000,
         "thinking": True,
         "effort": True,
+        "cache_read": 0.20,
+        "min_cache_tokens": 512,
+        "default_effort": "medium",
+        "per_message_effort": True,
+        "task_budget": True,
+        "server_fallback": "both",
+        "fast_pricing": {"input": 8.0, "output": 40.0},
         "notes": "The current Opus, below Opus 5's price. Thinking cannot be "
                  "disabled (the provider never sends a thinking parameter); "
                  "effort low..max is the control. The trade debate's "
@@ -59,6 +109,13 @@ MODELS = {
         "context": 1_000_000,
         "thinking": True,
         "effort": True,
+        "cache_read": 0.50,
+        "min_cache_tokens": 512,
+        "default_effort": "high",
+        "per_message_effort": True,
+        "task_budget": True,
+        "server_fallback": "both",
+        "fast_pricing": {"input": 10.0, "output": 50.0},
         "notes": "Strongest agentic/coding model. Thinking on by default.",
     },
     "claude-opus-4-8": {
@@ -68,6 +125,13 @@ MODELS = {
         "context": 1_000_000,
         "thinking": True,
         "effort": True,
+        "cache_read": 0.50,
+        "min_cache_tokens": 1024,
+        "default_effort": "high",
+        "per_message_effort": False,
+        "task_budget": True,
+        "server_fallback": None,
+        "fast_pricing": {"input": 10.0, "output": 50.0},
         "notes": "Previous-generation Opus; solid fallback.",
     },
     "claude-sonnet-5": {
@@ -85,7 +149,36 @@ MODELS = {
         "context": 1_000_000,
         "thinking": True,
         "effort": True,
+        "cache_read": 0.20,
+        "min_cache_tokens": 1024,
+        "default_effort": "high",
+        "per_message_effort": False,
+        "task_budget": False,
+        "server_fallback": None,
         "notes": "Near-Opus quality at Sonnet cost. Good default workhorse.",
+    },
+    "claude-sonnet-5-5": {
+        "label": "Claude Sonnet 5.5",
+        "tier_hint": "balanced",
+        "pricing": {"input": 2.0, "output": 10.0},
+        "context": 1_000_000,
+        "thinking": True,
+        "effort": True,
+        # $0.10, not the $0.20 of Sonnet 5 and Opus 5.5: the pricing page
+        # prices Opus 5.5 and Sonnet 5.5 cache hits at 0.05x their base
+        # input price (footnote 2), and $2 x 0.05 is $0.10.
+        "cache_read": 0.10,
+        "min_cache_tokens": 512,
+        "default_effort": "high",
+        "per_message_effort": True,
+        "task_budget": True,
+        # Only the "default" form of `fallbacks`, and only on the Claude
+        # API (the reference); the list form is a 400 here.
+        "server_fallback": "default",
+        "notes": "The current Sonnet ($2/$10, cache reads $0.10). Thinking "
+                 "cannot be disabled; effort low..max, default high (levels "
+                 "recalibrated from Sonnet 5). Added for the Orcs (PR O0a); "
+                 "no tier points at it.",
     },
     "claude-sonnet-4-6": {
         "label": "Claude Sonnet 4.6",
@@ -94,6 +187,12 @@ MODELS = {
         "context": 1_000_000,
         "thinking": True,
         "effort": True,
+        "cache_read": 0.30,
+        "min_cache_tokens": 1024,
+        "default_effort": "high",
+        "per_message_effort": False,
+        "task_budget": False,
+        "server_fallback": None,
         "notes": "Previous-generation Sonnet.",
     },
     # Older-but-live models: still valid deploy-time pins, so they must be
@@ -106,6 +205,12 @@ MODELS = {
         "context": 1_000_000,
         "thinking": True,
         "effort": True,
+        "cache_read": 0.50,
+        "min_cache_tokens": 2048,
+        "default_effort": "high",
+        "per_message_effort": False,
+        "task_budget": True,
+        "server_fallback": None,
         "notes": "Older Opus; still served.",
     },
     "claude-opus-4-6": {
@@ -115,6 +220,12 @@ MODELS = {
         "context": 1_000_000,
         "thinking": True,
         "effort": True,
+        "cache_read": 0.50,
+        "min_cache_tokens": 4096,
+        "default_effort": "high",
+        "per_message_effort": False,
+        "task_budget": False,
+        "server_fallback": None,
         "notes": "Older Opus; adaptive thinking must be set explicitly.",
     },
     "claude-sonnet-4-5": {
@@ -124,7 +235,38 @@ MODELS = {
         "context": 1_000_000,
         "thinking": False,
         "effort": False,
+        "cache_read": 0.30,
+        "min_cache_tokens": 1024,
+        "default_effort": None,
+        "per_message_effort": False,
+        "task_budget": False,
+        "server_fallback": None,
         "notes": "Legacy Sonnet; no effort parameter.",
+    },
+    "claude-haiku-5-5": {
+        "label": "Claude Haiku 5.5",
+        "tier_hint": "fast",
+        "pricing": {"input": 0.10, "output": 0.50},
+        "context": 1_000_000,
+        "thinking": True,
+        "effort": True,
+        "cache_read": 0.01,
+        "min_cache_tokens": 512,
+        "default_effort": "medium",
+        "per_message_effort": True,
+        "task_budget": True,
+        # Refusals have no server-side fallback on Haiku 5.5.
+        "server_fallback": None,
+        # Priced by prompt length: a request whose prompt (input + cache
+        # reads + cache writes) is over 100,000 tokens pays this card for
+        # ALL of its tokens (pricing page, "Long context pricing").
+        "long_context": {"above_prompt_tokens": 100_000,
+                         "input": 0.50, "output": 2.50, "cache_read": 0.05},
+        "notes": "The current Haiku: $0.10/$0.50 up to 100K prompt tokens, "
+                 "$0.50/$2.50 beyond; cache reads $0.01. Thinking on by "
+                 "default, effort default medium. Its tokenizer counts about "
+                 "30% more tokens than Haiku 4.5's on the same text. Added "
+                 "for the Orcs (PR O0a); no tier points at it.",
     },
     "claude-haiku-4-5": {
         "label": "Claude Haiku 4.5",
@@ -133,6 +275,12 @@ MODELS = {
         "context": 200_000,
         "thinking": False,
         "effort": False,
+        "cache_read": 0.10,
+        "min_cache_tokens": 4096,
+        "default_effort": None,
+        "per_message_effort": False,
+        "task_budget": False,
+        "server_fallback": None,
         "notes": "Cheapest + fastest. Classification, short prose, journals.",
     },
     "claude-haiku-4-5-20251001": {
@@ -142,6 +290,12 @@ MODELS = {
         "context": 200_000,
         "thinking": False,
         "effort": False,
+        "cache_read": 0.10,
+        "min_cache_tokens": 4096,
+        "default_effort": None,
+        "per_message_effort": False,
+        "task_budget": False,
+        "server_fallback": None,
         "notes": "Date-pinned Haiku 4.5 — same model, frozen id.",
     },
 }
@@ -190,6 +344,120 @@ def supports_thinking(model_id: str) -> bool:
     """True when adaptive thinking is on by default, so max_tokens must
     cover reasoning as well as the answer."""
     return bool(MODELS.get(model_id, {}).get("thinking"))
+
+
+def cache_pricing_for(model_id: str) -> dict:
+    """USD per million tokens for the cache: {"read", "write_5m",
+    "write_1h"}. The writes are the base input price times the TTL's
+    multiplier; an unknown model reads at 0.1x and writes at 1.25x / 2x
+    of the $3 fallback, so a cached call is never booked at zero.
+
+    Kept apart from pricing_for(), whose {"input", "output"} shape four
+    suites compare whole and every caller of today reads."""
+    entry = MODELS.get(model_id)
+    base = pricing_for(model_id)["input"]
+    read = (entry["cache_read"] if entry and entry.get("cache_read") is not None
+            else base * CACHE_READ_FALLBACK_X)
+    return {"read": read,
+            "write_5m": base * CACHE_WRITE_5M_X,
+            "write_1h": base * CACHE_WRITE_1H_X}
+
+
+def fast_pricing_for(model_id: str) -> dict | None:
+    """Fast mode's {"input", "output"}, or None where it does not exist."""
+    return MODELS.get(model_id, {}).get("fast_pricing")
+
+
+def cost_usd(model_id: str, *, input_tokens: int, output_tokens: int,
+             cache_read: int = 0, cache_write_5m: int = 0,
+             cache_write_1h: int = 0, speed: str | None = None) -> float:
+    """What one request costs, in USD, at the catalog's prices.
+
+    With every cache counter at 0 (and no fast mode, no long prompt) this
+    is (input x p_in + output x p_out) / 1e6 computed in exactly the order
+    the provider always computed it, so a call that caches nothing books
+    the same float it booked before PR O0a. The cache terms are added only
+    when nonzero.
+
+    `speed="fast"` prices at the model's fast card, with the caching
+    multipliers on top of it (the pricing page: "Prompt caching
+    multipliers apply on top of fast mode pricing"). A long prompt on
+    Haiku 5.5 (input + cache reads + cache writes over 100,000 tokens)
+    prices the WHOLE request at its long-context card."""
+    p = pricing_for(model_id)
+    p_in, p_out = p["input"], p["output"]
+    read_price = cache_pricing_for(model_id)["read"]
+    entry = MODELS.get(model_id, {})
+    fast = entry.get("fast_pricing") if speed == "fast" else None
+    if fast:
+        read_price = fast["input"] * (read_price / p_in)
+        p_in, p_out = fast["input"], fast["output"]
+    long_card = entry.get("long_context")
+    if long_card and (input_tokens + cache_read + cache_write_5m
+                      + cache_write_1h) > long_card["above_prompt_tokens"]:
+        p_in, p_out = long_card["input"], long_card["output"]
+        read_price = long_card["cache_read"]
+    cost = input_tokens * p_in + output_tokens * p_out
+    if cache_read:
+        cost += cache_read * read_price
+    if cache_write_5m:
+        cost += cache_write_5m * p_in * CACHE_WRITE_5M_X
+    if cache_write_1h:
+        cost += cache_write_1h * p_in * CACHE_WRITE_1H_X
+    return cost / 1_000_000
+
+
+def min_cache_tokens(model_id: str) -> int | None:
+    """The shortest prefix the model will cache; shorter caches nothing."""
+    return MODELS.get(model_id, {}).get("min_cache_tokens")
+
+
+def default_effort(model_id: str) -> str | None:
+    """The effort the API applies when none is sent (None: no effort)."""
+    return MODELS.get(model_id, {}).get("default_effort")
+
+
+def supports_per_message_effort(model_id: str) -> bool:
+    """The effort-only system message (beta) — an effort change between
+    turns that keeps the prompt cache (spec §5.2a)."""
+    return bool(MODELS.get(model_id, {}).get("per_message_effort"))
+
+
+def supports_task_budget(model_id: str) -> bool:
+    return bool(MODELS.get(model_id, {}).get("task_budget"))
+
+
+def server_fallback(model_id: str) -> str | None:
+    """"both", "default" or None: the `fallbacks` forms the model takes."""
+    return MODELS.get(model_id, {}).get("server_fallback")
+
+
+# The provider smoke's models (ai_agents/management/commands/claude_smoke.py):
+# the three the Orcs' ladder routes to, and Fable 5.1 on request.
+SMOKE_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-haiku-5-5")
+SMOKE_OPTIONAL = ("claude-fable-5-1",)
+
+# The Orcs' routing ladder, table v1 (spec §7.5.4). DISPLAY ONLY in O0:
+# /ai-models/ shows it so the operator sees which ids the Orcs will pin.
+# The router (O2) reads its own versioned copy and never the tier
+# resolver, so no tier setting on that page ever moves it, and until each
+# band boundary has two completed probe blocks it is an unvalidated prior.
+ORC_LADDER_V1 = (
+    {"rung": "h0", "model": "claude-haiku-5-5", "effort": "low",
+     "note": "a paper probe only; never decides"},
+    {"rung": "r0", "model": "claude-sonnet-5-5", "effort": "low",
+     "note": "routine"},
+    {"rung": "r1", "model": "claude-sonnet-5-5", "effort": "high",
+     "note": "paper material; real money only for questions"},
+    {"rung": "r2", "model": "claude-opus-5-5", "effort": "medium",
+     "note": "real-money material"},
+    {"rung": "r3", "model": "claude-opus-5-5", "effort": "high",
+     "note": "complex"},
+    {"rung": "r4", "model": "claude-opus-5-5", "effort": "xhigh",
+     "note": "extreme when the Fable gate fails; Fable's blind twin"},
+    {"rung": "r5", "model": "claude-fable-5-1", "effort": "max",
+     "note": "extreme, gate passes; real money only, under a quota"},
+)
 
 
 def choices() -> list[tuple[str, str]]:

@@ -1203,6 +1203,92 @@ value is IGNORED, not applied. The list is paginated at 50.
 ./deploy/dc exec web python manage.py signals show 4211     # the same six blocks
 ```
 
+## The AI budget lines and the provider smoke (/ai-models/)
+
+Since PR O0a the AI budget has two lines and one total. Nothing about
+today's spending changes until the Orcs arrive (O2):
+
+- **The total** is `AI_DAILY_BUDGET_USD`. Once the whole ledger's spend
+  today reaches it, no call runs on either line. Since O0a this also stops
+  the agents that never asked the budget before (the news analyst and the
+  anomaly detector run through `BaseAgent.run`): they are refused at the
+  total and never earlier. The pre-trade sanity check is exempt, because
+  its caller turns any error into "go, full size".
+- **The Orcs' line** is `ORC_DAILY_BUDGET_USD`, a cap. At `0` (the
+  default) the line is off: no Orc call is allowed and nothing is held
+  back for them. It stays `0` until O2. The cap holds even with
+  `AI_DAILY_BUDGET_USD=0` (no total): that lifts the total and the core
+  line, never the Orcs' cap, and with the line off it still refuses
+  every Orc call.
+- **The core line** is everything else (the Mind, the critic, the
+  strategist, the reviewers). With the Orcs' line off it is the total.
+  With it on, it is the total minus what the Orcs have actually spent
+  today minus a $3 floor kept for their live urgent wakes. The deep and
+  frontier tiers stop at 70% of a line's live allowance, as before.
+
+Both variables are read when the containers start. To make a new value
+bind (for example `AI_DAILY_BUDGET_USD=27`), edit `.env`, then:
+
+```bash
+./deploy/dc up -d                       # not restart: up re-reads .env
+```
+
+**Reading /ai-models/.** The TODAY cell keeps its first two lines (the
+core line's spend and what is left of it) and adds a third:
+
+- line off: `Orcs line off (ORC_DAILY_BUDGET_USD=0) · total stop $T`;
+- line on: `AI $x of $y (= $T − Orcs spent − $3.00 floor) · Orcs $z of $C · total $t of $T`.
+
+The card "The Orcs (read-only)" shows the ladder the Orcs' router will pin
+(model and effort per rung). It is an unvalidated prior, read by the
+router from O2; no tier setting on this page ever moves it, and no
+override can be saved for an Orc agent name. The catalog table lists each
+model's cache-read price and the shortest prefix it will cache.
+
+**The provider smoke.** Two facts behind the Orcs' design need the real
+API: how many tokens their dossier is on each model's tokenizer, and
+whether a mid-conversation "effort-only" message keeps the prompt cache
+while it changes the effort of the turn after it. `claude_smoke` measures
+both on a synthetic dossier (no market data, no money, nothing private).
+Nothing depends on the result until O1. It is dry by default:
+
+```bash
+./deploy/dc exec web python manage.py claude_smoke                # the plan and the cost bound; sends nothing
+./deploy/dc exec web python manage.py claude_smoke --yes          # Sonnet 5.5, Opus 5.5, Haiku 5.5
+./deploy/dc exec web python manage.py claude_smoke --yes --with-fable
+./deploy/dc exec web python manage.py claude_smoke --yes --count-only   # token counts only, free
+```
+
+The printed cost bound assumes the worst (every prompt token written to
+the cache at the 1-hour price on both calls, every answer at its
+`max_tokens`): about $1.35 for the three models and about $2.45 more with
+Fable. A normal run costs well under the bound. `--yes` needs
+`ANTHROPIC_API_KEY` and refuses when the day's budget would not cover the
+bound. The calls are booked under the agent `claude_smoke` (source
+`Smoke:<time>:<model>:<effort>`) on the core line and show on
+/ai-models/.
+
+What each model's block means:
+
+- `count_tokens`: the five layers and the whole request, and the ratio to
+  the first model's count (the Opus and Fable tokenizer counts up to about
+  1.35x Sonnet's).
+- `PASS`: the second call (effort `xhigh`) read the cache written by the
+  first (effort `low`), and wrote at least twice the first's output, both
+  ended normally and both answers fit the schema. One cache serves every
+  effort of a model.
+- `FAIL ... read no cache`: each (model, effort) pair would need its own
+  cache, so the Orcs' router must change model and effort per epoch,
+  never per wake.
+- `FAIL ... less than 2x`: the effort-only message did not govern the
+  answer; every call would run at the model's pinned effort.
+- `FAIL ... stop_reason` or `... schema`: the answer was cut short, refused
+  or malformed; rerun once before drawing a conclusion.
+
+Send back the whole printed block, from `THE PROVIDER SMOKE` to the last
+line. A FAIL exits with `smoke FAILED: ...` and changes nothing on the
+platform.
+
 ---
 
 ## Operating notes

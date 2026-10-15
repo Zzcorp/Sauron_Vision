@@ -58,6 +58,23 @@ AGENT_GROUPS = [
 # Every key the UI may write, so a typo can't create a dead override row.
 KNOWN_AGENT_KEYS = {name for _, rows in AGENT_GROUPS for name, _, _ in rows}
 
+# The Orcs' agent names (spec §7.1 and §7.5.8, the union of both lists),
+# SHOWN on the page and never writable: the Orcs' router reads its own
+# pinned ladder (catalog.ORC_LADDER_V1, versioned from O2), never
+# resolve_agent, so an override row here would persist and be read by
+# nothing — exactly what KNOWN_AGENT_KEYS exists to refuse. Their spend
+# is the Orcs' budget line (ai_agents/spend.py). No Orc exists before O2.
+ORC_AGENT_KEYS = (
+    ("orc", "The Orc (one per open position)"),
+    ("orc_confirm", "The Orc's confirm wake"),
+    ("orc_question", "The Orc answering a question"),
+    ("orc_postmortem", "The Orc's post-mortem"),
+    ("orc_tribunal", "The council of war"),
+    ("orc_emperor", "The Emperor"),
+    ("orc_skeptic", "The Skeptic's co-sign"),
+    ("captain", "The Captain (one per asset class)"),
+)
+
 
 @staff_member_required
 def ai_models_dashboard(request):
@@ -149,7 +166,10 @@ def ai_models_dashboard(request):
         u["known"] = known_model(u["model"])
     total_cost = sum(float(u["cost"] or 0) for u in usage)
 
-    from ai_agents.spend import daily_budget, remaining_today, spent_today
+    from ai_agents.catalog import (CACHE_SOURCE, ORC_LADDER_V1,
+                                   PRICES_READ_ON, PRICING_SOURCE)
+    from ai_agents.spend import (daily_budget, lines_summary, remaining_today,
+                                 spent_today)
 
     return render(request, "dashboard/ai_models.html", {
         "page_id": "ai_models",
@@ -157,6 +177,16 @@ def ai_models_dashboard(request):
         "budget_spent_today": round(spent_today(), 4),
         "budget_remaining": (None if remaining_today() == float("inf")
                               else round(remaining_today(), 4)),
+        # The two lines and the total (PR O0a): the core line, the Orcs'
+        # line (off until O2) and the total stop.
+        "budget_lines": lines_summary(),
+        "orc_ladder": [
+            {**rung, "label": MODELS.get(rung["model"], {}).get(
+                "label", rung["model"])} for rung in ORC_LADDER_V1],
+        "orc_agent_keys": ORC_AGENT_KEYS,
+        "prices_source": PRICING_SOURCE,
+        "cache_source": CACHE_SOURCE,
+        "prices_read_on": PRICES_READ_ON,
         "tier_rows": tier_rows,
         "agent_groups": agent_groups,
         "catalog": [
