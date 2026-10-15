@@ -59,6 +59,48 @@ VENUE_PAPER = "paper"
 VENUE_ALL = "all"      # pooled — the dashboards' question, not the book's
 _VENUES = (VENUE_LIVE, VENUE_PAPER, VENUE_ALL)
 
+# ── The three money worlds (2026-10-08) ──────────────────────────────────
+# VENUE_LIVE above is `paper=False`, which also counts the eToro DEMO: a
+# row routed to eToro's virtual segment is paper=False with
+# metadata.broker_env "paper" (AssetBot.venue_stamps, VENUE_WORLDS). The
+# order paths read VENUE_LIVE (aggregation.rule_weight, the base sizing
+# reads, the trade debate, the ladder's live leg) and are left exactly as
+# they are: this change touches no real-money order path.
+#
+# The brain is a reader, not an order path, and it must never again read a
+# simulator booking as a live failure: the morning brief of 2026-10-08
+# called a paper row's -8.12R "a failed stop or a sizing error". It reads the
+# three worlds `dashboard.position_summary.world_of` names, as query
+# filters that agree with it on every stamp (tests/test_brain_reads_venues):
+#   live  — real money at the broker
+#   demo  — eToro's virtual account: broker fills, not money
+#   paper — the platform's simulator (paper=True, or a non-paper row whose
+#           carrier stamp is the simulator's, "paper", as world_of reads it)
+WORLD_LIVE, WORLD_DEMO, WORLD_PAPER = "live", "demo", "paper"
+WORLDS = (WORLD_LIVE, WORLD_DEMO, WORLD_PAPER)
+
+
+def _world_filter(qs, world: str):
+    """Narrow `qs` (AssetBotTrade) to one money world. Raises on an unknown
+    world, for the reason `_venue_filter` does.
+
+    The has_key halves keep the rows that carry no stamp at all: a missing
+    JSON key reads NULL, and NOT (NULL = 'paper') would drop them from the
+    live world (the form ai_agents/agents/trade_debate.graded_count uses)."""
+    from django.db.models import Q
+    if world not in WORLDS:
+        raise ValueError(f"world must be one of {WORLDS}, got {world!r}")
+    carrier_paper = (Q(metadata__has_key="broker")
+                     & Q(metadata__broker="paper"))
+    env_paper = (Q(metadata__has_key="broker_env")
+                 & Q(metadata__broker_env="paper"))
+    if world == WORLD_PAPER:
+        return qs.filter(Q(paper=True) | carrier_paper)
+    qs = qs.filter(paper=False).exclude(carrier_paper)
+    if world == WORLD_DEMO:
+        return qs.filter(env_paper)
+    return qs.exclude(env_paper)
+
 # No boost, no penalty. Returned whenever the venue's evidence is absent or
 # too thin to act on — the honest answer there is "I have not measured this",
 # which multiplies to 1.0 and comes with a reason attached rather than
@@ -231,6 +273,14 @@ def grade_bot_trade(trade) -> bool:
             # multiple derived from a number that does not exist.
             if risk_dollars > 0 and trade.pnl is not None:
                 trade.realized_r = round(float(trade.pnl) / risk_dollars, 4)
+    # AN EXIT AFTER AN UNMANAGED STRETCH is not graded (2026-10-15,
+    # bot_program/paper_exits UNMANAGED_KEY): a paper row nothing ran for a
+    # day or more, whose bars could not say where a resting stop would have
+    # filled, booked at the first mark a tick read. A paper row's -8.12R was
+    # that number. The row keeps its outcome and its duration; its R would
+    # be a far mark read as evidence by the ladder.
+    if (trade.metadata or {}).get("unmanaged_exit"):
+        trade.realized_r = None
 
     trade.save(update_fields=["outcome", "realized_r", "duration_minutes"])
     return True
@@ -263,6 +313,40 @@ def bot_performance_summary(*, rule_name: Optional[str] = None,
     venue is echoed back in every row so a caller can never mistake a pooled
     number for a single-venue one; that was the silent half of the bug.
     """
+    qs = _venue_filter(_graded_closes(rule_name=rule_name,
+                                      asset_class=asset_class, days=days,
+                                      user=user, since=since), venue)
+    return _summarise(qs, venue, min_n)
+
+
+def world_performance_summary(world: str, *,
+                              rule_name: Optional[str] = None,
+                              asset_class: Optional[str] = None,
+                              days: int = 180,
+                              min_n: int = 1,
+                              user=None,
+                              since=None) -> list[dict]:
+    """`bot_performance_summary` for one money world (WORLDS): the same
+    rows, the same query shape, each row's "venue" naming the world it was
+    measured on (live = real money only, demo = eToro's virtual account,
+    paper = the simulator). The brain's reader (2026-10-08)."""
+    qs = _world_filter(_graded_closes(rule_name=rule_name,
+                                      asset_class=asset_class, days=days,
+                                      user=user, since=since), world)
+    return _summarise(qs, world, min_n)
+
+
+def performance_by_venue(**kw) -> dict:
+    """{"live": rows, "demo": rows, "paper": rows}: the three worlds side by
+    side, never pooled, each row labelled with its venue, in the order the
+    money rests on them. Takes `world_performance_summary`'s keywords."""
+    return {world: world_performance_summary(world, **kw)
+            for world in WORLDS}
+
+
+def _graded_closes(*, rule_name=None, asset_class=None, days=180, user=None,
+                   since=None):
+    """The graded closed bot trades every summary above is built from."""
     from .models import AssetBotTrade
     cutoff = since if since is not None else timezone.now() - timedelta(days=days)
     # `time_stop` belongs in the population, not outside it. An outcome
@@ -276,14 +360,17 @@ def bot_performance_summary(*, rule_name: Optional[str] = None,
                    outcome__in=["hit_target", "stopped_out", "manual_close",
                                  "expired", "time_stop"])
           .exclude(rule_name=""))
-    qs = _venue_filter(qs, venue)
     if rule_name:
         qs = qs.filter(rule_name=rule_name)
     if asset_class:
         qs = qs.filter(asset_class=asset_class)
     if user is not None:
         qs = qs.filter(config__user=user)
+    return qs
 
+
+def _summarise(qs, venue: str, min_n: int) -> list[dict]:
+    """Per-(rule_name, asset_class) rows of `qs`, each labelled `venue`."""
     buckets: dict[tuple[str, str], list] = defaultdict(list)
     for t in qs.only("rule_name", "asset_class", "outcome", "realized_r",
                        "duration_minutes", "closed_at"):

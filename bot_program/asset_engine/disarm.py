@@ -48,6 +48,15 @@ NO RECORD IS NOT A BRAKE. A config switched off before this module
 existed, or by a path that keeps no record, reads "off with no record of
 who" and is treated exactly as before: not ticked. Config 26 is such a
 config until `bot brake 26` records it.
+
+EXCEPT ITS PAPER ROWS (2026-10-08). Whatever stopped a config, its PAPER
+rows stay managed while the bot tick runs (manages_paper_only, the
+runner's paper-only pass, the bot's manage_paper_only): exits only, never
+an entry. Every reason above for leaving rows alone is a broker's, and a
+paper row has none: nothing else runs its stop, and a paper row sat on a
+stopped config for weeks until the first tick that acted booked it at
+-8.12R. Its REAL rows (live, and eToro demo, which a broker holds too) are
+left exactly as above: never routed, polled or closed by that pass.
 """
 from __future__ import annotations
 
@@ -268,6 +277,34 @@ def record_words(cfg, *, short: bool = False) -> str:
     if why and not short:
         out += f": {why}"
     return out
+
+
+def manages_paper_only(cfg) -> bool:
+    """True when the config is off and NOT by a brake (a stop by hand, the
+    kill switch, or no record): while the bot tick runs, its PAPER rows are
+    still managed, exits only, and its real rows are not (2026-10-08).
+
+    Every reason those stops leave rows alone is a BROKER's: the kill
+    switch leaves real rows for reconciliation by hand, and a manage pass
+    also books a WORKING entry that has filled. A paper row has no broker,
+    and nothing else runs its stop: a paper row sat unmanaged for weeks on a
+    stopped config and the first tick that acted booked it at -8.12R. A
+    real row (live, or eToro demo, which a broker holds too) is never
+    walked by that pass."""
+    return not getattr(cfg, "enabled", True) and not keeps_managing(cfg)
+
+
+def stopped_with_open_paper_rows() -> list:
+    """The configs off by a stop that is not a brake that still hold an
+    OPEN PAPER row: the ones the runner's paper-only pass manages. A braked
+    config is never listed (its own pass manages every row), so no row is
+    managed twice in one tick."""
+    from bot_program.models import AssetBotConfig
+    return [c for c in (AssetBotConfig.objects
+                        .filter(enabled=False, trades__status="OPEN",
+                                trades__paper=True)
+                        .distinct().select_related("user").order_by("pk"))
+            if manages_paper_only(c)]
 
 
 def braked_with_open_rows() -> list:

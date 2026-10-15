@@ -98,7 +98,8 @@ def build_snapshot(verdict: dict) -> dict:
             "symbol": pos["symbol"],
             "side": pos["side"],
             "asset_class": pos.get("asset_class", ""),
-            "venue": "paper" if pos.get("paper") else "live",
+            "venue": facts.get("venue") or (
+                "paper" if pos.get("paper") else "live"),
             "qty": pos.get("qty"),
             "entry": pos.get("entry"),
             "initial_stop": pos.get("initial_stop"),
@@ -408,6 +409,10 @@ def _post_hypothesis_for(review, verdict_row: dict, parsed: dict):
         criteria = {"kind": "rule_avg_r", "rule_name": rule,
                     "comparator": "<", "threshold": 0.0,
                     "window_days": 14, "min_n": 3}
+        # graded on the position's own world (2026-10-08): a claim about
+        # why a demo row was told to close is not a claim about real money
+        if facts.get("venue") in ("live", "demo", "paper"):
+            criteria["venue"] = facts["venue"]
         horizon_hours = 14 * 24
         claim_text = (f"{rule} keeps losing money over the next 14 days — "
                       f"the reason {review.symbol} was told to "

@@ -868,17 +868,24 @@ class OptionsBot(AssetBot):
 
     # ── manage_positions: add expiry-close gate on top of base SL/TP ────
 
-    def manage_positions(self) -> int:
+    def manage_positions(self, *, paper_only: bool = False) -> int:
         """Run base SL/TP management, then force-close anything within
         `close_before_dte` of expiry to avoid theta cliff and assignment risk.
+
+        `paper_only` (2026-10-08, the base's manage_paper_only): the PAPER
+        rows alone, in the expiry sweep too — a real option is never read.
         """
-        closed = super().manage_positions()
+        closed = super().manage_positions(paper_only=paper_only)
 
         from bot_program.models import AssetBotTrade
         from bot_program.engine.broker_router import client_for_symbol
 
         cutoff = timezone.now().date() + timedelta(days=self._close_before_dte())
-        for trade in AssetBotTrade.objects.filter(config=self.cfg, status__in=("OPEN", "CLOSE_PENDING")):
+        rows = AssetBotTrade.objects.filter(
+            config=self.cfg, status__in=("OPEN", "CLOSE_PENDING"))
+        if paper_only:
+            rows = rows.filter(paper=True)
+        for trade in rows:
             try:
                 meta = trade.metadata or {}
                 # A WORKING row is a queued ORDER: nothing filled and the

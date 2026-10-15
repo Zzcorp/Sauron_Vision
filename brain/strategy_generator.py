@@ -37,6 +37,10 @@ logger = logging.getLogger(__name__)
 
 # ── Snapshot ──────────────────────────────────────────────────────────────
 
+#: Rows per venue in the generator's top-performing table (2026-10-08).
+TOP_RULES_PER_VENUE = 5
+
+
 def _build_generation_snapshot() -> dict:
     """Aggregate inputs for the generator: top-performing setups, evaluator
     catalog, current regime, recent successful patterns."""
@@ -66,17 +70,22 @@ def _build_generation_snapshot() -> dict:
         snap["available_evaluators"] = []
         snap["accepted_sizing_keys"] = []
 
-    # 2. Top 10 currently best-performing rules (last 60d) — composition signal.
+    # 2. The best-performing rules (last 60d) — composition signal. PER
+    # VENUE (2026-10-08): the top rows of each of live, demo and paper,
+    # each naming its venue, never one pooled average of a simulator and
+    # real fills.
     try:
-        from bot_program.bot_grading import bot_performance_summary
-        rows = bot_performance_summary(days=60, min_n=3)
-        rows.sort(key=lambda r: float(r.get("avg_r") or 0), reverse=True)
-        snap["top_performing_rules"] = [
-            {"rule_name": r["rule_name"], "asset_class": r["asset_class"],
-             "n": r["n"], "win_rate": round(float(r["win_rate"] or 0), 4),
-             "avg_r": round(float(r["avg_r"] or 0), 4)}
-            for r in rows[:10]
-        ]
+        from bot_program.bot_grading import performance_by_venue
+        top = []
+        for venue, rows in performance_by_venue(days=60, min_n=3).items():
+            rows.sort(key=lambda r: float(r.get("avg_r") or 0), reverse=True)
+            top.extend(
+                {"rule_name": r["rule_name"], "asset_class": r["asset_class"],
+                 "venue": venue,
+                 "n": r["n"], "win_rate": round(float(r["win_rate"] or 0), 4),
+                 "avg_r": round(float(r["avg_r"] or 0), 4)}
+                for r in rows[:TOP_RULES_PER_VENUE])
+        snap["top_performing_rules"] = top
     except Exception:
         snap["top_performing_rules"] = []
 
@@ -127,6 +136,15 @@ def _build_generation_snapshot() -> dict:
         ]
     except Exception:
         snap["evidence_ledger"] = []
+    # The ledger's lanes are the promotion ladder's own (bot_program/
+    # evidence.py), left as they are: its "live" lane is every non-paper
+    # fill, the eToro demo included. Said, so no live number is read as
+    # real money alone (2026-10-08).
+    snap["evidence_ledger_note"] = (
+        "live_n/live_r count every broker fill, eToro demo (virtual "
+        "account, not money) included; paper_n/paper_r are the platform "
+        "simulator. top_performing_rules names each row's venue apart: "
+        "live (real money), demo, paper.")
 
     return snap
 

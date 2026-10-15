@@ -124,16 +124,19 @@ class SynthesizerEmitsHypothesesTests(TestCase):
         report = _persist_report(parsed={"regime_label": "unknown"},
                                   snapshot={}, model="t", tokens_in=0,
                                   tokens_out=0, cost_usd=0.0, n_consumed=0)
+        # a Mind rule prediction names its venue (2026-10-15): with none it
+        # posts no claim (tests.test_brain_reads_venues)
         _emit_predictions(report, {"predictions": [{
             "prediction_type": "rule_decay_continues",
             "predicted_value": "rule_x", "confidence": 0.7,
-            "horizon_hours": 48, "rationale": "y",
+            "horizon_hours": 48, "rationale": "y", "venue": "live",
         }]})
         h = Hypothesis.objects.filter(source_agent="sauron_mind").first()
         self.assertIsNotNone(h)
         self.assertEqual(h.resolution_criteria.get("kind"), "rule_avg_r")
         self.assertEqual(h.resolution_criteria.get("comparator"), "<")
         self.assertEqual(h.resolution_criteria.get("rule_name"), "rule_x")
+        self.assertEqual(h.resolution_criteria.get("venue"), "live")
 
     def test_unmappable_prediction_no_hypothesis_but_agent_prediction_kept(self):
         from brain.synthesizer import _emit_predictions, _persist_report

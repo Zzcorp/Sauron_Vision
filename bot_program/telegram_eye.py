@@ -172,8 +172,9 @@ BRAKE_WORDS = ("No position was closed.",
 #: Said only when this brake stopped something (2026-10-07): a brake's
 #: stop is managed (asset_engine/disarm.py), and a reply never promises
 #: that for a config listed under "Already stopped", which may have been
-#: stopped by hand or by the kill switch and is then not managed at all.
-#: Those lines say which, config by config.
+#: stopped by hand or by the kill switch: its real positions are then not
+#: managed at all (its paper ones are, 2026-10-08). Those lines say which,
+#: config by config.
 MANAGING_WORDS = ("The bots stopped here open nothing and keep managing "
                   "what is open.")
 #: Every promise of management rides the bot tick (platform_master AND
@@ -1087,9 +1088,17 @@ def apply_brake(user, ids=(), *, everything: bool = False,
                 managed = (" — still managing" if tick_on() else
                            " — braked; the bot tick is off, nothing manages "
                            "it now")
+            elif AssetBotTrade.objects.filter(config=c, status="OPEN",
+                                              paper=False).exists():
+                # its paper rows stay managed whatever stopped it
+                # (2026-10-08, runner.manage_stopped_paper); its real ones
+                # do not
+                managed = " — real positions not managed while off"
             elif AssetBotTrade.objects.filter(config=c,
                                               status="OPEN").exists():
-                managed = " — not managed while off"
+                managed = (" — paper positions still managed" if tick_on()
+                           else " — the bot tick is off, nothing manages "
+                                "its paper positions now")
             else:
                 managed = ""
             head.append(f"{BULLET}{config_label(c)} — "

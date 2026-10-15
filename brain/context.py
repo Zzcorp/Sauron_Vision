@@ -17,6 +17,11 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+#: What each venue a concern or an overlay entry names is (2026-10-15).
+VENUE_LEGEND_LINE = ("Venues: live = real money, demo = eToro virtual "
+                     "account, paper = platform simulator; a paper or demo "
+                     "loss is never a live failure")
+
 
 def get_brain_context(*, max_age_minutes: int = 45) -> Optional[dict]:
     """Return a compact dict from the latest fresh BrainReport.
@@ -29,6 +34,7 @@ def get_brain_context(*, max_age_minutes: int = 45) -> Optional[dict]:
         "top_concerns": [{"kind","severity","ref","text"}],   # up to 3
         "theme_pressures": {theme_name: float},               # at most 5 highest
         "rule_status_overlay": {rule_name: status},           # only non-active
+        "rule_status_venue": {rule_name: venue},              # its evidence's
         "as_of_iso": str,
         "trust_score": float | None,                          # Phase-6 derived
       }
@@ -63,6 +69,10 @@ def get_brain_context(*, max_age_minutes: int = 45) -> Optional[dict]:
         k: v for k, v in (report.rule_status_overlay or {}).items()
         if v in ("watch", "pause_recommended")
     }
+    # the venue each entry's evidence rests on (2026-10-15)
+    venues = getattr(report, "rule_status_venue", None) or {}
+    overlay_venue = {k: str(venues.get(k) or "") for k in overlay
+                     if isinstance(venues, dict)}
 
     return {
         "regime_label": report.regime_label,
@@ -71,6 +81,7 @@ def get_brain_context(*, max_age_minutes: int = 45) -> Optional[dict]:
         "top_concerns": concerns,
         "theme_pressures": pressures_dict,
         "rule_status_overlay": overlay,
+        "rule_status_venue": overlay_venue,
         "as_of_iso": report.created_at.isoformat(),
         "trust_score": _brain_trust_score(),
     }
@@ -252,11 +263,22 @@ def context_for_prompt() -> str:
     if ctx["theme_pressures"]:
         pressures = ", ".join(f"{k}={v:.2f}" for k, v in ctx["theme_pressures"].items())
         lines.append(f"- Theme pressures: {pressures}")
+    # THE VENUE TRAVELS WITH EVERY NUMBER (2026-10-15). This block reaches
+    # the trade debate that gates live entries, pretrade_sanity, the
+    # mutator and the decay investigator; a concern's R with no venue on it
+    # read a paper -8.12R as a live failure.
+    venues = ctx.get("rule_status_venue") or {}
     if ctx["rule_status_overlay"]:
-        rules = ", ".join(f"{k}: {v}" for k, v in ctx["rule_status_overlay"].items())
+        rules = ", ".join(
+            f"{k}: {v}" + (f" ({venues[k]})" if venues.get(k) else "")
+            for k, v in ctx["rule_status_overlay"].items())
         lines.append(f"- Rule overlay (exceptions): {rules}")
     if ctx["top_concerns"]:
         lines.append("- Top concerns:")
         for c in ctx["top_concerns"]:
-            lines.append(f"    - [{c.get('kind','')}] {c.get('text','')}")
+            venue = f" / {c['venue']}" if c.get("venue") else ""
+            lines.append(f"    - [{c.get('kind','')}{venue}] "
+                         f"{c.get('text','')}")
+    if ctx["top_concerns"] or ctx["rule_status_overlay"]:
+        lines.append(f"- {VENUE_LEGEND_LINE}")
     return "\n".join(lines)

@@ -63,6 +63,28 @@ REPORT_GRACE_HOURS = 12
 # expectancy. Grading against it scores the sample size, not the agent.
 MIN_TRADES_FOR_RULE_R = 3
 
+#: The venues a rule_avg_r claim may be graded on (2026-10-08), the money
+#: worlds of bot_grading.WORLDS. A claim that names none is graded on the
+#: pooled record it was made on, as every claim before this date was.
+RULE_VENUES = ("live", "demo", "paper")
+#: The authors whose NEW rule_avg_r claims must name their venue
+#: (2026-10-15): the model-written ones, made reading venue-labelled
+#: tables. A claim of theirs with no venue would grade on the pooled record
+#: (one paper booking deciding it) and move a trust score that prints with
+#: no venue. Rows already posted keep pooled grading.
+VENUE_REQUIRED_FROM = ("strategist", "sauron_mind", "critic")
+
+
+def rule_rows_for(rule: str, *, venue: str = "", **kw) -> list:
+    """bot_grading rows for `rule`: the pooled record when `venue` is empty
+    (a legacy claim), else that venue's alone. One reader for the market's
+    resolver and the Mind's calibration."""
+    from bot_program.bot_grading import (bot_performance_summary,
+                                         world_performance_summary)
+    if venue:
+        return world_performance_summary(venue, rule_name=rule, **kw)
+    return bot_performance_summary(rule_name=rule, **kw)
+
 
 def canonical_regime(value) -> "Optional[str]":
     """Map a free-text regime token onto the classifier's vocabulary.
@@ -155,6 +177,12 @@ def _validate_criteria(criteria: dict, horizon_hours: int = 24) -> None:
                         f"rule_avg_r {field} {criteria[field]!r} is not "
                         f"an integer — the resolver would crash on it "
                         f"every pass, forever")
+        # The venue the claim is graded on (2026-10-08): live, demo or
+        # paper; absent is the pooled record every older claim was made on.
+        if criteria.get("venue") not in (None, "") + RULE_VENUES:
+            raise UnmeasurableClaim(
+                f"rule_avg_r venue {criteria.get('venue')!r} is not one the "
+                f"resolver knows (known: {list(RULE_VENUES)})")
 
         # SHAPE IS NOT MEASURABILITY. Every check above asks whether the
         # resolver could PARSE this claim. None of them asks whether the
@@ -293,6 +321,14 @@ def post_hypothesis(*,
     criteria = dict(resolution_criteria or {})
     try:
         _validate_criteria(criteria, horizon_hours=horizon_hours)
+        if (criteria.get("kind") == "rule_avg_r"
+                and not criteria.get("venue")
+                and str(source_agent or "") in VENUE_REQUIRED_FROM):
+            raise UnmeasurableClaim(
+                f"a rule_avg_r claim from {source_agent} must name its "
+                f"venue (one of {list(RULE_VENUES)}): with none it would "
+                f"grade on the pooled record of real money, demo and the "
+                f"simulator")
     except UnmeasurableClaim as exc:
         logger.warning("[hypothesis] refused unmeasurable claim from "
                        "%s: %s (claim: %.120s)",
@@ -390,13 +426,13 @@ def _resolve_regime_holds(hyp):
 def _resolve_rule_avg_r_threshold(hyp):
     """`resolution_criteria = {"kind": "rule_avg_r", "rule_name": "X",
     "comparator": ">=" or "<", "threshold": 0.0, "window_days": 7,
-    "min_n": 3}`
+    "min_n": 3, "venue": "live"}` — `venue` optional (2026-10-08): absent
+    grades on the pooled record, as every claim before it was made on.
 
     Ungradeable (None) when the window holds fewer than `min_n` graded trades:
     an average over one trade measures that trade, not the rule, and the agent
     shouldn't be marked wrong because the rule barely fired.
     """
-    from bot_program.bot_grading import bot_performance_summary
     crit = hyp.resolution_criteria or {}
     rule = crit.get("rule_name")
     cmp_ = crit.get("comparator", ">=")
@@ -426,21 +462,29 @@ def _resolve_rule_avg_r_threshold(hyp):
     #
     # `since` already exists in the signature; nothing needed building.
     since = max(hyp.created_at, timezone.now() - timedelta(days=window))
-    rows = bot_performance_summary(rule_name=rule, since=since, min_n=1)
+    # THE VENUE THE CLAIM NAMES (2026-10-08): a claim about live trades is
+    # graded on live trades alone. None is the pooled record a legacy claim
+    # was made on.
+    venue = str(crit.get("venue") or "")
+    if venue and venue not in RULE_VENUES:
+        return None, f"ungradeable: unknown venue '{venue}'"
+    rows = rule_rows_for(rule, venue=venue, since=since, min_n=1)
+    where = f" on {venue}" if venue else ""
     if not rows:
-        return None, (f"ungradeable: no trades for '{rule}' closed since the "
-                      f"claim was posted — a forecast cannot be graded on "
-                      f"the record that produced it")
+        return None, (f"ungradeable: no trades for '{rule}'{where} closed "
+                      f"since the claim was posted — a forecast cannot be "
+                      f"graded on the record that produced it")
     # bot_performance_summary buckets per (rule, asset_class); a rule that
     # trades two classes returns two rows. Pool them n-weighted — grading off
     # rows[0] would score whichever bucket happened to be built first.
     n = sum(int(r.get("n") or 0) for r in rows)
     if n < min_n:
-        return None, (f"ungradeable: only {n} graded trade(s) for '{rule}' in "
-                      f"{window}d, need {min_n} before an average means anything")
+        return None, (f"ungradeable: only {n} graded trade(s) for '{rule}'"
+                      f"{where} in {window}d, need {min_n} before an average "
+                      f"means anything")
     avg_r = sum(float(r.get("avg_r") or 0) * int(r.get("n") or 0)
                 for r in rows) / n
-    note = f"avg_r={avg_r:.3f} n={n}"
+    note = f"avg_r={avg_r:.3f} n={n}" + (f" venue={venue}" if venue else "")
     if cmp_ == ">=":
         return avg_r >= threshold, note
     if cmp_ == "<=":

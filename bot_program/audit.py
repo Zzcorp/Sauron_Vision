@@ -116,6 +116,19 @@ def _world(trade) -> str:
         return ""
 
 
+def _exit_model(trade) -> str:
+    """"bar_replay" | "mark" for a paper exit, "broker" for a real one;
+    "unmanaged" for a paper exit after an unmanaged stretch (ungraded)."""
+    meta = trade.metadata if isinstance(trade.metadata, dict) else {}
+    if not trade.paper:
+        return "broker"
+    if meta.get("unmanaged_exit"):
+        return "unmanaged"
+    rec = meta.get("paper_exit")
+    return str((rec or {}).get("model") or "mark") if isinstance(rec, dict) \
+        else "mark"
+
+
 def record_trade_open(user, *, trade) -> None:
     """Hook from `AssetBot.scan_symbol` after a trade is created."""
     try:
@@ -162,6 +175,10 @@ def record_trade_close(user, *, trade) -> None:
             "rule_name": trade.rule_name or "",
             "mode": "paper" if trade.paper else "live",
             "world": _world(trade),
+            # how the exit price was found (2026-10-15): a paper exit
+            # replayed from the bars ("bar_replay") reads apart from one
+            # booked at a tick's mark ("mark"); a real one is the broker's
+            "exit_model": _exit_model(trade),
         }
         record_event("trade_close", data, user=user)
         from brain.observations import record_observation

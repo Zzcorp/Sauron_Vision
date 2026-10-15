@@ -1364,7 +1364,80 @@ def check_stop_overshoot(ctx, g) -> list:
     if simulated:
         ctx.note(g, f"{_plural(simulated, 'paper or demo close')} past "
                  f"-{OVERSHOOT_R}R not alarmed: not real money")
+    _note_paper_past_stop(ctx, g)
     return out
+
+
+#: G12's note: at most this many open paper rows named per run.
+PAPER_PAST_STOP_LINES = 5
+
+
+def _note_paper_past_stop(ctx, g) -> None:
+    """NOTE every OPEN PAPER row whose mark is more than OVERSHOOT_R past
+    its stop (2026-10-08): never a finding, never a brake, never a message
+    (notes print in `manage.py morgul` only), in R and prices only.
+
+    A paper row sat OPEN for weeks with its mark ever further past its stop
+    and nothing said so until the tick that booked it at -8.12R. Measured
+    from the STOP, not the entry, against the risk the row opened with
+    (trailing.initial_risk_per_unit): a managed row a tick behind a fast
+    move reads well under the line, only a stop nobody is running crosses
+    it. The mark is the one the tick would book on (PaperTrader.ticker: a
+    database read, no broker); no price, a shut market, or no frozen stop
+    is "not judged", and said. Demo and live rows are never read here: a
+    real stop rests at the broker."""
+    from bot_program.asset_engine import disarm
+    from bot_program.asset_models import AssetBotTrade
+    from bot_program.engine.paper_trader import PaperTrader
+    from bot_program.engine.trailing import initial_risk_per_unit
+
+    rows = (AssetBotTrade.objects
+            .filter(status="OPEN", paper=True, stop_loss__isnull=False)
+            .select_related("config").order_by("pk"))
+    trader, marks, lines, unjudged = PaperTrader(None), {}, [], 0
+    tick = []
+    for trade in rows:
+        if trade.symbol not in marks:
+            try:
+                tk = trader.ticker(trade.symbol) or {}
+            except Exception:  # noqa: BLE001 — no price is "not judged"
+                tk = {}
+            marks[trade.symbol] = _float(tk.get("lastPrice"))
+        mark, stop = marks[trade.symbol], _float(trade.stop_loss)
+        risk = _float(initial_risk_per_unit(trade))
+        if not mark or not risk or stop is None:
+            unjudged += 1
+            continue
+        d = 1 if str(trade.side).upper() == "BUY" else -1
+        past = d * (stop - mark) / risk
+        if past <= OVERSHOOT_R:
+            continue
+        cfg = trade.config
+        if not tick:
+            tick.append(_tick_runs())
+        if not tick[0]:
+            why = "the bot tick is off: nothing manages it"
+        elif cfg is not None and not cfg.enabled:
+            why = (f"its bot is {disarm.record_words(cfg, short=True)}; "
+                   f"its paper exits still run every tick")
+        else:
+            why = ("its bot runs: the next managed tick books it from "
+                   "its bars (at the stop, the open of a bar that gapped "
+                   "through it, or the time stop's bar); with no bars to "
+                   "replay it books at the mark, ungraded after a day "
+                   "unmanaged")
+        lines.append(f"{_trade_label(trade)}: open, its mark "
+                     f"{eye.price(mark)} is {past:.1f}R past its stop "
+                     f"{eye.price(stop)} — {why}")
+    for line in lines[:PAPER_PAST_STOP_LINES]:
+        ctx.note(g, line)
+    if len(lines) > PAPER_PAST_STOP_LINES:
+        ctx.note(g, f"+{len(lines) - PAPER_PAST_STOP_LINES} more open paper "
+                 f"positions past their stop by more than {OVERSHOOT_R}R")
+    if unjudged:
+        ctx.note(g, f"{_plural(unjudged, 'open paper position')} not "
+                 f"judged against its stop: no price now (a shut market or "
+                 f"no fresh quote), or no stop recorded at the open")
 
 
 GUARDS = [
@@ -1549,16 +1622,18 @@ def _left_open(pks) -> dict:
     (and those with no stop resting there, _bare), and paper positions.
     A working entry is an order, not a position: not counted as one.
 
-    MANAGED OR NOT (2026-10-07). "broker", "bare" and "paper" count only
-    the rows of configs still braked (disarm.keeps_managing): their stops
-    are run by the bot every tick. Where each config stands is read now
+    MANAGED OR NOT (2026-10-07). "broker" and "bare" count only the rows
+    of configs still braked (disarm.keeps_managing): their stops are run by
+    the bot every tick. "paper" counts the paper rows of every stopped
+    config (2026-10-08): a paper row is managed whatever stopped its config
+    (disarm.manages_paper_only), so it is never "unmanaged". Where each config stands is read now
     (_brake_state): an "earlier" outcome is rebuilt from memory, and its
     config may since have been re-armed or stopped again by another path.
       - "rearmed": the labels of the configs enabled again since. They
         are not stopped: their rows are not counted, and the words never
         say they open nothing.
-      - "unmanaged": the open rows of the configs off by any other stop,
-        which nothing manages, named per config by who stopped it:
+      - "unmanaged": the open REAL rows of the configs off by any other
+        stop, which nothing manages, named per config by who stopped it:
         "others", (label, code, rows) for a record that is not a brake's;
         "unrecorded", (label, pk, rows) for no record at all (stopped
         before stops were recorded: `bot brake` puts it under
@@ -1588,10 +1663,12 @@ def _left_open(pks) -> dict:
             if _is_manual_lane(off[trade.config_id]):
                 held[trade.config_id] += 1
             continue
-        if trade.config_id not in braked:
-            unmanaged[trade.config_id] += 1
-        elif trade.paper:
+        if trade.paper:
+            # a paper row is managed whatever stopped its config
+            # (2026-10-08, disarm.manages_paper_only)
             left["paper"] += 1
+        elif trade.config_id not in braked:
+            unmanaged[trade.config_id] += 1
         else:
             left["broker"] += 1
             left["bare"] += int(_bare(meta))

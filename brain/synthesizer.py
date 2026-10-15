@@ -32,6 +32,39 @@ logger = logging.getLogger(__name__)
 # closes in 14 days" while the query looked at 30 is worse than no note.
 TRACK_RECORD_WINDOW_DAYS = 14
 
+# THE VENUES, APART (2026-10-08). The 14-day record used to be one pooled
+# table with the venue dropped, so the brief of 2026-10-08 read a paper row —
+# a simulator stop nobody managed for weeks, booked at -8.12R — as "a
+# failed stop or a sizing error", and the operator's real manual_take
+# commodity trades (slightly positive) as -0.42R pooled with demo and
+# paper. Every row now names its venue, the legend below travels with the
+# rows into the prompt and the stored report, and each venue has its own
+# cap so paper rows can never push the live ones out of the table.
+TRACK_RECORD_ROWS_PER_VENUE = 10
+VENUE_LEGEND = {
+    "live": "real money at the broker",
+    "demo": ("eToro's virtual (demo) account: broker fills, not money"),
+    "paper": ("the platform simulator: its stop is booked from the bars "
+              "since 2026-10-08, but an older paper close, or one with no "
+              "bars, was a per-tick comparison that booked the first price "
+              "a tick saw, so a gap or an unmanaged stretch can book far "
+              "beyond -1R"),
+}
+VENUES = tuple(VENUE_LEGEND)
+
+#: The rule every agent that reads a track record is given, word for word
+#: (the Mind, the critic, the strategist).
+VENUE_RULE = (
+    "VENUES. Every track-record row names its venue: live (real money at "
+    "the broker), demo (eToro's virtual account: broker fills, not money) "
+    "or paper (the platform simulator). `track_record_venues` says what "
+    "each one is. Every R you cite names its venue. A paper or demo result "
+    "is never a live failure: never call a paper or demo loss a failed "
+    "stop, a sizing error or real money lost. Recommend "
+    "pause_recommended only on live evidence; a paper or demo decline is at "
+    "most watch (a pause stops the rule's real entries too). Each concern "
+    "carries the venue it rests on (empty when it rests on none).")
+
 # How far behind its own market a HEALTHY writer leaves the DAILY frame.
 #
 # Until 2026-09-26 this was a flat age limit on every probe, measured from
@@ -70,7 +103,21 @@ PROBE_WRITER_LAG_HOURS = {"1d": STALE_PROBE_HOURS, "4h": 2.0, "1h": 2.0}
 MIN_FRESH_PROBES = 2
 
 
-def _no_track_record_reason() -> str:
+def _venue_payload(payload):
+    """An observation's payload with its money world named `venue`
+    (2026-10-15): audit's fill_closed carries "mode": "live" for an eToro
+    demo row beside "world": "demo", and the prompt tells the Mind that rows
+    name a `venue`. The world wins; "mode" is dropped."""
+    if not isinstance(payload, dict) or not ("world" in payload
+                                              or "mode" in payload):
+        return payload
+    p = dict(payload)
+    p["venue"] = p.get("world") or p.get("mode") or ""
+    p.pop("mode", None)
+    return p
+
+
+def _no_track_record_reason(venue: str | None = None) -> str:
     """Why there is no realized-R evidence — in the terms an operator acts on.
 
     The distinction that matters is between "nothing has closed yet" (wait,
@@ -78,19 +125,28 @@ def _no_track_record_reason() -> str:
     fault, in the stop that was never recorded or the rule tag that was never
     written). Both produce an empty table; only one is a bug, and a briefing
     that cannot tell them apart escalates a young book as broken telemetry.
+
+    With `venue` (live, demo or paper), the same reading for that venue's
+    rows alone (2026-10-08): "no live closes" and "no closes" are different
+    statements about real money.
     """
     from datetime import timedelta as _td
     try:
         from bot_program.models import AssetBotTrade
+        from bot_program.bot_grading import _world_filter
     except Exception:  # pragma: no cover - app not installed
         return "NOT MEASURED — the bot trade book is unavailable."
 
+    def scoped(qs):
+        return qs if venue is None else _world_filter(qs, venue)
+
     since = timezone.now() - _td(days=TRACK_RECORD_WINDOW_DAYS)
-    closed = AssetBotTrade.objects.filter(status="CLOSED", closed_at__gte=since)
+    closed = scoped(AssetBotTrade.objects.filter(status="CLOSED",
+                                                 closed_at__gte=since))
     n_closed = closed.count()
     if not n_closed:
-        n_open = AssetBotTrade.objects.filter(
-            status__in=("OPEN", "CLOSE_PENDING")).count()
+        n_open = scoped(AssetBotTrade.objects.filter(
+            status__in=("OPEN", "CLOSE_PENDING"))).count()
         return (
             f"NO REALIZED R YET — nothing has closed in the last "
             f"{TRACK_RECORD_WINDOW_DAYS} days ({n_open} position(s) still "
@@ -210,7 +266,8 @@ def _build_world_snapshot(*, max_obs: int = 80) -> dict:
     obs_list = list(obs_qs.values("id", "kind", "payload", "source_agent",
                                     "created_at"))
     snap["observations"] = [
-        {**o, "created_at": o["created_at"].isoformat()} for o in obs_list
+        {**o, "payload": _venue_payload(o.get("payload")),
+         "created_at": o["created_at"].isoformat()} for o in obs_list
     ]
     snap["observations_count_by_kind"] = {}
     for o in obs_list:
@@ -235,6 +292,7 @@ def _build_world_snapshot(*, max_obs: int = 80) -> dict:
     n_bot = n_pf = 0
     try:
         from bot_program.models import AssetBotTrade
+        from dashboard.position_summary import world_of
         qs_bot = AssetBotTrade.objects.filter(
             status__in=("OPEN", "CLOSE_PENDING"))
         n_bot = qs_bot.count()
@@ -245,7 +303,9 @@ def _build_world_snapshot(*, max_obs: int = 80) -> dict:
                 "asset_class": t.asset_class,
                 "side": (t.side or "").upper(),
                 "rule_name": t.rule_name or "",
-                "paper": bool(t.paper),
+                # live, demo or paper (2026-10-08): a bare `paper: false`
+                # read an eToro demo position as real money
+                "venue": world_of(t),
                 "status": t.status,
                 "book": "bot",
             })
@@ -282,23 +342,44 @@ def _build_world_snapshot(*, max_obs: int = 80) -> dict:
     # states its own cause, and states the window it was measured over —
     # "no closes in 14 days" and "the query failed" are opposite instructions
     # to whoever reads this next.
+    #
+    # AND PER VENUE (2026-10-08). One pooled table read a paper row — a
+    # simulator stop nobody managed, booked at -8.12R — as a live failure.
+    # Every row names its venue (live, demo, paper), the legend says what
+    # each one is, the venues are listed live first, and each has its own
+    # cap, so paper rows can never push the live ones out of the table.
     snap["rule_track_records_window_days"] = TRACK_RECORD_WINDOW_DAYS
+    snap["track_record_venues"] = dict(VENUE_LEGEND)
     try:
-        from bot_program.bot_grading import bot_performance_summary
-        rows = bot_performance_summary(days=TRACK_RECORD_WINDOW_DAYS, min_n=1)
-        snap["rule_track_records"] = [
-            {
-                "rule_name": r["rule_name"],
-                "asset_class": r["asset_class"],
-                "n": r["n"],
-                "win_rate": round(float(r["win_rate"] or 0), 4),
-                "avg_r": round(float(r["avg_r"] or 0), 4),
-                "expectancy": round(float(r.get("expectancy") or 0), 4),
-            }
-            for r in rows[:30]
-        ]
-        if not snap["rule_track_records"]:
+        from bot_program.bot_grading import performance_by_venue
+        by_venue = performance_by_venue(days=TRACK_RECORD_WINDOW_DAYS,
+                                        min_n=1)
+        rows = []
+        snap["rule_track_records_total"] = {}
+        snap["rule_track_records_shown"] = {}
+        notes = {}
+        for venue, venue_rows in by_venue.items():
+            shown = venue_rows[:TRACK_RECORD_ROWS_PER_VENUE]
+            snap["rule_track_records_total"][venue] = len(venue_rows)
+            snap["rule_track_records_shown"][venue] = len(shown)
+            if not venue_rows:
+                notes[venue] = _no_track_record_reason(venue)
+            rows.extend(
+                {
+                    "rule_name": r["rule_name"],
+                    "asset_class": r["asset_class"],
+                    "venue": venue,
+                    "n": r["n"],
+                    "win_rate": round(float(r["win_rate"] or 0), 4),
+                    "avg_r": round(float(r["avg_r"] or 0), 4),
+                    "expectancy": round(float(r.get("expectancy") or 0), 4),
+                }
+                for r in shown)
+        snap["rule_track_records"] = rows
+        if not rows:
             snap["rule_track_records_note"] = _no_track_record_reason()
+        elif notes:
+            snap["rule_track_records_venue_notes"] = notes
     except Exception as e:  # noqa: BLE001
         snap["rule_track_records"] = []
         snap["rule_track_records_note"] = (
@@ -417,6 +498,9 @@ def _build_world_snapshot(*, max_obs: int = 80) -> dict:
             {
                 "rule_name": a.rule_name,
                 "asset_class": a.asset_class,
+                # the venue the decay was measured on; "all" is an alert
+                # from before the detector split the venues (2026-10-08)
+                "venue": a.venue,
                 "triggers": a.triggers,
                 "recent_avg_r": float(a.recent_avg_r or 0),
                 "baseline_avg_r": float(a.baseline_avg_r or 0),
@@ -437,7 +521,8 @@ SCHEMA_HINT = """{
   "regime_confidence": 0.0..1.0,
   "portfolio_health_score": 0.0..1.0,
   "top_concerns": [
-    {"kind": "string", "severity": 0.0..1.0, "ref": "string", "text": "string"}
+    {"kind": "string", "severity": 0.0..1.0, "ref": "string",
+     "venue": "live|demo|paper|", "text": "string"}
   ],
   "theme_pressures": {"<theme_name>": 0.0..1.0},
   "rule_status_overlay": {"<rule_name>": "active|watch|pause_recommended"},
@@ -445,6 +530,7 @@ SCHEMA_HINT = """{
   "predictions": [
     {"prediction_type": "regime_persistence|rule_decay_continues|rule_recovers|...",
      "predicted_value": "string concise label",
+     "venue": "live|demo|paper (rule predictions: the venue it is graded on)",
      "confidence": 0.0..1.0,
      "horizon_hours": int,
      "rationale": "one sentence"}
@@ -485,6 +571,7 @@ class SauronMindAgent(BaseAgent):
             "4. Emit 1-3 falsifiable predictions the platform can grade later. "
             "Bad: 'markets will be volatile'. Good: 'rule X continues decaying "
             "(recent_avg_r < 0) over next 48h, confidence 0.65'.\n\n"
+            f"{VENUE_RULE}\n\n"
             "Tone: terse, concrete, ZERO hedging. You are Sauron, not a "
             "weather forecaster.\n\n"
             "Respond ONLY with valid JSON in this exact schema:\n"
@@ -621,6 +708,71 @@ def _apply_regime_hysteresis(label: str, confidence: float
     return held, prev.regime_confidence
 
 
+def _track_records_of(snapshot) -> dict:
+    """The venue-labelled evidence the report was written from, stored on
+    the report (2026-10-08): the rows, the legend and the window. The
+    strategist reads the reports, not the snapshot, so the venue has to
+    travel with them; a snapshot with no track-record table stores {}."""
+    if not isinstance(snapshot, dict) or "rule_track_records" not in snapshot:
+        return {}
+    out = {
+        "rows": list(snapshot.get("rule_track_records") or []),
+        "venues": dict(snapshot.get("track_record_venues") or VENUE_LEGEND),
+        "window_days": snapshot.get("rule_track_records_window_days",
+                                    TRACK_RECORD_WINDOW_DAYS),
+    }
+    for key in ("rule_track_records_note", "rule_track_records_venue_notes",
+                "rule_track_records_total"):
+        if snapshot.get(key):
+            out[key.replace("rule_track_records_", "")] = snapshot[key]
+    return out
+
+
+def _names_rule(ref, rule: str) -> bool:
+    """Does a concern's `ref` name `rule` (the whole ref, or one of the
+    names it lists)?"""
+    import re
+    ref = str(ref or "").strip()
+    return bool(rule) and (ref == rule
+                           or rule in re.split(r"[\s,;/|]+", ref))
+
+
+def _overlay_on_evidence(overlay: dict, concerns: list,
+                         snapshot) -> tuple:
+    """(overlay, venues): `overlay` with every pause_recommended that has no
+    LIVE evidence downgraded to watch, and {rule: the venue its evidence
+    rests on, or ""}. Live evidence is a concern with venue "live" whose ref
+    names the rule, or a live track-record row of the rule below 0R in the
+    snapshot the report was written from. Otherwise the venue is the first
+    concern's that names the rule, or the first venue (live, demo, paper)
+    where the rule's record is below 0R."""
+    rows = []
+    if isinstance(snapshot, dict):
+        rows = [r for r in (snapshot.get("rule_track_records") or [])
+                if isinstance(r, dict)]
+    out, venues = dict(overlay), {}
+    for rule, status in overlay.items():
+        named = [c.get("venue") or "" for c in concerns
+                 if isinstance(c, dict) and _names_rule(c.get("ref"), rule)]
+        losing = []
+        for r in rows:
+            try:
+                below = float(r.get("avg_r")) < 0
+            except (TypeError, ValueError):
+                below = False
+            if r.get("rule_name") == rule and below:
+                losing.append(r.get("venue") or "")
+        live = "live" in named or "live" in losing
+        if live:
+            venues[rule] = "live"
+        else:
+            venues[rule] = next((v for v in named if v), "") or next(
+                (v for v in VENUES if v in losing), "")
+        if status == "pause_recommended" and not live:
+            out[rule] = "watch"
+    return out, venues
+
+
 def _persist_report(parsed: dict, snapshot: dict, *, model: str,
                      tokens_in: int, tokens_out: int, cost_usd: float,
                      n_consumed: int, error: str = "") -> "BrainReport":
@@ -654,6 +806,10 @@ def _persist_report(parsed: dict, snapshot: dict, *, model: str,
             c["severity"] = max(0.0, min(1.0, float(c.get("severity"))))
         except (TypeError, ValueError):
             c["severity"] = None
+        # The venue the concern rests on (2026-10-08): live, demo, paper,
+        # or "" — never a word the model made up.
+        venue = str(c.get("venue") or "").strip().lower()
+        c["venue"] = venue if venue in VENUES else ""
 
     pressures = parsed.get("theme_pressures")
     if not isinstance(pressures, dict):
@@ -673,6 +829,14 @@ def _persist_report(parsed: dict, snapshot: dict, *, model: str,
         str(k): v for k, v in overlay.items()
         if isinstance(v, str) and v in ALLOWED_RULE_STATUSES
     }
+    # A PAUSE RESTS ON LIVE EVIDENCE (2026-10-15). pause_recommended stops
+    # the rule's entries on every venue, real money included
+    # (context.brain_rule_advisory, base.py's BRAIN_PAUSED skip), so one
+    # resting on paper or demo alone is downgraded to watch here, whatever
+    # the prompt let through, and every overlay entry carries the venue its
+    # evidence came from.
+    cleaned_overlay, overlay_venue = _overlay_on_evidence(
+        cleaned_overlay, concerns, snapshot)
 
     narrative = parsed.get("narrative_md") or ""
     if not isinstance(narrative, str):
@@ -699,6 +863,8 @@ def _persist_report(parsed: dict, snapshot: dict, *, model: str,
         top_concerns=concerns,
         theme_pressures=cleaned_pressures,
         rule_status_overlay=cleaned_overlay,
+        rule_status_venue=overlay_venue,
+        track_records=_track_records_of(snapshot),
         narrative_md=narrative[:8000],
         model_used=model,
         tokens_in=tokens_in,
@@ -749,6 +915,16 @@ def _emit_predictions(report, parsed: dict) -> int:
         try:
             ptype = str(p.get("prediction_type") or "brain_call")[:30]
             pval = str(p.get("predicted_value") or "")[:100]
+            # A rule prediction is graded on the venue it names (2026-10-08);
+            # one that names none, or one we do not know, is graded pooled,
+            # as every prediction before this was.
+            venue = str(p.get("venue") or "").strip().lower()
+            venue = venue if venue in VENUES else ""
+            stored_val = pval
+            if venue and ptype in RULE_PREDICTIONS and pval:
+                # AgentPrediction has no JSON column: calibration reads
+                # "rule@venue" back (calibration._split_rule_venue)
+                stored_val = f"{pval[:90]}@{venue}"
             try:
                 conf = max(0.0, min(1.0, float(p.get("confidence", 0.5))))
             except (TypeError, ValueError):
@@ -761,7 +937,7 @@ def _emit_predictions(report, parsed: dict) -> int:
             ap = AgentPrediction.objects.create(
                 agent="sauron_mind",
                 prediction_type=ptype,
-                predicted_value=pval,
+                predicted_value=stored_val,
                 confidence=conf,
                 expected_resolution_at=now + timedelta(hours=horizon_hours),
                 evaluation_notes=rationale,
@@ -769,14 +945,17 @@ def _emit_predictions(report, parsed: dict) -> int:
 
             # Mirror as a Hypothesis where we can grade it.
             if post_hypothesis is not None:
-                criteria = _prediction_to_hypothesis_criteria(ptype, pval)
+                criteria = _prediction_to_hypothesis_criteria(
+                    ptype, pval, venue=venue)
                 if criteria:
                     try:
                         post_hypothesis(
-                            claim_text=f"[{ptype}] {pval}",
+                            claim_text=(f"[{ptype}] {pval}"
+                                        + (f" ({venue})" if venue else "")),
                             source_agent="sauron_mind",
                             claim_payload={"prediction_type": ptype,
                                             "predicted_value": pval,
+                                            "venue": venue,
                                             "rationale": rationale},
                             resolution_criteria=criteria,
                             confidence=conf,
@@ -792,13 +971,36 @@ def _emit_predictions(report, parsed: dict) -> int:
     return n
 
 
-def _prediction_to_hypothesis_criteria(ptype: str, pval: str) -> Optional[dict]:
+#: The prediction types graded on a rule's realized R.
+RULE_PREDICTIONS = ("rule_decay_continues", "rule_recovers")
+
+
+def _prediction_to_hypothesis_criteria(ptype: str, pval: str, *,
+                                       venue: str = "") -> Optional[dict]:
     """Translate a brain prediction type → hypothesis resolution_criteria.
 
     Returns None when the prediction can't be auto-graded by the existing
     resolvers — the AgentPrediction still gets created, but no Hypothesis
-    is posted.
+    is posted. A rule prediction carries the `venue` it names (2026-10-08);
+    none means the pooled record, as before.
     """
+    if ptype in RULE_PREDICTIONS and pval:
+        criteria = _rule_criteria(ptype, pval)
+        if venue in VENUES:
+            criteria["venue"] = venue
+        return criteria
+    return _other_criteria(ptype, pval)
+
+
+def _rule_criteria(ptype: str, pval: str) -> dict:
+    if ptype == "rule_decay_continues":
+        return {"kind": "rule_avg_r", "rule_name": pval,
+                "comparator": "<", "threshold": 0.0, "window_days": 7}
+    return {"kind": "rule_avg_r", "rule_name": pval,
+            "comparator": ">=", "threshold": 0.0, "window_days": 7}
+
+
+def _other_criteria(ptype: str, pval: str) -> Optional[dict]:
     if ptype == "regime_persistence" and pval:
         from .hypotheses import canonical_regime
         regime = canonical_regime(pval)
@@ -807,12 +1009,6 @@ def _prediction_to_hypothesis_criteria(ptype: str, pval: str) -> Optional[dict]:
             # still records the call; no market bet forms on it.
             return None
         return {"kind": "regime_holds", "regime": regime}
-    if ptype == "rule_decay_continues" and pval:
-        return {"kind": "rule_avg_r", "rule_name": pval,
-                "comparator": "<", "threshold": 0.0, "window_days": 7}
-    if ptype == "rule_recovers" and pval:
-        return {"kind": "rule_avg_r", "rule_name": pval,
-                "comparator": ">=", "threshold": 0.0, "window_days": 7}
     return None
 
 

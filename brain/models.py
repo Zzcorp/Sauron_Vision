@@ -106,6 +106,16 @@ class BrainReport(models.Model):
     theme_pressures = models.JSONField(default=dict)
     # JSON: {rule_name: "active" | "watch" | "pause_recommended"}
     rule_status_overlay = models.JSONField(default=dict)
+    # JSON: {rule_name: "live" | "demo" | "paper" | ""} — the venue each
+    # overlay entry's evidence rests on (2026-10-15). A pause_recommended
+    # always rests on live evidence (synthesizer._overlay_on_evidence).
+    rule_status_venue = models.JSONField(default=dict, blank=True)
+    # JSON: the venue-labelled track records the report was written from
+    # (2026-10-08): {"rows": [{rule_name, asset_class, venue, n, win_rate,
+    # avg_r, expectancy}], "venues": {venue: what it is}, "window_days": N}.
+    # The strategist reads reports, not snapshots: without this a paper
+    # -8R reached the morning brief as a live failure.
+    track_records = models.JSONField(default=dict, blank=True)
     # Free-form markdown for humans on the dashboard.
     narrative_md = models.TextField(blank=True)
 

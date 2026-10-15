@@ -96,8 +96,10 @@ def _manual_configs_outside_commodities(user):
 
 
 def _disable_cost_note(cfgs) -> str:
-    """Said BEFORE the press: a disabled config is not ticked, so what it
-    holds open goes unmanaged — counted per config, as of this page load."""
+    """Said BEFORE the press: a disabled config's REAL positions go
+    unmanaged (its paper ones stay managed while the bot tick runs,
+    2026-10-08, runner.manage_stopped_paper) — counted per config, as of
+    this page load."""
     from django.db.models import Count
     from bot_program.models import AssetBotTrade
 
@@ -109,8 +111,9 @@ def _disable_cost_note(cfgs) -> str:
     counts = ", ".join(f"{cfg.asset_class} {open_by_cfg.get(cfg.id, 0)}"
                        for cfg in cfgs)
     return ("Disabling stops the platform managing that config's open "
-            "positions: no time stop, no trailing stop, and a paper position "
-            f"has no stop at all. Open now: {counts}. A manual config opens "
+            "real positions: no time stop, no trailing stop, only what rests "
+            "at the broker. Its paper positions stay managed while the bot "
+            f"tick runs. Open now: {counts}. A manual config opens "
             "nothing on its own, so to stop manual entries without stranding "
             "a position, close its positions first, then disable.")
 

@@ -72,47 +72,79 @@ def _check_hypothesis_refuted(rule_name: str) -> Optional[dict]:
     }
 
 
+def _deciding_venue(by_venue: dict, min_n: int):
+    """(venue, rows, n): the venue a rule is judged on (2026-10-15) — live
+    when it holds at least `min_n` graded closes, else demo, else paper
+    (Aragorn's 1b rule); None when no venue holds that many. The RuleControl
+    a demotion pauses stops the rule's REAL entries too, so a paper or demo
+    record never outvotes a live one that passes."""
+    for venue in ("live", "demo", "paper"):
+        rows = by_venue.get(venue) or []
+        n = sum(int(r.get("n") or 0) for r in rows)
+        if n and n >= min_n:
+            return venue, rows, n
+    return None
+
+
 def _check_sustained_negative(rule_name: str, *,
                                 window_days: int, min_n: int,
                                 min_avg_r: float) -> Optional[dict]:
-    """Returns metrics dict if avg_r < min_avg_r over the window with ≥ min_n trades."""
+    """Returns metrics dict if avg_r < min_avg_r over the window with ≥ min_n
+    trades ON THE VENUE THAT DECIDES, the venue named in the metrics.
+
+    LIVE FIRST, NEVER POOLED (2026-10-08, 2026-10-15): the pooled record
+    averaged a simulator stop booked weeks late with real fills. The rule is
+    judged on its live trades when it has `min_n` of them in the window, and
+    a live record that passes spares it whatever demo or paper say; demo,
+    then paper, decide only when the venue above holds fewer than `min_n`.
+    Judging every venue and demoting on the first that failed paused rules
+    trading real money at a profit on a paper or demo record alone. A rule's
+    classes are pooled n-weighted within the venue: the RuleControl this
+    pauses is per rule, not per class."""
     try:
-        from bot_program.bot_grading import bot_performance_summary
+        from bot_program.bot_grading import performance_by_venue
     except Exception:
         return None
-    rows = bot_performance_summary(rule_name=rule_name,
-                                     days=window_days, min_n=1)
-    if not rows:
+    by_venue = performance_by_venue(rule_name=rule_name, days=window_days,
+                                    min_n=1)
+    decided = _deciding_venue(by_venue, min_n)
+    if decided is None:
         return None
-    row = rows[0]
-    n = int(row.get("n") or 0)
-    if n < min_n:
-        return None
-    avg_r = float(row.get("avg_r") or 0)
+    venue, rows, n = decided
+    avg_r = sum(float(r.get("avg_r") or 0) * int(r.get("n") or 0)
+                for r in rows) / n
     if avg_r >= min_avg_r:
         return None
-    return {"window_days": window_days, "n": n,
+    return {"window_days": window_days, "n": n, "venue": venue,
             "avg_r": round(avg_r, 4), "threshold": min_avg_r}
 
 
 def _check_consecutive_losses(rule_name: str, *,
                                 consec_threshold: int) -> Optional[dict]:
     """Returns metrics dict if the most recent `consec_threshold` graded trades
-    on this rule were ALL losses (realized_r < 0)."""
+    on this rule ON THE VENUE THAT DECIDES were ALL losses (realized_r < 0),
+    the venue named: the highest venue (live, demo, paper) holding at least
+    `consec_threshold` graded closes, alone (2026-10-15). Five paper losses
+    never pause a rule whose live trades are winning, and a streak that
+    alternates a paper loss and a real one is two venues' trades, not one
+    rule's streak."""
     try:
         from bot_program.models import AssetBotTrade
+        from bot_program.bot_grading import WORLDS, _world_filter
     except Exception:
         return None
-    qs = (AssetBotTrade.objects
-          .filter(rule_name=rule_name, status="CLOSED",
-                   realized_r__isnull=False)
-          .order_by("-closed_at")[:consec_threshold])
-    rows = list(qs.values("realized_r", "closed_at"))
-    if len(rows) < consec_threshold:
-        return None
-    if all(float(r["realized_r"]) < 0 for r in rows):
-        return {"consec_threshold": consec_threshold,
-                "last_realized_rs": [round(float(r["realized_r"]), 4) for r in rows]}
+    for venue in WORLDS:
+        qs = _world_filter(AssetBotTrade.objects.filter(
+            rule_name=rule_name, status="CLOSED", realized_r__isnull=False),
+            venue).order_by("-closed_at")[:consec_threshold]
+        rows = list(qs.values("realized_r", "closed_at"))
+        if len(rows) < consec_threshold:
+            continue
+        if not all(float(r["realized_r"]) < 0 for r in rows):
+            return None        # the deciding venue's streak is broken
+        return {"consec_threshold": consec_threshold, "venue": venue,
+                "last_realized_rs": [round(float(r["realized_r"]), 4)
+                                     for r in rows]}
     return None
 
 

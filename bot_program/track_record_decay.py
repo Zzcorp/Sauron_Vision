@@ -40,11 +40,34 @@ COOLDOWN_DAYS = 7
 # ── Per-user check ────────────────────────────────────────────────────────
 
 def check_user_decay(user) -> dict:
-    """Run the decay detector for one user.
+    """Run the decay detector for one user, once PER VENUE (2026-10-08).
+
+    Live, demo and paper are judged apart (bot_grading.WORLDS): a pooled
+    record averaged a simulator stop booked weeks late with real fills, and
+    the alert it raised (and the `rule_decayed` observation the Mind reads)
+    named no venue. Each alert, its dedupe and its resolution are keyed on
+    (rule, class, venue). An open alert from before the split (venue "all")
+    is resolved on the first pass: the per-venue pass that follows re-fires
+    on the venue that is actually decaying.
 
     Returns: {alerts_fired: int, resolved: int, checked: int}
     """
-    from .bot_grading import bot_performance_summary
+    from .bot_grading import WORLDS, world_performance_summary
+    from .track_record_models import RuleTrackRecordAlert
+
+    resolved = (RuleTrackRecordAlert.objects
+                .filter(user=user, venue="all", resolved_at__isnull=True)
+                .update(resolved_at=timezone.now()))
+    totals = {"alerts_fired": 0, "resolved": resolved, "checked": 0}
+    for venue in WORLDS:
+        out = _check_user_venue(user, venue, world_performance_summary)
+        for k in totals:
+            totals[k] += out[k]
+    return totals
+
+
+def _check_user_venue(user, venue, summary) -> dict:
+    """The detector on one venue's rows (check_user_decay)."""
     from .track_record_models import RuleTrackRecordAlert
     from .notifications import notify_track_record_decay
 
@@ -52,10 +75,8 @@ def check_user_decay(user) -> dict:
     baseline_since = now - timedelta(days=BASELINE_DAYS)
     recent_since = now - timedelta(days=RECENT_DAYS)
 
-    recent_rows = bot_performance_summary(
-        user=user, since=recent_since, min_n=1)
-    baseline_rows = bot_performance_summary(
-        user=user, since=baseline_since, min_n=1)
+    recent_rows = summary(venue, user=user, since=recent_since, min_n=1)
+    baseline_rows = summary(venue, user=user, since=baseline_since, min_n=1)
 
     recent_by_key = {(r["rule_name"], r["asset_class"]): r for r in recent_rows}
     baseline_by_key = {(r["rule_name"], r["asset_class"]): r for r in baseline_rows}
@@ -93,7 +114,7 @@ def check_user_decay(user) -> dict:
         cooldown_cutoff = now - timedelta(days=COOLDOWN_DAYS)
         existing = (RuleTrackRecordAlert.objects
                     .filter(user=user, rule_name=rule_name,
-                             asset_class=asset_class,
+                             asset_class=asset_class, venue=venue,
                              resolved_at__isnull=True)
                     .order_by("-detected_at").first())
 
@@ -103,6 +124,7 @@ def check_user_decay(user) -> dict:
                 continue  # still inside cooldown
             alert = RuleTrackRecordAlert.objects.create(
                 user=user, rule_name=rule_name, asset_class=asset_class,
+                venue=venue,
                 recent_n=r["n"], recent_avg_r=r["avg_r"],
                 recent_win_rate=r["win_rate"],
                 baseline_n=b["n"], baseline_avg_r=b["avg_r"],
@@ -115,6 +137,7 @@ def check_user_decay(user) -> dict:
                     kind="rule_decayed",
                     payload={
                         "rule_name": rule_name, "asset_class": asset_class,
+                        "venue": venue,
                         "triggers": triggers,
                         "recent_avg_r": r["avg_r"], "baseline_avg_r": b["avg_r"],
                         "recent_n": r["n"], "baseline_n": b["n"],
@@ -128,7 +151,7 @@ def check_user_decay(user) -> dict:
                 ok = notify_track_record_decay(
                     user, rule_name=rule_name, asset_class=asset_class,
                     recent_avg_r=r["avg_r"], baseline_avg_r=b["avg_r"],
-                    recent_n=r["n"], triggers=triggers,
+                    recent_n=r["n"], triggers=triggers, venue=venue,
                 )
             except Exception as e:
                 logger.warning("decay notification failed: %s", e)

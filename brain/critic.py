@@ -24,6 +24,8 @@ from typing import Optional
 
 from ai_agents.base_agent import BaseAgent
 
+from .synthesizer import VENUE_RULE
+
 logger = logging.getLogger(__name__)
 
 
@@ -125,7 +127,10 @@ class CriticAgent(BaseAgent):
             "5. Confidence must answer to the record: a claim asserted "
             "at 0.8 by an author whose similar claims keep grading "
             "refuted is mis-calibrated even when the direction is "
-            "plausible — refine the confidence down and say why.\n\n"
+            "plausible — refine the confidence down and say why.\n"
+            "6. A claim that reads a paper or demo result as a live "
+            "failure is wrong on its face: dissent, and name the venue.\n\n"
+            f"{VENUE_RULE}\n\n"
             f"Respond ONLY with valid JSON:\n{CRITIC_SCHEMA}\n\n"
             "No code fences, no surrounding text."
         )

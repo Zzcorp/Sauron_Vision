@@ -1941,10 +1941,16 @@ def notify_unclaimed_position(user, *, symbols: list, venue: str) -> bool:
     )
 
 
+#: The venue a decay was measured on, in the reader's words (2026-10-08).
+DECAY_VENUE_WORDS = {"live": "real money",
+                     "demo": "the eToro demo account (not money)",
+                     "paper": "paper (the platform simulator, not money)"}
+
+
 def notify_track_record_decay(user, *, rule_name: str, asset_class: str,
                                 recent_avg_r: float, baseline_avg_r: float,
                                 recent_n: int,
-                                triggers: list) -> bool:
+                                triggers: list, venue: str = "") -> bool:
     """Phase-26: rule's bot-trade performance has decayed.
 
     Triggers list: ["avg_r_drop", "win_rate_drop", "gone_negative"] (any subset).
@@ -1980,7 +1986,11 @@ def notify_track_record_decay(user, *, rule_name: str, asset_class: str,
         [f"Before: {before} times the risk per trade, on average"]
         if before else []) + [
         "Flagged because: " + (_and(why) if why else "no reason recorded"),
-        f"Market: {class_words(asset_class, capital=True)}"]
+        f"Market: {class_words(asset_class, capital=True)}"] + (
+        # the venue it was measured on (2026-10-08): a simulator's decay
+        # never reads as real money's
+        [f"Measured on: {DECAY_VENUE_WORDS[venue]}"]
+        if venue in DECAY_VENUE_WORDS else [])
     mark = NOTIFY_MARKS["track_record_decay"]
     return dispatch_notification(
         user, "track_record_decay",

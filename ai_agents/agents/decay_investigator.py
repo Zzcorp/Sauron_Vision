@@ -35,6 +35,10 @@ class DecayInvestigatorAgent(BaseAgent):
 A trading rule that previously worked has stopped working. You are given
 its baseline winners and its recent failures. Hypothesize the cause.
 
+Every number below is a graded SIGNAL: signal outcomes, not fills. No
+order, paper or real, stands behind them, so nothing here is a stop that
+failed or money lost: a fill problem cannot be the cause you name.
+
 Return JSON ONLY:
 
 {

@@ -21,8 +21,10 @@ Pinned here (bot_program/asset_engine/disarm.py and its callers):
   - every disabler goes through the helper (source greps);
   - the runner manages a braked config with an OPEN row in both fleet
     passes and in run_asset_bot_tick, never scans it or enters, writes its
-    heartbeat, and still skips a hand, kill-switch or unrecorded stop
-    whole, and a braked config with nothing open;
+    heartbeat, and still skips the REAL rows of a hand, kill-switch or
+    unrecorded stop (its PAPER rows are managed since 2026-10-08,
+    tests/test_stopped_config_paper_managed.py), and a braked config with
+    nothing open;
   - a WORKING entry of a braked bot config is polled, then withdrawn; one
     that filled is booked; a refused withdrawal is retried; one with no
     order id raises no alert; the manual config's held order is polled and
@@ -341,7 +343,7 @@ class TheRecordTests(TestCase):
 
     def test_a_brake_never_relabels_a_stop_it_did_not_make(self):
         cfg = _bot(self.op, "Forex swing", "forex")
-        _row(cfg, "EURUSD")
+        _row(cfg, "EURUSD", paper=False)
         _run("bot", "off", str(cfg.pk))
         reply = _eye_brake(self.op, cfg)
         lines = _lines(reply)
@@ -349,7 +351,10 @@ class TheRecordTests(TestCase):
         line = next(ln for ln in lines
                     if ln.startswith(f"{eye.BULLET}Forex swing #{cfg.pk}"))
         self.assertIn("stopped by `bot off` on the server", line)
-        self.assertTrue(line.endswith(" — not managed while off"), line)
+        # its REAL row is not managed; a paper one would be (2026-10-08,
+        # tests/test_stopped_config_paper_managed.py)
+        self.assertTrue(line.endswith(" — real positions not managed while "
+                                      "off"), line)
         self.assertEqual(_record(cfg)["by"], disarm.BY_BOT_OFF)
         self.assertFalse(disarm.keeps_managing(cfg))
         self.assertNotIn(eye.MANAGING_WORDS, lines)
@@ -408,7 +413,9 @@ class TheRecordTests(TestCase):
             with self.subTest(record=bad):
                 cfg = _bot(self.op, f"Odd {i}", enabled=False,
                            extras={disarm.RECORD_KEY: bad})
-                _row(cfg)
+                # a REAL row: a stopped config's paper rows are managed
+                # whatever the record says (2026-10-08)
+                _row(cfg, paper=False)
                 self.assertEqual(disarm.record_of(cfg), {})
                 self.assertFalse(disarm.keeps_managing(cfg))
                 self.assertEqual(disarm.record_words(cfg),
@@ -543,7 +550,11 @@ class TheRunnerTests(TestCase):
         row.refresh_from_db()
         self.assertEqual(row.status, "CLOSED")
 
-    def test_a_hand_kill_switch_or_unrecorded_stop_is_still_skipped_whole(self):
+    def test_a_hand_kill_switch_or_unrecorded_stop_leaves_real_rows_alone(self):
+        """Its REAL rows are never routed or closed, as before; since
+        2026-10-08 its PAPER rows are managed, exits only
+        (runner.manage_stopped_paper; the full pins are in
+        tests/test_stopped_config_paper_managed.py)."""
         from bot_program.asset_engine.runner import (run_all_asset_bots,
                                                      run_asset_bot_tick)
 
@@ -561,7 +572,7 @@ class TheRunnerTests(TestCase):
         for i, stop in enumerate((hand, killed, unrecorded)):
             with self.subTest(stop=stop.__name__):
                 cfg = _bot(self.op, f"Stopped {i}", symbols=["DSB1"])
-                row = _open_paper_row(cfg, "DSB1")
+                real = _row(cfg, "DSB1", paper=False)
                 stop(cfg)
                 with patch(ROUTER, return_value=_crossed_client()) as router:
                     out = run_asset_bot_tick(cfg.id)
@@ -571,8 +582,19 @@ class TheRunnerTests(TestCase):
                                        "reason": "disabled",
                                        "config_id": cfg.id})
                 self.assertEqual(fleet["braked"], [])
-                row.refresh_from_db()
-                self.assertEqual(row.status, "OPEN")
+                self.assertEqual(fleet["paper_only"], [])
+                real.refresh_from_db()
+                self.assertEqual(real.status, "OPEN")
+                # a paper row on the same config: managed, never braked
+                paper = _open_paper_row(cfg, "DSB2")
+                with patch(ROUTER, return_value=_crossed_client()):
+                    out = run_asset_bot_tick(cfg.id)
+                self.assertTrue(out["paper_only"])
+                self.assertNotIn("braked", out)
+                paper.refresh_from_db()
+                self.assertEqual(paper.status, "CLOSED")
+                real.refresh_from_db()
+                self.assertEqual(real.status, "OPEN")
 
     def test_a_braked_config_without_open_rows_is_not_ticked(self):
         from bot_program.asset_engine.runner import run_all_asset_bots
@@ -856,10 +878,10 @@ class TheWordsTests(TestCase):
                       unmanaged_on_disable(one))
         # a hand stop still reads today's words
         hand = _bot(self.op, "Hand", "forex", symbols=["EURUSD"])
-        _row(hand, "EURUSD")
+        _row(hand, "EURUSD", paper=False)
         _run("bot", "off", str(hand.pk))
         text = unmanaged_on_disable(hand)
-        self.assertTrue(text.startswith("Its open position is NOT MANAGED "
+        self.assertTrue(text.startswith("Its real position is NOT MANAGED "
                                         "while it stays off"), text)
         self.assertIn("also resumes its entries", text)
 
@@ -909,7 +931,7 @@ class TheWordsTests(TestCase):
         _row(braked, "EURUSD")
         _morgul_brake(self.op, braked)
         hand = _bot(self.op, "Handoff", "forex")
-        _row(hand, "GBPUSD")
+        _row(hand, "GBPUSD", paper=False)
         _run("bot", "off", str(hand.pk))
         bare = _bot(self.op, "Unrecorded", "forex", enabled=False)
         _row(bare, "USDJPY")
@@ -921,8 +943,11 @@ class TheWordsTests(TestCase):
                       out)
         self.assertIn("^ OFF — stopped by `bot off` on the server (shell) on",
                       out)
-        self.assertIn("; 1 open, NOT managed while it stays off", out)
+        self.assertIn("; 1 real open, NOT managed while it stays off", out)
         self.assertIn("^ OFF — off with no record of who turned it off", out)
+        # its PAPER row is managed whatever stopped it (2026-10-08)
+        self.assertIn("; 1 paper open, still managed every tick (exits "
+                      "only)", out)
         # a record and nothing open: who, and nothing more
         line = next(ln for ln in out.splitlines()
                     if "^ OFF" in ln and ": bot off" in ln
@@ -1117,7 +1142,7 @@ class TheWordsTests(TestCase):
     def test_brake_lines_never_promise_management_for_a_config_stopped_again_by_hand(self):
         from bot_program import morgul
         cfg = _bot(self.op, "Forex swing", "forex")
-        _row(cfg, "EURUSD")
+        _row(cfg, "EURUSD", paper=False)
         stopped, _already, pks = _morgul_brake(self.op, cfg)
         # re-armed on the server, then stopped again by hand
         _run("bot", "on", str(cfg.pk))
@@ -1145,12 +1170,12 @@ class TheWordsTests(TestCase):
         from bot_program import morgul
         _tick()
         old = _bot(self.op, "Old brake", "forex", enabled=False)
-        _row(old, "EURUSD")
-        _row(old, "GBPUSD")
+        _row(old, "EURUSD", paper=False)
+        _row(old, "GBPUSD", paper=False)
         old2 = _bot(self.op, "Old brake two", "forex", enabled=False)
-        _row(old2, "USDJPY")
+        _row(old2, "USDJPY", paper=False)
         killed = _bot(self.op, "Killed", "forex")
-        _row(killed, "AUDUSD")
+        _row(killed, "AUDUSD", paper=False)
         disarm.disable_config(killed, by=disarm.BY_KILL_SWITCH,
                               why="flatten", who=self.op.username)
         braked = _bot(self.op, "Still braked", "forex")
@@ -1179,6 +1204,11 @@ class TheWordsTests(TestCase):
         text = "\n".join(lines)
         self.assertNotIn("by hand or by the kill switch", text)
         self.assertNotIn("keep managing", text)
+        # a PAPER row of a config the kill switch stopped is managed
+        # (2026-10-08): counted with the paper rows, never "Not managed"
+        _row(killed, "EURGBP")
+        left = morgul._left_open(pks)
+        self.assertEqual((left["paper"], left["unmanaged"]), (2, 4))
         # one unrecorded config alone: "it"
         lines = morgul.brake_lines([("earlier", [eye.config_label(old2)], [],
                                      morgul._left_open([old2.pk]))])

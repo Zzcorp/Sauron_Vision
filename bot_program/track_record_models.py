@@ -17,6 +17,11 @@ class RuleTrackRecordAlert(models.Model):
     )
     rule_name = models.CharField(max_length=100, db_index=True)
     asset_class = models.CharField(max_length=12, db_index=True)
+    # The money world the decay was measured on (2026-10-08): live, demo or
+    # paper (bot_grading.WORLDS). "all" is every alert written before the
+    # detector split the venues, when a simulator's loss and a real one
+    # were averaged into one number.
+    venue = models.CharField(max_length=8, default="all", db_index=True)
 
     # Snapshot of the comparison at detection time.
     recent_n = models.IntegerField(default=0)

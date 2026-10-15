@@ -1,5 +1,5 @@
-"""A config disabled by a stop that is not a brake is not managed — and
-every lever that disables one says so.
+"""A config disabled by a stop that is not a brake leaves its REAL rows
+unmanaged — and every lever that disables one says so.
 
 The brain page's "Disable manual" press told the operator the config
 "manages what is open and opens nothing new". The runner skips a disabled
@@ -12,9 +12,13 @@ behaviour and the words that now state it (2026-09-26).
 
 Since 2026-10-07 every stop is recorded on the config
 (bot_program/asset_engine/disarm.py), and a config a BRAKE stopped is
-still managed (tests/test_brake_keeps_managing.py). The configs here carry
-no record, or a hand stop's (`bot off`, the brain's button), so every
-test below still holds as it did.
+still managed (tests/test_brake_keeps_managing.py). Since 2026-10-08 a
+stopped config's PAPER rows are managed whatever stopped it, exits only
+(tests/test_stopped_config_paper_managed.py): a paper row has no broker,
+and a paper row sat unmanaged for weeks before the first tick that acted
+booked it at -8.12R. The configs here carry no record, or a hand stop's
+(`bot off`, the brain's button): their REAL rows are pinned unmanaged, as
+before, and their paper rows managed.
 
 Run with:  python manage.py test tests.test_disabled_config_unmanaged
 """
@@ -57,6 +61,22 @@ def _open_paper_row(cfg, symbol):
         status="OPEN", paper=True)
 
 
+def _open_real_row(cfg, symbol):
+    """A real (eToro live) BUY whose stop (95) the mark (94) has crossed:
+    a stopped config never manages it."""
+    from bot_program.models import AssetBotTrade
+    from instruments.models import Instrument
+    Instrument.objects.get_or_create(
+        symbol=symbol,
+        defaults={"name": symbol, "asset_class": cfg.asset_class})
+    return AssetBotTrade.objects.create(
+        config=cfg, asset_class=cfg.asset_class, symbol=symbol, side="BUY",
+        qty=Decimal("10"), entry_price=Decimal("100"),
+        stop_loss=Decimal("95"), take_profit=Decimal("110"),
+        status="OPEN", paper=False,
+        metadata={"broker": "etoro", "broker_env": "live"})
+
+
 def _crossed_client():
     client = MagicMock()
     client.ticker.return_value = {"lastPrice": "94.00"}
@@ -80,10 +100,10 @@ class TheRunnerLeavesADisabledConfigAloneTests(TestCase):
         trade.refresh_from_db()
         self.assertEqual(trade.status, "CLOSED")
 
-    def test_disabled_the_tick_never_reads_the_mark_and_the_row_stays_open(self):
+    def test_disabled_the_tick_never_reads_a_real_rows_mark(self):
         from bot_program.asset_engine.runner import run_asset_bot_tick
         cfg = _config(self.user, enabled=False)
-        trade = _open_paper_row(cfg, "DSB1")
+        trade = _open_real_row(cfg, "DSB1")
         with patch(ROUTER, return_value=_crossed_client()) as router:
             out = run_asset_bot_tick(cfg.id)
         self.assertEqual(out, {"status": "skipped", "reason": "disabled",
@@ -92,10 +112,24 @@ class TheRunnerLeavesADisabledConfigAloneTests(TestCase):
         trade.refresh_from_db()
         self.assertEqual(trade.status, "OPEN")
 
-    def test_neither_fleet_pass_manages_a_disabled_config(self):
-        from bot_program.asset_engine.runner import run_all_asset_bots
+    def test_disabled_the_tick_manages_its_paper_row_exits_only(self):
+        """Since 2026-10-08: a paper row has no broker, so its stop runs
+        whatever stopped its config."""
+        from bot_program.asset_engine.runner import run_asset_bot_tick
         cfg = _config(self.user, enabled=False)
         trade = _open_paper_row(cfg, "DSB1")
+        with patch(ROUTER, return_value=_crossed_client()):
+            out = run_asset_bot_tick(cfg.id)
+        self.assertEqual(out["status"], "ok")
+        self.assertTrue(out["paper_only"])
+        self.assertEqual(out["opened"], [])
+        trade.refresh_from_db()
+        self.assertEqual(trade.status, "CLOSED")
+
+    def test_neither_fleet_pass_manages_a_disabled_configs_real_row(self):
+        from bot_program.asset_engine.runner import run_all_asset_bots
+        cfg = _config(self.user, enabled=False)
+        trade = _open_real_row(cfg, "DSB1")
         for desked in (False, True):
             with self.subTest(desked=desked), \
                     patch(DESK, return_value=desked), \
@@ -119,20 +153,23 @@ class TheBrainPressSaysWhatItLeavesTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         return self.client.session["brain_propose_result"]["msg"]
 
-    def test_a_press_over_open_positions_says_they_are_not_managed(self):
+    def test_a_press_over_open_positions_says_which_are_not_managed(self):
         cfg = _config(self.op, "forex")
-        _open_paper_row(cfg, "DSB2")
-        _open_paper_row(cfg, "DSB3")
+        _open_real_row(cfg, "DSB2")
+        _open_real_row(cfg, "DSB3")
+        _open_paper_row(cfg, "DSB8")
         msg = self._press(cfg)
         cfg.refresh_from_db()
         self.assertFalse(cfg.enabled)
         self.assertIn("Manual forex is DISABLED", msg)
-        self.assertIn("Its 2 open positions are NOT MANAGED", msg)
-        self.assertIn("A paper position has no stop at all", msg)
+        self.assertIn("Its 2 real positions are NOT MANAGED", msg)
         # Never promises a bracket: an unprotected live entry has none.
         self.assertIn("what rests at the broker, if anything", msg)
         self.assertIn("Close them on Positions", msg)
         self.assertNotIn("manages what is open", msg)
+        # the paper row is managed by the bot tick (off in this test: said)
+        self.assertIn("Its paper position stays managed by the bot tick", msg)
+        self.assertNotIn("A paper position has no stop at all", msg)
 
     def test_a_press_over_nothing_open_says_nothing_is_left_unmanaged(self):
         msg = self._press(_config(self.op, "stock"))
@@ -142,10 +179,10 @@ class TheBrainPressSaysWhatItLeavesTests(TestCase):
 
     def test_a_second_press_still_names_what_is_unmanaged(self):
         cfg = _config(self.op, "stock", enabled=False)
-        _open_paper_row(cfg, "DSB4")
+        _open_real_row(cfg, "DSB4")
         msg = self._press(cfg)
         self.assertIn("Manual stock was already disabled", msg)
-        self.assertIn("Its open position is NOT MANAGED", msg)
+        self.assertIn("Its real position is NOT MANAGED", msg)
 
     def test_the_page_names_the_cost_before_the_press(self):
         from brain.models import BrainReport
@@ -161,6 +198,9 @@ class TheBrainPressSaysWhatItLeavesTests(TestCase):
         html = self.client.get(reverse("brain_dashboard")).content.decode()
         self.assertIn("Disable manual &middot; forex", html)
         self.assertIn("Disabling stops the platform managing", html)
+        self.assertIn("Its paper positions stay managed while the bot tick "
+                      "runs", html)
+        self.assertNotIn("a paper position has no stop at all", html)
         self.assertIn("Open now: forex 1, stock 0.", html)
         self.assertIn(reverse("positions_list"), html)
 
@@ -176,17 +216,17 @@ class BotOffSaysWhatItLeavesTests(TestCase):
 
     def test_bot_off_over_an_open_position_says_it_is_not_managed(self):
         cfg = _config(self.user)
-        _open_paper_row(cfg, "DSB6")
+        _open_real_row(cfg, "DSB6")
         text = self._off(cfg)
         cfg.refresh_from_db()
         self.assertFalse(cfg.enabled)
         self.assertIn("DISABLED", text)
-        self.assertIn("Its open position is NOT MANAGED", text)
+        self.assertIn("Its real position is NOT MANAGED", text)
         self.assertIn("with no symbols it opens nothing on its own", text)
 
     def test_bot_off_never_calls_re_enabling_harmless_on_a_bot_with_symbols(self):
         cfg = _config(self.user, name="Trend", symbols=["DSB7"])
-        _open_paper_row(cfg, "DSB7")
+        _open_real_row(cfg, "DSB7")
         text = self._off(cfg)
         self.assertIn("NOT MANAGED", text)
         self.assertIn("also resumes its entries", text)

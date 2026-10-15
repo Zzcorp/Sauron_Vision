@@ -30,10 +30,18 @@ scan, a proposal or an entry), under the same fleet lock and switches as
 every enabled config. The summaries come back as out["braked"];
 configs_ticked keeps counting enabled configs only. A config stopped by
 hand or by the kill switch, or one with no record (every stop before this
-date), is skipped whole as before: the kill switch leaves its rows for
-reconciliation by hand. run_asset_bot_tick on a braked config manages it
+date), has its REAL rows left alone as before: the kill switch leaves them
+for reconciliation by hand. run_asset_bot_tick on a braked config manages it
 the same way. A real short left unmanaged on a braked config after Morgul's
 G1 brake of 2026-10-06 is why.
+
+ITS PAPER ROWS STAY MANAGED (2026-10-08, disarm.manages_paper_only). A
+paper row has no broker and nothing else runs its stop: a paper row sat on
+a stopped config for weeks and the first tick that acted booked it about
+eight R past its stop. Right after the braked pass, the paper-only pass runs
+the exits of the PAPER rows of every other stopped config
+(manage_stopped_paper, the bot's manage_paper_only), never an entry and
+never a real row; the summaries come back as out["paper_only"].
 """
 import logging
 import uuid
@@ -47,7 +55,9 @@ def run_asset_bot_tick(config_id: int) -> dict:
     """Run one tick for the given AssetBotConfig. Returns the bot's summary dict
     (or an error dict if the config is missing / disabled). A config a
     brake stopped is managed only (manage_braked, 2026-10-07); any other
-    disabled config is skipped, exactly as before."""
+    disabled config has its PAPER rows managed, exits only
+    (manage_stopped_paper, 2026-10-08), and is skipped when it holds none,
+    exactly as before."""
     from bot_program.asset_engine import disarm
     from bot_program.models import AssetBotConfig
 
@@ -57,6 +67,8 @@ def run_asset_bot_tick(config_id: int) -> dict:
     if not cfg.enabled:
         if disarm.keeps_managing(cfg):
             return manage_braked(config_id)
+        if _holds_open_paper(cfg):
+            return manage_stopped_paper(config_id)
         return {"status": "skipped", "reason": "disabled", "config_id": config_id}
 
     try:
@@ -88,24 +100,23 @@ def unmanaged_on_disable(cfg) -> str:
 
     A config stopped by the kill switch or by hand (`bot off`, the HQ and
     system-map toggles, the brain's disable, a seed command), or one with
-    no record, is not ticked at all: run_asset_bot_tick refuses it and both
-    fleet passes skip it. Its OPEN rows therefore lose every exit the
-    platform runs itself (base.manage_positions): the time stop, trailing
-    and break-even, the SL/TP comparison, the vanished-stop net. A paper
-    row has nothing at a broker, so it loses its stop outright; a live row
-    keeps only what rests there — its bracket when the entry was
-    protected, nothing when it was not.
-
-    That stays so ON PURPOSE for those stops (2026-09-26, and for them only
-    since 2026-10-07): the kill switch leaves its rows for reconciliation
-    by hand, and a runner that managed them would go back to closing rows
-    behind it — the management pass also books a WORKING entry that fills
-    into a position. The words follow the runner, not the other way round.
+    no record, has its PAPER rows still managed (2026-10-08,
+    manage_stopped_paper: exits only, while the bot tick runs), and its
+    REAL rows left alone: they lose every exit the platform runs itself
+    (base.manage_positions): the time stop, trailing and break-even, the
+    SL/TP comparison, the vanished-stop net, and keep only what rests at the
+    broker — the bracket when the entry was protected, nothing when it was
+    not. That stays so ON PURPOSE for real rows: the kill switch leaves
+    them for reconciliation by hand, and a runner that managed them would
+    go back to closing rows behind it — the management pass also books a
+    WORKING entry that fills into a position. The words follow the runner,
+    not the other way round.
     """
     from bot_program.asset_engine import disarm
     from bot_program.models import AssetBotTrade
 
-    n = AssetBotTrade.objects.filter(config=cfg, status="OPEN").count()
+    rows = AssetBotTrade.objects.filter(config=cfg, status="OPEN")
+    n = rows.count()
     if not n:
         return ""
     if disarm.keeps_managing(cfg):
@@ -128,18 +139,101 @@ def unmanaged_on_disable(cfg) -> str:
                 f"Re-enabling on the server resumes its entries; closing "
                 f"{'it' if n == 1 else 'them'} on Positions ends the "
                 f"management.")
-    rows = "Its open position is" if n == 1 else f"Its {n} open positions are"
-    them = "it" if n == 1 else "them"
-    if cfg.symbols:
-        way_back = (f"Close {them} by hand — re-enabling restores the "
-                    f"management but also resumes its entries.")
-    else:
-        way_back = (f"Close {them} on Positions, or re-enable the config — "
-                    f"with no symbols it opens nothing on its own.")
-    return (f"{rows} NOT MANAGED while it stays off: no "
-            f"time stop, no trailing stop, and no stop or target checked by "
-            f"the platform. A paper position has no stop at all; a live one "
-            f"keeps only what rests at the broker, if anything. {way_back}")
+    n_paper = rows.filter(paper=True).count()
+    n_real = n - n_paper
+    parts = []
+    if n_paper:
+        from bot_program.manual_trade import _tick_manages
+        them = "it" if n_paper == 1 else "them"
+        head = ("Its paper position stays" if n_paper == 1
+                else f"Its {n_paper} paper positions stay")
+        if _tick_manages():
+            parts.append(
+                f"{head} MANAGED: a paper position has no broker, so every "
+                f"bot tick still runs the exits of each — the time stop, "
+                f"trailing and break-even, its stop and target — and the "
+                f"bot opens nothing.")
+        else:
+            parts.append(
+                f"{head} managed by the bot tick, which is off now: nothing "
+                f"manages {them} until it is back on.")
+    if n_real:
+        what = ("Its real position is" if n_real == 1
+                else f"Its {n_real} real positions are")
+        them = "it" if n_real == 1 else "them"
+        if cfg.symbols:
+            way_back = (f"Close {them} by hand — re-enabling restores the "
+                        f"management but also resumes its entries.")
+        else:
+            way_back = (f"Close {them} on Positions, or re-enable the "
+                        f"config — with no symbols it opens nothing on its "
+                        f"own.")
+        parts.append(
+            f"{what} NOT MANAGED while it stays off: no time stop, no "
+            f"trailing stop, and no stop or target checked by the platform. "
+            f"A real position keeps only what rests at the broker, if "
+            f"anything. {way_back}")
+    return " ".join(parts)
+
+
+def _holds_open_paper(cfg) -> bool:
+    from bot_program.models import AssetBotTrade
+    return AssetBotTrade.objects.filter(config=cfg, status="OPEN",
+                                        paper=True).exists()
+
+
+def manage_stopped_paper(config_id: int) -> dict:
+    """The exits of the PAPER rows of one config off by a stop that is not
+    a brake — by hand, the kill switch, or no record — and nothing else
+    (2026-10-08, disarm.manages_paper_only; the bot's manage_paper_only).
+    Its real rows are never read.
+
+    Re-reads the row first: a config re-armed since the fleet listed it,
+    or braked since (the braked pass manages all of its rows), is not
+    managed here."""
+    from bot_program.asset_engine import disarm
+    from bot_program.models import AssetBotConfig
+
+    cfg = AssetBotConfig.objects.filter(id=config_id).first()
+    if cfg is None:
+        return {"status": "error", "reason": "config_not_found",
+                "config_id": config_id}
+    if not disarm.manages_paper_only(cfg):
+        return {"status": "skipped",
+                "reason": ("braked: the braked pass manages it"
+                           if disarm.keeps_managing(cfg)
+                           else "no longer stopped"),
+                "config_id": config_id}
+    try:
+        bot = make_bot(cfg)
+    except Exception as e:
+        return {"status": "error", "reason": f"make_bot_failed: {e}",
+                "config_id": config_id}
+    try:
+        return {"status": "ok", **bot.manage_paper_only()}
+    except Exception as e:
+        logger.exception("[asset_bot] paper-only manage pass raised for "
+                         "cfg=%s", config_id)
+        return {"status": "error", "reason": str(e), "config_id": config_id}
+
+
+def _manage_stopped_paper_pass() -> list:
+    """Every config off by a stop that is not a brake that holds an OPEN
+    PAPER row, its paper rows managed once (2026-10-08). Runs right after
+    the braked pass, under the same fleet lock and switches: with the
+    platform paused (platform_master) or the bot tick off, nothing runs."""
+    from bot_program.asset_engine import disarm
+
+    try:
+        stopped = disarm.stopped_with_open_paper_rows()
+    except Exception as e:  # noqa: BLE001 — never stop the enabled fleet
+        logger.warning("[asset_bot] stopped configs unreadable: %s", e)
+        return []
+    out = []
+    for cfg in stopped:
+        out.append(manage_stopped_paper(cfg.id))
+        _release_sessions()
+    return out
 
 
 def _release_sessions():
@@ -215,8 +309,13 @@ def run_all_asset_bots() -> dict:
     brake stopped that still holds an OPEN row, before anyone proposes —
     the same order tick() keeps (manage, then entries). Its summaries are
     out["braked"]; configs_ticked keeps counting enabled configs only.
+
+    THEN THE PAPER-ONLY PASS (2026-10-08): the PAPER rows of every config
+    off by any other stop, exits only (manage_stopped_paper). Its
+    summaries are out["paper_only"].
     """
     braked = _manage_braked_pass()
+    paper_only = _manage_stopped_paper_pass()
     try:
         from bot_program.capital_desk import is_desk_enabled
         desked = is_desk_enabled()
@@ -225,6 +324,7 @@ def run_all_asset_bots() -> dict:
         desked = False
     out = _run_all_legacy() if not desked else _run_all_desked()
     out["braked"] = braked
+    out["paper_only"] = paper_only
     return out
 
 
