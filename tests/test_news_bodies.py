@@ -198,7 +198,11 @@ class FetchGuardTests(SimpleTestCase):
     def test_it_identifies_itself(self):
         from scraping import article_body
         session = _Session(_Resp(body=_page("<article><p>x</p></article>")))
-        with patch.object(article_body, "_robots_allows", return_value=True):
+        # The host guard resolves the name before any request: the double
+        # keeps the test off the network (a sandbox without DNS refused
+        # example.com, and no request was made to identify itself in).
+        with patch.object(article_body, "_robots_allows", return_value=True), \
+                patch("socket.getaddrinfo", side_effect=_resolver()):
             article_body.fetch_article_body("https://example.com/a",
                                             session=session)
         _url, kw = session.calls[0]
