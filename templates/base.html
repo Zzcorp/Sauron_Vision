@@ -532,8 +532,6 @@
             <a href="{% url 'consolidation_dashboard' %}" class="nav-link {% if page_id == 'consolidation' %}active{% endif %}"><span class="icon">⊜</span> <span class="label-text">Consolidation</span></a>
             {% comment %}The 5-10 year sector view the share allocator reads as a ±10% prior, with its own graded calls (2026-09-12).{% endcomment %}
             <a href="{% url 'horizon_dashboard' %}" class="nav-link {% if page_id == 'horizon' %}active{% endif %}"><span class="icon">◕</span> <span class="label-text">Horizon</span></a>
-            {% comment %}Where the large players must move, from free public footprints, graded against what prices did next (2026-10-09). Information, never a gate.{% endcomment %}
-            <a href="{% url 'big_money_board' %}" class="nav-link {% if page_id == 'big_money' %}active{% endif %}"><span class="icon">◆</span> <span class="label-text">Big Money</span></a>
             <a href="{% url 'intelligence_hub' %}" class="nav-link {% if page_id == 'intelligence' %}active{% endif %}"><span class="icon">◯</span> <span class="label-text">Intelligence Hub</span></a>
             <a href="{% url 'briefing_dashboard' %}" data-nav-id="briefing" class="nav-link {% if page_id == 'briefing' %}active{% endif %}"><span class="icon">✦</span> <span class="label-text">Strategist Briefing</span></a>
             <a href="{% url 'earnings_reviews_dashboard' %}" class="nav-link {% if page_id == 'earnings_reviews' %}active{% endif %}"><span class="icon">$</span> <span class="label-text">Earnings Reviews</span></a>
@@ -546,6 +544,8 @@
             <a href="{% url 'instruments_list' %}" class="nav-link {% if page_id == 'instruments' or page_id == 'quotes' %}active{% endif %}"><span class="icon">⌗</span> <span class="label-text">Instruments & Quotes</span></a>
             <a href="{% url 'economic_calendar' %}" class="nav-link {% if page_id == 'calendar' %}active{% endif %}"><span class="icon">◇</span> <span class="label-text">Economic Calendar</span></a>
             <a href="{% url 'news_feed' %}" data-nav-id="news" class="nav-link {% if page_id == 'news' %}active{% endif %}"><span class="icon">▤</span> <span class="label-text">News & Sentiment</span></a>
+            {% comment %}Where the large players must move, from free public footprints, graded against what prices did next (2026-10-09). Information, never a gate; it reads the markets, so it sits with them.{% endcomment %}
+            <a href="{% url 'big_money_board' %}" class="nav-link {% if page_id == 'big_money' %}active{% endif %}"><span class="icon">◆</span> <span class="label-text">Big Money</span></a>
 
             {% comment %}IS IT RUNNING — not "is it switched on". /health/ and the system map exist because six scraper components
                once sat at last_status='success' with zero rows between them. These pages answer whether data is actually
