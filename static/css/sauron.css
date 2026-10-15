@@ -1212,6 +1212,38 @@
            figure pushes the strip rather than clipping. */
         .ip-cat-pnl .ip-count { font-size: 17px; font-variant-numeric: tabular-nums; letter-spacing: 0.3px; }
         .ip-cat-pnl .ip-count .sv-unknown { font-size: 14px; }
+        /* THE LIVE P&L LINE on the PORTFOLIO cell (2026-10-14): the open
+           P&L of the REAL book, in money and in R, read without hovering,
+           with paper and demo said apart and never added. It sits between
+           VALUE and the "N pos · X% in" sub-line. The bar is a fixed 60px
+           and --se-bottom-edge hangs on that 60: 60 − 8 of padding = 52px
+           of content. The label and the sub-line inherit the body's 1.6
+           line-height (12.8 + 14.4px), which with a fourth line would
+           overrun the bar — so in THIS cell they take 1.2. MEASURED in
+           Chromium with the web fonts at 1380 and 1100 (2026-10-15,
+           review): 9.6 (label) + 15.4 (count) + 11.9 (this line: Orbitron
+           10px bold beside the 8-9px mono pieces, so its line box is not
+           the nominal 11) + 10.8 (sub) + 3 gaps of 1px = 50.7px of the
+           52. That leaves 1.3px: a taller face or a larger size on this
+           line has no room left. The bar does not grow and nothing stacked
+           on it moves. Both rules are scoped to the one cell; its siblings
+           keep .ip-cat verbatim. Tabular figures, so a swing from
+           +1,234.56 to -987.65 keeps its columns.
+           WIDTH. The strip is a horizontal scroller by design (its arrows
+           page it), and this line is its widest content: measured, two
+           real and two paper rows take the cell from 106 to 203px; live,
+           paper, demo and a manual row from 97 to 298px; with the "· 3/4"
+           and "· stale" notes as well, 315px — two or three cells more
+           behind the arrow at 1380, three at 1100. The groups said APART
+           are a step quieter and narrower (the mono label face at 9px, 3px
+           off), which took about 25px off the first cut; the LIVE figure
+           keeps the display face. The venue markers are sized under the
+           venue convention below. */
+        .ip-cat-pf { gap: 1px; }
+        .ip-cat-pf .ip-label, .ip-cat-pf .ip-sub { line-height: 1.2; }
+        .ip-cat .ip-pnl { font-family: var(--font-display); font-size: 10px; line-height: 1.1; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+        .ip-cat .ip-pnl-apart { margin-left: 3px; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0; opacity: .85; }
+        .ip-cat .ip-pnl .ip-pnl-note { font-family: var(--font-mono); font-size: 8px; letter-spacing: .3px; }
         /* The long/short strip above the POSITIONS rows. */
         .ip-split {
             display: flex; align-items: baseline; gap: 10px;
@@ -2329,6 +2361,16 @@
         }
         .sv-venue--live { color: var(--accent-red); }
         .sv-venue--paper { color: var(--text-muted); }
+        /* DEMO on the label (2026-10-14): a broker's demo account, gold
+           like .sv-world--demo below, in the ink token that survives on
+           white. The headband's LIVE P&L line says a demo row apart. */
+        .sv-venue--demo { color: var(--accent-gold-ink); }
+        /* The markers on that line take the mono label face at 8px, as the
+           dropdown prints them; PAPER and DEMO, the groups said apart, a
+           tighter tracking. Written HERE, under the convention, so the
+           first .sv-venue rule in the sheet is still the convention's. */
+        .ip-cat .ip-pnl .sv-venue { font-family: var(--font-mono); font-size: 8px; letter-spacing: 1px; }
+        .ip-cat .ip-pnl-apart .sv-venue { letter-spacing: .5px; }
         /* ── THE MONEY WORLD, ON EVERY ROW (2026-09-30) ─────────────────
            The operator, on the live box: live and paper were "still light"
            for him and the keeper. The survey behind this found the
@@ -3257,6 +3299,13 @@
             color: var(--text-muted); letter-spacing: 0.5px;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
+        /* A sub-line whose words ARE the reading (2026-10-15, review): the
+           Portfolio page's LIVE OPEN P&L says the paper and demo figures
+           apart on it, and an ellipsis cut them mid-number at every width.
+           This one wraps; the rest of the strip keeps its single line. Two
+           classes, so the refinement layer's later .oc-strip-sub does not
+           take the line-height back. */
+        .oc-strip-sub.oc-strip-sub--wrap { white-space: normal; text-overflow: clip; line-height: 1.35; }
 
         /* Sparkline */
         .oc-sparkline { width: 100%; height: 48px; display: block; }

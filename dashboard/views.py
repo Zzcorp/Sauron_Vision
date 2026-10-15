@@ -1636,8 +1636,9 @@ def _live_cell(text, sub="", tone="", title=""):
     return {"text": text, "sub": sub, "tone": tone, "title": title}
 
 
-def _initial_stop_map(rows):
-    """{row key: the stop each open position OPENED with}.
+def _stop_and_world_maps(rows):
+    """({row key: the stop each open position OPENED with},
+        {row key: its money world, as position_summary.world_of reads it}).
 
     R is measured against the risk the trade was actually taken with. The
     CURRENT stop is the wrong denominator — a trailing stop rewrites it, so
@@ -1649,27 +1650,40 @@ def _initial_stop_map(rows):
 
     One extra query over a trade set unified_open_positions has already
     fetched: the normalised bot row carries no metadata at all, and the
-    alternative was a second copy of the union in this module.
+    alternative was a second copy of the union in this module. The WORLD
+    rides the same query (2026-10-14): world_of reads broker_env off the
+    trade's metadata to tell an eToro demo fill from real money, and off a
+    metadata-less row a demo fill reads "live". The worlds are taken
+    before the stops, so a failing stop lookup costs the R column and not
+    the real/paper split of the open P&L.
     """
-    out = {}
+    stops, worlds = {}, {}
     ids = [r.trade_id for r in rows
            if getattr(r, "source", "") == "bot"
            and getattr(r, "trade_id", None)]
     if not ids:
-        return out
+        return stops, worlds
+    try:
+        from bot_program.models import AssetBotTrade
+        trades = list(AssetBotTrade.objects.filter(id__in=ids).only(
+            "id", "stop_loss", "metadata", "paper"))
+    except Exception as e:
+        logger.warning("Open trades unreadable, R and the money worlds read "
+                       "as unmeasured: %s", e, exc_info=True)
+        return stops, worlds
+    for trade in trades:
+        worlds[f"bot-{trade.id}"] = _world_of(trade)
     try:
         from bot_program.manual_close import _initial_stop
-        from bot_program.models import AssetBotTrade
-        for trade in AssetBotTrade.objects.filter(id__in=ids).only(
-                "id", "stop_loss", "metadata"):
-            out[f"bot-{trade.id}"] = _initial_stop(trade)
+        for trade in trades:
+            stops[f"bot-{trade.id}"] = _initial_stop(trade)
     except Exception as e:
         # Every R then renders an em-dash, which is the honest reading of "we
         # could not find the risk". Silence here would have been a column of
         # dashes with no explanation anywhere.
         logger.warning("Initial stops unavailable, R reads as unmeasured: %s",
                        e, exc_info=True)
-    return out
+    return stops, worlds
 
 
 def _leverage_map(rows):
@@ -1677,7 +1691,7 @@ def _leverage_map(rows):
     it} — the broker's multiplier on an eToro row, the class's margin model
     otherwise, "" when unknown (2026-10-03, the operator: "add leverage used
     by position on the line of cells in positions page and portfolio too").
-    One query over the bot rows' metadata, beside _initial_stop_map's."""
+    One query over the bot rows' metadata, beside _stop_and_world_maps'."""
     out = {}
     bots = {r.trade_id: r for r in rows
             if getattr(r, "source", "") == "bot"
@@ -1758,7 +1772,7 @@ def _mark_words(row) -> dict:
     return {"mark_word": "", "mark_wait": "", "mark_title": ""}
 
 
-def _live_row(row, stops, levs=None):
+def _live_row(row, stops, levs=None, worlds=None):
     """One open position, shaped the way the tables already read it, plus R.
 
     A dict and not the model instance: UnifiedPosition declares __slots__, so
@@ -1786,10 +1800,16 @@ def _live_row(row, stops, levs=None):
     # Every term has to be there. An R with no stop behind it is not 0.0R —
     # it is a position whose risk was never recorded, and 0.0R reads as a
     # scratch trade sitting exactly at entry.
-    r_mult = None
+    #
+    # The unrounded R rides beside the printed one (2026-10-15, review):
+    # the strip's LIVE OPEN P&L sums R over the real rows, and a sum of
+    # two-decimal figures is not the sum the cockpit strip prints — three
+    # rows at 1/3R each read +0.99R here and +1.00R there.
+    r_raw = None
     if (mark is not None and entry
             and stop is not None and abs(entry - stop) > 1e-12):
-        r_mult = round((mark - entry) * sign / abs(entry - stop), 2)
+        r_raw = (mark - entry) * sign / abs(entry - stop)
+    r_mult = None if r_raw is None else round(r_raw, 2)
 
     pnl = _as_float(row.unrealized_pnl)
     pct = _as_float(row.unrealized_pnl_pct)
@@ -1829,6 +1849,7 @@ def _live_row(row, stops, levs=None):
         # quotes another instrument. Printed beside the price so a CFD's
         # entry against a futures feed is never read as money.
         "mark_source": getattr(row, "mark_source", None),
+        "mark_age_s": getattr(row, "mark_age_s", None),
         **_mark_words(row),
         "last_text": _live_num(mark, "{:,.4f}"),
         "pnl_text": _live_num(pnl),
@@ -1839,6 +1860,7 @@ def _live_row(row, stops, levs=None):
         "cap_pct_text": (_live_num(cap_pct, "{:+.2f}%")
                          if cap_pct is not None else ""),
         "r_multiple": r_mult,
+        "r_raw": r_raw,
         "r_text": _live_num(r_mult, "{:+.2f}R"),
         "r_tone": _live_tone(r_mult),
         "r_title": (
@@ -1853,6 +1875,13 @@ def _live_row(row, stops, levs=None):
         "status": getattr(row, "status", ""),
         "paper": getattr(row, "paper", True),
         "source": source,
+        # The money world (2026-10-14): "live", "demo" or "paper" from the
+        # TRADE (_stop_and_world_maps), "" for a legacy Position that
+        # states no venue. The row's own flags are the fallback only when
+        # the trade could not be read back. The strip's LIVE OPEN P&L
+        # splits the open book on this.
+        "world": ((worlds or {}).get(key) or _world_of(row)
+                  if source == "bot" else _world_of(row)),
         # The leverage this position carries (_leverage_map): "" unknown.
         "leverage": (levs or {}).get(key, ""),
     }
@@ -1874,9 +1903,9 @@ def _live_open_book(user, portfolio):
     """
     from .views_command import _open_book
     objects, n_priced, unrealized, deployed = _open_book(user, portfolio)
-    stops = _initial_stop_map(objects)
+    stops, worlds = _stop_and_world_maps(objects)
     levs = _leverage_map(objects)
-    return (objects, [_live_row(r, stops, levs) for r in objects],
+    return (objects, [_live_row(r, stops, levs, worlds) for r in objects],
             n_priced, unrealized, deployed)
 
 
@@ -1915,6 +1944,59 @@ def _closed_stats(closed_positions):
         "profit_factor": (round(gross_win / gross_loss, 2)
                           if gross_loss > 0 and winning else None),
     }
+
+
+LIVE_PNL_TITLE = ("Open P&L of the real-money book alone, each row at its "
+                  "venue's own rate; paper and demo are shown apart and never "
+                  "added. UNREALIZED P&L beside it is both books.")
+
+
+def _live_apart_words(split):
+    """The sub-line under LIVE OPEN P&L on the portfolio strip: the real
+    book's R, what the figure covers, then the paper and demo figures APART
+    — the words the cockpit strip's PORTFOLIO cell uses
+    (position_summary.live_book_words). A world that is open and unmarked
+    says so; one that is not open is not mentioned. Nothing here is a sum
+    of two worlds.
+
+    2026-10-15, review: the R head reads "—R" when the figure is measured
+    and no row has an R, as the strip does, never a bare dash; a partial
+    figure says "1 of 2 marked", one on the venue's last print "stale",
+    and a Position that states no venue is counted ("1 manual") where it
+    used to vanish. "apart" left the paper and demo groups: the label and
+    the title already say it, and the words were cut off at every width."""
+    from dashboard.position_summary import live_book_words
+
+    live, words = split["live"], live_book_words(split)
+    if not live["n"]:
+        parts = ["no real-money position open"]
+    elif live["pnl"] is None:
+        parts = [f"{live['n']} open, none marked at the venue"]
+    else:
+        parts = [_live_num(live["r"], "{:+.2f}R") if live["r"] is not None
+                 else f"{LIVE_DASH}R"]
+        parts += [w for w in (words["coverage_words"], words["stale_words"])
+                  if w]
+    for word in ("paper", "demo"):
+        if split[word]["n"]:
+            parts.append(f"{word} {_live_num(split[word]['pnl'])}")
+    if words["manual_words"]:
+        parts.append(words["manual_words"])
+    return " · ".join(parts)
+
+
+def _live_pnl_title(split):
+    """The LIVE OPEN P&L cell's title: what the figure is, then every
+    sentence the cockpit strip hangs on its own line — coverage, a stale
+    venue print, an R short of the book, the reason for a dash, the manual
+    rows — so the hover says what the line abbreviates."""
+    from dashboard.position_summary import live_book_words
+
+    words = live_book_words(split)
+    extra = [words[k] for k in ("figure_title", "r_title", "dash_title",
+                                "manual_title") if words[k]]
+    return " ".join([LIVE_PNL_TITLE] + [
+        t if t.endswith(".") else f"{t}." for t in extra])
 
 
 def _exposure_split(deployed, cash, n_open):
@@ -1996,6 +2078,21 @@ def _render_portfolio(request, live_only):
     cash = float(portfolio.cash_available or 0)
     deployed_value, cash_pct, exposure_pct = _exposure_split(
         deployed, cash, n_open)
+    # The open book by money world (2026-10-14), re-summed from the P&L and
+    # R the rows above already carry — a REAL row's is the one
+    # venue_mark.resolve priced — and never valued a second time. Three
+    # separate answers; none is added to another.
+    #
+    # The UNROUNDED R (r_raw), as the cockpit strip sums it, and the row's
+    # mark source and age so a figure resting on the venue's last print
+    # says so (2026-10-15, review).
+    from dashboard.position_summary import open_by_world
+    by_world = open_by_world({"world": r["world"], "pnl": r["unrealized_pnl"],
+                              "r": r["r_raw"],
+                              "mark_source": r["mark_source"],
+                              "mark_age_s": r["mark_age_s"]}
+                             for r in open_rows)
+    live_world = by_world["live"]
     # TOTAL VALUE, measured on this read. The union `_live_open_book` already
     # performed is handed straight over, so the strip's headline and the table
     # under it are two readings of ONE re-pricing rather than two of their own.
@@ -2086,6 +2183,12 @@ def _render_portfolio(request, live_only):
             sub="across open positions",
             title=(f"Marked to live quotes, never read off the stored "
                    f"column. {priced_note}")),
+        # THE REAL BOOK ALONE (2026-10-14): the same figure the cockpit
+        # strip's PORTFOLIO cell prints on every page, in the same words.
+        "unrealized_live": _live_cell(
+            _live_num(live_world["pnl"]), tone=_live_tone(live_world["pnl"]),
+            sub=_live_apart_words(by_world),
+            title=_live_pnl_title(by_world)),
         "win_rate": _live_cell(
             _live_num(stats["win_rate"], "{:.1f}%"),
             sub=(f"{stats['n_winning']}W / {stats['n_losing']}L · "

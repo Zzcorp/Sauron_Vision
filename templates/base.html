@@ -836,9 +836,37 @@
             <button type="button" class="ip-arrow right" aria-label="Scroll right">&#9654;</button>
             <div class="info-panel-scroll" id="ipScroll">
             <div class="info-panel-bar">
-                <a href="{% url 'portfolio_overview' %}" class="ip-cat ip-cat-link">
+                <a href="{% url 'portfolio_overview' %}" class="ip-cat ip-cat-link ip-cat-pf">
                     <span class="ip-label">PORTFOLIO</span>
                     <span class="ip-count" data-sv-live="hb-pf-value" data-sv-live-key="hb-pf-value">{% if panel_portfolio_value %}<span title="{{ panel_book_coverage }}">{{ panel_currency_symbol }}{{ panel_portfolio_value }}</span>{% else %}<span class="sv-unknown" title="{{ panel_book_coverage }}">&mdash;</span>{% endif %}</span>
+                    {% comment %}
+                    THE LIVE P&L (2026-10-14, the operator: "add also on
+                    portfolio the live P&L"). The open P&L of the REAL-MONEY
+                    book alone, in money and in R, read without hovering —
+                    the dropdown's OPEN P&L and OPEN R below are BOTH books
+                    and stay so. Each real row is priced by
+                    bot_program.venue_mark.resolve at its venue's own rate
+                    (portfolio.services); the context processor re-sums
+                    those per-row figures by world and values nothing twice.
+                    The paper book's figure stands APART under its own
+                    marker, a demo row under DEMO, and the two are never
+                    added to the live one — no key on this line is a sum of
+                    two worlds. The venue marker sits on the LABEL per the
+                    convention in sauron.css (sv-venue), never on the value,
+                    so a live figure keeps its own up/down colour. A dash
+                    means NOT MEASURED, with a title saying which: real rows
+                    open and none marked at the venue, or no real row open —
+                    never a +0.00. Tone and titles ride children of the
+                    region: the refresher copies innerHTML, not attributes.
+                    What the figure covers is SAID on the line (2026-10-15,
+                    review), in the words the Portfolio page uses
+                    (position_summary.live_book_words): "· 1/2" when a real
+                    row is open and unmarked, "· stale" when one rests on
+                    the venue's last print, each with its sentence as a
+                    title; a manual Position that states no venue is
+                    counted beside the worlds, in none of them.
+                    {% endcomment %}
+                    <span class="ip-pnl" data-sv-live="hb-pf-pnl" data-sv-live-key="hb-pf-pnl"><span class="sv-venue sv-venue--live" title="Open P&amp;L of the real-money book alone, each row at its venue's own rate. Paper and demo are shown apart and never added to it.">LIVE</span> {% if panel_open_pnl_live_display %}<span class="{% if panel_open_pnl_live > 0 %}up{% elif panel_open_pnl_live < 0 %}down{% endif %}"{% if panel_live_pnl_title %} title="{{ panel_live_pnl_title }}"{% endif %}>{{ panel_open_pnl_live_display }}</span> {% if panel_open_r_live_display %}<span class="{% if panel_open_r_live > 0 %}up{% elif panel_open_r_live < 0 %}down{% endif %}"{% if panel_live_r_title %} title="{{ panel_live_r_title }}"{% endif %}>{{ panel_open_r_live_display }}</span>{% else %}<span class="sv-unknown" title="{{ panel_live_r_title }}">&mdash;R</span>{% endif %}{% if panel_live_coverage_short %} <span class="ip-pnl-note sv-unknown" title="{{ panel_live_coverage_title }}">&middot; {{ panel_live_coverage_short }}</span>{% endif %}{% if panel_live_stale_title %} <span class="ip-pnl-note sv-unknown" title="{{ panel_live_stale_title }}">&middot; stale</span>{% endif %}{% else %}<span class="sv-unknown" title="{{ panel_live_dash_title }}">&mdash;</span>{% endif %}{% if panel_paper_positions %} <span class="ip-pnl-apart"><span class="sv-venue sv-venue--paper">PAPER</span> {% if panel_open_pnl_paper_display %}<span class="{% if panel_open_pnl_paper > 0 %}up{% elif panel_open_pnl_paper < 0 %}down{% endif %}">{{ panel_open_pnl_paper_display }}</span>{% else %}<span class="sv-unknown" title="Paper positions open, none with a live quote">&mdash;</span>{% endif %}</span>{% endif %}{% if panel_demo_positions %} <span class="ip-pnl-apart"><span class="sv-venue sv-venue--demo">DEMO</span> {% if panel_open_pnl_demo_display %}<span class="{% if panel_open_pnl_demo > 0 %}up{% elif panel_open_pnl_demo < 0 %}down{% endif %}">{{ panel_open_pnl_demo_display }}</span>{% else %}<span class="sv-unknown" title="Demo positions open, none marked at the venue's rate">&mdash;</span>{% endif %}</span>{% endif %}{% if panel_unvenued_words %} <span class="ip-pnl-apart ip-pnl-note sv-unknown" title="{{ panel_unvenued_title }}">{{ panel_unvenued_words }}</span>{% endif %}</span>
                     <span class="ip-sub" data-sv-live="hb-pf-sub">{{ panel_positions }} pos · {% if panel_exposure is not None %}{{ panel_exposure }}% in{% else %}<span class="sv-unknown" title="{{ panel_book_coverage }}">&mdash; in</span>{% endif %}</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">PORTFOLIO &middot; BOTH BOOKS, LIVE MARKS <span class="sv-live-chip" data-sv-live-status></span></div>

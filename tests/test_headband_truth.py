@@ -586,7 +586,7 @@ class RefreshTests(TestCase):
 
     def test_every_cell_declares_a_live_region(self):
         found = regions(self._page())
-        for name in ("hb-pf-value", "hb-pf-sub", "hb-pf-detail",
+        for name in ("hb-pf-value", "hb-pf-pnl", "hb-pf-sub", "hb-pf-detail",
                      "hb-pos-count", "hb-pos-sub", "hb-pos-detail",
                      "hb-bot-state", "hb-bot-sub", "hb-bot-detail",
                      "hb-signals", "hb-news", "hb-alerts", "hb-watchlist",
