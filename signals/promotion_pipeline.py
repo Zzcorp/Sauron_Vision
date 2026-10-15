@@ -718,9 +718,288 @@ class PipelineError(Exception):
     pass
 
 
+# ── Telling a move (2026-10-08) ─────────────────────────────────────────────
+# The wiring audit of 2026-10-08 (ladder moves reached no person): a
+# 04:30 move from live_small to live_full lifts the cap on a rule's real
+# size, and a hand promotion can go back to paper, both
+# silently: _transition wrote the row and the event and logged at INFO,
+# the sweep's refusals lived in a log line and its returned dict, and
+# only pull pages read any of it. A move that
+# touches a live stage is now told to the staff (notify_staff, once the
+# move has committed) and written on the audit chain (bot_program/audit,
+# inside the move's own transaction); the sweep tells one summary with its
+# refusals instead of one message per move; the morning digest reads the
+# night's moves (alerts/scheduled_digests.py, "Ladder overnight").
+
+#: The stages that trade real money.
+LIVE_STAGES = ("live_small", "live_full")
+
+#: A stage as a person reads it. THE STAGE, NOT THE SIZE (2026-10-08,
+#: review): a live stage bounds a rule's real size, it does not set it.
+#: The proof gate cuts an unproven class to a quarter and refuses a failed
+#: one (backtester/proving/proof.stage_with_proof), and Aragorn's own
+#: promotion to live_full puts one class on probation and leaves the
+#: others on paper (bot_program/aragorn._apply), so "real money at full
+#: size" was false for most classes of most live_full rules.
+STAGE_WORDS = {
+    "research": "research (no trades)",
+    "paper": "paper (simulated)",
+    "live_small": "live (real money), a quarter of size at most",
+    "live_full": "live (real money), up to full size",
+}
+
+#: What still sizes each class and side of a live rule, whatever its stage.
+SIZE_BY_PROOF = ("each class and side is still sized by the proof gate "
+                 "(unproven: a quarter; failed: none) and Aragorn's pair "
+                 "verdicts")
+
+#: Who moved a rule, when the caller says so (_transition's `by`).
+BY_SWEEP = "the nightly sweep"
+BY_BAR_LOSERS = "the bar_losers command at the server"
+BY_ARAGORN = "Aragorn"
+
+
+def touches_live(from_stage, to_stage) -> bool:
+    """True when a move starts or ends on a stage that trades real money."""
+    return from_stage in LIVE_STAGES or to_stage in LIVE_STAGES
+
+
+def stage_words(stage) -> str:
+    return STAGE_WORDS.get(str(stage or ""), str(stage or "no stage"))
+
+
+def _rule_words(rule_name) -> str:
+    """golden_cross -> "Golden cross" (position_summary.rule_words), the
+    key itself when it has no words."""
+    try:
+        from dashboard.position_summary import rule_words
+        return rule_words(rule_name) or str(rule_name)
+    except Exception:  # noqa: BLE001 — words, never the message
+        return str(rule_name)
+
+
+def mover_words(event, by: str = "") -> str:
+    """Who moved the rule: the caller's own word when it gave one
+    (_transition's `by`), the account that pressed it, Aragorn or the
+    bar_losers command (their notes say so), the nightly sweep (an
+    automatic move), or a hand with no account (a shell).
+
+    bar_losers before "auto_" (2026-10-08, review): the command is a
+    person at a shell and records reason auto_demote with notes
+    "bar_losers: ...", and every message, digest line and audit row
+    said "by the nightly sweep" at whatever hour it was run."""
+    if by:
+        return by
+    who = getattr(event, "triggered_by", None)
+    if who is not None and getattr(who, "username", ""):
+        return who.username
+    notes = str(getattr(event, "notes", "") or "").lower()
+    if notes.startswith("aragorn"):
+        return BY_ARAGORN
+    if notes.startswith("bar_losers"):
+        return BY_BAR_LOSERS
+    if str(getattr(event, "reason", "")).startswith("auto_"):
+        return BY_SWEEP
+    return "a hand at the server"
+
+
+def _size_words(from_stage, to_stage) -> str:
+    """What the move does to the CAP on the rule's real-money size, in
+    words: the stage allows, the proof gate and Aragorn size (SIZE_BY_
+    PROOF). Never "four times larger": an unproven class stays at a
+    quarter on live_full, a failed one at none."""
+    before = SIZE_FACTORS.get(from_stage or "research", 0.0)
+    after = SIZE_FACTORS.get(to_stage, 0.0)
+    if before == after:
+        return ""
+    if after == 0:
+        return "Its entries send no real money any more."
+    if after < before:
+        return ("The stage now caps its real-money size at a quarter of "
+                "full size.")
+    cap = "up to full size" if after >= 1 else "a quarter of full size at most"
+    return f"The stage now allows {cap} on real money; {SIZE_BY_PROOF}."
+
+
+def ladder_move_words(event, *, by: str = "", size_note: str = "") -> tuple:
+    """(title, body) of one move for notify_staff: the rule, the stages,
+    who moved it, why, what it does to the cap on its size (and, from
+    Aragorn, the pair verdicts the move set: `size_note`), and its SIGNAL
+    record at the move in R. Never a money figure.
+
+    A SIGNAL RECORD, NOT TRADES (2026-10-08, review): the event's
+    expectancy and n come from _stats_since, the Signal table, the
+    platform's predictions; a rule can move onto real money on 25 graded
+    signals having taken no trade (see _venue_stats)."""
+    frm, to = event.from_stage or "research", event.to_stage
+    rule = _rule_words(event.rule_name)
+    up = (STAGE_ORDER.index(to) > STAGE_ORDER.index(frm)
+          if frm in STAGE_ORDER and to in STAGE_ORDER else True)
+    title = (f"⟳ Ladder: {rule} {'promoted' if up else 'demoted'} to "
+             f"{stage_words(to)}")
+    lines = [f"{rule} moved from {stage_words(frm)} to {stage_words(to)}, "
+             f"by {mover_words(event, by)}."]
+    size = _size_words(frm, to)
+    if size:
+        lines.append(size)
+    note = " ".join(str(size_note or "").split())
+    if note:
+        lines.append(note)
+    why = REASON_WORDS.get(event.reason, str(event.reason or "").replace(
+        "_", " "))
+    notes = " ".join(str(event.notes or "").split())
+    lines.append(f"Why: {why}" + (f": {notes[:300]}" if notes else "."))
+    exp = event.expectancy_at_transition
+    if exp is not None:
+        n = event.n_at_transition
+        lines.append(f"Its signal record (last 90 days): {exp:+.2f}R a "
+                     f"signal over {n} graded signal"
+                     f"{'' if n == 1 else 's'}.")
+    lines.append(f"Rule key: {event.rule_name}")
+    return title, "\n".join(lines)
+
+
+#: PromotionEvent.REASON_CHOICES in a person's words.
+REASON_WORDS = {
+    "auto_promote": "an automatic promotion",
+    "auto_demote": "an automatic demotion",
+    "manual_promote": "a promotion by hand",
+    "manual_demote": "a demotion by hand",
+    "rollback": "a rollback to the stage before",
+}
+
+
+def tell_ladder_move(event, *, by: str = "", size_note: str = "") -> dict:
+    """notify_staff for one move that touched a live stage. Never raises:
+    a message that fails costs the message, never the move."""
+    try:
+        from bot_program.notifications import notify_staff
+        title, body = ladder_move_words(event, by=by, size_note=size_note)
+        return notify_staff(title=title, body=body, url="/promotions/") or {}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[promotion] the move of %s was not told: %s",
+                       getattr(event, "rule_name", "?"), e)
+        return {}
+
+
+def ladder_sweep_words(result: dict) -> tuple:
+    """(title, body) of the nightly sweep's ONE summary: what it promoted,
+    what it demoted (the live stages said), and what it HELD BACK with the
+    evidence gate's sentence. ("", "") when it did nothing at all."""
+    promoted = list(result.get("promoted") or [])
+    demoted = list(result.get("demoted") or [])
+    blocked = [b for b in (result.get("blocked") or []) if isinstance(b, dict)]
+    if not (promoted or demoted or blocked):
+        return "", ""
+    moves = {m.get("rule_name"): m for m in (result.get("moves") or [])
+             if isinstance(m, dict)}
+    title = (f"⟳ Ladder overnight: {len(promoted)} promoted, "
+             f"{len(demoted)} demoted, {len(blocked)} held back")
+    lines = []
+
+    def _move_line(rule):
+        m = moves.get(rule) or {}
+        frm, to = m.get("from_stage"), m.get("to_stage")
+        if frm or to:
+            return (f"• {_rule_words(rule)}: {stage_words(frm)} → "
+                    f"{stage_words(to)}")
+        return f"• {_rule_words(rule)}"
+
+    if promoted:
+        lines.append("Promoted:")
+        lines.extend(_move_line(r) for r in promoted[:10])
+        if len(promoted) > 10:
+            lines.append(f"• +{len(promoted) - 10} more on /promotions/")
+    if demoted:
+        lines.append("Demoted:")
+        lines.extend(_move_line(r) for r in demoted[:10])
+        if len(demoted) > 10:
+            lines.append(f"• +{len(demoted) - 10} more on /promotions/")
+    if blocked:
+        lines.append("Held back by the evidence gate:")
+        for b in blocked[:10]:
+            why = " ".join(str(b.get("reason") or "").split())[:160]
+            lines.append(f"• {_rule_words(b.get('rule_name'))} (to "
+                         f"{stage_words(b.get('target'))})"
+                         + (f": {why}" if why else ""))
+        if len(blocked) > 10:
+            lines.append(f"• +{len(blocked) - 10} more held back")
+    return title, "\n".join(lines)
+
+
+def _blocked_names(blocked) -> frozenset:
+    return frozenset(str(b.get("rule_name") or "") for b in (blocked or [])
+                     if isinstance(b, dict))
+
+
+def _sweep_says_something_new(result: dict) -> bool:
+    """True when the sweep moved a rule, or held back a set of rules that
+    differs from the previous sweep's (its ladder_sweep audit row). Read
+    BEFORE this sweep's row is written."""
+    if result.get("promoted") or result.get("demoted"):
+        return True
+    try:
+        from bot_program.audit import LADDER_SWEEP
+        from bot_program.audit_models import AuditLogEntry
+        prev = (AuditLogEntry.objects.filter(kind=LADDER_SWEEP)
+                .order_by("-id").first())
+    except Exception as e:  # noqa: BLE001 — unread: tell, rather than lose
+        logger.warning("[promotion] the previous sweep is unread: %s", e)
+        return True
+    if prev is None:
+        return True
+    return (_blocked_names((prev.data or {}).get("blocked"))
+            != _blocked_names(result.get("blocked")))
+
+
+def tell_ladder_sweep(result: dict) -> dict:
+    """The sweep's one summary to the staff, and its record on the audit
+    chain (the refusals were a log line). Nothing when the sweep did
+    nothing. Never raises.
+
+    NO NIGHTLY "NOTHING MOVED" (2026-10-08, review): a rule that is
+    eligible and keeps failing the evidence gate is held back every night,
+    and every staff phone got the same "0 promoted, 0 demoted, 3 held
+    back" each morning — the daily nothing-happened message that teaches
+    people to ignore the channel (core/component_digest.py). The record is
+    written every time; the message goes only when a rule moved or the
+    set held back changed. The 07:00 digest lists the refusals anyway."""
+    title, body = ladder_sweep_words(result)
+    if not title:
+        return {}
+    new = _sweep_says_something_new(result)
+    try:
+        from bot_program.audit import record_ladder_sweep
+        record_ladder_sweep(result)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[promotion] the sweep's record was not written: %s",
+                       e)
+    if not new:
+        logger.info("[promotion] the sweep held back the same rules as the "
+                    "last one: recorded, not told")
+        return {}
+    try:
+        from bot_program.notifications import notify_staff
+        return notify_staff(title=title, body=body, url="/promotions/") or {}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[promotion] the sweep was not told: %s", e)
+        return {}
+
+
 @transaction.atomic
 def _transition(rule_name: str, target_stage: str, *, user, reason: str,
-                notes: str = "") -> "PromotionEvent":
+                notes: str = "", tell: bool = True, by: str = "",
+                size_note: str = "") -> "PromotionEvent":
+    """Move one rule to `target_stage` and record it (PromotionEvent).
+
+    A move that touches a live stage (2026-10-08) is also written on the
+    audit chain, inside this transaction, and — when `tell` — told to the
+    staff once it has committed (a move rolled back is never announced).
+    The nightly sweep passes tell=False and tells one summary instead.
+    `by` names the mover when the caller knows it (BY_SWEEP,
+    BY_BAR_LOSERS, BY_ARAGORN; mover_words guesses otherwise);
+    `size_note` is a sentence on what the move set besides the stage
+    (Aragorn's pair verdicts)."""
     from signals.models import RuleControl, PromotionEvent
     if target_stage not in STAGE_ORDER:
         raise PipelineError(f"Unknown stage: {target_stage}")
@@ -761,11 +1040,22 @@ def _transition(rule_name: str, target_stage: str, *, user, reason: str,
     logger.info("[promotion] %s: %s → %s (reason=%s%s)",
                 rule_name, from_stage, target_stage, reason,
                 f", {notes}" if notes else "")
+    if touches_live(from_stage, target_stage):
+        # The record rides this transaction (rolled back with the move);
+        # the message waits for the commit, so a move that never happened
+        # is never announced.
+        from bot_program.audit import record_ladder_move
+        record_ladder_move(event, by=mover_words(event, by),
+                           size_note=size_note)
+        if tell:
+            transaction.on_commit(lambda: tell_ladder_move(
+                event, by=by, size_note=size_note))
     return event
 
 
 def promote_rule(rule_name: str, target_stage: Optional[str] = None, *,
-                 user=None, reason: str = "manual_promote") -> "PromotionEvent":
+                 user=None, reason: str = "manual_promote",
+                 by: str = "") -> "PromotionEvent":
     ctrl = _control(rule_name)
     if ctrl is None:
         raise PipelineError(f"No RuleControl for '{rule_name}'")
@@ -776,12 +1066,13 @@ def promote_rule(rule_name: str, target_stage: Optional[str] = None, *,
     # Sanity: must be a forward step (no backwards moves through this entry point).
     if STAGE_ORDER.index(target_stage) <= STAGE_ORDER.index(ctrl.promotion_stage):
         raise PipelineError("promote_rule called with a non-forward target_stage.")
-    return _transition(rule_name, target_stage, user=user, reason=reason)
+    return _transition(rule_name, target_stage, user=user, reason=reason,
+                       by=by)
 
 
 def demote_rule(rule_name: str, target_stage: Optional[str] = None, *,
                 user=None, reason: str = "manual_demote",
-                notes: str = "") -> "PromotionEvent":
+                notes: str = "", by: str = "") -> "PromotionEvent":
     ctrl = _control(rule_name)
     if ctrl is None:
         raise PipelineError(f"No RuleControl for '{rule_name}'")
@@ -792,7 +1083,7 @@ def demote_rule(rule_name: str, target_stage: Optional[str] = None, *,
     if STAGE_ORDER.index(target_stage) >= STAGE_ORDER.index(ctrl.promotion_stage):
         raise PipelineError("demote_rule called with a non-backward target_stage.")
     return _transition(rule_name, target_stage, user=user, reason=reason,
-                       notes=notes)
+                       notes=notes, by=by)
 
 
 # ── Bulk auto-evaluation ───────────────────────────────────────────────────
@@ -807,6 +1098,9 @@ def auto_evaluate_all_rules() -> dict:
     promoted: list[str] = []
     demoted: list[str] = []
     blocked: list[dict] = []
+    # Every move's stages, for the ONE summary the sweep tells at the end
+    # (2026-10-08): its moves are not told one by one (tell=False).
+    moves: list[dict] = []
     for ctrl in RuleControl.objects.all():
         # Skip rules that are admin-paused; admin lane wins.
         if ctrl.status == "paused":
@@ -819,10 +1113,14 @@ def auto_evaluate_all_rules() -> dict:
                 why = (measured_loser(ctrl.rule_name)
                        if target == "paper" and ctrl.promotion_stage
                        in ("live_small", "live_full") else "")
-                _transition(ctrl.rule_name, target, user=None,
-                            reason="auto_demote",
-                            notes=f"measured loser: {why}" if why else "")
+                event = _transition(
+                    ctrl.rule_name, target, user=None, reason="auto_demote",
+                    notes=f"measured loser: {why}" if why else "",
+                    tell=False, by=BY_SWEEP)
                 demoted.append(ctrl.rule_name)
+                moves.append({"rule_name": ctrl.rule_name,
+                              "from_stage": event.from_stage,
+                              "to_stage": event.to_stage})
                 continue
             target = is_eligible_for_promotion(ctrl.rule_name)
             if target is not None:
@@ -843,13 +1141,22 @@ def auto_evaluate_all_rules() -> dict:
                 # refused there and rolled every automatic promotion back,
                 # and it skipped the baseline snapshot _transition takes on
                 # "auto_promote". The evidence gate's sentence is the note.
-                _transition(ctrl.rule_name, target, user=None,
-                            reason="auto_promote", notes=why or "")
+                event = _transition(ctrl.rule_name, target, user=None,
+                                    reason="auto_promote", notes=why or "",
+                                    tell=False, by=BY_SWEEP)
                 promoted.append(ctrl.rule_name)
+                moves.append({"rule_name": ctrl.rule_name,
+                              "from_stage": event.from_stage,
+                              "to_stage": event.to_stage})
         except Exception as e:
             logger.warning("[promotion] auto-evaluation failed for %s: %s",
                            ctrl.rule_name, e)
 
-    return {"promoted": promoted, "demoted": demoted, "blocked": blocked,
-            "n_promoted": len(promoted), "n_demoted": len(demoted),
-            "n_blocked": len(blocked)}
+    result = {"promoted": promoted, "demoted": demoted, "blocked": blocked,
+              "n_promoted": len(promoted), "n_demoted": len(demoted),
+              "n_blocked": len(blocked)}
+    # ONE summary to the staff, the refusals in it, and the sweep's record
+    # on the audit chain (2026-10-08). Nothing when nothing moved or was
+    # held back. Never raises.
+    tell_ladder_sweep(dict(result, moves=moves))
+    return result

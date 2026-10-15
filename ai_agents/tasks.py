@@ -753,14 +753,254 @@ def _sizing_notes(portfolio_names) -> dict:
     return out
 
 
+# ── The weekly review reads the live book (2026-10-08) ───────────────────
+# The wiring audit of 2026-10-08 ("the weekly review grades wizard plans
+# nothing executes, with macro passed as an empty string"): the review read
+# PortfolioSnapshot and strategies.Strategy — wizard plans nothing executes
+# (dashboard/views.py) — and passed macro="" although its prompt requires a
+# macro regime section. It is the operator's one weekly synthesis, and it
+# seeds the newsletter, the Monday plan and the pause or size-cut proposals.
+# It now reads what the book did: the closed trades per rule and class from
+# bot_grading.bot_performance_summary, LIVE, DEMO and PAPER apart and
+# labelled by the platform's three worlds (position_summary.world_of: a
+# broker's demo account is paper=False, never real money);
+# the scorecard per lane (bots, the hand lane); the skip counters; Morgul's
+# findings and the brakes of the week; the latest FRED observations and the
+# measured market stress. R and counts, never a balance.
+
+#: The days the weekly review reads.
+WEEK_DAYS = 7
+#: Rows per book and configs in the skips, so a large fleet stays readable.
+WEEK_MAX_ROWS = 40
+
+
+def _r4(value):
+    try:
+        return None if value is None else round(float(value), 4)
+    except (TypeError, ValueError):
+        return None
+
+
+def _week_book(world: str, words: str, now) -> dict:
+    """One world's week: closed trades per (rule, class) and the scorecard
+    per lane. `world` is one of position_summary.world_of's three: "live"
+    (real money), "demo" (simulated at a broker's demo account), "paper"
+    (simulated). By world, not by venue (2026-10-08, review): the venue
+    split is paper=False, and a demo row is paper=False, so the "LIVE BOOK
+    (real money)" used to count eToro demo closes as money made or lost."""
+    from datetime import timedelta
+    from bot_program import scorecard
+    from bot_program.bot_grading import VENUE_ALL, bot_performance_summary
+    since = now - timedelta(days=WEEK_DAYS)
+    rows = bot_performance_summary(since=since, venue=VENUE_ALL, world=world)
+    by_rule = [{"rule_name": r["rule_name"], "asset_class": r["asset_class"],
+                "n": r["n"], "n_wins": r["n_wins"],
+                "n_losses": r["n_losses"], "win_rate": _r4(r["win_rate"]),
+                "expectancy_r": _r4(r["expectancy"]),
+                "avg_duration_min": r["avg_duration_min"]}
+               for r in rows[:WEEK_MAX_ROWS]]
+    lanes = {}
+    trades = scorecard.rows(days=WEEK_DAYS, now=now, world=world)
+    for lane, group in scorecard.group(trades, lambda r: r["lane"]).items():
+        s = scorecard.summarize(group)
+        lanes[lane] = {"n": s["n"], "unmeasured": s["unmeasured"],
+                       "thin_sample": s["thin"],
+                       "win_rate": _r4(s["win_rate"]),
+                       "avg_win_r": _r4(s["avg_win"]),
+                       "avg_loss_r": _r4(s["avg_loss"]),
+                       "expectancy": _r4(s["expectancy"]),
+                       "sum_r": _r4(s["sum_r"]),
+                       "closed_by_hand": s["by_hand"],
+                       "targets_hit": s["targets_hit"],
+                       "gave_back_after_1r": s["gave_back"],
+                       "stops_that_did_not_hold": s["overshoot"],
+                       "diagnosis": scorecard.diagnosis(s)}
+    return {"venue": words, "days": WEEK_DAYS,
+            "n_closed_graded": sum(r["n"] for r in rows),
+            "by_rule": by_rule, "scorecard": lanes,
+            "note": ("rule_name manual_take is the hand lane: trades the "
+                     "operator took by hand; lane 'manual' in the "
+                     "scorecard is the same trades")}
+
+
+def _week_skips() -> dict:
+    """Why the bots did not trade: each config's top skip codes and the
+    one-sentence diagnosis (asset_engine/skips.py)."""
+    from bot_program.asset_engine import skips
+    from bot_program.models import AssetBotConfig
+    configs = []
+    for cfg in AssetBotConfig.objects.order_by("-enabled", "pk")[:200]:
+        counts = skips.summary(cfg)
+        if not counts:
+            continue
+        configs.append({
+            "config": cfg.name, "asset_class": cfg.asset_class,
+            "mode": cfg.mode, "enabled": bool(cfg.enabled),
+            "top": [{"code": k, "count": v}
+                    for k, v in list(counts.items())[:5]],
+            "diagnosis": skips.diagnose(cfg)})
+        if len(configs) >= WEEK_MAX_ROWS:
+            break
+    return {"configs": configs,
+            "note": ("the counters are cumulative since each config's "
+                     "counters began, not this week alone: read the "
+                     "distribution, not the totals")}
+
+
+def _week_guards(now) -> dict:
+    """Every Morgul finding still standing, with when it was first seen
+    and whether that was this week, and the brakes of the week from the
+    audit chain (AuditLogEntry config_braked).
+
+    EVERY STANDING FINDING (2026-10-08, review): Morgul rewrites its state
+    each run (morgul._store, a 7-day TTL renewed every five minutes), so a
+    finding is kept for as long as it stands and dropped when it clears.
+    One first seen two weeks ago and still standing is live; it used to be
+    left out of the week as if it were not."""
+    from datetime import timedelta
+    from django.utils.dateparse import parse_datetime
+    since = now - timedelta(days=WEEK_DAYS)
+    findings = []
+    try:
+        from bot_program import morgul
+        state = morgul._load(morgul.STATE_KEY) or {}
+        for entry in state.values():
+            if not isinstance(entry, dict):
+                continue
+            first = parse_datetime(str(entry.get("first") or ""))
+            findings.append({"guard": entry.get("name") or entry.get("guard"),
+                             "severity": entry.get("severity"),
+                             "label": str(entry.get("label") or "")[:200],
+                             "first_seen": (first.isoformat() if first
+                                            else None),
+                             "new_this_week": bool(first and first >= since),
+                             "braked": bool(entry.get("braked"))})
+        findings.sort(key=lambda f: f["first_seen"] or "", reverse=True)
+        findings = findings[:WEEK_MAX_ROWS]
+    except Exception as e:  # noqa: BLE001 — a section, never the review
+        logger.warning("[weekly review] Morgul's findings unread: %s", e)
+    brakes = []
+    try:
+        from bot_program.audit import CONFIG_BRAKED
+        from bot_program.audit_models import AuditLogEntry
+        for row in (AuditLogEntry.objects
+                    .filter(kind=CONFIG_BRAKED, created_at__gte=since)
+                    .order_by("-created_at")[:WEEK_MAX_ROWS]):
+            d = row.data or {}
+            brakes.append({"config": d.get("config"),
+                           "by": d.get("by_words") or d.get("by"),
+                           "brake": bool(d.get("brake")),
+                           "at": row.created_at.isoformat(),
+                           "why": str(d.get("why") or "")[:200]})
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[weekly review] brakes unread: %s", e)
+    return {"findings": findings, "brakes": brakes,
+            "note": ("findings: every Morgul finding still standing, with "
+                     "when it was first seen (new_this_week says whether "
+                     "that was this week); one that cleared is not kept. "
+                     "brakes: 'brake' true means the bot kept managing its "
+                     "open positions and opened nothing new")}
+
+
+def _week_macro(now) -> dict:
+    """The latest FRED observation of every series the platform reads
+    (core.constants.FRED_SERIES), the previous one WITH ITS DATE, and the
+    measured market stress with the crisis-mode switch. Never empty: a
+    missing series is said.
+
+    THE PREVIOUS OBSERVATION, DATED (2026-10-08, review): "week_ago" was
+    the newest observation 7 days before the last, which for a monthly
+    series (FEDFUNDS, CPIAUCSL, UNRATE, M2SL) is last month's release and
+    for GDP last quarter's, printed as a week's change. A series that
+    prints more often than weekly (its last two observations under 7 days
+    apart: the daily ones) is compared with its value a week before; any
+    other with the release before its last. Either way the date is said."""
+    from datetime import timedelta
+    from core.constants import FRED_SERIES
+    from market_data.models import MacroObservation
+    fred = {}
+    for series_id, name in FRED_SERIES.items():
+        obs = list(MacroObservation.objects
+                   .filter(indicator__series_id=series_id)
+                   .order_by("-date")[:2])
+        if not obs:
+            fred[series_id] = {"name": name, "missing": True}
+            continue
+        last = obs[0]
+        before = obs[1] if len(obs) > 1 else None
+        if before is not None and (last.date - before.date).days < WEEK_DAYS:
+            before = (MacroObservation.objects
+                      .filter(indicator__series_id=series_id,
+                              date__lte=last.date - timedelta(days=WEEK_DAYS))
+                      .order_by("-date").first())
+        fred[series_id] = {
+            "name": name, "value": _r4(last.value),
+            "date": last.date.isoformat(),
+            "age_days": (now.date() - last.date).days,
+            "previous": _r4(before.value) if before else None,
+            "previous_date": before.date.isoformat() if before else None}
+    stored = [k for k, v in fred.items() if not v.get("missing")]
+    out = {"fred": fred,
+           "fred_note": ("" if stored else
+                         "no FRED observation stored: the FRED scrape has "
+                         "not run or has no key; say so, do not guess")}
+    try:
+        from bot_program import market_stress
+        from bot_program.posture import crisis_mode_on
+        cur = market_stress.current(now)
+        out["market_stress"] = {
+            "level": cur.get("level"), "score": cur.get("score"),
+            "fresh": bool(cur.get("fresh")), "why": cur.get("why"),
+            "what_it_does": market_stress.POSTURE_WORDS.get(
+                cur.get("level"), "")}
+        out["crisis_mode_on"] = bool(crisis_mode_on())
+    except Exception as e:  # noqa: BLE001
+        out["market_stress"] = {"level": None,
+                                "why": f"unreadable: {type(e).__name__}"}
+        out["crisis_mode_on"] = None
+    out["note"] = ("market_stress is the posture the platform MEASURES; it "
+                   "sizes real-money orders only while crisis_mode_on is "
+                   "true")
+    return out
+
+
+def weekly_book_context(now=None) -> dict:
+    """The live book's week for the weekly review: {live_book, demo_book,
+    paper_book, skips, guards, macro}. Each section is fenced: one that
+    cannot be read says so and the others stand."""
+    from django.utils import timezone
+    from dashboard.position_summary import WORLD_DEMO, WORLD_LIVE, WORLD_PAPER
+    now = now or timezone.now()
+    out = {}
+    builders = (
+        ("live_book", lambda: _week_book(
+            WORLD_LIVE, "live: real money", now)),
+        ("demo_book", lambda: _week_book(
+            WORLD_DEMO, "demo: simulated at a broker's demo account "
+                        "(eToro demo), not money", now)),
+        ("paper_book", lambda: _week_book(
+            WORLD_PAPER, "paper: simulated", now)),
+        ("skips", _week_skips),
+        ("guards", lambda: _week_guards(now)),
+        ("macro", lambda: _week_macro(now)),
+    )
+    for key, build in builders:
+        try:
+            out[key] = build()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[weekly review] %s unread: %s", key, e)
+            out[key] = {"unreadable": f"{type(e).__name__}: {e}"[:200]}
+    return out
+
+
 @shared_task
 @guarded_task("agent_weekly_review")
 def generate_weekly_review():
-    """Tier 6: Saturday deep weekly review."""
+    """Tier 6: Saturday deep weekly review, built from the live book
+    (weekly_book_context, 2026-10-08)."""
     import json
     from django.utils import timezone
     from datetime import timedelta
-    from strategies.models import Strategy
     from signals.models import Signal
     from portfolio.models import PortfolioSnapshot
     from scraping.models import NewsArticle
@@ -793,15 +1033,17 @@ def generate_weekly_review():
         s["portfolio"] = s.pop("portfolio__name")
         s["sizing_note"] = notes.get(s["portfolio"], "")
 
-    # Active + completed strategies this week
-    strategies = list(
-        Strategy.objects.filter(
-            status__in=["active", "completed"]
-        ).values(
-            "name", "status", "time_horizon", "pnl", "pnl_pct",
-            "max_drawdown", "sharpe_ratio", "created_at", "closed_at",
-        )
-    )
+    # THE LIVE BOOK (2026-10-08): what the bots and the hand lane closed,
+    # live and paper apart; the scorecard per lane; the skips; the guards
+    # and the brakes; FRED and the measured stress. strategies.Strategy
+    # (wizard plans NOTHING executes) is no longer read: a plan that never
+    # traded was graded as if it had.
+    book = weekly_book_context(now)
+    live, paper = book.get("live_book") or {}, book.get("paper_book") or {}
+    demo = book.get("demo_book") or {}
+    scorecards = {"live (real money)": live.get("scorecard"),
+                  "demo (simulated at eToro)": demo.get("scorecard"),
+                  "paper (simulated)": paper.get("scorecard")}
 
     # Signals created this week
     signals = list(
@@ -832,13 +1074,21 @@ def generate_weekly_review():
         .values("title", "country", "datetime", "impact", "actual", "forecast", "previous")
     )
 
+    def _j(value):
+        return json.dumps(value, indent=1, default=str)
+
     result = WeeklyReviewerAgent().run(
-        snapshots=json.dumps(snapshots, indent=2, default=str),
-        strategies=json.dumps(strategies, indent=2, default=str),
-        signals=json.dumps(signals, indent=2, default=str),
-        macro="",
+        snapshots=_j(snapshots),
+        live_book=_j({k: v for k, v in live.items() if k != "scorecard"}),
+        demo_book=_j({k: v for k, v in demo.items() if k != "scorecard"}),
+        paper_book=_j({k: v for k, v in paper.items() if k != "scorecard"}),
+        scorecard=_j(scorecards),
+        skips=_j(book.get("skips")),
+        guards=_j(book.get("guards")),
+        signals=_j(signals),
+        macro=_j(book.get("macro")),
         news_digest=news_digest,
-        economic_events=json.dumps(economic_events, indent=2, default=str),
+        economic_events=_j(economic_events),
     )
 
     review_text = result.get("review", "")
@@ -863,7 +1113,9 @@ def generate_weekly_review():
         review_text, now=now,
         prompt=f"Weekly review for {week_label}. "
                f"{len(snapshots)} portfolio snapshots, {len(signals)} signals, "
-               f"{len(strategies)} strategies.")
+               f"{live.get('n_closed_graded', 0)} live, "
+               f"{demo.get('n_closed_graded', 0)} demo and "
+               f"{paper.get('n_closed_graded', 0)} paper graded closes.")
 
     return {
         "status": "success",
@@ -873,7 +1125,9 @@ def generate_weekly_review():
                           if newsletter.scheduled_for else None),
         "staff_told": announced,
         "snapshots": len(snapshots),
-        "strategies": len(strategies),
+        "live_closes": live.get("n_closed_graded", 0),
+        "demo_closes": demo.get("n_closed_graded", 0),
+        "paper_closes": paper.get("n_closed_graded", 0),
         "signals": len(signals),
         "news_articles": len(news_articles),
         "economic_events": len(economic_events),

@@ -326,6 +326,134 @@ def record_hypothesis_resolved(*, hypothesis, outcome: str,
         logger.warning("audit record_hypothesis_resolved failed: %s", e)
 
 
+# ── Reach the phone, keep the record (2026-10-08) ────────────────────────
+# The wiring audit of 2026-10-08 found two decisions that left no row a
+# page could read: a ladder move onto or off real money (a PromotionEvent
+# and an INFO log line, signals/promotion_pipeline._transition) with the
+# nightly sweep's refusals in a log line alone, and a config's brake (an
+# extras record that enable_config pops, bot_program/asset_engine/
+# disarm.py). These kinds put them on the chain. Every one fits
+# AuditLogEntry.kind, a 20-wide column Postgres enforces (pinned by
+# tests/test_reach_the_phone.py).
+
+#: A rule moved onto, off or between the live stages.
+LADDER_MOVE = "ladder_move"
+#: The nightly sweep's whole answer: promoted, demoted, held back.
+LADDER_SWEEP = "ladder_sweep"
+#: A config turned off (disarm.disable_config), whoever did it.
+CONFIG_BRAKED = "config_braked"
+#: A config turned back on (disarm.enable_config): whose stop it lifted.
+CONFIG_REARMED = "config_rearmed"
+
+AUDIT_KINDS_20261008 = (LADDER_MOVE, LADDER_SWEEP, CONFIG_BRAKED,
+                        CONFIG_REARMED)
+
+
+def record_ladder_move(event, *, by: str = "", size_note: str = "") -> None:
+    """One PromotionEvent that touched a live stage, on the chain. Called
+    inside _transition's transaction: a move rolled back takes its row
+    with it. `size_note` is what the move set besides the stage (Aragorn's
+    pair verdicts). Never raises."""
+    try:
+        who = getattr(event, "triggered_by", None)
+        data = {
+            "event_id": event.pk,
+            "rule_name": event.rule_name,
+            "from_stage": event.from_stage or "",
+            "to_stage": event.to_stage,
+            "reason": event.reason,
+            "notes": (event.notes or "")[:500],
+            "expectancy": event.expectancy_at_transition,
+            "n": event.n_at_transition,
+            "by": (by or getattr(who, "username", "") or "")[:80],
+        }
+        if size_note:
+            data["size_note"] = str(size_note)[:300]
+        record_event(LADDER_MOVE, data, user=who)
+    except Exception as e:
+        logger.warning("audit record_ladder_move failed: %s", e)
+
+
+def record_ladder_sweep(result: dict) -> None:
+    """The nightly sweep's answer (auto_evaluate_all_rules): the rules it
+    promoted, demoted and HELD BACK with the evidence gate's sentence,
+    which until now lived in a log line and the returned dict. Never
+    raises."""
+    try:
+        data = {
+            "promoted": list(result.get("promoted") or []),
+            "demoted": list(result.get("demoted") or []),
+            "blocked": [{"rule_name": str(b.get("rule_name") or ""),
+                         "target": str(b.get("target") or ""),
+                         "reason": str(b.get("reason") or "")[:300]}
+                        for b in (result.get("blocked") or [])
+                        if isinstance(b, dict)],
+        }
+        record_event(LADDER_SWEEP, data)
+    except Exception as e:
+        logger.warning("audit record_ladder_sweep failed: %s", e)
+
+
+def _config_facts(cfg) -> dict:
+    return {"config_id": getattr(cfg, "pk", None),
+            "config": str(getattr(cfg, "name", "") or "")[:120],
+            "asset_class": str(getattr(cfg, "asset_class", "") or ""),
+            "mode": str(getattr(cfg, "mode", "") or "")}
+
+
+def record_config_braked(cfg, record: dict, *, superseded: bool = False,
+                         adopted: bool = False) -> None:
+    """A config turned off (disarm.disable_config, disarm.adopt_unrecorded):
+    the record it carries — by (the code), at, why, who — on the chain,
+    where re-arming cannot pop it. `brake` says whether the runner keeps
+    managing what it holds (disarm.BRAKES); `superseded` that the kill
+    switch replaced a brake's record on a config already off; `adopted`
+    that the config was ALREADY off with no record and `bot brake` only
+    recorded it (its exits had stopped with it and run again from this
+    row, not from a stop made now). Never raises."""
+    try:
+        from bot_program.asset_engine import disarm
+        by = str((record or {}).get("by") or "")
+        data = dict(_config_facts(cfg), **{
+            "by": by,
+            "by_words": disarm.BY_WORDS.get(by, by),
+            "brake": by in disarm.BRAKES,
+            "at": str((record or {}).get("at") or ""),
+            "why": str((record or {}).get("why") or "")[:200],
+            "who": str((record or {}).get("who") or "")[:80],
+            "superseded": bool(superseded),
+        })
+        if adopted:
+            data["adopted"] = True
+        record_event(CONFIG_BRAKED, data, user=getattr(cfg, "user", None))
+    except Exception as e:
+        logger.warning("audit record_config_braked failed: %s", e)
+
+
+def record_config_rearmed(cfg, lifted: dict, *, who: str = "",
+                          why: str = "") -> None:
+    """A config turned back on (disarm.enable_config): who re-armed it and
+    whose stop that lifted (the record enable_config cleared, {} when the
+    stop kept none). Never raises."""
+    try:
+        from bot_program.asset_engine import disarm
+        lifted = dict(lifted or {})
+        by = str(lifted.get("by") or "")
+        data = dict(_config_facts(cfg), **{
+            "who": str(who or "")[:80],
+            "why": str(why or "")[:200],
+            "lifted_by": by,
+            "lifted_by_words": (disarm.BY_WORDS.get(by, by) if by
+                                else "no record of who"),
+            "lifted_at": str(lifted.get("at") or ""),
+            "lifted_why": str(lifted.get("why") or "")[:200],
+            "lifted_who": str(lifted.get("who") or "")[:80],
+        })
+        record_event(CONFIG_REARMED, data, user=getattr(cfg, "user", None))
+    except Exception as e:
+        logger.warning("audit record_config_rearmed failed: %s", e)
+
+
 def record_desk_plan(plan, extra: dict = None) -> None:
     """Hook from the capital desk — one row per plan, taken or refused.
 

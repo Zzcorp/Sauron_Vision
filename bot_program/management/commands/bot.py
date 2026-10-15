@@ -119,7 +119,8 @@ class Command(BaseCommand):
             # records this stop (or clears the record on the way back on).
             cleared = {}
             if enable:
-                cleared = disarm.enable_config(cfg)
+                cleared = disarm.enable_config(cfg, who="shell",
+                                               why="bot on")
             else:
                 disarm.disable_config(cfg, by=disarm.BY_BOT_OFF,
                                       why="bot off", who="shell")

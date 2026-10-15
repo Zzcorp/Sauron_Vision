@@ -438,17 +438,28 @@ def _apply(m, *, now):
     from signals.promotion_pipeline import _transition
     with transaction.atomic():
         if kind == "rule_live":
+            # The pair verdicts this move sets, said with it (2026-10-08,
+            # review): the stage reads "up to full size", but only `cls`
+            # trades real money, on probation; the rest stay on paper.
+            others = (PairVerdict.objects.filter(
+                rule_name=rule, asset_class=PairVerdict.ANY_CLASS)
+                .values_list("state", flat=True).first())
+            bench_others = others in (None, "bench")
+            size_note = (f"Aragorn's pair verdicts: {cls} on probation at "
+                         f"{PROBATION_SIZE:g}x"
+                         + ("; every other class stays on paper"
+                            if bench_others else "") + ".")
             _transition(rule, "live_full", user=None, reason="auto_promote",
-                        notes=f"aragorn: {cls} {m['reason']}"[:500])
-            if not PairVerdict.objects.filter(
-                    rule_name=rule, asset_class=PairVerdict.ANY_CLASS).exists():
+                        notes=f"aragorn: {cls} {m['reason']}"[:500],
+                        by="Aragorn", size_note=size_note)
+            if others is None:
                 _set(rule, PairVerdict.ANY_CLASS, "bench",
                      f"the rule went live for {cls} alone; its other classes "
                      f"stay on paper until each proves itself", {}, now=now)
             _set(rule, cls, "probation", m["reason"], m["stats"], now=now)
         elif kind == "rule_paper":
             _transition(rule, "paper", user=None, reason="auto_promote",
-                        notes=f"aragorn: {m['reason']}"[:500])
+                        notes=f"aragorn: {m['reason']}"[:500], by="Aragorn")
             AragornAction.objects.create(at=now, kind="rule_paper",
                                          rule_name=rule, detail=m["reason"])
 

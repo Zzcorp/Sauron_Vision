@@ -292,6 +292,15 @@ class TheRecordTests(TestCase):
                                   why="Market-shut booking: test")
             return cfg
 
+        def rearmed_by(cfg):
+            """Who the chain says re-armed it (2026-10-08: the
+            config_rearmed row each re-enabler writes, with its `who`)."""
+            from bot_program.audit_models import AuditLogEntry
+            row = AuditLogEntry.objects.filter(
+                kind="config_rearmed", data__config_id=cfg.pk).latest("id")
+            self.assertEqual(row.data["lifted_by"], disarm.BY_MORGUL)
+            return row.data["who"]
+
         with self.subTest("bot on"):
             cfg = braked("Shell on")
             out = _run("bot", "on", str(cfg.pk))
@@ -299,6 +308,7 @@ class TheRecordTests(TestCase):
             self.assertIn("(the stop by Morgul's brake is cleared)", out)
             self.assertIsNone(_record(cfg))
             self.assertTrue(cfg.enabled)
+            self.assertEqual(rearmed_by(cfg), "shell")
         with self.subTest("HQ toggle"):
             cfg = braked("Hq on")
             resp = self.client.post(reverse("hq_toggle_asset_bot"),
@@ -308,6 +318,7 @@ class TheRecordTests(TestCase):
             self.assertIn("The stop by Morgul's brake is cleared.", said)
             self.assertIsNone(_record(cfg))
             self.assertTrue(cfg.enabled)
+            self.assertEqual(rearmed_by(cfg), self.op.username)
         with self.subTest("system map toggle"):
             cfg = braked("Map on")
             resp = self.client.post(reverse("system_map_toggle"),
@@ -315,6 +326,7 @@ class TheRecordTests(TestCase):
             self.assertEqual(resp.json()["enabled"], True)
             self.assertIsNone(_record(cfg))
             self.assertTrue(cfg.enabled)
+            self.assertEqual(rearmed_by(cfg), self.op.username)
         with self.subTest("seed_bots --activate"):
             Instrument.objects.get_or_create(
                 symbol="AAPL", defaults={"name": "AAPL",
@@ -323,6 +335,7 @@ class TheRecordTests(TestCase):
             seed_bots(self.op, activate=True)
             self.assertIsNone(_record(cfg))
             self.assertTrue(cfg.enabled)
+            self.assertEqual(rearmed_by(cfg), "seed")
 
     def test_the_record_survives_a_heartbeat_and_a_skip(self):
         from bot_program.asset_engine import skips

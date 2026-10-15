@@ -294,7 +294,8 @@ def bot_performance_summary(*, rule_name: Optional[str] = None,
                              min_n: int = 1,
                              user=None,
                              since=None,
-                             venue: str = VENUE_ALL) -> list[dict]:
+                             venue: str = VENUE_ALL,
+                             world: Optional[str] = None) -> list[dict]:
     """Return per-(rule_name, asset_class) stats for closed bot trades within
     the last `days`. Filterable by rule_name, asset_class, user, venue, or an
     explicit `since` datetime that overrides `days`.
@@ -312,10 +313,19 @@ def bot_performance_summary(*, rule_name: Optional[str] = None,
     it is about to trade on — see `bot_track_record_detail`. The chosen
     venue is echoed back in every row so a caller can never mistake a pooled
     number for a single-venue one; that was the silent half of the bug.
+
+    `world` (2026-10-08), when given, also keeps the rows of one of the
+    platform's three worlds (WORLDS, the query form of
+    dashboard.position_summary.world_of): "live" (real money), "demo"
+    (paper=False at a broker's demo account) or "paper". The venue split is
+    paper=False / paper=True, so a demo row sits in VENUE_LIVE; a reader that
+    says "real money" names world="live". The rows keep `venue` as asked.
     """
     qs = _venue_filter(_graded_closes(rule_name=rule_name,
                                       asset_class=asset_class, days=days,
                                       user=user, since=since), venue)
+    if world is not None:
+        qs = _world_filter(qs, world)
     return _summarise(qs, venue, min_n)
 
 

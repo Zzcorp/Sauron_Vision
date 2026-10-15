@@ -33,7 +33,10 @@ SETTINGS_PATH = "/notifications/settings/"
 
 
 def briefing_subject(briefing) -> str:
-    return (f"Sauron Vision — Daily briefing · {briefing.posture.upper()} "
+    """The brief's posture and the measured one (2026-10-08): "DEFENSIVE ·
+    measured: calm" (brain.strategist.posture_title)."""
+    from brain.strategist import posture_title
+    return (f"Sauron Vision — Daily briefing · {posture_title(briefing)} "
             f"({briefing.created_at:%b %d})")
 
 

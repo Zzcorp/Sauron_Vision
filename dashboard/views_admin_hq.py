@@ -920,7 +920,8 @@ def hq_toggle_asset_bot(request):
                               why="the HQ toggle",
                               who=request.user.username)
     else:
-        cleared = disarm.enable_config(cfg)
+        cleared = disarm.enable_config(cfg, who=request.user.username,
+                                       why="the HQ toggle")
     messages.success(
         request,
         f"AssetBot '{cfg.name}' ({cfg.asset_class}) "

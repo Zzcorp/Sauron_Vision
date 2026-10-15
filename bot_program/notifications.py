@@ -79,6 +79,9 @@ NOTIFY_MARKS = {
     "evidence_chain_cold": "\u2744\uFE0F",
     # A bank: money asked for in advance, sent, or released (2026-09-28).
     "withdrawal": "\U0001F3E6",
+    # The position reviewer's call, and the free pass's dead thesis
+    # (2026-10-08): a magnifying glass, the position looked at again.
+    "position_review": "\U0001F50E",
 }
 
 
@@ -323,6 +326,15 @@ OPERATOR_KINDS = {
     # /withdrawals/. Money leaving the real account is the one thing both
     # of them must always hear about, whoever of the two did it.
     "withdrawal",
+    # The position reviewer's exit / tighten / take-part call on a
+    # real-money position, and the free pass's notice that a real row's
+    # thesis turned to exit (2026-10-08, the wiring audit: the reviewer's
+    # verdicts never left the bell). Not
+    # the program telling what it did: a decision handed to the operator
+    # about a position they hold, hand trades first (the care never cuts
+    # a hand trade on a rule, bot_program/position_care.py), so a muted
+    # bot feed must not mute it.
+    "position_review",
 }
 
 # The in-app row's type, per kind — "bot" for everything not listed, because
@@ -2004,6 +2016,286 @@ def notify_track_record_decay(user, *, rule_name: str, asset_class: str,
     )
 
 
+# ── The position reviewer, on the phone (2026-10-08) ─────────────────────
+# The wiring audit of 2026-10-08 (the reviewer's verdicts never left
+# the bell): the five live positions were all
+# hand trades (manual_take), the care never cuts a hand trade on a rule
+# (bot_program/position_care.py), so the position reviewer was the only
+# per-position reasoning acting on them, and its "tighten XAUUSD" / "exit
+# USDCNH" reached the bell alone (brain/position_review_agent._notify).
+# These two put a REAL-money row's call on the phone the way the fills
+# are: the position, the call, the stop or the part, the R now and the
+# reason, in words. R and prices only, never a balance; nothing here can
+# close or move anything (dashboard/views_close.py is the one close path).
+
+#: The reviewer's verdicts in words.
+REVIEW_WORDS = {"exit": "exit", "take_part": "take part off",
+                "tighten": "tighten the stop"}
+
+#: What every reviewer message says, and what a hand trade adds.
+DECIDE_SENTENCE = "Nothing has been closed or moved: you decide."
+HAND_SENTENCE = ("This is a hand trade: the platform never cuts it on a "
+                 "rule, so the decision is yours.")
+
+
+def _hand_taken(row) -> bool:
+    """True for a row the operator took by hand (rule manual_take)."""
+    from dashboard.position_summary import _MANUAL_RULES
+    rule = (row.get("rule_name") if isinstance(row, dict)
+            else getattr(row, "rule_name", ""))
+    return str(rule or "").strip().lower() in _MANUAL_RULES
+
+
+def _position_line(symbol, side, row) -> str:
+    """"Position: XAUUSD long, taken by hand", "Position: EURUSD short,
+    opened by Golden cross"."""
+    from dashboard.position_summary import rule_words
+    how = ""
+    if row is not None:
+        if _hand_taken(row):
+            how = ", taken by hand"
+        else:
+            rule = rule_words(getattr(row, "rule_name", ""))
+            if rule:
+                how = f", opened by {rule}"
+    return (f"Position: {symbol} {'long' if _is_long(side) else 'short'}"
+            f"{how}")
+
+
+def _held_stop_in_force(row):
+    """The fill's venue echo (_held_stop) while it is still the stop in
+    force, else None — brain.close_advice.venue_stop's `applies` rule: no
+    stop moved since (stop_moves, level_edits, stop_reanchored_to_fill)
+    and the row's stop still the one sent. Once the care, a re-anchor or a
+    hand edit has moved the stop, the echo is history."""
+    held = _held_stop(row)
+    if held is None:
+        return None
+    meta = getattr(row, "metadata", None) or {}
+    if not isinstance(meta, dict) or (
+            meta.get("stop_moves") or meta.get("level_edits")
+            or meta.get("stop_reanchored_to_fill")):
+        return None
+    sent = _number((meta.get("stop_rewritten_by_venue") or {}).get("sent"))
+    current = _number(getattr(row, "stop_loss", None))
+    if sent is None or current is None or abs(current - sent) > max(
+            1e-9, abs(sent) * 1e-7):
+        return None
+    return held
+
+
+def _stop_now_line(row, asset_class, symbol) -> str:
+    """"Stop now: 2,345.10 at eToro", the level IN FORCE; "" without a row.
+
+    THE STOP THAT EXISTS (2026-10-08, review): the line used to prefer
+    the fill's venue echo (_held_stop) always, so on a hand trade whose
+    stop the care had since locked and mirrored onto eToro (position_care.
+    _mirror_to_venue: stop_loss and a stop_moves entry) it named a stop
+    that no longer existed, beside a model that reasoned on the row's
+    stop. It now reads what venue_exit.venue_levels reads for a row the
+    venue protects, then the echo only while it applies
+    (_held_stop_in_force), then the row's own stop."""
+    if row is None:
+        return ""
+    meta = getattr(row, "metadata", None) or {}
+    if isinstance(meta, dict) and meta.get("protected"):
+        try:
+            from bot_program.venue_exit import venue_levels
+            at_venue = venue_levels(row).get("stop")
+        except Exception:  # noqa: BLE001 — the row's own stop below
+            at_venue = None
+        if at_venue:
+            return (f"Stop now: {price_words(at_venue, asset_class, symbol)}"
+                    f" at eToro")
+    held = _held_stop_in_force(row)
+    if held is not None:
+        return ("Stop now: none at eToro" if held <= 0 else
+                f"Stop now: {price_words(held, asset_class, symbol)} at eToro")
+    stop = _number(getattr(row, "stop_loss", None))
+    if stop is None or stop <= 0:
+        return "Stop now: not set"
+    return f"Stop now: {price_words(row.stop_loss, asset_class, symbol)}"
+
+
+def _now_line(unrealized_r) -> str:
+    """"Now: −0.40R" (a true minus), the R the trade OPENED with as 1R."""
+    said = r_words(unrealized_r)
+    return f"Now: {said}R" if said else "Now: the R is not known"
+
+
+def _review_subtitle(row) -> str:
+    """Whose money it is: "Real money · eToro" (the position line and the
+    summary say a hand trade is one)."""
+    return _venue_line(row) if row is not None else ""
+
+
+def position_review_message(*, review, row=None) -> dict:
+    """The Telegram message of one actionable reviewer call:
+
+        🔎 XAUUSD: the reviewer says tighten the stop
+        Real money · eToro · taken by hand
+        The position reviewer says tighten the stop. Nothing has been
+        closed or moved: you decide. This is a hand trade: ...
+
+        Position: XAUUSD long, taken by hand
+        Verdict: tighten the stop (confidence 70%)
+        Suggested stop: 2,345.10        (take part: "Part to close: 40%")
+        Stop now: 2,330.00
+        Now: −0.40R
+        Why: <the triggers that fired>
+        Thesis DEAD: ...                (the structure's answer)
+        Reviewer: <the model's reasoning>
+    """
+    verdict = str(review.verdict or "")
+    said = REVIEW_WORDS.get(verdict, verdict.replace("_", " "))
+    symbol = str(review.symbol or "")
+    asset_class = str(getattr(row, "asset_class", "") or "")
+    lines = [_position_line(symbol, review.side, row)]
+    conf = _number(review.confidence)
+    lines.append(f"Verdict: {said}"
+                 + (f" (confidence {conf * 100:.0f}%)" if conf is not None
+                    else ""))
+    if verdict == "tighten":
+        stop = _number(review.suggested_stop)
+        lines.append(
+            f"Suggested stop: "
+            f"{price_words(review.suggested_stop, asset_class, symbol)}"
+            if stop and stop > 0 else "Suggested stop: none given")
+    elif verdict == "take_part":
+        lines.append(f"Part to close: {int(review.take_part_pct)}% of the "
+                     f"position" if review.take_part_pct
+                     else "Part to close: not given")
+    stop_now = _stop_now_line(row, asset_class, symbol)
+    if stop_now:
+        lines.append(stop_now)
+    lines.append(_now_line(review.unrealized_r))
+    reasons = [" ".join(str(t.get("text") or "").split())
+               for t in (review.triggers or [])[:2] if isinstance(t, dict)]
+    reasons = [r for r in reasons if r]
+    if reasons:
+        lines.append("Why: " + " ".join(reasons))
+    thesis = ((review.facts or {}).get("thesis") or {}).get("words") or ""
+    if thesis:
+        lines.append(" ".join(str(thesis).split())[:300])
+    prose = " ".join(str(review.reasoning_md or "").split())
+    if prose:
+        lines.append("Reviewer: " + prose[:500])
+    summary = f"The position reviewer says {said}. {DECIDE_SENTENCE}"
+    if row is not None and _hand_taken(row):
+        summary += " " + HAND_SENTENCE
+    trade_id = review.position_id if review.book == "bot" else None
+    return {"title": f"{symbol}: the reviewer says {said}",
+            "mark": NOTIFY_MARKS["position_review"],
+            "subtitle": _review_subtitle(row),
+            "summary": summary, "lines": lines,
+            "details": (([f"Trade: #{trade_id}"] if trade_id else [])
+                        + [f"Review: #{review.id}"]),
+            "button": _page_button(trade_id)}
+
+
+def notify_position_review(user, review, *, row=None, title: str,
+                           body: str, url: str = "") -> bool:
+    """One actionable reviewer call on a REAL-money position, through the
+    dispatcher: the bell row it always had (its title is the reviewer's
+    6 h cooldown key, its data the position card's payload), and the
+    operator's channel, quiet hours honoured. The caller decides the call
+    is actionable, real money and not said in the last six hours."""
+    message = _built(position_review_message, review=review, row=row)
+    data = {"kind": "position_review", **review.card_payload()}
+    if message:
+        data["items"] = _bell_items(message)
+        data["mark"] = message["mark"]
+    if _in_quiet_hours(user):
+        # The bell alone tonight (dispatch_notification mutes the phone):
+        # said on the row, so the reviewer's 6 h cooldown does not count
+        # it as a call the phone heard (position_review_agent._notify).
+        data["phone_held"] = True
+    return dispatch_notification(user, "position_review", title=title,
+                                 body=body, url=url, row_data=data,
+                                 telegram=message)
+
+
+def thesis_exit_message(*, pos, facts, row=None) -> dict:
+    """The Telegram message of a real row whose thesis turned to exit:
+
+        🔎 USDCNH: the thesis is dead
+        Real money · eToro · taken by hand
+        The thesis check reads this trade as dead. Nothing has been
+        closed or moved: you decide. ...
+
+        Position: USDCNH long, taken by hand
+        Thesis: dead, structure broke against it: ...
+        Stop now: 7.1000
+        Now: +0.40R
+    """
+    symbol = str(pos.get("symbol") or "")
+    asset_class = str(pos.get("asset_class") or "")
+    th = facts.get("thesis") or {}
+    why = [" ".join(str(w).split()) for w in (th.get("why") or [])
+           if str(w or "").strip()]
+    lines = [_position_line(symbol, pos.get("side"), row),
+             "Thesis: dead" + (f", {'; '.join(why)[:300]}" if why else "")]
+    stop_now = _stop_now_line(row, asset_class, symbol)
+    if stop_now:
+        lines.append(stop_now)
+    lines.append(_now_line(facts.get("unrealized_r")))
+    # The check's own verdict, never a claim about the bars it may not
+    # have made (2026-10-08, review): a thesis reads dead on a structure
+    # break, a bias against the trade OR the recovery odds alone
+    # (brain/thesis_check.py), and the Thesis line names which.
+    summary = "The thesis check reads this trade as dead. " + DECIDE_SENTENCE
+    if _hand_taken(row if row is not None else pos):
+        summary += " " + HAND_SENTENCE
+    trade_id = pos.get("position_id")
+    return {"title": f"{symbol}: the thesis is dead",
+            "mark": NOTIFY_MARKS["position_review"],
+            "subtitle": _review_subtitle(row),
+            "summary": summary, "lines": lines,
+            "details": [f"Trade: #{trade_id}"] if trade_id else [],
+            "button": _page_button(trade_id)}
+
+
+def notify_thesis_exit(user, *, pos, facts) -> bool:
+    """ONE notice when a REAL bot row's thesis turns to exit (the free
+    pass, brain/position_review.deterministic_pass), de-duplicated per row
+    and verdict on the bell row it leaves (data["thesis_notice"]). False
+    when it was said already, and during the user's quiet hours: nothing
+    is written then, so the first pass after them (every 30 minutes) says
+    it, if the thesis still reads exit. The caller decides the row is
+    real money and its thesis reads exit."""
+    key = f"{pos.get('book')}:{pos.get('position_id')}|exit"
+    try:
+        from alerts.models import Notification
+        if Notification.objects.filter(user=user,
+                                       data__thesis_notice=key).exists():
+            return False
+    except Exception as e:  # noqa: BLE001 — a dedupe failure must not mute it
+        logger.warning("thesis-exit dedupe failed: %s", e)
+    if _in_quiet_hours(user):
+        return False
+    row = _fill_row(None, pos.get("position_id"))
+    message = _built(thesis_exit_message, pos=pos, facts=facts, row=row)
+    symbol = str(pos.get("symbol") or "")
+    th = facts.get("thesis") or {}
+    words = " ".join(str(th.get("words") or "").split())[:300]
+    said = r_words(facts.get("unrealized_r"))
+    title = (f"⊟ {symbol} {'BUY' if _is_long(pos.get('side')) else 'SELL'}"
+             f" · thesis dead")
+    body = ((f"{said}R open. " if said else "")
+            + (f"{words}\n\n" if words else "\n\n")
+            + "This is a notice — nothing has been closed. Use CLOSE on "
+              "the position card if you agree.")
+    data = {"kind": "thesis_exit", "thesis_notice": key,
+            "position_key": key.split("|", 1)[0],
+            "mark": NOTIFY_MARKS["position_review"]}
+    if message:
+        data["items"] = _bell_items(message)
+    page = _page_button(pos.get("position_id"))[1]
+    return dispatch_notification(user, "position_review", title=title,
+                                 body=body, url=page, row_data=data,
+                                 telegram=message)
+
+
 # ── Phase-43 daily briefing fan-out ──────────────────────────────────────
 
 def notify_strategist_briefing_to_all(briefing) -> dict:
@@ -2026,8 +2318,12 @@ def notify_strategist_briefing_to_all(briefing) -> dict:
     if not eligible_users:
         return {"n_eligible": 0, "n_delivered": 0, "n_skipped": 0}
 
+    # BOTH POSTURES (2026-10-08): the brief's own word, then the measured
+    # one that sizes real-money orders while crisis mode is on —
+    # "DEFENSIVE · measured: calm" (brain.strategist.posture_title).
+    from brain.strategist import posture_title
     title = (
-        f"Sauron briefing — {briefing.posture.upper()} "
+        f"Sauron briefing — {posture_title(briefing)} "
         f"({briefing.created_at:%Y-%m-%d})"
     )
     # Strip the strategist's **emphasis** BEFORE truncation: the bell
@@ -2062,6 +2358,13 @@ def notify_strategist_briefing_to_all(briefing) -> dict:
         items.append({"label": "POSTURE",
                       "detail": briefing.posture_rationale[:160],
                       "url": briefing_url})
+    measured = str(getattr(briefing, "measured_posture", "") or "")
+    if measured:
+        note = str(getattr(briefing, "measured_posture_note", "") or "")
+        items.append({"label": "MEASURED POSTURE",
+                      "detail": (f"{measured}" + (f" — {note}" if note
+                                                  else ""))[:200],
+                      "url": ""})
     for i, idea in enumerate((briefing.ideas or [])[:3], start=1):
         summary = (idea or {}).get("summary", "")
         if summary:
@@ -2085,6 +2388,7 @@ def notify_strategist_briefing_to_all(briefing) -> dict:
     row_data = {"items": items,
                 "mark": NOTIFY_MARKS["strategist_briefing"],
                 "briefing": {"posture": briefing.posture,
+                             "measured_posture": measured,
                              "id": briefing.pk}}
 
     n_delivered = 0

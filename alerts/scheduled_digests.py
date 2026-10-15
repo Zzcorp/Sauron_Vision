@@ -92,7 +92,60 @@ def generate_morning_digest(user=None):
     except Exception as e:
         logger.error(f"Morning digest news section failed: {e}")
 
+    # THE LADDER OVERNIGHT (2026-10-08, the wiring audit: ladder moves
+    # reached no person). The promotion sweep runs at 04:30, inside most
+    # quiet hours, so its one
+    # summary reaches the bell and not the phone: this is the phone's copy.
+    # The night's moves from PromotionEvent, the refusals from the sweep's
+    # own audit row (they were a log line). R and stages, never money.
+    try:
+        digest['sections']['ladder'] = {'lines': ladder_overnight_lines(now)}
+    except Exception as e:
+        logger.error(f"Morning digest ladder section failed: {e}")
+
     return digest
+
+
+#: Moves listed in the ladder section before "+N more".
+LADDER_LINES_MAX = 8
+
+
+def ladder_overnight_lines(now=None, *, hours=24) -> list:
+    """The promotion ladder's last `hours`, as digest lines: every stage
+    change (PromotionEvent) newest first, then what the newest sweep held
+    back (its ladder_sweep audit row). One line saying so when nothing
+    moved."""
+    from bot_program.audit import LADDER_SWEEP
+    from bot_program.audit_models import AuditLogEntry
+    from signals.models_control import PromotionEvent
+    from signals.promotion_pipeline import (_rule_words, mover_words,
+                                            stage_words)
+    now = now or timezone.now()
+    since = now - timedelta(hours=hours)
+    events = list(PromotionEvent.objects.filter(created_at__gte=since)
+                  .select_related('triggered_by')
+                  .order_by('-created_at')[:LADDER_LINES_MAX + 1])
+    lines = []
+    for ev in events[:LADDER_LINES_MAX]:
+        lines.append(f"• {_rule_words(ev.rule_name)}: "
+                     f"{stage_words(ev.from_stage or 'research')} → "
+                     f"{stage_words(ev.to_stage)} (by {mover_words(ev)})")
+    if len(events) > LADDER_LINES_MAX:
+        more = PromotionEvent.objects.filter(created_at__gte=since).count()
+        lines.append(f"• +{more - LADDER_LINES_MAX} more on /promotions/")
+    sweep = (AuditLogEntry.objects.filter(kind=LADDER_SWEEP,
+                                          created_at__gte=since)
+             .order_by('-id').first())
+    blocked = [b for b in ((sweep.data or {}).get('blocked') or [])
+               if isinstance(b, dict)] if sweep else []
+    if blocked:
+        names = ", ".join(_rule_words(b.get('rule_name')) for b in blocked[:5])
+        more = f" (+{len(blocked) - 5} more)" if len(blocked) > 5 else ""
+        lines.append(f"• Held back: {len(blocked)} by the evidence gate — "
+                     f"{names}{more}")
+    if not lines:
+        lines.append(f"• No rule changed stage in the last {hours} hours")
+    return lines
 
 
 def generate_eod_digest(user=None):
@@ -211,6 +264,7 @@ SECTION_WORDS = {
     'daily_pnl': 'Daily P&L',
     'trades': 'Trades today',
     'strategies': 'Active strategies',
+    'ladder': 'Ladder overnight',
 }
 
 #: A field's name as a digest line says it.

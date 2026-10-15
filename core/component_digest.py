@@ -49,6 +49,11 @@ this reports only what an operator could act on today:
              `market_data/feeds.py`). `off` and `idle` are excluded: a feed
              nobody configured, or one whose market is shut, is the system
              working.
+  brakes     (2026-10-08) a bot a brake or the kill switch stopped in the
+             last 24 hours, from the audit chain, that is STILL OFF
+             (BRAKE_WINDOW_HOURS, below). One re-armed since is listed
+             under its own heading and does not count as a thing that
+             needs attention (NOTED_SECTIONS).
 
 NOT reported: components that are switched off. An operator who disabled
 something does not need telling about it daily, and a digest that nags
@@ -130,7 +135,27 @@ SECTIONS = (
     ("errors", "Failing", "the last run raised"),
     ("warnings", "Ran but did nothing", "stored nothing"),
     ("silent", "Stopped running", "no recent run"),
+    ("brakes", "Braked in the last 24 hours", "stopped"),
 )
+
+#: Listed after the faults, NEVER counted in the title and never a reason
+#: to send (2026-10-08, review): a brake already lifted is not a thing that
+#: needs attention, and a digest whose only line is one would break the
+#: rule that silence means healthy.
+NOTED_SECTIONS = (
+    ("rearmed", "Braked, and re-armed since", "re-armed"),
+)
+
+#: THE BRAKES OF THE LAST DAY (2026-10-08, "reach the phone, keep the
+#: record"). A bot stopped by Morgul's brake, the Telegram group's /stop,
+#: the alarm chat's /stopall, `bot brake` or the kill switch in the last
+#: BRAKE_WINDOW_HOURS, read from the audit chain (AuditLogEntry
+#: config_braked, bot_program/asset_engine/disarm.py), and whether it has
+#: been re-armed since. A stop by hand (`bot off`, a toggle, a seed) is a
+#: deliberate choice and is not listed, as a switched-off component is not.
+#: The line names the stop and the hour, never its why or who: free text a
+#: chat on a phone does not carry (disarm.record_words, short form).
+BRAKE_WINDOW_HOURS = 24
 
 #: The one emoji the Telegram title leads with. The bell keeps the
 #: platform's own ⊙, which a phone's font may draw as a box.
@@ -323,7 +348,7 @@ def collect_faults(now=None) -> dict:
 
     now = now or timezone.now()
     out = {"errors": [], "warnings": [], "silent": [], "feeds": [],
-           "checked": 0}
+           "brakes": [], "rearmed": [], "checked": 0}
 
     try:
         from core.platform_control import PlatformComponent
@@ -389,6 +414,9 @@ def collect_faults(now=None) -> dict:
 
     out["feeds"] = _feed_faults(now)
     out["errors"] += _withheld_pages()
+    brakes = _brakes(now)
+    out["brakes"] = [b for b in brakes if b.get("still_off")]
+    out["rearmed"] = [b for b in brakes if not b.get("still_off")]
     return out
 
 
@@ -418,6 +446,60 @@ def _withheld_pages() -> list:
     except Exception as e:  # noqa: BLE001 — a digest must never break a beat
         logger.warning("[digest] leak walk unreadable: %s", e)
     return out
+
+
+def _brakes(now) -> list:
+    """The bots a brake or the kill switch stopped in the last
+    BRAKE_WINDOW_HOURS, newest first, each said once with its day and hour
+    ("Wed 08:00 UTC": a 07:00 digest reads yesterday's hour as today's)
+    and whether it is still off (`still_off`). A stop `bot brake` only
+    ADOPTED (data["adopted"]: the bot was already off with no record) is
+    said as that, never as a stop made then. Never raises."""
+    from datetime import timedelta
+    try:
+        from bot_program.asset_engine import disarm
+        from bot_program.audit import CONFIG_BRAKED, CONFIG_REARMED
+        from bot_program.audit_models import AuditLogEntry
+        since = now - timedelta(hours=BRAKE_WINDOW_HOURS)
+        rows = list(AuditLogEntry.objects
+                    .filter(kind__in=(CONFIG_BRAKED, CONFIG_REARMED),
+                            created_at__gte=since)
+                    .order_by("created_at", "id")[:500])
+        rearmed = {}
+        for row in rows:
+            d = row.data or {}
+            if row.kind == CONFIG_REARMED:
+                rearmed[d.get("config_id")] = row.created_at
+        out, seen = [], set()
+        for row in reversed(rows):
+            d = row.data or {}
+            by = str(d.get("by") or "")
+            if row.kind != CONFIG_BRAKED or not (
+                    by in disarm.BRAKES or by == disarm.BY_KILL_SWITCH):
+                continue
+            key = d.get("config_id")
+            if key in seen:
+                continue
+            seen.add(key)
+            at = f"{row.created_at:%a %H:%M} UTC"
+            if d.get("adopted"):
+                words = (f"off with no record from before; recorded as "
+                         f"{disarm.BY_WORDS.get(by, by)} at {at}: its exits "
+                         f"run again from then")
+            else:
+                words = f"stopped by {disarm.BY_WORDS.get(by, by)} at {at}"
+            back = rearmed.get(key)
+            still_off = not (back is not None and back >= row.created_at)
+            words += ("; still off" if still_off
+                      else f"; re-armed at {back:%a %H:%M} UTC")
+            out.append({"key": f"config_{key}",
+                        "name": str(d.get("config") or f"Bot #{key}"),
+                        "message": words, "last_run": row.created_at,
+                        "still_off": still_off, "errors": 0})
+        return out
+    except Exception as e:  # noqa: BLE001 — a digest must never break a beat
+        logger.warning("[digest] brakes unreadable: %s", e)
+        return []
 
 
 def _feed_faults(now) -> list:
@@ -483,7 +565,8 @@ def render_digest(faults: dict) -> tuple:
 
     lines, hidden = [], 0
     room = MAX_LINES - 3  # the blank, a "+N more" and the closing line
-    for bucket, heading, fallback in SECTIONS:
+    # NOTED_SECTIONS last: listed beside the faults, never counted in `n`.
+    for bucket, heading, fallback in SECTIONS + NOTED_SECTIONS:
         items = faults.get(bucket) or []
         if not items:
             continue
@@ -523,6 +606,7 @@ def send_component_digest(now=None) -> dict:
     title, body = render_digest(faults)
     result = {"faults": (len(faults["errors"]) + len(faults["warnings"])
                          + len(faults["silent"]) + len(faults["feeds"])),
+              "brakes": len(faults.get("brakes") or []),
               "checked": faults["checked"], "sent": 0}
     if not title:
         return result

@@ -177,7 +177,7 @@ def disable_config(cfg, *, by: str, why: str = "", who: str = "",
             extras[RECORD_KEY] = record
             cfg.enabled, cfg.extras = False, extras
         return was_on
-    turned_off = False
+    turned_off = superseded = False
     with transaction.atomic():
         row = _locked(cfg)
         if row is None:
@@ -193,6 +193,7 @@ def disable_config(cfg, *, by: str, why: str = "", who: str = "",
             extras[RECORD_KEY] = record
             row.extras = extras
             row.save(update_fields=["extras", "updated_at"])
+            superseded = True
             logger.warning("[KILL SWITCH] config %s was stopped by a brake; "
                            "the kill switch's stop now stands — not managed",
                            row.pk)
@@ -200,13 +201,37 @@ def disable_config(cfg, *, by: str, why: str = "", who: str = "",
     if turned_off:
         logger.warning("[disarm] config %s (%s) stopped by %s: %s",
                        row.pk, row.name, BY_WORDS[by], record["why"])
+    if turned_off or superseded:
+        _audit_braked(row, record, superseded=superseded)
     return turned_off
 
 
-def enable_config(cfg) -> dict:
+def _audit_braked(row, record, *, superseded=False, adopted=False) -> None:
+    """THE CHAIN'S COPY (2026-10-08, the wiring audit: the brake left no
+    durable record): the record
+    on extras is popped by enable_config and Morgul's cache forgets in
+    seven days, so a page could not say who braked which config, when or
+    why once it was re-armed. AuditLogEntry kind config_braked keeps it
+    (by, at, why, who, the config). Written after the stop has committed;
+    never raises — a stop must never fail on its receipt."""
+    try:
+        from bot_program.audit import record_config_braked
+        record_config_braked(row, record, superseded=superseded,
+                             adopted=adopted)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[disarm] config %s: the brake's audit row was not "
+                       "written: %s", getattr(row, "pk", "?"), e)
+
+
+def enable_config(cfg, *, who: str = "", why: str = "") -> dict:
     """Turn the config on and clear its record, under the same lock.
     Returns the record it cleared ({} when there was none), so the caller
-    can say whose stop it lifted."""
+    can say whose stop it lifted.
+
+    A config that WAS off leaves an AuditLogEntry config_rearmed (2026-10-
+    08): `who` re-armed it, `why`, and the stop it lifted, so the record
+    this pops is never the only copy. Arming a config already on writes
+    nothing."""
     from django.db import transaction
     if getattr(cfg, "pk", None) is None:
         raise ValueError("enable_config needs a saved config")
@@ -214,6 +239,7 @@ def enable_config(cfg) -> dict:
         row = _locked(cfg)
         if row is None:
             return {}
+        was_off = not row.enabled
         cleared = record_of(row)
         extras = dict(row.extras) if isinstance(row.extras, dict) else {}
         extras.pop(RECORD_KEY, None)
@@ -221,6 +247,13 @@ def enable_config(cfg) -> dict:
         row.extras = extras
         row.save(update_fields=["enabled", "extras", "updated_at"])
     _mirror(cfg, row)
+    if was_off:
+        try:
+            from bot_program.audit import record_config_rearmed
+            record_config_rearmed(row, cleared, who=who, why=why)
+        except Exception as e:  # noqa: BLE001 — the arm stands regardless
+            logger.warning("[disarm] config %s: the re-arm's audit row was "
+                           "not written: %s", row.pk, e)
     return cleared
 
 
@@ -249,6 +282,12 @@ def adopt_unrecorded(cfg, *, why: str, who: str, now=None) -> bool:
         logger.warning("[disarm] config %s (%s), off with no record, is now "
                        "recorded as stopped by %s: %s", row.pk, row.name,
                        BY_WORDS[BY_BOT_BRAKE], record["why"])
+        # ADOPTED, NOT BRAKED NOW (2026-10-08, review): the config was off
+        # with no record since before this moment, its exits stopped with
+        # it; the row says so, and its readers (activity feed, the trade's
+        # timeline, the 07:00 digest) never call it a fresh brake whose
+        # exits "kept running".
+        _audit_braked(row, record, adopted=True)
     return adopted
 
 
