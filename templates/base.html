@@ -532,6 +532,8 @@
             <a href="{% url 'consolidation_dashboard' %}" class="nav-link {% if page_id == 'consolidation' %}active{% endif %}"><span class="icon">⊜</span> <span class="label-text">Consolidation</span></a>
             {% comment %}The 5-10 year sector view the share allocator reads as a ±10% prior, with its own graded calls (2026-09-12).{% endcomment %}
             <a href="{% url 'horizon_dashboard' %}" class="nav-link {% if page_id == 'horizon' %}active{% endif %}"><span class="icon">◕</span> <span class="label-text">Horizon</span></a>
+            {% comment %}Where the large players must move, from free public footprints, graded against what prices did next (2026-10-09). Information, never a gate.{% endcomment %}
+            <a href="{% url 'big_money_board' %}" class="nav-link {% if page_id == 'big_money' %}active{% endif %}"><span class="icon">◆</span> <span class="label-text">Big Money</span></a>
             <a href="{% url 'intelligence_hub' %}" class="nav-link {% if page_id == 'intelligence' %}active{% endif %}"><span class="icon">◯</span> <span class="label-text">Intelligence Hub</span></a>
             <a href="{% url 'briefing_dashboard' %}" data-nav-id="briefing" class="nav-link {% if page_id == 'briefing' %}active{% endif %}"><span class="icon">✦</span> <span class="label-text">Strategist Briefing</span></a>
             <a href="{% url 'earnings_reviews_dashboard' %}" class="nav-link {% if page_id == 'earnings_reviews' %}active{% endif %}"><span class="icon">$</span> <span class="label-text">Earnings Reviews</span></a>
@@ -2282,6 +2284,14 @@
           '</div>';
       }
 
+      /* THE BIG MONEY BOARD (2026-10-09, bigmoney/): the week's lean of
+         this market from forced flows, filled AFTER the ticket renders by
+         its own endpoint, never the order preview (_execute calls
+         _preview). A note, never a gate: no quantity, stop, leverage or
+         button reads it. */
+      warnHtml += '<div class="sz-note sz-bigmoney" data-role="bigmoney" ' +
+        'aria-live="polite" hidden></div>';
+
       /* Whether a Sauron signal backs this ticket (2026-10-02): the week's
          instrument-view tickets, taken with none, made -1.98R. A warning;
          the button is unchanged. */
@@ -2526,6 +2536,38 @@
             (funding ? ' is-danger' : '') + '" data-role="ok"></button>' +
         '</div>';
       document.body.appendChild(host);
+
+      /* The Big Money note: one GET, three seconds at most; a failure
+         writes its own words and changes nothing else on the ticket. */
+      (function fillBigMoney() {
+        var slot = host.querySelector('[data-role="bigmoney"]');
+        if (!slot || !p.symbol) return;
+        var ctl = (typeof AbortController === 'function') ? new AbortController() : null;
+        var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 3000);
+        function show(label, words, suffix) {
+          slot.innerHTML = '<b>' + esc(label || 'BIG MONEY') + '</b> ' + esc(words) +
+            (suffix ? ' ' + esc(suffix) : '');
+          slot.hidden = false;
+        }
+        fetch('/api/big-money/note/?symbol=' + encodeURIComponent(p.symbol) +
+              '&side=' + encodeURIComponent(p.side || ''),
+              { credentials: 'same-origin', signal: ctl ? ctl.signal : undefined })
+          .then(function (r) {
+            if (!r.ok) throw new Error('the board answered ' + r.status);
+            return r.json();
+          })
+          .then(function (d) {
+            clearTimeout(timer);
+            if (d && d.words) show(d.label, d.words, d.suffix);
+          })
+          .catch(function (e) {
+            clearTimeout(timer);
+            show('BIG MONEY', 'The board could not be read (' +
+              ((e && e.name === 'AbortError') ? 'no answer in 3 seconds'
+                                              : String((e && e.message) || e)) + ').',
+              'Information, never a gate.');
+          });
+      })();
 
       var okBtn = host.querySelector('[data-role="ok"]');
       var tradeLine = host.querySelector('[data-role="tradeline"]');

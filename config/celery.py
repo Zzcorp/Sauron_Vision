@@ -76,6 +76,13 @@ app.conf.task_routes = {
     # pass that queues the sends stays on the default queue (a query).
     "alerts.tasks.send_newsletter_task": {"queue": "slow"},
     "alerts.tasks.generate_newsletter_task": {"queue": "ai"},
+    # 2026-10-09 -- the Big Money Board (bigmoney/): a few thousand rows of
+    # stored closes, COT and FRED per read, no network: the slow worker,
+    # never in front of the quote poller.
+    "bigmoney.tasks.*": {"queue": "slow"},
+    # 2026-10-15 -- the crypto daily close: one Binance klines call per
+    # crypto instrument at 00:10 UTC, never in front of the quote poller.
+    "market_data.tasks.fetch_eod_crypto": {"queue": "slow"},
 }
 
 # ============================================================
@@ -272,6 +279,15 @@ app.conf.beat_schedule = {
         "task": "market_data.tasks.fetch_eod_all_instruments",
         "schedule": crontab(hour=22, minute=30),
     },
+    # 2026-10-15 -- the crypto daily close. Binance's 1d bar closes at
+    # 00:00 UTC; nothing else on the beat writes a crypto 1d bar (the
+    # 22:30 pass serves Yahoo's classes only), so the Big Money Board's
+    # crypto row went blind two days after a one-off backfill. Same switch
+    # as the 22:30 pass (scraper_eod); before the 05:20 board read.
+    "fetch-eod-crypto": {
+        "task": "market_data.tasks.fetch_eod_crypto",
+        "schedule": crontab(hour=0, minute=10),
+    },
     "recalculate-all-technicals": {
         "task": "indicators.tasks.recalculate_all_indicators",
         "schedule": crontab(hour=23, minute=0),
@@ -301,6 +317,17 @@ app.conf.beat_schedule = {
     "fetch-cot-reports": {
         "task": "scraping.tasks.fetch_cot_reports",
         "schedule": crontab(hour=0, minute=0, day_of_week="saturday"),
+    },
+    # 2026-10-15 -- the CFTC moves a holiday week's release to the Monday
+    # (Nov 16, Nov 30 and Dec 28, 2026: https://www.cftc.gov/es/node/207246,
+    # seen 2026-10-08), after the Saturday fetch: without this run the
+    # newest report stayed three weeks old until the next Saturday and
+    # every COT reader went blind Wednesday to Friday. The scraper upserts
+    # on (instrument, report_date), so an ordinary Tuesday re-asserts last
+    # week's rows and is a healthy run.
+    "fetch-cot-reports-after-monday": {
+        "task": "scraping.tasks.fetch_cot_reports",
+        "schedule": crontab(hour=0, minute=10, day_of_week="tuesday"),
     },
     "ai-weekly-review": {
         "task": "ai_agents.tasks.generate_weekly_review",
@@ -670,5 +697,23 @@ app.conf.beat_schedule = {
     "alarm-sentinel": {
         "task": "bot_program.tasks.run_alarm_sentinel",
         "schedule": 600.0,
+    },
+
+    # ── 2026-10-09 — the Big Money Board (bigmoney/): where the large
+    #    players must move, read from stored data. 05:20 UTC: after the
+    #    22:30 end-of-day bars, the crypto daily close written at 00:10
+    #    (fetch-eod-crypto) and the 03:30 calibration resolver, before the
+    #    07:00 brief. 23:20 UTC, weekdays:
+    #    after the 22:30 bars, for eToro's overnight session. Behind the
+    #    big_money_board switch, OFF on arrival. Information, never a gate.
+    "big-money-board": {
+        "task": "bigmoney.tasks.compute_big_money_board",
+        "schedule": crontab(hour=5, minute=20),
+        "kwargs": {"run": "morning"},
+    },
+    "big-money-board-evening": {
+        "task": "bigmoney.tasks.compute_big_money_board",
+        "schedule": crontab(hour=23, minute=20, day_of_week="mon-fri"),
+        "kwargs": {"run": "evening"},
     },
 }

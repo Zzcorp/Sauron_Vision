@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}{{ W.PAGE_TITLE }}{% endblock %}
+{# ◆ is the sidebar's Big Money mark (◈ is Signals'; the rail forbids a shared glyph, tests/test_nav_grouping.py): title and nav row agree. #}
+{% block page_title %}◆ {{ W.H1|upper }}{% endblock %}
+
+{% block content %}
+<style>
+  .bm-lede { font-size: 13px; color: var(--text-muted); margin: 0 0 12px; max-width: 900px; }
+  .bm-status { margin: 0 0 12px; padding: 8px 12px; border-left: 3px solid var(--warning, #c90); font-size: 13px; }
+  .bm-chip { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 8px; margin: 2px 4px 2px 0;
+             border: 1px solid var(--border, #444); color: var(--text-muted); white-space: nowrap; }
+  .bm-chip--strong { border-color: var(--success, #3a6); }
+  .bm-chip--zero { border-color: var(--danger, #c33); }
+  .bm-dash { font-family: var(--font-mono); cursor: help; }
+  .bm-cell { font-size: 12px; margin: 0 0 6px; }
+  .bm-lean { font-weight: 600; white-space: nowrap; }
+  .bm-up { color: var(--success, #3a6); }
+  .bm-down { color: var(--danger, #c33); }
+  .bm-small { font-size: 11px; color: var(--text-muted); }
+  .bm-not li { margin: 0 0 4px; font-size: 12px; }
+</style>
+
+<p class="bm-lede">{{ W.LEDE }}</p>
+{% for line in status %}<div class="bm-status" role="status">{{ line }}</div>{% endfor %}
+{% if as_of_line %}<p class="bm-small">{{ as_of_line }}</p>{% endif %}
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+  <div class="card-header"><span class="card-title">{{ W.SECTION_WORLD }}</span></div>
+  <div class="table-wrapper">
+  <table class="sv-perf-table sv-stack bm-world">
+    <thead><tr>{% for h in W.HEADERS_WORLD %}<th>{{ h }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td class="sv-ident" data-label="{{ W.HEADERS_WORLD.0 }}">{{ r.title }}{% if r.hint %}<div class="bm-small">{{ r.hint }}</div>{% endif %}</td>
+        <td data-label="{{ W.HEADERS_WORLD.1 }}">
+          <span class="bm-lean {% if r.label == W.LEANS_UP %}bm-up{% elif r.label == W.LEANS_DOWN %}bm-down{% endif %}">{{ r.label }}</span>
+          {% if r.lean_from %}<div class="bm-small">{{ r.lean_from|join:", " }}</div>{% endif %}
+          {% for f in r.risk %}<div class="bm-small">⚠ {{ f }}</div>{% endfor %}
+          {% if r.note %}<div class="bm-small">{{ r.note }}</div>{% endif %}
+        </td>
+        <td data-label="{{ W.HEADERS_WORLD.2 }}">
+          {% for c in r.why %}
+            <div class="bm-cell">
+              {% if c.dash %}<span class="bm-dash" title="{{ c.title }}">{{ W.DASH }}</span> <span class="bm-small">{{ c.name }}: {{ c.title }}</span>
+              {% else %}{{ c.words }}{% endif %}
+              <div>{% if c.grade %}<span class="bm-chip {% if c.grade == 'Strong evidence' %}bm-chip--strong{% endif %}">{{ c.grade }}</span>{% endif %}{% if c.role %}<span class="bm-chip">{{ c.role }}</span>{% endif %}{% if c.zeroed %}<span class="bm-chip bm-chip--zero" title="{{ W.ZEROED }}">{{ W.WEIGHT_ZERO_CHIP }}</span>{% endif %}</div>
+            </div>
+          {% endfor %}
+          {% for c in r.seasons %}<div class="bm-small">{{ c.words }}</div>{% endfor %}
+        </td>
+        <td data-label="{{ W.HEADERS_WORLD.3 }}">
+          {% for c in r.current %}
+            <div class="bm-cell">{% if c.dash %}<span class="bm-dash" title="{{ c.title }}">{{ W.DASH }}</span>{% else %}{{ c.words }}{% endif %}
+              <div><span class="bm-chip">{{ c.grade }}</span><span class="bm-chip">{{ c.role }}</span></div></div>
+          {% endfor %}
+        </td>
+        <td data-label="{{ W.HEADERS_WORLD.4 }}">
+          {% if r.crowding %}{% if r.crowding.dash %}<span class="bm-dash" title="{{ r.crowding.title }}">{{ W.DASH }}</span>{% else %}<div class="bm-cell">{{ r.crowding.words }}</div>{% endif %}{% else %}<span class="bm-small">{{ W.NO_COT_ROW }}</span>{% endif %}
+          {% if r.losing %}<div class="bm-cell">{{ r.losing.words }}</div>{% endif %}
+        </td>
+        <td data-label="{{ W.HEADERS_WORLD.5 }}">
+          {% if r.flows %}{% if r.flows.dash %}<span class="bm-dash" title="{{ r.flows.title }}">{{ W.DASH }}</span>{% else %}<div class="bm-cell">{{ r.flows.words }}</div>{% endif %}{% endif %}
+        </td>
+        <td data-label="{{ W.HEADERS_WORLD.6 }}">
+          {% for v in r.record %}<div class="bm-small">{{ v.footprint }}: {{ v.verdict }}</div>{% empty %}<span class="bm-small">{{ W.DASH }}</span>{% endfor %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+  <div class="card-header"><span class="card-title">{{ W.SECTION_INSTRUMENTS }}</span></div>
+  <p class="bm-lede" style="padding: 0 16px;">{{ W.INSTRUMENTS_LEDE }}</p>
+  {% if instruments %}
+  <div class="table-wrapper">
+  <table class="sv-perf-table sv-stack">
+    <thead><tr><th>{{ W.INSTRUMENT_HEADER }}</th><th>{{ W.HEADERS_WORLD.1 }}</th><th>{{ W.HEADERS_WORLD.2 }}</th></tr></thead>
+    <tbody>
+    {% for i in instruments %}
+      <tr>
+        <td class="sv-ident" data-label="{{ W.INSTRUMENT_HEADER }}">{{ i.symbol }}</td>
+        <td data-label="{{ W.HEADERS_WORLD.1 }}"><span class="bm-lean {% if i.label == W.LEANS_UP %}bm-up{% elif i.label == W.LEANS_DOWN %}bm-down{% endif %}">{{ i.label }}</span>
+          {% for f in i.risk %}<div class="bm-small">⚠ {{ f }}</div>{% endfor %}</td>
+        <td data-label="{{ W.HEADERS_WORLD.2 }}">
+          {% for c in i.cells %}<div class="bm-cell">{% if c.dash %}<span class="bm-dash" title="{{ c.title }}">{{ W.DASH }}</span> <span class="bm-small">{{ c.name }}</span>{% else %}{{ c.words }} <span class="bm-chip">{{ c.role }}</span>{% endif %}</div>{% endfor %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<div class="empty-state"><p><span class="bm-dash">{{ W.DASH }}</span></p></div>{% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+  <div class="card-header"><span class="card-title">{{ W.SECTION_AHEAD }}</span></div>
+  <div style="padding: 8px 16px;">
+  {% for e in calendar %}
+    <div class="bm-cell">{{ e.day }} · {{ e.event }} · {{ e.kind_words }}{% if e.source_url %} · <a href="{{ e.source_url }}" rel="noopener noreferrer" target="_blank">{{ W.SOURCE_LINK }}</a>{% endif %}{% if e.play %}<div class="bm-small">{{ e.play }}</div>{% endif %}</div>
+  {% empty %}<span class="bm-dash">{{ W.DASH }}</span>{% endfor %}
+  {% for n in global_unread %}<div class="bm-small">⚠ {{ n }}</div>{% endfor %}
+  </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+  <div class="card-header"><span class="card-title">{{ W.SECTION_TIDE }}</span></div>
+  <div style="padding: 8px 16px;">
+    {% if tide and not tide.dash %}<p class="bm-cell">{{ tide.words }}</p>{% else %}<span class="bm-dash" title="{% if tide %}{{ tide.title }}{% endif %}">{{ W.DASH }}</span> {% if tide %}<span class="bm-small">{{ tide.title }}</span>{% endif %}{% endif %}
+    <p class="bm-small">{{ W.TIDE_NOTE }}</p>
+  </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+  <div class="card-header"><span class="card-title">{{ W.SECTION_STRESS }}</span></div>
+  <div style="padding: 8px 16px;">
+    {% if stress and not stress.dash %}<p class="bm-cell">{{ stress.words }}</p>{% else %}<span class="bm-dash" title="{% if stress %}{{ stress.title }}{% endif %}">{{ W.DASH }}</span> {% if stress %}<span class="bm-small">{{ stress.title }}</span>{% endif %}{% endif %}
+  </div>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+  <div class="card-header"><span class="card-title">{{ W.SECTION_RECORD }}</span></div>
+  {% if record %}
+  <div class="table-wrapper">
+  <table class="sv-perf-table sv-stack">
+    <thead><tr>{% for h in W.HEADERS_RECORD %}<th>{{ h }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for r in record %}
+      <tr>
+        <td class="sv-ident" data-label="{{ W.HEADERS_RECORD.0 }}">{{ r.footprint }}</td>
+        <td data-label="{{ W.HEADERS_RECORD.1 }}">{{ r.market }}</td>
+        <td data-label="{{ W.HEADERS_RECORD.2 }}">{{ r.claim }}</td>
+        <td data-label="{{ W.HEADERS_RECORD.3 }}">{{ r.live|default:W.DASH }}</td>
+        <td data-label="{{ W.HEADERS_RECORD.4 }}">{{ r.replayed|default:W.DASH }}</td>
+        <td data-label="{{ W.HEADERS_RECORD.5 }}">{{ r.verdict }}{% if r.verdict == W.VERDICT_AGAINST %}<div class="bm-small">{{ W.ZEROED }}</div>{% endif %}</td>
+        <td data-label="{{ W.HEADERS_RECORD.6 }}">{{ r.cost|default:W.DASH }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<div style="padding: 8px 16px;"><span class="bm-dash">{{ W.DASH }}</span></div>{% endif %}
+  {% if has_replay %}<p class="bm-small" style="padding: 0 16px 8px;">{{ W.REPLAY_NOTE }}</p>{% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+  <div class="card-header"><span class="card-title">{{ W.SECTION_SOURCES }}</span></div>
+  {% if sources %}
+  <div class="table-wrapper">
+  <table class="sv-perf-table sv-stack">
+    <thead><tr>{% for h in W.HEADERS_SOURCES %}<th>{{ h }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for s in sources %}
+      <tr>
+        <td class="sv-ident" data-label="{{ W.HEADERS_SOURCES.0 }}">{{ s.input }}</td>
+        <td data-label="{{ W.HEADERS_SOURCES.1 }}">{{ s.newest|default:W.DASH }}</td>
+        <td data-label="{{ W.HEADERS_SOURCES.2 }}">{% if s.age is not None %}{{ s.age }} d{% else %}{{ W.DASH }}{% endif %}</td>
+        <td data-label="{{ W.HEADERS_SOURCES.3 }}">{{ s.bound }} d</td>
+        <td data-label="{{ W.HEADERS_SOURCES.4 }}" {% if s.why %}title="{{ s.why }}"{% endif %}>{{ s.state }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<div style="padding: 8px 16px;"><span class="bm-dash">{{ W.DASH }}</span></div>{% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+  <div class="card-header"><span class="card-title">{{ W.SECTION_NOT }}</span></div>
+  <ul class="bm-not" style="padding: 8px 32px;">{% for line in W.NOT_LINES %}<li>{{ line }}</li>{% endfor %}</ul>
+</div>
+
+<p class="bm-small">{{ W.FOOTER }}</p>
+{% endblock %}

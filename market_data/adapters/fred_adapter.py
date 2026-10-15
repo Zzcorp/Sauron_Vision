@@ -80,7 +80,20 @@ def fetch_series_info(series_id):
     return None
 
 
-def save_series_to_db(series_id):
+def store_units(indicator, info):
+    """Keep FRED's own unit on the indicator (2026-10-09, the Big Money
+    Board). `fetch_series_info` has always returned `units` and nothing kept
+    it, so a reader that sums series (the board's liquidity tide: WALCL in
+    millions, RRPONTSYD in billions) could only hard-code what FRED says.
+    Written when it differs from what is stored, never cleared by a reply
+    that carries none."""
+    units = (info or {}).get("units")
+    if units and (indicator.metadata or {}).get("units") != units:
+        indicator.metadata = dict(indicator.metadata or {}, units=units)
+        indicator.save(update_fields=["metadata"])
+
+
+def save_series_to_db(series_id, limit=500):
     """Fetch a FRED series into MacroIndicator + MacroObservation.
 
     Returns {"parsed", "observations_saved"}, plus {"skipped": NOT_CONFIGURED}
@@ -114,9 +127,11 @@ def save_series_to_db(series_id):
             "frequency": info.get("frequency", "daily") if info else "daily",
         }
     )
+    store_units(indicator, info)
 
-    # Fetch observations
-    observations = fetch_series(series_id, limit=500)
+    # Fetch observations. `limit` is 500 on the beat (about two years of a
+    # daily series); `manage.py big_money fred-history` asks 2000 once.
+    observations = fetch_series(series_id, limit=limit)
     created = revised = 0
     for obs in observations:
         row, was_created = MacroObservation.objects.get_or_create(

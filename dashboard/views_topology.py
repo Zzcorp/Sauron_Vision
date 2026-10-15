@@ -110,6 +110,12 @@ WIRING = {
     "agent_news_analyst":     {"task": "ai_agents.tasks.process_unanalyzed_news", "layer": "enrich", "writes": ["NewsArticle.ai_*"], "feeds": ["pipeline_opportunity_scanner"],
                                "note": "Needs ANTHROPIC_API_KEY. Instrument tagging also happens keylessly at ingest."},
     "pipeline_sentiment_agg": {"task": "scraping.tasks.aggregate_sentiment", "layer": "enrich", "writes": ["SentimentSnapshot"], "feeds": ["pipeline_opportunity_scanner"]},
+    # The Big Money Board (2026-10-09, bigmoney/): twice a day on crontabs,
+    # so the daily cadence is declared here.
+    "big_money_board":        {"task": "bigmoney.tasks.compute_big_money_board", "cadence": 86400, "layer": "enrich",
+                               "writes": ["BigMoneyRead", "BigMoneyCell", "AgentPrediction"], "feeds": ["pipeline_calibration"],
+                               "pages": ["/big-money/"],
+                               "note": "Information, never a gate: no order, size, stop or gate reads it. A footprint it cannot read is a dash with its reason."},
 
     # ── the eye: where it decides ─────────────────────────────────────
     "pipeline_signals":             {"task": "signals.tasks.run_signal_scan", "layer": "eye", "writes": ["Signal", "SmcSignal"], "feeds": ["gate_orchestrator", "execute_bots"]},

@@ -131,6 +131,9 @@ INSTALLED_APPS = [
     # The Lore (2026-10-14): Sauron's library, staff-only, read by agents
     # as fenced reference data and never as instructions (lore/read.py).
     "lore",
+    # The Big Money Board (2026-10-09): information only, its own app and
+    # its own 0001 so it never collides with bot_program's migrations.
+    "bigmoney",
 ]
 
 # The Lore's catalogue (seed, overlay, private terms) lives outside git,

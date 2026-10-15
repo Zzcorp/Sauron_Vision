@@ -425,8 +425,14 @@ class TheBeatDecidesWhoCanBeSilentTests(_ComponentsOnly):
                    last_run_at=_days_ago(10))
         entry = dict(app.conf.beat_schedule["fetch-eod-prices-full-universe"])
         entry["task"] = "market_data.tasks.fetch_eod_renamed_away"
-        with patch.dict(app.conf.beat_schedule,
-                        {"fetch-eod-prices-full-universe": entry}), \
+        # The row's only writer is renamed away. The crypto daily close
+        # (fetch-eod-crypto, 2026-10-15) also writes scraper_eod and would
+        # keep the row placed on its own daily beat, so it is off the beat
+        # for this scenario.
+        schedule = {k: v for k, v in app.conf.beat_schedule.items()
+                    if k != "fetch-eod-crypto"}
+        schedule["fetch-eod-prices-full-universe"] = entry
+        with patch.dict(app.conf.beat_schedule, schedule, clear=True), \
                 self.assertLogs("core.component_digest", "WARNING") as logs:
             out = collect_faults()
         self.assertEqual(out["silent"], [])
