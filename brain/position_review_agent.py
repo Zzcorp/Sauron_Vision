@@ -445,6 +445,46 @@ def _post_hypothesis_for(review, verdict_row: dict, parsed: dict):
     return hyp
 
 
+def _real_row(review):
+    """The AssetBotTrade a bot-book review is about, when it is REAL money
+    (position_summary.world_of "live"), else None. A row that cannot be
+    read is not real money here: the bell alone, as before."""
+    from .position_review_models import PositionReview
+    if review.book != PositionReview.BOOK_BOT:
+        return None
+    try:
+        from bot_program.models import AssetBotTrade
+        from dashboard.position_summary import world_of
+        row = (AssetBotTrade.objects.select_related("config")
+               .filter(pk=review.position_id).first())
+        return row if row is not None and world_of(row) == "live" else None
+    except Exception as e:  # noqa: BLE001 — the bell row still goes
+        logger.warning("[position-review] row #%s unreadable for the phone: "
+                       "%s", review.position_id, e)
+        return None
+
+
+def _thesis_notice_said(review, cutoff) -> bool:
+    """True when the reviewer's EXIT on a bot row repeats a dead-thesis
+    notice the free pass sent on the same row since `cutoff`
+    (bot_program.notifications.notify_thesis_exit, data["thesis_notice"]
+    "bot:<id>|exit"). Any other verdict, or an unreadable check, is False:
+    the call goes out."""
+    from .position_review_models import PositionReview
+    if (review.verdict != PositionReview.VERDICT_EXIT
+            or review.book != PositionReview.BOOK_BOT):
+        return False
+    try:
+        from alerts.models import Notification
+        return Notification.objects.filter(
+            user_id=review.user_id,
+            data__thesis_notice=f"bot:{review.position_id}|exit",
+            created_at__gte=cutoff).exists()
+    except Exception as e:  # noqa: BLE001 — a check that fails says it
+        logger.warning("[position-review] thesis-notice check failed: %s", e)
+        return False
+
+
 def _notify(review) -> bool:
     """Raise the recommendation where the operator already looks.
 
@@ -456,6 +496,19 @@ def _notify(review) -> bool:
 
     Only actionable verdicts notify. "Hold" is the status quo and pushing it
     would train the operator to dismiss the bell.
+
+    THE PHONE (2026-10-08, the wiring audit: the verdicts never left the
+    bell). A call on a REAL-money
+    row goes through bot_program.notifications.dispatch_notification (kind
+    "position_review", an operator kind): the same bell row, and the
+    operator's channel, Telegram, with the position, the call, the stop or
+    the part, the R now and the reason (notify_position_review), quiet
+    hours honoured. The five live positions of that day were hand trades
+    the care never cuts on a rule, so this call was the only per-position
+    reasoning acting on them, and it reached a bell. A simulated row keeps
+    the bell alone: it is not money a human must act on. The cooldown below
+    covers both, and the per-pass and per-day caps (review_open_positions_
+    now) bound how many calls exist at all.
     """
     from .position_review_models import PositionReview
 
@@ -478,10 +531,25 @@ def _notify(review) -> bool:
     title = (f"{icons.get(review.verdict, '◉')} {review.symbol} "
              f"{review.side} · {label.get(review.verdict, review.verdict)}")
 
+    cutoff = timezone.now() - timedelta(hours=NOTIFY_COOLDOWN_HOURS)
     try:
-        cutoff = timezone.now() - timedelta(hours=NOTIFY_COOLDOWN_HOURS)
-        if Notification.objects.filter(user_id=review.user_id, title=title[:200],
-                                        created_at__gte=cutoff).exists():
+        # A CALL HELD BY QUIET HOURS DOES NOT HOLD THE PHONE (2026-10-08,
+        # review). dispatch_notification writes the bell row during quiet
+        # hours and sends nothing else; that row (data["phone_held"],
+        # notify_position_review) used to start the 6 h cooldown, so an
+        # "exit USDCNH" said at 05:45 kept every later call off the phone
+        # until 11:45. While quiet hours last, any row of the last 6 h
+        # still holds the call (one bell row, not one every 30 minutes);
+        # once they end, only a row that reached the phone does, so the
+        # first pass after them sends the call once. Read in Python: a
+        # JSON-key exclude drops the rows that lack the key on sqlite.
+        from bot_program.notifications import _in_quiet_hours
+        quiet = review.user is not None and _in_quiet_hours(review.user)
+        recent = (Notification.objects
+                  .filter(user_id=review.user_id, title=title[:200],
+                          created_at__gte=cutoff)
+                  .values_list("data", flat=True))
+        if any(quiet or not (d or {}).get("phone_held") for d in recent):
             return False
     except Exception as e:  # noqa: BLE001 — dedupe failure must not mute it
         logger.warning("[position-review] notification dedupe failed: %s", e)
@@ -503,6 +571,24 @@ def _notify(review) -> bool:
             url = page_url("forensics_detail", review.position_id)
         except Exception:  # pragma: no cover
             url = ""
+    row = _real_row(review)
+    if row is not None and _thesis_notice_said(review, cutoff):
+        # ONE MESSAGE FOR ONE DEAD THESIS (2026-10-08, review): the free
+        # pass already put "USDCNH: the thesis is dead" on the phone
+        # (notify_thesis_exit, the same pass that sent this row to the
+        # model on trigger T13), so the reviewer's exit on the same
+        # position goes to the bell alone, as on a simulated row.
+        row = None
+    if row is not None:
+        try:
+            from bot_program.notifications import notify_position_review
+            return bool(notify_position_review(
+                review.user, review, row=row, title=title[:200], body=body,
+                url=Notification.safe_url(url)))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[position-review] notification failed for #%s: "
+                           "%s", review.id, e)
+            return False
     try:
         Notification.objects.create(
             user_id=review.user_id, notification_type="portfolio",

@@ -87,8 +87,33 @@ def _gate_events(trade):
     )
 
 
+#: The audit kinds that tell a config's stop and re-arm (2026-10-08,
+#: bot_program/asset_engine/disarm.py): part of a trade's story while it
+#: was open on that config.
+BRAKE_KINDS = ("config_braked", "config_rearmed")
+
+
+def _brake_rows(trade):
+    """The config_braked / config_rearmed rows of the trade's OWN config
+    written while it was open (opened_at to closed_at, or now), oldest
+    first. A brake on another config, or before the entry, is not this
+    trade's story."""
+    from django.utils import timezone
+
+    from bot_program.audit_models import AuditLogEntry
+    if trade.opened_at is None:
+        return []
+    qs = AuditLogEntry.objects.filter(
+        user=trade.config.user, kind__in=BRAKE_KINDS,
+        created_at__gte=trade.opened_at,
+        created_at__lte=trade.closed_at or timezone.now())
+    return [row for row in qs.order_by("created_at", "id")[:200]
+            if str((row.data or {}).get("config_id")) == str(trade.config_id)]
+
+
 def _audit_entries(trade):
-    """Immutable audit rows that mention this trade."""
+    """Immutable audit rows that mention this trade, and the brakes and
+    re-arms of its config while it was open (2026-10-08)."""
     from bot_program.audit_models import AuditLogEntry
 
     rows = (AuditLogEntry.objects
@@ -111,7 +136,60 @@ def _audit_entries(trade):
             out.append(row)
         if len(out) >= 12:
             break
+    try:
+        brakes = _brake_rows(trade)[-12:]
+    except Exception:  # noqa: BLE001 — the trade's own rows still show
+        logger.exception("[forensics] brake rows unreadable for #%s",
+                         trade.id)
+        brakes = []
+    if brakes:
+        out = sorted(out + brakes, key=lambda r: (r.created_at, r.id),
+                     reverse=True)
     return out
+
+
+def _brake_events(trade):
+    """The lifecycle's lines for the config's stops and re-arms while the
+    trade was open: "Bot braked" / "Bot re-armed", in words."""
+    try:
+        rows = _brake_rows(trade)
+    except Exception:  # noqa: BLE001
+        logger.exception("[forensics] brake events unreadable for #%s",
+                         trade.id)
+        return []
+    events = []
+    for row in rows:
+        d = row.data or {}
+        if row.kind == "config_braked" and d.get("adopted"):
+            # `bot brake` adopting a stop nobody recorded (2026-10-08,
+            # review): the exits had stopped with the bot until here.
+            detail = ("off since before with no record; now recorded as "
+                      f"{d.get('by_words') or d.get('by') or '?'}")
+            if d.get("who"):
+                detail += f" ({d['who']})"
+            detail += ": its exits run again from this moment"
+            events.append({"at": row.created_at,
+                           "label": "Bot's stop recorded", "detail": detail})
+            continue
+        if row.kind == "config_braked":
+            detail = f"stopped by {d.get('by_words') or d.get('by') or '?'}"
+            if d.get("who"):
+                detail += f" ({d['who']})"
+            if d.get("why"):
+                detail += f": {d['why']}"
+            detail += (" — its exits kept running (a brake opens nothing "
+                       "new)" if d.get("brake") else
+                       " — the bot was not ticked: its exits stopped too")
+            events.append({"at": row.created_at, "label": "Bot braked",
+                           "detail": detail})
+        else:
+            detail = (f"lifted the stop by "
+                      f"{d.get('lifted_by_words') or 'no record of who'}")
+            if d.get("who"):
+                detail += f", re-armed by {d['who']}"
+            events.append({"at": row.created_at, "label": "Bot re-armed",
+                           "detail": detail})
+    return events
 
 
 def _rule_state(trade):
@@ -186,6 +264,10 @@ def _lifecycle(trade):
                            f"at the broker "
                            f"({len(meta.get('protective_order_ids') or [])} legs)"),
             })
+    # The config's brakes and re-arms while the trade was open (2026-10-08,
+    # AuditLogEntry config_braked / config_rearmed), between the entry and
+    # the end.
+    events.extend(_brake_events(trade))
     if trade.status == "CLOSE_PENDING":
         events.append({
             "at": None, "label": "Close failed",

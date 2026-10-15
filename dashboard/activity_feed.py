@@ -328,6 +328,64 @@ def _audit_line(row):
                                        str(d.get("mode") or ""),
                                        "forced" if d.get("forced") else "") if x),
                 _url("asset_bots_dashboard"))
+    # The brakes, the re-arms and the ladder (2026-10-08, "reach the phone,
+    # keep the record"): written by bot_program/asset_engine/disarm.py and
+    # signals/promotion_pipeline.py, read here as sentences.
+    if k == "config_braked" and d.get("adopted"):
+        # `bot brake` on a bot ALREADY off with no record (2026-10-08,
+        # review): not a stop made now, and its exits did not "stay
+        # managed" — they had stopped with it and run again from here.
+        name = d.get("config") or f"config #{d.get('config_id') or '?'}"
+        return ("bot", "warn",
+                f"{name}: off with no record, now recorded as "
+                f"{d.get('by_words') or d.get('by') or '?'}",
+                " · ".join(x for x in (
+                    "off since before with no record",
+                    "its exits run again from this moment",
+                    f"by {d['who']}" if d.get("who") else "") if x),
+                _url("asset_bots_dashboard"))
+    if k == "config_braked":
+        name = d.get("config") or f"config #{d.get('config_id') or '?'}"
+        return ("bot", "warn",
+                f"{name} stopped by {d.get('by_words') or d.get('by') or '?'}",
+                " · ".join(x for x in (
+                    _scrubbed(d.get("why")) if d.get("why") else "",
+                    f"by {d['who']}" if d.get("who") else "",
+                    ("its open positions stay managed" if d.get("brake")
+                     else "not ticked at all"),
+                    "replaced a brake's stop" if d.get("superseded") else "")
+                    if x),
+                _url("asset_bots_dashboard"))
+    if k == "config_rearmed":
+        name = d.get("config") or f"config #{d.get('config_id') or '?'}"
+        return ("bot", "ok", f"{name} re-armed",
+                " · ".join(x for x in (
+                    f"lifted the stop by {d.get('lifted_by_words')}"
+                    if d.get("lifted_by_words") else "",
+                    f"by {d['who']}" if d.get("who") else "") if x),
+                _url("asset_bots_dashboard"))
+    if k == "ladder_move":
+        from signals.promotion_pipeline import (STAGE_ORDER, _rule_words,
+                                                stage_words)
+        frm, to = d.get("from_stage") or "research", d.get("to_stage") or ""
+        down = (frm in STAGE_ORDER and to in STAGE_ORDER
+                and STAGE_ORDER.index(to) < STAGE_ORDER.index(frm))
+        return ("system", "warn" if down else "ok",
+                f"{_rule_words(d.get('rule_name') or '?')}: "
+                f"{stage_words(frm)} → {stage_words(to)}",
+                " · ".join(x for x in (
+                    str(d.get("reason") or "").replace("_", " "),
+                    _scrubbed(d.get("notes")) if d.get("notes") else "",
+                    f"by {d['by']}" if d.get("by") else "") if x),
+                _url("promotions_dashboard"))
+    if k == "ladder_sweep":
+        held = d.get("blocked") or []
+        return ("system", "info",
+                f"Ladder sweep: {len(d.get('promoted') or [])} promoted, "
+                f"{len(d.get('demoted') or [])} demoted, {len(held)} held back",
+                ", ".join(str(b.get("rule_name") or "") for b in held[:4]
+                          if isinstance(b, dict)),
+                _url("promotions_dashboard"))
     # Anything else the chain carries: its kind in words and the few
     # scalar facts that name what it was about — never the dict itself.
     facts = [f"{key.replace('_', ' ')} {d[key]}"

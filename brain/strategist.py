@@ -199,6 +199,16 @@ def _build_strategist_snapshot() -> dict:
             h["resolution_deadline"].isoformat() if h["resolution_deadline"] else None)
     snap["pending_hypotheses"] = pending
 
+    # THE MEASURED POSTURE (2026-10-08, the wiring audit: "two postures
+    # with one name"). The brief's word (defensive / balanced / aggressive)
+    # sizes nothing; what sizes a real-money order is the crisis posture,
+    # measured every 15 minutes from the indices, the VIX and the credit
+    # spread (bot_program/market_stress.current() -> posture.entry_posture)
+    # while the crisis_mode switch is ON. The strategist never read it, so
+    # on 2026-10-08 the brief said DEFENSIVE above a calm measured posture
+    # and nothing told the operator which word moves money.
+    snap["measured_posture"] = measured_posture()
+
     return snap
 
 
@@ -219,6 +229,92 @@ def _graded_by_venue(agent: str) -> dict:
             key = "other"
         out[key] = out.get(key, 0) + 1
     return out
+
+
+#: The measured word when nothing was measured: no stress reading, one
+#: past market_stress.HOLD_HOURS, or a read that failed (all three come
+#: back from market_stress.current() as level "calm" with no score).
+UNMEASURED = "unmeasured"
+
+#: The prefix of the stored word while the crisis_mode switch is off: the
+#: posture is then neither read (bot_program/tasks.read_market_stress is
+#: guarded by it) nor applied to any order.
+CRISIS_OFF_PREFIX = "crisis mode OFF: "
+
+
+def _measured_word(cur: dict, now=None) -> str:
+    """The measured posture as it may honestly be named: its level when a
+    fresh reading says it, "stressed, 5h old" for a stale reading whose
+    level still holds, "calm (override)" for an operator's override, and
+    UNMEASURED when there is no reading behind it — never a bare "calm"
+    that nothing measured (2026-10-08, review)."""
+    level = str(cur.get("level") or "")
+    why = str(cur.get("why") or "")
+    if level and why.startswith("operator override"):
+        return f"{level} (override)"
+    if not level or cur.get("score") is None:
+        return UNMEASURED
+    if cur.get("fresh"):
+        return level
+    try:
+        age_h = ((now or timezone.now()) - cur["at"]).total_seconds() / 3600
+        return f"{level}, {age_h:.0f}h old"
+    except Exception:  # noqa: BLE001 — a stale reading with no time
+        return f"{level}, stale"
+
+
+def measured_posture(now=None) -> dict:
+    """The posture the platform MEASURES, in the strategist's words:
+    {level, raw_level, score, fresh, why, what_it_does, crisis_mode_on,
+    sizes_real_orders, title_word, note}. Never raises.
+
+    NOT "calm" WHEN NOTHING WAS MEASURED (2026-10-08, review):
+    market_stress.current() answers level "calm" with no reading at all,
+    with one past HOLD_HOURS, when the read fails, and with an operator's
+    override as if measured — and with crisis mode OFF no reading is ever
+    taken. `level` is _measured_word's honest name; `title_word`, the one
+    the briefing stores and its title prints, leads with "crisis mode
+    OFF: " while the switch is off ("DEFENSIVE · measured: crisis mode
+    OFF: unmeasured")."""
+    try:
+        from bot_program import market_stress
+        from bot_program.posture import crisis_mode_on
+        now = now or timezone.now()
+        cur = market_stress.current(now)
+        on = bool(crisis_mode_on())
+        raw = str(cur.get("level") or "")
+        word = _measured_word(cur, now)
+        why = str(cur.get("why") or "")
+        note = (f"{why}; " if why else "") + (
+            "crisis mode is ON: this posture sizes real-money orders"
+            if on else
+            "crisis mode is OFF: no stress reading is taken and this posture "
+            "sizes nothing until it is on")
+        return {"level": word, "raw_level": raw, "score": cur.get("score"),
+                "fresh": bool(cur.get("fresh")), "why": why,
+                "what_it_does": ("" if word == UNMEASURED else
+                                 market_stress.POSTURE_WORDS.get(raw, "")),
+                "crisis_mode_on": on, "sizes_real_orders": on,
+                "title_word": word if on else CRISIS_OFF_PREFIX + word,
+                "note": note[:300]}
+    except Exception as e:  # noqa: BLE001 — a brief without it, said
+        logger.warning("[strategist] measured posture unread: %s", e)
+        return {"level": UNMEASURED, "raw_level": "", "score": None,
+                "fresh": False,
+                "why": f"posture unreadable: {type(e).__name__}",
+                "what_it_does": "", "crisis_mode_on": False,
+                "sizes_real_orders": False, "title_word": UNMEASURED,
+                "note": f"posture unreadable: {type(e).__name__}"}
+
+
+def posture_title(briefing) -> str:
+    """The briefing's posture as a title says it: its own word, then the
+    measured one — "DEFENSIVE · measured: calm" — so the operator never
+    mistakes the brief's word for what sizes orders. A briefing written
+    before the measured posture was stored keeps its one word."""
+    word = str(getattr(briefing, "posture", "") or "").upper()
+    measured = str(getattr(briefing, "measured_posture", "") or "")
+    return f"{word} · measured: {measured}" if measured else word
 
 
 # ── The agent ─────────────────────────────────────────────────────────────
@@ -261,7 +357,20 @@ class StrategistAgent(BaseAgent):
             "- Current knowledge graph (regime/theme/rule/anomaly nodes)\n"
             "- Recently resolved hypotheses (what we got right or wrong)\n"
             "- Per-agent trust scores (which agents to weight)\n"
-            "- Pending hypotheses (open bets the system has placed)\n\n"
+            "- Pending hypotheses (open bets the system has placed)\n"
+            "- The measured posture (`measured_posture`)\n\n"
+            "TWO POSTURES, ONE NAME. `measured_posture` is the platform's "
+            "MEASURED posture (calm / stressed / crisis / recovery). While "
+            "`crisis_mode_on` is true it is read every 15 minutes from the "
+            "indices, the VIX and the credit spread, and it is the one that "
+            "sizes real-money orders; while `crisis_mode_on` is false no "
+            "reading is taken and it sizes nothing. Its `level` says when "
+            "nothing was measured (\"unmeasured\"), when a reading is stale "
+            "(\"stressed, 5h old\") or an override (\"calm (override)\"); "
+            "never call an unmeasured posture calm. YOUR posture word is "
+            "advice to the operator and sizes nothing. Say the measured "
+            "posture in the outlook, and when your word differs from it, "
+            "say why in posture_rationale.\n\n"
             "EVERY brain report and knowledge node carries `age_hours`, and "
             "the snapshot carries `brain_history_age_hours` for the freshest "
             "report. Read them. You measure nothing yourself — every number "
@@ -334,7 +443,8 @@ ALLOWED_POSTURES = {"defensive", "balanced", "aggressive"}
 
 def _persist_briefing(parsed: dict, *, model: str,
                        tokens_in: int, tokens_out: int, cost_usd: float,
-                       error: str = "") -> "StrategistBriefing":
+                       error: str = "", measured: Optional[dict] = None
+                       ) -> "StrategistBriefing":
     from .briefing_models import StrategistBriefing
 
     posture = parsed.get("posture") or "balanced"
@@ -356,10 +466,14 @@ def _persist_briefing(parsed: dict, *, model: str,
         ideas = []
     ideas = [i for i in ideas if isinstance(i, dict)][:5]
 
+    measured = measured if isinstance(measured, dict) else {}
     return StrategistBriefing.objects.create(
         outlook_md=outlook[:8000],
         posture=posture,
         posture_rationale=rationale,
+        measured_posture=str(measured.get("title_word")
+                             or measured.get("level") or "")[:40],
+        measured_posture_note=str(measured.get("note") or "")[:300],
         watchlist=watchlist,
         ideas=ideas,
         model_used=model,
@@ -471,7 +585,9 @@ def run_strategist_now() -> dict:
         logger.warning("[strategist] failed: %s", e)
         briefing = _persist_briefing(parsed={}, model="error",
                                        tokens_in=0, tokens_out=0,
-                                       cost_usd=0.0, error=str(e)[:1000])
+                                       cost_usd=0.0, error=str(e)[:1000],
+                                       measured=snapshot.get(
+                                           "measured_posture"))
         return {"ok": False, "error": str(e), "briefing_id": briefing.id}
 
     briefing = _persist_briefing(
@@ -479,6 +595,7 @@ def run_strategist_now() -> dict:
         tokens_in=usage.get("input_tokens", 0),
         tokens_out=usage.get("output_tokens", 0),
         cost_usd=float(usage.get("cost_usd", 0)),
+        measured=snapshot.get("measured_posture"),
     )
     n_ideas = _emit_idea_hypotheses(briefing, briefing.ideas)
 

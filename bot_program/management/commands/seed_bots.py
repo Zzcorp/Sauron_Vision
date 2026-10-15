@@ -103,7 +103,8 @@ def seed_bots(user, *, activate: bool = False) -> dict:
         if activate and not cfg.enabled:
             # Through asset_engine.disarm (2026-10-07): arming clears any
             # recorded stop with it, as every re-enabler does.
-            disarm.enable_config(cfg)
+            disarm.enable_config(cfg, who="seed",
+                                 why="seed_bots --activate")
 
         # Reported, never written. A seeded config with no time stop is the
         # one state this command must not create silently, so the number it

@@ -56,7 +56,7 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         from signals.models import RuleControl
         from signals.promotion_pipeline import (
-            LOSER_HIT_MAX, LOSER_MIN_N, LOSER_THIN_EDGE_R, MANUAL_DWELL_DAYS,
+            BY_BAR_LOSERS, LOSER_HIT_MAX, LOSER_MIN_N, LOSER_THIN_EDGE_R, MANUAL_DWELL_DAYS,
             _stats_since, demote_rule, hand_promoted_recently, loser_numbers,
             measured_loser, promotion_provenance)
         w = self.stdout.write
@@ -102,9 +102,11 @@ class Command(BaseCommand):
             if prov["note"].startswith("by hand") and prov["words"]:
                 w(f"    {prov['words']}")
             if apply and verdict == "LOSER":
+                # a person at a shell, never "the nightly sweep" (2026-10-08)
                 demote_rule(ctrl.rule_name, "paper", user=None,
                             reason="auto_demote",
-                            notes=f"bar_losers: measured loser: {why}")
+                            notes=f"bar_losers: measured loser: {why}",
+                            by=BY_BAR_LOSERS)
                 barred += 1
                 w(f"    -> barred to paper ({why})")
         if apply:

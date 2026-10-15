@@ -1291,6 +1291,37 @@ def facts_fingerprint(facts: dict, triggers: list[dict]) -> str:
 # The pass
 # ══════════════════════════════════════════════════════════════════════════
 
+def _tell_dead_thesis(pos: dict, facts: dict) -> bool:
+    """ONE notice to the phone when a REAL bot row's thesis reads exit
+    (2026-10-08, the wiring audit: the reviewer's verdicts never
+    left the bell).
+
+    The free pass reads the thesis of every open row every 30 minutes,
+    hand trades included, and until now an `exit` changed nothing a human
+    saw: the care reads only an `adjust` (thesis_check.care_stop), and the
+    model pass that might say so is capped at three calls a pass and
+    twelve a day. bot_program.notifications.notify_thesis_exit says it
+    once per row and verdict, quiet hours honoured. Real money only (a
+    simulated row is not money a human must act on). Never raises: a
+    notice that fails costs the notice, never the pass."""
+    if (facts.get("thesis") or {}).get("verdict") != "exit":
+        return False
+    user = pos.get("user")
+    if user is None:
+        return False
+    try:
+        from dashboard.position_summary import world_of
+        if world_of(pos) != "live":
+            return False
+        from bot_program.notifications import notify_thesis_exit
+        return bool(notify_thesis_exit(user, pos=pos, facts=facts))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[position-review] dead-thesis notice for %s:%s "
+                       "failed: %s", pos.get("book"), pos.get("position_id"),
+                       e)
+        return False
+
+
 def deterministic_pass() -> list[dict]:
     """Measure every open position and emit one structured verdict each.
 
@@ -1313,6 +1344,7 @@ def deterministic_pass() -> list[dict]:
             # carries the structure stop Aragorn applies (tighten-only).
             from .thesis_check import write_on_row
             write_on_row(pos["position_id"], facts["thesis"])
+            _tell_dead_thesis(pos, facts)
         severity = max((float(t.get("severity") or 0) for t in triggers),
                        default=0.0)
         verdicts.append({

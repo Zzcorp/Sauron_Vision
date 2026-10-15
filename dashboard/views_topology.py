@@ -717,7 +717,8 @@ def system_map_toggle(request):
                                   why="the system map toggle",
                                   who=request.user.username)
         else:
-            disarm.enable_config(cfg)
+            disarm.enable_config(cfg, who=request.user.username,
+                                 why="the system map toggle")
         return JsonResponse({"ok": True, "enabled": cfg.enabled,
                              "label": cfg.name or cfg.asset_class})
 

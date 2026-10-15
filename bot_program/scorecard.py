@@ -239,8 +239,11 @@ def row_of(trade) -> dict:
     }
 
 
-def rows(*, days=30, user=None, venue=None, now=None) -> list:
-    """Closed rows of the last `days` days, as scorecard rows."""
+def rows(*, days=30, user=None, venue=None, now=None, world=None) -> list:
+    """Closed rows of the last `days` days, as scorecard rows. `world`
+    (2026-10-08), when given, keeps one of dashboard.position_summary.
+    world_of's three worlds ("live", "demo", "paper"): venue "live" is
+    paper=False, which a broker's demo account is too."""
     from django.utils import timezone
 
     from bot_program.asset_models import AssetBotTrade
@@ -253,7 +256,11 @@ def rows(*, days=30, user=None, venue=None, now=None) -> list:
         qs = qs.filter(paper=False)
     elif venue == "paper":
         qs = qs.filter(paper=True)
-    return [row_of(t) for t in qs.order_by("-closed_at")]
+    trades = qs.order_by("-closed_at")
+    if world is not None:
+        from dashboard.position_summary import world_of
+        trades = [t for t in trades if world_of(t) == world]
+    return [row_of(t) for t in trades]
 
 
 def _mean(xs):
