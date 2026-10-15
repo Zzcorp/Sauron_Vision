@@ -444,6 +444,9 @@ class TheBotEntryIsStampedTests(TestCase):
         vm = trade.metadata["venue_mark"]
         self.assertEqual((vm["price"], vm["source"], vm["via"]),
                          (float(trade.entry_price), "etoro", "fill"))
+        # the last look read bid 99.9 / ask 100.1 (RATES); anchored at the
+        # 100.0 fill the new long reads at a bid of 99.8 (2026-10-15)
+        self.assertEqual((vm["bid"], vm["ask"]), (99.8, 100.0))
 
 
 class TheCandleStampTests(TestCase):
@@ -575,22 +578,27 @@ class TheExitPathsTests(TestCase):
         self.assertTrue(t.metadata.get(UNPRICED_EXIT_KEY))
 
     def test_the_kill_switch_never_books_the_future(self):
+        """(price, unpriced, stale-print age) since 2026-10-15: the entry
+        stands in for the bare row and is said UNPRICED; the fresh print
+        books; a paper row and a call with no trade read the quote."""
         from bot_program.engine.kill_switch import _market_exit_price
         dead = self._dead_ticker()
         t = _gold(self.cfg)
         self.assertEqual(_market_exit_price("XAUUSD", t.entry_price,
                                             client=dead, trade=t),
-                         float(SPOT_FILL))
+                         (float(SPOT_FILL), True, None))
         t2 = _gold(self.cfg, meta=_stamp("2649.75", age_s=60))
         self.assertEqual(_market_exit_price("XAUUSD", t2.entry_price,
-                                            client=dead, trade=t2), 2649.75)
+                                            client=dead, trade=t2),
+                         (2649.75, False, None))
         # a paper row, and a call with no trade: as before
         paper = _gold(_cfg(self.user, name="p", mode="paper"), paper=True)
         self.assertEqual(_market_exit_price("XAUUSD", paper.entry_price,
                                             client=dead, trade=paper),
-                         float(FUTURE))
+                         (float(FUTURE), False, None))
         self.assertEqual(_market_exit_price("XAUUSD", SPOT_FILL,
-                                            client=dead), float(FUTURE))
+                                            client=dead),
+                         (float(FUTURE), False, None))
 
     def test_the_close_dialog_stamps_the_venue_rate_it_read(self):
         from bot_program.manual_close import preview_close
@@ -617,15 +625,17 @@ class TheOneFunctionTests(SimpleTestCase):
     def test_the_readers_go_through_resolve(self):
         import inspect
 
-        from bot_program import reconcile_asset
         from bot_program.engine import kill_switch
         from portfolio import services
         self.assertIn("_venue_resolve(trade, quote)",
                       inspect.getsource(services._trade_to_position))
-        self.assertIn("venue_mark.resolve(trade, lq)",
-                      inspect.getsource(reconcile_asset._close_as_orphan))
-        self.assertIn("venue_mark.resolve(trade, quote)",
-                      inspect.getsource(kill_switch._market_exit_price))
+        # The two exit paths book through venue_mark.for_booking (resolve +
+        # bookable, 2026-10-15): pinned BY BEHAVIOUR, not by their text —
+        # tests.test_venue_mark_booking: the reconcile in
+        # TheOrphanCloseReadsTheLedgerTests.test_the_reconcile_books_the_
+        # print_a_stale_quote_would_hide, the kill switch in
+        # AQuoteBooksOnlyWhileFreshTests.test_a_stale_quote_never_hides_a_
+        # bookable_venue_print.
         self.assertIn("client=client, trade=trade)",
                       inspect.getsource(kill_switch._close_asset_trade))
 
@@ -701,14 +711,9 @@ class TheClosingSideTests(TestCase):
         self.assertAlmostEqual(_row(self.user, t).unrealized_pnl, -0.05,
                                places=6)
 
-    def test_the_manage_tick_hands_its_ticker_sides_to_the_stamp(self):
-        import inspect
-
-        from bot_program.asset_engine.base import AssetBot
-        src = inspect.getsource(AssetBot._mark_price)
-        self.assertIn("_last_ticks", src)
-        self.assertIn('bid=_tk.get("bid")', inspect.getsource(
-            AssetBot.manage_positions))
+    # The manage tick's bid/ask pass-through is pinned by behaviour in
+    # tests.test_venue_mark_booking.TheTestsDimensionTests (2026-10-15),
+    # where a source grep stood here.
 
 
 class TheNewerPrintTests(TestCase):
@@ -754,8 +759,9 @@ class TheNewerPrintTests(TestCase):
 
 class TheBookingRuleTests(TestCase):
     """Showing a stale venue price with its age is honest; BOOKING a close
-    at it is not, unless the market is shut or the print is under an hour
-    (review, 2026-10-08)."""
+    at it is not, unless the print is under an hour or it is the venue's
+    price at the close of a market now shut (review, 2026-10-08; the shut
+    rule re-checked 2026-10-15: tests.test_venue_mark_booking)."""
 
     def setUp(self):
         self.user = get_user_model().objects.create_user("vmb_bk",
@@ -763,12 +769,15 @@ class TheBookingRuleTests(TestCase):
         self.cfg = _cfg(self.user)
         _instrument("XAUUSD", "commodity", "Gold Spot")
         _quote("XAUUSD", FUTURE, asset_class="commodity")
-        self.open = mock.patch(
-            "bot_program.engine.paper_trader.paper_market_shut",
-            return_value="")
+        self.open = mock.patch("bot_program.venue_mark.market_shut",
+                               return_value=None)
+        # shut for two and a half hours: a three-hour print was taken half
+        # an hour before the close, inside BOOK_BEFORE_SHUT_S
         self.shut = mock.patch(
-            "bot_program.engine.paper_trader.paper_market_shut",
-            return_value="the market is shut")
+            "bot_program.venue_mark.market_shut",
+            return_value={"closed": timezone.now() - timedelta(hours=2,
+                                                               minutes=30),
+                          "reopens": None})
 
     def _dead(self):
         c = mock.MagicMock(spec=["ticker"])
@@ -819,23 +828,27 @@ class TheBookingRuleTests(TestCase):
                                delta=60)
 
     def test_the_kill_switch_books_a_recent_print_and_flags_none(self):
+        """The mark read answers its verdict and writes nothing (C1): the
+        recent print with its age, the bare row's entry said unpriced."""
         from bot_program.engine.kill_switch import _market_exit_price
         from bot_program.reconcile_asset import UNPRICED_EXIT_KEY
         t = _gold(self.cfg, meta=_stamp("2610", age_s=16 * 60))
         with self.open:
-            self.assertEqual(_market_exit_price("XAUUSD", t.entry_price,
-                                                client=self._dead(),
-                                                trade=t), 2610.0)
-        self.assertAlmostEqual(t.metadata["exit_mark_age_s"], 960, delta=30)
+            price, unpriced, age = _market_exit_price(
+                "XAUUSD", t.entry_price, client=self._dead(), trade=t)
+        self.assertEqual((price, unpriced), (2610.0, False))
+        self.assertAlmostEqual(age, 960, delta=30)
+        self.assertNotIn("exit_mark_age_s", t.metadata)
         self.assertNotIn(UNPRICED_EXIT_KEY, t.metadata)
         bare = _gold(self.cfg)
         with self.open:
             self.assertEqual(_market_exit_price("XAUUSD", bare.entry_price,
                                                 client=self._dead(),
                                                 trade=bare),
-                             float(SPOT_FILL))
-        self.assertTrue(bare.metadata.get(UNPRICED_EXIT_KEY),
-                        "an entry-price stand-in is flagged unpriced")
+                             (float(SPOT_FILL), True, None),
+                             "an entry-price stand-in is said unpriced")
+        self.assertNotIn(UNPRICED_EXIT_KEY, bare.metadata,
+                         "...and the verdict is not written on the row")
 
 
 class TheOtherSurfacesTests(TestCase):

@@ -65,7 +65,24 @@ def _mark_for(trade):
         if not getattr(trade, "paper", True):
             from bot_program import venue_mark
             mk = venue_mark.resolve(trade, quote)
-            return Decimal(str(mk.price)) if mk.price is not None else None
+            if mk.price is None:
+                return None
+            # A STALE venue print judges a level only when it is the venue's
+            # price AT THE CLOSE of a market now shut (2026-10-15, re-check:
+            # venue_mark.at_the_close, the booking's own rule); in an open
+            # market, or over a shut one days after it was taken, it is a
+            # price nothing confirms, and the side checks are skipped rather
+            # than judged against it. A same-instrument QUOTE judges within
+            # the bound a venue stamp must meet to be live (MAX_AGE_S), or at
+            # the close: resolve itself puts no age bound on it.
+            if mk.source == venue_mark.VENUE_STALE \
+                    and not venue_mark.at_the_close(mk, trade):
+                return None
+            if mk.source == venue_mark.QUOTE \
+                    and (mk.age_s is None or mk.age_s > venue_mark.MAX_AGE_S) \
+                    and not venue_mark.at_the_close(mk, trade):
+                return None
+            return Decimal(str(mk.price))
         return Decimal(str(quote.last)) if quote and quote.last else None
     except Exception:  # noqa: BLE001
         return None

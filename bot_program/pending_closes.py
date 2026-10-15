@@ -89,6 +89,29 @@ EXIT_SOURCE_PAPER = "paper"
 EXIT_SOURCE_VENUE_STOP = "venue_stop"
 EXIT_SOURCE_VENUE_TARGET = "venue_target"
 
+#: On a `close_fills` slice: the units were booked at the ENTRY standing in
+#: for a REAL row's exit nothing priced (no mark read, no price from the
+#: broker). Ledger forensics, and what `booking_unpriced` reads (2026-10-15).
+UNPRICED_SLICE_KEY = "unpriced"
+
+
+def booking_unpriced(meta) -> bool:
+    """THE PER-FILL RULE every CLOSED booking of a row asks (the kill switch,
+    the drain's finaliser, the reconcile's orphan close; 2026-10-15,
+    re-check): is this exit UNPRICED — the row flagged
+    `exit_price_unavailable`, its pnl NULL, never the entry's zero? Only
+    when the blended exit is not the broker's own fill AND no slice in the
+    ledger was priced (each slice at an entry stand-in carries
+    UNPRICED_SLICE_KEY). One priced slice books the measured blend. A
+    ledger written before this rule carries no marker and reads as
+    priced."""
+    meta = meta or {}
+    if str(meta.get(EXIT_FILL_SOURCE_KEY) or "") == EXIT_SOURCE_BROKER:
+        return False
+    ledger = [f for f in (meta.get(CLOSE_FILLS_KEY) or [])
+              if isinstance(f, dict)]
+    return bool(ledger) and all(f.get(UNPRICED_SLICE_KEY) for f in ledger)
+
 # AssetBotTrade.exit_price is DecimalField(decimal_places=8). A blended fill
 # price is a division and would otherwise carry 20+ digits into the column.
 EXIT_PRICE_QUANTUM = Decimal("0.00000001")
@@ -371,7 +394,8 @@ def resolve_exit_fill(trade, result, *, mark, mark_info=None,
     """
     qty = _decimal(trade.qty) or Decimal(0)
     mark_px = _decimal(mark)
-    if mark_px is None or mark_px <= 0:
+    stand_in = mark_px is None or mark_px <= 0
+    if stand_in:
         # Callers all check their mark first; if one ever doesn't, the entry
         # price is the only number on the row that is certainly real. Say so
         # loudly rather than booking a zero.
@@ -396,8 +420,18 @@ def resolve_exit_fill(trade, result, *, mark, mark_info=None,
 
     fills = list(prior)
     if slice_qty > 0:
-        fills.append({"qty": str(slice_qty), "price": str(slice_price),
-                      "source": slice_source})
+        new_slice = {"qty": str(slice_qty), "price": str(slice_price),
+                     "source": slice_source}
+        if stand_in and broker_px is None and not getattr(trade, "paper",
+                                                          True):
+            # THE ENTRY STOOD IN for a REAL row's slice (2026-10-15,
+            # re-check): no mark was read and the broker gave no price — the
+            # drain's resend while the venue's rates are down, eToro's proven
+            # close carrying no avgPrice. Marked so the booking can tell it
+            # from a price (`booking_unpriced`): a forced close of a real
+            # loser is not a scratch.
+            new_slice[UNPRICED_SLICE_KEY] = True
+        fills.append(new_slice)
 
     filled = already + slice_qty
     residual = max(Decimal(0), qty - filled)
@@ -1034,7 +1068,8 @@ def _cancel_working_close(trade, client) -> bool:
     return True
 
 
-def _reconcile_filled_against_broker(trade, client) -> None:
+def _reconcile_filled_against_broker(trade, client, *, mark=None,
+                                     unpriced=None) -> None:
     """Trust the broker's remaining size over our recorded fill, if we can read it.
 
     Called immediately after a confirmed cancel. The recorded
@@ -1059,6 +1094,16 @@ def _reconcile_filled_against_broker(trade, client) -> None:
     while we were not looking — so the slice is booked at the mark and
     sourced as such, which correctly degrades the blended exit's provenance
     to "mark" rather than letting it claim a broker fill it never saw.
+
+    WHICH MARK (2026-10-15, re-check). The kill switch hands its own exit
+    mark (`mark`: the one answer venue_mark.for_booking gave, or the entry
+    standing in) with its verdict (`unpriced`): the switch's ticker read is
+    the one that just failed, and reading it again here priced the slice
+    at the entry with nothing to say so — a stopped-out real row already
+    flat at the venue was booked as a confident scratch. Without a mark
+    (the drain's call) `_mark_price` reads one; with none for a REAL row the
+    entry stands in and the slice is marked UNPRICED_SLICE_KEY, so the
+    booking (`booking_unpriced`) never reads it as a price.
     """
     # NOT OFF A LIST READ INSIDE THE VENUE'S LAG (eToro, measured 2026-09-23:
     # a filled position is absent from /portfolio ~2 s after the fill). A
@@ -1115,13 +1160,19 @@ def _reconcile_filled_against_broker(trade, client) -> None:
     # correction. With no price at all the entry price is the only real number
     # on the row; the slice is already stamped `mark`, so the blended exit
     # correctly stops claiming a broker fill.
-    mark = _mark_price(trade, client)
+    if mark is None:
+        mark = _mark_price(trade, client)
+        unpriced = _decimal(mark) is None and not getattr(trade, "paper",
+                                                          True)
     mark_px = _decimal(mark) or _decimal(trade.entry_price) or Decimal(0)
     logger.info("close retry: broker shows %s of %s left on #%s — booking the "
                 "%s that printed in the cancel window at the mark %s",
                 remaining, qty, trade.id, delta, mark_px)
-    prior.append({"qty": qty_str(delta), "price": str(mark_px),
-                  "source": EXIT_SOURCE_MARK, "reconciled": True})
+    slice_ = {"qty": qty_str(delta), "price": str(mark_px),
+              "source": EXIT_SOURCE_MARK, "reconciled": True}
+    if unpriced:
+        slice_[UNPRICED_SLICE_KEY] = True
+    prior.append(slice_)
     meta.update({
         CLOSE_FILLS_KEY: prior,
         CLOSE_FILLED_QTY_KEY: qty_str(implied_filled),
@@ -1321,7 +1372,28 @@ def _finalise_closed(trade, *, fill: dict, reason: str) -> None:
     price = fill["price"]
     trade.exit_price = price
     trade.pnl = _pnl(trade, price)
-    trade.metadata = {**(trade.metadata or {}), **fill["metadata"]}
+    merged = {**(trade.metadata or {}), **fill["metadata"]}
+    # THE BOOKING DECIDES ITS OWN VERDICT, PER FILL (2026-10-15, re-check).
+    # A flag an earlier attempt left on the row (the kill switch's — the
+    # code before this date wrote it before the order was sent) and the
+    # stale-print age beside it are dropped: left in place on a priced
+    # booking they made the daily-loss gate skip a real, measured loss as
+    # unmeasured. The verdict is then this booking's own: UNPRICED (the
+    # flag, pnl NULL) only when no slice in the ledger was priced and the
+    # blend is not the broker's fill — the drain's resend while the rates
+    # are down books the entry standing in, and eToro's proven close
+    # carries no avgPrice, so that slice is not a price (`booking_unpriced`,
+    # the kill switch's own rule).
+    from bot_program.reconcile_asset import UNPRICED_EXIT_KEY
+    merged.pop(UNPRICED_EXIT_KEY, None)
+    merged.pop("exit_mark_age_s", None)
+    if booking_unpriced(merged):
+        merged[UNPRICED_EXIT_KEY] = True
+        trade.pnl = None
+        logger.error("close retry: #%s %s closed with NO price available — "
+                     "P&L recorded as UNMEASURED, not as flat",
+                     trade.id, trade.symbol)
+    trade.metadata = merged
     trade.status = "CLOSED"
     trade.closed_at = timezone.now()
     trade.reason = ((trade.reason or "") + f" | closed:{reason}").strip()[:1000]
@@ -1355,7 +1427,8 @@ def _finalise_closed(trade, *, fill: dict, reason: str) -> None:
             "trade_id": trade.id, "asset_class": trade.asset_class,
             "symbol": trade.symbol, "side": trade.side,
             "outcome": trade.outcome or "",
-            "pnl": str(trade.pnl) if trade.pnl is not None else "0",
+            # an unmeasured exit is said as nothing (a dash), never a zero
+            "pnl": str(trade.pnl) if trade.pnl is not None else "",
         })
     except Exception as e:
         logger.warning("close retry eye push failed for #%s: %s",

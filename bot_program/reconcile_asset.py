@@ -608,28 +608,40 @@ def _close_as_orphan(trade, *, venue_said: str = "",
             if last > 0:
                 exit_price, priced = Decimal(str(last)), True
         except Exception:
+            pass
+        if not priced:
+            # The ticker raised, OR ANSWERED "0" — eToro's word for a shut
+            # market (2026-10-15, re-check: that answer never reached the
+            # rule below and the row went unpriced beside a bookable
+            # print). Either way the row falls into the booking rule.
             try:
                 from instruments.models import Instrument
                 inst = Instrument.objects.filter(symbol=trade.symbol).first()
                 if inst:
                     lq = LiveQuote.objects.filter(instrument=inst).first()
                     # THROUGH THE ONE ANSWER (2026-10-08, venue_mark
-                    # .resolve): a REAL row is never booked at a quote of
-                    # another instrument — Gold Spot at GC=F, the future,
-                    # would book the basis as realized P&L. Its fresh venue
-                    # stamp, or the quote where it is the venue's
-                    # instrument; a STALE venue print only where
-                    # venue_mark.bookable allows it (a shut market, or
-                    # within an hour), its age written on the row; else
-                    # unpriced (flagged below), never an old price passed
-                    # off as the exit. A paper row: its quote, as before.
+                    # .for_booking): a REAL row is never booked at a quote
+                    # of another instrument — Gold Spot at GC=F, the
+                    # future, would book the basis as realized P&L. Its
+                    # fresh venue stamp, or the quote where it is the
+                    # venue's instrument and fresh; a STALE venue print
+                    # only where venue_mark.bookable allows it (within an
+                    # hour, or the venue's price at the close of a shut
+                    # market), its age written on the row; else unpriced
+                    # (flagged below), never an old price passed off as
+                    # the exit. A paper row: its quote, as before.
                     from . import venue_mark
-                    mk = venue_mark.resolve(trade, lq)
-                    if venue_mark.bookable(mk, trade):
+                    mk = venue_mark.for_booking(trade, lq)
+                    if mk is not None:
                         exit_price, priced = (
                             lq.last if mk.source == venue_mark.QUOTE
                             else Decimal(str(mk.price))), True
-                        if mk.source != venue_mark.QUOTE:
+                        # The age rides with ANY booked mark older than a
+                        # live one: a stale print, or a quote taken at a
+                        # shut market's close (2026-10-15, re-check).
+                        if mk.age_s is not None and (
+                                mk.source == venue_mark.VENUE_STALE
+                                or mk.age_s > venue_mark.MAX_AGE_S):
                             stale_mark_age = mk.age_s
                             logger.info("reconcile: #%s %s exit at the "
                                         "venue's last mark %s (%s, %s old)",
@@ -656,6 +668,37 @@ def _close_as_orphan(trade, *, venue_said: str = "",
                         trade.symbol, basis["level"], basis["price"],
                         basis["evidence"], exit_price if priced else "none")
             exit_price, priced = Decimal(str(basis["price"])), True
+            stale_mark_age = None      # the level priced it, not the print
+
+    # THE LEDGER (2026-10-15, re-check). A CLOSE_PENDING row may carry
+    # slices an earlier close already FILLED (`close_fills`, a partial at a
+    # broker's price). The price above is for the RESIDUAL only: booking it
+    # over the whole size overwrote a measured fill (6 at 2620 and 4 at
+    # 2600 booked as 10 at 2600), and with nothing priced the measured
+    # slices went NULL with the rest. The residual is blended with the
+    # ledger at its price (pending_closes.resolve_exit_fill), its slice
+    # marked unpriced when nothing priced it, and the row is UNPRICED only
+    # under the per-fill rule every booking asks (booking_unpriced): no
+    # slice priced and the blend not the broker's. A row with no ledger
+    # books exactly as before.
+    from .pending_closes import (CLOSE_FILLED_QTY_KEY, CLOSE_FILLS_KEY,
+                                 CLOSE_RESIDUAL_QTY_KEY, UNPRICED_SLICE_KEY,
+                                 booking_unpriced, resolve_exit_fill)
+    blend = None
+    prior = [f for f in ((trade.metadata or {}).get(CLOSE_FILLS_KEY) or [])
+             if isinstance(f, dict)]
+    if prior:
+        blend = resolve_exit_fill(
+            trade, None, mark=exit_price,
+            mark_source=(EXIT_SOURCE_BROKER if measured
+                         else basis["source"] if basis
+                         else EXIT_SOURCE_MARK))
+        fills = blend["metadata"][CLOSE_FILLS_KEY]
+        if not priced and len(fills) > len(prior):
+            fills[-1][UNPRICED_SLICE_KEY] = True
+        exit_price = blend["price"]
+    unmeasured = (booking_unpriced(blend["metadata"]) if blend is not None
+                  else not priced)
 
     if trade.side == "BUY":
         pnl = (exit_price - trade.entry_price) * trade.qty
@@ -688,15 +731,28 @@ def _close_as_orphan(trade, *, venue_said: str = "",
     # bracket-protected stock and forex exit takes, so without the flag a
     # large share of the track record would silently be estimates.
     meta = dict(trade.metadata or {})
-    if stale_mark_age is not None:
-        # The exit was booked at the venue's last print, not a fresh one:
-        # its age rides on the row beside exit_price_inferred.
+    # A PRICED BOOKING CARRIES NO LEFTOVER VERDICT (2026-10-15, re-check): a
+    # CLOSE_PENDING row may arrive flagged by an earlier attempt that could
+    # not price it; what prices it here decides anew. The age rides the row
+    # ONLY when a STALE venue print priced the exit — never beside the
+    # broker's fill, a fresh print or the level the venue held.
+    meta.pop(UNPRICED_EXIT_KEY, None)
+    meta.pop("exit_mark_age_s", None)
+    if priced and not measured and stale_mark_age is not None:
         meta["exit_mark_age_s"] = int(round(stale_mark_age))
     # INFERRED only when it really was. A fill read from the broker is a
     # measurement, and flagging it as an estimate would understate the one
     # part of the track record that is not one.
     meta["exit_price_inferred"] = not measured
-    if not priced:
+    if blend is not None:
+        # the residual's slice joins the ledger, and the blend's provenance
+        # is the row's: one assumed slice makes the blended exit an
+        # assumption too
+        for key in (CLOSE_FILLS_KEY, CLOSE_FILLED_QTY_KEY,
+                    CLOSE_RESIDUAL_QTY_KEY):
+            meta[key] = blend["metadata"][key]
+        meta["exit_price_inferred"] = blend["source"] != EXIT_SOURCE_BROKER
+    if unmeasured:
         # Nothing anywhere could price this exit. The row still closes — an
         # orphan left open forever is its own failure — but its P&L is NULL
         # rather than a zero derived from the entry price, because a
@@ -723,7 +779,8 @@ def _close_as_orphan(trade, *, venue_said: str = "",
     # But it is `broker` again, honestly, when the block at the top of this
     # function actually read the fill: stamping `mark` unconditionally would
     # have thrown away the one number here that is not an estimate.
-    meta[EXIT_FILL_SOURCE_KEY] = (EXIT_SOURCE_BROKER if measured
+    meta[EXIT_FILL_SOURCE_KEY] = (blend["source"] if blend is not None
+                                  else EXIT_SOURCE_BROKER if measured
                                   else basis["source"] if basis
                                   else EXIT_SOURCE_MARK)
     if basis:
@@ -814,7 +871,8 @@ def _close_as_orphan(trade, *, venue_said: str = "",
             "trade_id": trade.id, "asset_class": trade.asset_class,
             "symbol": trade.symbol, "side": trade.side,
             "outcome": trade.outcome or "",
-            "pnl": str(trade.pnl) if trade.pnl is not None else "0",
+            # an unmeasured exit is said as nothing (a dash), never a zero
+            "pnl": str(trade.pnl) if trade.pnl is not None else "",
         })
     except Exception as e:
         logger.warning("reconcile: eye push failed for #%s: %s",

@@ -2096,7 +2096,22 @@ class AssetBot(ABC):
         # NOT stamped: it may be hours old — the next tick stamps.
         if price > 0 and not trade.paper:
             from bot_program import venue_mark as _venue_mark
-            _vm = _venue_mark.at_fill(price, source=adapter_key(client))
+            # The closing side (2026-10-15): the order's last-look bid/ask
+            # (entry_quote, stored with the working row — the bot lane's
+            # last look, TAKE TRADE's ticket), anchored at the fill, so the
+            # row reads minus the spread as eToro shows it. That spread was
+            # read at ORDER time, up to ENTRY_WORKING_MAX_HOURS before this
+            # fill: it is dated from its read (`spread_from`), and a read
+            # older than the carry bound anchors nothing — the next tick
+            # measures.
+            _q = meta.get("entry_quote")
+            _q = _q if isinstance(_q, dict) else {}
+            _vm = _venue_mark.at_fill(
+                price, source=adapter_key(client),
+                spread_from=(_q.get("read_at")
+                             or meta.get("entry_working_since") or ""),
+                **_venue_mark.fill_sides(price, trade.side,
+                                         bid=_q.get("bid"), ask=_q.get("ask")))
             if _vm is not None:
                 meta["venue_mark"] = _vm
         trade.metadata = meta
@@ -6319,7 +6334,15 @@ class AssetBot(ABC):
         if not paper and not entry_meta.get("entry_working"):
             from bot_program import venue_mark as _venue_mark
             from bot_program.engine.capabilities import adapter_key
-            _vm = _venue_mark.at_fill(price, source=adapter_key(client))
+            # The closing side (2026-10-15): the last look's bid/ask
+            # (entry_quote), anchored at the fill — a buy fills at the ask
+            # — so a new real long reads minus the spread, as eToro shows it.
+            _q = entry_meta.get("entry_quote")
+            _q = _q if isinstance(_q, dict) else {}
+            _vm = _venue_mark.at_fill(
+                price, source=adapter_key(client),
+                **_venue_mark.fill_sides(price, decision.direction,
+                                         bid=_q.get("bid"), ask=_q.get("ask")))
             if _vm is not None:
                 entry_meta["venue_mark"] = _vm
 

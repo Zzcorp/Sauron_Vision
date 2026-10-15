@@ -154,7 +154,8 @@ def record_trade_close(user, *, trade) -> None:
             "qty": str(trade.qty),
             "entry_price": str(trade.entry_price),
             "exit_price": str(trade.exit_price) if trade.exit_price is not None else None,
-            "pnl": str(trade.pnl),
+            # None when the exit is unmeasured (2026-10-15), never "None"
+            "pnl": str(trade.pnl) if trade.pnl is not None else None,
             "outcome": trade.outcome or "",
             "realized_r": trade.realized_r,
             "duration_minutes": trade.duration_minutes,

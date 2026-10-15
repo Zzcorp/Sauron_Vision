@@ -259,18 +259,23 @@ class KillSwitchMarkTests(TestCase):
         _quote("EURUSD", 1.05)
         client = MagicMock()
         client.ticker.return_value = {"lastPrice": "1.0700"}
+        # (price, unpriced, stale-print age) since 2026-10-15: a call with
+        # no real row is a price, never a verdict
         self.assertEqual(
-            _market_exit_price("EURUSD", 1.0, client=client), 1.07)
+            _market_exit_price("EURUSD", 1.0, client=client),
+            (1.07, False, None))
 
     def test_a_stale_quote_is_refused_in_favour_of_the_entry(self):
         from bot_program.engine.kill_switch import _market_exit_price
         _quote("EURUSD", 1.05, age_seconds=1200)
-        self.assertEqual(_market_exit_price("EURUSD", 1.0), 1.0)
+        self.assertEqual(_market_exit_price("EURUSD", 1.0),
+                         (1.0, False, None))
 
     def test_a_fresh_quote_is_used_without_a_client(self):
         from bot_program.engine.kill_switch import _market_exit_price
         _quote("EURUSD", 1.05)
-        self.assertEqual(_market_exit_price("EURUSD", 1.0), 1.05)
+        self.assertEqual(_market_exit_price("EURUSD", 1.0),
+                         (1.05, False, None))
 
 
 # ── ETFs join the stock quote universe ──────────────────────────────────
