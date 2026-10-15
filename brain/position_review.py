@@ -327,7 +327,26 @@ def _venue_mark_for(pos: dict):
     if mk.source == venue_mark.VENUE:
         return mk.price, "venue"
     if mk.source == venue_mark.VENUE_STALE:
-        return mk.price, f"venue ({venue_mark.age_words(mk.age_s)} old)"
+        age = venue_mark.age_words(mk.age_s)
+        # A STALE print DECIDES only when it is the venue's price AT THE
+        # CLOSE of a market now shut (2026-10-15, re-check: the booking's
+        # own rule, venue_mark.at_the_close). In an open market it is a
+        # price nothing confirms — the thesis stop Aragorn applies read a
+        # days-old print as live — and over a shut market a print taken
+        # days before the close is not the close's price either. Where the
+        # quote is the venue's own instrument the review falls back to
+        # usable_mark's fresh-quote rule (and its shut-market close); where
+        # it is another instrument there is no mark, and the review decides
+        # nothing. The pages keep showing the print.
+        if venue_mark.at_the_close(mk, row):
+            return mk.price, f"venue ({age} old, market shut)"
+        if mk.stand_in:
+            shut = venue_mark.market_shut(row)
+            why = ("was not taken at its market's close" if shut else
+                   "is not live")
+            return None, (f"the venue's last price is {age} old and {why} "
+                          f"— no decision on it")
+        return None
     if mk.source == venue_mark.AWAITING_VENUE:
         return None, "waiting for the venue's price"
     return None    # the venue's own instrument's quote: usable_mark

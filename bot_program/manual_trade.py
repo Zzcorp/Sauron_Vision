@@ -2834,24 +2834,28 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                 # ticket's quote read moments ago gives the spread; it is
                 # anchored at the fill (a buy fills at the ask, a sell at
                 # the bid), so the row reads what eToro reads at once.
-                _bid = _ask = None
-                try:
-                    _q = preview.get("quote_advisory") or {}
-                    _spread = float(_q.get("ask")) - float(_q.get("bid"))
-                    if _spread >= 0 and float(booked_px) > 0:
-                        if side == "BUY":
-                            _ask = float(booked_px)
-                            _bid = _ask - _spread
-                        else:
-                            _bid = float(booked_px)
-                            _ask = _bid + _spread
-                except (TypeError, ValueError, AttributeError):
-                    _bid = _ask = None
-                _vm = _venue_mark.at_fill(booked_px,
-                                          source=adapter_key(client),
-                                          bid=_bid, ask=_ask)
+                _q = preview.get("quote_advisory")
+                _q = _q if isinstance(_q, dict) else {}
+                _vm = _venue_mark.at_fill(
+                    booked_px, source=adapter_key(client),
+                    **_venue_mark.fill_sides(booked_px, side,
+                                             bid=_q.get("bid"),
+                                             ask=_q.get("ask")))
                 if _vm is not None:
                     extra["venue_mark"] = _vm
+            else:
+                # ...and so that stamp has a SPREAD (2026-10-15, re-check):
+                # the ticket's two sides ride the working row with the time
+                # they were read, as the bot lane's last look does
+                # (entry_quote). The fill anchors them only while that read
+                # is young (venue_mark.at_fill's spread_from); without them
+                # a manual order eToro held read exactly zero at its fill.
+                _q = preview.get("quote_advisory")
+                if isinstance(_q, dict) and _q.get("bid") is not None \
+                        and _q.get("ask") is not None:
+                    extra["entry_quote"] = {
+                        "bid": _q.get("bid"), "ask": _q.get("ask"),
+                        "read_at": extra.get("entry_working_since")}
 
             with transaction.atomic():
                 trade = _book_row(booked_px,

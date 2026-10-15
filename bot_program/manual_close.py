@@ -374,8 +374,14 @@ def preview_close(user, trade) -> dict:
             from bot_program.asset_engine.base import AssetBot
             from bot_program.engine.capabilities import adapter_key
             if not AssetBot._is_paper_client(client):
+                # ...with the two sides the dialog's own read carried
+                # (AssetBot._mark_price keeps the last tick per symbol), so
+                # the closing-side valuation survives the stamp (2026-10-15).
+                _tk = (getattr(bot, "_last_ticks", None) or {}).get(
+                    trade.symbol) or {}
                 venue_mark.stamp(trade, mark, source=adapter_key(client),
-                                 via="close dialog")
+                                 via="close dialog", bid=_tk.get("bid"),
+                                 ask=_tk.get("ask"))
         except Exception as e:  # noqa: BLE001 — a stamp never blocks a close
             logger.info("[manual-close] #%s mark not stamped: %s",
                         trade.id, e)

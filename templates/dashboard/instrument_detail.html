@@ -230,6 +230,11 @@ exactly what a second queryset built for a table would eventually do.
                                 {% if p.pnl >= 0 %}+{% endif %}{{ p.pnl|floatformat:2 }}
                                 {% if p.pnl_pct is not None %}<small>{% if p.pnl_pct >= 0 %}+{% endif %}{{ p.pnl_pct|floatformat:2 }}%</small>{% endif %}
                             </span>
+                            {% comment %}Which mark priced it, with its age
+                            when the venue's print is stale — as the
+                            positions page says it (2026-10-15). A real row
+                            only: a paper row's quote is its venue.{% endcomment %}
+                            {% if p.mark_word and not p.paper %}<small class="ipos-mark sv-muted" data-mark-source="{{ p.mark_source }}" title="{{ p.mark_title }}" style="display:block;font-size:.7em;font-weight:400;letter-spacing:.04em;text-transform:uppercase;">{{ p.mark_word }}</small>{% endif %}
                         {% endif %}
                     </td>
                 </tr>

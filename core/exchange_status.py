@@ -467,27 +467,43 @@ def _forex_week(now_utc):
     still calls its prices not tradeable and a poller can re-stamp
     Friday's close. `reopens` is None while open, `opened` while shut."""
     now = now_utc.astimezone(pytz.UTC)
-    ny = pytz.timezone(_NEW_YORK)
-
-    def _edges(sunday):
-        friday = sunday + timedelta(days=5)
-        opens = max(
-            pytz.UTC.localize(datetime.combine(sunday, time(21, 0))),
-            ny.localize(datetime.combine(sunday, time(17, 0)))
-            .astimezone(pytz.UTC))
-        closes = min(
-            pytz.UTC.localize(datetime.combine(friday, time(21, 0))),
-            ny.localize(datetime.combine(friday, time(17, 0)))
-            .astimezone(pytz.UTC))
-        return opens, closes
-
     sunday = now.date() - timedelta(days=(now.weekday() + 1) % 7)
-    opens, closes = _edges(sunday)
+    opens, closes = _forex_edges(sunday)
     if opens <= now < closes:
         return True, None, opens
     if now < opens:
         return False, opens, None
-    return False, _edges(sunday + timedelta(days=7))[0], None
+    return False, _forex_edges(sunday + timedelta(days=7))[0], None
+
+
+def _forex_edges(sunday):
+    """(opens, closes) of the FX week that begins on `sunday`, as aware UTC
+    datetimes — the later of the two opens and the earlier of the two
+    closes (_forex_week's rule)."""
+    ny = pytz.timezone(_NEW_YORK)
+    friday = sunday + timedelta(days=5)
+    opens = max(
+        pytz.UTC.localize(datetime.combine(sunday, time(21, 0))),
+        ny.localize(datetime.combine(sunday, time(17, 0)))
+        .astimezone(pytz.UTC))
+    closes = min(
+        pytz.UTC.localize(datetime.combine(friday, time(21, 0))),
+        ny.localize(datetime.combine(friday, time(17, 0)))
+        .astimezone(pytz.UTC))
+    return opens, closes
+
+
+def _forex_prev_close(now_utc):
+    """When the running FX shut began (the last Friday close at or before
+    `now_utc`), as an aware UTC datetime; None while the week is open."""
+    now = now_utc.astimezone(pytz.UTC)
+    sunday = now.date() - timedelta(days=(now.weekday() + 1) % 7)
+    opens, closes = _forex_edges(sunday)
+    if now < opens:
+        return _forex_edges(sunday - timedelta(days=7))[1]
+    if now >= closes:
+        return closes
+    return None
 
 
 def _next_open_utc(code: str, now_utc):
@@ -578,6 +594,57 @@ def _prev_open_utc(code: str, now_utc):
     return None
 
 
+def _prev_close_utc(code: str, now_utc):
+    """The last instant at or before `now_utc` that session `code` CLOSED,
+    as an aware UTC datetime — asked while the session is shut, so it is
+    when the running shut began (the weekend, the daily break or a
+    product's gap). None for CRYPTO and anything unmodelled. The mirror of
+    _prev_open_utc, for the venue mark's booking rule (2026-10-15): a
+    stale print books over a shut market only when it was taken at that
+    close."""
+    product = _PRODUCT_BY_CODE.get(code)
+    if product is not None:
+        tz = pytz.timezone(product["tz"])
+        local_now = now_utc.astimezone(tz)
+        ends = []
+        for seg in product["segments"]:
+            for offset in range(0, 9):
+                day = local_now.date() - timedelta(days=offset)
+                if day.weekday() not in seg["weekdays"]:
+                    continue
+                _start, end = _segment_window(seg, day, tz)
+                if end <= local_now:
+                    ends.append(end)
+                    break
+        return max(ends).astimezone(pytz.UTC) if ends else None
+    if code == "FOREX":
+        return _forex_prev_close(now_utc)
+    ex = next((e for e in EXCHANGES if e["code"] == code), None)
+    if ex is None:
+        return None
+    tz = pytz.timezone(ex["tz"])
+    local_now = now_utc.astimezone(tz)
+    if code == "CME":
+        # Globex closes at 16:00 CT Monday through Friday: the daily break
+        # on four of them, the weekend on Friday.
+        weekdays, at = (0, 1, 2, 3, 4), time(16, 0)
+    else:
+        weekdays, at = ex["weekdays"], ex["close"]
+    for offset in range(0, 11):
+        day = local_now.date() - timedelta(days=offset)
+        if day.weekday() not in weekdays:
+            continue
+        if code in _US_EQUITY_SESSIONS and day in US_EQUITY_HOLIDAYS:
+            continue
+        close_at = at
+        if code in _US_EQUITY_SESSIONS:
+            close_at = US_EQUITY_EARLY_CLOSES.get(day) or at
+        end = tz.localize(datetime.combine(day, close_at))
+        if end <= local_now:
+            return end.astimezone(pytz.UTC)
+    return None
+
+
 def market_clock(asset_class: str, exchange: str = "", symbol: str = "",
                  now_utc=None) -> dict:
     """Is this instrument's market open NOW, and when does it next open?
@@ -608,14 +675,17 @@ def market_clock(asset_class: str, exchange: str = "", symbol: str = "",
     datetime, None while open or when unknowable), "reopens_words"
     ("Sunday 21:00 UTC", or ""), "opened" (while open, the aware UTC
     instant the running session opened; None while shut, and for crypto
-    and unmodelled classes)}.
+    and unmodelled classes), "closed" (while shut, the aware UTC instant
+    the running shut began — 2026-10-15, the venue mark's booking rule;
+    None while open, and for crypto and unmodelled classes)}.
     """
     if now_utc is None:
         now_utc = datetime.now(pytz.UTC)
     cls = (asset_class or "").strip().lower()
     if cls not in MODELLED_CLASSES:
         return {"is_open": True, "session": "", "modelled": False,
-                "reopens": None, "reopens_words": "", "opened": None}
+                "reopens": None, "reopens_words": "", "opened": None,
+                "closed": None}
     status = market_status_for(cls, exchange or "", now_utc=now_utc,
                                symbol=symbol or "")
     code = status.get("session") or status.get("code") or ""
@@ -628,8 +698,9 @@ def market_clock(asset_class: str, exchange: str = "", symbol: str = "",
             is_open = False
         reopens = None if is_open else _next_open_utc(code, now_utc)
         opened = _prev_open_utc(code, now_utc) if is_open else None
+    closed = None if is_open else _prev_close_utc(code, now_utc)
     return {"is_open": is_open, "session": code, "modelled": True,
             "reopens": reopens,
             "reopens_words": utc_words(reopens) if reopens is not None
             else "",
-            "opened": opened}
+            "opened": opened, "closed": closed}
