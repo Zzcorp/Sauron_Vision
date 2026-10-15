@@ -4391,9 +4391,15 @@ def _chart_positioning(instrument, levels=None):
         mark = float(lq.last) if lq and lq.last else None
     except Exception:  # noqa: BLE001 - a quote that cannot be read is no mark
         mark = None
-    out = compact(positioning_map(instrument.symbol,
-                                  asset_class=instrument.asset_class or "",
-                                  mark=mark, levels=levels))
+    pm = positioning_map(instrument.symbol,
+                         asset_class=instrument.asset_class or "",
+                         mark=mark, levels=levels)
+    out = compact(pm)
+    # The Power of Three's stages (2026-10-08) ride the CHART's copy of the
+    # day only: compact() is also the ticket's map and the position
+    # reviewer's, and an LLM that trades must not read a drawing.
+    if out.get("ok") and isinstance(out.get("po3"), dict):
+        out = dict(out, po3=dict(out["po3"], stages=pm.get("po3_stages")))
     cache.set(key, out, LEVELS_TTL)
     return out
 

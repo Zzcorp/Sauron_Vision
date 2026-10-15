@@ -395,7 +395,11 @@ def positioning_map(symbol, *, asset_class="", direction=None,
                 "stops": {"below": below, "above": above},
                 "bias": bias, "bias_confidence": conf,
                 "path": path, "odds": odds, "po3": po3, "words": words,
-                "levels_n": len(levels)})
+                "levels_n": len(levels),
+                # The day's stages as the chart draws them (2026-10-08):
+                # beside `po3`, never in it, so compact() — the ticket's and
+                # the position reviewer's map — never carries a drawing.
+                "po3_stages": day.get("stages")})
     if direction:
         out["side"] = side_read(out, direction)
     return out

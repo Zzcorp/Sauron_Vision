@@ -362,6 +362,8 @@ Optional page data (json_script blocks the widget picks up when present):
 .sv-lvl-key[aria-pressed="false"] { opacity: .5; text-decoration: line-through; }
 .sv-lvl-key--master[aria-pressed="false"] { text-decoration: none; }
 .sv-lvl-key b { font-weight: 400; color: var(--text-primary, #daf0e6); }
+/* The Power of Three switch names today's phase in the session's violet (2026-10-08). */
+.sv-lvl-key [data-role="phase"] { color: var(--lvl-session, var(--accent-purple)); }
 .sv-lvl-key--answer { color: var(--accent-gold-ink, var(--accent-gold, #d8b020)); }
 .sv-lvl-key--answer[data-kind="swing"] { color: var(--lvl-swing, var(--accent-blue, #30a0e8)); }
 .sv-lvl-key--answer[aria-pressed="true"] { border-color: currentColor; text-decoration: none; opacity: 1; }
@@ -484,6 +486,10 @@ Optional page data (json_script blocks the widget picks up when present):
     font-weight: 700;
     color: var(--text-primary, #daf0e6);
 }
+/* A Power of Three stage card's head says what happened in full (2026-10-08):
+   it wraps under its side badge rather than ending in an ellipsis. */
+.sv-sig-head--stage { align-items: flex-start; }
+.sv-sig-head--stage .sv-sig-rule { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.25; }
 .sv-sig-close {
     flex: 0 0 auto;
     width: 30px;
@@ -648,7 +654,7 @@ Optional page data (json_script blocks the widget picks up when present):
             <button class="sv-ind-btn" data-ind="macd" title="MACD 12/26/9 in its own pane">MACD</button>
             <button class="sv-ind-btn" data-ind="volume" title="Volume histogram">VOL</button>
             <button class="sv-ind-btn active" data-ind="positions" title="Open positions, stops, targets and signal entries on the tape">POSITIONS</button>
-            <button class="sv-ind-btn active" data-ind="levels" title="Where the crowd keeps its stops, read off the 4h bars: liquidity pools (gold areas from their first touch), swings (blue ticks on the candle that printed them; the nearest each side runs to now), round numbers (grey dots) and the Asian range (violet box). The key under the chart names the hunt and the draw and switches each kind. Recomputed every minute: a level the price trades through disappears">LEVELS</button>
+            <button class="sv-ind-btn active" data-ind="levels" title="Where the crowd keeps its stops, read off the 4h bars: liquidity pools (gold areas from their first touch), swings (blue ticks on the candle that printed them; the nearest each side runs to now), round numbers (grey dots) and the Power of Three in violet (A the Asian box, M the run of one of its sides, D the move back the other way). The key under the chart names the hunt and the draw and switches each kind. Recomputed every minute: a level the price trades through disappears">LEVELS</button>
         </div>
 
         <!-- View controls -->
@@ -774,7 +780,8 @@ toolbar button, which a phone pushes off-screen.{% endcomment %}
     <button type="button" class="sv-lvl-key sv-lvl-key--answer" data-lvl="above" aria-pressed="false" hidden></button>
     <button type="button" class="sv-lvl-key" data-lvl="pool" aria-pressed="true"><i class="sv-lvl-sw sv-lvl-sw--pool" aria-hidden="true"></i>Pools <b data-count="pool"></b></button>
     <button type="button" class="sv-lvl-key" data-lvl="swing" aria-pressed="true"><i class="sv-lvl-sw sv-lvl-sw--swing" aria-hidden="true"></i>Swings <b data-count="swing"></b></button>
-    <button type="button" class="sv-lvl-key" data-lvl="asia" aria-pressed="true"><i class="sv-lvl-sw sv-lvl-sw--asia" aria-hidden="true"></i>Asia range</button>
+    <button type="button" class="sv-lvl-key" data-lvl="asia" aria-pressed="true"
+            title="The day in three stages, in violet: A the Asian range (accumulation), M the run of one of its sides (manipulation, London's), D the close back inside and the other way (distribution, New York's). Intraday frames only; hover or tap a mark for its card."><i class="sv-lvl-sw sv-lvl-sw--asia" aria-hidden="true"></i>Power of Three <b data-role="phase"></b></button>
     <button type="button" class="sv-lvl-key" data-lvl="round" aria-pressed="true"><i class="sv-lvl-sw sv-lvl-sw--round" aria-hidden="true"></i>Round numbers <b data-count="round"></b></button>
     <span class="sv-lvl-count" data-role="count"></span>
     <button type="button" class="sv-lvl-key sv-lvl-key--all" data-lvl="all" aria-pressed="false">Show all</button>
@@ -1271,9 +1278,116 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         return h.join('');
     }
 
+    /* ── The Power of Three's stage cards (2026-10-08) ───────────────────
+       What happened, when and where: the M card on a run's diamond or its
+       label (or the Judas line), the D card on the arrow or its label. The
+       A card is the Asian box's (levelCard). `day` is the widget's ASIA
+       (the reply's po3 with its stages), `map` the positioning map (the
+       draw leg), `now` epoch seconds, `fmt` the chart's price format. */
+    function utc(e) { return new Date(e * 1000).toISOString().slice(11, 16) + ' UTC'; }
+    var SESSION_WORDS = { asia: 'Asia', london: 'London', ny_am: 'New York AM', ny_lunch: 'New York lunch',
+                          ny_pm: 'New York PM', off: 'between sessions', unknown: 'session unknown' };
+    function windowWords(win, now) {
+        if (!win || typeof win.opened !== 'number' || typeof win.closed !== 'number') return '';
+        return (win.ny ? win.ny + ' New York · ' : '')
+            + (now < win.opened ? 'opens ' + utc(win.opened) : now < win.closed ? 'open now' : 'closed');
+    }
+    /* a UTC time and its New York wall clock, when the server could read it */
+    function whenWords(e, ny) { return utc(e) + (ny ? ' · ' + ny + ' New York' : ''); }
+    /* The day's sentence without the old `judas` key's clause: that key
+       names the London of the Asian session's own New York date (F1,
+       decision D1 pending), 18 h before the swing the stage cards state
+       from stages.judas; one card never says two Judas swings. */
+    function dayWords(day) { return String(day.words || '').split(" London's Judas swing:")[0]; }
+    function stageCard(hit, day, map, now, fmt) {
+        hit = hit || {}; day = day || {};
+        fmt = fmt || function (v) { return String(v); };
+        var st = day.stages || {}, sweeps = Array.isArray(st.sweeps) ? st.sweeps : [];
+        var phase = day.phase, h = [], facts = [], chips = [], foot = [];
+        /* a 4h read: one bar spans the sessions, so a run is said as its
+           bar's span and the return by the bar's close (2026-10-15) */
+        var wide = (st.bar || 0) > 3600, tfName = (st.bar || 0) >= 14400 ? '4h' : '1h';
+        var tf = 'read on the ' + tfName + ' bars';
+        function backWords(s) {
+            if (!wide) return fmt(s.back_price) + ' at ' + whenWords(s.back_at, s.back_ny);
+            var close = typeof s.back_close_at === 'number' ? s.back_close_at : s.back_at + (st.bar || 0);
+            return fmt(s.back_price) + ' by ' + whenWords(close, s.back_ny) + ', the ' + tfName + " bar's close";
+        }
+        /* the head, the chips and the second foot are this card's own words
+           (no server string reaches them); every fact goes through text() */
+        /* the head says what happened in full: it wraps rather than ending
+           in an ellipsis ('Sweep of the A…' on a phone) */
+        function head(side, rule) {
+            h.push('<div class="sv-sig-head sv-sig-head--stage"><span class="sv-sig-side">' + side + '</span>'
+                + '<span class="sv-sig-rule">' + rule + '</span></div>');
+        }
+        var s = sweeps.filter(function (x) { return x && x.side === hit.side; })[0]
+             || (hit.stage === 'd' ? sweeps.filter(function (x) { return x && x.back_at; })[0] : null) || null;
+        if (hit.stage === 'm' && hit.part === 'judas') {
+            var j = st.judas || {};
+            head('MANIPULATION', "London's Judas swing");
+            facts.push(fact('Opened', fmt(j.open) + ' at ' + whenWords(j.open_at, j.open_ny)));
+            facts.push(fact('Faked to', fmt(j.extreme) + ' at ' + utc(j.extreme_at)));
+            facts.push(fact('Turned', j.direction === 'LONG' ? 'up' : j.direction === 'SHORT' ? 'down' : null));
+            if (st.london) facts.push(fact('London', windowWords(st.london, now)));
+            chips.push('The false move that traps the early side');
+            if (j.words) foot.push(esc(j.words));
+            foot.push('London runs one side of the Asian range to take its stops, then turns · ' + tf);
+        } else if (hit.stage === 'd') {
+            var up = day.direction ? day.direction === 'up' : !!(s && s.side === 'low');
+            var asia = day, leg = drawLeg(map), agree = drawAgrees(map, up ? 'up' : 'down', day.mark);
+            head('DISTRIBUTION', 'Back inside after the ' + (up ? "lows'" : "highs'") + ' run · pointing ' + (up ? 'up' : 'down'));
+            if (s && typeof s.back_at === 'number') {
+                facts.push(fact('Back inside', backWords(s)));
+            }
+            facts.push(fact('Pointing', up ? 'up, to the Asian high ' + fmt(asia.high) + ' first'
+                                           : 'down, to the Asian low ' + fmt(asia.low) + ' first'));
+            if (leg && typeof leg.price === 'number' && isFinite(leg.price)) {
+                facts.push(fact('The draw', LV.MARK.draw + ' ' + fmt(leg.price)
+                    + (agree === 'agrees' ? ' · the same way'
+                       : agree === 'disagrees' ? ' · the other way: wait for them to agree' : '')));
+            }
+            if (st.new_york) facts.push(fact('New York', windowWords(st.new_york, now)));
+            var odds = day.odds || null;
+            facts.push(fact('Odds', (!odds || !odds.verdict || odds.verdict === 'unjudged')
+                ? 'not yet judged (the po3 family)' : String(odds.verdict)));
+            chips.push('The manipulation is done: the real move points ' + (up ? 'up' : 'down'));
+            if (dayWords(day)) foot.push(esc(dayWords(day)));
+            foot.push('New York leaves the range the other way, toward the pools on the far side'
+                + ' · drawn at the first close back inside after the run\'s extreme'
+                + ' · nothing is drawn past the last bar');
+        } else {
+            var high = (s ? s.side : hit.side) === 'high', sideW = high ? 'highs' : 'lows';
+            head('MANIPULATION', phase === 'distribution' ? 'Sweep of the Asian ' + sideW
+                               : phase === 'unclear' ? 'Run of the Asian ' + sideW + ' · both sides run'
+                               : 'Run of the Asian ' + sideW);
+            if (s) {
+                facts.push(fact('Ran to', fmt(s.price)));
+                facts.push(fact(high ? 'Asian high' : 'Asian low', fmt(s.edge)));
+                facts.push(fact('When', (wide ? 'the ' + tfName + ' bar from ' : '') + whenWords(s.at, s.ny)
+                    + (SESSION_WORDS[s.session] ? ', ' + SESSION_WORDS[s.session] : '')));
+                facts.push(fact('Back inside', typeof s.back_at === 'number'
+                    ? backWords(s) + (phase === 'manipulation' ? ' · out again now' : '')
+                    : 'not yet: the price holds ' + (high ? 'over' : 'under') + ' the range'));
+            }
+            if (st.london) facts.push(fact('London', windowWords(st.london, now)));
+            if (st.judas) facts.push(fact('Judas', 'London opened ' + fmt(st.judas.open) + ', faked to '
+                + fmt(st.judas.extreme) + ' at ' + utc(st.judas.extreme_at)));
+            chips.push(high ? 'The stops over the Asian high were taken' : 'The stops under the Asian low were taken');
+            if (dayWords(day)) foot.push(esc(dayWords(day)));
+            foot.push('London runs one side of the Asian range to take its stops, then turns · ' + tf);
+        }
+        h.push('<dl class="sv-sig-facts">' + facts.join('') + '</dl>');
+        h.push('<div class="sv-sig-status">' + chips.map(function (c) {
+            return '<span class="sv-sig-chip">' + c + '</span>'; }).join('') + '</div>');
+        foot.forEach(function (f) { h.push('<div class="sv-sig-foot">' + f + '</div>'); });
+        return h.join('');
+    }
+
     window.svHoverCards = {
         nearestLine: nearestLine, levelCard: levelCard, positionCard: positionCard,
-        levelRole: levelRole, ageWords: ageWords, rWords: rWords
+        levelRole: levelRole, ageWords: ageWords, rWords: rWords,
+        stageCard: stageCard
     };
 
     /* ── THE LEVELS' VISUAL LANGUAGE (2026-10-07) ──────────────────────
@@ -1306,7 +1420,16 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         EDGE_STEP: 8,                       /* an edge count slides left by this much to clear a dot */
         MIN_BAND_PX: 4, TICK_W: 14, SERIF_H: 5, DOT_R: 2.5,
         HIT: { mouse: 6, touch: 12 },
-        MARK: { hunt: '①', draw: '②', round: '◎' }
+        MARK: { hunt: '①', draw: '②', round: '◎' },
+        /* The Power of Three's stages (2026-10-08), all in the session violet:
+           a run's diamond (half its 8 px), its gap beyond the wick, the D
+           arrow's shaft, head and floor, and the time bands' alphas. */
+        SWEEP_R: 4, SWEEP_GAP: 2, ARROW_W: 2, ARROW_HEAD: { w: 9, h: 7 }, ARROW_MIN: 16,
+        BAND_A: { dark: 0.045, light: 0.055 }, BAND_HOT: { dark: 0.08, light: 0.09 },
+        /* a stage mark answers the pointer as DRAWN, plus this much, before
+           the level shapes; its full reach (HIT) only after them: the 1h
+           phone's HUNT row runs 4 px under today's diamond */
+        MARK_HIT: 2
     };
     var RANK = { pool: 0, recent: 1, swing: 2, round: 3 };
     var WEIGHT = { pool: 2, recent: 1, swing: 1, round: -1 };
@@ -1423,6 +1546,20 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                     p.round = r.price; r.quiet = true; (r.quietFor = r.quietFor || []).push(p.id);
                 }
             });
+        });
+        /* 7. The day's run on its level (2026-10-08): London's run of an
+           Asian edge is often the very low or high a ray already names (the
+           fixture's LAST LOW 1.08288). Two chips on one price is the clutter
+           this layer folds away: the item is flagged, and layout() names it
+           M while the stage is drawn. A map without stages flags nothing. */
+        var stg = map && map.po3 && map.po3.stages;
+        ((stg && Array.isArray(stg.sweeps)) ? stg.sweeps : []).forEach(function (s) {
+            if (!s || !ok(s.price) || (s.side !== 'low' && s.side !== 'high')) return;
+            var on = items.filter(function (l) {
+                return (l.lv === 'recent' || l.lv === 'swing') && !l.sweep
+                    && isHigh(l) === (s.side === 'high') && samePrice(l.price, s.price);
+            })[0];
+            if (on) on.sweep = s.side;
         });
         items.forEach(function (l) {
             if (l.lv === 'pool') { l.topText = fmt(l.top); l.bottomText = fmt(l.bottom); }
@@ -1548,6 +1685,150 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         });
     }
 
+    /* ── THE POWER OF THREE'S STAGES (2026-10-08) ─────────────────────
+       The operator: "I only have the Asia session noted on the chart, not
+       the 3 stages of manipulation, accumulation and distribution." The
+       day's three parts in the session violet, each named by its letter
+       on the mark that proves it: A the Asian box; M London's window as a
+       faint time band, a diamond just beyond the wick that ran an Asian
+       edge and the Judas swing as a thin line; D New York's window as a
+       faint time band and an arrow at the bar that closed back inside,
+       from the swept edge to the far one. A stage that has not happened
+       draws nothing; an unclear day draws both runs and no direction.
+       Display only: nothing that trades reads any of it.
+
+       env.po3 (the widget's stageEnv, in pixels) -> g.po3: {phase,
+       direction, bands [{id, x0, x1, hot, k}], sweeps [{id, side, price,
+       text, x, tipY, cy, filled, hot, k, over (on the wick's end, over its
+       candle: a marker holds the far side), box}], judas {id, x0, y0, x1, y1,
+       hot, k} | null, arrow {id, side, x, y0 (tail), y1 (head tip), dir,
+       hot, k, box} | null, labels [] (placeChips), folded {} (side -> the
+       level chip that names M), labelK}. Null when there is no day, on a
+       daily frame and while the Power of Three switch is off. No hover
+       moves any of it: hover only sets `hot`. */
+    var PO3_PHASES = { accumulation: 1, manipulation: 1, distribution: 1, unclear: 1 };
+    function stageShapes(env, W, H, theme, titleRects) {
+        var P = env.po3;
+        if (!P || env.highTf || (env.hidden && env.hidden.asia)) return null;
+        var phase = PO3_PHASES[P.phase] ? P.phase : null;
+        var base = (env.pinned ? LV.PIN_DIM[theme] : 1) * ((env.focus && env.focus !== 'asia') ? LV.FOCUS_DIM : 1);
+        var hv = env.hover || null, R = LV.SWEEP_R;
+        function kOf(hot) { return hot ? 1 : base; }
+        var g = { phase: phase, direction: P.direction || null, bands: [], sweeps: [], judas: null,
+                  arrow: null, labels: [], folded: {},
+                  labelK: (env.focus && env.focus !== 'asia') ? LV.FOCUS_DIM : 1 };
+        if (!phase || phase === 'accumulation') return g;
+        var run = phase === 'manipulation' || phase === 'distribution' || phase === 'unclear';
+        function band(id, span, hot) {
+            if (!span || !ok(span.x0) || !ok(span.x1)) return;
+            var x0 = Math.max(0, span.x0), x1 = Math.min(W, span.x1);
+            if (span.x1 <= 0 || span.x0 >= W || x1 <= x0) return;
+            g.bands.push({ id: id, x0: x0, x1: x1, hot: hot, k: kOf(hot) });
+        }
+        var londonHot = hv === 'sv-po3-london' || hv === 'sv-po3-m-low' || hv === 'sv-po3-m-high' || hv === 'sv-po3-judas';
+        if (run) band('sv-po3-london', P.london, londonHot);
+        if (phase === 'distribution') band('sv-po3-ny', P.ny, hv === 'sv-po3-d');
+        /* the money's markers (a position's entry arrow, the signal dots)
+           and its rows, which a run's diamond never hides */
+        var markers = env.boxes || [];
+        var rowsY = (env.money || []).map(function (m) { return m.y; })
+            .concat(env.hlines || [], ok(env.lastY) ? [env.lastY] : []).filter(ok);
+        function hits(b, list) {
+            for (var i = 0; i < list.length; i++) { var m = list[i];
+                if (b.x0 < m.x1 && b.x1 > m.x0 && b.y0 < m.y1 && b.y1 > m.y0) return true; }
+            return false;
+        }
+        function onRow(b) {
+            for (var i = 0; i < rowsY.length; i++)
+                if (rowsY[i] >= b.y0 - LV.ROW_CLEAR && rowsY[i] <= b.y1 + LV.ROW_CLEAR) return true;
+            return false;
+        }
+        /* the price lines' title boxes as the axis stacks them, kept as a
+           label keeps them (GAP_X, GAP_Y): a diamond in the top pass paints
+           over them, and sat on the pinned signal's 'Stop' (2026-10-08) */
+        function onTitle(b) {
+            var t = titleRects || [];
+            for (var i = 0; i < t.length; i++) { var r = t[i];
+                if (b.x0 < r.x1 + LV.GAP_X && b.x1 > r.x0 - LV.GAP_X && b.y0 < r.y1 + LV.GAP_Y && b.y1 > r.y0 - LV.GAP_Y) return true; }
+            return false;
+        }
+        function dbox(x, cy) { return { x0: x - R - 1, x1: x + R + 1, y0: cy - R - 1, y1: cy + R + 1 }; }
+        (P.sweeps || []).forEach(function (s) {
+            if (!s || (s.side !== 'low' && s.side !== 'high') || !ok(s.x) || !ok(s.tip)) return;
+            if (phase !== 'unclear' && g.sweeps.length) return;                  /* one run on a clean day */
+            var tipY = env.toY(s.tip);
+            if (!ok(tipY) || s.x < 0 || s.x > W || tipY < 0 || tipY > H) return;
+            var id = 'sv-po3-m-' + s.side, hot = hv === id, low = s.side === 'low';
+            /* whole on the pane: the newest bar sits at the pane's edge */
+            var x = Math.max(R + 1, Math.min(W - R - 1, s.x));
+            var cy = low ? tipY + LV.SWEEP_GAP + R : tipY - LV.SWEEP_GAP - R, box = dbox(x, cy), over = false;
+            /* A position opened on the sweep bar (London's usual entry) puts
+               its marker just beyond the swept wick, over the diamond: the
+               diamond then sits on the wick's end, on the candle's side,
+               and paints over its candle (the top pass) — never over the
+               marker, a money row, a price line's title box or off the
+               pane. Failing that it stays beyond the wick, under the marker
+               and the lines: the money wins. */
+            if (hits(box, markers)) {
+                /* its far point on the wick's tip: the marker starts a
+                   shape margin (3 px or more) beyond it */
+                var icy = low ? tipY - R : tipY + R, ib = dbox(x, icy);
+                var drawnI = { x0: x - R, x1: x + R, y0: icy - R + 0.5, y1: icy + R - 0.5 };
+                if (ib.y0 >= 0 && ib.y1 <= H && !hits(drawnI, markers) && !onRow(ib) && !onTitle(ib)) {
+                    cy = icy; box = ib; over = true;
+                }
+            }
+            /* solid once it came back inside and stayed (the distribution);
+               hollow while the run holds — a manipulation day whose price
+               came back once and left again (the server's back_at is the
+               FIRST close back inside) still holds (2026-10-15); an unclear
+               day keeps each run's own return */
+            g.sweeps.push({ id: id, side: s.side, price: s.price, text: s.text || String(s.price),
+                            x: x, tipY: tipY, cy: cy, filled: !!s.back && phase !== 'manipulation',
+                            hot: hot, k: kOf(hot), over: over, box: box });
+        });
+        var J = P.judas;
+        if (J && ok(J.x0) && ok(J.x1)) {
+            var jy0 = env.toY(J.open), jy1 = env.toY(J.extreme);
+            if (ok(jy0) && ok(jy1)) {
+                var jh = hv === 'sv-po3-judas';
+                g.judas = { id: 'sv-po3-judas', x0: J.x0, y0: jy0, x1: J.x1, y1: jy1, hot: jh, k: kOf(jh) };
+            }
+        }
+        var T = P.ret;
+        if (phase === 'distribution' && T && ok(T.x) && ok(T.from) && ok(T.to) && T.x >= 0 && T.x <= W) {
+            var dir = P.direction === 'down' ? 'down' : P.direction === 'up' ? 'up' : (T.to > T.from ? 'up' : 'down');
+            var ty0 = env.toY(T.from), ty1 = env.toY(T.to);
+            if (ok(ty0) && ok(ty1) && ty0 >= 0 && ty0 <= H) {
+                /* a floor toward the direction, then the head kept on the pane */
+                ty1 = dir === 'up' ? Math.min(ty1, ty0 - LV.ARROW_MIN) : Math.max(ty1, ty0 + LV.ARROW_MIN);
+                ty1 = Math.max(2, Math.min(H - 2, ty1));
+                var ah = hv === 'sv-po3-d';
+                /* its head whole on the pane, as the diamond */
+                var ax = Math.max(5, Math.min(W - 5, T.x));
+                g.arrow = { id: 'sv-po3-d', side: dir === 'up' ? 'low' : 'high', x: ax, y0: ty0, y1: ty1,
+                            dir: dir, hot: ah, k: kOf(ah),
+                            box: { x0: ax - 5, x1: ax + 5, y0: Math.min(ty0, ty1), y1: Math.max(ty0, ty1) } };
+            }
+        }
+        return g;
+    }
+    /* The M words for a run: SWEEP once it came back inside (the
+       distribution), RUN while it holds (the manipulation); a phone, the
+       letter. */
+    function stageWords(phase, s, phone) {
+        if (phone) return { text: 'M', short: null };
+        var w = phase === 'distribution' ? 'M · SWEEP' : 'M · RUN';
+        return { text: w + '  ' + s.text, short: w };
+    }
+    /* A level chip that names M (digest's step 7): only while the run of
+       that side, at that price, is drawn on a clean day. */
+    function stageFold(gp, side, price, phone) {
+        if (!gp || (gp.phase !== 'manipulation' && gp.phase !== 'distribution')) return null;
+        var s = gp.sweeps.filter(function (x) { return x.side === side && ok(x.price) && samePrice(x.price, price); })[0];
+        return s ? stageWords(gp.phase, s, phone) : null;
+    }
+
     /* Items -> pixels. env: {toY(price), toX(epoch, price, high) -> x | -1
        (before the loaded bars) | null, width, height, theme 'dark'|'light',
        phone, highTf, showAll, hidden {pool, swing, asia, round}, hover id,
@@ -1559,16 +1840,22 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
        overlays [{x0,x1,y0,y1}] (the page's own boxes over the canvas: the
        crosshair legend, the bar-close countdown), candles [{x0,x1,y0,y1}]
        (the newest candles, high to low), asia {high, low, x0, x1} | null,
-       measure(text) -> px}. */
+       po3 (the day's stages in pixels, the widget's stageEnv: {phase,
+       direction, london {x0, x1} | null, ny {x0, x1} | null, sweeps [{side,
+       price, edge, x, tip, back, text}], judas {x0, open, x1, extreme} |
+       null, ret {x, from, to} | null, draw 'agrees' | 'disagrees' | null})
+       | null, measure(text) -> px}. */
     function layout(items, env) {
         var W = env.width, H = env.height, theme = env.theme === 'light' ? 'light' : 'dark';
         var g = { theme: theme, bands: [], hatch: null, rays: [], ticks: [], dots: [], rounds: [],
-                  asia: null, chips: [], edges: [], unplaced: [],
+                  asia: null, po3: null, chips: [], edges: [], unplaced: [],
                   /* what the chips kept clear of, as given (for the eye and the tests) */
                   keep: { marks: env.boxes || [], overlays: env.overlays || [], candles: env.candles || [],
                           lastY: ok(env.lastY) ? env.lastY : null,
                           titles: Array.isArray(env.titles) ? titleBoxes(env.titles, env.lastY, W, H) : null },
                   count: { shown: 0, total: 0, pool: 0, swing: 0, round: 0 } };
+        /* the day's stages first: the fold below names a ray M by them */
+        g.po3 = stageShapes(env, W, H, theme, g.keep.titles);
         var moneyY = (env.money || []).map(function (m) { return m.y; }).filter(ok);
         var off = { above: [], below: [] }, cands = [], drawn = {};
         /* where a stamp lands on the pane: x, -1 before the loaded bars, or null */
@@ -1627,15 +1914,31 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                number is quiet only while the pool that carries its ◎ is on
                the pane (items run pools first, so `drawn` already knows). */
             var quiet = l.quiet && (l.quietFor || []).some(function (id) { return !!drawn[id]; });
-            var own = l.lv === 'pool' || l.ray || l.role || (l.lv === 'round' && !quiet && !env.highTf);
-            if (own || hot) cands.push({ id: l.id, lv: l.lv, role: l.role || null, role2: l.role2 || null,
+            /* the day's run on this level, drawn and named (2026-10-08): its
+               chip says M rather than a second chip saying the same price */
+            var fold = (l.sweep && !l.role) ? stageFold(g.po3, l.sweep, l.price, env.phone) : null;
+            var own = l.lv === 'pool' || l.ray || l.role || (l.lv === 'round' && !quiet && !env.highTf) || !!fold;
+            var cand = { id: l.id, lv: l.lv, role: l.role || null, role2: l.role2 || null,
                 hot: hot, own: !!own, high: high, clipped: clipped, ray: !!l.ray,
                 y: (y0 + y1) / 2, edge0: y0, edge1: y1, origin: l.lv === 'round' ? 4 : xs,
                 text: chipText(l, env.phone), stub: stubText(l),
                 /* a ray's short words (LAST H), its last try on a desktop */
                 short: (l.ray && !l.role && !env.phone) ? chipText(l, true) : null,
                 score: (WEIGHT[l.lv] || 0) - num(l.atr_away, 9),
-                k: (env.focus && !inFocus(l, env.focus) && !hot) ? LV.FOCUS_DIM : 1 });
+                k: (env.focus && !inFocus(l, env.focus) && !hot) ? LV.FOCUS_DIM : 1 };
+            if (fold) {
+                /* PR51's chip, kept for when M finds no slot on its mark */
+                cand.plain = { text: cand.text, short: cand.short, k: cand.k,
+                               own: !!(l.lv === 'pool' || l.ray || l.role || (l.lv === 'round' && !quiet && !env.highTf)) };
+                cand.text = fold.text; cand.short = fold.short; cand.stage = 'm'; cand.sweep = l.sweep;
+                /* it dims as the stage it names does, not as its swing: the
+                   key's Power of Three switch focuses it, the Swings switch
+                   fades it with the diamond and D (2026-10-15) */
+                cand.k = hot ? 1 : g.po3.labelK;
+                /* its last try on a desktop: the letter alone, on its mark */
+                cand.letter = env.phone ? null : 'M';
+            }
+            if (own || hot) cands.push(cand);
         });
         /* the hunt zone: only when asked for, or when a stop sits in it */
         var hunt = (items || []).filter(function (l) { return hasRole(l, 'hunt') && l.zone; })[0];
@@ -1702,7 +2005,11 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         var laneW = Math.max(LV.LANE_W, env.laneW || 0), laneOpen = !env.labels, laneX = laneOpen ? W : W - laneW;
         var rows = (env.money || []).map(function (m) { return m.y; })
             .concat(env.hlines || [], ok(env.lastY) ? [env.lastY] : []).filter(ok);
-        var boxes = (env.boxes || []).concat(env.overlays || []), candles = env.candles || [], placed = [];
+        /* the stages' marks (a run's diamond, the D arrow) are keep-outs for
+           every chip and label, as the signal dots are (2026-10-08) */
+        var stageMarks = g.po3 ? g.po3.sweeps.map(function (s) { return s.box; })
+            .concat(g.po3.arrow ? [g.po3.arrow.box] : []) : [];
+        var boxes = (env.boxes || []).concat(env.overlays || [], stageMarks), candles = env.candles || [], placed = [];
         var measure = env.measure || function (t) { return String(t).length * LV.CHAR_W; };
         var roleOf = {};
         cands.forEach(function (c) { if (c.role) roleOf[c.id] = c.role; });
@@ -1736,11 +2043,16 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         }
         /* the title boxes themselves, as the axis stacks them (the ASIA label's keep-out) */
         var titleRects = g.keep.titles;
+        /* the newest candle (the forming bar the trader watches), which a
+           stage's words cover only as their last resort (2026-10-08) */
+        var newestBar = null;
+        candles.forEach(function (b) { if (b && ok(b.x1) && (!newestBar || b.x1 > newestBar.x1)) newestBar = b; });
         /* o: { cross: may cross a money row, own: a role's chip (its band
-           is its own), loose: may cover the newest candles, titles: keeps
-           off the title boxes, not the whole lane (the ASIA label), id: the
-           level the chip names (it keeps off every other level's shapes),
-           mix: may meet them all the same (the last resort) } */
+           is its own), loose: may cover the newest candles, spare: may cover
+           them but the newest one, titles: keeps off the title boxes, not
+           the whole lane (the ASIA label), id: the level the chip names (it
+           keeps off every other level's shapes), mix: may meet them all the
+           same (the last resort) } */
         function clash(r, o) {
             var titles = o.titles && titleRects;
             if (r.x0 < 0 || r.y0 < 0 || r.y1 > H || r.x1 > (titles ? W : laneX)) return true;
@@ -1750,7 +2062,8 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             if (!o.cross) for (var i = 0; i < rows.length; i++)
                 if (rows[i] >= r.y0 - LV.ROW_CLEAR && rows[i] <= r.y1 + LV.ROW_CLEAR) return true;
             if (!o.own && any(r, roleShapes, 0, LV.ROLE_GAP)) return true;
-            if (!o.loose && any(r, candles, 0, 0)) return true;
+            if (o.spare) { if (newestBar && meets(r, newestBar, 0, 0)) return true; }
+            else if (!o.loose && any(r, candles, 0, 0)) return true;
             if (o.id && !o.mix && others(r, o.id, o.own)) return true;
             return false;
         }
@@ -1780,7 +2093,17 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                 s.origin.push(rect(ox, mid, words));
             }
             if (laneOpen && (c.clipped || W - 4 >= c.origin)) {
-                s.right = [rect(W - 4 - w, out, words), rect(W - 4 - w, mid, words), rect(W - 4 - w, inn, words)];
+                s.right = [];
+                [out, mid, inn].forEach(function (y0) {
+                    var r = rect(W - 4 - w, y0, words), cut = null;
+                    s.right.push(r);
+                    /* (2026-10-08) today's stage marks stand at the right
+                       edge: a slot one of them blocks also tries ending just
+                       before it, still not wholly left of its own shape (the
+                       4h HUNT chip kept its words beside the diamond) */
+                    stageMarks.forEach(function (m) { if (meets(r, m, 0, 0) && (cut === null || m.x0 < cut)) cut = m.x0; });
+                    if (cut !== null && cut - 1 - w >= 4 && (c.clipped || cut - 1 >= c.origin)) s.right.push(rect(cut - 1 - w, y0, words));
+                });
             }
             if (ox > 4 && (c.role || c.clipped || c.origin <= 4 + w)) s.left = [rect(4, out, words), rect(4, inn, words)];
             return s;
@@ -1823,18 +2146,87 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             g.edges.push(e); placed.push(e);
         });
         var cap = env.phone ? LV.CHIPS.phone : LV.CHIPS.desktop, used = 0, late = [];
+        var rayNamed = {};          /* a run's side whose level kept PR51's chip (the price named there) */
         function prio(c) { return c.role === 'hunt' ? 0 : c.role === 'draw' ? 1 : 2; }
-        function put(c, s, o) {
+        /* A chip that named M given back PR51's own words and dim: M found no
+           slot on its mark, or the level is forced in late (hovered past the
+           cap, 2026-10-15), where a second M beside the diamond's own label
+           flickered under the pointer. */
+        function unfold(c) {
+            if (!c.stage) return;
+            c.stage = null; c.text = c.plain.text; c.short = c.plain.short; c.k = c.plain.k;
+        }
+        function put(c, s, o, late) {
             placed.push(s); used++;
-            g.chips.push({ id: c.id, lv: c.lv, role: c.role, role2: c.role2 || null, text: s.text,
-                           x0: s.x0, x1: s.x1, y0: s.y0, y1: s.y1, cross: !!o.cross, k: c.k });
+            var chip = { id: c.id, lv: c.lv, role: c.role, role2: c.role2 || null, text: s.text,
+                         x0: s.x0, x1: s.x1, y0: s.y0, y1: s.y1, cross: !!o.cross, k: c.k };
+            if (c.stage) {                             /* a level chip that names M */
+                chip.stage = c.stage; chip.sweep = c.sweep;
+                /* It keeps the level chip's own style in the session's
+                   violet: border, words, the bg plate (§4.2) — bare words
+                   over the candles read '1.0?2?8'. Over the forming bar
+                   alone (a run that holds: its own bar) the plate leaves
+                   that bar's column open and the words wear a bg halo, so
+                   the bar the trader watches shows through (2026-10-08). */
+                if (newestBar && meets(s, newestBar, 0, 0)) {
+                    chip.through = { x0: Math.max(s.x0, newestBar.x0), x1: Math.min(s.x1, newestBar.x1) };
+                }
+                if (g.po3 && !late) g.po3.folded[c.sweep] = c.id;
+            }
+            g.chips.push(chip);
         }
         function all(s) { return [].concat(s.origin, s.right, s.left); }
+        /* (2026-10-08) A run's diamond's own slots for its M words: beyond
+           it, away from the price (under a low's diamond; over it, on the
+           candle's side, when the diamond sits on the wick's end), anchored
+           right then left of its centre; then level with it, right of it. */
+        function markSlots(s, words) {
+            var w = measure(words) + 2 * LV.CHIP_PAD, h = LV.CHIP_H, b = s.box;
+            var below = (s.side === 'low') !== !!s.over;
+            var y0 = below ? b.y1 + 2 : b.y0 - 2 - h;
+            return [rect(s.x - 6, y0, words), rect(s.x + 6 - w, y0, words), rect(b.x1 + 2, s.cy - h / 2, words)];
+        }
+        /* ...and what keeps M's words on their mark: a slot reaches the
+           diamond itself (its near point, s.x - R: on a 4h pane the D arrow
+           stands on the very next bar, 4 px on, and the words end just
+           before it, over the diamond's own column) and starts no further
+           right than beside it — or, for a ray's chip, covers or starts
+           beside the ray's start (8 px right of it), the diamond's bar save
+           a feed's difference. A slot that starts further right reads as
+           another mark's: the D arrow's, the next bar's (the zoomed 1h read
+           A, D, M). */
+        function onMark(s, origin) {
+            function near(r, x, edge) { return r.x1 >= x && r.x0 <= edge + LV.NUDGE; }
+            return function (r) {
+                return near(r, s.x - LV.SWEEP_R, s.box.x1) || (ok(origin) && near(r, origin, origin + 5));
+            };
+        }
+        /* (2026-10-08) Each slot that another stage mark blocks (the D
+           arrow on the next bar) also tries ending just before that mark —
+           never before the chip's own diamond, which onMark then refuses.
+           PR51's LAST LOW slot on the 4h lay where the arrow now stands. */
+        function beforeMarks(list, own) {
+            var out = [];
+            list.forEach(function (r) {
+                var cut = null;
+                stageMarks.forEach(function (m) {
+                    if (m !== own.box && meets(r, m, 0, 0) && (cut === null || m.x0 < cut)) cut = m.x0;
+                });
+                var w = r.x1 - r.x0;
+                if (cut !== null && cut - 1 - w >= 4) out.push(rect(cut - 1 - w, r.y0, r.text));
+            });
+            return out;
+        }
+        /* clear, then over all but the newest candle, then over it too */
+        function tiers(list, o) {
+            function plus(k) { var q = {}; for (var f in o) q[f] = o[f]; q[k] = true; return q; }
+            return [[list, o], [list, plus('spare')], [list, plus('loose')]];
+        }
         cands.sort(function (a, b) { return (prio(a) - prio(b)) || (b.score - a.score); });
         cands.forEach(function (c) {
             /* a hovered level that gets no chip by the rules (a plain tick,
                or past the cap) is forced in last */
-            if (!c.own || (!c.role && used >= cap)) { if (c.hot) late.push(c); return; }
+            if (!c.own || (!c.role && used >= cap)) { if (c.hot) { unfold(c); late.push(c); } return; }
             var full = slots(c, c.text), passes;
             if (c.role) {
                 var stub = slots(c, c.stub);
@@ -1844,16 +2236,45 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                 passes = [[near, { own: true, id: c.id }], [near, { own: true, loose: true, id: c.id }],
                           [far, { own: true, id: c.id }], [across, { own: true, cross: true, id: c.id }],
                           [across, { own: true, cross: true, loose: true, id: c.id, mix: true }]];
-            } else if (c.ray) {
-                var brief = c.short ? all(slots(c, c.short)) : [];
-                passes = [[all(full), { id: c.id }], [all(full), { id: c.id, loose: true }],
-                          [brief, { id: c.id }], [brief, { id: c.id, loose: true }]];
             } else {
-                passes = [[all(full), { id: c.id }]];
+                if (c.stage) {
+                    /* a level chip that names M (2026-10-08): on its diamond or
+                       nowhere — the ray's slots that reach the diamond or start
+                       beside it, the diamond's own, the right edge's over it,
+                       each also ending just before the D arrow when that holds
+                       it; the words, M · SWEEP, then the letter, each clear,
+                       then sparing the forming bar, then over it */
+                    var mk = g.po3.sweeps.filter(function (s) { return s.side === c.sweep; })[0];
+                    var keepOn = onMark(mk, c.clipped ? null : c.origin);
+                    var foldAt = function (words) {
+                        var sl = slots(c, words), list = [].concat(sl.origin, markSlots(mk, words), sl.right, sl.left);
+                        return list.concat(beforeMarks(list, mk)).filter(keepOn);
+                    };
+                    var fold = tiers(foldAt(c.text), { id: c.id });
+                    if (c.short) fold = fold.concat(tiers(foldAt(c.short), { id: c.id }));
+                    if (c.letter) fold = fold.concat(tiers(foldAt(c.letter), { id: c.id }));
+                    for (var fp = 0; fp < fold.length; fp++) {
+                        var fs = first(fold[fp][0], fold[fp][1]);
+                        if (fs) { put(c, fs, fold[fp][1]); return; }
+                    }
+                    /* nowhere on its mark: the level keeps PR51's own chip
+                       (LAST LOW  1.08288) on PR51's slots, if it had one, and
+                       M is named on the diamond alone, without the price */
+                    unfold(c);
+                    if (!c.plain.own) { if (c.hot) late.push(c); return; }
+                    full = slots(c, c.text);
+                }
+                if (c.ray) {
+                    var brief = c.short ? all(slots(c, c.short)) : [];
+                    passes = [[all(full), { id: c.id }], [all(full), { id: c.id, loose: true }],
+                              [brief, { id: c.id }], [brief, { id: c.id, loose: true }]];
+                } else {
+                    passes = [[all(full), { id: c.id }]];
+                }
             }
             for (var p = 0; p < passes.length; p++) {
                 var s = first(passes[p][0], passes[p][1]);
-                if (s) { put(c, s, passes[p][1]); return; }
+                if (s) { put(c, s, passes[p][1]); if (c.sweep) rayNamed[c.sweep] = true; return; }
             }
             if (c.role) g.unplaced = g.unplaced.concat(rolesOf(c));
             else if (c.hot) late.push(c);
@@ -1876,28 +2297,106 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
            slots without regard to it, so a chip never moves for it) and
            before the hovered chip forced in last, so a hover moves it no
            more than any chip. */
+        /* With the day's stages in the reply (2026-10-08) the box is the
+           first of three and says so: 'A · ASIA' (a phone: 'A'), measured by
+           its own words; an older reply keeps 'ASIA'. */
+        var titled = !!titleRects;
         if (g.asia) {
-            var a = g.asia, lw = measure('ASIA') + 2 * LV.CHIP_PAD, titled = !!titleRects;
+            var at = env.po3 ? (env.phone ? 'A' : 'A · ASIA') : 'ASIA';
+            var a = g.asia, lw = measure(at) + 2 * LV.CHIP_PAD;
             var xMax = (titled ? W : laneX) - 2 - lw;
             var lx = function (x) { return Math.max(2, Math.min(x, xMax)); };
             var offBox = function (r) { return Math.max(0, a.x0 - r.x1, r.x0 - a.x1); };
             var ays = [a.yh - LV.CHIP_H - 1, a.yl + 1], onBox = [], near = [];
             ays.forEach(function (y0) {
-                onBox.push(rect(lx(a.x0 + 2), y0, 'ASIA'), rect(lx(a.x1 - lw), y0, 'ASIA'));
+                onBox.push(rect(lx(a.x0 + 2), y0, at), rect(lx(a.x1 - lw), y0, at));
             });
             onBox = onBox.filter(function (r) { return offBox(r) === 0; });
             for (var d = 1; d <= LV.ASIA_NEAR; d++) {
-                for (var ai = 0; ai < ays.length; ai++) near.push(rect(a.x0 - d - lw, ays[ai], 'ASIA'), rect(a.x1 + d, ays[ai], 'ASIA'));
+                for (var ai = 0; ai < ays.length; ai++) near.push(rect(a.x0 - d - lw, ays[ai], at), rect(a.x1 + d, ays[ai], at));
             }
             var ar = first(onBox, { own: true, titles: titled })
                   || first(onBox, { own: true, titles: titled, loose: true })
                   || first(near, { own: true, titles: titled });
-            if (ar) { g.asia.label = ar; placed.push(ar); }
+            if (ar) {
+                /* over candles it is bare words, as PR51's ASIA: a plate
+                   would hide the bars it sits on (2026-10-08) */
+                if (env.po3) ar.bare = any(ar, candles, 0, 0);
+                g.asia.label = ar; placed.push(ar);
+            }
+        }
+        /* The M and D labels (2026-10-08), after the A label: each on its
+           own mark or nowhere. Every slot covers the mark's centre x (the
+           last M slot starts at the diamond's edge), so a letter never ends
+           left of its shape and never floats off it. As the ASIA label they
+           keep off the title boxes rather than the whole lane, off every
+           level's shapes and the roles' bands, off every money, H-line and
+           last-price row (never `cross`), the markers, the page's boxes and
+           what is already placed; then the same over the newest candles,
+           where today's marks always sit — sparing the forming bar first.
+           M tries its words (M · SWEEP  1.08288, M · SWEEP, M) through
+           every tier before shorter ones: no other chip names the run's
+           price. D tries `D ▲` clear before `D ▲ · ② DRAW` covers any candle
+           (the draw has its own chip), and its words never start left of
+           M's, so the letters read A, M, D. No slot: no letter — the key
+           names the phase and the card names the stage. Outside the chip
+           cap, like the ASIA label; an unclear day names no M and no D. */
+        var gp = g.po3;
+        if (gp && (gp.phase === 'manipulation' || gp.phase === 'distribution')) {
+            var sh = LV.CHIP_H;
+            /* variants: the words, longest first; gen(words) -> its slots;
+               byWords: every tier of one variant before the next variant */
+            var stageLabel = function (id, stage, side, variants, gen, byWords, keep) {
+                var base = { titles: titled, id: id }, order = [];
+                var ladder = tiers(null, base).map(function (t) { return t[1]; });
+                if (byWords) variants.forEach(function (v) { ladder.forEach(function (o) { order.push([v, o]); }); });
+                else ladder.forEach(function (o) { variants.forEach(function (v) { order.push([v, o]); }); });
+                for (var i = 0; i < order.length; i++) {
+                    var list = gen(order[i][0]);
+                    if (keep) list = list.filter(keep);
+                    var r = first(list, order[i][1]);
+                    if (!r) continue;
+                    var L = { id: id, stage: stage, side: side, text: order[i][0], x0: r.x0, x1: r.x1,
+                              y0: r.y0, y1: r.y1, k: gp.labelK, bare: any(r, candles, 0, 0) };
+                    gp.labels.push(L); placed.push(L);
+                    return L;
+                }
+                return null;
+            };
+            /* where M starts once named, its words or its diamond, whichever
+               is further left: D's words start at or after it */
+            var mStart = null;
+            var seeM = function (x) { if (ok(x) && (mStart === null || x < mStart)) mStart = x; };
+            g.chips.forEach(function (ch) {
+                if (ch.stage !== 'm') return;
+                seeM(ch.x0);
+                gp.sweeps.forEach(function (s) { if (s.side === ch.sweep) seeM(s.x); });
+            });
+            gp.sweeps.forEach(function (s) {                        /* in time order */
+                if (gp.folded[s.side]) return;
+                var sw = stageWords(gp.phase, s, env.phone);
+                /* its level's own chip names the price: M without it */
+                var variants = (rayNamed[s.side] ? [] : [sw.text]).concat(sw.short ? [sw.short] : [], env.phone ? [] : ['M']);
+                if (!variants.length) variants = [sw.text];
+                var L = stageLabel(s.id, 'm', s.side, variants, function (words) { return markSlots(s, words); }, true);
+                if (L) { seeM(L.x0); seeM(s.x); }
+            });
+            if (gp.arrow && gp.phase === 'distribution') {
+                var aw = gp.arrow, up = aw.dir === 'up', head = up ? '▲' : '▼';
+                var dws = env.phone ? ['D' + head]
+                        : ((env.po3 && env.po3.draw === 'agrees') ? ['D ' + head + ' · ' + LV.MARK.draw + ' DRAW'] : [])
+                              .concat(['D ' + head]);
+                stageLabel(aw.id, 'd', aw.side, dws, function (dw) {
+                    var ww = measure(dw) + 2 * LV.CHIP_PAD, dy = up ? aw.y1 - 2 - sh : aw.y1 + 2;
+                    return [rect(aw.x - 6, dy, dw), rect(aw.x + 6 - ww, dy, dw), rect(aw.x + 7, up ? aw.y1 - sh : aw.y1, dw)];
+                }, false, mStart === null ? null : function (r) { return r.x0 >= mStart; });
+            }
         }
         late.forEach(function (c) {                               /* the hovered chip, forced in */
+            unfold(c);                                            /* always PR51's chip, never M */
             var full = slots(c, c.text), o = { own: true, loose: true, mix: true, id: c.id };
             var s = first([].concat(full.origin, full.right, full.left), o);
-            if (s) put(c, s, o);
+            if (s) put(c, s, o, true);
         });
     }
 
@@ -1916,8 +2415,76 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
     function hitChip(g, items, x, y) {
         if (!g || !g.chips) return null;
         for (var i = 0; i < g.chips.length; i++) { var c = g.chips[i];
-            if (x >= c.x0 && x <= c.x1 && y >= c.y0 && y <= c.y1) return { id: c.id, item: findItem(items, c.id) }; }
+            if (x >= c.x0 && x <= c.x1 && y >= c.y0 && y <= c.y1) {
+                var h = { id: c.id, item: findItem(items, c.id) };
+                if (c.stage) { h.stage = c.stage; h.sweep = c.sweep; }   /* a chip that names M */
+                return h;
+            } }
         return null;
+    }
+    /* A stage under the pointer (2026-10-08): {id, stage 'm' | 'd', side,
+       part 'label' | 'mark' | 'judas'} or null. A label by its exact box
+       (the widget asks that before the money lines, as for a chip);
+       `labelsOnly` false: a run's diamond or the D arrow by its box ± tol,
+       then the Judas line by its distance. The time bands are never hit:
+       over today's candles a full-height target would pop a card at every
+       rest of the pointer. `drawn` (2026-10-08): a diamond by its drawn
+       rhombus ± tol rather than its box — the widget asks that first, with
+       LV.MARK_HIT, before the level shapes, and the box ± a finger's reach
+       only after them: the phone's HUNT row ran through the diamond's box
+       corner, and a tap there opened M rather than the hunt. */
+    function hitStage(g, x, y, tol, labelsOnly, drawn) {
+        var P = g && g.po3;
+        if (!P || !ok(x) || !ok(y)) return null;
+        tol = num(tol, 0);
+        var i;
+        for (i = 0; i < P.labels.length; i++) { var L = P.labels[i];
+            if (x >= L.x0 && x <= L.x1 && y >= L.y0 && y <= L.y1) return { id: L.id, stage: L.stage, side: L.side, part: 'label' }; }
+        if (labelsOnly) return null;
+        function inBox(b) { return x >= b.x0 - tol && x <= b.x1 + tol && y >= b.y0 - tol && y <= b.y1 + tol; }
+        function onDiamond(s) { return Math.abs(x - s.x) + Math.abs(y - s.cy) <= LV.SWEEP_R + tol; }
+        for (i = 0; i < P.sweeps.length; i++) {
+            if (drawn ? onDiamond(P.sweeps[i]) : inBox(P.sweeps[i].box)) {
+                return { id: P.sweeps[i].id, stage: 'm', side: P.sweeps[i].side, part: 'mark' }; } }
+        if (P.arrow && inBox(P.arrow.box)) return { id: P.arrow.id, stage: 'd', side: P.arrow.side, part: 'mark' };
+        var J = P.judas;
+        if (J) {
+            var dx = J.x1 - J.x0, dy = J.y1 - J.y0, len2 = dx * dx + dy * dy;
+            var t = len2 > 0 ? Math.max(0, Math.min(1, ((x - J.x0) * dx + (y - J.y0) * dy) / len2)) : 0;
+            var px = J.x0 + t * dx - x, py = J.y0 + t * dy - y;
+            if (Math.sqrt(px * px + py * py) <= tol) return { id: J.id, stage: 'm', side: null, part: 'judas' };
+        }
+        return null;
+    }
+    /* The key's live answer for the Power of Three switch: the day's
+       phase in a few words (a phone: its letter), the server's sentence
+       as its title. Null for an unread day or an unknown phase. */
+    function phaseAnswer(po3, phone) {
+        if (!po3 || !po3.ok) return null;
+        var ph = po3.phase, text;
+        var arrow = po3.direction === 'up' ? '▲' : po3.direction === 'down' ? '▼' : '';
+        if (ph === 'accumulation') text = phone ? 'A' : 'A · accumulating';
+        else if (ph === 'manipulation') text = phone ? 'M' : 'M · the ' + (po3.run && po3.run.above ? 'highs' : 'lows') + ' run';
+        else if (ph === 'distribution') text = phone ? 'D' + arrow : 'D ' + (arrow ? arrow + ' ' : '') + 'distribution';
+        else if (ph === 'unclear') text = phone ? 'unclear' : 'unclear · both sides run';
+        else return null;
+        return { phase: ph, text: text, title: po3.words || '' };
+    }
+    /* The positioning map's draw leg, and whether the day's direction
+       points the same way: the leg's side, else (a leg without one) its
+       price against the mark. 'agrees' | 'disagrees' | null. */
+    function drawLeg(map) {
+        var path = (map && map.path) || [];
+        for (var i = 0; i < path.length; i++) if (path[i] && path[i].leg === 'draw') return path[i];
+        return null;
+    }
+    function drawAgrees(map, direction, mark) {
+        var leg = drawLeg(map);
+        if (!leg || (direction !== 'up' && direction !== 'down')) return null;
+        var side = (leg.side === 'above' || leg.side === 'below') ? leg.side
+                 : (ok(leg.price) && ok(mark)) ? (leg.price > mark ? 'above' : 'below') : null;
+        if (!side) return null;
+        return (direction === 'up') === (side === 'above') ? 'agrees' : 'disagrees';
     }
     function hit(g, items, x, y, tol) {
         if (!g) return null;
@@ -1987,7 +2554,8 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
 
     window.svLevels = { LV: LV, digest: digest, layout: layout, hit: hit, hitChip: hitChip, chipText: chipText,
                         keyAnswer: keyAnswer, moneyFacts: moneyFacts, markerBoxes: markerBoxes,
-                        titleBoxes: titleBoxes, fade: fade };
+                        titleBoxes: titleBoxes, fade: fade,
+                        hitStage: hitStage, phaseAnswer: phaseAnswer, drawAgrees: drawAgrees, drawLeg: drawLeg };
 })();
 </script>
 
@@ -2054,20 +2622,30 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
        low carried on to now, painted by the level layer under the candles.
        Without primitives (the node fake, a stale library) the two sides
        are two faint untitled lines, intraday only: a title without its
-       axis label is never painted. Redrawn from the map on every paint. */
+       axis label is never painted. Redrawn from the map on every paint.
+       (2026-10-08) The reply's po3 carries the day's STAGES for the chart
+       alone (dashboard/views._chart_positioning): with them the layer also
+       draws M and D (svLevels' stageShapes); without them — a reply cached
+       before the change — the box is PR51's, labelled ASIA. Never a price
+       line: the fallback below stays the two faint Asia lines. */
     function applyAsianRange(po3) {
         amdLines.forEach(function (pl) { try { mainSeries.removePriceLine(pl); } catch (e) {} });
         amdLines = [];
         ASIA = null;
         var layer = ensureLevelLayer();
-        if (layer) layer.set({ asia: null });
+        if (layer) layer.set({ asia: null, po3: null });
         if (!mainSeries || !activeInds.levels || !po3 || !po3.ok || !po3.asia) { paintLevelKey(); return; }
         var a = po3.asia;
         if (typeof a.high !== 'number' || typeof a.low !== 'number') { paintLevelKey(); return; }
         ASIA = { high: a.high, low: a.low, phase: po3.phase, words: po3.words,
-                 session: po3.session, direction: po3.direction, opened: a.opened, closed: a.closed };
+                 session: po3.session, direction: po3.direction, opened: a.opened, closed: a.closed,
+                 stages: po3.stages || null, run: po3.run || null, odds: po3.odds || null,
+                 /* the tape's last close: the stage card weighs the draw against it */
+                 mark: lastBars.length ? lastBars[lastBars.length - 1].close : null };
         paintLevelKey();
-        if (layer) { layer.set({ asia: { high: a.high, low: a.low, opened: a.opened, closed: a.closed } }); return; }
+        if (layer) { layer.set({ asia: { high: a.high, low: a.low, opened: a.opened, closed: a.closed },
+                                 po3: (po3.stages ? { phase: po3.phase, direction: po3.direction,
+                                                      run: po3.run, stages: po3.stages } : null) }); return; }
         /* No primitives: the two sides as faint lines, intraday only. */
         if (activeInds.lvl_asia === false || INTRADAY.indexOf(currentTf) === -1) return;
         var c = getThemeColors();
@@ -3509,7 +4087,7 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
        autoscaleInfo, no axis views. */
     function LevelLayer() {
         var self = this;
-        this.request = null; this.geom = null; this.data = { items: [], asia: null, box: null };
+        this.request = null; this.geom = null; this.data = { items: [], asia: null, box: null, po3: null };
         this.views = [{ zOrder: function () { return 'normal'; },
             renderer: function () { return {
                 draw: function () {},
@@ -3584,6 +4162,118 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         if (i === null) return null;
         if (i < 0) return -1;
         return barX(i);
+    }
+
+    /* ── The Power of Three's stages in pixels (2026-10-08) ──────────────
+       The server reads the day on its own bars (1h, or 4h when the 1h tape
+       is short); these place it on the chart's. Binary searches over
+       lastBars, nothing past the last bar. */
+    /* A session window [opened, closed) as the chart bars that overlap it,
+       edge to edge (the bar holding New York's 08:30 is in). Frames of 1h
+       and finer only: a 4h bar straddles London and New York. */
+    function spanX(win, half) {
+        if (!win || typeof win.opened !== 'number' || typeof win.closed !== 'number') return null;
+        var tf = TF_SECONDS[currentTf], n = lastBars.length;
+        if (!tf || tf > 3600 || !n) return null;
+        var i0 = barIndexAt(win.opened);
+        if (i0 === null) return null;
+        if (i0 < 0) i0 = 0;
+        else if (barEpoch(lastBars[i0].time) + tf <= win.opened) i0++;
+        var i1 = barIndexAt(win.closed - 1);
+        if (i1 === null || i1 < 0 || i0 >= n || i1 < i0) return null;
+        var x0 = barX(i0), x1 = barX(i1);
+        if (x0 === null || x1 === null) return null;
+        return { x0: x0 - half, x1: x1 + half };
+    }
+    /* The first chart bar inside the read's bar [epoch, epoch + bar): its
+       index, or null when the chart's feed has no bar there (the 15min
+       tape is another feed's, so a London without bars is reachable). A
+       mark with nowhere honest to stand then draws nothing, as spanX's
+       band does — never the last Asian bar (2026-10-15). */
+    function barIn(epoch, bar) {
+        var n = lastBars.length;
+        if (!n || typeof epoch !== 'number') return null;
+        var tf = TF_SECONDS[currentTf] || 3600, i = barIndexAt(epoch);
+        if (i < 0) i = 0;
+        else if (barEpoch(lastBars[i].time) + tf <= epoch) i++;
+        if (i >= n || barEpoch(lastBars[i].time) >= epoch + (bar || 3600)) return null;
+        return i;
+    }
+    /* The chart bar inside the read's bar (`bar` seconds from `epoch`) whose
+       high (or low) is nearest `price`, as originIndex does for a level:
+       {x, i, tip}; the tip is the further out of the server's price and the
+       wick drawn, so a diamond never sits on a wick from a slightly
+       different feed. */
+    function markAt(epoch, price, high, bar) {
+        if (typeof price !== 'number') return null;
+        var i = barIn(epoch, bar);
+        if (i === null) return null;
+        var shown = shownBars(), n = shown.length, best = i, bestD = Infinity;
+        for (var j = i; j < n && barEpoch(shown[j].time) < epoch + (bar || 3600); j++) {
+            var d = Math.abs((high ? shown[j].high : shown[j].low) - price);
+            if (d < bestD) { bestD = d; best = j; }
+        }
+        var x = barX(best), b = shown[best];
+        if (x === null || !b) return null;
+        return { x: x, i: best, tip: high ? Math.max(price, b.high) : Math.min(price, b.low) };
+    }
+    /* The return's chart bar (2026-10-15): inside the read's return bar, at
+       or after the run's diamond (`runI`), the first bar whose close is back
+       inside — on a 15min chart the quarter that came back, not the hour's
+       first quarter, which closed outside; failing one (the chart a quarter
+       behind the server), the bar holding the read bar's close, never left
+       of the diamond. Null when no chart bar lies in the read's bar. */
+    function returnIndex(s, bar, runI) {
+        var i = barIn(s.back_at, bar);
+        if (i === null) return null;
+        var end = s.back_at + (bar || 3600), n = lastBars.length;
+        for (var j = i; j < n && barEpoch(lastBars[j].time) < end; j++) {
+            if (runI !== null && j < runI) continue;
+            var c = lastBars[j].close;
+            if (s.side === 'low' ? c > s.edge : c < s.edge) return j;
+        }
+        var k = barIndexAt(end - 1);
+        return (runI !== null && k < runI) ? runI : k;
+    }
+    /* The layer's data.po3 -> svLevels.layout's env.po3, or null (no day,
+       a daily frame). */
+    function stageEnv(p, asia, spacing) {
+        var api = lvApi();
+        if (!p || !p.stages || !api || INTRADAY.indexOf(currentTf) === -1 || !lastBars.length) return null;
+        var st = p.stages, bar = st.bar || 3600, half = Math.max(1, (spacing || 6) / 2);
+        var list = Array.isArray(st.sweeps) ? st.sweeps : [], sweeps = [], runI = [];
+        list.forEach(function (s) {
+            if (!s || (s.side !== 'low' && s.side !== 'high')) return;
+            var m = markAt(s.at, s.price, s.side === 'high', bar);
+            if (!m) return;
+            sweeps.push({ side: s.side, price: s.price, edge: s.edge, x: m.x, tip: m.tip,
+                          back: typeof s.back_at === 'number', text: fmtPrice(s.price) });
+            runI.push(m.i);
+        });
+        /* London's Judas swing: from the chart bar holding London's open
+           (its first bar — the open is no low, so no nearest-low search) to
+           the sub-bar that printed the extreme */
+        var judas = null, j = st.judas;
+        if (j && typeof j.open === 'number' && typeof j.extreme === 'number') {
+            var i0 = barIn(j.open_at, bar), x0 = i0 === null ? null : barX(i0);
+            var a1 = markAt(j.extreme_at, j.extreme, j.direction === 'SHORT', bar);
+            if (x0 !== null && a1) judas = { x0: x0, open: j.open, x1: a1.x, extreme: j.extreme };
+        }
+        /* the return: the first close back inside at or after the run's
+           extreme, an arrow to the far Asian edge — distribution only */
+        var ret = null;
+        if (p.phase === 'distribution' && list.length === 1 && asia && typeof list[0].back_at === 'number') {
+            var s0 = list[0], ri = returnIndex(s0, bar, runI.length === 1 ? runI[0] : null);
+            var rx = ri === null ? null : barX(ri);
+            if (rx !== null) ret = { x: rx, from: s0.edge, to: s0.side === 'low' ? asia.high : asia.low };
+        }
+        var mark = lastBars[lastBars.length - 1].close, leg = api.drawLeg(POSMAP);
+        var agree = api.drawAgrees(POSMAP, p.direction, mark);
+        /* the label names the draw (② DRAW) only when the leg has a price */
+        if (agree === 'agrees' && !(leg && typeof leg.price === 'number' && isFinite(leg.price))) agree = null;
+        return { phase: p.phase, direction: p.direction || null,
+                 london: spanX(st.london, half), ny: spanX(st.new_york, half),
+                 sweeps: sweeps, judas: judas, ret: ret, draw: agree };
     }
 
     /* The money's rows, which a level chip never sits on: the open
@@ -3799,7 +4489,7 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             hlines: hlineRows(toY), lastY: lastShown === null ? null : toY(lastShown),
             boxes: api.markerBoxes(markerPoints(toY), spacing, 10),
             overlays: overlayBoxes(w), candles: candleBoxes(toY, w, spacing),
-            asia: asia, measure: measureChip
+            asia: asia, po3: stageEnv(d.po3, d.asia, spacing), measure: measureChip
         });
     };
 
@@ -3855,6 +4545,17 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                     }
                 }
                 if (!g) return;
+                /* The Power of Three's windows (2026-10-08): London's and New
+                   York's faint full-height columns, first of the level shapes
+                   so every one of them (and the candles, and every price line)
+                   paints over them. No edge lines: a band is time only. */
+                var P3 = g.po3, LVa = api ? api.LV : null;
+                if (P3 && LVa) P3.bands.forEach(function (b) {
+                    var bx0 = X(b.x0);
+                    ctx.fillStyle = tone(c.session, (b.hot ? T(LVa.BAND_HOT.dark, LVa.BAND_HOT.light)
+                                                           : T(LVa.BAND_A.dark, LVa.BAND_A.light)) * (b.hot ? 1 : b.k));
+                    ctx.fillRect(bx0, 0, Math.max(1, X(b.x1) - bx0), Y(h));
+                });
                 /* Round numbers: a dotted guide, clearly over the grid. */
                 g.rounds.forEach(function (r) {
                     hline(0, w, r.y, c.neutral, r.hot ? 1 : T(0.75, 0.85) * r.k, 1, [2, 3]);
@@ -3934,10 +4635,55 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                         ctx.fillRect(sx, sy, sw, sh);
                     }
                 });
+                /* The stages' marks, last of the shapes and still under the
+                   candles and every price line: a run's diamond just beyond
+                   the wick that ran the Asian edge (solid once it came back
+                   inside, hollow while it holds), London's Judas swing as a
+                   thin line, and the D arrow at the bar that closed back
+                   inside, from the swept edge to the far one. Never past the
+                   last bar, never toward the draw (it is named, not drawn). */
+                if (P3 && LVa) {
+                    ctx.setLineDash([]);
+                    /* a diamond on its wick's end (a marker holds the far
+                       side) paints in the top pass, over its candle */
+                    P3.sweeps.forEach(function (s) { if (!s.over) paintDiamond(ctx, s, LVa.SWEEP_R, hr, vr, c); });
+                    if (P3.judas) {
+                        var jd = P3.judas;
+                        ctx.strokeStyle = tone(c.session, jd.hot ? 1 : T(0.7, 0.85) * jd.k);
+                        ctx.lineWidth = Math.max(1, Math.floor(hr));
+                        ctx.beginPath(); ctx.moveTo(X(jd.x0), Y(jd.y0)); ctx.lineTo(X(jd.x1), Y(jd.y1)); ctx.stroke();
+                    }
+                    if (P3.arrow) {
+                        var aw = P3.arrow, awk = aw.hot ? 1 : aw.k, up = aw.dir === 'up';
+                        var hw = LVa.ARROW_HEAD.w / 2, hh = LVa.ARROW_HEAD.h;
+                        var base = up ? aw.y1 + hh : aw.y1 - hh;        /* the head's base, on the shaft */
+                        var lw = Math.max(1, Math.floor(LVa.ARROW_W * hr)), sx2 = X(aw.x) + (lw % 2 ? 0.5 : 0);
+                        ctx.strokeStyle = tone(c.session, T(0.85, 0.95) * awk); ctx.lineWidth = lw;
+                        ctx.beginPath(); ctx.moveTo(sx2, Y(aw.y0)); ctx.lineTo(sx2, Y(base)); ctx.stroke();
+                        ctx.fillStyle = tone(c.session, T(0.9, 1) * awk);
+                        ctx.beginPath();
+                        ctx.moveTo(X(aw.x), Y(aw.y1)); ctx.lineTo(X(aw.x + hw), Y(base));
+                        ctx.lineTo(X(aw.x - hw), Y(base)); ctx.lineTo(X(aw.x), Y(aw.y1));
+                        ctx.fill();
+                    }
+                }
             } finally { ctx.restore(); }
             updateLevelCount(g);
         });
     };
+
+    /* A run's diamond (2026-10-08) in bitmap pixels: filled once the run
+       came back inside, hollow (a 1.5 px outline) while it holds. */
+    function paintDiamond(ctx, s, R, hr, vr, c) {
+        var X = function (v) { return Math.round(v * hr); }, Y = function (v) { return Math.round(v * vr); };
+        ctx.globalAlpha = Math.max(0, Math.min(1, s.hot ? 1 : (c.isDark ? 0.9 : 1) * s.k));
+        ctx.beginPath();
+        ctx.moveTo(X(s.x), Y(s.cy - R)); ctx.lineTo(X(s.x + R), Y(s.cy));
+        ctx.lineTo(X(s.x), Y(s.cy + R)); ctx.lineTo(X(s.x - R), Y(s.cy));
+        ctx.lineTo(X(s.x), Y(s.cy - R));
+        if (s.filled) { ctx.fillStyle = c.session; ctx.fill(); }
+        else { ctx.strokeStyle = c.session; ctx.lineWidth = Math.max(1, Math.round(1.5 * hr)); ctx.stroke(); }
+    }
 
     /* The chips, over the candles and the lines (they were placed off the
        money's rows, the title lane and the dots): a bg box with a 1 px
@@ -3945,15 +4691,24 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
        light theme's gold ink stays legible; focus mode alone dims them. */
     LevelLayer.prototype.paintChips = function (target) {
         var g = this.geom;
-        if (!g || !(g.chips.length || g.edges.length || (g.asia && g.asia.label))) return;
+        var overs = (g && g.po3) ? g.po3.sweeps.filter(function (s) { return s.over; }) : [];
+        if (!g || !(g.chips.length || g.edges.length || (g.asia && g.asia.label)
+                    || (g.po3 && g.po3.labels.length) || overs.length)) return;
         target.useBitmapCoordinateSpace(function (s) {
             var ctx = s.context, hr = s.horizontalPixelRatio, vr = s.verticalPixelRatio;
             var c = levelPalette(), api = lvApi(), pad = api ? api.LV.CHIP_PAD : 4;
-            function chip(r, text, ink, border, borderAlpha, k) {
+            /* open: a column {x0, x1} the plate leaves clear (the forming
+               bar under a chip that names M, 2026-10-08); the words then
+               wear a bg halo, legible over the bar that shows through */
+            function chip(r, text, ink, border, borderAlpha, k, open) {
                 var x0 = Math.round(r.x0 * hr), x1 = Math.round(r.x1 * hr);
                 var y0 = Math.round(r.y0 * vr), y1 = Math.round(r.y1 * vr);
                 ctx.globalAlpha = 0.85 * k; ctx.fillStyle = c.bg;
-                ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+                if (open) {
+                    var o0 = Math.max(x0, Math.round(open.x0 * hr)), o1 = Math.min(x1, Math.round(open.x1 * hr));
+                    if (o0 > x0) ctx.fillRect(x0, y0, o0 - x0, y1 - y0);
+                    if (x1 > o1) ctx.fillRect(o1, y0, x1 - o1, y1 - y0);
+                } else ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
                 if (border) {
                     /* 1 css px, inside the box: an even bitmap width (DPR 2)
                        is offset by half of it, not straddled on the half pixel */
@@ -3961,8 +4716,14 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                     ctx.globalAlpha = borderAlpha * k; ctx.strokeStyle = border; ctx.lineWidth = lw;
                     ctx.strokeRect(x0 + o, y0 + o, Math.max(1, x1 - x0 - lw), Math.max(1, y1 - y0 - lw));
                 }
+                var tx = x0 + Math.round(pad * hr), ty = Math.round((y0 + y1) / 2) + 0.5;
+                if (open && typeof ctx.strokeText === 'function') {
+                    ctx.globalAlpha = 0.85 * k; ctx.strokeStyle = c.bg;
+                    ctx.lineWidth = Math.max(2, Math.round(3 * hr)); ctx.lineJoin = 'round';
+                    ctx.strokeText(text, tx, ty);
+                }
                 ctx.globalAlpha = k; ctx.fillStyle = ink;
-                ctx.fillText(text, x0 + Math.round(pad * hr), Math.round((y0 + y1) / 2) + 0.5);
+                ctx.fillText(text, tx, ty);
             }
             ctx.save();
             try {
@@ -3972,17 +4733,41 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                 ctx.font = '600 ' + (10 * hr) + 'px monospace';
                 ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
                 ctx.setLineDash([]);
+                /* a run's diamond on its wick's end, over its candle and
+                   under every chip (none ever meets it) */
+                overs.forEach(function (sw) { paintDiamond(ctx, sw, api ? api.LV.SWEEP_R : 4, hr, vr, c); });
                 g.edges.forEach(function (e) { chip(e, e.text, c.neutral, c.neutral, 0.6, 1); });
                 g.chips.forEach(function (ch) {
                     if (ch.lv === 'round') { chip(ch, ch.text, c.neutral, null, 0, ch.k); return; }
-                    var t = ch.lv === 'pool' ? c.gold : c.swing;
-                    chip(ch, ch.text, t, t, 1, ch.k);
+                    /* a level chip that names M wears the session's violet,
+                       on its plate like every chip (§4.2) */
+                    var t = ch.stage ? c.session : ch.lv === 'pool' ? c.gold : c.swing;
+                    chip(ch, ch.text, t, t, 1, ch.k, ch.stage ? ch.through : null);
                 });
+                /* the stages' letters (2026-10-08): violet at .95 on a bg
+                   plate, no border; dimmed by focus alone, like the chips.
+                   Over candles, bare words as PR51's ASIA: a plate there hid
+                   the newest bars. (A level chip that names M keeps its
+                   plate: bare, its price over the bars read '1.0?2?8'.) */
+                var plate = function (r, text, k) {
+                    var x0 = Math.round(r.x0 * hr), x1 = Math.round(r.x1 * hr);
+                    var y0 = Math.round(r.y0 * vr), y1 = Math.round(r.y1 * vr);
+                    if (!r.bare) {
+                        ctx.globalAlpha = 0.85 * k; ctx.fillStyle = c.bg;
+                        ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+                    }
+                    ctx.globalAlpha = 0.95 * k; ctx.fillStyle = c.session;
+                    ctx.fillText(text, x0 + Math.round(pad * hr), Math.round((y0 + y1) / 2) + 0.5);
+                };
                 if (g.asia && g.asia.label) {
                     var L = g.asia.label;
-                    ctx.globalAlpha = 0.95 * (g.asia.hot ? 1 : g.asia.k); ctx.fillStyle = c.session;
-                    ctx.fillText('ASIA', Math.round(L.x0 * hr), Math.round((L.y0 + L.y1) / 2 * vr) + 0.5);
+                    if (g.po3) plate(L, L.text, g.asia.hot ? 1 : g.po3.labelK);   /* A · ASIA, the first of three */
+                    else {
+                        ctx.globalAlpha = 0.95 * (g.asia.hot ? 1 : g.asia.k); ctx.fillStyle = c.session;
+                        ctx.fillText(L.text || 'ASIA', Math.round(L.x0 * hr), Math.round((L.y0 + L.y1) / 2 * vr) + 0.5);
+                    }
                 }
+                if (g.po3) g.po3.labels.forEach(function (lb) { plate(lb, lb.text, lb.k); });
             } finally { ctx.restore(); }
         });
     };
@@ -4027,6 +4812,12 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         ['pool', 'swing', 'asia', 'round'].forEach(function (k) {
             var kb = keyBtn(k); if (kb) kb.setAttribute('aria-pressed', activeInds['lvl_' + k] === false ? 'false' : 'true'); });
         var ab = keyBtn('all'); if (ab) ab.setAttribute('aria-pressed', activeInds.lvl_all === true ? 'true' : 'false');
+        /* The Power of Three switch names today's phase (2026-10-08), drawn
+           or not: the pane may have no room for a letter, the key always does. */
+        var pa = api ? api.phaseAnswer(POSMAP ? POSMAP.po3 : null, lvlPhone) : null;
+        var pb = keyBtn('asia');
+        var pe = (pb && typeof pb.querySelector === 'function') ? pb.querySelector('[data-role="phase"]') : null;
+        if (pe) { pe.textContent = pa ? pa.text : ''; pe.title = pa ? pa.title : ''; }
         ['below', 'above'].forEach(function (side) {
             var sb = keyBtn(side); if (!sb) return;
             var a = (api && activeInds.levels) ? api.keyAnswer(lvlItems, side, lvlPhone) : null;
@@ -4225,7 +5016,33 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         return (TOUCH_POINTER || lvlPhone) ? LVc.touch : LVc.mouse;
     }
     function setLevelHover(id) { if (id === lvlHover) return; lvlHover = id; requestLevels(); }
-    function lineKey(hit) { return 'line|' + hit.kind + '|' + (hit.item.id || '') + '|' + hit.price + '|' + (hit.part || ''); }
+    function lineKey(hit) {
+        if (hit.kind === 'stage') return 'line|stage|' + hit.hit.id + '|' + hit.hit.part;
+        return 'line|' + hit.kind + '|' + (hit.item.id || '') + '|' + hit.price + '|' + (hit.part || '');
+    }
+    /* The Power of Three's stages under the pointer (2026-10-08), as
+       lineHit answers them: a level chip that names M (`lc`), else a
+       stage's letter by its exact box (asked before the money's lines, as
+       a chip is), else a run's diamond, the D arrow or the Judas line as
+       drawn (asked after the money, before the level shapes), else the
+       same marks within the pointer's reach (after the level shapes: a
+       tap on the HUNT band beside the diamond opens the hunt). The stage's
+       id glows, its mark and its band. Never a time band. */
+    /* how: 'labels' (exact boxes), 'drawn' (a mark as drawn + LV.MARK_HIT,
+       asked before the level shapes) or 'reach' (a mark's box + the
+       pointer's reach, asked after them) */
+    function stageHit(lc, x, y, how) {
+        var la = lvApi(), sh = null;
+        if (lc && lc.stage) sh = { id: 'sv-po3-m-' + lc.sweep, stage: 'm', side: lc.sweep, part: 'label' };
+        else if (activeInds.levels && la && lvlLayer && lvlLayer.geom) {
+            sh = how === 'labels' ? la.hitStage(lvlLayer.geom, x, y, 0, true)
+               : how === 'drawn' ? la.hitStage(lvlLayer.geom, x, y, Math.min(la.LV.MARK_HIT, hitTol()), false, true)
+               : la.hitStage(lvlLayer.geom, x, y, hitTol(), false);
+        }
+        if (!sh) return null;
+        setLevelHover(sh.id);
+        return { kind: 'stage', hit: sh, price: null };
+    }
 
     function lineHit(param) {
         var api = hoverApi();
@@ -4238,6 +5055,8 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
            ①HUNT chip beside them. Bands and ticks keep positions first. */
         var lc = (activeInds.levels && lvApi() && lvlLayer && lvlLayer.geom)
             ? lvApi().hitChip(lvlLayer.geom, lvlItems, param.point.x, y) : null;
+        var st = stageHit(lc, param.point.x, y, 'labels');
+        if (st) return st;
         if (lc && lc.item) { setLevelHover(lc.id); return { kind: 'level', item: lc.item, price: lc.item.price }; }
         if (activeInds.positions) {
             var posItems = [];
@@ -4252,9 +5071,12 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             var ph = api.nearestLine(posItems, y, toY, hitTol());
             if (ph) { setLevelHover(null); return { kind: 'pos', item: ph.pos, part: ph.part, price: ph.price }; }
         }
+        var sm = stageHit(null, param.point.x, y, 'drawn');   /* see stageHit */
+        if (sm) return sm;
         if (activeInds.levels) {
             var la = lvApi();
             var lh = (la && lvlLayer) ? la.hit(lvlLayer.geom, lvlItems, param.point.x, y, hitTol()) : null;
+            if (!lh) { var sr = stageHit(null, param.point.x, y, 'reach'); if (sr) return sr; }
             setLevelHover(lh ? lh.id : null);
             if (lh && lh.item) return { kind: 'level', item: lh.item, price: lh.item.price };
             /* The Asian range: its box (the layer), or its two fallback lines. */
@@ -4279,7 +5101,11 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         if (!sigCardEl || !api || !dots || !hit) return;
         var key = lineKey(hit);
         if (key !== sigCardKey) {
-            if (hit.kind === 'pos') {
+            if (hit.kind === 'stage') {
+                /* M or D: what happened, when and where, in the session's violet */
+                sigCardEl.className = 'sv-sig-card sv-sig-card--level sv-sig-card--asia';
+                sigCardEl.innerHTML = api.stageCard(hit.hit, ASIA, POSMAP, Date.now() / 1000, fmtPrice);
+            } else if (hit.kind === 'pos') {
                 sigCardEl.className = 'sv-sig-card sv-sig-card--' + dots.tone(hit.item.side);
                 sigCardEl.innerHTML = api.positionCard(hit.item, lvApi() ? lvApi().moneyFacts(hit.item, lvlItems, fmtPrice) : []);
             } else {
