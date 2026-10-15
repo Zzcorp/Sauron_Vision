@@ -441,9 +441,21 @@ def fetch_fred_updates():
     from core.constants import FRED_SERIES
     from market_data.adapters.fred_adapter import save_series_to_db
 
+    # The Big Money Board's liquidity series (2026-10-15) are fetched here
+    # but kept OUT of FRED_SERIES: the monthly horizon puts every
+    # FRED_SERIES entry, without units, into the snapshot whose class tilts
+    # size live pools (brain/horizon.py _read_macro). The board's series
+    # reach the board only.
+    series = list(FRED_SERIES)
+    try:
+        from bigmoney.inputs import BOARD_FRED_SERIES
+        series += [s for s in BOARD_FRED_SERIES if s not in series]
+    except Exception as e:  # noqa: BLE001 — the macro fetch must not depend on the board
+        logger.warning("[fred] the board's series list is unreadable: %s", e)
+
     parsed = saved = 0
     skipped = None
-    for series_id in FRED_SERIES:
+    for series_id in series:
         try:
             out = save_series_to_db(series_id)
         except Exception as e:
@@ -492,6 +504,80 @@ def fetch_eod_all_instruments():
             logger.warning(f"EOD fetch failed for {inst.symbol}: {e}")
 
     return {"status": "success", "bars_saved": total}
+
+
+#: Binance daily klines asked per crypto instrument: the last few days, so
+#: the bar the 00:00 UTC close just completed is rewritten final, and a
+#: missed night or two heals on the next run (update_or_create).
+EOD_CRYPTO_BARS = 5
+#: The daily closes the Big Money Board grades on (bigmoney/rows.py
+#: CRYPTO_SYMBOLS): a night without them is a warning on the EOD row.
+EOD_CRYPTO_CORE = ("BTCUSD", "ETHUSD")
+
+
+@shared_task
+@guarded_task("scraper_eod")
+def fetch_eod_crypto():
+    """The crypto daily close (2026-10-15), at 00:10 UTC after Binance's
+    00:00 UTC bar closes, before the 05:20 Big Money read.
+
+    fetch_eod_all_instruments serves the classes Yahoo serves and stops
+    there (SUPPORTED_ASSET_CLASSES has no crypto), refresh_bot_bars writes
+    1h and 4h only, and fetch_crypto_quotes writes LiveQuote: nothing on the
+    beat wrote a crypto 1d bar, so two days after a one-off backfill_bars
+    every daily reader of BTCUSD (the board's crypto row, the tide's claim)
+    went blind for good. Keyless Binance public klines, the path
+    backfill_bars already uses.
+
+    THE EOD ROW HAS TWO WRITERS: this pass and the 22:30 universe pass. A
+    pass that wrote its bars returns `idle` so the row keeps the 22:30
+    verdict (core/task_gate.guarded_task), and the 07:00 digest still sees a
+    stock-side failure; a pass that wrote nothing, or missed a close the
+    board grades on (EOD_CRYPTO_CORE), writes its own warning in its own
+    words, so the digest learns that the crypto close stopped.
+    """
+    from instruments.models import Instrument
+    from market_data.bot_bars import _upsert_rows, _venue_symbol
+    from market_data.public_feed import public_feed_for
+
+    universe = list(Instrument.objects.filter(asset_class="crypto",
+                                              is_active=True))
+    if not universe:
+        return {"status": "success", "bars_saved": 0,
+                "idle": "no active crypto instrument"}
+    feed = public_feed_for("crypto")
+    saved, failed = 0, []
+    for inst in universe:
+        try:
+            rows = feed.klines(_venue_symbol(feed, inst.symbol), interval="1d",
+                               limit=EOD_CRYPTO_BARS) or []
+        except Exception as e:  # noqa: BLE001 — one symbol must not end the run
+            logger.warning("[eod crypto] klines(%s, 1d) failed: %s",
+                           inst.symbol, e)
+            rows = []
+        written, _skipped = _upsert_rows(inst, "1d", rows, "binance_public") \
+            if rows else (0, 0)
+        if written:
+            saved += written
+        else:
+            failed.append(inst.symbol)
+    result = {"status": "success", "parsed": len(universe), "bars_saved": saved}
+    if failed:
+        result["not_on_binance"] = failed[:25]
+    core_missed = [s for s in EOD_CRYPTO_CORE if s in failed]
+    if saved == 0 or core_missed:
+        # Nothing at all, or a daily close the board grades on, missed: the
+        # row says so. An alt Binance does not list is named, never a
+        # nightly alarm (fetch_crypto_quotes falls back for those).
+        missed = core_missed or failed
+        result["status"] = "warning"
+        result["reason"] = (f"crypto daily close: no Binance daily bar for "
+                            f"{', '.join(missed[:5])}"
+                            + (" and more" if len(missed) > 5 else "")
+                            + f" ({saved} bars written)")
+        return result
+    result["idle"] = "the crypto close is written; the row keeps the 22:30 verdict"
+    return result
 
 
 @shared_task

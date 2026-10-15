@@ -453,6 +453,13 @@ DEFAULT_COMPONENTS = [
     {"key": "etoro_leverage_live", "name": "eToro Leverage (per config)",
      "description": "Off (default): a typed extras['leverage'] above 1 is REFUSED at the tick and by preflight_live; 'auto' goes at 1x. On: up to 20x (forex, index; commodity 10x, stock 5x, crypto 2x) if in the instrument's LIVE leverageValues and its class is in the proven set; 'auto' is held to its proven multiplier.",
      "category": "system"},
+
+    # ── The Big Money Board (2026-10-09, bigmoney/) ─────────────────────
+    # Information only: no order, size, stop or gate reads it, so it is not
+    # in LIVE_MONEY_SWITCHES and the Wall's live-money count does not move.
+    # OFF on arrival. Description measured at 275 chars (< 300).
+    {"key": "big_money_board", "name": "Big Money Board", "category": "pipeline",
+     "description": "Off (default). On: at 05:20 and 23:20 UTC, one read per market (month-end rebalancing, hedging at the London fix, the speculators, trend followers, the tide, forced flows ahead) from stored data, each scored against later prices. Page, brief, ticket note. No orders, no gate."},
 ]
 
 

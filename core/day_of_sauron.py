@@ -68,8 +68,12 @@ STAGE_OF = {
     "fetch-fred-macro": ("see", "FRED macro series"),
     "fetch-tradingview-ideas": ("see", "TradingView ideas"),
     "fetch-eod-prices-full-universe": ("see", "end-of-day prices, every instrument"),
+    # 2026-10-15: the crypto daily close, and the COT re-read after a
+    # release the CFTC moved to a Monday.
+    "fetch-eod-crypto": ("see", "the crypto daily close"),
     "fetch-sec-filings": ("see", "SEC filings"),
     "fetch-cot-reports": ("see", "COT reports"),
+    "fetch-cot-reports-after-monday": ("see", "COT reports after a holiday Monday release"),
     "refresh-bot-bars": ("see", "the bots' bars"),
     # Market data, not orders (review, 2026-09-29): the IBKR feed upserts
     # klines and tickers into PriceData/LiveQuote, the chains are Greeks
@@ -96,6 +100,9 @@ STAGE_OF = {
     "scan-opportunities": ("think", "opportunity scan"),
     "recalculate-all-technicals": ("think", "all indicators"),
     "run-full-signal-scan": ("think", "full universe scan"),
+    # The Big Money Board (2026-10-09): information, never a gate.
+    "big-money-board": ("think", "the big money board reads the large players' footprints"),
+    "big-money-board-evening": ("think", "the big money board reads again after the US close"),
     # ── DECIDE: the bots, the desk, the allocators ──────────────────────
     "tick-asset-bots": ("decide", "every asset bot ticks: entries, exits, stops"),
     # The crisis mode's eyes and Aragorn (2026-10-02): the posture is

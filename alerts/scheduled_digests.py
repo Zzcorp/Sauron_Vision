@@ -77,6 +77,18 @@ def generate_morning_digest(user=None):
     except Exception as e:
         logger.error(f"Morning digest events section failed: {e}")
 
+    # THE BIG MONEY BOARD (2026-10-09, bigmoney/read.py): the week's lean
+    # per market from forced flows, the trend followers near a trigger, the
+    # tide, the forced flows ahead and what is blind. Words only (no
+    # decimals, no percentages, no currency figures, no levels). Left out
+    # while the big_money_board switch is off.
+    try:
+        from bigmoney.read import brief_lines, is_on as big_money_on
+        if big_money_on():
+            digest['sections']['big_money'] = {'lines': brief_lines()}
+    except Exception as e:
+        logger.error(f"Morning digest big money section failed: {e}")
+
     # Top news
     try:
         news = NewsArticle.objects.filter(
@@ -260,6 +272,7 @@ SECTION_WORDS = {
     'portfolio': 'Portfolio',
     'signals': 'Active signals',
     'events': 'Economic events today',
+    'big_money': 'Big money',
     'news': 'News',
     'daily_pnl': 'Daily P&L',
     'trades': 'Trades today',

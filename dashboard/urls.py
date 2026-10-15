@@ -94,6 +94,7 @@ from .views_shares import shares_dashboard
 from .views_personas import personas_dashboard
 from .views_desk import desk_dashboard
 from .views_horizon import horizon_dashboard
+from bigmoney.views import board as big_money_board, note as big_money_note  # 2026-10-09
 from .views_ops import ops_dashboard, ops_run_command
 from .views_setups import setups_arm, setups_dashboard
 from .views_oculus import oculus_dashboard
@@ -376,6 +377,10 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
 
     # ── Horizon: the 5-10 year sector synthesis (2026-09-12) ──
     path("horizon/", horizon_dashboard, name="horizon_dashboard"),
+    # ── The Big Money Board (2026-10-09): the page, and the ticket note's
+    #    own endpoint (never inside the order preview). ──
+    path("big-money/", big_money_board, name="big_money_board"),
+    path("api/big-money/note/", big_money_note, name="big_money_note"),
     path("admin-dashboard/horizon/run/", hq_run_horizon, name="hq_run_horizon"),
 
     # ── Phase 8: Promotion Pipeline ──────────────────────────
