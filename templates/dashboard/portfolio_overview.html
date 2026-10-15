@@ -72,6 +72,21 @@ honest.{% endcomment %}
         <span class="oc-strip-value {{ strip.unrealized.tone }}" data-sv-live-key="pf.unrealized">{{ strip.unrealized.text }}</span>
         <span class="oc-strip-sub">{{ strip.unrealized.sub }}</span>
     </div>
+    {% comment %}
+    THE REAL BOOK ALONE (2026-10-14, the operator: "add also on portfolio
+    the live P&L"). UNREALIZED P&L above is BOTH books. This cell is the
+    open P&L of the real-money rows only, each at its venue's own rate
+    (bot_program.venue_mark.resolve), with the paper and demo figures said
+    apart on the sub-line and never added — the same figure, in the same
+    words, the cockpit strip's PORTFOLIO cell prints on every page. The
+    venue marker sits on the label (sauron.css, sv-venue), never on the
+    value. A dash means not measured: no real row, or none marked.
+    {% endcomment %}
+    <div class="oc-strip-cell" title="{{ strip.unrealized_live.title }}">
+        <span class="oc-strip-label"><span class="sv-venue sv-venue--live">LIVE</span> OPEN P&amp;L</span>
+        <span class="oc-strip-value {{ strip.unrealized_live.tone }}" data-sv-live-key="pf.unrealized_live">{{ strip.unrealized_live.text }}</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap" data-sv-live-key="pf.unrealized_live.sub">{{ strip.unrealized_live.sub }}</span>
+    </div>
     <div class="oc-strip-cell" title="{{ strip.win_rate.title }}">
         <span class="oc-strip-label">WIN RATE</span>
         <span class="oc-strip-value {{ strip.win_rate.tone }}" data-sv-live-key="pf.win_rate">{{ strip.win_rate.text }}</span>

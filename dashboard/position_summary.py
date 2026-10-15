@@ -270,6 +270,160 @@ def world_of(row) -> str:
     return WORLD_LIVE
 
 
+def _world_num(value):
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def open_by_world(rows) -> dict:
+    """THE OPEN BOOK SPLIT BY MONEY WORLD (2026-10-14), from figures the
+    rows ALREADY carry — never a second valuation.
+
+    {"live" | "demo" | "paper" | "": {"n", "n_marked", "pnl", "r", "r_n"}}
+    over rows (dicts or objects) carrying `world`, `pnl` and `r`: the world
+    as world_of reads it ("" for a row that states no venue — a legacy
+    Position; an unknown spelling lands there too), the row's own open P&L
+    (for a real row, the one bot_program.venue_mark.resolve priced in
+    portfolio.services._trade_to_position; for a legacy row, the one
+    dashboard.views_command._open_book re-priced) and its R multiple.
+
+    `pnl` is None unless at least one row of that world carries one, and
+    `r` likewise: a world that is open and unmarked is NOT MEASURED, and
+    the surfaces print an em dash for it, never a 0 that reads as flat.
+    No world is ever added to another here — the operator's rule is that
+    real money is unmistakable and live and paper are never summed — and
+    the caller gets four separate answers to keep apart.
+
+    A row may also carry `mark_source` and `mark_age_s`, the two words
+    venue_mark.resolve put on it (2026-10-15, review): a row in the figure
+    whose mark is the venue's LAST print (VENUE_STALE, up to four days
+    old) is counted in `n_stale`, and the oldest such print's age is
+    `stale_age_s` — so a figure labelled LIVE can say what it rests on.
+    """
+    from bot_program.venue_mark import VENUE_STALE
+
+    out = {w: {"n": 0, "n_marked": 0, "pnl": None, "r": None, "r_n": 0,
+               "n_stale": 0, "stale_age_s": None}
+           for w in (WORLD_LIVE, WORLD_DEMO, WORLD_PAPER, "")}
+    for row in rows:
+        if isinstance(row, dict):
+            world, pnl, r = row.get("world"), row.get("pnl"), row.get("r")
+            source, age = row.get("mark_source"), row.get("mark_age_s")
+        else:
+            world = getattr(row, "world", None)
+            pnl, r = getattr(row, "pnl", None), getattr(row, "r", None)
+            source = getattr(row, "mark_source", None)
+            age = getattr(row, "mark_age_s", None)
+        slot = out[world if world in out else ""]
+        slot["n"] += 1
+        pnl = _world_num(pnl)
+        if pnl is not None:
+            slot["n_marked"] += 1
+            slot["pnl"] = pnl if slot["pnl"] is None else slot["pnl"] + pnl
+            if source == VENUE_STALE:
+                slot["n_stale"] += 1
+                age = _world_num(age)
+                if age is not None and (slot["stale_age_s"] is None
+                                        or age > slot["stale_age_s"]):
+                    slot["stale_age_s"] = age
+        r = _world_num(r)
+        if r is not None:
+            slot["r_n"] += 1
+            slot["r"] = r if slot["r"] is None else slot["r"] + r
+    for slot in out.values():
+        if slot["pnl"] is not None:
+            slot["pnl"] = round(slot["pnl"], 2)
+        if slot["r"] is not None:
+            slot["r"] = round(slot["r"], 2)
+    return out
+
+
+def _one_or_many(n, one, many):
+    """`one` for a count of one, `many` otherwise. Not _plural above, which
+    spells a counted noun ("3 days") for the duration words."""
+    return one if n == 1 else many
+
+
+def live_book_words(split) -> dict:
+    """THE WORDS AROUND THE REAL BOOK'S OPEN P&L (2026-10-15, review): one
+    spelling for the two surfaces that print the figure — the cockpit
+    strip's PORTFOLIO cell (core.context_processors) and the Portfolio
+    page's LIVE OPEN P&L cell (dashboard.views) — off an open_by_world
+    split. Words only: nothing is valued or added here.
+
+    A figure labelled LIVE that silently covers part of the real book, or
+    rests on a venue print hours old, reads as the whole book marked now —
+    the failure portfolio.services refuses for the both-books VALUE. So:
+      coverage_*  real rows open that could not be marked: "1/2" on the
+                  strip, "1 of 2 marked" on the page, a sentence for titles;
+      stale_*     a row in the figure rests on the venue's LAST print
+                  (venue_mark VENUE_STALE), with the oldest one's age;
+      r_title     the R covers fewer real rows than are open, or none;
+      dash_title  why the figure is a dash, when it is one;
+      manual_*    rows that state no venue (legacy Positions): in the
+                  both-books figures, in none of the three worlds.
+    Every key is "" when it has nothing to say.
+    """
+    from bot_program.venue_mark import age_words
+
+    live, manual = split[WORLD_LIVE], split[""]["n"]
+    n, marked, measured = live["n"], live["n_marked"], live["pnl"] is not None
+    out = dict.fromkeys(("coverage_short", "coverage_words", "coverage_title",
+                         "stale_words", "stale_title", "figure_title",
+                         "r_title", "dash_title", "manual_words",
+                         "manual_title"), "")
+    one = _one_or_many
+    if measured and marked < n:
+        rest = n - marked
+        out["coverage_short"] = f"{marked}/{n}"
+        out["coverage_words"] = f"{marked} of {n} marked"
+        out["coverage_title"] = (
+            f"Across {marked} of {n} real-money positions: the other"
+            f"{'' if rest == 1 else f' {rest}'} could not be marked at the "
+            f"venue's rate and {one(rest, 'is', 'are')} not in this figure.")
+    k = live.get("n_stale") or 0
+    if measured and k:
+        age = age_words(live.get("stale_age_s"))
+        aged = (f"{age} old" if k == 1 else f"up to {age} old") if age \
+            else "of unknown age"
+        who = ("The real-money position rests" if n == 1 else
+               f"All {n} real-money positions rest" if k == n else
+               f"{k} of {n} real-money positions {one(k, 'rests', 'rest')}")
+        out["stale_words"] = f"stale, {aged}"
+        out["stale_title"] = (
+            f"{who} on the venue's last print, {aged}: nothing newer has "
+            f"come in from the venue, which is normal while its market is "
+            f"shut.")
+    out["figure_title"] = " ".join(
+        t for t in (out["coverage_title"], out["stale_title"]) if t)
+    if measured and live["r_n"] < n:
+        out["r_title"] = (
+            ("" if not live["r_n"] else
+             f"Across {live['r_n']} of {n} real-money positions. ")
+            + "R needs an entry, the opening stop and a venue mark")
+    if n and not measured:
+        out["dash_title"] = (
+            f"{n} real-money position{one(n, '', 's')} open, none could be "
+            f"marked at the venue's rate")
+    elif not n:
+        out["dash_title"] = "No real-money position open" + (
+            f"; {manual} manual position{one(manual, '', 's')} "
+            f"{one(manual, 'states', 'state')} no venue" if manual else "")
+    if manual:
+        out["manual_words"] = f"{manual} manual"
+        out["manual_title"] = (
+            f"{manual} manual position{one(manual, '', 's')} "
+            f"{one(manual, 'states', 'state')} no venue, so "
+            f"{one(manual, 'it is', 'they are')} neither real money nor "
+            f"paper here: counted in the both-books figures, in none of "
+            f"LIVE, PAPER or DEMO.")
+    return out
+
+
 def _state(trade):
     """(kind, chip words, "open" | "closed") for the row's status."""
     from bot_program.asset_engine.base import is_entry_working

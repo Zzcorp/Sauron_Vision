@@ -7,7 +7,8 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from .exchange_status import get_exchange_status
-from dashboard.position_summary import world_of as _world_of
+from dashboard.position_summary import (
+    live_book_words, open_by_world, world_of as _world_of)
 
 logger = logging.getLogger(__name__)
 
@@ -226,24 +227,31 @@ def _book_fingerprint(user, portfolio):
                     for k in sorted(block))
 
 
-def _initial_stops(user):
-    """{trade_id: the stop the trade OPENED with}.
+def _initial_stops_and_worlds(user):
+    """({trade_id: the stop the trade OPENED with}, {trade_id: its world}).
 
     `bot_program.manual_close._initial_stop` is the platform's one definition
     of that number, and bot_grading books R against it. The unified position
     row cannot carry it — it exposes the CURRENT stop, which a trailing stop
     rewrites, and grading against that makes P&L and risk the same quantity
     so every trailed winner scores ~1.0R.
+
+    The world rides the same query (2026-10-14). `position_summary.world_of`
+    reads broker_env off the trade's metadata to tell an eToro DEMO fill
+    (paper=False) from REAL money, and the unified row carries no metadata
+    at all — read off the row, a demo fill was "live", which painted its
+    dropdown row red and would have counted its P&L as the real book's.
     """
     from bot_program.manual_close import _initial_stop
     from bot_program.models import AssetBotTrade
 
-    return {
-        trade.id: _initial_stop(trade)
-        for trade in AssetBotTrade.objects.filter(
+    stops, worlds = {}, {}
+    for trade in AssetBotTrade.objects.filter(
             config__user=user, status__in=("OPEN", "CLOSE_PENDING")
-        ).only("id", "metadata", "stop_loss")
-    }
+    ).only("id", "metadata", "stop_loss", "paper"):
+        stops[trade.id] = _initial_stop(trade)
+        worlds[trade.id] = _world_of(trade)
+    return stops, worlds
 
 
 def _book_truth(user, portfolio):
@@ -275,9 +283,14 @@ def _book_truth(user, portfolio):
     book = live_book_value(user, portfolio)
     rows, n_priced, unrealized = book.rows, book.n_priced, book.unrealized
     n_open = book.n_open
-    stops = _initial_stops(user) if n_open else {}
+    stops, worlds = _initial_stops_and_worlds(user) if n_open else ({}, {})
 
     detail, r_sum, r_n, bot_r_sum, bot_r_n = [], 0.0, 0, 0.0, 0
+    # The same rows once more, by money world, for the LIVE line on the
+    # PORTFOLIO cell: the world, the row's own P&L and its UNROUNDED R, so
+    # the per-world R is summed at the book's precision like r_sum above
+    # and not from the two-decimal figures the dropdown rows print.
+    by_world_rows = []
     # The long/short split the POSITIONS cell prints under its count. A row
     # whose direction column is blank still renders as LONG below (the sign
     # defaults that way so its P&L has a side), but it cannot be COUNTED as
@@ -310,6 +323,22 @@ def _book_truth(user, portfolio):
             if source == "bot":
                 bot_r_sum += r_mult
                 bot_r_n += 1
+        # The money world (2026-09-30, corrected 2026-10-14): a bot row's
+        # comes from the TRADE (world_of reads broker_env off its metadata,
+        # which the unified row does not carry), so an eToro demo fill is
+        # "demo" and never the live its paper flag alone implies. A legacy
+        # Position states no venue and reads "". The row's own flags are
+        # the fallback only when the trade could not be read back.
+        world = ((worlds.get(trade_id) or _world_of(row)) if source == "bot"
+                 else _world_of(row))
+        pnl = _f(getattr(row, "unrealized_pnl", None))
+        # With the two words venue_mark.resolve put on the row, so the LIVE
+        # line can say when it rests on the venue's last print, not a fresh
+        # one (2026-10-15, review).
+        by_world_rows.append({
+            "world": world, "pnl": pnl, "r": r_mult,
+            "mark_source": getattr(row, "mark_source", None),
+            "mark_age_s": getattr(row, "mark_age_s", None)})
         detail.append({
             # The trade id is what makes the row actionable: the CLOSE
             # control on each row posts against it. Legacy Position rows
@@ -324,11 +353,9 @@ def _book_truth(user, portfolio):
             "last": mark,
             "r": None if r_mult is None else round(r_mult, 2),
             "pct": _f(getattr(row, "unrealized_pnl_pct", None)),
-            "pnl": _f(getattr(row, "unrealized_pnl", None)),
+            "pnl": pnl,
             "paper": getattr(row, "paper", None),
-            # The money world from the row's own stamps (2026-09-30): a
-            # demo fill is "demo", never the live its paper flag implies.
-            "world": _world_of(row),
+            "world": world,
             "source": source,
             "status": getattr(row, "status", "") or "",
             "opened_at": getattr(row, "opened_at", None),
@@ -419,6 +446,54 @@ def _book_truth(user, portfolio):
     out["panel_open_r_n"] = r_n
     out["panel_bot_open_r"] = round(bot_r_sum, 2) if bot_r_n else None
     out["panel_bot_open_r_display"] = f"{bot_r_sum:+.2f}R" if bot_r_n else None
+
+    # THE LIVE P&L (2026-10-14, the operator: "add also on portfolio the
+    # live P&L"). panel_open_pnl / panel_open_r above are BOTH books and
+    # stay so for the dropdown; these are the same per-row figures summed
+    # by money world (position_summary.open_by_world) — a REAL row's P&L
+    # is the one venue_mark.resolve priced, never a raw quote, and nothing
+    # is valued a second time here. Live, paper and demo are three
+    # separate answers and no key below is ever a sum of two of them. Each
+    # display is None where that world is open and unmarked, or not open:
+    # the cell prints an em dash with a title saying which, never a 0.
+    split = open_by_world(by_world_rows)
+    live, paper, demo = split["live"], split["paper"], split["demo"]
+    # What the figure covers, in the words the Portfolio page uses too
+    # (position_summary.live_book_words, 2026-10-15, review): a real row
+    # open and unmarked, or one resting on the venue's last print, is SAID
+    # on the line, never left for a total to pass as the whole book.
+    words = live_book_words(split)
+    out["panel_open_pnl_live"] = live["pnl"]
+    out["panel_open_pnl_live_display"] = _signed(live["pnl"])
+    out["panel_open_r_live"] = live["r"]
+    out["panel_open_r_live_display"] = (
+        None if live["r"] is None else f"{live['r']:+.2f}R")
+    out["panel_open_r_live_n"] = live["r_n"]
+    out["panel_live_positions"] = live["n"]
+    out["panel_live_positions_marked"] = live["n_marked"]
+    out["panel_live_positions_stale"] = live["n_stale"]
+    out["panel_live_coverage_short"] = words["coverage_short"]
+    out["panel_live_coverage_title"] = words["coverage_title"]
+    out["panel_live_stale_title"] = words["stale_title"]
+    out["panel_live_pnl_title"] = words["figure_title"]
+    out["panel_live_r_title"] = words["r_title"]
+    out["panel_live_dash_title"] = words["dash_title"]
+    out["panel_open_pnl_paper"] = paper["pnl"]
+    out["panel_open_pnl_paper_display"] = _signed(paper["pnl"])
+    out["panel_open_r_paper"] = paper["r"]
+    out["panel_open_r_paper_display"] = (
+        None if paper["r"] is None else f"{paper['r']:+.2f}R")
+    out["panel_open_r_paper_n"] = paper["r_n"]
+    out["panel_paper_positions"] = paper["n"]
+    out["panel_paper_positions_marked"] = paper["n_marked"]
+    out["panel_open_pnl_demo"] = demo["pnl"]
+    out["panel_open_pnl_demo_display"] = _signed(demo["pnl"])
+    out["panel_demo_positions"] = demo["n"]
+    # Legacy Position rows: no venue stated, in the both-books figures
+    # above and in none of the three worlds.
+    out["panel_unvenued_positions"] = split[""]["n"]
+    out["panel_unvenued_words"] = words["manual_words"]
+    out["panel_unvenued_title"] = words["manual_title"]
 
     out["panel_open_rows"] = detail[:PANEL_ROW_LIMIT]
     out["panel_open_rows_hidden"] = max(0, n_open - PANEL_ROW_LIMIT)
@@ -1079,6 +1154,37 @@ def sauron_context(request):
         "panel_open_r": None,
         "panel_open_r_display": None,
         "panel_open_r_n": 0,
+        # The LIVE line on the PORTFOLIO cell: the real book alone, with
+        # paper and demo apart. None and 0 until a book has been read, so
+        # the line dashes and says "no real-money position open" rather
+        # than rendering an empty name as nothing.
+        "panel_open_pnl_live": None,
+        "panel_open_pnl_live_display": None,
+        "panel_open_r_live": None,
+        "panel_open_r_live_display": None,
+        "panel_open_r_live_n": 0,
+        "panel_live_positions": 0,
+        "panel_live_positions_marked": 0,
+        "panel_live_positions_stale": 0,
+        "panel_live_coverage_short": "",
+        "panel_live_coverage_title": "",
+        "panel_live_stale_title": "",
+        "panel_live_pnl_title": "",
+        "panel_live_r_title": "",
+        "panel_live_dash_title": "No real-money position open",
+        "panel_open_pnl_paper": None,
+        "panel_open_pnl_paper_display": None,
+        "panel_open_r_paper": None,
+        "panel_open_r_paper_display": None,
+        "panel_open_r_paper_n": 0,
+        "panel_paper_positions": 0,
+        "panel_paper_positions_marked": 0,
+        "panel_open_pnl_demo": None,
+        "panel_open_pnl_demo_display": None,
+        "panel_demo_positions": 0,
+        "panel_unvenued_positions": 0,
+        "panel_unvenued_words": "",
+        "panel_unvenued_title": "",
         "panel_open_rows": [],
         "panel_open_rows_hidden": 0,
         "panel_realised_24h_display": None,
