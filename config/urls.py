@@ -30,6 +30,9 @@ urlpatterns = [
     path("login/pin/", login_pin, name="login_pin"),
     path("login/pin/forgot/", login_pin_forgot, name="login_pin_forgot"),
     path("logout/", auth_views.LogoutView.as_view(next_page="the_wall"), name="logout"),
+    # The Lore (2026-10-14): the staff-only library, before the two
+    # catch-all includes so its slugs are never shadowed.
+    path("lore/", include("lore.urls")),
     path("", include("bot_program.urls")),
     path("", include("dashboard.urls")),
 ]

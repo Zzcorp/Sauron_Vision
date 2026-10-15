@@ -99,7 +99,8 @@ def _switches(now) -> dict:
     from core.platform_control import BULK_ENABLE_EXEMPT, PlatformComponent
 
     # `held`: the keys in the group its "all on" button leaves OFF (the
-    # live-money switches, the Morgul brake); the page says so in one line.
+    # live-money switches, the Morgul brake, the two Lore readers); the page
+    # says so in one line.
     groups = OrderedDict(
         (k, {"key": k, "label": label, "rows": [], "held": []})
         for k, label in CATEGORY_ORDER)

@@ -1185,7 +1185,10 @@ def could_not_answer(why: str) -> Reply:
 # ── the quoted question ──────────────────────────────────────────────────
 
 def _conversation_title(chat_id) -> str:
-    return f"Telegram · chat {chat_id}"
+    # The prefix is the research agent's: a thread with it never gets the
+    # library's block, even for a question asked on the web (lore/policy.py).
+    from brain.research_agent import TELEGRAM_THREAD_PREFIX
+    return f"{TELEGRAM_THREAD_PREFIX}{chat_id}"
 
 
 def _conversation(user, chat_id):
@@ -1269,6 +1272,9 @@ _MARKER_WORDS = {"RULE": "rule {v}", "HYP": "hypothesis #{v}",
                  "EARNINGS": "earnings review #{v}",
                  "KNOWLEDGE": "knowledge note #{v}"}
 _ACTION_MARKERS = {"APPROVE", "REJECT", "RESTORE"}
+#: Dropped from the group's text beside the action markers: the library
+#: citation (the Lore is staff-only, and the group is not; lore/policy.py).
+_DROPPED_MARKERS = _ACTION_MARKERS | {"LORE"}
 _LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
 _ITALIC_RE = re.compile(r"(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])")
 
@@ -1279,7 +1285,7 @@ def plain_answer(markdown: str) -> str:
     as bullets. Escaping is the sender's (notifications._telegram_text)."""
     def _words(match):
         kind, value = match.group(1).upper(), match.group(2).strip()
-        if kind in _ACTION_MARKERS:
+        if kind in _DROPPED_MARKERS:
             return ""
         shape = _MARKER_WORDS.get(kind)
         return shape.format(v=value) if shape else value
@@ -1333,7 +1339,10 @@ def answer_question(pending_id: int) -> dict:
                     "longer configured", pending_id)
         return {"status": "skipped", "reason": "chat no longer configured"}
     try:
-        result = complete_ask(pending_id)
+        # channel="telegram": the research agent never adds the library's
+        # block here. The group can hold people who are not staff, so the
+        # staff owner's clearance is not the reader's (lore/policy.py).
+        result = complete_ask(pending_id, channel="telegram")
     except Exception as e:  # noqa: BLE001
         name = type(e).__name__
         logger.warning("[telegram eye] the research agent raised (%s)", name)

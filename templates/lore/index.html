@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}The Lore · Sauron's library{% endblock %}
+{% block page_title %}❧ THE LORE · Sauron's library{% endblock %}
+{% block extra_css %}
+<style>
+.lore-lead { color: var(--text-muted); font-size: 13px; margin: 0 0 6px; }
+.lore-rule { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); margin: 0 0 16px; }
+.lore-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+.lore-form input[type=text] { flex: 1 1 260px; min-width: 160px; padding: 7px 10px; background: var(--bg-elevated, rgba(255,255,255,.04)); color: inherit; border: 1px solid var(--border, rgba(255,255,255,.12)); border-radius: 6px; font: inherit; }
+.lore-form select { padding: 6px 8px; background: var(--bg-elevated, rgba(255,255,255,.04)); color: inherit; border: 1px solid var(--border, rgba(255,255,255,.12)); border-radius: 6px; font: inherit; font-size: 12px; }
+.lore-form label.toggle { font-size: 12px; color: var(--text-muted); display: inline-flex; gap: 6px; align-items: center; }
+.lore-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; }
+.lore-card { padding: 12px 14px; }
+.lore-card h3 { margin: 0 0 6px; font-size: 15px; }
+.lore-card h3 a { color: inherit; text-decoration: none; }
+.lore-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.lore-badge { font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border, rgba(255,255,255,.14)); color: var(--text-muted); }
+.lore-badge.reviewed { border-color: var(--up, #3fb950); color: var(--up, #3fb950); }
+.lore-badge.draft { border-color: var(--warn, #d29922); color: var(--warn, #d29922); }
+.lore-badge.retired, .lore-badge.rejected { opacity: .7; }
+.lore-meta { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 6px; }
+.lore-draft-note { font-size: 11px; color: var(--warn, #d29922); margin-top: 4px; }
+.lore-pager { display: flex; gap: 12px; align-items: center; font-size: 12px; margin-top: 12px; }
+.lore-side .card { margin-bottom: 14px; }
+.lore-side ul { margin: 0; padding-left: 18px; font-size: 12px; }
+.lore-empty { padding: 18px; color: var(--text-muted); }
+.lore-footer { font-size: 11px; color: var(--text-muted); margin-top: 18px; }
+@media (max-width: 768px) { .lore-grid { grid-template-columns: minmax(0, 1fr); } }
+</style>
+{% endblock %}
+{% block content %}
+<div id="lore-page">
+{% if messages %}<ul class="lore-messages" style="list-style:none;margin:0 0 12px;padding:0;">{% for m in messages %}<li class="card" style="padding:8px 12px;font-size:12px;margin-bottom:6px;">{{ m }}</li>{% endfor %}</ul>{% endif %}
+<h1 style="margin:0 0 4px;font-size:22px;">The Lore</h1>
+<p class="lore-lead">Sauron's library: strategies, fund playbooks, past episodes and market concepts, each written in our own words with its sources. Staff only.</p>
+<p class="lore-rule">Reference data. Nothing here can change a rule, a gate, a size, a limit or an order.</p>
+
+<div class="oc-strip" style="margin-bottom:16px;">
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">ENTRIES</span>
+        <span class="oc-strip-value">{{ n_entries }}</span>
+        <span class="oc-strip-sub">{{ counts.reviewed }} reviewed · {{ counts.draft }} drafts · {{ counts.retired }} retired</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">SOURCES</span>
+        <span class="oc-strip-value">{{ n_sources }}</span>
+        <span class="oc-strip-sub">{{ n_opened }} opened by a person · {{ n_summary_only }} search summary only</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">AGENTS</span>
+        <span class="oc-strip-value">{{ switch_staff }}</span>
+        <span class="oc-strip-sub">Ask Sauron (staff, web): {{ switch_staff }} · Strategist background: {{ switch_background }}</span>
+    </div>
+    <div class="oc-strip-cell">
+        <span class="oc-strip-label">LAST READ</span>
+        {% if last_read %}
+        <span class="oc-strip-value">{{ last_read.created_at|timesince }} ago</span>
+        <span class="oc-strip-sub">{{ last_read.agent }}, {{ last_read.n_shown }} entries</span>
+        {% else %}
+        <span class="oc-strip-value">Never</span>
+        <span class="oc-strip-sub">no agent has read the library yet</span>
+        {% endif %}
+    </div>
+</div>
+
+<form method="get" class="lore-form" action="{% url 'lore:index' %}">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search the library: a strategy, a fund, a year, an idea" aria-label="Search the library">
+    <select name="kind" aria-label="Kind"><option value="">Kind: Any</option>{% for k, label in kinds %}<option value="{{ k }}" {% if k == kind %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    <select name="regime" aria-label="Regime"><option value="">Regime: Any</option>{% for k, label in regimes %}<option value="{{ k }}" {% if k == regime %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    <select name="class" aria-label="Asset class"><option value="">Asset class: Any</option>{% for k, label in classes %}<option value="{{ k }}" {% if k == klass %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    <select name="horizon" aria-label="Horizon"><option value="">Horizon: Any</option>{% for k, label in horizons %}<option value="{{ k }}" {% if k == horizon %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    <select name="evidence" aria-label="Evidence"><option value="">Evidence: Any</option>{% for k, label in grades %}<option value="{{ k }}" {% if k == grade %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    <select name="status" aria-label="Status"><option value="">Status: Drafts and reviewed</option>{% for k, label in statuses %}<option value="{{ k }}" {% if k == status %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    {% if tag %}<input type="hidden" name="tag" value="{{ tag }}">{% endif %}
+    {% if regime_now %}<label class="toggle"><input type="checkbox" name="now" value="1" {% if use_now %}checked{% endif %}> Relevant to the current regime ({{ regime_now_label }})</label>{% endif %}
+    <button type="submit" class="btn btn-sm">Search</button>
+    <a href="{% url 'lore:index' %}" class="btn btn-sm">Clear</a>
+</form>
+
+<div class="lore-grid">
+<div>
+    {% if n_entries == 0 %}
+    <div class="card lore-empty">The library is empty. Load the catalogue with manage.py lore import (it reads private/lore/ or LORE_DIR).</div>
+    {% elif not cards %}
+    <div class="card lore-empty">Nothing matches. Try fewer words or clear a filter.</div>
+    {% else %}
+    <div class="lore-meta" style="margin:0 0 10px;">{{ n_matched }} {% if n_matched == 1 %}entry{% else %}entries{% endif %}{% if tag %} · tag: {{ tag }}{% endif %} · Simple search</div>
+    {% for c in cards %}
+    <div class="card lore-card fade-in-up" style="margin-bottom:12px;">
+        <div class="lore-badges">
+            <span class="lore-badge">{{ c.entry.get_kind_display }}</span>
+            <span class="lore-badge">Evidence: {{ c.entry.evidence_grade }}</span>
+            <span class="lore-badge {{ c.entry.status }}">{{ c.entry.get_status_display }}</span>
+        </div>
+        <h3><a href="{% url 'lore:entry' c.entry.slug %}">{{ c.entry.title }}</a></h3>
+        <div style="font-size:13px;">{{ c.lead }}</div>
+        <div class="lore-meta">Works in: {{ c.works|default:"—" }} · Breaks in: {{ c.breaks|default:"—" }} · {{ c.n_sources }} source{{ c.n_sources|pluralize }} · {{ c.n_reputed }} reputed claim{{ c.n_reputed|pluralize }}</div>
+        {% if c.entry.tags %}<div class="lore-meta">{% for t in c.entry.tags %}<a href="{% url 'lore:index' %}?tag={{ t|urlencode }}">#{{ t }}</a> {% endfor %}</div>{% endif %}
+        {% if c.entry.status == "draft" %}<div class="lore-draft-note">Draft: no agent reads it yet.</div>{% endif %}
+    </div>
+    {% endfor %}
+    {% if page.paginator.num_pages > 1 %}
+    <div class="lore-pager">
+        {% if page.has_previous %}<a class="btn btn-sm" href="?{{ base_query }}&page={{ page.previous_page_number }}">Previous</a>{% endif %}
+        <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+        {% if page.has_next %}<a class="btn btn-sm" href="?{{ base_query }}&page={{ page.next_page_number }}">Next</a>{% endif %}
+    </div>
+    {% endif %}
+    {% endif %}
+</div>
+<aside class="lore-side">
+    <div class="card">
+        <div class="card-header"><span class="card-title">Review queue</span></div>
+        <div style="padding:10px 14px;font-size:12px;">{% if n_drafts %}{{ n_drafts }} draft{{ n_drafts|pluralize }} wait{{ n_drafts|pluralize:"s," }} for review.{% else %}Nothing waits for review.{% endif %}</div>
+    </div>
+    <div class="card">
+        <div class="card-header"><span class="card-title">Last reads by agents</span></div>
+        <div style="padding:10px 14px;">
+        {% if recent_reads %}<ul>{% for r in recent_reads %}<li>{{ r.agent }} · {{ r.n_shown }} entries · {{ r.created_at|timesince }} ago</li>{% endfor %}</ul>
+        {% else %}<span style="font-size:12px;color:var(--text-muted);">No agent has read the library yet.</span>{% endif %}
+        </div>
+    </div>
+</aside>
+</div>
+<p class="lore-footer">Documented means a source named here shows it; reputed means it is claimed but not shown.</p>
+</div><!-- /lore-page -->
+{% endblock %}

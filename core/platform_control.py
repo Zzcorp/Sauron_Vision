@@ -115,8 +115,14 @@ LIVE_MONEY_SWITCHES = (
 #: them off. The Morgul brake stops bots on a critical guard finding; it
 #: must not arrive with the System group's other switches — and neither
 #: must anything that moves real money (LIVE_MONEY_SWITCHES, above). /ops/
-#: says beside the group what the button leaves OFF.
-BULK_ENABLE_EXEMPT = frozenset({"morgul_brake", *LIVE_MONEY_SWITCHES})
+#: says beside the group what the button leaves OFF. The two Lore readers
+#: (lore/policy.py SWITCHES, in the Agents group) are decisions of their
+#: own too: lore_staff after the first entries are reviewed,
+#: lore_background only after decision D1 (the briefing reaches readers
+#: who are not staff).
+LORE_READER_SWITCHES = ("lore_staff", "lore_background")
+BULK_ENABLE_EXEMPT = frozenset({"morgul_brake", *LORE_READER_SWITCHES,
+                                *LIVE_MONEY_SWITCHES})
 
 
 # ── Default components to register ───────────────────────
@@ -160,6 +166,16 @@ DEFAULT_COMPONENTS = [
      "description": "Off (default). On: after the morning briefing, the weekly review, the Monday plan and the end-of-day digest, a fast pass extracts their next steps (pause a rule, trade smaller, watch an instrument, note) as proposals on /briefing/#next-steps. Nothing applies until approved.",
      "category": "agent"},
     {"key": "agent_optimization", "name": "Strategy Optimization", "description": "Strategy parameter tuning (Saturday 14:00 UTC)", "category": "agent"},
+    # THE LORE (2026-10-14, lore/policy.py): which agents may read the
+    # library. OFF on arrival; neither is a live-money switch: the block
+    # is reference data and can change no rule, gate, size, limit or
+    # order. Descriptions measured under the 300-character column.
+    {"key": "lore_staff", "name": "Lore: staff readers",
+     "description": "Ask Sauron reads matching library entries for staff questions asked on the web. Reference only: it changes no rule, gate, size, limit or order.",
+     "category": "agent"},
+    {"key": "lore_background", "name": "Lore: background readers",
+     "description": "The strategist reads library entries for the current regime as unquoted background; its briefing never names or quotes them. Reference only: it moves no money.",
+     "category": "agent"},
     {"key": "agent_monday_plan", "name": "Monday Planner", "description": "Monday game plan generation (Sunday 18:00 UTC)", "category": "agent"},
 
     # ── Phase 3 — AI operational ──────────────────────────────

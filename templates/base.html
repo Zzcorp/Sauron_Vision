@@ -527,6 +527,8 @@
             <a href="{% url 'hypotheses_dashboard' %}" data-nav-id="hypotheses" class="nav-link {% if page_id == 'hypotheses' %}active{% endif %}"><span class="icon">⊕</span> <span class="label-text">Hypothesis Market</span></a>
             <a href="{% url 'brain_dashboard' %}" class="nav-link {% if page_id == 'brain' %}active{% endif %}"><span class="icon">⌬</span> <span class="label-text">Sauron&#39;s Mind</span></a>
             <a href="{% url 'knowledge_dashboard' %}" class="nav-link {% if page_id == 'knowledge' %}active{% endif %}"><span class="icon">❖</span> <span class="label-text">Knowledge Graph</span></a>
+            {% comment %}The Lore (2026-10-14): Sauron's staff-only library of strategies, fund playbooks, episodes and concepts, read by cleared agents as reference data. Staff only, so the link shows to staff only.{% endcomment %}
+            {% if request.user.is_staff %}<a href="{% url 'lore:index' %}" class="nav-link {% if page_id == 'lore' %}active{% endif %}"><span class="icon">❧</span> <span class="label-text">The Lore</span></a>{% endif %}
             <a href="{% url 'consolidation_dashboard' %}" class="nav-link {% if page_id == 'consolidation' %}active{% endif %}"><span class="icon">⊜</span> <span class="label-text">Consolidation</span></a>
             {% comment %}The 5-10 year sector view the share allocator reads as a ±10% prior, with its own graded calls (2026-09-12).{% endcomment %}
             <a href="{% url 'horizon_dashboard' %}" class="nav-link {% if page_id == 'horizon' %}active{% endif %}"><span class="icon">◕</span> <span class="label-text">Horizon</span></a>
