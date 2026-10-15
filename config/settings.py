@@ -128,7 +128,14 @@ INSTALLED_APPS = [
     "backtester",
     "bot_program",
     "brain",
+    # The Lore (2026-10-14): Sauron's library, staff-only, read by agents
+    # as fenced reference data and never as instructions (lore/read.py).
+    "lore",
 ]
+
+# The Lore's catalogue (seed, overlay, private terms) lives outside git,
+# like the Book's staff chapter: private/lore/ on the checkout, or LORE_DIR.
+LORE_DIR = os.getenv("LORE_DIR") or str(BASE_DIR / "private" / "lore")
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

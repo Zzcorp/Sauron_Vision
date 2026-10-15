@@ -542,14 +542,22 @@ class BulkEnableExemptTests(_Fixture):
     def test_the_exempt_set_names_every_live_switch_beside_the_brake(self):
         from core.platform_control import (BULK_ENABLE_EXEMPT,
                                            DEFAULT_COMPONENTS,
-                                           LIVE_MONEY_SWITCHES)
+                                           LIVE_MONEY_SWITCHES,
+                                           LORE_READER_SWITCHES)
         self.assertEqual(set(LIVE_MONEY_SWITCHES), set(self.LIVE))
+        # Beside the brake and the live switches, the two Lore readers
+        # (Agents group): each is armed by its own decision (lore/policy.py).
         self.assertEqual(BULK_ENABLE_EXEMPT,
-                         frozenset({"morgul_brake", *LIVE_MONEY_SWITCHES}))
+                         frozenset({"morgul_brake", *LIVE_MONEY_SWITCHES,
+                                    *LORE_READER_SWITCHES}))
         system = {c["key"]: c for c in DEFAULT_COMPONENTS
                   if c["category"] == "system"}
-        for key in BULK_ENABLE_EXEMPT:
+        agent = {c["key"] for c in DEFAULT_COMPONENTS
+                 if c["category"] == "agent"}
+        for key in BULK_ENABLE_EXEMPT - set(LORE_READER_SWITCHES):
             self.assertIn(key, system, key)
+        for key in LORE_READER_SWITCHES:
+            self.assertIn(key, agent, key)
         # A future System switch whose key says it arms live money must be
         # named in the tuple too, or this fails.
         for key in system:
@@ -593,12 +601,20 @@ class BulkEnableExemptTests(_Fixture):
         groups = {g["key"]: g for g in resp.context["switches"]["groups"]}
         self.assertEqual(set(groups["system"]["held"]),
                          set(self.LIVE) | {"morgul_brake"})
+        self.assertEqual(set(groups["agent"]["held"]),
+                         {"lore_staff", "lore_background"})
         self.assertEqual(groups["scraper"]["held"], [])
+        # One line per group that holds something: System, then Agents.
         lines = [ln for ln in resp.content.decode().splitlines()
                  if "all on leaves" in ln]
-        self.assertEqual(len(lines), 1, lines)
+        self.assertEqual(len(lines), 2, lines)
+        system_line = next(ln for ln in lines if "morgul_brake" in ln)
         for key in self.LIVE + ("morgul_brake",):
-            self.assertIn(key, lines[0])
+            self.assertIn(key, system_line)
+        agent_line = next(ln for ln in lines if ln is not system_line)
+        self.assertIn("lore_staff", agent_line)
+        self.assertIn("lore_background", agent_line)
+        self.assertNotIn("morgul_brake", agent_line)
 
 
 # ── the Run lane ────────────────────────────────────────────────────────

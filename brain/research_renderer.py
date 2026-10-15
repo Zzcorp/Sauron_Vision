@@ -63,7 +63,14 @@ def _url_for_marker(kind: str, value: str) -> Optional[str]:
         return "/earnings-reviews/"
     if kind == "KNOWLEDGE":
         return "/knowledge/"
+    if kind == "LORE":
+        # An entry of Sauron's library (lore/): the page is staff-only in
+        # any case. A value that is not a slug is kept verbatim.
+        return f"/lore/{value}/" if _LORE_SLUG_RE.match(value) else None
     return None
+
+
+_LORE_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 def _label_for_marker(kind: str, value: str) -> str:
@@ -84,6 +91,8 @@ def _label_for_marker(kind: str, value: str) -> str:
         return f"earnings #{short}"
     if kind_lower == "knowledge":
         return f"knowledge #{short}"
+    if kind_lower == "lore":
+        return f"library: {short}"
     return short
 
 

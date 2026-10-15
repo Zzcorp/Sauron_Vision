@@ -1004,7 +1004,11 @@ class QuestionTests(_EyeCase):
         answer = ("## Regime\n\n**Mean-reverting** since Tuesday, per "
                   "<<REPORT:17>>.\n\n- first point\n\n" + "word " * 1200)
 
-        def complete(pk):
+        calls = []
+
+        def complete(pk, **kw):
+            # The eye passes channel="telegram" (no library block there).
+            calls.append(kw)
             from brain.research_agent import _settle
             _settle(ResearchMessage.objects.get(pk=pk), content=answer)
             return {"ok": True}
@@ -1014,6 +1018,9 @@ class QuestionTests(_EyeCase):
                 patch(SEND, return_value=True) as send:
             out = eye.answer_question(pending.pk)
         self.assertEqual(out, {"status": "success", "sent": 1})
+        # The fence for a group that can hold people who are not staff: the
+        # Lore's block is never asked for on this channel (lore/policy.py).
+        self.assertEqual(calls, [{"channel": "telegram"}])
         self.assertEqual(send.call_args.args[1], "Sauron — answer")
         body = send.call_args.args[2]
         self.assertTrue(body.startswith("Regime\n\nMean-reverting since "

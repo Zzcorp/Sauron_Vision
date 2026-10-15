@@ -66,7 +66,10 @@ RECORD_FALSE_ALLOWED = {"ai_agents/base_agent.py", "ai_agents/tasks.py"}
 # deliberately absent: this very file contains the strings it polices.
 SCAN_DIRS = ("ai_agents", "brain", "dashboard", "bot_program", "core",
              "signals", "portfolio", "market_data", "scraping", "alerts",
-             "strategies", "backtester", "instruments", "indicators")
+             "strategies", "backtester", "instruments", "indicators",
+             # The Lore (2026-10-14): no model call in PR1; listed now so the
+             # keeper's call is caught the day it lands.
+             "lore")
 
 
 def _client_returning(text="ok", input_tokens=1000, output_tokens=500):

@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}{{ entry.title }} · The Lore{% endblock %}
+{% block page_title %}❧ THE LORE · {{ entry.title }}{% endblock %}
+{% block extra_css %}
+<style>
+.lore-crumb { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+.lore-crumb a { color: inherit; }
+.lore-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 14px; }
+.lore-badge { font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border, rgba(255,255,255,.14)); color: var(--text-muted); }
+.lore-badge.reviewed { border-color: var(--up, #3fb950); color: var(--up, #3fb950); }
+.lore-badge.draft { border-color: var(--warn, #d29922); color: var(--warn, #d29922); }
+.lore-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; }
+.lore-section { padding: 12px 16px; font-size: 13px; line-height: 1.55; }
+.lore-section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin: 0 0 8px; }
+.lore-section ol, .lore-section ul { margin: 0; padding-left: 20px; }
+.lore-section li { margin-bottom: 6px; }
+.lore-facets { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; font-size: 12px; }
+.lore-facets b { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); }
+.lore-src { font-size: 12px; margin-bottom: 10px; }
+.lore-src .url { font-family: var(--font-mono); font-size: 11px; word-break: break-all; }
+.lore-src .note { color: var(--text-muted); }
+.lore-src .quote { font-style: italic; }
+.lore-why { color: var(--text-muted); }
+.lore-review label { display: block; font-size: 12px; margin-bottom: 6px; }
+.lore-review textarea { width: 100%; min-height: 54px; font: inherit; font-size: 12px; background: var(--bg-elevated, rgba(255,255,255,.04)); color: inherit; border: 1px solid var(--border, rgba(255,255,255,.12)); border-radius: 6px; padding: 6px; }
+.lore-review .btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.lore-state { font-size: 12px; margin-bottom: 10px; }
+.lore-history { font-size: 11px; font-family: var(--font-mono); color: var(--text-muted); }
+@media (max-width: 768px) { .lore-grid { grid-template-columns: minmax(0, 1fr); } }
+</style>
+{% endblock %}
+{% block content %}
+<div id="lore-page">
+{% if messages %}<ul class="lore-messages" style="list-style:none;margin:0 0 12px;padding:0;">{% for m in messages %}<li class="card" style="padding:8px 12px;font-size:12px;margin-bottom:6px;">{{ m }}</li>{% endfor %}</ul>{% endif %}
+<div class="lore-crumb"><a href="{% url 'lore:index' %}">The Lore</a> / {{ entry.title }}</div>
+<h1 style="margin:0;font-size:22px;">{{ entry.title }}</h1>
+<div class="lore-badges">
+    <span class="lore-badge">{{ entry.get_kind_display }}</span>
+    <span class="lore-badge">Evidence: {{ entry.evidence_grade }}</span>
+    <span class="lore-badge {{ entry.status }}">{{ entry.get_status_display }}</span>
+    <span class="lore-badge">Origin: {% if entry.origin == "world" %}The world{% else %}Sauron's own record{% endif %}</span>
+    <span class="lore-badge">Proposed by: {{ proposer_label }}</span>
+    <span class="lore-badge">v{{ entry.version }}</span>
+</div>
+
+<div class="lore-grid">
+<div>
+    <div class="card" style="margin-bottom:14px;"><div class="lore-section lore-facets">
+        <div><b>Asset classes</b>{% if class_labels %}{{ class_labels|join:", " }}{% else %}Not tagged yet{% endif %}</div>
+        <div><b>Regimes where it works</b>{% if works_labels %}{{ works_labels|join:", " }}{% else %}Not tagged yet{% endif %}</div>
+        <div><b>Regimes where it breaks</b>{% if breaks_labels %}{{ breaks_labels|join:", " }}{% else %}Not tagged yet{% endif %}</div>
+        <div><b>Horizon</b>{% if horizon_labels %}{{ horizon_labels|join:", " }}{% else %}Not tagged yet{% endif %}</div>
+        <div><b>Tags</b>{% if entry.tags %}{% for t in entry.tags %}<a href="{% url 'lore:index' %}?tag={{ t|urlencode }}">#{{ t }}</a> {% endfor %}{% else %}Not tagged yet{% endif %}</div>
+    </div></div>
+
+    <div class="card" style="margin-bottom:14px;"><div class="lore-section"><h2>In short</h2>{{ entry.summary }}</div></div>
+    <div class="card" style="margin-bottom:14px;"><div class="lore-section"><h2>How it works</h2>{{ entry.mechanism }}</div></div>
+    <div class="card" style="margin-bottom:14px;"><div class="lore-section"><h2>Works when</h2>{{ entry.works_when }}</div></div>
+    {% if entry.markets_text %}<div class="card" style="margin-bottom:14px;"><div class="lore-section"><h2>Markets</h2>{{ entry.markets_text }}</div></div>{% endif %}
+
+    <div class="card" style="margin-bottom:14px;"><div class="lore-section"><h2>Breaks when</h2>
+    {% if claims.breaks %}<ol>{% for c in claims.breaks %}<li>{{ c.text }}{% if c.episode %} <span class="lore-why">Seen in: {{ c.episode }}</span>{% endif %} {% for l in c.labels %}<span class="lore-badge">{{ l }}</span>{% endfor %}</li>{% endfor %}</ol>
+    {% else %}<span class="lore-why">No failure mode recorded.</span>{% endif %}</div></div>
+
+    <div class="card" style="margin-bottom:14px;"><div class="lore-section"><h2>Documented</h2>
+    <ol>{% for c in claims.documented %}<li>{{ c.text }} {% for l in c.labels %}<span class="lore-badge">{{ l }}</span>{% endfor %}</li>{% endfor %}</ol></div></div>
+
+    <div class="card" style="margin-bottom:14px;"><div class="lore-section"><h2>Reputed, not proven</h2>
+    {% if claims.reputed %}<ol>{% for c in claims.reputed %}<li>{{ c.text }} <span class="lore-why">Why only reputed: {{ c.basis }}</span> {% for l in c.labels %}<span class="lore-badge">{{ l }}</span>{% endfor %}</li>{% endfor %}</ol>
+    {% else %}Nothing reputed is recorded: every claim in this entry is documented.{% endif %}</div></div>
+
+    {% if entry.small_account_can or entry.small_account_cannot %}
+    <div class="card" style="margin-bottom:14px;"><div class="lore-section"><h2>On a small account</h2>
+    {% if entry.small_account_can %}<div><b>Can:</b> {{ entry.small_account_can }}</div>{% endif %}
+    {% if entry.small_account_cannot %}<div><b>Cannot:</b> {{ entry.small_account_cannot }}</div>{% endif %}</div></div>
+    {% endif %}
+
+    <div class="card" style="margin-bottom:14px;"><div class="lore-section"><h2>Sauron's replay</h2>
+    {% if replay %}<div class="lore-why">Simulated on past bars by the proving ground, not live trading.</div><ul>{% for line in replay %}<li>{{ line }}</li>{% endfor %}</ul>
+    {% elif entry.families %}<span class="lore-why">No saved replay for {{ entry.families|join:", " }} yet.</span>
+    {% else %}<span class="lore-why">No proving family is linked to this entry.</span>{% endif %}</div></div>
+
+    <div class="card" style="margin-bottom:14px;"><div class="lore-section"><h2>Sources</h2>
+    {% for s in sources %}
+    <div class="lore-src">
+        <div>[S{{ s.position }}] {{ s.by }}. "{{ s.title }}". {{ s.kind_label }}, {{ s.date_text }}.{% if s.date_kind == "approximate" %} (approximate date){% elif s.date_kind == "accessed" %} Undated; read on {{ s.date_text }}{% endif %}
+            {% if s.found_via == "opened" %}<span class="lore-badge reviewed">Opened {{ s.checked_on|date:"Y-m-d" }}{% if s.checked_by %} by {{ s.checked_by.get_username }}{% endif %}</span>{% else %}<span class="lore-badge">Search summary only</span>{% endif %}</div>
+        <div class="url"><a href="{{ s.url }}" rel="noopener noreferrer" target="_blank">{{ s.url }}</a></div>
+        {% if s.note %}<div class="note">{{ s.note }}</div>{% endif %}
+        {% if s.quote %}<div class="quote">"{{ s.quote }}" — {{ s.by }}</div>{% endif %}
+    </div>
+    {% empty %}<span class="lore-why">No source recorded.</span>{% endfor %}
+    </div></div>
+
+    <div class="card" style="margin-bottom:14px;"><div class="lore-section"><h2>Related entries</h2>
+    {% if links.related %}<div><b>Related:</b> {% for o in links.related %}<a href="{% url 'lore:entry' o.slug %}">{{ o.title }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+    {% if links.illustrates %}<div><b>Illustrates:</b> {% for o in links.illustrates %}<a href="{% url 'lore:entry' o.slug %}">{{ o.title }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+    {% if links.illustrated_by %}<div><b>Illustrated by:</b> {% for o in links.illustrated_by %}<a href="{% url 'lore:entry' o.slug %}">{{ o.title }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+    {% if links.contradicts %}<div><b>Contradicts:</b> {% for o in links.contradicts %}<a href="{% url 'lore:entry' o.slug %}">{{ o.title }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+    {% if not links.related and not links.illustrates and not links.illustrated_by and not links.contradicts %}<span class="lore-why">No related entry.</span>{% endif %}
+    </div></div>
+
+    {% if entry.code_refs %}
+    <div class="card" style="margin-bottom:14px;"><div class="lore-section"><h2>In Sauron's code</h2>
+    <ul>{% for x in entry.code_refs %}<li><span style="font-family:var(--font-mono);font-size:11px;">{{ x.ref }}</span> — {{ x.note }}</li>{% endfor %}</ul></div></div>
+    {% endif %}
+</div>
+
+<aside>
+    <div class="card lore-review" style="margin-bottom:14px;">
+        <div class="card-header"><span class="card-title">Review</span></div>
+        <div class="lore-section">
+            <div class="lore-state">
+            {% if entry.status == "draft" %}Draft: no agent reads this entry until it is reviewed.
+            {% elif entry.status == "reviewed" %}Reviewed by {{ entry.reviewed_by.get_username|default:"staff" }} on {{ entry.reviewed_at|date:"Y-m-d" }}. Agents cleared for the library may read it.
+            {% elif entry.status == "retired" %}Retired on {{ entry.retired_at|date:"Y-m-d" }}. No agent reads it; it stays here for the record.
+            {% else %}Rejected on {{ entry.updated_at|date:"Y-m-d" }}: {{ entry.review_note|default:"no reason recorded" }}{% endif %}
+            </div>
+            {% if entry.review_note and entry.status != "rejected" %}<div class="lore-why" style="margin-bottom:8px;">Note: {{ entry.review_note }}</div>{% endif %}
+            {% if can_review %}
+            {% if entry.status == "draft" %}
+            <form method="post" action="{% url 'lore:review' entry.slug %}">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="reviewed">
+                <input type="hidden" name="content_sha" value="{{ entry.content_sha }}">
+                {% for key, text in checks %}<label><input type="checkbox" name="check_{{ key }}" value="1"> {{ text }}</label>{% endfor %}
+                <label>Review note (optional, 300 characters)<textarea name="note" maxlength="300"></textarea></label>
+                <div class="btns"><button type="submit" class="btn btn-sm">Mark reviewed</button></div>
+            </form>
+            {% endif %}
+            {% if sources %}
+            <form method="post" action="{% url 'lore:review' entry.slug %}" style="margin-top:10px;">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="opened">
+                {% for s in sources %}{% if s.found_via != "opened" %}<label><input type="checkbox" name="opened" value="{{ s.position }}"> I opened S{{ s.position }}</label>{% endif %}{% endfor %}
+                <div class="btns"><button type="submit" class="btn btn-sm">Record the sources I opened</button></div>
+            </form>
+            {% endif %}
+            <form method="post" action="{% url 'lore:review' entry.slug %}" style="margin-top:10px;">
+                {% csrf_token %}
+                <label>Why (kept with the entry)<textarea name="note" maxlength="300"></textarea></label>
+                <div class="btns">
+                    {% if entry.status == "reviewed" %}<button type="submit" name="action" value="draft" class="btn btn-sm">Back to draft</button>{% endif %}
+                    {% if entry.status != "retired" %}<button type="submit" name="action" value="retire" class="btn btn-sm">Retire</button>{% endif %}
+                    {% if entry.status != "rejected" %}<button type="submit" name="action" value="reject" class="btn btn-sm">Reject</button>{% endif %}
+                    {% if entry.status == "retired" or entry.status == "rejected" %}<button type="submit" name="action" value="restore" class="btn btn-sm">Restore as a draft</button>{% endif %}
+                </div>
+            </form>
+            {% else %}
+            <div class="lore-why">Only a reviewer may change this entry's state.</div>
+            {% endif %}
+            <div class="btns" style="margin-top:10px;"><a class="btn btn-sm" href="{% url 'admin:lore_loreentry_change' entry.pk %}">Edit in the admin</a></div>
+        </div>
+    </div>
+    <div class="card" style="margin-bottom:14px;">
+        <div class="card-header"><span class="card-title">History</span></div>
+        <div class="lore-section lore-history">
+        {% for r in revisions %}<div>Version {{ r.version }} · {{ r.via }} · {% if r.saved_by %}{{ r.saved_by.get_username }}{% else %}the platform{% endif %} · {{ r.created_at|date:"Y-m-d H:i" }}</div>{% empty %}No revision recorded.{% endfor %}
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-header"><span class="card-title">Read by agents</span></div>
+        <div class="lore-section">
+        {% if n_reads %}{{ n_reads }} read{{ n_reads|pluralize }} in the last 30 days (last: {{ reads.0.agent }}, {{ reads.0.created_at|date:"Y-m-d" }}){% else %}Not read by any agent yet.{% endif %}
+        </div>
+    </div>
+</aside>
+</div>
+</div><!-- /lore-page -->
+{% endblock %}
