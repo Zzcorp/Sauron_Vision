@@ -1,4 +1,4 @@
-"""THE MORGUL GUARDS: the orcs that save Sauron from itself (2026-09-26).
+"""THE MORGUL GUARDS: the guards that save Sauron from itself (2026-09-26).
 
 The operator, 2026-09-26/27: "we need a 'Morgul', or orcs to save Sauron
 from itself" -- "guards". The trigger: on Saturday 2026-09-26 at 13:53 UTC

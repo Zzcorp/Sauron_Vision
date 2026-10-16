@@ -56,6 +56,9 @@ BYPASS_SITES = {
     "brain/horizon.py": "agent.agent_name",
     "brain/close_advice.py": "agent.agent_name",
     "ai_agents/consensus.py": '"consensus"',
+    # The provider smoke (PR O0a): the operator's own measurement, run by
+    # hand on the server, booked like every other call.
+    "ai_agents/management/commands/claude_smoke.py": '"claude_smoke"',
 }
 
 # The only files allowed to opt out of the provider's ledger write —
@@ -210,6 +213,46 @@ class ProviderLedgerTests(TestCase):
         row = AgentTask.objects.get()
         self.assertEqual(row.structured_output,
                          {"source_ref": "ResearchMessage:42"})
+
+    def test_the_row_records_its_latency_and_cache_columns(self):
+        """PR O0a: the provider's own row carries duration_seconds (it
+        used to stay 0 at the choke point) and the cache read and write
+        tokens, 0 on a call that cached nothing."""
+        from ai_agents.models import AgentTask
+        with patch("ai_agents.providers.claude_provider._monotonic",
+                   side_effect=[100.0, 101.75]):
+            _, usage = self._complete(model="claude-opus-5",
+                                      agent_name="sauron_mind")
+        row = AgentTask.objects.get()
+        self.assertEqual(row.duration_seconds, 1.75)
+        self.assertEqual(usage["duration_seconds"], 1.75)
+        self.assertEqual((row.cache_read_tokens, row.cache_write_tokens),
+                         (0, 0))
+
+    def test_cache_tokens_land_on_the_row_and_in_the_cost(self):
+        from types import SimpleNamespace
+        from ai_agents.catalog import cost_usd
+        from ai_agents.models import AgentTask
+        from ai_agents.providers.claude_provider import ClaudeProvider
+        client = _client_returning()
+        (client.messages.stream.return_value.__enter__.return_value
+         .get_final_message.return_value).usage = SimpleNamespace(
+            input_tokens=1000, output_tokens=500,
+            cache_read_input_tokens=8000, cache_creation_input_tokens=3000,
+            cache_creation=SimpleNamespace(ephemeral_5m_input_tokens=1000,
+                                           ephemeral_1h_input_tokens=2000))
+        provider = ClaudeProvider()
+        with patch.object(provider, "_get_client", return_value=client):
+            _, usage = provider.complete("sys", "q", model="claude-opus-5-5",
+                                         agent_name="sauron_mind")
+        row = AgentTask.objects.get()
+        self.assertEqual((row.cache_read_tokens, row.cache_write_tokens),
+                         (8000, 3000))
+        want = round(cost_usd("claude-opus-5-5", input_tokens=1000,
+                              output_tokens=500, cache_read=8000,
+                              cache_write_5m=1000, cache_write_1h=2000), 6)
+        self.assertEqual(usage["cost_usd"], want)
+        self.assertEqual(float(row.cost_usd), want)
 
 
 class CallSiteConventionTests(TestCase):

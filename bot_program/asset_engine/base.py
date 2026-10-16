@@ -34,6 +34,10 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+# "Not passed" for AssetBot._merge_row_metadata's stop_loss: None is a value
+# a row's stop may legitimately be written to.
+_UNSET = object()
+
 
 # How far into its own ceiling a position gets before the operator is told.
 # A fraction rather than a fixed lead time, because the ceilings in
@@ -2756,33 +2760,38 @@ class AssetBot(ABC):
                 resting = Decimal(str(accepted))
             except (TypeError, ValueError, InvalidOperation):
                 resting = candidate      # keep the request rather than none
-        meta = dict(trade.metadata or {})
-        moves = list(meta.get("stop_moves") or [])
-        # "at" stays the MARK the move was made at; "when" is the moment the
-        # venue accepted it (2026-10-07): venue_exit._level_changed_at reads
-        # it, so a crossing stamped at the old level is never evidence for
-        # the new one.
-        moves.append({"to": str(resting), "asked": str(candidate),
-                      "at": str(price), "why": why + ":broker",
-                      "when": timezone.now().isoformat()})
-        meta["stop_moves"] = moves[-20:]
-        if why == "breakeven":
-            # the rule's own lock only: a lock moved beyond the crowd is a
-            # stand-in, offered again until the full one goes in
-            meta["breakeven_armed"] = True
-        # A leg that MOVED is proof the rules are not inert after all — and
-        # the run of failures that led to the stamp is over, so the count and
-        # the venue's last words go with it. Leaving the count would make the
-        # next single failure look like the fourth and stamp the row on a
-        # blip; leaving the detail would print a stale reason on the page.
-        meta.pop("stop_rules_inert", None)
-        meta.pop("stop_rules_inert_detail", None)
-        meta.pop("stop_move_failures", None)
-        meta.pop("stop_move_last_error", None)
-        meta.pop("stop_move_last_at", None)
-        trade.stop_loss = resting
-        trade.metadata = meta
-        trade.save(update_fields=["stop_loss", "metadata"])
+        when = timezone.now().isoformat()
+
+        def _moved(meta):
+            moves = list(meta.get("stop_moves") or [])
+            # "at" stays the MARK the move was made at; "when" is the moment
+            # the venue accepted it (2026-10-07): venue_exit._level_changed_at
+            # reads it, so a crossing stamped at the old level is never
+            # evidence for the new one.
+            moves.append({"to": str(resting), "asked": str(candidate),
+                          "at": str(price), "why": why + ":broker",
+                          "when": when})
+            meta["stop_moves"] = moves[-20:]
+            if why == "breakeven":
+                # the rule's own lock only: a lock moved beyond the crowd is
+                # a stand-in, offered again until the full one goes in
+                meta["breakeven_armed"] = True
+            # A leg that MOVED is proof the rules are not inert after all —
+            # and the run of failures that led to the stamp is over, so the
+            # count and the venue's last words go with it. Leaving the count
+            # would make the next single failure look like the fourth and
+            # stamp the row on a blip; leaving the detail would print a stale
+            # reason on the page.
+            meta.pop("stop_rules_inert", None)
+            meta.pop("stop_rules_inert_detail", None)
+            meta.pop("stop_move_failures", None)
+            meta.pop("stop_move_last_error", None)
+            meta.pop("stop_move_last_at", None)
+        # MERGED into the row read fresh under its lock (PR O0b), after the
+        # venue answered: this tick's copy of the metadata is minutes old by
+        # now, and saving it whole clobbered what the care, a hand edit or a
+        # manual close wrote meanwhile.
+        self._merge_row_metadata(trade, _moved, stop_loss=resting)
         logger.info("[%s_bot] %s %s moved the BROKER stop to %s (asked %s) "
                     "at mark %s", self.asset_class, trade.symbol, why,
                     resting, candidate, price)
@@ -2812,16 +2821,20 @@ class AssetBot(ABC):
         reaching the venue for good.
         """
         try:
-            meta = dict(trade.metadata or {})
-            fails = int(meta.get("stop_move_failures") or 0) + 1
-            meta["stop_move_failures"] = fails
-            # The venue's OWN words, not our summary of them: "leg 3 is not
-            # among the open orders" and "no session" call for opposite
-            # actions from the operator.
-            meta["stop_move_last_error"] = str(note)[:300]
-            meta["stop_move_last_at"] = timezone.now().isoformat()
-            trade.metadata = meta
-            trade.save(update_fields=["metadata"])
+            counted = {}
+            at = timezone.now().isoformat()
+
+            def _failed(meta):
+                # counted on the ROW (PR O0b): the merge reads it fresh
+                counted["fails"] = int(meta.get("stop_move_failures") or 0) + 1
+                meta["stop_move_failures"] = counted["fails"]
+                # The venue's OWN words, not our summary of them: "leg 3 is
+                # not among the open orders" and "no session" call for
+                # opposite actions from the operator.
+                meta["stop_move_last_error"] = str(note)[:300]
+                meta["stop_move_last_at"] = at
+            self._merge_row_metadata(trade, _failed)
+            fails = counted["fails"]
         except Exception as e:  # pragma: no cover — never block the tick
             logger.warning("[%s_bot] could not record a failed stop move on "
                            "%s: %s", self.asset_class, trade.symbol, e)
@@ -2864,21 +2877,71 @@ class AssetBot(ABC):
                 "position until a leg moves again",
                 self.asset_class, trade.symbol, detail or "no leg matched")
         try:
-            meta = dict(meta)
-            meta["stop_rules_inert"] = reason
-            if detail:
-                meta["stop_rules_inert_detail"] = str(detail)[:200]
-            else:
-                # Re-stamped with a DIFFERENT reason and no detail of its own:
-                # the detail on the row belongs to the reason being replaced,
-                # and leaving it prints legs_unmovable's venue words beside a
-                # broker_protected stamp.
-                meta.pop("stop_rules_inert_detail", None)
-            trade.metadata = meta
-            trade.save(update_fields=["metadata"])
+            def _inert(meta):
+                meta["stop_rules_inert"] = reason
+                if detail:
+                    meta["stop_rules_inert_detail"] = str(detail)[:200]
+                else:
+                    # Re-stamped with a DIFFERENT reason and no detail of its
+                    # own: the detail on the row belongs to the reason being
+                    # replaced, and leaving it prints legs_unmovable's venue
+                    # words beside a broker_protected stamp.
+                    meta.pop("stop_rules_inert_detail", None)
+            self._merge_row_metadata(trade, _inert)
         except Exception as e:  # pragma: no cover - never block the tick
             logger.warning("[%s_bot] could not stamp stop_rules_inert: %s",
                            self.asset_class, e)
+
+    @staticmethod
+    def _merge_row_metadata(trade, mutate, *, stop_loss=_UNSET) -> dict:
+        """Apply `mutate(meta)` to the row's metadata READ FRESH UNDER A ROW
+        LOCK and save it (with `stop_loss` when given), the way
+        position_care._save_care merges the care (PR O0b). The stop mover
+        and its two notes saved the tick's whole in-memory copy, minutes
+        old by the time the venue answered, and so clobbered what the care,
+        a hand levels edit or a manual close had written meanwhile.
+
+        Called only AFTER the venue answered: no lock is ever held across
+        a venue call. `initial_stop_loss` is the one key a caller may stamp
+        in memory and leave to this save (position_care._mirror_to_venue,
+        the risk denominator stamped before the stop moves): it is carried
+        over when the fresh row has none. A trade that is not a saved model
+        row, or whose row is gone, gets exactly the old write: the copy in
+        memory, mutated and saved. Returns the metadata written."""
+        from django.db import models, transaction
+        fields = (["metadata"] if stop_loss is _UNSET
+                  else ["stop_loss", "metadata"])
+        pk = getattr(trade, "pk", None)
+        if isinstance(trade, models.Model) and pk is not None:
+            model = type(trade)
+            with transaction.atomic():
+                try:
+                    row = model.objects.select_for_update().get(pk=pk)
+                except model.DoesNotExist:
+                    row = None
+                if row is not None:
+                    meta = dict(row.metadata or {})
+                    stamped = (trade.metadata or {}).get("initial_stop_loss")
+                    if meta.get("initial_stop_loss") is None \
+                            and stamped is not None:
+                        meta["initial_stop_loss"] = stamped
+                    mutate(meta)
+                    row.metadata = meta
+                    if stop_loss is not _UNSET:
+                        row.stop_loss = stop_loss
+                    row.save(update_fields=fields)
+            if row is not None:
+                trade.metadata = meta
+                if stop_loss is not _UNSET:
+                    trade.stop_loss = stop_loss
+                return meta
+        meta = dict(trade.metadata or {})
+        mutate(meta)
+        if stop_loss is not _UNSET:
+            trade.stop_loss = stop_loss
+        trade.metadata = meta
+        trade.save(update_fields=fields)
+        return meta
 
     def _update_trailing_stop(self, trade, price: Decimal) -> bool:
         """Move the stop as the trade runs. True if it moved.
@@ -4942,7 +5005,9 @@ class AssetBot(ABC):
         market. The last entry read per symbol lives on
         extras["entry_marks"] (bounded, written only when the mid or the
         freeze clock moved). {ok, why, verdict}. Never raises: a read that
-        fails lets the entry run as before."""
+        fails lets the entry run as before, and says so with "unread": True
+        (PR O0b: _last_look(fail_closed=True) refuses on it; the default
+        reads ok and why only, as before)."""
         try:
             from bot_program import mark_sanity
             from bot_program.asset_engine.safety import _extras, _save_extras
@@ -4976,10 +5041,10 @@ class AssetBot(ABC):
             logger.warning("[%s_bot] %s: entry quote unread (%s) — the entry "
                            "runs on the quote as before", self.asset_class,
                            symbol, e)
-            return {"ok": True, "why": "", "verdict": {}}
+            return {"ok": True, "why": "", "verdict": {}, "unread": True}
 
     def _last_look(self, client, symbol, side, price, sl, tp, *,
-                   cand=None) -> dict:
+                   cand=None, fail_closed=False) -> dict:
         """THE LAST LOOK before a live order (2026-10-05): ONE fresh read
         of the venue's quote through the trade client, three reads off it
         — the DRIFT since the proposal (_drift_since_proposal: the trade
@@ -4997,10 +5062,23 @@ class AssetBot(ABC):
         EXCEPT a read that met eToro's 429 or failed inside this process's
         429 pause (2026-10-07): then "refused" carries the words and the
         caller sends nothing. Both are keyed on the adapter (eToro only):
-        another carrier's 429 refuses nothing, as before. Never raises."""
+        another carrier's 429 refuses nothing, as before. Never raises.
+
+        `fail_closed` (PR O0b, for a caller that ADDS risk; no caller passes
+        it yet, the entry keeps the default): every path above that refuses
+        nothing (a look that could not be read, a tick that is not a quote,
+        a quote with no price, a drift that could not be read, an entry
+        quote gate that could not judge the quote) sets "refused" with its
+        words instead. The 429 and the pause answer as they do at the
+        default."""
         from bot_program import mark_sanity
         from bot_program.asset_engine import skips
         out = {"skip": "", "why": "", "quote": None}
+
+        def _closed(what):
+            out["refused"] = (f"{symbol}: the last look {what} — nothing "
+                              f"sent: this look fails closed")
+            return out
         try:
             tk = client.ticker(symbol)
         except Exception as e:  # noqa: BLE001
@@ -5026,18 +5104,21 @@ class AssetBot(ABC):
                                   f"({_paused:.0f}s left) — nothing sent on "
                                   f"the proposal's price")
                 return out
+            if fail_closed:
+                return _closed(f"could not read the quote ({e})")
             logger.info("[%s_bot] %s: the last look could not read the "
                         "quote (%s) — the order goes on the proposal's "
                         "price", self.asset_class, symbol, e)
             return out
         if not isinstance(tk, dict):
-            return out
+            return _closed("got no quote back") if fail_closed else out
         try:
             fresh = float(tk.get("lastPrice") or 0)
         except (TypeError, ValueError):
             fresh = 0.0
         if fresh <= 0:
-            return out
+            return (_closed("read a quote with no price")
+                    if fail_closed else out)
         age_s = None
         created = getattr(cand, "created_at", None)
         if created is not None:
@@ -5051,12 +5132,19 @@ class AssetBot(ABC):
         except Exception as e:  # noqa: BLE001
             logger.info("[%s_bot] %s: drift unread (%s)", self.asset_class,
                         symbol, e)
+            if fail_closed:
+                return _closed(f"could not read the drift since the "
+                               f"proposal ({e})")
             drift = ""
         if drift:
             out.update(skip=skips.GATE_BLOCKED, why=drift)
             return out
         gate = self._entry_quote_gate(symbol, tk, client, stop=sl)
         v = gate.get("verdict") or {}
+        if fail_closed and (gate.get("unread") or not v):
+            # the gate failed open: the quote's sanity was never judged, or
+            # its verdict was lost (a failed entry_marks save discards it)
+            return _closed("could not read the entry quote's sanity")
         r = v.get("half_spread_r")
         out["quote"] = {
             "mid": v.get("mid"), "bid": v.get("bid"), "ask": v.get("ask"),

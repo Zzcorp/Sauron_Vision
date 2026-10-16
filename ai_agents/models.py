@@ -17,6 +17,12 @@ class AgentTask(models.Model):
     prompt_summary = models.TextField()
     input_tokens = models.IntegerField(default=0)
     output_tokens = models.IntegerField(default=0)
+    # The prompt cache's share of the call (PR O0a): tokens read from the
+    # cache and written to it (5-minute and 1-hour writes together). 0 on
+    # every call that sends no cache_control, which is every call before
+    # the Orcs. cost_usd already prices them; these say why it is lower.
+    cache_read_tokens = models.IntegerField(default=0)
+    cache_write_tokens = models.IntegerField(default=0)
     cost_usd = models.DecimalField(max_digits=10, decimal_places=6, default=0)
 
     response_summary = models.TextField(blank=True)

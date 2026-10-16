@@ -277,8 +277,9 @@ def adjust_levels(user, trade, stop=None, target=None, clear_target=False):
         # grading measures R against the stop the trade opened with.
         meta = dict(fresh.metadata or {})
         moves = list(meta.get("level_edits") or [])
+        edit_at = _now_iso()
         moves.append({
-            "at": _now_iso(),
+            "at": edit_at,
             "by": getattr(user, "username", "") or "operator",
             "stop": str(stop) if stop is not None else None,
             "target": (None if clear_target
@@ -291,6 +292,13 @@ def adjust_levels(user, trade, stop=None, target=None, clear_target=False):
             "broker": broker_note or ("row-only" if protected else "bot"),
         })
         meta["level_edits"] = moves[-20:]
+        if protected and stop is not None \
+                and not getattr(fresh, "paper", True):
+            # The venue took the operator's stop (the broker leg moved
+            # above, or this function returned): the care records it under
+            # this same row lock (PR O0b, spec §3.3). A record only: the
+            # mirror's own state is not touched.
+            _tell_the_care(meta, stop, at=edit_at)
         fresh.metadata = meta
         fields.append("metadata")
         fresh.save(update_fields=fields)
@@ -312,6 +320,43 @@ def adjust_levels(user, trade, stop=None, target=None, clear_target=False):
 def _now_iso():
     from django.utils import timezone
     return timezone.now().isoformat()
+
+
+def _tell_the_care(meta, stop, *, at):
+    """Record in the position care the stop the venue took from a hand edit
+    (PR O0b, spec §3.3): care["venue_stop_hand"] = {level, at}, on every
+    stop edit of a protected live row, tighter or wider. `meta` is the
+    row's metadata, read under the edit's row lock, changed in place. A row
+    the care has not met yet (no care dict) is left alone: no care is
+    created here.
+
+    A RECORD ONLY. care["venue_stop"] and care["venue_stop_refusal"] are
+    the mirror's own state (position_care._mirror_to_venue) and are not
+    touched: the mirror never reads venue_stop_hand, so every send it makes
+    stays what it was, whatever the sequence of hand edits and ticks.
+
+    Writing care["venue_stop"] from the hand would change real-money sends
+    both ways. A widened level makes the mirror re-send the care's soft
+    stop on its next tick and undo the operator's widen
+    (position_care.py:724-737). A tightened level stays recorded after a
+    later hand widen, and the mirror then skips every care lock between the
+    widened stop and that abandoned level (position_care.py:724-726), where
+    today it copies them to the venue. Teaching the mirror the operator's
+    level is O3's, with the hand hold that reads this record.
+
+    The mirror drops the record when it moves the venue's stop itself, or
+    finds the venue holding another level (position_care._mirror_to_venue).
+    Another mover (the engine's own stop rules) does not, so a reader
+    trusts the record only while its `at` is later than the row's last
+    stop_moves[-1]["when"] (spec §3.3)."""
+    care = meta.get("care")
+    if not isinstance(care, dict):
+        return
+    try:
+        level = float(stop)
+    except (TypeError, ValueError):
+        return
+    meta["care"] = {**care, "venue_stop_hand": {"level": level, "at": at}}
 
 
 def _move_broker_stop(user, trade, stop):
