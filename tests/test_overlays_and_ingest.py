@@ -1678,7 +1678,8 @@ class OrbUnreadSignTests(TestCase):
         script = self._script()
         opener = script.split("function openPanel() {", 1)[1].split("function closePanel()", 1)[0]
         self.assertIn("clearUnread();", opener)
-        for entry in ("window.askSauronAbout = function (subject, kind) {\n        openPanel();",
+        # The Horde (2026-10-08) gave it a third argument, the seat's facts.
+        for entry in ("window.askSauronAbout = function (subject, kind, facts) {\n        openPanel();",
                       "window.openEyeWithQuery = function(q) {\n        openPanel();",
                       "e.preventDefault(); openPanel();"):
             self.assertIn(entry, script)

@@ -13,6 +13,11 @@
  */
 (function (w, d) {
     "use strict";
+    /* Loaded once (2026-10-08): /positions/ has its own tag and the Horde
+     * loads this lazily on any page; a second copy must not bind a second
+     * click handler and open two dialogs. */
+    if (w.SVLevelEdit) return;
+    w.SVLevelEdit = { open: null };
 
     var dlg = null;
 
@@ -164,6 +169,9 @@
                 return;
             }
             close();
+            /* Said once it is saved, so a surface that is not a live
+             * region (the Horde) re-reads its own copy. */
+            d.dispatchEvent(new CustomEvent("sv:levels-saved", { detail: { trade: String(tradeId) } }));
             /* Repainted from the server, never optimistically: a cell
              * showing a level the broker never accepted is the exact
              * failure this whole path exists to avoid. */
@@ -188,4 +196,5 @@
         }
         if (dlg && !dlg.contains(e.target)) { close(); }
     });
+    w.SVLevelEdit.open = open;
 })(window, document);

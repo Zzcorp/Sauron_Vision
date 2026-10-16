@@ -1707,16 +1707,23 @@ def _leverage_map(rows):
         from bot_program.models import AssetBotTrade
         for trade in AssetBotTrade.objects.filter(id__in=list(bots)).only(
                 "id", "asset_class", "metadata", "entry_price", "qty"):
-            meta = trade.metadata or {}
-            entry = _as_float(trade.entry_price) or 0.0
-            qty = abs(_as_float(trade.qty) or 0.0)
-            vpu = _pos_value_per_unit(trade)
-            notional = qty * entry * vpu if (entry and qty) else None
-            out[f"bot-{trade.id}"] = _pos_leverage(
-                trade.asset_class or "", meta=meta, notional=notional)
+            out[f"bot-{trade.id}"] = _trade_leverage(trade)
     except Exception as e:  # noqa: BLE001 — a dash, never a wrong number
         logger.debug("[positions] leverage map failed: %s", e)
     return out
+
+
+def _trade_leverage(trade) -> str:
+    """The leverage one bot row carries, as _pos_leverage prints it — the
+    body of _leverage_map's loop, named so a caller holding the trade
+    already (the Horde, dashboard/horde.py) prints the same figure without
+    a second read of the row."""
+    meta = trade.metadata or {}
+    entry = _as_float(trade.entry_price) or 0.0
+    qty = abs(_as_float(trade.qty) or 0.0)
+    vpu = _pos_value_per_unit(trade)
+    notional = qty * entry * vpu if (entry and qty) else None
+    return _pos_leverage(trade.asset_class or "", meta=meta, notional=notional)
 
 
 #: Who read a venue stamp, in the words the mark's hover says
@@ -1795,6 +1802,10 @@ def _live_row(row, stops, levs=None, worlds=None):
     stop = stops.get(key)
     if stop is None:
         stop = _as_float(getattr(row, "stop_loss", None))
+    if stop is not None and stop <= 0:
+        # 0 is eToro's own spelling of "no stop" (2026-10-15, the Horde's
+        # review): dividing by the whole entry price made a fake R.
+        stop = None
     sign = -1 if (row.direction or "").lower() in ("short", "sell") else 1
 
     # Every term has to be there. An R with no stop behind it is not 0.0R —
