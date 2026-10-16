@@ -41,6 +41,19 @@ AGENT_GROUPS = [
         ("strategy_mutator", "Strategy Mutator", "balanced"),
         ("weekly_reviewer", "Weekly Reviewer", "deep"),
     ]),
+    # THE COUNCIL (2026-10-08, ai_agents/agents/council.py): eight shadow
+    # voices, DEBATE_MODEL unless a row here says otherwise. The council's
+    # own Executioner and Champion read the two debate rows above.
+    ("The council (shadow)", [
+        ("council_opportunist", "The Opportunist", "fast"),
+        ("council_striker", "The Striker", "fast"),
+        ("council_fixer", "The Fixer", "fast"),
+        ("council_gambler", "The Gambler", "fast"),
+        ("council_emperor", "The Emperor (chair)", "fast"),
+        ("council_skeptic", "The Skeptic", "fast"),
+        ("council_awakened", "The Awakened", "fast"),
+        ("council_theorist", "The Theorist", "fast"),
+    ]),
     # Keys MUST equal each agent's runtime agent_name — the resolver looks
     # up overrides by that value, so a friendly-but-wrong key writes a row
     # nothing ever reads.
@@ -136,12 +149,21 @@ def ai_models_dashboard(request):
             "unknown": not known_model(resolved),
         })
 
+    # The debate's and the council's agents answer on DEBATE_MODEL unless a
+    # row says otherwise (trade_debate._agent_model), never on their tier:
+    # the page shows what they actually run on (2026-10-08).
+    from ai_agents.agents.council import COUNCIL_AGENT_NAMES
+    from ai_agents.agents.trade_debate import (DEBATE_AGENT_NAMES,
+                                               effective_model)
+    pinned = set(DEBATE_AGENT_NAMES + COUNCIL_AGENT_NAMES)
+
     agent_groups = []
     for group_name, agents in AGENT_GROUPS:
         rows = []
         for name, label, tier in agents:
             row = overrides.get(("agent", name))
-            resolved = resolve_agent(name, tier)
+            resolved = (effective_model(name) if name in pinned
+                        else resolve_agent(name, tier))
             rows.append({
                 "name": name, "label": label, "tier": tier,
                 "resolved": resolved,

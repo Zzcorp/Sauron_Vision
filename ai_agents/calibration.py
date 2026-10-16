@@ -263,6 +263,15 @@ def trust_adjustment_for(agent: str, lookback_days: int = DEFAULT_LOOKBACK_DAYS)
     bs = brier_score(agent, lookback_days)
     if bs is None:
         return 1.0
+    return trust_from_brier(bs)
+
+
+def trust_from_brier(bs: float) -> float:
+    """The house's Brier bands as a pure function (2026-10-08): the one
+    precedent for weighing an AI voice by its record, read by
+    `trust_adjustment_for` above and by THE COUNCIL's weights
+    (ai_agents/council_grading.py). An uninformative 50% forecaster on a
+    near-even base rate scores about 0.25, which is 1.00: neutral."""
     if bs <= 0.10:
         return 1.30
     if bs <= 0.20:

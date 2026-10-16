@@ -316,7 +316,24 @@ def forensics_detail(request, trade_id: int):
         "track_record": _rule_track_record(trade),
         "lifecycle": _lifecycle(trade),
         "metadata_items": sorted((trade.metadata or {}).items()),
+        # THE COUNCIL AT ENTRY (2026-10-08, ai_agents/agents/council.py):
+        # the newest sitting on this trade, or None (no card).
+        "council": _council_or_none(trade),
     })
+
+
+def _council_or_none(trade):
+    """The council's card for this trade, or None. Fenced: a page never
+    breaks on the council's record."""
+    try:
+        from ai_agents.agents.council import card_payload
+        session = (trade.council_sessions.prefetch_related("voices", "claims")
+                   .order_by("-created_at").first())
+        return card_payload(session) if session is not None else None
+    except Exception:  # noqa: BLE001
+        logger.warning("[forensics] council card unread for #%s", trade.id,
+                       exc_info=True)
+        return None
 
 
 # ── The position page's plain summary (2026-09-26) ──────────────────────

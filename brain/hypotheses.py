@@ -71,8 +71,10 @@ RULE_VENUES = ("live", "demo", "paper")
 #: (2026-10-15): the model-written ones, made reading venue-labelled
 #: tables. A claim of theirs with no venue would grade on the pooled record
 #: (one paper booking deciding it) and move a trust score that prints with
-#: no venue. Rows already posted keep pooled grading.
-VENUE_REQUIRED_FROM = ("strategist", "sauron_mind", "critic")
+#: no venue. Rows already posted keep pooled grading. The council's
+#: Theorist (2026-10-08) is model-written too and argues real money only.
+VENUE_REQUIRED_FROM = ("strategist", "sauron_mind", "critic",
+                       "council_theorist")
 
 
 def rule_rows_for(rule: str, *, venue: str = "", **kw) -> list:
@@ -203,6 +205,35 @@ def _validate_criteria(criteria: dict, horizon_hours: int = 24) -> None:
     elif kind == "anomaly_persists":
         if not criteria.get("anomaly_key"):
             raise UnmeasurableClaim("anomaly_persists needs an anomaly_key")
+
+    elif kind == "price_direction":
+        # THE THEORIST's market theories (2026-10-08, the council): a
+        # symbol the catalogue holds, up or down, and the price the claim
+        # is measured from, written at birth so the grade is reproducible
+        # from the row alone.
+        symbol = str(criteria.get("symbol") or "").strip().upper()
+        try:
+            from instruments.models import Instrument
+            known = bool(symbol) and Instrument.objects.filter(
+                symbol=symbol).exists()
+        except Exception:  # noqa: BLE001 — an unread catalogue grades nothing
+            known = False
+        if not known:
+            raise UnmeasurableClaim(
+                f"price_direction names {symbol or '(no symbol)'!s}, which "
+                f"the catalogue does not hold — no bar could ever grade it")
+        if criteria.get("direction") not in ("up", "down"):
+            raise UnmeasurableClaim(
+                f"price_direction needs a direction of up or down, got "
+                f"{criteria.get('direction')!r}")
+        try:
+            ref = float(criteria.get("reference_price"))
+        except (TypeError, ValueError):
+            ref = float("nan")
+        if not math.isfinite(ref) or ref <= 0:
+            raise UnmeasurableClaim(
+                f"price_direction needs a finite reference price above 0, "
+                f"got {criteria.get('reference_price')!r}")
 
 
 def _refuse_if_the_rule_cannot_trade(criteria: dict,
@@ -534,10 +565,61 @@ def _resolve_anomaly_persists(hyp):
     return node.confidence >= 0.3, f"confidence={node.confidence:.2f}"
 
 
+def _resolve_price_direction(hyp):
+    """`resolution_criteria = {"kind": "price_direction", "symbol": "X",
+    "direction": "up" | "down", "reference_price": 1.2345}` (2026-10-08,
+    THE THEORIST of the council).
+
+    Graded the way a calibration direction call is (ai_agents.calibration,
+    whose constants and market clock are imported, never copied): the
+    first 1h/4h/1d bar at or after the deadline, a move inside the flat
+    band is a miss, and while no bar has printed the claim DEFERS for
+    DIRECTION_GRACE_HOURS of the market's own open hours before it is
+    unresolvable."""
+    from ai_agents.calibration import (DIRECTION_FLAT_BAND,
+                                       DIRECTION_GRACE_HOURS,
+                                       market_hours_between)
+    from market_data.models import PriceData
+
+    crit = hyp.resolution_criteria or {}
+    symbol = str(crit.get("symbol") or "").strip().upper()
+    expected = crit.get("direction")
+    try:
+        ref = float(crit.get("reference_price"))
+    except (TypeError, ValueError):
+        ref = float("nan")
+    if not symbol or expected not in ("up", "down") \
+            or not math.isfinite(ref) or ref <= 0:
+        return None, "ungradeable: incomplete price_direction criteria"
+    deadline = hyp.resolution_deadline
+    if deadline is None:
+        return None, "ungradeable: no deadline recorded"
+    bar = (PriceData.objects
+           .filter(instrument__symbol=symbol,
+                   timeframe__in=("1h", "4h", "1d"),
+                   timestamp__gte=deadline)
+           .order_by("timestamp").first())
+    if bar is None:
+        if market_hours_between(symbol, deadline,
+                                timezone.now()) < DIRECTION_GRACE_HOURS:
+            return DEFER, "no bar at the deadline yet — retrying"
+        return None, (f"no bar within {DIRECTION_GRACE_HOURS:.0f} market "
+                      f"hours after the deadline")
+    close = float(bar.close)
+    move = (close - ref) / ref
+    note = (f"{symbol} {ref:.6g} -> {close:.6g} ({move:+.2%}) by "
+            f"{bar.timestamp:%Y-%m-%d %H:%M} ({bar.timeframe})")
+    if abs(move) <= DIRECTION_FLAT_BAND:
+        return False, f"flat {note} is a miss"
+    actual = "up" if move > 0 else "down"
+    return actual == expected, note
+
+
 RESOLVERS = {
     "regime_holds": _resolve_regime_holds,
     "rule_avg_r": _resolve_rule_avg_r_threshold,
     "anomaly_persists": _resolve_anomaly_persists,
+    "price_direction": _resolve_price_direction,
 }
 
 

@@ -177,6 +177,18 @@ DEFAULT_COMPONENTS = [
      "description": "The strategist reads library entries for the current regime as unquoted background; its briefing never names or quotes them. Reference only: it moves no money.",
      "category": "agent"},
     {"key": "agent_monday_plan", "name": "Monday Planner", "description": "Monday game plan generation (Sunday 18:00 UTC)", "category": "agent"},
+    # THE COUNCIL (2026-10-08, ai_agents/agents/council.py): eight shadow
+    # voices beside the trade debate, the Emperor in the chair. Neither
+    # switch moves money (shadow: nothing reads them back), so neither is
+    # in LIVE_MONEY_SWITCHES and neither ends in _live; the bot lane stops
+    # at the deep tier's 70% of the day's AI budget and at 12 sittings a
+    # day, the ticket costs only when asked. Descriptions measured < 300.
+    {"key": "council_bots", "name": "The Council: live bot orders",
+     "description": "Off (default). On: once a LIVE bot order has left (up to 12 a day), eight more AI voices sit on it beside the Executioner and the Champion, the Emperor in the chair. Shadow: recorded on /council/ and graded on outcomes; no order, size, stop or limit reads them. Paper and demo are never argued.",
+     "category": "agent"},
+    {"key": "council_ticket", "name": "The Council: TAKE TRADE ticket",
+     "description": "Off (default). On: a LIVE TAKE TRADE ticket shows Ask the council. Only that click runs it: ten voices argue the ticket and the Emperor gives a balanced verdict. Advice only: it never blocks, sizes or changes a hand trade, and costs AI budget only when asked.",
+     "category": "agent"},
 
     # ── Phase 3 — AI operational ──────────────────────────────
     {"key": "feature_ai_pretrade_gate", "name": "AI Pre-Trade Sanity Gate",

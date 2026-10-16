@@ -1756,7 +1756,7 @@ class TheBookFollowsTheCode(SimpleTestCase):
         import importlib
         from backtester.proving import proof
         from bot_program import aragorn
-        from ai_agents.agents import trade_debate
+        from ai_agents.agents import council, trade_debate
         from portfolio.models import Portfolio
         from signals.promotion_pipeline import SIZE_FACTORS
 
@@ -1842,6 +1842,14 @@ class TheBookFollowsTheCode(SimpleTestCase):
              "'Aragorn': the trades placed by hand are never his to judge"),
             ("trade_debate.DEBATE_SHADOW_N", lambda: trade_debate.DEBATE_SHADOW_N, 30,
              "'The trade debate': the first 30 graded trades"),
+            # THE COUNCIL (2026-10-08, ai_agents/agents/council.py)
+            ("council.COUNCIL_VOICES", lambda: len(council.COUNCIL_VOICES), 8,
+             "'The council': eight more AI voices"),
+            ("council.COUNCIL_MIN_N", lambda: council.COUNCIL_MIN_N, 10,
+             "'The council': ten of its calls"),
+            ("council.COUNCIL_BOT_SITTINGS_PER_DAY",
+             lambda: council.COUNCIL_BOT_SITTINGS_PER_DAY, 12,
+             "'The council': up to twelve a day"),
             ("Portfolio.max_daily_loss_pct", lambda: field("max_daily_loss_pct"), 3.0,
              "'The limits of the book': 3% of it by default"),
             ("Portfolio.max_pledged_pct", lambda: field("max_pledged_pct"), 50,

@@ -1,0 +1,22 @@
+{% comment %} THE COUNCIL AT ENTRY (2026-10-08, ai_agents/agents/council.py:
+   card_payload). Shadow: what the ten voices said about this trade, and
+   once graded, who was right. Nothing on this page acts on it. {% endcomment %}
+{% if council %}
+<div class="card fade-in-up pd-council" data-role="council-card" style="margin: 16px 0;">
+    <div class="card-header"><span class="card-title">The council at entry</span></div>
+    <p style="padding: 0 16px 6px; font-size: 12px;">Argued {{ council.when|date:"Y-m-d H:i" }} on {{ council.lane_words }} · regime {{ council.regime }} · the Emperor: {{ council.emperor_words }}</p>
+    {% if council.graded and council.truth_line %}
+    <p style="padding: 0 16px 6px; font-size: 12px;">Graded: {{ council.truth_line }}. Right: {{ council.right|join:", "|default:"none" }}. Wrong: {{ council.wrong|join:", "|default:"none" }}. Not measured: {{ council.unmeasured|join:", "|default:"none" }}.</p>
+    {% elif council.graded %}
+    <p style="padding: 0 16px 6px; font-size: 12px; color: var(--text-muted);">Graded: not measured ({{ council.grade_notes }}).</p>
+    {% elif council.open %}
+    <p style="padding: 0 16px 6px; font-size: 12px; color: var(--text-muted);">Not graded yet: the trade is still open.</p>
+    {% else %}
+    <p style="padding: 0 16px 6px; font-size: 12px; color: var(--text-muted);">Not graded yet: the council is graded nightly.</p>
+    {% endif %}
+    <ul style="padding: 0 32px 6px; font-size: 12px;">
+        {% for v in council.voices %}<li>{{ v.text }}</li>{% endfor %}
+    </ul>
+    <p style="padding: 0 16px 12px; font-size: 11px; color: var(--text-muted);">{{ council.footer }}</p>
+</div>
+{% endif %}

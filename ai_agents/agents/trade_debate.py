@@ -23,6 +23,9 @@ elite door shut: the Executioner never vetoes by silence, the Champion
 never unlocks by silence.
 
 Paper candidates are never debated: the debate exists for real money.
+
+Its verdicts are recorded and graded with the council's
+(ai_agents/agents/council.py, ai_agents/council_grading.py).
 """
 import json
 import logging
@@ -120,6 +123,13 @@ def _agent_model(agent_name: str) -> str:
     except Exception:  # noqa: BLE001 — the table may not exist yet
         pass
     return DEBATE_MODEL
+
+
+#: The debate's two agent names, as /ai-models/ and the council read them.
+DEBATE_AGENT_NAMES = ("debate_executioner", "debate_champion")
+#: The model a debate (or council) agent actually answers on: the
+#: per-agent row, else DEBATE_MODEL — what /ai-models/ shows for them.
+effective_model = _agent_model
 
 
 class _DebateAgent(BaseAgent):
@@ -333,7 +343,11 @@ def debate_candidate(bot, cand, qty: float) -> dict:
     """Run both sides on one live candidate. Never raises.
 
     {"on", "ran", "binding", "graded", "why", "executioner", "champion",
-     "champion_wins", "veto", "scale", "held"}
+     "champion_wins", "veto", "scale", "held", "council_id"}
+
+    `council_id` (2026-10-08) is the council's record of this debate
+    (ai_agents/agents/council.py, open_debate_session), opened whenever
+    both sides were asked, or None: the debate is graded from it.
 
     `veto` / `scale` are what the Executioner WOULD do; the caller applies
     them only when `binding`. `champion_wins` is False whenever the debate
@@ -344,7 +358,7 @@ def debate_candidate(bot, cand, qty: float) -> dict:
     out = {"on": False, "ran": False, "binding": False, "graded": 0,
            "why": "", "executioner": None, "champion": None,
            "champion_wins": False, "veto": False, "scale": 1.0,
-           "held": None}
+           "held": None, "council_id": None}
     try:
         from core.platform_control import is_component_enabled
         if not is_component_enabled(DEBATE_SWITCH):
@@ -406,6 +420,15 @@ def debate_candidate(bot, cand, qty: float) -> dict:
     if out["ran"]:
         out["champion_wins"] = (ch["verdict"] == "back"
                                 and ch["conviction"] > ex["conviction"])
+    # THE COUNCIL'S RECORD (2026-10-08, ai_agents/agents/council.py): both
+    # sides were asked, so the debate is recorded where it can be graded,
+    # at no AI cost. One fenced insert in a savepoint; never raises, and
+    # nothing above reads it back.
+    try:
+        from ai_agents.agents.council import open_debate_session
+        out["council_id"] = open_debate_session(bot, cand, qty, brief, out)
+    except Exception as e:  # noqa: BLE001 — the record is beside the order
+        logger.warning("[debate] council record not opened: %s", e)
     logger.info("[debate] %s %s: executioner %s (%.2f), champion %s (%.2f) "
                 "— %s", cand.symbol, getattr(cand.decision, "direction", "?"),
                 (ex or {}).get("verdict"), (ex or {}).get("conviction", 0),
