@@ -491,6 +491,21 @@ CHAPTERS = [
                       "every other gate has said yes, just before the last "
                       "look at the price, and never on a simulated or demo "
                       "trade.")},
+            {"title": "The council",
+             "text": ("With their own switches on, eight more AI voices sit "
+                      "on a real-money bot order once it has left (up to "
+                      "twelve a day, within the day's AI budget), and on a "
+                      "real-money ticket when its owner asks: the "
+                      "Opportunist, the Striker, the Fixer, the Gambler, the "
+                      "Skeptic, the Awakened, the Theorist and, last, the "
+                      "Emperor, who weighs the others by their graded record. "
+                      "Every voice, the Executioner and the Champion "
+                      "included, is graded on what the market did next; a "
+                      "voice weighs exactly one until ten of its calls are "
+                      "graded. In this version the eight only record their "
+                      "case: none of them moves an order, a size, a stop or a "
+                      "limit, and the Executioner and the Champion keep only "
+                      "the debate's own powers.")},
             {"title": "The market's posture",
              "text": ("With its switch on, a stress score read every quarter "
                       "hour (the fall of the index, its volatility, the VIX, "

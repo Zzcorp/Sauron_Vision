@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}The council — Sauron Vision{% endblock %}
+{% block page_title %}THE COUNCIL · ten voices · graded · weighted by record{% endblock %}
+
+{% block content %}
+{% comment %} THE COUNCIL (2026-10-08, ai_agents/agents/council.py). Every
+   number on this page is a graded record or a count of one; no voice's
+   weight is asserted. Staff only, like /ai-models/. {% endcomment %}
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">The council</span></div>
+    <p style="color: var(--text-muted); padding: 0 16px 8px; max-width: 96ch;">
+        Ten voices argue live trades. Each is graded on what the market did next, and its record is its only weight. Shadow: no voice changes an order, a size, a stop or a limit; the Executioner and the Champion keep the debate's own powers.
+    </p>
+    <p style="padding: 0 16px 8px; font-size: 12px;" data-role="council-switches">
+        Bot orders: <strong>{% if switches.bots %}ON{% else %}OFF{% endif %}</strong>
+        · Tickets: <strong>{% if switches.ticket %}ON{% else %}OFF{% endif %}</strong>
+        · The debate: <strong>{% if switches.debate %}ON{% else %}OFF{% endif %}</strong>
+    </p>
+    <p style="padding: 0 16px 16px; font-size: 12px; color: var(--text-muted);">
+        Council AI spend today: ${{ spend.today|floatformat:2 }} across {{ spend.calls }} calls; 30 days: ${{ spend.month|floatformat:2 }}
+    </p>
+</div>
+
+{% if record_error %}
+<p style="font-size: 12px; color: var(--accent-red, #c33); padding: 0 0 16px;">{{ record_error }}</p>
+{% endif %}
+
+{% if record %}
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">The record</span></div>
+    {% if not record.graded_any %}
+    <p style="color: var(--text-muted); padding: 0 16px 10px;">No call graded yet: a voice weighs 1.00 until ten of its calls are graded.</p>
+    {% endif %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table" style="width: 100%; font-size: 11px;">
+      <thead>
+        <tr><th>Voice</th><th class="num">Weight</th><th>Lane</th><th class="num">Graded calls</th><th class="num">Brier</th><th class="num" title="How often the event it forecast came true: always saying this scores the reference Brier, which is what the weight is measured against">Base rate</th><th class="num">Calls right</th><th>Specialty</th><th class="num">Bot / hand</th><th class="num">Cost, 30 days</th></tr>
+      </thead>
+      <tbody>
+        {% for v in record.voices %}
+        <tr>
+          <td>{{ v.name }}</td>
+          <td class="num">{{ v.factor|floatformat:2 }}</td>
+          <td title="{{ v.reason }}">{{ v.lane }}</td>
+          <td class="num">{{ v.n }}</td>
+          <td class="num">{% if v.brier is not None %}{{ v.brier|floatformat:3 }}{% else %}—{% endif %}</td>
+          <td class="num" data-role="base-rate">{% if v.base_rate is not None %}{% widthratio v.base_rate 1 100 %}%{% if v.reference is not None %} (ref {{ v.reference|floatformat:3 }}){% endif %}{% else %}—{% endif %}</td>
+          <td class="num">{{ v.right }} of {{ v.right|add:v.wrong }}</td>
+          <td>{{ v.specialty }}</td>
+          <td class="num">{{ v.bot_n }} / {{ v.hand_n }}</td>
+          <td class="num">${{ v.cost_30d|floatformat:2 }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p style="padding: 12px 16px 4px; font-size: 12px;"><strong>Does weighting help?</strong></p>
+    <ul style="padding: 0 32px 8px; font-size: 12px;" data-role="council-benchmarks">
+      {% for b in record.benchmarks %}
+      <li>{{ b.name }}: {% if b.brier is not None %}Brier {{ b.brier|floatformat:3 }} over {{ b.n }} graded sittings{% else %}no graded sitting yet{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% if record.benchmarks_unpaired %}
+    <p style="padding: 0 16px 8px; font-size: 12px; color: var(--text-muted);" data-role="council-unpaired">
+        All three rows are graded on the same sittings: {{ record.benchmarks_unpaired }} graded sitting{{ record.benchmarks_unpaired|pluralize }} without the Emperor's call or the weights are left out of all three.
+    </p>
+    {% endif %}
+    <p style="padding: 0 16px 8px; font-size: 12px; color: var(--text-muted);">
+        Of the voices the Emperor overruled, {{ record.chair.over_wrong }} of {{ record.chair.over_n }} were wrong; of those he followed, {{ record.chair.follow_right }} of {{ record.chair.follow_n }} were right.
+    </p>
+    <p style="padding: 0 16px 16px; font-size: 12px; color: var(--text-muted);">
+        Replays carry the round-trip cost but not position care (break-even, trail). On {{ record.replay.n }} sittings with both, the replay and the realized result agreed in sign on {{ record.replay.agree }}.
+    </p>
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Weights by regime</span></div>
+    <form method="get" style="padding: 0 16px 8px; font-size: 12px;">
+        <label>Class
+        <select name="class" onchange="this.form.submit()">
+            <option value="">all classes</option>
+            {% for c in classes %}<option value="{{ c }}"{% if c == class_filter %} selected{% endif %}>{{ c }}</option>{% endfor %}
+        </select></label>
+    </form>
+    <div class="table-wrapper">
+    <table class="sv-perf-table" style="width: 100%; font-size: 11px;">
+      <thead><tr><th>Voice</th>{% for r in record.regimes %}<th class="num">{{ r }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        {% for row in record.matrix %}
+        <tr><td>{{ row.name }}</td>
+          {% for c in row.cells %}<td class="num">{% if c.lane == "measured" %}<strong>{{ c.factor|floatformat:2 }}</strong> ({{ c.n }}){% else %}neutral ({{ c.n }}){% endif %}</td>{% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+</div>
+{% endif %}
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">Recent sittings</span></div>
+    {% if recent %}
+    <ul style="padding: 0 32px 16px; font-size: 12px;">
+      {% for s in recent %}
+      <li>{{ s.when|date:"Y-m-d H:i" }} · {{ s.what }} · {{ s.symbol }} {{ s.side }} · The Emperor: {{ s.emperor }} · {{ s.status }} · {{ s.graded }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 0 16px 16px;">No sitting yet.</p>
+    {% endif %}
+</div>
+{% endblock %}

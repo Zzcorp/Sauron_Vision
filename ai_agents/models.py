@@ -302,3 +302,9 @@ class ReportNextStep(models.Model):
 
     def __str__(self):
         return f"[{self.status}] {self.kind} {self.ref} ({self.report_kind})"
+
+
+# THE COUNCIL's record (2026-10-08): its own file, imported here so the app
+# registry and the migrations see it.
+from ai_agents.council_models import (  # noqa: E402,F401
+    CouncilClaim, CouncilSession, CouncilVoice)

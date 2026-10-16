@@ -92,6 +92,8 @@
     <script src="{% static 'js/sv-market-status.js' %}" defer></script>
     {# Sidebar unseen-activity dots — nothing stays unseen. #}
     <script src="{% static 'js/sv-nav-activity.js' %}" defer></script>
+    {# THE COUNCIL on a LIVE ticket (2026-10-08): on demand only, advice only. #}
+    <script src="{% static 'js/sv-council.js' %}" defer></script>
     {# Headband news dwell-cards — SV.dwell client #5, not implementation #5. #}
     <script src="{% static 'js/sv-news-dwell.js' %}" defer></script>
     <script src="{% static 'js/sv-gollum.js' %}" defer></script>
@@ -2536,6 +2538,10 @@
           warnHtml +
           /* Filled by render(): it follows the levels as they move. */
           '<div data-role="rrwarn" aria-live="polite"></div>' +
+          /* THE COUNCIL (2026-10-08): a LIVE ticket only, its switch on.
+             Filled by SV.council.mount below; it runs nothing until its
+             own button is clicked, and okBtn never reads it. */
+          ((live && p.council_on) ? '<div data-role="council" aria-live="polite"></div>' : '') +
           '<div class="sv-dialog-facts">' + factsHtml + '</div>' +
           fundHtml + lvlHtml + levHtml + sizeHtml + pinHtml +
         '</div>' +
@@ -2577,6 +2583,19 @@
               'Information, never a gate.');
           });
       })();
+
+      /* THE COUNCIL (2026-10-08, static/js/sv-council.js): the region
+         reads the ticket as it stands when its button is clicked. */
+      var councilEl = host.querySelector('[data-role="council"]');
+      if (councilEl && window.SV && SV.council) {
+        SV.council.mount(councilEl, function () {
+          return { symbol: p.symbol, side: p.side, stop: stopVal,
+                   target: targetVal, entry: entry,
+                   qty: qtyTouched ? qtyVal : autoQty(),
+                   leverage: lever.chosen != null ? Number(lever.chosen) : null,
+                   signal_id: p.signal_id || null };
+        });
+      }
 
       var okBtn = host.querySelector('[data-role="ok"]');
       var tradeLine = host.querySelector('[data-role="tradeline"]');
@@ -2778,6 +2797,9 @@
       function finish(v) {
         if (settled) return;
         settled = true;
+        /* the sitting the owner asked, if any, so the trade can be graded
+           with it AFTER it is taken (never a condition of taking it) */
+        if (v && councilEl) v.council = Number(councilEl.dataset.session) || null;
         SV.overlay.close(host);
         resolve(v);
       }
@@ -2843,6 +2865,9 @@
          preview — so pressing CLOSE + TAKE liquidated whatever the server
          had picked, which the operator had been shown and never asked
          about. Positions leave the book by decision now. */
+      /* the signal behind a signal ticket, for the council's brief */
+      var sigMatch = /\/signals\/(\d+)\//.exec(previewUrl);
+      if (sigMatch && !p.signal_id) p.signal_id = Number(sigMatch[1]);
       sizeDialog(p).then(function (choice) {
         if (!choice) { done(); return; }
         if (choice.relever) {
@@ -2859,6 +2884,7 @@
         if (choice.stop !== null) body.stop = choice.stop;
         if (choice.target !== null) body.target = choice.target;
         if (choice.pin) body.pin = choice.pin;
+        if (choice.council) body.council_session = choice.council;
         fetch(executeUrl, {
           method: 'POST', credentials: 'same-origin',
           headers: { 'X-CSRFToken': csrf(), 'Content-Type': 'application/json' },

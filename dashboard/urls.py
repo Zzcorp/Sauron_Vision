@@ -85,6 +85,8 @@ from .views_rule_control import rule_control_dashboard
 from .views_calibration import calibration_dashboard
 from .views_evidence import evidence_ledger
 from .views_ai_models import ai_models_dashboard
+# THE COUNCIL (2026-10-08): the record, the ticket's ask and one sitting.
+from .views_council import council_ask, council_dashboard, council_session
 from .views_system_health import system_health
 from .views_topology import system_map, system_map_state, system_map_toggle
 from .views_forensics import forensics_list, forensics_detail, forensics_live
@@ -317,6 +319,9 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     path("calibration/", calibration_dashboard, name="calibration_dashboard"),
     path("evidence/", evidence_ledger, name="evidence_ledger"),
     path("ai-models/", ai_models_dashboard, name="ai_models_dashboard"),
+    path("council/", council_dashboard, name="council_dashboard"),
+    path("council/ask/", council_ask, name="council_ask"),
+    path("council/<int:session_id>/", council_session, name="council_session"),
     path("health/", system_health, name="system_health"),
     # The admin panel's second division: not "is it switched on?" but "is data
     # moving?" — the question neither the registry nor the health checks asked.

@@ -1941,7 +1941,34 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         # operator is looking at would be the browser and the server
         # disagreeing about what was ordered.
         "correlation": _correlation_note(user, inst, paper=not live),
+        # THE COUNCIL (2026-10-08, ai_agents/agents/council.py): whether a
+        # LIVE ticket offers "Ask the council". A switch read, never a
+        # council run: the council sits only when its owner clicks, and
+        # nothing on the ticket waits for it or reads it. Never on a
+        # rehearsal world (eToro with Demo ticked, a Saxo SIM, OANDA
+        # practice or Alpaca paper client): a rehearsal is not argued as
+        # real money.
+        "council_on": (_council_ticket_on()
+                       and not _rehearsal_client(_client)),
     }
+
+
+def _council_ticket_on() -> bool:
+    try:
+        from core.platform_control import is_component_enabled
+        return bool(is_component_enabled("council_ticket"))
+    except Exception:  # noqa: BLE001 — an unread switch offers nothing
+        return False
+
+
+def _rehearsal_client(client) -> bool:
+    """AssetBot.rehearsal_client, the test the council's ask refuses on;
+    unread is a rehearsal: nothing offered."""
+    try:
+        from bot_program.asset_engine.base import AssetBot
+        return bool(AssetBot.rehearsal_client(client))
+    except Exception:  # noqa: BLE001 — unsure is not real money
+        return True
 
 
 def preview_take_trade(user, signal, leverage=None) -> dict:

@@ -4797,15 +4797,23 @@ def take_trade_execute(request, signal_id):
     if err:
         return JsonResponse({"error": err}, status=400)
     from dashboard.views_close import _pin_ok as _trading_pin_ok
-    return JsonResponse(execute_take_trade(request.user, signal,
-                                           body["close_ids"],
-                                           qty=body["qty"],
-                                           stop=body["stop"],
-                                           target=body["target"],
-                                           leverage=body["leverage"],
-                                           pin_ok=_trading_pin_ok(
-                                               request,
-                                               {"pin": body["pin"]})))
+    res = execute_take_trade(request.user, signal,
+                             body["close_ids"],
+                             qty=body["qty"],
+                             stop=body["stop"],
+                             target=body["target"],
+                             leverage=body["leverage"],
+                             pin_ok=_trading_pin_ok(
+                                 request,
+                                 {"pin": body["pin"]}))
+    # THE COUNCIL (2026-10-08): a sitting the owner asked about is linked
+    # to the trade AFTER it was taken. It can only follow a trade, never
+    # precede or refuse one, and the response is the execution's own.
+    if isinstance(res, dict) and res.get("ok") and body.get("council_session"):
+        from dashboard.views_council import link_ticket_session
+        link_ticket_session(request.user, body["council_session"],
+                            res.get("trade_id"))
+    return JsonResponse(res)
 
 
 def _parse_trade_body(request):
@@ -4875,6 +4883,23 @@ def _parse_trade_body(request):
     if lev is not None and (lev < 1 or lev != int(lev)):
         return None, "leverage must be a whole number >= 1"
     parsed["leverage"] = None if lev is None else int(lev)
+
+    # THE COUNCIL's sitting on this ticket (2026-10-08), when its owner
+    # asked: a positive integer, else None — silent, never an error. It
+    # only LINKS the sitting to the trade after the trade is taken
+    # (dashboard/views_council.link_ticket_session); nothing in the
+    # execution reads it.
+    raw_council = body.get("council_session")
+    council_session = None
+    if isinstance(raw_council, (int, str)) and not isinstance(raw_council,
+                                                             bool):
+        try:
+            council_session = int(str(raw_council).strip())
+        except (TypeError, ValueError):
+            council_session = None
+        if council_session is not None and council_session <= 0:
+            council_session = None
+    parsed["council_session"] = council_session
 
     return {"close_ids": close_ids,
             "side": str(body.get("side", "")).upper(),
@@ -5185,15 +5210,21 @@ def asset_trade_execute(request, symbol):
     if err:
         return JsonResponse({"error": err}, status=400)
     from dashboard.views_close import _pin_ok as _trading_pin_ok
-    return JsonResponse(execute_asset_trade(request.user, inst, body["side"],
-                                            body["close_ids"],
-                                            qty=body["qty"],
-                                            stop=body["stop"],
-                                            target=body["target"],
-                                            leverage=body["leverage"],
-                                            pin_ok=_trading_pin_ok(
-                                                request,
-                                                {"pin": body["pin"]})))
+    res = execute_asset_trade(request.user, inst, body["side"],
+                              body["close_ids"],
+                              qty=body["qty"],
+                              stop=body["stop"],
+                              target=body["target"],
+                              leverage=body["leverage"],
+                              pin_ok=_trading_pin_ok(
+                                  request,
+                                  {"pin": body["pin"]}))
+    # THE COUNCIL (2026-10-08): linked after the trade, as above.
+    if isinstance(res, dict) and res.get("ok") and body.get("council_session"):
+        from dashboard.views_council import link_ticket_session
+        link_ticket_session(request.user, body["council_session"],
+                            res.get("trade_id"))
+    return JsonResponse(res)
 
 
 @login_required

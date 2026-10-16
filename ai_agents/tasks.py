@@ -1489,7 +1489,29 @@ def resolve_pending_calibrations():
     result = resolve_pending_predictions()
     logger.info("Calibration auto-resolver: resolved=%d failed=%d",
                 result.get("resolved", 0), result.get("failed", 0))
-    return {"status": "ok", **result}
+    # THE COUNCIL (2026-10-08, ai_agents/council_grading.py): graded right
+    # after the direction calls above (the Opportunist's are among them)
+    # and after the 03:00 consolidation resolved the hypothesis market
+    # (the Theorist's theories). No beat of its own: it rides this one.
+    try:
+        from ai_agents.council_grading import grade_due
+        council = grade_due()
+    except Exception as e:  # noqa: BLE001 — the council never breaks calibration
+        logger.warning("[council] grading failed: %s", e)
+        council = {"error": type(e).__name__}
+    return {"status": "ok", **result, "council": council}
+
+
+@shared_task(soft_time_limit=300, time_limit=330)
+def run_council_sitting(session_id):
+    """THE COUNCIL's sitting (2026-10-08, ai_agents/agents/council.py):
+    three waves of shadow voices on one live bot order that has left, or
+    on one live ticket its owner asked about. On the ai queue
+    (ai_agents.tasks.* routes there). Idempotent: only a queued session
+    is claimed. Worst case three waves of COUNCIL_WAVE_TIMEOUT_S, inside
+    the soft limit; no order ever waits for it."""
+    from ai_agents.agents.council import run_sitting
+    return run_sitting(int(session_id))
 
 
 @shared_task

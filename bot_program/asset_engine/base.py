@@ -6005,7 +6005,7 @@ class AssetBot(ABC):
                 entry_meta["debate"] = {
                     k: debate.get(k) for k in (
                         "ran", "binding", "graded", "why", "executioner",
-                        "champion", "champion_wins")}
+                        "champion", "champion_wins", "council_id")}
             if debate.get("held"):
                 return self._skip(symbol, skips.GATE_BLOCKED,
                                   f"the debate refused it: {debate['why']}")
@@ -6660,6 +6660,22 @@ class AssetBot(ABC):
         except Exception as e:
             logger.warning("[%s_bot] audit record_trade_open failed: %s",
                            self.asset_class, e)
+
+        # THE COUNCIL (2026-10-08, ai_agents/agents/council.py): the order has
+        # left. The debate's record is linked to its row and, with
+        # council_bots on, eight shadow voices sit on the ai queue. Nothing
+        # in this method reads them back; after_send never raises, and its
+        # import is fenced too: a sent order's bookkeeping below never
+        # depends on the shadow voices.
+        if not paper:
+            try:
+                from ai_agents.agents.council import after_send
+                # eToro's Demo or a SIM / practice / paper env: a rehearsal
+                after_send(self, cand, qty, trade,
+                           demo=self.rehearsal_client(client))
+            except Exception as e:  # noqa: BLE001 — beside the order
+                logger.warning("[%s_bot] shadow voices not seated: %s",
+                               self.asset_class, e)
 
         # Phase-27: open a tax lot for long entries — but NOT for an order
         # that has not filled. A lot is a cost basis for units the account
@@ -7512,6 +7528,20 @@ class AssetBot(ABC):
     def _is_paper_client(client) -> bool:
         from bot_program.engine.paper_trader import PaperTrader
         return isinstance(client, PaperTrader)
+
+    @classmethod
+    def rehearsal_client(cls, client) -> bool:
+        """True when `client` places in a rehearsal world, never real
+        money (2026-10-08, THE COUNCIL, which argues real money only):
+        eToro with Demo ticked (its .demo), an adapter whose env is a SIM,
+        practice, paper, demo or testnet world (VENUE_WORLDS, the map
+        venue_stamps writes a row's broker_env from: Saxo SIM, OANDA
+        practice, Alpaca paper), or the platform's own PaperTrader."""
+        if getattr(client, "demo", False) is True:
+            return True
+        world = cls.VENUE_WORLDS.get(
+            str(getattr(client, "env", "") or "").lower())
+        return world == "paper" or cls._is_paper_client(client)
 
     # ── the venue's own size floor ──────────────────────────────────────
     #
