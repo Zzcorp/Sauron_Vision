@@ -43,6 +43,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone as dt_tz
 
 from django.core.cache import cache
@@ -116,7 +117,7 @@ H_LOCKS = ("Held by the care: profit locks only (break-even, trail, weekend "
 H_BRAKED_SHORT = "Care · braked bot"
 H_BRAKED = ("Held by the care; its bot is braked ({record}): exits run, "
             "entries do not.")
-H_FULL_SHORT = "Care · full"
+H_FULL_SHORT = "Full care"
 H_FULL = ("Held by the care: locks, posture floors, weekend and event cuts, "
           "the no-progress close and the structure stop.")
 S_PROTECTED = ("The broker holds these levels, so they work even when Sauron "
@@ -173,6 +174,9 @@ L_TIME_STOP = "Time stop in {left}."
 L_NO_STAMP = "No USD conversion stamp: its money is left out of the totals."
 L_NO_STOP = "No stop."
 L_TICK = "Its bot last ticked {age} ago."
+# A ticket taken by hand has no bot of its own: the engine ticks the lane
+# that holds it (the Metrics "Last tick" line says the same, 2026-10-16).
+L_TICK_HAND = "The engine last ticked the lane that holds your ticket {age} ago."
 L_CALM = "Held; nothing flagged."
 INERT_WORDS = {
     "broker_protected": "the stop rests at the broker, which no client can "
@@ -242,7 +246,13 @@ NO_CAPTAIN = "No Captain seated yet."
 CAPTAINS_NOT_BUILT = ("Captains are not built yet. Today this class answers "
                       "to the book limits: open risk at the stops, theme "
                       "legs and the correlation taper.")
-NO_THESIS_YET = "No thesis is written for this seat yet."
+#: The MISSION slot "Orc's thesis" is the Orc's own and nobody else's: the
+#: thesis CHECK (bot_program thesis check, shown under VOICE) is another
+#: voice, and THESIS_CHECK_BESIDE says so beside this sentence whenever it
+#: has read the seat, so the two never read as a contradiction
+#: (2026-10-16 screenshot review: "No thesis is written" above a thesis
+#: check that read HOLD).
+NO_THESIS_YET = "No Orc has written a thesis for this seat yet."
 RESERVED_ORC_SENTENCES = frozenset({
     NO_ORC, NO_ORC_SEATED, NOT_DECIDED, ORC_ARRIVES, NO_CAPTAIN,
     CAPTAINS_NOT_BUILT, NO_THESIS_YET})
@@ -257,6 +267,8 @@ DEBATE_NONE = {
     "demo": "No debate: demo entries are never debated.",
     "": "No debate on record for this entry.",
 }
+THESIS_CHECK_BESIDE = ("The thesis check (VOICE) reads whether this entry's "
+                       "reason still holds: {verdict}, {age} ago.")
 REVIEW_QUIET = ("Nothing flagged in the last 24 hours. The reviewer writes "
                 "only when something triggers; this is not a clean bill.")
 REVIEW_OFF = "The position reviewer is switched off."
@@ -274,13 +286,27 @@ CORR_NOTE = ("Measured on the platform's 4h bars; a bar can come from "
              "different sources, so read it as a guide.")
 CORR_EMPTY = "No peer could be measured for this instrument."
 CORR_UNMEASURED = "not enough shared 4h bars"
+CHANGE_NONE_VENUE = ("No day change at the venue mark: the venue's rate "
+                     "carries none.")
+CHANGE_NONE = "No day change was measured for this quote."
 STAND_IN = ("The platform's quote for this symbol is {quote} ({kind}), not "
             "the instrument held.")
 STAND_IN_KIND = {"future": "a futures contract", "cash index": "a cash index"}
+#: Where the time stop's hours come from (bot_program/asset_models.py
+#: AssetBotConfig.time_stop_setting), in words, never the internal key.
+TIME_STOP_SOURCE = {
+    "class-default": "the class default",
+    "config": "set on the bot",
+    "extras": "set on the bot's legacy setting",
+}
 PHONE_LINES = (
     ("/positions", "Every open position, with the stop eToro holds."),
     ("/why {symbol}", "Why there is or is not a trade on {symbol}."),
-    ("/q {question}", "Ask Sauron from your phone (30 a day)."),
+    # A real question, never a placeholder (2026-10-16: "/q {question}"
+    # printed literally): any words work after /q, this is one example.
+    ("/q Is the reason for my {symbol} {side} still alive?",
+     "Ask Sauron anything from your phone ({per_day} a day); this question is an "
+     "example."),
 )
 PHONE_STOP = ("/stop {id}", "Brakes the bot {name} #{id}: no new entries. It "
                             "never closes this position.")
@@ -357,6 +383,43 @@ def _tone(value):
 def _price(value, cls="", symbol=""):
     from core.price_format import format_price
     return format_price(value, cls, symbol)
+
+
+#: The price in the care's mirror sentence (bot_program/position_care.py
+#: writes it with :g, so 4160 or 1.2e+05).
+_MIRROR_TO = re.compile(r"\bto (-?\d[\d,]*(?:\.\d+)?(?:e[-+]?\d+)?)", re.I)
+
+
+def _care_mirror_text(action, cls="", symbol=""):
+    """A care_mirror journal row in the dossier's own price format: the
+    stop it copied to the venue is read from its stats and printed through
+    _price, as the ENGINE rows beside it are (final review: "4160" and
+    "4,160.00" beside "4160.00"). A row with no readable stat keeps its
+    words as written."""
+    text = (action.detail or "").strip()
+    stats = action.stats if isinstance(action.stats, dict) else {}
+    stop = _f(stats.get("venue_stop"))
+    m = _MIRROR_TO.search(text)
+    if stop is None or not m:
+        return text
+    return text[:m.start(1)] + _price(stop, cls, symbol) + text[m.end(1):]
+
+
+def _mark_t(row, mark_v, cls, symbol):
+    """The mark at the instrument's one precision (core/price_format), the
+    precision of its levels, its plan and its correlated row; the money
+    (P&L, R, percentages) stays the positions page's own digits. Unpriced,
+    the positions page's own dash."""
+    return row["last_text"] if mark_v is None else _price(mark_v, cls, symbol)
+
+
+def _r_title(row, mark_v, entry, stop, cls, symbol):
+    """The R's tooltip at the same precision as the mark beside it."""
+    if _f(row.get("r_multiple")) is None or None in (mark_v, entry, stop):
+        return row["r_title"]
+    return (f"Marked at {_price(mark_v, cls, symbol)} against an entry of "
+            f"{_price(entry, cls, symbol)} and the stop this position opened "
+            f"with ({_price(stop, cls, symbol)}).")
 
 
 def _iso(moment):
@@ -729,7 +792,8 @@ def light(facts) -> dict:
     if world == "paper" and not facts.get("has_stop"):
         add("no_stop_paper", "watch", L_NO_STOP)
     if facts.get("tick_overdue"):
-        add("tick_stale", "watch", L_TICK.format(age=facts.get("tick_age_t") or DASH))
+        add("tick_stale", "watch", (L_TICK_HAND if facts.get("hand") else L_TICK)
+            .format(age=facts.get("tick_age_t") or DASH))
     # UNHELD
     if facts.get("holder_by") == "nothing" and (world == "paper" or facts.get("legacy")):
         add("unheld", "unheld", facts.get("holder_words") or (H_NOTHING_SHORT + "."))
@@ -934,11 +998,12 @@ def _bot_seat(book, trade, up, row, sides_book, now):
              # is in the quote currency and is left out of every total.
              "ccy": "" if (cls == "forex" and not stamped) else (cfg.base_currency or "USD"),
              "r_t": row["r_text"], "r_v": r_v,
-             "r_tone": row["r_tone"], "r_title": row["r_title"], "note": ""}
+             "r_tone": row["r_tone"],
+             "r_title": _r_title(row, mark_v, entry, istop, pcls, sym), "note": ""}
     if working:
         money.update(pnl_t=DASH, pnl_v=None, pnl_tone="", pct_t=DASH,
                      cap_pct_t=None, r_t=DASH, r_v=None, r_tone="", note=NOT_FILLED)
-    mark = {"t": row["last_text"], "v": mark_v, "word": row["mark_word"],
+    mark = {"t": _mark_t(row, mark_v, pcls, sym), "v": mark_v, "word": row["mark_word"],
             "title": row["mark_title"], "wait": row["mark_wait"],
             "source": row["mark_source"] or ""}
 
@@ -1046,6 +1111,7 @@ def _bot_seat(book, trade, up, row, sides_book, now):
         "care_present": bool(care), "refusal": care.get("venue_stop_refusal") or "",
         "time_stop_left_s": tleft, "asset_class": cls, "vpu_stamped": stamped,
         "tick_overdue": tick_overdue, "tick_age_t": tick_age_t, "legacy": False,
+        "hand": hand,
     }
     lt = light(lf)
 
@@ -1187,7 +1253,8 @@ def _legacy_seat(book, p, row, sides_book, now):
         "venue": "", "class": cls, "class_label": _class_label(cls),
         "instrument_class": cls, "lane": "legacy", "config": None,
         "mission": MISSION_LEGACY, "light": lt,
-        "mark": {"t": row["last_text"], "v": mark_v, "word": row["mark_word"],
+        "mark": {"t": _mark_t(row, mark_v, cls, sym), "v": mark_v,
+                 "word": row["mark_word"],
                  "title": row["mark_title"], "wait": row["mark_wait"],
                  "source": row["mark_source"] or ""},
         "money": {"pnl_t": row["pnl_text"], "pnl_v": _f(row["unrealized_pnl"]),
@@ -1195,7 +1262,10 @@ def _legacy_seat(book, p, row, sides_book, now):
                   "cap_pct_t": row["cap_pct_text"] or None,
                   "ccy": getattr(inst, "currency", "") or "USD",
                   "r_t": row["r_text"], "r_v": _f(row["r_multiple"]),
-                  "r_tone": row["r_tone"], "r_title": row["r_title"], "note": ""},
+                  "r_tone": row["r_tone"],
+                  "r_title": _r_title(row, mark_v, entry, _a_stop(row.get("initial_stop")),
+                                      cls, sym),
+                  "note": ""},
         "levels": levels,
         "risk": {"t": _money(risk), "v": round(risk, 2) if risk is not None else None,
                  "stopped": bool(stopped), "locked": False, "locked_t": None,
@@ -1291,13 +1361,15 @@ def _same_bets(seats):
         names = ", ".join(
             (f"{m['symbol']} {m['side_word'].lower()}" if forex else m["symbol"])
             for m in members)
+        # The count names its book: the line sits under both the REAL MONEY
+        # and the PAPER lines of a band (round 2, rule 4).
         text = (f"{'Long' if d > 0 else 'Short'} {word} through {len(members)} "
-                f"seats ({names})")
+                f"{_BET_BOOK.get(world, _BET_BOOK[''])} seats ({names})")
         out.append({"world": world, "t": text, "keys": [m["key"] for m in members]})
     return out
 
 
-_WORLD_SUFFIX = {"live": "real", "demo": "demo", "paper": "paper", "": "no venue"}
+_BET_BOOK = {"live": "real-money", "demo": "demo", "paper": "paper", "": "no-venue"}
 
 
 def _line(world, members, sizes):
@@ -1331,6 +1403,36 @@ def _line(world, members, sizes):
     }
 
 
+#: A seat whose instrument is of another class than its bot's (an index
+#: CFD run by a stock bot): the band is the bot's class, which the pools
+#: are drawn by (portfolio/services.py capital_summary) and the head's
+#: ALLOCATION counts by, and the band says so rather than letting an index
+#: pass for a stock (2026-10-16: NSDQ100 in the STOCK band, "STOCK 2.3%").
+CLASS_NOTE = ("{names} {verb} banded under {band}, the class of the bot that "
+              "holds {pron}: the pools and the ALLOCATION line count by it.")
+
+
+def _instrument_word(cls):
+    from core.constants import AssetClass
+    word = dict(AssetClass.CHOICES).get(cls) or cls or "other"
+    word = str(word).lower()
+    return ("an " if word[:1] in "aeiou" else "a ") + word
+
+
+def _class_note(cls, members):
+    odd = []
+    for m in members:
+        ic = m.get("instrument_class") or cls
+        if ic != cls and m["symbol"] not in [o[0] for o in odd]:
+            odd.append((m["symbol"], ic))
+    if not odd:
+        return ""
+    names = ", ".join(f"{sym} ({_instrument_word(ic)})" for sym, ic in odd)
+    many = len(odd) > 1
+    return CLASS_NOTE.format(names=names, verb="are" if many else "is",
+                             band=_class_label(cls), pron="them" if many else "it")
+
+
 def _groups(seats, sizes, gate_risk, user):
     classes = sorted({s["class"] for s in seats})
     captains = _captain_slots(user, classes)
@@ -1361,11 +1463,11 @@ def _groups(seats, sizes, gate_risk, user):
                 side="real account" if side == "live" else "paper book")
         groups.append({
             "key": cls, "label": _class_label(cls), "worlds": worlds,
-            "lines": lines,
+            "lines": lines, "class_note_t": _class_note(cls, members),
             "same_bet": [{"world": b["world"], "t": b["t"]} for b in bets],
             "today": {"share_t": share,
-                      "legs_t": [f"{b['t']} · {_WORLD_SUFFIX.get(b['world'], '')}"
-                                 for b in bets]},
+                      # the bet's sentence already names its book
+                      "legs_t": [b["t"] for b in bets]},
             "captain": captains.get(cls),
             "seats": members,
             "_alarm": any(m["light"]["tone"] == "alarm" for m in members),
@@ -1553,7 +1655,7 @@ def _daily(check, used):
 
 
 def _alloc(members, book):
-    segs, total, unmeasured = {}, 0.0, 0
+    segs, total, unmeasured, odd = {}, 0.0, 0, {}
     for m in members:
         v = m["at_work"]["v"]
         if v is None:
@@ -1563,14 +1665,22 @@ def _alloc(members, book):
         k = (m["class"], kind)
         segs[k] = segs.get(k, 0.0) + v
         total += v
+        ic = m.get("instrument_class") or m["class"]
+        if ic != m["class"]:
+            odd.setdefault(k, [])
+            if m["symbol"] not in [o[0] for o in odd[k]]:
+                odd[k].append((m["symbol"], ic))
     if not book:
         return [], None, unmeasured, "", ALLOC_UNKNOWN
     out = []
     for (cls, kind), v in sorted(segs.items(), key=lambda kv: -kv[1]):
         pct = v / book * 100
+        with_ = "; ".join(f"{sym}, {_instrument_word(ic)}"
+                          for sym, ic in odd.get((cls, kind), []))
         out.append({"class": cls, "label": _class_label(cls), "pct_v": round(pct, 2),
-                    "t": f"{_class_label(cls)} {pct:.1f}%", "demo": kind == "demo",
-                    "legacy": kind == "none"})
+                    "t": f"{_class_label(cls)} {pct:.1f}%"
+                         + (f" (with {with_})" if with_ else ""),
+                    "demo": kind == "demo", "legacy": kind == "none"})
     used = total / book * 100
     free = {"pct_v": round(max(0.0, 100 - used), 2),
             "t": "free {:.1f}%".format(max(0.0, 100 - used))}
@@ -1650,10 +1760,27 @@ def _head(raw, seats, book):
         f"used {_money(c.get('used')) or DASH}, free {_money(c.get('free')) or DASH}"
         for c in cap.get("classes") or []) or DASH
     real = [s for s in seats if s["world"] in ("live", "demo")]
+    paper = [s for s in seats if s["world"] == "paper"]
     marks = {"venue": sum(1 for s in real if s["mark"]["source"] == "venue"),
              "venue_stale": sum(1 for s in real if s["mark"]["source"] == "venue_stale"),
              "quote": sum(1 for s in real if s["mark"]["source"] == "quote"),
-             "waiting": sum(1 for s in real if s["mark"]["v"] is None)}
+             "waiting": sum(1 for s in real if s["mark"]["v"] is None),
+             "real_n": len(real), "paper_n": len(paper),
+             "paper_quote": sum(1 for s in paper if s["mark"]["source"] == "quote"),
+             "paper_waiting": sum(1 for s in paper if s["mark"]["v"] is None)}
+    # Which book each count covers, said on the line itself (2026-10-16:
+    # "MARKS 5 venue ... 0 feed" counted the real seats alone, beside
+    # three paper seats marked by the feed).
+    book_word = ("REAL AND DEMO" if any(s["world"] == "demo" for s in real)
+                 else "REAL")
+    parts = []
+    if real:
+        parts.append(MARKS_REAL.format(book=book_word, n=len(real), **marks))
+    if paper:
+        parts.append(MARKS_PAPER.format(n=len(paper), q=marks["paper_quote"],
+                                        w=marks["paper_waiting"]))
+    marks["t"] = "MARKS · " + " · ".join(parts) if parts else ""
+    marks["title"] = MARKS_TITLE
     sw = book.switches
     lines = []
     if not (sw.get("platform_master") and sw.get("pipeline_asset_bots")):
@@ -1671,6 +1798,16 @@ def _head(raw, seats, book):
                   "paper_neg": paper_neg, "classes_t": POOLS_TITLE.format(classes=classes)},
         "marks": marks, "switch_lines": lines, "tones": tones,
     }, gate_risk
+
+
+#: The MARKS line, one per book it counts: "venue" is the venue's own
+#: price, "old" its last one past the fresh window, "feed" the platform's
+#: quote, "waiting" no price yet.
+MARKS_REAL = "{book} ({n}): {venue} venue · {venue_stale} old · {quote} feed · {waiting} waiting"
+MARKS_PAPER = "PAPER ({n}): {q} feed · {w} waiting"
+MARKS_TITLE = ("How each seat is priced, per book: venue = the venue's own price; "
+               "old = its last price, past the fresh window; feed = the platform's "
+               "quote; waiting = no price yet. A paper seat is priced by the feed.")
 
 
 def _unreadable_head(book, seats):
@@ -2015,7 +2152,7 @@ def _timeline(trade, hand, actions, notices, reviews, pcls, now):
     for a in actions:
         detail = _end(a.detail)
         if a.kind == "care_mirror":
-            add(a.at, "CARE", (a.detail or "").strip())
+            add(a.at, "CARE", _care_mirror_text(a, pcls, sym))
         elif a.kind == "care_close":
             add(a.at, "CARE", f"The care closed it: {detail}.")
         elif a.kind == "care_close_pending":
@@ -2047,6 +2184,19 @@ def _timeline(trade, hand, actions, notices, reviews, pcls, now):
     return (timed + untimed)[:TIMELINE_MAX]
 
 
+#: The book a correlated seat belongs to, said inside its chip.
+SEAT_BOOK = {"live": "REAL", "demo": "DEMO", "paper": "PAPER"}
+
+
+def _your_seat(seat):
+    """"YOUR REAL SEAT #26" / "YOUR PAPER SEAT #31"; a row with no venue
+    says so rather than guess its book."""
+    book = SEAT_BOOK.get(seat.get("world") or "")
+    if book:
+        return f"YOUR {book} SEAT #{seat['id']}"
+    return f"YOUR SEAT #{seat['id']} ({NO_VENUE})"
+
+
 def _peers(user, symbol, side, cls, world, others, now):
     """The underlying's peers: the viewer's other seats (same world first),
     the SMT partner, the commodity complex, the seats that share a currency
@@ -2063,6 +2213,7 @@ def _peers(user, symbol, side, cls, world, others, now):
     from portfolio.risk_gate import COMMODITY_THEMES, _currency_legs
     from signals.rules.smc_rules import smt_partner_for
 
+    from .position_summary import WORLD_WORDS
     sym = symbol.upper()
     seats_by_sym = {}
     for o in sorted(others, key=lambda o: (o["world"] != world, o["id"])):
@@ -2078,19 +2229,26 @@ def _peers(user, symbol, side, cls, world, others, now):
         symbol__in=set(candidates) | {sym}).values("symbol", "is_active",
                                                     "asset_class")}
 
-    order, seen = [], {sym}
+    # The SMT partner and the complex are the instrument's own family and
+    # are never lost to the cap; every seat is a candidate (the matrix
+    # reads the whole open book anyway), and the cap keeps the strongest
+    # |rho| of them (2026-10-16: XAGUSD at +0.84 came 8th, under seats at
+    # -0.08, and twelve seats would have pushed it out entirely).
+    order, seen, family = [], {sym}, set()
 
     def push(s):
         if s and s not in seen:
             seen.add(s)
             order.append(s)
-    for s in seats_by_sym:
-        push(s)
     push(smt)
+    if smt:
+        family.add(smt)
     for s in complex_syms:
         if (insts.get(s) or {}).get("is_active"):
             push(s)
-    order = order[:PEERS_MAX]
+            family.add(s)
+    for s in seats_by_sym:
+        push(s)
     matrix = capital_desk.correlation_matrix(user, order + [sym]) if order else {}
     quotes = ({q.instrument.symbol.upper(): q for q in LiveQuote.objects
                .select_related("instrument").filter(instrument__symbol__in=order)}
@@ -2113,44 +2271,71 @@ def _peers(user, symbol, side, cls, world, others, now):
             rel = "SHARES " + sorted(my_legs & legs)[0]
         else:
             # Every other peer is one of the viewer's seats (the universe
-            # is seats, the SMT partner and the complex).
-            rel = f"SEAT #{seat['id']}"
+            # is seats, the SMT partner and the complex). The chip names
+            # the seat's book: a paper seat never reads like a real one
+            # (2026-10-16, round 2).
+            rel = _your_seat(seat)
         q = quotes.get(s)
         last_t, change_t = None, None
         quoted = q is not None
+        # One precision per instrument (core/price_format), keyed on the
+        # instrument's own class: the seat card, its dossier and this row
+        # print NSDQ100 alike.
+        pcls_s = (insts.get(s) or {}).get("asset_class") or (seat or {}).get("class", "")
         if seat:
             mark = resolve(seat["_trade"], q, now=now)
             if mark.price is not None:
-                last_t = _price(mark.price, seat["class"], s)
+                last_t = _price(mark.price, pcls_s, s)
             # The day's change is the quote's: printed only when the quote
             # IS what marks the seat, never a stand-in's.
             quoted = mark.source == QUOTE
         elif q is not None:
             at = q.updated_at
             if at is not None and (now - at).total_seconds() <= QUOTE_MAX_AGE_S:
-                last_t = _price(q.last, (insts.get(s) or {}).get("asset_class", ""), s)
+                last_t = _price(q.last, pcls_s, s)
         chg = _f(q.change_pct) if (q is not None and quoted) else None
         if chg is not None and chg != 0:
             change_t = "{:+.1f}%".format(chg)
+        # A printed price with no day change beside it says why: a dash is
+        # "not measured", an empty slot read as "no move" (final review).
+        change_why = None
+        if last_t is not None and change_t is None:
+            change_why = CHANGE_NONE_VENUE if (seat and not quoted) else CHANGE_NONE
         bet = None
         if seat and is_m:
             b = capital_desk.bet_rho(matrix, sym, side, s, seat["side"])
             bet = "same bet" if b >= 0.7 else "a hedge" if b <= -0.7 else None
         has_page = s in insts
+        # The word follows the PRINTED number: "+0.40 weak" beside "+0.46
+        # moderate" judged 0.398 against 0.4 (2026-10-16).
+        shown = round(rho, 2) if rho is not None else None
         rows.append({
             "symbol": s, "relation": rel, "measured": is_m,
-            "rho_t": "{:+.2f}".format(rho) if rho is not None else None,
+            "rho_t": "{:+.2f}".format(shown) if shown is not None else None,
             "rho_v": round(rho, 3) if rho is not None else None,
-            "strength": ("strong" if abs(rho) >= 0.7 else "moderate" if abs(rho) >= 0.4
-                         else "weak") if rho is not None else None,
+            "strength": ("strong" if abs(shown) >= 0.7 else "moderate" if abs(shown) >= 0.4
+                         else "weak") if shown is not None else None,
+            "family": s in family,
             "n_bars": int(((matrix or {}).get("n_bars") or {}).get(pair) or 0),
             "why_t": None if is_m else CORR_UNMEASURED,
             "bet_t": bet, "is_seat": bool(seat), "seat_key": seat["key"] if seat else None,
-            "last_t": last_t, "change_t": change_t,
+            "seat_world": (seat.get("world") or "") if seat else None,
+            "seat_world_word": (WORLD_WORDS.get(seat.get("world") or "", NO_VENUE)
+                                if seat else None),
+            "seat_world_title": (WORLD_TITLES.get(seat.get("world") or "")
+                                 if seat else None),
+            "last_t": last_t, "change_t": change_t, "change_why": change_why,
             "page": f"/instruments/{s}/" if has_page else None,
             "ticket": bool(has_page and (insts.get(s) or {}).get("is_active")
                            and not seat),
         })
+    # Strongest |rho| first, the unmeasured last; then the cap, which keeps
+    # the family whatever its strength.
+    rows.sort(key=lambda r: (r["rho_v"] is None, -abs(r["rho_v"] or 0.0), r["symbol"]))
+    keep = [r for r in rows if r["family"]]
+    room = max(0, PEERS_MAX - len(keep))
+    kept = keep + [r for r in rows if not r["family"]][:room]
+    rows = [r for r in rows if r in kept]
     chips = [f"SMT partner: {smt}"] if smt else []
     return rows, chips
 
@@ -2268,7 +2453,7 @@ def seat_detail(user, raw_key, *, now=None):
                        reviews, book, sizes, peers, chips, pcls, now)
 
 
-def _voice_reviewer(reviews, switches, now):
+def _voice_reviewer(reviews, switches, now, pcls="", sym=""):
     if not switches.get("agent_position_review"):
         return {"switch_on": False, "present": False, "t": REVIEW_OFF}
     latest = next((r for r in reviews if r.created_at >= now - timedelta(hours=24)), None)
@@ -2288,7 +2473,10 @@ def _voice_reviewer(reviews, switches, now):
             # characters and a "more" that unfolds the rest.
             "reasoning": reasoning[:REASONING_KEPT],
             "reasoning_cut": REASONING_MAX if len(reasoning) > REASONING_MAX else None,
-            "suggested_stop_t": (_g(card["suggested_stop"])
+            # The instrument's one precision (core/price_format), the
+            # levels' and the thesis check's: "4168" beside "4128.00" read
+            # as two different kinds of number (2026-10-16).
+            "suggested_stop_t": (_price(card["suggested_stop"], pcls, sym)
                                  if card.get("suggested_stop") is not None else None),
             "take_part_t": (f"Take {card['take_part_pct']}%"
                             if card.get("take_part_pct") else None)}
@@ -2300,8 +2488,13 @@ def _orc_block(seat):
 
 
 def _phone(seat, trade=None):
-    lines = [{"cmd": c.format(symbol=seat["symbol"], question="{question}"),
-              "t": t.format(symbol=seat["symbol"])} for c, t in PHONE_LINES]
+    side = (seat.get("side_word") or "").lower()
+    # The Eye's own daily cap, read where the Eye counts it, so the
+    # sentence follows the constant (final review).
+    from bot_program.telegram_eye import QUESTIONS_PER_DAY
+    lines = [{"cmd": c.format(symbol=seat["symbol"], side=side),
+              "t": t.format(symbol=seat["symbol"], per_day=QUESTIONS_PER_DAY)}
+             for c, t in PHONE_LINES]
     if trade is not None and seat["lane"] == "bot":
         cfg = trade.config
         words = PHONE_STOP_WORKING if seat.get("working") else PHONE_STOP[1]
@@ -2316,11 +2509,10 @@ def _bot_detail(seat, trade, up, quote, row, hand, signal, actions, notices,
     from bot_program.asset_engine.safety import heartbeat_age_seconds
     from bot_program.notifications import _held_stop
     from bot_program.venue_mark import quote_stand_in
-    from core.exchange_status import get_exchange_status, market_status_for
     from market_data.public_feed import YF_SYMBOL_MAP
     from portfolio.services import notional_usd, value_per_unit
 
-    from .position_summary import countdown_words, quantity
+    from .position_summary import quantity
     from .views import _pos_committed_pct
 
     meta = trade.metadata or {}
@@ -2343,9 +2535,13 @@ def _bot_detail(seat, trade, up, quote, row, hand, signal, actions, notices,
     if istop is not None and entry and target and abs(entry - istop) > 1e-12:
         tgt_r = abs(target - entry) / abs(entry - istop)
     lv = seat["levels"]
+    # 1R is money in the pool's base currency (value_per_unit): said with
+    # its unit, never readable as a price distance (round 2).
+    one_r_t = (f"{_money(one_r)} {trade.config.base_currency or 'USD'}"
+               if one_r is not None else None)
     mission["plan"] = {"t": (
         f"entry {lv['entry_t']} · opening stop {lv['istop_t'] or 'none'} "
-        f"(1R = {_money(one_r) or DASH}) · stop now {lv['stop_t'] or 'none'}"
+        f"(1R = {one_r_t or DASH}) · stop now {lv['stop_t'] or 'none'}"
         + (f" (sent {lv['sent_stop_t']})" if lv.get("sent_stop_t") else "")
         + f" · target {lv['target_t'] or 'none'}"
         + (f" · target is {tgt_r:.2f}R from entry at the opening stop" if tgt_r else ""))}
@@ -2375,7 +2571,7 @@ def _bot_detail(seat, trade, up, quote, row, hand, signal, actions, notices,
         _line_t("of the book", _pct(at_work["v"] / side_book * 100)
                 if (at_work["v"] and side_book) else None),
         _line_t("Risk at the stop", risk_t, sub=risk_sub),
-        _line_t("1R", _money(one_r), sub=None if one_r is not None
+        _line_t("1R", one_r_t, sub=None if one_r is not None
                 else "No USD conversion stamp"),
         _line_t("Who holds the levels", seat["holder"]["suffix"]),
         _line_t("Carrier", seat["venue"]),
@@ -2411,24 +2607,21 @@ def _bot_detail(seat, trade, up, quote, row, hand, signal, actions, notices,
             metrics.append(_line_t("Stand-in", stand))
     metrics.append(_line_t("Held", f"Held for {seat['held']['t']}"))
     try:
-        ms = market_status_for(pcls, getattr(up.instrument, "exchange", "") or "",
-                               _status=get_exchange_status(), symbol=sym)
-        when = countdown_words(ms.get("time_until_change"))
-        if ms.get("code") == "CRYPTO":
-            mtext = "Crypto: always open"
-        elif ms.get("is_open"):
-            mtext = f"{ms.get('name')} open" + (f" · shuts in {when}" if when else "")
-        else:
-            mtext = f"{ms.get('name')} shut" + (f" · opens in {when}" if when else "")
-    except Exception:  # noqa: BLE001
+        mtext = _market_words(trade, world, pcls, up, quote, now)
+    except Exception:  # noqa: BLE001 — an unreadable clock is a dash
         mtext = None
     metrics.append(_line_t("Market", mtext))
     # The engine's clock exit runs on every row a config manages, the
     # manual lane's included (asset_engine/base.py _time_stop_hit reads
     # the config's ceiling, the class default when blank).
     ts = time_stop_status(trade, config=trade.config, now=now)
+    src = TIME_STOP_SOURCE.get(ts.get("source") or "")
+    if hand and src:
+        # Your ticket's clock is the manual lane's setting, not a bot's.
+        src = src.replace("the bot", "the lane")
     metrics.append(_line_t("Time stop", (
-        f"Time stop: {_g(ts['max_hold_hours'])} h after entry ({ts.get('source')})"
+        f"Time stop: {_g(ts['max_hold_hours'])} h after entry"
+        + (f" ({src})" if src else "")
         if ts.get("enabled") else "Time stop: off")))
     so = meta.get("scale_out") if isinstance(meta.get("scale_out"), dict) else None
     if so:
@@ -2436,8 +2629,17 @@ def _bot_detail(seat, trade, up, quote, row, hand, signal, actions, notices,
             f"Half banked at {_price(so.get('price'), pcls, sym)}, "
             f"{_g(so.get('r'))}R, {_hhmm(so.get('at')) or DASH}")))
     age = heartbeat_age_seconds(trade.config)
-    metrics.append(_line_t("Last tick", f"The bot last ticked {_age_words(age)} ago."
-                           if age is not None else None))
+    # A ticket taken by hand is ticked by the engine through the lane that
+    # holds it; "the bot" is said of a bot's own row only (2026-10-16).
+    if age is None:
+        tick_t = None
+    elif hand:
+        tick_t = (f"The engine last ticked the lane that holds your ticket "
+                  f"({trade.config.name} #{trade.config.id}) {_age_words(age)} ago.")
+    else:
+        tick_t = (f"The bot {trade.config.name} #{trade.config.id} last ticked "
+                  f"{_age_words(age)} ago.")
+    metrics.append(_line_t("Last tick", tick_t))
 
     stops = [{"label": "stop on the row",
               "t": _price(trade.stop_loss, pcls, sym) if trade.stop_loss else "none"}]
@@ -2467,8 +2669,12 @@ def _bot_detail(seat, trade, up, quote, row, hand, signal, actions, notices,
 
     thesis = meta.get("thesis") if isinstance(meta.get("thesis"), dict) else None
     th = _thesis_of(meta, now)
+    # The Orc's thesis slot (MISSION) names the other voice that HAS read
+    # the seat, so "no thesis" never stands against a HOLD below it.
+    mission["thesis_note"] = (THESIS_CHECK_BESIDE.format(
+        verdict=th["word"], age=th["age_t"] or DASH) if th else "")
     voice = {
-        "reviewer": _voice_reviewer(reviews, book.switches, now),
+        "reviewer": _voice_reviewer(reviews, book.switches, now, pcls, sym),
         "thesis": ({"word": th["word"], "age_t": th["age_t"], "words": th["words"],
                     "stop_t": (_price(thesis.get("stop"), pcls, sym)
                                if thesis.get("stop") else None),
@@ -2507,6 +2713,62 @@ def _bot_detail(seat, trade, up, quote, row, hand, signal, actions, notices,
                         "note": CORR_NOTE, "empty_t": CORR_EMPTY},
         "phone": _phone(seat, trade),
     }
+
+
+#: The market line names the venue that HOLDS the row. The platform keeps
+#: no clock of eToro's own CFD hours: a real eToro row is timed by the
+#: clock bot_program.venue_mark.market_shut reads for it (an index CFD by
+#: the FX week, anything else by its underlying's session), and the line
+#: says which, rather than naming CME as if CME held the row (2026-10-16:
+#: "CME Futures open" on a gold CFD held at eToro).
+MARKET_CRYPTO = "{venue}: crypto, open around the clock."
+MARKET_INDEX_CFD = ("{venue}: an index CFD keeps the FX week. {state}. eToro's own "
+                    "hours are not modelled here.")
+MARKET_CFD = ("{venue}: timed by the {session} session, the clock the platform "
+              "reads for this row; eToro's own hours are not modelled here. "
+              "{state}.")
+MARKET_PAPER = "Paper venue, on the {session} clock. {state}."
+
+
+def _market_words(trade, world, pcls, up, quote, now):
+    """The Market line of a bot row's dossier, venue first."""
+    from bot_program.venue_mark import quote_stand_in
+    from core.exchange_status import (_forex_edges, _forex_week,
+                                      get_exchange_status, market_status_for)
+
+    from .position_summary import countdown_words, duration_words
+
+    meta = trade.metadata or {}
+    sym = trade.symbol
+    exchange = getattr(getattr(up, "instrument", None), "exchange", "") or ""
+    real = world in ("live", "demo")
+    venue = _venue_word(meta) if real else ""
+    if (pcls or "").lower() == "crypto":
+        return MARKET_CRYPTO.format(venue=venue or "Paper venue")
+    index_cfd = real and (str(pcls or "").lower() == "index"
+                          or quote_stand_in(sym, quote,
+                                            carrier=str(meta.get("broker") or ""))
+                          == "cash index")
+    if index_cfd:
+        is_open, reopens, _opened = _forex_week(now)
+        if is_open:
+            sunday = now.date() - timedelta(days=(now.weekday() + 1) % 7)
+            closes = _forex_edges(sunday)[1]
+            state = "Open · shuts in " + duration_words((closes - now).total_seconds())
+        else:
+            state = ("Shut · opens in " + duration_words((reopens - now).total_seconds())
+                     if reopens else "Shut")
+        return MARKET_INDEX_CFD.format(venue=venue, state=state)
+    ms = market_status_for(pcls, exchange, _status=get_exchange_status(), symbol=sym)
+    when = countdown_words(ms.get("time_until_change"))
+    if ms.get("is_open"):
+        state = "Open" + (f" · shuts in {when}" if when else "")
+    else:
+        state = "Shut" + (f" · opens in {when}" if when else "")
+    session = ms.get("name") or DASH
+    if real:
+        return MARKET_CFD.format(venue=venue, session=session, state=state)
+    return MARKET_PAPER.format(session=session, state=state)
 
 
 def _venue_pin(symbol):
@@ -2549,7 +2811,8 @@ def _legacy_detail(seat, p, reviews, book, peers, chips, now):
     stops = [{"label": "stop on the row",
               "t": seat["levels"]["stop_t"] or "none"}]
     voice = {
-        "reviewer": _voice_reviewer(reviews, book.switches, now),
+        "reviewer": _voice_reviewer(reviews, book.switches, now,
+                                    seat["instrument_class"], sym),
         "thesis": {"word": None, "t": THESIS_LEGACY},
         "care": {"words": seat["holder"]["words"], "suffix": "", "soft_t": None,
                  "venue_t": None, "refusal": "", "event": None, "none_t": ""},

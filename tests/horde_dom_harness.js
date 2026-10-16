@@ -63,8 +63,11 @@ class Element {
     this.style = new Style();
     this.classList = new ClassList(this);
     this.scrollTop = 0;
+    this.scrollLeft = 0;
     this._clientHeight = 300;
     this._clientWidth = 0;
+    this._scrollWidth = 0;          // a number, or a function of the element
+    this._rect = null;              // a scenario's measured box, when it sets one
     this.content = null;            // a <template>'s fragment
   }
   // attributes
@@ -101,6 +104,9 @@ class Element {
   set rel(v) { this.setAttribute('rel', v); }
   get clientHeight() { return this._clientHeight; }
   get clientWidth() { return this._clientWidth; }
+  get scrollWidth() {
+    return typeof this._scrollWidth === 'function' ? this._scrollWidth(this) : this._scrollWidth;
+  }
   // tree
   get children() { return this.childNodes.filter((n) => n.nodeType === 1); }
   get firstChild() { return this.childNodes[0] || null; }
@@ -174,8 +180,11 @@ class Element {
   }
   blur() { if (doc.activeElement === this) doc._blur(); }
   click() { this.dispatchEvent(makeEvent('click', { detail: 1 })); }
-  getBoundingClientRect() { return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 }; }
-  scrollIntoView() {}
+  getBoundingClientRect() {
+    if (this._rect) return Object.assign({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 }, this._rect);
+    return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 };
+  }
+  scrollIntoView(opts) { if (doc) (doc.scrolledIntoView = doc.scrolledIntoView || []).push({ id: this.id, opts }); }
   setPointerCapture() {}
   releasePointerCapture() {}
 }

@@ -51,6 +51,12 @@
   var LENS_KEY = 'sauron_horde_lens';
   var SHUT_KEY = 'sauron_horde_shut';
   var SNAP_KEY = 'sauron_horde_snap_phone';
+  var LIMITS_KEY = 'sauron_horde_limits';
+  /* The tab's tiers, widest first: what each one shows is the stylesheet's
+     (sv-horde.css); which one is used is the widest whose content fits the
+     tab's room, measured, never guessed (2026-10-16: every segment of the
+     tab ended in an ellipsis at 1380). */
+  var TAB_TIERS = ['hd-t-l', 'hd-t-m', 'hd-t-s'];
   var BOOK_KINDS = { fill_open: 1, fill_close: 1, close_pending: 1 };
   var GLYPHS = { alarm: '!', order: '◇', watch: '▲', unheld: '○', calm: '●' };
   var DASH = '—';
@@ -65,6 +71,7 @@
   var seatsEl = document.getElementById('svHordeSeats');
   var sayEl = document.getElementById('svHordeSay');
   var tableEl = document.getElementById('svHordeTable');
+  var sumEl = document.getElementById('svHordeSum');
   var notesEl = document.getElementById('svHordeNotes');
   var stateEl = document.getElementById('svHordeState');
   var bandsEl = document.getElementById('svHordeBands');
@@ -101,11 +108,28 @@
   }
 
   /* ── the DOM, by hand ────────────────────────────────────────────── */
+  /* A middle dot never opens a line (2026-10-16: "· 25,840.55, the broker
+     account", "· at the stops 27.60"): in running text the space before
+     it is a no-break space, so a wrapped line ends with the dot; between
+     the boxes of a wrapping row (joinDots) the dot ends the box before it. */
+  function dots(t) {
+    return String(t === undefined || t === null ? '' : t).replace(/ \u00b7/g, '\u00a0\u00b7');
+  }
+  function txt(t) { return document.createTextNode(dots(t)); }
   function el(tag, cls, text) {
     var n = document.createElement(tag);
     if (cls) n.className = cls;
-    if (text !== undefined && text !== null && text !== '') n.textContent = String(text);
+    if (text !== undefined && text !== null && text !== '') n.textContent = dots(text);
     return n;
+  }
+  function joinDots(parent, nodes) {
+    nodes = nodes.filter(Boolean);
+    nodes.forEach(function (n, i) {
+      if (i === nodes.length - 1) { add(parent, n); return; }
+      var unit = add(parent, el('span', 'hd-unit'));
+      add(unit, n);
+      add(unit, el('span', 'hd-sep', '\u00a0\u00b7'));
+    });
   }
   function add(parent, child) { if (parent && child) parent.appendChild(child); return child; }
   function clear(n) { while (n && n.firstChild) n.removeChild(n.firstChild); }
@@ -164,8 +188,8 @@
     lens: 'all', tone: '', shut: {}, tabAria: '',
     seatKey: null, seatRev: null, seatData: null, seatGone: false, seatFrom: null, seatFocus: false,
     lvlFailed: false, moves: 0, lastAlarms: null, lastSayAt: 0,
-    evTimer: null, persistTimer: null, prev: {}, limitsOpen: false,
-    grownFrom: null, grownTo: null, tierSig: null,
+    evTimer: null, persistTimer: null, prev: {}, limitsOpen: load(LIMITS_KEY) === '1',
+    grownFrom: null, grownTo: null,
     /* Per band: is its "What holds this class today" open (kept across
        the board's repaints, never stored). */
     today: {},
@@ -217,17 +241,85 @@
       var sr = rect('.info-panel-wrap');
       if (sr) stripTop = sr.top;
     }
-    state.maxH = Math.max(120, Math.round(stripTop - top - 12));
+    /* FULL meets the header's bottom edge: no strip of the page shows
+       between them, and the tab, which would sit under the header there,
+       tucks away (applyHeight) while the head says what it said. */
+    state.maxH = Math.max(120, Math.round(stripTop - top));
     state.minH = Math.min(196, state.maxH);
+    state.stripTop = stripTop;
+    state.headerBottom = top;
+  }
+  /* The page's side-panel toggles (sauron.css .sidebar-toggle-btn,
+     .rail-toggle-btn: 28x56, centred on the viewport, one rung over the
+     sheet) stood on the open sheet's head (round 2: at 1100 and with the
+     activity drawer open). While the sheet is open they move up into the
+     page above it when it has their room; else they stand in the body's
+     side gutter, under the head, where nothing is written. Their own
+     z-index is kept, so they stay reachable; closed, they go back. */
+  var TOGGLE_HALF = 28, TOGGLE_GAP = 8;
+  function placeToggles() {
+    var b = document.body;
+    if (!b) return;
+    if (!state.open || state.phone || !state.stripTop) {
+      b.style.removeProperty('--hd-toggle-y');
+      return;
+    }
+    var vh = window.innerHeight;
+    var sheetTop = state.stripTop - state.h;
+    var y = vh / 2;
+    if (y + TOGGLE_HALF + TOGGLE_GAP > sheetTop) {
+      if (sheetTop - (state.headerBottom || 0) >= 2 * (TOGGLE_HALF + TOGGLE_GAP)) {
+        y = sheetTop - TOGGLE_HALF - TOGGLE_GAP;
+      } else {
+        var head = document.getElementById('svHordeHead');
+        var hb = head ? head.getBoundingClientRect().bottom : sheetTop;
+        y = Math.max(y, hb + TOGGLE_HALF + TOGGLE_GAP);
+      }
+    }
+    b.style.setProperty('--hd-toggle-y', Math.round(y) + 'px');
+  }
+  /* The tab tucks away while the sheet is open, at every height: the
+     head's own count, alarms and REAL pill stand in for it (sv-horde.css
+     .hd-tab-tucked), and the head's snaps and x close it. FULL tucked it
+     first (it would sit under the header); round 2 found the open tab
+     riding the sheet's top cut through the page's own lines (the account
+     card's "LIVE 25,840.55 USD" with the activity drawer open, "PORTFOLIO
+     VALUE" at 1100). */
+  function tuckTab() {
+    var tuck = state.open && !state.phone;
+    if (tuck !== root.classList.contains('hd-tab-tucked')) root.classList.toggle('hd-tab-tucked', tuck);
+    /* A hidden tab never keeps the focus: it goes to the head's title. */
+    if (tuck && document.activeElement === tab) {
+      try { title.focus({ preventScroll: true }); } catch (e) { /* an old engine */ }
+    }
+  }
+  /* HALF shows at least the first row of seat cards whole (2026-10-16:
+     at 1100x800 no card showed at HALF): the height that row needs is
+     measured from the cards on screen, and HALF is the larger of half the
+     room and that, below FULL. Nothing on screen yet: half the room. */
+  function firstRowNeed() {
+    if (!bodyEl || !state.open || !bandsEl) return 0;
+    var cards = bandsEl.querySelectorAll('.hd-seat');
+    var b = bodyEl.getBoundingClientRect();
+    for (var i = 0; i < cards.length; i++) {
+      var c = cards[i].getBoundingClientRect();
+      if (!c.height) continue;
+      return Math.ceil((state.h - bodyEl.clientHeight) + (c.bottom - b.top + bodyEl.scrollTop) + 8);
+    }
+    return 0;
   }
   function snaps() {
     if (state.phone) return [Math.round(state.maxH / 3), Math.round(state.maxH * 2 / 3), state.maxH];
-    return [state.minH, Math.round(state.maxH * 0.5), state.maxH];
+    var half = Math.max(Math.round(state.maxH * 0.5),
+                        Math.min(firstRowNeed(), Math.round(state.maxH * 0.8)));
+    return [state.minH, Math.min(half, state.maxH), state.maxH];
   }
   function clampH(h) { return Math.max(state.minH, Math.min(state.maxH, Math.round(h))); }
   function applyHeight(h) {
     state.h = clampH(h || 0);
     root.style.setProperty('--horde-h', state.h + 'px');
+    tuckTab();
+    placeToggles();
     var p = state.maxH ? Math.round(100 * state.h / state.maxH) : 0;
     grip.setAttribute('aria-valuenow', String(state.open ? p : 0));
     grip.setAttribute('aria-valuetext', state.open ? fill(W('valuetext'), { p: p, px: state.h })
@@ -291,20 +383,35 @@
   }
 
   /* ── width tiers and the phone ───────────────────────────────────── */
-  /* The closed tab's room: its max-width in sv-horde.css, in pixels. Half
-     the root less 170px on the strip's line; with the strip minimized it
-     starts right of the pill and of the strip's own minimize tab and ends
-     short of the Eye (the same arithmetic as the stylesheet's rule). */
-  function tabRoom(w) {
-    if (state.phone) return window.innerWidth - 96;
+  /* The tab's tier: the widest whose content fits the room the stylesheet
+     gives the tab (its max-width on the strip's line, or beside the pill
+     with the strip minimized). Every segment keeps its whole width (no
+     ellipsis, sv-horde.css), so the tab's scrollWidth IS what the tier
+     needs; its clientWidth is what it has. The alarms and the REAL pill
+     are in every tier. */
+  function setTabTier(cls) {
+    TAB_TIERS.forEach(function (c) { root.classList.toggle(c, c === cls); });
+    if (state.seatN !== null) seatsEl.textContent = seatWords(state.seatN);
+  }
+  function fitTab() {
+    root.classList.remove('hd-tab-alt');
+    if (state.phone) { setTabTier('hd-t-s'); return; }
+    if (fitTier()) return;
+    /* The strip minimized: the tab stands left of the pill; where not
+       even the narrowest tier fits there, it takes the room right of the
+       pill (sv-horde.css hd-tab-alt). */
     var strip = document.querySelector('.info-panel-wrap');
-    if (!strip || !strip.classList.contains('minimized')) return w / 2 - 170;
-    var cs = window.getComputedStyle(root);
-    var l = px(cs.getPropertyValue('--hd-l')), r = px(cs.getPropertyValue('--hd-r'));
-    var sr = px(cs.getPropertyValue('--hd-sr'));
-    var fab = px(window.getComputedStyle(document.documentElement).getPropertyValue('--se-fab-size')) || 56;
-    var left = Math.max(w / 2 + (r - l) / 2 + 84, w / 2 + (r - sr) / 2 + 40);
-    return w - left - Math.max(8, fab + 64 - (r - sr));
+    if (strip && strip.classList.contains('minimized')) {
+      root.classList.add('hd-tab-alt');
+      if (!fitTier()) setTabTier('hd-t-s');
+    }
+  }
+  function fitTier() {
+    for (var i = 0; i < TAB_TIERS.length; i++) {
+      setTabTier(TAB_TIERS[i]);
+      if (tab.scrollWidth <= tab.clientWidth + 1) return true;
+    }
+    return false;
   }
   function tier() {
     var w = state.phone ? window.innerWidth : (root.clientWidth || panel.clientWidth || window.innerWidth);
@@ -313,22 +420,7 @@
     root.classList.toggle('hd-w-l', !state.phone && w >= 900);
     root.classList.toggle('hd-w-m', !state.phone && w >= 560 && w < 900);
     root.classList.toggle('hd-w-s', state.phone || w < 560);
-    /* The tab's tiers, from the room the TAB has: what it drops (R and
-       risk, then the name) is chosen by what fits, and the alarms and
-       the REAL pill never go (sv-horde.css). */
-    var room = tabRoom(w);
-    root.classList.toggle('hd-t-l', !state.phone && room >= 360);
-    root.classList.toggle('hd-t-m', !state.phone && room >= 240 && room < 360);
-    root.classList.toggle('hd-t-s', state.phone || room < 240);
-    /* Called on every re-measure: the words are repainted only when a
-       tier moved. */
-    var sig = root.className;
-    if (sig === state.tierSig) return;
-    state.tierSig = sig;
-    /* The seat count takes the tier's words ("HORDE 7" when narrow) from
-       the first paint on, before any answer has come back. */
-    if (state.seatN !== null) seatsEl.textContent = seatWords(state.seatN);
-    if (state.board && state.board.tab) paintTab(state.board.tab);
+    fitTab();
   }
   function setPhone(on) {
     var was = state.phone;
@@ -503,7 +595,7 @@
     if (cls !== undefined) node.className = cls;
   }
   function seatWords(n) {
-    var compact = state.phone || root.classList.contains('hd-t-s');
+    var compact = state.phone || !root.classList.contains('hd-t-l');
     if (compact) return fill(W('tab_compact'), { n: n });
     return n === 1 ? fill(W('tab_seat'), { n: n }) : fill(W('tab_seats'), { n: n });
   }
@@ -522,6 +614,8 @@
     var flag = t.flag === 'elite' ? W('flag_elite') : t.flag === 'shut' ? W('flag_shut')
              : t.flag === 'unreadable' ? W('flag_unreadable') : '';
     seg(segs.flag, flag, 'hd-tab-flag ' + (t.flag || ''));
+    /* The content moved: the tier is measured again. */
+    fitTab();
     if (t.title_t) tab.title = t.title_t;
     state.tabAria = t.aria_t || '';
     paintTabWords();
@@ -543,16 +637,22 @@
     seg(segs.moves, n ? String(n > 99 ? '99+' : n) : '');
     if (segs.moves) segs.moves.title = n ? fill(W('moves_title'), { n: n }) : '';
   }
-  /* The open sheet's own count (a phone hides the tab while it is open):
-     the seats and the alarm chip. */
+  /* The open sheet's own count, where the tab is hidden while the sheet
+     is open (a phone) or tucked (a wide screen, round 2):
+     the seats, the alarm chip and the REAL pill, as the tab says them. */
   function paintHeadCount(t) {
     if (!headCountEl) return;
     clear(headCountEl);
     var n = t.seats || 0;
     add(headCountEl, el('span', '', n === 1 ? fill(W('tab_seat'), { n: 1 }) : fill(W('tab_seats'), { n: n })));
     if (t.alarms) {
-      add(headCountEl, el('span', 'hd-tab-alarms', t.alarms === 1 ? fill(W('tab_alarm'), { n: 1 })
+      add(headCountEl, el('span', 'hd-tab-alarms hd-count-alarms', t.alarms === 1 ? fill(W('tab_alarm'), { n: 1 })
                                                                   : fill(W('tab_alarms'), { n: t.alarms })));
+    }
+    if (t.by_world && t.by_world.live) {
+      var real = add(headCountEl, el('span', 'hd-tab-real sv-world sv-world--live',
+                                     fill(W('tab_real'), { n: t.by_world.live })));
+      real.title = segs.real ? segs.real.title : '';
     }
   }
 
@@ -592,6 +692,7 @@
         if (state.seatRev && s.rev !== state.seatRev) readSeat(state.seatKey);
       }
     }
+    lineEndsSoon();
   }
 
   function paintLens(d) {
@@ -654,8 +755,7 @@
                  || ((lens() === 'live' || lens() === 'demo' || lens() === 'none') && side === 'paper');
     if (folded || !s.present) cell.classList.add('hd-folded');
     var t = add(cell, el('div', 'hd-cell-title'));
-    add(t, el('span', 'sv-venue ' + s.venue_class, s.label));
-    add(t, el('span', '', '· ' + s.book_t));
+    joinDots(t, [el('span', 'sv-venue ' + s.venue_class, s.label), el('span', '', s.book_t)]);
     var body = add(cell, el('div', 'hd-cell-body'));
     var orisk = s.open_risk || {};
     var l1 = line(body, orisk.tone ? 'hd-tone-' + orisk.tone : '');
@@ -667,19 +767,19 @@
       var bar = add(meter, el('span'));
       bar.style.width = fillPct.toFixed(1) + '%';
       add(meter, el('i'));
-      add(l1, document.createTextNode(' ' + fill(W('pct_of'), { pct: orisk.pct_t, limit: orisk.limit_pct_t })));
-      line(body).textContent = orisk.t;
+      add(l1, txt(' ' + fill(W('pct_of'), { pct: orisk.pct_t, limit: orisk.limit_pct_t })));
+      line(body).textContent = dots(orisk.t);
     } else {
-      add(l1, document.createTextNode(' ' + DASH + ' ' + (orisk.t || '')));
+      add(l1, txt(' ' + DASH + ' ' + (orisk.t || '')));
     }
     l1.title = orisk.reason || '';
-    if (orisk.past_t) line(body, 'hd-tone-past').textContent = orisk.past_t;
-    if (s.demo_note_t) line(body, 'hd-muted').textContent = s.demo_note_t;
-    if (s.extra_t) line(body, 'hd-muted').textContent = s.extra_t;
+    if (orisk.past_t) line(body, 'hd-tone-past').textContent = dots(orisk.past_t);
+    if (s.demo_note_t) line(body, 'hd-muted').textContent = dots(s.demo_note_t);
+    if (s.extra_t) line(body, 'hd-muted').textContent = dots(s.extra_t);
     var daily = s.daily || {};
     var l2 = line(body, daily.mode === 'shut' ? 'hd-tone-bad' : daily.mode === 'elite' ? 'hd-tone-near' : '');
     bold(l2, W('daily_stop'));
-    add(l2, document.createTextNode(' ' + (daily.mode === 'unmeasured' ? DASH + ' ' : '') + (daily.t || '')));
+    add(l2, txt(' ' + (daily.mode === 'unmeasured' ? DASH + ' ' : '') + (daily.t || '')));
     l2.title = W('daily_title') + (daily.reason ? ' ' + daily.reason : '');
     var l3 = line(body);
     bold(l3, W('allocation'));
@@ -693,17 +793,17 @@
         words.push(a.t + (a.demo ? ' (' + W('demo') + ')' : a.legacy ? ' (' + W('no_venue_seg') + ')' : ''));
       });
       if (s.alloc_free) words.push(s.alloc_free.t);
-      add(l3, document.createTextNode(' ' + words.join(' · ')));
-      if (s.alloc_unmeasured_t) line(body, 'hd-muted').textContent = s.alloc_unmeasured_t;
-      if (s.alloc_over_t) line(body, 'hd-tone-past').textContent = s.alloc_over_t;
+      add(l3, txt(' ' + words.join(' · ')));
+      if (s.alloc_unmeasured_t) line(body, 'hd-muted').textContent = dots(s.alloc_unmeasured_t);
+      if (s.alloc_over_t) line(body, 'hd-tone-past').textContent = dots(s.alloc_over_t);
     } else {
-      add(l3, document.createTextNode(' ' + (s.alloc_t || DASH)));
+      add(l3, txt(' ' + (s.alloc_t || DASH)));
     }
     var l4 = line(body);
     [['exposure', s.exposure], ['notional', s.notional]].forEach(function (pair, i) {
-      if (i) add(l4, document.createTextNode(' · '));
+      if (i) add(l4, txt(' · '));
       bold(l4, pair[0] === 'exposure' ? W('exposure') : W('notional'));
-      add(l4, document.createTextNode(' '));
+      add(l4, txt(' '));
       var ok = pair[1] ? pair[1].ok : null;
       var chip = add(l4, el('span', 'hd-chip ' + (ok === true ? 'ok' : ok === false ? 'bad' : 'muted'),
                             ok === true ? W('ok') : ok === false ? W('past') : DASH));
@@ -711,63 +811,18 @@
     });
     return cell;
   }
-  function paintTable(d) {
-    var keep = focusKey(tableEl);
-    clear(tableEl);
-    clear(notesEl);
-    /* The warnings go under the table, outside its capped scroller: the
-       limits that could not be read, the marks, the switches turned off
-       (they were below that scroller's fold at HALF). */
-    var notes = notesEl || tableEl;
-    var hd = d.head || {};
-    if (!hd.readable) { add(notes, el('div', 'hd-failed', hd.t)); return; }
-    var sides = hd.sides || {};
-    var failedSaid = '';
-    ['live', 'paper'].forEach(function (k) {
-      var s = sides[k];
-      if (s && s.failed_open && s.failed_t !== failedSaid) {
-        add(notes, el('div', 'hd-failed', s.failed_t));
-        failedSaid = s.failed_t;
-      }
-    });
-    var holder = tableEl;
-    if (state.phone) {
-      var live = sides.live || {}, lo = live.open_risk || {}, ld = live.daily || {};
-      /* An unmeasured stop is a dash, never "OPEN": the gate could not
-         apply it (its reason is in the cell underneath). */
-      var mode = ld.mode === 'shut' ? W('mode_shut') : ld.mode === 'elite' ? W('mode_elite')
-               : ld.mode === 'open' ? W('mode_open') : DASH;
-      var toggle = add(tableEl, button('hd-btn', W('book_limits') + ' · '
-        + fill(W('phone_limits'), { x: lo.pct_t || DASH, limit: lo.limit_pct_t || DASH, mode: mode })));
-      toggle.setAttribute('aria-expanded', state.limitsOpen ? 'true' : 'false');
-      toggle.setAttribute('data-hd-focus', 'limits');
-      holder = add(tableEl, el('div', 'hd-row2'));
-      holder.hidden = !state.limitsOpen;
-      toggle.addEventListener('click', function () {
-        state.limitsOpen = !state.limitsOpen;
-        toggle.setAttribute('aria-expanded', state.limitsOpen ? 'true' : 'false');
-        holder.hidden = !state.limitsOpen;
-      });
-    }
-    ['live', 'paper'].forEach(function (k) { if (sides[k]) add(holder, paintSide(k, sides[k])); });
-    if (hd.pools) {
-      var pools = add(holder, el('div', 'hd-cell hd-small'));
-      add(add(pools, el('div', 'hd-cell-title')), el('span', '', W('pools')));
-      line(pools, hd.pools.live_neg ? 'hd-tone-down' : '').textContent = hd.pools.live_t;
-      line(pools, hd.pools.paper_neg ? 'hd-tone-down' : '').textContent = hd.pools.paper_t;
-      pools.title = hd.pools.classes_t || '';
-    }
-    var tones = hd.tones || {};
-    var alarms = add(holder, el('div', 'hd-cell hd-small'));
-    add(add(alarms, el('div', 'hd-cell-title')), el('span', '', W('alarms_cell')));
-    var chips = line(alarms);
+  /* The tone of an alarm chip: the tab's own colours (2026-10-16: the
+     head's "1 ALARM" was grey beside the tab's red pill). */
+  var CHIP_TONES = { alarm: 'hd-chip-btn--alarm', watch: 'hd-chip-btn--watch',
+                     order: 'hd-chip-btn--order', unheld: 'hd-chip-btn--unheld' };
+  function toneChips(parent, tones) {
     [['alarm', tones.alarm, tones.alarm === 1 ? fill(W('chip_alarm'), { n: 1 }) : fill(W('chip_alarms'), { n: tones.alarm })],
      ['watch', tones.watch, fill(W('chip_watch'), { n: tones.watch })],
      ['unheld', tones.unheld, fill(W('chip_unheld'), { n: tones.unheld })],
      ['order', tones.order, tones.order === 1 ? fill(W('chip_order'), { n: 1 }) : fill(W('chip_orders'), { n: tones.order })]
     ].forEach(function (c) {
       if (!c[1]) return;
-      var b = add(chips, button('hd-chip-btn', c[2], function () {
+      var b = add(parent, button('hd-chip-btn ' + CHIP_TONES[c[0]], c[2], function () {
         state.tone = state.tone === c[0] ? '' : c[0];
         paintTable(state.board);
         applyFilters();
@@ -779,13 +834,90 @@
       b.setAttribute('aria-pressed', state.tone === c[0] ? 'true' : 'false');
       b.setAttribute('data-hd-focus', 'chip:' + c[0]);
     });
-    var real = allSeats(d).filter(function (s) { return s.world === 'live' || s.world === 'demo'; });
-    if (real.length && hd.marks) {
-      add(notes, el('div', 'hd-note', fill(W('marks'), {
-        v: hd.marks.venue, s: hd.marks.venue_stale, q: hd.marks.quote, w: hd.marks.waiting })));
+  }
+  /* THE WAR TABLE. The head keeps ONE line pinned (2026-10-16: at HALF
+     its capped scroller cut the REAL ACCOUNT card mid-content, and at
+     1100 no seat card was left on screen): the book limits in a sentence
+     per side, the alarm chips that filter the seats, and a toggle. The
+     cells, when the reader opens them, stand at the top of the body and
+     scroll with the bands as ONE unit, whole, never cut by a scroller of
+     their own. The choice is kept per viewer. */
+  function sideSummary(k, s) {
+    var o = s.open_risk || {}, dl = s.daily || {};
+    var mode = dl.mode === 'shut' ? W('mode_shut') : dl.mode === 'elite' ? W('mode_elite')
+             : dl.mode === 'open' ? W('mode_open') : DASH;
+    var span = el('span', 'hd-sum-side' + (o.tone ? ' hd-tone-' + o.tone : ''),
+                  fill(W('sum_side'), { side: k === 'live' ? W('sum_real') : W('sum_paper'),
+                                        x: o.pct_t || DASH, limit: o.limit_pct_t || DASH, mode: mode }));
+    span.title = [s.label, s.book_t, o.t].filter(Boolean).join(' · ');
+    return span;
+  }
+  function paintTable(d) {
+    var keep = focusKey(tableEl) || focusKey(sumEl);
+    clear(tableEl);
+    clear(notesEl);
+    clear(sumEl);
+    var notes = notesEl || tableEl;
+    var hd = d.head || {};
+    var sides = hd.sides || {};
+    var toggle = null;
+    if (hd.readable) {
+      toggle = add(sumEl, button('hd-sum-btn', W('book_limits')));
+      toggle.setAttribute('aria-controls', 'svHordeTable');
+      toggle.setAttribute('aria-expanded', state.limitsOpen ? 'true' : 'false');
+      toggle.setAttribute('data-hd-focus', 'limits');
+      toggle.title = state.limitsOpen ? W('limits_hide') : W('limits_show');
+      var parts = [];
+      ['live', 'paper'].forEach(function (k) {
+        if (sides[k] && sides[k].present) parts.push(sideSummary(k, sides[k]));
+      });
+      /* A phone's one line is the real account's (the paper side is in the
+         opened cells), as it was before; a paper-only book keeps paper. */
+      if (state.phone && parts.length > 1) parts = parts.slice(0, 1);
+      joinDots(sumEl, parts);
+      toggle.addEventListener('click', function () {
+        state.limitsOpen = !state.limitsOpen;
+        store(LIMITS_KEY, state.limitsOpen ? '1' : '0');
+        toggle.setAttribute('aria-expanded', state.limitsOpen ? 'true' : 'false');
+        toggle.title = state.limitsOpen ? W('limits_hide') : W('limits_show');
+        tableEl.hidden = !state.limitsOpen;
+        root.classList.toggle('hd-limits-open', state.limitsOpen);
+        fitDossier();
+      });
+    }
+    toneChips(add(sumEl, el('span', 'hd-sum-chips')), hd.tones || {});
+    tableEl.hidden = !(hd.readable && state.limitsOpen);
+    root.classList.toggle('hd-limits-open', !!(hd.readable && state.limitsOpen));
+    if (!hd.readable) { add(notes, el('div', 'hd-failed', dots(hd.t))); refocus(sumEl, keep); return; }
+    var failedSaid = '';
+    ['live', 'paper'].forEach(function (k) {
+      var s = sides[k];
+      if (s && s.failed_open && s.failed_t !== failedSaid) {
+        add(notes, el('div', 'hd-failed', dots(s.failed_t)));
+        failedSaid = s.failed_t;
+      }
+    });
+    ['live', 'paper'].forEach(function (k) { if (sides[k]) add(tableEl, paintSide(k, sides[k])); });
+    if (hd.pools) {
+      var pools = add(tableEl, el('div', 'hd-cell hd-small'));
+      add(add(pools, el('div', 'hd-cell-title')), el('span', '', W('pools')));
+      line(pools, hd.pools.live_neg ? 'hd-tone-down' : '').textContent = dots(hd.pools.live_t);
+      line(pools, hd.pools.paper_neg ? 'hd-tone-down' : '').textContent = dots(hd.pools.paper_t);
+      pools.title = hd.pools.classes_t || '';
+    }
+    /* Which book each count covers is the server's sentence (MARKS · REAL
+       seats (5): ... · PAPER seats (3): ...). */
+    if (hd.marks && hd.marks.t) {
+      /* One box per "·" segment, so a wrap breaks between whole segments
+         and lineEnds can drop the dot that would end a line (final
+         review: "0 waiting ·" then "PAPER (3)" on the phone). */
+      var mk = add(notes, el('div', 'hd-note hd-note-units'));
+      mk.title = hd.marks.title || '';
+      joinDots(mk, String(hd.marks.t).split(' \u00b7 ').map(function (t) { return el('span', '', t); }));
     }
     (hd.switch_lines || []).forEach(function (t) { add(notes, el('div', 'hd-note gold', t)); });
     refocus(tableEl, keep);
+    refocus(sumEl, keep);
   }
   /* Every repaint rebuilds its box: the reader's place (a band title, an
      expander, a chip, a seat) is kept by a key, read before and focused
@@ -803,9 +935,6 @@
     if (n.hasAttribute('data-open-seat')) n.tabIndex = 0;
     try { n.focus({ preventScroll: true }); } catch (e) { /* gone */ }
   }
-  /* Under the middle tier the war table is one row that scrolls sideways;
-     the wheel moves it as it moves the strip (base.html). */
-  if (window.svWheelScrollsSideways) window.svWheelScrollsSideways(tableEl);
 
   /* the bands */
   function worldPill(world, word, titleText) {
@@ -827,14 +956,19 @@
           : world === 'paper' ? W('pill_paper') : W('pill_none');
     return fill(t, { n: n });
   }
+  /* The verdict on a card says whose it is (2026-10-16: an unlabelled
+     EXIT sat on the care's row and read as the care's): the position
+     reviewer's, or else the thesis check's. */
   function voiceChip(s) {
-    var v = (s.voice && (s.voice.reviewer || s.voice.thesis)) || null;
+    var rv = s.voice && s.voice.reviewer, th = s.voice && s.voice.thesis;
+    var v = rv || th || null;
     if (!v) return null;
     var verdict = v.verdict || '';
     var cls = verdict === 'exit' ? ' red'
             : (verdict === 'tighten' || verdict === 'adjust' || verdict === 'take_part') ? ' gold' : '';
-    var chip = el('span', 'hd-voice-chip' + cls, v.word);
-    chip.title = v.age_t ? v.word + ' · ' + v.age_t : v.word;
+    var chip = el('span', 'hd-voice-chip' + cls,
+                  fill(rv ? W('chip_reviewer') : W('chip_thesis'), { v: v.word }));
+    chip.title = fill(rv ? W('chip_reviewer_title') : W('chip_thesis_title'), { age: v.age_t || DASH });
     return chip;
   }
   function seatCard(s) {
@@ -880,31 +1014,24 @@
       }
     }
     var notFilled = s.working ? el('span', 'hd-wait', s.money.note) : null;
-    if (state.phone) {
-      /* Two lines on a phone (§3.8): light, symbol, side, world, R; then
-         the mission, the P&L and the mark's word. */
-      if (rr) add(r1, rr);
-      add(r1, el('span', 'hd-grow', s.kind === 'bot' ? '#' + s.trade_id : 'pos #' + s.position_id));
-      var p2 = add(card, el('div', 'hd-seat-row'));
-      var pm = add(p2, el('span', 'hd-mission', s.mission));
-      pm.title = s.mission;
-      add(p2, notFilled || pnl);
-      markBits.forEach(function (b) { add(p2, b); });
-    } else {
-      add(r1, el('span', 'hd-grow', s.kind === 'bot' ? '#' + s.trade_id : 'pos #' + s.position_id));
-      var r2 = add(card, el('div', 'hd-seat-row'));
-      var m = add(r2, el('span', 'hd-mission', s.mission));
-      m.title = s.mission;
-      if (s.instrument_class && s.instrument_class !== s['class']) {
-        add(r2, el('span', 'hd-muted', fill(W('inst_class'), { 'class': s.instrument_class })));
-      }
-      if (s.orc && s.orc.plan_line) add(card, el('div', 'hd-seat-row hd-muted', s.orc.plan_line));
-      var r3 = add(card, el('div', 'hd-seat-row'));
-      add(r3, notFilled);
-      add(r3, rr);
-      add(r3, pnl);
-      markBits.forEach(function (b) { add(r3, b); });
+    add(r1, el('span', 'hd-grow', s.kind === 'bot' ? '#' + s.trade_id : 'pos #' + s.position_id));
+    var r2 = add(card, el('div', 'hd-seat-row'));
+    var m = add(r2, el('span', 'hd-mission', s.mission));
+    m.title = s.mission;
+    /* The instrument's own class, as a chip (round 2: "Index momentum
+       instrument: index" ran into the mission with no separator). */
+    if (!state.phone && s.instrument_class && s.instrument_class !== s['class']) {
+      add(r2, el('span', 'hd-chip hd-inst-chip', fill(W('inst_class'), { 'class': s.instrument_class })));
     }
+    if (!state.phone && s.orc && s.orc.plan_line) add(card, el('div', 'hd-seat-row hd-muted', s.orc.plan_line));
+    /* The money line is one unit on its own row, on the phone too (round
+       2: the phone split "-0.50R", "-57.24 USD" and "7.12860 venue" over
+       the head row, the mission's row and a third line). */
+    var r3 = add(card, el('div', 'hd-seat-row hd-money-row'));
+    add(r3, notFilled);
+    add(r3, rr);
+    add(r3, pnl);
+    markBits.forEach(function (b) { add(r3, b); });
     var lv = s.levels || {};
     var r4 = add(card, el('div', 'hd-seat-row hd-phone-hide'));
     /* The stop that can be hit (the venue's, on a row it protects), and
@@ -917,16 +1044,41 @@
       tickEl.style.left = (Math.max(0, Math.min(1, lv.progress_v)) * 100).toFixed(1) + '%';
     }
     add(r4, el('span', 'hd-muted', W('lbl_target') + ' ' + (lv.target_t || W('no_target'))));
+    /* The distance to the stop has its own row at every width (round 2:
+       "target 1.33200 0.89% to the stop" ran together in a narrow card). */
     if (lv.stop_pct_t) {
-      add(r4, el('span', lv.stop_through ? 'hd-through' : 'hd-muted',
-                 lv.stop_through ? fill(W('through_stop'), { x: lv.stop_pct_t })
-                                 : fill(W('to_stop'), { x: lv.stop_pct_t })));
+      var r4b = add(card, el('div', 'hd-seat-row hd-phone-hide hd-stop-dist'));
+      add(r4b, el('span', lv.stop_through ? 'hd-through' : 'hd-muted',
+                  lv.stop_through ? fill(W('through_stop'), { x: lv.stop_pct_t })
+                                  : fill(W('to_stop'), { x: lv.stop_pct_t })));
     }
-    var r5 = add(card, el('div', 'hd-seat-row hd-phone-hide'));
+    /* The voice has a row of its own, so the holder row, and "No Orc" at
+       its right, stand at the same height on every card, pinned to the
+       card's foot (round 2). */
+    /* An ALARM or a WATCH always names its cause, on the phone too (final
+       review: the phone card showed a red ALARM and hid "Reviewer: EXIT").
+       The voice row stays when the voice is what raised the light; a
+       light raised by something else says its own first reason, so a
+       calm verdict is never shown as the cause. */
+    var vc = voiceChip(s);
+    var lt = s.light || {};
+    var loud = lt.tone === 'alarm' || lt.tone === 'watch';
+    var said = (lt.why || []).filter(function (w) { return w.tone === lt.tone; });
+    var voiceCode = (s.voice && s.voice.reviewer) ? 'reviewer_' : 'thesis_';
+    var voiceSaid = loud && said.some(function (w) { return String(w.code || '').indexOf(voiceCode) === 0; });
+    if (vc) add(add(card, el('div', voiceSaid ? 'hd-seat-row hd-voice-row' : 'hd-seat-row hd-phone-hide')), vc);
+    if (loud && !voiceSaid && said.length) {
+      add(add(card, el('div', 'hd-seat-row hd-light-why')),
+          el('span', 'hd-muted', said[0].t + (said.length > 1 ? ' ' + fill(W('more_causes'), { n: said.length - 1 }) : '')));
+    }
+    /* Two facts, two subjects, two rows: how long the position has been
+       open, then who holds it (round 2: "Care · profit locks held 1 day
+       20 hours" read as the lock's age). */
+    var foot = add(card, el('div', 'hd-seat-foot hd-phone-hide'));
+    add(add(foot, el('div', 'hd-seat-row')), el('span', 'hd-muted', fill(W('held_for'), { t: s.held.t })));
+    var r5 = add(foot, el('div', 'hd-seat-row'));
     var h = add(r5, el('span', '', s.holder.short));
     h.title = s.holder.words + (s.holder.suffix ? ' ' + s.holder.suffix : '');
-    add(r5, voiceChip(s));
-    add(r5, el('span', 'hd-muted', s.held.t));
     if (s.orc && s.orc.label) {
       add(r5, el('span', 'hd-grow', s.orc.label + (s.orc.authority && s.orc.authority.level_t
                                                    ? ' · ' + s.orc.authority.level_t : '')));
@@ -989,25 +1141,38 @@
       (g.today.legs_t || []).forEach(function (t) { add(today, el('div', '', t)); });
     }
     add(today, el('div', 'hd-muted', W('captains_not_built')));
+    if (g.class_note_t) add(parts.body, el('div', 'hd-class-note', g.class_note_t));
     (g.lines || []).forEach(function (l) {
       var row = add(parts.body, el('div', 'hd-line'));
       row.setAttribute('data-world', l.world || 'none');
       add(row, worldPill(l.world, l.world_word));
       var bits = [l.seats === 1 ? fill(W('seat_n'), { n: 1 }) : fill(W('seats_n'), { n: l.seats })];
       bits.push(l.sides_known ? fill(W('long_short'), { l: l['long'], s: l['short'] }) : W('long_short_unknown'));
-      add(row, el('span', '', bits.join(' ')));
-      if (l.at_work_t) add(row, el('span', '', '· ' + fill(W('at_work'), { x: l.at_work_t })));
-      (l.pnl || []).forEach(function (p) {
-        add(row, el('span', toneCls(p.tone), '· ' + p.t + ' ' + p.ccy));
+      var items = [el('span', '', bits.join(' '))];
+      if (l.at_work_t) items.push(el('span', '', fill(W('at_work'), { x: l.at_work_t })));
+      (l.pnl || []).forEach(function (p, i) {
+        var pn = el('span', toneCls(p.tone), p.t + ' ' + p.ccy);
+        /* The unpriced count rides with the last money figure. */
+        if (i === l.pnl.length - 1 && l.priced < l.seats) {
+          add(pn, el('span', 'hd-muted', ' ' + fill(W('priced_of'), { n: l.priced, m: l.seats })));
+        }
+        items.push(pn);
       });
-      if (l.priced < l.seats) add(row, el('span', 'hd-muted', fill(W('priced_of'), { n: l.priced, m: l.seats })));
+      if (!(l.pnl || []).length && l.priced < l.seats) {
+        items.push(el('span', 'hd-muted', fill(W('priced_of'), { n: l.priced, m: l.seats })));
+      }
       if (l.r_t) {
-        add(row, el('span', '', '· ' + l.r_t + (l.r_n < l.seats ? ' ' + fill(W('r_of'), { n: l.r_n, m: l.seats }) : '')));
+        items.push(el('span', '', l.r_t + (l.r_n < l.seats ? ' ' + fill(W('r_of'), { n: l.r_n, m: l.seats }) : '')));
       }
       if (l.risk_t) {
-        add(row, el('span', '', '· ' + fill(W('at_stops'), { x: l.risk_t, y: dash(l.risk_pct_t) })
-                               + (l.risk_n < l.seats ? ' ' + fill(W('r_of'), { n: l.risk_n, m: l.seats }) : '')));
+        items.push(el('span', '', fill(W('at_stops'), { x: l.risk_t, y: dash(l.risk_pct_t) })
+                                  + (l.risk_n < l.seats ? ' ' + fill(W('r_of'), { n: l.risk_n, m: l.seats }) : '')));
       }
+      /* The pill has a column of its own and the words wrap in theirs, so
+         a continuation starts under the words, not under the pill, with
+         no pill-high gap (final review: "at the stops ..." read as a
+         fourth line of its own). */
+      joinDots(add(row, el('span', 'hd-line-words')), items);
     });
     (g.same_bet || []).forEach(function (b) {
       var bet = add(parts.body, el('div', 'hd-bet', fill(W('same_bet'), { words: b.t })));
@@ -1312,14 +1477,21 @@
     seatBox.setAttribute('aria-label', fill(W('seat_label'), {
       sym: s.symbol, side: (s.side_word || '').toLowerCase(), id: s.trade_id || s.position_id }));
     var head = add(seatBox, el('div', 'hd-dos-head'));
-    var row = add(head, el('div', 'hd-seat-row'));
+    /* One row: the heading, then three compact buttons (2026-10-16: on a
+       phone "Back to the Horde", "Refresh this seat" and the close took
+       three rows of the pinned head). Their full names are their labels. */
+    var row = add(head, el('div', 'hd-seat-row hd-dos-title'));
     var h3 = add(row, el('h3', '', seatHeadText(s)));
     h3.tabIndex = -1;
+    var tools = add(row, el('span', 'hd-dos-tools'));
     if (!root.classList.contains('hd-w-l') || state.phone) {
-      add(row, button('hd-btn', W('back'), function () { closeDossier(true); }));
+      var back = add(tools, button('hd-btn', W('back'), function () { closeDossier(true); }));
+      back.setAttribute('aria-label', W('back_label'));
     }
-    add(row, button('hd-btn', W('refresh_seat'), function () { readSeat(s.key); }));
-    var x = add(row, button('hd-icon-btn hd-grow', '×', function () { closeDossier(true); }));
+    var rf = add(tools, button('hd-icon-btn', '\u21bb', function () { readSeat(s.key); }));
+    rf.setAttribute('aria-label', W('refresh_seat'));
+    rf.title = W('refresh_seat');
+    var x = add(tools, button('hd-icon-btn', '×', function () { closeDossier(true); }));
     x.setAttribute('aria-label', W('close_seat'));
     x.title = W('close_seat');
     add(head, el('div', 'hd-dos-live'));
@@ -1329,6 +1501,10 @@
      ['instruments', W('d_instruments')]].forEach(function (c) {
       add(chips, button('hd-chip-btn', c[1], function () {
         var target = document.getElementById('svHordeSec-' + c[0]);
+        /* The section's scroll-margin-top is the pinned head's measured
+           height (sv-horde.css, --hd-dos-head-h): its heading lands
+           under the head, never behind it. */
+        measureDossierHead();
         if (target) target.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
       }));
     });
@@ -1346,7 +1522,9 @@
     if ((mi.tags || []).length) rows.push({ label: W('m_tags'), t: mi.tags.join(' · ') });
     if (mi.rule_stage_t) rows.push({ label: W('m_rule'), t: mi.rule_stage_t });
     if (mi.plan) rows.push({ label: W('m_plan'), t: mi.plan.t });
-    rows.push({ label: W('m_thesis'), t: W('no_thesis') });
+    /* The Orc's own slot, said as the Orc's; the thesis check that HAS
+       read the seat is named under it, so the two never contradict. */
+    rows.push({ label: W('m_thesis'), t: mi.thesis || W('no_thesis'), sub: mi.thesis_note || '' });
     kv(sec, rows);
 
     sec = section(seatBox, 'svHordeSec-deployment', W('t_deployment'));
@@ -1377,34 +1555,50 @@
     sec = section(seatBox, 'svHordeSec-voice', W('t_voice'));
     paintVoice(sec, d.voice || {});
 
-    /* The command bar is the dossier's own child, not its section's, so
-       it stays stuck to the bottom while any section above is read. */
     section(seatBox, 'svHordeSec-commands', W('t_commands'));
-    add(seatBox, el('div', 'hd-cmds hd-dos-cmdbar')).id = 'svHordeCmds';
     add(seatBox, el('div', 'hd-cmds hd-cmd-links')).id = 'svHordeCmdLinks';
-    paintCommands(d);
     if ((d.phone || []).length) {
       sec = add(seatBox, el('section', 'hd-dos-sec'));
       add(sec, el('h4', '', W('t_phone')));
-      var lines = d.phone.map(function (p) { return p.cmd + ' — ' + p.t; });
-      var ul = add(sec, el('ul', 'hd-tl'));
-      lines.forEach(function (l) { var li = add(ul, el('li', '', l)); li.style.display = 'block'; });
-      var copy = add(sec, button('hd-btn', W('copy')));
-      copy.addEventListener('click', function () {
-        var text = d.phone.map(function (p) { return p.cmd; }).join('\n');
-        try {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text).then(function () { copy.textContent = W('copied'); },
-                                                     function () { /* the reader copies by hand */ });
-          }
-        } catch (e) { /* the reader copies by hand */ }
+      /* Each command with its own Copy, which says what it copies
+         (2026-10-16: one Copy under three commands). */
+      var ul = add(sec, el('ul', 'hd-tl hd-phone-cmds'));
+      d.phone.forEach(function (p) {
+        var li = add(ul, el('li'));
+        add(li, el('code', 'hd-cmd-text', p.cmd));
+        var copy = add(li, button('hd-btn hd-copy', W('copy')));
+        copy.setAttribute('aria-label', fill(W('copy_label'), { cmd: p.cmd }));
+        copy.setAttribute('data-copy', p.cmd);
+        copy.addEventListener('click', function () {
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(p.cmd).then(function () { copy.textContent = W('copied'); },
+                                                        function () { /* the reader copies by hand */ });
+            }
+          } catch (e) { /* the reader copies by hand */ }
+        });
+        add(li, el('span', 'hd-muted', p.t));
       });
     }
 
     sec = section(seatBox, 'svHordeSec-instruments', W('t_instruments'));
     paintInstruments(sec, d.instruments || {}, s);
+    /* The command bar is the dossier's own LAST child, not its section's:
+       sticky at the bottom, it stays on screen over every section, the
+       last one included (round 2: placed after the Commands heading, it
+       scrolled away once Instruments was read). */
+    add(seatBox, el('div', 'hd-cmds hd-dos-cmdbar')).id = 'svHordeCmds';
+    paintCommands(d);
+    measureDossierHead();
     if (first) { try { h3.focus(); } catch (e) { /* no focus */ } }
     else seatBox.scrollTop = keep;
+  }
+  /* The pinned head's height, for the sections' scroll-margin-top. */
+  function measureDossierHead() {
+    var h = seatBox.querySelector('.hd-dos-head');
+    if (!h) return;
+    var r = h.getBoundingClientRect();
+    seatBox.style.setProperty('--hd-dos-head-h', Math.ceil(r.height || 0) + 'px');
   }
   function voiceBox(parent, heading, cls) {
     var box = add(parent, el('div', 'hd-voice' + (cls ? ' ' + cls : '')));
@@ -1471,9 +1665,12 @@
     if (lbox !== box) clear(lbox);
     var side = (s.side_word || '').toLowerCase();
     var ident = s.trade_id || s.position_id;
-    add(box, button('hd-btn', W('c_ask'), function () {
+    /* On a phone the bar's cell holds "Ask Sauron" on one line (final
+       review: the full label wrapped to two); the seat is the dossier's. */
+    var ask = add(box, button('hd-btn', state.phone ? W('c_ask_short') : W('c_ask'), function () {
       if (window.askSauronAbout) window.askSauronAbout(cmd.ask.subject, 'position', cmd.ask.facts);
     }));
+    ask.title = W('c_ask');
     if (cmd.advice && window.SVCloseAdvice) {
       var adv = add(box, button('hd-btn', W('c_advice')));
       adv.setAttribute('data-sv-advice-ids', String(s.trade_id));
@@ -1536,19 +1733,39 @@
     var peers = ins.peers || [];
     if (!peers.length) add(sec, el('div', 'hd-muted', ins.empty_t));
     else {
-      var table = add(sec, el('table', 'hd-peers'));
-      var tbody = add(table, el('tbody'));
+      /* One row per peer that WRAPS inside the dossier column (2026-10-16:
+         a six-column table overflowed 380-520px, clipped "Long…" to "L"
+         and broke "moderate · 180 bars" over three lines). The server
+         sends the strongest |rho| first, the SMT partner and the complex
+         always kept; the viewer's own seats are marked. */
+      var list = add(sec, el('ul', 'hd-peers'));
       peers.forEach(function (p) {
-        var tr = add(tbody, el('tr'));
-        add(add(tr, el('td')), el('b', '', p.symbol));
-        var rho = add(tr, el('td', '', p.measured ? p.rho_t : DASH));
-        if (!p.measured) rho.title = p.why_t || '';
-        add(tr, el('td', 'hd-muted', [p.strength, p.n_bars ? fill(W('bars'), { n: p.n_bars }) : ''].filter(Boolean).join(' · ')));
-        var rel = add(tr, el('td'));
-        add(rel, el('span', 'hd-chip', p.relation));
-        if (p.bet_t) add(rel, el('span', 'hd-muted', ' ' + p.bet_t));
-        add(tr, el('td', '', dash(p.last_t) + (p.change_t ? ' ' + p.change_t : '')));
-        var acts = add(tr, el('td'));
+        var li = add(list, el('li', 'hd-peer' + (p.is_seat ? ' hd-peer--seat' : '')));
+        var top = add(li, el('div', 'hd-peer-row'));
+        add(top, el('b', '', p.symbol));
+        var rho = add(top, el('span', 'hd-peer-rho', p.measured ? p.rho_t : DASH));
+        if (p.measured) {
+          rho.title = fill(W('bars'), { n: p.n_bars });
+          add(top, el('span', 'hd-muted', p.strength));
+        } else {
+          add(top, el('span', 'hd-muted', fill(W('unmeasured_bars'), { n: p.n_bars || 0 })));
+        }
+        /* A seat peer wears its book's pill, as on the cards: a paper
+           seat never reads like a real one (round 2, rule 4). */
+        if (p.is_seat) add(top, worldPill(p.seat_world || '', p.seat_world_word || '', p.seat_world_title || ''));
+        add(top, el('span', 'hd-chip', p.relation));
+        if (p.is_seat && p.relation.indexOf('YOUR ') !== 0) add(top, el('span', 'hd-chip ok', W('your_seat')));
+        if (p.bet_t) add(top, el('span', 'hd-wait', p.bet_t));
+        /* A price with no measured day change shows a dash there, with the
+           server's reason: an empty slot read as "no move" (final review). */
+        var px_ = add(top, el('span', 'hd-peer-last', dash(p.last_t)));
+        if (p.change_t) add(px_, txt(' ' + p.change_t));
+        else if (p.last_t && p.change_why) {
+          add(px_, txt(' '));
+          add(px_, el('span', 'sv-unknown', DASH)).title = p.change_why;
+        }
+        px_.setAttribute('data-peer-last', p.symbol);
+        var acts = add(li, el('div', 'hd-peer-acts'));
         if (p.is_seat && p.seat_key) {
           add(acts, button('hd-btn', W('seat_go'), function () { openSeat(p.seat_key); }));
         } else {
@@ -1771,16 +1988,34 @@
       if (now === lastCount) return;
       lastCount = now;
       var n = parseInt(now, 10);
-      if (isFinite(n)) { state.seatN = n; seatsEl.textContent = seatWords(n); }
+      if (isFinite(n)) { state.seatN = n; seatsEl.textContent = seatWords(n); fitTab(); }
       bookMoved(false);
     }).observe(countEl, { childList: true, characterData: true, subtree: true });
+  }
+  /* A wrapped row of "·"-joined boxes: the box that ends a line keeps its
+     dot's room but not its ink, so no line ends on a dangling dot and none
+     opens with one (final review). Measured after layout, again on every
+     resize; a box whose next one starts lower ends its line. */
+  var eolRaf = 0;
+  function lineEndsSoon() {
+    if (eolRaf || !window.requestAnimationFrame) return;
+    eolRaf = window.requestAnimationFrame(function () { eolRaf = 0; lineEnds(); });
+  }
+  function lineEnds() {
+    if (!state.open) return;
+    Array.prototype.forEach.call(root.querySelectorAll('.hd-unit'), function (u) {
+      var next = u.nextElementSibling;
+      var eol = !!(next && typeof u.offsetTop === 'number' && typeof next.offsetTop === 'number'
+                   && u.offsetHeight > 0 && next.offsetTop >= u.offsetTop + u.offsetHeight / 2);
+      u.classList.toggle('hd-eol', eol);
+    });
   }
   var remeasureRaf = 0;
   function remeasureSoon() {
     if (remeasureRaf) return;
     remeasureRaf = window.requestAnimationFrame(function () { remeasureRaf = 0; remeasure(); });
   }
-  window.addEventListener('resize', function () { remeasureSoon(); tier(); fitDossier(); });
+  window.addEventListener('resize', function () { remeasureSoon(); tier(); fitDossier(); lineEndsSoon(); });
   document.addEventListener('transitionend', function (e) {
     if (e.target && root.contains(e.target)) return;
     remeasureSoon();
@@ -1788,6 +2023,8 @@
   if (window.ResizeObserver) {
     try { new window.ResizeObserver(tier).observe(root); } catch (e) { /* the window's resize covers it */ }
     try { if (bodyEl) new window.ResizeObserver(fitDossier).observe(bodyEl); } catch (e) { /* below */ }
+    try { if (bandsEl) new window.ResizeObserver(lineEndsSoon).observe(bandsEl); } catch (e) { /* the resize covers it */ }
+    try { if (head) new window.ResizeObserver(lineEndsSoon).observe(head); } catch (e) { /* the resize covers it */ }
   }
   if (phoneMq) {
     var onPhone = function (e) { setPhone(e.matches); };

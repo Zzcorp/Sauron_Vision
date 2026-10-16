@@ -416,6 +416,11 @@ class TheTruthTests(_Base):
         self.assertIn("mark_waiting", [w["code"] for w in seat["light"]["why"]])
 
     def test_the_digits_are_the_positions_pages(self):
+        """The money (P&L, R, percentages) is the positions page's to the
+        digit; the PRICE is the instrument's one precision (core/
+        price_format), its levels', its plan's and its correlated row's
+        (2026-10-16 review: "4,182.1000" beside "4160.00")."""
+        from core.price_format import format_price
         from dashboard.views import _live_open_book
         from portfolio.services import get_or_create_default_portfolio
         _quote("BTCUSD", "101.5", cls="crypto", source="binance_public")
@@ -437,7 +442,9 @@ class TheTruthTests(_Base):
             self.assertEqual(seat["money"]["r_t"], row["r_text"])
             self.assertEqual(seat["money"]["pnl_t"], row["pnl_text"])
             self.assertEqual(seat["money"]["pct_t"], row["pct_text"])
-            self.assertEqual(seat["mark"]["t"], row["last_text"])
+            self.assertEqual(seat["mark"]["t"],
+                             format_price(row["current_price"], seat["instrument_class"],
+                                          seat["symbol"]))
             self.assertEqual(seat["mark"]["word"], row["mark_word"])
             self.assertEqual(seat["mark"]["wait"], row["mark_wait"])
 
@@ -535,7 +542,7 @@ class TheTruthTests(_Base):
         self.assertEqual((braked["by"], braked["short"]),
                          ("care_braked", "Care · braked bot"))
         full = holder(bot, on)
-        self.assertEqual((full["by"], full["short"]), ("care", "Care · full"))
+        self.assertEqual((full["by"], full["short"]), ("care", "Full care"))
         self.assertEqual(full["suffix"],
                          "A paper row: only the platform's simulator acts on it.")
         self.assertIn("so they work even when Sauron is offline",
@@ -826,7 +833,8 @@ class TheTruthTests(_Base):
         peers = self.seat(f"pf:{pos.id}")["instruments"]["peers"]
         mine = [p for p in peers if p["symbol"] == "XAUUSD"]
         self.assertEqual(len(mine), 1)
-        self.assertEqual(mine[0]["relation"], f"SEAT #{t.id}")
+        self.assertEqual(mine[0]["relation"], f"YOUR PAPER SEAT #{t.id}")
+        self.assertEqual(mine[0]["seat_world"], "paper")
         self.assertTrue(mine[0]["is_seat"])
         self.assertFalse(mine[0]["ticket"])
 
@@ -871,7 +879,7 @@ RESERVED = {
     "No Captain seated yet.",
     "Captains are not built yet. Today this class answers to the book limits: "
     "open risk at the stops, theme legs and the correlation taper.",
-    "No thesis is written for this seat yet.",
+    "No Orc has written a thesis for this seat yet.",
 }
 ORC_WORD = re.compile(r"\b(Orc|Orcs|Captain|Captains)\b")
 
@@ -1323,7 +1331,7 @@ class TheMarkupTests(TestCase):
         for line in ("Mustering the Horde", "THE HORDE", "Toggle the Horde",
                      "Locked. Unlock Sauron to see the Horde.",
                      "Signed out. Sign in again to see the Horde.",
-                     "Resize the Horde", "‹ Back to the Horde",
+                     "Resize the Horde", "Back to the Horde",
                      "Should I close?", "Stop / target…", "opens a confirmation",
                      "No Orc seated.", "Nothing on this seat was decided by an Orc."):
             self.assertIn(line, src + _read("templates", "base.html"), line)
@@ -1389,12 +1397,18 @@ class TheSheetTests(SimpleTestCase):
         moved = [b for b in blocks
                  if "body:has(.info-panel-wrap.minimized) .sv-horde-tab" in b]
         self.assertEqual(len(moved), 1)
+        # Round 2: LEFT of the pill (viewport centre - 84) and of the
+        # strip's own minimize tab, as in every other state.
         rule = self._rule("body:has(.info-panel-wrap.minimized) .sv-horde-tab", moved[0])
-        self.assertIn("right: auto;", rule)
-        # Right of the pill (viewport centre + 84) and of the strip's own
-        # minimize tab (the STRIP's centre +/- 32), whichever is further.
+        self.assertIn("right: max(calc(50% + 40px), "
+                      "calc(50% + (var(--hd-l) - var(--hd-r)) / 2 + 84px));", rule)
+        # Where even the narrowest tier has no room there, right of the
+        # pill (viewport centre + 84) and of the strip's own minimize tab.
+        alt = self._rule("body:has(.info-panel-wrap.minimized) .sv-horde.hd-tab-alt .sv-horde-tab",
+                         moved[0])
+        self.assertIn("right: auto;", alt)
         self.assertIn("left: max(calc(50% + (var(--hd-r) - var(--hd-l)) / 2 + 84px), "
-                      "calc(50% + (var(--hd-r) - var(--hd-sr)) / 2 + 40px));", rule)
+                      "calc(50% + (var(--hd-r) - var(--hd-sr)) / 2 + 40px));", alt)
         for b in blocks:
             for w in ("280px", "404px", "640px"):
                 if f"right: {w};" in b:
@@ -1427,7 +1441,8 @@ class TheSheetTests(SimpleTestCase):
         blocks = re.findall(r"@media \(min-width: 769px\) \{(.*?)\n\}", self.css, re.S)
         moved = [b for b in blocks
                  if "body:has(.info-panel-wrap.minimized) .sv-horde-tab" in b][0]
-        rule = self._rule("body:has(.info-panel-wrap.minimized) .sv-horde-tab", moved)
+        rule = self._rule("body:has(.info-panel-wrap.minimized) .sv-horde.hd-tab-alt .sv-horde-tab",
+                          moved)
         left = re.search(r"left: (max\(.*?\));", rule).group(1)
         width = re.search(r"max-width: (calc\(.*\));", rule).group(1)
         # (viewport, sidebar, root's right edge, strip's right edge): the
@@ -1442,21 +1457,31 @@ class TheSheetTests(SimpleTestCase):
             self.assertGreaterEqual(x, strip_mid + 32, (vw, l, r, sr))       # the minimize tab
             self.assertGreaterEqual(x, vw / 2 + 70, (vw, l, r, sr))         # the pill
             self.assertLessEqual(x + max(w, 0), vw - r, (vw, l, r, sr))     # inside the root
+        # Round 2, the usual place: LEFT of the pill and of the minimize
+        # tab, clear of Gollum (74px inside the root's left edge).
+        rule = self._rule("body:has(.info-panel-wrap.minimized) .sv-horde-tab", moved)
+        right = re.search(r"right: (max\(.*?\));", rule).group(1)
+        width = re.search(r"max-width: (calc\(.*\));", rule).group(1)
+        for vw, l, r, sr in ((1380, 260, 404, 44), (1380, 260, 44, 44), (1380, 68, 404, 44),
+                             (1100, 68, 280, 280), (1380, 260, 0, 0), (1440, 260, 44, 44)):
+            root_w = vw - l - r
+            x_r = vw - r - self._css_px(right, root_w, hd_l=l, hd_r=r, hd_sr=sr)
+            w = self._css_px(width, root_w, hd_l=l, hd_r=r, hd_sr=sr)
+            strip_mid = l + (vw - l - sr) / 2
+            self.assertLessEqual(x_r, strip_mid - 32, (vw, l, r, sr))       # the minimize tab
+            self.assertLessEqual(x_r, vw / 2 - 70, (vw, l, r, sr))          # the pill
+            self.assertGreaterEqual(x_r - w, l + 74, (vw, l, r, sr))        # Gollum
+            self.assertGreater(w, 200, (vw, l, r, sr))                      # room for a tier
 
     def test_the_alarms_and_the_real_pill_never_clip(self):
         """Spec §4.1 and rule 3: the alarm segment never hides and the REAL
-        pill is on the tab; the other segments give their room up first,
-        and the tab's tiers are its own (hd-t-*), never the root's."""
-        keep = self.css[self.css.index(".sv-horde-tab > .hd-tab-alarms,"):]
-        keep = keep[:keep.index("}")]
-        self.assertIn(".sv-horde-tab > .hd-tab-real", keep)
-        self.assertIn("flex-shrink: 0;", keep)
-        shrink = self.css[self.css.index(".sv-horde-tab > .hd-tab-name,"):]
-        shrink = shrink[:shrink.index("}")]
-        for seg in (".hd-tab-name", ".hd-tab-seats", ".hd-tab-r", ".hd-tab-risk"):
-            self.assertIn(".sv-horde-tab > " + seg, shrink)
-        for decl in ("min-width: 0;", "overflow: hidden;", "text-overflow: ellipsis;"):
-            self.assertIn(decl, shrink)
+        pill is on the tab. No segment is ever cut (2026-10-16: at 1380
+        every one ended in an ellipsis, numbers included): each keeps its
+        whole width and a tier drops whole segments, chosen by the
+        script from the measured content (TheScreenshotReviewScriptTests)."""
+        self.assertIn("flex-shrink: 0;", self._rule(".sv-horde-tab > *"))
+        self.assertNotIn("text-overflow", self.css[self.css.index(".sv-horde-tab {"):
+                                                   self.css.index(".sv-horde-panel {")])
         hides = re.findall(r"([^{}]+)\{\s*display: none;\s*\}", self.css)
         for sel in hides:
             self.assertNotIn(".hd-tab-real", sel, sel)
@@ -1468,12 +1493,17 @@ class TheSheetTests(SimpleTestCase):
         self.assertNotIn("info-panel-wrap.minimized", phone)
 
     def test_the_tab_and_the_body(self):
+        """The tab ends 40px left of the root's centre (clear of the strip's
+        32px-wide-each-side minimize tab, whose centre is at or right of the
+        root's) and starts clear of Gollum (18-74px inside the root): its
+        room is half the root less 122px. The body keeps the floating
+        controls in its side gutters, never over its content."""
         tab = self._rule(".sv-horde-tab")
         self.assertIn("top: -28px;", tab)
-        self.assertIn("right: calc(50% + 84px);", tab)
+        self.assertIn("right: calc(50% + 40px);", tab)
+        self.assertIn("max-width: calc(50% - 122px);", tab)
         body = self._rule(".hd-body")
-        self.assertIn("calc(var(--se-fab-size) + var(--se-fab-gap) + 8px)", body)
-        self.assertIn("32px", body)
+        self.assertIn("padding: 0 var(--hd-gut-r) 0 var(--hd-gut-l);", body)
 
     def test_reduced_motion(self):
         m = re.search(r"@media \(prefers-reduced-motion: reduce\) \{(.*?)\n\}",
@@ -1508,7 +1538,11 @@ class TheSheetTests(SimpleTestCase):
         self.assertIn("position: sticky;", bar)
         self.assertIn("bottom: 0;", bar)
         self.assertNotIn("se-fab", bar)
-        self.assertIn("calc(var(--se-fab-size) + var(--se-fab-gap) + 8px)", self._rule(".hd-body"))
+        # The scrollers that hold the bar have no bottom padding: a sticky
+        # inset is measured inside it (2026-10-16: text bled under the bar
+        # through the dossier's 10px, and the phone's bar floated 82px up).
+        self.assertIn("padding: 0 var(--hd-gut-r) 0 var(--hd-gut-l);", self._rule(".hd-body"))
+        self.assertRegex(self._rule(".hd-dossier"), r"padding: 0 10px;")
         self.assertIn("position: static;", self._rule(".sv-horde:not(.hd-w-l) .hd-dos-head"))
         self.assertIn("position: sticky;", self._rule(".hd-dos-head"))
         self.assertIn("bottom: 0;", self._rule(".hd-dos-cmdbar", phone.group(1)))
@@ -1526,9 +1560,15 @@ class TheSheetTests(SimpleTestCase):
         self.assertGreater(z["chrome"], z["horde"])
 
     def test_the_warnings_have_their_own_box(self):
+        """The head pins the summary line and the warnings; the war table's
+        cells stand in the body, at its top, and scroll with the bands as
+        one unit (2026-10-16)."""
         partial = PARTIAL.read_text(encoding="utf-8")
         head = partial[partial.index('id="svHordeHead"'):partial.index("</header>")]
-        self.assertLess(head.index('id="svHordeTable"'), head.index('id="svHordeNotes"'))
+        self.assertLess(head.index('id="svHordeSum"'), head.index('id="svHordeNotes"'))
+        self.assertNotIn('id="svHordeTable"', head)
+        body = partial[partial.index('id="svHordeBody"'):]
+        self.assertLess(body.index('id="svHordeTable"'), body.index('id="svHordeBands"'))
         notes = self._rule(".hd-notes")
         self.assertIn("flex-direction: column;", notes)
         self.assertNotIn("max-height", notes)
@@ -1675,18 +1715,22 @@ class TheScriptTests(SimpleTestCase):
         self.assertIn("getComputedStyle(panel).bottom", fn)
         self.assertNotIn("getPropertyValue('--sv-bottom-chrome')", self.code)
 
-    def test_a_phone_card_is_two_lines(self):
-        """§3.8: light, symbol, side, world and R; then the mission, the
-        P&L and the mark's word. The rail and the holder fold away."""
+    def test_a_phone_card_keeps_its_money_on_one_row(self):
+        """§3.8, round 2: light, symbol, side, world; the mission; then R,
+        P&L and the mark on one row of their own (driven in
+        TheScreenshotReviewScriptTests.test_a_card_says_its_money_as_one_
+        unit). The rail, the voice and the holder fold away."""
         card = self._fn("seatCard")
-        phone = card[card.index("if (state.phone) {"):card.index("} else {", card.index("if (state.phone) {"))]
-        self.assertIn("if (rr) add(r1, rr);", phone)
-        self.assertIn("add(p2, notFilled || pnl);", phone)
+        self.assertNotIn("if (rr) add(r1, rr);", card)
+        self.assertIn("'hd-seat-row hd-money-row'", card)
         self.assertEqual(card.count("'hd-seat-row hd-phone-hide'"), 2)
 
     def test_an_unmeasured_daily_stop_is_never_open_on_the_phone(self):
-        table = self._fn("paintTable")
-        self.assertIn("ld.mode === 'open' ? W('mode_open') : DASH", table)
+        """The summary line says OPEN only for an open stop (driven:
+        TheScreenshotReviewScriptTests.test_an_unmeasured_stop_is_a_dash_
+        on_the_summary)."""
+        table = self._fn("sideSummary")
+        self.assertIn("dl.mode === 'open' ? W('mode_open') : DASH", table)
 
     def test_a_refreshed_dossier_keeps_the_readers_place(self):
         """Only the first paint after opening takes the focus to the
@@ -2282,7 +2326,8 @@ class TheHeadAndTabTests(_Base):
               target="33", meta=_vm(31))
         group = [g for g in self.board()["groups"] if g["key"] == "commodity"][0]
         self.assertEqual([b["world"] for b in group["same_bet"]], ["live"])
-        self.assertIn("Long precious through 2 seats", group["same_bet"][0]["t"])
+        # round 2: the count names its book
+        self.assertIn("Long precious through 2 real-money seats", group["same_bet"][0]["t"])
 
 
 # ── 13.12 the script, driven: behaviour, not source text ────────────────
@@ -2402,7 +2447,7 @@ class TheScriptBehaviourTests(_Base):
             const out = {before, after: env.focusKey(), read: env.fetched.length - reads,
                          expanded: exp.getAttribute('aria-expanded'),
                          todayHidden: band.querySelector('.hd-today').hidden};
-            const chip = env.$('svHordeTable').querySelector('[data-hd-focus="chip:alarm"]');
+            const chip = env.$('svHordeSum').querySelector('[data-hd-focus="chip:alarm"]');
             chip.focus();
             await env.advance(20000);
             out.chip = env.focusKey();
@@ -2439,8 +2484,8 @@ class TheScriptBehaviourTests(_Base):
             return {h, kept, after: root.style.getPropertyValue('--horde-h'),
                     keptAfter: env.store['sauron_horde_h'], open: root.classList.contains('open')};
         """, self.payloads())
-        self.assertEqual(got["h"], "468px")        # HALF 444 + one 24px step
-        self.assertEqual(got["after"], "468px")    # not snapped back to HALF
+        self.assertEqual(got["h"], "474px")        # HALF 450 + one 24px step
+        self.assertEqual(got["after"], "474px")    # not snapped back to HALF
         self.assertEqual(got["keptAfter"], got["kept"])
         self.assertTrue(got["open"])
 
@@ -2519,31 +2564,43 @@ class TheScriptBehaviourTests(_Base):
         self.assertTrue(got["second"].startswith("seat:bot:"), got)
         self.assertEqual(got["scroll"], 120)
 
-    def test_the_tab_tier_follows_the_tabs_own_room(self):
-        got = _drive("""
-            env.load();
+    def test_the_tab_tier_follows_the_tabs_measured_content(self):
+        """The tier is the widest whose content fits the tab's room, both
+        MEASURED (the tab's scrollWidth against its clientWidth), never a
+        guess from the root's width: at 1380 the full tier needed ~470px
+        in a 368px room and every segment ended in an ellipsis
+        (2026-10-16). The harness measures a segment at 7px a character,
+        hides what sv-horde.css hides per tier, and gives the tab a room."""
+        got = _drive(OPEN + """
+            env.click(env.$('svHordeClose'));
             await env.settle();
-            const root = env.$('svHorde');
-            const tierAt = (w) => {
-                root._clientWidth = w; env.resize();
-                return ['hd-t-l', 'hd-t-m', 'hd-t-s'].filter((c) => root.classList.contains(c))
-                    .concat([env.$('svHordeSeats').textContent]);
+            const root = env.$('svHorde'), tab = env.$('svHordeTab');
+            const hiddenBy = {'hd-t-m': ['hd-tab-name'],
+                              'hd-t-s': ['hd-tab-name', 'hd-tab-r', 'hd-tab-risk', 'hd-tab-flag']};
+            const need = (t) => {
+                const off = [].concat(...Object.keys(hiddenBy).filter((c) => root.classList.contains(c))
+                                                              .map((c) => hiddenBy[c]));
+                const segs = t.children.filter((s) => !s.hidden && !off.some((c) => s.classList.contains(c)));
+                return 20 + segs.reduce((w, s) => w + 7 * s.textContent.length, 0) + 8 * (segs.length - 1);
             };
-            const out = {wide: tierAt(1100), mid: tierAt(900), narrow: tierAt(700)};
-            env.strip.classList.add('minimized');
-            root.style.setProperty('--hd-l', '240px');
-            root.style.setProperty('--hd-r', '44px');
-            root.style.setProperty('--hd-sr', '44px');
-            out.minimized = tierAt(1100);
-            root.style.setProperty('--hd-r', '404px');       // the drawer open
-            out.drawer = tierAt(1100);
-            return out;
+            tab._scrollWidth = need;
+            const at = (room) => {
+                tab._clientWidth = room; env.resize();
+                const tier = ['hd-t-l', 'hd-t-m', 'hd-t-s'].filter((c) => root.classList.contains(c));
+                return {tier, seats: env.$('svHordeSeats').textContent, need: need(tab), room};
+            };
+            const full = (() => { tab._clientWidth = 2000; env.resize(); return need(tab); })();
+            return {text: tab.textContent, roomy: at(full), short: at(full - 2), tight: at(160)};
         """, self.payloads())
-        self.assertEqual(got["wide"], ["hd-t-l", "3 seats"])
-        self.assertEqual(got["mid"], ["hd-t-m", "3 seats"])
-        self.assertEqual(got["narrow"], ["hd-t-s", "HORDE 3"])
-        self.assertEqual(got["minimized"][0], "hd-t-l")
-        self.assertEqual(got["drawer"][0], "hd-t-m")
+        self.assertEqual(got["roomy"]["tier"], ["hd-t-l"])
+        self.assertTrue(got["roomy"]["seats"].endswith("seats"), got)
+        # Two pixels short of the full tier (one is rounding's): the next
+        # tier, whose content fits.
+        self.assertEqual(got["short"]["tier"], ["hd-t-m"])
+        self.assertTrue(got["short"]["seats"].startswith("HORDE"), got)
+        self.assertLessEqual(got["short"]["need"], got["short"]["room"])
+        self.assertEqual(got["tight"]["tier"], ["hd-t-s"])
+        self.assertIn("REAL", got["text"])
 
 
 @unittest.skipUnless(NODE, "node is not installed")
@@ -2604,3 +2661,867 @@ process.stdout.write(JSON.stringify(out));
         self.assertEqual(full, {"top": 114, "right": 52, "bottom": 68, "left": 248})
         # HALF: pinned above the sheet.
         self.assertEqual(half, {"top": 114, "right": 52, "bottom": 411, "left": 248})
+
+
+# ── 13.14 the screenshot review of 2026-10-16 ────────────────────────────
+#
+# The committed Horde was screenshot at 1100, 1380, 1440 and 390 and the
+# review listed what was untrue and what was ugly, clipped or overlapping
+# (shots_report.md). Each test here fails on the code the review saw.
+
+def _thesis(verdict="hold", stop=98):
+    return {"thesis": {"verdict": verdict, "words": "the structure still holds",
+                       "at": timezone.now().isoformat(), "stop": stop}}
+
+
+@override_settings(CACHES=LOCMEM)
+class TheScreenshotReviewTests(_Base):
+    """The untrue list, through the endpoint."""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg = _cfg(self.user)
+
+    # untrue 1
+    def test_the_orc_thesis_slot_is_the_orcs_and_names_the_thesis_check(self):
+        """MISSION's slot said "No thesis is written for this seat yet."
+        above a thesis check that read HOLD."""
+        from dashboard import horde
+        t = _trade(self.cfg, "XAUUSD", meta=_thesis("hold"))
+        mission = self.seat(f"bot:{t.id}")["mission"]
+        self.assertEqual(mission["thesis"], "No Orc has written a thesis for this seat yet.")
+        self.assertEqual(mission["thesis"], horde.NO_THESIS_YET)
+        self.assertIn("The thesis check", mission["thesis_note"])
+        self.assertIn("HOLD", mission["thesis_note"])
+        bare = _trade(self.cfg, "XAGUSD", entry="30", stop="29", target="33")
+        self.assertEqual(self.seat(f"bot:{bare.id}")["mission"]["thesis_note"], "")
+
+    # untrue 2
+    def test_marks_says_which_book_each_count_covers(self):
+        _real(self.cfg, "XAUUSD", meta=_vm(101))
+        _trade(self.cfg, "WTIUSD", entry="70", stop="68", target="75")
+        _quote("WTIUSD", "71")
+        marks = self.board()["head"]["marks"]
+        self.assertTrue(marks["t"].startswith("MARKS · REAL (1): 1 venue"), marks["t"])
+        self.assertIn("PAPER (1): 1 feed · 0 waiting", marks["t"])
+        self.assertEqual((marks["real_n"], marks["paper_n"]), (1, 1))
+
+    def test_marks_names_demo_when_the_real_side_holds_demo(self):
+        _real(self.cfg, "XAUUSD", demo=True, meta=_vm(101))
+        self.assertIn("REAL AND DEMO (1)", self.board()["head"]["marks"]["t"])
+
+    # untrue 4
+    def test_an_index_cfd_in_a_stock_bot_says_why_it_is_banded_there(self):
+        _instrument("NSDQ100", "index")
+        stock = _cfg(self.user, cls="stock", name="s", symbols=["NSDQ100"])
+        _real(stock, "NSDQ100", entry="24000", stop="23800", target="24500",
+              meta=_vm(24100))
+        board = self.board()
+        band = [g for g in board["groups"] if g["key"] == "stock"][0]
+        self.assertIn("NSDQ100 (an index) is banded under STOCK", band["class_note_t"])
+        alloc = board["head"]["sides"]["live"]["alloc"]
+        self.assertIn("(with NSDQ100, an index)", alloc[0]["t"])
+        plain = [g for g in board["groups"] if g["key"] != "stock"]
+        self.assertTrue(all(g["class_note_t"] == "" for g in plain))
+
+    # untrue 5 and 6
+    def _peer_rows(self, rho_by_symbol, n_seats=0):
+        """_peers over a mocked matrix: XAUUSD against its SMT partner and
+        complex and `n_seats` other seats."""
+        from bot_program import capital_desk
+        from dashboard.horde import _peer_seat, _peers
+        for s in ("XAGUSD", "XPTUSD", "XPDUSD"):
+            _instrument(s)
+        fx = _cfg(self.user, cls="forex", name="fx", symbols=[])
+        others = []
+        for i in range(n_seats):
+            sym = f"S{i:02d}USD"
+            _instrument(sym, "forex")
+            others.append(_peer_seat(_trade(fx, sym, entry="1.1", stop="1.09", target="1.2")))
+        rho, measured = {}, set()
+        for s, r in rho_by_symbol.items():
+            pair = tuple(sorted(("XAUUSD", s)))
+            rho[pair] = r
+            measured.add(pair)
+        matrix = {"rho": rho, "measured": measured,
+                  "n_bars": {p: 180 for p in measured}, "symbols": [], "pairs_total": 0}
+        with mock.patch.object(capital_desk, "correlation_matrix", return_value=matrix):
+            rows, _chips = _peers(self.user, "XAUUSD", "BUY", "commodity", "paper",
+                                  others, timezone.now())
+        return rows
+
+    # round 2: "(1R = 25.98)" read like a price distance
+    def test_one_r_is_said_with_its_currency(self):
+        t = _trade(self.cfg, "XAUUSD", qty="0.6", entry="4141.3", stop="4098", target="4260")
+        d = self.seat(f"bot:{t.id}")
+        self.assertIn("(1R = 25.98 USD)", d["mission"]["plan"]["t"])
+        one = [m for m in d["deployment"] if m["label"] == "1R"][0]
+        self.assertEqual(one["t"], "25.98 USD")
+
+    # round 2: "YOUR SEAT #31" on a paper seat read like the real ones
+    def test_a_correlated_seat_names_its_book(self):
+        from bot_program import capital_desk
+        from dashboard.horde import _peer_seat, _peers
+        fx = _cfg(self.user, cls="forex", name="fx", symbols=[])
+        for s in ("EURUSD", "GBPUSD", "USDCNH"):
+            _instrument(s, "forex")
+        real = _real(fx, "EURUSD", entry="1.1", stop="1.09", target="1.2", meta=_vm(1.1))
+        demo = _real(fx, "USDCNH", demo=True, entry="7.1", stop="7.2", target="7.0",
+                     side="SELL", meta=_vm(7.1))
+        paper = _trade(fx, "GBPUSD", entry="1.3", stop="1.29", target="1.4")
+        others = [_peer_seat(t) for t in (real, demo, paper)]
+        with mock.patch.object(capital_desk, "correlation_matrix", return_value={}):
+            rows, _ = _peers(self.user, "XAUUSD", "BUY", "commodity", "live",
+                             others, timezone.now())
+        by = {r["symbol"]: r for r in rows}
+        self.assertEqual(by["EURUSD"]["relation"], f"YOUR REAL SEAT #{real.id}")
+        self.assertEqual(by["USDCNH"]["relation"], f"YOUR DEMO SEAT #{demo.id}")
+        self.assertEqual(by["GBPUSD"]["relation"], f"YOUR PAPER SEAT #{paper.id}")
+        self.assertEqual([by[s]["seat_world"] for s in ("EURUSD", "USDCNH", "GBPUSD")],
+                         ["live", "demo", "paper"])
+        self.assertEqual(by["EURUSD"]["seat_world_word"], "REAL MONEY")
+
+    def test_the_strength_word_follows_the_printed_number(self):
+        """"+0.40 weak" beside "+0.46 moderate": 0.398 was judged against
+        0.4 and printed as 0.40."""
+        rows = {r["symbol"]: r for r in self._peer_rows(
+            {"XAGUSD": 0.398, "XPTUSD": 0.6951, "XPDUSD": 0.394})}
+        self.assertEqual((rows["XAGUSD"]["rho_t"], rows["XAGUSD"]["strength"]), ("+0.40", "moderate"))
+        self.assertEqual((rows["XPTUSD"]["rho_t"], rows["XPTUSD"]["strength"]), ("+0.70", "strong"))
+        self.assertEqual((rows["XPDUSD"]["rho_t"], rows["XPDUSD"]["strength"]), ("+0.39", "weak"))
+
+    def test_the_strongest_comes_first_and_the_family_survives_the_cap(self):
+        """XAGUSD at +0.84 came 8th under seats at -0.08; with twelve or
+        more seats the partner and the complex were cut entirely."""
+        rhos = {f"S{i:02d}USD": (0.05 + i / 100) * (-1 if i % 2 else 1) for i in range(14)}
+        rhos.update({"XAGUSD": 0.84, "XPTUSD": 0.02, "XPDUSD": -0.01})
+        rows = self._peer_rows(rhos, n_seats=14)
+        from dashboard.horde import PEERS_MAX
+        syms = [r["symbol"] for r in rows]
+        self.assertEqual(len(rows), PEERS_MAX)
+        self.assertEqual(syms[0], "XAGUSD")
+        for fam in ("XAGUSD", "XPTUSD", "XPDUSD"):
+            self.assertIn(fam, syms)
+        strengths = [abs(r["rho_v"]) for r in rows]
+        self.assertEqual(strengths, sorted(strengths, reverse=True))
+        seats = [r for r in rows if r["is_seat"]]
+        self.assertTrue(seats)
+        self.assertTrue(all(r["relation"].startswith("YOUR PAPER SEAT #") for r in seats))
+        # the strongest seats are the ones kept
+        kept = {r["symbol"] for r in seats}
+        dropped = set(rhos) - set(syms)
+        self.assertTrue(dropped)
+        self.assertLessEqual(max(abs(rhos[s]) for s in dropped),
+                             min(abs(rhos[s]) for s in kept))
+
+    # untrue 7
+    def test_the_market_line_names_the_venue_that_holds_the_row(self):
+        """"CME Futures open" on a gold CFD held at eToro."""
+        gold = _real(self.cfg, "XAUUSD", meta=_vm(101))
+        line = [m for m in self.seat(f"bot:{gold.id}")["metrics"] if m["label"] == "Market"][0]
+        self.assertTrue(line["t"].startswith("eToro:"), line["t"])
+        self.assertIn("eToro's own hours are not modelled here", line["t"])
+        self.assertFalse(line["t"].startswith("CME"), line["t"])
+        _instrument("NSDQ100", "index")
+        stock = _cfg(self.user, cls="stock", name="s", symbols=["NSDQ100"])
+        ndx = _real(stock, "NSDQ100", entry="24000", stop="23800", target="24500",
+                    meta=_vm(24100))
+        line = [m for m in self.seat(f"bot:{ndx.id}")["metrics"] if m["label"] == "Market"][0]
+        self.assertTrue(line["t"].startswith("eToro: an index CFD keeps the FX week."), line["t"])
+        paper = _trade(self.cfg, "XAGUSD", entry="30", stop="29", target="33")
+        line = [m for m in self.seat(f"bot:{paper.id}")["metrics"] if m["label"] == "Market"][0]
+        self.assertTrue(line["t"].startswith("Paper venue, on the "), line["t"])
+
+    # untrue 8
+    def test_a_hand_trade_is_never_the_bots(self):
+        from bot_program.asset_engine import safety
+        manual = _manual(self.user)
+        hand = _real(manual, "XAUUSD", meta={**_vm(101), "manual": True})
+        bot = _trade(self.cfg, "XAGUSD", entry="30", stop="29", target="33")
+        with mock.patch.object(safety, "heartbeat_age_seconds", return_value=180):
+            h = [m for m in self.seat(f"bot:{hand.id}")["metrics"] if m["label"] == "Last tick"][0]
+            b = [m for m in self.seat(f"bot:{bot.id}")["metrics"] if m["label"] == "Last tick"][0]
+        self.assertNotIn("bot", h["t"].lower())
+        self.assertIn("the lane that holds your ticket", h["t"])
+        self.assertTrue(b["t"].startswith(f"The bot {self.cfg.name} #{self.cfg.id} last ticked"), b["t"])
+
+    # round 2: the light said "Its bot last ticked" of a hand ticket
+    def test_a_hand_tickets_light_never_says_its_bot(self):
+        from bot_program.asset_engine import safety
+        _all_on()
+        manual = _manual(self.user)
+        hand = _real(manual, "XAUUSD", meta={**_vm(101), "manual": True})
+        bot = _trade(self.cfg, "XAGUSD", entry="30", stop="29", target="33")
+        with mock.patch.object(safety, "heartbeat_age_seconds", return_value=10 ** 6):
+            board = self.board()
+        hw = [w for w in _seat(board, f"bot:{hand.id}")["light"]["why"]
+              if w["code"] == "tick_stale"]
+        bw = [w for w in _seat(board, f"bot:{bot.id}")["light"]["why"]
+              if w["code"] == "tick_stale"]
+        self.assertEqual(len(hw), 1, _seat(board, f"bot:{hand.id}")["light"])
+        self.assertNotIn("bot", hw[0]["t"].lower())
+        self.assertIn("the lane that holds your ticket", hw[0]["t"])
+        self.assertEqual(len(bw), 1)
+        self.assertTrue(bw[0]["t"].startswith("Its bot last ticked"), bw[0]["t"])
+
+    # untrue 9
+    def test_the_phone_commands_are_real_commands(self):
+        t = _trade(self.cfg, "XAUUSD")
+        phone = self.seat(f"bot:{t.id}")["phone"]
+        for p in phone:
+            self.assertNotIn("{", p["cmd"])
+            self.assertNotIn("}", p["cmd"])
+        q = [p for p in phone if p["cmd"].startswith("/q ")][0]
+        self.assertEqual(q["cmd"], "/q Is the reason for my XAUUSD long still alive?")
+
+    # untrue 10
+    def test_one_price_format_per_instrument_across_the_dossier(self):
+        """The mark "4,182.1000" and "24,856.0000", the levels "4160.00",
+        the reviewer's "Suggested stop 4168" beside "structure stop
+        4128.00": one precision per instrument, core/price_format's."""
+        from core.price_format import format_price
+        _instrument("NSDQ100", "index")
+        stock = _cfg(self.user, cls="stock", name="s", symbols=["NSDQ100"])
+        ndx = _real(stock, "NSDQ100", entry="24000", stop="23800", target="24500",
+                    meta=_vm(24856))
+        gold = _real(self.cfg, "XAUUSD", entry="4141.3", stop="4098", target="4260",
+                     meta={**_vm(4182.1), **_thesis("hold", 4128)})
+        _review(f"bot:{gold.id}", verdict="tighten", user=self.user, suggested_stop=4168)
+        board = self.board()
+        self.assertEqual(_seat(board, f"bot:{ndx.id}")["mark"]["t"], "24856.00")
+        g = _seat(board, f"bot:{gold.id}")
+        self.assertEqual(g["mark"]["t"], "4182.10")
+        self.assertNotIn(".1000", json.dumps(g["money"]["r_title"]))
+        d = self.seat(f"bot:{gold.id}")
+        self.assertEqual(d["voice"]["reviewer"]["suggested_stop_t"], "4168.00")
+        self.assertEqual(d["voice"]["thesis"]["stop_t"], "4128.00")
+        peer = [p for p in d["instruments"]["peers"] if p["symbol"] == "NSDQ100"][0]
+        self.assertEqual(peer["last_t"], format_price(24856, "index", "NSDQ100"))
+
+
+@unittest.skipUnless(NODE, "node is not installed")
+@override_settings(CACHES=LOCMEM)
+class TheScreenshotReviewScriptTests(_Base):
+    """The ugly, clipped and overlapping list, and the untrue words the
+    script paints, driven in tests/horde_dom_harness.js."""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg = _cfg(self.user)
+        _instrument("XAUUSD")
+        _instrument("XAGUSD")
+        self.live = _real(self.cfg, "XAUUSD", meta={**_vm(101), **_thesis("hold")})
+        _review(f"bot:{self.live.id}", verdict="exit", user=self.user)
+        self.demo = _real(self.cfg, "XAGUSD", demo=True, entry="30", stop="29",
+                          target="33", meta=_vm(31))
+        self.paper = _trade(self.cfg, "WTIUSD", entry="70", stop="68", target="75")
+
+    def payloads(self):
+        return {"board": self.board(), "tab": self.tab(), "seat": self.seat(f"bot:{self.live.id}")}
+
+    OPEN_SEAT = OPEN.replace("env.load();", "env.win.SVLevelEdit = {}; env.win.SVCloseAdvice = {}; env.load();") + """
+        env.click(env.$('svHordeBands').querySelector('[data-open-seat="' + env.payloads.seat.seat.key + '"]'));
+        await env.settle();
+        const box = env.$('svHordeSeat');
+    """
+
+    # untrue 1 and 3, on screen
+    def test_the_verdict_chip_and_the_thesis_slot_say_whose_they_are(self):
+        got = _drive(self.OPEN_SEAT + """
+            const card = env.$('svHordeBands').querySelector('[data-seat="' + env.payloads.seat.seat.key + '"]');
+            const kv = box.querySelector('#svHordeSec-mission dl');
+            const dts = kv.querySelectorAll('dt'), dds = kv.querySelectorAll('dd');
+            const i = dts.findIndex((d) => d.textContent === "Orc's thesis");
+            return {chip: card.querySelector('.hd-voice-chip').textContent,
+                    chipTitle: card.querySelector('.hd-voice-chip').title,
+                    slot: i >= 0 ? dds[i].textContent : null};
+        """, self.payloads())
+        self.assertEqual(got["chip"], "Reviewer: EXIT")
+        self.assertIn("position reviewer", got["chipTitle"])
+        self.assertTrue(got["slot"].startswith("No Orc has written a thesis for this seat yet."), got)
+        self.assertIn("The thesis check (VOICE)", got["slot"])
+
+    # untrue 2, on screen
+    def test_the_marks_line_on_screen_is_the_servers_sentence(self):
+        got = _drive(OPEN + "return env.$('svHordeNotes').textContent;", self.payloads())
+        self.assertIn("REAL AND DEMO (2)", got)
+        self.assertIn("PAPER (1)", got)
+
+    # untrue 9, on screen
+    def test_each_phone_command_has_its_own_copy(self):
+        got = _drive(self.OPEN_SEAT + """
+            const copied = [];
+            env.win.navigator = undefined;
+            const lis = box.querySelectorAll('.hd-phone-cmds li');
+            return lis.map((li) => ({cmd: li.querySelector('.hd-cmd-text').textContent,
+                                     copy: li.querySelector('.hd-copy').getAttribute('data-copy'),
+                                     aria: li.querySelector('.hd-copy').getAttribute('aria-label')}));
+        """, self.payloads())
+        self.assertGreaterEqual(len(got), 3)
+        for row in got:
+            self.assertEqual(row["copy"], row["cmd"])
+            self.assertEqual(row["aria"], "Copy " + row["cmd"])
+            self.assertNotIn("{", row["cmd"])
+
+    # ugly 1 is TheScriptBehaviourTests.test_the_tab_tier_follows_the_tabs_measured_content
+
+    # ugly 2
+    def test_full_tucks_the_tab_under_nothing_and_meets_the_header(self):
+        """FULL left 12px of page between the header and the sheet, with
+        the tab half under the header."""
+        got = _drive(OPEN + """
+            const root = env.$('svHorde'), tab = env.$('svHordeTab');
+            tab.focus();
+            env.click(root.querySelector('[data-snap="full"]'));
+            await env.settle();
+            const full = {h: root.style.getPropertyValue('--horde-h'),
+                          tucked: root.classList.contains('hd-tab-tucked'),
+                          focus: env.focusKey(),
+                          count: env.$('svHordeCount').textContent};
+            env.click(root.querySelector('[data-snap="half"]'));
+            await env.settle();
+            return {full, half: root.classList.contains('hd-tab-tucked')};
+        """, self.payloads())
+        self.assertEqual(got["full"]["h"], "900px")         # the harness: no header, no strip box
+        self.assertTrue(got["full"]["tucked"])
+        self.assertEqual(got["full"]["focus"], "svHordeTitle")
+        self.assertIn("1 ALARM", got["full"]["count"])
+        self.assertIn("REAL 1", got["full"]["count"])
+        # Round 2: open at any height, the tab tucks (riding the sheet's
+        # top it cut through the page's own lines).
+        self.assertTrue(got["half"])
+
+    # ugly 4, 5, 16
+    def test_the_war_table_is_one_line_that_opens_whole(self):
+        """The head's capped scroller cut the cards mid-content and left no
+        seat card at HALF; its alarm chips were grey."""
+        got = _drive(OPEN + """
+            const sum = env.$('svHordeSum'), table = env.$('svHordeTable');
+            const btn = sum.querySelector('.hd-sum-btn');
+            const out = {sum: sum.textContent, hidden: table.hidden, cells: table.querySelectorAll('.hd-cell').length,
+                         inBody: env.$('svHordeBody').contains(table),
+                         chips: sum.querySelectorAll('.hd-chip-btn').map((c) => c.className)};
+            env.click(btn);
+            out.opened = {hidden: table.hidden, expanded: btn.getAttribute('aria-expanded'),
+                          kept: env.store['sauron_horde_limits']};
+            await env.advance(20000);                   // a poll repaints: still open
+            out.afterPoll = env.$('svHordeTable').hidden;
+            return out;
+        """, self.payloads())
+        self.assertIn("REAL risk", got["sum"])
+        self.assertIn("PAPER risk", got["sum"])
+        self.assertTrue(got["hidden"])
+        self.assertTrue(got["inBody"])
+        self.assertGreaterEqual(got["cells"], 2)
+        self.assertEqual(got["opened"], {"hidden": False, "expanded": "true", "kept": "1"})
+        self.assertFalse(got["afterPoll"])
+        self.assertTrue(any("hd-chip-btn--alarm" in c for c in got["chips"]), got["chips"])
+
+    def test_an_unmeasured_stop_is_a_dash_on_the_summary(self):
+        from django.core.cache import cache as c
+        board = self.board()
+        board["head"]["sides"]["live"]["daily"]["mode"] = "unmeasured"
+        got = _drive(OPEN + "return env.$('svHordeSum').textContent;",
+                     {"board": board, "tab": self.tab(), "seat": self.seat(f"bot:{self.live.id}")})
+        c.clear()
+        self.assertIn("REAL risk", got)
+        self.assertRegex(got, r"REAL risk [^·]+· daily stop —")
+
+    def test_half_shows_the_first_row_of_cards_whole(self):
+        """At 1100x800 HALF showed no seat card: HALF is the larger of half
+        the room and the height the first row of cards needs, measured."""
+        got = _drive(OPEN + """
+            const root = env.$('svHorde'), body = env.$('svHordeBody');
+            body._clientHeight = 200;                      // what the body has at half (450)
+            body._rect = {top: 300, bottom: 500, height: 200};
+            const card = env.$('svHordeBands').querySelector('.hd-seat');
+            card._rect = {top: 560, bottom: 650, height: 90};   // its bottom 350px into the body
+            env.click(root.querySelector('[data-snap="half"]'));
+            await env.settle();
+            return root.style.getPropertyValue('--horde-h');
+        """, self.payloads())
+        # chrome (450 - 200) + the card's bottom in the body (350) + 8 of air
+        self.assertEqual(got, "608px")
+
+    # ugly 7, 10
+    def test_a_chip_lands_its_heading_under_the_pinned_head(self):
+        got = _drive(self.OPEN_SEAT + """
+            const head = box.querySelector('.hd-dos-head');
+            head._rect = {top: 0, bottom: 123, height: 123};
+            const chips = box.querySelector('.hd-dos-chips');
+            env.doc.scrolledIntoView = [];
+            env.click(chips.querySelectorAll('.hd-chip-btn')[3]);     // Activity
+            return {var: box.style.getPropertyValue('--hd-dos-head-h'),
+                    went: env.doc.scrolledIntoView};
+        """, self.payloads())
+        self.assertEqual(got["var"], "123px")
+        self.assertEqual(got["went"][-1]["id"], "svHordeSec-activity")
+        self.assertEqual(got["went"][-1]["opts"]["block"], "start")
+
+    # ugly 12
+    def test_the_correlated_rows_wrap_and_their_buttons_stand_apart(self):
+        got = _drive(self.OPEN_SEAT + """
+            const sec = env.$('svHordeSec-instruments');
+            return {table: sec.querySelectorAll('table').length,
+                    rows: sec.querySelectorAll('.hd-peer').map((li) => ({
+                        top: li.querySelector('.hd-peer-row').textContent,
+                        acts: li.querySelector('.hd-peer-acts').querySelectorAll('button, a').map((b) => b.textContent)}))};
+        """, self.payloads())
+        self.assertEqual(got["table"], 0)
+        self.assertTrue(got["rows"])
+        for row in got["rows"]:
+            self.assertTrue(row["acts"], row)
+
+    # ugly 14
+    def test_no_line_opens_with_a_middle_dot(self):
+        """"· 25,840.55, the broker account", "· at the stops 27.60": the
+        dot ends the piece before it (a no-break space binds it there),
+        and no box of a wrapping row starts with one."""
+        got = _drive(self.OPEN_SEAT + """
+            env.click(env.$('svHordeSum').querySelector('.hd-sum-btn'));
+            await env.settle();
+            const bad = [];
+            const walk = (n) => n.childNodes.forEach((c) => {
+                if (c.nodeType === 3) { if (/ \\u00b7/.test(c.data)) bad.push('space-dot: ' + c.data); return; }
+                const t = c.textContent;
+                if (/^\\s*\\u00b7/.test(t) && !(c.classList.contains('hd-muted') || c.classList.contains('hd-sep')))
+                    bad.push('starts: ' + c.className + ' ' + t.slice(0, 40));
+                walk(c);
+            });
+            ['svHordeSum', 'svHordeTable', 'svHordeNotes', 'svHordeBands'].forEach((id) => walk(env.$(id)));
+            return {bad, units: env.$('svHordeBands').querySelectorAll('.hd-line .hd-unit').length};
+        """, self.payloads())
+        self.assertEqual(got["bad"], [])
+        self.assertGreater(got["units"], 0)
+
+    # ugly 15
+    CARD = """
+            const card = env.$('svHordeBands').querySelector('[data-seat="' + env.payloads.seat.seat.key + '"]');
+            const rows = card.querySelectorAll('.hd-seat-row').map((r) => ({
+                cls: r.className + (r.parentNode.className === 'hd-seat-foot hd-phone-hide' ? ' IN-FOOT' : ''),
+                kids: r.children.map((k) => k.className), t: r.textContent}));
+            return rows;
+    """
+
+    # round 2: the phone split "-0.50R", "-57.24 USD" and "7.12860 venue"
+    # over three places; the desktop card ran "held" into the holder and
+    # "% to the stop" into the target, and "No Orc" moved up and down.
+    def test_a_card_says_its_money_as_one_unit(self):
+        for phone in (True, False):
+            got = _drive(("env.media.matches = true;" if phone else "") + OPEN + self.CARD,
+                         self.payloads())
+            head, mission, money = got[0], got[1], got[2]
+            self.assertFalse(any("hd-r" in k.split() for k in head["kids"]), (phone, head))
+            self.assertIn("hd-mission", mission["kids"])
+            self.assertEqual(money["cls"], "hd-seat-row hd-money-row", (phone, money))
+            self.assertEqual([k.split()[0] for k in money["kids"]][:3], ["hd-r", "hd-pnl", "hd-mark"],
+                             (phone, money))
+            if phone:
+                continue
+            dist = [r for r in got if "hd-stop-dist" in r["cls"]]
+            self.assertEqual(len(dist), 1)
+            self.assertIn("% to the stop", dist[0]["t"])
+            self.assertNotIn("to the stop", "".join(r["t"] for r in got if "hd-stop-dist" not in r["cls"]))
+            age, holder = got[-2], got[-1]
+            self.assertIn("IN-FOOT", age["cls"])
+            self.assertIn("IN-FOOT", holder["cls"])
+            self.assertTrue(age["t"].startswith("position open "), age["t"])   # its own subject
+            self.assertNotIn("position open", holder["t"])
+            self.assertTrue(holder["t"].rstrip().endswith("No Orc"), holder["t"])
+            voice = [r for r in got if any("hd-voice-chip" in k for k in r["kids"])]
+            self.assertEqual(len(voice), 1)
+            self.assertEqual(len(voice[0]["kids"]), 1)                      # a row of its own
+
+    # round 2: placed after the Commands heading, the bar scrolled away
+    # once Instruments was read
+    def test_the_command_bar_is_the_dossiers_last_child(self):
+        got = _drive(self.OPEN_SEAT + """
+            const kids = box.children;
+            const last = kids[kids.length - 1];
+            const ids = kids.map((k) => k.id);
+            return {last: last.id, cls: last.className, btns: last.querySelectorAll('button').length,
+                    afterInstruments: ids.indexOf('svHordeCmds') > ids.indexOf('svHordeSec-instruments')};
+        """, self.payloads())
+        self.assertEqual(got["last"], "svHordeCmds")
+        self.assertIn("hd-dos-cmdbar", got["cls"])
+        self.assertGreater(got["btns"], 0)
+        self.assertTrue(got["afterInstruments"])
+
+    # round 2: the page's side-panel toggles stood on the open sheet's head
+    def test_the_side_toggles_leave_the_sheets_head(self):
+        got = _drive(OPEN + """
+            const root = env.$('svHorde');
+            env.click(root.querySelector('[data-snap="half"]'));
+            await env.settle();
+            const half = env.doc.body.style.getPropertyValue('--hd-toggle-y');
+            const h = parseFloat(root.style.getPropertyValue('--horde-h'));
+            env.click(env.$('svHordeClose'));
+            await env.settle();
+            return {half, h, vh: env.win.innerHeight,
+                    closed: env.doc.body.style.getPropertyValue('--hd-toggle-y')};
+        """, self.payloads())
+        sheet_top = got["vh"] - got["h"]                       # the harness: no strip, no header
+        y = float(got["half"].replace("px", ""))
+        self.assertLessEqual(y + 28 + 8, sheet_top + 1, got)   # the 56px toggle ends 8px above it
+        self.assertEqual(got["closed"], "")
+
+    def test_the_dossier_head_is_one_row_of_compact_buttons(self):
+        got = _drive("""
+            env.media.matches = true;
+            env.win.SVLevelEdit = {}; env.win.SVCloseAdvice = {};
+            env.load();
+            await env.settle();
+            env.click(env.$('svHordeTab'));
+            await env.settle();
+            env.click(env.$('svHordeBands').querySelector('[data-open-seat="' + env.payloads.seat.seat.key + '"]'));
+            await env.settle();
+            const tools = env.$('svHordeSeat').querySelector('.hd-dos-title .hd-dos-tools');
+            return tools.querySelectorAll('button').map((b) => [b.textContent, b.getAttribute('aria-label')]);
+        """, self.payloads())
+        self.assertEqual(got, [["‹ Back", "Back to the Horde"], ["\u21bb", "Refresh this seat"],
+                               ["×", "Close this dossier"]])
+
+
+class TheScreenshotReviewSheetTests(SimpleTestCase):
+    """What only a layout engine can show is pinned in the sheet's own
+    words here, and was measured in Chromium at 1100, 1380, 1440 and 390
+    (polish/shoot.js: no floating control over a pill or a money line,
+    the tab whole, HALF with a whole row of cards, the dossier's room)."""
+
+    def setUp(self):
+        self.css = _strip_css(SHEET.read_text(encoding="utf-8"))
+        self.phone = re.search(r"@media \(max-width: 768px\) \{(.*?)\n\}", self.css, re.S).group(1)
+
+    def _rule(self, selector, text=None):
+        m = re.search(r"(?:^|\})\s*" + re.escape(selector) + r"\s*\{([^}]*)\}", text or self.css)
+        self.assertIsNotNone(m, selector)
+        return " ".join(m.group(1).split())
+
+    # ugly 3
+    def test_the_floating_controls_never_stand_over_the_content(self):
+        root = self._rule(".sv-horde")
+        # Gollum: 18px inside the left chrome, a fab wide; the Eye: the
+        # right edge's own distance, a fab wide; 8px of air each.
+        self.assertIn("--hd-gut-l: max(32px, calc(var(--se-left-chrome, 0px) + 18px + "
+                      "var(--se-fab-size, 56px) + 8px - var(--hd-l)));", root)
+        self.assertIn("--hd-gut-r: max(32px, calc(var(--se-right-edge, 0px) + "
+                      "var(--se-fab-size, 56px) + 8px - var(--hd-r)));", root)
+        self.assertIn("--hd-foot: 28px;", root)                 # the strip's minimize tab
+        self.assertIn("padding-bottom: var(--hd-foot);", self._rule(".sv-horde-panel"))
+        self.assertIn("--hd-foot: 44px;", self._rule("body:has(.info-panel-wrap.minimized) .sv-horde"))
+        self.assertIn("z-index: calc(var(--z-horde) - 1) !important;",
+                      self._rule("body:has(.sv-horde.open) .gollum-bubble"))
+        self.assertIn("z-index: calc(var(--z-horde) - 1) !important;",
+                      self._rule("body:has(.sv-horde.open) .se-eye-fab", self.phone))
+        self.assertRegex(self.phone, r"\.sv-horde \{ --hd-foot: 0px; \}")
+        self.assertNotIn("info-panel-wrap", self.phone)
+
+    # ugly 6, 8, 9
+    def test_the_dossier_has_the_room_and_the_pinned_boxes_do_not_meet(self):
+        col = self._rule(".sv-horde.hd-w-l .hd-dossier")
+        self.assertIn("max-height: calc(var(--hd-body-h, 300px) - 10px);", col)
+        self.assertNotIn("se-fab", col)
+        self.assertIn("z-index: calc(var(--z-sticky) + 1);", self._rule(".hd-dos-head"))
+        self.assertIn("z-index: var(--z-sticky);", self._rule(".hd-dos-cmdbar"))
+        self.assertIn("scroll-margin-top: calc(var(--hd-dos-head-h, 0px) + 8px);",
+                      self._rule(".hd-dos-sec"))
+        self.assertNotRegex(self.css, r"#svHordeTable\s*\{[^}]*max-height")
+
+    # ugly 10
+    def test_the_chip_row_wraps_and_shows_every_chip(self):
+        """Round 2: a sideways scroller hid Instruments behind a fade
+        ("Comm..."): the row wraps, all seven chips on screen."""
+        chips = self._rule(".hd-dos-chips")
+        self.assertIn("flex-wrap: wrap;", chips)
+        self.assertNotIn("overflow-x", chips)
+        self.assertNotIn("hd-more-r", self.css)
+
+    # ugly 11
+    # round 2
+    def test_the_side_toggles_follow_the_open_sheet(self):
+        self.assertIn("body:has(.sv-horde.open) .rail-toggle-btn { top: var(--hd-toggle-y, 50%); }",
+                      " ".join(self.css.split()))
+
+    def test_the_alarms_are_said_once_in_the_open_head(self):
+        flat = " ".join(self.css.split())
+        self.assertIn(".sv-horde.open:not(.hd-phone) .hd-head:has(.hd-sum-chips .hd-chip-btn--alarm) "
+                      ".hd-count-alarms { display: none; }", flat)
+        self.assertIn(".sv-horde.hd-limits-open .hd-head:has(.hd-sum-chips .hd-chip-btn--alarm) "
+                      ".hd-count-alarms { display: none; }", " ".join(self.phone.split()))
+        self.assertIn("'hd-tab-alarms hd-count-alarms'", JS.read_text(encoding="utf-8"))
+
+    def test_the_phone_expander_rides_the_captains_line(self):
+        rule = self._rule(".hd-band-head .hd-expander", self.phone)
+        self.assertNotIn("flex-basis: 100%", rule)
+        self.assertIn("padding: 14px 0; margin: -14px 0;", rule)       # a 44px hit area, no gap
+
+    def test_no_real_glow_bleeds_over_the_scroll_edge(self):
+        self.assertEqual(self._rule(".hd-body .sv-world--live"), "box-shadow: none;")
+
+    def test_no_orc_stands_at_the_cards_foot(self):
+        self.assertIn("display: flex; flex-direction: column;", self._rule(".hd-seat"))
+        self.assertIn("margin-top: auto;", self._rule(".hd-seat-foot"))
+
+    def test_stop_target_reads_as_a_button(self):
+        lvl = self._rule(".hd-cmds .hd-btn.lvl-edit")
+        for decl in ("display: inline-block;", "width: auto;", "text-align: center;",
+                     "border: 1px solid var(--border);"):
+            self.assertIn(decl, lvl)
+
+    # ugly 13
+    def test_the_phone_bar_sits_on_the_sheets_bottom(self):
+        self.assertIn("padding: 0 12px;", self._rule(".hd-body", self.phone))
+        self.assertIn("padding: 6px 0;", self._rule(".hd-dos-cmdbar", self.phone))
+
+    # ugly 16
+    def test_the_alarm_chips_wear_the_tabs_colours(self):
+        self.assertIn("var(--danger)", self._rule(".hd-chip-btn--alarm"))
+        self.assertIn("var(--warning)", self._rule(".hd-chip-btn--watch"))
+
+
+# ── the final review (2026-10-16): the minor items left after round 2 ───
+
+@override_settings(CACHES=LOCMEM)
+class TheFinalReviewTests(_Base):
+    """The words the server sends, after the last screenshot review."""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg = _cfg(self.user)
+        _instrument("XAUUSD")
+
+    def test_the_phone_hint_reads_the_eyes_own_daily_cap(self):
+        from bot_program.telegram_eye import QUESTIONS_PER_DAY
+        t = _real(self.cfg, "XAUUSD", meta=_vm(101))
+        lines = [p["t"] for p in self.seat(f"bot:{t.id}")["phone"]]
+        ask = [x for x in lines if x.startswith("Ask Sauron anything")]
+        self.assertEqual(len(ask), 1, lines)
+        self.assertIn(f"({QUESTIONS_PER_DAY} a day)", ask[0])
+        self.assertNotIn("{", ask[0])
+        with mock.patch("bot_program.telegram_eye.QUESTIONS_PER_DAY", 7):
+            cache.clear()
+            again = [p["t"] for p in self.seat(f"bot:{t.id}")["phone"]
+                     if p["t"].startswith("Ask Sauron anything")]
+        self.assertIn("(7 a day)", again[0])
+
+    def test_the_time_stop_says_where_its_hours_come_from_in_words(self):
+        t = _real(self.cfg, "XAUUSD", meta=_vm(101))
+        line = [m for m in self.seat(f"bot:{t.id}")["metrics"] if m["label"] == "Time stop"][0]
+        self.assertTrue(line["t"].endswith("h after entry (the class default)"), line)
+        self.assertNotIn("class-default", line["t"])
+        self.cfg.max_hold_hours = 48
+        self.cfg.save(update_fields=["max_hold_hours"])
+        cache.clear()
+        line = [m for m in self.seat(f"bot:{t.id}")["metrics"] if m["label"] == "Time stop"][0]
+        self.assertEqual(line["t"], "Time stop: 48 h after entry (set on the bot)")
+
+    def test_a_care_mirror_row_prints_its_stop_like_the_engine_rows(self):
+        from bot_program.aragorn_models import AragornAction
+        from core.price_format import format_price
+        t = _real(self.cfg, "XAUUSD", entry="4141.3", stop="4098", target="4260",
+                  meta={**_vm(4182.1), "stop_moves": [
+                      {"to": 4160.0, "asked": 4160.0, "why": "trail:broker",
+                       "when": timezone.now().isoformat()}]})
+        # The production sentence (bot_program/position_care.py, :g).
+        AragornAction.objects.create(
+            kind="care_mirror", trade_id=t.id, symbol="XAUUSD",
+            detail="REAL MONEY: the venue stop follows the trail to 4160 — the lock "
+                   "outlives the platform",
+            stats={"soft_stop": 4160.0, "venue_stop": 4160.0})
+        # A row with no stat keeps its words.
+        AragornAction.objects.create(kind="care_mirror", trade_id=t.id, symbol="XAUUSD",
+                                     detail="REAL MONEY: moved")
+        rows = self.seat(f"bot:{t.id}")["timeline"]
+        want = format_price(4160.0, "commodity", "XAUUSD")
+        engine = [e["t"] for e in rows if e["author"] == "ENGINE"]
+        care = [e["t"] for e in rows if e["author"] == "CARE"]
+        self.assertTrue(any(want in x for x in engine), engine)
+        self.assertIn(f"REAL MONEY: the venue stop follows the trail to {want} — the lock "
+                      "outlives the platform", care)
+        self.assertIn("REAL MONEY: moved", care)
+        self.assertFalse(any(" to 4160 " in x for x in care), care)
+
+    def test_a_price_without_a_day_change_says_why_with_a_dash(self):
+        _instrument("NSDQ100", "index")
+        stock = _cfg(self.user, cls="stock", name="s", symbols=["NSDQ100"])
+        _real(stock, "NSDQ100", entry="24000", stop="23800", target="24500", meta=_vm(24856))
+        gold = _real(self.cfg, "XAUUSD", entry="4141.3", stop="4098", target="4260",
+                     meta=_vm(4182.1))
+        peer = [p for p in self.seat(f"bot:{gold.id}")["instruments"]["peers"]
+                if p["symbol"] == "NSDQ100"][0]
+        self.assertIsNotNone(peer["last_t"])
+        self.assertIsNone(peer["change_t"])
+        self.assertEqual(peer["change_why"], horde_mod().CHANGE_NONE_VENUE)
+
+    def test_the_strip_says_which_books_its_open_pnl_adds(self):
+        from django.template.loader import get_template
+        src = get_template("base.html").template.source
+        sub = re.search(r'data-sv-live="hb-pnl-sub"[^>]*>(.*?)</span>', src, re.S).group(1)
+        self.assertIn("real + paper across {{ panel_positions_priced }} of", sub)
+        self.assertIn("real + paper across {{ panel_positions }} position", sub)
+
+
+def horde_mod():
+    from dashboard import horde
+    return horde
+
+
+@unittest.skipUnless(NODE, "node is not installed")
+@override_settings(CACHES=LOCMEM)
+class TheFinalReviewScriptTests(_Base):
+    """The phone card and the dossier, driven in tests/horde_dom_harness.js."""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg = _cfg(self.user)
+        _instrument("XAUUSD")
+        _instrument("XAGUSD")
+        self.live = _real(self.cfg, "XAUUSD", meta={**_vm(101), **_thesis("hold")})
+        self.paper = _trade(self.cfg, "XAGUSD", entry="30", stop="29", target="33")
+
+    def payloads(self, key=None):
+        return {"board": self.board(), "tab": self.tab(),
+                "seat": self.seat(key or f"bot:{self.live.id}")}
+
+    ROWS = OPEN + """
+        const card = env.$('svHordeBands').querySelector('[data-seat="' + env.payloads.seat.seat.key + '"]');
+        return {tone: card.getAttribute('data-tone'),
+                rows: card.querySelectorAll('.hd-seat-row').map((r) => ({cls: r.className, t: r.textContent}))};
+    """
+
+    def test_a_phone_alarm_names_the_voice_that_raised_it(self):
+        _review(f"bot:{self.live.id}", verdict="exit", user=self.user)
+        got = _drive("env.media.matches = true;" + self.ROWS, self.payloads())
+        self.assertEqual(got["tone"], "alarm")
+        voice = [r for r in got["rows"] if "Reviewer: EXIT" in r["t"]]
+        self.assertEqual(len(voice), 1, got)
+        self.assertNotIn("hd-phone-hide", voice[0]["cls"])
+        self.assertFalse(any("hd-light-why" in r["cls"] for r in got["rows"]), got)
+
+    def test_a_calm_voice_is_never_shown_as_the_cause(self):
+        """The reviewer says HOLD; the alarm is the price through the
+        stop: the phone card says that reason, and the HOLD chip stays
+        folded."""
+        _review(f"bot:{self.live.id}", verdict="hold", user=self.user)
+        self.live.metadata = {**self.live.metadata, **_vm(90)}
+        self.live.save(update_fields=["metadata"])
+        got = _drive("env.media.matches = true;" + self.ROWS, self.payloads())
+        self.assertEqual(got["tone"], "alarm")
+        voice = [r for r in got["rows"] if "Reviewer:" in r["t"]]
+        self.assertTrue(all("hd-phone-hide" in r["cls"] for r in voice), got)
+        why = [r for r in got["rows"] if "hd-light-why" in r["cls"]]
+        self.assertEqual(len(why), 1, got)
+        self.assertIn("through the stop", why[0]["t"])
+
+    def test_a_phone_watch_says_its_first_reason(self):
+        got = _drive("env.media.matches = true;" + self.ROWS,
+                     self.payloads(f"bot:{self.paper.id}"))
+        self.assertEqual(got["tone"], "watch")
+        why = [r for r in got["rows"] if "hd-light-why" in r["cls"]]
+        self.assertEqual(len(why), 1, got)
+        self.assertEqual(why[0]["t"], "The care has no record of this row yet.")
+
+    def test_the_phone_bar_asks_in_two_words_and_keeps_the_full_title(self):
+        open_seat = (OPEN.replace("env.load();", "env.win.SVLevelEdit = {}; env.win.SVCloseAdvice = {}; env.load();")
+                     + """
+            env.click(env.$('svHordeBands').querySelector('[data-open-seat="' + env.payloads.seat.seat.key + '"]'));
+            await env.settle();
+            const b = env.$('svHordeCmds').querySelectorAll('button')[0];
+            return {t: b.textContent, title: b.title};
+        """)
+        phone = _drive("env.media.matches = true;" + open_seat, self.payloads())
+        wide = _drive(open_seat, self.payloads())
+        self.assertEqual(phone, {"t": "Ask Sauron", "title": "Ask Sauron about this seat"})
+        self.assertEqual(wide["t"], "Ask Sauron about this seat")
+
+    def test_a_band_line_wraps_its_words_beside_the_pill(self):
+        got = _drive(OPEN + """
+            const line = env.$('svHordeBands').querySelector('.hd-line');
+            return {kids: line.children.map((k) => k.className),
+                    units: line.children[1].querySelectorAll('.hd-unit').length};
+        """, self.payloads())
+        self.assertEqual(len(got["kids"]), 2, got)
+        self.assertIn("sv-world", got["kids"][0])
+        self.assertEqual(got["kids"][1], "hd-line-words")
+        self.assertGreater(got["units"], 0)
+
+    def test_the_marks_note_breaks_between_whole_segments(self):
+        got = _drive(OPEN + """
+            const note = env.$('svHordeNotes').querySelector('.hd-note-units');
+            return {units: note.querySelectorAll('.hd-unit').map((u) => u.textContent),
+                    t: note.textContent};
+        """, self.payloads())
+        self.assertTrue(got["units"], got)
+        self.assertEqual(got["units"][0], "MARKS\u00a0\u00b7")
+        self.assertIn("PAPER (1)", got["t"])
+        self.assertNotIn(" \u00b7", got["t"])
+
+    def test_a_peer_price_without_a_change_shows_a_titled_dash(self):
+        _instrument("NSDQ100", "index")
+        stock = _cfg(self.user, cls="stock", name="s", symbols=["NSDQ100"])
+        _real(stock, "NSDQ100", entry="24000", stop="23800", target="24500", meta=_vm(24856))
+        got = _drive(OPEN.replace("env.load();", "env.win.SVLevelEdit = {}; env.win.SVCloseAdvice = {}; env.load();") + """
+            env.click(env.$('svHordeBands').querySelector('[data-open-seat="' + env.payloads.seat.seat.key + '"]'));
+            await env.settle();
+            const px = env.$('svHordeSeat').querySelector('[data-peer-last="NSDQ100"]');
+            const d = px.querySelector('.sv-unknown');
+            return {t: px.textContent, dash: d ? d.textContent : null, title: d ? d.title : null};
+        """, self.payloads())
+        self.assertTrue(got["t"].endswith(" —"), got)
+        self.assertEqual(got["dash"], "—")
+        self.assertIn("No day change", got["title"])
+
+
+class TheFinalReviewSheetTests(SimpleTestCase):
+    """The final review's layout, pinned in the sheet's own words (measured
+    in Chromium at 1100, 1380, 1440 and 390: polish/shots_r3)."""
+
+    def setUp(self):
+        self.css = _strip_css(SHEET.read_text(encoding="utf-8"))
+        self.phone = re.search(r"@media \(max-width: 768px\) \{(.*?)\n\}", self.css, re.S).group(1)
+        self.code = _strip_js(JS.read_text(encoding="utf-8"))
+
+    def _rule(self, selector, text=None):
+        m = re.search(r"(?:^|\})\s*" + re.escape(selector) + r"\s*\{([^}]*)\}", text or self.css)
+        self.assertIsNotNone(m, selector)
+        return " ".join(m.group(1).split())
+
+    def test_a_band_line_keeps_its_pill_in_a_column_of_its_own(self):
+        self.assertIn("flex-wrap: nowrap;", self._rule(".hd-line"))
+        self.assertIn("flex: none;", self._rule(".hd-line > .sv-world, .hd-line > .hd-no-venue"))
+        words = self._rule(".hd-line-words")
+        self.assertIn("flex-wrap: wrap;", words)
+        self.assertIn("row-gap: 0;", words)
+        self.assertIn("min-width: 0;", words)
+
+    def test_a_line_never_ends_on_a_dangling_dot(self):
+        self.assertEqual(self._rule(".hd-unit.hd-eol > .hd-sep"), "visibility: hidden;")
+        self.assertIn("u.classList.toggle('hd-eol', eol);", self.code)
+        self.assertIn("lineEndsSoon();", self.code[self.code.index("function paintBoard("):])
+
+    def test_the_phone_card_head_has_no_44px_box_of_its_own(self):
+        self.assertIn("min-height: 0;", self._rule(".hd-seat-open", self.phone))
+        tap = [r for r in re.findall(r"([^{}]+)\{\s*min-height: 44px;", self.phone)]
+        self.assertTrue(tap)
+        self.assertFalse(any(".hd-seat-open" in r for r in tap), tap)
+        # The card stays one tap target: the button's ::after covers it.
+        self.assertIn("inset: 0;", self._rule(".hd-seat-open::after"))
+        self.assertEqual(self._rule(".hd-light-why"), "display: none;")
+        self.assertEqual(self._rule(".hd-light-why", self.phone), "display: flex;")
+
+    def test_an_open_seat_folds_the_book_limits_and_marks_on_the_phone(self):
+        flat = " ".join(self.phone.split())
+        self.assertIn(".sv-horde.hd-has-seat .hd-sum, .sv-horde.hd-has-seat .hd-notes > .hd-note "
+                      "{ display: none; }", flat)
+        # A failed read is still said.
+        self.assertIn(".sv-horde.hd-has-seat .hd-notes:not(:has(.hd-failed)) { display: none; }", flat)
+
+    def test_the_phone_pill_is_the_eyes_size_so_the_pages_padding_clears_it(self):
+        tab = self._rule(".sv-horde-tab", self.phone)
+        self.assertIn("height: var(--se-fab-size, 48px);", tab)
+        self.assertIn("bottom: var(--se-bottom-edge);", tab)
+        resp = " ".join(_read("static", "css", "sv-responsive.css").split())
+        self.assertIn("padding-bottom: calc(var(--sv-bottom-chrome) + var(--se-fab-size) + 28px) !important;",
+                      resp)
+        self.assertIn("html body:has(.sv-phone-nav .sv-pn-item) { --se-bottom-edge: "
+                      "calc(var(--sv-bottom-chrome) + 12px); }", resp)

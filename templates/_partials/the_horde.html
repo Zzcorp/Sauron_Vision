@@ -72,10 +72,11 @@ Included by base.html for an authenticated reader only.
                 <a class="hd-link" href="{% url 'positions_list' %}">Positions ›</a>
                 <button type="button" class="hd-icon-btn hd-close" id="svHordeClose" aria-label="Collapse the Horde (Esc)" title="Collapse the Horde (Esc)">&times;</button>
             </div>
-            <div class="hd-row2" id="svHordeTable"></div>
+            <div class="hd-sum" id="svHordeSum"></div>
             <div class="hd-notes" id="svHordeNotes"></div>
         </header>
         <div class="hd-body" id="svHordeBody">
+            <div class="hd-row2" id="svHordeTable" hidden></div>
             <div class="hd-state" id="svHordeState"><div class="sv-loading">Mustering the Horde</div></div>
             <div class="hd-bands" id="svHordeBands"></div>
             <aside class="hd-dossier" id="svHordeSeat" role="region" aria-label="Seat" hidden></aside>
@@ -113,15 +114,18 @@ Included by base.html for an authenticated reader only.
         <span data-w="past">PAST</span>
         <span data-w="pools">POOLS</span>
         <span data-w="alarms_cell">ALARMS</span>
-        <span data-w="marks">MARKS {v} venue · {s} stale · {q} feed · {w} waiting</span>
         <span data-w="chip_alarm">{n} ALARM</span>
         <span data-w="chip_alarms">{n} ALARMS</span>
         <span data-w="chip_watch">{n} WATCH</span>
         <span data-w="chip_unheld">{n} UNHELD</span>
         <span data-w="chip_order">{n} ORDER</span>
         <span data-w="chip_orders">{n} ORDERS</span>
-        <span data-w="book_limits">Book limits</span>
-        <span data-w="phone_limits">REAL risk {x} of {limit} · daily stop {mode}</span>
+        <span data-w="book_limits">BOOK LIMITS</span>
+        <span data-w="limits_show">Show the book limits</span>
+        <span data-w="limits_hide">Hide the book limits</span>
+        <span data-w="sum_side">{side} risk {x} of {limit} · daily stop {mode}</span>
+        <span data-w="sum_real">REAL</span>
+        <span data-w="sum_paper">PAPER</span>
         <span data-w="mode_open">OPEN</span>
         <span data-w="mode_elite">ELITE ONLY</span>
         <span data-w="mode_shut">SHUT</span>
@@ -155,11 +159,17 @@ Included by base.html for an authenticated reader only.
         <span data-w="lbl_target">target</span>
         <span data-w="stop_sent">(stop sent {x})</span>
         <span data-w="inst_class">instrument: {class}</span>
+        <span data-w="chip_reviewer">Reviewer: {v}</span>
+        <span data-w="more_causes">(and {n} more)</span>
+        <span data-w="chip_thesis">Thesis check: {v}</span>
+        <span data-w="chip_reviewer_title">The position reviewer's latest verdict, {age} ago. Advice only.</span>
+        <span data-w="chip_thesis_title">The thesis check's latest reading, {age} ago.</span>
+        <span data-w="held_for">position open {t}</span>
         <span data-w="no_orc">No Orc</span>
         <span data-w="no_orc_seated">No Orc seated.</span>
         <span data-w="not_decided">Nothing on this seat was decided by an Orc.</span>
         <span data-w="orc_arrives">When the Orcs arrive, this seat's Orc writes its thesis, plan and notes here.</span>
-        <span data-w="no_thesis">No thesis is written for this seat yet.</span>
+        <span data-w="no_thesis">No Orc has written a thesis for this seat yet.</span>
         <span data-w="d_mission">Mission</span>
         <span data-w="d_deployment">Deployment</span>
         <span data-w="d_metrics">Metrics</span>
@@ -178,8 +188,9 @@ Included by base.html for an authenticated reader only.
         <span data-w="t_instruments">INSTRUMENTS</span>
         <span data-w="t_underlying">THE UNDERLYING</span>
         <span data-w="t_correlated">CORRELATED · 4h returns, 45 days</span>
-        <span data-w="close_seat">Close the seat</span>
-        <span data-w="back">‹ Back to the Horde</span>
+        <span data-w="close_seat">Close this dossier</span>
+        <span data-w="back">‹ Back</span>
+        <span data-w="back_label">Back to the Horde</span>
         <span data-w="loading_seat">Loading this seat…</span>
         <span data-w="seat_failed">Could not load this seat's detail. The card is still live.</span>
         <span data-w="retry">Retry</span>
@@ -195,7 +206,7 @@ Included by base.html for an authenticated reader only.
         <span data-w="m_tags">Tags</span>
         <span data-w="m_rule">Rule state</span>
         <span data-w="m_plan">Plan</span>
-        <span data-w="m_thesis">Thesis</span>
+        <span data-w="m_thesis">Orc's thesis</span>
         <span data-w="v_reviewer">THE REVIEWER · advice only</span>
         <span data-w="v_thesis">THE THESIS CHECK</span>
         <span data-w="v_care">THE CARE</span>
@@ -208,6 +219,7 @@ Included by base.html for an authenticated reader only.
         <span data-w="structure_stop">structure stop {x}</span>
         <span data-w="full_story">Full story ›</span>
         <span data-w="c_ask">Ask Sauron about this seat</span>
+        <span data-w="c_ask_short">Ask Sauron</span>
         <span data-w="c_advice">Should I close?</span>
         <span data-w="c_levels">Stop / target…</span>
         <span data-w="c_confirm">opens a confirmation</span>
@@ -219,6 +231,7 @@ Included by base.html for an authenticated reader only.
         <span data-w="c_close_aria">Close {sym} {side} #{id}…</span>
         <span data-w="c_levels_aria">Edit the stop and target of {sym} {side} #{id}…</span>
         <span data-w="copy">Copy</span>
+        <span data-w="copy_label">Copy {cmd}</span>
         <span data-w="copied">Copied</span>
         <span data-w="positions_link">Positions ›</span>
         <span data-w="platform_instrument">Platform instrument: {symbol}</span>
@@ -227,6 +240,8 @@ Included by base.html for an authenticated reader only.
         <span data-w="ask_about">Ask Sauron about {symbol}</span>
         <span data-w="bars">{n} bars</span>
         <span data-w="seat_go">Seat ›</span>
+        <span data-w="your_seat">YOUR SEAT</span>
+        <span data-w="unmeasured_bars">not measured: {n} shared 4h bars</span>
         <span data-w="page_go">Page ›</span>
         <span data-w="long">Long…</span>
         <span data-w="short">Short…</span>

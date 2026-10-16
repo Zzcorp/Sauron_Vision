@@ -1020,11 +1020,14 @@
                 same panel_open_pnl the POSITIONS and PORTFOLIO popups quote,
                 so the three can never disagree. No live mark on any open
                 position is an em-dash: an unmarked book is unknown, not flat.
+                The sub-line says which books the figure adds ("real +
+                paper"), as the PORTFOLIO cell beside it keeps them apart
+                (the Horde's final review, 2026-10-16).
                 {% endcomment %}
                 <a href="{% url 'positions_list' %}" class="ip-cat ip-cat-link ip-cat-pnl">
                     <span class="ip-label">OPEN P&amp;L</span>
                     <span class="ip-count" data-sv-live="hb-pnl" data-sv-live-key="hb-pnl">{% if panel_open_pnl_display %}<span class="{% if panel_open_pnl > 0 %}up{% elif panel_open_pnl < 0 %}down{% endif %}" title="Unrealised across both books at live marks. {{ panel_book_coverage }}">{{ panel_open_pnl_display }}</span>{% elif panel_positions %}<span class="sv-unknown" title="{{ panel_book_coverage }} No open position could be marked to a live quote.">&mdash;</span>{% else %}<span class="sv-unknown" title="Nothing open in either book">&mdash;</span>{% endif %}</span>
-                    <span class="ip-sub" data-sv-live="hb-pnl-sub" title="{{ panel_book_coverage }}">{% if not panel_positions %}none open{% elif panel_positions_priced < panel_positions %}across {{ panel_positions_priced }} of {{ panel_positions }} positions{% else %}across {{ panel_positions }} position{{ panel_positions|pluralize }}{% endif %}</span>
+                    <span class="ip-sub" data-sv-live="hb-pnl-sub" title="{{ panel_book_coverage }}">{% if not panel_positions %}none open{% elif panel_positions_priced < panel_positions %}real + paper across {{ panel_positions_priced }} of {{ panel_positions }} positions{% else %}real + paper across {{ panel_positions }} position{{ panel_positions|pluralize }}{% endif %}</span>
                     <div class="ip-dropdown">
                         <div class="ip-dd-head">OPEN P&amp;L &middot; BOTH BOOKS, LIVE MARKS <span class="sv-live-chip" data-sv-live-status></span></div>
                         <div data-sv-live="hb-pnl-detail">
