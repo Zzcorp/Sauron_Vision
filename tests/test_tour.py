@@ -95,7 +95,8 @@ class TourPageTests(TestCase):
         silently skip half the walk."""
         resp = self.client.get("/getting-started/")
         for anchor in ('id="mainSidebar"', 'id="tickerBar"',
-                       'id="infoPanelWrap"', 'id="signalsRail"',
+                       'id="infoPanelWrap"', 'id="svHordeTab"',
+                       'id="signalsRail"',
                        'id="notifBell"', 'id="userMenuTrigger"',
                        'id="seEyeFab"', 'class="theme-toggle-btn"'):
             self.assertContains(resp, anchor)

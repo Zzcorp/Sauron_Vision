@@ -50,6 +50,8 @@
       words: "open pnl profit loss cell headband bigger" },
     { label: "Headband · NEWS popup", href: "#headband",
       words: "news popup headband hover dwell card headline summary sentiment" },
+    { label: "The Horde · a seat per open position", href: "#horde",
+      words: "horde orc orcs seat seats captain mission allocation deployment" },
     { label: "News & sentiment feed", href: "/news/", page: "news",
       words: "news sentiment feed articles headlines breaking keywords" },
     { label: "Instruments & quotes", href: "/instruments/",
@@ -196,6 +198,18 @@
         band.classList.remove("gl-pointed");
         void band.offsetWidth;
         band.classList.add("gl-pointed");
+      }
+      close();
+      return;
+    }
+    if (e.href === "#horde") {
+      /* He points at the Horde's tab; he never opens it. */
+      ev.preventDefault();
+      var hordeTab = d.getElementById("svHordeTab");
+      if (hordeTab) {
+        hordeTab.classList.remove("gl-pointed");
+        void hordeTab.offsetWidth;
+        hordeTab.classList.add("gl-pointed");
       }
       close();
       return;

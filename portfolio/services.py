@@ -237,9 +237,13 @@ def value_per_unit(trade) -> float:
     return vpu
 
 
-def usd_per_unit(row):
+def usd_per_unit(row, rates=None):
     """USD one price point of one unit of this row is worth, or None when
     it cannot be known.
+
+    `rates` (optional): a dict the caller keeps for one pass over many
+    rows, so each quote currency's rate is read once, not once per row
+    (views_command._reprice_legacy; the Horde re-prices on every poll).
 
     THE UNIT ERROR (2026-10-04). Every notional the book summed was
     price x quantity: right for a dollar-quoted row, and 150 times too big
@@ -271,12 +275,18 @@ def usd_per_unit(row):
     symbol = (getattr(inst, "symbol", "") or "").upper().replace("/", "")
     if len(symbol) != 6 or not symbol.isalpha():
         return 1.0
+    ccy = symbol[3:]
+    if rates is not None and ccy in rates:
+        return rates[ccy]
     try:
         from bot_program.asset_engine.forex_bot import quote_ccy_usd_rate
-        rate = quote_ccy_usd_rate(symbol[3:])
+        rate = quote_ccy_usd_rate(ccy)
     except Exception:  # noqa: BLE001 — an unreadable rate is "unknown"
         rate = None
-    return float(rate) if rate and rate > 0 else None
+    out = float(rate) if rate and rate > 0 else None
+    if rates is not None:
+        rates[ccy] = out
+    return out
 
 
 def notional_usd(row):

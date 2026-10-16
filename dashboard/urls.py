@@ -107,6 +107,7 @@ from .views_command import (
 )
 from .views_day import day_live
 from .views_activity import activity_feed
+from .views_horde import horde_feed
 from .views_bot_performance import bot_performance_dashboard
 from .views_bot_backtest import (
     bot_backtest_list, bot_backtest_run, bot_backtest_detail,
@@ -145,6 +146,10 @@ urlpatterns = [
     # calls, pipeline runs, bot ticks and the bell, newest first, for the
     # staff drawer under the signals rail. Under /api/ for the same 423.
     path("api/activity/feed/", activity_feed, name="activity_feed"),
+    # THE HORDE (2026-10-08): a seat for every open position, the band beside
+    # the cockpit strip. One JSON door (board, tab, one seat), under /api/
+    # for the same 423.
+    path("api/horde/", horde_feed, name="horde_feed"),
 
     # ── Frontend Pages ──────────────────────────────────────
     path("", views.dashboard, name="dashboard"),

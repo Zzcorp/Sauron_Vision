@@ -97,9 +97,7 @@ def _open_book(user, portfolio):
     deployed are None when nothing could be priced: an unpriced book is
     unknown, not flat.
     """
-    from market_data.models import LiveQuote
-    from portfolio.services import (notional_usd, unified_open_positions,
-                                    usd_per_unit)
+    from portfolio.services import notional_usd, unified_open_positions
 
     rows = unified_open_positions(user, portfolio)
     if not rows:
@@ -108,15 +106,50 @@ def _open_book(user, portfolio):
     # Bot rows arrive already marked by portfolio.services (None where no
     # quote exists). Legacy Position rows carry the dead column, so they are
     # re-priced here against the same LiveQuote table the bot rows used.
-    legacy = [r for r in rows if getattr(r, "source", "") != "bot"]
-    quotes = {}
-    if legacy:
-        ids = {r.instrument_id for r in legacy
-               if getattr(r, "instrument_id", None)}
-        if ids:
-            quotes = {q.instrument_id: q for q in
-                      LiveQuote.objects.filter(instrument_id__in=ids)}
+    _reprice_legacy([r for r in rows if getattr(r, "source", "") != "bot"])
 
+    n_priced = 0
+    unrealized = 0.0
+    deployed = 0.0
+    for r in rows:
+        if r.unrealized_pnl is None or r.current_price is None:
+            continue
+        # notional_usd: price x quantity x the row's USD-per-unit, so a
+        # yen-quoted row is deployed dollars, not deployed yen.
+        notional = notional_usd(r)
+        if notional is None:
+            continue
+        unrealized += float(r.unrealized_pnl)
+        deployed += notional
+        n_priced += 1
+
+    if n_priced == 0:
+        return rows, 0, None, None
+    return rows, n_priced, round(unrealized, 2), round(deployed, 2)
+
+
+def _reprice_legacy(legacy) -> None:
+    """Re-price legacy portfolio.Position rows IN MEMORY against LiveQuote —
+    _open_book's own legacy loop, named so the Horde (dashboard/horde.py)
+    marks a legacy seat exactly as this book does without reading the
+    union a second time. One LiveQuote read by instrument_id; nothing is
+    saved. A row with no quote, or a forex row whose quote currency has
+    no readable USD rate, is unpriced (None), never its entry price."""
+    from market_data.models import LiveQuote
+    from portfolio.services import usd_per_unit
+
+    if not legacy:
+        return
+    quotes = {}
+    ids = {r.instrument_id for r in legacy
+           if getattr(r, "instrument_id", None)}
+    if ids:
+        quotes = {q.instrument_id: q for q in
+                  LiveQuote.objects.filter(instrument_id__in=ids)}
+
+    # One rate read per quote CURRENCY for the whole pass: three yen rows
+    # read the yen once (the Horde re-prices on every poll).
+    rates = {}
     for r in legacy:
         quote = quotes.get(getattr(r, "instrument_id", None))
         mark = (float(quote.last)
@@ -143,7 +176,7 @@ def _open_book(user, portfolio):
         # row's (mark - entry) x qty is YEN. Without a readable rate the
         # row is unpriced — a number this book cannot measure is left out,
         # never counted at 1.
-        mult = usd_per_unit(r)
+        mult = usd_per_unit(r, rates)
         if mult is None:
             r.mark_source = None
             r.current_price = None
@@ -158,25 +191,6 @@ def _open_book(user, portfolio):
         r.unrealized_pnl = round((mark - entry) * qty * sign * mult, 2)
         r.unrealized_pnl_pct = (round((mark - entry) / entry * 100 * sign, 2)
                                 if entry else None)
-
-    n_priced = 0
-    unrealized = 0.0
-    deployed = 0.0
-    for r in rows:
-        if r.unrealized_pnl is None or r.current_price is None:
-            continue
-        # notional_usd: price x quantity x the row's USD-per-unit, so a
-        # yen-quoted row is deployed dollars, not deployed yen.
-        notional = notional_usd(r)
-        if notional is None:
-            continue
-        unrealized += float(r.unrealized_pnl)
-        deployed += notional
-        n_priced += 1
-
-    if n_priced == 0:
-        return rows, 0, None, None
-    return rows, n_priced, round(unrealized, 2), round(deployed, 2)
 
 
 def _tab_bar_metrics(user) -> dict:

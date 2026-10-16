@@ -3121,6 +3121,19 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         var panel = visibleRect('.info-panel-wrap');
         var bottom = (panel && panel.top > vh * 0.5)
             ? Math.max(0, vh - panel.top) : 0;
+        /* The Horde's open sheet (2026-10-08) stands on the strip and can
+           rise past mid-height, so it is believed by its BOTTOM; a closed
+           one is visibility:hidden and measures nothing. Its inset is
+           taken only while it leaves the chart its floor (MIN_TALL_H):
+           past that the floor below would drop EVERY inset and lay the
+           chart over the whole screen, the topbar's toolbar row
+           included. Without it the chart pins over the sheet, as it lies
+           over the closed tab. */
+        var horde = visibleRect('#svHordePanel');
+        if (horde && horde.bottom > vh * 0.5) {
+            var hb = Math.max(bottom, vh - horde.top);
+            if (vh - (top + pad) - (hb + pad) >= MIN_TALL_H) bottom = hb;
+        }
 
         var side = visibleRect('.sidebar');
         var left = (side && side.right < vw * 0.5)
@@ -5999,6 +6012,8 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         if (ev.target === container || container.contains(ev.target)) return;
         relayout();
     });
+    /* A drag of the Horde's edge moves no transition: the Horde says so. */
+    document.addEventListener('sv:chrome-moved', function () { if (viewState === 'tall') relayout(); });
 
     // ── Bootstrap ─────────────────────────────────────────────────────────
     function bootstrap() {

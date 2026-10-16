@@ -35,6 +35,7 @@
     --z-canvas:       0;   /* globe-eye, particles, grid background */
     --z-sticky:     100;   /* sticky table headers, section heads   */
     --z-chrome:     500;   /* headbands, ticker bar, info panel     */
+    --z-horde:      499;   /* the Horde sheet, one under the strip  */
     --z-drawer:     550;   /* activity drawer, UNDER the rail       */
     --z-rail:       600;   /* signal rail                          */
     --z-nav-scrim:  700;   /* mobile sidebar scrim                  */
@@ -90,6 +91,17 @@
 .ticker-bar,
 .data-headband,
 .info-panel-wrap { z-index: var(--z-chrome) !important; }
+/* The Horde (2026-10-08) opens a sheet over the page from the strip's line,
+   one rung under the strip. Four things that sat under it are lifted onto
+   the strip's rung: the restore pill (was 89, under an open sheet once the
+   strip is minimized), the two mid-height edge toggles (were 70, under
+   any sheet taller than half the screen), and the headband restore tabs
+   (were 80: a collapsed headband gives its height to a FULL sheet, which
+   then covered the only way to bring it back; they sit in the sheet's
+   32px right padding, so no Horde content goes under them). */
+#ipRestorePill { z-index: var(--z-chrome) !important; }
+.rail-toggle-btn, .sidebar-toggle-btn { z-index: var(--z-chrome) !important; }
+.hb-restore-tab { z-index: var(--z-chrome) !important; }
 .sidebar-overlay { z-index: var(--z-nav-scrim) !important; }
 .sidebar,
 .sidebar.mobile-open { z-index: var(--z-sidebar) !important; }

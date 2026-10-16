@@ -1,0 +1,700 @@
+/* ════════════════════════════════════════════════════════════════════════
+   THE HORDE (2026-10-08): a seat for every open position, in a sheet that
+   opens upward from the cockpit strip's own line and that the reader drags
+   to any height (templates/_partials/the_horde.html, static/js/sv-horde.js).
+
+   How it hides: the root is fixed on the strip's top edge (bottom:
+   var(--ip-h), the strip's effective height: 60px, or 0 when the strip is
+   minimized or the Command Center hides it) and as tall as the sheet
+   (--horde-h, set inline by the script). Closed, it is translated its own
+   height down, so its top lands on the strip's top edge: the tab hung off
+   that edge sits on the strip's line beside the minimize tab, and the
+   body lies under the strip (the Horde's rung, --z-horde, is one under
+   --z-chrome) and past the viewport's bottom, where a fixed box adds no
+   scroll. visibility and inert keep it out of paint and the tab order.
+
+   The left and right edges mirror the strip (sauron.css's info panel:
+   the sidebar, its mini width, the rail closed and open) and learn the
+   activity drawer (sv-activity.css: 360px wide against the rail's edge).
+   Every offset rule that measures the bottom chrome is listed in the
+   build spec; the TALL chart measures #svHordePanel itself.
+
+   No container queries on purpose: container-type would make the root the
+   containing block of its fixed children, and the phone tier's pill and
+   sheet are fixed children of a zero-size root. The width tiers are
+   classes the script sets (hd-w-l, hd-w-m, hd-w-s, hd-phone for the
+   sheet; hd-t-l, hd-t-m, hd-t-s for the closed tab, from its own room).
+
+   Tokens only, every z-index a rung of the ladder (sv-overlay.css), and
+   nothing is born at opacity 0. Loaded after sv-activity.css and before
+   sv-responsive.css.
+   ════════════════════════════════════════════════════════════════════════ */
+
+body:has(.info-panel-wrap) { --ip-h: 60px; }
+body:has(.info-panel-wrap.minimized),
+body.page-dashboard { --ip-h: 0px; }
+
+.sv-horde {
+    position: fixed;
+    left: var(--sidebar-width);
+    right: 0;
+    /* The two edges again, as numbers the tab can do arithmetic with
+       when the strip is minimized (below). */
+    --hd-l: var(--sidebar-width);
+    --hd-r: 0px;
+    /* The STRIP's own right edge (sauron.css .info-panel-wrap): the rail,
+       never the activity drawer, which the strip does not learn. */
+    --hd-sr: 0px;
+    /* THE FLOATING CONTROLS (2026-10-16, rule 3: a REAL MONEY pill or a
+       money line was under the strip's minimize chevron, Gollum or the
+       Eye). The sheet reserves their room instead of sliding under them:
+       the body's side gutters clear Gollum (18px inside the sidebar's
+       edge, a fab wide) and the Eye (--se-right-edge from the viewport's
+       right, a fab wide) wherever they stand over the sheet, and the
+       panel's foot (--hd-foot) keeps the strip's 28px minimize tab, or
+       the minimized strip's restore pill, over an empty band. */
+    --hd-gut-l: max(32px, calc(var(--se-left-chrome, 0px) + 18px + var(--se-fab-size, 56px) + 8px - var(--hd-l)));
+    --hd-gut-r: max(32px, calc(var(--se-right-edge, 0px) + var(--se-fab-size, 56px) + 8px - var(--hd-r)));
+    --hd-foot: 28px;
+    bottom: var(--ip-h, 0px);
+    height: var(--horde-h, 360px);
+    z-index: var(--z-horde);
+    transform: translateY(100%);
+    transition: transform .3s ease, bottom .4s cubic-bezier(.4, 0, .2, 1), left .3s ease, right .3s ease;
+    font-family: var(--font-body, inherit);
+}
+.sv-horde.open { transform: none; }
+.sv-horde.sv-horde--instant,
+.sv-horde.sv-horde--instant .sv-horde-panel,
+body.sv-horde-resizing .sv-horde { transition: none; }
+body.sv-horde-resizing { user-select: none; cursor: ns-resize; }
+body:has(.sidebar.mini) .sv-horde { left: 68px; --hd-l: 68px; }
+body.page-dashboard .sv-horde { --hd-foot: 8px; }
+/* Gollum's whisper stands over the sheet's body wherever the sheet is
+   open: while it is, the sheet is lifted above the bubble (his count on
+   the stone still says something changed). His dialog, opened on
+   purpose, stays above. */
+body:has(.sv-horde.open) .gollum-bubble { z-index: calc(var(--z-horde) - 1) !important; }
+body:has(.signals-rail) .sv-horde { right: 44px; --hd-r: 44px; --hd-sr: 44px; }
+@media (min-width: 769px) {
+    body:has(.signals-rail.open) .sv-horde { right: 280px; --hd-r: 280px; --hd-sr: 280px; }
+    body:has(.sv-activity.open) .sv-horde { right: 404px; --hd-r: 404px; }
+    body:has(.signals-rail.open):has(.sv-activity.open) .sv-horde { right: 640px; --hd-r: 640px; }
+    /* The minimized strip's restore pill: 12px up, ~30px tall. */
+    body:has(.info-panel-wrap.minimized) .sv-horde { --hd-foot: 44px; }
+}
+
+/* The page's side-panel toggles while the sheet is open: placed by the
+   script (sv-horde.js placeToggles) above the sheet, or in its body's
+   side gutter, never on its head (round 2). */
+@media (min-width: 769px) {
+    body:has(.sv-horde.open) .sidebar-toggle-btn,
+    body:has(.sv-horde.open) .rail-toggle-btn { top: var(--hd-toggle-y, 50%); }
+}
+
+.sv-horde .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ── the tab: on the strip's line, left of its minimize tab ─────────── */
+.sv-horde-tab {
+    position: absolute;
+    top: -28px;
+    /* Its right edge 40px left of the root's centre: the strip's minimize
+       tab is 32px each side of the STRIP's centre, which stands at or
+       right of the root's (the strip learns the rail, the root also the
+       activity drawer). Its left edge clear of Gollum, whose stone stands
+       18-74px inside the root's left edge on the same line. */
+    right: calc(50% + 40px);
+    height: 28px;
+    max-width: calc(50% - 122px);
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    overflow: hidden;
+    white-space: nowrap;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 1px;
+    transition: background .2s, color .2s;
+}
+/* The strip minimized: its SHOW PANEL pill stands at the bottom centre of
+   the VIEWPORT (sauron.css .ip-restore-pill, about 70px each side) and its
+   minimize tab at the centre of the STRIP (32px each side), both on the
+   line the closed tab sits on. The tab stays LEFT of the centre, as in
+   every other state (round 2: it once jumped right, over the page's
+   meta line): its right edge is 40px left of the root's centre, or 84px
+   left of the viewport's centre where that is further left (50% of the
+   root plus half the edge difference is the viewport's centre, measured
+   from the root's right edge); the strip's own centre (--hd-sr) is never
+   left of the root's, so 40px past the root's clears its minimize tab.
+   It ends 82px inside the root's left edge, clear of Gollum, as above.
+   Where even the narrowest tier has no room there (1100 with the full
+   sidebar: ~120px), the script sets hd-tab-alt (sv-horde.js fitTab) and
+   the tab starts right of the pill and of the strip's minimize tab
+   instead, short of the Eye where it stands in the root, 8px short of
+   the root's edge where the drawer moved that edge left of the Eye.
+   Wide screens only (a phone marks the strip minimized too). */
+@media (min-width: 769px) {
+    body:has(.info-panel-wrap.minimized) .sv-horde-tab {
+        right: max(calc(50% + 40px), calc(50% + (var(--hd-l) - var(--hd-r)) / 2 + 84px));
+        max-width: calc(100% - max(calc(50% + 40px), calc(50% + (var(--hd-l) - var(--hd-r)) / 2 + 84px)) - 82px);
+    }
+    body:has(.info-panel-wrap.minimized) .sv-horde.hd-tab-alt .sv-horde-tab {
+        right: auto;
+        left: max(calc(50% + (var(--hd-r) - var(--hd-l)) / 2 + 84px),
+                  calc(50% + (var(--hd-r) - var(--hd-sr)) / 2 + 40px));
+        max-width: calc(100% - max(calc(50% + (var(--hd-r) - var(--hd-l)) / 2 + 84px),
+                                   calc(50% + (var(--hd-r) - var(--hd-sr)) / 2 + 40px))
+                   - max(8px, calc(var(--se-fab-size) + 64px - (var(--hd-r) - var(--hd-sr)))));
+    }
+}
+.sv-horde-tab:hover { background: var(--bg-card-hover); color: var(--accent); }
+.sv-horde-tab:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.sv-horde.open .sv-horde-tab { color: var(--text-primary); }
+.hd-tab-name { color: var(--accent); letter-spacing: 2px; }
+.hd-tab-alarms {
+    padding: 0 6px; border: 1px solid var(--danger); border-radius: 9px;
+    color: var(--danger); font-weight: 700;
+}
+.hd-tab-real { margin: 0; }
+.hd-tab-r.up { color: var(--accent); }
+.hd-tab-r.down { color: var(--accent-red); }
+.hd-tab-risk.near { color: var(--accent-gold-ink); }
+.hd-tab-risk.past { color: var(--danger); }
+.hd-tab-flag { color: var(--accent-gold-ink); }
+.hd-tab-flag.shut, .hd-tab-flag.unreadable { color: var(--danger); }
+.hd-tab-moves {
+    min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+    background: var(--accent-dim); color: var(--accent); text-align: center; line-height: 16px;
+}
+.sv-horde-tab [hidden] { display: none; }
+/* Every segment is whole or absent, never cut (2026-10-16: at 1380 each
+   one ended in an ellipsis, numbers included). The script measures the
+   content against the room (sv-horde.js fitTab) and takes the widest tier
+   that fits: hd-t-l says it all; hd-t-m drops the name (the count reads
+   "HORDE 8"); hd-t-s also drops the R, the risk and the flag. The alarms
+   and the REAL pill are in every tier (rule 3, spec §4.1). */
+.sv-horde-tab > * { flex-shrink: 0; }
+.sv-horde.hd-t-m .hd-tab-name,
+.sv-horde.hd-t-s .hd-tab-name,
+.sv-horde.hd-t-s .hd-tab-r,
+.sv-horde.hd-t-s .hd-tab-risk,
+.sv-horde.hd-t-s .hd-tab-flag { display: none; }
+/* Open on a wide screen (round 2: at every height, not FULL only), the
+   tab tucks away and the head's own count (seats, the REAL pill) says
+   what it said. The alarms are said once, by the head's own alarm chips
+   (.hd-sum-chips): the count's copy of them is not shown beside them. */
+.sv-horde.hd-tab-tucked .sv-horde-tab { visibility: hidden; }
+.sv-horde.hd-tab-tucked .hd-count { display: inline-flex; }
+.sv-horde.open:not(.hd-phone) .hd-head:has(.hd-sum-chips .hd-chip-btn--alarm) .hd-count-alarms { display: none; }
+
+/* ── the sheet ───────────────────────────────────────────────────────── */
+.sv-horde-panel {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: var(--hd-foot);
+    background: var(--bg-primary);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -10px 28px color-mix(in srgb, var(--bg-void) 55%, transparent);
+    visibility: hidden;
+    transition: visibility 0s linear .3s;
+}
+.sv-horde.open .sv-horde-panel { visibility: visible; transition: none; }
+.sv-horde-grip {
+    position: absolute; top: -6px; left: 0; right: 0; height: 12px;
+    cursor: ns-resize; touch-action: none; z-index: var(--z-sticky);
+}
+.sv-horde-grip::after {
+    content: ""; position: absolute; left: 0; right: 0; top: 5px; height: 2px;
+    background: var(--accent); opacity: 0; transition: opacity .2s;
+}
+.sv-horde-grip:hover::after,
+.sv-horde-grip:focus-visible::after,
+body.sv-horde-resizing .sv-horde-grip::after { opacity: .6; }
+.sv-horde-grip:focus-visible { outline: none; }
+.hd-grabber { display: none; }
+
+.hd-head {
+    flex-shrink: 0;
+    padding: 8px 32px 6px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+}
+.hd-row1 { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.hd-title {
+    margin: 0; font-family: var(--font-display, var(--font-mono)); font-size: 12px;
+    letter-spacing: 3px; color: var(--accent); font-weight: 700;
+}
+.hd-title:focus { outline: none; }
+.hd-sub { font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); cursor: help; }
+/* The open sheet's own count: the phone's head, where the pill is hidden
+   while the sheet is open. The wide tab already says it. */
+.hd-count { display: none; gap: 6px; align-items: center; font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); }
+.hd-lens { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.hd-lens-btn, .hd-chip-btn {
+    padding: 2px 7px; border: 1px solid var(--border); border-radius: 10px;
+    background: transparent; color: var(--text-muted); cursor: pointer;
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: .5px;
+}
+.hd-lens-btn[hidden] { display: none; }
+.hd-cell-line .hd-chip-btn { margin: 0 4px 3px 0; }
+.hd-lens-btn[aria-pressed="true"], .hd-chip-btn[aria-pressed="true"] {
+    background: var(--accent-dim); border-color: var(--accent-dim); color: var(--accent);
+}
+/* The alarm chips in the tab's own colours (2026-10-16: grey beside the
+   tab's red pill). Pressed, they keep their tone and fill behind it. */
+.hd-chip-btn--alarm { border-color: var(--danger); color: var(--danger); font-weight: 700; }
+.hd-chip-btn--watch { border-color: var(--warning); color: var(--warning); }
+.hd-chip-btn--order { border-color: var(--accent-blue); color: var(--accent-blue); }
+.hd-chip-btn--unheld { border-style: dashed; }
+.hd-chip-btn--alarm[aria-pressed="true"] { border-color: var(--danger); color: var(--danger); background: color-mix(in srgb, var(--danger) 16%, transparent); }
+.hd-chip-btn--watch[aria-pressed="true"] { border-color: var(--warning); color: var(--warning); background: color-mix(in srgb, var(--warning) 16%, transparent); }
+.hd-chip-btn--order[aria-pressed="true"] { border-color: var(--accent-blue); color: var(--accent-blue); background: color-mix(in srgb, var(--accent-blue) 16%, transparent); }
+.hd-stamp { margin-left: auto; font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); white-space: nowrap; }
+.hd-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; }
+.hd-dot.live { background: var(--accent); }
+.hd-dot.old { background: var(--accent-gold-ink); }
+.hd-dot.err { background: var(--accent-red); }
+.hd-snaps { display: inline-flex; gap: 3px; }
+.hd-icon-btn {
+    min-width: 24px; height: 24px; padding: 0 4px;
+    border: 1px solid var(--border); border-radius: 4px; background: transparent;
+    color: var(--text-muted); cursor: pointer; font-size: 12px; line-height: 1;
+}
+.hd-icon-btn:hover { color: var(--accent); border-color: var(--accent-dim); }
+.hd-close { font-size: 16px; }
+.hd-link { font-family: var(--font-mono); font-size: 10px; color: var(--accent); text-decoration: none; white-space: nowrap; }
+.hd-link:hover { text-decoration: underline; }
+
+/* The war table. The head pins ONE summary line (the book limits per
+   side, the alarm chips, the toggle); the cells, opened, stand at the
+   top of the body and scroll with the bands as one unit, whole
+   (2026-10-16: a capped scroller cut the REAL ACCOUNT card mid-content
+   at HALF and left no seat card on screen at 1100). */
+.hd-sum {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 5px;
+    font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+.hd-sum:empty { display: none; }
+.hd-sum-btn {
+    padding: 2px 8px; border: 1px solid var(--border); border-radius: 10px;
+    background: transparent; color: var(--text-muted); cursor: pointer;
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 1px;
+}
+.hd-sum-btn::after { content: " ▸"; }
+.hd-sum-btn[aria-expanded="true"]::after { content: " ▾"; }
+.hd-sum-btn:hover, .hd-sum-btn[aria-expanded="true"] { color: var(--accent); border-color: var(--accent-dim); }
+.hd-sum-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }
+.hd-sum-chips:empty { display: none; }
+.hd-unit { display: inline-flex; align-items: baseline; }
+/* The box that ends a wrapped line keeps its dot's room, not its ink
+   (sv-horde.js lineEnds): no line ends on a dangling dot. */
+.hd-unit.hd-eol > .hd-sep { visibility: hidden; }
+.hd-note-units { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; row-gap: 0; }
+.hd-row2 { display: flex; gap: 10px; margin-top: 8px; align-items: stretch; flex-wrap: wrap; }
+.hd-row2[hidden] { display: none; }
+.hd-cell {
+    min-width: 0; flex: 1 1 260px; padding: 6px 8px;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--bg-primary);
+    font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+.hd-cell.hd-small { flex: 0 1 180px; }
+.hd-cell.hd-folded .hd-cell-body { display: none; }
+.hd-cell-title { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; color: var(--text-muted); letter-spacing: 1px; }
+.hd-cell-line { margin-top: 3px; line-height: 1.4; overflow-wrap: anywhere; }
+.hd-cell-line b { color: var(--text-primary); font-weight: 600; letter-spacing: .5px; }
+.hd-meter {
+    position: relative; height: 6px; margin: 3px 0; border-radius: 3px;
+    background: var(--bg-card); overflow: hidden;
+}
+.hd-meter > span { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); }
+.hd-meter.near > span { background: var(--accent-gold-ink); }
+.hd-meter.past > span { background: var(--danger); }
+.hd-meter > i { position: absolute; top: 0; bottom: 0; left: 80%; width: 1px; background: var(--text-muted); }
+.hd-alloc { display: flex; height: 8px; margin: 3px 0; border-radius: 3px; overflow: hidden; background: var(--bg-card); }
+.hd-alloc > span { display: block; height: 100%; background: var(--accent); border-right: 1px solid var(--bg-primary); }
+.hd-alloc > span:nth-child(2n) { background: var(--accent-blue); }
+.hd-alloc > span.demo,
+.hd-alloc > span.legacy {
+    background: repeating-linear-gradient(45deg, var(--accent-gold-ink) 0 3px, transparent 3px 6px);
+}
+.hd-tone-ok { color: var(--accent); }
+.hd-tone-near { color: var(--accent-gold-ink); }
+.hd-tone-past, .hd-tone-bad { color: var(--danger); }
+.hd-tone-up { color: var(--accent); }
+.hd-tone-down { color: var(--accent-red); }
+.hd-chip {
+    display: inline-block; padding: 0 5px; border: 1px solid var(--border); border-radius: 3px;
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: .5px; color: var(--text-secondary);
+}
+.hd-chip.ok { border-color: var(--accent-dim); color: var(--accent); }
+.hd-chip.bad { border-color: var(--danger); color: var(--danger); }
+.hd-chip.muted { color: var(--text-muted); }
+.hd-failed {
+    width: 100%; padding: 6px 8px; border: 1px solid var(--danger); border-radius: 6px;
+    color: var(--danger); font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+}
+.hd-note { width: 100%; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+.hd-note.gold { color: var(--accent-gold-ink); }
+/* The warnings (the limits unread, the marks, the switches turned off)
+   stand under the war table, outside its capped scroller and in one
+   column: at HALF they were below the scroller's fold, and in the middle
+   tier squeezed beside the ALARMS cell (2026-10-15). */
+.hd-notes { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.hd-notes:empty { display: none; }
+
+/* ── the body: bands of seats, the dossier beside them ───────────────── */
+.hd-body {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    /* No bottom padding: a sticky command bar is held inside the
+       scroller's padding, and 82px of it floated the phone's bar mid-sheet
+       with rows showing under and below it (2026-10-16). The end of the
+       content gets its air from the spacer below; the side gutters keep
+       the floating controls off the content. */
+    padding: 0 var(--hd-gut-r) 0 var(--hd-gut-l);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+}
+.hd-body::after { content: ""; display: block; height: 12px; }
+/* The REAL pill keeps its solid red fill and white word inside the sheet,
+   without its 8px glow (sauron.css .sv-world--live): a pill just under
+   the scroll edge painted a red smudge above the edge (round 2). */
+.hd-body .sv-world--live { box-shadow: none; }
+.hd-class-note { margin-top: 3px; font-family: var(--font-mono); font-size: 10px; color: var(--accent-gold-ink); }
+.sv-horde.hd-w-l.hd-has-seat .hd-body { display: grid; grid-template-columns: minmax(0, 1fr) clamp(380px, 36%, 520px); column-gap: 14px; align-items: start; }
+.sv-horde.hd-w-l.hd-has-seat .hd-state,
+.sv-horde.hd-w-l.hd-has-seat #svHordeTable,
+.sv-horde.hd-w-l.hd-has-seat .hd-bands { grid-column: 1; }
+.sv-horde.hd-w-l.hd-has-seat .hd-body::after { grid-column: 1; }
+.hd-state:empty { display: none; }
+.hd-state { padding: 14px 0; font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); }
+.hd-state .hd-err { color: var(--accent-red); }
+.sv-horde.hd-stale .hd-bands { opacity: .55; }
+.hd-band { margin-top: 8px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+.hd-band[hidden] { display: none; }
+.hd-band-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hd-band-title {
+    padding: 2px 0; border: 0; background: transparent; cursor: pointer;
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 2px; color: var(--text-primary); font-weight: 700;
+}
+.hd-band-title::before { content: "▾ "; color: var(--text-muted); }
+.hd-band-title[aria-expanded="false"]::before { content: "▸ "; }
+.hd-band-title:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.hd-band-body[hidden] { display: none; }
+.hd-captain { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+.hd-expander {
+    padding: 0; border: 0; background: transparent; cursor: pointer;
+    font-family: var(--font-mono); font-size: 10px; color: var(--accent);
+}
+.hd-today { margin: 4px 0; padding: 4px 8px; border-left: 2px dashed var(--border); font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); }
+.hd-today[hidden] { display: none; }
+.hd-line { display: flex; gap: 6px; align-items: baseline; flex-wrap: nowrap; margin-top: 3px; font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.hd-line[hidden] { display: none; }
+/* The pill in a column of its own, the words wrapping in theirs: a
+   continuation starts under the words, with no pill-high gap above it
+   (final review: "at the stops ..." read as a line of its own). */
+.hd-line > .sv-world, .hd-line > .hd-no-venue { flex: none; }
+.hd-line-words { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; row-gap: 0; min-width: 0; flex: 1 1 auto; line-height: 1.45; }
+.hd-bet { margin-top: 3px; font-family: var(--font-mono); font-size: 10px; color: var(--accent-gold-ink); }
+.hd-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 8px; margin-top: 6px; }
+
+/* a seat card: one stretched button opens the dossier */
+.hd-seat {
+    position: relative; padding: 7px 9px 6px 11px;
+    /* A column: the foot row (who holds it, how long, the Orc) is pinned
+       to the card's bottom, so "No Orc" stands at one height on every
+       card of a row (round 2). */
+    display: flex; flex-direction: column;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card);
+    font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary);
+    font-variant-numeric: tabular-nums; transition: border-color .2s;
+}
+.hd-seat[hidden] { display: none; }
+.hd-seat:hover, .hd-seat.hd-current { border-color: var(--accent-dim); }
+.hd-seat-open {
+    position: static; padding: 0; border: 0; background: transparent; cursor: pointer;
+    color: var(--text-primary); font: inherit; font-weight: 700; font-size: 11px; letter-spacing: .5px;
+}
+.hd-seat-open::after { content: ""; position: absolute; inset: 0; border-radius: 6px; }
+.hd-seat-open:focus-visible { outline: none; }
+.hd-seat-open:focus-visible::after { outline: 1px solid var(--accent); outline-offset: 1px; }
+.hd-seat-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; line-height: 1.45; min-width: 0; }
+.hd-seat-row .hd-grow { margin-left: auto; color: var(--text-muted); }
+.hd-mission { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.hd-wait { color: var(--accent-gold-ink); }
+.hd-rail { position: relative; height: 4px; flex: 1 1 60px; min-width: 40px; border-radius: 2px; background: var(--bg-primary); }
+.hd-rail > i { position: absolute; top: -2px; width: 2px; height: 8px; background: var(--text-primary); }
+.hd-rail.through { background: color-mix(in srgb, var(--danger) 35%, transparent); }
+.hd-through { color: var(--danger); font-weight: 700; }
+.hd-voice-chip { padding: 0 4px; border: 1px solid var(--border); border-radius: 3px; }
+.hd-voice-chip.red { border-color: var(--danger); color: var(--danger); }
+.hd-voice-chip.gold { border-color: var(--accent-gold-ink); color: var(--accent-gold-ink); }
+.hd-no-orc { color: var(--text-muted); border-bottom: 1px dashed var(--text-muted); }
+.hd-seat-foot { margin-top: auto; padding-top: 2px; }
+/* The light's own first reason, said on the phone card only (the wide
+   card says it through its voice row and the light's title). */
+.hd-light-why { display: none; }
+/* The instrument's own class beside the mission, as a chip. */
+.hd-inst-chip { padding: 0 4px; border: 1px solid var(--border); border-radius: 3px; color: var(--text-muted); font-size: 9px; }
+
+/* the state light: a glyph on a ring, never a solid red fill */
+.hd-light { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; letter-spacing: .5px; }
+.hd-light-glyph {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px; border-radius: 50%; border: 1px solid currentColor; font-size: 8px; line-height: 1;
+}
+.hd-light--alarm { color: var(--danger); }
+.hd-light--alarm .hd-light-glyph { animation: hdPulse 2.4s ease-in-out infinite; }
+.hd-light--order { color: var(--accent-blue); }
+.hd-light--watch { color: var(--warning); }
+.hd-light--unheld { color: var(--text-muted); }
+.hd-light--unheld .hd-light-glyph { border-style: dashed; }
+.hd-light--calm { color: var(--accent); }
+@keyframes hdPulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 55%, transparent); }
+    50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 0%, transparent); }
+}
+.hd-no-venue { color: var(--text-muted); border: 1px solid var(--text-muted); border-radius: 3px; padding: 0 5px; font-size: 9px; }
+
+/* the special bands */
+.hd-straggler, .hd-unseated { margin-top: 5px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); }
+.hd-straggler { border-color: var(--danger); }
+
+/* ── the dossier ─────────────────────────────────────────────────────── */
+.hd-dossier {
+    position: relative; margin-top: 10px; padding: 0 10px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card);
+    font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary);
+    font-variant-numeric: tabular-nums; transition: border-color .2s;
+}
+.hd-dossier[hidden] { display: none; }
+.sv-horde.hd-w-l .hd-dossier {
+    grid-column: 2; grid-row: 1 / span 4; position: sticky; top: 0;
+    /* --hd-body-h is the body's visible height (the script reads it). The
+       floating controls stand in the gutters and the foot now, not over
+       the column, so the column takes the body's whole height less its
+       10px top margin (2026-10-16: it ended a fab band short, and the
+       war table's cap took more: ~160px were left to read at FULL). */
+    max-height: calc(var(--hd-body-h, 300px) - 10px);
+    overflow: auto; overscroll-behavior: contain;
+}
+.sv-horde.hd-w-l .hd-dos-cmdbar { bottom: 0; }
+/* The middle tier's head stays on one row: "Your book" (a tooltip) goes. */
+.sv-horde.hd-w-m .hd-sub { display: none; }
+.hd-dos-sec h4:not(:first-child) { margin-top: 10px; }
+.sv-horde:not(.hd-w-l).hd-has-seat .hd-bands,
+.sv-horde:not(.hd-w-l).hd-has-seat .hd-state { display: none; }
+/* The head paints over the command bar where the two pinned boxes meet
+   (2026-10-16: the bar painted over the head on the Commands chip). */
+.hd-dos-head { position: sticky; top: 0; z-index: calc(var(--z-sticky) + 1); padding: 8px 0 6px; background: var(--bg-card); border-bottom: 1px solid var(--border); }
+.hd-dos-title { flex-wrap: nowrap; align-items: flex-start; }
+.hd-dos-title h3 { flex: 1 1 auto; min-width: 0; }
+.hd-dos-tools { display: inline-flex; gap: 4px; flex-shrink: 0; margin-left: auto; }
+/* Below the dossier column (and on a phone) only the command bar sticks:
+   two sticky boxes in one short scroller met, and the bar covered the
+   why lines and the section chips. */
+.sv-horde:not(.hd-w-l) .hd-dos-head { position: static; }
+.hd-dos-head h3 { margin: 0; font-size: 12px; letter-spacing: 1px; color: var(--text-primary); }
+.hd-dos-head h3:focus { outline: none; }
+/* The reasons the light fired, in the sticky head, at a height of their
+   own: a long list scrolls inside it rather than pushing the sections
+   under the command bar. */
+.hd-dos-why { max-height: 5.8em; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+/* The section chips wrap onto a second line rather than scroll: all
+   seven are on screen at the 380px column and on a phone (round 2: a
+   sideways scroller hid Instruments behind a fade, "Comm…"). */
+.hd-dos-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; padding-bottom: 3px; }
+.hd-dos-chips > .hd-chip-btn { flex-shrink: 0; }
+/* A chip lands its section's heading under the pinned head: the head's
+   measured height (sv-horde.js measureDossierHead) is the margin. Below
+   the dossier column the head does not pin. */
+.hd-dos-sec { margin-top: 10px; scroll-margin-top: calc(var(--hd-dos-head-h, 0px) + 8px); }
+.sv-horde:not(.hd-w-l) .hd-dos-sec { scroll-margin-top: 8px; }
+.hd-dos-sec h4 { margin: 0 0 4px; font-size: 10px; letter-spacing: 2px; color: var(--text-muted); font-weight: 700; }
+.hd-kv { display: grid; grid-template-columns: minmax(90px, 34%) minmax(0, 1fr); gap: 2px 8px; }
+.hd-kv dt { color: var(--text-muted); }
+.hd-kv dd { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.hd-kv dd small { display: block; color: var(--text-muted); }
+.hd-tl { list-style: none; margin: 0; padding: 0; }
+.hd-tl li { display: grid; grid-template-columns: 74px 84px minmax(0, 1fr); gap: 6px; padding: 2px 0; border-bottom: 1px dotted var(--border); }
+.hd-tl .hd-author { color: var(--accent); letter-spacing: .5px; }
+.hd-voice { margin-top: 6px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; }
+.hd-voice.hd-orc { border-style: dashed; color: var(--text-muted); }
+.hd-voice pre { margin: 4px 0 0; white-space: pre-wrap; font: inherit; color: var(--text-secondary); }
+.hd-cmds { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+/* The command bar sticks to the bottom of whatever scrolls the dossier,
+   flush: a sticky inset is measured inside the scroller's padding, so the
+   scrollers that hold it (the wide dossier, .hd-body) have no bottom
+   padding, and nothing shows under the bar (2026-10-16: text bled
+   through the dossier's 10px and, on a phone, under an 82px float). The
+   floating controls stand in the gutters and the foot, not in its way. */
+.hd-dos-cmdbar {
+    position: sticky; bottom: 0; z-index: var(--z-sticky);
+    margin-top: 4px; padding: 6px 0;
+    background: var(--bg-card); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+/* "Stop / target…" is a button like its neighbours: the level editor
+   finds it by .lvl-edit, whose own rule (sauron.css, a stop edited where
+   it is read in a table cell) makes a full-width, right-aligned dashed
+   box that read as an empty input (2026-10-16). */
+.hd-cmds .hd-btn.lvl-edit {
+    display: inline-block; width: auto; margin: 0; padding: 4px 9px;
+    border: 1px solid var(--border); border-radius: 4px; background: var(--bg-primary);
+    color: var(--text-primary); text-align: center;
+}
+.hd-cmds .hd-btn.lvl-edit:hover, .hd-cmds .hd-btn.lvl-edit:focus-visible { border-color: var(--accent-dim); color: var(--accent); background: var(--bg-primary); }
+.hd-cmd-links { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 6px; }
+.hd-cmd-links:empty { display: none; }
+.hd-cap-row { display: none; }
+.hd-cmds .hd-money { outline: 1px solid var(--danger); outline-offset: 1px; }
+.hd-cmd-cap { color: var(--text-muted); font-size: 9px; }
+.hd-btn {
+    padding: 4px 9px; border: 1px solid var(--border); border-radius: 4px;
+    background: var(--bg-primary); color: var(--text-primary); cursor: pointer;
+    font-family: var(--font-mono); font-size: 10px; text-decoration: none;
+}
+.hd-btn:hover { border-color: var(--accent-dim); color: var(--accent); }
+/* The correlated instruments: one wrapping row per peer, its buttons on a
+   line of their own, so nothing is clipped in a 380px column. */
+.hd-peers { list-style: none; margin: 0; padding: 0; }
+.hd-peer { padding: 4px 0; border-bottom: 1px dotted var(--border); }
+.hd-peer--seat { border-left: 2px solid var(--accent-dim); padding-left: 6px; }
+.hd-peer-row { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
+.hd-peer-rho { color: var(--text-primary); }
+.hd-peer-last { margin-left: auto; white-space: nowrap; }
+.hd-peer-acts { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-top: 3px; }
+.hd-peer-acts:empty { display: none; }
+.hd-phone-cmds li { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
+.hd-phone-cmds .hd-cmd-text { color: var(--text-primary); font: inherit; }
+.hd-phone-cmds .hd-copy { padding: 1px 7px; font-size: 9px; }
+.hd-phone-cmds .hd-muted { flex-basis: 100%; }
+.hd-muted { color: var(--text-muted); }
+
+#svHordeTab.gl-pointed { animation: glPointed 1.6s ease-out; }
+
+/* ── the phone tier (768px and below) ────────────────────────────────── */
+@media (max-width: 768px) {
+    .sv-horde {
+        position: fixed; left: 0; bottom: 0; right: auto; top: auto;
+        width: 0; height: 0; transform: none; transition: none;
+    }
+    .sv-horde.open { transform: none; }
+    /* The pill stands where the Eye stands, at the Eye's height: the
+       page's bottom padding (sv-responsive.css (h): the bottom nav, the
+       Eye's size and 28px) clears both, so the page's last line scrolls
+       clear of the pill (final review). */
+    .sv-horde-tab {
+        position: fixed; left: max(12px, env(safe-area-inset-left, 0px)); bottom: var(--se-bottom-edge);
+        top: auto; right: auto; height: var(--se-fab-size, 48px); min-width: 48px; max-width: calc(100vw - 96px);
+        border-radius: 24px; border-bottom: 1px solid var(--border);
+        font-size: 11px; box-shadow: 0 4px 16px color-mix(in srgb, var(--bg-void) 60%, transparent);
+    }
+    .sv-horde.open .sv-horde-tab { display: none; }
+    .sv-horde-panel {
+        position: fixed; left: 0; right: 0; bottom: var(--sv-bottom-chrome); top: auto;
+        height: var(--horde-h, 66vh); border-radius: 12px 12px 0 0; border: 1px solid var(--border);
+        transform: translateY(calc(100% + var(--sv-bottom-chrome)));
+        transition: transform .3s ease, visibility 0s linear .3s;
+    }
+    .sv-horde.open .sv-horde-panel { transform: none; transition: transform .3s ease; }
+    .sv-horde-grip { position: relative; top: 0; height: 24px; flex-shrink: 0; touch-action: none; }
+    .sv-horde-grip::before { content: ""; position: absolute; left: 0; right: 0; top: -10px; bottom: -10px; }
+    .hd-grabber { display: block; width: 36px; height: 4px; margin: 10px auto 0; border-radius: 2px; background: var(--text-muted); }
+    .sv-horde-grip::after { display: none; }
+    .hd-head { padding: 4px 12px 6px; touch-action: none; }
+    .hd-snaps, .hd-lens, .hd-sub, .hd-row1 .hd-link { display: none; }
+    .hd-close { min-width: 44px; min-height: 44px; }
+    .hd-row2 { flex-direction: column; flex-wrap: nowrap; }
+    /* The Eye stands over the sheet's bottom right: while the sheet is
+       open it is lifted above the Eye, which the bottom nav's own rows
+       still reach once the sheet is down (rule 3: it covered a card's
+       corner and the Deployment rows, 2026-10-16). */
+    body:has(.sv-horde.open) .se-eye-fab { z-index: calc(var(--z-horde) - 1) !important; }
+    /* No strip and no pill on a phone: no foot. */
+    .sv-horde { --hd-foot: 0px; }
+    /* The alarm filters stand with the opened book limits on a phone;
+       the head's own count already shows the alarm pill. */
+    .sv-horde:not(.hd-limits-open) .hd-sum-chips { display: none; }
+    /* Opened, the chips say the alarms: the count does not say them twice. */
+    .sv-horde.hd-limits-open .hd-head:has(.hd-sum-chips .hd-chip-btn--alarm) .hd-count-alarms { display: none; }
+    .hd-body { padding: 0 12px; }
+    .hd-cards { grid-template-columns: minmax(0, 1fr); }
+    .hd-seat-row.hd-phone-hide, .hd-seat-foot.hd-phone-hide { display: none; }
+    .hd-light-why { display: flex; }
+    /* The card's head on one line of text: the seat button's hit area
+       is the whole card (its ::after), so it takes no 44px box of its
+       own, which set the symbol 2px under ALARM and left ~22px of air
+       above the head (final review). */
+    .hd-seat > .hd-seat-row:first-child { margin-top: 0; }
+    .hd-seat-open { min-height: 0; line-height: 14px; }
+    .hd-dossier { margin-top: 0; border-radius: 0; border-left: 0; border-right: 0; }
+    .hd-count { display: inline-flex; }
+    /* The head is one line: title, count, alarm chip, dot, close. */
+    .hd-row1 { flex-wrap: nowrap; }
+    .hd-stamp { display: none; }
+    .hd-close { margin-left: auto; }
+    .hd-title { letter-spacing: 2px; }
+    /* The bar is a two-by-two grid of buttons, clear of the Eye at the
+       right; its caption moves to the row under it. */
+    .hd-dos-cmdbar {
+        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px;
+        bottom: 0; padding: 6px 0; border-bottom: 0;
+    }
+    .hd-dos-cmdbar .hd-btn { white-space: normal; font-size: 11px; line-height: 1.2; }
+    .hd-cmds.hd-dos-cmdbar .hd-btn.lvl-edit { display: block; width: 100%; }
+    /* The band head: title, pills and the captain's line, then the
+       expander flush under them (2026-10-16: it sat alone after a gap). */
+    .hd-band-head { row-gap: 0; }
+    /* The expander rides the Captain's line, its 44px hit area made of
+       padding the margins take back, so it is not a lone line between
+       two gaps (round 2: ~20px of air above and below it). */
+    .hd-band-head .hd-expander { min-height: 0; padding: 14px 0; margin: -14px 0; text-align: left; }
+    /* A seat open: the war table folds away and the dossier has the room. */
+    .sv-horde.hd-has-seat #svHordeTable { display: none; }
+    /* ...and so do the book-limits line and the MARKS note: THE HORDE
+       row keeps its count, REAL pill and alarm; a failed read stays said
+       (final review: about 200px were left for the dossier). */
+    .sv-horde.hd-has-seat .hd-sum,
+    .sv-horde.hd-has-seat .hd-notes > .hd-note { display: none; }
+    .sv-horde.hd-has-seat .hd-notes:not(:has(.hd-failed)) { display: none; }
+    .hd-sum-chips { margin-left: 0; }
+    .hd-cap-bar { display: none; }
+    .hd-cap-row { display: inline; }
+    .hd-btn, .hd-icon-btn, .hd-band-title, .hd-expander, .hd-chip-btn { min-height: 44px; }
+    .hd-body .hd-link { display: inline-flex; align-items: center; min-height: 44px; }
+    [data-sv-close-trade].hd-btn { min-height: 48px; }
+    body:has(#pdCloseBtn) .sv-horde { display: none !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    /* At the weight of every rule that moves something, the phone
+       sheet's .sv-horde.open .sv-horde-panel included. */
+    .sv-horde,
+    .sv-horde-panel,
+    .sv-horde .sv-horde-panel,
+    .sv-horde.open .sv-horde-panel,
+    .sv-horde-tab,
+    .sv-horde-grip::after,
+    .hd-dossier,
+    .hd-seat { transition: none; }
+    .hd-light--alarm,
+    .hd-light--alarm .hd-light-glyph,
+    #svHordeTab.gl-pointed { animation: none; }
+}

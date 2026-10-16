@@ -1,0 +1,260 @@
+{% load static %}{% comment %}
+THE HORDE (2026-10-08). The operator: "un nouveau bandeau inférieur qui se
+place au même niveau que celui actuel des portfolio, que l'on peut agrandir
+ou rétrécir ... Appelez ça la Horde."
+
+A tab on the cockpit strip's own line opens a sheet upward that the reader
+drags to any height (PEEK, HALF, FULL, or anything between). Every open
+position is a seat: its mission, its numbers, its levels, who holds it
+today and a state light, grouped in one band per asset class with one line
+per money world. A seat opens a dossier: mission, deployment, metrics, the
+activity timeline, the authored voices, the commands (each one opens an
+EXISTING dialog with its own confirmation; nothing here sends an order)
+and the underlying with its correlated instruments.
+
+Markup only. The script is static/js/sv-horde.js, the sheet
+static/css/sv-horde.css; the data is GET /api/horde/ (dashboard/
+views_horde.py over dashboard/horde.py), read on open, then on the strip's
+own clock while open AND visible, and on the book's own events. Collapsed,
+nothing polls: the tab reads one cached answer after load and on the
+book's events, and copies the strip's position count for free.
+
+THE TRAP: nothing in here may be a live region (the strip's refresher
+attribute, templates/_partials/live_region.html). That refresher swaps every
+such region in the document from a render of this very page, which carries
+the empty skeleton below; a live region in here would be wiped on every
+sweep.
+
+Every static sentence the script prints is in the template #svHordeWords,
+one span per key, so the copy is reviewed here and nowhere else; every
+sentence that depends on data arrives formatted from the server.
+Included by base.html for an authenticated reader only.
+{% endcomment %}
+<section class="sv-horde" id="svHorde" aria-label="The Horde"
+         data-horde-url="{% url 'horde_feed' %}"
+         data-level-edit-src="{% static 'js/sv-level-edit.js' %}"
+         data-advice-src="{% static 'js/sv-close-advice.js' %}"
+         data-advice-css="{% static 'css/sv-close-advice.css' %}"
+         data-positions-url="{% url 'positions_list' %}"
+         data-signals-url="{% url 'signals_list' %}">
+    <button type="button" class="sv-horde-tab" id="svHordeTab" aria-expanded="false" aria-controls="svHordePanel" title="The Horde: a seat for every open position (h)">
+        <span class="hd-tab-name">THE HORDE</span>
+        <span class="hd-tab-seats" id="svHordeSeats">{{ panel_positions|default:0 }} seat{{ panel_positions|default:0|pluralize }}</span>
+        <span class="hd-tab-alarms" hidden></span>
+        <span class="hd-tab-real sv-world sv-world--live" title="Real money: this is an order at the broker" hidden></span>
+        <span class="hd-tab-r" hidden></span>
+        <span class="hd-tab-risk" hidden></span>
+        <span class="hd-tab-flag" hidden></span>
+        <span class="hd-tab-moves" hidden></span>
+    </button>
+    <div class="sr-only" id="svHordeSay" aria-live="polite"></div>
+    <div class="sv-horde-panel" id="svHordePanel" role="region" aria-labelledby="svHordeTitle" inert>
+        <div class="sv-horde-grip" id="svHordeGrip" role="separator" aria-orientation="horizontal" tabindex="0" aria-controls="svHordePanel" aria-label="Resize the Horde" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"><span class="hd-grabber" aria-hidden="true"></span></div>
+        <header class="hd-head" id="svHordeHead">
+            <div class="hd-row1">
+                <h2 class="hd-title" id="svHordeTitle" tabindex="-1">THE HORDE</h2>
+                <span class="hd-sub" id="svHordeBook">Your book</span>
+                <span class="hd-count" id="svHordeCount"></span>
+                <span class="hd-lens" role="toolbar" aria-label="Show only">
+                    <button type="button" class="hd-lens-btn" data-lens="all" aria-pressed="true">ALL</button>
+                    <button type="button" class="hd-lens-btn" data-lens="live" aria-pressed="false" hidden>REAL</button>
+                    <button type="button" class="hd-lens-btn" data-lens="demo" aria-pressed="false" hidden>DEMO</button>
+                    <button type="button" class="hd-lens-btn" data-lens="paper" aria-pressed="false" hidden>PAPER</button>
+                    <button type="button" class="hd-lens-btn" data-lens="none" aria-pressed="false" hidden>NO VENUE</button>
+                </span>
+                <span class="hd-stamp" id="svHordeStamp"></span>
+                <span class="hd-dot" id="svHordeDot" aria-hidden="true"></span>
+                <span class="hd-snaps">
+                    <button type="button" class="hd-icon-btn" data-snap="peek" aria-label="Peek height" title="Peek height">&#9643;</button>
+                    <button type="button" class="hd-icon-btn" data-snap="half" aria-label="Half height" title="Half height">&#9644;</button>
+                    <button type="button" class="hd-icon-btn" data-snap="full" aria-label="Full height" title="Full height">&#9608;</button>
+                </span>
+                <a class="hd-link" href="{% url 'positions_list' %}">Positions ›</a>
+                <button type="button" class="hd-icon-btn hd-close" id="svHordeClose" aria-label="Collapse the Horde (Esc)" title="Collapse the Horde (Esc)">&times;</button>
+            </div>
+            <div class="hd-sum" id="svHordeSum"></div>
+            <div class="hd-notes" id="svHordeNotes"></div>
+        </header>
+        <div class="hd-body" id="svHordeBody">
+            <div class="hd-row2" id="svHordeTable" hidden></div>
+            <div class="hd-state" id="svHordeState"><div class="sv-loading">Mustering the Horde</div></div>
+            <div class="hd-bands" id="svHordeBands"></div>
+            <aside class="hd-dossier" id="svHordeSeat" role="region" aria-label="Seat" hidden></aside>
+        </div>
+    </div>
+    <template id="svHordeWords">
+        <span data-w="tab_seat">{n} seat</span>
+        <span data-w="tab_seats">{n} seats</span>
+        <span data-w="tab_alarm">{n} ALARM</span>
+        <span data-w="tab_alarms">{n} ALARMS</span>
+        <span data-w="tab_real">REAL {n}</span>
+        <span data-w="tab_risk">risk {x} of {limit}</span>
+        <span data-w="tab_compact">HORDE {n}</span>
+        <span data-w="flag_elite">DAILY STOP: ELITE ONLY</span>
+        <span data-w="flag_shut">DAILY STOP: SHUT</span>
+        <span data-w="flag_unreadable">LIMITS UNREADABLE</span>
+        <span data-w="press_open">Press to open.</span>
+        <span data-w="press_close">Press to close.</span>
+        <span data-w="moves_title">{n} book moves since you last looked</span>
+        <span data-w="title">THE HORDE</span>
+        <span data-w="book_title">Your bots' positions and tickets, plus the open rows of your own hand-kept book ({book}): the same set the Positions page shows.</span>
+        <span data-w="as_of">as of {t}</span>
+        <span data-w="last_read_ago">Last read {age} ago</span>
+        <span data-w="kept">Book limits as of {t} (kept up to 20 s).</span>
+        <span data-w="open_risk">OPEN RISK</span>
+        <span data-w="pct_of">{pct} of {limit}</span>
+        <span data-w="daily_stop">DAILY STOP</span>
+        <span data-w="daily_title">The daily stop refuses new bot entries. It never closes an open position. Your own tickets are not refused by it; the ticket warns.</span>
+        <span data-w="allocation">ALLOCATION</span>
+        <span data-w="demo">Demo</span>
+        <span data-w="no_venue_seg">No venue</span>
+        <span data-w="exposure">EXPOSURE</span>
+        <span data-w="notional">NOTIONAL</span>
+        <span data-w="ok">OK</span>
+        <span data-w="past">PAST</span>
+        <span data-w="pools">POOLS</span>
+        <span data-w="alarms_cell">ALARMS</span>
+        <span data-w="chip_alarm">{n} ALARM</span>
+        <span data-w="chip_alarms">{n} ALARMS</span>
+        <span data-w="chip_watch">{n} WATCH</span>
+        <span data-w="chip_unheld">{n} UNHELD</span>
+        <span data-w="chip_order">{n} ORDER</span>
+        <span data-w="chip_orders">{n} ORDERS</span>
+        <span data-w="book_limits">BOOK LIMITS</span>
+        <span data-w="limits_show">Show the book limits</span>
+        <span data-w="limits_hide">Hide the book limits</span>
+        <span data-w="sum_side">{side} risk {x} of {limit} · daily stop {mode}</span>
+        <span data-w="sum_real">REAL</span>
+        <span data-w="sum_paper">PAPER</span>
+        <span data-w="mode_open">OPEN</span>
+        <span data-w="mode_elite">ELITE ONLY</span>
+        <span data-w="mode_shut">SHUT</span>
+        <span data-w="pill_live">REAL {n}</span>
+        <span data-w="pill_demo">DEMO {n}</span>
+        <span data-w="pill_paper">PAPER {n}</span>
+        <span data-w="pill_none">NO VENUE {n}</span>
+        <span data-w="seat_n">{n} seat</span>
+        <span data-w="seats_n">{n} seats</span>
+        <span data-w="long_short">({l} long · {s} short)</span>
+        <span data-w="long_short_unknown">— long · — short</span>
+        <span data-w="at_work">at work {x}</span>
+        <span data-w="priced_of">({n} of {m} priced)</span>
+        <span data-w="r_of">({n} of {m})</span>
+        <span data-w="at_stops">at the stops {x} ({y})</span>
+        <span data-w="same_bet">Same bet: {words}</span>
+        <span data-w="what_holds">What holds this class today ›</span>
+        <span data-w="no_captain">No Captain seated yet.</span>
+        <span data-w="captains_not_built">Captains are not built yet. Today this class answers to the book limits: open risk at the stops, theme legs and the correlation taper.</span>
+        <span data-w="stragglers_title">CLOSES SAURON GAVE UP ON</span>
+        <span data-w="trade_detail">Trade detail ›</span>
+        <span data-w="unseated_title">AT {broker}, NO SEAT</span>
+        <span data-w="read_ago">Read {age} ago</span>
+        <span data-w="venue_unknown">VENUE UNKNOWN</span>
+        <span data-w="no_world">No {world} seats.</span>
+        <span data-w="to_stop">{x}% to the stop</span>
+        <span data-w="through_stop">THROUGH the stop by {x}%</span>
+        <span data-w="no_stop">no stop</span>
+        <span data-w="no_target">no target</span>
+        <span data-w="lbl_stop">stop</span>
+        <span data-w="lbl_target">target</span>
+        <span data-w="stop_sent">(stop sent {x})</span>
+        <span data-w="inst_class">instrument: {class}</span>
+        <span data-w="chip_reviewer">Reviewer: {v}</span>
+        <span data-w="more_causes">(and {n} more)</span>
+        <span data-w="chip_thesis">Thesis check: {v}</span>
+        <span data-w="chip_reviewer_title">The position reviewer's latest verdict, {age} ago. Advice only.</span>
+        <span data-w="chip_thesis_title">The thesis check's latest reading, {age} ago.</span>
+        <span data-w="held_for">position open {t}</span>
+        <span data-w="no_orc">No Orc</span>
+        <span data-w="no_orc_seated">No Orc seated.</span>
+        <span data-w="not_decided">Nothing on this seat was decided by an Orc.</span>
+        <span data-w="orc_arrives">When the Orcs arrive, this seat's Orc writes its thesis, plan and notes here.</span>
+        <span data-w="no_thesis">No Orc has written a thesis for this seat yet.</span>
+        <span data-w="d_mission">Mission</span>
+        <span data-w="d_deployment">Deployment</span>
+        <span data-w="d_metrics">Metrics</span>
+        <span data-w="d_activity">Activity</span>
+        <span data-w="d_voice">Voice</span>
+        <span data-w="d_commands">Commands</span>
+        <span data-w="d_instruments">Instruments</span>
+        <span data-w="t_mission">MISSION</span>
+        <span data-w="t_deployment">DEPLOYMENT</span>
+        <span data-w="t_metrics">METRICS</span>
+        <span data-w="t_stops">Stops in play</span>
+        <span data-w="t_activity">ACTIVITY</span>
+        <span data-w="t_voice">VOICE</span>
+        <span data-w="t_commands">COMMANDS</span>
+        <span data-w="t_phone">ON YOUR PHONE</span>
+        <span data-w="t_instruments">INSTRUMENTS</span>
+        <span data-w="t_underlying">THE UNDERLYING</span>
+        <span data-w="t_correlated">CORRELATED · 4h returns, 45 days</span>
+        <span data-w="close_seat">Close this dossier</span>
+        <span data-w="back">‹ Back</span>
+        <span data-w="back_label">Back to the Horde</span>
+        <span data-w="loading_seat">Loading this seat…</span>
+        <span data-w="seat_failed">Could not load this seat's detail. The card is still live.</span>
+        <span data-w="retry">Retry</span>
+        <span data-w="refresh_seat">Refresh this seat</span>
+        <span data-w="seat_gone">This position is no longer open.</span>
+        <span data-w="seat_label">Seat {sym} {side} #{id}</span>
+        <span data-w="m_why">Why</span>
+        <span data-w="m_who">Who</span>
+        <span data-w="m_signal">Signal</span>
+        <span data-w="m_reason">Engine reason</span>
+        <span data-w="m_at_entry">At entry</span>
+        <span data-w="m_debate">Debate</span>
+        <span data-w="m_tags">Tags</span>
+        <span data-w="m_rule">Rule state</span>
+        <span data-w="m_plan">Plan</span>
+        <span data-w="m_thesis">Orc's thesis</span>
+        <span data-w="v_reviewer">THE REVIEWER · advice only</span>
+        <span data-w="v_thesis">THE THESIS CHECK</span>
+        <span data-w="v_care">THE CARE</span>
+        <span data-w="v_notes">YOUR NOTES</span>
+        <span data-w="v_orc">THE ORC</span>
+        <span data-w="more">more</span>
+        <span data-w="review_line">{verdict} · {age} ago · confidence {c}</span>
+        <span data-w="suggested">Suggested stop {x} (tighten only)</span>
+        <span data-w="thesis_read">{verdict} · read {age} ago: {words}</span>
+        <span data-w="structure_stop">structure stop {x}</span>
+        <span data-w="full_story">Full story ›</span>
+        <span data-w="c_ask">Ask Sauron about this seat</span>
+        <span data-w="c_ask_short">Ask Sauron</span>
+        <span data-w="c_advice">Should I close?</span>
+        <span data-w="c_levels">Stop / target…</span>
+        <span data-w="c_confirm">opens a confirmation</span>
+        <span data-w="c_page">Instrument page ›</span>
+        <span data-w="c_chart">Chart ›</span>
+        <span data-w="c_none">Nothing on the platform can close or edit this position.</span>
+        <span data-w="c_levels_open_only">Levels can be edited on open positions only.</span>
+        <span data-w="c_lvl_failed">The level editor could not be loaded. The Positions page has it.</span>
+        <span data-w="c_close_aria">Close {sym} {side} #{id}…</span>
+        <span data-w="c_levels_aria">Edit the stop and target of {sym} {side} #{id}…</span>
+        <span data-w="copy">Copy</span>
+        <span data-w="copy_label">Copy {cmd}</span>
+        <span data-w="copied">Copied</span>
+        <span data-w="positions_link">Positions ›</span>
+        <span data-w="platform_instrument">Platform instrument: {symbol}</span>
+        <span data-w="chart_label">platform chart, with your levels drawn</span>
+        <span data-w="at_etoro">At eToro: instrument {id}</span>
+        <span data-w="ask_about">Ask Sauron about {symbol}</span>
+        <span data-w="bars">{n} bars</span>
+        <span data-w="seat_go">Seat ›</span>
+        <span data-w="your_seat">YOUR SEAT</span>
+        <span data-w="unmeasured_bars">not measured: {n} shared 4h bars</span>
+        <span data-w="page_go">Page ›</span>
+        <span data-w="long">Long…</span>
+        <span data-w="short">Short…</span>
+        <span data-w="ask_go">Ask ›</span>
+        <span data-w="ticket_title">Opens the TAKE TRADE ticket with its gates and confirm. Nothing is sent from here.</span>
+        <span data-w="mustering">Mustering the Horde</span>
+        <span data-w="locked">Locked. Unlock Sauron to see the Horde.</span>
+        <span data-w="signed_out">Signed out. Sign in again to see the Horde.</span>
+        <span data-w="cannot_reach">Cannot reach Sauron. Retrying; the figures below are from {t}.</span>
+        <span data-w="not_live">Last read at {t} — not live</span>
+        <span data-w="signals_link">Signals ›</span>
+        <span data-w="resize">Resize the Horde</span>
+        <span data-w="valuetext">Horde at {p}% of the room above the strip, {px} pixels</span>
+        <span data-w="collapsed">Collapsed</span>
+    </template>
+</section>
