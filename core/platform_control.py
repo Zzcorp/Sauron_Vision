@@ -303,6 +303,12 @@ DEFAULT_COMPONENTS = [
     {"key": "aragorn_scale_out", "name": "Aragorn Scale-Out (half at +1R, paper)",
      "description": "Off (default). On, with Aragorn on: a PAPER bot position whose mark reaches +1R banks half its size at the modelled fill, once; the rest rides break-even and the trail. One trade in the ledger, its R blended on the original size. Never a real-money row (eToro closes whole), never the manual lane.",
      "category": "system"},
+    # THE ORCS (2026-10-16, bot_program/orcs, spec §10.4): journals
+    # written by code, no model, no order. Not a live-money switch and not
+    # exempt from "all on": nothing it does moves money.
+    {"key": "orcs", "name": "Orcs (journals, no model)",
+     "description": "Off (default). On: each open position gets an Orc, a journal written by code: its birth, thesis and army type, the care's and the venue's stop moves, reviews, thesis checks and the close. No model, no order, no stop moved. manage.py orcs.",
+     "category": "system"},
     # THE TRADE DEBATE (2026-10-01, ai_agents/agents/trade_debate.py): the
     # Executioner and the Champion argue every live bot entry before its
     # order. Shadow for its first 30 graded live trades, binding after.

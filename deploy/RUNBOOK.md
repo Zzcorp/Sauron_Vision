@@ -1291,6 +1291,60 @@ platform.
 
 ---
 
+## The Orcs (O1: journals, no model)
+
+An Orc follows one open position from its birth to its close and keeps
+its journal. In O1 every line of that journal is written by code: the
+birth (the entry and its stop, so what 1R means), the thesis (the entry's
+own record, or a reconstruction for a row that was open before the Orcs),
+the army type and why, the care's and the venue's stop moves, a hand
+levels edit, an event window, the reviewer's verdicts, the thesis checks,
+a pending close and the close itself. **No model is called, no order is
+sent and no stop is moved.** The Orcs write their own tables and one stamp
+on the trade row (`metadata["orc"]`), nothing else.
+
+**OFF on arrival.** The switch `orcs` (System) arrives OFF. While it is
+OFF the platform behaves exactly as before: no Orc is born, no journal
+line is written, the census beat (`orc-census`, every 5 min, fast queue)
+skips. It is not a live-money switch, so the System group's "all on"
+turns it on with the rest.
+
+To switch it on:
+
+```bash
+./deploy/dc exec web python manage.py component on orcs
+```
+
+Within 5 minutes the census adopts every open position that may have an
+Orc (adoption: the entry moment was missed, so the thesis is rebuilt from
+the row). To see the plan first, or to adopt now:
+
+```bash
+./deploy/dc exec web python manage.py orcs adopt --open          # the plan: each open row, adopted or why not
+./deploy/dc exec web python manage.py orcs adopt --open --yes    # adopt now (refused while the switch is OFF)
+./deploy/dc exec web python manage.py orcs                       # the live Orcs and their last journal lines
+```
+
+Each adopted **real-money** position sends one line to its owner's own
+channel (never the alarm group), for example "Orc #N adopted XAUUSD long
+(advise). Its thesis is reconstructed; state yours on its page." Quiet
+hours apply. Paper and eToro demo positions get journal lines only, and at
+most 10 Orcs outside real money (paper and demo together) live at once
+(`OrcSetting` `max_paper_orcs`). An eToro demo row sits on its own `demo`
+seat, never on the real-money one, so its evidence is never pooled with
+real money.
+
+Rows that get no Orc: an entry still working at the venue (it is born at
+its fill), an options row, and a row on a config no tick manages (a
+config stopped by hand keeps its paper rows managed, and those get one).
+
+**Switching it OFF** stops new births, new journal lines and the census at
+the next tick; the Orcs already born keep what they wrote.
+
+**The kill switch ends every idea** in its scope, whatever the orcs switch
+says: each Orc is marked dead with no re-entry window before the sweep
+closes its rows.
+
 ## Operating notes
 
 **Going live is deliberate.** Bots ship in paper mode; flipping one to live

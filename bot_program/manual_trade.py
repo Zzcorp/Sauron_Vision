@@ -2554,6 +2554,16 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                     inst.save(update_fields=["is_watchlist"])
             except Exception as e:  # noqa: BLE001
                 logger.warning("[take-trade] watchlist star failed: %s", e)
+            # THE ORCS (bot_program/orcs, O1): the ticket is born an Orc
+            # once this booking commits, never on a rollback (a working
+            # entry is born at its fill). The Orc tables and the row's
+            # stamp only.
+            try:
+                from bot_program.orcs.birth import ensure_on_commit
+                ensure_on_commit(row)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[take-trade] the Orc's birth was not "
+                               "registered: %s", e)
             return row
 
         if not live:

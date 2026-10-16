@@ -1395,6 +1395,18 @@ class AssetBot(ABC):
                 # aragorn switch OFF: nothing here.
                 from bot_program.position_care import care as _care
                 _cared = _care(self, trade, price, client)
+                # THE ORCS (bot_program/orcs, O1): the row's Orc journals
+                # what the care just did, as code facts in its own tables.
+                # A row with no Orc costs no query; nothing here moves a
+                # stop, sends an order or stops the tick.
+                try:
+                    from bot_program.orcs.observe import (
+                        after_care as _orc_after_care)
+                    _orc_after_care(self, trade, price, _cared)
+                except Exception as e:  # noqa: BLE001 — never stops the tick
+                    logger.warning("[%s_bot] %s #%s: the Orc did not read "
+                                   "the care: %s", self.asset_class,
+                                   trade.symbol, trade.id, e)
                 if _cared:
                     closed += 1 if _cared == "closed" else 0
                     continue
@@ -2305,6 +2317,15 @@ class AssetBot(ABC):
             # no fill message names the rewritten stop: the staff alert is
             # the one message (2026-09-27)
             self._alert_stop_rewrite(trade, STOP_ALERT_UNTOLD)
+        # THE ORCS (bot_program/orcs, O1): the position is born an Orc once
+        # the fill is booked. The Orc tables and the row's stamp only.
+        try:
+            from bot_program.orcs.birth import ensure_on_commit
+            ensure_on_commit(trade, getattr(self, "_tick_broker_cache", None))
+        except Exception as e:  # noqa: BLE001 — never stops a fill
+            logger.warning("[%s_bot] %s: the Orc's birth was not "
+                           "registered: %s", self.asset_class, trade.symbol,
+                           e)
 
     def _broker_snapshot(self, client, what: str):
         """`what` in {"resting", "positions"} from this tick's cache.
@@ -6686,6 +6707,16 @@ class AssetBot(ABC):
         except Exception as e:
             logger.warning("[%s_bot] WS push (open) failed: %s",
                            self.asset_class, e)
+
+        # THE ORCS (bot_program/orcs, O1): an immediate fill is born an
+        # Orc once its row commits (a working entry is born at its fill).
+        # The Orc tables and the row's stamp only.
+        try:
+            from bot_program.orcs.birth import ensure_on_commit
+            ensure_on_commit(trade, getattr(self, "_tick_broker_cache", None))
+        except Exception as e:  # noqa: BLE001 — never stops an entry
+            logger.warning("[%s_bot] %s: the Orc's birth was not "
+                           "registered: %s", self.asset_class, symbol, e)
 
         skips.clear(self.cfg, symbol)
         return {"trade_id": trade.id, "symbol": symbol,

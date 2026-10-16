@@ -137,6 +137,21 @@ COMMANDS = [
         "category": "decide",
     },
     {
+        "name": "orcs",
+        "title": "The Orcs",
+        "purpose": "Each open position's Orc as a command: the switch, every live Orc with its last journal lines, and the adoption of the open rows (O1: journals written by code; no model, no order, no stop moved).",
+        "usage": [
+            "python manage.py orcs                          # the switch, every live Orc, its last facts",
+            "python manage.py orcs adopt --open             # plan: the open rows that would be adopted",
+            "python manage.py orcs adopt --open --yes       # ... and adopt them",
+            "python manage.py orcs adopt --open --user NAME --yes",
+        ],
+        "mirrors": "",
+        "read_only": False,
+        "run_args": [],
+        "category": "decide",
+    },
+    {
         "name": "aragorn",
         "title": "Aragorn and crisis mode",
         "purpose": "Aragorn (which rule/class pairs trade real money, the position care) and the crisis mode (the market posture) as a command: the state, the plan, the moves, the overrides, the journal.",
