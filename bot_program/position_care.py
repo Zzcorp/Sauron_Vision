@@ -748,6 +748,12 @@ def _mirror_to_venue(bot, trade, price, client, decision) -> bool:
                 # hand, or the config knobs): remembered, nothing sent
                 care["venue_stop"] = held
                 care.pop("venue_stop_refusal", None)
+                hand = care.get("venue_stop_hand")
+                if not (isinstance(hand, dict)
+                        and _f(hand.get("level")) == held):
+                    # the hand level a hand edit recorded (PR O0b) is not
+                    # the one the venue holds now: never read stale
+                    care.pop("venue_stop_hand", None)
             else:
                 care["venue_stop_refusal"] = ("not sent: the level is not "
                                               "on the right side of the mark")
@@ -769,6 +775,8 @@ def _mirror_to_venue(bot, trade, price, client, decision) -> bool:
             taken = _f(trade.stop_loss)
             care["venue_stop"] = taken if taken is not None else float(candidate)
             care.pop("venue_stop_refusal", None)
+            # the venue no longer holds a hand level (PR O0b's record)
+            care.pop("venue_stop_hand", None)
         else:
             care["venue_stop_refusal"] = str(
                 (trade.metadata or {}).get("stop_move_last_error")

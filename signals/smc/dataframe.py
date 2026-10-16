@@ -2,11 +2,17 @@
 import pandas as pd
 
 
-def load_ohlcv(symbol, timeframe="4h", bars=500):
+def load_ohlcv(symbol, timeframe="4h", bars=500, source=None):
     """Return a DataFrame indexed by timestamp with open/high/low/close/volume.
 
     Returns None if the instrument or data is missing. Tolerant to schema
     differences in PriceData/Instrument across the project's history.
+
+    `source` (PR O0b): only the bars written under that source, a string,
+    or under any of them, a list, tuple or set (the bar refresh writes a
+    venue's candles under the venue adapter's label,
+    market_data/bot_bars.py). None, the default, is the query as before:
+    every source.
     """
     try:
         from market_data.models import PriceData
@@ -30,6 +36,11 @@ def load_ohlcv(symbol, timeframe="4h", bars=500):
         if field in [f.name for f in PriceData._meta.get_fields()]:
             qs = qs.filter(**{field: timeframe})
             break
+    if source is not None:
+        if isinstance(source, (list, tuple, set, frozenset)):
+            qs = qs.filter(source__in=sorted(str(s) for s in source))
+        else:
+            qs = qs.filter(source=str(source))
 
     rows = list(qs.order_by("-timestamp")[:bars])
     if not rows:

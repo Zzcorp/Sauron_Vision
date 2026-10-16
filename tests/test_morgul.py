@@ -1,4 +1,4 @@
-"""The Morgul guards: the orcs that save Sauron from itself (2026-09-26).
+"""The Morgul guards: the guards that save Sauron from itself (2026-09-26).
 
 The operator, 2026-09-26/27: "we need a 'Morgul', or orcs to save Sauron
 from itself". On Saturday 2026-09-26 at 13:53 UTC two paper forex

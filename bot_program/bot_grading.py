@@ -35,6 +35,7 @@ survives real execution.
 from __future__ import annotations
 
 import logging
+import re
 from collections import defaultdict
 from datetime import timedelta
 from decimal import Decimal
@@ -43,6 +44,12 @@ from typing import Optional
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+# An Orc's own exit (`_close_trade(..., reason="ORC")`, written into the
+# row's reason as "closed:ORC"): a deliberate close, graded like the
+# operator's hand (PR O0b; nothing closes with it until O3). The whole word
+# only: "closed:ORCA" is not it.
+_ORC_CLOSE = re.compile(r"closed:ORC(?![A-Za-z0-9_])")
 
 
 # ── Venues ───────────────────────────────────────────────────────────────
@@ -146,6 +153,7 @@ def grade_bot_trade(trade) -> bool:
       - exit_price ≤ stop_loss (BUY) or ≥ SL (SELL)          → stopped_out
       - reason contains 'EXPIRY_CLOSE' (options, Phase 14)   → expired
       - reason contains 'closed:TIME' (the time stop)        → time_stop
+      - reason contains 'closed:ORC' (an Orc's exit)         → manual_close
       - else                                                  → manual_close
     """
     if trade.status != "CLOSED" or trade.exit_price is None:
@@ -224,6 +232,13 @@ def grade_bot_trade(trade) -> bool:
         outcome = "hit_target"
     elif "closed:SL" in reason:
         outcome = "stopped_out"
+    elif _ORC_CLOSE.search(reason):
+        # An Orc's market exit, at or past a stop the mirror moved to the
+        # Orc's level, would otherwise fall through to the price
+        # comparisons below and grade `stopped_out`: the venue's or the
+        # care's stop, which it was not. metadata["orc_exit"] carries the
+        # attribution (spec C12).
+        outcome = "manual_close"
     elif side == "BUY":
         if tp and exit_p >= tp:
             outcome = "hit_target"
