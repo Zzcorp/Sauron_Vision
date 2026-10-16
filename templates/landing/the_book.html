@@ -1473,41 +1473,40 @@
    sky slows to a quiet twinkle when the page is still. */
 (function () {
     "use strict";
-    var doc = document;
-    var root = doc.documentElement;
-    var moving = root.classList.contains("book-js");
-    var hasIO = "IntersectionObserver" in window;
-    var raf = window.requestAnimationFrame
-        ? function (fn) { return window.requestAnimationFrame(fn); }
-        : function (fn) { return window.setTimeout(function () { fn(Date.now()); }, 16); };
+    var rootElement = document.documentElement;
+    var moving = rootElement.classList.contains("book-js");
+    var canObserve = "IntersectionObserver" in window;
+    var nextFrame = window.requestAnimationFrame
+        ? function (callback) { return window.requestAnimationFrame(callback); }
+        : function (callback) { return window.setTimeout(function () { callback(Date.now()); }, 16); };
 
     function all(selector, scope) {
-        return Array.prototype.slice.call((scope || doc).querySelectorAll(selector));
+        return Array.prototype.slice.call((scope || document).querySelectorAll(selector));
     }
     function grouped(n) {
         return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
     }
-    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+    function clamp(value, low, high) { return Math.max(low, Math.min(high, value)); }
 
     /* 1. Stagger: the n-th revealed child of a group waits n beats. */
     all("[data-stagger]").forEach(function (group) {
-        all("[data-reveal]", group).forEach(function (el, i) {
-            el.style.setProperty("--i", String(i % 8));
+        all("[data-reveal]", group).forEach(function (element, i) {
+            element.style.setProperty("--i", String(i % 8));
         });
     });
 
     /* 2. Reveal on scroll: once in, it stays in. When the entrance has
           played, the element drops its reveal hook, so its own hover
           transitions answer at once instead of waiting on the stagger. */
-    function settle(el) {
+    function settle(element) {
         var done = false;
-        function finish(ev) {
-            if (done || (ev && (ev.target !== el || ev.propertyName !== "opacity"))) { return; }
+        function finish(event) {
+            if (done || (event && (event.target !== element || event.propertyName !== "opacity"))) { return; }
             done = true;
-            el.removeEventListener("transitionend", finish);
-            el.removeAttribute("data-reveal");
+            element.removeEventListener("transitionend", finish);
+            element.removeAttribute("data-reveal");
         }
-        el.addEventListener("transitionend", finish);
+        element.addEventListener("transitionend", finish);
         window.setTimeout(finish, 2200);
     }
     if (moving) {
@@ -1520,15 +1519,15 @@
                 }
             });
         }, { rootMargin: "0px 0px -7% 0px", threshold: 0 });
-        all("[data-reveal]").forEach(function (el) { revealer.observe(el); });
+        all("[data-reveal]").forEach(function (element) { revealer.observe(element); });
     }
     /* The reveal is armed: tell the failsafe in <head> the page is awake. */
     window.bookAwake = true;
 
     /* 3. The counted numbers climb from zero when they come into view.
           The server printed the real value; the box keeps that width. */
-    function climb(el) {
-        var target = parseInt(el.getAttribute("data-count"), 10);
+    function climb(element) {
+        var target = parseInt(element.getAttribute("data-count"), 10);
         if (!(target >= 0)) { return; }
         var final = grouped(target);
         var start = null;
@@ -1537,18 +1536,18 @@
             if (start === null) { start = now; }
             var k = clamp((now - start) / span, 0, 1);
             var eased = 1 - Math.pow(1 - k, 3);
-            el.textContent = k < 1 ? grouped(Math.round(target * eased)) : final;
-            if (k < 1) { raf(step); }
+            element.textContent = k < 1 ? grouped(Math.round(target * eased)) : final;
+            if (k < 1) { nextFrame(step); }
         }
-        raf(step);
+        nextFrame(step);
     }
     /* A number that is still rising into its cell (the opening's counts)
        waits for its entrance to end: counted while it is invisible, it
        would finish its climb before anyone saw it. */
-    function afterEntrance(el, go) {
+    function afterEntrance(element, go) {
         var fired = false;
         function once() { if (!fired) { fired = true; go(); } }
-        var anims = el.getAnimations ? el.getAnimations() : [];
+        var anims = element.getAnimations ? element.getAnimations() : [];
         var pending = anims.filter(function (a) { return a.playState !== "finished"; });
         if (!pending.length || !window.Promise) { once(); return; }
         Promise.all(pending.map(function (a) { return a.finished; })).then(once, once);
@@ -1557,26 +1556,26 @@
     if (moving) {
         var counter = new IntersectionObserver(function (entries) {
             entries.forEach(function (entry) {
-                var el = entry.target;
+                var element = entry.target;
                 if (!entry.isIntersecting) { return; }
-                if (!el.getAttribute("data-armed")) {
-                    var w = el.getBoundingClientRect().width;
-                    if (w) { el.style.minWidth = Math.ceil(w) + "px"; }
-                    el.setAttribute("data-armed", "1");
-                    el.textContent = "0";
+                if (!element.getAttribute("data-armed")) {
+                    var w = element.getBoundingClientRect().width;
+                    if (w) { element.style.minWidth = Math.ceil(w) + "px"; }
+                    element.setAttribute("data-armed", "1");
+                    element.textContent = "0";
                 }
                 if (entry.intersectionRatio >= 0.35) {
-                    counter.unobserve(el);
-                    afterEntrance(el, function () { climb(el); });
+                    counter.unobserve(element);
+                    afterEntrance(element, function () { climb(element); });
                 }
             });
         }, { threshold: [0, 0.35] });
-        all("[data-count]").forEach(function (el) { counter.observe(el); });
+        all("[data-count]").forEach(function (element) { counter.observe(element); });
     }
 
     /* 4. Which chapter is being read: the pill in the bar and the rail. */
-    var nowNum = doc.querySelector("[data-now-num]");
-    var nowLabel = doc.querySelector("[data-now-label]");
+    var nowNum = document.querySelector("[data-now-num]");
+    var nowLabel = document.querySelector("[data-now-label]");
     var railLinks = all(".chrail a");
     var chapters = all("[data-chapter]");
     var current = null;
@@ -1598,7 +1597,7 @@
             nowLabel.classList.add("swap");
         }
     }
-    if (hasIO && chapters.length) {
+    if (canObserve && chapters.length) {
         var reading = {};
         var reader = new IntersectionObserver(function (entries) {
             entries.forEach(function (entry) { reading[entry.target.id] = entry.isIntersecting; });
@@ -1611,41 +1610,41 @@
 
     /* 5. What is on screen plays; what is not, rests. */
     var ghosts = [];
-    if (hasIO) {
+    if (canObserve) {
         var stage = new IntersectionObserver(function (entries) {
             entries.forEach(function (entry) {
                 entry.target.classList.toggle("in-view", entry.isIntersecting);
             });
             schedule();
         }, { rootMargin: "12% 0px 12% 0px" });
-        all("[data-chapter], [data-hero]").forEach(function (el) { stage.observe(el); });
-        all(".ch-ghost").forEach(function (g) { ghosts.push({ el: g, host: g.parentNode, top: 0 }); });
+        all("[data-chapter], [data-hero]").forEach(function (element) { stage.observe(element); });
+        all(".ch-ghost").forEach(function (g) { ghosts.push({ element: g, host: g.parentNode, top: 0 }); });
     }
 
     /* 6. Everything tied to the scroll, read then written, once a frame. */
-    var bar = doc.querySelector(".progress");
-    var nav = doc.querySelector(".bnav");
-    var toTop = doc.querySelector(".totop");
-    var heroEye = doc.querySelector(".hero-eye");
-    var heroCopy = doc.querySelector(".hero-copy");
-    var line = doc.querySelector("[data-timeline]");
+    var bar = document.querySelector(".progress");
+    var navBar = document.querySelector(".bnav");
+    var toTop = document.querySelector(".totop");
+    var heroEye = document.querySelector(".hero-eye");
+    var heroCopy = document.querySelector(".hero-copy");
+    var line = document.querySelector("[data-timeline]");
     var lineFill = line ? line.querySelector(".tl-rail-fill") : null;
     var lineHead = null;
     if (line && moving) {
-        lineHead = doc.createElement("i");
+        lineHead = document.createElement("i");
         lineHead.className = "tl-rail-head";
         lineHead.setAttribute("aria-hidden", "true");
         line.querySelector(".tl-rail").appendChild(lineHead);
     }
     var queued = false;
     function schedule() {
-        if (!queued) { queued = true; raf(frame); }
+        if (!queued) { queued = true; nextFrame(frame); }
     }
     function frame() {
         queued = false;
-        var y = window.pageYOffset || root.scrollTop || 0;
-        var vh = window.innerHeight || 1;
-        var total = Math.max(1, root.scrollHeight - vh);
+        var y = window.pageYOffset || rootElement.scrollTop || 0;
+        var viewportHeight = window.innerHeight || 1;
+        var total = Math.max(1, rootElement.scrollHeight - viewportHeight);
         var lineBox = line && moving ? line.getBoundingClientRect() : null;
         var railBox = lineBox ? line.querySelector(".tl-rail").getBoundingClientRect() : null;
         if (moving) {
@@ -1655,22 +1654,22 @@
             });
         }
         if (bar) { bar.style.transform = "scaleX(" + clamp(y / total, 0, 1).toFixed(4) + ")"; }
-        if (nav) { nav.classList.toggle("is-scrolled", y > 24); }
-        if (toTop) { toTop.classList.toggle("is-shown", y > vh * 1.1); }
+        if (navBar) { navBar.classList.toggle("is-scrolled", y > 24); }
+        if (toTop) { toTop.classList.toggle("is-shown", y > viewportHeight * 1.1); }
         if (!moving) { return; }
-        if (heroEye && y < vh * 1.4) {
-            var p = y / vh;
+        if (heroEye && y < viewportHeight * 1.4) {
+            var p = y / viewportHeight;
             heroEye.style.transform = "translate3d(0," + (y * 0.34).toFixed(1) + "px,0) scale(" + (1 - p * 0.14).toFixed(3) + ")";
             heroEye.style.opacity = clamp(1 - p * 0.95, 0, 1).toFixed(3);
             if (heroCopy) { heroCopy.style.transform = "translate3d(0," + (y * 0.12).toFixed(1) + "px,0)"; }
         }
         if (railBox && lineFill) {
-            var k = clamp((vh * 0.62 - railBox.top) / Math.max(1, railBox.height), 0, 1);
+            var k = clamp((viewportHeight * 0.62 - railBox.top) / Math.max(1, railBox.height), 0, 1);
             lineFill.style.transform = "scaleY(" + k.toFixed(4) + ")";
             if (lineHead) { lineHead.style.transform = "translate3d(0," + (k * railBox.height).toFixed(1) + "px,0)"; }
         }
         ghosts.forEach(function (g) {
-            if (g.live) { g.el.style.transform = "translate3d(0," + (-g.top * 0.16).toFixed(1) + "px,0)"; }
+            if (g.live) { g.element.style.transform = "translate3d(0," + (-g.top * 0.16).toFixed(1) + "px,0)"; }
         });
     }
     window.addEventListener("scroll", schedule, { passive: true });
@@ -1679,11 +1678,11 @@
 
     /* 7. Smooth passage between chapters, and the focus follows. */
     all('a[href^="#"]').forEach(function (a) {
-        a.addEventListener("click", function (ev) {
+        a.addEventListener("click", function (event) {
             var id = a.getAttribute("href").slice(1);
-            var target = id ? doc.getElementById(id) : null;
+            var target = id ? document.getElementById(id) : null;
             if (!target) { return; }
-            ev.preventDefault();
+            event.preventDefault();
             target.scrollIntoView({ behavior: moving ? "smooth" : "auto", block: "start" });
             if (window.history && window.history.replaceState) {
                 window.history.replaceState(null, "", id === "top" ? window.location.pathname : "#" + id);
@@ -1694,33 +1693,33 @@
     });
 
     /* 8. The eye follows the pointer, and wanders when left alone. */
-    var look = doc.getElementById("bookEyeLook");
+    var look = document.getElementById("bookEyeLook");
     if (look && heroEye && moving) {
-        var aimX = 0, aimY = 0, atX = 0, atY = 0, eyeQueued = false, lastPointer = 0;
+        var aimX = 0, aimY = 0, gazeX = 0, gazeY = 0, eyeQueued = false, lastPointer = 0;
         function eyeFrame() {
             eyeQueued = false;
-            atX += (aimX - atX) * 0.12;
-            atY += (aimY - atY) * 0.12;
-            look.style.transform = "translate3d(" + atX.toFixed(2) + "px," + atY.toFixed(2) + "px,0)";
-            if (Math.abs(aimX - atX) > 0.05 || Math.abs(aimY - atY) > 0.05) { eyeQueued = true; raf(eyeFrame); }
+            gazeX += (aimX - gazeX) * 0.12;
+            gazeY += (aimY - gazeY) * 0.12;
+            look.style.transform = "translate3d(" + gazeX.toFixed(2) + "px," + gazeY.toFixed(2) + "px,0)";
+            if (Math.abs(aimX - gazeX) > 0.05 || Math.abs(aimY - gazeY) > 0.05) { eyeQueued = true; nextFrame(eyeFrame); }
         }
         function aim(x, y) {
             aimX = x; aimY = y;
-            if (!eyeQueued) { eyeQueued = true; raf(eyeFrame); }
+            if (!eyeQueued) { eyeQueued = true; nextFrame(eyeFrame); }
         }
-        doc.addEventListener("pointermove", function (ev) {
-            if (ev.pointerType === "touch") { return; }
+        document.addEventListener("pointermove", function (event) {
+            if (event.pointerType === "touch") { return; }
             lastPointer = Date.now();
             var box = heroEye.getBoundingClientRect();
             if (box.bottom < 0) { return; }
-            var dx = clamp((ev.clientX - (box.left + box.width / 2)) / (window.innerWidth / 2), -1, 1);
-            var dy = clamp((ev.clientY - (box.top + box.height / 2)) / (window.innerHeight / 2), -1, 1);
-            aim(dx * box.width * 0.06, dy * box.height * 0.07);
+            var offsetX = clamp((event.clientX - (box.left + box.width / 2)) / (window.innerWidth / 2), -1, 1);
+            var offsetY = clamp((event.clientY - (box.top + box.height / 2)) / (window.innerHeight / 2), -1, 1);
+            aim(offsetX * box.width * 0.06, offsetY * box.height * 0.07);
         }, { passive: true });
         var born = Date.now();
         window.setInterval(function () {
-            if (doc.hidden || Date.now() - lastPointer < 2600) { return; }
-            var hero = doc.querySelector("[data-hero]");
+            if (document.hidden || Date.now() - lastPointer < 2600) { return; }
+            var hero = document.querySelector("[data-hero]");
             if (hero && !hero.classList.contains("in-view")) { return; }
             var box = heroEye.getBoundingClientRect();
             var t = (Date.now() - born) / 1000;
@@ -1730,12 +1729,12 @@
 
     /* 9. A trade's circuit: an impulse travels the steps, lighting
           each, then loops back to the first. Only while it is in view. */
-    var circuit = doc.querySelector("[data-circuit]");
-    if (circuit && moving && hasIO) {
+    var circuit = document.querySelector("[data-circuit]");
+    if (circuit && moving && canObserve) {
         var steps = all(".step", circuit);
         var track = circuit.querySelector(".circuit-track");
         var fill = circuit.querySelector(".circuit-fill");
-        var pulse = doc.createElement("i");
+        var pulse = document.createElement("i");
         pulse.className = "circuit-pulse";
         pulse.setAttribute("aria-hidden", "true");
         track.appendChild(pulse);
@@ -1781,31 +1780,31 @@
     if (moving) {
         all("[data-tilt]").forEach(function (card) {
             var inner = card.querySelector(".pcard-in");
-            var shine = doc.createElement("i");
+            var shine = document.createElement("i");
             shine.className = "pcard-shine";
             shine.setAttribute("aria-hidden", "true");
             inner.appendChild(shine);
-            var px = 0, py = 0, sx = -300, sy = -300, tiltQueued = false;
+            var tiltX = 0, tiltY = 0, shineX = -300, shineY = -300, tiltQueued = false;
             function paint() {
                 tiltQueued = false;
-                inner.style.setProperty("--rx", (-py * 6).toFixed(2) + "deg");
-                inner.style.setProperty("--ry", (px * 8).toFixed(2) + "deg");
-                shine.style.setProperty("--sx", sx.toFixed(0) + "px");
-                shine.style.setProperty("--sy", sy.toFixed(0) + "px");
+                inner.style.setProperty("--rx", (-tiltY * 6).toFixed(2) + "deg");
+                inner.style.setProperty("--ry", (tiltX * 8).toFixed(2) + "deg");
+                shine.style.setProperty("--sx", shineX.toFixed(0) + "px");
+                shine.style.setProperty("--sy", shineY.toFixed(0) + "px");
             }
-            function queue() { if (!tiltQueued) { tiltQueued = true; raf(paint); } }
-            card.addEventListener("pointermove", function (ev) {
-                if (ev.pointerType === "touch") { return; }
+            function queue() { if (!tiltQueued) { tiltQueued = true; nextFrame(paint); } }
+            card.addEventListener("pointermove", function (event) {
+                if (event.pointerType === "touch") { return; }
                 var box = card.getBoundingClientRect();
-                px = clamp((ev.clientX - box.left) / box.width * 2 - 1, -1, 1);
-                py = clamp((ev.clientY - box.top) / box.height * 2 - 1, -1, 1);
-                sx = ev.clientX - box.left;
-                sy = ev.clientY - box.top;
+                tiltX = clamp((event.clientX - box.left) / box.width * 2 - 1, -1, 1);
+                tiltY = clamp((event.clientY - box.top) / box.height * 2 - 1, -1, 1);
+                shineX = event.clientX - box.left;
+                shineY = event.clientY - box.top;
                 card.classList.add("is-tilting");
                 queue();
             });
             card.addEventListener("pointerleave", function () {
-                px = 0; py = 0;
+                tiltX = 0; tiltY = 0;
                 card.classList.remove("is-tilting");
                 queue();
             });
@@ -1816,14 +1815,14 @@
     /* 11. The sky: three depths of stars that drift, twinkle, part for
            the pointer and slide with the scroll, and now and then a
            falling star. Drawn once and left still when motion is off. */
-    var sky = doc.getElementById("bookSky");
+    var sky = document.getElementById("bookSky");
     var pen = sky && sky.getContext ? sky.getContext("2d") : null;
     if (pen) {
-        var styles = window.getComputedStyle(root);
+        var styles = window.getComputedStyle(rootElement);
         var tone = (styles.getPropertyValue("--accent") || "").trim() || "rgb(0,232,104)";
         var pale = (styles.getPropertyValue("--text") || "").trim() || "rgb(218,240,230)";
         var W = 0, H = 0, stars = [], streak = null, nextStreak = 0, skyQueued = false;
-        var ptrX = 0, ptrY = 0, driftX = 0, driftY = 0, lastPaint = -1000, stirred = Date.now();
+        var pointerX = 0, pointerY = 0, driftX = 0, driftY = 0, lastPaint = -1000, stirred = Date.now();
         /* a scroll or a pointer asks for every frame; at rest, every other
            one is enough for a twinkle; after a few still seconds, about ten
            a second (the loop itself sleeps between them) */
@@ -1842,7 +1841,7 @@
                 stars.push({
                     x: Math.random() * W, y: Math.random() * H, z: z,
                     r: 0.35 + z * 1.4, a: 0.22 + z * 0.62,
-                    ph: Math.random() * 6.283, sp: 0.5 + Math.random() * 1.7,
+                    phase: Math.random() * 6.283, speed: 0.5 + Math.random() * 1.7,
                     pale: Math.random() < 0.2
                 });
             }
@@ -1858,8 +1857,8 @@
         function paint(t) {
             pen.clearRect(0, 0, W, H);
             var scrolled = window.pageYOffset || 0;
-            driftX += (ptrX - driftX) * 0.04;
-            driftY += (ptrY - driftY) * 0.04;
+            driftX += (pointerX - driftX) * 0.04;
+            driftY += (pointerY - driftY) * 0.04;
             for (var i = 0; i < stars.length; i++) {
                 var s = stars[i];
                 var depth = 0.1 + s.z * 0.6;
@@ -1867,7 +1866,7 @@
                 var x = s.x + driftX * depth * 26;
                 y = ((y % H) + H) % H;
                 x = ((x % W) + W) % W;
-                var twinkle = moving ? 0.62 + 0.38 * Math.sin(t * 0.001 * s.sp + s.ph) : 1;
+                var twinkle = moving ? 0.62 + 0.38 * Math.sin(t * 0.001 * s.speed + s.phase) : 1;
                 pen.globalAlpha = s.a * twinkle;
                 pen.fillStyle = s.pale ? pale : tone;
                 if (s.r < 1.1) {
@@ -1883,16 +1882,16 @@
                 if (life >= 1) {
                     streak = null;
                 } else {
-                    var hx = streak.x + streak.vx * life, hy = streak.y + streak.vy * life;
-                    var grad = pen.createLinearGradient(hx, hy, hx - streak.vx * 0.22, hy - streak.vy * 0.22);
-                    grad.addColorStop(0, pale);
-                    grad.addColorStop(1, "rgba(0,0,0,0)");
+                    var headX = streak.x + streak.travelX * life, headY = streak.y + streak.travelY * life;
+                    var gradient = pen.createLinearGradient(headX, headY, headX - streak.travelX * 0.22, headY - streak.travelY * 0.22);
+                    gradient.addColorStop(0, pale);
+                    gradient.addColorStop(1, "rgba(0,0,0,0)");
                     pen.globalAlpha = Math.sin(life * Math.PI) * 0.9;
-                    pen.strokeStyle = grad;
+                    pen.strokeStyle = gradient;
                     pen.lineWidth = 1.4;
                     pen.beginPath();
-                    pen.moveTo(hx, hy);
-                    pen.lineTo(hx - streak.vx * 0.22, hy - streak.vy * 0.22);
+                    pen.moveTo(headX, headY);
+                    pen.lineTo(headX - streak.travelX * 0.22, headY - streak.travelY * 0.22);
                     pen.stroke();
                 }
             }
@@ -1900,14 +1899,14 @@
         }
         function skyFrame(t) {
             skyQueued = false;
-            if (doc.hidden) { return; }
+            if (document.hidden) { return; }
             if (!streak && t > nextStreak) {
                 var fromLeft = Math.random() < 0.5;
                 streak = {
                     x: fromLeft ? Math.random() * W * 0.5 : W * 0.5 + Math.random() * W * 0.5,
                     y: Math.random() * H * 0.45,
-                    vx: (fromLeft ? 1 : -1) * (W * 0.35 + Math.random() * W * 0.2),
-                    vy: H * 0.22 + Math.random() * H * 0.12,
+                    travelX: (fromLeft ? 1 : -1) * (W * 0.35 + Math.random() * W * 0.2),
+                    travelY: H * 0.22 + Math.random() * H * 0.12,
                     born: t, span: 900 + Math.random() * 500
                 };
                 nextStreak = t + 7000 + Math.random() * 9000;
@@ -1919,22 +1918,22 @@
             }
             skyQueued = true;
             if (!streak && still > RESTING_AFTER) {
-                window.setTimeout(function () { raf(skyFrame); }, RESTING_GAP);
+                window.setTimeout(function () { nextFrame(skyFrame); }, RESTING_GAP);
             } else {
-                raf(skyFrame);
+                nextFrame(skyFrame);
             }
         }
         fit();
         if (moving) {
             nextStreak = 3500;
             skyQueued = true;
-            raf(skyFrame);
-            doc.addEventListener("visibilitychange", function () {
-                if (!doc.hidden && !skyQueued) { skyQueued = true; raf(skyFrame); }
+            nextFrame(skyFrame);
+            document.addEventListener("visibilitychange", function () {
+                if (!document.hidden && !skyQueued) { skyQueued = true; nextFrame(skyFrame); }
             });
-            doc.addEventListener("pointermove", function (ev) {
-                ptrX = ev.clientX / (W || 1) - 0.5;
-                ptrY = ev.clientY / (H || 1) - 0.5;
+            document.addEventListener("pointermove", function (event) {
+                pointerX = event.clientX / (W || 1) - 0.5;
+                pointerY = event.clientY / (H || 1) - 0.5;
                 stir();
             }, { passive: true });
         }

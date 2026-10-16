@@ -2675,12 +2675,12 @@
     secSlider.addEventListener('input', syncLabels);
 
     // Live exposure state
-    var exp = { usd: 0, equity: 0, sectors: {} };
+    var exposure = { usd: 0, equity: 0, sectors: {} };
 
     function topSector() {
         var best = null, bestN = 0;
-        Object.keys(exp.sectors).forEach(function(k) {
-            if (exp.sectors[k] > bestN) { best = k; bestN = exp.sectors[k]; }
+        Object.keys(exposure.sectors).forEach(function(k) {
+            if (exposure.sectors[k] > bestN) { best = k; bestN = exposure.sectors[k]; }
         });
         return [best, bestN];
     }
@@ -2691,30 +2691,30 @@
         var secCap = parseInt(secSlider.value, 10);
 
         // USD bar — bipolar around zero
-        var usdRatio = Math.min(1, Math.abs(exp.usd) / usdCap);
-        expUsdEl.textContent = (exp.usd >= 0 ? '+' : '') + exp.usd.toFixed(1);
-        expUsdEl.style.color = Math.abs(exp.usd) > usdCap ? 'var(--accent-red)' : 'var(--accent)';
-        if (exp.usd >= 0) {
+        var usdRatio = Math.min(1, Math.abs(exposure.usd) / usdCap);
+        expUsdEl.textContent = (exposure.usd >= 0 ? '+' : '') + exposure.usd.toFixed(1);
+        expUsdEl.style.color = Math.abs(exposure.usd) > usdCap ? 'var(--accent-red)' : 'var(--accent)';
+        if (exposure.usd >= 0) {
             expUsdFill.style.left = '50%';
             expUsdFill.style.width = (usdRatio * 50) + '%';
         } else {
             expUsdFill.style.left = (50 - usdRatio * 50) + '%';
             expUsdFill.style.width = (usdRatio * 50) + '%';
         }
-        expUsdFill.classList.toggle('over', Math.abs(exp.usd) > usdCap);
+        expUsdFill.classList.toggle('over', Math.abs(exposure.usd) > usdCap);
 
         // Equity bar
-        var eqRatio = Math.min(1, Math.abs(exp.equity) / eqCap);
-        expEqEl.textContent = (exp.equity >= 0 ? '+' : '') + exp.equity.toFixed(1);
-        expEqEl.style.color = Math.abs(exp.equity) > eqCap ? 'var(--accent-red)' : 'var(--accent)';
-        if (exp.equity >= 0) {
+        var eqRatio = Math.min(1, Math.abs(exposure.equity) / eqCap);
+        expEqEl.textContent = (exposure.equity >= 0 ? '+' : '') + exposure.equity.toFixed(1);
+        expEqEl.style.color = Math.abs(exposure.equity) > eqCap ? 'var(--accent-red)' : 'var(--accent)';
+        if (exposure.equity >= 0) {
             expEqFill.style.left = '50%';
             expEqFill.style.width = (eqRatio * 50) + '%';
         } else {
             expEqFill.style.left = (50 - eqRatio * 50) + '%';
             expEqFill.style.width = (eqRatio * 50) + '%';
         }
-        expEqFill.classList.toggle('over', Math.abs(exp.equity) > eqCap);
+        expEqFill.classList.toggle('over', Math.abs(exposure.equity) > eqCap);
 
         // Top sector — unipolar, fills from left
         var s = topSector();
@@ -2813,19 +2813,19 @@
         var a = pool[Math.floor(Math.random() * pool.length)];
         var contrib = classify(a[0], a[1], a[2], a[3]);
 
-        var afterUsd = exp.usd + contrib.usd;
-        var afterEq  = exp.equity + contrib.equity;
-        var afterSec = (exp.sectors[contrib.sector] || 0) + (contrib.sector ? 1 : 0);
+        var afterUsd = exposure.usd + contrib.usd;
+        var afterEq  = exposure.equity + contrib.equity;
+        var afterSec = (exposure.sectors[contrib.sector] || 0) + (contrib.sector ? 1 : 0);
 
         var usdCap = parseFloat(usdSlider.value);
         var eqCap  = parseFloat(eqSlider.value);
         var secCap = parseInt(secSlider.value, 10);
 
         var rejected = false, reason = '';
-        if (Math.abs(afterUsd) > usdCap && Math.abs(afterUsd) > Math.abs(exp.usd)) {
+        if (Math.abs(afterUsd) > usdCap && Math.abs(afterUsd) > Math.abs(exposure.usd)) {
             rejected = true;
             reason = 'USD cap |' + afterUsd.toFixed(1) + '| > ' + usdCap.toFixed(1);
-        } else if (Math.abs(afterEq) > eqCap && Math.abs(afterEq) > Math.abs(exp.equity)) {
+        } else if (Math.abs(afterEq) > eqCap && Math.abs(afterEq) > Math.abs(exposure.equity)) {
             rejected = true;
             reason = 'Equity cap |' + afterEq.toFixed(1) + '| > ' + eqCap.toFixed(1);
         } else if (contrib.sector && afterSec > secCap) {
@@ -2869,9 +2869,9 @@
                 } else {
                     dot.style.color = '#00e868';
                     dot.style.background = '#00e868';
-                    exp.usd = afterUsd;
-                    exp.equity = afterEq;
-                    if (contrib.sector) exp.sectors[contrib.sector] = afterSec;
+                    exposure.usd = afterUsd;
+                    exposure.equity = afterEq;
+                    if (contrib.sector) exposure.sectors[contrib.sector] = afterSec;
                     passN++; passEl.textContent = passN;
                     logRow(true, label, '');
                     renderExposure();
@@ -2892,24 +2892,24 @@
 
     // Slow exposure decay so caps stay relevant + visitor can experiment
     setInterval(function() {
-        exp.usd *= 0.95; exp.equity *= 0.95;
+        exposure.usd *= 0.95; exposure.equity *= 0.95;
         // Kept to a tenth, so a refusal never reads "3.0 > 3".
-        Object.keys(exp.sectors).forEach(function(k) {
-            exp.sectors[k] = Math.round(Math.max(0, exp.sectors[k] - 0.4) * 10) / 10;
+        Object.keys(exposure.sectors).forEach(function(k) {
+            exposure.sectors[k] = Math.round(Math.max(0, exposure.sectors[k] - 0.4) * 10) / 10;
         });
         renderExposure();
     }, 1500);
 
     // Preset buttons — switch the asset pool + reset exposure for clarity
-    document.querySelectorAll('.demo-preset-btn').forEach(function(btn) {
-        btn.addEventListener('click', function() {
+    document.querySelectorAll('.demo-preset-btn').forEach(function(button) {
+        button.addEventListener('click', function() {
             document.querySelectorAll('.demo-preset-btn').forEach(function(b) {
                 b.classList.remove('active');
             });
-            btn.classList.add('active');
-            currentPool = btn.getAttribute('data-preset');
+            button.classList.add('active');
+            currentPool = button.getAttribute('data-preset');
             // Reset exposure on preset change so the demo starts fresh
-            exp = { usd: 0, equity: 0, sectors: {} };
+            exposure = { usd: 0, equity: 0, sectors: {} };
             passN = 0; rejN = 0;
             passEl.textContent = '0'; rejEl.textContent = '0'; rateEl.textContent = '0%';
             logList.innerHTML = '<div class="demo-empty-log">awaiting first trade…</div>';
@@ -2927,7 +2927,7 @@
     if (typeof window.IntersectionObserver !== 'function') {
         spawnInterval = setInterval(spawn, 1100);
     } else {
-        var io = new IntersectionObserver(function(entries) {
+        var visibilityObserver = new IntersectionObserver(function(entries) {
             entries.forEach(function(e) {
                 if (e.isIntersecting && !spawnInterval) {
                     spawnInterval = setInterval(spawn, 1100);
@@ -2937,7 +2937,7 @@
                 }
             });
         }, { threshold: 0.2 });
-        io.observe(document.getElementById('demo'));
+        visibilityObserver.observe(document.getElementById('demo'));
     }
 })();
 </script>
@@ -4533,8 +4533,8 @@
             }
         });
     }, { threshold: 0.05, rootMargin: '0px 0px -40px 0px' }) : null;
-    reveals.forEach(function(el) {
-        if (observer) { observer.observe(el); } else { el.classList.add('visible'); }
+    reveals.forEach(function(element) {
+        if (observer) { observer.observe(element); } else { element.classList.add('visible'); }
     });
     // The head switch's failsafe reads this: the observer is armed, so
     // the hidden blocks will be shown and the class may stay.
@@ -4571,7 +4571,7 @@
 
     // ── Particles carrying platform counters ─────────────────────────
     var canvas = document.getElementById('bgCanvas');
-    var ctx = canvas.getContext('2d');
+    var canvasContext = canvas.getContext('2d');
     var W, H;
     function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
     resize();
@@ -4595,7 +4595,7 @@
     for (var i = 0; i < PARTICLE_COUNT; i++) {
         particles.push({
             x: Math.random()*2000, y: Math.random()*2000,
-            vx: (Math.random()-0.5)*0.4, vy: (Math.random()-0.5)*0.4,
+            velocityX: (Math.random()-0.5)*0.4, velocityY: (Math.random()-0.5)*0.4,
             s: Math.random()*1.8+0.3, a: Math.random()*0.25+0.06,
             tag: i < particleTags.length ? particleTags[i] : null,
             trail: [], trailMax: 7
@@ -4603,19 +4603,19 @@
     }
 
     function drawParticles() {
-        ctx.clearRect(0,0,W,H);
+        canvasContext.clearRect(0,0,W,H);
         // Connections
         for (var i = 0; i < particles.length; i++) {
             for (var j = i+1; j < particles.length; j++) {
-                var dx = particles[i].x - particles[j].x;
-                var dy = particles[i].y - particles[j].y;
-                var d = Math.sqrt(dx*dx + dy*dy);
+                var distanceX = particles[i].x - particles[j].x;
+                var distanceY = particles[i].y - particles[j].y;
+                var d = Math.sqrt(distanceX*distanceX + distanceY*distanceY);
                 if (d < 140) {
-                    ctx.beginPath();
-                    ctx.moveTo(particles[i].x, particles[i].y);
-                    ctx.lineTo(particles[j].x, particles[j].y);
-                    ctx.strokeStyle = 'rgba(0,232,104,' + (0.05*(1-d/140)) + ')';
-                    ctx.stroke();
+                    canvasContext.beginPath();
+                    canvasContext.moveTo(particles[i].x, particles[i].y);
+                    canvasContext.lineTo(particles[j].x, particles[j].y);
+                    canvasContext.strokeStyle = 'rgba(0,232,104,' + (0.05*(1-d/140)) + ')';
+                    canvasContext.stroke();
                 }
             }
         }
@@ -4627,34 +4627,34 @@
             p.trail.push({x: p.x, y: p.y});
             if (p.trail.length > p.trailMax) p.trail.shift();
 
-            p.x += p.vx; p.y += p.vy;
-            if (p.x < 0 || p.x > W) { p.vx *= -1; p.trail = []; }
-            if (p.y < 0 || p.y > H) { p.vy *= -1; p.trail = []; }
+            p.x += p.velocityX; p.y += p.velocityY;
+            if (p.x < 0 || p.x > W) { p.velocityX *= -1; p.trail = []; }
+            if (p.y < 0 || p.y > H) { p.velocityY *= -1; p.trail = []; }
 
             // Draw fading trail
-            for (var ti = 0; ti < p.trail.length; ti++) {
-                var frac = (ti + 1) / p.trail.length;
+            for (var trailIndex = 0; trailIndex < p.trail.length; trailIndex++) {
+                var frac = (trailIndex + 1) / p.trail.length;
                 var tailA = p.a * frac * 0.55;
                 var tailR = p.s * frac * 0.75;
                 if (tailR < 0.2) continue;
-                ctx.beginPath();
-                ctx.arc(p.trail[ti].x, p.trail[ti].y, tailR, 0, Math.PI*2);
-                ctx.fillStyle = 'rgba(0,232,104,' + tailA.toFixed(3) + ')';
-                ctx.fill();
+                canvasContext.beginPath();
+                canvasContext.arc(p.trail[trailIndex].x, p.trail[trailIndex].y, tailR, 0, Math.PI*2);
+                canvasContext.fillStyle = 'rgba(0,232,104,' + tailA.toFixed(3) + ')';
+                canvasContext.fill();
             }
 
             // Core particle
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, p.s, 0, Math.PI*2);
-            ctx.fillStyle = 'rgba(0,232,104,' + p.a + ')';
-            ctx.fill();
+            canvasContext.beginPath();
+            canvasContext.arc(p.x, p.y, p.s, 0, Math.PI*2);
+            canvasContext.fillStyle = 'rgba(0,232,104,' + p.a + ')';
+            canvasContext.fill();
 
             if (p.tag) {
-                ctx.font = '10px "Share Tech Mono", monospace';
-                ctx.fillStyle = 'rgba(0,232,104,0.28)';
-                ctx.fillText(p.tag[0], p.x + 10, p.y - 5);
-                ctx.fillStyle = 'rgba(0,232,104,0.18)';
-                ctx.fillText(p.tag[1], p.x + 10, p.y + 8);
+                canvasContext.font = '10px "Share Tech Mono", monospace';
+                canvasContext.fillStyle = 'rgba(0,232,104,0.28)';
+                canvasContext.fillText(p.tag[0], p.x + 10, p.y - 5);
+                canvasContext.fillStyle = 'rgba(0,232,104,0.18)';
+                canvasContext.fillText(p.tag[1], p.x + 10, p.y + 8);
             }
         }
         // One frame is drawn either way; the next is scheduled only
@@ -4703,10 +4703,10 @@
     track.innerHTML = html;
 
     // ── Navbar scroll state ──────────────────────────────────────────
-    var nav = document.getElementById('wallNav');
+    var navBar = document.getElementById('wallNav');
     window.addEventListener('scroll', function() {
-        if (window.scrollY > 80) { nav.classList.add('scrolled'); }
-        else { nav.classList.remove('scrolled'); }
+        if (window.scrollY > 80) { navBar.classList.add('scrolled'); }
+        else { navBar.classList.remove('scrolled'); }
     });
 
     // ── Count-up animation ───────────────────────────────────────────
@@ -4717,34 +4717,34 @@
     // the head switch found no observer, the number is only grouped.
     var countEls = document.querySelectorAll('.count-up');
     if (!canObserve) {
-        countEls.forEach(function(el) {
-            el.textContent = wallNum(parseInt(el.dataset.target, 10) || 0);
+        countEls.forEach(function(element) {
+            element.textContent = wallNum(parseInt(element.dataset.target, 10) || 0);
         });
     }
     var countObserver = canObserve && new IntersectionObserver(function(entries) {
         entries.forEach(function(entry) {
             if (entry.isIntersecting) {
-                var el = entry.target;
-                countObserver.unobserve(el);
+                var element = entry.target;
+                countObserver.unobserve(element);
                 // Counts now come from the server, so they can be six
                 // figures — group them, and never render NaN.
-                var target = parseInt(el.dataset.target, 10) || 0;
+                var target = parseInt(element.dataset.target, 10) || 0;
                 if (prefersReducedMotion || !wallJs) {
-                    el.textContent = wallNum(target);
+                    element.textContent = wallNum(target);
                     return;
                 }
                 var current = 0;
                 var step = Math.max(1, Math.floor(target / 40));
-                el.textContent = '0';
+                element.textContent = '0';
                 var interval = setInterval(function() {
                     current += step;
                     if (current >= target) { current = target; clearInterval(interval); }
-                    el.textContent = wallNum(current);
+                    element.textContent = wallNum(current);
                 }, 40);
             }
         });
     }, { threshold: 0.5 });
-    if (countObserver) { countEls.forEach(function(el) { countObserver.observe(el); }); }
+    if (countObserver) { countEls.forEach(function(element) { countObserver.observe(element); }); }
 
     // ── Parallax + pupil-tracking on mouse move ──────────────────────
     // The globe-eye-fixed (giant Sauron eye) drifts subtly with cursor;
@@ -4759,31 +4759,31 @@
     var PUPIL_RANGE_X = 22;
     var PUPIL_RANGE_Y = 14;
     document.addEventListener('mousemove', function(e) {
-        var mx = (e.clientX / W - 0.5) * 2;  // -1..+1
-        var my = (e.clientY / H - 0.5) * 2;
+        var cursorX = (e.clientX / W - 0.5) * 2;  // -1..+1
+        var cursorY = (e.clientY / H - 0.5) * 2;
         if (globe && !prefersReducedMotion) {
-            globe.style.transform = 'translate(calc(-50% + ' + (mx*15) + 'px), calc(-50% + ' + (my*15) + 'px))';
+            globe.style.transform = 'translate(calc(-50% + ' + (cursorX*15) + 'px), calc(-50% + ' + (cursorY*15) + 'px))';
         }
         if (eyeShadow && !prefersReducedMotion) {
-            eyeShadow.style.transform = 'translate(calc(-50% + ' + (mx*32) + 'px), calc(-50% + ' + (my*32) + 'px))';
+            eyeShadow.style.transform = 'translate(calc(-50% + ' + (cursorX*32) + 'px), calc(-50% + ' + (cursorY*32) + 'px))';
         }
         if (pupilGroup && !prefersReducedMotion) {
             // Clamp at 1.0 so the pupil maxes out at the edges, not beyond.
-            var px = Math.max(-1, Math.min(1, mx));
-            var py = Math.max(-1, Math.min(1, my));
+            var pupilX = Math.max(-1, Math.min(1, cursorX));
+            var pupilY = Math.max(-1, Math.min(1, cursorY));
             pupilGroup.style.transform =
-                'translate(' + (px * PUPIL_RANGE_X) + 'px, ' + (py * PUPIL_RANGE_Y) + 'px)';
+                'translate(' + (pupilX * PUPIL_RANGE_X) + 'px, ' + (pupilY * PUPIL_RANGE_Y) + 'px)';
         }
     });
     // On touch devices, idle-drift the pupil so it still feels alive.
     if (pupilGroup && !prefersReducedMotion && 'ontouchstart' in window) {
-        var t0 = Date.now();
+        var driftStart = Date.now();
         setInterval(function() {
-            var phase = (Date.now() - t0) / 1000;
-            var px = Math.sin(phase * 0.4) * 0.7;
-            var py = Math.cos(phase * 0.3) * 0.5;
+            var phase = (Date.now() - driftStart) / 1000;
+            var pupilX = Math.sin(phase * 0.4) * 0.7;
+            var pupilY = Math.cos(phase * 0.3) * 0.5;
             pupilGroup.style.transform =
-                'translate(' + (px * PUPIL_RANGE_X) + 'px, ' + (py * PUPIL_RANGE_Y) + 'px)';
+                'translate(' + (pupilX * PUPIL_RANGE_X) + 'px, ' + (pupilY * PUPIL_RANGE_Y) + 'px)';
         }, 80);
     }
 
@@ -4852,15 +4852,15 @@
     }
 
     // ── Helper: show error in a target element ──────────────────────
-    function showError(el, msg) {
-        if (!el) return;
-        el.textContent = msg || 'An error occurred';
-        el.style.display = 'block';
+    function showError(element, message) {
+        if (!element) return;
+        element.textContent = message || 'An error occurred';
+        element.style.display = 'block';
     }
-    function hideError(el) {
-        if (!el) return;
-        el.style.display = 'none';
-        el.textContent = '';
+    function hideError(element) {
+        if (!element) return;
+        element.style.display = 'none';
+        element.textContent = '';
     }
 
     // ── Intercept credentials form: AJAX submit ─────────────────────
@@ -4874,10 +4874,10 @@
             // and surface an invisible error).
             if (document.body.classList.contains('pin-mode')) return;
             hideError(loginErrors);
-            var fd = new FormData(loginForm);
+            var formData = new FormData(loginForm);
             fetch(loginForm.action, {
                 method: 'POST',
-                body: fd,
+                body: formData,
                 headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 credentials: 'same-origin'
             })
@@ -4885,14 +4885,14 @@
                 return r.json().then(function(j) { return { ok: r.ok, body: j }; })
                     .catch(function() { return { ok: r.ok, body: {} }; });
             })
-            .then(function(res) {
-                if (res.ok && res.body.status === 'ok') {
+            .then(function(reply) {
+                if (reply.ok && reply.body.status === 'ok') {
                     // No PIN — full login, redirect
-                    window.location.href = res.body.redirect || '/';
-                } else if (res.ok && res.body.status === 'pin_required') {
+                    window.location.href = reply.body.redirect || '/';
+                } else if (reply.ok && reply.body.status === 'pin_required') {
                     // Show PIN overlay
-                    var op = document.getElementById('pinOperator');
-                    if (op) op.textContent = 'OPERATOR :: ' + (res.body.username || '');
+                    var operatorLabel = document.getElementById('pinOperator');
+                    if (operatorLabel) operatorLabel.textContent = 'OPERATOR :: ' + (reply.body.username || '');
                     document.body.classList.add('pin-mode');
                     // Focus the first PIN box IMMEDIATELY — the overlay looks
                     // ready long before the pa-* stagger ends, and focus left
@@ -4909,7 +4909,7 @@
                     // Safety net in case something steals focus mid-entrance.
                     setTimeout(focusFirstEmptyPinBox, 1300);
                 } else {
-                    showError(loginErrors, (res.body && res.body.message) || 'Authentication failed — invalid credentials');
+                    showError(loginErrors, (reply.body && reply.body.message) || 'Authentication failed — invalid credentials');
                 }
             })
             .catch(function() {
@@ -4942,16 +4942,16 @@
     function makePinBox() {
         // Same attributes as the static boxes, but NO pin-anim/pa-* class —
         // appended boxes must not replay the entrance animation.
-        var inp = document.createElement('input');
-        inp.type = 'password';
-        inp.maxLength = 1;
-        inp.setAttribute('inputmode', 'numeric');
-        inp.setAttribute('autocomplete', 'one-time-code');
-        inp.setAttribute('data-pin', '');
-        return inp;
+        var pinInput = document.createElement('input');
+        pinInput.type = 'password';
+        pinInput.maxLength = 1;
+        pinInput.setAttribute('inputmode', 'numeric');
+        pinInput.setAttribute('autocomplete', 'one-time-code');
+        pinInput.setAttribute('data-pin', '');
+        return pinInput;
     }
-    function focusPinBox(el) {
-        if (el) el.focus({ preventScroll: true });
+    function focusPinBox(element) {
+        if (element) element.focus({ preventScroll: true });
     }
     function focusFirstEmptyPinBox() {
         var boxes = pinBoxes();
@@ -4972,11 +4972,11 @@
         }
         // All boxes full — grow up to 8 for longer PINs.
         if (boxes.length < PIN_MAX && pinRow) {
-            var nb = makePinBox();
-            pinRow.appendChild(nb);
-            nb.value = d;
+            var newBox = makePinBox();
+            pinRow.appendChild(newBox);
+            newBox.value = d;
             updatePinFinal();
-            focusPinBox(nb);
+            focusPinBox(newBox);
         }
     }
     function pinBackspace() {
@@ -5040,7 +5040,7 @@
         } else if (e.key === 'Enter') {
             e.preventDefault();
             // Always submit: submitPin() owns the "at least 4 digits"
-            // message, so Enter is never a silent no-op.
+            // message, so Enter never silently does nothing.
             submitPin();
         }
     });
@@ -5059,9 +5059,9 @@
         });
     }
 
-    document.querySelectorAll('.sauron-keypad button').forEach(function(btn) {
-        btn.addEventListener('click', function() {
-            var k = btn.dataset.k;
+    document.querySelectorAll('.sauron-keypad button').forEach(function(button) {
+        button.addEventListener('click', function() {
+            var k = button.dataset.k;
             if (k === 'clear') {
                 pinClear();
             } else if (k === 'back') {
@@ -5080,10 +5080,10 @@
             showError(pinErrors, 'Enter at least 4 digits');
             return;
         }
-        var fd = new FormData(pinForm);
+        var formData = new FormData(pinForm);
         fetch(pinForm.action, {
             method: 'POST',
-            body: fd,
+            body: formData,
             headers: { 'X-Requested-With': 'XMLHttpRequest' },
             credentials: 'same-origin'
         })
@@ -5091,14 +5091,14 @@
             return r.json().then(function(j) { return { ok: r.ok, status: r.status, body: j }; })
                 .catch(function() { return { ok: r.ok, status: r.status, body: {} }; });
         })
-        .then(function(res) {
-            if (res.ok && res.body.status === 'ok') {
-                window.location.href = res.body.redirect || '/intro/';
+        .then(function(reply) {
+            if (reply.ok && reply.body.status === 'ok') {
+                window.location.href = reply.body.redirect || '/intro/';
             } else {
-                showError(pinErrors, (res.body && res.body.message) || 'Invalid PIN');
+                showError(pinErrors, (reply.body && reply.body.message) || 'Invalid PIN');
                 // A throttle refusal is not a wrong PIN — erasing a correct
                 // one and calling it invalid is how operators get stuck.
-                if (res.status !== 429) pinClear();
+                if (reply.status !== 429) pinClear();
             }
         })
         .catch(function() {
@@ -5126,8 +5126,8 @@
         if (pinKeypadEl) pinKeypadEl.style.display = 'none';
         if (pinForgotLink) pinForgotLink.style.display = 'none';
         pinForgotPanel.style.display = '';
-        var pw = document.getElementById('id_forgot_password');
-        if (pw) { pw.value = ''; pw.focus({ preventScroll: true }); }
+        var passwordField = document.getElementById('id_forgot_password');
+        if (passwordField) { passwordField.value = ''; passwordField.focus({ preventScroll: true }); }
     }
     function closePinForgot() {
         if (!pinForgotPanel || pinForgotPanel.style.display === 'none') return;
@@ -5154,10 +5154,10 @@
         pinForgotForm.addEventListener('submit', function(e) {
             e.preventDefault();
             hideError(pinErrors);
-            var fd = new FormData(pinForgotForm);
+            var formData = new FormData(pinForgotForm);
             fetch(pinForgotForm.action, {
                 method: 'POST',
-                body: fd,
+                body: formData,
                 headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 credentials: 'same-origin'
             })
@@ -5165,11 +5165,11 @@
                 return r.json().then(function(j) { return { ok: r.ok, body: j }; })
                     .catch(function() { return { ok: r.ok, body: {} }; });
             })
-            .then(function(res) {
-                if (res.ok && res.body.status === 'ok') {
-                    window.location.href = res.body.redirect || '/profile/?modal=pin';
+            .then(function(reply) {
+                if (reply.ok && reply.body.status === 'ok') {
+                    window.location.href = reply.body.redirect || '/profile/?modal=pin';
                 } else {
-                    showError(pinErrors, (res.body && res.body.message) || 'Password incorrect');
+                    showError(pinErrors, (reply.body && reply.body.message) || 'Password incorrect');
                 }
             })
             .catch(function() {
