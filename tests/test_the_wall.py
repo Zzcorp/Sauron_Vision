@@ -1370,11 +1370,11 @@ class MotionIsOptionalOnTheWallTests(TestCase):
         script = self._main_script()
         self.assertNotIn("classList.remove('visible')", script)
         self.assertIn("observer.unobserve(entry.target)", script)
-        self.assertIn("countObserver.unobserve(el)", script)
+        self.assertIn("countObserver.unobserve(element)", script)
         # The observer is armed before the counters, the ticker and the
         # particles, so a throw further down never leaves a block hidden.
         self.assertLess(script.index("window.wallAwake = true"), script.index("var WALL = {"))
-        self.assertLess(script.index("observer.observe(el)"), script.index("window.wallAwake = true"))
+        self.assertLess(script.index("observer.observe(element)"), script.index("window.wallAwake = true"))
 
     def test_the_reduced_motion_frame_survives_a_resize(self):
         """Setting the canvas size clears it, and under reduced motion no
@@ -1405,7 +1405,7 @@ class MotionIsOptionalOnTheWallTests(TestCase):
         script = self._main_script()
         self.assertLess(script.index("var canObserve = typeof window.IntersectionObserver === 'function';"),
                         script.index("new IntersectionObserver"))
-        self.assertIn("if (observer) { observer.observe(el); } else { el.classList.add('visible'); }",
+        self.assertIn("if (observer) { observer.observe(element); } else { element.classList.add('visible'); }",
                       script)
         self.assertIn("if (!canObserve) {", script[script.index("var countEls"):])
         self.assertIn("window.wallAwake = true", script)
@@ -1420,7 +1420,7 @@ class MotionIsOptionalOnTheWallTests(TestCase):
         self.assertNotIn("' sector ' + afterSec + ", self.body)
         # The tally itself is kept to a tenth: a sum that only printed as
         # one decimal read "EUR sector 3.0 > 3" (measured 2026-10-08).
-        self.assertIn("exp.sectors[k] = Math.round(Math.max(0, exp.sectors[k] - 0.4) * 10) / 10;",
+        self.assertIn("exposure.sectors[k] = Math.round(Math.max(0, exposure.sectors[k] - 0.4) * 10) / 10;",
                       self.body)
 
     def test_the_decorative_layers_are_hidden_from_assistive_tech(self):

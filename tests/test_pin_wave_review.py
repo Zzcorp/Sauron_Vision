@@ -54,7 +54,7 @@ class ThrottleSpeaksJsonTests(TestCase):
         # The client half of the same defect: only a non-429 failure clears.
         with open("templates/landing/the_wall.html", encoding="utf-8") as fh:
             body = fh.read()
-        self.assertIn("if (res.status !== 429) pinClear();", body)
+        self.assertIn("if (reply.status !== 429) pinClear();", body)
 
 
 class ThrottleIpTrustTests(TestCase):

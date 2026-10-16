@@ -1350,15 +1350,15 @@ class MotionIsOptional(TestCase):
 
     def test_the_openings_counts_wait_for_their_entrance(self):
         script = re.findall(r"<script>(.*?)</script>", self.body, re.S)[1]
-        self.assertIn("function afterEntrance(el, go)", script)
+        self.assertIn("function afterEntrance(element, go)", script)
         self.assertIn("getAnimations", script)
-        self.assertIn("afterEntrance(el, function () { climb(el); })", script)
+        self.assertIn("afterEntrance(element, function () { climb(element); })", script)
         self.assertRegex(self.css, r"\.book-js \.stats \{ animation: rise")
 
     def test_the_sky_rests_when_the_page_is_still(self):
         script = re.findall(r"<script>(.*?)</script>", self.body, re.S)[1]
         self.assertIn("RESTING_AFTER", script)
-        self.assertIn("window.setTimeout(function () { raf(skyFrame); }, RESTING_GAP)", script)
+        self.assertIn("window.setTimeout(function () { nextFrame(skyFrame); }, RESTING_GAP)", script)
 
     def test_the_motion_is_all_there(self):
         for mark in ('id="bookEyeLook"', "iris-fibres", "iris-ticks", "iris-mer", "iris-scan", "pupil",
