@@ -107,6 +107,15 @@ def execute_kill_switch(user=None, reason="manual"):
             disarm.disable_config(config, by=disarm.BY_KILL_SWITCH,
                                   why=reason, who=who)
 
+    # THE ORCS (bot_program/orcs, O1): every idea in scope ends here, before
+    # the sweep closes its rows, with no re-entry window — whatever the
+    # orcs switch says. Orc tables only; a failure never stops the flatten.
+    try:
+        from bot_program.orcs.lifecycle import kill_all
+        kill_all(user, reason=reason)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[KILL SWITCH] the Orcs were not ended: %s", e)
+
     # ── 2. Close open legacy (crypto) trades ─────────────────────────────────
     open_legacy = BotTrade.objects.filter(status="OPEN")
     if user:

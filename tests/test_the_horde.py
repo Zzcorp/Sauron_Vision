@@ -3605,6 +3605,17 @@ class TheStoredReasonTests(_Base):
     """The debate's `why`, the voices' words, the venue's refusals, the
     thesis check's unread words and the gate's failure: said by cause."""
 
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # The council subclasses the debate's agents when it is imported
+        # (ai_agents/agents/council.py CouncilExecutioner, CouncilChampion).
+        # The tests below stand the agents in for the debate and patch the
+        # council's open_debate_session, which imports the council: done
+        # here first, a worker never builds the council's voices on a
+        # stand-in, and the council's own suites never meet one.
+        import ai_agents.agents.council  # noqa: F401
+
     def setUp(self):
         super().setUp()
         self.cfg = _cfg(self.user)

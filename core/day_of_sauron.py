@@ -128,6 +128,7 @@ STAGE_OF = {
     "track-record-decay-check": ("watch", "track-record decay"),
     "watch-evidence-chain": ("watch", "the evidence chain watched"),
     "alarm-sentinel": ("watch", "the alarm sentinel"),
+    "orc-census": ("watch", "open positions journaled"),
     # ── TELL: the voices ────────────────────────────────────────────────
     "poll-telegram-eye": ("tell", "the Eye reads its Telegram group"),
     "poll-telegram-alarm": ("tell", "the alarm bot reads its group"),

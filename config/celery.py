@@ -17,6 +17,9 @@ app.conf.imports = (
     "market_data.cleanup_tasks",
     "market_data.funding_alerts",
     "signals.tasks_lifecycle",
+    # The Orcs (bot_program/orcs/tasks.py): a package below the app, so
+    # autodiscover_tasks does not find it.
+    "bot_program.orcs.tasks",
 )
 
 # ============================================================
@@ -83,6 +86,10 @@ app.conf.task_routes = {
     # 2026-10-15 -- the crypto daily close: one Binance klines call per
     # crypto instrument at 00:10 UTC, never in front of the quote poller.
     "market_data.tasks.fetch_eod_crypto": {"queue": "slow"},
+    # 2026-10-16 -- the Orcs' census (bot_program/orcs): database reads and
+    # the Orc tables only, no broker, no model, beside the Morgul guards.
+    # No orcs.* glob: the `orcs` queue and its worker arrive with O2.
+    "bot_program.orcs.tasks.orc_census": {"queue": "fast"},
 }
 
 # ============================================================
@@ -428,6 +435,15 @@ app.conf.beat_schedule = {
         # behind a slow one (tick_all_asset_bots also holds a pass lock).
         # expire_seconds beside expires (2026-10-07): the database
         # scheduler keeps only the former, so "expires" alone was lost.
+        "options": {"expires": 280, "expire_seconds": 280},
+    },
+    # THE ORCS (2026-10-16, bot_program/orcs): the census every 5 min,
+    # behind the orcs switch (OFF on arrival): births the entry hooks
+    # missed, the deaths no receiver saw, the reviews and pending closes
+    # as facts. A pass not started within the beat is dropped.
+    "orc-census": {
+        "task": "bot_program.orcs.tasks.orc_census",
+        "schedule": 300.0,
         "options": {"expires": 280, "expire_seconds": 280},
     },
     # THE CRISIS MODE AND ARAGORN (2026-10-02, bot_program/

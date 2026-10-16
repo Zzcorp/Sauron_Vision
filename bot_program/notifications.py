@@ -82,6 +82,9 @@ NOTIFY_MARKS = {
     # The position reviewer's call, and the free pass's dead thesis
     # (2026-10-08): a magnifying glass, the position looked at again.
     "position_review": "\U0001F50E",
+    # An Orc adopted an open real position (2026-10-16, bot_program/orcs):
+    # a scroll, its journal begins.
+    "orc_adopted": "\U0001F4DC",
 }
 
 
@@ -335,6 +338,11 @@ OPERATOR_KINDS = {
     # a hand trade on a rule, bot_program/position_care.py), so a muted
     # bot feed must not mute it.
     "position_review",
+    # An Orc adopted one of the operator's open real positions (2026-10-16,
+    # bot_program/orcs/birth.py): a record that his position now has a
+    # journal, said once per row. Operator-side: it is about his book, and
+    # a muted bot feed must not hide that it started. R and prices only.
+    "orc_adopted",
 }
 
 # The in-app row's type, per kind — "bot" for everything not listed, because
