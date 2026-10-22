@@ -518,14 +518,17 @@ def _stamp_venue_rows(client, symbol, interval, rows) -> int:
 
 def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                             limit=DEFAULT_LIMIT, pass_state=None,
-                            cut=True) -> dict:
+                            cut=True, stamp_marks=True) -> dict:
     """Fetch and persist bars for every symbol on one bot config.
 
     `pass_state` (2026-10-07) is the refresh pass this config belongs to
     (_CandlePass: the dedup, the eToro pacing and stop); a call without
     one is a pass of its own. `cut=False` keeps every symbol past the
     pass's deadline: the held real rows (_held_real_rows) are never cut.
-    Each symbol lands in the pass's `reached` or `cut` set."""
+    Each symbol lands in the pass's `reached` or `cut` set. `stamp_marks`
+    False (the Orcs' parts, 2026-10-16) writes the bars and stamps no
+    venue mark on any row: the Orcs' bars are evidence, never a price for
+    a row."""
     from instruments.models import Instrument
 
     state = pass_state if pass_state is not None else _CandlePass()
@@ -632,7 +635,7 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                     inst, interval, rows, source)
                 out["bars"] += written
                 out["skipped"] += skipped
-                if written:
+                if written and stamp_marks:
                     _stamp_venue_rows(client, symbol, interval, rows)
                 if evicted:
                     logger.info("[bars] %s %s: %s answered — %d public-feed "
@@ -966,6 +969,103 @@ def _held_real_rows(live_covered) -> list:
         return []
 
 
+class _OrcHeld(_HeldRows):
+    """An Orc's symbol (bot_program/orcs, O1b): a row's config, the
+    intervals the Orc reads, the config's own mode (a real row's is
+    "live"); it stamps no venue mark."""
+
+    def __init__(self, cfg, symbol, asset_class, *, mode, intervals):
+        super().__init__(cfg, symbol, asset_class)
+        self.mode = mode
+        self.intervals = tuple(intervals)
+
+
+def _orcs_on() -> bool:
+    """The `orcs` switch, read once a pass; unreadable reads OFF."""
+    try:
+        from bot_program.orcs.switches import orcs_on
+        return bool(orcs_on())
+    except Exception:  # noqa: BLE001 — the Orcs never cost a bar
+        return False
+
+
+def _orc_held(part) -> list:
+    """The Orcs' symbols the bar refresh fetches, by part (2026-10-16, O1b;
+    spec §5.2, §6.1), 4h and 1h only:
+
+      "real"   a real idea whose row has CLOSED while an arm still walks
+               its bars (no other part refreshes it then); an open real
+               row is the configs' and the held rows' to refresh
+      "paper"  the LIVING paper ideas, at most the Orcs' paper cap of
+               (config, symbol) pairs, oldest first (2026-10-22: the cap
+               bounds the living ideas, §5.2), then the dead paper ideas
+               whose arms still walk their tail, on top
+
+    An idea whose arms should all be out (a bar of the multi-ghost's
+    timeframe past its tail cap: ghost.step_bars closes them there) asks
+    nothing more, so an idea that could not end never holds a request
+    for ever. No 1d candle (2026-10-22): the Orcs' daily frame is the
+    venue's 4h bars by UTC day (bot_program/orcs/bars.py), so no second
+    daily grid sits beside the nightly EOD bars. The caller reads the
+    switch. Never raises."""
+    try:
+        from django.utils import timezone
+
+        from bot_program.orcs.bars import BAR_FINAL_AFTER, span_of
+        from bot_program.orcs.birth import paper_cap
+        from bot_program.orcs.constants import (LEG_DONE_STATUSES,
+                                                MULTI_GHOST_TF, STATE_DEAD)
+        from bot_program.orcs.ghost import tail_cap
+        from bot_program.orcs.models import Orc
+        now = timezone.now()
+        paper = part == "paper"
+        base = (Orc.objects.filter(paper=paper)
+                .select_related("root_trade", "config__user")
+                .order_by("born_at", "pk"))
+        tailing = base.filter(state=STATE_DEAD, tracks__open=True).distinct()
+        if paper:
+            living = list(base.exclude(state=STATE_DEAD))
+            orcs = living + list(tailing)
+            cap_left = max(0, int(paper_cap()))
+        else:
+            orcs = list(base.exclude(state=STATE_DEAD)) + list(tailing)
+            cap_left = None
+
+        def done(orc):
+            try:
+                cap = tail_cap(orc, orc.root_trade, now)
+            except Exception:  # noqa: BLE001 — an unread cap holds the bars
+                return False
+            return cap is not None and now >= (cap + span_of(MULTI_GHOST_TF)
+                                               + BAR_FINAL_AFTER)
+
+        out, seen = [], set()
+        for orc in orcs:
+            row = orc.root_trade
+            dead = orc.state == STATE_DEAD
+            if not paper and row.status not in LEG_DONE_STATUSES:
+                continue
+            if (dead or not paper) and done(orc):
+                continue
+            key = (orc.config_id, orc.symbol)
+            if key in seen:
+                continue
+            if paper and not dead:
+                if cap_left <= 0:
+                    continue
+                cap_left -= 1
+            seen.add(key)
+            cfg = orc.config
+            out.append(_OrcHeld(cfg, orc.symbol, orc.asset_class,
+                                mode="live" if not paper
+                                else getattr(cfg, "mode", "paper"),
+                                intervals=DEFAULT_INTERVALS))
+        return out
+    except Exception as e:  # noqa: BLE001 — the Orcs never cost a bar
+        logger.warning("[bars] the Orcs' symbols could not be listed: %s", e)
+        return []
+
+
 def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dict:
     """Refresh bars for every enabled AssetBotConfig, then for held and
     starred instruments the fleet does not already cover.
@@ -976,7 +1076,19 @@ def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dic
     BARS_PASS_MAX_S, symbol by symbol; the held part is never cut, and a
     held symbol on a config the deadline cut is the watchlist's. eToro's
     candles follow _CandlePass, and their summary is said before the
-    watchlist."""
+    watchlist.
+
+    THE ORCS (2026-10-16, O1b; only while the `orcs` switch is ON, else
+    the pass is exactly as before): their parts come LAST (2026-10-22),
+    after every config and after the cut symbols are settled, so
+    every config asks exactly what it asks OFF. An Orc's 429 or eToro
+    budget can then never send a config's decision bars to the public
+    feed, and an Orc fetch never takes a config's dedup slot (its
+    venue-mark stamp with it). The parts are cut by the deadline like a
+    config, stamp no venue mark, and are counted apart under "orcs"
+    (_orc_held). The watchlist gets the very `unreached` it gets OFF, and
+    a `covered` that also holds every symbol an Orc part reached
+    (2026-10-22): the venue owns that series, as a config's."""
     from bot_program.models import AssetBotConfig
 
     totals = {"configs": 0, "symbols": 0, "bars": 0, "skipped": 0, "errors": 0,
@@ -1036,6 +1148,36 @@ def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dic
                        "not reached and the starred watchlist skipped; held "
                        "symbols are still refreshed", BARS_PASS_MAX_S,
                        totals["not_reached"])
+    # THE ORCS' PARTS, LAST (O1b, 2026-10-22): every config has
+    # asked what it asks OFF and the cut symbols are settled above, so
+    # nothing here changes a config's bars, its venue-mark stamp or the
+    # watchlist's `unreached`; `covered` gains what an Orc part reached.
+    # Cut by the deadline like a config; counted apart.
+    if _orcs_on():
+        orcs = dict.fromkeys(keys, 0)
+        for part in ("real", "paper"):
+            for held in _orc_held(part):
+                try:
+                    res = refresh_bars_for_config(
+                        held, intervals=held.intervals, limit=limit,
+                        pass_state=state, stamp_marks=False)
+                except Exception as e:  # noqa: BLE001
+                    logger.exception("[bars] the Orcs' %s failed: %s",
+                                     held.symbols, e)
+                    orcs["errors"] += 1
+                    continue
+                for k in keys:
+                    orcs[k] += res.get(k, 0)
+                # THE VENUE OWNS WHAT AN ORC PART REACHED (2026-10-22), as
+                # a config's symbol: else the watchlist's held part wrote
+                # the public feed's bars over it in this same pass (a
+                # symbol held by a row no config lists), and the next pass
+                # asked eToro the whole window again. A 429 already falls
+                # back to the public feed in the part itself; a symbol the
+                # deadline cut stays the watchlist's.
+                covered.update(s for s in held.symbols
+                               if s in state.reached)
+        totals["orcs"] = orcs
     # eToro's part of the pass is over: its summary is said BEFORE the
     # watchlist (review, 2026-10-07), whose held part is never cut, so a
     # hard kill there cannot drop the lines operator checks #3 and #4 read.

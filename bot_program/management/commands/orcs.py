@@ -4,6 +4,7 @@
     python manage.py orcs adopt --open             # plan: the open rows that would be adopted
     python manage.py orcs adopt --open --yes       # ... and adopt them
     python manage.py orcs adopt --open --user NAME --yes
+    python manage.py orcs shadow-audit [--days 7] [--journal]
 
 `adopt --open` lists every OPEN row with no Orc and says, row by row, the
 Orc it would get or why it gets none (an entry still working at the venue,
@@ -15,6 +16,11 @@ the same rows within five minutes of the switch going ON; this command
 does it now. An adopted real-money row sends one line to its owner's
 channel; a paper or demo row, none. No order is sent, no stop moved and no
 model called.
+
+`shadow-audit` (O1b, spec §6.1) checks the care ghost of every idea that
+died in the last N days against the care's own exits and prints one line
+per idea; it writes nothing unless --journal, which journals each line as
+a fact on its idea, once.
 """
 
 from django.core.management.base import BaseCommand, CommandError
@@ -30,17 +36,30 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("action", nargs="?", default="status",
-                            choices=["status", "adopt"])
+                            choices=["status", "adopt", "shadow-audit"])
         parser.add_argument("--open", action="store_true",
                             help="adopt: every open row with no Orc")
         parser.add_argument("--yes", action="store_true")
         parser.add_argument("--user", default="",
                             help="adopt: only this user's rows")
+        parser.add_argument("--days", type=int, default=7,
+                            help="shadow-audit: the window, in days")
+        parser.add_argument("--journal", action="store_true",
+                            help="shadow-audit: journal each line as a fact")
 
     def handle(self, *args, **opts):
         if opts["action"] == "adopt":
             return self._adopt(opts)
+        if opts["action"] == "shadow-audit":
+            return self._audit(opts)
         return self._status()
+
+    # ── shadow-audit ───────────────────────────────────────────────────
+    def _audit(self, opts):
+        from bot_program.orcs.grading import shadow_audit
+        for line in shadow_audit(days=max(1, int(opts["days"])),
+                                 journal=bool(opts["journal"])):
+            self.stdout.write(line)
 
     # ── status ─────────────────────────────────────────────────────────
     def _status(self):

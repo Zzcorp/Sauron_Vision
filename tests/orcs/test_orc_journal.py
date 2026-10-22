@@ -19,6 +19,24 @@ from tests.orcs.helpers import (_config, _manual_config, _manual_row, _on,
                                 _row, _user, born, headlines)
 
 
+_STEPS = None
+
+
+def setUpModule():
+    """These suites read O1a's observer alone (facts.observe_tick). The
+    steps O1b added to the same hook (the thesis predicates, the arms) have
+    their own suites (tests.orcs.test_orc_predicates, test_orc_ghost,
+    test_orc_tick_off), whose facts and queries would blur these counts."""
+    global _STEPS
+    from bot_program.orcs import observe
+    _STEPS = patch.object(observe, "TICK_STEPS", (observe._observe_tick,))
+    _STEPS.start()
+
+
+def tearDownModule():
+    _STEPS.stop()
+
+
 def _bot():
     """What after_care reads of the bot: its per-pass cache."""
     return SimpleNamespace(_tick_broker_cache={}, asset_class="crypto")

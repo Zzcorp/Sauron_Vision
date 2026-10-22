@@ -457,7 +457,7 @@ class TheSourcePinTests(SimpleTestCase):
 
     def test_nothing_outside_the_orcs_reads_the_stamp(self):
         """The stamp is the one write outside the Orc tables; nothing else
-        reads it, so it changes no behaviour."""
+        reads it but Morgul's G8 (O1b), so it changes no behaviour."""
         import re
 
         from django.conf import settings
@@ -487,7 +487,15 @@ class TheSourcePinTests(SimpleTestCase):
                     if pattern.search(open(path, encoding="utf-8").read()):
                         hits.append(os.path.relpath(path, base))
         self.assertGreater(scanned, 400, "the guard must read the tree")
-        self.assertEqual(hits, [])
+        # O1b (spec §4.5): Morgul's G8 reads the idea, and only there, so
+        # the legs of one idea are one position; with no leg before O5 it
+        # changes nothing (tests/orcs/test_morgul_g8_ideas.py)
+        self.assertEqual(hits, [os.path.join("bot_program", "morgul.py")])
+        from bot_program import morgul
+        src = inspect.getsource(morgul)
+        self.assertEqual(len(pattern.findall(src)), 1)
+        self.assertIn('stamp = meta.get("orc")',
+                      inspect.getsource(morgul._idea_of))
 
     def test_the_hooks_sit_where_they_must(self):
         from bot_program.asset_engine.base import AssetBot

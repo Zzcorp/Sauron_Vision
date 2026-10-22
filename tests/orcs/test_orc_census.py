@@ -216,3 +216,92 @@ class TheCensusTests(TestCase):
         self.assertEqual(list(Orc.objects.values_list("root_trade_id",
                                                       flat=True)),
                          [second.pk])
+
+
+class TheLateSeedTests(TestCase):
+    """AN ORC BORN BEFORE ITS ARMS (O1a's births). The census gives it
+    the arms it lacks, marked "late" (graded, never counted for a seat),
+    and brings O1a's care track up to the arms' format IN PLACE: the
+    static keys the stepper needs come from the row and its config, every
+    care-state key the track already holds stays, and nothing is reseeded
+    from the row's care. Before, the old track lacked `cf` and never
+    stepped again."""
+
+    def setUp(self):
+        from tests.orcs.helpers import _switch
+        _on()
+        _switch("aragorn")
+        self.user = _user("orc_late")
+        self.cfg = _config(self.user)
+
+    def _o1a(self):
+        """An Orc as O1a left it: one care track in O1a's own format."""
+        from datetime import datetime, timezone as dt_tz
+
+        from bot_program.models import AssetBotTrade
+        from bot_program.orcs import tracks
+        from bot_program.orcs.models import OrcTrack
+        t0 = datetime(2026, 10, 14, 10, 0, tzinfo=dt_tz.utc)
+        row = _row(self.cfg)
+        AssetBotTrade.objects.filter(pk=row.pk).update(opened_at=t0)
+        row.refresh_from_db()
+        orc = born(self, row, at=t0)
+        OrcTrack.objects.filter(orc=orc).delete()
+        old = tracks.seed_care(orc, row)
+        old.update({"peak": 101.7, "worst": 99.4, "soft_stop": 100.1,
+                    "soft_why": "breakeven"})
+        OrcTrack.objects.create(orc=orc, arm="care", open=True, state=old)
+        # the row's care moved on since: a reseed would read 103.0
+        meta = dict(row.metadata)
+        meta["care"] = {"peak": 103.0, "worst": 99.4, "soft_stop": 101.0,
+                        "soft_why": "trail", "mfe_r": 1.5}
+        AssetBotTrade.objects.filter(pk=row.pk).update(metadata=meta)
+        row.refresh_from_db()
+        return t0, row, orc, old
+
+    def test_seed_late_upgrades_an_o1a_care_track_in_place_never_reseeding_its_state(
+            self):
+        from datetime import timedelta
+
+        from bot_program.orcs import census
+        from bot_program.orcs.constants import GHOST_ARMS
+        from tests.orcs.helpers import drive, tracks_of
+        t0, row, orc, old = self._o1a()
+        self.assertEqual(census._seed_late(t0 + timedelta(minutes=5)), 1)
+        t = tracks_of(orc)
+        self.assertEqual(set(t), set(GHOST_ARMS))
+        care = t["care"].state
+        for key in ("peak", "worst", "soft_stop", "soft_why", "venue_stop",
+                    "entry", "initial_stop", "qty", "qty_open", "side"):
+            self.assertEqual(care[key], old[key], key)
+        self.assertEqual((care["cf"], care["rpu"], care["symbol"],
+                          care["asset_class"], care["root"], care["paper"],
+                          care["seed"], care["manual"]),
+                         (t["playbook"].state["cf"], 2.0, "BTCUSD", "crypto",
+                          row.pk, True, "late", False))
+        for arm in ("playbook", "orc_shadow", "chandelier3", "staged"):
+            self.assertEqual(t[arm].state["seed"], "late", arm)
+        drive(self, self.cfg, row, [(t0 + timedelta(minutes=30), "100.6")])
+        care = tracks_of(orc)["care"].state
+        self.assertEqual(care["last_tick_at"],
+                         (t0 + timedelta(minutes=30)).isoformat(),
+                         "the old track steps")
+        self.assertEqual(care["peak"], 101.7, "its own peak, never the row's")
+
+    def test_census_seeds_missing_arms_once_marked_late(self):
+        from datetime import timedelta
+
+        from bot_program.orcs import census
+        from bot_program.orcs.models import Orc, OrcTrack
+        t0, row, orc, _old = self._o1a()
+        dead = born(self, _row(self.cfg, symbol="ETHUSD"), at=t0)
+        OrcTrack.objects.filter(orc=dead).exclude(arm="care").delete()
+        Orc.objects.filter(pk=dead.pk).update(state="dead")
+        with patch("django.utils.timezone.now",
+                   return_value=t0 + timedelta(minutes=5)):
+            out = census.run(now=t0 + timedelta(minutes=5))
+        self.assertEqual(out["seeded"], 1, "the living Orc only")
+        self.assertEqual(OrcTrack.objects.filter(orc=orc).count(), 5)
+        self.assertEqual(OrcTrack.objects.filter(orc=dead).count(), 1)
+        self.assertEqual(census._seed_late(t0 + timedelta(minutes=10)), 0,
+                         "once")

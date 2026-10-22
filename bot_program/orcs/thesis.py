@@ -18,12 +18,15 @@ The desk writes its keys only after execute_entry returns
 desk's stamp, while the Orc has nothing past its birth lines. Nothing else
 ever writes a thesis after birth.
 
-The invalidation predicates are machine-checkable (O1b checks them as
-facts on every tick): a bot idea's time predicate (the persona's hold,
-else the care's no-progress clock) and the displaced break of structure
-against it on 4h; a hand idea's structure predicate only (the care never
-cuts an operator's ticket on a clock). `close_beyond` joins once the menu
-exists (O1b, menu=).
+The invalidation predicates are machine-checkable, each marked "by":
+"code" (O1b checks them as facts on every tick, bot_program/orcs/
+predicates.py): a bot idea's time predicate (the persona's hold, else the
+care's no-progress clock) and the displaced break of structure against it
+on the decision timeframe (4h; 1d for a stock, an ETF or an Olog-hai once
+60 fresh 1d venue bars exist); a hand idea's structure predicate only (the
+care never cuts an operator's ticket on a clock); and, from the menu at
+birth, a close beyond the nearest 4h structure level between the entry and
+the stop.
 """
 
 #: The bot entry's metadata keys a thesis may carry, as they are.
@@ -117,19 +120,28 @@ def provenance(meta, *, manual: bool) -> dict:
     return out
 
 
-def invalidation(trade, cfg, *, manual: bool, menu=None) -> list:
-    """The machine-checkable predicates. `menu` is O1b's (close_beyond)."""
-    structure = {"kind": "displaced_bos_against", "tf": STRUCTURE_TF}
-    if manual:
-        return [structure]
-    hold = _persona_hold(cfg)
-    if hold is None:
-        from bot_program.position_care import (NO_PROGRESS_DEFAULT_HOURS,
-                                               NO_PROGRESS_HOURS)
-        hold = float(NO_PROGRESS_HOURS.get(str(trade.asset_class),
-                                           NO_PROGRESS_DEFAULT_HOURS))
-    return [{"kind": "time", "market_h": float(hold),
-             "min_mfe_r": TIME_MIN_MFE_R}, structure]
+def invalidation(trade, cfg, *, manual: bool, menu=None,
+                 army_type="") -> list:
+    """The machine-checkable predicates, written by code (O1b,
+    bot_program/orcs/predicates.code_invalidation): a bot idea's time
+    predicate (the persona's hold, else the care's no-progress clock), the
+    displaced break against it on the decision timeframe, and, with the
+    menu at birth, a close beyond the nearest 4h structure level between the
+    entry and the stop."""
+    from bot_program.orcs import predicates
+    from bot_program.orcs.facts import initial_stop
+    hold = None
+    if not manual:
+        hold = _persona_hold(cfg)
+        if hold is None:
+            from bot_program.position_care import (NO_PROGRESS_DEFAULT_HOURS,
+                                                   NO_PROGRESS_HOURS)
+            hold = float(NO_PROGRESS_HOURS.get(str(trade.asset_class),
+                                               NO_PROGRESS_DEFAULT_HOURS))
+    return predicates.code_invalidation(
+        side=trade.side, manual=manual, hold_h=hold, menu=menu,
+        entry=trade.entry_price, init_stop=initial_stop(trade),
+        tf=predicates.decision_tf(trade.asset_class, army_type, menu))
 
 
 #: The last stop moves an adopted thesis carries, and its memory's words.
@@ -218,12 +230,14 @@ def reconstructed_from(trade) -> dict:
     return out
 
 
-def build(trade, cfg, *, source: str, manual: bool, menu=None) -> dict:
+def build(trade, cfg, *, source: str, manual: bool, menu=None,
+          army_type="") -> dict:
     out = {"source": source,
            "reason": " ".join(str(trade.reason or "").split())[:REASON_MAX],
            "rule": str(trade.rule_name or ""),
            "provenance": provenance(trade.metadata, manual=manual),
-           "invalidation": invalidation(trade, cfg, manual=manual, menu=menu),
+           "invalidation": invalidation(trade, cfg, manual=manual, menu=menu,
+                                        army_type=army_type),
            "horizon_market_h": horizon(cfg)}
     if source == "reconstructed":
         out["reconstructed_from"] = reconstructed_from(trade)

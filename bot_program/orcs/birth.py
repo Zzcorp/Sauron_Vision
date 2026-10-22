@@ -12,7 +12,7 @@ hooks missed. Every path goes through `ensure`, which:
      (OrcSetting "max_paper_orcs", 10);
   3. freezes `manual`, FAILING TOWARD MANUAL: the operator's ticket must
      never become a bot idea with commission class because a read failed
-     (the care's own lane read fails toward a bot, position_care.py:582-587);
+     (the care's own lane read fails toward a bot, position_care.py:583-588);
   4. seats the idea at L0 on (world, class, rule key): a demo row never
      sits on the real-money seat;
   5. freezes r_money from the initial stop (manual_close._risk_dollars);
@@ -228,12 +228,15 @@ def ensure(trade, *, adopted=False, now=None):
     from bot_program.orcs import army, situation, thesis
     sit = situation.situation_for(row, cfg, manual=manual, now=now)
     assigned = army.assign(sit)
+    the_menu = menu_at_birth(row, now)
     the_thesis = thesis.build(row, cfg, manual=manual,
-                              source="reconstructed" if adopted else "entry")
+                              source="reconstructed" if adopted else "entry",
+                              menu=the_menu, army_type=assigned["base"])
     try:
         with transaction.atomic():
             orc = _create(row, cfg, manual=manual, adopted=adopted,
-                          sit=sit, assigned=assigned, the_thesis=the_thesis)
+                          sit=sit, assigned=assigned, the_thesis=the_thesis,
+                          the_menu=the_menu, now=now)
             if orc is None:
                 # born by another process while we read (the row lock
                 # serialises births on Postgres; this re-check sees it)
@@ -255,9 +258,36 @@ def ensure(trade, *, adopted=False, now=None):
     return orc
 
 
-def _create(row, cfg, *, manual, adopted, sit, assigned, the_thesis):
+def menu_at_birth(row, now):
+    """The symbol's menu at birth (bot_program/orcs/menu.py), on the venue's
+    bars; None when it cannot be read. Never raises."""
+    try:
+        from bot_program.orcs import menu
+        return menu.symbol_levels(row.symbol, str(row.asset_class or ""),
+                                  now=now)
+    except Exception as e:  # noqa: BLE001 — an unread menu is no menu
+        logger.info("[orcs] #%s: the menu at birth was not read: %s",
+                    getattr(row, "pk", "?"), e)
+        return None
+
+
+def menu_line(the_menu) -> str:
+    if the_menu is None:
+        return "The menu at birth is empty: its bars could not be read."
+    if not the_menu.levels:
+        why = "; ".join(the_menu.why) or "no level within reach"
+        return f"The menu at birth is empty: {why}."
+    tfs = ", ".join(the_menu.tfs) or "no"
+    source = the_menu.source or "no source"
+    return (f"The menu at birth: {len(the_menu.levels)} levels on {tfs} "
+            f"venue bars ({source}).")
+
+
+def _create(row, cfg, *, manual, adopted, sit, assigned, the_thesis,
+            the_menu=None, now=None):
     from bot_program.models import AssetBotTrade
-    from bot_program.orcs import facts, journal, tracks
+    from bot_program.orcs import facts, ghost, journal
+    from bot_program.orcs.constants import SEED_ADOPT, SEED_BIRTH
     from bot_program.orcs.models import Orc, OrcLeg
     locked = AssetBotTrade.objects.select_for_update().get(pk=row.pk)
     if OrcLeg.objects.filter(trade_id=row.pk).exists():
@@ -287,13 +317,19 @@ def _create(row, cfg, *, manual, adopted, sit, assigned, the_thesis):
     locked.metadata = meta
     locked.save(update_fields=["metadata"])
     row.metadata = meta
-    tracks.seed_at_birth(orc, locked)
+    # THE ARMS (O1b, §6.1): every arm seeded once, in this transaction,
+    # before any Orc candidate can exist
+    ghost.seed_tracks(orc, locked, now=now,
+                      seed=SEED_ADOPT if adopted else SEED_BIRTH)
     journal.append(orc, "adopt" if adopted else "birth",
                    facts.birth_line(locked, adopted=adopted),
                    body={"leg": locked.pk, "manual": manual,
                          "seat": [seat.venue, seat.asset_class,
                                   seat.rule_key],
-                         "commission": orc.commission})
+                         "commission": orc.commission},
+                   # the seat's level at the birth, frozen for the grade
+                   # (a seat promoted later changes nothing)
+                   remember={"level_at_birth": int(seat.level or 0)})
     journal.append(orc, "fact", facts.army_line(assigned),
                    body={"army": assigned["base"], "why": assigned["why"]},
                    fact=True)
@@ -301,6 +337,20 @@ def _create(row, cfg, *, manual, adopted, sit, assigned, the_thesis):
         journal.append(orc, "fact", facts.overlay_line(assigned),
                        body={"overlay": assigned["overlay"],
                              "why": assigned["overlay_why"]}, fact=True)
+    journal.append(orc, "fact", menu_line(the_menu),
+                   body=({"menu": the_menu.as_dict()} if the_menu is not None
+                         else {"menu": None}),
+                   fact=True, remember={"menu_source": (
+                       the_menu.source if the_menu is not None else "")})
+    if the_menu is not None and the_menu.levels and not [
+            p for p in (the_thesis.get("invalidation") or [])
+            if p.get("kind") == "close_beyond"]:
+        # an empty menu already said why in the line above
+        journal.append(orc, "fact",
+                       "No level invalidation written at birth: no 4h "
+                       "structure level stands between the entry and the "
+                       "stop.", body={"predicate": "close_beyond"},
+                       fact=True)
     facts.baseline(orc, locked)
     return orc
 
