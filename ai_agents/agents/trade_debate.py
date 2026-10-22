@@ -339,7 +339,8 @@ def remember_refusal(bot, cand, why: str, *, kind: str = "veto") -> None:
         logger.info("[debate] refusal not remembered: %s", e)
 
 
-def debate_candidate(bot, cand, qty: float) -> dict:
+def debate_candidate(bot, cand, qty: float, *,
+                     rehearsal: bool = False) -> dict:
     """Run both sides on one live candidate. Never raises.
 
     {"on", "ran", "binding", "graded", "why", "executioner", "champion",
@@ -348,6 +349,11 @@ def debate_candidate(bot, cand, qty: float) -> dict:
     `council_id` (2026-10-08) is the council's record of this debate
     (ai_agents/agents/council.py, open_debate_session), opened whenever
     both sides were asked, or None: the debate is graded from it.
+
+    `rehearsal` (2026-10-16) stamps that record a rehearsal (a Saxo SIM,
+    OANDA practice or Alpaca paper client: AssetBot.rehearsal_or_unsure),
+    so it is never graded as real money. It changes nothing else: every
+    power below is computed before the record and never reads it.
 
     `veto` / `scale` are what the Executioner WOULD do; the caller applies
     them only when `binding`. `champion_wins` is False whenever the debate
@@ -426,7 +432,8 @@ def debate_candidate(bot, cand, qty: float) -> dict:
     # nothing above reads it back.
     try:
         from ai_agents.agents.council import open_debate_session
-        out["council_id"] = open_debate_session(bot, cand, qty, brief, out)
+        out["council_id"] = open_debate_session(bot, cand, qty, brief, out,
+                                                rehearsal=rehearsal)
     except Exception as e:  # noqa: BLE001 — the record is beside the order
         logger.warning("[debate] council record not opened: %s", e)
     logger.info("[debate] %s %s: executioner %s (%.2f), champion %s (%.2f) "

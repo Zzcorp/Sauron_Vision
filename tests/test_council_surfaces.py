@@ -150,6 +150,75 @@ class TheRecordPageTests(TestCase):
                                   "three.")
 
 
+class TheHandAndMoodPageTests(TestCase):
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.staff = get_user_model().objects.create_user(
+            "csf_hm", password="x", is_staff=True)
+
+    def _money(self):
+        from tests.test_alarm_bot import MONEY
+        import re
+        pattern = (MONEY.pattern
+                   .replace(r"|\d[\d,]*\.\d+\b", "")
+                   .replace(r"|[-+−]?\d+(?:\.\d+)?\s?%", ""))
+        return re.compile(pattern, MONEY.flags)
+
+    def test_the_page_shows_the_hands_the_emperor_against_his_hand_and_the_mood(self):
+        from tests.test_council_hand import _good
+        _good("gambler", 34, asset_class="crypto")
+        _good("champion", 12, asset_class="forex")
+        self.client.force_login(self.staff)
+        resp = self.client.get("/council/")
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        for role in ("council-hands", "council-against-hand",
+                     "council-skeptic-first", "council-mood",
+                     "council-recent"):
+            self.assertIn(f'data-role="{role}"', html, role)
+        hands = html[html.index('data-role="council-hands"'):
+                     html.index('data-role="council-mood"')]
+        self.assertIn("One seat per regime and class: the voice with the "
+                      "best measured weight there, with at least 30 graded "
+                      "calls in that cell and a weight of at least 1.15.",
+                      " ".join(hands.split()))
+        self.assertIn("The Gambler", hands)
+        self.assertIn("no voice has earned it yet", hands)
+        self.assertIn("When the Emperor's verdict went against his Hand",
+                      hands)
+        mood = html[html.index('data-role="council-mood"'):
+                    html.index('data-role="council-recent"')]
+        self.assertIn("Now, for your book:", mood)
+        self.assertIn("The mood counsels caution only", mood)
+        for section in (hands, mood):
+            self.assertNotIn("$", section)
+            self.assertIsNone(self._money().search(section))
+
+    def test_a_rehearsal_record_is_said_on_the_recent_sittings(self):
+        from ai_agents.council_models import CouncilSession, CouncilVoice
+        s = CouncilSession.objects.create(origin="bot", status="record",
+                                          venue="demo", symbol="SIMX",
+                                          side="BUY")
+        CouncilSession.objects.create(
+            origin="bot", status="done", symbol="MOODX", side="SELL",
+            mood="uneasy", hand={"voice": "gambler", "name": "The Gambler",
+                                 "side": "for"})
+        e = CouncilSession.objects.get(symbol="MOODX")
+        CouncilVoice.objects.create(session=e, voice="emperor", wave=3,
+                                    status="spoke",
+                                    answer={"verdict": "refuse",
+                                            "hand_overruled": True})
+        self.client.force_login(self.staff)
+        resp = self.client.get("/council/")
+        self.assertContains(resp, "a rehearsal: not real money · SIMX BUY")
+        self.assertContains(resp, "MOODX SELL · The Emperor: refuse the "
+                                  "battle · done · not graded yet · mood "
+                                  "uneasy · the Hand: The Gambler "
+                                  "(overruled)")
+        self.assertEqual(s.venue, "demo")
+
+
 class TheCardTests(TestCase):
 
     @classmethod
@@ -254,6 +323,39 @@ class TheCardTests(TestCase):
         self.assertNotContains(resp, "graded nightly")
         self.assertNotContains(resp, "Not graded yet")
 
+    def test_the_card_names_the_hand_and_the_mood_at_entry(self):
+        from ai_agents.council_models import CouncilSession, CouncilVoice
+        t = self._trade()
+        s = CouncilSession.objects.create(
+            origin="bot", status="done", trade=t, symbol="BTCUSD", side="BUY",
+            mood="uneasy", hand={"voice": "gambler", "name": "The Gambler",
+                                 "side": "for", "why_empty": ""})
+        CouncilVoice.objects.create(
+            session=s, voice="emperor", wave=3, status="spoke",
+            verdict="refuse",
+            answer={"verdict": "refuse", "hand": "gambler",
+                    "hand_side": "for", "hand_overruled": True,
+                    "hand_why": "the stop sits in the pool"})
+        self.client.force_login(self.user)
+        resp = self.client.get(f"/forensics/{t.id}/")
+        self.assertContains(resp, "The Hand of the Emperor at entry: The "
+                                  "Gambler (for the trade); the Emperor "
+                                  "overruled it: the stop sits in the pool.")
+        self.assertContains(resp, "The people&#x27;s mood at entry: uneasy.")
+        from ai_agents.agents.council import card_payload
+        CouncilSession.objects.filter(id=s.id).update(
+            hand={"voice": "", "why_empty": "no voice has earned it yet"},
+            mood="")
+        s.refresh_from_db()
+        p = card_payload(s)
+        self.assertEqual(p["hand_line"], "The Hand of the Emperor at entry: "
+                                         "no voice had earned it yet.")
+        self.assertEqual(p["mood_line"], "")
+        CouncilSession.objects.filter(id=s.id).update(hand={})
+        s.refresh_from_db()
+        self.assertEqual(card_payload(s)["hand_line"], "",
+                         "a sitting before the seat says nothing of it")
+
     def test_no_sitting_no_card(self):
         t = self._trade()
         self.client.force_login(self.user)
@@ -350,6 +452,30 @@ class TheWordsTests(SimpleTestCase):
         for voice, answers in samples.items():
             for a in answers:
                 sentences.append(C.verdict_words(voice, a))
+        # the Hand, the Skeptic's target and the mood (2026-10-16)
+        from ai_agents import council_mood as M
+        from ai_agents.council_grading import (REHEARSAL_ARGUED_NOTES,
+                                               hand_of)
+        held = {"cell": "trending on crypto", "voice": "gambler",
+                "name": "The Gambler", "factor": 1.3, "n": 34,
+                "reason": "measured in trending on crypto", "why_empty": ""}
+        for hand in (hand_of({}, "trending", "crypto"),
+                     hand_of({}, "unknown", "forex"),
+                     dict(held, side="for"), dict(held, side="")):
+            sentences.append(C.hand_text(hand))
+        for how in ("hand", "highest", "none"):
+            sentences.append(C.trusted_text(dict(
+                held, trusted="champion" if how == "highest" else
+                "gambler" if how == "hand" else "", trusted_why=how)))
+        inputs = {k: M.input_entry(k, None, why="no reading")
+                  for k in M.INPUTS}
+        sentences += [M.mood_text(M.mood_of(inputs)), M.CAUTION_ONLY,
+                      REHEARSAL_ARGUED_NOTES, *M.LEVEL_WORDS.values()]
+        inputs = {k: M.input_entry(k, v) for k, v in (
+            ("r_short", -2.5), ("r_long", -9.0), ("drawdown", 0.21),
+            ("streak", 4), ("day_stop", {"spent": 1.6, "mode": "shut"}),
+            ("stress", "crisis"), ("open_risk_share", 1.2))}
+        sentences.append(M.mood_text(M.mood_of(inputs)))
         self.assertIn("the evidence is shaky: the Executioner, noise",
                       sentences)
         self.assertIn("fight smaller, commit 50%", sentences)
@@ -365,6 +491,7 @@ class TheWordsTests(SimpleTestCase):
         for path in ("ai_agents/agents/council.py",
                      "ai_agents/council_grading.py",
                      "ai_agents/council_models.py",
+                     "ai_agents/council_mood.py",
                      "dashboard/views_council.py",
                      "ai_agents/management/commands/council.py",
                      "static/js/sv-council.js"):
@@ -403,6 +530,19 @@ class TheWordsTests(SimpleTestCase):
         self.assertIn("(up to twelve a day, within the day's AI budget)",
                       found[0])
         self.assertNotIn("every real-money bot order", found[0])
+        # the Hand of the Emperor and the people's mood (2026-10-16), in
+        # the Book's voice: no digit, the bar said in words
+        for words in ("the Hand of the Emperor", "thirty of its calls",
+                      "its record has earned trust",
+                      "the seat is lost the day another voice does better",
+                      "only the Skeptic is told which voice is trusted most",
+                      "the people's mood",
+                      "its last five and twenty trading days",
+                      "may only counsel caution, never boldness",
+                      "a good run reads steady"):
+            self.assertIn(words, found[0])
+        self.assertLess(found[0].index("the Hand of the Emperor"),
+                        found[0].index("In this version"))
         from core.platform_control import DEFAULT_COMPONENTS
         bots = next(c for c in DEFAULT_COMPONENTS
                     if c["key"] == "council_bots")

@@ -283,7 +283,7 @@ class TheWiringTests(SimpleTestCase):
 
         from bot_program.asset_engine.base import AssetBot
         src = inspect.getsource(AssetBot.execute_entry)
-        self.assertEqual(src.count("debate_candidate(self, cand, qty)"), 1)
+        self.assertEqual(src.count("debate_candidate(self, cand, qty,"), 1)
         self.assertIn('if debate.get("binding"):', src)
         self.assertIn('if debate.get("veto"):', src)
         self.assertIn("qty = self._round_qty(qty * _scale", src)
@@ -291,7 +291,7 @@ class TheWiringTests(SimpleTestCase):
         self.assertIn('entry_meta["debate"] = {', src)
         self.assertIn('remember_refusal(self, cand, _veto, kind="veto")', src)
         # the kill switch / disarm is read AGAIN after the debate
-        self.assertLess(src.index("debate_candidate(self, cand, qty)"),
+        self.assertLess(src.index("debate_candidate(self, cand, qty,"),
                         src.rindex("self._still_armed()"))
         self.assertLess(src.rindex("self._still_armed()"),
                         src.index("client.market_order("))
@@ -304,7 +304,7 @@ class TheWiringTests(SimpleTestCase):
         # gate, the fee, the floor, the multiplier, the headroom, the
         # disarm — and right before the order: only an order about to be
         # sent is debated (and billed)
-        at = src.index("debate_candidate(self, cand, qty)")
+        at = src.index("debate_candidate(self, cand, qty,")
         for gate in ("self._etoro_entry_refusal(", "self._venue_fee_refusal(",
                      "self._venue_size_floor(", "self._order_leverage(",
                      "self._leverage_headroom(", "self._still_armed()"):

@@ -5996,11 +5996,17 @@ class AssetBot(ABC):
             # not run changes nothing and keeps the elite door shut.
             from ai_agents.agents.trade_debate import (debate_candidate,
                                                        remember_refusal)
+            # A SIM, practice or paper client is argued exactly as before;
+            # only the debate's record is stamped a rehearsal, so it is
+            # never graded as real money (2026-10-16). Unsure is a
+            # rehearsal. Nothing below reads the stamp.
+            _rehearsal = self.rehearsal_or_unsure(client)
             # an eToro DEMO world is not real money: never argued, never
             # counted toward the shadow (review, 2026-10-02)
             debate = ({"why": "the venue's demo world: not debated"}
                       if getattr(client, "demo", False) is True
-                      else debate_candidate(self, cand, qty))
+                      else debate_candidate(self, cand, qty,
+                                            rehearsal=_rehearsal))
             if debate.get("on"):
                 entry_meta["debate"] = {
                     k: debate.get(k) for k in (
@@ -7542,6 +7548,18 @@ class AssetBot(ABC):
         world = cls.VENUE_WORLDS.get(
             str(getattr(client, "env", "") or "").lower())
         return world == "paper" or cls._is_paper_client(client)
+
+    @classmethod
+    def rehearsal_or_unsure(cls, client) -> bool:
+        """rehearsal_client, fenced (2026-10-16): a client whose world
+        cannot be read is not real money, the ticket's own rule
+        (dashboard/views_council.py, council_ask). Never raises. Read only
+        to stamp the trade debate's record; no order, size or gate reads
+        it."""
+        try:
+            return bool(cls.rehearsal_client(client))
+        except Exception:  # noqa: BLE001 — unsure is not real money
+            return True
 
     # ── the venue's own size floor ──────────────────────────────────────
     #

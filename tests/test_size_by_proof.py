@@ -860,7 +860,7 @@ class TheWiringTests(SimpleTestCase):
                                   "decision)"))
         src = inspect.getsource(AssetBot.execute_entry)
         self.assertLess(src.index('entry_meta["proof"]'),
-                        src.index("debate_candidate(self, cand, qty)"))
+                        src.index("debate_candidate(self, cand, qty,"))
         src = inspect.getsource(OptionsBot.scan_symbol)
         self.assertLess(src.index("proof.proof_for("),
                         src.index('raw *= float(stage["live_size_factor"])'))

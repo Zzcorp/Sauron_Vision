@@ -55,6 +55,13 @@ class Command(BaseCommand):
                 f"  {b['name']}: " + (f"Brier {b['brier']:.3f} over {b['n']} "
                                       f"graded sittings" if b["brier"] is not None
                                       else "no graded sitting yet"))
+        a = rec["against_hand"]
+        self.stdout.write(
+            f"  The Emperor against his Hand: {a['graded']} graded, the "
+            f"Emperor right {a['emperor_right']}, the Hand right "
+            f"{a['hand_right']}; {a['unresolved']} inside a quarter R, "
+            f"{a['pending']} not graded yet; overruled without a reason "
+            f"{a['no_reason']}")
         since = timezone.now() - timedelta(days=days)
         self.stdout.write(f"Recent sittings ({days} days)")
         for s in (CouncilSession.objects.filter(created_at__gte=since)
