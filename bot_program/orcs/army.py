@@ -16,7 +16,8 @@ The situation is a plain dict built by bot_program/orcs/situation.py:
     stop|, or None), atr {1h, 4h, 1d} (None when unmeasured), spread,
     shuts [{at, words, kind, hours}] inside the hold, crypto_weekend,
     prints (high-impact, its currencies, inside the hold), exotic_legs,
-    gap_p90_r (None until O1b's gap model measures it),
+    gap_p90_r (the next shut's measured gap in R, orcs/gaps.py; None
+    while unmeasured),
     operator_horizon_h (None until the operator writes a thesis, O1d).
 """
 from dataclasses import dataclass

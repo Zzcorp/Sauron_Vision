@@ -129,6 +129,12 @@ STAGE_OF = {
     "watch-evidence-chain": ("watch", "the evidence chain watched"),
     "alarm-sentinel": ("watch", "the alarm sentinel"),
     "orc-census": ("watch", "open positions journaled"),
+    # The Orcs' arms and grades (O1b): through the day, every 15 min and
+    # hourly, so WATCH (LEARN reads as the night's clock)
+    "orc-track-ghosts": ("watch", "closed positions followed on their "
+                                  "mechanical counterfactual"),
+    "orc-grade-closed": ("watch", "closed positions graded against the "
+                                  "mechanical care"),
     # ── TELL: the voices ────────────────────────────────────────────────
     "poll-telegram-eye": ("tell", "the Eye reads its Telegram group"),
     "poll-telegram-alarm": ("tell", "the alarm bot reads its group"),
@@ -171,6 +177,9 @@ STAGE_OF = {
     "mine-patterns": ("learn", "patterns mined"),
     "weekly-portfolio-rebalance-suggestions": ("learn", "rebalancing suggested"),
     "ai-monday-game-plan": ("learn", "the Monday plan"),
+    # The Orcs' weekly audit (O1b): public words, plain, with no slash.
+    "orc-shadow-audit": ("learn", "the counterfactual checked against the "
+                                  "care's own exits"),
 }
 
 #: The counts each stage shows off the Wall's own facts (core.wall_facts):

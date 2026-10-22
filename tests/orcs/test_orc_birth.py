@@ -368,7 +368,10 @@ class TheBirthTests(TestCase):
         born(self, AssetBotTrade.objects.get(pk=row.pk))
         track.refresh_from_db()
         self.assertEqual(track.state["soft_stop"], 102.0, "never reseeded")
-        self.assertEqual(OrcTrack.objects.filter(orc=orc).count(), 1)
+        # O1b: every arm is seeded at birth, once
+        from bot_program.orcs.constants import GHOST_ARMS
+        self.assertEqual(OrcTrack.objects.filter(orc=orc).count(),
+                         len(GHOST_ARMS))
         fresh = born(self, _row(self.cfg, symbol="ETHUSD"))
         state = OrcTrack.objects.get(orc=fresh, arm="care").state
         self.assertEqual((state["seeded_from"], state["peak"],
@@ -497,9 +500,11 @@ class TheBirthTests(TestCase):
         for key in ("risk_dollars", "capital_use", "notional_fraction",
                     "risk_fraction", "conviction"):
             self.assertNotIn(key, blob)
+        # O1b: every predicate is marked as written by code
         self.assertEqual(th["invalidation"], [
-            {"kind": "time", "market_h": 72.0, "min_mfe_r": 1.0},
-            {"kind": "displaced_bos_against", "tf": "4h"}])
+            {"kind": "time", "market_h": 72.0, "min_mfe_r": 1.0,
+             "by": "code"},
+            {"kind": "displaced_bos_against", "tf": "4h", "by": "code"}])
         self.assertEqual(th["horizon_market_h"], 72.0)
         AssetBotTrade.objects.filter(pk=row.pk).update(
             reason="a new reason", metadata={**row.metadata,
@@ -515,7 +520,8 @@ class TheBirthTests(TestCase):
                                                              "reason": "r"},
                                           "risk_dollars": 30.0}))
         self.assertEqual(hand.thesis["invalidation"],
-                         [{"kind": "displaced_bos_against", "tf": "4h"}])
+                         [{"kind": "displaced_bos_against", "tf": "4h",
+                           "by": "code"}])
         self.assertEqual(hand.thesis["provenance"],
                          {"signal_id": 7, "size_source": "risk_budget",
                           "theme_at_entry": False})
@@ -528,7 +534,8 @@ class TheBirthTests(TestCase):
         orc = born(self, _row(scalp, symbol="M1USD"), now=WED)
         th = orc.thesis
         self.assertEqual(th["invalidation"][0],
-                         {"kind": "time", "market_h": 8.0, "min_mfe_r": 1.0})
+                         {"kind": "time", "market_h": 8.0, "min_mfe_r": 1.0,
+                          "by": "code"})
         self.assertEqual(th["horizon_market_h"], 8.0)
         kinds = [p["kind"] for p in th["invalidation"]]
         self.assertEqual(kinds.count("time"), 1)
@@ -556,7 +563,9 @@ class TheBirthTests(TestCase):
                       "expected hold (Wednesday 20:00 UTC); a weekend shut "
                       "inside the expected hold (Friday 20:00 UTC).", lines)
         facts = [e.fact_id for e in journal(deep, kind="fact")]
-        self.assertEqual(facts, ["F1", "F2"])
+        # the army, the overlay and (O1b) the menu at birth
+        self.assertEqual(facts, ["F1", "F2", "F3"])
+        self.assertTrue(lines[-1].startswith("The menu at birth"))
 
 
 class TheCensusAndCommandTests(TestCase):

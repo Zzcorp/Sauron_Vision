@@ -1348,6 +1348,86 @@ the next tick; the Orcs already born keep what they wrote.
 says: each Orc is marked dead with no re-entry window before the sweep
 closes its rows.
 
+### O1b: the arms and the grade (still no model)
+
+Each Orc now carries five counterfactual arms in its own table, priced by
+one function from the same tick or venue bar: the **care ghost** (the
+position care replayed on its own state, the reference), the **playbook**
+(the care plus code rules on the menu of levels), the **Orc arm** (the
+real row, recorded; after a hand act it carries on as a shadow), and two
+mechanical exits from the proving ground (`chandelier3`, `staged`) walked
+on the venue's 4h bars. Arms move only on the tick (the hook after the
+care) and on bars; they never move a stop, send an order or call a model.
+While the row is open the tick alone moves them; once it has closed, the
+`orc-track-ghosts` beat alone does, so the two never overwrite each other.
+An arm walks only the bars after its birth: an adopted row's history is
+never replayed. An arm reads a bar only once it is final: the bar refresh
+stores the bar still forming and rewrites it on its next pass, so a bar
+that has just ended counts once that pass has stored the next one, or 12
+minutes after its end. When the row closes, the arms that are still open
+keep walking the venue's 1h bars, from the first bar that opens after
+their last tick, up to a cap (a bot row: the later of its close and its
+birth plus 1.5 times the class's no-progress hours; the manual lane: its
+close plus 30 days). They are marked to market at the close of the bar
+that spans the cap; a bar after the cap, every arm still open is closed at
+the newest price known, so no idea outlives its cap. On those bars the
+care-like arms run the care with the context the tick last gave them (a
+manual-lane idea keeps the manual lane's care, which never cuts on a
+clock), and the playbook keeps its own rules, every frame cut at the
+bar's close: the thesis exit, the structure trail, and the draw trim on
+paper. Each arm walks on its own: one that fails is logged and waits, and
+the others go on. A row with no stop has no R: its two proving-ground
+arms close at once and the idea is graded without numbers. An Orc arm
+whose real exit nobody priced (the row's exit price unknown) is closed at
+the cap on its last tick and flagged as inferred.
+
+Three beats, all on the `slow` queue by exact name, all behind `orcs`:
+
+- `orc-track-ghosts` every 15 min: the arms that outlive their row walk
+  new bars; a pass with no new bar changes nothing.
+The thesis's bar predicates read final bars only. The time predicate
+needs the care's best excursion: while the care is off it reads
+"unchecked", and the journal says so once.
+
+- `orc-grade-closed` hourly at :40: a dead idea whose arms are all closed
+  gets one grade (R only: the Orc against the care ghost and the playbook,
+  the capture, won / honourable defeat / fault, and whether it counts for
+  a seat). It counts when the Orc arm and the care ghost both resolved
+  with an R, its arms were not seeded late, and the care ghost stayed
+  faithful (its soft stop matched the care's on every tick the Orc arm
+  recorded). A stretch with no tick is flagged on the grade, never
+  excluded. No seat reads it in O1. The grade is journaled; nothing is
+  sent.
+- `orc-shadow-audit` Sundays 05:40 UTC: the care ghost of each idea that
+  died in the last 7 days checked against the care's own exits, one
+  journal line per idea, written once.
+
+The same audit by hand, and the graded ideas grouped (never pooled):
+
+```bash
+./deploy/dc exec web python manage.py orcs shadow-audit --days 7             # prints only
+./deploy/dc exec web python manage.py orcs shadow-audit --days 7 --journal   # and journals each line once
+./deploy/dc exec web python manage.py scorecard --by orc                     # class, venue, bar source, level
+```
+
+With `orcs` ON the bar refresh also fetches the Orcs' symbols, 4h and 1h
+only: a living paper idea's (at most the paper cap of them, oldest first),
+a dead paper idea's whose arms still walk their tail, and a real idea's
+whose row has closed while an arm still walks its bars. An idea a bar past
+its cap asks nothing more. These requests come last in the pass, after
+every config, so every config asks exactly what it asks OFF and an eToro
+429 there stops only the Orcs' part. They are cut by the pass's deadline
+like a config, stamp no mark on any row, and are counted apart (`orcs` in
+the pass's result). A symbol an Orc part reached is the venue's for the
+rest of the pass: the watchlist does not write the public feed's bars
+over it. No 1d candle is asked: an Orc's daily
+bars are the venue's 4h bars grouped by UTC day, built in memory, so the
+1d table keeps the nightly EOD bars alone. A stock, ETF or Olog-hai idea
+born once 60 such fresh days exist reads its thesis on 1d closes; one born
+before reads 4h. OFF, the pass requests exactly what it did before.
+Morgul's duplicate check (G8) reads the idea of a row's Orc stamp: the
+legs of one idea are one position; there is no second leg before O5.
+
 ## Operating notes
 
 **Going live is deliberate.** Bots ship in paper mode; flipping one to live

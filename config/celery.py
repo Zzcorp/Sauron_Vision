@@ -90,6 +90,13 @@ app.conf.task_routes = {
     # the Orc tables only, no broker, no model, beside the Morgul guards.
     # No orcs.* glob: the `orcs` queue and its worker arrive with O2.
     "bot_program.orcs.tasks.orc_census": {"queue": "fast"},
+    # 2026-10-16 -- the Orcs' arms and grades (O1b): bars and the Orc tables
+    # only, no broker, no model. On `slow` (worker-slow serves slow,ai) by
+    # exact name until O2 ships the `orcs` queue and worker-orc: a glob to
+    # a queue no worker consumes would strand them.
+    "bot_program.orcs.tasks.track_ghosts": {"queue": "slow"},
+    "bot_program.orcs.tasks.grade_closed": {"queue": "slow"},
+    "bot_program.orcs.tasks.shadow_audit": {"queue": "slow"},
 }
 
 # ============================================================
@@ -445,6 +452,24 @@ app.conf.beat_schedule = {
         "task": "bot_program.orcs.tasks.orc_census",
         "schedule": 300.0,
         "options": {"expires": 280, "expire_seconds": 280},
+    },
+    # THE ORCS' ARMS (2026-10-16, O1b, bot_program/orcs/ghost.py): every
+    # 15 min the arms that outlive their row walk the venue's bars; hourly
+    # the dead ideas are graded against the care; weekly the care ghost is
+    # checked against the care's own exits. Behind the orcs switch; each is
+    # idempotent and catch-up safe.
+    "orc-track-ghosts": {
+        "task": "bot_program.orcs.tasks.track_ghosts",
+        "schedule": 900.0,
+        "options": {"expires": 840, "expire_seconds": 840},
+    },
+    "orc-grade-closed": {
+        "task": "bot_program.orcs.tasks.grade_closed",
+        "schedule": crontab(minute=40),
+    },
+    "orc-shadow-audit": {
+        "task": "bot_program.orcs.tasks.shadow_audit",
+        "schedule": crontab(hour=5, minute=40, day_of_week="sunday"),
     },
     # THE CRISIS MODE AND ARAGORN (2026-10-02, bot_program/
     # market_stress.py, aragorn.py): the posture every 15 min, the pair

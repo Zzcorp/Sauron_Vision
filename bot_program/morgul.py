@@ -1031,6 +1031,15 @@ def check_daily_loss(ctx, g) -> list:
 
 # ── G8: duplicates ───────────────────────────────────────────────────────
 
+def _idea_of(trade):
+    """The idea a row belongs to: its Orc stamp's idea, else the row."""
+    meta = trade.metadata if isinstance(trade.metadata, dict) else {}
+    stamp = meta.get("orc")
+    if isinstance(stamp, dict) and stamp.get("idea"):
+        return ("idea", stamp["idea"])
+    return ("row", trade.pk)
+
+
 def check_duplicates(ctx, g) -> list:
     """More than one OPEN row at a broker (live or demo, said) on one
     config, symbol and side."""
@@ -1044,6 +1053,13 @@ def check_duplicates(ctx, g) -> list:
     out = []
     for (cfg_pk, symbol, side, world), rows in groups.items():
         if len(rows) < 2:
+            continue
+        # THE ORCS (O1b, spec §4.4): the legs of one idea (the idea in the
+        # Orc stamp, read by _idea_of above) are one position, never a
+        # duplicate; two ideas, or an unstamped row beside one, still are.
+        # The spec asks for a note on the group; it is skipped instead,
+        # since no leg exists before O5, so this changes nothing today.
+        if len({_idea_of(t) for t in rows}) < 2:
             continue
         first = rows[0]
         side_words = eye.SIDE_WORDS.get(side, str(side).lower())

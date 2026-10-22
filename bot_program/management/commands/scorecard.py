@@ -15,6 +15,13 @@ Read-only: it writes nothing and touches no broker.
 inferred, and how many live stock and ETF closes the venue made outside
 09:30-16:00 New York ("unmeasured" when the venue's close time is not
 recorded). `--by policy` waits for PR51b: no exit policy exists yet.
+
+    python manage.py scorecard --by orc         # the Orcs' graded ideas
+
+`--by orc` (2026-10-16, the Orcs O1b, spec §6.8) reads the Orcs' grades:
+one block per (class, venue, bar source, seat level), never pooled, with
+the mean delta against the care ghost and the playbook, the captures, the
+AI cost per idea in R and the inferred-exit line. R only, never money.
 """
 from django.core.management.base import BaseCommand
 
@@ -27,6 +34,13 @@ def _r(x):
     return "—" if x is None else f"{x:+.2f}R"
 
 
+def _cap(x):
+    """A capture as shown: a pyramid's above 1 is capped at the display
+    bound (bot_program/orcs/constants.CAPTURE_DISPLAY_MAX)."""
+    from bot_program.orcs.constants import CAPTURE_DISPLAY_MAX
+    return "—" if x is None else f"{min(x, CAPTURE_DISPLAY_MAX):.2f}"
+
+
 class Command(BaseCommand):
     help = "Win rate, payoff and expectancy of the closed book, and the diagnosis."
 
@@ -34,7 +48,7 @@ class Command(BaseCommand):
         parser.add_argument("--days", type=int, default=30)
         parser.add_argument("--venue", choices=["live", "paper"], default=None)
         parser.add_argument("--by", choices=["lane", "rule", "class", "venue",
-                                     "signal", "exit"],
+                                     "signal", "exit", "orc"],
                             default="lane",
                             help="How to split the book (default: lane — "
                                  "your hand-taken trades against the bots).")
@@ -42,6 +56,8 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         from bot_program import scorecard as sc
 
+        if opts["by"] == "orc":
+            return self._orcs(max(1, opts["days"]), opts["venue"])
         rows = sc.rows(days=max(1, opts["days"]), venue=opts["venue"])
         w = self.stdout.write
         scope = opts["venue"] or "live + paper"
@@ -64,6 +80,39 @@ class Command(BaseCommand):
         for name, members in sorted(groups.items(),
                                     key=lambda kv: -len(kv[1])):
             self._block(f"{opts['by']} {name}", sc.summarize(members))
+
+    def _orcs(self, days, venue):
+        """The Orcs' grades: (class, venue, bar source, level), never
+        pooled; R only."""
+        from bot_program import scorecard as sc
+        w = self.stdout.write
+        rows = sc.orc_rows(days=days, venue=venue)
+        w(f"SCORECARD · the Orcs · last {days} days · "
+          f"{venue or 'every venue'} · {len(rows)} graded idea(s)")
+        if not rows:
+            w("")
+            w("  no graded Orc idea in this window")
+            return
+        groups = sc.group(rows, lambda r: (r["asset_class"], r["venue"],
+                                           r["bar_source"], r["level"]))
+        for (cls, ven, source, level), members in sorted(groups.items()):
+            s = sc.summarize_orc(members)
+            w("")
+            w(f"── orc {cls} · {ven} · {source} · L{level} ──")
+            w(f"  ideas {s['n']} · Δ care {_r(s['delta_care'])} · "
+              f"Δ playbook {_r(s['delta_play'])}")
+            if s["with_avail"]:
+                w(f"  capture: Orc {_cap(s['capture_orc'])} · care "
+                  f"{_cap(s['capture_ghost'])} · playbook "
+                  f"{_cap(s['capture_play'])} ({s['with_avail']} ideas with "
+                  f"at least +0.5R available)")
+            else:
+                w("  capture: — (no idea offered +0.5R)")
+            w("  add legs: — (no add before O5)")
+            cost = s["ai_cost_r"]
+            w("  AI cost per idea: " + ("—" if cost is None
+                                         else f"{cost:+.3f}R"))
+            w(f"  {sc.inferred_line(members)}")
 
     def _block(self, title, s):
         from bot_program import scorecard as sc

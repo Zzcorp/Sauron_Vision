@@ -14,6 +14,8 @@ fast queue, behind the `orcs` switch.
                again (a full save from a stale copy in memory)
   4. reviews   a new reviewer verdict on an open leg is a fact
   5. pending   a close pending at the venue is a fact
+  6. seeded    (O1b) an Orc born before its arms existed gets them, marked
+               "late": graded, never counted for a seat
 
 Each row runs on its own: one that fails never stops the pass. The result
 names no `skipped`, `parsed` or `attempted` key: the task gate reads those
@@ -97,6 +99,33 @@ def _restamp() -> int:
     return n
 
 
+def _seed_late(now) -> int:
+    """An Orc born before its arms existed (O1a's births) gets the arms it
+    lacks, seeded now from the row as it stands, and its O1a care track is
+    brought to the arms' format in place, its own care state kept
+    (ghost.seed_tracks), all marked "late": such an idea is graded but
+    never counts for a seat (spec §6.4). Only living Orcs are counted."""
+    from django.db.models import Count
+
+    from bot_program.orcs import ghost
+    from bot_program.orcs.constants import GHOST_ARMS, SEED_LATE
+    from bot_program.orcs.models import Orc, OrcTrack
+    have = dict(OrcTrack.objects.exclude(orc__state=STATE_DEAD)
+                .values("orc").annotate(n=Count("id"))
+                .values_list("orc", "n"))
+    n = 0
+    for orc in (Orc.objects.exclude(state=STATE_DEAD)
+                .select_related("root_trade__config")):
+        if have.get(orc.pk, 0) >= len(GHOST_ARMS):
+            continue
+        try:
+            ghost.seed_tracks(orc, orc.root_trade, now=now, seed=SEED_LATE)
+            n += 1
+        except Exception as e:  # noqa: BLE001 — one idea never stops it
+            logger.warning("[orcs] census: Orc %s not seeded: %s", orc.pk, e)
+    return n
+
+
 def run(now=None) -> dict:
     from django.utils import timezone
 
@@ -106,13 +135,14 @@ def run(now=None) -> dict:
         return {"status": "skipped", "reason": "orcs_disabled"}
     now = now or timezone.now()
     out = {"status": "success", "born": 0, "adopted": 0, "died": 0,
-           "facts": 0, "restamped": 0}
+           "facts": 0, "restamped": 0, "seeded": 0}
     # the dead first: the cap is counted after the sweep has ended the
     # Orcs whose legs closed where no receiver saw them
     steps = (
         ("died", lambda: lifecycle.sweep(now)),
         ("born", lambda: _births(now)),
         ("restamped", _restamp),
+        ("seeded", lambda: _seed_late(now)),
     )
     for key, step in steps:
         try:

@@ -15,7 +15,8 @@ assigns the type from it, purely.
                      row's currencies (either leg of a pair; USD otherwise;
                      the care's sources, position_care.py:168-175)
   exotic legs        a forex leg outside risk_gate.THEME_CURRENCIES
-  gap p90            None until O1b's gap model measures it
+  gap p90            the next shut's measured gap in R (orcs/gaps.py),
+                     None while unmeasured
 """
 import logging
 from datetime import timedelta
@@ -136,6 +137,22 @@ def _crypto_weekend(now, hold_h) -> bool:
     return False
 
 
+def gap_p90_r(trade, now, stop_distance):
+    """The next shut's measured gap p90 in R (bot_program/orcs/gaps.py:
+    the weekend's, the overnight's, a never-shut class's 1h range), or None
+    while it is unmeasured or the row has no R. Never raises."""
+    if not stop_distance:
+        return None
+    try:
+        from bot_program.orcs import gaps
+        gap = gaps.next_shut_gap(trade.symbol, str(trade.asset_class or ""),
+                                 now=now)
+        return gaps.in_r(gap, stop_distance) if gaps.measured(gap) else None
+    except Exception as e:  # noqa: BLE001 — an unread gap adds nothing
+        logger.info("[orcs] %s: the gap was not read: %s", trade.symbol, e)
+        return None
+
+
 def situation_for(trade, cfg, *, manual=False, now=None) -> dict:
     from bot_program.orcs import sessions
     from bot_program.orcs.facts import initial_stop
@@ -187,7 +204,7 @@ def situation_for(trade, cfg, *, manual=False, now=None) -> dict:
                            and _crypto_weekend(now, hold_h)),
         "prints": _prints(trade, now, hold_h),
         "exotic_legs": exotic_legs(trade),
-        "gap_p90_r": None,
+        "gap_p90_r": gap_p90_r(trade, now, stop_distance),
         "operator_horizon_h": None,
         "at": now.isoformat(),
     }

@@ -1,6 +1,6 @@
-"""The arms of the grade (spec §6.1), seeded at birth. O1a seeds the care
-ghost; O1b adds the playbook and the multi-ghost policies to the arms born
-here (ARMS_AT_BIRTH, SEEDERS) and steps them.
+"""The arms of the grade (spec §6.1), seeded at birth. O1a seeded the care
+ghost here; O1b seeds every arm (bot_program/orcs/ghost.seed_tracks, which
+builds the care-like arms on `seed_care` below) and steps them.
 
 THE CARE GHOST RUNS ON ITS OWN STATE (§3.3). It is seeded ONCE, here, from
 the row's metadata["care"] (or from the entry when the care has not met
@@ -11,14 +11,16 @@ against.
 
 Its venue stop is the stop the VENUE holds at birth, the row's
 `stop_loss` (§2.1; the mirror itself writes care["venue_stop"] from it,
-position_care.py:776), never only the mirror's record: a hand edit or the
+position_care.py:814), never only the mirror's record: a hand edit or the
 engine's own break-even moves the venue's stop without touching that
 record, and a ghost seeded on the initial stop would run looser than the
 position ever was. The mirror's last accepted level is kept beside it as
 `mirror_venue_stop`.
 """
 
-ARMS_AT_BIRTH = ("care",)
+from bot_program.orcs.constants import GHOST_ARMS
+
+ARMS_AT_BIRTH = GHOST_ARMS
 #: The care's own keys the ghost carries (position_care.plan's state).
 CARE_KEYS = ("peak", "worst", "since", "soft_stop", "soft_why", "venue_stop",
              "scaled_out")
@@ -66,17 +68,8 @@ def seed_care(orc, trade) -> dict:
     return state
 
 
-SEEDERS = {"care": seed_care}
-
-
-def seed_at_birth(orc, trade) -> list:
+def seed_at_birth(orc, trade, *, now=None, seed="birth") -> list:
     """One OrcTrack per arm born with the idea, created once: a second call
-    finds them and writes nothing."""
-    from bot_program.orcs.models import OrcTrack
-    out = []
-    for arm in ARMS_AT_BIRTH:
-        track, created = OrcTrack.objects.get_or_create(
-            orc=orc, arm=arm,
-            defaults={"state": SEEDERS[arm](orc, trade), "open": True})
-        out.append(track)
-    return out
+    finds them and writes nothing (ghost.seed_tracks)."""
+    from bot_program.orcs.ghost import seed_tracks
+    return seed_tracks(orc, trade, now=now, seed=seed)
