@@ -2,6 +2,7 @@
 with an id the model may later cite, only when something changed — the
 care's stop by the quarter R, the mirror held or refused, a hand edit, an
 event window, a scale-out, the care's close, the thesis check, a review,
+what the venue said of the position (no more than its stamp proves),
 a pending close. R and prices only; never money, never a reviewer's prose.
 
 Run with:  python manage.py test tests.orcs.test_orc_journal
@@ -13,6 +14,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.utils import timezone
 
+from tests import test_venue_exit as _ve
 from tests.orcs.helpers import (_config, _manual_config, _manual_row, _on,
                                 _row, _user, born, headlines)
 
@@ -27,6 +29,18 @@ def _care(row, **care):
     from bot_program.models import AssetBotTrade
     meta = dict(row.metadata or {})
     meta["care"] = {**(meta.get("care") or {}), **care}
+    row.metadata = meta
+    AssetBotTrade.objects.filter(pk=row.pk).update(metadata=meta)
+
+
+def _stamp(row, *, pop=(), **keys):
+    """The venue's own evidence on the row (venue_exit.merge_meta's
+    idiom): top-level metadata keys set, or popped."""
+    from bot_program.models import AssetBotTrade
+    meta = dict(row.metadata or {})
+    for key in pop:
+        meta.pop(key, None)
+    meta.update(keys)
     row.metadata = meta
     AssetBotTrade.objects.filter(pk=row.pk).update(metadata=meta)
 
@@ -130,6 +144,183 @@ class TheJournalTests(TestCase):
             "The thesis check reads hold.",
             "The thesis check reads adjust: a structure stop at 99.50."])
 
+    def test_an_unread_thesis_check_says_it_could_not_read(self):
+        """brain/thesis_check.UNREAD is no verdict on the thesis: the fact
+        says the check could not read, never "reads unread"."""
+        from bot_program.models import AssetBotTrade
+        meta = dict(self.row.metadata, thesis={"verdict": "unread",
+                                               "stop": None, "at": "t1"})
+        self.row.metadata = meta
+        AssetBotTrade.objects.filter(pk=self.row.pk).update(metadata=meta)
+        self._tick()
+        self._tick()
+        self.assertEqual(self._facts(), [
+            "The thesis check could not read the structure."])
+
+    def test_the_tick_list_missing_the_position_is_a_fact_once(self):
+        """venue_exit.MISSING_AT_KEY, stamped by the care's read of the
+        tick's list (position_care._venue_still_holds -> note_missing). It
+        proves only that this list did not show the position: the fact says
+        that, is the care's, and promises no booking (the reconcile books
+        only on the venue's own order read). One fact per stamp; the
+        reconcile listing it again (note_listed: LISTED_AT_KEY stamped, the
+        miss popped) is one fact; a new stamp is news."""
+        _stamp(self.row, venue_missing_at="2026-10-14T15:07:41+00:00")
+        self._tick()
+        self._tick()
+        _stamp(self.row, pop=("venue_missing_at",),
+               venue_listed_at="2026-10-14T15:15:02+00:00")
+        self._tick()
+        _stamp(self.row, venue_listed_at="2026-10-14T15:30:02+00:00")
+        self._tick()
+        _stamp(self.row, venue_missing_at="2026-10-14T16:20:00+00:00")
+        self._tick()
+        self.assertEqual(self._facts(), [
+            "The tick's position list did not show this position at 15:07 "
+            "UTC; the reconcile asks the venue before it books anything.",
+            "The venue's position list shows this position again (15:15 "
+            "UTC).",
+            "The tick's position list did not show this position at 16:20 "
+            "UTC; the reconcile asks the venue before it books anything."])
+        entry = self.orc.journal.filter(
+            headline__startswith="The tick's position list").first()
+        self.assertEqual(entry.author, "care", "the care's read stamped it")
+        self.assertEqual(entry.body, {"at": "2026-10-14T15:07:41+00:00"})
+        for text in self._facts():
+            self.assertNotIn("will book", text)
+
+    def test_the_venues_open_answer_is_one_fact_per_run_of_misses(self):
+        """venue_exit.said_open: the list missed the position and the
+        venue's own order read says OPEN. Nothing is booked, the miss
+        stamp stays on the row, and the journal says exactly that, once
+        per run of misses (said_open stamps every answer); a listing ends
+        the run, and an open answer after it is news again."""
+        from datetime import datetime, timezone as dt_tz
+
+        from bot_program import venue_exit
+
+        def said_open(hh, mm):
+            with patch("bot_program.notifications.notify_staff"):
+                venue_exit.said_open(self.row, None, where="reconcile",
+                                     now=datetime(2026, 10, 14, hh, mm,
+                                                  tzinfo=dt_tz.utc))
+
+        venue_exit.merge_meta(self.row, {
+            venue_exit.MISSING_AT_KEY: "2026-10-14T15:07:41+00:00"})
+        self._tick()
+        said_open(15, 15)
+        self._tick()
+        said_open(15, 30)
+        self._tick()
+        self.row.refresh_from_db()
+        self.assertEqual(self.row.status, "OPEN")
+        self.assertIn(venue_exit.MISSING_AT_KEY, self.row.metadata,
+                      "an open answer leaves the miss stamp on the row")
+        open_at_1515 = ("The venue's position list missed this position, but "
+                        "its own order read says it is still open (15:15 "
+                        "UTC); nothing was booked.")
+        self.assertEqual(self._facts()[1:], [open_at_1515])
+        venue_exit.merge_meta(
+            self.row, {venue_exit.LISTED_AT_KEY: "2026-10-14T15:45:00+00:00"},
+            pop=(venue_exit.MISSING_AT_KEY,))
+        self._tick()
+        self._tick()
+        said_open(16, 0)
+        self._tick()
+        self.assertEqual(self._facts()[1:], [
+            open_at_1515,
+            "The venue's position list shows this position again (15:45 "
+            "UTC).",
+            "The venue's position list missed this position, but its own "
+            "order read says it is still open (16:00 UTC); nothing was "
+            "booked."])
+        for text in self._facts():
+            self.assertNotIn("will book", text)
+
+    def test_one_ticks_crossing_comes_before_its_miss(self):
+        """The tick stamps the crossing (base.py, note_crossing) before the
+        care's list read stamps the miss: the journal numbers them in that
+        order, whatever order the stamps sit in, and two stamps read late
+        together are written in the order of their times."""
+        _stamp(self.row, venue_missing_at="2026-10-07T11:07:59+00:00",
+               venue_level_crossed={"level": "stop", "price": 98.0,
+                                    "mark": 97.9,
+                                    "at": "2026-10-07T11:07:59+00:00"})
+        self._tick("97.9")
+        self.assertEqual(self._facts(), [
+            "The mark crossed the venue's stop at 98.00 (11:07 UTC).",
+            "The tick's position list did not show this position at 11:07 "
+            "UTC; the reconcile asks the venue before it books anything."])
+        ids = [e.fact_id for e in self.orc.journal.filter(kind="fact")
+               .order_by("id")][self.n0:]
+        self.assertEqual(ids, [f"F{self.n0 + 1}", f"F{self.n0 + 2}"])
+        other = _row(self.cfg, symbol="ETHUSD")
+        orc = born(self, other)
+        n0 = len(headlines(orc, kind="fact"))
+        _stamp(other, venue_missing_at="2026-10-07T11:07:59+00:00",
+               venue_level_crossed={"level": "stop", "price": 98.0,
+                                    "mark": 97.9,
+                                    "at": "2026-10-07T11:12:00+00:00"})
+        from bot_program.orcs.observe import after_care
+        after_care(self.bot, other, "97.9", "")
+        self.assertEqual(headlines(orc, kind="fact")[n0:], [
+            "The tick's position list did not show this position at 11:07 "
+            "UTC; the reconcile asks the venue before it books anything.",
+            "The mark crossed the venue's stop at 98.00 (11:12 UTC)."])
+
+    def test_a_crossing_of_the_venue_level_is_a_fact_once(self):
+        """venue_exit.CROSSED_KEY, stamped by the tick before the care
+        (base.py, note_crossing): the first mark beyond a level the venue
+        holds. Written again only as new evidence (a new `at`)."""
+        _stamp(self.row, venue_level_crossed={
+            "level": "stop", "price": 98.0, "mark": 97.9,
+            "at": "2026-10-14T15:05:00+00:00"})
+        self._tick("97.9")
+        self._tick("97.8")
+        _stamp(self.row, venue_level_crossed={
+            "level": "target", "price": 110.0, "mark": 110.2,
+            "at": "2026-10-14T18:45:00+00:00"})
+        self._tick("110.2")
+        self.assertEqual(self._facts(), [
+            "The mark crossed the venue's stop at 98.00 (15:05 UTC).",
+            "The mark crossed the venue's target at 110.00 (18:45 UTC)."])
+        entry = self.orc.journal.filter(
+            headline__startswith="The mark crossed").first()
+        self.assertEqual(entry.body, {"level": "stop", "price": 98.0,
+                                      "mark": 97.9,
+                                      "at": "2026-10-14T15:05:00+00:00"})
+
+    def test_the_venue_keys_are_venue_exits_own(self):
+        """facts reads the keys by their strings (the package imports
+        nothing of the venue's); they must stay the writer's."""
+        from bot_program import venue_exit
+        from bot_program.orcs import facts
+        self.assertEqual(facts.VENUE_MISSING_KEY, venue_exit.MISSING_AT_KEY)
+        self.assertEqual(facts.VENUE_CROSSED_KEY, venue_exit.CROSSED_KEY)
+        self.assertEqual(facts.VENUE_SAID_OPEN_KEY,
+                         venue_exit.SAID_OPEN_AT_KEY)
+        self.assertEqual(facts.VENUE_LISTED_KEY, venue_exit.LISTED_AT_KEY)
+        from brain import thesis_check
+        self.assertEqual(facts.THESIS_UNREAD, thesis_check.UNREAD)
+
+    def test_a_venue_stamp_on_a_dead_orc_is_not_news(self):
+        """A dead Orc's tick reaches the fact reader only with a care close
+        (observe.after_care returns before it otherwise): it hears that
+        close and nothing of the venue."""
+        from bot_program.orcs.lifecycle import kill_all
+        kill_all(self.user)
+        n = self.orc.journal.count()
+        _stamp(self.row, venue_missing_at="2026-10-14T15:07:41+00:00",
+               venue_said_open_at="2026-10-14T15:15:00+00:00",
+               venue_level_crossed={"level": "stop", "price": 98.0,
+                                    "mark": 97.9,
+                                    "at": "2026-10-14T15:05:00+00:00"})
+        self._tick("97.9", cared="attempted")
+        new = [e.headline for e in self.orc.journal.order_by("id")][n:]
+        self.assertEqual(new, [
+            "The care decided to close (its stop) at 97.90, -1.05R."],
+            "a dead Orc hears its care's close, no venue news")
+
     def test_a_review_is_one_fact_without_its_reasoning(self):
         from brain.position_review_models import PositionReview
         from bot_program.orcs import facts
@@ -179,6 +370,14 @@ class TheJournalTests(TestCase):
               venue_stop=100.2,
               venue_stop_hand={"level": 99.0, "at": "x"},
               event={"title": "CPI", "at": "2026-10-16T12:30:00+00:00"})
+        _stamp(self.row, venue_missing_at="2026-10-16T12:40:00+00:00",
+               venue_said_open_at="2026-10-16T12:45:00+00:00",
+               venue_level_crossed={"level": "stop", "price": 98.0,
+                                    "mark": 97.9,
+                                    "at": "2026-10-16T12:35:00+00:00"})
+        self._tick()
+        _stamp(self.row, pop=("venue_missing_at",),
+               venue_listed_at="2026-10-16T13:00:00+00:00")
         self._tick()
         kill_all(self.user, reason="t")
         texts = [e.headline for e in self.orc.journal.all()]
@@ -234,9 +433,16 @@ class TheJournalTests(TestCase):
         from bot_program.orcs.lifecycle import kill_all
         kill_all(self.user)
         n = self.orc.journal.count()
-        _care(self.row, soft_stop=100.6, soft_why="trail")
+        _care(self.row, soft_stop=100.6, soft_why="trail", venue_stop=100.6,
+              event={"title": "CPI", "at": "2026-10-16T12:30:00+00:00"})
         self._tick()
         self.assertEqual(self.orc.journal.count(), n)
+        # ...and with a care close, the one path that reaches the fact
+        # reader for a dead Orc: the close, and none of the care's moves
+        self._tick("100.6", cared="attempted")
+        new = [e.headline for e in self.orc.journal.order_by("id")][n:]
+        self.assertEqual(new, [
+            "The care decided to close (its stop) at 100.60, +0.30R."])
 
     def test_journal_entries_are_never_updated(self):
         from bot_program.orcs import journal
@@ -252,6 +458,20 @@ class TheAdoptedHistoryTests(TestCase):
     row's history is in its reconstructed thesis, never journaled again as
     new facts, and a hand edit made before the adoption is not this idea's
     hand act."""
+
+    def test_a_care_stop_with_no_recorded_why_is_history_too(self):
+        """baseline keeps the care's stop under the key observe_tick builds,
+        its "lock" default included: a row whose care holds a stop and no
+        why says nothing new on its first tick."""
+        from bot_program.orcs.observe import after_care
+        _on()
+        cfg = _config(_user("orc_no_why"))
+        row = _row(cfg, meta={"care": {"soft_stop": 99.0, "peak": 101.0}})
+        orc = born(self, row)
+        row.refresh_from_db()
+        n = len(headlines(orc, kind="fact"))
+        after_care(SimpleNamespace(_tick_broker_cache={}), row, "101", "")
+        self.assertEqual(headlines(orc, kind="fact")[n:], [])
 
     def test_an_adopted_rows_care_history_is_not_journaled_again(self):
         from brain.position_review_models import PositionReview
@@ -270,7 +490,15 @@ class TheAdoptedHistoryTests(TestCase):
         row = _manual_row(lane, paper=False, symbol="XAUUSD", cls="commodity",
                           entry="2650", stop="2630", target="2700",
                           meta={"care": care,
-                                "thesis": {"verdict": "hold", "stop": None}})
+                                "thesis": {"verdict": "hold", "stop": None},
+                                "venue_missing_at":
+                                    "2026-10-15T13:00:00+00:00",
+                                "venue_said_open_at":
+                                    "2026-10-15T13:15:00+00:00",
+                                "venue_level_crossed": {
+                                    "level": "stop", "price": 2630.0,
+                                    "mark": 2629.0,
+                                    "at": "2026-10-15T12:55:00+00:00"}})
         PositionReview.objects.create(
             book="bot", position_id=row.pk, symbol="XAUUSD", side="BUY",
             verdict="tighten", mark=2660, unrealized_r=0.5)
@@ -290,3 +518,60 @@ class TheAdoptedHistoryTests(TestCase):
         after_care(SimpleNamespace(_tick_broker_cache={}), row, "2670", "")
         self.assertEqual(headlines(orc, kind="fact")[n:], [
             "The care moved its stop to 2660.00 (trail), +0.50R."])
+
+
+class TheVenuesWordThroughTheReconcileTests(_ve.Base):
+    """The case PR50's guard was built for, end to end on an eToro-shaped
+    real row (tests.test_venue_exit's fixtures, no network): the care's
+    list read misses the position, the reconcile asks the venue, the venue
+    says OPEN. Nothing is booked, and nothing in the Orc's journal says a
+    close will be."""
+
+    def _observe(self, row):
+        from bot_program.orcs.observe import after_care
+        after_care(SimpleNamespace(_tick_broker_cache={}), row, "102", "")
+
+    def test_an_open_answer_books_nothing_and_the_journal_says_so(self):
+        from bot_program import venue_exit
+        from bot_program.orcs import facts
+        _on()
+        row = self._share()
+        with patch("bot_program.notifications.dispatch_notification"):
+            orc = born(self, row)
+        row.refresh_from_db()
+        n0 = len(headlines(orc, kind="fact"))
+        self.assertTrue(venue_exit.note_missing(row, _ve.EtoroTrader()))
+        self._observe(row)
+        missed = facts._hhmm(row.metadata[venue_exit.MISSING_AT_KEY])
+        out, staff = self._run(_ve.EtoroTrader(state="open"))
+        self.assertEqual(out["venue_says_open"], 1)
+        row.refresh_from_db()
+        said = facts._hhmm(row.metadata[venue_exit.SAID_OPEN_AT_KEY])
+        self._observe(row)
+        out, _ = self._run(_ve.EtoroTrader(state="open"))  # the same run
+        row.refresh_from_db()
+        self._observe(row)
+        self.assertEqual(row.status, "OPEN")
+        self.assertIsNone(row.exit_price)
+        self.assertIn(venue_exit.MISSING_AT_KEY, row.metadata)
+        self.assertEqual(headlines(orc, kind="fact")[n0:], [
+            f"The tick's position list did not show this position at "
+            f"{missed} UTC; the reconcile asks the venue before it books "
+            f"anything.",
+            f"The venue's position list missed this position, but its own "
+            f"order read says it is still open ({said} UTC); nothing was "
+            f"booked."])
+        # the reconcile's read lists it again: one fact, the run is over
+        self._run(_ve.EtoroTrader(held=[("AAPL", "P101")]))
+        row.refresh_from_db()
+        self.assertNotIn(venue_exit.MISSING_AT_KEY, row.metadata)
+        listed = facts._hhmm(row.metadata[venue_exit.LISTED_AT_KEY])
+        self._observe(row)
+        self._observe(row)
+        lines = headlines(orc, kind="fact")[n0:]
+        self.assertEqual(lines[2:], [
+            f"The venue's position list shows this position again "
+            f"({listed} UTC)."])
+        for text in headlines(orc):
+            self.assertNotIn("will book", text)
+            self.assertNotIn("no longer lists", text)
