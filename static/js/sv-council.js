@@ -98,6 +98,19 @@
         '. Followed: ' + ((s.emperor.followed || []).join(', ') || 'none') +
         '. Overruled: ' + ((s.emperor.overruled || []).join(', ') || 'none') +
         '.') + '</b></p>');
+      // THE HAND OF THE EMPEROR (2026-10-16): who held the seat, and
+      // whether the chair went against it
+      var hand = s.hand || {};
+      if (hand.name) {
+        html.push('<p class="sz-note">' + esc('The Hand: ' + hand.name +
+          (hand.side ? ' (' + hand.side + ' the trade)' : ' (no side taken)') +
+          (s.emperor.hand_overruled ? '; the Emperor overruled it' +
+            (s.emperor.hand_why ? ': ' + s.emperor.hand_why : ' without saying why')
+            : '') + '.') + '</p>');
+      } else if (hand.why_empty) {
+        html.push('<p class="sz-note">' + esc('The Hand: ' + hand.why_empty +
+          '.') + '</p>');
+      }
     }
     var items = voices.filter(function (v) { return v.voice !== 'emperor'; })
       .map(function (v) { return '<li>' + esc(voiceLine(v)) + '</li>'; });

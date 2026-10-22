@@ -26,6 +26,15 @@ eight more sit:
   THE EMPEROR      the chair: balanced, visionary, the war over the battle;
                    weighs every voice by its measured record.
 
+THE HAND OF THE EMPEROR (2026-10-16): in each (regime, class) the voice
+with the best measured weight there, once COUNCIL_HAND_MIN_N of its calls
+in that cell are graded at COUNCIL_HAND_MIN_FACTOR or better, is named to
+the chair, who says why when he overrules it; every overruling is graded.
+The members still read arguments, not records; only the Skeptic is told
+which voice is the most trusted, to attack its evidence first. The chair
+also reads THE PEOPLE'S MOOD (ai_agents/council_mood.py), a gauge of the
+real-money book computed by code that may only counsel caution.
+
 THE LAW, enforced by code and by every test in tests/test_council_*.py:
   - SHADOW. The eight new voices are recorded, shown and graded; nothing
     in an order path, sizing, a stop, a gate or a limit reads them. The
@@ -58,6 +67,7 @@ from ai_agents.agents.trade_debate import (DEBATE_EST_USD, DEBATE_HOLD_HOURS,
                                            DEBATE_MIN_SCALE, ChampionAgent,
                                            ExecutionerAgent, _agent_model,
                                            _clean_json, _DebateAgent, _unit)
+from ai_agents.council_mood import MOOD_LONG_DAYS, MOOD_SHORT_DAYS
 from bot_program import capital_desk as _desk
 from bot_program import evidence as _evidence
 from brain import position_review_agent as _review
@@ -124,6 +134,17 @@ COUNCIL_REPEAT_HOURS = DEBATE_HOLD_HOURS
 COUNCIL_LINK_WINDOW_MIN = 30
 #: Stored on each session for later readers (the council band, the Orcs).
 COUNCIL_SCHEMA_VERSION = 1
+#: THE HAND OF THE EMPEROR (2026-10-16): one seat per (regime, class),
+#: held by the best MEASURED weight in that very cell
+#: (council_grading.hand_of): at least this many graded calls there...
+COUNCIL_HAND_MIN_N = 30
+#: ...and a weight of at least trust_from_brier's first band above
+#: neutral (ai_agents/calibration.py).
+COUNCIL_HAND_MIN_FACTOR = 1.15
+#: The venue a debate argued on a rehearsal client is recorded under:
+#: world_of's word for a venue's rehearsal world
+#: (dashboard/position_summary.py). Graded never; closed ungraded.
+REHEARSAL_VENUE = "demo"
 
 VOICE_NAMES = {
     "executioner": "The Executioner", "champion": "The Champion",
@@ -336,7 +357,15 @@ brief never gave; what single observation, inside the trade's horizon,
 would prove it wrong. Name that voice, quote that claim and name its
 flaw. Say "sound" when the evidence behind the strongest claims holds,
 "shaky" when it might not, "unfounded" when the case rests on noise, a
-thin sample, stale data or a fact the brief does not contain. Your lane
+thin sample, stale data or a fact the brief does not contain.
+
+When the brief names THE MOST TRUSTED VOICE (the Hand of the Emperor,
+else the voice before you with the best record measured in this regime
+and class), attack its
+evidence FIRST when it gives you something to attack: trust that is never
+tested becomes habit. When its evidence holds, say so and take the
+weakest claim on the table, as always. Your grade does not change: you
+are right when the voice you name was wrong. Your lane
 is the evidence: whether the trade fails is the Executioner's question,
 never yours, and you give no probability for the trade itself."""
     LAW_NOTE = ("- The p_work paragraph above does not apply to you: your "
@@ -407,7 +436,7 @@ belong to the Executioner and the Champion."""
 class EmperorAgent(_CouncilAgent):
     agent_name = "council_emperor"
     voice = "emperor"
-    PROMPT = """You are THE EMPEROR, chair of Sauron Vision's council: balanced, smart,
+    PROMPT = f"""You are THE EMPEROR, chair of Sauron Vision's council: balanced, smart,
 patient, visionary. You do not trade battles; you win a war. The war is
 the book over the long run: stay inside its limits (the daily stop, the
 open-risk limit, the pledge cap, the elite allowance), follow the
@@ -417,11 +446,33 @@ when it cannot (the account's current pledge is not read there): never
 fill a missing number. The operator has set no season objective: do not
 invent one. This trade is one battle in that war.
 
+THE WAR ends with THE PEOPLE'S MOOD: a gauge the platform computes by
+code, with no AI, from the real-money book (its R over the last
+{MOOD_SHORT_DAYS} and {MOOD_LONG_DAYS} trading days, its fall from its peak, its losing
+streak, the day against its stop, the market's measured stress and its
+open risk). It counsels caution only. A content people is never a reason
+to press or to commit more; an unhappy people (uneasy, restless or
+afraid) is a reason to weigh fight_smaller or refuse. An input it says is
+unmeasured is unmeasured: never read it as calm.
+
 You have heard the other voices. Beside each stands its RECORD on this
 council in this regime and class: a weight above 1.00 has earned trust,
 below 1.00 has lost it, and "neutral" means not yet measured, which is
 neither trust nor distrust. Weigh the voices by their record, never by
 their eloquence or their number.
+
+One voice may hold THE HAND OF THE EMPEROR in this regime and class: the
+voice whose measured record here is the best on the council, with at
+least {COUNCIL_HAND_MIN_N} graded calls in this cell and a weight of at least
+{COUNCIL_HAND_MIN_FACTOR:.2f}. Hear it first; it does not bind you. Your side is read
+as your battle claim is graded: "fight" stands for the trade;
+"fight_smaller" and "refuse" stand against it (a commitment under the
+whole is graded on -R). When your verdict goes against the Hand's side,
+say why in hand_why, from the facts in the brief: fight_smaller or refuse
+against a Hand that is for the trade, or fight against a Hand that is
+against it. Every such overruling is graded: the record shows how often
+you and your Hand were right when you disagreed. When the brief says no
+voice has earned it yet, none has; weigh the records as above.
 
 Then judge: "fight" commits the proposed size, "fight_smaller" commits a
 share of it (0.25 to 0.75), "refuse" commits nothing. Name the voices you
@@ -438,6 +489,7 @@ campaign."""
  "followed": ["<voice>"], "overruled": [{"voice": "<voice>", "why": "<text>"}],
  "battle": "<this trade in the campaign, one sentence>",
  "war_cost": "<if lost / if won, in R and in shares of the limits' room>",
+ "hand_why": "<why your verdict goes against the Hand, from the brief: fight_smaller or refuse against a Hand for the trade, fight against a Hand against it; empty otherwise or when the seat is empty>",
  "plan": "<the long line this battle serves, one sentence>"}"""
 
 
@@ -782,11 +834,27 @@ def _parse_emperor(data, ctx):
                 and k not in [o["voice"] for o in overruled]:
             overruled.append({"voice": k, "why": _txt(
                 item.get("why") if isinstance(item, dict) else "", 200)})
-    return {"verdict": verdict, "commit": round(commit, 4),
-            "p_work": _p_work(data.get("p_work")), "followed": followed,
-            "overruled": overruled, "battle": _txt(data.get("battle")),
-            "war_cost": _txt(data.get("war_cost")),
-            "plan": _txt(data.get("plan"))}
+    out = {"verdict": verdict, "commit": round(commit, 4),
+           "p_work": _p_work(data.get("p_work")), "followed": followed,
+           "overruled": overruled, "battle": _txt(data.get("battle")),
+           "war_cost": _txt(data.get("war_cost")),
+           "plan": _txt(data.get("plan"))}
+    # THE HAND (2026-10-16): whether he went against it is decided by code
+    # from the two sides, never from his own "overruled" list, so leaving
+    # the Hand off it does not escape the grade.
+    hand = ctx.get("hand") if isinstance(ctx.get("hand"), dict) else {}
+    hv, hs = str(hand.get("voice") or ""), str(hand.get("side") or "")
+    overruled_hand = bool(hv and hs and hs != emperor_side(verdict))
+    # His reason, else the reason he gave for the Hand in his own
+    # "overruled" list: either is a reason said.
+    why = (_txt(data.get("hand_why"), 200).strip()
+           or next((str(o.get("why") or "") for o in overruled
+                    if o["voice"] == hv), "").strip())
+    out.update({"hand": hv, "hand_side": hs, "hand_overruled": overruled_hand,
+                "hand_why": why if overruled_hand else "",
+                "hand_note": ("overruled the Hand without saying why"
+                              if overruled_hand and not why else "")})
+    return out
 
 
 PARSERS = {"opportunist": _parse_opportunist, "striker": _parse_striker,
@@ -1027,21 +1095,29 @@ def _bot_session_fields(bot, cand, qty, brief) -> dict:
     }
 
 
-def open_debate_session(bot, cand, qty, brief, out):
+def open_debate_session(bot, cand, qty, brief, out, *, rehearsal=False):
     """The debate's record: one CouncilSession (status "record"), its two
     wave-0 voices copied from the debate (no second bill) and their claims.
     Called from debate_candidate once both sides were asked. Returns the
     session id, or None on any failure. Never raises; every write runs in
     a savepoint, so a failed insert never poisons a surrounding
-    transaction on the order path."""
+    transaction on the order path.
+
+    `rehearsal` (2026-10-16): the debate argued a SIM, practice or paper
+    client (AssetBot.rehearsal_or_unsure). The record and its claims are
+    stamped REHEARSAL_VENUE, so no weight, benchmark or chair statistic
+    (all venue "live") ever reads them, and the grader closes the record
+    ungraded instead of replaying it as "not sent"."""
     try:
         from django.db import transaction
 
         from ai_agents.council_models import CouncilSession, CouncilVoice
+        fields = _bot_session_fields(bot, cand, qty, brief)
+        if rehearsal:
+            fields["venue"] = REHEARSAL_VENUE
         with transaction.atomic():
             session = CouncilSession.objects.create(
-                status=CouncilSession.RECORD,
-                **_bot_session_fields(bot, cand, qty, brief))
+                status=CouncilSession.RECORD, **fields)
             meta = _meta(session)
             for side, agent in (("executioner", "debate_executioner"),
                                 ("champion", "debate_champion")):
@@ -1865,6 +1941,180 @@ def record_text(session, weights: dict) -> str:
     return "\n".join(lines)
 
 
+# ── the Hand of the Emperor and the most trusted voice (2026-10-16) ───────
+
+def emperor_side(verdict: str) -> str:
+    """The chair's side, measured by code: "fight" commits the trade; any
+    smaller commitment stands against it, as his battle claim is graded
+    (a commit under 1 is graded on -R, council_grading)."""
+    return {"fight": "for", "fight_smaller": "against",
+            "refuse": "against"}.get(str(verdict or ""), "")
+
+
+def deciding_claim(claims, voice: str):
+    """The claim a voice's side in a sitting is read from, and graded on
+    against the chair: its stance, else (the Skeptic) its attack, else its
+    work claim. None when it made none."""
+    cs = list(claims or [])
+    for c in cs:
+        if c.kind == "stance" and c.stance in ("for", "against"):
+            return c
+    if voice == "skeptic":
+        return next((c for c in cs if c.kind == "attack"), None)
+    return next((c for c in cs if c.kind == "work" and c.p is not None),
+                None)
+
+
+def claim_side(session, voice: str) -> str:
+    """"for", "against" or "" (silent, or no side taken): one voice's side
+    in this sitting, measured from its own claims. The Skeptic's side is
+    the opposite of the voice his attack names."""
+    from ai_agents.council_models import CouncilVoice
+    if not voice or not session.voices.filter(
+            voice=voice, status__in=(CouncilVoice.SPOKE,
+                                     CouncilVoice.COPIED)).exists():
+        return ""
+    c = deciding_claim(session.claims.filter(
+        voice_key=voice, kind__in=("stance", "attack", "work")), voice)
+    if c is None:
+        return ""
+    if c.kind == "stance":
+        return c.stance
+    if c.kind == "attack":
+        target = str((c.payload or {}).get("target") or "")
+        if not target or target == voice:
+            return ""
+        return {"for": "against", "against": "for"}.get(
+            claim_side(session, target), "")
+    return "for" if c.p > 0.5 else "against" if c.p < 0.5 else ""
+
+
+def hand_text(hand: dict) -> str:
+    """THE HAND OF THE EMPEROR as the chair reads it, after THE RECORD."""
+    h = hand or {}
+    cell = h.get("cell") or "this regime and class"
+    head = f"THE HAND OF THE EMPEROR ({cell}): "
+    if not h.get("voice"):
+        return (head + f"{h.get('why_empty') or 'no voice has earned it yet'}"
+                f" (the seat needs {COUNCIL_HAND_MIN_N} graded calls in this "
+                f"regime and class and a weight of at least "
+                f"{COUNCIL_HAND_MIN_FACTOR:.2f}).")
+    name = h.get("name") or VOICE_NAMES.get(h["voice"], h["voice"])
+    factor = _num(h.get("factor"))
+    record = ((f"weight {factor:.2f}, " if factor is not None else "")
+              + str(h.get("reason") or "measured in this cell")).rstrip(".")
+    side = h.get("side") or ""
+    if side == "for":
+        said = ("Its side in this sitting: for the trade. Only fight goes "
+                "with it: fight_smaller and refuse go against it, so say "
+                "why in hand_why.")
+    elif side == "against":
+        said = ("Its side in this sitting: against the trade. fight goes "
+                "against it (say why in hand_why); fight_smaller and refuse "
+                "go with it.")
+    else:
+        said = ("Its side in this sitting: none (silent, or no side taken): "
+                "there is nothing of it to overrule.")
+    return f"{head}{name} holds it.\n  Its record: {record}.\n  {said}"
+
+
+def trusted_text(hand: dict) -> str:
+    """The one line the Skeptic alone reads: a name and a title, never a
+    number (the members argue arguments, not records)."""
+    h = hand or {}
+    cell = h.get("cell") or "this regime and class"
+    v = h.get("trusted") or ""
+    attack = "Attack its evidence first when it gives you something to attack."
+    if v and h.get("trusted_why") == "hand":
+        return (f"THE MOST TRUSTED VOICE: {VOICE_NAMES.get(v, v)}, the Hand of "
+                f"the Emperor in {cell}. {attack}")
+    if v:
+        return (f"THE MOST TRUSTED VOICE: {VOICE_NAMES.get(v, v)}, the voice "
+                f"before you with the best measured record in {cell}. "
+                f"{attack}")
+    if h.get("trusted_why") == "unread":
+        return ("THE MOST TRUSTED VOICE: not read: the council's record "
+                "could not be read for this sitting. Choose your target on "
+                "the evidence alone.")
+    return (f"THE MOST TRUSTED VOICE: none named: no voice before you has "
+            f"earned trust in {cell}. Choose your target on the evidence "
+            f"alone.")
+
+
+def hand_line(session, emperor: dict = None) -> str:
+    """The position card's line: who held the seat at entry, its side, and
+    whether the chair overruled it. "" for a sitting before the seat."""
+    h = session.hand or {}
+    if not h:
+        return ""
+    if not h.get("voice"):
+        why = str(h.get("why_empty") or "")
+        if why.startswith(SEAT_UNREAD):
+            return f"The Hand of the Emperor at entry: {why}."
+        return "The Hand of the Emperor at entry: no voice had earned it yet."
+    name = h.get("name") or VOICE_NAMES.get(h["voice"], h["voice"])
+    side = h.get("side") or ""
+    line = (f"The Hand of the Emperor at entry: {name} ("
+            + (f"{side} the trade" if side in ("for", "against")
+               else "no side taken") + ")")
+    e = emperor or {}
+    if e.get("hand_overruled"):
+        why = str(e.get("hand_why") or "").strip().rstrip(".")
+        line += (f"; the Emperor overruled it: {why}" if why
+                 else "; the Emperor overruled it without saying why")
+    return line + "."
+
+
+#: The empty seat's words when the record behind it could not be read:
+#: never "no voice has earned it yet", which is a measured fact.
+SEAT_UNREAD = "the seat could not be read"
+
+
+def _seat(weights: dict, session, spoke: set, unread: str = "") -> dict:
+    """The Hand at this sitting and the Skeptic's target, from the weights
+    the chair will read. Fenced: an unread seat is empty, said. `unread`
+    names the error when the weights themselves could not be read: the
+    seat is then empty because nothing was read, and says so."""
+    cell = (f"{session.regime or 'unknown'} on "
+            f"{session.asset_class or 'every class'}")
+    empty = {"cell": cell, "voice": "", "name": "", "factor": None, "n": 0,
+             "brier": None, "reference": None, "reason": ""}
+    if unread:
+        return {**empty, "why_empty": f"{SEAT_UNREAD} ({unread})",
+                "trusted": "", "trusted_why": "unread"}
+    try:
+        from ai_agents.council_grading import hand_of, most_trusted
+        hand = hand_of(weights, session.regime, session.asset_class)
+        trusted, how = most_trusted(weights, hand.get("voice") or "", spoke)
+    except Exception as e:  # noqa: BLE001 — an unread seat is empty
+        logger.warning("[council] the Hand unread: %s", e)
+        hand = {**empty, "why_empty": f"{SEAT_UNREAD} ({type(e).__name__})"}
+        trusted, how = "", "unread"
+    return {**hand, "trusted": trusted, "trusted_why": how}
+
+
+def _fenced_mood(session) -> dict:
+    """THE PEOPLE'S MOOD for the sitting's owner: pure code, never a model
+    call; unmeasured, said, when it cannot be read."""
+    from ai_agents.council_mood import people_mood, unmeasured_mood
+    if session.user_id is None:
+        return unmeasured_mood("no owner's book to read")
+    try:
+        return people_mood(session.user)
+    except Exception as e:  # noqa: BLE001 — an unread gauge is unmeasured
+        logger.warning("[council] mood unread: %s", e)
+        return unmeasured_mood(f"the gauge could not be read "
+                               f"({type(e).__name__})")
+
+
+def _mood_lines(mood: dict) -> str:
+    from ai_agents.council_mood import mood_text
+    try:
+        return mood_text(mood)
+    except Exception as e:  # noqa: BLE001
+        return f"  the people's mood: unmeasured ({type(e).__name__})"
+
+
 # ── the estimates ─────────────────────────────────────────────────────────
 
 def estimate_usd(system: str, user: str, model: str) -> float:
@@ -2229,9 +2479,18 @@ def _sit(session) -> None:
         session.brief = ticket_brief(session)
     extras = council_extras(session)
     session.extras = extras["war"] + "\n\n" + extras["footprints"]
-    session.save(update_fields=["brief", "extras"])
+    # THE PEOPLE'S MOOD (2026-10-16): read once, by code, recorded on every
+    # sitting (a refused one too). Only the chair reads it: the members'
+    # briefs stay as they were, so their grades stay comparable.
+    mood = _fenced_mood(session)
+    session.mood = str(mood.get("level") or "unmeasured")[:10]
+    session.mood_read = _jsonable(mood)
+    session.save(update_fields=["brief", "extras", "mood", "mood_read"])
     common = "\n\n".join([_header(session), session.brief or "",
                           extras["war"], extras["footprints"]])
+    common_chair = "\n\n".join([_header(session), session.brief or "",
+                                extras["war"] + "\n" + _mood_lines(mood),
+                                extras["footprints"]])
     try:
         theories_text, theory_ids = live_theories(session)
     except Exception as e:  # noqa: BLE001
@@ -2263,26 +2522,47 @@ def _sit(session) -> None:
         else:
             post_theory(session, row)
 
-    ctx2 = dict(ctx, spoke=_spoke(session))
+    # The weights the chair will read (the nightly-graded snapshot), read
+    # before wave 2 only to seat the Hand and name the Skeptic's target;
+    # stored on the session after wave 2, as before, so a sitting refused
+    # there is never shown as weighted.
+    from ai_agents.council_grading import voice_weights
+    unread = ""
+    try:
+        weights = voice_weights(session.regime, session.asset_class)
+    except Exception as e:  # noqa: BLE001 — unread weights are neutral
+        logger.warning("[council] weights unread: %s", e)
+        weights, unread = {}, type(e).__name__
+    spoke = _spoke(session)
+    hand = _seat(weights, session, spoke, unread=unread)
+    session.hand = _jsonable(hand)
+    session.save(update_fields=["hand"])
+    ctx2 = dict(ctx, spoke=spoke)
     msg2 = common + "\n\n" + so_far(session)
-    res = run_wave(session, 2, [(v, msg2, ctx2) for v in later[2]],
-                   tier=tier)
+    # The members read arguments, not records: only the Skeptic is told
+    # which voice is the most trusted, to attack its evidence first.
+    specs2 = [(v, (msg2 + "\n\n" + trusted_text(session.hand))
+               if v == "skeptic" else msg2, ctx2) for v in later[2]]
+    res = run_wave(session, 2, specs2, tier=tier)
     if res["refused"]:
         _silence_waves(session, {3: later[3]}, res["refused"])
         _finish(session, why=res["refused"])
         return
 
-    from ai_agents.council_grading import voice_weights
-    try:
-        weights = voice_weights(session.regime, session.asset_class)
-    except Exception as e:  # noqa: BLE001 — unread weights are neutral
-        logger.warning("[council] weights unread: %s", e)
-        weights = {}
     session.weights = _jsonable(weights)
     session.save(update_fields=["weights"])
-    ctx3 = dict(ctx, spoke=_spoke(session))
-    msg3 = (common + "\n\n" + so_far(session) + "\n\n"
-            + record_text(session, weights))
+    try:
+        side = claim_side(session, hand.get("voice") or "")
+    except Exception as e:  # noqa: BLE001 — an unread side is no side
+        logger.warning("[council] the Hand's side unread: %s", e)
+        side = ""
+    session.hand = {**session.hand, "side": side}
+    session.save(update_fields=["hand"])
+    ctx3 = dict(ctx, spoke=_spoke(session),
+                hand={"voice": hand.get("voice") or "", "side": side})
+    msg3 = (common_chair + "\n\n" + so_far(session) + "\n\n"
+            + record_text(session, weights) + "\n\n"
+            + hand_text(session.hand))
     res = run_wave(session, 3, [("emperor", msg3, ctx3)], tier=tier)
     # The snapshot the chair read, on every voice's row (his own included).
     for row in session.voices.all():
@@ -2322,7 +2602,10 @@ def session_payload(session) -> dict:
                                                      o.get("voice"))
                                      for o in a.get("overruled") or []],
                        "war_cost": a.get("war_cost", ""),
-                       "plan": a.get("plan", "")}
+                       "plan": a.get("plan", ""),
+                       "hand_overruled": bool(a.get("hand_overruled")),
+                       "hand_why": a.get("hand_why", ""),
+                       "hand_note": a.get("hand_note", "")}
         voices.append(item)
     return {"id": session.id, "status": session.status, "why": session.why,
             "origin": session.origin, "symbol": session.symbol,
@@ -2331,6 +2614,11 @@ def session_payload(session) -> dict:
             if session.created_at else None,
             "asked": {"stop": session.stop, "target": session.target},
             "voices": voices, "emperor": emperor,
+            "hand": {"name": (session.hand or {}).get("name") or "",
+                     "side": (session.hand or {}).get("side") or "",
+                     "why_empty": (session.hand or {}).get("why_empty")
+                     or ""},
+            "mood": session.mood or "not read",
             "truth": session.truth, "truth_r": session.truth_r,
             "graded": session.graded_at is not None,
             "schema_version": session.schema_version}
@@ -2393,6 +2681,11 @@ def card_payload(session) -> dict:
         # Graded without an R (a repeat, no bars, no risk to measure):
         # the grader is done with it, and the card says why.
         "grade_notes": session.grade_notes or "nothing to grade",
+        # THE HAND and THE PEOPLE'S MOOD at entry (2026-10-16); "" for a
+        # sitting before them
+        "hand_line": hand_line(session, emperor),
+        "mood_line": (f"The people's mood at entry: {session.mood}."
+                      if session.mood else ""),
         "footer": FOOTER_WORDS})
     return p
 

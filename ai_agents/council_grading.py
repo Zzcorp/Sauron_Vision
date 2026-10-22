@@ -13,6 +13,10 @@ ai_agents/tasks.py: resolve_pending_calibrations):
     _decision_bars (bot_program/capital_desk.py), minus the round trip
     in R, so a replay pays what a real trade pays.
 
+THE HAND OF THE EMPEROR (hand_of, 2026-10-16): the seat each (regime,
+class) gives the voice with the best measured weight there; the
+Emperor's overrulings of it are graded (against_hand).
+
 THE WEIGHT (voice_weight): the house's Brier bands (trust_from_brier,
 ai_agents/calibration.py) over ONE weight claim per voice per sitting
 (the common event p_work, or the Skeptic's attack), read per (regime,
@@ -225,24 +229,30 @@ _DEMO_WORLD = (Q(metadata__has_key="broker_env")
 #: Why a record whose order filled in a rehearsal world is closed ungraded.
 REHEARSAL_NOTES = ("a rehearsal fill (paper, or the venue's demo or SIM "
                    "world): not real money, not graded")
+#: Why a debate argued on a rehearsal client (stamped venue "demo" by
+#: open_debate_session, 2026-10-16) is closed ungraded, sent or not.
+REHEARSAL_ARGUED_NOTES = ("argued on a rehearsal client (the venue's demo, "
+                          "SIM, practice or paper world): not real money, "
+                          "not graded")
 
 
-def close_rehearsal(session_id, now=None) -> int:
+def close_rehearsal(session_id, now=None, *, notes=REHEARSAL_NOTES,
+                    why="the order filled in a rehearsal world") -> int:
     """Close a record whose order filled in a rehearsal world (paper, or a
     venue's demo / SIM / practice world, dashboard.position_summary
-    .world_of): its pending claims are ungraded and the session is graded
-    with REHEARSAL_NOTES, so a simulator fill never moves a live weight
-    and is never replayed as "not sent". Returns the claims closed."""
+    .world_of), or that was argued on a rehearsal client: its pending
+    claims are ungraded and the session is graded with `notes`, so a
+    simulator never moves a live weight and is never replayed as "not
+    sent". Returns the claims closed."""
     from ai_agents.council_models import CouncilClaim, CouncilSession
     now = now or timezone.now()
     n = CouncilClaim.objects.filter(
         session_id=session_id, grade="pending").update(
-        grade="ungraded", grade_notes=REHEARSAL_NOTES[:300], graded_at=now)
+        grade="ungraded", grade_notes=notes[:300], graded_at=now)
     CouncilSession.objects.filter(id=session_id, graded_at__isnull=True
                                   ).update(graded_at=now,
-                                           grade_notes=REHEARSAL_NOTES[:300])
-    CouncilSession.objects.filter(id=session_id, why="").update(
-        why="the order filled in a rehearsal world")
+                                           grade_notes=notes[:300])
+    CouncilSession.objects.filter(id=session_id, why="").update(why=why)
     return n
 
 
@@ -578,6 +588,16 @@ def grade_session(session, now=None) -> int:
     Idempotent: only pending claims are touched."""
     from ai_agents.council_models import CouncilSession
     now = now or timezone.now()
+    if (session.venue or "live") != "live":
+        # a debate argued on a rehearsal client (a SIM, practice or paper
+        # client, 2026-10-16): sent or not, never graded as real money and
+        # never replayed as "not sent" into the live weights
+        n = close_rehearsal(session.id, now, notes=REHEARSAL_ARGUED_NOTES,
+                            why="argued on a rehearsal client: not real "
+                                "money")
+        session.graded_at, session.grade_notes = (now,
+                                                  REHEARSAL_ARGUED_NOTES[:300])
+        return n
     if _link(session, now) == "rehearsal":
         # the debate's record of an order that filled in a rehearsal world
         # (a SIM, practice or demo client the debate argued): closed
@@ -593,8 +613,10 @@ def grade_session(session, now=None) -> int:
     # record, but only the first is graded.
     if (session.origin == "bot" and session.trade_id is None
             and now - session.created_at >= NOT_SENT_AFTER):
+        # live records only: a rehearsal's record never makes a live one a
+        # repeat (2026-10-16)
         prev = (CouncilSession.objects
-                .filter(origin="bot", trade__isnull=True,
+                .filter(origin="bot", trade__isnull=True, venue="live",
                         config_id=session.config_id, symbol=session.symbol,
                         side=session.side, rule_name=session.rule_name,
                         created_at__lt=session.created_at,
@@ -849,6 +871,197 @@ def voice_weights(regime, asset_class, now=None) -> dict:
             for v in C.ALL_VOICES}
 
 
+# ── the Hand of the Emperor (2026-10-16) ──────────────────────────────────
+#
+# One seat per (regime, class), held by the voice with the best MEASURED
+# weight in that very cell: lane "measured" on the regime_class rung (a
+# fallback rung never counts), at least COUNCIL_HAND_MIN_N graded calls
+# there and a weight of at least COUNCIL_HAND_MIN_FACTOR. Ties go to more
+# graded calls, then the lower Brier, then a fixed order. Recomputed from
+# the live weights at every sitting: the seat is lost the day another
+# voice does better, the voice falls below the bar, or its calls age out
+# of the COUNCIL_RECORD_DAYS window. The Emperor never holds his own Hand.
+
+HAND_EMPTY = "no voice has earned it yet"
+
+
+def _seat_key(v, w):
+    b = _f(w.get("brier"))
+    return (-float(w["factor"]), -int(w.get("n") or 0),
+            b if b is not None else 1.0, C.ALL_VOICES.index(v))
+
+
+def hand_of(weights: dict, regime: str, asset_class: str) -> dict:
+    """{cell, voice, name, factor, n, brier, reference, reason, why_empty}
+    for one cell, from its weights. Pure: no query. voice "" is an empty
+    seat, and why_empty says why."""
+    regime = regime or "unknown"
+    cell = f"{regime} on {asset_class or 'every class'}"
+    best = None
+    for v in C.ALL_VOICES:
+        w = (weights or {}).get(v)
+        if v == "emperor" or not isinstance(w, dict):
+            continue
+        factor = _f(w.get("factor"))
+        if (w.get("lane") != "measured" or w.get("rung") != "regime_class"
+                or factor is None
+                or int(w.get("n") or 0) < C.COUNCIL_HAND_MIN_N
+                or factor < C.COUNCIL_HAND_MIN_FACTOR - 1e-9):
+            continue
+        key = _seat_key(v, w)
+        if best is None or key < best[0]:
+            best = (key, v, w)
+    if best is None:
+        return {"cell": cell, "voice": "", "name": "", "factor": None,
+                "n": 0, "brier": None, "reference": None, "reason": "",
+                "why_empty": (HAND_EMPTY if regime != "unknown" else
+                              f"{HAND_EMPTY}: the regime is unknown, so no "
+                              f"cell is measured")}
+    _key, v, w = best
+    return {"cell": cell, "voice": v, "name": C.VOICE_NAMES[v],
+            "factor": _f(w.get("factor")), "n": int(w.get("n") or 0),
+            "brier": _f(w.get("brier")), "reference": _f(w.get("reference")),
+            "reason": str(w.get("reason") or ""), "why_empty": ""}
+
+
+def most_trusted(weights: dict, hand_voice: str, spoke) -> tuple:
+    """(voice, how) the Skeptic is pointed at: the Hand when it spoke
+    before him ("hand"); else, among the voices that spoke before him, the
+    best weight above 1.00 measured in this very cell (the regime_class
+    rung, as the Hand), earned trust ("highest"); else ("", "none"). A
+    best weight of 0.80 is not "most trusted", and a weight read from a
+    fallback rung (the regime, the class, or all of them) is not a record
+    "in this cell", which is what the Skeptic is told."""
+    spoke = set(spoke or ())
+    if hand_voice and hand_voice in spoke:
+        return hand_voice, "hand"
+    best = None
+    for v in C.ALL_VOICES:
+        w = (weights or {}).get(v)
+        if v in ("skeptic", "emperor") or v not in spoke \
+                or not isinstance(w, dict) or w.get("lane") != "measured" \
+                or w.get("rung") != "regime_class":
+            continue
+        factor = _f(w.get("factor"))
+        if factor is None or factor <= 1.0:
+            continue
+        key = _seat_key(v, w)
+        if best is None or key < best[0]:
+            best = (key, v)
+    return (best[1], "highest") if best else ("", "none")
+
+
+def hands(asset_class: str = "", now=None) -> list:
+    """The seat of every (regime, class) with a graded live call in the
+    record window (an unknown regime measures no cell), for /council/."""
+    now = now or timezone.now()
+    cells, spec = _cells(now), _specialty_cells(now)
+    keys = sorted({(rg, cl) for (_v, rg, cl) in cells
+                   if rg and rg != "unknown"
+                   and (not asset_class or cl == asset_class)})
+    out = []
+    for rg, cl in keys:
+        rung = [_rungs(rg, cl)[0]]          # the regime_class rung only
+        weights = {v: _ladder(cells, spec, v, rg, cl, rungs=rung)
+                   for v in C.ALL_VOICES}
+        out.append({"regime": rg, "asset_class": cl,
+                    **hand_of(weights, rg, cl)})
+    return out
+
+
+def against_hand(since) -> dict:
+    """The Emperor against his Hand: in the live sittings since `since`
+    where the Hand took a side and the chair went against it, how often
+    each was right (the chair on his battle claim, the Hand on the claim
+    its side was read from, council.deciding_claim). The sittings where
+    they agreed are counted apart, for contrast."""
+    from ai_agents.council_models import CouncilClaim, CouncilVoice
+    out = {"overruled": 0, "graded": 0, "emperor_right": 0, "hand_right": 0,
+           "unresolved": 0, "pending": 0, "no_reason": 0, "by_voice": {},
+           "agreed": {"n": 0, "right": 0}}
+    sits = []
+    for e in CouncilVoice.objects.filter(
+            voice="emperor", status="spoke", session__venue="live",
+            session__created_at__gte=since).values("session_id", "answer"):
+        a = e["answer"] or {}
+        if a.get("hand") and a.get("hand_side"):
+            sits.append((e["session_id"], a))
+    if not sits:
+        return out
+    claims = {}
+    for c in CouncilClaim.objects.filter(
+            session_id__in=[sid for sid, _a in sits],
+            kind__in=("battle", "stance", "attack", "work")):
+        claims.setdefault((c.session_id, c.voice_key), []).append(c)
+    decided = ("right", "wrong")
+    for sid, a in sits:
+        battle = next((c for c in claims.get((sid, "emperor"), [])
+                       if c.kind == "battle"), None)
+        eg = battle.grade if battle is not None else ""
+        if not a.get("hand_overruled"):
+            if eg in decided:
+                out["agreed"]["n"] += 1
+                out["agreed"]["right"] += eg == "right"
+            continue
+        hv = a["hand"]
+        out["overruled"] += 1
+        out["no_reason"] += not a.get("hand_why")
+        hc = C.deciding_claim(claims.get((sid, hv), []), hv)
+        hg = hc.grade if hc is not None else ""
+        if "pending" in (eg, hg):
+            out["pending"] += 1
+        elif eg in decided and hg in decided:
+            out["graded"] += 1
+            out["emperor_right"] += eg == "right"
+            out["hand_right"] += hg == "right"
+            bv = out["by_voice"].setdefault(hv, {"graded": 0,
+                                                 "emperor_right": 0,
+                                                 "hand_right": 0})
+            bv["graded"] += 1
+            bv["emperor_right"] += eg == "right"
+            bv["hand_right"] += hg == "right"
+        else:
+            out["unresolved"] += 1
+    return out
+
+
+def skeptic_first(since) -> dict:
+    """In the live sittings where the Skeptic was told the most trusted
+    voice, how often his attack named it, and how many of those attacks
+    were right. Told means he answered (spoke, or late: his answer is
+    stored and graded): the trusted voice is saved on the sitting before
+    wave 2, so a sitting whose wave 2 the AI budget refused, or whose
+    Skeptic fell silent or is still being asked, never read the line and
+    is not counted."""
+    from ai_agents.council_models import (CouncilClaim, CouncilSession,
+                                          CouncilVoice)
+    named = {}
+    told = CouncilVoice.objects.filter(
+        voice="skeptic", status__in=(CouncilVoice.SPOKE, CouncilVoice.LATE)
+    ).values("session_id")
+    for s in CouncilSession.objects.filter(
+            venue="live", created_at__gte=since, id__in=told).exclude(
+            status=CouncilSession.RECORD).values("id", "hand"):
+        trusted = (s["hand"] or {}).get("trusted") \
+            if isinstance(s["hand"], dict) else ""
+        if trusted:
+            named[s["id"]] = trusted
+    out = {"named": len(named), "attacked": 0, "first": 0, "right": 0,
+           "graded": 0}
+    if not named:
+        return out
+    for c in CouncilClaim.objects.filter(
+            session_id__in=list(named), voice_key="skeptic",
+            kind="attack").values("session_id", "payload", "grade"):
+        out["attacked"] += 1
+        if (c["payload"] or {}).get("target") == named[c["session_id"]]:
+            out["first"] += 1
+            if c["grade"] in ("right", "wrong"):
+                out["graded"] += 1
+                out["right"] += c["grade"] == "right"
+    return out
+
+
 # ── the record matrix (/council/, the command, the readers) ───────────────
 
 def _brier(rows):
@@ -1069,10 +1282,16 @@ def record_matrix(asset_class: str = "", now=None) -> dict:
 
     graded_any = CouncilClaim.objects.filter(
         Q(grade="right") | Q(grade="wrong")).exists()
+    from ai_agents.council_mood import mood_outcomes
     return {"schema_version": C.COUNCIL_SCHEMA_VERSION, "voices": voices,
             "benchmarks": benchmarks,
             "benchmarks_unpaired": len(sess) - len(paired),
             "regimes": regimes, "matrix": matrix,
             "replay": {"n": len(both), "agree": agree},
             "chair": chair, "graded_any": graded_any,
-            "asset_class": asset_class}
+            "asset_class": asset_class,
+            # THE HAND OF THE EMPEROR and THE PEOPLE'S MOOD (2026-10-16)
+            "hands": hands(asset_class, now),
+            "against_hand": against_hand(since),
+            "skeptic_first": skeptic_first(since),
+            "moods": mood_outcomes(since)}

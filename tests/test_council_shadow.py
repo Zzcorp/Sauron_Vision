@@ -10,9 +10,13 @@ the order path reads nothing back from the council.
 
 Run with:  python manage.py test tests.test_council_shadow
 """
+import contextlib
 import inspect
 import re
+from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from django.conf import settings
@@ -218,6 +222,34 @@ class TheWiringTests(SimpleTestCase):
                 "\n", 0, src.index('"council_id")}'))
             self.assertTrue(inside or stamp, src[m.start() - 60:m.start() + 20])
 
+    def test_the_stamp_is_the_only_new_word_on_the_order_path(self):
+        """2026-10-16: the debate on a SIM, practice or paper client is
+        stamped a rehearsal on its record, and nothing else changes: the
+        stamp is one keyword of the debate call, read before it, and the
+        method mentions the council exactly as often as before."""
+        from unittest.mock import patch as _patch
+
+        from bot_program.asset_engine.base import AssetBot
+        src = self._src()
+        self.assertEqual(src.count("rehearsal=_rehearsal"), 1)
+        call = src.index("debate_candidate(self, cand, qty,")
+        stamp = src.index("rehearsal=_rehearsal")
+        self.assertLess(call, stamp)
+        self.assertNotIn(")", src[call + len("debate_candidate("):stamp])
+        self.assertLess(src.index("_rehearsal = self.rehearsal_or_unsure("
+                                  "client)"), call)
+        # the eToro demo world is still never argued, on the same test
+        self.assertIn('if getattr(client, "demo", False) is True', src)
+        self.assertEqual(len(re.findall(r"council", src, re.I)), 5)
+        # unsure is not real money
+        with _patch.object(AssetBot, "rehearsal_client",
+                           side_effect=RuntimeError("venue unread")):
+            self.assertTrue(AssetBot.rehearsal_or_unsure(object()))
+        self.assertFalse(AssetBot.rehearsal_or_unsure(SimpleNamespace(
+            env="live")))
+        self.assertTrue(AssetBot.rehearsal_or_unsure(SimpleNamespace(
+            env="sim")))
+
     def test_nothing_between_the_debate_and_the_order_reads_the_council(self):
         src = self._src()
         a = src.index('if debate.get("held"):')
@@ -230,7 +262,8 @@ class TheWiringTests(SimpleTestCase):
         for path in ("ai_agents/agents/council.py",
                      "ai_agents/council_grading.py",
                      "dashboard/views_council.py",
-                     "ai_agents/council_models.py"):
+                     "ai_agents/council_models.py",
+                     "ai_agents/council_mood.py"):
             text = (REPO / path).read_text(encoding="utf-8")
             for banned in ("market_order", "_close_trade", "pending_closes",
                            "set_stop", "bot_program.alarm", "telegram",
@@ -279,3 +312,198 @@ class TheWiringTests(SimpleTestCase):
             encoding="utf-8")
         self.assertEqual(base.count("after_send("), 1)
         self.assertIn('is_component_enabled("council_ticket")', manual)
+
+
+class TheRehearsalStampTests(TestCase):
+    """THE GAP the council's first version left open (2026-10-16): main's
+    debate checks only eToro's .demo before arguing, so a Saxo SIM, OANDA
+    practice or Alpaca paper candidate argued and then NOT sent had its
+    record replayed as "not sent" into the live weights. Fixed without
+    changing any order behaviour: the debate runs exactly as before on
+    every client; only its record is stamped a rehearsal
+    (AssetBot.rehearsal_or_unsure), and the grader closes such a record
+    ungraded. Each client is sent twice: A, the real code; B, the stamp
+    forced off. Everything the order path does must be byte-identical."""
+
+    RULE = "csh_reh"
+    CLIENTS = ("live", "etoro_demo", "sim", "practice", "paper")
+
+    def setUp(self):
+        TheOrderIsTheSameTests.setUp(self)
+        switch("trade_debate")
+
+    def _client(self, kind):
+        from tests.test_size_by_proof import TheBotLaneTests
+        client = TheBotLaneTests._client(self)
+        if kind == "etoro_demo":
+            client.demo = True
+        elif kind in ("sim", "practice", "paper"):
+            client.env = kind
+        return client
+
+    def _send(self, kind, *, stamp=True, binding=False):
+        from ai_agents.agents import trade_debate
+        from bot_program.asset_engine import skips
+        from bot_program.asset_engine.base import AssetBot
+        from bot_program.asset_engine.stock_bot import StockBot
+        from bot_program.models import AssetBotTrade
+        from django.core.cache import cache
+        from tests.test_council_sitting import CH_RUN, EX_RUN, SPEND
+        from tests.test_entry_quote import ROUTER
+        AssetBotTrade.objects.all().delete()
+        cache.clear()
+        self.cfg.refresh_from_db()
+        self.cfg.extras = {k: v for k, v in (self.cfg.extras or {}).items()
+                           if k not in ("skips", "skip_counts")}
+        self.cfg.save(update_fields=["extras"])
+        client = self._client(kind)
+        bot = StockBot(self.cfg)
+        with mock.patch(ROUTER, return_value=client):
+            cand = bot.propose_entry("AAPL")
+        self.assertIsNotNone(cand)
+        ex = ({"verdict": "veto", "conviction": 0.9, "size_scale": 1.0,
+               "killer": "fights the trend", "reasons": []} if binding else
+              {"verdict": "pass", "conviction": 0.3, "size_scale": 1.0,
+               "killer": "k", "reasons": []})
+        real = trade_debate.debate_candidate
+        with mock.patch(ROUTER, return_value=client), \
+                mock.patch("time.sleep"), \
+                mock.patch("ai_agents.tasks.run_council_sitting.apply_async"), \
+                mock.patch(SPEND, return_value=(True, "")), \
+                mock.patch(EX_RUN, return_value=ex), \
+                mock.patch(CH_RUN, return_value={
+                    "verdict": "back", "conviction": 0.6, "edge": "e",
+                    "reasons": []}), \
+                mock.patch("ai_agents.agents.trade_debate.graded_count",
+                           return_value=30 if binding else 0), \
+                mock.patch("ai_agents.agents.trade_debate.debate_candidate",
+                           side_effect=real) as spy, \
+                (mock.patch.object(AssetBot, "rehearsal_or_unsure",
+                                   return_value=False) if not stamp
+                 else contextlib.nullcontext()), \
+                self.captureOnCommitCallbacks(execute=True):
+            res = bot.execute_entry(cand)
+        row = (AssetBotTrade.objects.filter(id=res["trade_id"]).first()
+               if res else None)
+        debate = dict((row.metadata or {}).get("debate") or {}) if row else None
+        council_id = (debate or {}).pop("council_id", None)
+        self.cfg.refresh_from_db()
+        skipped = {sym: (d["code"], d["detail"])
+                   for sym, d in skips.last_by_symbol(self.cfg).items()}
+        sent = client.market_order.call_args
+        return {"args": sent.args if sent else None,
+                "kwargs": ({k: v for k, v in sent.kwargs.items()
+                            if k != "client_order_id"} if sent else None),
+                "res": (res["qty"], res["entry"]) if res else None,
+                "debate": debate, "skips": skipped, "spy": spy,
+                "council_id": council_id}
+
+    def _venues(self):
+        from ai_agents.council_models import CouncilSession
+        return list(CouncilSession.objects.order_by("id").values_list(
+            "venue", flat=True))
+
+    def test_every_client_sends_the_same_order_and_only_the_stamp_differs(self):
+        from ai_agents.council_models import CouncilClaim, CouncilSession
+        for kind in self.CLIENTS:
+            with self.subTest(client=kind):
+                CouncilSession.objects.all().delete()
+                a = self._send(kind)
+                venues_a = self._venues()
+                CouncilSession.objects.all().delete()
+                b = self._send(kind, stamp=False)
+                venues_b = self._venues()
+                for key in ("args", "kwargs", "res", "debate", "skips"):
+                    self.assertEqual(a[key], b[key], key)
+                self.assertIsNotNone(a["args"], "the order was sent")
+                if kind == "etoro_demo":
+                    # never argued, as before: no debate, no record
+                    a["spy"].assert_not_called()
+                    b["spy"].assert_not_called()
+                    self.assertEqual((venues_a, venues_b), ([], []))
+                    self.assertEqual(a["debate"], {}, "nothing stamped")
+                    continue
+                self.assertEqual(a["spy"].call_count, 1)
+                self.assertEqual(a["spy"].call_args.kwargs,
+                                 {"rehearsal": kind != "live"})
+                self.assertEqual(b["spy"].call_args.kwargs,
+                                 {"rehearsal": False})
+                self.assertTrue(a["debate"]["ran"])
+                self.assertEqual(venues_a,
+                                 ["live" if kind == "live" else "demo"])
+                self.assertEqual(venues_b, ["live"])
+        # a rehearsal's claims carry its venue: none is a live weight claim
+        CouncilSession.objects.all().delete()
+        self._send("sim")
+        s = CouncilSession.objects.get()
+        self.assertEqual(set(s.claims.values_list("venue", flat=True)),
+                         {"demo"})
+        self.assertFalse(CouncilClaim.objects.filter(venue="live").exists())
+
+    def test_a_vetoed_sim_candidate_is_never_replayed_into_the_live_weights(self):
+        from ai_agents.council_grading import (REHEARSAL_ARGUED_NOTES,
+                                               grade_session)
+        from ai_agents.council_models import CouncilSession
+        from bot_program.asset_engine import skips
+        from tests.test_council_grading import _bars
+        a = self._send("sim", binding=True)
+        b = self._send("sim", stamp=False, binding=True)
+        self.assertIsNone(a["args"], "the veto sent nothing")
+        for key in ("args", "kwargs", "res", "skips"):
+            self.assertEqual(a[key], b[key], key)
+        self.assertEqual(a["skips"]["AAPL"][0], skips.GATE_BLOCKED)
+        self.assertIn("the Executioner vetoed it", a["skips"]["AAPL"][1])
+        first, second = CouncilSession.objects.order_by("id")
+        self.assertEqual((first.venue, second.venue), ("demo", "live"))
+        self.assertEqual((first.trade_id, second.trade_id), (None, None))
+        # 48h later, the trade it would have been was stopped
+        for s in (first, second):
+            CouncilSession.objects.filter(id=s.id).update(
+                created_at=s.created_at - timedelta(hours=48),
+                horizon_hours=24.0)
+        first.refresh_from_db()
+        _bars(first.created_at,
+              [(first.entry * 1.001, first.stop * 0.999, first.stop)],
+              symbol="AAPL")
+        now = first.created_at + timedelta(hours=48)
+        grade_session(CouncilSession.objects.get(id=first.id), now)
+        grade_session(CouncilSession.objects.get(id=second.id), now)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        # A: closed, never replayed, nothing graded
+        self.assertEqual(first.grade_notes, REHEARSAL_ARGUED_NOTES)
+        self.assertEqual((first.truth, first.truth_r, first.replay_r),
+                         ("", None, None))
+        self.assertEqual(set(first.claims.values_list("grade", flat=True)),
+                         {"ungraded"})
+        # B, the gap: the same record stamped live is replayed "not sent"
+        # into the live weights (not a repeat of the rehearsal before it)
+        self.assertEqual((second.truth, second.grade_notes),
+                         ("replay", "replayed: not sent"))
+        self.assertTrue(second.claims.filter(y__isnull=False).exists())
+
+    def test_the_debate_returns_the_same_whatever_the_stamp(self):
+        from ai_agents.agents.trade_debate import debate_candidate
+        from ai_agents.council_models import CouncilSession
+        from tests.test_council_sitting import (CH_RUN, EX_RUN, SPEND,
+                                                make_bot_and_cand)
+        user = get_user_model().objects.create_user("csh_st", password="x")
+        bot, cand = make_bot_and_cand(user)
+        outs = {}
+        for rehearsal in (True, False):
+            with mock.patch(SPEND, return_value=(True, "")), \
+                    mock.patch(EX_RUN, return_value={
+                        "verdict": "cut", "conviction": 0.7,
+                        "size_scale": 0.5, "killer": "k", "reasons": []}), \
+                    mock.patch(CH_RUN, return_value={
+                        "verdict": "back", "conviction": 0.6, "edge": "e",
+                        "reasons": []}):
+                outs[rehearsal] = debate_candidate(bot, cand, 0.01,
+                                                   rehearsal=rehearsal)
+        ids = {k: v.pop("council_id") for k, v in outs.items()}
+        self.assertEqual(outs[True], outs[False])
+        for rehearsal, venue in ((True, "demo"), (False, "live")):
+            s = CouncilSession.objects.get(id=ids[rehearsal])
+            self.assertEqual(s.venue, venue)
+            self.assertEqual(set(s.claims.values_list("venue", flat=True)),
+                             {venue})

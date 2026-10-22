@@ -252,6 +252,34 @@ class TheParsersTests(SimpleTestCase):
         self.assertEqual(out["overruled"], [{"voice": "gambler", "why": "w"}])
 
 
+class TheHandFieldsTests(SimpleTestCase):
+    """2026-10-16: the chair's answer carries the Hand of the Emperor and
+    whether he went against it, decided by code from the sides."""
+
+    def test_the_emperor_parser_reads_the_hand(self):
+        out = parse("emperor", VALID["emperor"])
+        self.assertEqual((out["hand"], out["hand_side"], out["hand_overruled"],
+                          out["hand_why"], out["hand_note"]),
+                         ("", "", False, "", ""))
+        out = parse("emperor", dict(VALID["emperor"], verdict="refuse",
+                                    hand_why="w" * 500),
+                    hand={"voice": "champion", "side": "for"})
+        self.assertEqual((out["hand"], out["hand_side"], out["hand_overruled"],
+                          len(out["hand_why"]), out["hand_note"]),
+                         ("champion", "for", True, 200, ""))
+        out = parse("emperor", dict(VALID["emperor"], verdict="fight",
+                                    hand_why="w"),
+                    hand={"voice": "champion", "side": "for"})
+        self.assertEqual((out["hand_overruled"], out["hand_why"]),
+                         (False, ""))
+        out = parse("emperor", dict(VALID["emperor"], verdict="refuse"),
+                    hand=None)
+        self.assertFalse(out["hand_overruled"])
+        # every field the chair had before is still read as before
+        self.assertEqual(out["commit"], 0.0)
+        self.assertEqual(out["followed"], ["champion"])
+
+
 class TheClaimsTests(SimpleTestCase):
 
     def _claims(self, voice, answer, **kw):
