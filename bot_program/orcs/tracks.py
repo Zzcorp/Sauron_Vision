@@ -11,7 +11,7 @@ against.
 
 Its venue stop is the stop the VENUE holds at birth, the row's
 `stop_loss` (§2.1; the mirror itself writes care["venue_stop"] from it,
-position_care.py:775), never only the mirror's record: a hand edit or the
+position_care.py:776), never only the mirror's record: a hand edit or the
 engine's own break-even moves the venue's stop without touching that
 record, and a ghost seeded on the initial stop would run looser than the
 position ever was. The mirror's last accepted level is kept beside it as

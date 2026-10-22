@@ -520,6 +520,21 @@ class TheBirthTests(TestCase):
                          {"signal_id": 7, "size_source": "risk_budget",
                           "theme_at_entry": False})
 
+    def test_a_scalp_thesis_holds_the_personas_hours_and_no_session_end(self):
+        """The scalp persona's hold (personas.py, max_hold_hours 8) is the
+        time predicate and the horizon; no clause ends the idea at a
+        session's end (spec §1.6: the clock is the persona's)."""
+        scalp = _config(self.user, extras={"persona": "scalp"}, name="sc")
+        orc = born(self, _row(scalp, symbol="M1USD"), now=WED)
+        th = orc.thesis
+        self.assertEqual(th["invalidation"][0],
+                         {"kind": "time", "market_h": 8.0, "min_mfe_r": 1.0})
+        self.assertEqual(th["horizon_market_h"], 8.0)
+        kinds = [p["kind"] for p in th["invalidation"]]
+        self.assertEqual(kinds.count("time"), 1)
+        self.assertEqual([k for k in kinds if "session" in k], [])
+        self.assertNotIn("session", json.dumps(th["invalidation"]))
+
     def test_army_type_is_assigned_and_journaled_at_birth(self):
         from bot_program.orcs.birth import ensure
         scalp = _config(self.user, extras={"persona": "scalp"}, name="sc")

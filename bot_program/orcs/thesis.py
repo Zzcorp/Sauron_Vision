@@ -32,7 +32,7 @@ exists (O1b, menu=).
 BOT_KEYS = ("debate_cut", "proof", "promotion_stage", "posture",
             "posture_leverage", "aragorn", "leverage",
             "cost_fraction_charged", "desk_size_mult", "desk_lane")
-#: The desk's keys, written on the row after the birth (runner.py:524).
+#: The desk's keys, written on the row after the birth (runner.py:536).
 DESK_KEYS = ("desk_size_mult", "desk_lane")
 #: A hand ticket's.
 MANUAL_KEYS = ("signal_id", "size_source", "leverage")

@@ -10,7 +10,17 @@ what the row and the platform did, each once, when it changed.
                and a hand act for the grade
   the thesis   the thesis check's verdict changed (metadata["thesis"])
   the reviewer a reviewer's verdict (never its reasoning)
-  the venue    a close pending at the venue; the close itself (lifecycle)
+  the venue    what the platform read of it, as stamped on the row
+               (bot_program/venue_exit.py), in the order it happened and
+               saying no more than the stamp proves: the first mark
+               beyond a level the venue holds (CROSSED_KEY); the first
+               tick list that did not show the position (MISSING_AT_KEY,
+               the care's read: nothing is booked on it, the reconcile
+               asks the venue first); the venue's own order read saying
+               the position is still open (SAID_OPEN_AT_KEY, once per run
+               of misses); the list showing it again (LISTED_AT_KEY, once
+               after a miss the journal wrote); a close pending at the
+               venue; the close itself (lifecycle)
 
 R is the price-distance R: d x (level - entry) / |entry - initial stop|.
 Prices go through core.price_format.format_price. No money, balance or
@@ -24,6 +34,7 @@ written only on a change.
 import logging
 import math
 from datetime import datetime
+from datetime import timezone as dt_tz
 
 from core.price_format import format_price
 
@@ -37,6 +48,14 @@ logger = logging.getLogger(__name__)
 OPEN_STATUSES = ("OPEN", "CLOSE_PENDING")
 REVIEW_WORDS = {"hold": "hold", "tighten": "tighten",
                 "take_part": "take part", "exit": "exit"}
+#: The venue's evidence on the row (bot_program/venue_exit.py:43-45, :49;
+#: the same strings, so the package imports nothing of the venue's here).
+VENUE_LISTED_KEY = "venue_listed_at"
+VENUE_SAID_OPEN_KEY = "venue_said_open_at"
+VENUE_MISSING_KEY = "venue_missing_at"
+VENUE_CROSSED_KEY = "venue_level_crossed"
+#: brain/thesis_check.UNREAD: the check read nothing, no verdict.
+THESIS_UNREAD = "unread"
 
 
 # ── the arithmetic and the words ─────────────────────────────────────────
@@ -92,18 +111,26 @@ def _bucket(trade, level):
     return int(math.floor(r / CARE_FACT_STEP_R + 1e-9))
 
 
-def _hhmm(at) -> str:
+def _when(at):
+    """A stamp as an aware UTC moment, or None when it does not read."""
     if isinstance(at, datetime):
         moment = at
     else:
         from django.utils.dateparse import parse_datetime
-        moment = parse_datetime(str(at or ""))
+        try:
+            moment = parse_datetime(str(at or ""))
+        except (TypeError, ValueError):
+            return None
     if moment is None:
-        return "an unread time"
-    from datetime import timezone as dt_tz
+        return None
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=dt_tz.utc)
-    return moment.astimezone(dt_tz.utc).strftime("%H:%M")
+    return moment.astimezone(dt_tz.utc)
+
+
+def _hhmm(at) -> str:
+    moment = _when(at)
+    return "an unread time" if moment is None else moment.strftime("%H:%M")
 
 
 # ── birth ─────────────────────────────────────────────────────────────────
@@ -155,8 +182,12 @@ def baseline(orc, trade) -> None:
     hand = care.get("venue_stop_hand")
     event = care.get("event")
     th = meta.get("thesis")
+    crossed = meta.get(VENUE_CROSSED_KEY)
     memory = {
-        "care_stop": ([_bucket(trade, soft), str(care.get("soft_why") or "")]
+        # the same key observe_tick builds, default included: a stop with
+        # no recorded why is the care's lock there, so it is here
+        "care_stop": ([_bucket(trade, soft),
+                       str(care.get("soft_why") or "lock")]
                       if soft is not None else None),
         "venue_stop": _bucket(trade, venue) if venue is not None else None,
         "venue_refused": (_bucket(trade, care.get("venue_asked_for"))
@@ -170,6 +201,16 @@ def baseline(orc, trade) -> None:
         "thesis": ([th.get("verdict"), _f(th.get("stop"))]
                    if isinstance(th, dict) and th.get("verdict") else None),
         "review_id": _latest_review_id(trade),
+        "venue_missing_at": (str(meta.get(VENUE_MISSING_KEY))
+                             if meta.get(VENUE_MISSING_KEY) else None),
+        "venue_crossed_at": (str(crossed.get("at"))
+                             if isinstance(crossed, dict)
+                             and crossed.get("at") else None),
+        "venue_said_open_at": (str(meta.get(VENUE_SAID_OPEN_KEY))
+                               if meta.get(VENUE_SAID_OPEN_KEY) else None),
+        # a run of misses this journal wrote, so a listing after it is
+        # news (none at birth: the row's history is not journaled again)
+        "venue_unlisted": None,
         "pending": [],
         "closed_legs": [],
         # the facts the birth itself wrote (the army type, the overlay):
@@ -272,12 +313,17 @@ def observe_tick(bot, trade, price, cared, orc) -> int:
             stop = _f(th.get("stop"))
             key = [verdict, stop]
             if key != seen.get("thesis"):
-                text = (f"The thesis check reads adjust: a structure stop at "
-                        f"{px(trade, stop)}." if verdict == "adjust"
-                        and stop is not None
-                        else f"The thesis check reads {verdict}.")
+                if verdict == "adjust" and stop is not None:
+                    text = (f"The thesis check reads adjust: a structure "
+                            f"stop at {px(trade, stop)}.")
+                elif verdict == THESIS_UNREAD:
+                    text = "The thesis check could not read the structure."
+                else:
+                    text = f"The thesis check reads {verdict}."
                 fact(text, body={"verdict": verdict, "stop": stop},
                      remember={"thesis": key})
+        for headline, kw in _venue_news(trade, meta, seen):
+            fact(headline, **kw)
     if cared in ("closed", "attempted") and not seen.get("care_close"):
         why = str(meta.get("care_exit") or care.get("exit") or "its stop")
         fact(with_r(f"The care decided to close ({why}) at "
@@ -286,6 +332,83 @@ def observe_tick(bot, trade, price, cared, orc) -> int:
                                   "sent": cared},
              remember={"care_close": True})
     return n
+
+
+_NEVER = datetime(1970, 1, 1, tzinfo=dt_tz.utc)
+
+
+def _venue_news(trade, meta, seen) -> list:
+    """The venue's evidence on the row the journal has not written yet,
+    oldest first: [(headline, fact kwargs)]. Each says only what its
+    stamp proves (bot_program/venue_exit.py):
+
+      CROSSED_KEY     base.py stamps it before the care: a mark beyond a
+                      level the venue holds; once per `at`.
+      MISSING_AT_KEY  the care's read of the tick's list did not show the
+                      position (position_care._venue_still_holds ->
+                      note_missing). It books nothing: the reconcile books
+                      a close only on the venue's own order read
+                      (word_on_miss), so the fact never says a close will
+                      be booked. Once per stamp.
+      SAID_OPEN_AT_KEY  the list missed it and the venue's order read said
+                      OPEN (said_open): nothing booked. Stamped at every
+                      such answer, so written once per run of misses: a
+                      run ends when the list shows the position again.
+      LISTED_AT_KEY   the reconcile's read listed the position (note_listed
+                      pops MISSING_AT_KEY): written once, only after a miss
+                      or an "open" answer this journal wrote.
+    The stamps come from separate readers (the tick, the care, the
+    reconcile), so they are written in the order their times say, and
+    one tick's crossing comes before the same tick's miss."""
+    news = []           # (moment, order, headline, kwargs)
+    crossed = meta.get(VENUE_CROSSED_KEY)
+    if isinstance(crossed, dict) and crossed.get("at") \
+            and str(crossed.get("at")) != seen.get("venue_crossed_at"):
+        at = str(crossed.get("at"))
+        which = "target" if str(crossed.get("level")) == "target" else "stop"
+        level = _f(crossed.get("price"))
+        where = f" at {px(trade, level)}" if level is not None else ""
+        news.append((_when(at), 0,
+                     f"The mark crossed the venue's {which}{where} "
+                     f"({_hhmm(at)} UTC).",
+                     {"body": {"level": which, "price": level,
+                               "mark": _f(crossed.get("mark")), "at": at},
+                      "remember": {"venue_crossed_at": at}}))
+    missing = meta.get(VENUE_MISSING_KEY)
+    if missing and str(missing) != seen.get("venue_missing_at"):
+        at = str(missing)
+        news.append((_when(at), 1,
+                     f"The tick's position list did not show this position "
+                     f"at {_hhmm(at)} UTC; the reconcile asks the venue "
+                     f"before it books anything.",
+                     {"author": "care", "body": {"at": at},
+                      "remember": {"venue_missing_at": at,
+                                   "venue_unlisted": at}}))
+    listed = _when(meta.get(VENUE_LISTED_KEY))
+    said = _when(meta.get(VENUE_SAID_OPEN_KEY))
+    told = _when(seen.get("venue_said_open_at"))
+    if said is not None and (listed is None or said > listed) \
+            and (told is None or (listed is not None and told < listed)):
+        at = str(meta.get(VENUE_SAID_OPEN_KEY))
+        news.append((said, 2,
+                     f"The venue's position list missed this position, but "
+                     f"its own order read says it is still open "
+                     f"({_hhmm(at)} UTC); nothing was booked.",
+                     {"body": {"at": at},
+                      "remember": {"venue_said_open_at": at,
+                                   "venue_unlisted": at}}))
+    unlisted = seen.get("venue_unlisted")
+    if unlisted and listed is not None and not missing \
+            and listed > (_when(unlisted) or _NEVER):
+        at = str(meta.get(VENUE_LISTED_KEY))
+        news.append((listed, 3,
+                     f"The venue's position list shows this position again "
+                     f"({_hhmm(at)} UTC).",
+                     {"body": {"at": at},
+                      "remember": {"venue_unlisted": None,
+                                   "venue_missing_at": None}}))
+    news.sort(key=lambda n: (n[0] is None, n[0] or _NEVER, n[1]))
+    return [(headline, kw) for _, _, headline, kw in news]
 
 
 def _part_words(so) -> str:

@@ -12,7 +12,7 @@ hooks missed. Every path goes through `ensure`, which:
      (OrcSetting "max_paper_orcs", 10);
   3. freezes `manual`, FAILING TOWARD MANUAL: the operator's ticket must
      never become a bot idea with commission class because a read failed
-     (the care's own lane read fails toward a bot, position_care.py:587-591);
+     (the care's own lane read fails toward a bot, position_care.py:582-587);
   4. seats the idea at L0 on (world, class, rule key): a demo row never
      sits on the real-money seat;
   5. freezes r_money from the initial stop (manual_close._risk_dollars);
