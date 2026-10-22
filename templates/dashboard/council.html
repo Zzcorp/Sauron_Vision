@@ -5,7 +5,9 @@
 {% block content %}
 {% comment %} THE COUNCIL (2026-10-08, ai_agents/agents/council.py). Every
    number on this page is a graded record or a count of one; no voice's
-   weight is asserted. Staff only, like /ai-models/. {% endcomment %}
+   weight is asserted. Staff only, like /ai-models/. The Hand of the
+   Emperor and the people's mood (2026-10-16) are in R, percent and counts
+   only, never money. {% endcomment %}
 <div class="card fade-in-up" style="margin-bottom: 24px;">
     <div class="card-header"><span class="card-title">The council</span></div>
     <p style="color: var(--text-muted); padding: 0 16px 8px; max-width: 96ch;">
@@ -73,6 +75,61 @@
     </p>
 </div>
 
+{% with a=record.against_hand sf=record.skeptic_first %}
+<div class="card fade-in-up" style="margin-bottom: 24px;" data-role="council-hands">
+    <div class="card-header"><span class="card-title">The Hand of the Emperor</span></div>
+    <p style="color: var(--text-muted); padding: 0 16px 8px; max-width: 96ch;">
+        One seat per regime and class: the voice with the best measured weight there, with at least {{ hand_min_n }} graded calls in that cell and a weight of at least {{ hand_min_factor }}. It is lost the day another voice does better or its record falls below the bar.
+    </p>
+    {% if record.hands %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table" style="width: 100%; font-size: 11px;">
+      <thead><tr><th>Regime</th><th>Class</th><th>The Hand</th><th class="num">Weight</th><th class="num">Graded calls there</th><th class="num">Brier</th></tr></thead>
+      <tbody>
+        {% for h in record.hands %}
+        <tr><td>{{ h.regime }}</td><td>{{ h.asset_class }}</td>
+          {% if h.voice %}<td>{{ h.name }}</td><td class="num">{{ h.factor|floatformat:2 }}</td><td class="num">{{ h.n }}</td><td class="num">{% if h.brier is not None %}{{ h.brier|floatformat:3 }}{% else %}—{% endif %}</td>{% else %}<td colspan="4" style="color: var(--text-muted);">{{ h.why_empty }}</td>{% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted); padding: 0 16px 8px;">No cell is measured yet: no voice has earned it yet.</p>
+    {% endif %}
+    <p style="padding: 12px 16px 4px; font-size: 12px;" data-role="council-against-hand">
+        When the Emperor's verdict went against his Hand ({{ a.graded }} graded): the Emperor was right {{ a.emperor_right }}, the Hand {{ a.hand_right }}; {{ a.unresolved }} inside a quarter R; {{ a.pending }} not graded yet. Overruled without a reason: {{ a.no_reason }}. When they agreed: right {{ a.agreed.right }} of {{ a.agreed.n }}.
+    </p>
+    <p style="padding: 0 16px 16px; font-size: 12px; color: var(--text-muted);" data-role="council-skeptic-first">
+        When the Skeptic was told the most trusted voice ({{ sf.named }} sitting{{ sf.named|pluralize }}), his attack named it {{ sf.first }} time{{ sf.first|pluralize }} of {{ sf.attacked }}; right {{ sf.right }} of {{ sf.graded }} graded.
+    </p>
+</div>
+{% endwith %}
+
+<div class="card fade-in-up" style="margin-bottom: 24px;" data-role="council-mood">
+    <div class="card-header"><span class="card-title">The people's mood</span></div>
+    <p style="color: var(--text-muted); padding: 0 16px 8px; max-width: 96ch;">
+        A gauge computed by code, with no AI, from the real-money book at every sitting. It may only counsel caution: a good run reads steady. Below, what the argued trades returned under each mood: if the mood predicts nothing, the rows will not differ.
+    </p>
+    <p style="padding: 0 16px 4px; font-size: 12px;">Now, for your book: <strong>{{ mood_now.level }}</strong> ({{ mood_now.measured_n }} of {{ mood_now.of }} inputs measured){% if mood_now.why %}: {{ mood_now.why }}{% endif %}</p>
+    <ul style="padding: 0 32px 4px; font-size: 12px;">
+      {% for e in mood_now.inputs %}<li>{{ e.label }}: {{ e.words }}</li>{% endfor %}
+    </ul>
+    <p style="padding: 0 16px 8px; font-size: 12px; color: var(--text-muted);">{{ mood_now.caution }}</p>
+    <div class="table-wrapper">
+    <table class="sv-perf-table" style="width: 100%; font-size: 11px;">
+      <thead><tr><th>Mood</th><th class="num">Graded sittings</th><th class="num">Average R</th><th class="num">Won</th><th class="num">The Emperor committed</th></tr></thead>
+      <tbody>
+        {% for m in record.moods %}
+        <tr><td>{{ m.level }}</td><td class="num">{{ m.n }}</td>
+          {% if not m.n %}<td colspan="3" style="color: var(--text-muted);">none graded</td>{% elif m.thin %}<td colspan="3" style="color: var(--text-muted);">too few to read</td>{% else %}<td class="num">{{ m.avg_r_text }}</td><td class="num">{{ m.won_text }}</td><td class="num">{{ m.commit_text }}</td>{% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+</div>
+
 <div class="card fade-in-up" style="margin-bottom: 24px;">
     <div class="card-header"><span class="card-title">Weights by regime</span></div>
     <form method="get" style="padding: 0 16px 8px; font-size: 12px;">
@@ -97,12 +154,12 @@
 </div>
 {% endif %}
 
-<div class="card fade-in-up" style="margin-bottom: 24px;">
+<div class="card fade-in-up" style="margin-bottom: 24px;" data-role="council-recent">
     <div class="card-header"><span class="card-title">Recent sittings</span></div>
     {% if recent %}
     <ul style="padding: 0 32px 16px; font-size: 12px;">
       {% for s in recent %}
-      <li>{{ s.when|date:"Y-m-d H:i" }} · {{ s.what }} · {{ s.symbol }} {{ s.side }} · The Emperor: {{ s.emperor }} · {{ s.status }} · {{ s.graded }}</li>
+      <li>{{ s.when|date:"Y-m-d H:i" }} · {{ s.what }} · {{ s.symbol }} {{ s.side }} · The Emperor: {{ s.emperor }} · {{ s.status }} · {{ s.graded }} · mood {{ s.mood }} · the Hand: {{ s.hand }}{% if s.overruled %} (overruled){% endif %}</li>
       {% endfor %}
     </ul>
     {% else %}

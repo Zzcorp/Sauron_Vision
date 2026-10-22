@@ -1018,7 +1018,7 @@ class TheWiringTests(SimpleTestCase):
         # before the billed debate (review 2026-10-06), and again on the
         # fresh clock after the last look, just before the order
         first = src.index("self._entry_timing_gate(symbol)")
-        debate = src.index("debate_candidate(self, cand, qty)")
+        debate = src.index("debate_candidate(self, cand, qty,")
         look = src.index("self._last_look(client, symbol, decision.direction,")
         again = src.rindex("self._entry_timing_gate(symbol)")
         order = src.index("order_kwargs = {")

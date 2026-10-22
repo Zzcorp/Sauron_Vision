@@ -13,7 +13,10 @@ a trade row's metadata, because:
 
 CouncilSession  one sitting: the trade as argued, the regime recorded at
                 the sitting, the frozen brief, the weights the Emperor read,
-                and, once graded, the truth it was judged against.
+                the Hand of the Emperor and the people's mood at the
+                sitting (2026-10-16), and, once graded, the truth it was
+                judged against. `venue` "demo" marks a debate argued on a
+                rehearsal client: closed ungraded, never real money.
 CouncilVoice    one voice in one sitting: its status (asked, spoke, late,
                 silent, copied), its verdict and its parsed answer verbatim.
 CouncilClaim    the only thing graded: one claim per row, so a voice may
@@ -85,6 +88,17 @@ class CouncilSession(models.Model):
     #: The weights the Emperor read: {voice: {factor, lane, n, brier,
     #: rung, reason}}.
     weights = models.JSONField(default=dict, blank=True)
+    #: THE HAND OF THE EMPEROR at this sitting (2026-10-16): {cell, voice,
+    #: name, factor, n, brier, reference, reason, why_empty, side,
+    #: trusted, trusted_why}; {} before the seat existed, or on a record
+    #: that never sat.
+    hand = models.JSONField(default=dict, blank=True)
+    #: THE PEOPLE'S MOOD at this sitting (ai_agents/council_mood.py):
+    #: steady | uneasy | restless | afraid | unmeasured; "" = not read (a
+    #: debate's record, or a sitting before the gauge).
+    mood = models.CharField(max_length=10, blank=True, default="")
+    #: Its inputs as read: R, fractions, counts and words; never money.
+    mood_read = models.JSONField(default=dict, blank=True)
 
     # The benchmark rows (does weighting help?): the voices' plain
     # average p_work, the record-weighted average, and the Emperor's own.

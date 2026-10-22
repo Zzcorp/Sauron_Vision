@@ -204,7 +204,7 @@ class TheOrderOfTheLaneTests(SimpleTestCase):
         # debate's Executioner cut (2026-10-02), after the debate
         self.assertEqual(src.count("self._venue_fee_refusal("), 2)
         self.assertGreater(src.rindex("self._venue_fee_refusal("),
-                           src.index("debate_candidate(self, cand, qty)"))
+                           src.index("debate_candidate(self, cand, qty,"))
         order = [src.index(n) for n in ("_etoro_entry_refusal(",
                                         "self._venue_fee_refusal(",
                                         "_venue_size_floor(",

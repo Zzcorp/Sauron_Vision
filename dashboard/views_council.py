@@ -2,7 +2,10 @@
 
   /council/               the record: each voice's weight, earned only by
                           its graded calls, the benchmark rows, the
-                          weights by regime, the recent sittings (staff).
+                          Hand of the Emperor per cell and the Emperor
+                          against his Hand, the people's mood and what the
+                          trades returned under it, the weights by regime,
+                          the recent sittings (staff).
   /council/ask/           POST: "Ask the council" on a LIVE TAKE TRADE
                           ticket. On demand only; it queues a sitting on
                           the ai worker and answers at once.
@@ -266,12 +269,30 @@ def _emperor_words(session) -> str:
     return "silent"
 
 
+def _hand_words(session) -> tuple:
+    """(who held the Hand at the sitting, whether the chair overruled it)."""
+    from ai_agents.agents import council as C
+    hand = session.hand or {}
+    if not hand:
+        return "not read", False
+    if not hand.get("voice"):
+        return "no voice had earned it", False
+    overruled = any(v.voice == "emperor" and v.status == "spoke"
+                    and (v.answer or {}).get("hand_overruled")
+                    for v in session.voices.all())
+    return (hand.get("name") or C.VOICE_NAMES.get(hand["voice"],
+                                                  hand["voice"]), overruled)
+
+
 def _recent(limit=30):
     from ai_agents.council_models import CouncilSession
     out = []
     for s in (CouncilSession.objects.select_related("trade")
               .prefetch_related("voices").order_by("-created_at")[:limit]):
-        if s.origin == "ticket":
+        if (s.venue or "live") != "live":
+            # argued on a SIM, practice or paper client (2026-10-16)
+            what = "a rehearsal: not real money"
+        elif s.origin == "ticket":
             what = "your ticket"
         elif s.trade_id:
             what = "the bot's order"
@@ -285,10 +306,29 @@ def _recent(limit=30):
             graded = f"not measured ({s.grade_notes or 'nothing to grade'})"
         else:
             graded = "not graded yet"
+        hand, overruled = _hand_words(s)
         out.append({"when": s.created_at, "what": what, "symbol": s.symbol,
                     "side": s.side, "emperor": _emperor_words(s),
-                    "status": s.status, "graded": graded, "id": s.id})
+                    "status": s.status, "graded": graded, "id": s.id,
+                    "mood": s.mood or "not read", "hand": hand,
+                    "overruled": overruled})
     return out
+
+
+def _mood_now(user) -> dict:
+    """THE PEOPLE'S MOOD for this page's reader, now: pure code, fenced."""
+    from ai_agents import council_mood as M
+    try:
+        mood = M.people_mood(user)
+    except Exception as e:  # noqa: BLE001 — the page says it
+        logger.warning("[council] mood unread: %s", e)
+        mood = M.unmeasured_mood(f"the gauge could not be read "
+                                 f"({type(e).__name__})")
+    inputs = mood.get("inputs") or {}
+    return {"level": mood.get("level"), "measured_n": mood.get("measured_n"),
+            "of": mood.get("of"), "why": mood.get("why", ""),
+            "inputs": [inputs[k] for k in M.INPUTS if k in inputs],
+            "caution": M.CAUTION_ONLY}
 
 
 @staff_member_required
@@ -306,6 +346,7 @@ def council_dashboard(request):
         record, record_error = None, f"The record could not be read ({type(e).__name__})."
     classes = sorted({c for c in CouncilSession.objects.values_list(
         "asset_class", flat=True).distinct() if c})
+    from ai_agents.agents import council as C
     return render(request, "dashboard/council.html", {
         "page_id": "council",
         "switches": {"bots": is_component_enabled("council_bots"),
@@ -314,4 +355,7 @@ def council_dashboard(request):
         "spend": _spend(now),
         "record": record, "record_error": record_error,
         "recent": _recent(), "classes": classes, "class_filter": cls,
+        "mood_now": _mood_now(request.user),
+        "hand_min_n": C.COUNCIL_HAND_MIN_N,
+        "hand_min_factor": f"{C.COUNCIL_HAND_MIN_FACTOR:.2f}",
     })

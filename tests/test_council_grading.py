@@ -270,6 +270,59 @@ class TheTruthTests(_Rows):
         self.assertIsNone(s2.trade_id)
         self.assertEqual(s2.grade_notes, REHEARSAL_NOTES)
 
+    def test_a_sim_record_argued_and_not_sent_is_never_replayed(self):
+        """2026-10-16: a candidate argued on a SIM, practice or paper
+        client is stamped venue "demo" on its record (AssetBot
+        .rehearsal_or_unsure). Not sent, it has no row: it is closed
+        ungraded, never replayed as "not sent" into the live weights."""
+        from ai_agents.council_grading import (REHEARSAL_ARGUED_NOTES,
+                                               grade_due, voice_weights)
+        from ai_agents.council_models import CouncilClaim, CouncilSession
+        s = _session()
+        _bars(s.created_at, STOPPED)
+        claims = [_claim(s, "executioner", "work", p=0.2),
+                  _claim(s, "champion", "stance", stance="for"),
+                  _claim(s, "gambler", "work", p=0.9)]
+        CouncilSession.objects.filter(id=s.id).update(venue="demo")
+        CouncilClaim.objects.filter(session_id=s.id).update(venue="demo")
+        out = grade_due()
+        self.assertEqual(out["graded"], 1)
+        s = CouncilSession.objects.get(id=s.id)
+        self.assertIsNotNone(s.graded_at)
+        self.assertEqual(s.grade_notes, REHEARSAL_ARGUED_NOTES)
+        self.assertEqual((s.truth, s.truth_r, s.replay_r, s.y),
+                         ("", None, None, None))
+        self.assertEqual(s.why, "argued on a rehearsal client: not real "
+                                "money")
+        for c in claims:
+            c.refresh_from_db()
+            self.assertEqual((c.grade, c.y, c.brier), ("ungraded", None,
+                                                       None))
+            self.assertEqual(c.grade_notes, REHEARSAL_ARGUED_NOTES)
+        w = voice_weights("trending", "stock")
+        self.assertEqual({v["lane"] for v in w.values()}, {"neutral"})
+        self.assertEqual(grade_due()["sessions"], 0, "touched once")
+        self.assertLessEqual(len(REHEARSAL_ARGUED_NOTES), 300)
+
+    def test_a_rehearsal_record_never_makes_a_live_one_a_repeat(self):
+        from ai_agents.council_models import CouncilSession
+        first = _session(hours_ago=50, config=self.cfg)
+        CouncilSession.objects.filter(id=first.id).update(venue="demo")
+        again = _session(hours_ago=48, config=self.cfg)
+        _bars(again.created_at, STOPPED)
+        c = _claim(again, "gambler", "work", p=0.8)
+        again = _grade(again)
+        c.refresh_from_db()
+        self.assertEqual((again.truth, again.grade_notes),
+                         ("replay", "replayed: not sent"))
+        self.assertEqual(c.grade, "wrong")
+        # a live one before it still makes it a repeat, as before
+        third = _session(hours_ago=47, config=self.cfg)
+        c3 = _claim(third, "gambler", "work", p=0.8)
+        _grade(third)
+        c3.refresh_from_db()
+        self.assertEqual(c3.grade_notes, f"a repeat of session #{again.id}")
+
     def test_a_not_sent_candidate_waits_its_first_hour(self):
         """The row an order writes lands with the debate: a bot record with
         no trade is not judged "not sent" in its first hour, even past its
@@ -662,3 +715,37 @@ class TheMigrationTests(SimpleTestCase):
             ("ai_agents", "0013_council")].parents if p.key[0] == "ai_agents"}
         self.assertEqual(parents, {("ai_agents",
                                     "0012_agenttask_cache_tokens")})
+
+    def test_the_hand_and_the_mood_add_fields_only(self):
+        """The Hand and the mood are per-sitting facts: three fields on
+        CouncilSession, one migration on the council's, reversible."""
+        from django.db import migrations
+        from django.db.migrations.loader import MigrationLoader
+        loader = MigrationLoader(None, ignore_no_migrations=True)
+        key = ("ai_agents", "0014_council_hand_mood")
+        node = loader.graph.node_map[key]
+        self.assertEqual({p.key for p in node.parents},
+                         {("ai_agents", "0013_council")})
+        mig = loader.disk_migrations[key]
+        self.assertEqual(
+            [(type(op), op.model_name, op.name) for op in mig.operations],
+            [(migrations.AddField, "councilsession", "hand"),
+             (migrations.AddField, "councilsession", "mood"),
+             (migrations.AddField, "councilsession", "mood_read")])
+        leaves = [n for n in loader.graph.leaf_nodes() if n[0] == "ai_agents"]
+        self.assertEqual(leaves, [key])
+        # reversible: an AddField reverses to a RemoveField
+        for op in mig.operations:
+            self.assertTrue(op.reversible, op)
+
+
+class TheModelMatchesItsMigrationsTests(TestCase):
+
+    def test_makemigrations_finds_nothing_to_add(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+        out = StringIO()
+        call_command("makemigrations", "ai_agents", "--check", "--dry-run",
+                     stdout=out)
+        self.assertIn("No changes detected", out.getvalue())
