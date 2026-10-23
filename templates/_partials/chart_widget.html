@@ -3142,6 +3142,22 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         var rail = visibleRect('.signals-rail');
         var right = (rail && rail.left > vw * 0.5)
             ? Math.max(0, vw - rail.left) : 0;
+        /* An open dock beside the rail (2026-10-22): the council band, or
+           the activity drawer. A shut one is visibility:hidden and
+           measures nothing; one is believed only right of the sidebar.
+           Like the Horde's, its inset is taken only while it leaves the
+           chart its MIN_TALL_W: the chamber, or the band at 1100 with the
+           rail open, would leave a sliver, and the floor below would then
+           drop EVERY inset and lay the chart over the whole screen, the
+           strip's REAL marker and the topbar included. Without it the
+           chart stays beside the rail and under the topbar, over the
+           dock, as it did before the dock. */
+        var dock = visibleRect('.sv-council-band.open .sv-council-band-panel')
+            || visibleRect('.sv-activity.open .sv-activity-panel');
+        if (dock && dock.left > left) {
+            var dr = Math.max(right, vw - dock.left);
+            if (vw - (left + pad) - (dr + pad) >= MIN_TALL_W) right = dr;
+        }
 
         /* And a floor under the result, because a guard is a belief about
            the page and this is a measurement of it. Whatever the furniture

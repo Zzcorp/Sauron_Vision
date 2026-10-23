@@ -1088,16 +1088,25 @@ SPECIALTY_KIND = {"executioner": "stance", "champion": "stance",
                   "gambler": "boldness", "theorist": "theory"}
 
 
+def _r_worth(v) -> str:
+    """'saved +0.50R', 'cost 1.10R', 'changed nothing': the verb follows
+    the sign, never "saved -1.10"."""
+    return (f"saved {v:+.2f}R" if v > 0 else f"cost {-v:.2f}R" if v < 0
+            else "changed nothing")
+
+
 def specialty_line(voice, stats) -> str:
     s = stats
+    graded = s.get("right", 0) + s.get("wrong", 0)
     if voice == "executioner":
-        return (f"R his vetoes and cuts would have saved: "
-                f"{s['value_r']:+.2f}")
+        if not graded and not s["value_r"]:
+            return "his vetoes and cuts: none graded yet"
+        return f"his vetoes and cuts would have {_r_worth(s['value_r'])}"
     if voice == "gambler":
         a, n1, b, n2 = s["all_in_avg"], s["all_in_n"], s["rest_avg"], s["rest_n"]
         return (f"all in: {a:+.2f}R average (n {n1}) against the rest "
                 f"{b:+.2f}R (n {n2})" if n1 and n2 else
-                f"all in: n {n1}; the rest: n {n2}")
+                f"all in: {n1 or 'none yet'}; other calls: {n2 or 'none yet'}")
     if voice == "striker":
         return f"waits: {s['value_r']:+.2f}R against taking at once"
     if voice == "fixer":
@@ -1114,9 +1123,18 @@ def specialty_line(voice, stats) -> str:
                 f"market " + (f"{t:.2f}" if t is not None
                               else "not yet measured"))
     if voice == "emperor":
-        return (f"his commitment saved {s['value_r']:+.2f}R in total; of the "
-                f"voices he overruled, {s['over_wrong']} of {s['over_n']} "
-                f"were wrong")
+        head = ("his commitment: none graded yet"
+                if not graded and not s["value_r"] else
+                f"his commitment {_r_worth(s['value_r'])} in total")
+        over = ("none graded yet" if not s["over_n"] else
+                f"{s['over_wrong']} of {s['over_n']} "
+                f"{'was' if s['over_wrong'] == 1 else 'were'} wrong")
+        return f"{head}; of the voices he overruled, {over}"
+    if voice == "champion":
+        # his stance: for or against the trade, beside the weight's own
+        # right/wrong count (round 2: two "right" counts side by side)
+        return (f"for-or-against calls right {s['right']} of "
+                f"{s['right'] + s['wrong']}")
     return f"calls right {s['right']} of {s['right'] + s['wrong']}"
 
 

@@ -1511,7 +1511,27 @@ def run_council_sitting(session_id):
     is claimed. Worst case three waves of COUNCIL_WAVE_TIMEOUT_S, inside
     the soft limit; no order ever waits for it."""
     from ai_agents.agents.council import run_sitting
-    return run_sitting(int(session_id))
+    out = run_sitting(int(session_id))
+    # THE COUNCIL BAND (2026-10-22): tell the owner's open band that a
+    # sitting closed, so its badge and its next read wake on it. One
+    # fenced push to the page's own eye socket: no banner (the page has no
+    # words for this kind), nothing to any chat, never a raise.
+    if (out or {}).get("status") != "noop":
+        try:
+            from ai_agents.council_models import CouncilSession
+            from dashboard.consumers import push_eye_event
+            s = (CouncilSession.objects.select_related("user", "config__user")
+                 .filter(id=int(session_id)).first())
+            if s is not None:
+                owner = s.user or (s.config.user if s.config_id else None)
+                verdict = (s.voices.filter(voice="emperor", status="spoke")
+                           .values_list("verdict", flat=True).first() or "")
+                push_eye_event(owner, "council_sitting", {
+                    "session": s.id, "origin": s.origin, "symbol": s.symbol,
+                    "side": s.side, "status": s.status, "verdict": verdict})
+        except Exception as e:  # noqa: BLE001 — the band is beside the sitting
+            logger.info("[council] band event not sent: %s", type(e).__name__)
+    return out
 
 
 @shared_task

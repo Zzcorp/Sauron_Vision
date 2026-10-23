@@ -110,6 +110,7 @@ from .views_command import (
 from .views_day import day_live
 from .views_activity import activity_feed
 from .views_horde import horde_feed
+from .views_council_band import council_band
 from .views_bot_performance import bot_performance_dashboard
 from .views_bot_backtest import (
     bot_backtest_list, bot_backtest_run, bot_backtest_detail,
@@ -152,6 +153,10 @@ urlpatterns = [
     # the cockpit strip. One JSON door (board, tab, one seat), under /api/
     # for the same 423.
     path("api/horde/", horde_feed, name="horde_feed"),
+    # THE COUNCIL BAND (2026-10-22): Sauron's voices on the right edge, staff
+    # only, read-only. One JSON door (the room, the sittings, one sitting, one
+    # voice), under /api/ for the same 423.
+    path("api/council/band/", council_band, name="council_band"),
 
     # ── Frontend Pages ──────────────────────────────────────
     path("", views.dashboard, name="dashboard"),
