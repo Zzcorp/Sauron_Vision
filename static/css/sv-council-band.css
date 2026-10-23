@@ -1,0 +1,477 @@
+/* ════════════════════════════════════════════════════════════════════════
+   THE COUNCIL BAND (task #104, 2026-10-22): Sauron's voices on the right
+   edge, staff only (templates/_partials/council_band.html,
+   static/js/sv-council-band.js).
+
+   How it hides: like the activity drawer, a fixed column standing against
+   the signals rail's left edge, translated its own width to the right
+   while shut, so it lies under the rail (--z-drawer, one rung under
+   --z-rail) and past the viewport's edge. Only its tab, hung off its left
+   edge, stays in view. A shut root takes no click: a transparent box
+   riding an open drawer would otherwise take that drawer's clicks.
+
+   Its height: under the headbands' slot (88px under the topbar, both
+   shown or not) and above the cockpit strip, with a foot over the strip's
+   minimize tab (28px) or the minimized strip's restore pill (44px), so it
+   never covers a headband control, a strip control or a REAL MONEY,
+   PAPER or DEMO marker in the chrome. --ip-h is the Horde's (sv-horde.css:
+   60px with the strip, 0 when minimized or on the Command Center); the
+   band reads it and never moves it.
+
+   Its neighbours: one dock open at a time (the band or ACTIVITY), the
+   shut one's tab and the rail's toggle riding the open one's edge. An
+   open band PUSHES an OPEN Horde's right edge at every desktop width
+   rather than covering its REAL pills, by the band and the tabs' own
+   28px gutter, so the COUNCIL and ACTIVITY tabs never stand on the
+   Horde's body (round 2); the chamber is not offered while the Horde is
+   open (the script). A shut Horde is never pushed: its tab stands on the
+   strip's line, which the column's foot already clears, and a push would
+   crush that tab and its REAL pill (round 1). A Horde pushed by the band
+   or by ACTIVITY keeps its controls on its first row. sv-horde.css is
+   not edited: this sheet loads after it and wins on load order.
+
+   Tokens only, every z-index a rung of the ladder (sv-overlay.css), no
+   animation fill. Loaded after sv-horde.css and before sv-responsive.css,
+   whose phone tier hides it on the rail's own line.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* Shell variables, read by the band, the ACTIVITY ride, the rail toggle
+   and the Horde push. */
+body {
+    --sv-rail-w: 0px;
+    --sv-dock-w: 0px;
+    /* never past the sidebar with its tab: below 900px with the rail
+       open, 360px would put the tab and the title under the sidebar, so
+       the floor gives way to the room left of the rail, less the tab */
+    --sv-cband-open-w: clamp(min(360px, calc(100vw - var(--se-left-chrome, 260px) - var(--sv-rail-w) - 28px)), calc(100vw - var(--se-left-chrome, 260px) - var(--sv-rail-w) - 96px), 400px);
+    --sv-cband-w: var(--sv-cband-open-w);
+}
+body:has(.signals-rail) { --sv-rail-w: 44px; }
+@media (min-width: 769px) {
+    body:has(.signals-rail.open) { --sv-rail-w: 280px; }
+    body:has(.sv-activity.open) { --sv-dock-w: 360px; }
+    body:has(.sv-council-band.open) { --sv-dock-w: var(--sv-cband-w); }
+    body:has(.sv-council-band.chamber) { --sv-cband-w: clamp(760px, calc(100vw - var(--se-left-chrome, 260px) - var(--sv-rail-w) - 96px), 880px); }
+}
+
+.sv-council-band {
+    --cb-top: calc(var(--topbar-height) + 88px);
+    --cb-foot: 28px;
+    --cb-bottom: calc(var(--ip-h, 0px) + var(--cb-foot));
+    position: fixed;
+    top: var(--cb-top);
+    bottom: var(--cb-bottom);
+    right: var(--sv-rail-w);
+    width: var(--sv-cband-w);
+    z-index: var(--z-drawer);
+    transform: translateX(100%);
+    pointer-events: none;
+    transition: transform .3s ease, right .3s ease, width .3s ease, bottom .3s ease;
+    font-family: var(--font-body, inherit);
+}
+body.page-dashboard .sv-council-band { --cb-foot: 0px; }
+.sv-council-band.open { transform: none; }
+.sv-council-band.sv-council-band-instant,
+.sv-council-band.sv-council-band-instant .sv-council-band-panel { transition: none; }
+@media (min-width: 769px) {
+    /* the minimized strip's restore pill: 12px up, ~30px tall (the Horde's --hd-foot) */
+    body:has(.info-panel-wrap.minimized) .sv-council-band { --cb-foot: 44px; }
+}
+
+/* One dock at a time; the shut one's tab and the rail toggle ride the
+   open one's edge; an open band pushes the Horde. */
+@media (min-width: 769px) {
+    body:has(.sv-activity.open) .sv-council-band { right: calc(var(--sv-rail-w) + 360px); }
+    body:has(.sv-council-band.open) .sv-activity { right: calc(var(--sv-rail-w) + var(--sv-cband-w)); pointer-events: none; }
+    body:has(.sv-council-band.open) .sv-activity-tab { pointer-events: auto; }
+    body:has(.sv-activity.open) .rail-toggle-btn,
+    body:has(.sv-council-band.open) .rail-toggle-btn { right: calc(var(--sv-rail-w) + var(--sv-dock-w)); }
+    body:has(.sv-council-band.open) .sv-horde.open {
+        right: calc(var(--sv-rail-w) + var(--sv-cband-w) + 28px);
+        --hd-r: calc(var(--sv-rail-w) + var(--sv-cband-w) + 28px);
+    }
+    /* The pushed Horde is narrow (368px at 1100 beside the band, 436px
+       beside ACTIVITY): its head's first row is the title and the
+       controls, close last at the right; the book, the lenses and the
+       stamp wrap to the row under it, never the close. A 6px gap keeps
+       title, dot, snaps, link and close on one 304px row at 1100 (297px
+       measured; at 10px they took 313). */
+    body:has(.sv-council-band.open) .sv-horde.open .hd-row1,
+    body:has(.sv-activity.open) .sv-horde.open .hd-row1 { row-gap: 4px; column-gap: 6px; }
+    body:has(.sv-council-band.open) .sv-horde.open .hd-row1 > *,
+    body:has(.sv-activity.open) .sv-horde.open .hd-row1 > * { order: 2; }
+    body:has(.sv-council-band.open) .sv-horde.open .hd-row1 > :is(.hd-title, .hd-dot, .hd-snaps, .hd-link, .hd-close),
+    body:has(.sv-activity.open) .sv-horde.open .hd-row1 > :is(.hd-title, .hd-dot, .hd-snaps, .hd-link, .hd-close) { order: 0; }
+    body:has(.sv-council-band.open) .sv-horde.open .hd-row1 > .hd-dot,
+    body:has(.sv-activity.open) .sv-horde.open .hd-row1 > .hd-dot { margin-left: auto; }
+    body:has(.sv-council-band.open) .sv-horde.open .hd-row1::after,
+    body:has(.sv-activity.open) .sv-horde.open .hd-row1::after { content: ""; order: 1; flex-basis: 100%; height: 0; }
+}
+
+.sv-council-band .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ── the tab ─────────────────────────────────────────────────────────── */
+.sv-council-band-tab {
+    position: absolute;
+    left: -28px;
+    top: var(--cb-tab-top, max(8px, calc(50% - 156px - var(--cb-top) / 2 + var(--cb-bottom) / 2)));
+    width: 28px;
+    height: 112px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    pointer-events: auto;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-right: 0;
+    border-radius: 8px 0 0 8px;
+    color: var(--accent-gold-ink);
+    cursor: pointer;
+    box-shadow: -2px 0 12px color-mix(in srgb, var(--bg-void) 60%, transparent);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    transition: background .2s, width .2s, left .2s, top .3s ease;
+}
+.sv-council-band-tab:hover { background: var(--bg-card-hover); width: 32px; left: -32px; }
+.sv-council-band-tab:focus-visible { outline: 1px solid var(--accent-gold-ink); outline-offset: 2px; }
+.sv-council-band.open .sv-council-band-tab { color: var(--text-primary); }
+.sv-council-band-tab-label { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; line-height: 1; }
+.sv-council-band-badge {
+    min-width: 18px; height: 16px; padding: 0 4px; border-radius: 8px;
+    background: var(--bg-card); border: 1px solid var(--accent-gold-ink);
+    color: var(--accent-gold-ink); font-size: 10px; letter-spacing: 0; font-weight: 700;
+    line-height: 14px; text-align: center;
+}
+.sv-council-band-badge[hidden] { display: none; }
+#svCouncilBandTab.gl-pointed { animation: glPointed 1.6s ease-out; }
+
+/* ── the panel ───────────────────────────────────────────────────────── */
+.sv-council-band-panel {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+    border-left: 1px solid var(--border);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    border-radius: 8px 0 0 8px;
+    box-shadow: -10px 0 28px color-mix(in srgb, var(--bg-void) 55%, transparent);
+    visibility: hidden;
+    transition: visibility 0s linear .3s;
+    overflow: hidden;
+}
+.sv-council-band.open .sv-council-band-panel { visibility: visible; transition-delay: 0s; pointer-events: auto; }
+
+.cb-head {
+    display: flex; align-items: center; gap: 8px; row-gap: 3px; flex-wrap: wrap;
+    padding: 9px 12px; background: var(--bg-card);
+    border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+/* OPEN (400px): the title and the two buttons on the first row, the
+   chips and the stamp on the row under them, never a button alone on a
+   third row. CHAMBER has the room for one row. */
+.cb-head > .cb-chips, .cb-head > .cb-stamp { order: 2; }
+.cb-head::after { content: ""; order: 1; flex-basis: 100%; height: 0; }
+.cb-widen { margin-left: auto; }
+.sv-council-band.chamber .cb-head > .cb-chips,
+.sv-council-band.chamber .cb-head > .cb-stamp { order: 0; }
+.sv-council-band.chamber .cb-head::after { display: none; }
+.cb-title {
+    margin: 0; flex: 0 0 auto; font-family: var(--font-display, var(--font-mono));
+    font-size: 11px; letter-spacing: 3px; color: var(--accent-gold-ink); font-weight: 700;
+}
+.cb-title:focus { outline: none; }
+.cb-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; flex: 1 1 auto; min-width: 0; }
+.cb-chip {
+    padding: 1px 6px; border: 1px dashed var(--border); border-radius: 9px;
+    color: var(--text-secondary); font-family: var(--font-mono); font-size: 10px; letter-spacing: .5px;
+    white-space: nowrap;
+}
+.cb-chip--binding { border-style: solid; border-color: var(--warning); color: var(--warning); }
+.cb-chip--off { border-style: solid; color: var(--text-secondary); }
+.cb-chip--dissent, .cb-chip--split { border-style: solid; border-color: var(--text-primary); color: var(--text-primary); }
+.cb-chip--hand { border-style: solid; background: var(--bg-card); border-color: var(--accent-gold-ink); color: var(--accent-gold-ink); }
+.cb-stamp { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+.cb-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--text-muted); }
+.cb-dot.live { background: var(--accent); animation: svActPulse 2.4s ease-in-out infinite; }
+.cb-dot.err { background: var(--accent-red); }
+.cb-icon {
+    width: 24px; height: 24px; padding: 0; border: 1px solid var(--border); border-radius: 4px;
+    background: transparent; color: var(--text-muted); font-size: 14px; line-height: 1; cursor: pointer;
+}
+.cb-icon:hover { color: var(--accent-gold-ink); border-color: var(--accent-gold-ink); }
+.cb-icon[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+.cb-icon[aria-pressed="true"] { color: var(--accent-gold-ink); border-color: var(--accent-gold-ink); }
+.cb-close { font-size: 16px; }
+
+.cb-body { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.sv-council-band.chamber .cb-body { grid-template-columns: 400px minmax(0, 1fr); }
+.cb-room, .cb-sidebody, .cb-dossier {
+    overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+    /* the last line scrolls clear of the Eye. Every later rule on these
+       three sets its padding by longhands: a shorthand would reset this
+       (round 1: 8px and 0px measured where 46px was meant). */
+    padding-bottom: max(16px, calc(var(--se-bottom-edge, 24px) + var(--se-fab-size, 56px) - var(--cb-bottom)));
+}
+.cb-room { min-height: 0; }
+.cb-state:empty { display: none; }
+.cb-side { display: none; min-height: 0; flex-direction: column; background: var(--bg-primary); }
+.sv-council-band.chamber .cb-side { display: flex; border-left: 1px solid var(--border); }
+.sv-council-band.over .cb-side { display: flex; position: absolute; inset: 0; z-index: var(--z-sticky); }
+.cb-sidehead {
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+    border-bottom: 1px solid var(--border); background: var(--bg-card); flex-shrink: 0;
+}
+.cb-sidebody { flex: 1; min-height: 0; padding-top: 8px; padding-left: 12px; padding-right: 12px; }
+.sv-council-band.cb-in-sitting .cb-sidehead { display: none; }
+.cb-back, .cb-link {
+    padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px; background: transparent;
+    color: var(--text-secondary); font-family: var(--font-mono); font-size: 10px; cursor: pointer;
+    text-decoration: none; white-space: nowrap;
+}
+.cb-back:hover, .cb-link:hover { color: var(--accent-gold-ink); border-color: var(--accent-gold-ink); }
+.cb-back[hidden] { display: none; }
+.cb-tabs { display: inline-flex; gap: 4px; }
+.cb-tabbtn {
+    padding: 4px 9px; border: 1px solid var(--border); border-radius: 12px; background: transparent;
+    color: var(--text-muted); font-family: var(--font-mono); font-size: 10px; letter-spacing: .5px; cursor: pointer;
+}
+.cb-tabbtn[aria-selected="true"] { background: var(--bg-card-hover); color: var(--accent-gold-ink); border-color: var(--accent-gold-ink); }
+.cb-dossier {
+    position: absolute; inset: 0; z-index: var(--z-sticky); background: var(--bg-primary);
+    transform: translateX(100%); transition: transform .2s ease; padding-left: 12px; padding-right: 12px;
+}
+.cb-dossier.on { transform: none; }
+.cb-dossier[hidden] { display: none; }
+.sv-council-band.chamber .cb-dossier { left: 400px; border-left: 1px solid var(--border); }
+
+/* ── the room ────────────────────────────────────────────────────────── */
+.cb-direction {
+    display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; align-items: start;
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg-card) 60%, var(--bg-primary));
+}
+.cb-direction:empty { display: none; }
+.cb-dir-table { cursor: pointer; background: transparent; border: 0; padding: 0; }
+.cb-dir-table:focus-visible { outline: 1px solid var(--accent-gold-ink); }
+.cb-dir-rows { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cb-dir-row { min-width: 0; }
+.cb-label {
+    display: block; font-family: var(--font-mono); font-size: 10px; letter-spacing: 2px;
+    color: var(--text-muted); text-transform: uppercase;
+}
+/* a sub-label under a heading: air above, so it never hugs the line
+   before it */
+p.cb-label { margin: 8px 0 2px; }
+.cb-sentence { display: block; color: var(--text-primary); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.cb-sentence button.cb-inline { margin-left: 4px; }
+.cb-inline {
+    padding: 0; border: 0; background: transparent; color: var(--accent-gold-ink);
+    font-family: var(--font-mono); font-size: 10px; cursor: pointer;
+}
+.cb-inline:hover { text-decoration: underline; }
+
+.cb-sec { border-bottom: 1px solid var(--border); }
+.cb-sec-title {
+    display: flex; align-items: center; justify-content: space-between; width: 100%;
+    padding: 9px 12px; border: 0; background: transparent; cursor: pointer;
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 2px; color: var(--text-primary);
+}
+.cb-sec-title::after { content: "▾"; color: var(--text-muted); }
+.cb-sec-title[aria-expanded="false"]::after { content: "▸"; }
+.cb-sec-body { padding: 0 12px 12px; }
+.cb-sec-body[hidden] { display: none; }
+.cb-sub {
+    margin: 14px 0 4px; padding-bottom: 2px; border-bottom: 1px solid var(--border);
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 2px;
+    color: var(--text-secondary);
+}
+.cb-line { margin: 2px 0; color: var(--text-secondary); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.cb-line--strong { color: var(--text-primary); }
+.cb-line--muted { color: var(--text-muted); }
+.cb-line--note {
+    padding: 6px 8px; border: 1px dashed var(--border); border-radius: 4px; color: var(--text-secondary);
+}
+.cb-mono { font-family: var(--font-mono); font-size: 10px; }
+.cb-error { color: var(--accent-red); font-size: 11px; padding: 8px 12px; }
+
+/* the throne */
+.cb-throne { border-top: 2px solid color-mix(in srgb, var(--accent-gold) 45%, transparent); }
+.cb-throne-head { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 10px; align-items: center; margin: 4px 0 6px; }
+.cb-name { font-family: var(--font-heading, inherit); font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--text-primary); }
+.cb-throne .cb-name { color: var(--accent-gold-ink); font-size: 15px; }
+.cb-role { color: var(--text-secondary); font-size: 12px; }
+.cb-ring {
+    width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--border);
+    display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+    font-family: var(--font-display, var(--font-mono)); font-size: 10px; color: var(--text-primary);
+    background: var(--bg-card); cursor: pointer; padding: 0;
+}
+.cb-ring--big { width: 44px; height: 44px; font-size: 12px; border-color: var(--accent-gold-ink); color: var(--accent-gold-ink); }
+.cb-ring.cb-side--for { border-color: var(--accent); }
+.cb-ring.cb-side--against { border-color: var(--accent-red); }
+.cb-ring.cb-side--none { border-color: var(--text-secondary); }
+.cb-ring.cb-side--silent { border-style: dotted; border-color: var(--text-muted); }
+.cb-ring.cb-side--waiting { border-style: dotted; border-color: var(--text-muted); }
+.cb-ring.cb-side--absent { border-style: dotted; border-color: var(--border); }
+.cb-ring.cb-late { border-style: dashed; }
+.cb-ring.cb-ring--smaller { border-color: var(--warning); }
+.cb-ring:focus-visible { outline: 1px solid var(--accent-gold-ink); outline-offset: 2px; }
+
+.cb-mood-level { font-weight: 700; border-radius: 3px; border: 1px solid transparent; }
+.cb-mood--steady { color: var(--text-secondary); }
+.cb-mood--uneasy { color: var(--accent-gold-ink); }
+.cb-mood--restless { color: var(--warning); }
+.cb-mood--afraid { color: var(--danger); }
+.cb-mood--unmeasured { color: var(--text-muted); border: 1px dashed var(--border); padding: 0 3px; }
+.cb-mood-inputs { margin: 4px 0; padding: 0; list-style: none; }
+.cb-mood-inputs li { font-size: 11px; color: var(--text-secondary); padding: 1px 0; }
+.cb-mood-inputs li.unmeasured { color: var(--text-muted); font-style: italic; }
+.cb-chipline { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0; }
+
+.cb-rulings { margin: 0; padding: 0; list-style: none; }
+.cb-rulings li { margin: 2px 0; }
+.cb-rulings button {
+    width: 100%; text-align: left; padding: 3px 0; border: 0; background: transparent;
+    color: var(--text-secondary); font-size: 11px; cursor: pointer;
+}
+.cb-rulings button:hover { color: var(--accent-gold-ink); }
+
+/* the nine */
+.cb-triad { margin-top: 8px; }
+.cb-triad-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 2px; color: var(--text-secondary); }
+.cb-triad-sub { font-size: 10px; color: var(--text-muted); margin-left: 6px; letter-spacing: 0; }
+.cb-voices { list-style: none; margin: 4px 0 0; padding: 0; }
+.cb-voice { border-top: 1px solid var(--border); }
+.cb-voice-open {
+    display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 8px; width: 100%;
+    padding: 7px 0; border: 0; background: transparent; text-align: left; cursor: pointer; color: inherit;
+}
+.cb-voice-open:hover, .cb-voice-open:focus-visible { background: var(--bg-card-hover); outline: none; }
+.cb-voice-main { min-width: 0; }
+.cb-voice-top { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.cb-token {
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; padding: 0 5px;
+    border: 1px solid var(--border); border-radius: 3px; color: var(--text-primary); white-space: nowrap;
+}
+.cb-token.cb-side--for { border-color: var(--accent); color: var(--accent); }
+.cb-token.cb-side--against { border-color: var(--accent-red); color: var(--accent-red); }
+.cb-token.cb-token--smaller { border-color: var(--warning); color: var(--warning); }
+.cb-voice-meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); }
+.cb-bar { display: inline-block; width: 48px; height: 4px; background: var(--border); border-radius: 2px; vertical-align: middle; position: relative; overflow: hidden; }
+.cb-bar > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--text-secondary); }
+.cb-bar.cb-side--for > i { background: var(--accent); }
+.cb-bar.cb-side--against > i { background: var(--accent-red); }
+
+/* the traders */
+.cb-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.cb-card { padding: 6px 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); min-width: 0; }
+.cb-card-title { font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; color: var(--text-secondary); }
+.cb-card-line { font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.cb-lane--measured { font-weight: 700; color: var(--accent-gold-ink); }
+.cb-lane--prior { font-style: italic; color: var(--text-muted); }
+.cb-matrix { margin-top: 6px; border-collapse: collapse; }
+.cb-matrix th { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); font-weight: 400; padding: 1px 3px; text-align: left; }
+.cb-matrix td { padding: 1px 3px; }
+.cb-cell { display: inline-block; width: 12px; height: 12px; border-radius: 2px; border: 1px solid var(--border); }
+.cb-cell--measured { background: var(--accent-gold-ink); border-color: var(--accent-gold-ink); }
+.cb-cell--prior { border-style: dashed; border-color: var(--text-muted); }
+.cb-cell--now { outline: 1px solid var(--text-primary); outline-offset: 1px; }
+
+.cb-links { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px; }
+
+/* ── the round table (SVG) ───────────────────────────────────────────── */
+.cb-table { display: block; overflow: visible; }
+.cb-table .cb-ringline { fill: none; stroke: var(--border); stroke-width: 1; }
+.cb-seat { stroke: var(--bg-primary); stroke-width: 1; transition: fill .2s ease; }
+.cb-seat.cb-side--for { fill: var(--accent); }
+.cb-seat.cb-side--against { fill: var(--accent-red); }
+.cb-seat.cb-side--none { fill: var(--text-secondary); }
+.cb-seat.cb-side--silent { fill: none; stroke: var(--text-muted); stroke-dasharray: 2 2; }
+.cb-seat.cb-side--waiting { fill: none; stroke: var(--text-muted); stroke-dasharray: 1 2; }
+.cb-seat.cb-side--absent { fill: none; stroke: var(--border); stroke-dasharray: 1 3; }
+.cb-seat.cb-late { stroke: var(--text-primary); stroke-dasharray: 2 1; }
+.cb-dis { fill: none; stroke: var(--text-primary); stroke-width: 1.5; }
+.cb-chair { stroke-width: 1.5; fill: var(--bg-card); stroke: var(--border); }
+.cb-chair.cb-side--for { fill: color-mix(in srgb, var(--accent) 22%, var(--bg-card)); stroke: var(--accent); }
+.cb-chair.cb-side--against { fill: color-mix(in srgb, var(--accent-red) 22%, var(--bg-card)); stroke: var(--accent-red); }
+.cb-chair.cb-side--none { stroke: var(--text-secondary); }
+/* fight_smaller: the order went out, smaller (◐). Its side stays the
+   council's (against, as his battle is graded), but it is not drawn as a
+   refusal. */
+.cb-chair.cb-chair--smaller { fill: color-mix(in srgb, var(--warning) 22%, var(--bg-card)); stroke: var(--warning); }
+.cb-chair.cb-nochair { stroke-dasharray: 2 2; }
+.cb-table text { font-family: var(--font-mono); fill: var(--text-primary); text-anchor: middle; dominant-baseline: central; }
+.cb-table .cb-seat-mono { font-size: 6px; fill: var(--bg-primary); }
+.cb-table .cb-seat-mono.cb-hollow { fill: var(--text-secondary); }
+.cb-table .cb-chair-word { font-size: 7px; }
+
+/* ── the sittings ────────────────────────────────────────────────────── */
+.cb-filters { display: flex; gap: 4px; flex-wrap: wrap; margin: 2px 0 8px; }
+.cb-filter {
+    padding: 2px 7px; border: 1px solid var(--border); border-radius: 10px; background: transparent;
+    color: var(--text-muted); font-family: var(--font-mono); font-size: 10px; cursor: pointer;
+}
+.cb-filter[aria-pressed="true"] { background: var(--bg-card-hover); color: var(--accent-gold-ink); border-color: var(--accent-gold-ink); }
+.cb-cards-list { list-style: none; margin: 0; padding: 0; }
+.cb-sitting {
+    display: grid; grid-template-columns: 3px 64px minmax(0, 1fr); gap: 8px; width: 100%;
+    padding: 8px 0; border: 0; border-bottom: 1px solid var(--border); background: transparent;
+    text-align: left; cursor: pointer; color: inherit;
+}
+.cb-sitting:hover, .cb-sitting:focus-visible { background: var(--bg-card-hover); outline: none; }
+.cb-mark { border-radius: 2px; background: var(--border); }
+.cb-mark.cb-side--for { background: var(--accent); }
+.cb-mark.cb-side--against { background: var(--accent-red); }
+.cb-mark.cb-mark--smaller { background: var(--warning); }
+.sv-council-band.chamber .cb-sitting { grid-template-columns: 3px 88px minmax(0, 1fr); }
+.cb-sitting > .cb-table { width: 100%; height: auto; }
+.cb-sitting-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cb-sitting-head { display: flex; justify-content: space-between; gap: 6px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 1px; color: var(--text-muted); }
+/* one line (round 2: "BOT ORDER · XAUUSD · commodity · / SELL" wrapped
+   at 1100); the script gives it its whole text as a title */
+.cb-sitting-head .cb-kind { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cb-sitting-head .cb-age { white-space: nowrap; flex-shrink: 0; }
+.cb-new { animation: cbIn .35s ease-out; }
+@keyframes cbIn {
+    from { opacity: 0; transform: translateX(14px); }
+    to { opacity: 1; transform: none; }
+}
+
+/* ── a transcript and a dossier ──────────────────────────────────────── */
+.cb-tr-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; justify-items: center; padding: 6px 0 10px; border-bottom: 1px solid var(--border); }
+.cb-tr-head .cb-line { text-align: center; margin: 0; }
+.cb-block { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.cb-block-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cb-reasons summary { cursor: pointer; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+.cb-reasons ul { margin: 4px 0 0 16px; padding: 0; color: var(--text-secondary); font-size: 11px; }
+.cb-quote { margin: 4px 0; padding-left: 8px; border-left: 2px solid var(--border); color: var(--text-primary); font-size: 12px; }
+.cb-footer { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 0; }
+.cb-dossier-head { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 10px; align-items: center; padding: 10px 0; }
+.cb-cells { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 10px; }
+.cb-cells .now { outline: 1px solid var(--accent-gold-ink); outline-offset: 1px; }
+.cb-cells .measured { font-weight: 700; color: var(--accent-gold-ink); }
+.cb-wtable { border-collapse: collapse; width: 100%; font-family: var(--font-mono); font-size: 10px; }
+.cb-wtable th, .cb-wtable td { padding: 2px 4px; border-bottom: 1px solid var(--border); text-align: left; color: var(--text-secondary); font-weight: 400; }
+.cb-wtable td.measured { font-weight: 700; color: var(--accent-gold-ink); }
+.cb-wtable td.now, .cb-wtable th.now { background: var(--bg-card-hover); }
+
+@media (prefers-reduced-motion: reduce) {
+    .sv-council-band,
+    .sv-council-band-panel,
+    .sv-council-band-tab,
+    .cb-dossier,
+    .cb-seat { transition: none; }
+    .cb-dot.live,
+    .cb-new,
+    #svCouncilBandTab.gl-pointed { animation: none; }
+}

@@ -52,6 +52,8 @@
       words: "news popup headband hover dwell card headline summary sentiment" },
     { label: "The Horde · a seat per open position", href: "#horde",
       words: "horde orc orcs seat seats captain mission allocation deployment" },
+    { label: "The council band · Sauron's voices (right edge)", href: "#council", needs: "#svCouncilBandTab",
+      words: "council band emperor executioner champion skeptic awakened theorist opportunist striker fixer gambler voices verdict sitting dissent debate record weight hand mood personalities scalp swing position regime throne" },
     { label: "News & sentiment feed", href: "/news/", page: "news",
       words: "news sentiment feed articles headlines breaking keywords" },
     { label: "Instruments & quotes", href: "/instruments/",
@@ -114,6 +116,9 @@
                  words: label.toLowerCase(), kind: "page" });
     });
     GOLLUM_LORE.forEach(function (l) {
+      /* A road to a control that is not on this page (the council band
+         is staff only) is not offered. */
+      if (l.needs && !d.querySelector(l.needs)) return;
       out.push({ label: l.label, href: l.href, page: l.page || "",
                  words: (l.words + " " + l.label).toLowerCase(),
                  kind: "section" });
@@ -210,6 +215,18 @@
         hordeTab.classList.remove("gl-pointed");
         void hordeTab.offsetWidth;
         hordeTab.classList.add("gl-pointed");
+      }
+      close();
+      return;
+    }
+    if (e.href === "#council") {
+      /* He points at the council band's tab; he never opens it. */
+      ev.preventDefault();
+      var councilTab = d.getElementById("svCouncilBandTab");
+      if (councilTab) {
+        councilTab.classList.remove("gl-pointed");
+        void councilTab.offsetWidth;
+        councilTab.classList.add("gl-pointed");
       }
       close();
       return;

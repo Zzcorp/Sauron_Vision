@@ -107,6 +107,9 @@
     {# THE HORDE (2026-10-08): a seat for every open position, in a sheet that opens upward from the cockpit strip's line. After the drawer, before the phone tier; its own phone rules live in its sheet. #}
     <link rel="stylesheet" href="{% static 'css/sv-horde.css' %}">
     <script src="{% static 'js/sv-horde.js' %}" defer></script>
+    {# THE COUNCIL BAND (2026-10-22): Sauron's voices on the right edge, staff only. After the Horde, whose right edge an open band pushes; before the phone tier, whose rail line hides it. #}
+    <link rel="stylesheet" href="{% static 'css/sv-council-band.css' %}">
+    <script src="{% static 'js/sv-council-band.js' %}" defer></script>
     {# The phone tier (2026-09-28): the last shell sheet, so at 768px and below it overrides the sheets above; a page's own extra_css still loads after it. #}
     <link rel="stylesheet" href="{% static 'css/sv-responsive.css' %}">
 {% block extra_css %}{% endblock %}
@@ -520,6 +523,8 @@
             <a href="{% url 'backtest_list' %}" class="nav-link {% if page_id == 'backtest' %}active{% endif %}"><span class="icon">&#x25A1;</span> <span class="label-text">Backtesting</span></a>
             <a href="{% url 'bot_backtest_list' %}" class="nav-link {% if page_id == 'bot_backtest' %}active{% endif %}"><span class="icon">⊟</span> <span class="label-text">Bot Backtest</span></a>
             <a href="{% url 'calibration_dashboard' %}" class="nav-link {% if page_id == 'calibration' %}active{% endif %}"><span class="icon">◔</span> <span class="label-text">Agent Calibration</span></a>
+            {% comment %}THE COUNCIL (2026-10-22): ten voices graded nightly on what the market did next, beside the calibration they run in; it acts on nothing, so it is measured, not "can act". Staff only, as the page is. Mark U+2654, used nowhere else.{% endcomment %}
+            {% if request.user.is_staff %}<a href="{% url 'council_dashboard' %}" class="nav-link {% if page_id == 'council' %}active{% endif %}"><span class="icon">♔</span> <span class="label-text">The Council</span></a>{% endif %}
 
             {% comment %}WHAT IS BEING INVENTED. The research half: what the miner proposes, what the generator writes, what the
                brain believes and how long it has believed it. NOTHING in this section can place an order — every path out of it
@@ -1569,6 +1574,9 @@
 
 {# The activity drawer (2026-09-29): Sauron's live log, tucked under the rail above with only its tab showing. Staff only — the feed is. #}
 {% if user.is_staff %}{% include "_partials/activity_drawer.html" %}{% endif %}
+
+{# THE COUNCIL BAND (2026-10-22): what Sauron thinks, who disagrees, who has been right, on the right edge above ACTIVITY. Staff only — its door is. Outside .page-content. #}
+{% if user.is_staff %}{% include "_partials/council_band.html" %}{% endif %}
 
 {# THE HORDE (2026-10-08): the band beside the cockpit strip, a seat for every open position. Any signed-in reader: the door scopes every read to its own book. Outside the strip's live slice and outside .page-content. #}
 {% if request.user.is_authenticated %}{% include "_partials/the_horde.html" %}{% endif %}
@@ -5124,6 +5132,7 @@ window.svWheelMarquee = function (frame, track) {
             <div class="kbd-row"><span class="kbd-label">Toggle theme</span><span class="kbd-keys"><kbd>t</kbd></span></div>
             <div class="kbd-row"><span class="kbd-label">Mark notifs read</span><span class="kbd-keys"><kbd>n</kbd></span></div>
             <div class="kbd-row"><span class="kbd-label">Toggle the Horde</span><span class="kbd-keys"><kbd>h</kbd></span></div>
+            {% if user.is_staff %}<div class="kbd-row"><span class="kbd-label">Toggle the council</span><span class="kbd-keys"><kbd>c</kbd></span></div><div class="kbd-row"><span class="kbd-label">Widen the council</span><span class="kbd-keys"><kbd>Shift</kbd><kbd>C</kbd></span></div>{% endif %}
             <div class="kbd-row"><span class="kbd-label">Open Ask Sauron</span><span class="kbd-keys"><kbd>Ctrl</kbd><kbd>K</kbd></span></div>
         </div>
     </div>
@@ -5234,6 +5243,10 @@ window.svWheelMarquee = function (frame, track) {
 
         // h — the Horde (static/js/sv-horde.js); a g-then-h is the chord's
         if (key === 'h' && !ctrl && !e.altKey) { if (window.SVHorde) window.SVHorde.toggle('key'); return; }
+
+        // c and Shift+C — the council band (static/js/sv-council-band.js), staff only; Ctrl+C stays a copy
+        if (key === 'c' && !ctrl && !e.altKey) { if (window.SVCouncilBand) window.SVCouncilBand.toggle('key'); return; }
+        if (key === 'C' && e.shiftKey && !ctrl && !e.altKey) { if (window.SVCouncilBand) window.SVCouncilBand.widen('key'); return; }
 
         // t — toggle theme
         if (key === 't') {
@@ -5766,6 +5779,16 @@ never nags. He never acts.{% endcomment %}
             lead: function (s) { return 'How is my ' + s + ' position doing?'; },
             more: ['What would invalidate it?', 'Is the stop in the right place?',
                    'What does the care do next?', 'What moves with it right now?']
+        },
+        /* The council band (2026-10-22): a sitting or a voice, its facts
+           travelling beside the subject, as the Horde's seat does. */
+        sitting: {
+            lead: function (s) { return 'What do you make of the council on ' + s + '?'; },
+            more: ['Who was right?', 'What did the dissent see?', 'What would change the verdict?']
+        },
+        voice: {
+            lead: function (s) { return 'How has ' + s + ' been doing, and should I listen to it?'; },
+            more: ['When has it been right?', 'When was it wrong, and why?', 'Who disagrees with it most?']
         },
         generic: {
             lead: function (s) { return 'What do you think about ' + s + '?'; },
@@ -6526,7 +6549,7 @@ never nags. He never acts.{% endcomment %}
         lastQuestion = q;
         /* The subject travels with the question. Without it a follow-up like
            "why is it firing?" arrives with no idea what "it" is. */
-        var asked = askContext ? q + '\n\n(About: ' + askContext.subject + ')' + (askContext.facts ? '\n(Facts shown by the Horde: ' + askContext.facts + ')' : '') : q;
+        var asked = askContext ? q + '\n\n(About: ' + askContext.subject + ')' + (askContext.facts ? '\n(Facts shown on screen: ' + askContext.facts + ')' : '') : q;
         if (sendBtn) { sendBtn.disabled = true; sendBtn.classList.add('working'); }
         /* Optimistic bubbles bridge the moment before the server answers with
            the real rows; renderThread replaces them. */

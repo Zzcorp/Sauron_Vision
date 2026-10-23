@@ -1827,7 +1827,7 @@ class TheOpenerTests(_Base):
         self.assertIn("'How is my '", kinds)
         self.assertIn("function (subject, kind, facts)", base)
         self.assertIn("data-ask-facts", base)
-        self.assertIn("(Facts shown by the Horde: '", base)
+        self.assertIn("(Facts shown on screen: '", base)
 
     def test_the_commands_each_seat_offers(self):
         cfg = _cfg(self.user)
