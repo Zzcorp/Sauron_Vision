@@ -208,3 +208,164 @@ DIVERGE_HOLD, DIVERGE_REDUCE, DIVERGE_ADD = "hold", "reduce", "add"
 #: How a track was seeded: at birth, at adoption, or late by the census
 #: (an Orc born before its arms existed; it never counts for a seat).
 SEED_BIRTH, SEED_ADOPT, SEED_LATE = "birth", "adopt", "late"
+
+# ── O1c: the dossier from code, the score, the weather, the drums ─────────
+# (spec §5.2a, §7.5.1-7.5.3, §4.7, §10.6, §10.7). Nothing here routes,
+# calls a model or sends anything: O1 records.
+
+#: §10.7 verbatim.
+DOSSIER_MAX_TOKENS = 22000
+BOARD_SYMBOLS = ("DXY", "US10Y", "XAUUSD", "WTIUSD", "SPX500", "NSDQ100",
+                 "DAX40", "NIKKEI225", "BTCUSD", "EURUSD", "USDJPY")
+MK_HEADLINES_PER_SESSION = 6
+#: MK12 shrinks 6 -> 4 -> 3 headlines per model at build time (§5.2a D21).
+MK_HEADLINE_STEPS = (6, 4, 3)
+IN_HEADLINES = 8
+MK_SESSION_MAX_TOKENS = 900
+FENCE_CAPS = {"headline": 120, "calendar_title": 80, "mind": 300,
+              "reviewer": 280, "lesson": 200, "note": 140}
+#: V10 (§5.2a item 5, revised 2026-10-15): the T0 fact kinds that may
+#: justify each action kind. `symbol`: the fact must be on this symbol;
+#: `event`: a gap or calendar fact of the named event; `newer`: any fact
+#: newer than the current plan. The I3 facts of an add arrive with the
+#: mandate (O2). Enforced by the validator from O2; O1 ships the table and
+#: the check.
+_V10_REDUCE = {"kinds": ("bar", "structure", "predicate", "care"),
+               "symbol": True}
+_V10_ADD = {"kinds": ("structure", "bar"), "symbol": True, "i3": True}
+V10_RELEVANCE = {
+    "exit": _V10_REDUCE, "trim": _V10_REDUCE, "tighten": _V10_REDUCE,
+    "lock_waive": {"kinds": ("gap", "calendar"), "event": True},
+    "add": _V10_ADD, "reenter": _V10_ADD,
+    "plan": {"kinds": "any", "newer": True},
+}
+NEWS_SHOCK_CORROBORATION_ATR1H = 1.0
+NEWS_SHOCK_CORROBORATION_MIN = 15
+BAND_ROUTINE_MAX = 30
+BAND_MATERIAL_MAX = 55
+BAND_COMPLEX_MAX = 75
+BAND_HYSTERESIS = 5
+BAND_HOLD_AFTER_URGENT_MIN = 60
+STAKES_REAL = 10
+STAKES_HAND = 5
+STAKES_WOUND = 10
+STAKES_L3 = 5
+DRUM_MAX_HOP = 2
+DRUM_JOIN_MIN = 15
+DRUM_SETTLE_MIN = 15
+DRUM_RHO_MIN = 0.7
+MIN_WAKE_SPACING_MIN = 15
+MARK_MAX_AGE_S = 120
+
+#: §7.5.1: the weights (summing to 1.00) and the breakpoints x -> s.
+COMPLEXITY_WEIGHTS = {"vol": 0.12, "regime": 0.10, "prints": 0.12,
+                      "news": 0.06, "stress": 0.10, "gap": 0.08,
+                      "stop": 0.10, "decision_point": 0.06, "size": 0.08,
+                      "disagreement": 0.08, "reversibility": 0.10}
+COMPLEXITY_BREAKPOINTS = {
+    "vol": ((1.0, 0), (1.25, 40), (1.6, 75), (2.2, 100)),
+    "news": ((1.0, 0), (2.0, 50), (4.0, 100)),
+    "gap": ((0.0, 0), (0.2, 20), (0.5, 60), (1.0, 100)),
+    "stop": ((0.5, 100), (1.0, 60), (2.0, 20), (3.0, 0)),
+    "size": ((0.05, 0), (0.15, 40), (0.30, 80), (0.50, 100)),
+    "disagreement": ((0.2, 0), (0.5, 60), (0.8, 100)),
+}
+#: §7.5.1 reversibility: the most irreversible candidate on the table.
+REVERSIBILITY = {"R0": 0, "R1": 25, "R2": 40, "R3": 55, "R4": 75, "R5": 90,
+                 "R6": 100}
+
+#: MK is sized per model when it is built (§5.2a D21). What differs between
+#: the models at build time is the tokenizer, so the dossier names a model
+#: by its FAMILY (the word after "claude-" in its id: bot_program/orcs/
+#: dossier.family_of), never by its id: a model id lives in
+#: ai_agents/catalog.py alone (tests/test_model_catalog.py) and the orcs
+#: package imports nothing of ai_agents. These are the families of the
+#: Orcs' ladder, table v1 (catalog ORC_LADDER_V1; every ladder model maps
+#: to one, pinned by tests/orcs/test_orc_dossier.py). A model of no known
+#: family is sized as MK_GUARD_FAMILY, the largest factor.
+MK_FAMILIES = ("haiku", "sonnet", "opus", "fable")
+MK_GUARD_FAMILY = "fable"
+#: Tokens per estimated token, per family. MEASURED 2026-10-16 (spec §5.2a):
+#: count_tokens gave the same counts on Opus 5.5 and Haiku 5.5 as on
+#: Sonnet 5.5; Fable 5.1 is unmeasured and keeps the 1.35x guard. O1 has
+#: no network, so it estimates (4 characters a prose token, 8.5 tokens a
+#: bar row) times this factor. OrcSetting "token_factors" overrides it, by
+#: family or by the model's full name.
+TOKEN_FACTORS = {"haiku": 1.0, "sonnet": 1.0, "opus": 1.0, "fable": 1.35}
+#: The family an O1 wake's dossier is rendered for (no model is asked).
+DOSSIER_REFERENCE_MODEL = "sonnet"
+CHARS_PER_TOKEN = 4.0
+TOKENS_PER_BAR_ROW = 8.5
+#: S (the doctrine) as measured by the 2026-10-16 smoke: reserved in the cap.
+S_TOKENS_RESERVE = 3930
+#: The per-wake trim (§5.2a D21): uncached parts only, in this order. The
+#: last, IN1's 1h rows beyond 3 days, is decided per (model, symbol) when
+#: IN-slow is built, so the Orcs on one symbol still share IN-slow.
+TRIM_ORDER = ("in12_5m", "in12_15m_old", "ps5_notes", "in9", "in1_1h_old")
+
+#: The detector's memory of the reason keys it has recorded.
+WAKE_KEYS_KEPT = 200
+#: W4 (§1.3): +1R, +2R, +3R; -0.5R, -0.75R (thesis_check.DEEP_MAE_R).
+W4_THRESHOLDS = (1.0, 2.0, 3.0, -0.5, -0.75)
+#: The give-back: ur <= this share of the best after a best of +1R.
+W4_GIVEBACK_SHARE = 0.5
+#: W5: minutes from a high-impact print (T-180, T-60, T+15), earnings 24h.
+W5_OFFSETS_MIN = (-180, -60, 15)
+W5_EARNINGS_H = 24
+#: W5 at T+15 is fired at most this long after the print.
+W5_LATE_MIN = 60
+#: W11: the metronome every 4 hours while the market is open; a stock or
+#: ETF at the open + 60 min and the close - 90 min; 2 h before a weekend.
+W11_METRONOME_H = 4
+W11_OPEN_AFTER_MIN = 60
+W11_CLOSE_BEFORE_MIN = 90
+W11_WEEKEND_BEFORE_H = 2
+#: W7: open risk at this share of its limit.
+W7_OPEN_RISK_SHARE = 0.8
+#: W3: the mark within this many ATR(1h) of an invalidation level, once per
+#: level per 4 hours.
+W3_NEAR_ATR1H = 0.1
+W3_ONCE_H = 4
+#: PS13: the venue mark against the platform quote, a contradiction past
+#: this many ATR(1h).
+MARK_QUOTE_CONTRADICTION_ATR1H = 0.5
+
+#: §4.7 the declared factor map, version 1 (OrcSetting "drum_factor_map"
+#: overrides it). The USD factor reaches gold and silver (quoted in USD),
+#: EURUSD and USDJPY (their legs), the US indices and the dollar index.
+DRUM_FACTOR_MAP_V1 = {
+    "v": 1,
+    "map": {"USD": ["XAUUSD", "XAGUSD", "EURUSD", "USDJPY", "SPX500",
+                    "NSDQ100", "DXY"]},
+}
+DRUM_KINDS = ("stop_hit", "sweep", "thesis_turned", "level_break",
+              "news_shock", "print_surprise", "fill", "lock")
+#: The care's lock transitions that drum (never a trail step).
+DRUM_LOCK_WHYS = ("breakeven", "event lock", "weekend lock")
+#: A drum's journal kind and its fact id's prefix.
+DRUM_PREFIX = "DR"
+#: The LiveQuote ring the census keeps for the news-shock corroboration.
+RING_SAMPLES = 8
+RING_TTL_S = 3600
+
+#: OrcWake.status values O1 writes (no `pending`: dispatch is O2's).
+WAKE_STATUS_SKIPPED = "skipped"
+WAKE_STATUS_QUIET = "quiet"
+WAKE_SKIPPED_REASON = "no model before O2"
+#: The words a wake's status is shown in.
+STATUS_WORDS = {"skipped": "recorded only: no model before O2",
+                "quiet": "nothing new: a code reading"}
+#: The routing table's version the weather is computed for (display only).
+ROUTING_VERSION = "table-v1"
+
+#: The eToro tape (§5.2a item 3, IN12): 15m and 5m candles, behind the
+#: `orcs_tape` switch AND a recorded headroom measurement. The tape takes
+#: at most this share of the candle rate measured clean.
+TAPE_INTERVALS = ("15m", "5m")
+TAPE_SHARE = 0.25
+TAPE_SWITCH = "orcs_tape"
+DRUMS_SWITCH = "orcs_drums"
+HEADROOM_KEY = "etoro_candle_headroom"
+
+#: The trading day rolls at 17:00 New York (§5.2a, §7.5.3).
+TRADING_DAY_ROLL_NY_HOUR = 17

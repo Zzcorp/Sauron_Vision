@@ -16,6 +16,11 @@ fast queue, behind the `orcs` switch.
   5. pending   a close pending at the venue is a fact
   6. seeded    (O1b) an Orc born before its arms existed gets them, marked
                "late": graded, never counted for a seat
+  7. O1c       the reasons the next tick's wake merges: the book (W7), the
+               clock around a print (W5), a close pending (W10); the
+               market's drums (the LiveQuote ring, news shocks, print
+               surprises) and the routing of every unrouted drum within
+               its user's book, as journal facts
 
 Each row runs on its own: one that fails never stops the pass. The result
 names no `skipped`, `parsed` or `attempted` key: the task gate reads those
@@ -159,4 +164,16 @@ def run(now=None) -> dict:
         out["facts"] += facts.observe_pending(now, legs=legs)
     except Exception as e:  # noqa: BLE001
         logger.warning("[orcs] census: facts not read: %s", e)
+    from bot_program.orcs import drum_bus, wake
+    o1c = (("book", lambda: wake.census_book(now)),
+           ("clock", lambda: wake.census_clock(now)),
+           ("pending_w10", lambda: wake.census_pending(now)),
+           ("drums_published", lambda: drum_bus.census_market(now)),
+           ("drums_routed", lambda: drum_bus.route(now)))
+    for key, step in o1c:
+        out[key] = 0
+        try:
+            out[key] = int(step() or 0)
+        except Exception as e:  # noqa: BLE001 — one step never stops the rest
+            logger.warning("[orcs] census step %s failed: %s", key, e)
     return out

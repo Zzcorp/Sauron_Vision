@@ -637,7 +637,12 @@ class TheBasisTests(_Base):
                           wraps=menus.symbol_levels) as spy:
             drive(self, self.cfg, row, [(_at(35), "101.3")])
         self.assertTrue(spy.called, "T-STRUCT read the menu")
-        self.assertEqual(spy.call_args.kwargs["basis_samples"], samples)
+        # the playbook's own read (O1c's dossier reads the menu after it,
+        # for its levels, without the O arm's samples)
+        ghost_reads = [c for c in spy.call_args_list
+                       if "basis_samples" in c.kwargs]
+        self.assertTrue(ghost_reads)
+        self.assertEqual(ghost_reads[-1].kwargs["basis_samples"], samples)
 
 
 class ThePlaybookArmTests(_Base):

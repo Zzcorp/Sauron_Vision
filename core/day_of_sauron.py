@@ -135,6 +135,13 @@ STAGE_OF = {
                                   "mechanical counterfactual"),
     "orc-grade-closed": ("watch", "closed positions graded against the "
                                   "mechanical care"),
+    # The Orcs' dossier (O1c): the market day written down at the roll and
+    # at each session's close, read through the day; the short candles of
+    # the quick strikes beside the bars.
+    "orc-day-roll": ("see", "the trading day's header and weather"),
+    "orc-session-close": ("see", "each closed session written down"),
+    "orc-hourly": ("watch", "open positions' instruments read each hour"),
+    "orc-tape-mercenary": ("see", "short candles for quick strikes"),
     # ── TELL: the voices ────────────────────────────────────────────────
     "poll-telegram-eye": ("tell", "the Eye reads its Telegram group"),
     "poll-telegram-alarm": ("tell", "the alarm bot reads its group"),

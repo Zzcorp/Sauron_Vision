@@ -80,19 +80,36 @@ def _reentry_open(orc, trade) -> tuple:
 def on_leg_closed(trade_id, *, now=None):
     """Journal the close of one leg (once), and end the idea when its last
     leg is closed: `dead`, died_at the last leg's close time. A dead Orc
-    still hears the close of its legs. Idempotent. The Orc, or None."""
-    from bot_program.models import AssetBotTrade
-    from bot_program.orcs import facts, journal
-    from bot_program.orcs.models import Orc, OrcLeg
+    still hears the close of its legs. Idempotent. The Orc, or None.
+
+    O1c (§4.7): once the close is journaled and its block has committed, a
+    leg its stop closed publishes a stop_hit drum
+    (drum_bus.on_close_quietly, never raises), called here rather than
+    through a second on_commit, so a closing save still queues one
+    callback."""
+    from bot_program.orcs.models import OrcLeg
     leg = OrcLeg.objects.filter(trade_id=trade_id).only("orc_id").first()
     if leg is None:
         return None
+    orc, journaled = _close_leg(leg, trade_id, now)
+    if journaled:
+        from bot_program.orcs import drum_bus
+        drum_bus.on_close_quietly(orc.pk, trade_id)
+    return orc
+
+
+def _close_leg(leg, trade_id, now) -> tuple:
+    """(orc, journaled): the close fact (once) and the idea's end."""
+    from bot_program.models import AssetBotTrade
+    from bot_program.orcs import facts, journal
+    from bot_program.orcs.models import Orc, OrcLeg
+    journaled = False
     with transaction.atomic():
         # the Orc's row alone is locked (never its shared seat)
         orc = Orc.objects.select_for_update().get(pk=leg.orc_id)
         trade = AssetBotTrade.objects.get(pk=trade_id)
         if trade.status not in LEG_DONE_STATUSES:
-            return orc
+            return orc, False
         closed = list((orc.seen or {}).get("closed_legs") or [])
         if trade.pk not in closed:
             hand = facts.is_hand_close(trade)
@@ -109,18 +126,19 @@ def on_leg_closed(trade_id, *, now=None):
                                  "hand": hand},
                            fact=True, remember={"closed_legs": closed + [
                                trade.pk]}, fields=fields)
+            journaled = True
         if orc.state == STATE_DEAD:
-            return orc
+            return orc, journaled
         legs = list(OrcLeg.objects.select_related("trade").filter(orc=orc))
         if not legs or not all(lg.trade.status in LEG_DONE_STATUSES
                                for lg in legs):
-            return orc
+            return orc, journaled
         ok, why = _reentry_open(orc, trade)
         if ok:
             journal.append(orc, "fact", "The last leg closed; the re-entry "
                            "window is open.", fact=True,
                            fields={"state": STATE_REENTRY})
-            return orc
+            return orc, journaled
         died = max((lg.trade.closed_at for lg in legs
                     if lg.trade.closed_at is not None),
                    default=None) or now or timezone.now()
@@ -128,7 +146,7 @@ def on_leg_closed(trade_id, *, now=None):
                        f"closed. No re-entry window: {why}.",
                        body={"why": why}, fact=True,
                        fields={"state": STATE_DEAD, "died_at": died})
-    return orc
+    return orc, journaled
 
 
 def kill_all(user=None, *, reason="", now=None) -> int:

@@ -10,8 +10,11 @@ once per pass (the tick's per-pass cache). A row with an Orc costs a
 bounded handful on a quiet tick: the Orc, the bars its predicates read
 (once per symbol and pass), its arms and their one bulk update. Later
 commits append their steps to TICK_STEPS (O1b: the thesis predicates, then
-the arms' step; O1c: wake detection).
+the arms' step; O1c: the memory before the tick, the lock and thesis
+drums, and wake detection, which costs no query on a quiet tick and
+renders the dossier only when it records a wake).
 """
+import copy
 import logging
 
 from bot_program.orcs import facts
@@ -53,8 +56,31 @@ def _step_ghosts(bot, trade, price, cared, orc):
                            results=getattr(orc, "_orc_results", None))
 
 
+def _snapshot_seen(bot, trade, price, cared, orc):
+    """O1c: the Orc's memory as the tick found it, in memory only: the
+    drums and the detector read what this tick's steps changed."""
+    orc._seen_before = copy.deepcopy(orc.seen or {})
+
+
+def _drums_tick(bot, trade, price, cared, orc):
+    """O1c: a lock or a turned thesis drums, on its transition only."""
+    if orc.state == STATE_DEAD:
+        return 0
+    from bot_program.orcs import drum_bus
+    return drum_bus.on_tick(orc, trade, getattr(orc, "_seen_before", None),
+                            orc.seen)
+
+
+def _detect_wakes(bot, trade, price, cared, orc):
+    """O1c: wake detection, recorded with its score and dossier (no model;
+    the dispatch is O2's)."""
+    from bot_program.orcs import wake
+    return wake.detect(bot, trade, price, cared, orc)
+
+
 #: Each step is fenced on its own: one failing never stops the next.
-TICK_STEPS = (_observe_tick, _check_predicates, _step_ghosts)
+TICK_STEPS = (_snapshot_seen, _observe_tick, _check_predicates, _step_ghosts,
+              _drums_tick, _detect_wakes)
 
 
 def after_care(bot, trade, price, cared="") -> None:

@@ -725,3 +725,29 @@ def refresh_bot_bars_task():
         return refresh_bot_bars()
     finally:
         cache.delete(BARS_LOCK_KEY)
+
+
+#: THE MERCENARIES' TAPE (O1c, spec §1.6, §5.2a item 3): their 15m and 5m
+#: eToro candles every 5 minutes, behind `orcs_tape`, `orcs` and a recorded
+#: headroom measurement. It stands aside while a bar pass holds
+#: BARS_LOCK_KEY (never takes it: the pass's own tape part runs inside it)
+#: and holds its own lock.
+ORC_TAPE_LOCK_KEY = "bars:orc_tape_lock"
+ORC_TAPE_TIME_LIMIT_S = 280
+
+
+@shared_task(time_limit=ORC_TAPE_TIME_LIMIT_S)
+@guarded_task("orcs_tape")
+def refresh_orc_tape_task():
+    from django.core.cache import cache
+
+    from market_data.bot_bars import refresh_orc_tape
+    if cache.get(BARS_LOCK_KEY):
+        return {"idle": "a bar refresh is running: the tape waits for the "
+                        "next beat"}
+    if not cache.add(ORC_TAPE_LOCK_KEY, 1, ORC_TAPE_TIME_LIMIT_S):
+        return {"idle": "another tape pass is running"}
+    try:
+        return refresh_orc_tape()
+    finally:
+        cache.delete(ORC_TAPE_LOCK_KEY)

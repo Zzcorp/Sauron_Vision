@@ -121,9 +121,13 @@ class _OrcBase(_Base):
 
     def _wl(self):
         """What the watchlist was handed, but for its bound `stop` (the
-        pass's own deadline method, a new object every pass)."""
+        pass's own deadline method, a new object every pass) and O1c's
+        `also` (the board of market symbols that joins the held part while
+        `orcs` is ON; tests/orcs/test_orc_tape.py pins it, and that it is
+        absent OFF)."""
         kw = dict(self.wl.call_args.kwargs)
         kw.pop("stop", None)
+        kw.pop("also", None)
         return kw
 
     def _late_after(self, n_clients):

@@ -97,6 +97,14 @@ app.conf.task_routes = {
     "bot_program.orcs.tasks.track_ghosts": {"queue": "slow"},
     "bot_program.orcs.tasks.grade_closed": {"queue": "slow"},
     "bot_program.orcs.tasks.shadow_audit": {"queue": "slow"},
+    # 2026-10-22 -- the Orcs' dossier (O1c): the day roll, the session
+    # close and the hourly read write the Orc tables only (no broker, no
+    # model), on `slow` by exact name like the O1b tasks. The Mercenaries'
+    # tape (market_data.tasks.refresh_orc_tape_task) rides the
+    # market_data.tasks.* glob to `fast`, beside the bar refresh.
+    "bot_program.orcs.tasks.orc_day_roll": {"queue": "slow"},
+    "bot_program.orcs.tasks.orc_session_close": {"queue": "slow"},
+    "bot_program.orcs.tasks.orc_hourly": {"queue": "slow"},
 }
 
 # ============================================================
@@ -470,6 +478,30 @@ app.conf.beat_schedule = {
     "orc-shadow-audit": {
         "task": "bot_program.orcs.tasks.shadow_audit",
         "schedule": crontab(hour=5, minute=40, day_of_week="sunday"),
+    },
+    # THE ORCS' DOSSIER (2026-10-22, O1c, spec §5.2a, §7.5.3, §10.7). UTC
+    # crontabs covering both sides of the clock change, every pass
+    # idempotent (a zone-aware crontab has no precedent here): the day
+    # rolls at 17:00 New York (21:00 or 22:00 UTC); the five sessions end
+    # at 00:00, 05:00, 11:00, 13:00 and 16:00 New York; the hourly read at
+    # :06. The Mercenaries' tape every 5 min, behind orcs_tape, orcs and
+    # the headroom measurement; it stands aside while a bar pass runs.
+    "orc-day-roll": {
+        "task": "bot_program.orcs.tasks.orc_day_roll",
+        "schedule": crontab(minute=3, hour="21,22"),
+    },
+    "orc-session-close": {
+        "task": "bot_program.orcs.tasks.orc_session_close",
+        "schedule": crontab(minute=4, hour="4,5,9,10,15,16,17,18,20,21"),
+    },
+    "orc-hourly": {
+        "task": "bot_program.orcs.tasks.orc_hourly",
+        "schedule": crontab(minute=6),
+    },
+    "orc-tape-mercenary": {
+        "task": "market_data.tasks.refresh_orc_tape_task",
+        "schedule": 300.0,
+        "options": {"expires": 280, "expire_seconds": 280},
     },
     # THE CRISIS MODE AND ARAGORN (2026-10-02, bot_program/
     # market_stress.py, aragorn.py): the posture every 15 min, the pair
