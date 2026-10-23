@@ -17,12 +17,19 @@ CLOSE_PENDING, and the open portfolio.Position rows of their own
 are a band of their own, never seats; broker positions no row claims are a
 display band; the shared Main book is a footnote.
 
-The truth contract, in four lines:
+The truth contract, in five lines:
   * a real row is valued by bot_program.venue_mark.resolve, through the
     positions page's own row (dashboard.views._live_row), so the Horde and
     /positions/ print the same digits;
   * unmeasured is None here and an em dash on the page, never 0;
   * worlds (real, demo, paper, no venue) and currencies are never summed;
+  * a reason stored beside an order (the debate's `why`, a venue's answer
+    to a stop move, an unread thesis, a gate that failed) is said in fixed
+    words keyed on its cause, never forwarded: no exception text reaches a
+    page. A voice's own words (the debate's two sides, the reviewer's
+    reasoning) are shown as written or withheld whole: when they name an
+    exception or repeat a failed read's text, or may name an amount of
+    money: R and percent only (dashboard/plain_words.py);
   * the seat slot for the coming trader agents is None today and the
     group slot for their class leaders is None today: the seams are
     _orc_slots and _captain_slots below. No sentence here says one of them
@@ -53,6 +60,10 @@ from django.utils.dateparse import parse_datetime
 
 from core.context_processors import PANEL_TTL_SECONDS
 from core.templatetags.sauron_tags import _WORLD_TITLES
+
+from .plain_words import (LINE_MAX, VENUE_CAUSES, debate_why_words,
+                          failure_texts, money_marks, scrub, size_step,
+                          thesis_words, venue_cause, venue_words)
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +180,10 @@ L_WAITING = "No price: waiting for the venue."
 L_NEAR = "Within {r}R of the stop."
 L_EVENT = "A high-impact print is near: {title} at {at} UTC."
 L_NO_CARE = "The care has no record of this row yet."
-L_REFUSED = "eToro refused the care's stop: {refusal}."
+#: The care's mirror did not land (bot_program/position_care.py
+#: _mirror_to_venue): its refusal note is the venue's answer or an
+#: exception's text, so the cause is said in words (plain_words.venue_words).
+L_REFUSED = "The care's stop did not reach eToro: {refusal}."
 L_TIME_STOP = "Time stop in {left}."
 L_NO_STAMP = "No USD conversion stamp: its money is left out of the totals."
 L_NO_STOP = "No stop."
@@ -183,6 +197,10 @@ INERT_WORDS = {
                         "modify yet",
     "legs_unmovable": "every recorded leg handle was refused",
 }
+#: The causes the inert stamp's detail (the engine mover's notes, the
+#: venue's answers or an exception's text: bot_program/asset_engine/base.py
+#: _note_stop_move_failed) may add, in words; any other detail adds none.
+INERT_CAUSES = ("timeout", "unreachable", "no_leg")
 
 # The head.
 SIDE_LABELS = {"live": "REAL ACCOUNT", "paper": "PAPER BOOK"}
@@ -203,8 +221,11 @@ ALLOC_UNKNOWN = "Book size unknown: allocation cannot be measured."
 ALLOC_OVER = "over the book by {x}%"
 ALLOC_UNMEASURED = "{n} seats not measured"
 ALLOC_UNMEASURED_ONE = "1 seat not measured"
+#: The gate failed open (portfolio/risk_gate.py preflight): its reason
+#: carries the exception's text, so it is said in these words alone.
 FAILED_OPEN = ("THE BOOK LIMITS COULD NOT BE READ: entries are not gated by "
-               "them right now. ({reason})")
+               "them right now.")
+FAILED_REASON = "The book limits could not be read."
 HEAD_UNREADABLE = "The book limits could not be read. The seats below are live."
 POOLS_LINE = "{world} {used} of {pool} used · {free} free"
 POOLS_TITLE = ("Pools are what the bots may draw on; they are not the book. "
@@ -269,8 +290,25 @@ DEBATE_NONE = {
 }
 THESIS_CHECK_BESIDE = ("The thesis check (VOICE) reads whether this entry's "
                        "reason still holds: {verdict}, {age} ago.")
+#: The two sides' verdicts (ai_agents/agents/trade_debate.py: the
+#: Executioner's pass, cut or veto, the Champion's back or neutral).
+DEBATE_VERDICTS = ("pass", "cut", "veto", "back", "neutral")
+#: A side whose words may name an amount of money (the brief puts the risk
+#: at the stop before both sides): withheld whole, in the debate's line.
+DEBATE_SAID_WITHHELD = "its words are withheld: they may name an amount of money"
+#: A side whose words name an exception (the brief names one when a read
+#: failed: "the rule's record could not be read (OSError)"): withheld whole.
+DEBATE_SAID_ERROR = "its words are withheld: they quote an error"
 REVIEW_QUIET = ("Nothing flagged in the last 24 hours. The reviewer writes "
                 "only when something triggers; this is not a clean bill.")
+#: The reviewer's reasoning when it may name an amount of money.
+REASONING_WITHHELD = ("Withheld: this reasoning may name an amount of money. "
+                      "The verdict above stands.")
+#: The reviewer's reasoning when it names an exception or repeats the text
+#: of a read that failed (brain/position_review.py: the positioning and
+#: the thesis check store "... unread: <the exception's text>").
+REASONING_ERROR = ("Withheld: this reasoning quotes an error. The verdict "
+                   "above stands.")
 REVIEW_OFF = "The position reviewer is switched off."
 THESIS_APPLIED = "Applied by the care: tighten only, for 24 hours."
 THESIS_ADVICE = "Advice only on your own ticket: the care does not apply it."
@@ -737,9 +775,11 @@ def light(facts) -> dict:
     inert = facts.get("stop_rules_inert") or ""
     if inert:
         reason = INERT_WORDS.get(inert, str(inert).replace("_", " "))
-        detail = _end(facts.get("stop_rules_inert_detail"))
-        if detail:
-            reason = f"{reason} ({detail})"
+        # The detail is the mover's notes (the venue's answers or an
+        # exception's text): its cause in words, never the notes.
+        cause = venue_cause(facts.get("stop_rules_inert_detail"))
+        if cause in INERT_CAUSES:
+            reason = f"{reason} ({VENUE_CAUSES[cause]})"
         add("stop_rules_inert", "alarm", L_INERT.format(reason=reason))
     if facts.get("through_stop"):
         add("through_stop", "alarm", L_THROUGH.format(stop=facts.get("stop_t") or DASH))
@@ -781,7 +821,8 @@ def light(facts) -> dict:
             and not facts.get("care_present"):
         add("no_care_record", "watch", L_NO_CARE)
     if facts.get("refusal"):
-        add("mirror_refused", "watch", L_REFUSED.format(refusal=_end(facts["refusal"])))
+        add("mirror_refused", "watch",
+            L_REFUSED.format(refusal=venue_words(facts["refusal"])))
     left = _f(facts.get("time_stop_left_s"))
     if left is not None and left <= TIME_STOP_SOON_S:
         from .position_summary import duration_words
@@ -815,8 +856,10 @@ def _thesis_of(meta, now):
             "word": str(t.get("verdict") or "").upper() or DASH,
             "age_t": _age_words(age) if age is not None else "",
             "fresh": age is not None and age <= THESIS_FRESH_H * 3600,
-            "words": str(t.get("words") or ""), "stop": t.get("stop"),
-            "at": t.get("at")}
+            # An unread check's why is said by cause (brain/thesis_check.py
+            # writes a structure read's exception text into its words).
+            "words": thesis_words(t.get("verdict"), t.get("words")),
+            "stop": t.get("stop"), "at": t.get("at")}
 
 
 #: The reviewer's four verdicts (brain/position_review_models.py). Its two
@@ -1736,8 +1779,10 @@ def _head(raw, seats, book):
             "notional": {"ok": bool(notl["ok"]) if "ok" in notl else None,
                          "reason": notl.get("reason") or ""},
             "failed_open": failed,
-            "failed_reason": pre.get("reason", "") if failed else "",
-            "failed_t": FAILED_OPEN.format(reason=pre.get("reason", "")) if failed else "",
+            # The gate's reason here is "could not be read (<the
+            # exception's text>)": said in the Horde's words alone.
+            "failed_reason": FAILED_REASON if failed else "",
+            "failed_t": FAILED_OPEN if failed else "",
             "demo_note": side == "live" and any(s["world"] == "demo" for s in seats),
             "demo_note_t": DEMO_NOTE if (side == "live" and any(
                 s["world"] == "demo" for s in seats)) else "",
@@ -1962,26 +2007,114 @@ def _line_t(label, text, **extra):
     return out
 
 
-def _debate_words(debate, cut=None):
+def _debate_words(debate, cut=None, marks=None):
     """The debate recorded on the row (bot_program/asset_engine/base.py
     entry_meta["debate"]: each side is the agent's own parse, ai_agents/
     agents/trade_debate.py — the Executioner's verdict and killer, the
-    Champion's verdict and edge), in one line."""
+    Champion's verdict and edge), in one line.
+
+    A side's words are a voice's, shown as it wrote them or withheld
+    whole: when they name an exception, or may name an amount of money
+    (`marks`: the brief's own amount, _debate_marks). Why the debate did
+    not run in full is said by cause (plain_words.debate_why_words); its
+    stored `why` is never printed."""
     def side(name, why_key):
         said = debate.get(name)
         if not isinstance(said, dict):
             return DASH
-        verdict = str(said.get("verdict") or "").upper() or DASH
-        why = _end(said.get(why_key))
+        verdict = str(said.get("verdict") or "").lower()
+        verdict = verdict.upper() if verdict in DEBATE_VERDICTS else DASH
+        why = _end(scrub(said.get(why_key), LINE_MAX, marks,
+                         withheld=DEBATE_SAID_WITHHELD,
+                         withheld_error=DEBATE_SAID_ERROR))
         return f"{verdict}: {why}" if why else verdict
     text = (f"Executioner: {side('executioner', 'killer')} · "
             f"Champion: {side('champion', 'edge')} · "
             f"{'binding' if debate.get('binding') else 'shadow'}")
-    if not debate.get("ran") and debate.get("why"):
-        text += f" · {_end(debate['why'])}"
+    if not debate.get("ran"):
+        said = debate_why_words(debate.get("why"))
+        if said:
+            text += f" · {said}"
     if isinstance(cut, dict) and _f(cut.get("scale")) is not None:
         text += f" · Size cut: {_g(cut.get('scale'))}x"
     return text
+
+
+#: The brief's own amount, as candidate_brief prints it.
+_BRIEF_AMOUNT = re.compile(r"risk at the stop (-?[\d,]+(?:\.\d+)?)")
+
+
+def _debate_session(debate):
+    """The council's record of the debate (ai_agents/agents/council.py
+    open_debate_session: the brief and its candidate's price, stop, size
+    and value per unit, as both sides were shown them), or None."""
+    cid = debate.get("council_id") if isinstance(debate, dict) else None
+    if not cid:
+        return None
+    try:
+        from ai_agents.council_models import CouncilSession
+        return (CouncilSession.objects.only("brief", "entry", "stop", "qty",
+                                            "value_per_unit")
+                .filter(pk=int(cid)).first())
+    except Exception:  # noqa: BLE001 — a record that cannot be read adds no mark
+        return None
+
+
+def _debate_marks(trade, meta):
+    """The amount the debate's brief put before both sides ("risk at the
+    stop N": qty × |price − stop| × value per unit, ai_agents/agents/
+    trade_debate.py candidate_brief) as plain_words.money_marks, which a
+    side's line is read against by value; never printed.
+
+    Read first from the council's record of the debate, which keeps the
+    brief itself and the candidate it was priced on (_debate_session). The
+    row is read as well (a debate argued before the record existed, or
+    whose record failed): the brief priced the candidate at its proposal
+    and sized it before the debate's cut, and a real row keeps the
+    broker's fill, so every price, stop and size the row records for the
+    entry is read (bot_program/asset_engine/base.py): the fill
+    (entry_price), the proposal (slippage.proposal), a paper fill's
+    market_price; the initial stop, the stop sent before a re-anchor to
+    the fill (stop_reanchored_to_fill.sent) and the row's stop; the filled
+    size, the size asked for (qty_requested, overfilled.requested), the
+    cut's own size, and the range each was before the cut (÷ its scale,
+    widened by the step it was rounded to); and the sizer's risk budget
+    (risk_dollars). None when nothing is known."""
+    def d(obj, key):
+        v = obj.get(key) if isinstance(obj, dict) else None
+        return v if isinstance(v, dict) else {}
+
+    def vals(*xs):
+        return {v for v in (_f(x) for x in xs) if v}
+
+    amounts = [_f(meta.get("risk_dollars"))]
+    session = _debate_session(meta.get("debate"))
+    if session is not None:
+        said = _BRIEF_AMOUNT.search(session.brief or "")
+        if said:
+            amounts.append(_f(said.group(1).replace(",", "")))
+        q, e, st = _f(session.qty), _f(session.entry), _f(session.stop)
+        if q and e is not None and st is not None:
+            amounts.append(abs(q) * abs(e - st) * (_f(session.value_per_unit) or 1.0))
+    slip, moved, over, cut = (d(meta, "slippage"), d(meta, "stop_reanchored_to_fill"),
+                              d(meta, "overfilled"), d(meta, "debate_cut"))
+    prices = vals(trade.entry_price, meta.get("market_price"),
+                  slip.get("proposal"), slip.get("fill"))
+    stops = vals(meta.get("initial_stop_loss"), trade.stop_loss,
+                 moved.get("sent"))
+    sizes = {abs(q) for q in vals(trade.qty, meta.get("qty_requested"),
+                                  over.get("requested"), cut.get("qty"))}
+    spans = {(q, q) for q in sizes}
+    scale = _f(cut.get("scale"))
+    if scale and 0 < scale < 1:
+        spans |= {(max(q - size_step(q) / 2, 0.0) / scale,
+                   (q + size_step(q) / 2) / scale) for q in sizes}
+    vpu = _f(meta.get("value_per_unit")) or 1.0
+    for p in prices:
+        for s in stops:
+            per = abs(p - s) * vpu
+            amounts += [(lo * per, hi * per) for lo, hi in spans]
+    return money_marks([a for a in amounts if a])
 
 
 def _entry_tags(meta):
@@ -2065,7 +2198,9 @@ def _mission(trade, hand, signal, pcls, now):
         out["at_entry"] = lines
     debate = meta.get("debate") if isinstance(meta.get("debate"), dict) else None
     if debate:
-        out["debate"] = {"present": True, "t": _debate_words(debate, meta.get("debate_cut"))}
+        out["debate"] = {"present": True,
+                         "t": _debate_words(debate, meta.get("debate_cut"),
+                                            _debate_marks(trade, meta))}
     else:
         from .position_summary import world_of
         world = world_of(trade)
@@ -2175,8 +2310,9 @@ def _timeline(trade, hand, actions, notices, reviews, pcls, now):
         add(r.created_at, "REVIEWER", f"{_review_word(r.verdict)}: {_end(first) or DASH}.")
     thesis = meta.get("thesis") if isinstance(meta.get("thesis"), dict) else None
     if thesis:
+        words = thesis_words(thesis.get("verdict"), thesis.get("words"))
         add(_when(thesis.get("at")), "THESIS CHECK",
-            f"{str(thesis.get('verdict') or '').upper()}: {thesis.get('words') or DASH}")
+            f"{str(thesis.get('verdict') or '').upper()}: {words or DASH}")
     for n in notices:
         add(n.created_at, "NOTICE", n.title)
     timed = sorted([e for e in out if e["at"]], key=lambda e: e["at"], reverse=True)
@@ -2453,7 +2589,41 @@ def seat_detail(user, raw_key, *, now=None):
                        reviews, book, sizes, peers, chips, pcls, now)
 
 
-def _voice_reviewer(reviews, switches, now, pcls="", sym=""):
+def _reviewer_marks(review, vpu=None):
+    """The amounts the reviewer could work out from what it was shown
+    (brain/position_review_agent.py: the qty, the entry, the initial and
+    the current stop, the mark, stored on the review as its facts) and may
+    echo "in the trade's own numbers": the risk at the initial and at the
+    current stop, the open P&L, and what a stop-out gives back, each with
+    and without the row's value per unit. plain_words.money_marks; never
+    printed. None when the review lacks a size or a level."""
+    facts = review.facts if isinstance(review.facts, dict) else {}
+    qty = abs(_f(facts.get("qty")) or 0.0)
+    entry, mark = _f(facts.get("entry")), _f(review.mark)
+    if mark is None:
+        mark = _f(facts.get("mark"))
+    if not qty or entry is None:
+        return None
+    pairs = [(entry, _f(facts.get("initial_stop"))), (entry, _f(facts.get("stop"))),
+             (mark, entry), (mark, _f(facts.get("stop")))]
+    units = {1.0, _f(vpu) or 1.0}
+    return money_marks([qty * abs(a - b) * u for a, b in pairs
+                        if a is not None and b is not None for u in units])
+
+
+def _reviewer_failures(review):
+    """The text of each read that failed on the review (brain/
+    position_review.py: the positioning's why, the thesis check's whys,
+    "... unread: <the exception's text>"), for plain_words.scrub."""
+    facts = review.facts if isinstance(review.facts, dict) else {}
+    pos = facts.get("positioning") if isinstance(facts.get("positioning"), dict) else {}
+    th = facts.get("thesis") if isinstance(facts.get("thesis"), dict) else {}
+    whys = th.get("why") if isinstance(th.get("why"), list) else [th.get("why")]
+    st = th.get("structure") if isinstance(th.get("structure"), dict) else {}
+    return failure_texts(pos.get("why"), *whys, st.get("why"))
+
+
+def _voice_reviewer(reviews, switches, now, pcls="", sym="", vpu=None):
     if not switches.get("agent_position_review"):
         return {"switch_on": False, "present": False, "t": REVIEW_OFF}
     latest = next((r for r in reviews if r.created_at >= now - timedelta(hours=24)), None)
@@ -2461,7 +2631,15 @@ def _voice_reviewer(reviews, switches, now, pcls="", sym=""):
         return {"switch_on": True, "present": False, "t": REVIEW_QUIET}
     card = latest.card_payload()
     age = (now - latest.created_at).total_seconds()
-    reasoning = str(card.get("reasoning_md") or "")
+    # The model's own words (brain/position_review_agent.py), shown as it
+    # wrote them or withheld whole: when they name an exception or repeat
+    # a failed read's text, or may name an amount of money (the trade's own
+    # amounts read by value).
+    reasoning = scrub(card.get("reasoning_md"), REASONING_KEPT,
+                      _reviewer_marks(latest, vpu),
+                      withheld=REASONING_WITHHELD,
+                      withheld_error=REASONING_ERROR,
+                      failures=_reviewer_failures(latest), keep_lines=True)
     return {"switch_on": True, "present": True,
             "word": _review_word(card.get("verdict")),
             "age_t": _age_words(age),
@@ -2674,7 +2852,8 @@ def _bot_detail(seat, trade, up, quote, row, hand, signal, actions, notices,
     mission["thesis_note"] = (THESIS_CHECK_BESIDE.format(
         verdict=th["word"], age=th["age_t"] or DASH) if th else "")
     voice = {
-        "reviewer": _voice_reviewer(reviews, book.switches, now, pcls, sym),
+        "reviewer": _voice_reviewer(reviews, book.switches, now, pcls, sym,
+                                    vpu=meta.get("value_per_unit")),
         "thesis": ({"word": th["word"], "age_t": th["age_t"], "words": th["words"],
                     "stop_t": (_price(thesis.get("stop"), pcls, sym)
                                if thesis.get("stop") else None),
@@ -2686,9 +2865,9 @@ def _bot_detail(seat, trade, up, quote, row, hand, signal, actions, notices,
                             if care.get("soft_stop") is not None else None),
                  "venue_t": (f"Copied to eToro: {_price(care['venue_stop'], pcls, sym)}"
                              if care.get("venue_stop") is not None else None),
-                 "refusal": (f"eToro refused the care's stop: "
-                             f"{care['venue_stop_refusal']}"
-                             if care.get("venue_stop_refusal") else ""),
+                 "refusal": (_end(L_REFUSED.format(
+                     refusal=venue_words(care["venue_stop_refusal"])))
+                     if care.get("venue_stop_refusal") else ""),
                  "event": (f"Event ahead: {care['event'].get('title')} at "
                            f"{_hhmm(care['event'].get('at'))} UTC"
                            if isinstance(care.get("event"), dict) else None),
