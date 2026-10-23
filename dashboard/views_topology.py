@@ -729,12 +729,18 @@ def system_map_toggle(request):
                              "label": cfg.name or cfg.asset_class})
 
     from core.platform_control import PlatformComponent
+    from core.switch_pin import OPS_POINTER, VIA_SYSTEM_MAP, set_switch
     comp = PlatformComponent.objects.filter(key=key).first()
     if comp is None:
         return JsonResponse({"ok": False, "error": f"no component '{key}'"}, status=404)
-    comp.is_enabled = not comp.is_enabled
-    # updated_at is auto_now, which update_fields skips: it is the instant
-    # of the flip, and the alarm bot reads it off platform_master to tell
-    # a pause from a stop (bot_program/alarm._resumed_at).
-    comp.save(update_fields=["is_enabled", "updated_at"])
-    return JsonResponse({"ok": True, "enabled": comp.is_enabled, "label": comp.name})
+    # THE WRITE (2026-10-23, core/switch_pin.py), with its updated_at
+    # stamp (bot_program/alarm._resumed_at): a live-money switch is not
+    # turned ON from here without the trading PIN, which the map's
+    # overlay never asks for; the refusal names /ops/. OFF is free.
+    result = set_switch(key, not comp.is_enabled, via=VIA_SYSTEM_MAP,
+                        request=request, pin=request.POST.get("pin"))
+    if not result.ok:
+        return JsonResponse({"ok": False, "enabled": bool(result.before),
+                             "error": result.message,
+                             "detail": OPS_POINTER}, status=403)
+    return JsonResponse({"ok": True, "enabled": result.after, "label": comp.name})

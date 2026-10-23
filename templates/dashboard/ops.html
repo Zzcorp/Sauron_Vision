@@ -104,8 +104,8 @@
         {% endif %}
     </div>
     {% if is_admin and g.held %}
-    {# The live-money switches, the Morgul brake and the Lore readers: "all on" leaves them OFF (core.platform_control.BULK_ENABLE_EXEMPT). #}
-    <div style="padding:0 16px 6px;font-size:11px;color:var(--text-muted);">all on leaves {{ g.held|join:", " }} OFF — each is a decision of its own, by its own toggle or <code>component on &lt;key&gt;</code>; all off still turns them off.</div>
+    {# The live-money switches, the Morgul brake and the Lore readers: "all on" leaves them OFF (core.platform_control.BULK_ENABLE_EXEMPT). A live-money switch takes the trading PIN on its own toggle; the shell refuses it (core/switch_pin.py). #}
+    <div style="padding:0 16px 6px;font-size:11px;color:var(--text-muted);">all on leaves {{ g.held|join:", " }} OFF — each is a decision of its own: {% if g.held_live %}a live-money switch takes your trading PIN on its own toggle here, the others their own toggle or <code>component on &lt;key&gt;</code>{% else %}by its own toggle or <code>component on &lt;key&gt;</code>{% endif %}; all off still turns them off.</div>
     {% endif %}
     <div class="table-wrapper">
     <table class="sv-perf-table sv-stack">
@@ -125,7 +125,8 @@
             <td class="num {% if r.comp.error_count %}down{% endif %}" data-label="Errors">{{ r.comp.error_count }}</td>
             {% if is_admin %}
             <td data-label="Toggle">
-                <form method="post" action="{% url 'admin_toggle_component' %}" style="display:inline;">{% csrf_token %}<input type="hidden" name="key" value="{{ r.comp.key }}"><input type="hidden" name="next" value="ops"><button type="submit" class="btn btn-sm {% if r.comp.is_enabled %}btn-danger{% else %}btn-primary{% endif %}">{% if r.comp.is_enabled %}turn off{% else %}turn on{% endif %}</button></form>
+                {# A live-money switch: ON takes the trading PIN, OFF never does; `want` says which way, so a stale "turn on" never flips it off (core/switch_pin.py). #}
+                <form method="post" action="{% url 'admin_toggle_component' %}" style="display:inline;">{% csrf_token %}<input type="hidden" name="key" value="{{ r.comp.key }}"><input type="hidden" name="next" value="ops">{% if r.live %}<input type="hidden" name="want" value="{% if r.comp.is_enabled %}off{% else %}on{% endif %}">{% if not r.comp.is_enabled %}<input type="password" name="pin" placeholder="PIN" inputmode="numeric" autocomplete="off" required aria-label="Trading PIN to turn {{ r.comp.key }} on" style="width:60px;padding:4px;font-size:11px;margin-right:4px;">{% endif %}{% endif %}<button type="submit" class="btn btn-sm {% if r.comp.is_enabled %}btn-danger{% else %}btn-primary{% endif %}">{% if r.comp.is_enabled %}turn off{% else %}turn on{% endif %}</button></form>
             </td>
             {% endif %}
           </tr>

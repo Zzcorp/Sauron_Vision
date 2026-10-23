@@ -13,6 +13,14 @@ setting it — so "run seed_components first" is never the answer.
 
 Turning `platform_master` off stops every automated task; the command
 says so when it does it.
+
+A live-money switch (core.platform_control.LIVE_MONEY_SWITCHES) is
+never turned ON from here (2026-10-23, core/switch_pin.py): turning one
+on takes the trading PIN, and this command neither prompts for one nor
+accepts one on its command line, where it would sit in the shell
+history. It refuses before any write, even when other keys in the same
+list could be set, and names /ops/, where the toggle takes the PIN.
+Turning one OFF stays free here, as everywhere.
 """
 import difflib
 
@@ -63,7 +71,21 @@ class Command(BaseCommand):
     # ── on / off ────────────────────────────────────────────────────────
     def _set(self, keys, *, enabled):
         from core.platform_control import (DEFAULT_COMPONENTS,
-                                           PlatformComponent, seed_components)
+                                           PlatformComponent,
+                                           is_component_enabled,
+                                           seed_components)
+        from core.switch_pin import (VIA_SHELL, needs_pin, refusal_sentence,
+                                     refuse_here, set_switch)
+        # A live-money switch is not turned ON from the shell: checked for
+        # every key before any write, and before the registering below, so
+        # a refused list changes nothing at all.
+        blocked = [k for k in dict.fromkeys(keys)
+                   if needs_pin(k, was_on=is_component_enabled(k),
+                                want_on=enabled)]
+        if blocked:
+            for key in blocked:
+                refuse_here(key, via=VIA_SHELL)
+            raise CommandError(refusal_sentence(blocked, via=VIA_SHELL))
         known = {c["key"] for c in DEFAULT_COMPONENTS}
         registered = set(PlatformComponent.objects.values_list("key", flat=True))
         # A key the code knows but the database does not: register first.
@@ -79,14 +101,14 @@ class Command(BaseCommand):
                 near = difflib.get_close_matches(key, pool, n=3, cutoff=0.5)
                 hint = f" — did you mean: {', '.join(near)}?" if near else ""
                 raise CommandError(f"unknown component {key!r}{hint}")
-            before = "ON" if row.is_enabled else "OFF"
-            after = "ON" if enabled else "OFF"
-            if row.is_enabled != enabled:
-                row.is_enabled = enabled
-                # updated_at is auto_now, which update_fields skips: it
-                # is the instant of the flip, and the alarm bot reads it
-                # off platform_master to tell a pause from a stop.
-                row.save(update_fields=["is_enabled", "updated_at"])
+            # THE WRITE (core.switch_pin.set_switch), with its updated_at
+            # stamp: the instant of the flip, which the alarm bot reads
+            # off platform_master to tell a pause from a stop.
+            result = set_switch(key, enabled, via=VIA_SHELL)
+            if not result.ok:
+                raise CommandError(result.message)
+            before = "ON" if result.before else "OFF"
+            after = "ON" if result.after else "OFF"
             self.stdout.write(f"{key}: {before} → {after}"
                               + ("" if before != after else " (unchanged)"))
             if key == MASTER and not enabled:

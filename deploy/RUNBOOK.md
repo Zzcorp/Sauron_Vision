@@ -181,7 +181,10 @@ old environment.
 > `share_allocator_mode_live`, `share_allocator_auto_derisk`,
 > `capital_desk_mode_live`, `fractional_units_live`, `etoro_leverage_live`
 > — and the Morgul brake with them; the page says so beside the button.
-> Each of those is its own `component on <key>` or its own toggle.
+> Each of those is its own decision: a live-money switch is turned on
+> from its own toggle on `/ops/` with your trading PIN (the shell refuses
+> it, and never asks for a PIN), the brake by its own toggle or
+> `component on <key>`.
 
 Confirm it took:
 
@@ -1449,7 +1452,11 @@ followed by:
 - `component list` / `component on KEY...` / `component off KEY...` — the
   health page's toggle. Says the state before and after, refuses a key it
   does not know (and names the nearest), and registers a component the code
-  knows but the database does not before setting it.
+  knows but the database does not before setting it. A live-money switch
+  (`LIVE_MONEY_SWITCHES` in `core/platform_control.py`) is never turned ON
+  here: that takes your trading PIN, which the shell never asks for, so the
+  command refuses the whole list, changes nothing and names `/ops/`, where
+  the switch's own toggle takes the PIN. `component off` stays free.
 - `proposals list` / `proposals approve ID...` / `proposals reject ID...` —
   the brain page's click, through the same `approve_proposal` and the same
   blocker check. An approved proposal is a RESEARCH-stage setup: graded by
@@ -1515,8 +1522,9 @@ stored a reading — and proposes; it re-sizes nothing on its own.
 - *The two switches.* After `./deploy/dc exec web python manage.py migrate`
   (0026 creates both tables), `component on pipeline_share_allocator`
   starts the proposals — shadow, safe, and worth a week of reading before
-  anything else. `component on share_allocator_mode_live` is the second
-  switch: only then does Apply work, and it still takes the trading PIN
+  anything else. `share_allocator_mode_live` is the second switch, turned
+  on from `/ops/` with your trading PIN (the shell refuses it): only then
+  does Apply work, and it still takes the trading PIN
   on `/shares/` (or `--yes` on the shell) per plan, three plans per user
   per day. Applying writes each follower's `extras["account_share_pct"]`
   and re-splits the pools through the sync's own arithmetic at once;
@@ -1552,8 +1560,8 @@ stored a reading — and proposes; it re-sizes nothing on its own.
   drawdown — no brain context on that path) it proposes at once, once
   per hour per user, and staff get "⚠ Shock plan proposed"; the 4-hourly
   beat is unchanged. Applying still takes the PIN — unless the third
-  switch is on: `component on share_allocator_auto_derisk` (LIVE mode
-  required too) applies a SHOCK plan that only LOWERS shares by itself,
+  switch is on: `share_allocator_auto_derisk`, turned on from `/ops/`
+  with your trading PIN (LIVE mode required too) applies a SHOCK plan that only LOWERS shares by itself,
   under the same daily cap and fresh-reading rule, with the same snapshot
   for rollback, an audit row whose decision reads `auto_derisk`, and a
   "⚠ Shares de-risked automatically" alert. A plan with any upward

@@ -654,8 +654,9 @@ CHAPTERS = [
                       "gestures that open the way to real money: unticking "
                       "the broker's demo box, switching on a real bot, "
                       "placing or closing a real order by hand, applying a "
-                      "capital plan. Switching a bot off never asks for "
-                      "it.")},
+                      "capital plan, and since 23 October turning on a "
+                      "platform switch that moves real money. Switching a "
+                      "bot or a switch off never asks for it.")},
             {"title": "The guards watch the machine",
              "text": ("Since 27 September the platform has the Morgul "
                       "guards: a watchdog outside the engine that checks "

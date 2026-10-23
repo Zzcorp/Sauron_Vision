@@ -348,6 +348,46 @@ CONFIG_REARMED = "config_rearmed"
 AUDIT_KINDS_20261008 = (LADDER_MOVE, LADDER_SWEEP, CONFIG_BRAKED,
                         CONFIG_REARMED)
 
+# ── The live-money switches (2026-10-23, core/switch_pin.py) ────────────
+# A LIVE_MONEY_SWITCHES key turned on (with the trading PIN), turned off
+# (free), or refused ON (no PIN, a wrong one, or a door that never takes
+# one). Who, through which door, and when (created_at). Never the PIN,
+# its length or its hash. Same 20-wide column as the kinds above.
+
+#: A live-money switch turned ON, the PIN verified.
+SWITCH_ARMED = "switch_armed"
+#: A live-money switch turned OFF (stopping never asks for the PIN).
+SWITCH_DISARMED = "switch_disarmed"
+#: An ON refused: the row was left as it was.
+SWITCH_REFUSED = "switch_refused"
+
+AUDIT_KINDS_SWITCH = (SWITCH_ARMED, SWITCH_DISARMED, SWITCH_REFUSED)
+
+
+def record_switch(kind: str, *, key: str, name: str = "", via: str,
+                  who: str, before, after, reason: str = "",
+                  user=None) -> None:
+    """One flip (or refused flip) of a live-money switch on the chain.
+    `via` is the door (ops, admin_dashboard, system_map, shell,
+    django_admin, all_off); `who` the username, or "shell". Only a saved
+    account is linked as `user`. Never raises: an audit failure neither
+    blocks nor allows a switch."""
+    try:
+        linked = user if getattr(user, "is_authenticated", False) and \
+            getattr(user, "pk", None) else None
+        data = {
+            "key": str(key or "")[:50],
+            "name": str(name or "")[:100],
+            "via": str(via or "")[:20],
+            "who": str(who or "")[:80],
+            "before": None if before is None else bool(before),
+            "after": None if after is None else bool(after),
+            "reason": str(reason or "")[:40],
+        }
+        record_event(kind, data, user=linked)
+    except Exception as e:
+        logger.warning("audit record_switch(%s) failed: %s", kind, e)
+
 
 def record_ladder_move(event, *, by: str = "", size_note: str = "") -> None:
     """One PromotionEvent that touched a live stage, on the chain. Called

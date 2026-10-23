@@ -3960,6 +3960,10 @@ def admin_dashboard(request):
 
     context["master_enabled"] = master_enabled
     context["components_by_category"] = components_by_category
+    # The live-money switches: their forms carry a PIN field while OFF
+    # (core/switch_pin.py, 2026-10-23).
+    from core.platform_control import LIVE_MONEY_SWITCHES
+    context["live_money_keys"] = LIVE_MONEY_SWITCHES
 
     # What STOP ALL does NOT do. Toggling platform_master stops the scheduler
     # from running tasks; it does not close a single position. So an operator
@@ -4204,22 +4208,37 @@ def admin_dashboard(request):
 
 @login_required
 def admin_toggle_component(request):
-    """Toggle a single platform component on/off."""
+    """Toggle a single platform component on/off.
+
+    The write is core.switch_pin.set_switch (2026-10-23): turning a
+    live-money switch ON takes the trading PIN (`pin`), OFF never does.
+    A form may say which way it means (`want` = on | off) so a stale
+    "turn on" never spends the PIN on a stop; without it, the toggle
+    flips the row as before.
+    """
     if not request.user.is_superuser:
         from django.http import HttpResponseForbidden
         return HttpResponseForbidden()
     if request.method == "POST":
         from core.platform_control import PlatformComponent
+        from core.switch_pin import VIA_ADMIN_DASHBOARD, VIA_OPS, set_switch
         from django.contrib import messages
         key = request.POST.get("key", "")
-        try:
-            comp = PlatformComponent.objects.get(key=key)
-            comp.is_enabled = not comp.is_enabled
-            comp.save()
-            action = "started" if comp.is_enabled else "stopped"
-            messages.success(request, f"{comp.name} {action}.")
-        except PlatformComponent.DoesNotExist:
+        comp = PlatformComponent.objects.filter(key=key).first()
+        if comp is None:
             messages.error(request, f"Component '{key}' not found.")
+        else:
+            want = request.POST.get("want")
+            want_on = (want == "on") if want in ("on", "off") \
+                else not comp.is_enabled
+            via = VIA_OPS if request.POST.get("next") == "ops" \
+                else VIA_ADMIN_DASHBOARD
+            result = set_switch(key, want_on, via=via, request=request,
+                                pin=request.POST.get("pin"))
+            if result.ok:
+                messages.success(request, result.message)
+            else:
+                messages.error(request, result.message)
     from django.shortcuts import redirect
     # The cockpit (/ops/) posts the same form with next=ops; without
     # this the toggle bounced the operator to the admin dashboard and
@@ -4236,22 +4255,19 @@ def admin_bulk_toggle(request):
         from django.http import HttpResponseForbidden
         return HttpResponseForbidden()
     if request.method == "POST":
-        from core.platform_control import PlatformComponent
         from django.contrib import messages
         category = request.POST.get("category", "")
         action = request.POST.get("action", "")
         enable = action == "enable"
-        rows = PlatformComponent.objects.filter(category=category)
-        if enable:
-            # The separate decisions (the Morgul brake, every live-money
-            # switch) are never switched on in bulk:
-            # core.platform_control.BULK_ENABLE_EXEMPT. "All off" is bulk.
-            from core.platform_control import BULK_ENABLE_EXEMPT
-            rows = rows.exclude(key__in=BULK_ENABLE_EXEMPT)
-        # updated_at is auto_now, which a queryset update skips: it is the
-        # instant of the flip, and the alarm bot reads it off
-        # platform_master to tell a pause from a stop (alarm._resumed_at).
-        count = rows.update(is_enabled=enable, updated_at=timezone.now())
+        # The separate decisions (the Morgul brake, every live-money
+        # switch) are never switched on in bulk:
+        # core.platform_control.BULK_ENABLE_EXEMPT. "All off" is bulk, and
+        # records each live-money switch it turns off. The write, with its
+        # updated_at stamp (alarm._resumed_at), is core.switch_pin's.
+        from core.switch_pin import VIA_ALL_OFF, VIA_ALL_ON, set_category
+        count = set_category(category, enable,
+                             via=VIA_ALL_ON if enable else VIA_ALL_OFF,
+                             request=request)
         verb = "started" if enable else "stopped"
         messages.success(request, f"{count} {category} components {verb}.")
     from django.shortcuts import redirect

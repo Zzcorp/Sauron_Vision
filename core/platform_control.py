@@ -111,10 +111,12 @@ LIVE_MONEY_SWITCHES = (
 
 #: Switches a category's "all on" button never turns on (2026-09-26,
 #: dashboard.views.admin_bulk_toggle): each is a separate decision, made by
-#: `manage.py component on <key>` or its own toggle. "All off" still turns
-#: them off. The Morgul brake stops bots on a critical guard finding; it
-#: must not arrive with the System group's other switches — and neither
-#: must anything that moves real money (LIVE_MONEY_SWITCHES, above). /ops/
+#: its own toggle (a live-money switch with the trading PIN, which the
+#: shell never takes: core/switch_pin.py, 2026-10-23) or, for the others,
+#: `manage.py component on <key>`. "All off" still turns them off. The
+#: Morgul brake stops bots on a critical guard finding; it must not arrive
+#: with the System group's other switches — and neither must anything
+#: that moves real money (LIVE_MONEY_SWITCHES, above). /ops/
 #: says beside the group what the button leaves OFF. The two Lore readers
 #: (lore/policy.py SWITCHES, in the Agents group) are decisions of their
 #: own too: lore_staff after the first entries are reviewed,
