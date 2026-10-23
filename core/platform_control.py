@@ -323,6 +323,20 @@ DEFAULT_COMPONENTS = [
     {"key": "orcs", "name": "Orcs (journals, no model)",
      "description": "Off (default). On: each open position gets an Orc, a journal written by code: its birth, thesis and army type, the care's and the venue's stop moves, reviews, thesis checks and the close. No model, no order, no stop moved. manage.py orcs.",
      "category": "system"},
+    # THE WAR DRUMS (2026-10-22, O1c, spec §4.7, §10.7, §11): with `orcs`
+    # ON the drums are published, routed and journaled whatever this says.
+    # In O1 this switch is INERT: drum wakes (W12) are O2's, which reads it
+    # (bot_program/orcs/drum_bus.route's seam). Description below 300.
+    {"key": "orcs_drums", "name": "Orc War Drums (wakes from O2)",
+     "description": "Off (default). With orcs on, the war drums (a stop hit, a lock, a level break...) are always journaled on the Orcs they reach within one user's book. In O1 this switch changes nothing; from O2, on, a drum also wakes the Orcs it reaches.",
+     "category": "system"},
+    # THE ORCS' TAPE (2026-10-22, O1c, spec §5.2a item 3): eToro's 15m and
+    # 5m candles of the held and board symbols. It sends nothing until
+    # `manage.py etoro_candle_headroom --yes` has recorded eToro's 429
+    # headroom, so the System group's "all on" alone asks nothing.
+    {"key": "orcs_tape", "name": "Orc Tape (eToro 15m and 5m candles)",
+     "description": "Off (default). On, with orcs on and eToro's candle headroom measured (manage.py etoro_candle_headroom --yes): the bar refresh asks eToro's 15m and 5m candles of the held and board symbols, last in its pass, within the measured budget, stopping at the first 429.",
+     "category": "system"},
     # THE TRADE DEBATE (2026-10-01, ai_agents/agents/trade_debate.py): the
     # Executioner and the Champion argue every live bot entry before its
     # order. Shadow for its first 30 graded live trades, binding after.

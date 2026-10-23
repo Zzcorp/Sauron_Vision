@@ -27,6 +27,10 @@ class NewsArticle(models.Model):
 
     class Meta:
         ordering = ["-published_at"]
+        # every reader of the day's news filters and orders on it (the
+        # Orcs' dossier, news_risk, the brain); O1c, spec §5.2a item 6
+        indexes = [models.Index(fields=["published_at"],
+                                name="newsarticle_published_idx")]
 
     def __str__(self):
         return f"[{self.source}] {self.title[:80]}"

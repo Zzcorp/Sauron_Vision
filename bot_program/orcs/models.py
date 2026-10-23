@@ -320,8 +320,12 @@ class OrcDossierBlock(models.Model):
     text = models.TextField(blank=True)
     tokens_est = models.IntegerField(default=0)
     built_at = models.DateTimeField(default=timezone.now, db_index=True)
-    #: MK is sized per model at build time (§5.2a, D21)
+    #: MK is sized per model at build time (§5.2a, D21): the model's
+    #: family (bot_program/orcs/dossier.family_of), never its id
     model = models.CharField(max_length=50, blank=True)
+    #: the builder's natural key (O1c: "2026-10-22|london|<model>"), so a
+    #: built block is found without its text and never built twice
+    key = models.CharField(max_length=160, blank=True, db_index=True)
 
 
 class OrcDayBaseline(models.Model):
@@ -363,6 +367,13 @@ class OrcDrum(models.Model):
     payload = models.JSONField(default=dict, blank=True)
     #: who the routing reached (O1 measures the reach before any wake)
     reach = models.JSONField(default=list, blank=True)
+    #: O1c: a drum routes within ONE user's book (a stop level or a
+    #: holding is private); null for a drum no user's book owns
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True,
+                             blank=True, on_delete=models.CASCADE,
+                             related_name="orc_drums")
+    #: when the census routed it (null: not yet)
+    routed_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     class Meta:
         indexes = [models.Index(fields=["symbol", "-at"],
