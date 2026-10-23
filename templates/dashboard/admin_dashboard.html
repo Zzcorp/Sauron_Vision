@@ -94,7 +94,15 @@ six scrapers could sit green with zero rows between them.
                 'Content-Type': 'application/json'},
       body: JSON.stringify(body)
     }).then(function (r) { return r.json(); }).then(function (res) {
-      if (res.error) { msg.textContent = 'ERR ' + res.error; msg.style.color = 'var(--accent-red)'; return; }
+      if (res.error) {
+        msg.textContent = 'ERR ' + res.error; msg.style.color = 'var(--accent-red)';
+        /* Five wrong PINs ended the session (core/trading_pin.py). */
+        if (res.logged_out) {
+          SV.overlay.alert({ title: 'Session ended', message: res.error })
+            .then(function () { window.location.assign('/wall/'); });
+        }
+        return;
+      }
       window.location.reload();
     }).catch(function (e) { msg.textContent = 'ERR ' + e; msg.style.color = 'var(--accent-red)'; });
   }

@@ -861,11 +861,14 @@ class PersonasPageTests(TestCase):
         resp = self.client.post(reverse("hq_apply_persona"),
                                 {"config_id": cfg.pk, "persona": "scalp"},
                                 follow=True)
-        self.assertIn("PIN required", _flashes(resp))
+        self.assertIn("takes your trading PIN", _flashes(resp))
         self.assertEqual(AssetBotConfig.objects.get(pk=cfg.pk).timeframe,
                          "4h")
 
         _pin(self.admin)
+        # A PIN set after the login acts only after a login under it
+        # (core/trading_pin.py, the login mark).
+        self.client.force_login(self.admin)
         resp = self.client.post(reverse("hq_apply_persona"),
                                 {"config_id": cfg.pk, "persona": "scalp",
                                  "pin": PIN}, follow=True)

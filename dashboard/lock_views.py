@@ -14,7 +14,6 @@ force_pin_reset) owned by dashboard/auth_views.py.
 """
 import time
 
-from django.contrib.auth import logout
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
 from django.shortcuts import render
@@ -22,12 +21,13 @@ from django.views.decorators.http import require_POST
 
 from core.audit import AuditLog
 from core.presence import client_ip
+# One session, five guesses, shared with every other PIN door since
+# 2026-10-23 (core/trading_pin.py, where the counter now lives). A 4-digit
+# PIN is 10,000 combinations; an unlimited-attempt lock screen would be
+# the weakest gate on the platform.
+from core.trading_pin import (ATTEMPTS_KEY, LOCK, MAX_ATTEMPTS,  # noqa: F401
+                              PIN_MISSING, PIN_NOT_SET, PIN_WRONG, check)
 from portfolio.trader_profile import get_or_create_profile
-
-# One session, five guesses. A 4-digit PIN is 10,000 combinations; an
-# unlimited-attempt lock screen would be the weakest gate on the platform.
-MAX_ATTEMPTS = 5
-ATTEMPTS_KEY = "pin_lock_attempts"
 
 
 @login_required
@@ -91,32 +91,36 @@ def session_ping(request):
 @login_required
 @require_POST
 def session_unlock(request):
-    """Release the lock — the PIN is verified HERE, never client-side."""
-    pin = request.POST.get("pin", "")
-    profile = get_or_create_profile(request.user)
-
-    if profile.check_pin(pin):
+    """Release the lock — the PIN is verified HERE, never client-side,
+    by the one counted check (core.trading_pin, the LOCK class): wrong
+    answers here and at every other PIN door add up, and the fifth ends
+    the session. A blank PIN is not counted. Past five (a session spent at
+    a stopping door), the lock gives one check: a right PIN unlocks
+    without clearing the count, so the operator can still close; a wrong
+    one ends the session."""
+    verdict = check(request, request.POST.get("pin", ""), door=LOCK,
+                    act="Idle lock")
+    if verdict.ok:
         request.session.pop("pin_locked", None)
-        request.session.pop(ATTEMPTS_KEY, None)
         request.session["sv_last_seen"] = int(time.time())
         AuditLog.log(
             request.user, "login", "Idle lock released with PIN",
             target_type="Session", ip_address=client_ip(request))
         return JsonResponse({"status": "ok"})
-
-    attempts = request.session.get(ATTEMPTS_KEY, 0) + 1
-    if attempts >= MAX_ATTEMPTS:
-        # Log while request.user is still the user — logout() clears it.
-        AuditLog.log(
-            request.user, "login",
-            f"Idle lock: {MAX_ATTEMPTS} failed PIN attempts — session terminated",
-            target_type="Session", ip_address=client_ip(request))
-        logout(request)  # flushes the session, attempt counter included
+    if verdict.logged_out:
         return JsonResponse({"status": "logged_out"})
-
-    request.session[ATTEMPTS_KEY] = attempts
+    if verdict.refusal == PIN_MISSING:
+        return JsonResponse({"status": "error", "error": "Enter your PIN."})
+    if verdict.refusal == PIN_NOT_SET:
+        return JsonResponse({"status": "error",
+                             "error": "This account has no trading PIN: "
+                                      "log out to leave the lock."})
+    if verdict.refusal != PIN_WRONG:
+        return JsonResponse({"status": "error",
+                             "error": "Your PIN could not be checked just "
+                                      "now: try again."})
     return JsonResponse({
         "status": "error",
         "error": "Incorrect PIN.",
-        "attempts_left": MAX_ATTEMPTS - attempts,
+        "attempts_left": verdict.attempts_left,
     })

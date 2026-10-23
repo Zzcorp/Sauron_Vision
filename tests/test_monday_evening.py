@@ -273,6 +273,8 @@ class TheEtoroSaveTellsTheTruthTests(TestCase):
         prof = get_or_create_profile(self.admin)
         prof.set_pin("4321")
         prof.save()
+        # ...under a login made with that PIN (core/trading_pin.py).
+        self.client.force_login(self.admin)
         with mock.patch("dashboard.views_brokers.etoro_probe",
                         return_value=("ok", "")):
             self._post(pin="4321")                   # demo absent = live

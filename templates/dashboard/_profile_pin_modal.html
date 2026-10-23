@@ -48,6 +48,13 @@ async function submitPinChange() {
     } else {
       errEl.textContent = j.error || "Update failed.";
       errEl.style.display = "block";
+      // Five wrong current PINs ended the session (core/trading_pin.py).
+      if (j.logged_out) {
+        if (window.SV && SV.overlay) {
+          await SV.overlay.alert({ title: "Session ended", message: j.error });
+        }
+        window.location.assign("/wall/");
+      }
     }
   } catch (e) {
     errEl.textContent = "Network error.";

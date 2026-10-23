@@ -678,9 +678,12 @@ def system_map_state(request):
     """
     topo = build_topology(request.user)
     return JsonResponse({
+        # `mode` rides the refresh: the page asks the trading PIN to arm a
+        # LIVE bot from it, so it must not go stale between renders.
         "nodes": [{"key": n["key"], "state": n["state"], "why": n["why"],
                    "enabled": n["enabled"], "meta": n["meta"],
-                   "last_run": n["last_run"], "metric": n.get("metric")}
+                   "last_run": n["last_run"], "metric": n.get("metric"),
+                   **({"mode": n["mode"]} if "mode" in n else {})}
                   for n in topo["nodes"]],
         "edges": [{"from": e["from"], "to": e["to"], "live": e["live"]}
                   for e in topo["edges"]],
@@ -709,6 +712,14 @@ def system_map_toggle(request):
         cfg = AssetBotConfig.objects.filter(pk=key, user=request.user).first()
         if cfg is None:
             return JsonResponse({"ok": False, "error": "bot not found"}, status=404)
+        label = cfg.name or cfg.asset_class
+        # The direction the page meant (2026-10-23): a stale "stop" click on
+        # a bot someone else re-armed must not ARM it. Asked state already
+        # held: nothing is written. A page without `want` keeps the flip.
+        want = request.POST.get("want", "")
+        if want in ("on", "off") and (want == "on") == bool(cfg.enabled):
+            return JsonResponse({"ok": True, "enabled": cfg.enabled,
+                                 "label": label, "unchanged": True})
         if not cfg.enabled:
             # A PAPER pool larger than its owner's book is not armed
             # (2026-10-04, risk_gate.pool_vs_book); disabling never asks.
@@ -718,6 +729,20 @@ def system_map_toggle(request):
                 return JsonResponse({"ok": False, "enabled": False,
                                      "error": f"not armed — {pool['reason']}"},
                                     status=409)
+            # Arming a LIVE bot takes the acting user's trading PIN (D2,
+            # 2026-10-23), through the one counted check; OFF and paper
+            # never ask.
+            if cfg.mode == "live":
+                from core.trading_pin import ACT, gate, json_refusal, refusal_of
+                pin_ok = gate(request, request.POST.get("pin", ""), door=ACT,
+                              act="arm a live bot (system map)")
+                if not pin_ok:
+                    return JsonResponse(json_refusal(
+                        refusal_of(pin_ok), subject=f"Arming {label} LIVE",
+                        nothing=f"{label} stays OFF",
+                        extra={"ok": False, "enabled": False,
+                               "detail": "Nothing was changed."}),
+                        status=403)
         # THE WRITE (2026-10-07, bot_program/asset_engine/disarm.py): a
         # stop here is recorded as the system map toggle's, by the presser,
         # and is a stop by hand (not managed); arming clears the record.
@@ -731,7 +756,7 @@ def system_map_toggle(request):
             disarm.enable_config(cfg, who=request.user.username,
                                  why="the system map toggle")
         return JsonResponse({"ok": True, "enabled": cfg.enabled,
-                             "label": cfg.name or cfg.asset_class})
+                             "label": label})
 
     from core.platform_control import PlatformComponent
     from core.switch_pin import OPS_POINTER, VIA_SYSTEM_MAP, set_switch

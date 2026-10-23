@@ -166,6 +166,17 @@
                 err.hidden = false;
                 save.disabled = false;
                 save.textContent = "SAVE";
+                /* Five wrong PINs on a live act ended the session
+                 * (core/trading_pin.py): say why, then leave. */
+                if (out.body.logged_out) {
+                    var said = (w.SV && w.SV.overlay)
+                        ? w.SV.overlay.alert({ title: "Session ended",
+                                               message: out.body.error })
+                        : null;
+                    Promise.resolve(said).then(function () {
+                        w.location.assign("/wall/");
+                    });
+                }
                 return;
             }
             close();

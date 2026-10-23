@@ -122,6 +122,7 @@
         <p class="login-subtitle fade-up d2">AUTHENTICATE TO PROCEED</p>
         <div class="login-card fade-up d3">
             {% if form.errors %}<div class="errors">AUTHENTICATION FAILED — INVALID CREDENTIALS</div>{% endif %}
+            {% if messages %}{% for m in messages %}{% if m.level_tag == "error" %}<div class="errors">{{ m }}</div>{% endif %}{% endfor %}{% endif %}
             <form method="post" action="{% url 'login' %}">
                 {% csrf_token %}
                 <div class="form-group"><label for="id_username">Operator ID</label><input type="text" name="username" id="id_username" autofocus autocomplete="username" required></div>

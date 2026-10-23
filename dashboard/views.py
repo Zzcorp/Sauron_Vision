@@ -4845,16 +4845,20 @@ def take_trade_execute(request, signal_id):
     body, err = _parse_trade_body(request)
     if err:
         return JsonResponse({"error": err}, status=400)
+    from core.trading_pin import ACT
     from dashboard.views_close import _pin_ok as _trading_pin_ok
+    # A lazy gate, asked only where manual_trade demands the PIN (a LIVE
+    # lane; twice, counted once): a paper ticket never counts.
+    pin_ok = _trading_pin_ok(request, {"pin": body["pin"]}, door=ACT,
+                             act="take a live trade")
     res = execute_take_trade(request.user, signal,
                              body["close_ids"],
                              qty=body["qty"],
                              stop=body["stop"],
                              target=body["target"],
                              leverage=body["leverage"],
-                             pin_ok=_trading_pin_ok(
-                                 request,
-                                 {"pin": body["pin"]}))
+                             pin_ok=pin_ok)
+    res = _ticket_pin_words(res, pin_ok)
     # THE COUNCIL (2026-10-08): a sitting the owner asked about is linked
     # to the trade AFTER it was taken. It can only follow a trade, never
     # precede or refuse one, and the response is the execution's own.
@@ -4863,6 +4867,19 @@ def take_trade_execute(request, signal_id):
         link_ticket_session(request.user, body["council_session"],
                             res.get("trade_id"))
     return JsonResponse(res)
+
+
+def _ticket_pin_words(res, pin_ok):
+    """A LIVE ticket refused for its PIN says why in the one check's
+    sentence, and whether the session ended (the page then leaves for the
+    Wall). `closed` (funding closes already run) is kept."""
+    from core.trading_pin import refusal_of, sentence
+    v = refusal_of(pin_ok)
+    if v is None or not isinstance(res, dict) or not res.get("error"):
+        return res
+    return dict(res, error=sentence(v, subject="This LIVE order",
+                                    nothing="the trade was not taken"),
+                pin_required=True, logged_out=bool(v.logged_out))
 
 
 def _parse_trade_body(request):
@@ -5258,16 +5275,18 @@ def asset_trade_execute(request, symbol):
     body, err = _parse_trade_body(request)
     if err:
         return JsonResponse({"error": err}, status=400)
+    from core.trading_pin import ACT
     from dashboard.views_close import _pin_ok as _trading_pin_ok
+    pin_ok = _trading_pin_ok(request, {"pin": body["pin"]}, door=ACT,
+                             act="take a live trade")
     res = execute_asset_trade(request.user, inst, body["side"],
                               body["close_ids"],
                               qty=body["qty"],
                               stop=body["stop"],
                               target=body["target"],
                               leverage=body["leverage"],
-                              pin_ok=_trading_pin_ok(
-                                  request,
-                                  {"pin": body["pin"]}))
+                              pin_ok=pin_ok)
+    res = _ticket_pin_words(res, pin_ok)
     # THE COUNCIL (2026-10-08): linked after the trade, as above.
     if isinstance(res, dict) and res.get("ok") and body.get("council_session"):
         from dashboard.views_council import link_ticket_session
@@ -5302,16 +5321,27 @@ def take_trade_arm(request):
     if not isinstance(body, dict):
         return JsonResponse({"error": "Body must be a JSON object"},
                             status=400)
+    from core.trading_pin import ACT, refusal_of, sentence
     from dashboard.views_close import _pin_ok as _trading_pin_ok
     track = body.get("track")
-    return JsonResponse(arm_manual_lane(
+    # Asked only for mode "live" (arm_manual_lane): the disarm never counts.
+    pin_ok = _trading_pin_ok(request, body, door=ACT,
+                             act="arm the manual lane")
+    res = arm_manual_lane(
         request.user,
         asset_class=str(body.get("asset_class", "") or ""),
         mode=str(body.get("mode", "") or ""),
         capital=body.get("capital"),
-        pin_ok=_trading_pin_ok(request, body),
+        pin_ok=pin_ok,
         track=(bool(track) if track is not None else None),
-        share=body.get("share")))
+        share=body.get("share"))
+    v = refusal_of(pin_ok)
+    if v is not None and isinstance(res, dict) and res.get("error"):
+        res = dict(res, error=sentence(v, subject="Arming the manual lane "
+                                                  "LIVE",
+                                       nothing="the lane stays as it was"),
+                   pin_required=True, logged_out=bool(v.logged_out))
+    return JsonResponse(res)
 
 
 @login_required
@@ -6695,20 +6725,26 @@ def kill_switch_api(request):
         return JsonResponse({'error': 'POST required'}, status=405)
 
     from bot_program.engine.kill_switch import execute_kill_switch
-    from django.contrib.auth.hashers import check_password
+    from core.trading_pin import STOP, gate, json_refusal, refusal_of
     import json
 
     try:
         data = json.loads(request.body) if request.body else {}
     except Exception:
         data = {}
+    if not isinstance(data, dict):
+        data = {}
 
+    # A STOPPING door (core/trading_pin.py): a wrong PIN counts on the
+    # session's one counter but never ends the session, and the right PIN
+    # always flattens, whatever the counter says.
     pin = data.get('pin') or request.POST.get('pin', '')
-    prof = getattr(request.user, 'trader_profile', None)
-    if not (prof and prof.access_pin_hash
-            and check_password(pin, prof.access_pin_hash)):
-        return JsonResponse(
-            {'error': 'PIN required to flatten the book.'}, status=403)
+    pin_ok = gate(request, pin, door=STOP, act="kill switch")
+    if not pin_ok:
+        return JsonResponse(json_refusal(refusal_of(pin_ok),
+                                         subject="Flattening the book",
+                                         nothing="nothing was closed"),
+                            status=403)
 
     reason = data.get('reason', 'manual activation')
     results = execute_kill_switch(user=request.user, reason=reason)

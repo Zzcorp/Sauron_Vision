@@ -32,6 +32,7 @@
                 data-bot-name="{{ row.config.name|default:row.config.id }}"
                 data-bot-market="{{ row.market }}"
                 data-bot-enabled="{% if row.enabled %}1{% else %}0{% endif %}"
+                data-bot-mode="{{ row.mode }}"
                 data-bot-open="{{ row.open_trades|default:0 }}"
                 data-bot-circuit="{{ row.circuit|default:'' }}">
               <button class="btn-small" onclick="adminBotToggle({{ row.config.id }}, this)">Toggle</button>
@@ -68,22 +69,42 @@ function getCsrf() {
   const m = document.cookie.match(/csrftoken=([^;]+)/);
   return m ? m[1] : "";
 }
-async function adminBotPost(url) {
+async function adminBotPost(url, body) {
   const r = await fetch(url, {
     method: "POST",
     headers: { "X-CSRFToken": getCsrf() },
+    body: body || undefined,
   });
-  return r.json();
+  /* A session that ended answers with a redirect to the Wall (or a login
+     page), not JSON. Any other reply that is not JSON (a 500, a 502, a
+     CSRF page) is a plain failure, never "the session has ended". */
+  try { return await r.json(); }
+  catch (e) {
+    const ended = r.redirected && /\/(login|wall)\//.test(r.url);
+    return ended
+      ? { ok: false, logged_out: true,
+          error: "The session has ended — log in again." }
+      : { ok: false,
+          error: "The server answered " + r.status + " without saying why." };
+  }
+}
+/* Five wrong PINs end the session (core/trading_pin.py): say why, leave. */
+async function botSessionEnded(r) {
+  if (!r || !r.logged_out) return false;
+  await SV.overlay.alert({ title: "Session ended", message: String(r.error || "") });
+  window.location.assign("/wall/");
+  return true;
 }
 /* Row context, so a confirmation can name the bot it is about to change
    rather than asking about "the bot". */
 function botCtx(el) {
   const d = (el && el.closest("[data-bot-name]")) || null;
-  if (!d) return { name: "this bot", market: "—", enabled: null, open: 0, circuit: "" };
+  if (!d) return { name: "this bot", market: "—", enabled: null, mode: "", open: 0, circuit: "" };
   return {
     name: d.dataset.botName || "this bot",
     market: d.dataset.botMarket || "—",
     enabled: d.dataset.botEnabled === "1",
+    mode: d.dataset.botMode || "",
     open: parseInt(d.dataset.botOpen || "0", 10) || 0,
     circuit: d.dataset.botCircuit || "",
   };
@@ -121,9 +142,16 @@ async function adminBotToggle(id, el) {
       : "",
     danger: !arming,
     confirmLabel: arming ? "Arm bot" : "Disarm bot",
+    /* Arming a LIVE bot takes YOUR trading PIN, whoever's bot it is
+       (2026-10-23); the server checks it and counts a wrong one. */
+    secretLabel: arming && c.mode === "live" ? "Your trading PIN" : undefined,
   });
   if (!ok) return;
-  const r = await adminBotPost(`/htmx/admin/bots/${id}/toggle/`);
+  const body = new URLSearchParams();
+  body.append("want", arming ? "on" : "off");
+  if (typeof ok === "string") body.append("pin", ok);
+  const r = await adminBotPost(`/htmx/admin/bots/${id}/toggle/`, body);
+  if (await botSessionEnded(r)) return;
   if (r.ok) location.reload();
   else botFail("Toggle", r.error);
 }

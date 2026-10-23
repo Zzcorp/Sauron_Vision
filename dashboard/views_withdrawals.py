@@ -10,13 +10,17 @@ and redirects.
 Every state change takes the trading PIN, the same check as the HQ forms
 (views_admin_hq._pin_ok, form field "pin") and deliberately NOT the
 superuser gate those forms also carry: Gandalf acts on this account as
-its owner does. A wrong PIN flashes an error and changes nothing.
+its owner does. A wrong PIN flashes an error and changes nothing; it
+counts on the session's one PIN counter (core/trading_pin.py), and the
+fifth wrong answer ends the session.
 POST-redirect-GET throughout, so a refresh never files a request twice.
 Owner-scoped: another user's request is a 404, not a refusal that
 confirms it exists. Nothing here places, closes or cancels an order.
 """
 import logging
 from datetime import timezone as dt_timezone
+
+from core.trading_pin import ACT
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -28,9 +32,21 @@ from django.views.decorators.http import require_POST
 logger = logging.getLogger(__name__)
 
 
-def _pin_ok(request) -> bool:
+def _pin_ok(request, *, door: str, act: str):
+    """The HQ forms' lazy gate (views_admin_hq._pin_ok), counted on the
+    session's one counter (core/trading_pin.py). Every withdrawal step
+    moves or releases money: an ACT door, whose fifth wrong answer ends
+    the session."""
     from dashboard.views_admin_hq import _pin_ok as hq_pin_ok
-    return hq_pin_ok(request)
+    return hq_pin_ok(request, door=door, act=act)
+
+
+def _pin_refused(request, pin_ok, *, subject: str, nothing: str,
+                 fallback: str):
+    from dashboard.views_admin_hq import _pin_refusal
+    messages.error(request, _pin_refusal(pin_ok, subject=subject,
+                                         nothing=nothing, fallback=fallback))
+    return redirect("withdrawals")
 
 
 def _confirmed(request) -> bool:
@@ -176,10 +192,12 @@ def withdrawals_page(request):
 @require_POST
 def withdrawal_create(request):
     from bot_program.withdrawals import create_request
-    if not _pin_ok(request):
-        messages.error(request, "Wrong or missing trading PIN. Nothing was "
-                                "reserved.")
-        return redirect("withdrawals")
+    pin_ok = _pin_ok(request, door=ACT, act="file a withdrawal")
+    if not pin_ok:
+        return _pin_refused(request, pin_ok, subject="Filing this withdrawal",
+                            nothing="nothing was reserved",
+                            fallback="Wrong or missing trading PIN. Nothing "
+                                     "was reserved.")
     out = create_request(
         request.user,
         requested_by=request.POST.get("requested_by", ""),
@@ -203,10 +221,12 @@ def withdrawal_create(request):
 def withdrawal_mark_paid(request, pk):
     from bot_program.withdrawals import mark_paid, money
     wr = _own_request(request, pk)
-    if not _pin_ok(request):
-        messages.error(request, "Wrong or missing trading PIN. Nothing "
-                                "changed.")
-        return redirect("withdrawals")
+    pin_ok = _pin_ok(request, door=ACT, act="mark a withdrawal paid")
+    if not pin_ok:
+        return _pin_refused(request, pin_ok, subject="This withdrawal step",
+                            nothing="nothing changed",
+                            fallback="Wrong or missing trading PIN. Nothing "
+                                     "changed.")
     out = mark_paid(request.user, wr.pk,
                     acted_by=request.POST.get("acted_by", ""),
                     paid_amount=request.POST.get("paid_amount", "") or None,
@@ -229,10 +249,12 @@ def withdrawal_mark_paid(request, pk):
 def withdrawal_cancel(request, pk):
     from bot_program.withdrawals import cancel_request, money
     wr = _own_request(request, pk)
-    if not _pin_ok(request):
-        messages.error(request, "Wrong or missing trading PIN. Nothing "
-                                "changed.")
-        return redirect("withdrawals")
+    pin_ok = _pin_ok(request, door=ACT, act="cancel a withdrawal")
+    if not pin_ok:
+        return _pin_refused(request, pin_ok, subject="This withdrawal step",
+                            nothing="nothing changed",
+                            fallback="Wrong or missing trading PIN. Nothing "
+                                     "changed.")
     out = cancel_request(request.user, wr.pk,
                          acted_by=request.POST.get("acted_by", ""),
                          note=request.POST.get("note", ""))
@@ -253,10 +275,12 @@ def withdrawal_correct(request, pk):
     same as marking it."""
     from bot_program.withdrawals import correct_paid, money
     wr = _own_request(request, pk)
-    if not _pin_ok(request):
-        messages.error(request, "Wrong or missing trading PIN. Nothing "
-                                "changed.")
-        return redirect("withdrawals")
+    pin_ok = _pin_ok(request, door=ACT, act="correct a withdrawal")
+    if not pin_ok:
+        return _pin_refused(request, pin_ok, subject="This withdrawal step",
+                            nothing="nothing changed",
+                            fallback="Wrong or missing trading PIN. Nothing "
+                                     "changed.")
     out = correct_paid(request.user, wr.pk,
                        acted_by=request.POST.get("acted_by", ""),
                        paid_amount=request.POST.get("paid_amount", "") or None,

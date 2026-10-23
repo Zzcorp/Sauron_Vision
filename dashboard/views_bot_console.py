@@ -43,11 +43,32 @@ def bot_console(request):
 @login_required
 @require_POST
 def bot_pause(request):
-    """Toggle the user's bot enabled flag (the big PAUSE/RESUME button)."""
-    try:
-        cfg = request.user.bot_config
-    except Exception as e:
-        return JsonResponse({"ok": False, "error": f"no config: {e}"})
+    """Toggle the user's bot enabled flag (the big PAUSE/RESUME button).
+
+    RESUME on a LIVE bot arms real money: it takes the trading PIN
+    (2026-10-23), through the one counted check (core/trading_pin.py, an
+    ACT door). PAUSE never asks, and paper is unchanged. `want` (on|off)
+    is the direction the page meant: a stale click writes nothing."""
+    from bot_program.models import BotConfig
+    cfg = BotConfig.objects.filter(user=request.user).first()
+    if cfg is None:
+        return JsonResponse({"ok": False, "error": "No bot is configured."})
+    want = request.POST.get("want", "")
+    if want in ("on", "off") and (want == "on") == bool(cfg.enabled):
+        return JsonResponse({"ok": True, "enabled": cfg.enabled,
+                             "unchanged": True})
+    if not cfg.enabled and cfg.mode == "live":
+        from core.trading_pin import ACT, gate, json_refusal, refusal_of
+        pin_ok = gate(request, request.POST.get("pin", ""), door=ACT,
+                      act="resume a live crypto bot")
+        if not pin_ok:
+            return JsonResponse(json_refusal(
+                refusal_of(pin_ok), subject="Resuming the bot LIVE",
+                nothing="it stays paused", extra={"ok": False}))
     cfg.enabled = not cfg.enabled
     cfg.save(update_fields=["enabled"])
+    if cfg.mode == "live":
+        from bot_program.audit import record_legacy_bot
+        record_legacy_bot(cfg, on=cfg.enabled, via="bot_console",
+                          who=request.user.username, user=request.user)
     return JsonResponse({"ok": True, "enabled": cfg.enabled})

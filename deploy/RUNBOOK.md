@@ -131,7 +131,21 @@ docker compose --env-file .env -f deploy/docker-compose.yml logs web | grep Disa
 
 Then set your **trading PIN**: Profile → Change PIN. Leave "current PIN" blank
 on first set; 4–8 digits. Nothing can be armed live without it, and no PIN
-exists until you create one.
+exists until you create one. Then log out and log back in with it: a session
+that set or changed its PIN opens and arms nothing until it logs in again
+(closing a position and the kill switch work as they are).
+
+Wrong PINs add up on ONE count per session, at every door that asks for the
+PIN (core/trading_pin.py): the lock screen, the switches, a close, close-all,
+both kill switches, TAKE TRADE, arming a bot or the manual lane, withdrawals,
+the eToro Demo untick, change PIN. At a close, close-all, close-selected, a
+kill switch or a stop that only tightens, a wrong PIN never logs you out and
+the right one always works. Anywhere else the fifth wrong answer ends the
+session, and a session that has used up its five is ended there before any
+PIN is checked; only a fresh login (password and PIN) clears it, and
+signing in again from the same browser is enough, with or without logging
+out first. The login PIN pad allows five wrong answers per sign-in, then
+asks for the password again.
 
 ## 5. Turn the platform on
 
@@ -203,7 +217,9 @@ docker compose --env-file .env -f deploy/docker-compose.yml logs --tail=50 worke
 ## 6. Create your first bots
 
 The fastest path is the seeded paper fleet — six configs (FX majors and
-crosses, metals, energy, softs, megacap stocks), all paper:
+crosses, metals, energy, softs, megacap stocks), all paper (`--activate`
+never arms a starter config since promoted to live: arm that one from
+/asset-bots/ with your PIN):
 
 ```bash
 docker compose --env-file .env -f deploy/docker-compose.yml exec web \

@@ -670,7 +670,9 @@ demo row the book and the venue in one click).
   boxes still UNTICKED, and the trading PIN typed in the form's PIN field. The
   save is refused, nothing written, while any live config is enabled, while
   any class box is ticked on that same save, or without the PIN; the flash
-  names which. The environment flip drops the demo reading cells on purpose.
+  names which. The PIN is checked last, only once nothing else refuses, and
+  a wrong one counts toward the session's five (the fifth ends the session:
+  log in again). The environment flip drops the demo reading cells on purpose.
   From this save every order the platform routes to eToro is real money.
 - D5. THE REAL WORLD, MEASURED — DONE 2026-09-26 (planned for Sunday
   2026-09-27; run on Saturday ~21:25-22:03 UTC by the operator, code

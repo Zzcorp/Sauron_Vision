@@ -389,6 +389,70 @@ def record_switch(kind: str, *, key: str, name: str = "", via: str,
         logger.warning("audit record_switch(%s) failed: %s", kind, e)
 
 
+# ── The trading PIN at every door (2026-10-23, core/trading_pin.py) ─────
+# Wrong answers one to five, the fifth, a right PIN given past five, an
+# ended session, and the live arms of the legacy crypto bot. Constants
+# only, never KIND_CHOICES (a choices change is a migration). Same
+# 20-wide column. Never the PIN, its length or its hash.
+
+#: A refused PIN: a counted guess, an ended session, "log in again", or
+#: a live arm at a door that never takes one.
+PIN_REFUSED = "pin_refused"
+#: The session's fifth wrong answer (once per session).
+PIN_SPENT = "pin_spent"
+#: A right PIN given after five wrong answers (a stop, or the lock).
+PIN_OK_SPENT = "pin_ok_spent"
+#: The legacy crypto BotConfig armed LIVE, or a live one turned off.
+LEGACY_BOT_ARMED = "legacy_bot_armed"
+LEGACY_BOT_OFF = "legacy_bot_off"
+
+AUDIT_KINDS_PIN = (PIN_REFUSED, PIN_SPENT, PIN_OK_SPENT, LEGACY_BOT_ARMED,
+                   LEGACY_BOT_OFF)
+
+
+def record_pin(kind: str, *, who: str, door: str, act: str,
+               reason: str = "", attempts=None, ended: bool = False,
+               user=None, **extra) -> None:
+    """One PIN event on the chain: which door class, which act, why, the
+    session's count and whether the session ended. Never raises."""
+    try:
+        linked = user if getattr(user, "is_authenticated", False) and \
+            getattr(user, "pk", None) else None
+        data = {
+            "who": str(who or "")[:80],
+            "door": str(door or "")[:10],
+            "act": str(act or "")[:40],
+            "reason": str(reason or "")[:40],
+            "attempts": None if attempts is None else int(attempts),
+            "ended": bool(ended),
+        }
+        for k, v in extra.items():
+            data[str(k)[:20]] = v if isinstance(v, (bool, int)) \
+                else str(v)[:40]
+        record_event(kind, data, user=linked)
+    except Exception as e:
+        logger.warning("audit record_pin(%s) failed (%s)", kind,
+                       type(e).__name__)
+
+
+def record_legacy_bot(cfg, *, on: bool, via: str, who: str,
+                      user=None) -> None:
+    """A legacy crypto BotConfig turned on in LIVE mode, or a live one
+    turned off: whose, by whom, through which door. Never raises."""
+    try:
+        linked = user if getattr(user, "is_authenticated", False) and \
+            getattr(user, "pk", None) else None
+        owner = getattr(getattr(cfg, "user", None), "username", "") or ""
+        data = {"config_id": getattr(cfg, "pk", None),
+                "owner": str(owner)[:80], "mode": str(cfg.mode)[:8],
+                "via": str(via or "")[:20], "who": str(who or "")[:80]}
+        record_event(LEGACY_BOT_ARMED if on else LEGACY_BOT_OFF, data,
+                     user=linked)
+    except Exception as e:
+        logger.warning("audit record_legacy_bot failed (%s)",
+                       type(e).__name__)
+
+
 def record_ladder_move(event, *, by: str = "", size_note: str = "") -> None:
     """One PromotionEvent that touched a live stage, on the chain. Called
     inside _transition's transaction: a move rolled back takes its row
