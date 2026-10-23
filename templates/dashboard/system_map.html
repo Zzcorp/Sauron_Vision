@@ -538,7 +538,7 @@ which is how it catches a task that reports success and writes nothing.
                 SV.overlay.alert({
                     title: "Could not switch that",
                     message: (res.j && res.j.error) || "The server refused the change.",
-                    detail: "Only a superuser can arm or disarm parts of the platform."
+                    detail: (res.j && res.j.detail) || "Only a superuser can arm or disarm parts of the platform."
                 });
                 return;
             }

@@ -510,10 +510,11 @@ demo row the book and the venue in one click).
     every levered config's
     `max_hold_hours` has been set by the operator with the printed overnight
     fee in mind (or the fee accepted here in writing); the operator's own
-    book is saved on /setup/. Command:
-    `./deploy/dc exec worker-fast python manage.py shell -c "from core.platform_control import PlatformComponent; print(PlatformComponent.objects.filter(key='etoro_leverage_live').update(is_enabled=True))"`
-    → prints 1; then `preflight_live` must show the config's leverage line
-    without a BLOCKER.
+    book is saved on /setup/. How: turn `etoro_leverage_live` on from /ops/
+    (Switches, System) with your trading PIN (2026-10-23: a live-money
+    switch takes the PIN, the shell never arms one, and the flip lands on
+    the audit chain as switch_armed); then `preflight_live` must show the
+    config's leverage line without a BLOCKER.
 - D2c. FRACTIONS — on the DEMO row, after D2 has closed flat and before any
   class is ticked or the `fractional_units_live` switch is flipped. Every
   answer written down by NAME; the shell idiom of D2 (values printed, never a
@@ -842,7 +843,7 @@ commodity symbol reads `route=etoro` before its config is enabled.
   as test_proof_stock_fraction / _index_fraction / _commodity_fraction):
   AAPL 0.05, SPX500 0.14 and WHEAT.FUT 1.5 each filled EXACTLY as sent and
   closed by id — the precondition for `fractional_units_live` (a runtime
-  switch: `manage.py component on fractional_units_live`), which a stock
+  switch, turned on from /ops/ with the trading PIN), which a stock
   or index config below one whole unit needs. Four-decimal fractions stay
   unmeasured. FEES eToro takes beside the spread, measured and charged
   since 2026-09-29 on live eToro entries at the size sent

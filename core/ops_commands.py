@@ -45,7 +45,7 @@ COMMANDS = [
     {
         "name": "component",
         "title": "Platform components",
-        "purpose": "Turn platform components on and off from the shell — the same write as the health page's toggle, with the nearest key suggested on a typo.",
+        "purpose": "Turn platform components on and off from the shell — the same write as the health page's toggle, with the nearest key suggested on a typo. A live-money switch is refused ON here: /ops/ with the trading PIN.",
         "usage": [
             "python manage.py component list",
             "python manage.py component list --category agent",
