@@ -373,6 +373,42 @@ class TheScopeTests(_Base):
             self.tab()
         self.assertEqual(body["empty"]["code"], "no_seats")
 
+    def test_another_users_orc_never_appears(self):
+        from tests.orcs.helpers import born
+        born(self, self.mine)
+        born(self, self.theirs)
+        _switches(orcs=True)
+        board = self.board()
+        labels = {s["orc"]["label"] for s in _seats(board) if s["orc"]}
+        self.assertEqual(labels, {f"Orc #{self.mine.id}"})
+        self.assertNotIn(f"Orc #{self.theirs.id}", json.dumps(board))
+        r = self.client.get(URL, {"seat": f"bot:{self.theirs.id}"})
+        self.assertEqual(r.status_code, 404)
+        from dashboard.horde import _orc_slots
+        self.assertEqual(_orc_slots([self.theirs.id], on=True,
+                                    user=self.user), {})
+
+    def test_no_ai_spend_key_travels_with_orcs(self):
+        from decimal import Decimal as D
+
+        from bot_program.orcs.models import Orc
+        from tests.orcs.helpers import _wake_card, born
+        orc = born(self, self.mine)
+        _wake_card(orc)
+        Orc.objects.filter(pk=orc.pk).update(spend_today_usd=D("1.25"),
+                                             r_money=D("99.5"))
+        _switches(orcs=True)
+        board, seat = self.board(), self.seat(f"bot:{self.mine.id}")
+        # the walk below reads real Orc slots, not an empty board
+        self.assertTrue(any(s["orc"] for s in _seats(board)))
+        self.assertIsNotNone(seat["voice"]["orc"])
+        for payload in (board, seat):
+            keys = _keys(payload)
+            for banned in ("cost_usd", "tokens_in", "tokens_out",
+                           "model_used", "r_money", "spend_today_usd",
+                           "ai_cost_usd", "spend"):
+                self.assertNotIn(banned, keys)
+
     def test_no_ai_spend_key_travels_staff_or_not(self):
         _review(f"bot:{self.mine.id}", verdict="tighten", user=self.user,
                 cost_usd=Decimal("0.02"), tokens_in=900, tokens_out=200,
@@ -969,6 +1005,262 @@ class TheOrcTests(_Base):
         self.assertNotRegex(HORDE_PY.read_text(encoding="utf-8"),
                             r'"seat"\s*:\s*\{[^}]*"level"')
 
+    # ── O1d (Orcs spec §9.5): the seams filled, only while orcs is ON ──
+
+    def _orcs_on(self):
+        """The book above, an Orc on each bot seat, the switch ON, a wake,
+        a drum and the day's weather written as O1c writes them."""
+        from bot_program.orcs.models import OrcDayBaseline
+        from bot_program.orcs.sessions import trading_day
+        from tests.orcs.helpers import (_drum_heard, _paper_cap, _wake_card,
+                                        born)
+        self._full_book()
+        _paper_cap()
+        from bot_program.models import AssetBotTrade
+        self.orcs = [born(self, t) for t in AssetBotTrade.objects.filter(
+            config__user=self.user, status="OPEN")]
+        for o in self.orcs:
+            _wake_card(o)
+            _drum_heard(o)
+        OrcDayBaseline.objects.create(
+            user=self.user, asset_class="commodity",
+            trading_day=trading_day(timezone.now()), day_class="eventful",
+            score=44)
+        _switches(orcs=True)
+
+    def test_the_seams_fill_when_on(self):
+        self._orcs_on()
+        board = self.board()
+        self.assertEqual(board["v"], 2)
+        orcs = {s["key"]: s["orc"] for s in _seats(board) if s["orc"]}
+        self.assertIn(f"bot:{self.t.id}", orcs)
+        slot = orcs[f"bot:{self.t.id}"]
+        self.assertEqual(slot["label"], f"Orc #{self.t.id}")
+        self.assertEqual(slot["authority"]["level_t"], "L0 · Snaga")
+        self.assertEqual(slot["mode"], "shadow")
+        group = next(g for g in board["groups"] if g["key"] == "commodity")
+        self.assertEqual(group["captain"], {"day": {
+            "class": "eventful", "score_t": "score 44",
+            "t": "eventful · score 44"}})
+        # a legacy seat is no idea of the Orcs
+        self.assertTrue(all(s["orc"] is None for s in _seats(board)
+                            if s["key"].startswith("pf:")))
+        seat = self.seat(f"bot:{self.t.id}")
+        self.assertEqual(seat["v"], 2)
+        self.assertEqual(seat["voice"]["orc"]["label"], f"Orc #{self.t.id}")
+        self.assertEqual(seat["voice"]["orc_block"],
+                         {"present": True, "t": []})
+        self.assertEqual(seat["mission"]["thesis"],
+                         slot["thesis"]["t"])
+
+    def test_an_unimportable_orcs_package_leaves_the_seams_empty(self):
+        from dashboard.horde import _captain_slots, _orc_slots
+        self._orcs_on()
+        with mock.patch.dict("sys.modules", {"bot_program.orcs.notes": None}):
+            self.assertEqual(_orc_slots([self.t.id], on=True), {})
+            self.assertEqual(_captain_slots(self.user, ["commodity"],
+                                            on=True), {})
+            board = self.board()
+        for seat in _seats(board):
+            self.assertIsNone(seat["orc"])
+        for group in board["groups"]:
+            self.assertIsNone(group["captain"])
+
+    def test_a_failing_notes_read_never_blanks_the_band(self):
+        self._orcs_on()
+        with mock.patch("bot_program.orcs.notes.for_rows",
+                        side_effect=RuntimeError("boom")), \
+                mock.patch("bot_program.orcs.notes.for_classes",
+                           side_effect=RuntimeError("boom")), \
+                self.assertLogs("dashboard.horde", level="WARNING"):
+            board = self.board()
+            seat = self.seat(f"bot:{self.t.id}")
+        self.assertEqual(len(_seats(board)), 5)
+        self.assertTrue(all(s["orc"] is None for s in _seats(board)))
+        self.assertIsNone(seat["voice"]["orc"])
+        self.assertFalse(seat["voice"]["orc_block"]["present"])
+
+    def test_every_orc_word_in_an_on_payload_is_reserved(self):
+        from bot_program.orcs import notes
+        self._orcs_on()
+        board = self.board()
+        seat = self.seat(f"bot:{self.t.id}")
+        journal = {j["t"] for s in _seats(board) if s["orc"]
+                   for j in s["orc"]["journal"]}
+        journal |= {j["t"] for j in seat["voice"]["orc"]["journal"]}
+        verb = re.compile(r"Orc\w*\s+(decided|closed|trimmed|tightened|"
+                          r"added|moved|exited)")
+        for text in _strings(board) + _strings(seat):
+            if text in journal:
+                self.assertIsNone(verb.search(text), text)
+                continue
+            for sentence in _sentences(text):
+                if ORC_WORD.search(sentence):
+                    self.assertTrue(
+                        notes.is_reserved(sentence)
+                        or any(sentence.startswith(r) or r.startswith(sentence)
+                               or sentence in r or r in sentence
+                               for r in RESERVED | {"Today:"}),
+                        sentence)
+
+    def test_the_lineage_key_is_never_seat(self):
+        self._orcs_on()
+        for payload in (self.board(), self.seat(f"bot:{self.t.id}")):
+            for s in ([x["orc"] for x in _seats(payload) if x["orc"]]
+                      if "groups" in payload else [payload["voice"]["orc"]]):
+                self.assertIn("lineage", s)
+                self.assertNotIn("seat", _keys(s))
+
+    def test_the_contract_is_v2_only_while_on(self):
+        self._orcs_on()
+        self.assertEqual(self.board()["v"], 2)
+        _switches(orcs=False)
+        cache.clear()
+        board = self.board()
+        self.assertEqual(board["v"], 1)
+        self.assertEqual(self.seat(f"bot:{self.t.id}")["v"], 1)
+        for seat in _seats(board):
+            self.assertIsNone(seat["orc"])
+
+    def test_the_ask_facts_are_the_same_on_and_off(self):
+        self._orcs_on()
+        on = self.seat(f"bot:{self.t.id}")["seat"]["commands"]["ask"]
+        _switches(orcs=False)
+        cache.clear()
+        off = self.seat(f"bot:{self.t.id}")["seat"]["commands"]["ask"]
+        self.assertEqual(on, off)
+
+    # ── the plain words (PR68) on an Orc's slot ──────────────────────────
+
+    def _orc_of_t(self):
+        return next(o for o in self.orcs if o.root_trade_id == self.t.id)
+
+    def _operator_thesis(self, orc, text):
+        from bot_program.orcs import journal
+        journal.append(orc, "thesis", "Your thesis: " + text,
+                       author="operator",
+                       body={"thesis": {"source": "operator", "text": text}})
+
+    def _slot_and_seat(self):
+        cache.clear()
+        board = self.board()
+        slot = next(s["orc"] for s in _seats(board)
+                    if s["key"] == f"bot:{self.t.id}")
+        return board, slot, self.seat(f"bot:{self.t.id}")
+
+    def test_the_operators_thesis_that_may_name_money_is_withheld_whole(self):
+        from dashboard.plain_words import WITHHELD
+        self._orcs_on()
+        self._operator_thesis(self._orc_of_t(),
+                              "risk at the stop 1,234.56 and it still holds")
+        board, slot, seat = self._slot_and_seat()
+        self.assertEqual(slot["thesis"]["source"], "operator")
+        self.assertEqual(slot["thesis"]["t"], WITHHELD)
+        self.assertEqual(seat["voice"]["orc"]["thesis"]["t"], WITHHELD)
+        self.assertEqual(seat["mission"]["thesis"], WITHHELD)
+        mine = [j for j in slot["journal"] if j["author"] == "operator"]
+        self.assertTrue(mine)
+        self.assertTrue(all(j["t"] == WITHHELD for j in mine))
+        for payload in (board, seat):
+            self.assertNotIn("1,234.56", json.dumps(payload))
+
+    def test_the_rows_own_amount_is_read_by_value_in_the_thesis(self):
+        """The row's amount at its stop (125 × |100 − 98| = 250), said bare,
+        with no money word: withheld all the same. A level and an R stay."""
+        from bot_program.models import AssetBotTrade
+        from dashboard.plain_words import WITHHELD
+        self._orcs_on()
+        AssetBotTrade.objects.filter(pk=self.t.pk).update(qty=Decimal("125"))
+        self._operator_thesis(self._orc_of_t(), "worst case 250 if wrong")
+        _board, slot, _seat = self._slot_and_seat()
+        self.assertEqual(slot["thesis"]["t"], WITHHELD)
+        self._operator_thesis(self._orc_of_t(),
+                              "holds above 98.00 for +2R by Friday")
+        _board, slot, seat = self._slot_and_seat()
+        self.assertEqual(slot["thesis"]["t"],
+                         "holds above 98.00 for +2R by Friday")
+        self.assertEqual(seat["mission"]["thesis"],
+                         "holds above 98.00 for +2R by Friday")
+
+    def test_a_line_that_names_an_exception_is_withheld_whole(self):
+        from bot_program.orcs import journal
+        from bot_program.orcs.models import Orc
+        from dashboard.plain_words import WITHHELD_ERROR
+        self._orcs_on()
+        orc = self._orc_of_t()
+        journal.append(orc, "fact", "The venue now holds the stop at "
+                       "1,950.00 (-1.00R).", fact=True)
+        journal.append(orc, "fact", "The read failed (OperationalError: "
+                       "database is locked).", fact=True)
+        self._operator_thesis(orc, "KeyError: 'bias' says the trend is gone")
+        Orc.objects.filter(pk=orc.pk).update(
+            latest_note="requests.exceptions.ConnectionError at the venue")
+        board, slot, seat = self._slot_and_seat()
+        for sl in (slot, seat["voice"]["orc"]):
+            self.assertEqual(sl["thesis"]["t"], WITHHELD_ERROR)
+            self.assertEqual(sl["latest_note"], WITHHELD_ERROR)
+            lines = [j["t"] for j in sl["journal"]]
+            # a code line in prices and R is kept as written
+            self.assertIn("The venue now holds the stop at 1,950.00 "
+                          "(-1.00R).", lines)
+            self.assertEqual(lines[-2:], [WITHHELD_ERROR, WITHHELD_ERROR])
+        for payload in (board, seat):
+            text = json.dumps(payload)
+            for leak in ("OperationalError", "database is locked",
+                         "KeyError", "ConnectionError"):
+                self.assertNotIn(leak, text)
+
+    def test_a_fact_code_writes_under_the_operators_name_is_codes(self):
+        """A hand edit's fact (bot_program/orcs/facts.py) is written by
+        code with author "operator": a price and an R, never his words. A
+        price that sits near the row's amount at its stop (50 x |100 - 98|
+        = 100) is no amount: the line shows as written, as the same
+        sentence by code does. Only his thesis entries are a voice's."""
+        from bot_program.models import AssetBotTrade
+        from bot_program.orcs import journal
+        from dashboard.plain_words import WITHHELD
+        self._orcs_on()
+        AssetBotTrade.objects.filter(pk=self.t.pk).update(qty=Decimal("50"))
+        orc = self._orc_of_t()
+        hand = ("A hand edit set the venue's stop at 99.00 (-0.50R). The "
+                "grade counts it as a hand act.")
+        journal.append(orc, "fact", "The venue now holds the stop at 99.00 "
+                       "(-0.50R).", fact=True)
+        journal.append(orc, "fact", hand, author="operator", fact=True)
+        self._operator_thesis(orc, "worst case 100 if it fails")
+        board, slot, seat = self._slot_and_seat()
+        for sl in (slot, seat["voice"]["orc"]):
+            lines = {(j["author"], j["kind"]): j["t"] for j in sl["journal"]}
+            self.assertEqual(lines[("operator", "fact")], hand)
+            self.assertEqual(lines[("code", "fact")],
+                             "The venue now holds the stop at 99.00 "
+                             "(-0.50R).")
+            # his own thesis entry naming the row's amount bare is withheld
+            self.assertEqual(lines[("operator", "thesis")], WITHHELD)
+            self.assertEqual(sl["thesis"]["t"], WITHHELD)
+
+    def test_the_plain_words_never_change_the_slot_they_read(self):
+        """The entry's own reason is a voice on the seat (the operator's
+        thesis already passes the plain words in notes.slot): the Horde
+        withholds it on a copy and leaves the slot it read as it was."""
+        from bot_program.orcs.models import Orc
+        from bot_program.orcs.notes import for_rows
+        from dashboard.horde import _orc_slots
+        self._orcs_on()
+        orc = self._orc_of_t()
+        Orc.objects.filter(pk=orc.pk).update(
+            thesis={**orc.thesis, "reason": "KeyError says so"})
+        raw = for_rows([self.t.id], user=self.user)
+        before = json.dumps(raw, sort_keys=True, default=str)
+        with mock.patch("bot_program.orcs.notes.for_rows", return_value=raw):
+            shown = _orc_slots([self.t.id], on=True, user=self.user,
+                               trades=[self.t])
+        self.assertEqual(json.dumps(raw, sort_keys=True, default=str), before)
+        self.assertEqual(raw[f"bot:{self.t.id}"]["thesis"]["t"],
+                         "KeyError says so")
+        self.assertNotEqual(shown[f"bot:{self.t.id}"]["thesis"]["t"],
+                            "KeyError says so")
+
 
 # ── 13.5 the ceiling (rule 5) ────────────────────────────────────────────
 
@@ -1006,6 +1298,7 @@ class TheCeilingTests(_Base):
                        meta={"stop_moves": [{"to": "99", "why": "trail"}],
                              "care": {"soft_stop": 99.0, "soft_why": "breakeven",
                                       "since": timezone.now().isoformat()}})]
+        return self._made
 
     def _count(self, fn):
         with CaptureQueriesContext(connection) as ctx:
@@ -1025,6 +1318,40 @@ class TheCeilingTests(_Base):
         big = self._board_warm()
         self.assertEqual(small, big)
         self.assertEqual(big, 10)
+
+    def _with_orcs(self):
+        from bot_program.models import AssetBotTrade
+        from tests.orcs.helpers import _drum_heard, _paper_cap, born
+        _paper_cap()
+        for t in AssetBotTrade.objects.filter(config__user=self.user,
+                                              status="OPEN"):
+            orc = born(self, t)
+            if orc is not None:
+                _drum_heard(orc)
+        _switches(orcs=True)
+
+    def test_a_warm_board_with_orcs_costs_the_same_for_3_and_30_seats(self):
+        """O1d: ON, the seats' notes are two reads (the legs with their
+        Orc, seat and row; the arms) and the bands' one (the day), whatever
+        the seat count; the switch rides the batch."""
+        self._bots(3)
+        self._with_orcs()
+        small = self._board_warm()
+        self._bots(27)
+        self._with_orcs()
+        cache.clear()
+        big = self._board_warm()
+        self.assertEqual(small, big)
+        self.assertEqual(big, 13)
+
+    def test_the_seat_detail_with_an_orc_stays_within_16(self):
+        from dashboard import horde
+        t = self._bots(2)[0]
+        self._with_orcs()
+        horde.seat_detail(self.user, f"bot:{t.id}")
+        n = self._count(lambda: horde.seat_detail(self.user, f"bot:{t.id}"))
+        self.assertLessEqual(n, 16)
+        self.assertEqual(n, 15)
 
     def test_legacy_rows_cost_one_more_whatever_their_number(self):
         self._bots(2)
@@ -2429,6 +2756,50 @@ class TheScriptBehaviourTests(_Base):
         out = {"board": self.board(), "tab": self.tab()}
         out["seat"] = self.seat(seat or f"bot:{self.live.id}")
         return out
+
+    def test_an_orc_seat_paints_label_level_and_the_day_and_text_stays_text(self):
+        from bot_program.orcs import journal
+        from bot_program.orcs.models import OrcDayBaseline
+        from bot_program.orcs.sessions import trading_day
+        from tests.orcs.helpers import _paper_cap, _wake_card, born
+        _paper_cap()
+        orc = born(self, self.live)
+        _wake_card(orc)
+        journal.append(orc, "thesis", "Your thesis: <script>alert(1)</script>",
+                       author="operator", body={"thesis": {
+                           "source": "operator",
+                           "text": "<script>alert(1)</script> holds"}})
+        OrcDayBaseline.objects.create(
+            user=self.user, asset_class="commodity",
+            trading_day=trading_day(timezone.now()), day_class="stormy",
+            score=63)
+        _switches(orcs=True)
+        got = _drive(OPEN + """
+            const bands = env.$('svHordeBands'), box = env.$('svHordeSeat');
+            const key = env.payloads.seat.seat.key;
+            const card = bands.querySelector('[data-open-seat="' + key + '"]').closest('.hd-seat');
+            const foot = card.textContent;
+            const head = bands.querySelector('.hd-band[data-band="commodity"] .hd-band-head').textContent;
+            env.click(bands.querySelector('[data-open-seat="' + key + '"]'));
+            await env.settle();
+            const orcBox = box.querySelector('.hd-orc');
+            const scripts = box.querySelectorAll('script').length;
+            const links = Array.prototype.map.call(orcBox.querySelectorAll('a'),
+                                                   (a) => a.getAttribute('href'));
+            return {foot, head, orc: orcBox.textContent, scripts, links};
+        """, self.payloads())
+        got = {k: (v.replace("\xa0", " ") if isinstance(v, str) else v)
+               for k, v in got.items()}
+        self.assertIn(f"Orc #{self.live.id} · L0 · Snaga", got["foot"])
+        self.assertIn("Day: stormy · score 63", got["head"])
+        self.assertIn("No Captain seated yet.", got["head"])
+        self.assertIn("Rank: L0 · Snaga", got["orc"])
+        self.assertIn("<script>alert(1)</script> holds", got["orc"])
+        self.assertIn("Complexity: score 58 · complex · No model (code only)",
+                      got["orc"])
+        self.assertIn(f"Open Orc #{self.live.id} ›", got["orc"])
+        self.assertEqual(got["scripts"], 0)
+        self.assertEqual(got["links"], [f"/orcs/{self.live.id}/"])
 
     def test_the_switch_lines_stand_outside_the_capped_table(self):
         _switches(aragorn=False)

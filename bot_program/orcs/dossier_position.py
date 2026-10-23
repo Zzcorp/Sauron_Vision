@@ -10,7 +10,9 @@ debate stores).
 
   PS1  you: L0 shadow, the commission, the allowed actions and why not,
        the army type (never a rank)
-  PS2  the thesis and its provenance (money-free, thesis.provenance)
+  PS2  the thesis and its provenance (money-free, thesis.provenance), the
+       debate's sides, and the operator's own thesis (O1d) as a view: his
+       words, never a fact
   PS3  "no plan yet: the Orc writes one from O2"
   PS4  the mandate: worst case, gross, loss, adds and re-entry left, the
        book's headroom in R
@@ -102,7 +104,27 @@ def _ps2(orc, row) -> dict:
                            or "—"),
             "killer": _debate_view(ex.get("killer"), row),
             "edge": _debate_view(ch.get("edge"), row),
-            "operator": "— (no thesis typed by the operator)"}
+            "operator": _operator_view(orc, row)}
+
+
+#: PS2 when the operator typed no thesis on his Orc's page.
+NO_OPERATOR_THESIS = "— (no thesis typed by the operator)"
+
+
+def _operator_view(orc, row) -> str:
+    """The operator's own thesis (O1d: the last one he wrote on
+    /orcs/<id>/, kept on the card as `thesis_operator`), as a view under
+    source "operator": his words, never a fact (no F-id), whole or
+    withheld whole (plain.voice), never cut. The dash when he wrote
+    none."""
+    card = orc.card if isinstance(orc.card, dict) else {}
+    mine = card.get("thesis_operator")
+    said = mine.get("t") if isinstance(mine, dict) else None
+    if not said:
+        return NO_OPERATOR_THESIS
+    from bot_program.orcs.constants import THESIS_OPERATOR_MAX
+    line = voice(said, row_marks(row))
+    return fence.view("operator", line, max(THESIS_OPERATOR_MAX, len(line)))
 
 
 def _debate_view(said, row) -> str:

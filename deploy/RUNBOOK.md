@@ -1571,6 +1571,94 @@ pass with no Mercenary holding a position is a success that read nothing;
 an unmeasured headroom is a warning in words). To stop it:
 `component off orcs_tape`.
 
+### O1d: where the Orcs are seen (still no model)
+
+Everything below is read by code from the Orc tables, only while the
+switch `orcs` is ON. No new switch, no new beat, no new queue and no tick
+hook: switching `orcs` OFF puts every page back to what it was before the
+Orcs, byte for byte, and `/orcs/`, `/orcs/<number>/` and `/orcs/seats/`
+answer 404 as they did before (the record stays in the tables and reads
+again once the switch is ON). The route probe (`manage.py probe_routes`)
+counts those two argument-free pages under "off" while the switch is
+OFF, never under "missing", so the forge does not report them. Nothing
+here sends an order, moves a stop, calls a model or notifies anyone.
+
+**On Telegram** (your own Eye chat, never the alarm group):
+
+```
+/orc 12            one Orc: rank, state, R at the last tick and best, the
+                   stops its venue and the care hold (once the position is
+                   closed: where it closed and the R it booked, never a
+                   stop), its thesis and what invalidates it, its latest
+                   note, the last fact written by code, the next wake, the
+                   care beside the position, its army, and its page. A
+                   leg's number works too.
+/orcs              every Orc on watch, one line each (20 at most)
+/orcs forex        the same, one class
+```
+
+R and prices only: never a balance, an amount or a quantity. Your own
+thesis shows as you wrote it, or "Withheld: this line may name an amount
+of money." when it names one; the Horde and the positions page say the
+same. The stops line names the row's own venue (eToro, eToro demo, OANDA
+practice, Saxo simulation...). While
+`orcs` is OFF, `/orc` is ignored like any unknown command and a quoted
+"orc 12" goes to Sauron as a question, as before. `/orc 12 <question>`,
+`/orc 12 stand down` and `/orcs off` answer in words and change nothing:
+no Orc reasons or acts in this release.
+
+**On the platform:**
+
+- **The Horde.** Each seat with an Orc shows its label and "L0 · Snaga"
+  at the card's foot; the dossier's THE ORC box shows its state, thesis,
+  what invalidates it, the risk at the venue's stop, the care beside the
+  position, the complexity score of its last detected wake ("No model
+  (code only)"), the dossier's integrity, its journal, the drums it heard
+  and a link to its page. Each class band shows the day's weather. The
+  answer's `v` is 2 while `orcs` is ON, 1 while OFF.
+- **The positions page.** One muted line under the symbol of an open row
+  an Orc follows ("Orc #12 · L0 · Snaga, class · invalidates on a 4h close
+  below … · no plan yet · "Nothing new: +0.4R…" 14:05 · risk 1.0R of
+  2R": the rank and the commission, the first invalidation, the plan, the
+  latest note and its time, the risk at the stop the venue holds); the
+  dwell card adds its plan, the comparison with the care and its last
+  three journal lines. The comparison prices the position and the care
+  ghost on the same tick, at the closing side of the spread, with what
+  each banked, so two arms that took the same steps read the same R. The
+  history tab is unchanged.
+- **The close dialog.** A row an Orc follows shows its note beside the
+  early-close warning: its rank, state and plan, the thesis, the latest
+  note and the last fact written by code (your own thesis is never shown
+  as a fact). Information only: the close itself, its PIN rule and
+  close-all are unchanged.
+- **`/orcs/`** lists your Orcs on watch, those that ended in the last 30
+  days with their grade, and the seats they sit on. Staff also see the AI
+  spend lines there.
+- **`/orcs/<number>/`** is one Orc: its thesis (the entry's, or the one
+  reconstructed for a row that was open before the Orcs) and its
+  predicates, your own thesis, the plan, the journal (facts written by
+  code and notes drawn apart, your words marked as yours), the arms, the
+  detected wakes and the grade. A leg's number opens its idea.
+- **Your thesis.** The form on an Orc's page keeps your thesis beside the
+  entry's, in your words (600 characters at most). It is journaled as
+  yours, never as a fact, and changes nothing the care does. It is
+  refused while `orcs` is OFF and on an idea that has ended.
+- **`/orcs/seats/`** (staff only) shows every seat by bar source, never
+  pooled: graded ideas, the mean Δ against the care with its 80% bounds,
+  and the capture; then each army type by venue, class and bar source,
+  with its n, mean Δ and 80% bounds. Only the grades that count for their
+  seat enter a statistic. In this release no Orc takes a step, so Δ
+  measures the care ghost against the care, and no seat holds any power.
+
+The adoption line sent for a real-money row now opens that Orc's page.
+
+To check, with `orcs` ON:
+
+```bash
+./deploy/dc exec web python manage.py orcs                  # the live Orcs, their numbers
+# then open /orcs/ and /orcs/<number>/, and send /orc <number> on Telegram
+```
+
 ## Operating notes
 
 **Going live is deliberate.** Bots ship in paper mode; flipping one to live

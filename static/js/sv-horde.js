@@ -1080,8 +1080,10 @@
     var h = add(r5, el('span', '', s.holder.short));
     h.title = s.holder.words + (s.holder.suffix ? ' ' + s.holder.suffix : '');
     if (s.orc && s.orc.label) {
-      add(r5, el('span', 'hd-grow', s.orc.label + (s.orc.authority && s.orc.authority.level_t
-                                                   ? ' · ' + s.orc.authority.level_t : '')));
+      var oc = add(r5, el('span', 'hd-grow', s.orc.label + (s.orc.authority && s.orc.authority.level_t
+                                                            ? ' · ' + s.orc.authority.level_t : '')));
+      /* Its army and its state on hover: words of the slot, as text. */
+      oc.title = [s.orc.army && s.orc.army.type_t, s.orc.state_t].filter(Boolean).join(' · ');
     } else {
       var no = add(r5, el('span', 'hd-grow hd-no-orc', W('no_orc')));
       no.title = W('no_orc_seated') + ' ' + s.holder.words;
@@ -1121,6 +1123,11 @@
     });
     if (g.captain && g.captain.label) add(parts.head, el('span', 'hd-captain', g.captain.label));
     else add(parts.head, el('span', 'hd-captain', W('no_captain')));
+    /* The day's weather for this class (calm, eventful, stormy), when the
+       slot carries one; nothing is routed on it. */
+    if (g.captain && g.captain.day && g.captain.day.t) {
+      add(parts.head, el('span', 'hd-captain hd-day', fill(W('day_t'), { t: g.captain.day.t })));
+    }
     /* Open or shut as the reader left it: the board repaints every band
        on each read, and an expander that closed itself every 20-60 s
        could not be read. */
@@ -1646,12 +1653,45 @@
     b = voiceBox(sec, W('v_notes'));
     add(b, el('div', 'hd-muted', (v.notes && v.notes.t) || ''));
     b = voiceBox(sec, W('v_orc'), 'hd-orc');
-    if (v.orc && v.orc.latest_note) {
-      add(b, el('div', '', v.orc.latest_note));
+    if (v.orc && v.orc.label) {
+      paintOrc(b, v.orc);
     } else {
-      ((v.orc_block && v.orc_block.t) || [W('no_orc_seated'), W('not_decided'), W('orc_arrives')])
+      ((v.orc_block && v.orc_block.t && v.orc_block.t.length && v.orc_block.t) ||
+       [W('no_orc_seated'), W('not_decided'), W('orc_arrives')])
         .forEach(function (t) { add(b, el('div', '', t)); });
     }
+  }
+  /* The trader agent's slot, every line through el() (textContent): the
+     operator's own thesis and the journal stay text, never markup. */
+  function paintOrc(b, o) {
+    var au = o.authority || {}, th = o.thesis || {}, li = o.lineage || {};
+    add(b, el('div', '', fill(W('orc_state'), { t: o.state_t })));
+    add(b, el('div', '', fill(W('orc_rank'), { t: au.level_t })));
+    add(b, el('div', '', fill(W('orc_thesis'), { source: th.source_t || '', t: th.t || DASH })));
+    (th.invalidation_t || []).forEach(function (t) { add(b, el('div', 'hd-muted', '· ' + t)); });
+    if (o.plan_line) add(b, el('div', 'hd-muted', fill(W('orc_plan'), { t: o.plan_line })));
+    if (o.risk_line) add(b, el('div', '', fill(W('orc_risk'), { t: o.risk_line })));
+    if (o.care_compare && o.care_compare.t) add(b, el('div', '', fill(W('orc_compare'), { t: o.care_compare.t })));
+    if (o.latest_note) add(b, el('div', '', o.latest_note));
+    if (o.army && o.army.type_t) add(b, el('div', 'hd-muted', fill(W('orc_army'), { t: o.army.type_t })));
+    if (o.intellect) {
+      add(b, el('div', 'hd-muted', fill(W('orc_score'), { score: o.intellect.score_t, rung: o.intellect.rung_t })));
+    }
+    if (o.integrity && o.integrity.t) add(b, el('div', 'hd-muted', fill(W('orc_integrity'), { t: o.integrity.t })));
+    add(b, el('div', 'hd-muted', fill(W('orc_lineage'), { rank: li.rank_t || '', n: li.provisional_t || '' })));
+    if ((o.journal || []).length) {
+      add(b, el('div', 'hd-muted', W('orc_journal')));
+      o.journal.slice(-3).reverse().forEach(function (j) {
+        add(b, el('div', '', (j.at ? stamp(j.at) : DASH) + ' · ' + (j.author || '') + ' · ' + (j.t || '')));
+      });
+    }
+    if ((o.drums || []).length) {
+      add(b, el('div', 'hd-muted', W('orc_drums')));
+      o.drums.forEach(function (d) {
+        add(b, el('div', '', (d.at ? stamp(d.at) : DASH) + ' · ' + d.kind_t + (d.from_symbol ? ' · ' + d.from_symbol : '')));
+      });
+    }
+    if (o.page) add(b, link('hd-link', fill(W('orc_open'), { label: o.label }), o.page));
   }
   /* The bar holds the buttons alone, so it stays one short strip on any
      width; what is unavailable, and the links, sit in the row under it. */

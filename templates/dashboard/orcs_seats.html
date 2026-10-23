@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Orc seats — Sauron Vision{% endblock %}
+{% block page_title %}ORCS · SEATS (STAFF){% endblock %}
+
+{% block content %}
+{# Every seat by bar source, never pooled (O1d, spec §6.4-6.7, §9.2). #}
+<div class="orc-page">
+<div style="margin-bottom:12px;"><a href="{% url 'orcs_list' %}" class="orc-muted">← every Orc</a></div>
+<div class="card orc-banner" role="note">{{ note }}</div>
+
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Seats (venue × class × rule, by bar source)</span></div>
+    {% if rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack orc-table" id="orc-seats">
+        <thead><tr><th>Venue</th><th>Class</th><th>Rule</th><th>Bars</th><th>Rank</th><th class="num">Graded</th><th class="num">Counted</th><th class="num">Mean Δ</th><th class="num">SE</th><th class="num">LB80</th><th class="num">UB80</th><th class="num">Capture (position)</th><th class="num">Capture (care ghost)</th></tr></thead>
+        <tbody>
+        {% for r in rows %}
+        <tr>
+            <td data-label="Venue">{{ r.seat.venue }}</td>
+            <td data-label="Class">{{ r.seat.asset_class }}</td>
+            <td data-label="Rule">{{ r.seat.rule_key }}</td>
+            <td data-label="Bars">{{ r.source }}</td>
+            <td data-label="Rank">{{ r.level_t }}</td>
+            <td data-label="Graded" class="num">{{ r.graded }}</td>
+            <td data-label="Counted" class="num">{{ r.n }}</td>
+            <td data-label="Mean Δ" class="num">{{ r.mean }}</td>
+            <td data-label="SE" class="num">{{ r.se }}</td>
+            <td data-label="LB80" class="num">{{ r.lb80 }}</td>
+            <td data-label="UB80" class="num">{{ r.ub80 }}</td>
+            <td data-label="Capture (position)" class="num">{% if r.cap_orc is not None %}{{ r.cap_orc|floatformat:2 }}{% else %}—{% endif %}</td>
+            <td data-label="Capture (care ghost)" class="num">{% if r.cap_ghost is not None %}{{ r.cap_ghost|floatformat:2 }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}<p class="eye-empty">No seat yet.</p>{% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">By army type, venue, class and bar source</span></div>
+    {% if army_rows %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack orc-table" id="orc-armies">
+        <thead><tr><th>Army</th><th>Venue</th><th>Class</th><th>Bars</th><th class="num">Graded</th><th class="num">Counted</th><th class="num">Mean Δ against the care</th><th class="num">LB80</th><th class="num">UB80</th><th class="num">Against Line</th></tr></thead>
+        <tbody>
+        {% for a in army_rows %}
+        <tr>
+            <td data-label="Army">{{ a.type_t }}</td>
+            <td data-label="Venue">{{ a.venue }}</td>
+            <td data-label="Class">{{ a.cls }}</td>
+            <td data-label="Bars">{{ a.source }}</td>
+            <td data-label="Graded" class="num">{{ a.graded }}</td>
+            <td data-label="Counted" class="num">{{ a.n }}</td>
+            <td data-label="Mean Δ" class="num">{{ a.delta }}</td>
+            <td data-label="LB80" class="num">{{ a.lb80 }}</td>
+            <td data-label="UB80" class="num">{{ a.ub80 }}</td>
+            <td data-label="Against Line" class="num">{{ a.vs_line }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p class="orc-muted">Only the grades that count for their seat enter Counted, the mean and the bounds; venues and bar sources are never pooled. Against Line is measured once the types act on their own parameters; until then it is a dash.</p>
+    {% else %}<p class="eye-empty">No idea is graded yet.</p>{% endif %}
+</div>
+</div>
+
+<style>
+.orc-banner { padding: 10px 14px; margin-bottom: 14px; border-left: 3px solid var(--warning); color: var(--text-muted); font-size: 12px; }
+.orc-muted { color: var(--text-muted); font-size: 11px; }
+</style>
+{% endblock %}

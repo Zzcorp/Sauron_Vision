@@ -30,10 +30,17 @@ The truth contract, in five lines:
     reasoning) are shown as written or withheld whole: when they name an
     exception or repeat a failed read's text, or may name an amount of
     money: R and percent only (dashboard/plain_words.py);
-  * the seat slot for the coming trader agents is None today and the
-    group slot for their class leaders is None today: the seams are
-    _orc_slots and _captain_slots below. No sentence here says one of them
-    did anything; the holder line says who really holds the seat.
+  * the seat slot of the trader agents and the group slot of their class
+    leaders are filled through the seams _orc_slots and _captain_slots
+    below, from bot_program.orcs.notes, only while the orcs switch is ON
+    (read from the switch batch, never alone); OFF, both are None and the
+    answer is the one before them. Every line of a slot passes the same
+    plain words (_orc_plain): a thesis, and the operator's own thesis in
+    the journal (kind "thesis" by author "operator"), is a voice's; every
+    other line is written by code (a fact code writes under the
+    operator's name, a hand edit's, included) and is withheld whole if it
+    ever names an exception. No sentence here says one of them did
+    anything; the holder line says who really holds the seat.
 
 The reads (rule 5): Block A, every board and tab compute, a constant number
 of queries whatever the seat count (dashboard.horde.board, pinned by
@@ -61,13 +68,17 @@ from django.utils.dateparse import parse_datetime
 from core.context_processors import PANEL_TTL_SECONDS
 from core.templatetags.sauron_tags import _WORLD_TITLES
 
-from .plain_words import (LINE_MAX, VENUE_CAUSES, debate_why_words,
-                          failure_texts, money_marks, scrub, size_step,
+from .plain_words import (LINE_MAX, VENUE_CAUSES, WITHHELD_ERROR,
+                          debate_why_words, failure_texts,
+                          may_name_exception, money_marks, scrub, size_step,
                           thesis_words, venue_cause, venue_words)
 
 logger = logging.getLogger(__name__)
 
 V = 1
+#: The contract while the orcs switch is ON: the seat and band slots are
+#: filled (bot_program/orcs/notes.py; additive keys). OFF stays V.
+V_ORCS = 2
 DASH = "—"
 #: The open band's clock: the strip's own (templates/_partials/
 #: live_region.html TICK_MS / UP_EVERY).
@@ -77,7 +88,7 @@ UP_EVERY = 3
 KEPT_S = PANEL_TTL_SECONDS
 SEAT_STATUSES = ("OPEN", "CLOSE_PENDING")
 SWITCH_KEYS = ("platform_master", "pipeline_asset_bots", "aragorn",
-               "agent_position_review")
+               "agent_position_review", "orcs")
 FACTS_MAX = 900
 PEERS_MAX = 12                      # dashboard/views_desk.py HEAT_MAX
 NEAR_STOP_R = 0.25
@@ -277,6 +288,13 @@ NO_THESIS_YET = "No Orc has written a thesis for this seat yet."
 RESERVED_ORC_SENTENCES = frozenset({
     NO_ORC, NO_ORC_SEATED, NOT_DECIDED, ORC_ARRIVES, NO_CAPTAIN,
     CAPTAINS_NOT_BUILT, NO_THESIS_YET})
+try:
+    # The trader agents' own sentences (their slots' words), reserved here
+    # too: they live in their package, never in this file.
+    from bot_program.orcs.notes import RESERVED_SENTENCES as _ORC_WORDS
+    RESERVED_ORC_SENTENCES = RESERVED_ORC_SENTENCES | _ORC_WORDS
+except ImportError:  # pragma: no cover — the package is optional here
+    pass
 
 # The dossier.
 WHO_YOU = "Opened by you (TAKE TRADE)"
@@ -368,16 +386,122 @@ STOP_FILL_REPLACED = "{venue}'s stop at the fill (since replaced)"
 
 # ── the seams the trader agents will fill ────────────────────────────────
 
-def _orc_slots(trade_ids) -> dict:
-    """{seat key: slot} for the seats a trader agent sits in. Empty today:
-    none is built. The agents' own PR replaces this with their notes read
-    (one bulk read over trade_ids), keyed bot:<id>."""
-    return {}
+def _orc_slots(trade_ids, *, on=False, user=None, trades=None) -> dict:
+    """{seat key: slot} for the seats a trader agent sits in, keyed
+    bot:<id>: their notes read (bot_program.orcs.notes.for_rows, two
+    queries whatever the seat count), only while `on` (the orcs switch,
+    from the switch batch). Empty when off, when the package cannot be
+    imported, and when the read fails (the seats are still served)."""
+    if not on or not trade_ids:
+        return {}
+    try:
+        from bot_program.orcs.notes import for_rows
+    except ImportError:
+        return {}
+    try:
+        found = for_rows(trade_ids, user=user, trades=trades)
+    except Exception:  # noqa: BLE001 — a failed read never blanks a seat
+        logger.warning("[horde] the seats' notes could not be read",
+                       exc_info=True)
+        return {}
+    rows = {getattr(t, "pk", None): t for t in (
+        trades.values() if isinstance(trades, dict) else trades or ())}
+    out = {}
+    for key, sl in found.items():
+        try:
+            tid = int(str(key).split(":", 1)[1])
+        except (IndexError, TypeError, ValueError):
+            tid = None
+        out[key] = _orc_plain(sl, rows.get(tid))
+    return out
 
 
-def _captain_slots(user, classes) -> dict:
-    """{asset class: slot} for the class leaders. Empty today."""
-    return {}
+def _captain_slots(user, classes, *, on=False) -> dict:
+    """{asset class: slot} for the class bands: the day's weather
+    (bot_program.orcs.notes.for_classes, one query) while `on`; no class
+    leader is seated before their own PR, so a slot carries no label.
+    Empty when off, unimportable or unread."""
+    if not on or not classes:
+        return {}
+    try:
+        from bot_program.orcs.notes import for_classes
+    except ImportError:
+        return {}
+    try:
+        found = for_classes(user, classes)
+    except Exception:  # noqa: BLE001 — a failed read never blanks a band
+        logger.warning("[horde] the bands' notes could not be read",
+                       exc_info=True)
+        return {}
+    return {cls: _code_plain(sl) for cls, sl in found.items()}
+
+
+#: A line in a trader agent's journal is a person's own words, not code's,
+#: only when its author is one of these AND its kind one of the next: the
+#: operator's thesis, written on /orcs/<id>/ (bot_program/orcs/notes.py
+#: AUTHOR_OPERATOR, KIND_THESIS). Code also writes facts under the
+#: operator's name (a hand edit of the venue's stop, bot_program/orcs/
+#: facts.py and ghost.py): those are code's lines, in prices and R.
+ORC_VOICE_AUTHORS = ("operator",)
+#: The journal kind of the operator's own thesis (notes.KIND_THESIS).
+ORC_VOICE_KINDS = ("thesis",)
+
+
+def _code_plain(value):
+    """A slot's lines written by code (bot_program/orcs/notes.py: R,
+    prices and fixed words), copied, each string withheld whole if it ever
+    names an exception (plain_words.may_name_exception); nothing is cut
+    out of one."""
+    if isinstance(value, dict):
+        return {k: _code_plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_code_plain(v) for v in value]
+    if isinstance(value, str) and may_name_exception(value):
+        return WITHHELD_ERROR
+    return value
+
+
+def _orc_voice(text, marks):
+    """A line in a voice's own words, as written or withheld whole
+    (plain_words.scrub): never cut."""
+    t = str(text or "")
+    return scrub(t, max(len(t), LINE_MAX), marks)
+
+
+def _orc_plain(slot, trade=None):
+    """A trader agent's slot (bot_program/orcs/notes.py slot) as the Horde
+    shows it, under the plain words every stored line obeys here
+    (dashboard/plain_words.py). Its thesis (the entry's reason, a
+    reconstructed one, or the operator's own) and the operator's own
+    thesis in the journal (author ORC_VOICE_AUTHORS and kind
+    ORC_VOICE_KINDS, both) are a voice's: shown as written, or withheld
+    whole when they name an exception or may name an amount of money, the
+    row's own amounts read by value (_debate_marks on the row alone, never
+    the council's record: no query). Every other line is code's, in R and
+    prices (_code_plain), a fact code wrote under the operator's name
+    included. The slot itself is never changed."""
+    if not isinstance(slot, dict):
+        return slot
+    marks = None
+    if trade is not None:
+        try:
+            meta = trade.metadata if isinstance(trade.metadata, dict) else {}
+            marks = _debate_marks(trade, {k: v for k, v in meta.items()
+                                          if k != "debate"})
+        except Exception:  # noqa: BLE001 — no mark is a mark less, never a failure
+            marks = None
+    out = _code_plain(slot)
+    th = slot.get("thesis")
+    if isinstance(th, dict) and th.get("t") and isinstance(out.get("thesis"), dict):
+        out["thesis"]["t"] = _orc_voice(th.get("t"), marks)
+    said = slot.get("journal")
+    if isinstance(said, list) and isinstance(out.get("journal"), list):
+        for i, j in enumerate(said):
+            if isinstance(j, dict) and (j.get("author") in ORC_VOICE_AUTHORS
+                                        and j.get("kind") in ORC_VOICE_KINDS) \
+                    and isinstance(out["journal"][i], dict):
+                out["journal"][i]["t"] = _orc_voice(j.get("t"), marks)
+    return out
 
 
 # ── small formatting helpers ─────────────────────────────────────────────
@@ -1351,7 +1475,7 @@ def _book_sizes(raw):
     return out
 
 
-def _seats(book, raw):
+def _seats(book, raw, *, slots=True, user=None):
     sizes = _book_sizes(raw)
     seats = []
     by_trade = {t.id: t for t in book.trades}
@@ -1370,10 +1494,17 @@ def _seats(book, raw):
                                       book.now))
         except Exception:  # noqa: BLE001
             logger.warning("[horde] seat pf:%s not shaped", p.pk, exc_info=True)
-    slots = _orc_slots([s["trade_id"] for s in seats if s["trade_id"]])
+    found = _orc_slots([s["trade_id"] for s in seats if s["trade_id"]],
+                       on=slots and _orcs_on(book), user=user,
+                       trades=book.trades)
     for s in seats:
-        s["orc"] = slots.get(s["key"])
+        s["orc"] = found.get(s["key"])
     return seats, sizes
+
+
+def _orcs_on(book) -> bool:
+    """The orcs switch, from the batch this read already holds."""
+    return bool((getattr(book, "switches", None) or {}).get("orcs"))
 
 
 # ── bands ────────────────────────────────────────────────────────────────
@@ -1476,9 +1607,9 @@ def _class_note(cls, members):
                              band=_class_label(cls), pron="them" if many else "it")
 
 
-def _groups(seats, sizes, gate_risk, user):
+def _groups(seats, sizes, gate_risk, user, *, on=False):
     classes = sorted({s["class"] for s in seats})
-    captains = _captain_slots(user, classes)
+    captains = _captain_slots(user, classes, on=on)
     groups = []
     for cls in classes:
         members = sorted([s for s in seats if s["class"] == cls],
@@ -1928,20 +2059,22 @@ def _tab_of(book, seats, head, raw, now):
                             f"{'' if alarms != 1 else 's'} attention." if alarms else "")}
 
 
-def _compute(user, pf, fp, now):
+def _compute(user, pf, fp, now, *, slots=True):
+    """`slots` False (the tab) never reads a trader agent's notes."""
     book = _read_book(user, pf, fp, now)
     try:
         raw = _head_raw(user, fp[0], now)
     except Exception:  # noqa: BLE001 — the seats are still served
         logger.warning("[horde] the book limits could not be read", exc_info=True)
         raw = None
-    seats, sizes = _seats(book, raw)
+    seats, sizes = _seats(book, raw, slots=slots, user=user)
     if raw is not None:
         head, gate_risk = _head(raw, seats, book)
     else:
         head, gate_risk = _unreadable_head(book, seats), {}
     tab = _tab_of(book, seats, head, raw, now)
-    groups = _groups(seats, sizes, gate_risk, user)
+    groups = _groups(seats, sizes, gate_risk, user,
+                     on=slots and _orcs_on(book))
     return book, raw, head, groups, tab
 
 
@@ -1960,7 +2093,8 @@ def board(user, *, now=None) -> dict:
                      else {"code": "no_seats", "t": EMPTY_NO_SEATS})
     cache.set(_tab_key(user, fp[0]), tab, KEPT_S)
     return {
-        "ok": True, "v": V, "part": "board", "as_of": _iso(now),
+        "ok": True, "v": V_ORCS if _orcs_on(book) else V, "part": "board",
+        "as_of": _iso(now),
         "cadence": {"tick_s": TICK_S, "up_every": UP_EVERY},
         "book": {"label": "Your book", "legacy_book": f"{user.username}_main",
                  "readable": head["readable"]},
@@ -1983,7 +2117,8 @@ def tab(user, *, now=None) -> dict:
     hit = cache.get(key)
     if hit is not None:
         return hit
-    _book, _raw, _head_, _groups_, out = _compute(user, pf, fp, now)
+    _book, _raw, _head_, _groups_, out = _compute(user, pf, fp, now,
+                                                  slots=False)
     cache.set(key, out, KEPT_S)
     return out
 
@@ -2581,6 +2716,8 @@ def seat_detail(user, raw_key, *, now=None):
     seat = _bot_seat(book, trade, up, row, sizes, now)
     for k in ("_sort", "_theme", "_ccy", "_unstamped"):
         seat.pop(k, None)
+    seat["orc"] = _orc_slots([trade.id], on=_orcs_on(book), user=user,
+                             trades=[trade]).get(f"bot:{trade.id}")
     pcls = seat["instrument_class"]
     others = [_peer_seat(t) for t in open_rows if t.pk != trade.pk]
     peers, chips = _peers(user, trade.symbol, str(trade.side).upper(), seat["class"],
@@ -2661,6 +2798,9 @@ def _voice_reviewer(reviews, switches, now, pcls="", sym="", vpu=None):
 
 
 def _orc_block(seat):
+    if seat.get("orc"):
+        # the slot speaks for itself (its own words, its mode)
+        return {"present": True, "t": []}
     return {"present": False, "t": [NO_ORC_SEATED, NOT_DECIDED, ORC_ARRIVES,
                                     TODAY.format(holder=seat["holder"]["words"])]}
 
@@ -2873,9 +3013,16 @@ def _bot_detail(seat, trade, up, quote, row, hand, signal, actions, notices,
                            if isinstance(care.get("event"), dict) else None),
                  "none_t": "" if care else CARE_NONE},
         "notes": {"stored": False, "t": NOTES_NONE},
-        "orc": None,
+        "orc": seat.get("orc"),
         "orc_block": _orc_block(seat),
     }
+    slot = seat.get("orc")
+    if slot:
+        # the MISSION's thesis slot is the trader agent's own: its thesis
+        # (the entry's, reconstructed, or the operator's). The plan row
+        # keeps the row's levels: the agent's plan line rides its own slot
+        # (VOICE) until one writes a plan.
+        mission["thesis"] = (slot.get("thesis") or {}).get("t") or NO_THESIS_YET
     page = seat["links"]["page"]
     underlying = {
         "symbol": sym, "page": page, "chart": seat["links"]["chart"],
@@ -2883,7 +3030,8 @@ def _bot_detail(seat, trade, up, quote, row, hand, signal, actions, notices,
         "stand_in_t": stand or None, "market_t": mtext,
     }
     return {
-        "ok": True, "v": V, "as_of": _iso(now), "seat": seat,
+        "ok": True, "v": V_ORCS if _orcs_on(book) else V, "as_of": _iso(now),
+        "seat": seat,
         "mission": mission, "deployment": deployment, "metrics": metrics,
         "stops": stops, "timeline": timeline, "timeline_now": timeline_now,
         "timeline_note": TIMELINE_NOTE, "timeline_empty": TIMELINE_EMPTY,

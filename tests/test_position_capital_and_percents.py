@@ -144,7 +144,11 @@ class TheCardTests(TestCase):
         body = self.client.get("/positions/", HTTP_HOST=HOST).content.decode(
             "utf-8", "replace")
         writes = set(re.findall(r'data-pos-([a-z-]+)=', body))
-        self.assertEqual(reads - writes, set())
+        # The Orc's keys (O1d) are written only on a row an Orc follows,
+        # while the orcs switch is ON: their half of the contract is pinned
+        # by tests/orcs/test_orc_positions_line.py on such a row.
+        orc = {k for k in reads if k.startswith("orc-")}
+        self.assertEqual(reads - writes - orc, set())
 
     def test_the_ladder_names_the_entry_as_the_reference(self):
         from pathlib import Path

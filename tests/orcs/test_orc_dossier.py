@@ -454,6 +454,36 @@ class TheInstrumentAndPositionTests(_Dossier):
                      reviews[0]["reasoning"]):
             self.assertFalse(may_name_money(line), line)
 
+    def test_ps2_reads_the_operators_own_thesis_as_a_view(self):
+        """O1d: the thesis the operator saved on /orcs/<id>/ reaches PS2 as
+        his words, a view (never a fact), under the plain words."""
+        from bot_program.orcs import journal
+        from bot_program.orcs.models import Orc
+        from dashboard.plain_words import WITHHELD
+        out = self._render()
+        ps = _json_of(self._block(out["ps"]).text)[1]
+        self.assertEqual(ps["ps2"]["operator"],
+                         "— (no thesis typed by the operator)")
+        text = "the pool below holds until the London close"
+        journal.append(self.orc, "thesis", "Your thesis: " + text,
+                       author="operator",
+                       body={"thesis": {"source": "operator", "text": text}})
+        self.orc = Orc.objects.get(pk=self.orc.pk)
+        out = self._render()
+        ps = _json_of(self._block(out["ps"]).text)[1]
+        self.assertTrue(ps["ps2"]["operator"].startswith(
+            '<view source="operator" note="may be wrong; facts win">'))
+        self.assertIn(text, ps["ps2"]["operator"])
+        text = "worst case 1,234.56 if the pool gives"
+        journal.append(self.orc, "thesis", "Your thesis: " + text,
+                       author="operator",
+                       body={"thesis": {"source": "operator", "text": text}})
+        self.orc = Orc.objects.get(pk=self.orc.pk)
+        out = self._render()
+        ps = _json_of(self._block(out["ps"]).text)[1]
+        self.assertIn(WITHHELD, ps["ps2"]["operator"])
+        self.assertNotIn("1,234.56", ps["ps2"]["operator"])
+
     def test_the_rows_own_amount_said_bare_is_withheld_in_ps2(self):
         """qty 1 x |100 - 98| = 2 is no money figure; a row sized 125
         risks 250 at its stop, and a side that says "250" bare is

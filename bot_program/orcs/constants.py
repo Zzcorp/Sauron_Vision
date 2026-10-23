@@ -369,3 +369,27 @@ HEADROOM_KEY = "etoro_candle_headroom"
 
 #: The trading day rolls at 17:00 New York (§5.2a, §7.5.3).
 TRADING_DAY_ROLL_NY_HOUR = 17
+
+# ── O1d: seen (spec §9, §9.5, §10.2). Read-only surfaces, no model. ──────
+
+#: The operator's own thesis (§1.4, §9.2 "the operator's thesis field"):
+#: a journal entry of its own kind, author `operator`, never a fact (no
+#: F-id: it is his text, never a T0 fact), kept beside the entry's thesis.
+#: Orc.thesis itself is never rewritten.
+JOURNAL_KINDS = JOURNAL_KINDS + ("thesis",)
+THESIS_OPERATOR_MAX = 600
+#: The idea's gross risk cap (§2.2 I2, §10.6), printed in the risk line;
+#: no mandate binds in O1.
+GROSS_MAX_R = 2.0
+#: The Horde's contract while the switch is ON (§9.5): additive keys.
+SLOT_V = 2
+#: Every key that describes an Orc's act or outcome carries a mode
+#: (§9.5, revised 2026-10-15). Every Orc is in shadow in O1.
+MODE_BINDING, MODE_SHADOW, MODE_REFUSED = "binding", "shadow", "refused"
+MODES = (MODE_BINDING, MODE_SHADOW, MODE_REFUSED)
+#: A rank is provisional below this many graded ideas (§6.9, §3.7).
+RANK_GATE_N = 20
+#: The pages: the dead ideas listed, the journal and the wakes shown.
+PAGE_DEAD_DAYS = 30
+PAGE_JOURNAL_MAX = 100
+PAGE_WAKES_MAX = 10

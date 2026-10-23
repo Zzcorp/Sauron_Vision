@@ -1938,25 +1938,29 @@ def _close_past_cap(tracks, states, closed_now, *, rx, row, os_, cap,
 # ── the readers ──────────────────────────────────────────────────────────
 
 def compare_line(tracks) -> dict:
-    """{orc_r, care_r, t}: the O arm against the care ghost, closed or not
-    (an open arm reads its last R)."""
+    """{orc_r, care_r, t}: the O arm against the care ghost, closed or not.
+    An open arm is priced ON THE SAME MARK (§2.1, §6.1): the O arm's last
+    tick, at the closing side of the spread and the cost, with what each
+    arm banked counted at its birth size (arm_r). Never the care's own
+    r_now, which is the trigger measure on the tick price, per unit, with
+    no banked part: two arms that took the same steps read the same R.
+    None for an open arm until the O arm has a tick."""
     by = {t.arm: t for t in tracks or ()}
+    o_track = by.get(ARM_ORC)
+    o_tick = _tick_from(((o_track.state or {}) if o_track is not None
+                         else {}).get("last"))
 
     def r_of(t):
         if t is None:
             return None
         if not t.open:
             return t.exit_r
+        if o_tick is None:
+            return None
         st = t.state or {}
-        if t.arm == ARM_ORC:
-            last = st.get("last") or {}
-            tick = _tick_from(last)
-            if tick is None:
-                return None
-            return arm_r(st, pricing.closing_mark(tick, st.get("side"),
-                                                  st.get("cf") or 0))
-        return _f(st.get("r_now"))
-    return {"orc_r": r_of(by.get(ARM_ORC)), "care_r": r_of(by.get(ARM_CARE)),
+        return arm_r(st, pricing.closing_mark(o_tick, st.get("side"),
+                                              st.get("cf") or 0))
+    return {"orc_r": r_of(o_track), "care_r": r_of(by.get(ARM_CARE)),
             "t": _iso(max((t.exit_at for t in tracks or () if t.exit_at),
                           default=None))}
 

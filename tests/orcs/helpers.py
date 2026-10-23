@@ -183,3 +183,51 @@ def care_tick(test, bot, row, price, client, at, *, bid=None, ask=None):
 def tracks_of(orc):
     from bot_program.orcs.models import OrcTrack
     return {t.arm: t for t in OrcTrack.objects.filter(orc=orc)}
+
+
+# ── O1d: what the surfaces read ──────────────────────────────────────────
+
+def _wake_card(orc, *, score=58.0, band="complex", day="eventful",
+               flag="ok", t=None):
+    """What O1c's render_wake leaves on the card (wake.py: a `wake` entry
+    kept off the card's lines, the card's intellect and integrity), its
+    agreed shape pinned here."""
+    from bot_program.orcs import journal
+    from bot_program.orcs.integrity import words
+    verdict = {"flag": flag, "critical": [], "contradictions": [],
+               "stale": [], "missing": []}
+    if flag == "stale":
+        verdict["stale"] = ["the 4h venue bars are 9 h old"]
+    elif flag == "contradiction":
+        verdict["contradictions"] = ["the venue mark and the quote differ"]
+    journal.append(orc, "wake",
+                   f"Wake detected: the metronome. Complexity {score:.0f} "
+                   f"({band}); the day is {day}. Recorded only: no model is "
+                   f"asked yet.",
+                   body={"score": score, "band": band, "day_class": day},
+                   card=False, card_extra={
+                       "intellect": {"score_v": round(score),
+                                     "score_t": f"score {score:.0f} · {band}",
+                                     "band": band, "day_class": day,
+                                     "rung_t": "no model (O1: code only)",
+                                     "status_t": "recorded only",
+                                     "escalated": False, "late": False,
+                                     "at": "2026-10-22T14:05:00+00:00"},
+                       "integrity": {"flag": flag,
+                                     "t": t or words(verdict)}})
+
+
+def _drum_heard(orc, *, kind="stop_hit", symbol="XAGUSD", relation="factor"):
+    """A drum heard, as drum_bus.route journals it (a DR fact)."""
+    from bot_program.orcs import journal
+    journal.append(orc, "drum", lambda fid: f"{fid}: a {kind} on {symbol}.",
+                   body={"fk": "drum", "drum": 1, "drum_kind": kind,
+                         "symbol": symbol, "relation": relation, "hop": 1,
+                         "wave": "w1"},
+                   fact=True, id_prefix="DR")
+
+
+def _paper_cap(n=200):
+    from bot_program.orcs.models import OrcSetting
+    OrcSetting.objects.update_or_create(key="max_paper_orcs",
+                                        defaults={"value": n})

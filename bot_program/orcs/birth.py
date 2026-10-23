@@ -391,7 +391,7 @@ def notify_adopted(orc_id) -> bool:
             return False
         return bool(dispatch_notification(
             orc.user, "orc_adopted", title=adoption_line(orc), body="",
-            url="/positions/",
+            url=f"/orcs/{orc.root_trade_id}/",
             row_data={"kind": "orc_adopted", "orc": orc.pk,
                       "mark": NOTIFY_MARKS.get("orc_adopted", "")}))
     except Exception as e:  # noqa: BLE001

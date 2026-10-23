@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Orcs — Sauron Vision{% endblock %}
+{% block page_title %}ORCS · JOURNALS BY CODE{% endblock %}
+
+{% block content %}
+{# THE ORCS (O1d, spec §9.2): one per open position, a journal written by #}
+{# code. Read only; nothing on this page calls a model or an order path. #}
+<div class="orc-page">
+
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">On watch ({{ alive|length }})</span></div>
+    {% if alive %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack orc-table">
+        <thead><tr><th>Orc</th><th>Position</th><th>World</th><th>State</th><th>Line</th><th>Beside the care</th></tr></thead>
+        <tbody>
+        {% for r in alive %}
+        <tr>
+            <td data-label="Orc" class="nowrap"><a href="{{ r.slot.page }}">{{ r.slot.label }}</a></td>
+            <td data-label="Position">{{ r.orc.symbol }} {% if r.orc.side == "BUY" %}long{% else %}short{% endif %}</td>
+            <td data-label="World">{{ r.slot.lineage.venue_t }}</td>
+            <td data-label="State">{{ r.slot.state_t }}</td>
+            <td data-label="Line" class="orc-muted">{{ r.line }}</td>
+            <td data-label="Beside the care">{{ r.slot.care_compare.t }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="eye-empty">No Orc is on watch.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Ended in the last {{ dead_days }} days ({{ dead|length }})</span></div>
+    {% if dead %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack orc-table">
+        <thead><tr><th>Orc</th><th>Position</th><th>World</th><th>Ended</th><th>Grade</th></tr></thead>
+        <tbody>
+        {% for r in dead %}
+        <tr>
+            <td data-label="Orc" class="nowrap"><a href="{{ r.slot.page }}">{{ r.slot.label }}</a></td>
+            <td data-label="Position">{{ r.orc.symbol }} {% if r.orc.side == "BUY" %}long{% else %}short{% endif %}</td>
+            <td data-label="World">{{ r.slot.lineage.venue_t }}</td>
+            <td data-label="Ended" class="nowrap">{{ r.orc.died_at|date:"Y-m-d H:i" }} UTC</td>
+            <td data-label="Grade">{{ r.grade_t|default:"not graded yet: an arm is still walking" }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p class="eye-empty">None ended in the last {{ dead_days }} days.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Seats</span></div>
+    {% if seats %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack orc-table">
+        <thead><tr><th>Venue</th><th>Class</th><th>Rule</th><th>Rank</th><th class="num">Graded</th></tr></thead>
+        <tbody>
+        {% for s in seats %}
+        <tr>
+            <td data-label="Venue">{{ s.seat.venue }}</td>
+            <td data-label="Class">{{ s.seat.asset_class }}</td>
+            <td data-label="Rule">{{ s.seat.rule_key }}</td>
+            <td data-label="Rank">{{ s.level_t }}</td>
+            <td data-label="Graded" class="num">{{ s.n }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p class="orc-muted">Every seat is L0 · Snaga: it watches and writes, in shadow. Seats hold no power in this release.{% if is_staff %} <a href="{% url 'orcs_seats' %}">The seats' numbers ›</a>{% endif %}</p>
+    {% else %}
+    <p class="eye-empty">No seat yet.</p>
+    {% endif %}
+</div>
+
+{% if is_staff and spend %}
+<div class="card fade-in-up orc-spend" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">AI spend today (staff)</span></div>
+    <p>The Orcs' line: {% if spend.orcs_enabled %}${{ spend.orcs_spent|floatformat:2 }} of ${{ spend.orcs_cap|floatformat:2 }}{% else %}off (no Orc calls a model in this release){% endif %}.</p>
+    <p>The core line: ${{ spend.core_spent|floatformat:2 }} of ${{ spend.core_budget|floatformat:2 }} {{ spend.core_formula }}.</p>
+    <p class="orc-muted">The platform's own spend, every agent included; the full lines are on <a href="{% url 'ai_models_dashboard' %}">AI models</a>.</p>
+</div>
+{% endif %}
+</div>
+
+<style>
+.orc-muted { color: var(--text-muted); font-size: 11px; }
+.orc-table td { vertical-align: top; }
+</style>
+{% endblock %}
