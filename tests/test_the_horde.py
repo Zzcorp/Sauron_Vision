@@ -29,7 +29,10 @@ What is pinned here:
      the phone tier, the polling guard, rule 1 in the source;
   7. the openers: the level editor loads once and says when it saved, the
      Ask panel takes the seat's facts;
-  8. the chrome: the TALL chart, the motion layer, Gollum and the tour.
+  8. the chrome: the TALL chart, the motion layer, Gollum and the tour;
+  9. the stored reasons: the debate's `why`, a venue's refusal, an unread
+     thesis and a gate that failed are said by cause, and a voice's words
+     never carry an exception name or an amount it wrote.
 
 Run with:  python manage.py test tests.test_the_horde
 """
@@ -743,11 +746,15 @@ class TheTruthTests(_Base):
             head = self.board()["head"]
             flag = self.tab()["flag"]
         self.assertTrue(head["sides"]["live"]["failed_open"])
-        self.assertEqual(head["sides"]["live"]["failed_reason"], broken["reason"])
+        # Said in the Horde's words: the gate's reason carries the
+        # exception's text (portfolio/risk_gate.py preflight), never shown.
+        from dashboard.horde import FAILED_OPEN, FAILED_REASON
+        self.assertEqual(head["sides"]["live"]["failed_reason"], FAILED_REASON)
         # The gate said nothing about exposure or notional: a dash, never OK.
         self.assertIsNone(head["sides"]["live"]["exposure"]["ok"])
         self.assertIsNone(head["sides"]["live"]["notional"]["ok"])
-        self.assertIn(broken["reason"], head["sides"]["live"]["failed_t"])
+        self.assertEqual(head["sides"]["live"]["failed_t"], FAILED_OPEN)
+        self.assertNotIn("boom", json.dumps(head))
         self.assertEqual(flag, "unreadable")
 
     def test_a_day_whose_closes_carry_no_price_is_unmeasured(self):
@@ -3525,3 +3532,629 @@ class TheFinalReviewSheetTests(SimpleTestCase):
                       resp)
         self.assertIn("html body:has(.sv-phone-nav .sv-pn-item) { --se-bottom-edge: "
                       "calc(var(--sv-bottom-chrome) + 12px); }", resp)
+
+
+# ── 13.13 a stored reason is said, never forwarded ───────────────────────
+#
+# The council band's review (2026-10-23): the dossier printed the trade
+# debate's raw `why`, which can carry an exception's text (ai_agents/agents/
+# trade_debate.py debate_candidate) and an amount of money (the AI budget's
+# refusal is in dollars, and a side may echo the brief's "risk at the stop
+# N"). Every free text the Horde forwards is fed here through its real
+# producer (or a faithful fake of the last write) with an exception-like and
+# an amount-like piece: the payload and the painted page never carry them,
+# and the cause is still said in words (dashboard/plain_words.py).
+
+#: An exception's text with an amount inside it, as a transport error
+#: prints itself (str(e) of a requests ConnectionError).
+EXC_TEXT = ("HTTPSConnectionPool(host='api.etoro.com'): Max retries exceeded "
+            "(Caused by NewConnectionError: margin 1,234.56 USD)")
+EXC_FRAGS = ("HTTPSConnectionPool", "NewConnectionError", "api.etoro.com",
+             "Max retries", "Caused by", "1,234.56")
+
+#: The band and the open dossier as the script paints them: every text and
+#: every attribute of the document, the "more" of a long answer unfolded.
+_WALK = """
+    const out = [];
+    const walk = (n) => {
+      if (n.nodeType === 3) { out.push(n.data); return; }
+      Object.keys(n.attrs || {}).forEach((k) => out.push(String(n.attrs[k])));
+      (n.childNodes || []).forEach(walk);
+    };
+    walk(env.doc.documentElement);
+    return out.join('\\n');
+"""
+BAND_DOM = OPEN + _WALK
+SEAT_DOM = (OPEN.replace("env.load();", "env.win.SVLevelEdit = {}; "
+                         "env.win.SVCloseAdvice = {}; env.load();") + """
+    env.click(env.$('svHordeBands').querySelector('[data-open-seat="' + env.payloads.seat.seat.key + '"]'));
+    await env.settle();
+    env.$('svHordeSeat').querySelectorAll('.hd-expander').forEach((b) => env.click(b));
+    await env.settle();
+""" + _WALK)
+
+
+def _debate_cand(price=2000.0, stop=1950.0, target=2150.0):
+    """A live candidate as the engine hands it to the debate (bot_program/
+    asset_engine/base.py EntryCandidate: the fields candidate_brief reads)."""
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        symbol="XAUUSD", asset_class="commodity", price=price, stop=stop,
+        target=target, cost={"fraction": 0.001}, value_per_unit=1.0, elite=None,
+        decision=SimpleNamespace(direction="BUY", rule_name="golden_cross",
+                                 score=0.7,
+                                 reasons=["bull evidence +1.20 clears 0.50"]))
+
+
+def _debate_bot(cfg):
+    from types import SimpleNamespace
+    return SimpleNamespace(cfg=cfg, _instrument_class=lambda symbol: "commodity")
+
+
+def _recorded(debate):
+    """What the engine keeps of a debate on the row it opens (bot_program/
+    asset_engine/base.py, the trade debate: only while the debate is on)."""
+    assert debate.get("on"), debate
+    return {k: debate.get(k) for k in (
+        "ran", "binding", "graded", "why", "executioner", "champion",
+        "champion_wins", "council_id")}
+
+
+@override_settings(CACHES=LOCMEM)
+class TheStoredReasonTests(_Base):
+    """The debate's `why`, the voices' words, the venue's refusals, the
+    thesis check's unread words and the gate's failure: said by cause."""
+
+    def setUp(self):
+        super().setUp()
+        self.cfg = _cfg(self.user)
+        _instrument("XAUUSD")
+
+    def _all(self, key):
+        """(the payloads as one text, the payloads, the painted page)."""
+        payloads = {"board": self.board(), "tab": self.tab(), "seat": self.seat(key)}
+        page = _drive(SEAT_DOM, payloads) if NODE else ""
+        return json.dumps(payloads, ensure_ascii=False), payloads, page
+
+    def _never(self, frags, *texts):
+        for text in texts:
+            for frag in frags:
+                self.assertNotIn(frag, text)
+
+    def _debated(self, debate, meta=None, **kw):
+        kw.setdefault("entry", "2000")
+        kw.setdefault("stop", "1950")
+        kw.setdefault("target", "2150")
+        kw.setdefault("qty", "5")
+        return _real(self.cfg, "XAUUSD",
+                     meta={**_vm(2010), "debate": _recorded(debate), **(meta or {})},
+                     **kw)
+
+    def _argued(self, killer, edge, record=False):
+        """A debate argued through debate_candidate (price 2000, stop 1950,
+        size 5: "risk at the stop 250.00") whose sides answer from the
+        brief they were shown: `killer` and `edge` are formatted with its
+        amount and its net reward:risk. `record` lets the council keep its
+        record of the debate (the brief and its candidate)."""
+        from ai_agents.agents import trade_debate
+        _switches(trade_debate=True)
+        real_ex, real_ch = trade_debate.ExecutionerAgent, trade_debate.ChampionAgent
+
+        def read(brief):
+            return {"amount": re.search(r"risk at the stop ([\d,.]+)", brief).group(1),
+                    "rr": re.search(r"net reward:risk ([\d.]+)", brief).group(1)}
+
+        class Ex:
+            def run(self, brief="", **kw):
+                return real_ex.parse_response(None, json.dumps({
+                    "verdict": "cut", "conviction": 0.6, "size_scale": 0.5,
+                    "killer": killer.format(**read(brief)), "reasons": []}))
+
+        class Ch:
+            def run(self, brief="", **kw):
+                return real_ch.parse_response(None, json.dumps({
+                    "verdict": "back", "conviction": 0.7,
+                    "edge": edge.format(**read(brief)), "reasons": []}))
+
+        with mock.patch.object(trade_debate, "ExecutionerAgent", Ex), \
+                mock.patch.object(trade_debate, "ChampionAgent", Ch):
+            if record:
+                return trade_debate.debate_candidate(_debate_bot(self.cfg),
+                                                     _debate_cand(), 5.0)
+            with mock.patch("ai_agents.agents.council.open_debate_session",
+                            return_value=None):
+                return trade_debate.debate_candidate(_debate_bot(self.cfg),
+                                                     _debate_cand(), 5.0)
+
+    # the debate's `why`
+
+    def test_a_budget_refusal_says_the_budget_and_never_its_dollars(self):
+        from ai_agents.agents.trade_debate import debate_candidate
+        from ai_agents.models import AgentTask
+        _switches(trade_debate=True)
+        AgentTask.objects.create(agent="news_analyst", provider="anthropic",
+                                 model="m-1", prompt_summary="x",
+                                 cost_usd=Decimal("5.03"))
+        ai = {**getattr(settings, "AI_CONFIG", {}), "daily_budget_usd": 5.0,
+              "orc_daily_budget_usd": 0}
+        with self.settings(AI_CONFIG=ai):
+            debate = debate_candidate(_debate_bot(self.cfg), _debate_cand(), 5.0)
+        # The producer's own words carry the dollars (ai_agents/spend.py).
+        self.assertFalse(debate["ran"])
+        self.assertIn("$5.03", debate["why"])
+        t = self._debated(debate)
+        text, p, page = self._all(f"bot:{t.id}")
+        said = p["seat"]["mission"]["debate"]["t"]
+        self.assertTrue(said.endswith(" · Not argued: today's AI budget refused it"), said)
+        self.assertIn("Not argued: today's AI budget refused it", page)
+        self._never(("$5.03", "5.03", "AI budget:", "daily AI budget spent"), text, page)
+
+    def test_a_debate_that_failed_says_so_and_never_the_exception(self):
+        from django.db.utils import OperationalError
+
+        from ai_agents.agents import trade_debate
+        _switches(trade_debate=True)
+        boom = OperationalError("could not read the ledger: equity 1,234.56 USD")
+        with mock.patch.object(trade_debate, "candidate_brief", side_effect=boom):
+            debate = trade_debate.debate_candidate(_debate_bot(self.cfg),
+                                                   _debate_cand(), 5.0)
+        self.assertTrue(debate["why"].startswith("debate unavailable (OperationalError: "),
+                        debate["why"])
+        t = self._debated(debate)
+        text, p, page = self._all(f"bot:{t.id}")
+        said = p["seat"]["mission"]["debate"]["t"]
+        self.assertTrue(said.endswith(
+            " · Not argued: the debate failed before either side was asked"), said)
+        self.assertIn("the debate failed before either side was asked", page)
+        self._never(("OperationalError", "could not read the ledger", "1,234.56",
+                     "debate unavailable"), text, page)
+
+    def test_a_silent_side_is_named_in_words_never_its_exception(self):
+        import threading
+
+        from ai_agents.agents import trade_debate
+        _switches(trade_debate=True)
+        gate = threading.Event()
+
+        class Broken:
+            def run(self, **kw):
+                raise ValueError("no JSON object with a verdict in the answer: "
+                                 "risk at the stop 250.00")
+
+        class Slow:
+            def run(self, **kw):
+                gate.wait(10)
+
+        try:
+            with mock.patch.object(trade_debate, "ExecutionerAgent", Broken), \
+                    mock.patch.object(trade_debate, "ChampionAgent", Slow), \
+                    mock.patch.object(trade_debate, "DEBATE_TIMEOUT_S", 0.3), \
+                    mock.patch("ai_agents.agents.council.open_debate_session",
+                               return_value=None):
+                debate = trade_debate.debate_candidate(_debate_bot(self.cfg),
+                                                       _debate_cand(), 5.0)
+        finally:
+            gate.set()
+        self.assertEqual(debate["why"], "executioner unavailable (ValueError); "
+                                        "champion unavailable (timeout)")
+        t = self._debated(debate)
+        text, p, page = self._all(f"bot:{t.id}")
+        said = p["seat"]["mission"]["debate"]["t"]
+        want = ("Not argued in full: the Executioner's call failed; the Champion "
+                "did not answer in time")
+        self.assertTrue(said.endswith(" · " + want), said)
+        self.assertIn(want, page)
+        self._never(("ValueError", "unavailable", "no JSON object"), text, page)
+
+    def test_a_side_that_echoes_the_briefs_amount_is_withheld_whole(self):
+        """The brief puts the risk at the stop before both sides
+        (trade_debate.candidate_brief); a side that repeats it, even bare,
+        is withheld whole. A side that names an exception is withheld
+        whole too: nothing is cut out of a voice's line."""
+        from ai_agents.agents import trade_debate
+        _switches(trade_debate=True)
+        real_ex, real_ch = trade_debate.ExecutionerAgent, trade_debate.ChampionAgent
+
+        class Echo:
+            def run(self, brief="", **kw):
+                amount = re.search(r"risk at the stop ([\d,.]+)", brief).group(1)
+                return real_ex.parse_response(None, json.dumps({
+                    "verdict": "cut", "conviction": 0.6, "size_scale": 0.5,
+                    "killer": f"one touch of the stop costs {amount} and the "
+                              f"day cannot carry it", "reasons": []}))
+
+        class Plain:
+            def run(self, brief="", **kw):
+                return real_ch.parse_response(None, json.dumps({
+                    "verdict": "back", "conviction": 0.7,
+                    "edge": "the lows were swept at 1948.5 and reclaimed (the "
+                            "record could not be read: KeyError)",
+                    "reasons": []}))
+
+        with mock.patch.object(trade_debate, "ExecutionerAgent", Echo), \
+                mock.patch.object(trade_debate, "ChampionAgent", Plain), \
+                mock.patch("ai_agents.agents.council.open_debate_session",
+                           return_value=None):
+            debate = trade_debate.debate_candidate(_debate_bot(self.cfg),
+                                                   _debate_cand(), 5.0)
+        self.assertTrue(debate["ran"])
+        self.assertIn("costs 250.00", debate["executioner"]["killer"])
+        t = self._debated(debate)
+        text, p, page = self._all(f"bot:{t.id}")
+        said = p["seat"]["mission"]["debate"]["t"]
+        self.assertEqual(said, (
+            "Executioner: CUT: its words are withheld: they may name an amount "
+            "of money · Champion: BACK: its words are withheld: they quote an "
+            "error · shadow"))
+        # The script binds each dot to the word before it (a no-break space).
+        self.assertIn(said, page.replace(" ", " "))
+        self._never(("one touch of the stop", "KeyError", "the lows were swept"),
+                    text, page)
+
+    ECHO = "one touch of the stop and {amount} is gone for the day"
+    EDGE = "net reward:risk {rr} after costs; the sweep at 1948.5 was reclaimed"
+
+    def test_a_bare_echo_is_withheld_when_the_fill_or_the_cut_moved_the_size(self):
+        """A real row keeps the broker's fill, not the proposal the brief was
+        priced at, and the cut's rounded size, not the size the brief was
+        shown (review: "risk at the stop 250.00" echoed bare printed). The
+        row's proposal, its cut and its size are read and the figure is
+        matched by value. The Champion's own reward:risk is a ratio, not
+        money, and prints."""
+        debate = self._argued(self.ECHO, self.EDGE)
+        self.assertIn("and 250.00 is gone", debate["executioner"]["killer"])
+        rr = re.search(r"reward:risk ([\d.]+)", debate["champion"]["edge"]).group(1)
+        rows = {
+            "a favourable slip, nothing re-anchored": dict(
+                entry="1990", meta={"slippage": {"proposal": 2000.0, "fill": 1990.0,
+                                                 "points": -10.0, "r_fraction": -0.2}}),
+            "a refused re-anchor": dict(
+                entry="2010", meta={"slippage": {"proposal": 2000.0, "fill": 2010.0,
+                                                 "points": 10.0, "r_fraction": 0.2},
+                                    "stop_reanchor_refused": "refused"}),
+            "a cut rounded to 1.6 at 0.33x": dict(
+                qty="1.6", meta={"debate_cut": {"scale": 0.33, "qty": 1.6,
+                                                "leverage": 1}}),
+            "a whole-unit cut: 2 at 0.5x": dict(
+                qty="2", meta={"debate_cut": {"scale": 0.5, "qty": 2.0,
+                                              "leverage": 1}}),
+            "a fill smaller than the size": dict(qty="4.9"),
+        }
+        for name, kw in rows.items():
+            with self.subTest(name):
+                cache.clear()
+                t = self._debated(debate, **kw)
+                text, p, page = self._all(f"bot:{t.id}")
+                said = p["seat"]["mission"]["debate"]["t"]
+                self.assertTrue(said.startswith(
+                    "Executioner: CUT: its words are withheld: they may name an "
+                    "amount of money · Champion: BACK: net reward:risk "
+                    f"{rr} after costs; the sweep at 1948.5 was reclaimed · "), said)
+                self._never(("is gone for the day",), text, page)
+
+    def test_the_councils_record_gives_the_briefs_own_amount(self):
+        """The council keeps the brief and the candidate it was priced on
+        (ai_agents/agents/council.py open_debate_session): a row whose own
+        levels no longer say the brief's amount (an older row: no proposal
+        recorded, the stop since moved) still withholds the echo."""
+        debate = self._argued(self.ECHO, self.EDGE, record=True)
+        self.assertTrue(debate["council_id"])
+        t = self._debated(debate, entry="1990", stop="1985",
+                          meta={"initial_stop_loss": 1985.0})
+        text, p, page = self._all(f"bot:{t.id}")
+        said = p["seat"]["mission"]["debate"]["t"]
+        self.assertTrue(said.startswith(
+            "Executioner: CUT: its words are withheld: they may name an amount "
+            "of money · Champion: BACK: net reward:risk"), said)
+        self._never(("is gone for the day",), text, page)
+        # The same row without the record: nothing of the row says 250.00.
+        from dashboard import horde
+        meta = {**t.metadata, "debate": {**t.metadata["debate"], "council_id": None}}
+        self.assertIsNone(horde._debate_marks(t, meta).search("and 250.00 is gone"))
+
+    # the venue's refusals: the care's mirror and the inert stamp
+
+    def test_a_stop_move_the_venue_did_not_take_is_said_by_cause(self):
+        from bot_program.asset_engine.base import make_bot
+        from bot_program.position_care import care
+        cfg = _cfg(self.user, cls="crypto", name="c", symbols=["BTCUSD"],
+                   extras={"breakeven_at_r": 1.0})
+        _instrument("BTCUSD", "crypto")
+        t = _real(cfg, "BTCUSD", meta={"protected": True,
+                                       "protective_trade_id": "P1", **_vm(102.2)})
+        client = mock.MagicMock(spec=["modify_protective", "ticker"])
+        client.modify_protective.side_effect = ConnectionError(EXC_TEXT)
+        bot = make_bot(cfg)
+        care(bot, t, 102.2, client)               # the mirror: one refusal
+        for _ in range(2):                        # three in all: the stamp
+            bot._move_broker_stop(t, 102.2, client, Decimal("100.2"),
+                                  "care breakeven")
+        t.refresh_from_db()
+        self.assertIn("NewConnectionError", t.metadata["care"]["venue_stop_refusal"])
+        self.assertIn("1,234.56", t.metadata["stop_rules_inert_detail"])
+        text, p, page = self._all(f"bot:{t.id}")
+        why = {w["code"]: w["t"] for w in _seat(p["board"], f"bot:{t.id}")["light"]["why"]}
+        self.assertEqual(why["mirror_refused"],
+                         "The care's stop did not reach eToro: the venue could not "
+                         "be reached.")
+        self.assertEqual(why["stop_rules_inert"],
+                         "Stop moves keep failing at the broker: every recorded leg "
+                         "handle was refused (the venue could not be reached).")
+        self.assertEqual(p["seat"]["voice"]["care"]["refusal"],
+                         "The care's stop did not reach eToro: the venue could not "
+                         "be reached")
+        self.assertIn("the venue could not be reached", page)
+        self._never(EXC_FRAGS, text, page)
+
+    # the thesis check's unread words
+
+    def test_an_unread_thesis_says_which_read_failed_never_the_exception(self):
+        from brain import thesis_check
+        t = _real(self.cfg, "XAUUSD", meta=_vm(101))
+        pos = {"symbol": "XAUUSD", "side": "BUY", "position_id": t.id}
+        facts = {"mark": 101.0, "symbol": "XAUUSD", "side": "BUY",
+                 "unrealized_r": 0.5, "mae_r": -0.2}
+        boom = ValueError("bars unreadable: equity 1,234.56 USD")
+        with mock.patch.object(thesis_check, "structure_read", side_effect=boom):
+            th = thesis_check.thesis_check(pos, facts)
+        self.assertIn("1,234.56", th["words"])
+        self.assertTrue(thesis_check.write_on_row(t.id, th))
+        text, p, page = self._all(f"bot:{t.id}")
+        voice = p["seat"]["voice"]["thesis"]
+        self.assertEqual((voice["word"], voice["words"]),
+                         ("UNREAD", "Thesis unread: the structure could not be read."))
+        line = [e["t"] for e in p["seat"]["timeline"] if e["author"] == "THESIS CHECK"]
+        self.assertEqual(line, ["UNREAD: Thesis unread: the structure could not be read."])
+        self.assertIn("Thesis unread: the structure could not be read.", page)
+        self._never(("bars unreadable", "1,234.56", "ValueError", "structure unread:"),
+                    text, page)
+
+    # the reviewer's reasoning
+
+    def test_the_reviewers_reasoning_never_carries_an_amount_or_an_exception_name(self):
+        """What review_one stores (brain/position_review_agent.py: the
+        model's reasoning_md, cut at 4000): an answer that may name an
+        amount, or names an exception, is withheld whole."""
+        from dashboard import horde
+        t = _real(self.cfg, "XAUUSD", meta=_vm(101))
+        _review(f"bot:{t.id}", verdict="tighten", user=self.user, model_used="m-1",
+                reasoning_md="Risking 1,234.56 USD on a stale thesis is too much.\n"
+                             "Tighten to 99.")
+        text, p, page = self._all(f"bot:{t.id}")
+        rv = p["seat"]["voice"]["reviewer"]
+        self.assertEqual((rv["word"], rv["reasoning"], rv["reasoning_cut"]),
+                         ("TIGHTEN", horde.REASONING_WITHHELD, None))
+        self.assertIn(horde.REASONING_WITHHELD, page)
+        self._never(("1,234.56", "Risking", "stale thesis"), text, page)
+        g = _real(self.cfg, "XAGUSD", entry="30", stop="29", target="33", meta=_vm(31))
+        _review(f"bot:{g.id}", verdict="hold", user=self.user, model_used="m-1",
+                symbol="XAGUSD",
+                reasoning_md="The structure holds; the positioning read failed "
+                             "(KeyError: 'pools').\nHold.")
+        cache.clear()
+        text, p, page = self._all(f"bot:{g.id}")
+        self.assertEqual(p["seat"]["voice"]["reviewer"]["reasoning"],
+                         horde.REASONING_ERROR)
+        self.assertIn(horde.REASONING_ERROR, page)
+        self._never(("KeyError", "'pools'", "The structure holds"), text, page)
+
+    def test_the_reviewer_never_repeats_a_failed_read_or_the_trades_own_amount(self):
+        """The reviewer is shown the positioning read's failure text
+        (brain/position_review.py _positioning: "positioning unread: <the
+        exception's text>") and the trade's own qty and levels; reasoning
+        that repeats the one, or names an amount worked from the other
+        (matched by value), is withheld whole. Reasoning that quotes the
+        exposure trigger in units and the stop loss level prints as
+        written."""
+        from brain import position_review
+        from dashboard import horde
+        t = _real(self.cfg, "XAUUSD", qty="5", entry="2000", stop="1950",
+                  target="2150", meta=_vm(2010))
+        with mock.patch("bot_program.positioning.positioning_map",
+                        side_effect=ConnectionError(EXC_TEXT)):
+            pos = position_review._positioning({"symbol": "XAUUSD"},
+                                               {"symbol": "XAUUSD", "side": "BUY",
+                                                "mark": 2010.0})
+        self.assertIn("Max retries exceeded", pos["why"])
+        facts = {"qty": 5.0, "entry": 2000.0, "initial_stop": 1950.0,
+                 "stop": 1950.0, "target": 2150.0, "mark": 2010.0,
+                 "positioning": pos}
+        r = _review(f"bot:{t.id}", verdict="hold", user=self.user, model_used="m-1",
+                    facts=facts, mark=Decimal("2010"), reasoning_md="x")
+        cases = (
+            ("The map is blind: Max retries exceeded on its read.\nHold.",
+             horde.REASONING_ERROR, "Max retries"),
+            ("Hold: the stop still caps this trade at 250.00, inside the plan.",
+             horde.REASONING_WITHHELD, "caps this trade"),
+            ("Hold: a stop-out now takes back 300 of the open move.",
+             horde.REASONING_WITHHELD, "takes back"),
+        )
+        for reasoning, shown, frag in cases:
+            with self.subTest(reasoning):
+                type(r).objects.filter(pk=r.pk).update(reasoning_md=reasoning)
+                cache.clear()
+                text, p, page = self._all(f"bot:{t.id}")
+                self.assertEqual(p["seat"]["voice"]["reviewer"]["reasoning"], shown)
+                self._never((frag, "HTTPSConnectionPool", "1,234.56"), text, page)
+        kept = ("The concentration trigger is real: net USD exposure +1.2 is at "
+                "the gate.\nHold; the stop loss at 1950 already sits below the "
+                "swept low, a reward:risk of 2.85 remains.")
+        type(r).objects.filter(pk=r.pk).update(reasoning_md=kept)
+        cache.clear()
+        text, p, page = self._all(f"bot:{t.id}")
+        self.assertEqual(p["seat"]["voice"]["reviewer"]["reasoning"], kept)
+
+    # the gate that could not be read
+
+    def test_limits_that_could_not_be_read_never_print_the_exception(self):
+        from dashboard import horde
+        _real(self.cfg, "XAUUSD", meta=_vm(101))
+        boom = RuntimeError("ledger unreadable: equity 1,234.56 USD")
+        with mock.patch("portfolio.risk_gate.daily_loss_state", side_effect=boom):
+            board, tab = self.board(), self.tab()
+        live = board["head"]["sides"]["live"]
+        self.assertTrue(live["failed_open"])
+        self.assertEqual((live["failed_t"], live["failed_reason"]),
+                         (horde.FAILED_OPEN, horde.FAILED_REASON))
+        page = _drive(BAND_DOM, {"board": board, "tab": tab, "seat": {}}) if NODE else ""
+        if NODE:
+            self.assertIn("THE BOOK LIMITS COULD NOT BE READ", page)
+        self._never(("ledger unreadable", "1,234.56", "RuntimeError"),
+                    json.dumps([board, tab]), page)
+
+
+class ThePlainWordsTests(TestCase):
+    """dashboard/plain_words.py over what the real producers write."""
+
+    def test_every_debate_why_the_producers_write_is_said_in_words(self):
+        from ai_agents.agents.trade_debate import debate_candidate
+        from dashboard import plain_words as pw
+        cfg = _cfg(_user("pw_u"))
+        off = debate_candidate(_debate_bot(cfg), _debate_cand(), 5.0)
+        self.assertEqual(off["why"], "trade_debate is OFF")
+        # The demo branch's own words, read from the engine's source.
+        demo = re.search(r'\{"why": "([^"]*demo world[^"]*)"\}',
+                         _read("bot_program", "asset_engine", "base.py")).group(1)
+        cases = {
+            off["why"]: "Not argued: the debate's switch was off",
+            demo: ("Not argued: the venue's demo world is a rehearsal and is "
+                   "never argued"),
+            ("refused at 2026-10-23T10:00: the Executioner vetoed it (0.80): "
+             "risk at the stop 1,234.56"):
+                "Not argued: an earlier binding refusal still held",
+            "AI budget: daily AI budget spent ($5.03 of $5.00)":
+                "Not argued: today's AI budget refused it",
+            "debate unavailable (KeyError: 'price')":
+                "Not argued: the debate failed before either side was asked",
+            "executioner unavailable (BudgetRefused)":
+                "Not argued in full: today's AI budget refused the Executioner",
+            "champion unavailable (timeout)":
+                "Not argued in full: the Champion did not answer in time",
+            "something nobody wrote 1,234.56 (ValueError)": "Not argued in full",
+            "": "",
+        }
+        for why, words in cases.items():
+            self.assertEqual(pw.debate_why_words(why), words, why)
+
+    def test_a_refusal_note_is_said_by_cause(self):
+        from dashboard import plain_words as pw
+        # The care's own sentence, read from its source (adjacent literals
+        # joined): bot_program/position_care.py _mirror_to_venue.
+        own = "not sent: the level is not on the right side of the mark"
+        self.assertIn(own, re.sub(r'"\s*"', "", _read("bot_program", "position_care.py")))
+        cases = {
+            own: "not sent, the level is not on the right side of the mark",
+            "P1: " + EXC_TEXT: "the venue could not be reached",
+            "P1: ReadTimeout(read timed out)": "the venue did not answer in time",
+            "P1: x; remaining handles not asked: the venue did not answer within "
+            "the walk budget": "the venue did not answer in time",
+            "P1: no leg matched; P2: no leg matched":
+                "no order the row records was found at the venue",
+            "eToro refused (400): stop too close; margin 1,234.56 USD":
+                "the move failed; the venue's answer is kept in the log, not shown here",
+            "refused": "the move failed; the venue's answer is kept in the log, "
+                       "not shown here",
+            "": "",
+        }
+        for note, words in cases.items():
+            self.assertEqual(pw.venue_words(note), words, note)
+
+    def test_a_voices_line_is_withheld_whole_when_it_may_name_an_amount(self):
+        from dashboard import plain_words as pw
+        marks = pw.money_marks([250.0])
+        for line in ("risk at the stop 1,234.56", "a $500 cushion", "500 dollars",
+                     "equity: 1234", "it costs 250.00", "it costs 250 to be wrong"):
+            self.assertEqual(pw.scrub(line, marks=marks), pw.WITHHELD, line)
+        for line in ("a loss of 1R is the plan", "drawdown 4% today",
+                     "the stop at 1948.5 holds", "2.50R left to the target"):
+            self.assertEqual(pw.scrub(line, marks=marks), line, line)
+        self.assertEqual(pw.scrub("the read failed (KeyError: 'x') twice"),
+                         pw.WITHHELD_ERROR)
+        self.assertIsNone(pw.money_marks([None, 0, "x"]))
+
+    def test_a_currency_with_a_sign_or_a_magnitude_is_money(self):
+        """A sign or a k/m suffix between the currency and the figure, and
+        the stablecoin codes (review: each of these passed unchanged)."""
+        from dashboard import plain_words as pw
+        for line in ("Risk at the stop USD -850.00 if it fails", "P&L: $-412.50 now",
+                     "1.2k USD at risk", "about 12k USD", "1250 USDC",
+                     "US$1,250 on it", "EUR +85.20 since the open", "a 3m GBP book"):
+            self.assertEqual(pw.scrub(line), pw.WITHHELD, line)
+
+    def test_a_money_word_or_verb_with_fillers_or_a_trailing_ratio_is_money(self):
+        """The R and percent exemption ends with the figure's own digits
+        ("850.00, R:R 1.8" is money); a run of fillers may stand between
+        the word and the figure; the verbs a voice uses for an amount; a
+        figure before "at risk". Below 1,000 and ungrouped, so only these
+        patterns catch them."""
+        from dashboard import plain_words as pw
+        for line in ("risk at the stop 850.00, R:R 1.8", "risk at the stop 850.00 R:R 1.8",
+                     "a loss of about 850.00", "risk ≈ 850.00", "risk of roughly 1,250",
+                     "a stop-out costs 850.00", "would lose 1250.00 on the stop",
+                     "gives back 412.50 of open profit", "it lost 120 on the gap",
+                     "850.00 at risk on a thin edge", "1250 on the line"):
+            self.assertEqual(pw.scrub(line), pw.WITHHELD, line)
+
+    def test_ratios_levels_counts_and_names_are_kept_as_written(self):
+        """The ratio and the level that share a money word, a count after a
+        verb, a theme's exposure in units, and a CamelCase name that is
+        not an exception: the voice's line shows as it wrote it."""
+        from dashboard import plain_words as pw
+        for line in ("net reward:risk 2.85 after costs", "reward-to-risk of 2.85",
+                     "the stop loss at 1950 sits under a swept low",
+                     "stop-loss at 1950 is inside the ATR",
+                     "take profit at 2150 is 7.5% away",
+                     "net USD exposure +1.2 is at the gate level",
+                     "the rule lost 3 of its last 5 trades", "risk 2 ATR away",
+                     "the signal came from: TradingView",
+                     "Edge: PowerOfThree sweep (GoldenCross)",
+                     "catalyst: PayPal earnings tonight",
+                     "flows: BlackRock bought the ETF two days running",
+                     "the big holder (MicroStrategy) has not sold",
+                     "an exception to the rule: the trend is up"):
+            self.assertEqual(pw.scrub(line), line, line)
+        many = ("The concentration trigger is real: net USD exposure +1.2 is at "
+                "the gate.\nHold; the stop loss at 2318.4 already sits below the "
+                "swept low.")
+        self.assertEqual(pw.scrub(many, 6000, keep_lines=True), many)
+
+    def test_a_line_that_names_an_exception_is_withheld_whole(self):
+        """Keyed on the class name's suffix: acronym-led, dotted and
+        nested-bracket names, and a name after a colon with its message
+        (review: each passed, or kept its message)."""
+        from dashboard import plain_words as pw
+        for line in ("the rule's record could not be read (OSError), so no edge is proven",
+                     "positioning unread: OSError: [Errno 111] Connection refused",
+                     "debate unavailable (HTTPError: 500 Server Error)",
+                     "(OperationalError: could not connect (timeout))",
+                     "read failed (requests.exceptions.ConnectionError: "
+                     "HTTPSConnectionPool(host='x', port=443))",
+                     "thesis check failed: KeyError: 'level'",
+                     "posture unreadable: JSONDecodeError", "EOFError at the read",
+                     "socket.timeout: timed out", "the read: Exception"):
+            self.assertEqual(pw.scrub(line), pw.WITHHELD_ERROR, line)
+        failures = pw.failure_texts(
+            'positioning unread: connection to server at "db" (172.18.0.3), '
+            'port 5432 failed: FATAL: too many connections', "no usable mark")
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(pw.scrub("Hold: port 5432 failed: FATAL: too many "
+                                  "connections, so the map is blind.",
+                                  failures=failures), pw.WITHHELD_ERROR)
+        self.assertEqual(pw.scrub("Hold: the map is blind.", failures=failures),
+                         "Hold: the map is blind.")
+
+    def test_the_marks_match_by_value_not_by_spelling(self):
+        """A fill or a rounded cut moves the brief's amount a little: every
+        figure in the line is read and matched within the tolerance; a
+        short whole figure, and a figure in R or percent, never count."""
+        from dashboard import plain_words as pw
+        marks = pw.money_marks([849.0])
+        for line in ("and 850.00 goes with it", "850 is gone", "a touch takes 849.5",
+                     "-850.00 at the stop"):
+            self.assertTrue(marks.search(line), line)
+        for line in ("the sweep at 1948.5", "850R is not a plan", "a 850% move",
+                     "3 of 5", "the stop at 15.00"):
+            self.assertFalse(marks.search(line), line)
+        small = pw.money_marks([2.5])
+        self.assertTrue(small.search("2.50 goes with it"))
+        self.assertFalse(small.search("2 sweeps, 3 breaks"))
