@@ -249,13 +249,18 @@ class PlatformZoneIsStaffOnlyTests(TestCase):
         self.client.force_login(self.viewer)
         html = self.client.get("/desk/").content.decode()
         self.assertIn("staff only — platform-wide", html)
-        self.assertNotIn("component on capital_desk_mode_live", html)
+        self.assertNotIn("from /ops/ with your trading PIN", html)
 
     def test_staff_receive_the_switches(self):
+        """The live mode moves real money: since 2026-10-23 the shell
+        refuses to turn it on (core/switch_pin.py), so the page names
+        /ops/ and the PIN instead of a command that would be refused."""
         self.client.force_login(self.staff)
         html = self.client.get("/desk/").content.decode()
         self.assertNotIn("staff only — platform-wide", html)
-        self.assertIn("component on capital_desk_mode_live", html)
+        self.assertIn("from /ops/ with your trading PIN", html)
+        self.assertNotIn("component on capital_desk_mode_live", html)
+        self.assertIn("component on pipeline_capital_desk", html)
 
     def test_login_is_required(self):
         self.assertEqual(self.client.get("/desk/").status_code, 302)

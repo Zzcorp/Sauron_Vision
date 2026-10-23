@@ -52,7 +52,11 @@ HEAT_MAX = 12
 # The command that changes each empty state. An empty state that does not
 # name its own fix is a dead end.
 CMD_ON = "./deploy/dc exec web python manage.py component on pipeline_capital_desk"
-CMD_LIVE = "./deploy/dc exec web python manage.py component on capital_desk_mode_live"
+# The live mode moves real money: turning it on takes the trading PIN on
+# /ops/, and the shell refuses it (2026-10-23, core/switch_pin.py), so
+# the page names where, not a command that would be refused.
+LIVE_HOW = "turn it on from /ops/ with your trading PIN"
+CMD_LIVE = "turn capital_desk_mode_live on from /ops/ with your trading PIN"
 CMD_GRADE = "./deploy/dc exec web python manage.py desk grade"
 
 _WORDS = {0: "none", 1: "one", 2: "two", 3: "three", 4: "four", 5: "five",
@@ -533,7 +537,8 @@ def desk_dashboard(request):
         platform = {"staff_only": False, "error": "", "components": [],
                     "last_grade": None}
         try:
-            from core.platform_control import PlatformComponent
+            from core.platform_control import (LIVE_MONEY_SWITCHES,
+                                               PlatformComponent)
             rows = {c.key: c for c in PlatformComponent.objects.filter(
                 key__in=(capital_desk.PIPELINE_COMPONENT,
                          capital_desk.LIVE_COMPONENT))}
@@ -544,7 +549,8 @@ def desk_dashboard(request):
                     "key": key, "row": comp,
                     "on": bool(comp and comp.is_enabled),
                     "registered": comp is not None,
-                    "command": (f"./deploy/dc exec web python manage.py "
+                    "command": (LIVE_HOW if key in LIVE_MONEY_SWITCHES else
+                                f"./deploy/dc exec web python manage.py "
                                 f"component on {key}"),
                 })
             platform["last_grade"] = (

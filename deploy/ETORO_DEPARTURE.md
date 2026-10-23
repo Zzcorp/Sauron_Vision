@@ -842,7 +842,7 @@ commodity symbol reads `route=etoro` before its config is enabled.
   as test_proof_stock_fraction / _index_fraction / _commodity_fraction):
   AAPL 0.05, SPX500 0.14 and WHEAT.FUT 1.5 each filled EXACTLY as sent and
   closed by id — the precondition for `fractional_units_live` (a runtime
-  switch: `manage.py component on fractional_units_live`), which a stock
+  switch, turned on from /ops/ with the trading PIN), which a stock
   or index config below one whole unit needs. Four-decimal fractions stay
   unmeasured. FEES eToro takes beside the spread, measured and charged
   since 2026-09-29 on live eToro entries at the size sent

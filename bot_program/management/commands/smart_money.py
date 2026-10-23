@@ -10,8 +10,9 @@
 target from a bot config that trades the symbol (its own levels), or
 from the default ATR levels when none does. Nothing is sent, nothing is
 stored. `cot-backfill --years N` takes N years before this one (3 by
-default). The switch is `smart_money` (manage.py component on
-smart_money): OFF, the bots ignore everything this prints.
+default). The switch is `smart_money`, turned on from /ops/ with the
+trading PIN (it moves real money; the shell refuses it): OFF, the bots
+ignore everything this prints.
 """
 from types import SimpleNamespace
 
@@ -84,7 +85,8 @@ class Command(BaseCommand):
             self.stdout.write(f"  · {why}")
         if not sm.is_on():
             self.stdout.write("  (switch OFF: the bots do none of this; "
-                              "manage.py component on smart_money)")
+                              "turn smart_money on from /ops/ with the "
+                              "trading PIN)")
 
     def _cot(self, o):
         from bot_program.smart_money import COT_MIN_WEEKS, cot_read

@@ -745,9 +745,12 @@ button.
         </div>
         <form method="post" action="{% url 'admin_toggle_component' %}">
             {% csrf_token %}<input type="hidden" name="key" value="actuator_mode_live">
+            {# Live money: ON takes the trading PIN, OFF never does (core/switch_pin.py). #}
             {% if actuator_live_component.is_enabled %}
+            <input type="hidden" name="want" value="off">
             <button type="submit" class="btn btn-danger btn-sm">DISABLE LIVE MODE</button>
             {% else %}
+            <input type="hidden" name="want" value="on"><input type="password" name="pin" placeholder="PIN" inputmode="numeric" autocomplete="off" required aria-label="Trading PIN to turn actuator_mode_live on" style="width:60px;padding:4px;font-size:11px;margin-right:4px;">
             <button type="submit" class="btn btn-primary btn-sm">PROMOTE TO LIVE</button>
             {% endif %}
         </form>
@@ -1107,8 +1110,10 @@ button.
             <form method="post" action="{% url 'admin_toggle_component' %}">
                 {% csrf_token %}<input type="hidden" name="key" value="meta_allocator_mode_live">
                 {% if allocator_live_component.is_enabled %}
+                <input type="hidden" name="want" value="off">
                 <button type="submit" class="btn btn-danger btn-sm">DISABLE LIVE</button>
                 {% else %}
+                <input type="hidden" name="want" value="on"><input type="password" name="pin" placeholder="PIN" inputmode="numeric" autocomplete="off" required aria-label="Trading PIN to turn meta_allocator_mode_live on" style="width:60px;padding:4px;font-size:11px;margin-right:4px;">
                 <button type="submit" class="btn btn-primary btn-sm">PROMOTE TO LIVE</button>
                 {% endif %}
             </form>
@@ -1184,8 +1189,10 @@ button.
             <form method="post" action="{% url 'admin_toggle_component' %}">
                 {% csrf_token %}<input type="hidden" name="key" value="share_allocator_mode_live">
                 {% if share_allocator_live_component.is_enabled %}
+                <input type="hidden" name="want" value="off">
                 <button type="submit" class="btn btn-danger btn-sm">DISABLE LIVE</button>
                 {% else %}
+                <input type="hidden" name="want" value="on"><input type="password" name="pin" placeholder="PIN" inputmode="numeric" autocomplete="off" required aria-label="Trading PIN to turn share_allocator_mode_live on" style="width:60px;padding:4px;font-size:11px;margin-right:4px;">
                 <button type="submit" class="btn btn-primary btn-sm">PROMOTE TO LIVE</button>
                 {% endif %}
             </form>
@@ -1193,8 +1200,10 @@ button.
             <form method="post" action="{% url 'admin_toggle_component' %}">
                 {% csrf_token %}<input type="hidden" name="key" value="share_allocator_auto_derisk">
                 {% if share_allocator_auto_derisk_component.is_enabled %}
+                <input type="hidden" name="want" value="off">
                 <button type="submit" class="btn btn-danger btn-sm" title="A SHOCK plan that only lowers shares is applied automatically in LIVE mode">AUTO DE-RISK OFF</button>
                 {% else %}
+                <input type="hidden" name="want" value="on"><input type="password" name="pin" placeholder="PIN" inputmode="numeric" autocomplete="off" required aria-label="Trading PIN to turn share_allocator_auto_derisk on" style="width:60px;padding:4px;font-size:11px;margin-right:4px;">
                 <button type="submit" class="btn btn-primary btn-sm" title="A SHOCK plan that only lowers shares is applied automatically in LIVE mode">AUTO DE-RISK ON</button>
                 {% endif %}
             </form>
@@ -1218,6 +1227,7 @@ button.
             <td style="font-family:var(--font-mono);font-size:12px;">{{ c.run_count }}</td>
             <td style="font-family:var(--font-mono);font-size:12px;color:{% if c.error_count > 0 %}var(--accent-red){% else %}var(--text-muted){% endif %};">{{ c.error_count }}</td>
             <td><form method="post" action="{% url 'admin_toggle_component' %}" style="display:inline;">{% csrf_token %}<input type="hidden" name="key" value="{{ c.key }}">
+                {% if c.key in live_money_keys %}<input type="hidden" name="want" value="{% if c.is_enabled %}off{% else %}on{% endif %}">{% if not c.is_enabled %}<input type="password" name="pin" placeholder="PIN" inputmode="numeric" autocomplete="off" required aria-label="Trading PIN to turn {{ c.key }} on" style="width:60px;padding:4px;font-size:11px;margin-right:4px;">{% endif %}{% endif %}
                 {% if c.is_enabled %}<button type="submit" class="btn btn-sm btn-danger">STOP</button>
                 {% else %}<button type="submit" class="btn btn-sm btn-primary">START</button>{% endif %}
             </form></td>

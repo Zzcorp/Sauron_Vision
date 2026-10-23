@@ -578,9 +578,24 @@ class BulkEnableExemptTests(_Fixture):
              "telegram_eye": True})
 
     def test_each_live_switch_still_flips_on_its_own_toggle(self):
+        """...with the trading PIN since 2026-10-23 (core/switch_pin.py):
+        without it the toggle changes nothing and says why."""
+        from portfolio.trader_profile import get_or_create_profile
+        test_pin = "583920"     # a test-only value
         for key in self.LIVE:
             resp = self.client.post("/admin-dashboard/toggle/",
                                     {"key": key, "next": "ops"})
+            self.assertRedirects(resp, "/ops/", fetch_redirect_response=False)
+            self.assertIn("trading PIN", _flashes(resp))
+        self.assertEqual(self._state(*self.LIVE),
+                         {k: False for k in self.LIVE})
+        prof = get_or_create_profile(self.admin)
+        prof.set_pin(test_pin)
+        prof.save()
+        for key in self.LIVE:
+            resp = self.client.post("/admin-dashboard/toggle/",
+                                    {"key": key, "next": "ops",
+                                     "want": "on", "pin": test_pin})
             self.assertRedirects(resp, "/ops/", fetch_redirect_response=False)
         self.assertEqual(self._state(*self.LIVE),
                          {k: True for k in self.LIVE})
