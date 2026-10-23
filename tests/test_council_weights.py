@@ -300,15 +300,15 @@ class TheBenchmarkTests(TestCase):
                          "all in: +2.00R average (n 1) against the rest "
                          "-1.00R (n 1)")
         self.assertEqual(lines["executioner"],
-                         "R his vetoes and cuts would have saved: +0.50")
+                         "his vetoes and cuts would have saved +0.50R")
         self.assertEqual(rec["replay"], {"n": 3, "agree": 2})
 
     def test_the_record_matrix_shows_each_voices_specialty_line(self):
         from ai_agents.council_grading import record_matrix
         rec = record_matrix()
         lines = {v["voice"]: v["specialty"] for v in rec["voices"]}
-        self.assertTrue(lines["executioner"].startswith(
-            "R his vetoes and cuts would have saved:"))
+        self.assertEqual(lines["executioner"],
+                         "his vetoes and cuts: none graded yet")
         self.assertTrue(lines["striker"].startswith("waits:"))
         self.assertTrue(lines["fixer"].startswith("measured fixes:"))
         self.assertTrue(lines["theorist"].endswith("not yet measured"))

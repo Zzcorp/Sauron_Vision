@@ -109,8 +109,10 @@
        rail: the margin goes whatever localStorage says. The activity
        drawer tucked under the rail, and its tab, go with it: a saved
        sauron_activity_open would otherwise slide 360px of log over a
-       390px screen. */
-    .signals-rail, .rail-toggle-btn, .sidebar-toggle-btn, .mobile-toggle, .sv-activity, .sv-activity-tab { display: none !important; }
+       390px screen. The council band goes with them too (its script
+       neither restores nor reads at this width); on a phone the council
+       is its own /council/ page, from the sidebar. */
+    .signals-rail, .rail-toggle-btn, .sidebar-toggle-btn, .mobile-toggle, .sv-activity, .sv-activity-tab, .sv-council-band, .sv-council-band-tab { display: none !important; }
     .main-content { margin-right: 0 !important; }
 
     /* (c) The news ticker and the info panel: 56px stubs at 360, nothing

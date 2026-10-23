@@ -75,7 +75,7 @@
   /* Never a candidate: the fixed chrome, the overlays, the passation
      card, and anything INSIDE a live region — the region swaps its
      innerHTML from under whatever class sat there. */
-  var OUTSIDE = '#svHorde, .info-panel-wrap, .data-headband, .ticker-bar, ' +
+  var OUTSIDE = '#svHorde, #svCouncilBand, .info-panel-wrap, .data-headband, .ticker-bar, ' +
                 '.signals-rail, .sidebar, .topbar, .sv-passation-card, ' +
                 '[data-sv-live], [data-sv-overlay], .modal, .modal-overlay, ' +
                 '.sv-dialog, .il-overlay, .se-chat-panel, .gollum-dialog';

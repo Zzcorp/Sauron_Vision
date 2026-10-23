@@ -1,0 +1,172 @@
+{% comment %}
+THE COUNCIL BAND (task #104, 2026-10-22). Sauron's voices on the right edge:
+what Sauron thinks now, who disagrees and who has been right. The council
+of ten with the Emperor in the chair, its sittings at the round table, each
+voice's dossier, the Emperor's Hand, the people's mood and the traders'
+personalities. It reads; nothing in it acts.
+
+A tab on the right edge, above the rail's toggle, opens a column (OPEN, up
+to 400px) that stops under the headbands and above the cockpit strip; the
+chamber (CHAMBER, up to 880px) adds the sittings and the record beside it.
+Only one of the band and the activity drawer is open at a time, and an open
+band pushes the Horde's right edge instead of covering it.
+
+Markup only. The script is static/js/sv-council-band.js, the sheet
+static/css/sv-council-band.css; the data is GET /api/council/band/
+(dashboard/views_council_band.py over dashboard/council_band.py), read on
+open, then every 60 seconds while open AND visible, and on the book's own
+events. Shut, nothing is read.
+
+Nothing in here may be a live region of the strip's refresher: it swaps
+every such region in the document from a render of this very page. Every
+static label the script prints is in the template below, one span per key;
+every sentence that depends on data arrives formatted from the server.
+Included by base.html for staff only.
+{% endcomment %}
+<aside class="sv-council-band" id="svCouncilBand" aria-label="The council"
+       data-band-url="{% url 'council_band' %}"
+       data-record-url="{% url 'council_dashboard' %}">
+    <button type="button" class="sv-council-band-tab" id="svCouncilBandTab" aria-expanded="false" aria-controls="svCouncilBandPanel" title="The council: what Sauron thinks, who disagrees, who has been right (c)">
+        <span class="sv-council-band-tab-label">COUNCIL</span>
+        <span class="sv-council-band-badge" id="svCouncilBandBadge" hidden>0</span>
+    </button>
+    <div class="sr-only" id="svCouncilBandSay" aria-live="polite"></div>
+    <div class="sv-council-band-panel" id="svCouncilBandPanel" role="region" aria-labelledby="svCouncilBandTitle" inert>
+        <header class="cb-head">
+            <span class="cb-dot" id="svCouncilBandDot" aria-hidden="true"></span>
+            <h2 class="cb-title" id="svCouncilBandTitle" tabindex="-1">THE COUNCIL</h2>
+            <span class="cb-chips" id="svCouncilBandChips"></span>
+            <span class="cb-stamp" id="svCouncilBandStamp"></span>
+            <button type="button" class="cb-icon cb-widen" id="svCouncilBandWiden" aria-pressed="false" aria-label="Widen the council (Shift+C)" title="Widen the council (Shift+C)">&#x21D4;</button>
+            <button type="button" class="cb-icon cb-close" id="svCouncilBandClose" aria-label="Close the council (Esc)" title="Close the council (Esc)">&times;</button>
+        </header>
+        <div class="cb-body" id="svCouncilBandBody">
+            <div class="cb-room" id="svCouncilBandRoom">
+                <div class="cb-state" id="svCouncilBandState"><div class="sv-loading">Calling the council</div></div>
+                <section class="cb-direction" id="cbDirection" aria-label="Direction"></section>
+                <section class="cb-sec cb-throne" id="cbThrone" aria-label="The throne"></section>
+                <section class="cb-sec cb-nine" id="cbNine" aria-label="The nine"></section>
+                <section class="cb-sec cb-traders" id="cbTraders" aria-label="The traders"></section>
+                <nav class="cb-links" id="cbLinks" aria-label="Council pages">
+                    <button type="button" class="cb-link" data-side="sittings">The sittings ›</button>
+                    <button type="button" class="cb-link" data-side="record">The record ›</button>
+                    <a class="cb-link" href="{% url 'council_dashboard' %}">The full record ›</a>
+                    <a class="cb-link" href="{% url 'personas_dashboard' %}">Personalities ›</a>
+                    <a class="cb-link" href="{% url 'brain_dashboard' %}">The Mind ›</a>
+                    <a class="cb-link" href="{% url 'hypotheses_dashboard' %}">Claims ›</a>
+                    <a class="cb-link" href="{% url 'ai_models_dashboard' %}">AI models ›</a>
+                </nav>
+            </div>
+            <div class="cb-side" id="svCouncilBandSide" role="region" aria-label="Chamber">
+                <div class="cb-sidehead">
+                    <button type="button" class="cb-back" id="cbSideBack" hidden>‹ Back to the council</button>
+                    <div class="cb-tabs" role="tablist" aria-label="Chamber">
+                        <button type="button" role="tab" class="cb-tabbtn" id="cbTabSittings" data-side="sittings" aria-selected="true" aria-controls="svCouncilBandSideBody">The sittings</button>
+                        <button type="button" role="tab" class="cb-tabbtn" id="cbTabRecord" data-side="record" aria-selected="false" aria-controls="svCouncilBandSideBody" tabindex="-1">The record</button>
+                    </div>
+                </div>
+                <div class="cb-sidebody" id="svCouncilBandSideBody" role="tabpanel" aria-labelledby="cbTabSittings"></div>
+            </div>
+            <aside class="cb-dossier" id="svCouncilBandDossier" role="region" aria-label="Voice" hidden></aside>
+        </div>
+    </div>
+    <template id="svCouncilBandWords">
+        <span data-w="tab">COUNCIL</span>
+        <span data-w="tab_title">The council: what Sauron thinks, who disagrees, who has been right (c)</span>
+        <span data-w="badge_label">{n} new sittings since you last looked</span>
+        <span data-w="tab_label">The council</span>
+        <span data-w="title">THE COUNCIL</span>
+        <span data-w="title_chamber">THE COUNCIL CHAMBER</span>
+        <span data-w="widen">Widen the council (Shift+C)</span>
+        <span data-w="narrow">Narrow the council (Shift+C)</span>
+        <span data-w="no_room">Not enough room to widen: close the rail or fold the sidebar.</span>
+        <span data-w="no_room_horde">Close the Horde to widen the council.</span>
+        <span data-w="close">Close the council (Esc)</span>
+        <span data-w="read_ago">read {t}</span>
+        <span data-w="not_live">read {t} UTC · not live</span>
+        <span data-w="calling">Calling the council</span>
+        <span data-w="locked">Locked. The council carries on once the PIN is entered.</span>
+        <span data-w="signed_out">Signed out. Sign in again to see the council.</span>
+        <span data-w="staff_only">Staff only. This account cannot see the council.</span>
+        <span data-w="cannot_reach">Cannot reach Sauron. Retrying; the figures below are from {t}.</span>
+        <span data-w="narrowed_room">Council narrowed: not enough room.</span>
+        <span data-w="narrowed_horde">Council narrowed: the Horde is open.</span>
+        <span data-w="sat_on">The council sat on {s}.</span>
+        <span data-w="not_sat">The council did not sit on {s}.</span>
+        <span data-w="thinks">SAURON THINKS</span>
+        <span data-w="disagrees">WHO DISAGREES</span>
+        <span data-w="right">WHO HAS BEEN RIGHT</span>
+        <span data-w="throne">THE THRONE</span>
+        <span data-w="nine">THE NINE</span>
+        <span data-w="traders">THE TRADERS</span>
+        <span data-w="campaign">THE CAMPAIGN</span>
+        <span data-w="hand">THE EMPEROR'S HAND</span>
+        <span data-w="hand_now">THE SEAT PER CELL, NOW</span>
+        <span data-w="hand_last">AT THE LAST SITTING</span>
+        <span data-w="hand_against">THE EMPEROR AGAINST HIS HAND</span>
+        <span data-w="mood">THE PEOPLE'S MOOD</span>
+        <span data-w="war">THE WAR, AS THE GATES READ IT</span>
+        <span data-w="posture">POSTURE</span>
+        <span data-w="horizon">HORIZON</span>
+        <span data-w="battles">BATTLES · 30 DAYS</span>
+        <span data-w="chair_record">THE CHAIR'S RECORD</span>
+        <span data-w="rulings">LAST RULINGS</span>
+        <span data-w="orcs">THE ORCS</span>
+        <span data-w="emperor">The Emperor</span>
+        <span data-w="open_dossier">Open the dossier of {name}</span>
+        <span data-w="fold">Fold or unfold {name}</span>
+        <span data-w="sittings_link">The sittings ›</span>
+        <span data-w="record_link">The record ›</span>
+        <span data-w="tab_sittings">The sittings</span>
+        <span data-w="tab_record">The record</span>
+        <span data-w="back_council">‹ Back to the council</span>
+        <span data-w="back_sittings">‹ Back to the sittings</span>
+        <span data-w="back_sitting">‹ Back to the sitting</span>
+        <span data-w="chamber_tabs">Chamber</span>
+        <span data-w="filter_all">All</span>
+        <span data-w="filter_bot">Bot orders</span>
+        <span data-w="filter_ticket">Tickets</span>
+        <span data-w="filter_dissent">Dissent only</span>
+        <span data-w="show_older">Show older</span>
+        <span data-w="no_sitting_7">No sitting in the last 7 days.</span>
+        <span data-w="nothing_kind">No sitting of this kind among those shown.</span>
+        <span data-w="loading">Reading…</span>
+        <span data-w="t_emperor">THE EMPEROR</span>
+        <span data-w="t_dissent">DISSENT</span>
+        <span data-w="t_others">THE OTHERS</span>
+        <span data-w="reasons">Reasons ({n})</span>
+        <span data-w="open_trade">Open trade #{id} ›</span>
+        <span data-w="ask_sitting">Ask Sauron about this sitting</span>
+        <span data-w="ask_voice">Ask Sauron about {name}</span>
+        <span data-w="r_hand">THE HAND, CELL BY CELL</span>
+        <span data-w="r_against">THE EMPEROR AGAINST HIS HAND</span>
+        <span data-w="r_skeptic">THE SKEPTIC TOLD</span>
+        <span data-w="r_mood">THE MOOD, GRADED</span>
+        <span data-w="r_weights">WEIGHTS BY REGIME</span>
+        <span data-w="r_weights_note">Live record, 180 days, every class. A cell is measured at 10 graded calls; below that it reads —.</span>
+        <span data-w="r_bench">DOES WEIGHTING HELP?</span>
+        <span data-w="d_weight">WEIGHT AS THE EMPEROR LAST READ IT</span>
+        <span data-w="d_regimes">RECORD BY REGIME</span>
+        <span data-w="d_regimes_note">A cell is measured at 10 graded calls; below that it reads —. Live record, 180 days, every class.</span>
+        <span data-w="d_table">THE TABLE</span>
+        <span data-w="d_hand">THE EMPEROR'S HAND</span>
+        <span data-w="d_best">BEST CALLS</span>
+        <span data-w="d_worst">WORST CALLS</span>
+        <span data-w="d_history">HISTORY</span>
+        <span data-w="d_today">CALLS TODAY</span>
+        <span data-w="d_loading">Reading this voice…</span>
+        <span data-w="d_failed">This voice could not be read. The rest of the council is current.</span>
+        <span data-w="s_loading">Reading this sitting…</span>
+        <span data-w="s_failed">This sitting could not be read. The rest of the council is current.</span>
+        <span data-w="side_for">for</span>
+        <span data-w="side_against">against</span>
+        <span data-w="side_none">no side</span>
+        <span data-w="side_silent">silent</span>
+        <span data-w="side_waiting">waiting</span>
+        <span data-w="side_absent">not asked</span>
+        <span data-w="seat_label">{name}: {side}</span>
+        <span data-w="chair_none">no chair</span>
+        <span data-w="matrix_label">{label} in {regime}: ×{f} {lane}</span>
+        <span data-w="regime_now">now</span>
+    </template>
+</aside>

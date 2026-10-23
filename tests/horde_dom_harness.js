@@ -1,5 +1,9 @@
 /* A small DOM for driving static/js/sv-horde.js under node (tests/
- * test_the_horde.py TheScriptBehaviourTests). No jsdom on the build
+ * test_the_horde.py TheScriptBehaviourTests), and the council band's
+ * sv-council-band.js beside sv-activity.js (tests/test_council_band.py
+ * ThePollingBehaviourTests: the desk media query, a clock Date.now()
+ * follows, an answer's status and the round table's SVG elements). No
+ * jsdom on the build
  * machines, so this is the least of a document the script touches:
  * elements built from the rendered partial (a JSON tree Python's
  * html.parser made), classes, attributes, text, events that bubble, a
@@ -279,10 +283,12 @@ const body = html.appendChild(new Element('body', {}));
 doc = {
   documentElement: html, head, body, activeElement: body, hidden: false, listeners: {},
   _blur() { this.activeElement = this.body; },
+  contains(n) { return html.contains(n); },
   getElementById(id) { return html.querySelector('#' + id); },
   querySelector(s) { return html.querySelector(s); },
   querySelectorAll(s) { return html.querySelectorAll(s); },
   createElement(t) { return new Element(t, {}); },
+  createElementNS(ns, t) { return new Element(t, {}); },
   createTextNode(t) { return new Text(t); },
   addEventListener(t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); },
   removeEventListener() {},
@@ -310,8 +316,9 @@ let serve = (url) => {
   return payloads.board;
 };
 function respond(body) {
+  const st = (body && body.__status) || 200;
   return Promise.resolve({
-    status: 200, ok: true, redirected: false,
+    status: st, ok: st < 400, redirected: false,
     headers: { get: () => 'application/json' },
     json: () => Promise.resolve(JSON.parse(JSON.stringify(body))),
   });
@@ -319,7 +326,7 @@ function respond(body) {
 const media = { matches: false, addEventListener() {}, addListener() {} };
 const win = {
   innerWidth: 1380, innerHeight: 900,
-  matchMedia: (q) => ({ matches: q.indexOf('max-width: 768px') !== -1 ? media.matches : false,
+  matchMedia: (q) => ({ get matches() { return q.indexOf('max-width: 768px') !== -1 ? media.matches : q.indexOf('min-width: 769px') !== -1 ? !media.matches : false; },
                         addEventListener() {}, addListener() {} }),
   localStorage: {
     getItem: (k) => (Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null),
@@ -351,6 +358,7 @@ const sandbox = {
   window: win, document: doc, navigator: {}, console,
   fetch: win.fetch, CustomEvent: win.CustomEvent, setTimeout: win.setTimeout,
   clearTimeout: win.clearTimeout, Promise,
+  Date: class extends Date { static now() { return 1790000000000 + clock; } },
 };
 vm.createContext(sandbox);
 

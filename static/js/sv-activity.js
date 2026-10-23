@@ -48,6 +48,10 @@
   var KIND_WORDS = { trade: 'trade', gate: 'gate', ai: 'ai', pipeline: 'pipeline',
                      bot: 'bot', alert: 'alert', system: 'system' };
   var reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  /* The phone tier hides the drawer (sv-responsive.css): at 768px and
+     below a saved open state is not restored and nothing is read. */
+  var deskMq = window.matchMedia ? window.matchMedia('(min-width: 769px)') : null;
+  function onDesk() { return !deskMq || deskMq.matches; }
 
   var tab = document.getElementById('svActivityTab');
   var panel = document.getElementById('svActivityPanel');
@@ -280,7 +284,7 @@
     else if (stamp) stamp.textContent = title.toLowerCase();
   }
   function fetchFeed() {
-    if (!FEED_URL || inflight || stopped || document.hidden || !isOpen()) return;
+    if (!FEED_URL || inflight || stopped || document.hidden || !isOpen() || !onDesk()) return;
     inflight = true;
     if (!loaded) setState('sv-loading', '', "Reading Sauron's log");
     fetch(feedUrl(), { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
@@ -348,6 +352,9 @@
     if (on) panel.removeAttribute('inert'); else panel.setAttribute('inert', '');
     if (save) remember(on);
     if (on) {
+      /* One dock drawer at a time: the council band (sv-council-band.js)
+         shuts when this one opens, and this one when it opens. */
+      try { document.dispatchEvent(new CustomEvent('sv:dock-open', { detail: 'activity' })); } catch (e) { /* an old engine: both may stay open */ }
       setUnread(0);
       stopped = false;
       refreshAgo();
@@ -392,6 +399,9 @@
   });
 
   /* ── the page's own signals ──────────────────────────────────────── */
+  document.addEventListener('sv:dock-open', function (e) {
+    if (e && e.detail === 'council') shut(false);
+  });
   document.addEventListener('visibilitychange', function () {
     if (document.hidden || !isOpen()) return;
     stopped = false;
@@ -429,7 +439,7 @@
   });
 
   /* A drawer left open comes back open, in place rather than sliding. */
-  if (remembered()) {
+  if (remembered() && onDesk()) {
     root.classList.add('sv-activity-instant');
     setOpen(true, false);
     window.requestAnimationFrame(function () {
