@@ -45,6 +45,14 @@ and New York windows of the trading day by the sessions table, each run of
 an Asian edge with its bar and its return, and the trading day's Judas
 swing with its bar times. Display only: the positioning map keeps it out
 of `compact()`, which the ticket and the position reviewer read.
+
+THE SESSIONS (2026-10-24): the operator, "I still only have on chart the
+Asia session marked, not the 2 others". `sessions` (power_of_three, beside
+the read) is the calendar the chart marks every day by: each of the last
+SESSION_DAYS New York trading days with its Asia, London and New York
+windows (session_days). No bar is read for it and no query is made; a day
+the read cannot say (the weekend) still has the days before. Display only,
+like the stages.
 """
 from __future__ import annotations
 
@@ -145,6 +153,19 @@ def _span(df, rng):
 #: (signals/smc/sessions.ICT_SESSIONS_NY): London is the manipulation's,
 #: New York AM's open to New York PM's close the distribution's.
 STAGE_WINDOWS = {"london": ("london", "london"), "new_york": ("ny_am", "ny_pm")}
+#: The three sessions the chart marks on every day (2026-10-24), in the
+#: day's order: Asia (from 20:00 New York the evening before to midnight),
+#: then the stages' two.
+SESSION_WINDOWS = {"asia": ("asia", "asia"), **STAGE_WINDOWS}
+#: How many calendar days the chart is sent, sized from the deepest
+#: intraday tape it marks sessions on: 240 1h bars of a market open about
+#: seven hours a day (a cash index, a stock, a European or Asian exchange)
+#: are about 35 trading days, seven weeks of calendar plus the holidays;
+#: a 24/5 market's 240 1h bars are only two weeks. Every calendar day
+#: counts (a shut day has no bars, and the chart draws a window only over
+#: its own bars), so ten weeks cover the deepest tape with room. A window
+#: is two epochs, so the reply stays about 13 KB.
+SESSION_DAYS = 70
 
 
 def _epoch(ts) -> int:
@@ -173,19 +194,63 @@ def _window(day, first, last, now):
     datetime.combine(..., tzinfo=ZoneInfo) takes fold 0: on the
     spring-forward Sunday 02:00 does not exist and maps to 07:00 UTC (03:00
     EDT), so London is two hours long that night — as in_ny_session's bar
-    membership has it."""
-    from datetime import datetime
+    membership has it.
+
+    A window that wraps past midnight (Asia, 20:00 to 00:00) belongs to the
+    trading day it closes on (2026-10-24): it opens the evening before, on
+    `day` - 1 — the New York date session_windows files it under."""
+    from datetime import datetime, timedelta
     from signals.smc.sessions import ICT_SESSIONS_NY, new_york_timezone
     tz = new_york_timezone()
     if tz is None or first not in ICT_SESSIONS_NY or last not in ICT_SESSIONS_NY:
         return None
     start, end = ICT_SESSIONS_NY[first][0], ICT_SESSIONS_NY[last][1]
-    o = int(datetime.combine(day, start, tzinfo=tz).timestamp())
+    opens_on = day - timedelta(days=1) if end <= start else day
+    o = int(datetime.combine(opens_on, start, tzinfo=tz).timestamp())
     c = int(datetime.combine(day, end, tzinfo=tz).timestamp())
     n = _epoch(now)
     return {"opened": o, "closed": c,
             "state": "upcoming" if n < o else ("open" if n < c else "closed"),
             "ny": f"{start:%H:%M}–{end:%H:%M}"}
+
+
+def session_days(now=None, days=SESSION_DAYS) -> list:
+    """The Power of Three's three sessions on each of the last `days` New
+    York trading days, oldest first (2026-10-24): [{date, asia, london,
+    new_york}], each window {opened, closed} in UTC epoch seconds, as
+    _window gives them. Only the two epochs: the chart reads nothing else
+    (its sessionEnv), and the reply is refetched every minute. The trading
+    day is the date London and New York open on; its Asia opens at 20:00
+    New York the evening before, so from then on the newest day is
+    tomorrow's. Every calendar day, shut or not: the chart draws a window
+    over its own bars only. The calendar alone — no bar, no query; []
+    without a tz database. Display only."""
+    from datetime import timedelta
+    from signals.smc.sessions import ICT_SESSIONS_NY, new_york_timezone
+    tz = new_york_timezone()
+    if tz is None or days <= 0:
+        return []
+    t = pd.Timestamp(now or timezone.now())
+    t = (t.tz_localize("UTC") if t.tzinfo is None else t).tz_convert(tz)
+    newest = t.date() + timedelta(days=1 if t.time() >= ICT_SESSIONS_NY["asia"][0] else 0)
+    out = []
+    for back in range(days - 1, -1, -1):
+        day = newest - timedelta(days=back)
+        wins = {name: _window(day, first, last, now or t)
+                for name, (first, last) in SESSION_WINDOWS.items()}
+        if any(w is None for w in wins.values()):
+            return []
+        out.append({"date": day.isoformat(),
+                    **{name: {"opened": w["opened"], "closed": w["closed"]} for name, w in wins.items()}})
+    return out
+
+
+def _sessions_or_none(now):
+    try:
+        return session_days(now)
+    except Exception as e:  # noqa: BLE001 - a drawing is a bonus to the read
+        logger.debug("[po3] sessions unread: %s", e)
+        return None
 
 
 def _ny_span(ts, bar):
@@ -414,7 +479,9 @@ def words_for(day: dict) -> str:
 
 def power_of_three(symbol, *, now=None, bars=None) -> dict:
     """The day's three parts for `symbol`: read_day on the 1h bars (else
-    the 4h), with `timeframe` and `words`. Never raises."""
+    the 4h), with `timeframe` and `words`, and beside the read the chart's
+    calendar, `sessions` (session_days; None when it cannot be built) —
+    read or unread alike. Never raises."""
     now = now or timezone.now()
     try:
         df, swings, timeframe = _frame(symbol, bars)
@@ -429,4 +496,7 @@ def power_of_three(symbol, *, now=None, bars=None) -> dict:
     day["timeframe"] = timeframe
     day["symbol"] = symbol
     day["words"] = words_for(day)
+    # Every day's Asia, London and New York for the chart (2026-10-24): the
+    # calendar, so a day the read cannot say still marks the days before.
+    day["sessions"] = _sessions_or_none(now)
     return day

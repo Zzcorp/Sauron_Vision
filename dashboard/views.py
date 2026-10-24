@@ -4558,11 +4558,13 @@ def _chart_positioning(instrument, levels=None):
                          asset_class=instrument.asset_class or "",
                          mark=mark, levels=levels)
     out = compact(pm)
-    # The Power of Three's stages (2026-10-08) ride the CHART's copy of the
-    # day only: compact() is also the ticket's map and the position
-    # reviewer's, and an LLM that trades must not read a drawing.
+    # The Power of Three's stages (2026-10-08) and every day's three
+    # sessions (2026-10-24) ride the CHART's copy of the day only: compact()
+    # is also the ticket's map and the position reviewer's, and an LLM that
+    # trades must not read a drawing.
     if out.get("ok") and isinstance(out.get("po3"), dict):
-        out = dict(out, po3=dict(out["po3"], stages=pm.get("po3_stages")))
+        out = dict(out, po3=dict(out["po3"], stages=pm.get("po3_stages"),
+                                 sessions=pm.get("po3_sessions")))
     cache.set(key, out, LEVELS_TTL)
     return out
 

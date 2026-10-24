@@ -7,14 +7,17 @@ and distribution."
 The day's three stages are drawn in the session violet, and each is named
 by its letter on the mark that proves it:
   A  the Asian box, labelled `A · ASIA`;
-  M  London's window as a faint time band, a diamond just beyond the wick
-     that ran the Asian edge (`M · SWEEP  1.08288`, or `M · RUN` while the
-     run holds) and London's Judas swing as a thin line;
-  D  New York's window as a faint time band and a vertical arrow at the bar
-     that closed back inside, from the swept edge to the far one (`D ▲`,
-     `D ▲ · ② DRAW` when the map's draw points the same way).
+  M  a diamond just beyond the wick that ran the Asian edge (`M · SWEEP
+     1.08288`, or `M · RUN` while the run holds) and London's Judas swing
+     as a thin line;
+  D  a vertical arrow at the bar that closed back inside, from the swept
+     edge to the far one (`D ▲`, `D ▲ · ② DRAW` when the map's draw points
+     the same way).
 A stage that has not happened draws nothing; an unclear day draws both
 runs and no direction. The key's `Power of Three` switch names the phase.
+(2026-10-24) London's and New York's windows are no longer faint columns
+drawn as a stage's evidence: every day's Asia, London and New York are
+boxes of their own, whatever the phase (tests/test_chart_po3_sessions.py).
 Display only: nothing that trades reads any of it (tests/test_power_of_three
 pins the server side, TheMapTests M1 to M3).
 
@@ -73,6 +76,22 @@ STAGES = {"date": "2026-10-07", "bar": 3600,
                       "ny": "04:00", "session": "london", "back_at": 1791374400,
                       "back_close_at": 1791378000, "back_price": 1.0851, "back_ny": "08:00"}],
           "judas": None}
+#: Every day's three sessions as the server sends them with the harness day
+#: (2026-10-24, bot_program/power_of_three.session_days at 14:30 UTC, three
+#: days; two epochs a window): the 7th's London and New York are STAGES'
+#: own windows.
+def _ses(o, c):
+    return {"opened": o, "closed": c}
+
+
+SESSIONS = [
+    {"date": "2026-10-05", "asia": _ses(1791158400, 1791172800),
+     "london": _ses(1791180000, 1791190800), "new_york": _ses(1791203400, 1791230400)},
+    {"date": "2026-10-06", "asia": _ses(1791244800, 1791259200),
+     "london": _ses(1791266400, 1791277200), "new_york": _ses(1791289800, 1791316800)},
+    {"date": "2026-10-07", "asia": _ses(1791331200, 1791345600),
+     "london": _ses(1791352800, 1791363600), "new_york": _ses(1791376200, 1791403200)},
+]
 JUDAS = {"direction": "LONG", "open": 1.0852, "open_at": 1791352800, "open_ny": "02:00",
          "extreme": 1.08288, "extreme_at": 1791360000, "extreme_ny": "04:00",
          "words": "London opened 1.0852, faked to 1.0829 early in the window, reversed back "
@@ -541,12 +560,14 @@ class ThePo3LanguageTests(SimpleTestCase):
             "judas": JUDAS, "words": WORDS, "stageIds": STAGE_IDS, "huntId": HUNT_ID,
             "lowId": LOW_ID, "lateRows": LATE_ROWS, "oldJudas": OLD_JUDAS})
 
-    # P1
-    def test_accumulation_draws_the_box_alone(self):
+    # P1 (2026-10-24: the day's sessions are boxes of their own, every day,
+    # whatever the phase — tests/test_chart_po3_sessions S1)
+    def test_accumulation_draws_no_stage_mark(self):
         g = self.out["acc"]
         p = g["po3"]
-        self.assertEqual((p["bands"], p["sweeps"], p["judas"], p["arrow"], p["labels"]),
-                         ([], [], None, None, []))
+        self.assertEqual((p["sweeps"], p["judas"], p["arrow"], p["labels"]),
+                         ([], None, None, []))
+        self.assertNotIn("bands", p, "no window drawn as a stage's column")
         self.assertEqual(p["phase"], "accumulation")
         self.assertEqual(g["asia"]["label"]["text"], "A · ASIA")
         self.assertIn("LAST LOW  1.08288", _texts(g), "no stage, no fold")
@@ -555,9 +576,7 @@ class ThePo3LanguageTests(SimpleTestCase):
     def test_a_run_holding_draws_london_a_hollow_mark_and_no_d(self):
         for g in (self.out["man"], self.out["freeMan"]):
             p = g["po3"]
-            self.assertEqual([b["id"] for b in p["bands"]], ["sv-po3-london"],
-                             "no New York band although its window was given")
-            self.assertEqual((p["bands"][0]["x0"], p["bands"][0]["x1"]), (520, 560))
+            self.assertNotIn("bands", p)
             self.assertEqual(len(p["sweeps"]), 1)
             s = p["sweeps"][0]
             self.assertFalse(s["filled"], "a run that holds is hollow")
@@ -575,8 +594,7 @@ class ThePo3LanguageTests(SimpleTestCase):
     def test_distribution_up_draws_the_three_stages(self):
         for g in (self.out["dis"], self.out["free"]):
             p = g["po3"]
-            self.assertEqual([b["id"] for b in p["bands"]], ["sv-po3-london", "sv-po3-ny"])
-            self.assertEqual((p["bands"][1]["x0"], p["bands"][1]["x1"]), (600, 700))
+            self.assertNotIn("bands", p)
             self.assertTrue(p["sweeps"][0]["filled"], "a run that came back is a sweep: solid")
             a = p["arrow"]
             self.assertEqual(a["x"], 605)
@@ -613,7 +631,7 @@ class ThePo3LanguageTests(SimpleTestCase):
         self.assertEqual([(s["side"], s["filled"]) for s in p["sweeps"]],
                          [("low", True), ("high", False)], "both runs, filled by their own return")
         self.assertIsNone(p["arrow"])
-        self.assertEqual([b["id"] for b in p["bands"]], ["sv-po3-london"])
+        self.assertNotIn("bands", p)
         self.assertEqual(p["labels"], [])
         self.assertEqual(p["folded"], {})
         for t in _texts(g):
@@ -777,16 +795,14 @@ class ThePo3LanguageTests(SimpleTestCase):
                 chips = [c for c in got[0] if not (c.startswith(h + "|") and c not in base[0])]
                 self.assertEqual(chips, base[0], (family, h))
                 self.assertEqual(got[1:], base[1:], (family, h))
-        # ...and a hovered stage glows: its mark and its band
+        # ...and a hovered stage glows: its mark (its session's box glows
+        # too: tests/test_chart_po3_sessions S4)
         hot = self.out["hover"]["sv-po3-m-low"]["po3"]
         self.assertTrue(hot["sweeps"][0]["hot"])
-        self.assertEqual([b["id"] for b in hot["bands"] if b["hot"]], ["sv-po3-london"])
         hot_d = self.out["hover"]["sv-po3-d"]["po3"]
         self.assertTrue(hot_d["arrow"]["hot"])
-        self.assertEqual([b["id"] for b in hot_d["bands"] if b["hot"]], ["sv-po3-ny"])
         hot_j = self.out["hover"]["sv-po3-judas"]["po3"]
         self.assertTrue(hot_j["judas"]["hot"])
-        self.assertEqual([b["id"] for b in hot_j["bands"] if b["hot"]], ["sv-po3-london"])
 
     # P12
     def test_phone_texts_are_letters(self):
@@ -818,7 +834,7 @@ class ThePo3LanguageTests(SimpleTestCase):
 
         def shapes(g):
             p = g["po3"]
-            return p["bands"] + p["sweeps"] + [p["judas"], p["arrow"]]
+            return p["sweeps"] + [p["judas"], p["arrow"]]
         for key, k in (("pinDark", 0.55), ("pinLight", 0.8), ("focusPool", 0.2), ("focusAsia", 1)):
             for s in shapes(d[key]):
                 self.assertAlmostEqual(s["k"], k, msg=(key, s["id"]))
@@ -828,11 +844,9 @@ class ThePo3LanguageTests(SimpleTestCase):
             self.assertAlmostEqual(l["k"], 0.2)
         hot = d["hotD"]["po3"]
         self.assertEqual(hot["arrow"]["k"], 1)
-        self.assertEqual([b["k"] for b in hot["bands"] if b["id"] == "sv-po3-ny"], [1])
         self.assertAlmostEqual(hot["sweeps"][0]["k"], 0.55)
         hm = d["hotM"]["po3"]
         self.assertEqual(hm["sweeps"][0]["k"], 1)
-        self.assertEqual([b["k"] for b in hm["bands"] if b["id"] == "sv-po3-london"], [1])
 
     # P15
     def test_hit_the_stages_as_drawn(self):
@@ -845,7 +859,7 @@ class ThePo3LanguageTests(SimpleTestCase):
         self.assertEqual(h["arrow"], {"id": "sv-po3-d", "stage": "d", "side": "low", "part": "mark"})
         self.assertEqual(h["judas"], {"id": "sv-po3-judas", "stage": "m", "side": None, "part": "judas"})
         self.assertIsNone(h["judasFar"])
-        self.assertIsNone(h["band"], "a band is never hit")
+        self.assertIsNone(h["band"], "a session's window is never hit")
         self.assertIsNone(h["none"])
         self.assertEqual(h["chip"], {"id": LOW_ID, "item": True, "stage": "m", "sweep": "low"})
 
@@ -1438,7 +1452,7 @@ def _xq(bars, h, m=0):
     return 20 + 10 * [b["time"] for b in bars].index(_utc(2026, 10, 7, h, m))
 
 
-def _po3_payload(stages=True, positions=None, bars=None, signals=None):
+def _po3_payload(stages=True, positions=None, bars=None, signals=None, sessions=True):
     p = _levels_payload(positions=positions)
     p["timeframe"] = "1h"
     p["bars"] = bars if bars is not None else _hourly_bars()
@@ -1450,6 +1464,8 @@ def _po3_payload(stages=True, positions=None, bars=None, signals=None):
     po3["odds"] = {"verdict": "unjudged", "why": "x"}
     if stages:
         po3["stages"] = copy.deepcopy(STAGES)
+    if sessions:
+        po3["sessions"] = copy.deepcopy(SESSIONS)
     return p
 
 
@@ -1483,9 +1499,13 @@ class ThePo3WidgetTests(SimpleTestCase):
         self.assertEqual(set(r["data"]["asia"]), {"high", "low", "opened", "closed"})
         x = r["x"]
         p = r["geom"]["po3"]
-        bands = {b["id"]: b for b in p["bands"]}
-        self.assertEqual((bands["sv-po3-london"]["x0"], bands["sv-po3-london"]["x1"]), (x["l6"] - 5, x["l8"] + 5))
-        self.assertEqual((bands["sv-po3-ny"]["x0"], bands["sv-po3-ny"]["x1"]), (x["n12"] - 5, x["n14"] + 5),
+        self.assertNotIn("bands", p)
+        # London's and New York's windows: the read day's session boxes
+        # (2026-10-24), at the columns' old x's
+        boxes = {b["id"]: b for b in r["geom"]["sessions"]["boxes"]}
+        lon, ny = boxes["sv-ses-london-2026-10-07"], boxes["sv-ses-new_york-2026-10-07"]
+        self.assertEqual((lon["x0"], lon["x1"]), (x["l6"] - 5, x["l8"] + 5))
+        self.assertEqual((ny["x0"], ny["x1"]), (x["n12"] - 5, x["n14"] + 5),
                          "from the bar holding 08:30 New York to the newest bar, nothing past it")
         self.assertEqual(p["sweeps"][0]["x"], x["l8"])
         self.assertAlmostEqual(p["sweeps"][0]["tipY"], y_of(1.08288), places=9)
@@ -1494,44 +1514,59 @@ class ThePo3WidgetTests(SimpleTestCase):
         self.assertAlmostEqual(p["arrow"]["y0"], y_of(1.08441), places=9)
         self.assertAlmostEqual(p["arrow"]["y1"], y_of(1.08608), places=9)
         self.assertIsNone(p["judas"], "the detector names none on the harness day")
-        self.assertLessEqual(max(b["x1"] for b in p["bands"]), x["n14"] + 5)
+        self.assertLessEqual(max(b["x1"] for b in boxes.values()), x["n14"] + 5)
 
     # W2
     def test_shapes_paint_under_and_labels_over(self):
         ops, texts = self.main["ops"], self.main["texts"]
         violet = "#a878f0"
         top0 = next(i for i, o in enumerate(ops) if o["op"] == "fillText")
-        bands = [o for o in ops if o["op"] == "fillRect" and o["fill"] == violet
-                 and abs(o["alpha"] - 0.045) < 1e-9]
-        self.assertEqual(len(bands), 2, "London and New York, the faint columns")
-        for o in bands:
-            self.assertEqual((o["args"][1], o["args"][3]), (0, 384), "full height")
-        idx = [i for i, o in enumerate(ops) if o in bands]
-        self.assertTrue(all(i < top0 for i in idx))
+        # (2026-10-24) no faint full-height column any more: London and New
+        # York are session boxes in their own tones (test_chart_po3_sessions W2)
+        columns = [o for o in ops if o["op"] == "fillRect" and o["args"][1] == 0 and o["args"][3] == 384]
+        self.assertEqual(columns, [])
         # the diamond (filled), the arrow's shaft and head: violet, all before the top pass
         fills = [i for i, o in enumerate(ops) if o["op"] == "fill" and o["fill"] == violet]
         strokes = [i for i, o in enumerate(ops) if o["op"] == "stroke" and o["stroke"] == violet]
         self.assertGreaterEqual(len(fills), 2, "the diamond and the arrow's head")
         self.assertTrue(strokes, "the arrow's shaft")
         self.assertTrue(all(i < top0 for i in fills + strokes))
-        # the bands come before every other level shape (the Asia box's fill)
-        box = next(i for i, o in enumerate(ops) if o["op"] == "fillRect" and o["fill"] == violet
-                   and abs(o["alpha"] - 0.09) < 1e-9)
-        self.assertLess(max(idx), box)
         for t in ("A · ASIA", "M · SWEEP  1.08288", "D ▲ · ② DRAW"):
             self.assertIn(t, texts)
-        self.assertNotIn("ASIA", texts)
+        self.assertEqual(self.main["geom"]["asia"]["label"]["text"], "A · ASIA")
+        # 'ASIA' names the day before's Asia box alone (the sessions)
+        self.assertEqual([b["id"] for b in self.main["geom"]["sessions"]["boxes"]
+                          if (b.get("label") or {}).get("text") == "ASIA"], ["sv-ses-asia-2026-10-06"])
+        self.assertEqual(texts.count("ASIA"), 1)
         self.assertNotIn("LAST LOW  1.08288", texts)
         stage_ops = [i for i, o in enumerate(ops)
                      if o["op"] in ("fill", "stroke") and (o["fill"] == violet or o["stroke"] == violet)]
         self.assertTrue(all(i < top0 for i in stage_ops), "no stage shape in the top pass")
 
     # W3
-    def test_four_hour_frames_keep_the_marks_and_drop_the_bands(self):
+    def test_four_hour_frames_keep_the_marks_and_mark_the_sessions_by_time(self):
         bars = _hourly_bars(step_hours=4)
         out = _po3_run("boot", payload=_po3_payload(bars=bars), timeframe="4h")
         p = out["geom"]["po3"]
-        self.assertEqual(p["bands"], [])
+        self.assertNotIn("bands", p)
+        # a 4h bar straddles the sessions: no price box; every day's three
+        # are strips by time at the foot, each from its open to its close
+        # inside its bars (tests/test_chart_po3_sessions W4)
+        s = out["geom"]["sessions"]
+        self.assertTrue(s["wide"])
+        tf, t = 14400, [b["time"] for b in bars]
+
+        def at(e):
+            i = max(k for k, v in enumerate(t) if v <= e)
+            return 20 + 10 * i - 5 + min(1, (e - t[i]) / tf) * 10
+        days = {}
+        for b in s["boxes"]:
+            days.setdefault(b["date"], []).append(b["name"])
+            w = [d for d in SESSIONS if d["date"] == b["date"]][0][b["name"]]
+            self.assertEqual((b["x0"], b["x1"]), (at(w["opened"]), at(w["closed"])), b["id"])
+            self.assertEqual((b["priced"], b["ribbon"], b["yh"]), (False, True, None), b["id"])
+        self.assertEqual(days, {"2026-10-06": ["asia", "london", "new_york"],
+                                "2026-10-07": ["asia", "london", "new_york"]})
         self.assertEqual(len(p["sweeps"]), 1)
         self.assertIsNotNone(p["arrow"])
         self.assertEqual(out["geom"]["asia"]["label"]["text"], "A · ASIA")
@@ -1605,7 +1640,7 @@ class ThePo3WidgetTests(SimpleTestCase):
 
     # W7
     def test_an_old_reply_draws_the_pr51_box(self):
-        out = _po3_run("main", payload=_po3_payload(stages=False))
+        out = _po3_run("main", payload=_po3_payload(stages=False, sessions=False))
         self.assertIsNone(out["data"]["po3"])
         self.assertIsNone(out["geom"]["po3"])
         self.assertEqual(out["geom"]["asia"]["label"]["text"], "ASIA")
@@ -1640,11 +1675,14 @@ class ThePo3WidgetTests(SimpleTestCase):
         self.assertIn("is-pinned", out["after"]["cls"])
         self.assertEqual(len(out["after"]["sigLines"]), 3)
         p = out["after"]["geom"]["po3"]
-        shapes = p["bands"] + p["sweeps"] + [p["arrow"]]
+        shapes = p["sweeps"] + [p["arrow"]]
         for s in shapes:
             self.assertAlmostEqual(s["k"], 0.55, msg=s["id"])
-        for s in out["before"]["geom"]["po3"]["bands"]:
-            self.assertEqual(s["k"], 1)
+        # the sessions dim with them, the days before at their own dim
+        for s in out["after"]["geom"]["sessions"]["boxes"]:
+            self.assertAlmostEqual(s["k"], 0.55 * (1 if s["newest"] else 0.6), msg=s["id"])
+        for s in out["before"]["geom"]["sessions"]["boxes"]:
+            self.assertEqual(s["k"], 1 if s["newest"] else 0.6)
         self.assertEqual(out["after"]["money"], out["before"]["money"])
         self.assertEqual(len(out["before"]["money"]), 3)
 
@@ -1704,20 +1742,22 @@ class ThePo3WidgetTests(SimpleTestCase):
         bar (§4.1 ³, F5): the tape cut at 12:15Z draws the D arrow and no
         New York band; one more quarter, and the band starts on it."""
         bars = _quarter_bars(end=(12, 15), late_return=False)
-        p = self._fine(bars)["geom"]["po3"]
+        g = self._fine(bars)["geom"]
+        p = g["po3"]
         self.assertEqual(p["sweeps"][0]["x"], _xq(bars, 8, 30), "the 08:30 quarter printed 1.08288")
         self.assertAlmostEqual(p["sweeps"][0]["tipY"], y_of(1.08288), places=9)
-        bands = {b["id"]: b for b in p["bands"]}
-        self.assertEqual(list(bands), ["sv-po3-london"], "New York has no bar yet")
-        self.assertEqual((bands["sv-po3-london"]["x0"], bands["sv-po3-london"]["x1"]),
+        # the read day's windows as its session boxes (2026-10-24)
+        bands = {b["id"]: b for b in g["sessions"]["boxes"] if b["date"] == "2026-10-07"}
+        self.assertEqual(list(bands), ["sv-ses-london-2026-10-07"], "New York has no bar yet")
+        self.assertEqual((bands["sv-ses-london-2026-10-07"]["x0"], bands["sv-ses-london-2026-10-07"]["x1"]),
                          (_xq(bars, 6, 0) - 5, _xq(bars, 8, 45) + 5))
         self.assertIsNotNone(p["arrow"], "the return is drawn inside London's quarters")
         self.assertEqual(p["arrow"]["x"], _xq(bars, 12, 0), "the 12:00 quarter closed back inside")
         bars = _quarter_bars(end=(12, 30), late_return=False)
-        p = self._fine(bars)["geom"]["po3"]
-        bands = {b["id"]: b for b in p["bands"]}
-        self.assertEqual(list(bands), ["sv-po3-london", "sv-po3-ny"])
-        self.assertEqual((bands["sv-po3-ny"]["x0"], bands["sv-po3-ny"]["x1"]),
+        g = self._fine(bars)["geom"]
+        bands = {b["id"]: b for b in g["sessions"]["boxes"] if b["date"] == "2026-10-07"}
+        self.assertEqual(list(bands), ["sv-ses-london-2026-10-07", "sv-ses-new_york-2026-10-07"])
+        self.assertEqual((bands["sv-ses-new_york-2026-10-07"]["x0"], bands["sv-ses-new_york-2026-10-07"]["x1"]),
                          (_xq(bars, 12, 30) - 5, _xq(bars, 12, 30) + 5))
 
     # W15
@@ -1766,7 +1806,8 @@ class ThePo3WidgetTests(SimpleTestCase):
         out = self._fine(bars, stages=st, mode="main")
         p = out["geom"]["po3"]
         self.assertEqual((p["sweeps"], p["arrow"], p["judas"], p["labels"]), ([], None, None, []))
-        self.assertEqual([(b["id"], b["x0"]) for b in p["bands"]], [("sv-po3-ny", _xq(bars, 13, 0) - 5)])
+        self.assertEqual([(b["id"], b["x0"]) for b in out["geom"]["sessions"]["boxes"] if b["date"] == "2026-10-07"],
+                         [("sv-ses-new_york-2026-10-07", _xq(bars, 13, 0) - 5)])
         self.assertEqual(out["phase"]["text"], "D ▲ distribution")
         self.assertIn("LAST LOW  1.08288", out["texts"])
         self.assertFalse([t for t in out["texts"] if t.startswith("M") or t.startswith("D ")])
@@ -1939,7 +1980,7 @@ class ThePo3WiringTests(SimpleTestCase):
             self.assertIn("c.session", body, name)
             self.assertEqual(HEX.findall(_strip_vars(body)), [], name)
         back = self._method("paintBack")
-        for shape in ("P3.bands.forEach", "P3.judas", "P3.arrow", "paintDiamond(ctx, s"):
+        for shape in ("P3.judas", "P3.arrow", "paintDiamond(ctx, s"):
             self.assertIn(shape, back)
         self.assertIn("ch.stage ? c.session", self._method("paintChips"), "the chip that names M")
 
@@ -1958,9 +1999,10 @@ class ThePo3WiringTests(SimpleTestCase):
         body = inspect.getsource(views._chart_positioning)
         self.assertIn("compact(pm)", body)
         self.assertIn("po3_stages", body)
-        self.assertNotIn("stages", inspect.getsource(positioning.compact))
-        self.assertNotIn("stages", inspect.getsource(positioning.side_read))
-        self.assertNotIn("stages", inspect.getsource(positioning._day_words_for_side))
+        self.assertIn("po3_sessions", body)
+        for fn in (positioning.compact, positioning.side_read, positioning._day_words_for_side):
+            self.assertNotIn("stages", inspect.getsource(fn))
+            self.assertNotIn("sessions", inspect.getsource(fn))
 
     def test_no_stage_is_a_price_line(self):
         i = self.src.index("function LevelLayer() {")

@@ -364,6 +364,9 @@ Optional page data (json_script blocks the widget picks up when present):
 .sv-lvl-key b { font-weight: 400; color: var(--text-primary, #daf0e6); }
 /* The Power of Three switch names today's phase in the session's violet (2026-10-08). */
 .sv-lvl-key [data-role="phase"] { color: var(--lvl-session, var(--accent-purple)); }
+/* ...and says when the frame cannot hold a session (a 4h bar, 2026-10-24). */
+.sv-lvl-key [data-role="sessions"] { font-size: inherit; font-style: italic; color: var(--text-secondary, #7aaa8a); }
+.sv-lvl-key [data-role="sessions"][hidden] { display: none; }
 .sv-lvl-key--answer { color: var(--accent-gold-ink, var(--accent-gold, #d8b020)); }
 .sv-lvl-key--answer[data-kind="swing"] { color: var(--lvl-swing, var(--accent-blue, #30a0e8)); }
 .sv-lvl-key--answer[aria-pressed="true"] { border-color: currentColor; text-decoration: none; opacity: 1; }
@@ -388,8 +391,14 @@ Optional page data (json_script blocks the widget picks up when present):
     border-bottom: 1px solid var(--accent-gold-ink, var(--accent-gold, #d8b020));
 }
 .sv-lvl-sw--swing { width: 14px; height: 0; border-top: 2px solid var(--lvl-swing, var(--accent-blue, #30a0e8)); }
+/* The sessions' swatch (2026-10-24): Asia, London and New York, the three
+   tones of the session violet the chart's boxes wear, side by side. */
 .sv-lvl-sw--asia {
-    background: color-mix(in srgb, var(--lvl-session, #a878f0) 16%, transparent);
+    width: 18px;
+    background: linear-gradient(90deg,
+        color-mix(in srgb, var(--lvl-session, #a878f0) 45%, transparent) 0 33.4%,
+        color-mix(in srgb, var(--lvl-session-london, #d870e0) 45%, transparent) 33.4% 66.7%,
+        color-mix(in srgb, var(--lvl-session-ny, #7c88f8) 45%, transparent) 66.7% 100%);
     border: 1px solid var(--lvl-session, #a878f0);
 }
 .sv-lvl-sw--round { height: 0; border-top: 1px dotted var(--text-secondary, #7aaa8a); }
@@ -654,7 +663,7 @@ Optional page data (json_script blocks the widget picks up when present):
             <button class="sv-ind-btn" data-ind="macd" title="MACD 12/26/9 in its own pane">MACD</button>
             <button class="sv-ind-btn" data-ind="volume" title="Volume histogram">VOL</button>
             <button class="sv-ind-btn active" data-ind="positions" title="Open positions, stops, targets and signal entries on the tape">POSITIONS</button>
-            <button class="sv-ind-btn active" data-ind="levels" title="Where the crowd keeps its stops, read off the 4h bars: liquidity pools (gold areas from their first touch), swings (blue ticks on the candle that printed them; the nearest each side runs to now), round numbers (grey dots) and the Power of Three in violet (A the Asian box, M the run of one of its sides, D the move back the other way). The key under the chart names the hunt and the draw and switches each kind. Recomputed every minute: a level the price trades through disappears">LEVELS</button>
+            <button class="sv-ind-btn active" data-ind="levels" title="Where the crowd keeps its stops, read off the 4h bars: liquidity pools (gold areas from their first touch), swings (blue ticks on the candle that printed them; the nearest each side runs to now), round numbers (grey dots) and the Power of Three in violet (every day's Asia, London and New York sessions as boxes in three violet tones on 1h and finer charts, as strips along the chart's foot on 4h; A the Asian box, M the run of one of its sides, D the move back the other way). The key under the chart names the hunt and the draw and switches each kind. Recomputed every minute: a level the price trades through disappears">LEVELS</button>
         </div>
 
         <!-- View controls -->
@@ -781,7 +790,7 @@ toolbar button, which a phone pushes off-screen.{% endcomment %}
     <button type="button" class="sv-lvl-key" data-lvl="pool" aria-pressed="true"><i class="sv-lvl-sw sv-lvl-sw--pool" aria-hidden="true"></i>Pools <b data-count="pool"></b></button>
     <button type="button" class="sv-lvl-key" data-lvl="swing" aria-pressed="true"><i class="sv-lvl-sw sv-lvl-sw--swing" aria-hidden="true"></i>Swings <b data-count="swing"></b></button>
     <button type="button" class="sv-lvl-key" data-lvl="asia" aria-pressed="true"
-            title="The day in three stages, in violet: A the Asian range (accumulation), M the run of one of its sides (manipulation, London's), D the close back inside and the other way (distribution, New York's). Intraday frames only; hover or tap a mark for its card."><i class="sv-lvl-sw sv-lvl-sw--asia" aria-hidden="true"></i>Power of Three <b data-role="phase"></b></button>
+            title="The sessions, every day, as boxes in three violet tones: Asia (20:00 to midnight New York, violet), London (02:00 to 05:00, orchid), New York (08:30 to 16:00, periwinkle), on 1h and finer charts; on 4h, by time, a strip in each tone along the chart's foot. And the day in three stages: A the Asian range (accumulation), M the run of one of its sides (manipulation, London's), D the close back inside and the other way (distribution, New York's). Hover or tap a mark for its card."><i class="sv-lvl-sw sv-lvl-sw--asia" aria-hidden="true"></i>Sessions · Power of Three <b data-role="phase"></b> <small data-role="sessions" hidden></small></button>
     <button type="button" class="sv-lvl-key" data-lvl="round" aria-pressed="true"><i class="sv-lvl-sw sv-lvl-sw--round" aria-hidden="true"></i>Round numbers <b data-count="round"></b></button>
     <span class="sv-lvl-count" data-role="count"></span>
     <button type="button" class="sv-lvl-key sv-lvl-key--all" data-lvl="all" aria-pressed="false">Show all</button>
@@ -1423,9 +1432,19 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         MARK: { hunt: '①', draw: '②', round: '◎' },
         /* The Power of Three's stages (2026-10-08), all in the session violet:
            a run's diamond (half its 8 px), its gap beyond the wick, the D
-           arrow's shaft, head and floor, and the time bands' alphas. */
+           arrow's shaft, head and floor. */
         SWEEP_R: 4, SWEEP_GAP: 2, ARROW_W: 2, ARROW_HEAD: { w: 9, h: 7 }, ARROW_MIN: 16,
-        BAND_A: { dark: 0.045, light: 0.055 }, BAND_HOT: { dark: 0.08, light: 0.09 },
+        /* The sessions (2026-10-24): a box's fill, its fill under a hovered
+           stage, its edge (dark / light); the days before the newest at
+           SES_PAST of it, their names at SES_PAST_LABEL; the names, full
+           then short (a phone: the last). */
+        SES_A: { dark: 0.08, light: 0.09 }, SES_HOT: { dark: 0.14, light: 0.16 },
+        SES_EDGE: { dark: 0.65, light: 0.8 }, SES_PAST: 0.6, SES_PAST_LABEL: 0.8,
+        SES_NAMES: { asia: ['ASIA'], london: ['LONDON', 'LDN'], new_york: ['NEW YORK', 'NY'] },
+        /* ...a box narrower than SES_THIN px reads by a solid strip in its
+           tone along the pane's foot, SES_RIBBON_H px tall at SES_RIBBON_A
+           (a 4h pane's sessions are that strip alone) */
+        SES_THIN: 8, SES_RIBBON_H: 4, SES_RIBBON_A: 0.75,
         /* a stage mark answers the pointer as DRAWN, plus this much, before
            the level shapes; its full reach (HIT) only after them: the 1h
            phone's HUNT row runs 4 px under today's diamond */
@@ -1689,16 +1708,17 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
        The operator: "I only have the Asia session noted on the chart, not
        the 3 stages of manipulation, accumulation and distribution." The
        day's three parts in the session violet, each named by its letter
-       on the mark that proves it: A the Asian box; M London's window as a
-       faint time band, a diamond just beyond the wick that ran an Asian
-       edge and the Judas swing as a thin line; D New York's window as a
-       faint time band and an arrow at the bar that closed back inside,
-       from the swept edge to the far one. A stage that has not happened
-       draws nothing; an unclear day draws both runs and no direction.
+       on the mark that proves it: A the Asian box; M a diamond just beyond
+       the wick that ran an Asian edge and the Judas swing as a thin line;
+       D an arrow at the bar that closed back inside, from the swept edge
+       to the far one. A stage that has not happened draws nothing; an
+       unclear day draws both runs and no direction. London's and New
+       York's windows are no stage's: every day's three sessions are boxes
+       of their own, whatever the phase (sessionShapes, 2026-10-24).
        Display only: nothing that trades reads any of it.
 
        env.po3 (the widget's stageEnv, in pixels) -> g.po3: {phase,
-       direction, bands [{id, x0, x1, hot, k}], sweeps [{id, side, price,
+       direction, sweeps [{id, side, price,
        text, x, tipY, cy, filled, hot, k, over (on the wick's end, over its
        candle: a marker holds the far side), box}], judas {id, x0, y0, x1, y1,
        hot, k} | null, arrow {id, side, x, y0 (tail), y1 (head tip), dir,
@@ -1714,20 +1734,10 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         var base = (env.pinned ? LV.PIN_DIM[theme] : 1) * ((env.focus && env.focus !== 'asia') ? LV.FOCUS_DIM : 1);
         var hv = env.hover || null, R = LV.SWEEP_R;
         function kOf(hot) { return hot ? 1 : base; }
-        var g = { phase: phase, direction: P.direction || null, bands: [], sweeps: [], judas: null,
+        var g = { phase: phase, direction: P.direction || null, sweeps: [], judas: null,
                   arrow: null, labels: [], folded: {},
                   labelK: (env.focus && env.focus !== 'asia') ? LV.FOCUS_DIM : 1 };
         if (!phase || phase === 'accumulation') return g;
-        var run = phase === 'manipulation' || phase === 'distribution' || phase === 'unclear';
-        function band(id, span, hot) {
-            if (!span || !ok(span.x0) || !ok(span.x1)) return;
-            var x0 = Math.max(0, span.x0), x1 = Math.min(W, span.x1);
-            if (span.x1 <= 0 || span.x0 >= W || x1 <= x0) return;
-            g.bands.push({ id: id, x0: x0, x1: x1, hot: hot, k: kOf(hot) });
-        }
-        var londonHot = hv === 'sv-po3-london' || hv === 'sv-po3-m-low' || hv === 'sv-po3-m-high' || hv === 'sv-po3-judas';
-        if (run) band('sv-po3-london', P.london, londonHot);
-        if (phase === 'distribution') band('sv-po3-ny', P.ny, hv === 'sv-po3-d');
         /* the money's markers (a position's entry arrow, the signal dots)
            and its rows, which a run's diamond never hides */
         var markers = env.boxes || [];
@@ -1813,6 +1823,71 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         }
         return g;
     }
+    /* ── THE SESSIONS (2026-10-24) ────────────────────────────────────
+       The operator: "I still only have on chart the Asia session marked,
+       not the 2 others". London and New York were a stage's evidence: a
+       faint column (4.5 %, no edge, no name) once the day had run an Asian
+       edge, New York's on a distribution day alone, the read's day only.
+       Every day in view now marks its three sessions, whatever the phase:
+       a box over the session's bars, its high to its low, in its tone of
+       the session violet — Asia the violet, London the orchid, New York
+       the periwinkle; the newest day at full strength, the days before at
+       LV.SES_PAST. The read's own Asia is the A box (its card, its label),
+       never a second box. A hover on M (its diamond, its letter, the Judas
+       line) lights the read day's London, on D its New York; a session is
+       never hit itself (over the candles it is everywhere). The M and D
+       marks stay the stages' own, drawn when they happen.
+
+       env.sessions (the widget's sessionEnv): {wide, pxh, list [{date,
+       name, x0, x1, high, low}]} | null -> g.sessions: {wide, strip,
+       newest, boxes [{id, date, name, x0, x1, yh, yl, priced, thin,
+       ribbon, clipped, newest, hot, k, label}]}.
+       `wide` (a 4h frame): a 4h bar's high and low belong to more than one
+       session, so no box can stand over a session's bars; each session is
+       marked by time alone, a strip in its tone along the pane's foot
+       (`ribbon`, no `priced` box, no name), from its open to its close
+       inside the bars (sessionEnv). `strip`: where London's three hours
+       span fewer than LV.SES_THIN px (a phone at 1h: 4 px boxes whose 1 px
+       violet and orchid edges could not be told apart), every box also
+       wears that strip, so each day reads as three blocks of colour, the
+       key's swatch; a box itself that thin (`thin`) drops its edge. `pxh`:
+       the pane's pixels per hour. Null on a daily frame, without
+       sessions, and while the Power of Three switch is off. */
+    var SESSION_ORDER = ['asia', 'london', 'new_york'];
+    function sessionShapes(env, W, H, theme) {
+        var S = env.sessions;
+        if (!S || env.highTf || (env.hidden && env.hidden.asia)) return null;
+        var wide = !!S.wide;
+        var g = { wide: wide, strip: wide || (ok(S.pxh) && 3 * S.pxh < LV.SES_THIN), newest: null, boxes: [] };
+        var list = (S.list || []).filter(function (s) {
+            return s && typeof s.date === 'string' && SESSION_ORDER.indexOf(s.name) >= 0
+                && ok(s.x0) && ok(s.x1) && (wide || (ok(s.high) && ok(s.low)));
+        });
+        list.forEach(function (s) { if (g.newest === null || s.date > g.newest) g.newest = s.date; });
+        var base = (env.pinned ? LV.PIN_DIM[theme] : 1) * ((env.focus && env.focus !== 'asia') ? LV.FOCUS_DIM : 1);
+        var hv = env.hover || null, read = env.po3 && env.po3.date;
+        var mHot = hv === 'sv-po3-m-low' || hv === 'sv-po3-m-high' || hv === 'sv-po3-judas';
+        list.forEach(function (s) {
+            if (s.x1 <= 0 || s.x0 >= W) return;
+            var yh = null, yl = null, priced = !wide;
+            if (priced) {
+                var ya = env.toY(s.high), yb = env.toY(s.low);
+                if (!ok(ya) || !ok(yb)) return;
+                yh = Math.min(ya, yb); yl = Math.max(ya, yb);
+                /* off the pane's prices: its strip alone, where it has one */
+                if (yl < 0 || yh > H) { if (!g.strip) return; priced = false; yh = yl = null; }
+            }
+            var id = 'sv-ses-' + s.name + '-' + s.date, newest = s.date === g.newest;
+            var hot = hv === id || (!!read && s.date === read
+                && ((s.name === 'london' && mHot) || (s.name === 'new_york' && hv === 'sv-po3-d')));
+            g.boxes.push({ id: id, date: s.date, name: s.name, x0: Math.max(0, s.x0), x1: Math.min(W, s.x1),
+                           yh: yh, yl: yl, priced: priced, thin: priced && s.x1 - s.x0 < LV.SES_THIN,
+                           ribbon: g.strip, clipped: s.x0 < 0, newest: newest, hot: hot,
+                           k: hot ? 1 : base * (newest ? 1 : LV.SES_PAST) });
+        });
+        return g;
+    }
+
     /* The M words for a run: SWEEP once it came back inside (the
        distribution), RUN while it holds (the manipulation); a phone, the
        letter. */
@@ -1841,14 +1916,15 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
        crosshair legend, the bar-close countdown), candles [{x0,x1,y0,y1}]
        (the newest candles, high to low), asia {high, low, x0, x1} | null,
        po3 (the day's stages in pixels, the widget's stageEnv: {phase,
-       direction, london {x0, x1} | null, ny {x0, x1} | null, sweeps [{side,
-       price, edge, x, tip, back, text}], judas {x0, open, x1, extreme} |
-       null, ret {x, from, to} | null, draw 'agrees' | 'disagrees' | null})
-       | null, measure(text) -> px}. */
+       direction, date (the read's trading day), sweeps [{side, price,
+       edge, x, tip, back, text}], judas {x0, open, x1, extreme} | null,
+       ret {x, from, to} | null, draw 'agrees' | 'disagrees' | null})
+       | null, sessions (every day's three, the widget's sessionEnv: see
+       sessionShapes) | null, measure(text) -> px}. */
     function layout(items, env) {
         var W = env.width, H = env.height, theme = env.theme === 'light' ? 'light' : 'dark';
         var g = { theme: theme, bands: [], hatch: null, rays: [], ticks: [], dots: [], rounds: [],
-                  asia: null, po3: null, chips: [], edges: [], unplaced: [],
+                  asia: null, po3: null, sessions: null, chips: [], edges: [], unplaced: [],
                   /* what the chips kept clear of, as given (for the eye and the tests) */
                   keep: { marks: env.boxes || [], overlays: env.overlays || [], candles: env.candles || [],
                           lastY: ok(env.lastY) ? env.lastY : null,
@@ -1856,6 +1932,8 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                   count: { shown: 0, total: 0, pool: 0, swing: 0, round: 0 } };
         /* the day's stages first: the fold below names a ray M by them */
         g.po3 = stageShapes(env, W, H, theme, g.keep.titles);
+        /* every day's three sessions (2026-10-24): no chip keeps off a box */
+        g.sessions = sessionShapes(env, W, H, theme);
         var moneyY = (env.money || []).map(function (m) { return m.y; }).filter(ok);
         var off = { above: [], below: [] }, cands = [], drawn = {};
         /* where a stamp lands on the pane: x, -1 before the loaded bars, or null */
@@ -2392,6 +2470,62 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                 }, false, mStart === null ? null : function (r) { return r.x0 >= mStart; });
             }
         }
+        /* The sessions' names (2026-10-24), after every chip and the A, M
+           and D labels, so none of them moves for a name, and before the
+           hovered chip forced in last, so a hover moves a name no more than
+           a chip. The newest day first, in the day's order. A name sits on
+           its own box, centred: over it, else under it, and the newest
+           day's also inside its top or its bottom edge (today's London
+           often has the last price over it and its swept low under it). It
+           keeps off the title boxes (not the whole lane), every level's
+           shapes, the money's rows, the markers, the page's boxes, the
+           stages' marks and what is placed; clear of the newest candles,
+           else over them as bare words. Its words are no wider than its box
+           and a chip's padding each side — a wider name sat on the
+           neighbouring session and named it — the full name, then the
+           short one (a phone: the short); the newest day's short name
+           alone may overhang a box narrower still, as the A label does.
+           Whatever its width, a name stays centred over its own box (the
+           pane's edge may not slide it off) and never meets another
+           session's box or the A box: today's boxes stand at the right
+           edge, and the phone's 'NY', slid left, sat wholly on London.
+           No slot: no name — the box's tone and the key's swatch say which.
+           A strip by time alone (a 4h pane) is never named. */
+        var gs = g.sessions;
+        if (gs && gs.boxes.length) {
+            var sesOrder = gs.boxes.filter(function (b) { return b.priced; }).sort(function (a, b) {
+                return (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)
+                    || (SESSION_ORDER.indexOf(a.name) - SESSION_ORDER.indexOf(b.name));
+            });
+            var aBox = (g.asia && !g.asia.wash && ok(g.asia.x0) && ok(g.asia.x1))
+                ? [{ x0: g.asia.x0, x1: g.asia.x1, y0: g.asia.yh, y1: g.asia.yl }] : [];
+            sesOrder.forEach(function (b) {
+                var names = LV.SES_NAMES[b.name] || [], words = env.phone ? names.slice(-1) : names;
+                var o = { titles: titled, id: b.id }, oLoose = { titles: titled, id: b.id, loose: true };
+                var near = sesOrder.filter(function (q) { return q !== b; })
+                    .map(function (q) { return { x0: q.x0, x1: q.x1, y0: q.yh, y1: q.yl }; }).concat(aBox);
+                var fits = function (wd) { return measure(wd) <= b.x1 - b.x0 + 2 * LV.CHIP_PAD; };
+                var order = words.filter(fits);
+                if (b.newest && words.length && !fits(words[words.length - 1])) order.push(words[words.length - 1]);
+                for (var vi = 0; vi < order.length; vi++) {
+                    var wd = order[vi], lw = measure(wd) + 2 * LV.CHIP_PAD;
+                    var sMax = (titled ? W : laneX) - 2 - lw;
+                    var mid = Math.max(2, Math.min((b.x0 + b.x1 - lw) / 2, sMax));
+                    var tries = [rect(mid, b.yh - LV.CHIP_H - 1, wd), rect(mid, b.yl + 1, wd)];
+                    if (b.newest && b.yl - b.yh >= LV.CHIP_H + 2) tries.push(rect(mid, b.yh + 1, wd), rect(mid, b.yl - 1 - LV.CHIP_H, wd));
+                    tries = tries.filter(function (r) {
+                        var cx = (r.x0 + r.x1) / 2;
+                        return cx >= b.x0 && cx <= b.x1 && !any(r, near, 0, 0);
+                    });
+                    var sr = first(tries, o) || first(tries, oLoose);
+                    if (!sr) continue;
+                    sr.bare = any(sr, candles, 0, 0);
+                    sr.k = b.hot ? 1 : (b.newest ? 1 : LV.SES_PAST_LABEL) * ((env.focus && env.focus !== 'asia') ? LV.FOCUS_DIM : 1);
+                    b.label = sr; placed.push(sr);
+                    break;
+                }
+            });
+        }
         late.forEach(function (c) {                               /* the hovered chip, forced in */
             unfold(c);                                            /* always PR51's chip, never M */
             var full = slots(c, c.text), o = { own: true, loose: true, mix: true, id: c.id };
@@ -2426,9 +2560,10 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
        part 'label' | 'mark' | 'judas'} or null. A label by its exact box
        (the widget asks that before the money lines, as for a chip);
        `labelsOnly` false: a run's diamond or the D arrow by its box ± tol,
-       then the Judas line by its distance. The time bands are never hit:
-       over today's candles a full-height target would pop a card at every
-       rest of the pointer. `drawn` (2026-10-08): a diamond by its drawn
+       then the Judas line by its distance. A session's box is never hit
+       (2026-10-24; the time bands before it neither): over the candles a
+       session is everywhere and would pop a card at every rest of the
+       pointer. `drawn` (2026-10-08): a diamond by its drawn
        rhombus ± tol rather than its box — the widget asks that first, with
        LV.MARK_HIT, before the level shapes, and the box ± a finger's reach
        only after them: the phone's HUNT row ran through the diamond's box
@@ -2627,14 +2762,21 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
        alone (dashboard/views._chart_positioning): with them the layer also
        draws M and D (svLevels' stageShapes); without them — a reply cached
        before the change — the box is PR51's, labelled ASIA. Never a price
-       line: the fallback below stays the two faint Asia lines. */
+       line: the fallback below stays the two faint Asia lines.
+       (2026-10-24) The reply's po3 also carries every recent day's three
+       sessions (`sessions`, the server's calendar): the layer marks them
+       read or unread — a weekend's day without an Asian range still shows
+       the week's sessions. */
     function applyAsianRange(po3) {
         amdLines.forEach(function (pl) { try { mainSeries.removePriceLine(pl); } catch (e) {} });
         amdLines = [];
         ASIA = null;
         var layer = ensureLevelLayer();
-        if (layer) layer.set({ asia: null, po3: null });
-        if (!mainSeries || !activeInds.levels || !po3 || !po3.ok || !po3.asia) { paintLevelKey(); return; }
+        if (layer) layer.set({ asia: null, po3: null, sessions: null });
+        if (!mainSeries || !activeInds.levels || !po3) { paintLevelKey(); return; }
+        var days = Array.isArray(po3.sessions) && po3.sessions.length ? po3.sessions : null;
+        if (layer && days) layer.set({ sessions: days });
+        if (!po3.ok || !po3.asia) { paintLevelKey(); return; }
         var a = po3.asia;
         if (typeof a.high !== 'number' || typeof a.low !== 'number') { paintLevelKey(); return; }
         ASIA = { high: a.high, low: a.low, phase: po3.phase, words: po3.words,
@@ -2751,6 +2893,11 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             ink:          token('--text-primary', isDark ? '#daf0e6' : '#1a2a1a'),
             swing:        token('--lvl-swing', isDark ? '#30a0e8' : '#1f6fb2'),
             session:      token('--lvl-session', isDark ? '#a878f0' : '#8840d0'),
+            /* The sessions' other two tones (2026-10-24): London the
+               orchid, New York the periwinkle, in the session violet's
+               family and apart from the swing blue and the pool gold. */
+            sessionLondon: token('--lvl-session-london', isDark ? '#d870e0' : '#a03aa8'),
+            sessionNy:     token('--lvl-session-ny', isDark ? '#7c88f8' : '#4a48c8'),
         };
     }
     function indicatorTone(key, c) {
@@ -4116,7 +4263,7 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
        autoscaleInfo, no axis views. */
     function LevelLayer() {
         var self = this;
-        this.request = null; this.geom = null; this.data = { items: [], asia: null, box: null, po3: null };
+        this.request = null; this.geom = null; this.data = { items: [], asia: null, box: null, po3: null, sessions: null };
         this.views = [{ zOrder: function () { return 'normal'; },
             renderer: function () { return {
                 draw: function () {},
@@ -4198,27 +4345,26 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
        is short); these place it on the chart's. Binary searches over
        lastBars, nothing past the last bar. */
     /* A session window [opened, closed) as the chart bars that overlap it,
-       edge to edge (the bar holding New York's 08:30 is in). Frames of 1h
-       and finer only: a 4h bar straddles London and New York. */
-    function spanX(win, half) {
+       edge to edge (the bar holding New York's 08:30 is in): {i0, i1}, or
+       null when no loaded bar lies in it (an upcoming window, a shut
+       market's day). Nothing past the newest bar. */
+    function spanIdx(win) {
         if (!win || typeof win.opened !== 'number' || typeof win.closed !== 'number') return null;
         var tf = TF_SECONDS[currentTf], n = lastBars.length;
-        if (!tf || tf > 3600 || !n) return null;
+        if (!tf || !n) return null;
         var i0 = barIndexAt(win.opened);
         if (i0 === null) return null;
         if (i0 < 0) i0 = 0;
         else if (barEpoch(lastBars[i0].time) + tf <= win.opened) i0++;
         var i1 = barIndexAt(win.closed - 1);
         if (i1 === null || i1 < 0 || i0 >= n || i1 < i0) return null;
-        var x0 = barX(i0), x1 = barX(i1);
-        if (x0 === null || x1 === null) return null;
-        return { x0: x0 - half, x1: x1 + half };
+        return { i0: i0, i1: i1 };
     }
     /* The first chart bar inside the read's bar [epoch, epoch + bar): its
        index, or null when the chart's feed has no bar there (the 15min
        tape is another feed's, so a London without bars is reachable). A
-       mark with nowhere honest to stand then draws nothing, as spanX's
-       band does — never the last Asian bar (2026-10-15). */
+       mark with nowhere honest to stand then draws nothing, as spanIdx's
+       window does — never the last Asian bar (2026-10-15). */
     function barIn(epoch, bar) {
         var n = lastBars.length;
         if (!n || typeof epoch !== 'number') return null;
@@ -4265,11 +4411,13 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         return (runI !== null && k < runI) ? runI : k;
     }
     /* The layer's data.po3 -> svLevels.layout's env.po3, or null (no day,
-       a daily frame). */
-    function stageEnv(p, asia, spacing) {
+       a daily frame). London's and New York's windows are the sessions'
+       (sessionEnv, 2026-10-24); `date` names the read's trading day, whose
+       London and New York a hovered stage lights. */
+    function stageEnv(p, asia) {
         var api = lvApi();
         if (!p || !p.stages || !api || INTRADAY.indexOf(currentTf) === -1 || !lastBars.length) return null;
-        var st = p.stages, bar = st.bar || 3600, half = Math.max(1, (spacing || 6) / 2);
+        var st = p.stages, bar = st.bar || 3600;
         var list = Array.isArray(st.sweeps) ? st.sweeps : [], sweeps = [], runI = [];
         list.forEach(function (s) {
             if (!s || (s.side !== 'low' && s.side !== 'high')) return;
@@ -4300,9 +4448,106 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         var agree = api.drawAgrees(POSMAP, p.direction, mark);
         /* the label names the draw (② DRAW) only when the leg has a price */
         if (agree === 'agrees' && !(leg && typeof leg.price === 'number' && isFinite(leg.price))) agree = null;
-        return { phase: p.phase, direction: p.direction || null,
-                 london: spanX(st.london, half), ny: spanX(st.new_york, half),
+        return { phase: p.phase, direction: p.direction || null, date: st.date || null,
                  sweeps: sweeps, judas: judas, ret: ret, draw: agree };
+    }
+
+    /* The layer's data.sessions (every recent day's three windows, the
+       server's calendar: bot_program/power_of_three.session_days) ->
+       svLevels.layout's env.sessions (2026-10-24): each window over the
+       chart's own bars, edge to edge, its high and low as the candles drawn
+       have them, so the box fits them on 1min to 1h. A window with no
+       loaded bar draws nothing (upcoming, before the tape, a shut day). The
+       read's Asia — the window that holds the A box (`aWin`, the span the
+       box stands on: computeGeom) — is the A box's alone; a window the box
+       merely overlaps keeps its own (a 4h read's box after the US clock
+       change, 2026-10-24).
+       A 4h frame cannot hold a session's prices: a 4h bar straddles Asia's
+       close and London's open, London's three hours and New York's 08:30.
+       Each window is then marked by time alone (`wide`, every entry a
+       `ribbon`): its open and its close placed inside the bar that holds
+       them, the bar's left edge plus the time's share of it; a time in a
+       gap (the weekend) at the edge of the bar before it, so a shut day's
+       window spans nothing and is dropped. Every day's Asia too: a strip
+       is a time, the A box a price.
+       An exchange-hours tape (a US stock, a cash index: no Asia and no
+       London on any day in view) draws no session at all — one New York
+       box around every whole trading day says nothing. A day with New
+       York alone keeps it only in a tape that has the others and when its
+       London lies before the tape's first bar (the oldest day).
+       `pxh`: the pane's pixels per hour (sessionShapes' strip). Null on a
+       daily frame. */
+    function sessionEnv(days, aWin, spacing) {
+        if (!Array.isArray(days) || !days.length || INTRADAY.indexOf(currentTf) === -1 || !lastBars.length) return null;
+        var tf = TF_SECONDS[currentTf];
+        if (!tf) return null;
+        var sp = spacing || 6, half = Math.max(1, sp / 2), wide = tf > 3600;
+        var shown = shownBars(), list = [], has = {}, any = false, byDate = {};
+        var t0 = barEpoch(lastBars[0].time);
+        var aOk = !!aWin && typeof aWin.opened === 'number' && typeof aWin.closed === 'number';
+        /* a time's x inside the bar that holds it (a 4h frame) */
+        function at(t) {
+            var i = barIndexAt(t);
+            if (i === null) return null;
+            var x = barX(i < 0 ? 0 : i);
+            if (x === null) return null;
+            if (i < 0) return x - half;
+            var f = Math.max(0, Math.min(1, (t - barEpoch(lastBars[i].time)) / tf));
+            return x - half + f * sp;
+        }
+        days.forEach(function (d) {
+            if (!d || typeof d.date !== 'string') return;
+            byDate[d.date] = d;
+            ['asia', 'london', 'new_york'].forEach(function (name) {
+                var w = d[name];
+                if (!w || typeof w.opened !== 'number' || typeof w.closed !== 'number') return;
+                if (wide) {
+                    var a = at(w.opened), b = at(w.closed);
+                    if (a === null || b === null || b - a < 0.5) return;
+                    if (name !== 'new_york') { has[d.date] = true; any = true; }
+                    list.push({ date: d.date, name: name, x0: a, x1: b, ribbon: true });
+                    return;
+                }
+                var r = spanIdx(w);
+                if (!r) return;
+                if (name !== 'new_york') { has[d.date] = true; any = true; }
+                if (name === 'asia' && aOk && aWin.opened >= w.opened && aWin.closed <= w.closed) return;
+                var x0 = barX(r.i0), x1 = barX(r.i1), hi = -Infinity, lo = Infinity;
+                if (x0 === null || x1 === null) return;
+                for (var i = r.i0; i <= r.i1; i++) {
+                    var b = shown[i];
+                    if (!b) continue;
+                    if (b.high > hi) hi = b.high;
+                    if (b.low < lo) lo = b.low;
+                }
+                if (!isFinite(hi) || !isFinite(lo)) return;
+                list.push({ date: d.date, name: name, x0: x0 - half, x1: x1 + half, high: hi, low: lo });
+            });
+        });
+        list = list.filter(function (s) {
+            if (s.name !== 'new_york' || has[s.date]) return true;
+            var d = byDate[s.date];
+            return any && !!d && !!d.london && typeof d.london.opened === 'number' && d.london.opened < t0;
+        });
+        return { wide: wide, pxh: sp * 3600 / tf, list: list };
+    }
+    /* (2026-10-24) A read on a wider bar than the chart's (the 4h read
+       when the 1h tape is short) stamps the A box on the 4h bar that holds
+       the Asian bars: after the US clock change that bar is 04:00 to 08:00
+       UTC while Asia is 01:00 to 05:00, and the box ran into London. On a
+       finer chart the box then stands on the read day's Asia window, over
+       its own bars, at the read's prices: {win, i0, i1}, or null — the
+       read's own bar, a box already inside its window, no such window, no
+       bar in it. */
+    function readAsiaWindow(d, aWin) {
+        var st = d.po3 && d.po3.stages, tf = TF_SECONDS[currentTf];
+        if (!aWin || !st || typeof st.date !== 'string' || !tf || !(st.bar > tf) || !Array.isArray(d.sessions)) return null;
+        var w = null;
+        d.sessions.forEach(function (s) { if (s && s.date === st.date) w = s.asia; });
+        if (!w || typeof w.opened !== 'number' || typeof w.closed !== 'number') return null;
+        if (aWin.opened >= w.opened && aWin.closed <= w.closed) return null;
+        var r = spanIdx(w);
+        return r ? { win: { opened: w.opened, closed: w.closed }, i0: r.i0, i1: r.i1 } : null;
     }
 
     /* The money's rows, which a level chip never sits on: the open
@@ -4492,12 +4737,16 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         var ts = chart.timeScale(), d = this.data;
         var toY = function (p) { var y = mainSeries.priceToCoordinate(p); return y === null ? null : y; };
         var spacing = ((ts.options && ts.options()) || {}).barSpacing;
-        var asia = null;
+        var asia = null, aWin = null;
         if (d.asia) {
             /* The box covers its session's bars, edge to edge. */
             var half = Math.max(1, (spacing || 6) / 2);
             var ok2 = typeof d.asia.opened === 'number' && typeof d.asia.closed === 'number';
             var x0 = ok2 ? epochX(d.asia.opened) : null, x1 = ok2 ? epochX(d.asia.closed - 1) : null;
+            aWin = ok2 ? { opened: d.asia.opened, closed: d.asia.closed } : null;
+            /* a wider read's box on the read day's Asia window (2026-10-24) */
+            var moved = readAsiaWindow(d, aWin);
+            if (moved) { aWin = moved.win; x0 = barX(moved.i0); x1 = barX(moved.i1); }
             asia = { high: d.asia.high, low: d.asia.low,
                      x0: x0 === null ? null : (x0 < 0 ? 0 : x0 - half),
                      x1: x1 === null ? null : (x1 < 0 ? 0 : x1 + half) };
@@ -4518,7 +4767,8 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             hlines: hlineRows(toY), lastY: lastShown === null ? null : toY(lastShown),
             boxes: api.markerBoxes(markerPoints(toY), spacing, 10),
             overlays: overlayBoxes(w), candles: candleBoxes(toY, w, spacing),
-            asia: asia, po3: stageEnv(d.po3, d.asia, spacing), measure: measureChip
+            asia: asia, po3: stageEnv(d.po3, d.asia),
+            sessions: sessionEnv(d.sessions, aWin, spacing), measure: measureChip
         });
     };
 
@@ -4574,16 +4824,34 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                     }
                 }
                 if (!g) return;
-                /* The Power of Three's windows (2026-10-08): London's and New
-                   York's faint full-height columns, first of the level shapes
-                   so every one of them (and the candles, and every price line)
-                   paints over them. No edge lines: a band is time only. */
-                var P3 = g.po3, LVa = api ? api.LV : null;
-                if (P3 && LVa) P3.bands.forEach(function (b) {
-                    var bx0 = X(b.x0);
-                    ctx.fillStyle = tone(c.session, (b.hot ? T(LVa.BAND_HOT.dark, LVa.BAND_HOT.light)
-                                                           : T(LVa.BAND_A.dark, LVa.BAND_A.light)) * (b.hot ? 1 : b.k));
-                    ctx.fillRect(bx0, 0, Math.max(1, X(b.x1) - bx0), Y(h));
+                /* The sessions (2026-10-24): every day's Asia, London and New
+                   York, a box over its bars in its own tone of the session
+                   violet, a light fill and a 1 px edge — first of the level
+                   shapes, so every one of them (and the candles, and every
+                   price line) paints over them. A box too thin for its edge
+                   to read drops it; a strip (a 4h pane's session, a thin
+                   pane's every box) is a solid band in the tone along the
+                   pane's foot. */
+                var P3 = g.po3, LVa = api ? api.LV : null, GS = g.sessions;
+                if (GS && LVa) GS.boxes.forEach(function (b) {
+                    var col = b.name === 'london' ? c.sessionLondon : b.name === 'new_york' ? c.sessionNy : c.session;
+                    var bk = b.hot ? 1 : b.k, bx0 = X(b.x0), bw = Math.max(1, X(b.x1) - bx0);
+                    ctx.setLineDash([]);
+                    if (b.priced) {
+                        var by0 = Y(b.yh), bh = Math.max(1, Y(b.yl) - by0);
+                        ctx.fillStyle = tone(col, (b.hot ? T(LVa.SES_HOT.dark, LVa.SES_HOT.light)
+                                                         : T(LVa.SES_A.dark, LVa.SES_A.light)) * bk);
+                        ctx.fillRect(bx0, by0, bw, bh);
+                        if (!b.thin) {
+                            ctx.strokeStyle = tone(col, T(LVa.SES_EDGE.dark, LVa.SES_EDGE.light) * bk);
+                            frame(bx0, by0, bw, bh, Math.max(1, Math.floor(hr)));
+                        }
+                    }
+                    if (b.ribbon) {
+                        var rh = Math.max(1, Math.round(LVa.SES_RIBBON_H * vr));
+                        ctx.fillStyle = tone(col, LVa.SES_RIBBON_A * bk);
+                        ctx.fillRect(bx0, Y(h) - rh, bw, rh);
+                    }
                 });
                 /* Round numbers: a dotted guide, clearly over the grid. */
                 g.rounds.forEach(function (r) {
@@ -4721,8 +4989,9 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
     LevelLayer.prototype.paintChips = function (target) {
         var g = this.geom;
         var overs = (g && g.po3) ? g.po3.sweeps.filter(function (s) { return s.over; }) : [];
+        var named = (g && g.sessions) ? g.sessions.boxes.filter(function (b) { return b.label; }) : [];
         if (!g || !(g.chips.length || g.edges.length || (g.asia && g.asia.label)
-                    || (g.po3 && g.po3.labels.length) || overs.length)) return;
+                    || (g.po3 && g.po3.labels.length) || overs.length || named.length)) return;
         target.useBitmapCoordinateSpace(function (s) {
             var ctx = s.context, hr = s.horizontalPixelRatio, vr = s.verticalPixelRatio;
             var c = levelPalette(), api = lvApi(), pad = api ? api.LV.CHIP_PAD : 4;
@@ -4778,14 +5047,14 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                    Over candles, bare words as PR51's ASIA: a plate there hid
                    the newest bars. (A level chip that names M keeps its
                    plate: bare, its price over the bars read '1.0?2?8'.) */
-                var plate = function (r, text, k) {
+                var plate = function (r, text, k, ink) {
                     var x0 = Math.round(r.x0 * hr), x1 = Math.round(r.x1 * hr);
                     var y0 = Math.round(r.y0 * vr), y1 = Math.round(r.y1 * vr);
                     if (!r.bare) {
                         ctx.globalAlpha = 0.85 * k; ctx.fillStyle = c.bg;
                         ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
                     }
-                    ctx.globalAlpha = 0.95 * k; ctx.fillStyle = c.session;
+                    ctx.globalAlpha = 0.95 * k; ctx.fillStyle = ink || c.session;
                     ctx.fillText(text, x0 + Math.round(pad * hr), Math.round((y0 + y1) / 2) + 0.5);
                 };
                 if (g.asia && g.asia.label) {
@@ -4797,6 +5066,11 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                     }
                 }
                 if (g.po3) g.po3.labels.forEach(function (lb) { plate(lb, lb.text, lb.k); });
+                /* the sessions' names (2026-10-24), each in its box's tone */
+                named.forEach(function (b) {
+                    plate(b.label, b.label.text, b.label.k,
+                          b.name === 'london' ? c.sessionLondon : b.name === 'new_york' ? c.sessionNy : c.session);
+                });
             } finally { ctx.restore(); }
         });
     };
@@ -4847,6 +5121,22 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         var pb = keyBtn('asia');
         var pe = (pb && typeof pb.querySelector === 'function') ? pb.querySelector('[data-role="phase"]') : null;
         if (pe) { pe.textContent = pa ? pa.text : ''; pe.title = pa ? pa.title : ''; }
+        /* (2026-10-24) A frame wider than 1h cannot hold a session's
+           prices — a 4h bar straddles Asia's close and London's open — so
+           a 4h chart marks each session by time, a strip along its foot,
+           a daily chart none, and the switch says where the boxes are. */
+        var se = (pb && typeof pb.querySelector === 'function') ? pb.querySelector('[data-role="sessions"]') : null;
+        if (se) {
+            var tfs = TF_SECONDS[currentTf];
+            var said = !!(activeInds.levels && POSMAP && POSMAP.po3 && Array.isArray(POSMAP.po3.sessions)
+                          && POSMAP.po3.sessions.length && (!tfs || tfs > 3600));
+            se.hidden = !said;
+            se.textContent = said ? (lvlPhone ? '· boxes on 1h' : '· session boxes on 1h or finer') : '';
+            se.title = said ? 'A 4h bar straddles the sessions (Asia closes and London opens inside one, '
+                + 'New York opens at 08:30), so no box can stand over a session\'s bars: a 4h chart marks '
+                + 'each session by time, a strip in its tone along the foot of the chart; the boxes are '
+                + 'drawn on 1h and finer charts.' : '';
+        }
         ['below', 'above'].forEach(function (side) {
             var sb = keyBtn(side); if (!sb) return;
             var a = (api && activeInds.levels) ? api.keyAnswer(lvlItems, side, lvlPhone) : null;
@@ -5056,7 +5346,8 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
        drawn (asked after the money, before the level shapes), else the
        same marks within the pointer's reach (after the level shapes: a
        tap on the HUNT band beside the diamond opens the hunt). The stage's
-       id glows, its mark and its band. Never a time band. */
+       id glows, its mark and its session's box (M London's, D New
+       York's). Never a session's box itself. */
     /* how: 'labels' (exact boxes), 'drawn' (a mark as drawn + LV.MARK_HIT,
        asked before the level shapes) or 'reach' (a mark's box + the
        pointer's reach, asked after them) */
