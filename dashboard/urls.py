@@ -597,9 +597,14 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
 
     # ── Phase 38: knowledge graph + hypothesis market ──────────────────────────
     path("knowledge/", knowledge_dashboard, name="knowledge_dashboard"),
-    path("knowledge/rule_state/<str:key>/clear/", knowledge_rule_state_clear,
+    # <path:key>: a rule_state key may hold a "/" ("<rule>/stock", a class
+    # key the Mind wrote before 2026-10-15), and a <str:key> link to it made
+    # /knowledge/ fail to render at all (2026-10-24). The clear route stays
+    # first, so ".../<key>/clear/" reaches the clear view, which refuses a
+    # class key with a 404.
+    path("knowledge/rule_state/<path:key>/clear/", knowledge_rule_state_clear,
          name="knowledge_rule_state_clear"),
-    path("knowledge/<str:kind>/<str:key>/", knowledge_node_history,
+    path("knowledge/<str:kind>/<path:key>/", knowledge_node_history,
          name="knowledge_node_history"),
     path("hypotheses/", hypotheses_dashboard, name="hypotheses_dashboard"),
     path("hypotheses/critic-run/", critic_run_now, name="critic_run_now"),

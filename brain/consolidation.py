@@ -221,8 +221,10 @@ def _tighten_from_last_report(now, window: int, out: dict) -> None:
     a pause it said before it went quiet keeps binding through the outage
     ("a Mind that is down keeps its pauses"). Nothing is re-affirmed,
     counted or released from it, and a node version newer than that
-    report (a release or a superuser's clear since) is left as it is."""
-    from .context import BINDING_STATUSES, STATUS_RANK
+    report (a release or a superuser's clear since) is left as it is. A
+    class key ("<rule>/stock") is never added: no gate would read it
+    (2026-10-24)."""
+    from .context import BINDING_STATUSES, STATUS_RANK, split_rule_key
     from .knowledge_models import KnowledgeNode
     from .models import BrainReport
 
@@ -239,7 +241,7 @@ def _tighten_from_last_report(now, window: int, out: dict) -> None:
     venues = venues if isinstance(venues, dict) else {}
     as_of = report.created_at.isoformat()
     for rule, status in overlay.items():
-        if status not in BINDING_STATUSES:
+        if status not in BINDING_STATUSES or not split_rule_key(rule)[2]:
             continue
         rule = str(rule)
         current = KnowledgeNode.current(KnowledgeNode.KIND_RULE_STATE, rule)
@@ -285,9 +287,17 @@ def _consolidate_rule_states(*, releases: bool = False, out=None) -> dict:
     appended to `out["released_rules"]` the moment it is written, for the
     audit rows and the staff notice; `out` is the caller's, so a later
     step raising never hides a release already on disk.
+
+    A class key in the report ("<rule>/stock", "<rule>:forex": brain.
+    context.split_rule_key) is not named: no gate reads one, so it is never
+    written, re-affirmed or tightened into a node, and a class node left
+    from before takes its one miss every fresh night, named or not, and is
+    released on the third with a reason that says so (2026-10-24). It is
+    never folded onto the bare rule: that would widen a one-class word to
+    every class.
     """
     from .context import (BINDING_STATUSES, STATUS_RANK, _parse_iso,
-                          mind_fresh_minutes)
+                          mind_fresh_minutes, split_rule_key)
     from .knowledge_models import KnowledgeNode
     from .models import BrainReport
 
@@ -307,7 +317,8 @@ def _consolidate_rule_states(*, releases: bool = False, out=None) -> dict:
     venues = venues if isinstance(venues, dict) else {}
     as_of = report.created_at.isoformat()
     named = {str(rule): status for rule, status in overlay.items()
-             if status in (*BINDING_STATUSES, "active")}
+             if status in (*BINDING_STATUSES, "active")
+             and split_rule_key(rule)[2]}
 
     def release(node, why, now_status="allow"):
         was = dict(node.payload or {})
@@ -384,8 +395,15 @@ def _consolidate_rule_states(*, releases: bool = False, out=None) -> dict:
             misses = 1
         if misses >= RELEASE_AFTER_MISSES:
             last = payload.get("affirmed_at") or payload.get("as_of") or "?"
-            release(node, (f"not named in {RELEASE_AFTER_MISSES} fresh "
-                           f"nightly reports in a row (last affirmed {last})"))
+            if split_rule_key(node.key)[2]:
+                why = (f"not named in {RELEASE_AFTER_MISSES} fresh nightly "
+                       f"reports in a row (last affirmed {last})")
+            else:
+                # Named or not, a class key is never re-affirmed: "not
+                # named" would be false when the Mind still says it.
+                why = (f"a class key, never re-affirmed: {RELEASE_AFTER_MISSES}"
+                       f" fresh nights in a row (last affirmed {last})")
+            release(node, why)
         elif _touch_rule_state(node, {"misses": misses,
                                       "last_missed_report_id": report.id,
                                       "last_missed_at": now.isoformat()}):
@@ -396,32 +414,49 @@ def _consolidate_rule_states(*, releases: bool = False, out=None) -> dict:
 def _announce_releases(released: list) -> None:
     """One audit row per release and ONE staff notice for the night,
     naming each rule and where it can trade now. Names and statuses only.
-    Fenced: a release that happened is never undone by its announcement."""
+    Fenced: a release that happened is never undone by its announcement.
+
+    A class key's release ("<rule>/stock") changes nothing for the rule's
+    entries, since no gate read it: its line says so, and its stage and
+    the audit row's real_money are the bare rule's (2026-10-24)."""
+    from .context import split_rule_key
     if not released:
         return
     lines = []
+    n_class = 0
     for r in released:
-        reach = rule_reach(r["rule_name"])
+        bare, _, read = split_rule_key(r["rule_name"])
+        reach = rule_reach(bare)
         try:
             from bot_program.audit import record_event
             record_event(AUDIT_RELEASE, {
                 **r, "promotion_stage": reach["stage"],
                 "control_status": reach["control_status"],
-                "real_money": reach["real_money"]})
+                "real_money": reach["real_money"],
+                "read_by_gates": read})
         except Exception as e:  # noqa: BLE001
             logger.warning("[consolidation] release audit failed: %s",
                            type(e).__name__)
-        blocks = ("its entries are no longer blocked"
-                  if r["was_status"] == "pause_recommended"
-                  else "no longer watched")
+        if not read:
+            n_class += 1
+            blocks = (f"read by no gate, so nothing changes for {bare}'s "
+                      f"entries")
+        elif r["was_status"] == "pause_recommended":
+            blocks = "its entries are no longer blocked"
+        else:
+            blocks = "no longer watched"
         lines.append(f"{r['rule_name']}: {r['was_status']} -> "
                      f"{r['now_status']} ({r['why']}); {blocks}; "
                      f"{reach['words']}")
     try:
         from bot_program.notifications import notify_staff
-        n = len(released)
+        n = len(released) - n_class
+        title = f"Sauron's Mind released {n} rule{'s' if n != 1 else ''}"
+        if n_class:
+            title += (f" and {n_class} class key{'s' if n_class != 1 else ''}"
+                      f" no gate read")
         notify_staff(
-            title=f"Sauron's Mind released {n} rule{'s' if n != 1 else ''}",
+            title=title,
             body=("\n".join(lines)
                   + "\nA released rule still passes the stage, proof and "
                     "posture gates. " + KEEP_OFF_WORDS),

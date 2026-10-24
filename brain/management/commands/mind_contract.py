@@ -16,6 +16,12 @@ bands and counts only.
 
 There is no shell clear on purpose (core/switch_pin.py): a node is
 cleared on /knowledge/ by a superuser with the trading PIN.
+
+A class key ("<rule>/stock", "<rule>:forex": brain.context.split_rule_key)
+is read by no rule gate, since every reader asks with the bare rule name:
+its line says so, and what the bare rule's entries get and where it trades
+(2026-10-24). manual_take's pause is counted apart: no bot trades it, and
+on the ticket it is a warning, never a block.
 """
 from django.core.management.base import BaseCommand
 from django.utils import timezone
@@ -53,7 +59,7 @@ class Command(BaseCommand):
     def _report(self):
         from brain.context import (MIND_BEAT_KEY, MIND_GRACE_MINUTES,
                                    brain_rule_advisory, get_brain_context,
-                                   mind_fresh_minutes)
+                                   mind_fresh_minutes, split_rule_key)
         from brain.models import BrainReport
         window = mind_fresh_minutes()
         self.w("== The report ==")
@@ -77,10 +83,18 @@ class Command(BaseCommand):
         for rule, status in sorted(overlay.items()):
             if status not in ("watch", "pause_recommended", "active"):
                 continue
-            now_status, _ = brain_rule_advisory(rule)
+            # A class key is read by no rule gate: say what the bare rule's
+            # entries get instead. The Mind's text block (context_for_prompt)
+            # still shows it to the agents, the trade debate included
+            # (2026-10-24).
+            bare, _, read = split_rule_key(rule)
+            now_status, _ = brain_rule_advisory(bare)
             self.w(f"  overlay {rule}: {status} "
-                   f"({venues.get(rule) or 'no venue'}) -> the rule now: "
-                   f"{now_status}")
+                   f"({venues.get(rule) or 'no venue'}) -> "
+                   + ("the rule now: " if read else
+                      f"a class key, read by no rule gate (the trade debate "
+                      f"sees it as text); the rule {bare} now: ")
+                   + now_status)
             shown += 1
         if not shown:
             self.w("  overlay: names no rule")
@@ -102,36 +116,67 @@ class Command(BaseCommand):
                f"{RELEASE_AFTER_MISSES}rd fresh night in a row that no "
                f"longer names it (one miss a night), or by a superuser's "
                f"clear; never aged out by the reader")
+        self.w(f"  a class key ('<rule>/stock') is never re-affirmed: it "
+               f"takes a miss every fresh night, named or not, and is "
+               f"released on the {RELEASE_AFTER_MISSES}rd")
         nodes = list(KnowledgeNode.objects
                      .filter(kind=KnowledgeNode.KIND_RULE_STATE,
                              superseded_by__isnull=True).order_by("key"))
         if not nodes:
             self.w("  none")
-        soften = 0
+        try:
+            from bot_program.manual_trade import MANUAL_RULE
+        except Exception:  # noqa: BLE001 — a read, never a crash
+            MANUAL_RULE = "manual_take"
+        soften = n_read = binding = 0
+        manual_paused = False
+        class_keys = []
         for n in nodes:
             v = rule_state_view(n, now=self.now)
-            now_status, why = brain_rule_advisory(n.key)
-            reach = rule_reach(n.key)
+            # What the rule's entries get is asked by the BARE name, as the
+            # readers ask it; the stage too: a class node of a live_full rule
+            # is no "paper venue only" (2026-10-24).
+            now_status, why = brain_rule_advisory(v["rule"])
+            reach = rule_reach(v["rule"])
             age = (f"{v['age_hours']:.0f} h" if v["age_hours"] is not None
                    else "unknown")
             self.w(f"  {n.key}: {v['status']} v{v['version']}, last affirmed "
                    f"{age} ago, missed {v['misses']} of "
                    f"{RELEASE_AFTER_MISSES}, venue {v['venue'] or 'none'}, "
                    f"source {v['source'] or 'none'}")
-            self.w(f"      node: {v['effect']}; the rule now: {now_status}"
+            rule_now = ("the rule now" if v["read_by_gates"] else
+                        f"the class node itself is read by no gate; the rule "
+                        f"{v['rule']} now")
+            self.w(f"      node: {v['effect']}; {rule_now}: {now_status}"
                    + (f" ({why})" if why else "") + f"; {reach['words']}")
+            if not v["read_by_gates"]:
+                class_keys.append(n.key)
+                continue
+            n_read += 1
             if v["status"] == "pause_recommended":
                 soften += 1
+                # No bot trades manual_take: its pause is the ticket's
+                # warning, never a block (bot_program/manual_trade.py).
+                if n.key == MANUAL_RULE:
+                    manual_paused = True
+                else:
+                    binding += 1
         band = brain_trust_band(_brain_trust_score())
         self.w(f"  if D2 shipped (a low band softens node pauses too): "
                f"{soften if band == 'low' else 0} node pause(s) would "
                f"soften to watch at today's band ({band})")
+        self.w(f"  summary: {n_read} node(s) a gate reads, {binding} "
+               f"pause(s) among them bind bot entries"
+               + (f" ({MANUAL_RULE}'s pause is a warning on the ticket, "
+                  f"never a block)" if manual_paused else "")
+               + f"; {len(class_keys)} class-suffixed node(s) block nothing"
+               + (f": {', '.join(class_keys)}" if class_keys else ""))
 
     # ── trust ────────────────────────────────────────────────────────────
     def _trust(self):
         from brain.calibration import projected_mind_trust, trust_disagreements
         from brain.context import (_brain_trust_score, brain_trust_band,
-                                   get_brain_context)
+                                   get_brain_context, split_rule_key)
         from brain.hypotheses import agent_trust_score
         self.w("== Trust ==")
         score = _brain_trust_score()
@@ -149,8 +194,9 @@ class Command(BaseCommand):
                f"moves at the 03:00 passes, not at deploy")
         ctx = get_brain_context() or {}
         overlay = ctx.get("rule_status_overlay") or {}
+        # a class key's pause binds nothing, softened or not
         pauses = sorted(r for r, s in overlay.items()
-                        if s == "pause_recommended")
+                        if s == "pause_recommended" and split_rule_key(r)[2])
         if band != "low" and proj["band"] == "low" and pauses:
             self.w("  report pauses the projected band would soften to "
                    "watch (released): " + ", ".join(pauses))

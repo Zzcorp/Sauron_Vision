@@ -37,6 +37,14 @@ exactly this, wherever it is read:
    pass, up to a day later: conservative on purpose.
 4. Failure. Each source is read on its own; a read that fails says
    "allow" for that source alone, and nothing here ever raises.
+5. Names. Every reader asks with the bare rule name. A class key the Mind
+   wrote before the 2026-10-15 evidence gate ("<rule>/stock",
+   "<rule>:forex": split_rule_key) is read by no rule gate and binds
+   nothing; the consolidation never adds, re-affirms or tightens one, and
+   a class node left from before takes a miss every fresh night and is
+   released (an "allow" version) on the third (2026-10-24). A class key
+   in the fresh report's overlay still reaches the agents' prompt as text
+   (context_for_prompt), the trade debate's included.
 """
 from __future__ import annotations
 
@@ -131,6 +139,10 @@ def get_brain_context(*, max_age_minutes: Optional[int] = None) -> Optional[dict
     pressures_dict = {k: round(v, 4) for k, v in pressures}
 
     # Only show overlay for non-active rules — agents only care about exceptions.
+    # A class key ("<rule>/stock", split_rule_key) rides along as the Mind
+    # wrote it: _report_advisory looks up the bare rule name alone, so no
+    # rule gate reads it, but context_for_prompt still prints it into the
+    # Mind's block for the agents (the trade debate included) (2026-10-24).
     overlay = {
         k: v for k, v in (report.rule_status_overlay or {}).items()
         if v in ("watch", "pause_recommended")
@@ -230,6 +242,42 @@ EFFECT_WORDS = {
 }
 
 
+#: What a class key's node does, at any binding status (2026-10-24). The
+#: bot entry gate is the only one of its readers that blocks; the ticket
+#: only warns and the position review only flags.
+CLASS_KEY_EFFECT = ("blocks nothing: no reader asks for a class key (the "
+                    "bot entry gate, the ticket's warning and the position "
+                    "review ask for the bare rule name)")
+
+#: Rule names that carry a ":" of their own: the TradingView webhook names
+#: its rules "tradingview:<strategy>" (signals/tradingview_webhook.py), and
+#: the entry gate reads them whole, so "tradingview:forex" is never a class
+#: key. Every other rule name is a slug with no "/" or ":" (the registry's
+#: names, "<parent>_evolved_vN", "generated_YYYYMMDD_<slug>").
+WHOLE_NAME_PREFIXES = frozenset({"tradingview"})
+
+
+def split_rule_key(key) -> tuple[str, str, bool]:
+    """(rule, class_suffix, read_by_gates) for a rule_state or overlay key
+    (2026-10-24). Every reader of the Mind asks with the bare rule name
+    (bot_program/asset_engine/base.py, the manual ticket, brain/
+    position_review.py), so a key with a "/" or a ":" after the rule name
+    ("<rule>/stock", "<rule>:forex", "<rule>/stocks", "<rule>/stock/live":
+    whatever the Mind put after it) is read by no gate: it blocks nothing.
+    The split is at the first "/" or ":"; a "tradingview:<strategy>" rule
+    stays whole, and so does a key with nothing before or after the
+    separator."""
+    key = str(key or "")
+    for i, ch in enumerate(key):
+        if ch in "/:":
+            rule, suffix = key[:i].strip(), key[i + 1:].strip()
+            if (rule and suffix
+                    and rule.lower() not in WHOLE_NAME_PREFIXES):
+                return rule, suffix, False
+            break
+    return key, "", True
+
+
 def _rank(status) -> int:
     return STATUS_RANK.get(str(status or ""), 0)
 
@@ -253,12 +301,18 @@ def rule_state_view(node, *, now=None) -> dict:
     /knowledge/ page and `manage.py mind_contract` alike.
 
     {status, effect, reason, version, affirmed_at, age_hours, misses,
-     venue, source}: `affirmed_at` is the last fresh report that named the
-    rule at this status (the payload's, else the version's own time), and
-    `misses` how many scheduled passes in a row have since seen a fresh
-    report that no longer names it (the third releases it,
-    brain/consolidation.py). A node never ages out here: the release is a
-    written version, or nothing."""
+     venue, source, rule, class_suffix, read_by_gates}: `affirmed_at` is
+    the last fresh report that named the rule at this status (the
+    payload's, else the version's own time), and `misses` how many
+    scheduled passes in a row have since seen a fresh report that no
+    longer names it (the third releases it, brain/consolidation.py). A
+    node never ages out here: the release is a written version, or
+    nothing.
+
+    A class key ("<rule>/stock", split_rule_key) is read by no gate, so at
+    a binding status its effect is CLASS_KEY_EFFECT, and `rule` is the
+    bare name its entries are asked by (2026-10-24). `status` stays the
+    node's own."""
     from .consolidation import RELEASE_AFTER_MISSES
     now = now or timezone.now()
     payload = getattr(node, "payload", None) or {}
@@ -267,6 +321,10 @@ def rule_state_view(node, *, now=None) -> dict:
     status = str(payload.get("status") or "allow")
     if status not in STATUS_RANK:
         status = "allow"
+    rule, suffix, read = split_rule_key(getattr(node, "key", ""))
+    effect = EFFECT_WORDS[status]
+    if not read and status in BINDING_STATUSES:
+        effect = CLASS_KEY_EFFECT
     affirmed = (_parse_iso(payload.get("affirmed_at"))
                 or _parse_iso(payload.get("as_of"))
                 or getattr(node, "created_at", None))
@@ -278,7 +336,10 @@ def rule_state_view(node, *, now=None) -> dict:
         misses = 0
     return {
         "status": status,
-        "effect": EFFECT_WORDS[status],
+        "effect": effect,
+        "rule": rule,
+        "class_suffix": suffix,
+        "read_by_gates": read,
         "reason": f"knowledge_graph rule_state v{getattr(node, 'version', '?')}",
         "version": getattr(node, "version", None),
         "affirmed_at": affirmed,

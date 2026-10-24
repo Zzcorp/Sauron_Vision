@@ -52,7 +52,12 @@ def _severity_tone(sev) -> str:
 
 
 def _overlay_rows(report, user):
-    """One row per rule in the overlay, with its proposal button or chip."""
+    """One row per rule in the overlay, with its proposal button or chip.
+    A class key ("<rule>/stock") is shown as the Mind wrote it, marked as
+    read by no rule gate (`read_by_gates`, brain.context.split_rule_key),
+    and offers no proposal: the actuator refuses a name it does not govern,
+    and the lever is on the bare rule (2026-10-24)."""
+    from brain.context import split_rule_key
     from signals.models import RuleAction
 
     overlay = report.rule_status_overlay or {}
@@ -70,13 +75,17 @@ def _overlay_rows(report, user):
         existing = standing.get((rule_name, action_key)) if action_key else None
         if existing is not None and existing.state not in STANDING_STATES:
             existing = None
+        bare, _, read = split_rule_key(rule_name)
         rows.append({
             "rule": rule_name,
+            "bare_rule": bare,
+            "read_by_gates": read,
             "status": status,
             "action": action_key,
             "label": f"{label} · {rule_name}" if label else "",
             "existing": existing,
-            "can_propose": bool(action_key) and bool(getattr(user, "is_staff", False)),
+            "can_propose": (bool(action_key) and read
+                            and bool(getattr(user, "is_staff", False))),
         })
     return rows
 

@@ -54,21 +54,22 @@
         </div>
         {% if kind == "rule_state" %}
         {% comment %}THE MIND'S MEMORY OF A PAUSE (2026-10-24): what the node does and what the
-           rule's entries get now, the stricter of the node and the fresh report.{% endcomment %}
-        <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px;">A pause blocks every bot entry of the rule, paper and live. Nodes are written by the consolidation from a fresh report (the 03:00 pass, or the staff button, which only adds and re-affirms), from the Mind's last report of the past day when none is fresh (adding or tightening only), and by a superuser's clear. Besides that clear, only the 03:00 pass releases: on an "active", or a "watch" for a paused rule, in a fresh report, or on the 3rd fresh night in a row that no longer names it (one miss a night); a night with no fresh report releases nothing. {{ keep_off_words }}</p>
+           rule's entries get now, the stricter of the node and the fresh report. A class
+           key ("rule/stock") is read by no gate: the rule now and the stage are the bare rule's.{% endcomment %}
+        <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px;">A pause blocks every bot entry of the rule, paper and live. A class key such as "rule/stock" or "rule:forex" blocks nothing: its readers (the bot entry gate, the ticket's warning, the position review) ask for the bare rule name. The 03:00 pass never adds, re-affirms or tightens one: a class node left from before takes a miss every fresh night, named or not, and is released (an "allow" version) on the 3rd. Nodes are written by the consolidation from a fresh report (the 03:00 pass, or the staff button, which only adds and re-affirms), from the Mind's last report of the past day when none is fresh (adding or tightening only), and by a superuser's clear. Besides that clear, only the 03:00 pass releases: on an "active", or a "watch" for a paused rule, in a fresh report, or on the 3rd fresh night in a row that no longer names it (one miss a night); a night with no fresh report releases nothing. {{ keep_off_words }}</p>
         <div class="table-wrapper">
         <table class="sv-perf-table">
             <thead><tr><th>rule</th><th>v</th><th>node</th><th>effect of the node</th><th>last affirmed</th><th>missed</th><th>the rule now</th><th>stage</th><th>history</th>{% if request.user.is_superuser %}<th>clear</th>{% endif %}</tr></thead>
             <tbody>
             {% for r in rule_rows %}
                 <tr>
-                    <td><strong>{{ r.key }}</strong>{% if r.view.venue %} <span style="color:var(--text-muted);font-size:11px;">({{ r.view.venue }})</span>{% endif %}</td>
+                    <td><strong>{{ r.key }}</strong>{% if r.view.venue %} <span style="color:var(--text-muted);font-size:11px;">({{ r.view.venue }})</span>{% endif %}{% if not r.view.read_by_gates %}<br><span style="color:var(--text-muted);font-size:11px;">a class key: read by no gate; its readers ask for {{ r.view.rule }}</span>{% endif %}</td>
                     <td>v{{ r.view.version }}</td>
                     <td>{{ r.view.status }}</td>
-                    <td class="{% if r.view.status == 'pause_recommended' %}down{% endif %}">{{ r.view.effect }}</td>
+                    <td class="{% if r.view.status == 'pause_recommended' and r.view.read_by_gates %}down{% endif %}">{{ r.view.effect }}</td>
                     <td>{% if r.view.age_hours is not None %}{{ r.view.age_hours|floatformat:0 }} h ago{% else %}&mdash;{% endif %}</td>
                     <td>{{ r.view.misses }} of {{ r.view.misses_to_release }}</td>
-                    <td class="{% if r.now == 'pause_recommended' %}down{% endif %}" title="{{ r.now_why }}">{{ r.now_effect }}</td>
+                    <td class="{% if r.now == 'pause_recommended' %}down{% endif %}" title="{{ r.now_why }}">{% if not r.view.read_by_gates %}{{ r.view.rule }}: {% endif %}{{ r.now_effect }}</td>
                     <td>{{ r.reach.words }}</td>
                     <td><a href="{% url 'knowledge_node_history' r.node.kind r.key %}" style="color:var(--accent);">history →</a></td>
                     {% if request.user.is_superuser %}<td>{% if r.can_clear %}
