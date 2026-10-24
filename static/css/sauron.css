@@ -7592,3 +7592,25 @@ body.light-mode .gollum-fab .gl-lid { fill: var(--bg-elev); }
     border-radius: 3px; border: 1px solid var(--border); color: var(--text-muted); }
 .bkp-claim--unclaimed { color: var(--accent-gold-ink, var(--accent-gold));
     border-color: var(--accent-gold-ink, var(--accent-gold)); }
+
+/* ── A Telegram button's page (2026-10-24) ───────────────────────────────
+   /signals/<id>/ticket/ and /positions/<id>/close-dialog/ say in one line
+   what they open (dashboard/views_links.py) above the page they render,
+   with the one button that opens it again. Tokens only, so light mode
+   follows. */
+.sv-deeplink-note {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 16px; padding: 10px 14px;
+    border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: var(--radius-md, 6px);
+    background: var(--bg-card);
+    font-size: 12.5px; line-height: 1.5; color: var(--text-secondary);
+}
+.sv-deeplink-note__text { flex: 1 1 260px; }
+.sv-deeplink-note__open {
+    font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .14em;
+    padding: 6px 12px; border-radius: 4px; cursor: pointer;
+    border: 1px solid var(--accent); background: transparent;
+    color: var(--accent);
+}
+.sv-deeplink-note__open:hover { background: var(--accent-dim); }

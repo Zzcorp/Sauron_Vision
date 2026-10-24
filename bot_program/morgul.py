@@ -118,6 +118,7 @@ with --send), the /health/ row (health_row) and the Eye's /status line
 from __future__ import annotations
 
 import logging
+import re
 from collections import Counter, OrderedDict
 from datetime import timedelta
 
@@ -202,6 +203,15 @@ CLOCK_CLASSES = ("forex", "stock", "etf", "index", "commodity", "options")
 VENUE_SESSION_CLASSES = ("stock", "etf")
 OPEN_STATUSES = ("OPEN", "CLOSE_PENDING")
 BOOKED_STATUSES = ("OPEN", "CLOSE_PENDING", "CLOSED")
+#: The guards whose finding about ONE open real position carries a
+#: "Close position" button (2026-10-24, close_button): G2, a live
+#: position without a stop at the broker (and its "stop moved farther"
+#: warning), and G5, a live eToro row past its proof or ceiling. Closing
+#: is a natural remedy there. Not G1 or G4 (a past booking), G3 (a close
+#: already in flight, the retry drain's), G12 (already closed), nor the
+#: account-wide guards.
+CLOSE_GUARDS = ("no_stop", "proofs")
+_TRADE_SUBJECT = re.compile(r"^trade:(\d+)(?::|$)")
 #: One run at a time: a worker back from an outage drains the queued runs
 #: two at a time, and both would read the same memory before either wrote.
 LOCK_KEY = "morgul:lock"
@@ -235,10 +245,14 @@ class Guard:
 
 class Finding:
     """What a guard found about one subject: its facts as lines, and the
-    configs the brake may stop for it (with the user they belong to)."""
+    configs the brake may stop for it (with the user they belong to).
+    `closable` False (2026-10-24) says its row is an order still waiting
+    at the broker, with no position a "Close position" button could
+    name (close_button)."""
 
     def __init__(self, guard, subject, *, title, label, facts,
-                 severity=None, event=False, user=None, configs=()):
+                 severity=None, event=False, user=None, configs=(),
+                 closable=True):
         self.guard = guard
         self.subject = str(subject)
         self.title = title
@@ -248,6 +262,7 @@ class Finding:
         self.event = bool(event)
         self.user = user
         self.configs = list(dict.fromkeys(int(c) for c in configs))
+        self.closable = bool(closable)
 
     @property
     def key(self) -> str:
@@ -257,6 +272,40 @@ class Finding:
     def brakes(self) -> bool:
         return (self.guard.brake and self.severity == "critical"
                 and self.user is not None and bool(self.configs))
+
+    @property
+    def trade_id(self):
+        """The AssetBotTrade a "trade:<id>" or "trade:<id>:<what>" subject
+        names (2026-10-24), else None."""
+        match = _TRADE_SUBJECT.match(self.subject)
+        return int(match.group(1)) if match else None
+
+
+def close_button(finding):
+    """("Close position", the platform's close dialog for the row), or
+    None (2026-10-24).
+
+    Only for a CLOSE_GUARDS finding about one OPEN row (not an event: a
+    G5 row already closed files one), and not for an order still waiting
+    at the broker (closable False: G5 judges a working entry too, and it
+    has no position to close; G2 skips one already). A URL to the
+    platform, never a callback: the dialog asks the login that opens it
+    for the trading PIN on a real position, and shows nothing of a row
+    that is not that login's own. The link carries the row's id, which
+    the label already shows ("#id"): no amount reaches the chat."""
+    try:
+        if (finding.guard.key not in CLOSE_GUARDS or finding.event
+                or not getattr(finding, "closable", True)
+                or finding.trade_id is None):
+            return None
+        from alerts.links import close_path
+        from bot_program.notifications import CLOSE_BUTTON
+        path = close_path(finding.trade_id)
+    except Exception:  # noqa: BLE001 — a link is never worth the message
+        logger.warning("[morgul] the close link of %s could not be built",
+                       getattr(finding, "key", "?"), exc_info=True)
+        return None
+    return (CLOSE_BUTTON, path) if path else None
 
 
 class Context:
@@ -784,7 +833,9 @@ def check_proofs(ctx, g) -> list:
             out.append(g.finding(
                 f"trade:{trade.pk}", label=_trade_label(trade), facts=facts,
                 event=trade.status not in OPEN_STATUSES,
-                user=trade.config.user, configs=[trade.config_id]))
+                user=trade.config.user, configs=[trade.config_id],
+                # an order still waiting: no "Close position" (2026-10-24)
+                closable=not meta.get("entry_working")))
     return out
 
 
@@ -1859,7 +1910,10 @@ def brake_lines(outcomes) -> list:
 def build_messages(findings, outcomes, now) -> list:
     """One Reply per title, in the guards' order: the severity, each
     subject in bold with its facts, then the brake's words and the time,
-    both kept whole by fit (meta keep_tail)."""
+    both kept whole by fit (meta keep_tail). A message about ONE finding
+    a close answers (close_button) carries its "Close position" URL
+    button in meta["button"] (2026-10-24); a message naming several
+    carries none: a button names one row."""
     groups = OrderedDict()
     for f in findings:
         groups.setdefault(f.title, []).append(f)
@@ -1874,10 +1928,13 @@ def build_messages(findings, outcomes, now) -> list:
         tail = brake_lines([outcomes[f.key] for f in group
                             if f.key in outcomes])
         tail.append(f"Checked: {eye.when(now)}")
+        meta = {"keep_tail": len(tail), "keys": [f.key for f in group]}
+        button = close_button(group[0]) if len(group) == 1 else None
+        if button:
+            meta["button"] = button
         out.append(eye.Reply(MARK, title,
                              eye._cap(lines, eye.MAX_LINES - len(tail)) + tail,
-                             meta={"keep_tail": len(tail),
-                                   "keys": [f.key for f in group]}))
+                             meta=meta))
     return out
 
 

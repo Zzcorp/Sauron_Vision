@@ -21,6 +21,11 @@ SIGNAL_SIDES = {"bullish": "BUY", "bearish": "SELL"}
 
 #: The signal message's button (2026-09-27): the instrument's page.
 SIGNAL_BUTTON = "Open instrument"
+#: Its second button (2026-10-24): the platform's TAKE TRADE ticket,
+#: filled from the signal. It opens a page; nothing is sent from it
+#: until the operator presses the ticket's own button (and, for real
+#: money, types the trading PIN).
+TICKET_BUTTON = "Prepare ticket"
 
 
 def _signal_path(signal) -> str:
@@ -32,12 +37,39 @@ def _signal_path(signal) -> str:
         return "/signals/"
 
 
+def _ticket_path(signal) -> str:
+    """The signal's ticket page (/signals/<id>/ticket/), or "" when the
+    platform could not take it (2026-10-24): a direction that is neither
+    bullish nor bearish, an instrument switched off, a class the manual
+    lane does not trade (manual_trade.EXECUTABLE_CLASS), or a symbol with
+    no page (the ticket is drawn on it). The link carries the signal's id
+    and nothing else, the same for every chat and every reader."""
+    from alerts.links import instrument_url, ticket_path
+    try:
+        from bot_program.manual_trade import EXECUTABLE_CLASS
+        inst = signal.instrument
+        if str(signal.direction or "").lower() not in SIGNAL_SIDES:
+            return ""
+        if not (getattr(inst, "is_active", False)
+                and EXECUTABLE_CLASS.get(getattr(inst, "asset_class", ""))
+                and instrument_url(inst.symbol)):
+            return ""
+        return ticket_path(signal.pk)
+    except Exception:  # noqa: BLE001 — a link is never worth the message
+        return ""
+
+
 def signal_extras(signal) -> dict:
     """The signal message's summary sentence and its button (2026-09-27):
     "Sauron flags MSFT as a buy at 421.37." and ("Open instrument", its
     page), or ("Open signals", "/signals/") for a symbol with no page of
     its own (untracked, or a pair like BTC/USD). The sentence says the
-    title's side and the entry in words; it claims no order."""
+    title's side and the entry in words; it claims no order.
+
+    A signal the platform could take (_ticket_path) also carries
+    `buttons` (2026-10-24): the page, then ("Prepare ticket",
+    "/signals/<id>/ticket/"), two URL buttons on one row. `button` stays
+    the page alone, for a reader that takes one."""
     from core.price_format import format_price
 
     inst = signal.instrument
@@ -51,7 +83,11 @@ def signal_extras(signal) -> dict:
             else f"Sauron flags a signal on {symbol}{at}.")
     path = _signal_path(signal)
     label = SIGNAL_BUTTON if path != "/signals/" else "Open signals"
-    return {"summary": said, "button": (label, path)}
+    out = {"summary": said, "button": (label, path)}
+    ticket = _ticket_path(signal)
+    if ticket:
+        out["buttons"] = [(label, path), (TICKET_BUTTON, ticket)]
+    return out
 
 
 def signal_telegram(signal) -> tuple:
@@ -65,14 +101,17 @@ def signal_telegram(signal) -> tuple:
         Entry 421.37 · stop 410.00 · target 440.00
         Reward to risk: 1.85
         Urgency: medium
-        [Open instrument]                           (signal_extras)
+        [Open instrument] [Prepare ticket]          (signal_extras)
 
     Prices at the instrument's own decimals (core.price_format, the
     convention every page uses); a level the signal does not carry is
     left out, never printed as zero. The rule reads in words
     (position_summary.rule_words, 2026-09-27). The page is the button
     when the deployment names a host a phone can open; a "Page: …" line
-    stands in when it does not.
+    stands in when it does not (the instrument page carries the ticket,
+    so no ticket line is added then). "Prepare ticket" (2026-10-24)
+    opens the TAKE TRADE ticket filled from this signal; nothing is sent
+    from Telegram.
     """
     import math
 
@@ -222,7 +261,9 @@ def _telegram_signal(signal, chats: list) -> dict:
                          getattr(signal, "pk", None))
         extras = {}
     summary = str(extras.get("summary") or "")
-    button = extras.get("button")
+    # the page and the ticket (2026-10-24), else the page alone: the same
+    # buttons in every chat, whoever reads it
+    button = extras.get("buttons") or extras.get("button")
     for chat in chats:
         admitted, extra, held = _flood_admit(chat, signal)
         if not admitted:

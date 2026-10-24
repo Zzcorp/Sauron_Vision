@@ -369,7 +369,7 @@ _BANNER_SILENT_KINDS = {"bot_fill_open", "bot_fill_close", "manual_fill_open"}
 
 def dispatch_notification(user, kind: str, *, title: str, body: str = "",
                           url: str = "", payload=None,
-                          row_data=None, telegram=None) -> bool:
+                          row_data=None, telegram=None, button=None) -> bool:
     """Send a bot-event or operator-event notification to `user`.
 
     Returns True if at least one delivery channel succeeded (including in-app).
@@ -386,6 +386,11 @@ def dispatch_notification(user, kind: str, *, title: str, body: str = "",
     "details", "button"} (see _telegram_text). The bell row is built from
     title, body, url and row_data exactly as before; only the Telegram
     channel reads it.
+
+    `button` (2026-10-24) is the URL button of a plain message (one
+    without `telegram`), as _send_telegram takes it: notify_staff's
+    "Close position" under an alert about one open position. A message
+    written for people carries its own (`telegram["button"]`).
     """
     if kind not in BOT_KINDS and kind not in OPERATOR_KINDS:
         logger.warning("dispatch_notification: unknown kind=%r", kind)
@@ -440,6 +445,8 @@ def dispatch_notification(user, kind: str, *, title: str, body: str = "",
         # notifier hands them over; a plain call keeps its shape.
         rd = row_data if isinstance(row_data, dict) else {}
         tg = telegram if isinstance(telegram, dict) else {}
+        # a plain call without a button keeps its three-argument shape
+        extra = {"button": button} if button else {}
         if tg.get("title"):
             # A message written for people (the fills, 2026-09-27): its
             # own title in words, a sentence, the facts, the folded record
@@ -455,9 +462,9 @@ def dispatch_notification(user, kind: str, *, title: str, body: str = "",
         elif rd.get("items") or rd.get("mark"):
             delivered = _send_telegram(
                 user, title, body, lines=_telegram_lines(rd.get("items")),
-                mark=str(rd.get("mark") or "")) or delivered
+                mark=str(rd.get("mark") or ""), **extra) or delivered
         else:
-            delivered = _send_telegram(user, title, body) or delivered
+            delivered = _send_telegram(user, title, body, **extra) or delivered
     elif channel == "email":
         # Phase-45 — when delivering a briefing via email, render the
         # Sauron-themed HTML template instead of a plain-text dump.
@@ -662,12 +669,13 @@ def _send_telegram(user, title: str, body: str, *, lines=None,
 
     `subtitle`, `summary` and `details` render as _telegram_text says
     (2026-09-27). `button` is (label, platform path): ONE inline URL
-    button under the message (telegram_alert.button_markup), only when
-    the deployment names a host a phone can open; when Telegram refuses
-    the BUTTON, the message goes again without it, its page as a line
-    (message_parts, post_message). Never a callback button: nothing is
-    done from Telegram but the Eye's commands and the alarm bot's
-    /stopall.
+    button under the message (telegram_alert.button_markup), or a list
+    of up to two such pairs, one or two URL buttons on one row
+    (2026-10-24), only when the deployment names a host a phone can
+    open; when Telegram refuses the BUTTONS, the message goes again
+    without them, each page as a line (message_parts, post_message).
+    Never a callback button: nothing is done from Telegram but the Eye's
+    commands and the alarm bot's /stopall.
     """
     try:
         import os
@@ -718,7 +726,10 @@ def _external_copy(message, title: str, body: str) -> tuple:
     A notifier that hands a message written for people (dispatch_
     notification's `telegram`) is copied from it in plain text: its
     title; whose money it is and the summary sentence; its facts; the
-    page its button opens, as a line. Until 2026-09-27 these copies
+    page each of its buttons opens, as a line (telegram_alert.
+    button_lines: "Page: …" for one, "<label>: …" for two or for one
+    that prepares an act, 2026-10-24).
+    Until 2026-09-27 these copies
     carried the bell's log line ("EURCAD BUY opened", "FOREX · qty
     7900.00000000 @ 1.60725571"). The folded record stays on Telegram and
     in the bell. A notifier that hands none keeps its title and body."""
@@ -732,12 +743,11 @@ def _external_copy(message, title: str, body: str) -> tuple:
     button = message.get("button")
     if button:
         try:
-            from alerts.channels.telegram_alert import page_line
-            line = page_line(button[1])
+            from alerts.channels.telegram_alert import button_lines
+            pages = button_lines(button)
         except Exception:  # noqa: BLE001 — a link never costs the copy
-            line = ""
-        if line:
-            facts.append(line)
+            pages = []
+        facts.extend(line for line in pages if line)
     text = "\n\n".join(part for part in ("\n".join(head), "\n".join(facts))
                        if part)
     return str(message["title"]), text or body
@@ -1109,6 +1119,36 @@ def _page_button(trade_id) -> tuple:
             else ("Open positions", "/positions/"))
 
 
+#: The second button under an alert about ONE open position
+#: (2026-10-24): the platform's close dialog for it. A URL, never a
+#: callback: the dialog reads the position for the login that opens it,
+#: shows its facts and asks for the trading PIN on a real one; nothing
+#: closes from Telegram.
+CLOSE_BUTTON = "Close position"
+
+
+def _close_button(trade_id):
+    """("Close position", /positions/<id>/close-dialog/), or None.
+
+    `trade_id` must be an AssetBotTrade's: the dialog reads that table,
+    so a legacy BotTrade's or a portfolio Position's id would name
+    another row. The link carries the id alone; the dialog shows nothing
+    of a row that is not the reader's own."""
+    if not trade_id:
+        return None
+    from alerts.links import close_path
+    path = close_path(trade_id)
+    return (CLOSE_BUTTON, path) if path else None
+
+
+def _position_buttons(trade_id):
+    """[Open position, Close position] for an alert about one OPEN
+    AssetBotTrade (2026-10-24), else _page_button alone."""
+    page = _page_button(trade_id)
+    close = _close_button(trade_id)
+    return [page, close] if close else page
+
+
 def _bell_items(message) -> list:
     """The bell card's lines: whose money it is (the subtitle), the
     message's facts, then its record flat. A rule's key reads in words
@@ -1168,14 +1208,15 @@ def fill_open_message(*, asset_class, symbol, side, qty, entry_price,
         Attack mode: …                   (when the row is attack mode)
         Stop moved by eToro: …           (when the venue rewrote it)
         ▸ Trade: #108 · Rule key: golden_cross · Config: FX trend
-        [Open position]
+        [Open position] [Close position]
 
     A waiting order that filled says so first; a fill short of its order
     says how much of it filled. `rule_name` is the rule's KEY (_rule_key
     reads the old multi-line shape too). A stop the venue rewrote is the
     one the Stop and risk lines read (_open_levels); a caller that hands
     no stop-moved line (the hand lane) gets the row's own
-    (stop_moved_words)."""
+    (stop_moved_words). "Close position" (2026-10-24) opens the
+    platform's close dialog for the row (_position_buttons)."""
     row = _fill_row(trade, trade_id)
     tid = getattr(row, "id", None) or trade_id
     meta = (getattr(row, "metadata", None) or {}) if row is not None else {}
@@ -1233,7 +1274,7 @@ def fill_open_message(*, asset_class, symbol, side, qty, entry_price,
             "subtitle": _venue_line(row, live), "summary": summary,
             "lines": lines,
             "details": _record(row, tid, "" if manual else rule_key),
-            "button": _page_button(tid)}
+            "button": _position_buttons(tid)}
 
 
 def fill_queued_message(*, asset_class, symbol, side, qty, trade=None,
@@ -1805,7 +1846,9 @@ def notify_manual_close_refused(user, *, asset_class: str, symbol: str,
             summary=(f"The broker could not be reached, so the close of "
                      f"{symbol} was refused and the position is still "
                      f"open."),
-            button=(("Open position", page) if page
+            # the position is still open: its close dialog beside its
+            # page (2026-10-24), to try again once the broker answers
+            button=(_position_buttons(trade_id) if page
                     else ("Open positions", "/positions/"))),
     )
 
@@ -1888,7 +1931,9 @@ def notify_protection_vanished(user, *, asset_class: str, symbol: str,
             title, items, NOTIFY_MARKS["protection_vanished"],
             summary=(f"The stop at the broker is gone while the {symbol} "
                      f"position is still open."),
-            button=(("Open position", page) if page
+            # a live position without its stop: its close dialog beside
+            # its page (2026-10-24)
+            button=(_position_buttons(trade_id) if page
                     else ("Open positions", "/positions/"))),
     )
 
@@ -2192,13 +2237,16 @@ def position_review_message(*, review, row=None) -> dict:
     if row is not None and _hand_taken(row):
         summary += " " + HAND_SENTENCE
     trade_id = review.position_id if review.book == "bot" else None
+    # Close position only for the bot book (an AssetBotTrade id,
+    # 2026-10-24): a portfolio Position has no close dialog, and its id
+    # would name another table's row.
     return {"title": f"{symbol}: the reviewer says {said}",
             "mark": NOTIFY_MARKS["position_review"],
             "subtitle": _review_subtitle(row),
             "summary": summary, "lines": lines,
             "details": (([f"Trade: #{trade_id}"] if trade_id else [])
                         + [f"Review: #{review.id}"]),
-            "button": _page_button(trade_id)}
+            "button": _position_buttons(trade_id)}
 
 
 def notify_position_review(user, review, *, row=None, title: str,
@@ -2255,12 +2303,16 @@ def thesis_exit_message(*, pos, facts, row=None) -> dict:
     if _hand_taken(row if row is not None else pos):
         summary += " " + HAND_SENTENCE
     trade_id = pos.get("position_id")
+    # Close position for the bot book only (an AssetBotTrade id,
+    # 2026-10-24), as position_review_message.
     return {"title": f"{symbol}: the thesis is dead",
             "mark": NOTIFY_MARKS["position_review"],
             "subtitle": _review_subtitle(row),
             "summary": summary, "lines": lines,
             "details": [f"Trade: #{trade_id}"] if trade_id else [],
-            "button": _page_button(trade_id)}
+            "button": (_position_buttons(trade_id)
+                       if pos.get("book") == "bot"
+                       else _page_button(trade_id))}
 
 
 def notify_thesis_exit(user, *, pos, facts) -> bool:
@@ -2425,12 +2477,33 @@ def notify_strategist_briefing_to_all(briefing) -> dict:
 # ── Phase-46 staff-only health alerts ────────────────────────────────────
 
 def notify_staff(*, title: str, body: str = "", url: str = "",
-                  cooldown_hours: int = 3) -> dict:
+                  cooldown_hours: int = 3, close_trade_id=None) -> dict:
     """Push an operational health alert to all staff users.
 
     De-dupes via the in-app `Notification` table — if a row with the same
     title already exists within `cooldown_hours`, skips. Useful for
     "brain failed N times in a row" type alerts that shouldn't spam.
+
+    `close_trade_id` (2026-10-24) puts ONE URL button under the Telegram
+    message: "Close position", the platform's close dialog for that
+    AssetBotTrade (_close_button). Every staff chat gets the same link;
+    the dialog shows the row only to the login that owns it. Passed only
+    where the alert is about one OPEN position and closing it is a
+    remedy: filled at eToro with no stop read, the venue rewrote the
+    stop (asset_engine/base.py), and eToro's list missed a live position
+    (venue_exit.said_open). Left out on purpose, so a later caller knows
+    why:
+      * a working entry or a leftover leg (no position yet, or none
+        left): base.py's working-entry and leg alerts;
+      * a close in doubt or held back ("a second close reverses the
+        position", "read the broker before acting"): base.py's close
+        alerts, pending_closes' in-flight and held closes;
+      * a leg left after a close, and an alert sent before the row
+        exists (the fill message that follows carries the button);
+      * the frozen mark (mark_sanity): a paper close would book at the
+        frozen print;
+      * a legacy BotTrade (engine/runner.py): another table, whose id
+        would name a different AssetBotTrade.
 
     Returns counts: {n_staff, n_delivered, n_skipped_cooldown}.
     """
@@ -2449,6 +2522,7 @@ def notify_staff(*, title: str, body: str = "", url: str = "",
         pass  # If lookup fails, still try to dispatch.
 
     staff = list(User.objects.filter(is_staff=True, is_active=True))
+    button = _close_button(close_trade_id)
     n_delivered = 0
     for u in staff:
         try:
@@ -2456,7 +2530,7 @@ def notify_staff(*, title: str, body: str = "", url: str = "",
             # Telegram renders the body under the bold title.
             ok = dispatch_notification(
                 u, "system_health", title=title, body=body, url=url,
-                row_data={"mark": _staff_mark(title)},
+                row_data={"mark": _staff_mark(title)}, button=button,
             )
             if ok:
                 n_delivered += 1

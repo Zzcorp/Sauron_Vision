@@ -597,11 +597,15 @@ def _still_authorised(user) -> bool:
 
 def _send(user, reply) -> bool:
     """To the user's configured chat, through the platform sender, cut
-    to what Telegram accepts (fit)."""
+    to what Telegram accepts (fit). A reply's meta "button" (Morgul's
+    "Close position" under one finding, 2026-10-24) rides as its URL
+    button; every other reply has none."""
     from bot_program import notifications as N
     reply = fit(reply)
+    button = reply.meta.get("button")
     return N._send_telegram(user, reply.title, reply.body,
-                            lines=reply.lines or None, mark=reply.mark)
+                            lines=reply.lines or None, mark=reply.mark,
+                            **({"button": button} if button else {}))
 
 
 # ── what was said ────────────────────────────────────────────────────────

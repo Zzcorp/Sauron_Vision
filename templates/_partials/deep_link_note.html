@@ -1,0 +1,17 @@
+{% comment %}
+A Telegram button's page (2026-10-24, dashboard/views_links.py): one line
+saying what this link opens, above the page it renders. deep_link.note is
+the sentence (escaped here); deep_link.run is what the page's script opens
+(#svDeepLink, read once by the runner in base.html): ids, or a symbol and
+a side, never a price. The button opens it again, and opens it the first
+time when it must wait for a click (the ticket of a lane that does not
+exist yet). Nothing here acts: the ticket and the close dialog keep their
+own confirm and their trading PIN.
+{% endcomment %}
+<div class="sv-deeplink-note" id="svDeepLinkNote" role="status">
+    <span class="sv-deeplink-note__text">{{ deep_link.note }}</span>
+    {% if deep_link.run.open %}
+    <button type="button" class="sv-deeplink-note__open" id="svDeepLinkOpen">{% if deep_link.run.open == "close" %}OPEN THE CLOSE DIALOG{% else %}OPEN THE TICKET{% endif %}</button>
+    {% endif %}
+</div>
+{% if deep_link.run.open %}{{ deep_link.run|json_script:"svDeepLink" }}{% endif %}

@@ -350,7 +350,10 @@ class TheBellAndTheCopiesTests(_Base):
             "Target: 1.76798 (10.0% above)",
             "Risk if the stop is hit: 463.45 USD",
             "Why: Golden cross",
-            "Page: /forensics/108/ on the platform"]))
+            # each button's page (2026-10-24): the position, its close
+            "Open position: /forensics/108/ on the platform",
+            "Close position: /positions/108/close-dialog/ on the "
+            "platform"]))
         for old in ("FOREX", "qty", "7900.00000000", "1.60725571",
                     "golden_cross"):
             self.assertNotIn(old, title + body)
@@ -373,7 +376,9 @@ class TheBellAndTheCopiesTests(_Base):
             "**Bought EURCAD**\nSimulated\n7,900 units at 1.60726 — about "
             "9,269 USD.\n\nStop: 1.52689 (5.0% below)"), first)
         self.assertTrue(first.endswith(
-            f"Page: https://{HOST}/forensics/108/"), first)
+            f"Open position: https://{HOST}/forensics/108/\n"
+            f"Close position: https://{HOST}/positions/108/close-dialog/"),
+            first)
         self.assertEqual(second, "**Plain title**\nplain body")
 
     def test_the_bells_title_dedupes_still_hold(self):

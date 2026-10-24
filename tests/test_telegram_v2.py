@@ -11,9 +11,11 @@ Pinned here, with requests.post patched (no real HTTP):
     with the attack mode and a stop eToro moved (the engine's own words),
     a close in profit, a close at a loss by its stop, a hand-taken open,
     a working entry that filled (through the engine), and a signal;
-  * ONE URL button, only with a DOMAIN a phone can open, never a callback
+  * one or two URL buttons on one row (an open position: its page and
+    "Close position", 2026-10-24; a signal: its instrument and "Prepare
+    ticket"), only with a DOMAIN a phone can open, never a callback
     button anywhere, and a refused button costing the button, never the
-    message;
+    message (each page then a line);
   * the folded record escaped; 4,096 characters still held, the record
     going first;
   * the bell row still created, the message's facts as its items;
@@ -61,6 +63,19 @@ def _payloads(post):
 def _button(path, text="Open position"):
     return {"inline_keyboard": [[{"text": text,
                                   "url": f"https://{HOST}{path}"}]]}
+
+
+def _buttons(*pairs):
+    """One row of URL buttons, from (text, path) pairs (2026-10-24)."""
+    return {"inline_keyboard": [[{"text": text,
+                                  "url": f"https://{HOST}{path}"}
+                                 for text, path in pairs]]}
+
+
+def _open_and_close(tid):
+    """An open position's two buttons: its page and its close dialog."""
+    return _buttons(("Open position", f"/forensics/{tid}/"),
+                    ("Close position", f"/positions/{tid}/close-dialog/"))
 
 
 def _user(name="tg2_ops"):
@@ -270,7 +285,7 @@ class TheFillMessagesTests(_Base):
             "<blockquote expandable>Trade: #109",
             "Rule key: <code>ema_cross_4h</code>",
             "Config: FX attack</blockquote>"]))
-        self.assertEqual(p["reply_markup"], _button("/forensics/109/"))
+        self.assertEqual(p["reply_markup"], _open_and_close(109))
 
     def test_a_short_open_says_sold_short_in_red(self):
         from bot_program.notifications import notify_bot_fill_open
@@ -449,7 +464,7 @@ class TheFillMessagesTests(_Base):
             "Taken: by hand, from signal #415 (Golden cross)",
             "<blockquote expandable>Trade: #110",
             "Config: Manual stocks</blockquote>"]))
-        self.assertEqual(p["reply_markup"], _button("/forensics/110/"))
+        self.assertEqual(p["reply_markup"], _open_and_close(110))
         self.assertNotIn("manual_take", p["text"])
 
     def test_a_queued_order_names_no_price(self):
@@ -669,9 +684,10 @@ class TheButtonTests(_Base):
         first, second = _payloads(post)
         self.assertIn("reply_markup", first)
         self.assertNotIn("reply_markup", second)
-        # the button's page stays, as a line: the facts, then the page
-        page = f"Page: https://{HOST}/forensics/108/"
-        self.assertNotIn(page, first["text"])
+        # each button's page stays, as a line: the facts, then the pages
+        page = (f"Open position: https://{HOST}/forensics/108/\n"
+                f"Close position: https://{HOST}/positions/108/close-dialog/")
+        self.assertNotIn("forensics/108", first["text"])
         self.assertEqual(second["text"], first["text"].replace(
             "Why: Golden cross\n", f"Why: Golden cross\n{page}\n"))
         self.assertIn("telegram refused the button (400)",
@@ -714,8 +730,13 @@ class TheButtonTests(_Base):
             dispatch_signal_alert(_signal(_instrument("MSFT")))
         first, second = _payloads(post)
         self.assertNotIn("Page:", first["text"])
+        self.assertNotIn("https://", first["text"])
+        sid = _payloads(post)[0]["reply_markup"]["inline_keyboard"][0][1][
+            "url"].split("/signals/")[1].split("/")[0]
         self.assertTrue(second["text"].endswith(
-            f"Page: https://{HOST}/instruments/MSFT/"), second["text"])
+            f"Open instrument: https://{HOST}/instruments/MSFT/\n"
+            f"Prepare ticket: https://{HOST}/signals/{sid}/ticket/"),
+            second["text"])
         self.assertNotIn("reply_markup", second)
 
     def test_a_symbol_without_a_page_gets_the_signals_button(self):
@@ -796,8 +817,9 @@ class TheOtherMessagesTests(_Base):
             "Entry 421.37 · stop 410.00 · target 440.00",
             "Reward to risk: 1.85",
             "Urgency: medium"]))
-        self.assertEqual(p["reply_markup"],
-                         _button("/instruments/MSFT/", "Open instrument"))
+        self.assertEqual(p["reply_markup"], _buttons(
+            ("Open instrument", "/instruments/MSFT/"),
+            ("Prepare ticket", f"/signals/{sig.pk}/ticket/")))
         # without a host a phone can open, the Page line stands in
         p = self._send(lambda: dispatch_signal_alert(_signal(
             _instrument("MSFT"))))
@@ -825,7 +847,7 @@ class TheOtherMessagesTests(_Base):
                 reason="the stop leg 77 no longer rests at the broker",
                 trade_id=row.id),
              "The stop at the broker is gone while the AAPL position is "
-             "still open.", _button("/forensics/115/")),
+             "still open.", _open_and_close(115)),
             (lambda: N.notify_unclaimed_position(
                 self.user, symbols=["AAPL", "MSFT"], venue="IBKR"),
              "IBKR holds positions Sauron has no record of, so nothing on "
@@ -836,7 +858,7 @@ class TheOtherMessagesTests(_Base):
                 trade_id=row.id),
              "The broker could not be reached, so the close of AAPL was "
              "refused and the position is still open.",
-             _button("/forensics/115/")),
+             _open_and_close(115)),
         ]
         for call, summary, button in cases:
             with self.subTest(summary[:30]):

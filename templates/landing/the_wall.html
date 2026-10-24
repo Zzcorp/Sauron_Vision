@@ -1914,7 +1914,8 @@
     {# The ring scheme's own sheet (2026-09-29): shared with the home page, so one drawing has one style. After the inline sheet, which owns the tokens it reads. #}
     <link rel="stylesheet" href="{% static 'css/sv-day-scheme.css' %}">
 </head>
-<body>
+{# A Telegram button's link (2026-10-24, login_next): the login form is up at once. #}
+<body{% if login_next %} class="login-mode"{% endif %}>
 
 <!-- ═══════════════════════════════════════════════════════════════════ -->
 <!-- BACKGROUND LAYERS                                                  -->
@@ -4439,7 +4440,7 @@
                     <label for="id_password">Access Key</label>
                     <input type="password" name="password" id="id_password" autocomplete="current-password" required>
                 </div>
-                <input type="hidden" name="next" value="{% url 'intro' %}">
+                <input type="hidden" name="next" value="{% if login_next %}{{ login_next }}{% else %}{% url 'intro' %}{% endif %}">
                 <button type="submit" class="btn-login-submit">Initialize Session</button>
             </form>
         </div>

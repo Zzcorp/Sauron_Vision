@@ -45,6 +45,10 @@ SUMMARY_MAX_CHARS = 600
 SUBTITLE_MAX_CHARS = 120
 #: A button's words are cut past this (Telegram draws a short label).
 BUTTON_MAX_CHARS = 40
+#: The URL buttons one message may carry, side by side on one row
+#: (2026-10-24): a page and the act it prepares ("Open instrument" and
+#: "Prepare ticket", "Open position" and "Close position").
+MAX_BUTTONS = 2
 SEND_TIMEOUT_S = 10
 
 #: The leading emoji of each message these paths send (the Telegram
@@ -195,29 +199,85 @@ def page_line(path, label: str = "Page") -> str:
     return f"{label}: {link}" if link else f"{label}: {path} on the platform"
 
 
+def _pairs(button) -> list:
+    """The (label, platform path) pairs a `button` argument names, at
+    most MAX_BUTTONS, in order (2026-10-24).
+
+    `button` is None, ONE (label, path) pair (every call since
+    2026-09-27), or a list or tuple of such pairs. A pair without words,
+    or whose path is not a platform path ("/…", never "//…" or an
+    address), is dropped on its own; so is a second pair to the same
+    page."""
+    if not button or not isinstance(button, (tuple, list)):
+        return []
+    if (len(button) == 2 and isinstance(button[0], str)
+            and not isinstance(button[1], (tuple, list))):
+        button = [button]  # the one-pair call
+    out, seen = [], set()
+    for pair in button:
+        try:
+            label, path = pair
+        except (TypeError, ValueError):
+            continue
+        label = " ".join(str(label or "").split())[:BUTTON_MAX_CHARS]
+        path = str(path or "").strip()
+        if (not label or not path.startswith("/") or path.startswith("//")
+                or path in seen):
+            continue
+        seen.add(path)
+        out.append((label, path))
+        if len(out) == MAX_BUTTONS:
+            break
+    return out
+
+
+def _buttons(button) -> list:
+    """(label, address) of each button a phone can open: the pairs
+    (_pairs) whose page platform_link can address on a host with a dot
+    (Telegram refuses "localhost")."""
+    out = []
+    for label, path in _pairs(button):
+        link = platform_link(path)
+        host = link[len("https://"):].split("/", 1)[0].split(":", 1)[0]
+        if link and "." in host:
+            out.append((label, link))
+    return out
+
+
 def button_markup(button):
-    """The inline keyboard of ONE URL button, from (label, platform path),
-    or None (2026-09-27).
+    """The inline keyboard of one or two URL buttons on one row, from
+    (label, platform path) or a list of such pairs, or None (2026-09-27;
+    two buttons since 2026-10-24).
 
     A URL button only, never a callback: a message never acts from
     Telegram (the Eye's commands, and the alarm bot's /stopall, are the
-    only doors). The address is
+    only doors). A button that prepares an act ("Prepare ticket", "Close
+    position") opens the platform's own page, which asks for the
+    operator's login and, for real money, the trading PIN before anything
+    is sent. The address is
     platform_link's; there is no button when it has none (no DOMAIN, a
     placeholder) or when its host has no dot ("localhost"): Telegram
     refuses a button a phone cannot open, and a refused button would
-    have cost the message (post_message sends it again without)."""
-    if not button:
-        return None
-    try:
-        label, path = button
-    except (TypeError, ValueError):
-        return None
-    label = " ".join(str(label or "").split())[:BUTTON_MAX_CHARS]
-    link = platform_link(path)
-    host = link[len("https://"):].split("/", 1)[0].split(":", 1)[0]
-    if not (label and link and "." in host):
-        return None
-    return {"inline_keyboard": [[{"text": label, "url": link}]]}
+    have cost the message (post_message sends it again without). One
+    pair that cannot be a button costs that button only."""
+    row = [{"text": label, "url": link} for label, link in _buttons(button)]
+    return {"inline_keyboard": [row]} if row else None
+
+
+def button_lines(button) -> list:
+    """Each button's page as a line, for a text that carries no button
+    (2026-10-24): one button reads "Page: https://…" as it always did,
+    two read "<label>: https://…" each ("Open instrument: …",
+    "Prepare ticket: …"). One button that prepares an act (a page
+    alerts.links.deep_link_next admits: the ticket, the close dialog)
+    reads by its own label too ("Close position: …"), so the line still
+    says what the link opens. Without a host a phone can open, the path
+    in words (page_line)."""
+    from alerts.links import deep_link_next
+    pairs = _pairs(button)
+    if len(pairs) == 1 and not deep_link_next(pairs[0][1]):
+        return [page_line(pairs[0][1])]
+    return [page_line(path, label) for label, path in pairs]
 
 
 #: Words in Telegram's 400 answer that blame the BUTTON rather than the
@@ -245,8 +305,9 @@ def post_message(token, payload, *, timeout, markup=None,
 
     A button is an extra. When Telegram refuses the message FOR the
     button (button_refused), the message goes again without it, as
-    `fallback_text` when given (the page as a line, message_parts), so a
-    button can cost the button, never the message; the caller logs the
+    `fallback_text` when given (each button's page as a line,
+    message_parts), so a button can cost the button, never the message;
+    the caller logs the
     first refusal. Anything else (another 400, a 429, a 5xx, a transport
     error) is answered as it came. Raises what requests raises."""
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -263,22 +324,24 @@ def post_message(token, payload, *, timeout, markup=None,
 def message_parts(title, body="", *, lines=None, mark="", subtitle="",
                   summary="", details=None, button=None) -> tuple:
     """(text, markup, fallback): one message as fit_text renders it, its
-    button (button_markup, or None), and the text to send when Telegram
-    refuses the button: the same message with the button's page as a
-    line ("Page: https://…"), so a refused button costs the button, never
-    the way to the page. `fallback` is None without a button."""
+    buttons (button_markup, or None), and the text to send when Telegram
+    refuses them: the same message with each button's page as a line
+    ("Page: https://…"; two buttons, or one that prepares an act,
+    "<label>: https://…" each, button_lines), so a refused button costs
+    the button, never the way to the page. `fallback` is None without a
+    button."""
     fields = {"mark": mark, "subtitle": subtitle, "summary": summary,
               "details": details}
     text = fit_text(title, body, lines=lines, **fields)
     markup = button_markup(button)
     if not markup:
         return text, None, None
-    _label, path = button
-    line = page_line(path)
+    pages = [ln for ln in button_lines(button) if ln]
     if lines:
-        fallback = fit_text(title, body, lines=list(lines) + [line], **fields)
+        fallback = fit_text(title, body, lines=list(lines) + pages, **fields)
     else:
-        fallback = fit_text(title, f"{body}\n{line}" if body else line,
+        said = "\n".join(pages)
+        fallback = fit_text(title, f"{body}\n{said}" if body else said,
                             **fields)
     return text, markup, fallback
 
@@ -323,7 +386,8 @@ def send_to_chat(chat_id, title, body="", *, lines=None, mark="",
     `subtitle`, `summary` and `details` render as
     bot_program.notifications._telegram_text says; `button` is (label,
     platform path), one URL button (message_parts, post_message), since
-    2026-09-27.
+    2026-09-27, or a list of up to two such pairs, one or two URL buttons
+    on one row, since 2026-10-24.
     """
     return send_to_chat_outcome(
         chat_id, title, body, lines=lines, mark=mark, subtitle=subtitle,
@@ -360,7 +424,8 @@ def send_to_chat_outcome(chat_id, title, body="", *, lines=None, mark="",
     token or chat, a connection that could not be made, a message that
     could not be built); UNKNOWN (the request left and the answer was
     lost: it may have been posted, and sending it again may post it
-    twice). The same logging as send_to_chat; it never raises."""
+    twice). The same logging as send_to_chat; it never raises. `button`
+    is one or two URL buttons, as send_to_chat takes them."""
     chat = str(chat_id or "").strip()
     token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     if not (token and chat):
