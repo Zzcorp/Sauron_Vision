@@ -664,6 +664,58 @@ def hand_promoted_recently(rule_name: str, now=None) -> bool:
         created_at__gte=now - timedelta(days=MANUAL_DWELL_DAYS)).exists()
 
 
+#: The words of a hold that could not be read: an unread hold is a hold.
+HOLD_UNREAD = "its hold could not be read, so it is held"
+
+
+def stage_hold(rule_name: str) -> str:
+    """THE HOLD (R22, 2026-10-24): why no AUTOMATIC move may take
+    `rule_name` up to a live stage (Aragorn's paper -> live_full, the
+    sweep's paper -> live_small and live_small -> live_full), or "".
+
+      a hand demotion  the newest HAND move on the rule (manual_promote or
+                       manual_demote) is a demotion: it stays where its
+                       owner put it until a promotion by hand. No expiry.
+      taken off real   its owner demoted it by hand FROM a live stage and
+      money by hand    has not promoted it by hand TO a live stage since:
+                       a hand promotion below a live stage (research ->
+                       paper) lets it paper-trade, and is no vote for real
+                       money. No expiry.
+      a measured loser measured_loser() reads it on its all-time signal
+                       record: an automatic promotion would only hand the
+                       next floor sweep a demotion (the flip-flop).
+
+    hand_promoted_recently is not read: a hand promotion to paper is no
+    vote for real money. Raises on a failed read; every caller treats a
+    raise as a hold (HOLD_UNREAD). Words only; nothing here moves a
+    stage. Each sentence fits the sweep summary's 160-character cut."""
+    from signals.models import PromotionEvent
+    hand = PromotionEvent.objects.filter(
+        rule_name=rule_name, reason__in=("manual_promote", "manual_demote"))
+    ev = hand.order_by("-created_at", "-id").first()
+    if ev is not None and ev.reason == "manual_demote":
+        # HQ ↑ moves one rung; a "*" bench Aragorn left survives it, so
+        # the words promise no class (pair_policy still binds each one)
+        return (f"demoted by hand ({ev.from_stage} → {ev.to_stage}, "
+                f"{ev.created_at:%m-%d}): no automatic promotion until one "
+                f"by hand (HQ ↑, one rung; Aragorn's pair verdicts still "
+                f"bind each class)")
+    off = (hand.filter(reason="manual_demote", from_stage__in=LIVE_STAGES)
+           .order_by("-created_at", "-id").first())
+    if off is not None:
+        on = (hand.filter(reason="manual_promote", to_stage__in=LIVE_STAGES)
+              .order_by("-created_at", "-id").first())
+        if on is None or (on.created_at, on.id) < (off.created_at, off.id):
+            return (f"taken off real money by hand ({off.from_stage} → "
+                    f"{off.to_stage}, {off.created_at:%m-%d}): only a "
+                    f"promotion by hand to a live stage (HQ ↑ from paper) "
+                    f"brings it back")
+    why = measured_loser(rule_name)
+    if why:
+        return f"a measured loser on its all-time signal record: {why}"
+    return ""
+
+
 def is_due_for_demotion(rule_name: str) -> Optional[str]:
     """Return demoted stage if degradation criteria are met, else None."""
     ctrl = _control(rule_name)
@@ -916,7 +968,9 @@ def ladder_sweep_words(result: dict) -> tuple:
         if len(demoted) > 10:
             lines.append(f"• +{len(demoted) - 10} more on /promotions/")
     if blocked:
-        lines.append("Held back by the evidence gate:")
+        # the evidence gate, a hand demotion or a measured loser (R22):
+        # each line's own sentence says which
+        lines.append("Held back:")
         for b in blocked[:10]:
             why = " ".join(str(b.get("reason") or "").split())[:160]
             lines.append(f"• {_rule_words(b.get('rule_name'))} (to "
@@ -1123,6 +1177,23 @@ def auto_evaluate_all_rules() -> dict:
                               "to_stage": event.to_stage})
                 continue
             target = is_eligible_for_promotion(ctrl.rule_name)
+            if target in LIVE_STAGES:
+                # THE HOLD (R22, 2026-10-24): a rule its owner demoted by
+                # hand, or a measured loser, is never taken up to a live
+                # stage by the sweep (Aragorn reads the same hold). An
+                # unread hold is a hold.
+                try:
+                    hold = stage_hold(ctrl.rule_name)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("[promotion] %s: hold unread (%s) — held",
+                                   ctrl.rule_name, e)
+                    hold = HOLD_UNREAD
+                if hold:
+                    logger.info("[promotion] %s held at %s — %s",
+                                ctrl.rule_name, ctrl.promotion_stage, hold)
+                    blocked.append({"rule_name": ctrl.rule_name,
+                                    "target": target, "reason": hold})
+                    continue
             if target is not None:
                 # A good recent live/paper record is a small, recent sample.
                 # Before risking real money, require out-of-sample evidence

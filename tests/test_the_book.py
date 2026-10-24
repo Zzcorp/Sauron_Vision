@@ -1816,6 +1816,8 @@ class TheBookFollowsTheCode(SimpleTestCase):
              lambda: attr("bot_program.position_care", "WEEKEND_WINDOW_NY_DEFAULT"),
              (datetime.time(15, 30), datetime.time(17, 0)),
              "'The clock': a Friday in the hour or so before its market shuts"),
+            ("position_care.LONG_SHUT_HOURS", lambda: attr("bot_program.position_care", "LONG_SHUT_HOURS"), 24,
+             "'The clock': a US share market shuts for a day or more"),
             ("venue_health.SICK_BURST", lambda: attr("bot_program.venue_health", "SICK_BURST"), 3,
              "'The venue's health': three failures"),
             ("venue_health.BURST_WINDOW_S", lambda: attr("bot_program.venue_health", "BURST_WINDOW_S"), 180,

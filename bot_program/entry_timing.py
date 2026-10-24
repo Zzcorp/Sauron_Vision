@@ -25,8 +25,11 @@ calendar the open-position care already reads (position_care):
   CLOSE GUARD   a stock or ETF in the last CLOSE_GUARD_MINUTES before its
                 exchange closes (early closes kept); and every class
                 that shuts, in Friday's last hour before the weekend
-                (position_care.is_weekend_window): a position opened
-                into the gap cannot be managed through it.
+                (position_care.is_weekend_window), and the window before
+                a US session closes into a shut of a day or more, a
+                holiday's eve or an early close (position_care.
+                long_shut_ahead, R29): a position opened into the gap
+                cannot be managed through it.
   THE PRINT     a high-impact macro print on the instrument's currency
                 (either leg of a pair, the home currency for every other
                 class) from EVENT_BEFORE_MINUTES before to
@@ -345,8 +348,9 @@ def _g1_would_flag(cls, exchange, symbol, now) -> bool:
 def clock_verdict(symbol, asset_class, *, exchange="", now=None) -> dict | None:
     """The clock's refusal — the rollover, a shut exchange (SHUT:
     SHUT_CLASSES on Morgul G1's own clock), Friday's last hour before the
-    weekend, a market's first quarter hour, an exchange's last minutes — in
-    that order, or None. A shut market of another class (an index CFD at
+    weekend or the window before a US holiday's long shut (WEEKEND), a
+    market's first quarter hour, an exchange's last minutes — in that
+    order, or None. A shut market of another class (an index CFD at
     night) answers None. Never raises past its own log."""
     now = now or timezone.now()
     cls = str(asset_class or "").strip().lower()
@@ -377,13 +381,37 @@ def clock_verdict(symbol, asset_class, *, exchange="", now=None) -> dict | None:
         if shut:
             return shut
     try:
-        from bot_program.position_care import is_weekend_window
+        from bot_program.position_care import (is_weekend_window,
+                                               long_shut_ahead)
         if is_weekend_window(now, cls):
             return {"ok": False, "code": WEEKEND,
                     "why": (f"Friday's last hour before the weekend for the "
                             f"{_class_words(cls)} market — a position "
                             f"opened now cannot be managed through the gap; "
                             f"new entries resume on the week's open"),
+                    "until": None, "attack": None}
+        # THE LONG SHUT (R29, 2026-10-24): the same window before a US
+        # equity session closes into a shut of a day or more (a holiday's
+        # eve, an early close), the care's own reading. Recorded as
+        # BAD_TIMING like every WEEKEND. A class the SHUT rule judges is
+        # told when its market reopens; an index CFD is not (its venue
+        # outlives the cash session, so it enters again after the close).
+        shut = long_shut_ahead(now, cls, symbol or "", exchange=exchange or "")
+        if shut is not None:
+            if cls in SHUT_CLASSES:
+                why = (f"the {_class_words(cls)} market shuts at "
+                       f"{shut['at_words']} for {shut['hours']:g} hours (a "
+                       f"US market holiday or an early close) — a position "
+                       f"opened now cannot be managed through the gap; new "
+                       f"entries resume after it reopens "
+                       f"{shut['reopens_words']}")
+            else:
+                why = (f"the US cash session closes at {shut['at_words']} "
+                       f"before a {shut['hours']:g}-hour holiday shut — no "
+                       f"new {_class_words(cls)} entry in the window before "
+                       f"it (a position opened now would ride the gap "
+                       f"unmanaged)")
+            return {"ok": False, "code": WEEKEND, "why": why,
                     "until": None, "attack": None}
     except Exception as e:  # noqa: BLE001
         logger.warning("[timing] weekend window unread for %s: %s", symbol, e)

@@ -1575,7 +1575,7 @@ def war_text(session) -> str:
         if m.get("crisis_mode_on"):
             from bot_program.posture import entry_posture
             p = entry_posture(user, session.symbol, session.asset_class,
-                              session.side)
+                              session.side, cfg=_config_for(session))
             size = _num(p.get("size"))
             line += (f"; this entry: "
                      f"{str(p.get('kind') or '').replace('_', ' ')}, "

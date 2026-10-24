@@ -21,14 +21,18 @@ Aragorn switch ON:
                 posture      a REAL-MONEY risk-on long (or a haven short) in
                              a stressed market: no worse than -0.75R; in a
                              crisis -0.5R (bot_program/posture.py)
-                weekend      Friday from WEEKEND_FROM_UTC, a market that
-                             shuts: a winner of WEEKEND_LOCK_AT_R or more
+                weekend      the Friday window (WEEKEND_WINDOW_NY, New
+                             York time) of a market that shuts, and the
+                             same window before a US equity session closes
+                             into a shut of a day or more (a holiday's
+                             eve, a Friday early close: long_shut_ahead,
+                             R29): a winner of WEEKEND_LOCK_AT_R or more
                              locks break-even
               The mark crossing it closes the position at market
               (reason SL, metadata["care_exit"] says which).
-  WEEKEND CUT a real-money loser carrying WEEKEND_CUT_LEVERAGE or more,
-              Friday evening in a market that shuts: closed rather than
-              carried through a gap.
+  WEEKEND CUT a real-money loser carrying WEEKEND_CUT_LEVERAGE or more, in
+              those same windows: closed rather than carried through a
+              gap.
   NO PROGRESS open NO_PROGRESS_HOURS[class] or more, never reached +1R and
               under NO_PROGRESS_MAX_R now: closed (reason TIME, graded
               time_stop) — capital back from a thesis that did nothing.
@@ -117,6 +121,7 @@ that fails leaves the row to the rest of manage_positions, exactly as
 before.
 """
 import logging
+from datetime import datetime
 from datetime import time as dtime
 from datetime import timedelta
 from zoneinfo import ZoneInfo
@@ -142,6 +147,15 @@ WEEKEND_WINDOW_NY = {"stock": (dtime(15, 0), dtime(16, 0)),
 WEEKEND_WINDOW_NY_DEFAULT = (dtime(15, 30), dtime(17, 0))
 WEEKEND_LOCK_AT_R = 0.5
 WEEKEND_CUT_LEVERAGE = 5
+#: THE LONG SHUT (R29, 2026-10-24): a US equity session (NYSE, NASDAQ: the
+#: only sessions whose holidays core.exchange_status models) that closes
+#: into a shut of LONG_SHUT_HOURS or more on a day the Friday window does
+#: not cover (the eve of a holiday, a Friday early close) is a weekend for
+#: the care and the entry gate, in the class's own window length. The
+#: cheap guard first: New York time in [LONG_SHUT_GUARD_FROM, 16:00), the
+#: earliest a window can open before a 13:00 early close.
+LONG_SHUT_HOURS = 24
+LONG_SHUT_GUARD_FROM = dtime(11, 30)
 NO_PROGRESS_HOURS = {"forex": 96, "index": 96, "commodity": 120,
                      "stock": 120, "etf": 120, "crypto": 72}
 NO_PROGRESS_DEFAULT_HOURS = 120
@@ -220,6 +234,60 @@ def is_weekend_window(now, asset_class) -> bool:
     start, end = WEEKEND_WINDOW_NY.get(str(asset_class),
                                        WEEKEND_WINDOW_NY_DEFAULT)
     return ny.weekday() == 4 and start <= ny.time() < end
+
+
+def long_shut_ahead(now, asset_class, symbol="", *, exchange="") -> dict | None:
+    """THE LONG SHUT (R29): {"at", "reopens", "hours", "at_words",
+    "reopens_words"} when `now` sits in this class's weekend-window length
+    before a US equity session closes into a shut of LONG_SHUT_HOURS or
+    more on a day the Friday window does not cover; else None.
+
+    The eves are those of core.exchange_status's table: Monday to Thursday
+    with tomorrow in US_EQUITY_HOLIDAYS, or a Friday in
+    US_EQUITY_EARLY_CLOSES. An ordinary Friday is the Friday window's
+    (is_weekend_window), unchanged. Cheap guards first, as plan() runs per
+    row per tick and per bar in the Orcs' replay; then three pure clock
+    reads (no DB, no cache), made only on those eves. The clock is
+    imported at call time. Never raises: a clock that cannot be read
+    answers None, which leaves the Friday window as it was."""
+    cls = str(asset_class or "").strip().lower()
+    if cls in NEVER_SHUTS:
+        return None
+    try:
+        from core import exchange_status as es
+        ny = now.astimezone(NY)
+        if not LONG_SHUT_GUARD_FROM <= ny.time() < dtime(16, 0):
+            return None
+        day = ny.date()
+        if day.weekday() <= 3:
+            if day + timedelta(days=1) not in es.US_EQUITY_HOLIDAYS:
+                return None
+        elif day.weekday() != 4 or day not in es.US_EQUITY_EARLY_CLOSES:
+            return None
+        clock = es.market_clock(cls, exchange or "", symbol or "",
+                                now_utc=now)
+        if not (clock.get("modelled") and clock.get("is_open")
+                and clock.get("session") in es._US_EQUITY_SESSIONS):
+            return None
+        start, end = WEEKEND_WINDOW_NY.get(cls, WEEKEND_WINDOW_NY_DEFAULT)
+        span = (datetime.combine(day, end) - datetime.combine(day, start))
+        at = es.next_close_utc(cls, exchange or "", symbol or "", now)
+        if at is None or not now < at <= now + span:
+            return None
+        after = es.market_clock(cls, exchange or "", symbol or "", now_utc=at)
+        reopens = after.get("reopens")
+        if after.get("is_open", True) or reopens is None:
+            return None
+        hours = round((reopens - at).total_seconds() / 3600.0, 2)
+        if hours < LONG_SHUT_HOURS:
+            return None
+        return {"at": at, "reopens": reopens, "hours": hours,
+                "at_words": es.utc_words(at),
+                "reopens_words": es.utc_words(reopens)}
+    except Exception as e:  # noqa: BLE001 — unread: the Friday window stands
+        logger.info("[care] the long shut is unread for %s %s: %s",
+                    cls, symbol, e)
+        return None
 
 
 def market_hours(start, now, asset_class) -> float:
@@ -401,6 +469,13 @@ def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
     if live and fights and posture_level == "crisis":
         cands.append((lvl(CRISIS_FLOOR_R), "crisis"))
     weekend = is_weekend_window(now, trade.asset_class)
+    shut = None
+    if not weekend:
+        # THE LONG SHUT (R29): the eve of a US holiday, or an early close
+        # into one, is a weekend too; the OR keeps every Friday window
+        shut = long_shut_ahead(now, trade.asset_class,
+                               getattr(trade, "symbol", "") or "")
+        weekend = shut is not None
     if weekend and r_now >= WEEKEND_LOCK_AT_R:
         # a winner NOW locks break-even; a past peak never closes a loser
         cands.append((lvl(BREAKEVEN_LOCK_R), "weekend lock"))
@@ -474,9 +549,15 @@ def plan(trade, price, *, now=None, posture_level="calm", kind="neutral",
         return out
     lev = int(_f(meta.get("leverage")) or 1)
     if live and weekend and r_now < 0 and lev >= WEEKEND_CUT_LEVERAGE:
-        out.update(action="close", reason="SL",
-                   why=f"Friday evening, a {lev}x loser ({r_now:+.2f}R) is not "
-                       f"carried through the weekend gap")
+        if shut:
+            why = (f"before the US equity session shuts {shut['at_words']} "
+                   f"for {shut['hours']:g} hours (a holiday or an early "
+                   f"close; it reopens {shut['reopens_words']}), a {lev}x "
+                   f"loser ({r_now:+.2f}R) is not carried through the gap")
+        else:
+            why = (f"Friday evening, a {lev}x loser ({r_now:+.2f}R) is not "
+                   f"carried through the weekend gap")
+        out.update(action="close", reason="SL", why=why)
         out["care"]["exit"] = "weekend cut"
         return out
     if live and event and r_now < 0 and lev >= EVENT_CUT_LEVERAGE:

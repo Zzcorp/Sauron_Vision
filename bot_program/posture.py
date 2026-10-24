@@ -25,8 +25,10 @@ back in steps by days since the crisis eased (RECOVERY_STEPS).
 Two dark-water scales sit beside it and bind in every level:
   drawdown_scale  the account under its 90-day high-water mark ->
                   share_allocator.governor_for (1.0 down to 0.4 between 5%
-                  and 20%), unless the share allocator or the desk live
-                  mode already applies it
+                  and 20%), less the governor an APPLIED share plan
+                  already applied to this config's pool
+                  (share_allocator.carried_cut); a live switch alone
+                  carries nothing (Gap 3, 2026-10-24)
   streak_scale    the last STREAK_N real-money closes all losses ->
                   STREAK_SCALE until a win
 
@@ -149,17 +151,15 @@ def leverage_cap(level, kind, class_ceiling, *, recovery_days=0.0):
     return max(1, min(caps))
 
 
-def drawdown_scale(user) -> tuple:
-    """(scale, why) from the account's drawdown under its high-water mark —
-    unless the share allocator or the capital desk already applies the
-    same governor (their live modes), which would square it."""
-    try:
-        from core.platform_control import is_component_enabled
-        for key in ("share_allocator_mode_live", "capital_desk_mode_live"):
-            if is_component_enabled(key):
-                return 1.0, ""
-    except Exception:  # noqa: BLE001
-        pass
+def drawdown_scale(user, cfg=None) -> tuple:
+    """(scale, why) from the account's drawdown under its high-water mark
+    (share_allocator.governor_for), less what an APPLIED share plan already
+    cut this config's pool by (share_allocator.carried_cut, credited no
+    lower than that plan's own governor), so the governor is never applied
+    twice and a drawdown that deepened since binds again (Gap 3,
+    2026-10-24). A live switch alone carries nothing: the share switch only
+    permits an apply, and the desk's governor cuts the desk's budget, not
+    the entry. A plan unread is a plan not applied: the full governor."""
     try:
         from bot_program.capital_truth import equity_drawdown
         from bot_program.share_allocator import governor_for
@@ -168,8 +168,20 @@ def drawdown_scale(user) -> tuple:
             return 1.0, ""
         pct = float(dd.get("drawdown_pct") or 0.0)
         g = float(governor_for(pct))
-        if g < 1.0:
-            return g, f"account {pct * 100:.1f}% under its high-water mark"
+        if g >= 1.0:
+            return 1.0, ""
+        why = f"account {pct * 100:.1f}% under its high-water mark"
+        try:
+            from bot_program.share_allocator import carried_cut
+            cut = carried_cut(user, cfg)
+        except Exception:  # noqa: BLE001 — unread is not applied
+            cut = None
+        if cut is None:
+            return g, why
+        scale = min(1.0, g / cut)
+        if scale < 1.0:
+            return scale, (f"{why}, an applied share plan already cut this "
+                           f"pool to x{cut:.2f}")
         return 1.0, ""
     except Exception as e:  # noqa: BLE001 — an unread drawdown scales nothing
         return 1.0, f"drawdown unread ({type(e).__name__})"
@@ -190,18 +202,20 @@ def streak_scale(user) -> tuple:
         return 1.0, f"streak unread ({type(e).__name__})"
 
 
-def entry_posture(user, symbol, asset_class, side, *, now=None) -> dict:
+def entry_posture(user, symbol, asset_class, side, *, now=None,
+                  cfg=None) -> dict:
     """The whole posture for one REAL-MONEY entry:
     {level, kind, live, size, lev_cap_frac, lev_abs, recovery_days, why}
     where size already multiplies the posture, the drawdown and the
-    streak scales."""
+    streak scales. `cfg` is the config the entry sizes from: the drawdown
+    governor credits only what an applied share plan cut ITS pool by."""
     from bot_program import market_stress
     cur = market_stress.current(now)
     level = cur["level"]
     kind = classify(symbol, asset_class, side)
     rdays = market_stress.recovery_days(now) if level == "recovery" else 0.0
     rule = posture_rule(level, kind, recovery_days=rdays)
-    dd, dd_why = drawdown_scale(user)
+    dd, dd_why = drawdown_scale(user, cfg)
     st, st_why = streak_scale(user)
     why = [f"posture {level} ({cur['why']}), {kind.replace('_', ' ')}"]
     if rule["size"] < 1.0:

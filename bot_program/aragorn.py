@@ -36,7 +36,16 @@ THE MOVES, every EVALUATE_HOURS (and on `manage.py aragorn run --yes`):
                        created without a stage defaults to live_full, a
                        hazard this module never relies on), the proven
                        pair enters probation and every other class of the
-                       rule is benched (the "*" row)
+                       rule is benched (the "*" row). Never (R22) for a
+                       rule whose newest hand move is a demotion (until a
+                       hand promotion), that its owner took off real money
+                       by hand (until a hand promotion to a live stage), or
+                       that the loser floor reads a measured loser
+                       (promotion_pipeline.stage_hold, the nightly sweep's
+                       hold too), a pair on the bench
+                       (step 2 lifts a bench), or a pair benched earlier
+                       in the same pass; each hold is journaled ("held")
+                       once a day and listed by the daily report
   research -> paper    a rule at the research stage the ladder's own
                        criterion (promotion_pipeline.is_eligible_for_
                        promotion) sends to paper: it starts paper trading
@@ -91,6 +100,11 @@ SKIP_RULES = frozenset({"manual_take", ""})
 #: a research rule demoted (or entered) this recently is not sent back to
 #: paper: no daily research <-> paper churn with the 04:30 ladder
 RESEARCH_DWELL_DAYS = 14
+#: R22: a rule the hold keeps off real money is journaled ("held") once
+#: a day (a row is skipped while one is younger than this less half a
+#: pass), and listed by the daily report while it still stands
+HELD_JOURNAL_HOURS = 24
+HELD_REPORT_LIMIT = 10
 
 
 def is_on() -> bool:
@@ -260,14 +274,22 @@ def _set(rule, cls, state, reason, s, *, by="aragorn", now=None):
 
 # ── the pass ─────────────────────────────────────────────────────────────
 
-def evaluate(*, apply=False, now=None) -> list:
+def evaluate(*, apply=False, now=None, held=None) -> list:
     """Every move Aragorn would make now, as dicts {kind, rule,
     asset_class, reason, stats}; applied (verdicts written, stages moved,
-    the journal kept) when `apply`. Never raises on one pair."""
+    the journal kept) when `apply`. Never raises on one pair.
+
+    `held` (R22, 2026-10-24): a list, extended with every paper rule a
+    proven pair would have taken live and the hold kept off real money
+    ({rule, asset_class, reason, stats}, one per rule). With `apply`, each
+    hold is journaled (AragornAction "held") once a day per rule
+    (_journal_hold); a plan writes nothing. The return value is the
+    moves, as before."""
     from bot_program.asset_models import AssetBotTrade
     from bot_program.aragorn_models import PairVerdict
     now = now or timezone.now()
     moves = []
+    held_now = []
     since = now - timedelta(days=WINDOW_DAYS)
 
     def _move(kind, rule, cls, reason, s):
@@ -388,21 +410,54 @@ def evaluate(*, apply=False, now=None) -> list:
         rule_name__in=paper_rules - SKIP_RULES)
         .exclude(asset_class__in=SKIP_CLASSES)
         .values_list("rule_name", "asset_class"))
+    # R22 (2026-10-24): never a pair benched in THIS pass (moves apply
+    # after every step is judged), never a pair on the bench (step 2 is
+    # the only way off it), and never a rule the hold reads (a hand
+    # demotion, a measured loser: promotion_pipeline.stage_hold, the
+    # sweep's own). The hold is read only for a rule with a proven pair,
+    # once per rule per pass, inside the pair's try: an unread hold is a
+    # hold, and the steps above still apply.
+    try:
+        from signals.promotion_pipeline import HOLD_UNREAD, stage_hold
+    except Exception as e:  # noqa: BLE001 — unread is a hold, steps 1-2 stand
+        HOLD_UNREAD = "its hold could not be read, so it is held"
+        logger.warning("[aragorn] the hold is unread: %s", e)
+
+        def stage_hold(_rule, _e=e):
+            raise RuntimeError(f"the hold is unread: {_e}")
     promoted_rules = set()
+    benched_now = {(m["rule"], m["asset_class"]) for m in moves
+                   if m["kind"] == "bench"}
+    holds = {}
     for rule, cls in sorted(paper_pairs):
-        if rule in promoted_rules:
+        if rule in promoted_rules or holds.get(rule) \
+                or (rule, cls) in benched_now:
             continue
+        s = {}
         try:
             v = verdict_for(rule, cls)
-            if v is not None and v.pinned:
+            if v is not None and (v.pinned or v.state == "bench"):
                 continue
             s = stats(_closes(rule, cls, paper=True, now=now))
             why = proven_reason(s)
             if why:
+                if rule not in holds:
+                    holds[rule] = HOLD_UNREAD
+                    holds[rule] = stage_hold(rule)
+                if holds[rule]:
+                    held_now.append({"rule": rule, "asset_class": cls,
+                                     "reason": holds[rule], "stats": s})
+                    continue
                 _move("rule_live", rule, cls, why, s)
                 promoted_rules.add(rule)
         except Exception as e:  # noqa: BLE001
             logger.warning("[aragorn] paper %s/%s not judged: %s", rule, cls, e)
+            if holds.get(rule) == HOLD_UNREAD:
+                # said, not hidden: the unread hold is journaled too
+                held_now.append({"rule": rule, "asset_class": cls,
+                                 "reason": f"{HOLD_UNREAD} "
+                                           f"({type(e).__name__})",
+                                 "stats": s})
 
     # 4 — research rules the ladder's own criterion sends to paper
     try:
@@ -426,7 +481,34 @@ def evaluate(*, apply=False, now=None) -> list:
             except Exception as e:  # noqa: BLE001
                 logger.error("[aragorn] move %s failed: %s", m, e)
                 m["error"] = str(e)
+        for h in held_now:
+            try:
+                _journal_hold(h, now=now)
+            except Exception as e:  # noqa: BLE001 — the hold stands unsaid
+                logger.warning("[aragorn] hold of %s not journaled: %s",
+                               h["rule"], e)
+    if isinstance(held, list):
+        held.extend(held_now)
     return moves
+
+
+def _journal_hold(h, *, now):
+    """One AragornAction "held" per rule a day, not every four hours. The
+    window is half a pass short of a day: the pass runs every
+    EVALUATE_HOURS from the beat, so a beat a few hundred milliseconds
+    early still finds yesterday's row outside it and the hold is said in
+    the same slot each day (a full 24 h let the jitter skip a morning, and
+    the 07:10 report then left out a hold that still stood)."""
+    from bot_program.aragorn_models import AragornAction
+    if AragornAction.objects.filter(
+            kind="held", rule_name=h["rule"],
+            at__gte=now - timedelta(hours=HELD_JOURNAL_HOURS
+                                    - EVALUATE_HOURS / 2)).exists():
+        return
+    AragornAction.objects.create(
+        at=now, kind="held", rule_name=h["rule"],
+        asset_class=h.get("asset_class") or "", detail=h["reason"],
+        stats=h.get("stats") or {})
 
 
 def _apply(m, *, now):
@@ -492,6 +574,64 @@ def report_lines(now=None, *, limit=40) -> list:
              f"{cur['level'].upper()} (score "
              f"{cur['score'] if cur['score'] is not None else '—'}): "
              f"{cur['why']}"]
+    try:
+        # R29: the care's holiday eves read core.exchange_status's table;
+        # a table about to run out is said here, every morning, rather than
+        # by a dated test that would turn every build red
+        from core import exchange_status as es
+        from zoneinfo import ZoneInfo
+        today = now.astimezone(ZoneInfo("America/New_York")).date()
+        left = es.us_holiday_cover_days(today)
+        if left < es.US_HOLIDAY_COVER_WARN_DAYS:
+            lines.append(
+                f"WARNING: the US holiday table ends "
+                f"{max(es.US_EQUITY_HOLIDAYS):%Y-%m-%d} ({left} days left); "
+                f"extend core/exchange_status.py, or the care and the entry "
+                f"gate stop seeing holiday eves")
+    except Exception:  # noqa: BLE001 — the report never fails on a section
+        pass
+    try:
+        # R22: the rules a proven paper record would have taken live and
+        # the hold kept off real money — near the top, so neither the
+        # pairs nor a busy day of care rows push them past the message's
+        # cut; one line per rule. The journal is read a pass wider than a
+        # day (a hold is journaled once a day, give or take the beat), and
+        # each rule is read again NOW: a rule no longer at paper, or whose
+        # hold is lifted (HQ ↑), is not listed; a re-read that fails keeps
+        # the line, in the journal's words.
+        from signals.models_control import RuleControl
+        seen, held = set(), []
+        for a in AragornAction.objects.filter(
+                kind="held",
+                at__gte=now - timedelta(hours=HELD_JOURNAL_HOURS
+                                        + EVALUATE_HOURS)):
+            if a.rule_name in seen:
+                continue
+            seen.add(a.rule_name)
+            words = a.detail
+            try:
+                from signals.promotion_pipeline import stage_hold
+                stage = (RuleControl.objects.filter(rule_name=a.rule_name)
+                         .values_list("promotion_stage", flat=True).first())
+                if stage != "paper":
+                    continue
+                words = stage_hold(a.rule_name)
+                if not words:
+                    continue
+            except Exception:  # noqa: BLE001 — unread: the hold is kept
+                words = a.detail
+            held.append((a, words))
+        if held:
+            lines.append("Held off real money:")
+            for a, words in held[:HELD_REPORT_LIMIT]:
+                lines.append(f"  {a.rule_name}"
+                             f"{'/' + a.asset_class if a.asset_class else ''}"
+                             f": {words[:200]}")
+            if len(held) > HELD_REPORT_LIMIT:
+                lines.append(f"  +{len(held) - HELD_REPORT_LIMIT} more "
+                             f"(manage.py aragorn journal)")
+    except Exception:  # noqa: BLE001 — the report never fails on a section
+        pass
     rows = list(PairVerdict.objects.all())
     if rows:
         lines.append("Pairs:")
@@ -505,7 +645,7 @@ def report_lines(now=None, *, limit=40) -> list:
                 f"{(f'{exp:+.2f}R' if isinstance(exp, (int, float)) else '—')}"
                 f" · {v.reason[:90]}")
     acts = list(AragornAction.objects.filter(
-        at__gte=now - timedelta(days=1))[:15])
+        at__gte=now - timedelta(days=1)).exclude(kind="held")[:15])
     if acts:
         lines.append("Last 24h:")
         for a in acts:

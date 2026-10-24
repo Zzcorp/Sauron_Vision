@@ -436,6 +436,19 @@ US_EQUITY_EARLY_CLOSES = {
 }
 _US_EQUITY_SESSIONS = frozenset({"NYSE", "NASDAQ"})
 _NEW_YORK = "America/New_York"
+#: R29 (2026-10-24): the care and the entry gate treat the eve of a US
+#: holiday as a weekend (position_care.long_shut_ahead) on the table above,
+#: so a table that runs out is said, not left to a dated test that turns
+#: every build red: the 07:10 Aragorn report warns when fewer days than
+#: this remain (us_holiday_cover_days).
+US_HOLIDAY_COVER_WARN_DAYS = 60
+
+
+def us_holiday_cover_days(today) -> int:
+    """Days from `today` (a New York date) to the last holiday the table
+    knows, 0 once it is reached or passed: past it every weekday reads as
+    a session again and no holiday eve is seen. Pure."""
+    return max(0, (max(US_EQUITY_HOLIDAYS) - today).days)
 
 
 def utc_words(moment) -> str:

@@ -153,8 +153,10 @@ def ladder_overnight_lines(now=None, *, hours=24) -> list:
     if blocked:
         names = ", ".join(_rule_words(b.get('rule_name')) for b in blocked[:5])
         more = f" (+{len(blocked) - 5} more)" if len(blocked) > 5 else ""
-        lines.append(f"• Held back: {len(blocked)} by the evidence gate — "
-                     f"{names}{more}")
+        # the sweep holds back for the evidence gate, a hand demotion or a
+        # measured loser (R22): the cause is not always the gate
+        lines.append(f"• Held back: {len(blocked)} (the evidence gate, a "
+                     f"hand demotion or a measured loser) — {names}{more}")
     if not lines:
         lines.append(f"• No rule changed stage in the last {hours} hours")
     return lines

@@ -236,7 +236,8 @@ SKIP_WORDS = {
     "cooldown": "this symbol traded too recently",
     "already_open": "a position is already open",
     "gate_blocked": "the risk gate declined",
-    "stage_blocked": "the rule is not promoted far enough to trade",
+    "stage_blocked": "the rule is not promoted far enough to trade, or "
+                     "it is paused",
     "paper_fallback": "a live bot had no working broker",
     "no_price": "no usable price",
     "cost_filter": "the planned move could not cover the costs",
@@ -261,7 +262,8 @@ SKIP_WORDS = {
     "wide_spread": "the quoted half-spread at the send would have eaten "
                    "too much of the stop distance",
     "bad_timing": "the clock said no: a rollover, a market's first quarter "
-                  "hour or last minutes, or a high-impact print near",
+                  "hour or last minutes, a weekend or a US holiday ahead, "
+                  "or a high-impact print near",
     # 2026-10-07: SIZE BY PROOF (backtester/proving/proof.py) — a live
     # entry on a rule the proving ground FAILED on this class and side.
     "proving_failed": "the proving ground failed this rule on this class "
