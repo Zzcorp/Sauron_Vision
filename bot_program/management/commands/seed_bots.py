@@ -7,7 +7,7 @@ remaining reason the fleet was one bot wide was that nobody had created
 the configs. This command creates them.
 
     python manage.py seed_bots                  # create, DISABLED, paper
-    python manage.py seed_bots --activate       # ...and switch them on
+    python manage.py seed_bots --activate       # ...and switch the paper ones on
     python manage.py seed_bots --user <you>       # attach to a named user
     python manage.py seed_bots --reset          # remove seeded configs
 
@@ -80,6 +80,7 @@ def seed_bots(user, *, activate: bool = False) -> dict:
     created = updated = 0
     missing: set[str] = set()
     time_stops: list[str] = []
+    skipped_live: list[str] = []
     for asset_class, name, symbols in FLEET:
         present = [s for s in symbols if s in known]
         missing.update(s for s in symbols if s not in known)
@@ -101,10 +102,16 @@ def seed_bots(user, *, activate: bool = False) -> dict:
             cfg.save(update_fields=["symbols", "updated_at"])
             updated += 1
         if activate and not cfg.enabled:
-            # Through asset_engine.disarm (2026-10-07): arming clears any
-            # recorded stop with it, as every re-enabler does.
-            disarm.enable_config(cfg, who="seed",
-                                 why="seed_bots --activate")
+            if cfg.mode == "live":
+                # A starter config promoted to LIVE is never armed here:
+                # arming real money takes the trading PIN, which this
+                # command and the HQ button never ask (2026-10-23).
+                skipped_live.append(cfg.name)
+            else:
+                # Through asset_engine.disarm (2026-10-07): arming clears
+                # any recorded stop with it, as every re-enabler does.
+                disarm.enable_config(cfg, who="seed",
+                                     why="seed_bots --activate")
 
         # Reported, never written. A seeded config with no time stop is the
         # one state this command must not create silently, so the number it
@@ -116,7 +123,8 @@ def seed_bots(user, *, activate: bool = False) -> dict:
             f"{cfg.name}: NO time stop ({ts['source']}) — unbounded in time")
     return {"created": created, "updated": updated,
             "missing_symbols": sorted(missing),
-            "time_stops": time_stops}
+            "time_stops": time_stops,
+            "skipped_live": skipped_live}
 
 
 def reset_bots(user) -> dict:
@@ -157,8 +165,10 @@ class Command(BaseCommand):
                             help="Username to own the fleet "
                                  "(default: the first superuser)")
         parser.add_argument("--activate", action="store_true",
-                            help="Enable the seeded bots so the 5-min tick "
-                                 "picks them up")
+                            help="Enable the seeded PAPER bots so the 5-min "
+                                 "tick picks them up (a starter config "
+                                 "promoted to live is left off: arm it "
+                                 "with the PIN)")
         parser.add_argument("--reset", action="store_true",
                             help="Delete seeded configs that have never traded")
 
@@ -195,9 +205,14 @@ class Command(BaseCommand):
                 f"  {sym}: no Instrument row — run seed_instruments first; "
                 f"the symbol was left out of its config"))
         self.stdout.write(self.style.SUCCESS(
-            f"Seeded {out['created'] + out['updated']} paper bot config(s) "
+            f"Seeded {out['created'] + out['updated']} bot config(s) "
             f"for {user.username} — {out['created']} created / "
             f"{out['updated']} updated · enabled={options['activate']}"))
+        if out["skipped_live"]:
+            self.stderr.write(self.style.WARNING(
+                f"  left OFF because they are LIVE: "
+                f"{', '.join(out['skipped_live'])} — arm each from "
+                f"/asset-bots/ with your PIN"))
         if out["time_stops"]:
             self.stdout.write(
                 "  Time stops (max hold before a stale position is closed "

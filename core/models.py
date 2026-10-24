@@ -33,16 +33,19 @@ class FeatureFlag(models.Model):
         return f"{self.name} [{state}]"
 
 
-# ── the switch PIN's login mark (core/switch_pin.py, 2026-10-23) ────────
+# ── the trading PIN's login mark (core/trading_pin.py, 2026-10-23) ──────
 # Connected here because this module is loaded with the app: every login
 # stamps the session with a keyed mark of the PIN it logged in under, and
-# turning a live-money switch on refuses a session whose mark no longer
-# matches (a PIN set or changed after login, by any door).
+# every door that opens, arms or moves money (a live-money switch among
+# them) refuses a session whose mark no longer matches (a PIN set or
+# changed after login, by any door).
 from django.contrib.auth.signals import user_logged_in  # noqa: E402
 from django.dispatch import receiver  # noqa: E402
 
 
 @receiver(user_logged_in, dispatch_uid="core.switch_pin.login_mark")
 def _mark_the_login_pin(sender, request, user, **kwargs):
-    from core.switch_pin import stamp_login_mark
-    stamp_login_mark(request, user)
+    # The mark, and a fresh PIN count: a login is the fresh proof that
+    # ends a spent count, even over a live session (core/trading_pin.py).
+    from core.trading_pin import on_login
+    on_login(request, user)

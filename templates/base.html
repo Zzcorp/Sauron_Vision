@@ -2902,12 +2902,17 @@
           if (res.error) {
             /* If funding closes already happened, the operator must know —
                capital moved even though nothing opened. */
-            SV.overlay.alert({
+            var said = SV.overlay.alert({
               title: 'Trade not taken',
               message: res.error + (res.closed && res.closed.length
                 ? '  ·  Already closed for funding: ' + res.closed.join(', ')
                 : '')
             });
+            /* Five wrong PINs ended the session (core/trading_pin.py):
+               nothing behind this page answers any more. */
+            if (res.logged_out) {
+              Promise.resolve(said).then(function () { window.location.assign('/wall/'); });
+            }
             return;
           }
           /* The decision is made — retire the card while the alert is

@@ -1,6 +1,7 @@
 """Two-step login: username/password → PIN verification popup."""
+from django.contrib import messages
 from django.contrib.auth import authenticate, login as auth_login
-from django.contrib.auth.hashers import check_password, make_password
+from django.contrib.auth.hashers import make_password
 from django.http import JsonResponse
 from django.shortcuts import render, redirect
 from django.contrib.auth.views import LoginView
@@ -67,20 +68,50 @@ def login_pin(request):
 
     error = None
     if request.method == "POST":
-        pin = request.POST.get("pin", "")
-        prof = getattr(user, "trader_profile", None)
-        if prof and prof.access_pin_hash and check_password(pin, prof.access_pin_hash):
+        # The one PIN check's login step (core/trading_pin.check_login_pin):
+        # wrong answers are counted on this pending login, reserved before
+        # the hash; the fifth drops the pending login, so the password must
+        # be proven again (the IP limiter bounds that). Blank is not counted.
+        from core.trading_pin import (LOGIN_ATTEMPTS_KEY, PIN_MISSING,
+                                      PIN_WRONG, check_login_pin)
+        verdict = check_login_pin(request, user, request.POST.get("pin", ""))
+        if verdict.ok:
             auth_login(request, user)
             next_url = request.session.pop("sauron_pending_next", "/intro/") or "/intro/"
             request.session.pop(PENDING_KEY, None)
+            # login() keeps the pending session's data: never carry the
+            # login step's count into the logged-in session.
+            request.session.pop(LOGIN_ATTEMPTS_KEY, None)
             if is_ajax:
                 return JsonResponse({"status": "ok", "redirect": next_url})
             return redirect(next_url)
-        error = "Invalid PIN"
+        if verdict.logged_out:
+            request.session.pop(PENDING_KEY, None)
+            request.session.pop("sauron_pending_next", None)
+            error = RESTART
+            if is_ajax:
+                return JsonResponse({"status": "error", "message": error,
+                                     "restart": True}, status=400)
+            # Straight back to the password: the PIN pad has nothing left
+            # to answer (critique A12).
+            messages.error(request, error)
+            return redirect("login")
+        if verdict.refusal == PIN_MISSING:
+            error = "Enter your PIN."
+        elif verdict.refusal == PIN_WRONG:
+            n = verdict.attempts_left or 0
+            error = (f"Invalid PIN: {n} attempt{'' if n == 1 else 's'} left "
+                     f"before the password is asked again.")
+        else:
+            error = "Invalid PIN"
         if is_ajax:
             return JsonResponse({"status": "error", "message": error}, status=400)
     return render(request, "registration/login_pin.html",
                   {"error": error, "username": user.username})
+
+
+#: The login step's fifth wrong answer: the pending login is dropped.
+RESTART = "Too many incorrect PINs: sign in again with your password."
 
 
 @csrf_protect

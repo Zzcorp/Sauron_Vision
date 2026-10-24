@@ -9,6 +9,7 @@
     {% if config %}
       <button id="pause-btn" class="btn {% if config.enabled %}btn-danger{% else %}btn-primary{% endif %}"
               data-bot-paused="{% if config.enabled %}0{% else %}1{% endif %}"
+              data-bot-mode="{{ config.mode }}"
               onclick="togglePause()" style="font-size:1.1rem;padding:14px 28px;">
         {% if config.enabled %}⏸  PAUSE BOT{% else %}▶  RESUME BOT{% endif %}
       </button>
@@ -132,6 +133,7 @@ function getCsrf() {
 async function togglePause() {
   const btn = document.getElementById("pause-btn");
   const paused = !!btn && btn.dataset.botPaused === "1";
+  const live = !!btn && btn.dataset.botMode === "live";
   const ok = await SV.overlay.confirm({
     title: paused ? "Resume the bot" : "Pause the bot",
     message: paused
@@ -142,14 +144,33 @@ async function togglePause() {
       + "live at the broker without the bot managing their stops.",
     danger: !paused,
     confirmLabel: paused ? "Resume" : "Pause",
+    /* Resuming a LIVE bot arms real money: it takes the trading PIN
+       (2026-10-23), checked and counted by the server. Pausing never asks. */
+    secretLabel: paused && live ? "Your trading PIN" : undefined,
   });
   if (!ok) return;
+  const body = new URLSearchParams();
+  body.append("want", paused ? "on" : "off");
+  if (typeof ok === "string") body.append("pin", ok);
   try {
     const r = await fetch("/bot/console/pause/", {
-      method: "POST", headers: { "X-CSRFToken": getCsrf() },
+      method: "POST", headers: { "X-CSRFToken": getCsrf() }, body: body,
     });
-    const j = await r.json();
+    let j;
+    try { j = await r.json(); }
+    catch (e) {
+      /* Not JSON. Only a redirect to the Wall or a login page means the
+         session ended; a 500, a 502 or a CSRF page is a plain failure. */
+      const ended = r.redirected && /\/(login|wall)\//.test(r.url);
+      j = ended ? { ok: false, logged_out: true, error: "The session has ended — log in again." }
+                : { ok: false, error: "The server answered " + r.status + " without saying why." };
+    }
     if (j.ok) location.reload();
+    else if (j.logged_out) {
+      /* Five wrong PINs ended the session (core/trading_pin.py). */
+      await SV.overlay.alert({ title: "Session ended", message: String(j.error || "") });
+      window.location.assign("/wall/");
+    }
     else SV.overlay.alert({ title: "Could not change the bot", message: String(j.error || "The server did not say why."), detail: "The bot is in the state it was in before." });
   } catch (e) {
     SV.overlay.alert({ title: "Network error", message: String(e), detail: "The request never reached the server, so nothing changed." });

@@ -104,6 +104,21 @@ def _set_pin(user, pin=TEST_PIN):
     return prof
 
 
+def _set_count(session, n):
+    """A session's PIN count as the one check keeps it (core/trading_pin.py):
+    the cache's atomic count, the authority whenever it holds the key, and
+    the session's own copy. A login sets the cache's count to zero, so a
+    fixture that wrote the session's copy alone would be overruled."""
+    from types import SimpleNamespace
+
+    from django.core.cache import cache
+
+    from core.trading_pin import ATTEMPTS_KEY, SESSION, _key, _tag
+    session[ATTEMPTS_KEY] = n
+    session.save()
+    cache.set(_key(_tag(SimpleNamespace(session=session)), SESSION), n, None)
+
+
 class _Fixture(TestCase):
 
     def setUp(self):
@@ -386,9 +401,7 @@ class TheRightPinArmsTests(_Fixture):
 
     def test_the_right_pin_clears_the_session_counter(self):
         from dashboard.lock_views import ATTEMPTS_KEY
-        s = self.client.session
-        s[ATTEMPTS_KEY] = 2
-        s.save()
+        _set_count(self.client.session, 2)
         self.ops("aragorn", want="on", pin=TEST_PIN)
         self.assertTrue(_row("aragorn").is_enabled)
         self.assertNotIn(ATTEMPTS_KEY, self.client.session)
@@ -1144,10 +1157,8 @@ class OnlyALoginUnderTheCurrentPinArmsTests(_Fixture):
 class ASpentCounterIsNeverCheckedTests(_Fixture):
 
     def test_the_right_pin_on_a_spent_counter_ends_the_session(self):
-        from dashboard.lock_views import ATTEMPTS_KEY, MAX_ATTEMPTS
-        s = self.client.session
-        s[ATTEMPTS_KEY] = MAX_ATTEMPTS
-        s.save()
+        from dashboard.lock_views import MAX_ATTEMPTS
+        _set_count(self.client.session, MAX_ATTEMPTS)
         resp = self.ops("aragorn", want="on", pin=TEST_PIN)
         self.assertIn("session has ended", _last_flash(resp))
         self.assertFalse(_row("aragorn").is_enabled)

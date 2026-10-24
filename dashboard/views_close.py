@@ -28,20 +28,32 @@ def _trade_for(request, trade_id):
         pk=trade_id, config__user=request.user)
 
 
-def _pin_ok(request, body) -> bool:
-    """True iff the acting user supplied their correct trading PIN.
+def _pin_ok(request, body, *, door: str, act: str):
+    """The acting user's trading PIN from the JSON body, as a lazy gate
+    (core.trading_pin.gate): truthy iff the PIN checks out, asked only
+    where a PIN is demanded (a paper close never counts), counted on the
+    session's one counter. `door` is the call site's class: STOP for a
+    close, close-all, close-selected and a stop that only tightens; ACT
+    for everything that opens, arms or moves (TAKE TRADE and the manual
+    lane reuse this helper). A user with no PIN set can never satisfy it,
+    which is the intended outcome."""
+    from core.trading_pin import gate
+    raw = (body or {}).get("pin")
+    return gate(request, "" if raw is None else str(raw), door=door, act=act)
 
-    Same check the kill switch and live-arming use — the PIN arrives in the
-    JSON body here rather than a form field, because the close flow is an
-    XHR from a dialog. A user with no PIN set can never satisfy it, which
-    is the intended outcome: the platform already tells them to set one
-    before anything live is reachable.
-    """
-    from django.contrib.auth.hashers import check_password
-    pin = str((body or {}).get("pin", ""))
-    prof = getattr(request.user, "trader_profile", None)
-    return bool(prof and prof.access_pin_hash
-                and check_password(pin, prof.access_pin_hash))
+
+def _pin_words(gate_, *, subject: str, nothing: str):
+    """The sentence a refused gate answers with, or None (not asked, ok,
+    or a test's plain bool)."""
+    from core.trading_pin import refusal_of, sentence
+    v = refusal_of(gate_)
+    return sentence(v, subject=subject, nothing=nothing) if v else None
+
+
+def _logged_out(gate_) -> bool:
+    from core.trading_pin import refusal_of
+    v = refusal_of(gate_)
+    return bool(v and v.logged_out)
 
 
 def _body(request):
@@ -109,11 +121,18 @@ def close_position_execute(request, trade_id):
     if err:
         return JsonResponse({"error": err}, status=400)
 
-    result = execute_close(request.user, trade, pin_ok=_pin_ok(request, body))
+    from core.trading_pin import STOP
+    pin_ok = _pin_ok(request, body, door=STOP, act="close a live position")
+    result = execute_close(request.user, trade, pin_ok=pin_ok)
     # The row vanished between the fetch and the locked re-read — deleted,
     # or reassigned. 404 is the same answer the fetch would have given.
     if result.get("not_found"):
         return JsonResponse({"error": "No such position"}, status=404)
+    words = _pin_words(pin_ok, subject=f"Closing {trade.symbol}",
+                       nothing=f"{trade.symbol} was not closed")
+    if words and result.get("error"):
+        result = dict(result, error=words, pin_required=True,
+                      logged_out=_logged_out(pin_ok))
     return JsonResponse(result)
 
 
@@ -253,7 +272,8 @@ def close_all_execute(request):
     the book is flat when three rows are still live is how a hedge becomes a
     naked position.
     """
-    from bot_program.manual_close import execute_close
+    from bot_program.manual_close import execute_close, requires_pin
+    from core.trading_pin import STOP
 
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
@@ -261,7 +281,9 @@ def close_all_execute(request):
     if err:
         return JsonResponse({"error": err}, status=400)
 
-    pin_ok = _pin_ok(request, body)
+    # One gate for the whole loop, asked at the first live row only: a
+    # book with no live row never counts, and the loop counts once.
+    pin_ok = _pin_ok(request, body, door=STOP, act="close all positions")
     closed, failed = [], []
     for trade in _open_closable(request.user):
         try:
@@ -271,9 +293,14 @@ def close_all_execute(request):
             failed.append({"symbol": trade.symbol, "error": str(e)[:160]})
             continue
         if result.get("error") or result.get("not_found"):
+            words = (_pin_words(pin_ok, subject=f"Closing {trade.symbol}",
+                                nothing=f"{trade.symbol} was not closed")
+                     if requires_pin(trade) else None)
             failed.append({
                 "symbol": trade.symbol,
-                "error": str(result.get("error") or "no longer open")[:160],
+                # The PIN's sentence whole; anything else cut as before.
+                "error": words or str(result.get("error")
+                                      or "no longer open")[:160],
             })
             continue
         closed.append({
@@ -321,7 +348,8 @@ def position_levels(request, trade_id):
     paper row is a simulation and gating it teaches the operator to type
     the PIN reflexively, which is the opposite of what a PIN is for.
     """
-    from bot_program.adjust_levels import adjust_levels
+    from bot_program import adjust_levels as levels
+    from core.trading_pin import ACT, STOP, refusal_of
 
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
@@ -330,16 +358,42 @@ def position_levels(request, trade_id):
     if err:
         return JsonResponse({"error": err}, status=400)
 
-    if not trade.paper and not _pin_ok(request, body):
-        return JsonResponse(
-            {"error": "This is a LIVE position — the trading PIN is "
-                      "required to move its stop or target. Nothing was "
-                      "changed.", "pin_required": True}, status=403)
+    stop, target = body.get("stop"), body.get("target")
+    clear_target = bool(body.get("clear_target"))
+    tighten = False
+    if not trade.paper:
+        # What holds no secret is refused BEFORE the PIN (critique A3): an
+        # edit that would not be applied never tells a right PIN from a
+        # wrong one. adjust_levels judges all of it again under the lock.
+        problem = levels.precheck(trade, stop=stop, target=target,
+                                  clear_target=clear_target)
+        if problem:
+            return JsonResponse({"error": problem}, status=400)
+        # A stop that only tightens, the target left as it is, is a
+        # STOPPING act (the operator's rule): a right PIN always moves it
+        # and a wrong one never ends the session. Widening the stop,
+        # moving or clearing the target is a live act.
+        tighten = levels.tightens_only(trade, stop, target, clear_target)
+        pin_ok = _pin_ok(request, body, door=(STOP if tighten else ACT),
+                         act=("tighten a live stop" if tighten
+                              else "move a live stop or target"))
+        if not pin_ok:
+            v = refusal_of(pin_ok)
+            subject = ("Moving this live stop" if tighten
+                       else "Moving a live position's stop or target")
+            # Non-2xx: the dialog reads the status (sv-level-edit.js).
+            return JsonResponse({
+                "error": (_pin_words(pin_ok, subject=subject,
+                                     nothing="nothing was changed")
+                          or "This is a LIVE position — the trading PIN is "
+                             "required to move its stop or target. Nothing "
+                             "was changed."),
+                "pin_required": True,
+                "logged_out": bool(v and v.logged_out)}, status=403)
 
-    result = adjust_levels(
-        request.user, trade,
-        stop=body.get("stop"), target=body.get("target"),
-        clear_target=bool(body.get("clear_target")))
+    result = levels.adjust_levels(
+        request.user, trade, stop=stop, target=target,
+        clear_target=clear_target, tighten_only=tighten)
     if result.get("gone"):
         return JsonResponse({"error": result["error"]}, status=404)
     if not result.get("ok"):
@@ -569,6 +623,7 @@ def close_selected_execute(request):
     SELECTION, re-read after the loop rather than inferred from it.
     """
     from bot_program.manual_close import execute_close, requires_pin
+    from core.trading_pin import STOP
     from dashboard.position_summary import money
 
     if request.method != "POST":
@@ -581,13 +636,18 @@ def close_selected_execute(request):
         return JsonResponse({"error": err}, status=400)
 
     trades, missing, abandoned = _selected_closable(request.user, ids)
-    pin_ok = _pin_ok(request, body)
-    if not pin_ok and any(requires_pin(t) for t in trades):
+    pin_ok = _pin_ok(request, body, door=STOP,
+                     act="close the selected positions")
+    # Asked only when a ticked row is live: a paper selection never counts.
+    if any(requires_pin(t) for t in trades) and not pin_ok:
         return JsonResponse({
-            "error": ("At least one of these positions is held at a broker, "
-                      "so your trading PIN is needed — it was missing or "
-                      "wrong. Nothing was closed."),
+            "error": (_pin_words(pin_ok, subject="Closing these positions",
+                                 nothing="nothing was closed")
+                      or "At least one of these positions is held at a "
+                         "broker, so your trading PIN is needed — it was "
+                         "missing or wrong. Nothing was closed."),
             "pin_required": True,
+            "logged_out": _logged_out(pin_ok),
             "closed": [], "failed": [], "n_closed": 0, "n_failed": 0,
             "still_open": len(trades), "unclosable": 0,
             "abandoned": len(abandoned), "flat": False, "missing": missing,

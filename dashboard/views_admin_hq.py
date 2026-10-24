@@ -83,17 +83,22 @@ def _broker_ping(build_client, label: str) -> bool:
                 pass
 
 
-def _pin_ok(request) -> bool:
-    """True iff the acting user supplied their correct trading PIN.
+def _pin_ok(request, *, door: str, act: str):
+    """The acting user's trading PIN from the POST field "pin", as a lazy
+    gate (core.trading_pin.gate): truthy iff it checks out, counted on the
+    session's one counter. `door` is the call site's class: STOP for the
+    flatten, ACT for every arm, re-size, withdrawal and the eToro untick
+    (views_withdrawals and views_brokers use this same helper)."""
+    from core.trading_pin import gate
+    return gate(request, request.POST.get("pin", ""), door=door, act=act)
 
-    Mirrors the legacy crypto bot's arming check (bot_program.views.toggle_bot):
-    a PIN is required to move any bot into LIVE mode so real-money trading can't
-    be armed by a click alone.
-    """
-    from django.contrib.auth.hashers import check_password
-    pin = request.POST.get("pin", "")
-    prof = getattr(request.user, "trader_profile", None)
-    return bool(prof and prof.access_pin_hash and check_password(pin, prof.access_pin_hash))
+
+def _pin_refusal(pin_ok, *, subject: str, nothing: str, fallback: str) -> str:
+    """The one sentence a refused gate answers with; `fallback` when the
+    verdict is a test's plain bool."""
+    from core.trading_pin import refusal_of, sentence
+    v = refusal_of(pin_ok)
+    return sentence(v, subject=subject, nothing=nothing) if v else fallback
 
 
 def _tell_the_alarm_chat(results):
@@ -129,9 +134,16 @@ def flatten_all_positions(request):
     from django.shortcuts import redirect
     from bot_program.engine.kill_switch import execute_kill_switch
 
-    if not _pin_ok(request):
-        messages.error(request, "Trading PIN required to flatten positions. "
-                                "Nothing was closed.")
+    # A STOPPING door (core/trading_pin.py): a wrong PIN counts but never
+    # ends the session, and the right PIN always flattens.
+    from core.trading_pin import STOP
+    pin_ok = _pin_ok(request, door=STOP, act="flatten all positions")
+    if not pin_ok:
+        messages.error(request, _pin_refusal(
+            pin_ok, subject="Flattening the book",
+            nothing="nothing was closed",
+            fallback="Trading PIN required to flatten positions. Nothing "
+                     "was closed."))
         return redirect("admin_dashboard")
 
     reason = (request.POST.get("reason") or "manual kill switch").strip()[:200]
@@ -358,9 +370,15 @@ def hq_seed_bots(request):
 
     out = seed_bots(user, activate=activate)
     n = out["created"] + out["updated"]
-    msg = (f"Seeded {n} paper bot config(s) for {user.username} — "
+    msg = (f"Seeded {n} bot config(s) for {user.username} — "
            f"{out['created']} created, {out['updated']} updated, "
            f"{'ARMED' if activate else 'left disabled'}.")
+    # Activate never arms a LIVE config: that takes the trading PIN, which
+    # this button never asks for (2026-10-23).
+    if out.get("skipped_live"):
+        msg += (f" These were left OFF because they are LIVE: "
+                f"{', '.join(out['skipped_live'])} — arm each from Asset bots "
+                f"with your PIN.")
     # A symbol with no Instrument row is dropped from its config silently
     # by seed_bots. Silently is how a fleet ends up quietly trading twelve
     # pairs when the operator configured thirteen.
@@ -808,12 +826,7 @@ def hq_create_asset_bot(request):
                 f"extras['{LEGACY_MAX_HOLD_EXTRAS_KEY}']={legacy} were set; "
                 f"the field wins and the extras key was dropped.")
 
-    # Setting LIVE mode requires the trading PIN — otherwise an already-enabled
-    # paper config could be flipped to live (and armed) without one.
     mode = request.POST.get("mode", "paper")
-    if mode == "live" and not _pin_ok(request):
-        messages.error(request, "PIN required to configure a LIVE asset bot.")
-        return redirect("admin_dashboard")
 
     # Stop-management knobs. These live in `extras` because the engine
     # reads them with `_extras_float`, but they get real inputs of their
@@ -854,6 +867,20 @@ def hq_create_asset_bot(request):
             return redirect("admin_dashboard")
         extras[field] = value
 
+    # Setting LIVE mode requires the trading PIN — otherwise an already-enabled
+    # paper config could be flipped to live (and armed) without one. Asked
+    # LAST, after every refusal that holds no secret, so no later refusal
+    # can tell a right PIN from a wrong one and a doomed save costs no guess.
+    if mode == "live":
+        from core.trading_pin import ACT
+        pin_ok = _pin_ok(request, door=ACT, act="save a live bot config")
+        if not pin_ok:
+            messages.error(request, _pin_refusal(
+                pin_ok, subject="Saving a LIVE bot config",
+                nothing="nothing was saved",
+                fallback="PIN required to configure a LIVE asset bot."))
+            return redirect("admin_dashboard")
+
     cfg, created = AssetBotConfig.objects.update_or_create(
         user=request.user, asset_class=asset_class, name=name,
         defaults={
@@ -893,12 +920,6 @@ def hq_toggle_asset_bot(request):
     if not cfg:
         messages.error(request, "AssetBotConfig not found")
         return redirect("admin_dashboard")
-    # Require the trading PIN to ARM a live-mode bot (parity with the legacy
-    # crypto bot). Disabling never needs a PIN — stopping must stay frictionless.
-    arming_live = (not cfg.enabled) and cfg.mode == "live"
-    if arming_live and not _pin_ok(request):
-        messages.error(request, "PIN required to arm a LIVE asset bot.")
-        return redirect("admin_dashboard")
     if not cfg.enabled:
         # A PAPER pool larger than its owner's book is not armed
         # (2026-10-04, risk_gate.pool_vs_book); disabling never asks.
@@ -907,6 +928,19 @@ def hq_toggle_asset_bot(request):
         if not pool["ok"]:
             messages.error(request, f"AssetBot '{cfg.name}' not armed — "
                                     f"{pool['reason']}.")
+            return redirect("admin_dashboard")
+    # Require the trading PIN to ARM a live-mode bot (parity with the legacy
+    # crypto bot), after the refusals that hold no secret. Disabling never
+    # needs a PIN — stopping must stay frictionless.
+    arming_live = (not cfg.enabled) and cfg.mode == "live"
+    if arming_live:
+        from core.trading_pin import ACT
+        pin_ok = _pin_ok(request, door=ACT, act="arm a live bot (HQ)")
+        if not pin_ok:
+            messages.error(request, _pin_refusal(
+                pin_ok, subject=f"Arming '{cfg.name}' LIVE",
+                nothing="it stays OFF",
+                fallback="PIN required to arm a LIVE asset bot."))
             return redirect("admin_dashboard")
     # THE WRITE (2026-10-07, bot_program/asset_engine/disarm.py): a stop
     # here is recorded as the HQ toggle's, by the presser, and is a stop by
@@ -970,9 +1004,14 @@ def hq_follow_asset_bot(request):
         messages.error(request, "Only a LIVE bot can follow the account — "
                                 "a paper pool follows nothing.")
         return redirect("asset_bots_dashboard")
-    if not _pin_ok(request):
-        messages.error(request, "PIN required — following the account "
-                                "re-sizes a live pool.")
+    from core.trading_pin import ACT
+    pin_ok = _pin_ok(request, door=ACT, act="follow the account")
+    if not pin_ok:
+        messages.error(request, _pin_refusal(
+            pin_ok, subject="Following the account",
+            nothing="nothing changed",
+            fallback="PIN required — following the account re-sizes a "
+                     "live pool."))
         return redirect("asset_bots_dashboard")
     raw = str(request.POST.get("share", "") or "").strip()
     share = None
@@ -1105,11 +1144,18 @@ def hq_apply_persona(request):
                                 f"the three are {', '.join(PERSONA_KEYS)}.")
         return redirect("personas_dashboard")
     live = (cfg.mode == "live")
-    if live and not _pin_ok(request):
-        messages.error(request, f"PIN required — '{cfg.name}' is LIVE, and a "
-                                f"personality re-sizes real risk on its next "
-                                f"entry.")
-        return redirect("personas_dashboard")
+    if live:
+        from core.trading_pin import ACT
+        pin_ok = _pin_ok(request, door=ACT,
+                         act="apply a persona to a live bot")
+        if not pin_ok:
+            messages.error(request, _pin_refusal(
+                pin_ok, subject=f"Restyling '{cfg.name}', a LIVE bot,",
+                nothing="nothing was changed",
+                fallback=f"PIN required — '{cfg.name}' is LIVE, and a "
+                         f"personality re-sizes real risk on its next "
+                         f"entry."))
+            return redirect("personas_dashboard")
 
     result = apply_persona(cfg, key, user=request.user, force=live)
     if not result["ok"]:
@@ -1718,10 +1764,16 @@ def hq_apply_share_plan(request):
     plan = _own_share_plan(request)
     if plan is None:
         return redirect("shares_dashboard")
-    if is_live_mode() and not _pin_ok(request):
-        messages.error(request, "PIN required — applying a share plan "
-                                "re-sizes live pools.")
-        return redirect("shares_dashboard")
+    if is_live_mode():
+        from core.trading_pin import ACT
+        pin_ok = _pin_ok(request, door=ACT, act="apply a share plan")
+        if not pin_ok:
+            messages.error(request, _pin_refusal(
+                pin_ok, subject="Applying a share plan",
+                nothing="no pool was re-sized",
+                fallback="PIN required — applying a share plan re-sizes "
+                         "live pools."))
+            return redirect("shares_dashboard")
     try:
         plan = apply_share_plan(plan.pk, request.user)
         n = len(plan.targets or {}) - int(plan.configs_skipped or 0)
@@ -1743,9 +1795,14 @@ def hq_rollback_share_plan(request):
     plan = _own_share_plan(request)
     if plan is None:
         return redirect("shares_dashboard")
-    if not _pin_ok(request):
-        messages.error(request, "PIN required — rolling back a share plan "
-                                "re-sizes live pools.")
+    from core.trading_pin import ACT
+    pin_ok = _pin_ok(request, door=ACT, act="roll back a share plan")
+    if not pin_ok:
+        messages.error(request, _pin_refusal(
+            pin_ok, subject="Rolling back a share plan",
+            nothing="no pool was re-sized",
+            fallback="PIN required — rolling back a share plan re-sizes "
+                     "live pools."))
         return redirect("shares_dashboard")
     try:
         plan = rollback_share_plan(plan.pk, request.user)

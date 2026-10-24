@@ -265,6 +265,10 @@ class TheDemoUntickIsGuardedTests(TestCase):
         prof = get_or_create_profile(self.admin)
         prof.set_pin(self.PIN)
         prof.save()
+        # A PIN set after the login does not act until a login under it
+        # (core/trading_pin.py, the login mark): log in again, as a person
+        # would.
+        self.client.force_login(self.admin)
 
     def _cfg(self, *, enabled, mode="live", name="megacaps"):
         from bot_program.models import AssetBotConfig
@@ -302,13 +306,16 @@ class TheDemoUntickIsGuardedTests(TestCase):
         self.assertIn("nothing was saved", body)
         self.assertIn("measured 2026-09-23: the same eToro pair answered 200 "
                       "on the demo AND the live aggregate-portfolio", body)
-        self.assertIn("the trading PIN was not supplied or is wrong", body)
+        self.assertIn("Unticking Demo takes your trading PIN and none was "
+                      "entered, so Demo stays ticked", body)
 
     def test_a_wrong_pin_is_no_pin(self):
         self._give_the_admin_a_pin()
         body, probe = self._post(pin="0000")
         self.assertNothingWasSaved(probe)
-        self.assertIn("the trading PIN was not supplied or is wrong", body)
+        # The one counted check's sentence (core/trading_pin.py).
+        self.assertIn("Incorrect trading PIN, so Demo stays ticked", body)
+        self.assertEqual(self.client.session.get("pin_lock_attempts"), 1)
 
     def test_the_flip_is_refused_while_a_live_config_is_enabled(self):
         self._give_the_admin_a_pin()
@@ -320,6 +327,25 @@ class TheDemoUntickIsGuardedTests(TestCase):
         self.assertIn("bot off &lt;id&gt;", body)     # the page escapes it
         # the PIN was right: that reason must not be on the list
         self.assertNotIn("trading PIN was not supplied", body)
+
+    def test_a_typed_pin_is_never_checked_while_another_reason_refuses(self):
+        """A refusal list that changed with the PIN would tell a right PIN
+        from a wrong one: while another reason refuses, a typed PIN is
+        neither checked nor counted, and the flash is the same for both."""
+        from django.contrib.auth import hashers
+        self._give_the_admin_a_pin()
+        self._cfg(enabled=True)
+        flashes = []
+        for pin in (self.PIN, "0000"):
+            with mock.patch("django.contrib.auth.hashers.check_password",
+                            wraps=hashers.check_password) as hashed:
+                body, probe = self._post(pin=pin)
+            self.assertNothingWasSaved(probe)
+            self.assertEqual(hashed.call_count, 0)   # never the args: they carry the PIN
+            i = body.index("REFUSED to untick")
+            flashes.append(body[i:i + 800])
+        self.assertEqual(flashes[0], flashes[1])
+        self.assertNotIn("pin_lock_attempts", self.client.session)
 
     def test_the_flip_is_refused_with_a_class_ticked_on_the_same_save(self):
         self._give_the_admin_a_pin()
@@ -587,7 +613,8 @@ class TheDemoTickIsGuardedTests(TestCase):
         self.assertTrue(self._row().demo)
         probe.assert_not_called()
         self.assertIn("REFUSED to untick Demo for dt_u", body)
-        self.assertIn("the trading PIN was not supplied", body)
+        self.assertIn("Unticking Demo takes your trading PIN and none was "
+                      "entered", body)
 
 
 class TheKeySwapIsGuardedTests(TestCase):

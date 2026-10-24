@@ -1437,7 +1437,8 @@ class CloseSelectedTests(_Endpoint):
             self.assertFalse(ex.called, payload)
             out = resp.json()
             self.assertTrue(out["pin_required"])
-            self.assertIn("Nothing was closed.", out["error"])
+            # The one counted check's sentence (core/trading_pin.py).
+            self.assertIn("nothing was closed", out["error"])
             self.assertEqual(out["n_closed"], 0)
         self.a.refresh_from_db()
         self.assertEqual(self.a.status, "OPEN")

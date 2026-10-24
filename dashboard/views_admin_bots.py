@@ -1,8 +1,12 @@
 """Admin bot control panel — surfaces money-protection state for all users."""
+import logging
+
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.http import JsonResponse
 from django.shortcuts import render, redirect
 from django.views.decorators.http import require_POST
+
+logger = logging.getLogger(__name__)
 
 
 def _is_staff(u):
@@ -51,15 +55,45 @@ def admin_bots_panel(request):
 @user_passes_test(_is_staff)
 @require_POST
 def admin_bot_toggle(request, config_id):
-    """Toggle a bot's enabled flag."""
+    """Toggle a bot's enabled flag — any user's legacy crypto bot.
+
+    Arming one in LIVE mode takes the ACTING staff user's trading PIN
+    (D2, 2026-10-23), through the one counted check (core/trading_pin.py,
+    an ACT door). Turning one off never asks, and paper is unchanged.
+    `want` (on|off) is the direction the panel meant: a stale click on a
+    bot already in that state writes nothing. Every live flip is recorded.
+    Always HTTP 200: the panel reads the body's `ok`."""
+    from bot_program.models import BotConfig
+    cfg = BotConfig.objects.select_related("user").filter(id=config_id).first()
+    if cfg is None:
+        return JsonResponse({"ok": False, "error": "No such bot."})
+    want = request.POST.get("want", "")
+    if want in ("on", "off") and (want == "on") == bool(cfg.enabled):
+        return JsonResponse({"ok": True, "enabled": cfg.enabled,
+                             "unchanged": True})
+    if not cfg.enabled and cfg.mode == "live":
+        from core.trading_pin import ACT, gate, json_refusal, refusal_of
+        pin_ok = gate(request, request.POST.get("pin", ""), door=ACT,
+                      act="arm a live crypto bot (admin panel)")
+        if not pin_ok:
+            owner = cfg.user.username
+            return JsonResponse(json_refusal(
+                refusal_of(pin_ok),
+                subject=f"Arming {owner}'s crypto bot LIVE",
+                nothing="it stays OFF", extra={"ok": False}))
     try:
-        from bot_program.models import BotConfig
-        cfg = BotConfig.objects.get(id=config_id)
         cfg.enabled = not cfg.enabled
         cfg.save(update_fields=["enabled"])
-        return JsonResponse({"ok": True, "enabled": cfg.enabled})
-    except Exception as e:
-        return JsonResponse({"ok": False, "error": str(e)})
+    except Exception:  # noqa: BLE001 — never the exception's text
+        logger.exception("[admin bots] toggle of config %s failed", config_id)
+        return JsonResponse({"ok": False,
+                             "error": "The bot could not be changed; the "
+                                      "reason is in the server log."})
+    if cfg.mode == "live":
+        from bot_program.audit import record_legacy_bot
+        record_legacy_bot(cfg, on=cfg.enabled, via="admin_bots",
+                          who=request.user.username, user=request.user)
+    return JsonResponse({"ok": True, "enabled": cfg.enabled})
 
 
 @login_required

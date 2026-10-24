@@ -520,38 +520,74 @@ which is how it catches a task that reports success and writes nothing.
 
     /* ── Toggling ─────────────────────────────────────────────────── */
     function applyToggle(kind, key, nodeRef, input) {
-        var body = new URLSearchParams();
-        body.append("kind", kind);
-        body.append("key", key);
+        var node = byKey[nodeRef];
+        /* The direction the operator meant: the box's new state, or the
+           opposite of the node's for the inspector's button. The server
+           writes nothing when the bot already stands there, so a stale
+           "stop" can never arm. */
+        var want = input ? (input.checked ? "on" : "off")
+                         : (node && node.enabled ? "off" : "on");
+        /* What the server last said, never a flip of the box: the poll
+           below may have reset the box while the PIN dialog was open, and
+           flipping it back would show a bot ON that the server kept OFF. */
+        function serverState() { return !!(node && node.enabled); }
+        /* The box is held for the whole exchange, dialog included, so the
+           15-second poll and the dialog never fight over it. */
         if (input) input.disabled = true;
-        return fetch("{% url 'system_map_toggle' %}", {
-            method: "POST", credentials: "same-origin",
-            headers: { "X-CSRFToken": csrf(), "Content-Type": "application/x-www-form-urlencoded" },
-            body: body.toString()
-        })
-        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-        .then(function (res) {
-            if (!res.ok || !res.j.ok) {
-                /* Put the switch back. A control that shows a state the server
-                   never accepted is worse than one that refuses. */
-                if (input) input.checked = !input.checked;
-                SV.overlay.alert({
-                    title: "Could not switch that",
-                    message: (res.j && res.j.error) || "The server refused the change.",
-                    detail: (res.j && res.j.detail) || "Only a superuser can arm or disarm parts of the platform."
-                });
+        /* Arming a LIVE bot takes the trading PIN (2026-10-23, checked and
+           counted by the server, core/trading_pin.py). Switching off and
+           paper bots never ask. The mode rides every refresh. */
+        var asked = (kind === "bot" && want === "on" && node && node.mode === "live")
+            ? SV.overlay.confirm({
+                  title: "Arm " + (node.label || "this bot") + " LIVE",
+                  message: "Real money: this bot opens real positions on its next tick.",
+                  secretLabel: "Your trading PIN",
+                  confirmLabel: "Arm LIVE",
+                  danger: true
+              })
+            : Promise.resolve(true);
+        return Promise.resolve(asked).then(function (secret) {
+            if (!secret) {
+                if (input) input.checked = serverState();    /* cancelled */
                 return;
             }
-            var n = byKey[nodeRef];
-            if (n) n.enabled = res.j.enabled;
-            if (input) input.checked = res.j.enabled;
-            refresh();
-        })
-        .catch(function (e) {
-            if (input) input.checked = !input.checked;
-            SV.overlay.alert({ title: "Network error", message: String(e) });
-        })
-        .finally(function () { if (input) input.disabled = false; });
+            var body = new URLSearchParams();
+            body.append("kind", kind);
+            body.append("key", key);
+            body.append("want", want);
+            if (typeof secret === "string") body.append("pin", secret);
+            return fetch("{% url 'system_map_toggle' %}", {
+                method: "POST", credentials: "same-origin",
+                headers: { "X-CSRFToken": csrf(), "Content-Type": "application/x-www-form-urlencoded" },
+                body: body.toString()
+            })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+            .then(function (res) {
+                if (!res.ok || !res.j.ok) {
+                    /* Put the switch back. A control that shows a state the server
+                       never accepted is worse than one that refuses. */
+                    if (input) input.checked = (res.j && typeof res.j.enabled === "boolean")
+                        ? res.j.enabled : serverState();
+                    var said = SV.overlay.alert({
+                        title: "Could not switch that",
+                        message: (res.j && res.j.error) || "The server refused the change.",
+                        detail: (res.j && res.j.detail) || "Only a superuser can arm or disarm parts of the platform."
+                    });
+                    /* Five wrong PINs ended the session. */
+                    if (res.j && res.j.logged_out) {
+                        Promise.resolve(said).then(function () { window.location.assign("/wall/"); });
+                    }
+                    return;
+                }
+                if (node) node.enabled = res.j.enabled;
+                if (input) input.checked = res.j.enabled;
+                refresh();
+            })
+            .catch(function (e) {
+                if (input) input.checked = serverState();
+                SV.overlay.alert({ title: "Network error", message: String(e) });
+            });
+        }).finally(function () { if (input) input.disabled = false; });
     }
 
     document.addEventListener("change", function (e) {
@@ -635,7 +671,8 @@ which is how it catches a task that reports success and writes nothing.
                     var age = el.querySelector(".tm-node-age");
                     if (age) age.textContent = u.last_run;
                     var box = el.querySelector("[data-toggle-key]");
-                    if (box && document.activeElement !== box) box.checked = u.enabled;
+                    /* A held box is mid-exchange (applyToggle): left alone. */
+                    if (box && !box.disabled && document.activeElement !== box) box.checked = u.enabled;
                 });
                 EDGES.forEach(function (e) {
                     var m = d.edges.find(function (x) { return x.from === e.from && x.to === e.to; });

@@ -12,14 +12,14 @@ switch did not, so a hijacked superuser session could do it in one POST.
 The rule, kept here and only here:
 
 * OFF -> ON of a live-money key takes the PIN of the user making the
-  request, checked against the same TraderProfile hash every other PIN
-  act uses (TraderProfile.check_pin), behind the idle lock's own session
-  counter (dashboard.lock_views.MAX_ATTEMPTS): wrong answers at a switch
-  and at the lock screen add up, and the fifth ends the session.
+  request, through THE counted check every PIN door shares
+  (core.trading_pin.check, as an ACT door): wrong answers at a switch, at
+  the lock screen and at every other PIN door add up on one session
+  counter, and the fifth ends the session.
 * A missing, blank or wrong PIN changes nothing and says why. A blank
   PIN, or an account with no PIN set, is not counted as a guess. A
   session that has already spent its five is refused, and ended, before
-  any hash is checked.
+  anything else is read (a blank PIN included, since 2026-10-23).
 * Only a session that logged in under the account's CURRENT PIN can arm.
   Login stamps the session with a keyed mark of the stored PIN hash
   (stamp_login_mark, the way Django keeps the password's own mark in
@@ -42,17 +42,22 @@ The rule, kept here and only here:
 What stays out of reach of any PIN: the ORM, `manage.py shell`, dbshell
 and SQL. Whoever can run those holds the database.
 
-KNOWN GAP, awaiting the operator's decision (D1): other doors check the
-same PIN without counting wrong answers. The change-PIN forms
-(dashboard/views_profile_modals.change_pin_modal, which also answers a
-wrong current PIN apart from a bad new one, and dashboard/pin_views.
-change_pin), the close and kill-switch PIN checks, and arming a live bot
-all verify the hash with no counter. A hijacked session can therefore
-still find the PIN by guessing there, without limit, and then present it
-here. Counting them on this same session counter changes behaviour
-outside the switches, so it waits for the operator's yes. Until then the
-five-guess lockout bounds the guesses made at a switch and at the lock
-screen only.
+Closed (D1, 2026-10-23, "Oui fait les deux"): every door that checks the
+trading PIN now counts on this same session counter, through the one
+check in core/trading_pin.py, each door with its class. A stopping door
+(a close, close-all, close-selected, both kill switches, a stop edit that
+only tightens) counts but never ends the session, and a right PIN always
+stops; every other door, the switches included, ends the session at the
+fifth wrong answer. The change-PIN forms judge the new PIN before the
+current one, and the system map and the admin bot panel ask the PIN to
+arm a live bot.
+
+Still without a PIN, by design or awaiting the operator: `manage.py bot on
+ID --yes` (and `follow --yes`, `persona --yes`), where `--yes` plays the
+PIN's role at a shell that already holds the database; and the venue
+doors that make an armed live config's next order real (Saxo SIM to LIVE,
+a new eToro row saved live, keys re-attached to a live eToro row, OANDA
+and Alpaca unticked, Binance testnet unticked).
 """
 from __future__ import annotations
 
@@ -84,18 +89,15 @@ OPS_POINTER = ("Live-money switches are turned on from /ops/ with your "
                "trading PIN.")
 
 # The refusal codes (SwitchResult.refusal, and the audit row's "reason").
+# The PIN's own codes, the verdict and the login mark live in
+# core/trading_pin.py (the one check); re-exported here unchanged.
 NOT_FOUND = "not_found"
-PIN_MISSING = "pin_missing"
-PIN_NOT_SET = "pin_not_set"
-PIN_WRONG = "pin_wrong"
-LOCKED_OUT = "locked_out"
-NO_PIN_HERE = "no_pin_here"
-LOGIN_AGAIN = "login_again"
-
-#: The session key holding the login's mark of the stored PIN hash. A
-#: keyed HMAC of the hash, never the hash nor the PIN.
-LOGIN_MARK_KEY = "switch_pin_login_mark"
-_LOGIN_MARK_SALT = "core.switch_pin.login_mark"
+from core.trading_pin import (LOCKED_OUT, LOGIN_AGAIN,  # noqa: E402,F401
+                              LOGIN_MARK_KEY, NO_PIN_HERE, PIN_MISSING,
+                              PIN_NOT_SET, PIN_WRONG, PinVerdict,
+                              _LOGIN_MARK_SALT, _logged_in_with_current_pin,
+                              _pin_mark, _stored_hash, stamp_login_mark)
+from core import trading_pin  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -108,14 +110,6 @@ class SwitchResult:
     after: Optional[bool]
     message: str            # one English sentence for the page or the shell
     refusal: str = ""
-    logged_out: bool = False
-
-
-@dataclass(frozen=True)
-class PinVerdict:
-    ok: bool
-    refusal: str = ""
-    attempts_left: Optional[int] = None
     logged_out: bool = False
 
 
@@ -185,98 +179,15 @@ def _pin_sentence(refusal: str, name: str, verdict: PinVerdict = None) -> str:
     return f"{name} stays OFF. Nothing was changed."
 
 
-# ── the login's mark of the PIN ─────────────────────────────────────────
-def _pin_mark(stored_hash: str) -> str:
-    from django.utils.crypto import salted_hmac
-    return salted_hmac(_LOGIN_MARK_SALT, stored_hash or "",
-                       algorithm="sha256").hexdigest()
-
-
-def _stored_hash(user) -> str:
-    # Read, never create: a login must not write a TraderProfile row.
-    from portfolio.trader_profile import TraderProfile
-    return (TraderProfile.objects.filter(user=user)
-            .values_list("access_pin_hash", flat=True).first() or "")
-
-
-def stamp_login_mark(request, user) -> None:
-    """At login (core.models' user_logged_in receiver): remember which PIN
-    this session logged in under. Every login proves the password, so a
-    session that changes its PIN afterwards has to come back through
-    here before it can arm. A failure leaves no mark, which refuses."""
-    session = getattr(request, "session", None)
-    if session is None:
-        return
-    try:
-        session[LOGIN_MARK_KEY] = _pin_mark(_stored_hash(user))
-    except Exception:  # noqa: BLE001 — a login must never fail on this
-        session.pop(LOGIN_MARK_KEY, None)
-        logger.warning("switch PIN: could not mark the login of %s",
-                       user.get_username())
-
-
-def _logged_in_with_current_pin(request, profile) -> bool:
-    from django.utils.crypto import constant_time_compare
-    mark = request.session.get(LOGIN_MARK_KEY) or ""
-    return bool(mark) and constant_time_compare(
-        mark, _pin_mark(profile.access_pin_hash))
-
-
 # ── the PIN ─────────────────────────────────────────────────────────────
 def check_trading_pin(request, pin, *, act: str = "Switch PIN") -> PinVerdict:
-    """The requesting user's trading PIN, checked on their own profile's
-    hash, behind the idle lock's session counter.
-
-    Blank, or no PIN set on the account: refused, not counted (a mistake,
-    not a guess). A session that did not log in under the current PIN
-    (set or changed since, or a login older than the mark): refused, not
-    counted, no hash checked; it must log in again. A session whose
-    counter is already spent: ended before any hash is checked. Wrong:
-    counted; at MAX_ATTEMPTS the session ends, as on the lock screen
-    (dashboard/lock_views.session_unlock). Right: the counter is cleared.
-    The PIN itself is never logged or stored.
-    """
-    from django.contrib.auth import logout
-
-    from core.audit import AuditLog
-    from core.presence import client_ip
-    from dashboard.lock_views import ATTEMPTS_KEY, MAX_ATTEMPTS
-    from portfolio.trader_profile import get_or_create_profile
-
-    user = getattr(request, "user", None)
-    if user is None or not getattr(user, "is_authenticated", False):
-        return PinVerdict(ok=False, refusal=PIN_MISSING)
-    if not (pin or "").strip():
-        return PinVerdict(ok=False, refusal=PIN_MISSING)
-    profile = get_or_create_profile(user)
-    if not profile.has_pin:
-        return PinVerdict(ok=False, refusal=PIN_NOT_SET)
-    if not _logged_in_with_current_pin(request, profile):
-        return PinVerdict(ok=False, refusal=LOGIN_AGAIN)
-
-    def _end_session():
-        # Log while request.user is still the user: logout() clears it.
-        AuditLog.log(
-            user, "login",
-            f"{act}: {MAX_ATTEMPTS} failed attempts — session terminated",
-            target_type="Session", ip_address=client_ip(request))
-        logout(request)   # flushes the session, the counter with it
-        return PinVerdict(ok=False, refusal=LOCKED_OUT, attempts_left=0,
-                          logged_out=True)
-
-    spent = int(request.session.get(ATTEMPTS_KEY, 0) or 0)
-    if spent >= MAX_ATTEMPTS:
-        return _end_session()     # no sixth guess is ever checked
-    if profile.check_pin(pin):
-        request.session.pop(ATTEMPTS_KEY, None)
-        return PinVerdict(ok=True)
-
-    attempts = spent + 1
-    if attempts >= MAX_ATTEMPTS:
-        return _end_session()
-    request.session[ATTEMPTS_KEY] = attempts
-    return PinVerdict(ok=False, refusal=PIN_WRONG,
-                      attempts_left=MAX_ATTEMPTS - attempts)
+    """The requesting user's trading PIN at a switch: THE counted check
+    (core.trading_pin.check) as an ACT door. Blank, or no PIN set:
+    refused, not counted. A session that did not log in under the current
+    PIN: refused, not counted, no hash checked. A spent counter: the
+    session ends before anything else is read. Wrong: counted; the fifth
+    ends the session. Right: the counter is cleared."""
+    return trading_pin.check(request, pin, door=trading_pin.ACT, act=act)
 
 
 # ── the writes ──────────────────────────────────────────────────────────

@@ -802,7 +802,9 @@ class ThePageTests(_Quiet):
             resp = self.client.post(reverse(name, args=[wr.pk]),
                                     {"acted_by": "operator", "pin": "0000"})
             self.assertEqual(resp.status_code, 302)
-            self.assertIn("Nothing changed", self._messages(resp))
+            # The one counted check's sentence (core/trading_pin.py).
+            self.assertIn("Incorrect trading PIN, so nothing changed",
+                          self._messages(resp))
         wr.refresh_from_db()
         self.assertEqual(wr.status, "reserved")
         self.dispatch.assert_not_called()

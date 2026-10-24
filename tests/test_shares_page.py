@@ -341,10 +341,17 @@ class ApplyViewTests(_Fixture):
         from bot_program.share_models import SharePlan
         _set_live(True)
         plan = self._propose()
-        for bad in (None, "", "9999"):
+        # The one counted check's sentences (core/trading_pin.py): a
+        # missing PIN, then a wrong one, each saying nothing was re-sized.
+        for bad, said in ((None, "Applying a share plan takes your trading "
+                                 "PIN and none was entered"),
+                          ("", "Applying a share plan takes your trading "
+                               "PIN and none was entered"),
+                          ("9999", "Incorrect trading PIN, so no pool was "
+                                   "re-sized")):
             resp = self._post("hq_apply_share_plan", plan, pin=bad)
-            self.assertIn("PIN required — applying a share plan re-sizes "
-                          "live pools.", _flashes(resp))
+            self.assertIn(said, _flashes(resp))
+            self.assertIn("no pool was re-sized", _flashes(resp))
         plan.refresh_from_db()
         self.assertEqual(plan.state, SharePlan.STATE_PROPOSED)
         self.a.refresh_from_db()
@@ -442,7 +449,8 @@ class RejectAndRollbackViewTests(_Fixture):
         plan = self._propose()
         apply_share_plan(plan.pk, self.admin)
         resp = self._post("hq_rollback_share_plan", plan, pin="0000")
-        self.assertIn("PIN required", _flashes(resp))
+        self.assertIn("Incorrect trading PIN, so no pool was re-sized",
+                      _flashes(resp))
         plan.refresh_from_db()
         self.assertEqual(plan.state, SharePlan.STATE_APPLIED)
         self.a.refresh_from_db()

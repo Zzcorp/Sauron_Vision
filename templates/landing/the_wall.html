@@ -5095,6 +5095,19 @@
         .then(function(reply) {
             if (reply.ok && reply.body.status === 'ok') {
                 window.location.href = reply.body.redirect || '/intro/';
+            } else if (reply.body && reply.body.restart) {
+                // Five wrong PINs dropped the pending login
+                // (core/trading_pin.py): back to the password step, with
+                // the reason where the password's own errors are said.
+                pinClear();
+                document.body.classList.remove('pin-mode');
+                setCredentialFieldsDisabled(false);
+                closePinForgot();
+                showError(loginErrors, reply.body.message);
+                setTimeout(function() {
+                    var password = document.getElementById('id_password');
+                    if (password) { password.value = ''; password.focus(); }
+                }, 500);
             } else {
                 showError(pinErrors, (reply.body && reply.body.message) || 'Invalid PIN');
                 // A throttle refusal is not a wrong PIN — erasing a correct

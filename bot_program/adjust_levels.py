@@ -144,10 +144,70 @@ def widens_risk(trade, stop):
             else stop > current)
 
 
-def adjust_levels(user, trade, stop=None, target=None, clear_target=False):
+def _same_target(trade, target) -> bool:
+    """The target asked is the one the row holds: the level dialog always
+    sends the stored target back (static/js/sv-level-edit.js), so an
+    unchanged box is not a move."""
+    if target is None:
+        return True
+    return target == _dec(getattr(trade, "take_profit", None))
+
+
+def tightens_only(trade, stop, target=None, clear_target=False) -> bool:
+    """True when this edit only reduces risk: a stop is given, it does not
+    give the position more room to lose, and the target is left as it is
+    (absent, or the stored one sent back). That edit is a STOPPING act for
+    the trading PIN (core/trading_pin.py, 2026-10-23): a right PIN always
+    moves it, a wrong one never ends the session. A widening, a moved
+    target or a cleared one is not."""
+    stop = _dec(stop)
+    if stop is None or clear_target:
+        return False
+    if not _same_target(trade, _dec(target)):
+        return False
+    return not widens_risk(trade, stop)
+
+
+def precheck(trade, *, stop=None, target=None, clear_target=False) -> str:
+    """The refusals that hold no secret, judged on the row as read, BEFORE
+    the trading PIN is asked (critique A3): an edit that would not be
+    applied must never reach the PIN, or a right PIN refused for the edit
+    would be a silent test of the PIN. "" when nothing refuses it here;
+    adjust_levels judges all of it again under the row lock."""
+    stop = _dec(stop)
+    target = None if clear_target else _dec(target)
+    if stop is None and target is None and not clear_target:
+        return "Nothing to change."
+    if trade.status not in EDITABLE_STATUSES:
+        return (f"This position is {trade.status.lower()} — its levels can "
+                f"no longer be changed.")
+    from bot_program.asset_engine.base import is_entry_working
+    if is_entry_working(trade):
+        return ("This entry order is still WORKING at the broker — nothing "
+                "has filled yet, so there is no position whose levels can "
+                "be moved. Withdraw the order and place it again with the "
+                "levels you want.")
+    problems = validate_levels(trade, stop, target, _mark_for(trade))
+    if problems:
+        return " ".join(problems)
+    if clear_target and (trade.metadata or {}).get("protected"):
+        return ("This position's target rests at the broker and clearing it "
+                "from here is not supported yet. Remove it at the broker, or "
+                "close the position. Nothing was changed.")
+    return ""
+
+
+def adjust_levels(user, trade, stop=None, target=None, clear_target=False,
+                  tighten_only=False):
     """Set the stop and/or target on one open position.
 
     Returns a dict the view can hand straight back to the browser.
+
+    `tighten_only`: the caller took this edit as one that only reduces
+    risk (tightens_only, a STOPPING act for the trading PIN). It is judged
+    again on the row as locked: a stop that would now widen the risk, or a
+    target that is no longer the stored one, is refused, so a race can
+    never turn a tightening into a widening behind the PIN's back.
     """
     from django.db import transaction
 
@@ -188,6 +248,13 @@ def adjust_levels(user, trade, stop=None, target=None, clear_target=False):
                               "no position whose levels can be moved. "
                               "Withdraw the order and place it again with "
                               "the levels you want.")}
+
+        if tighten_only and not tightens_only(fresh, stop, target,
+                                              clear_target):
+            return {"ok": False,
+                    "error": ("This stop would now widen the risk, or the "
+                              "target moved, so nothing was changed: enter "
+                              "it again.")}
 
         mark = _mark_for(fresh)
         problems = validate_levels(fresh, stop, target, mark)

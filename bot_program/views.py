@@ -102,12 +102,32 @@ def link_binance(request):
         form = BinanceLinkForm(instance=acct)
     return render(request, "bot_program/link.html", _ctx(request, form=form, acct=acct))
 
+#: What a door that never asks for the PIN says to a live arm.
+CONFIGURE_NEVER_ARMS = ("Arming the crypto bot LIVE takes your trading PIN, "
+                        "and this form never asks for one: save it disarmed, "
+                        "then arm it from the bot page with your PIN. Nothing "
+                        "was saved.")
+
+
 @login_required
 def configure_bot(request):
     cfg, _ = BotConfig.objects.get_or_create(user=request.user)
     if request.method == "POST":
+        # Read BEFORE the form binds: is_valid() writes the POST onto the
+        # instance. The form carries `enabled` and `mode`, so a crafted POST
+        # could arm the bot LIVE with no PIN; it never does (2026-10-23).
+        was_enabled, was_mode = cfg.enabled, cfg.mode
         form = BotConfigForm(request.POST, instance=cfg)
         if form.is_valid():
+            from core.trading_pin import arms_live, no_pin_here
+            if arms_live(was_enabled=was_enabled, was_mode=was_mode,
+                         want_enabled=form.cleaned_data.get("enabled", False),
+                         want_mode=form.cleaned_data.get("mode", was_mode)):
+                no_pin_here(request, act="arm the crypto bot (configure)",
+                            via="configure")
+                messages.error(request, CONFIGURE_NEVER_ARMS)
+                return render(request, "bot_program/configure.html",
+                              _ctx(request, form=form, cfg=cfg))
             form.save(); messages.success(request, "Configuration saved.")
             return redirect("bot_home")
     else:
@@ -118,16 +138,24 @@ def configure_bot(request):
 @require_POST
 def toggle_bot(request):
     cfg, _ = BotConfig.objects.get_or_create(user=request.user)
-    # Require PIN to arm live mode
+    # Arming LIVE takes the trading PIN, through the one counted check
+    # (core/trading_pin.py, an ACT door: the fifth wrong answer ends the
+    # session). Disarming is free.
     if not cfg.enabled and cfg.mode == "live":
-        pin = request.POST.get("pin", "")
-        prof = getattr(request.user, "trader_profile", None)
-        from django.contrib.auth.hashers import check_password
-        if not (prof and prof.access_pin_hash and check_password(pin, prof.access_pin_hash)):
-            messages.error(request, "PIN required to arm LIVE mode.")
+        from core.trading_pin import ACT, gate, refusal_of, sentence
+        pin_ok = gate(request, request.POST.get("pin", ""), door=ACT,
+                      act="arm the crypto bot")
+        if not pin_ok:
+            messages.error(request, sentence(
+                refusal_of(pin_ok), subject="Arming the crypto bot LIVE",
+                nothing="it stays OFF"))
             return redirect("bot_home")
     cfg.enabled = not cfg.enabled
     cfg.save()
+    if cfg.mode == "live":
+        from bot_program.audit import record_legacy_bot
+        record_legacy_bot(cfg, on=cfg.enabled, via="bot_home",
+                          who=request.user.username, user=request.user)
     messages.info(request, f"Bot {'ENABLED' if cfg.enabled else 'DISABLED'}")
     return redirect("bot_home")
 

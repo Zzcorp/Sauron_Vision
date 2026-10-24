@@ -576,8 +576,10 @@ def demo_untick_refusals(request, user) -> list:
         the book and the venue (broker_backed) in the click that made it
         live; the flip and the tick are two saves, in that order;
       * the acting superuser's trading PIN, checked by the same `_pin_ok`
-        that arms a live bot and flattens the book. A superuser with no
-        PIN set cannot untick Demo at all, which is the intended reading.
+        that arms a live bot and flattens the book, LAST and only when no
+        other reason refuses (a counted ACT door, core/trading_pin.py). A
+        superuser with no PIN set cannot untick Demo at all, which is the
+        intended reading.
 
     The caller is the only writer of EtoroAccount.demo (the row is not in
     Django admin); a shell bypasses this, and every demo write snippet in
@@ -602,9 +604,24 @@ def demo_untick_refusals(request, user) -> list:
                        f"the book and the venue in this click; untick Demo "
                        f"with every box OFF, then tick one class on a "
                        f"second save")
-    if not _pin_ok(request):
-        reasons.append("the trading PIN was not supplied or is wrong — the "
-                       "same PIN that arms a live bot")
+    # The PIN LAST, and only when nothing else refuses (2026-10-23): a
+    # list that dropped its PIN line whenever the PIN was right told a
+    # right PIN from a wrong one, uncounted, while another reason refused.
+    # Now a PIN is checked (and counted, core/trading_pin.py) only when the
+    # flip would otherwise go ahead; a blank box is still named.
+    if reasons:
+        if not str(request.POST.get("pin", "") or "").strip():
+            reasons.append("the trading PIN was not supplied — the same PIN "
+                           "that arms a live bot")
+        return reasons
+    from core.trading_pin import ACT, refusal_of, sentence
+    pin_ok = _pin_ok(request, door=ACT, act="untick eToro Demo")
+    if not pin_ok:
+        v = refusal_of(pin_ok)
+        reasons.append(sentence(v, subject="Unticking Demo",
+                                nothing="Demo stays ticked").rstrip(".")
+                       if v else "the trading PIN was not supplied or is "
+                                 "wrong — the same PIN that arms a live bot")
     return reasons
 
 
