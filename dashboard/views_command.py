@@ -728,6 +728,9 @@ def command_tab_live(request):
         context["brain_trust"] = None
         context["brain_trust_band"] = "unknown"
 
+    # The concerns' text is staff-only, as on /brain/ (2026-10-24).
+    from core.views_book import is_staff
+    context["show_text"] = is_staff(request.user)
     return render(request, "dashboard/_command_live.html", context)
 
 

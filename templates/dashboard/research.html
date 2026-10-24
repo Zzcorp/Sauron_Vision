@@ -79,7 +79,7 @@ error-stamped assistant messages.
         <div class="mind-kv"><span class="k">last synth</span>
           <span class="v"><span class="sv-age" data-sv-at="{{ mind_latest.created_at|date:'c' }}"></span></span></div>
       {% else %}
-        <div class="sv-empty"><b>No report yet</b>The Mind synthesises every 30 minutes.</div>
+        <div class="sv-empty"><b>No report yet</b>The Mind synthesises every hour.</div>
       {% endif %}
     </div>
 
@@ -88,7 +88,7 @@ error-stamped assistant messages.
       <div class="card-header"><span class="card-title">Top concerns</span></div>
       <ul class="mind-concerns">
         {% for c in mind_top_concerns %}
-          <li><span class="ck">{{ c.kind }}</span>{{ c.text|truncatechars:120 }}
+          <li><span class="ck">{{ c.kind }}</span>{% if show_text %}{{ c.text|truncatechars:120 }}{% else %}&mdash;{% endif %}
             {% if c.severity %}<span class="sev">sev {{ c.severity|floatformat:2 }}</span>{% endif %}</li>
         {% endfor %}
       </ul>

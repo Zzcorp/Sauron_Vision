@@ -556,10 +556,17 @@ def collect_system_map(user):
         newest = BrainReport.objects.filter(error="").aggregate(m=Max("created_at"))["m"]
         total = BrainReport.objects.count()
         age = _age_s(newest)
+        # Live while the bots still read it: the contract's window
+        # (brain.context.mind_fresh_minutes), not a copy of the cadence.
+        from brain.context import MIND_GRACE_MINUTES, mind_fresh_minutes
+        window = mind_fresh_minutes()
         if total == 0:
             st, why = "idle", "The Mind has never produced a report."
-        elif age is not None and age > 7200:
-            st, why = "stale", f"Newest report is {_fmt_age(age)} old; it synthesises every 30 minutes."
+        elif age is not None and age > window * 60:
+            st, why = "stale", (f"Newest report is {_fmt_age(age)} old; it "
+                                f"synthesises every "
+                                f"{window - MIND_GRACE_MINUTES} min and the "
+                                f"bots read a report for {window} min.")
         else:
             st, why = "live", f"{total} reports, newest {_fmt_age(age)} old."
         learn.append(node(

@@ -43,11 +43,16 @@ def run_critic_pass(*, max_n: int = 5) -> dict:
 
 
 @shared_task(name="brain.tasks.run_consolidation")
-def run_consolidation() -> dict:
+def run_consolidation(*, manual: bool = False) -> dict:
     """Beat task — nightly 03:00 UTC. Promotes settled facts into the
-    knowledge graph, prunes stale observations, resolves due hypotheses."""
+    knowledge graph, prunes stale observations, resolves due hypotheses.
+
+    The beat calls it bare, and only that scheduled pass may release a
+    paused rule (brain.consolidation). The staff "Run consolidation now"
+    button dispatches it with manual=True: no PIN stands behind that
+    button, so its run adds and re-affirms only (2026-10-24)."""
     from .consolidation import consolidate_now
-    return consolidate_now()
+    return consolidate_now(releases=not manual)
 
 
 @shared_task(name="brain.tasks.run_strategist")

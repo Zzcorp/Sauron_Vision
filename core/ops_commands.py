@@ -408,6 +408,20 @@ COMMANDS = [
         "category": "read",
     },
     {
+        "name": "mind_contract",
+        "title": "The Mind's contract",
+        "purpose": "What the Mind says about each rule right now, as the bots read it: the fresh report (its window, its pauses and watches with their venues), the rule_state nodes the 03:00 pass keeps (status, age, misses, venue, effect on bot entries, the rule's stage), both trust numbers and the crisis switch. Writes nothing; a node is cleared on /knowledge/ with the trading PIN.",
+        "usage": [
+            "python manage.py mind_contract           # the Mind's report, its rule_state nodes and its trust, side by side",
+            "python manage.py mind_contract nodes     # each rule_state node: status, age, venue, effect on bot entries",
+            "python manage.py mind_contract trust     # both trust numbers, n graded, the band, rows the two graders disagree on",
+        ],
+        "mirrors": "/knowledge/",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+    },
+    {
         "name": "positioning",
         "title": "Positioning map",
         "purpose": "Who is already placed on a symbol (COT, funding, flow, sentiment, one score), where their stops sit (the pools above and below), the hunt the market runs first and the draw after it, the proving ground's word on pool sweeps — and what that means for a buy or a sell. Nothing in it is a probability that other desks take a trade.",

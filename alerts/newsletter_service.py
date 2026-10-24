@@ -558,6 +558,22 @@ def send_test(newsletter, user) -> tuple:
 
 # ── the send ──────────────────────────────────────────────────────────────
 
+#: When account figures left the letter (2026-10-24): PR72's merge,
+#: db65695, at 13:08:25 UTC. An edition written before it was drafted from
+#: a weekly review handed the book in money; a reader who is not staff is
+#: shown its title and date only (dashboard/views_newsletter.py). If PR72
+#: reached the server later AND a review was run by hand in between
+#: (deploy/RUNBOOK.md), move this to the deploy time.
+NO_ACCOUNT_FIGURES_SINCE = datetime(2026, 10, 24, 13, 8, 25,
+                                    tzinfo=dt_tz.utc)
+
+
+def kept_for_staff(newsletter) -> bool:
+    """True for an edition written before NO_ACCOUNT_FIGURES_SINCE."""
+    created = getattr(newsletter, "created_at", None)
+    return created is not None and created < NO_ACCOUNT_FIGURES_SINCE
+
+
 def published():
     """The editions a reader may open: gone out ("sent", or still
     "sending" its retries after the first delivery)."""
@@ -1117,14 +1133,24 @@ def _conclude(run) -> dict:
 def due_newsletter_ids(now=None) -> list:
     """Editions the scheduled pass should send now: READY or APPROVED whose
     time has come, and "sending" ones whose lease was released (retries
-    due) or abandoned (older than SEND_LEASE_MINUTES)."""
+    due) or abandoned (older than SEND_LEASE_MINUTES).
+
+    HELD (2026-10-24): a Saturday-review draft written before
+    NO_ACCOUNT_FIGURES_SINCE that no person has touched. It was drafted
+    from a review handed the book in money, and an email or a Telegram
+    post cannot be recalled. A staff edit, approval or reschedule at
+    /admin-dashboard/newsletters/ sets touched_at and releases it."""
     from django.db.models import Q
 
     from alerts.models import Newsletter
     now = now or timezone.now()
     stale = now - timedelta(minutes=SEND_LEASE_MINUTES)
+    tainted = Q(origin="weekly_review",
+                created_at__lt=NO_ACCOUNT_FIGURES_SINCE,
+                touched_at__isnull=True)
     due = Newsletter.objects.filter(
-        Q(status__in=("ai_generated", "approved"), scheduled_for__lte=now)
+        (Q(status__in=("ai_generated", "approved"), scheduled_for__lte=now)
+         & ~tainted)
         | Q(status="sending", send_started_at__isnull=True)
         | Q(status="sending", send_started_at__lt=stale))
     return list(due.order_by("scheduled_for", "pk").values_list("pk",

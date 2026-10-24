@@ -26,7 +26,7 @@
     <h1 class="nld-title">{{ title }}</h1>
     <div class="nld-date">{{ date_words }}</div>
     {% if not published %}<div class="nld-draft">Not sent yet: only staff can open this page ({{ nl.get_status_display }}).</div>{% endif %}
-    <div class="nld-body">{{ body_html }}</div>
+    {% if withheld %}<div class="nld-body" style="color:var(--text-muted);">This edition is kept for staff: it was written before account figures were taken out of the letter.</div>{% else %}<div class="nld-body">{{ body_html }}</div>{% endif %}
     <div class="nld-foot">
         <a href="{% url 'newsletter_archive' %}">All editions</a>
         <a href="{% url 'user_notifications' %}">How you receive it</a>

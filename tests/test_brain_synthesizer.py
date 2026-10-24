@@ -451,6 +451,8 @@ class BrainDashboardTests(TestCase):
         self.assertEqual(r.status_code, 200)
 
     def test_dashboard_shows_latest_report(self):
+        """The regime to any login; the narrative to staff only
+        (2026-10-24, tests/test_no_account_figures_pages.py)."""
         from brain.models import BrainReport
         BrainReport.objects.create(
             regime_label="trending", regime_confidence=0.7,
@@ -459,6 +461,12 @@ class BrainDashboardTests(TestCase):
         )
         r = self.client.get("/brain/")
         body = r.content.decode("utf-8", errors="ignore")
+        self.assertIn("TRENDING", body)
+        self.assertNotIn("markets trending up", body)
+        self.assertIn("narrative is for staff", body)
+        self.client.force_login(_staff())
+        body = self.client.get("/brain/").content.decode("utf-8",
+                                                         errors="ignore")
         self.assertIn("TRENDING", body)
         self.assertIn("markets trending up", body)
 

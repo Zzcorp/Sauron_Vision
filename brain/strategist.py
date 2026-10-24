@@ -66,7 +66,7 @@ def _build_strategist_snapshot() -> dict:
     now = timezone.now()
     snap: dict = {"as_of": now.isoformat()}
 
-    # Latest 6 BrainReports (≈ 3h of brain history at 30-min cadence).
+    # Latest 6 BrainReports (≈ 6h of brain history at the hourly cadence).
     recent_reports = list(BrainReport.objects.filter(error="")
                            .order_by("-created_at")[:6]
                            .values("regime_label", "regime_confidence",
@@ -139,6 +139,31 @@ def _build_strategist_snapshot() -> dict:
         if score is not None:
             trust[a] = score
     snap["agent_trust_scores"] = trust
+
+    # THE NUMBER THE BOTS ACT ON (2026-10-24), said beside the market's. The
+    # briefing used to see only agent_trust_scores and could not tell which
+    # number moves the bot gates.
+    try:
+        from ai_agents.models import AgentPrediction
+        from .context import _brain_trust_score, brain_trust_band
+        bots_score = _brain_trust_score()
+        snap["mind_trust_bots"] = {
+            "score": bots_score,
+            "band": brain_trust_band(bots_score)
+            if bots_score is not None else "unknown",
+            "graded_n": AgentPrediction.objects.filter(
+                agent="sauron_mind", was_correct__isnull=False)
+            .order_by("-evaluated_at")[:50].count(),
+            "note": ("the number the bots act on (entry pauses, theme "
+                     "squeeze, risk-off cut, position review); 1 - 2*Brier "
+                     "over the last 50 graded sauron_mind predictions; "
+                     "equals agent_trust_scores['sauron_mind'] over linked "
+                     "rows; differs only by predictions the market refused "
+                     "(orphans)"),
+        }
+    except Exception:  # noqa: BLE001 — a briefing input, never a crash
+        snap["mind_trust_bots"] = {"score": None, "band": "unknown",
+                                   "graded_n": 0, "note": "unreadable"}
 
     # WHAT THE SCORE IS COMPUTED OVER. The number alone invites a causal
     # story, and on 2026-09-07 the briefing told its operator that

@@ -189,11 +189,14 @@ def resolve_pending_predictions(now=None) -> dict:
     # evaluated_at__isnull: a call the market never answered (no bar in
     # the grace window) is stamped evaluated with was_correct left NULL —
     # ungraded, not wrong — and must not be walked again every night.
+    # The Mind's rows have their own graders (brain/calibration.py, and the
+    # hypothesis market's mirror), and its prediction_type is free text: a
+    # Mind row typed "direction" was graded a third time here (2026-10-24).
     pending = AgentPrediction.objects.filter(
         was_correct__isnull=True,
         evaluated_at__isnull=True,
         expected_resolution_at__lte=now,
-    )
+    ).exclude(agent="sauron_mind")
     resolved = 0
     failed = 0
     by_type = {}

@@ -381,13 +381,20 @@ def newsletter_detail(request, pk):
     if not request.user.is_staff and not ns.published().filter(
             pk=nl.pk).exists():
         raise Http404("no such edition")
+    # AN EDITION FROM BEFORE THE LETTER LOST ITS ACCOUNT FIGURES (2026-10-24,
+    # ns.NO_ACCOUNT_FIGURES_SINCE) is kept for staff: a reader who is not
+    # staff gets its title and date, and one line in place of the body.
+    from core.views_book import is_staff
+    withheld = ns.kept_for_staff(nl) and not is_staff(request.user)
     return render(request, "dashboard/newsletter_detail.html", {
         "page_id": "newsletters",
         "nl": nl,
         "title": ns.plain_title(nl.title),
         "edition": ns.edition_words(nl),
         "date_words": ns.date_words(nl.sent_at or nl.created_at),
-        "body_html": newsletter_md(ns.letter_prose(nl.content_markdown)),
+        "withheld": withheld,
+        "body_html": "" if withheld
+        else newsletter_md(ns.letter_prose(nl.content_markdown)),
         "published": nl.sent_at is not None
         and nl.status in ("sent", "sending"),
     })

@@ -103,6 +103,23 @@ PROBE_WRITER_LAG_HOURS = {"1d": STALE_PROBE_HOURS, "4h": 2.0, "1h": 2.0}
 MIN_FRESH_PROBES = 2
 
 
+#: What the Mind is never handed (2026-10-24): a fill's money P&L, a size,
+#: and the broker's order id. Its narrative reaches the strategist
+#: briefing, the bell, Telegram and the Orcs' dossier; it grades a rule on
+#: realized_r and outcome, which stay, with the prices and the venue.
+MIND_HIDDEN_KEYS = ("pnl", "qty", "broker_order_id")
+
+
+def _without_account_figures(payload):
+    """`payload` with MIND_HIDDEN_KEYS dropped at the top level, whatever
+    its kind: fill_closed, the trade_open audit event and shadow_entry all
+    carry a size, and shadow_entry has no world or mode key, so this runs
+    before _venue_payload's early return."""
+    if not isinstance(payload, dict):
+        return payload
+    return {k: v for k, v in payload.items() if k not in MIND_HIDDEN_KEYS}
+
+
 def _venue_payload(payload):
     """An observation's payload with its money world named `venue`
     (2026-10-15): audit's fill_closed carries "mode": "live" for an eToro
@@ -266,7 +283,8 @@ def _build_world_snapshot(*, max_obs: int = 80) -> dict:
     obs_list = list(obs_qs.values("id", "kind", "payload", "source_agent",
                                     "created_at"))
     snap["observations"] = [
-        {**o, "payload": _venue_payload(o.get("payload")),
+        {**o, "payload": _venue_payload(
+            _without_account_figures(o.get("payload"))),
          "created_at": o["created_at"].isoformat()} for o in obs_list
     ]
     snap["observations_count_by_kind"] = {}
@@ -548,7 +566,7 @@ class SauronMindAgent(BaseAgent):
 
     Uses the `deep` tier (Opus 4.7) — this agent is THE central coordinator;
     every downstream agent inherits its mistakes. Quality > frequency-
-    optimized cost. ~$15-20/day at 30-min cadence; cheap insurance against
+    optimized cost. Hourly (config/celery.py); cheap insurance against
     one bad correlated decision propagating across all rules.
     """
 
@@ -859,7 +877,10 @@ def _persist_report(parsed: dict, snapshot: dict, *, model: str,
                            exc_info=True)
         _record_regime_vote(raw_label, raw_conf)
 
-    valid_until = timezone.now() + timedelta(minutes=45)  # 30min cadence + grace
+    # The contract's window (brain/context.py), read from the beat: the same
+    # span every reader treats this report as the Mind's word.
+    from .context import mind_fresh_minutes
+    valid_until = timezone.now() + timedelta(minutes=mind_fresh_minutes())
 
     report = BrainReport.objects.create(
         regime_label=regime,
