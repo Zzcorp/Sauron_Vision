@@ -234,12 +234,23 @@ class TheCloseGuardTests(SimpleTestCase):
                                        events=[])["ok"])
 
     def test_an_early_close_is_kept(self):
-        # Friday 2026-11-27, the 13:00 New York early close
+        # Friday 2026-11-27, the 13:00 New York early close. R29: its last
+        # hour precedes a 68.5-hour shut, so the long shut (WEEKEND, which
+        # clock_verdict asks before CLOSE_GUARD, as on every Friday at
+        # 15:55) answers first; both refuse, both are BAD_TIMING. Every
+        # early close in the table precedes such a shut, so the arithmetic
+        # of the early close is pinned on _session_close itself.
         with _on():
             v = et.verdict("AAPL", "stock", exchange="NASDAQ",
                            now=_ny(2026, 11, 27, 12, 55), events=[])
-            self.assertEqual(v["code"], et.CLOSE_GUARD)
-            self.assertIn("closes at Friday 18:00 UTC", v["why"])
+            self.assertEqual(v["code"], et.WEEKEND)
+            self.assertIn("Friday 18:00 UTC", v["why"])
+            self.assertIn("Monday 14:30 UTC", v["why"])
+            from bot_program.asset_engine import skips
+            self.assertEqual(et.skip_code(v), skips.BAD_TIMING)
+            self.assertEqual(et._session_close("NYSE",
+                                               _ny(2026, 11, 27, 12, 55)),
+                             _ny(2026, 11, 27, 13, 0))
             # after it the market is shut: SHUT since 2026-10-07, with the
             # next session's opening (Monday, past the weekend)
             v = et.verdict("AAPL", "stock", exchange="NASDAQ",
@@ -282,6 +293,111 @@ class TheCloseGuardTests(SimpleTestCase):
             self.assertTrue(et.verdict("EURUSD", "forex", exchange="FOREX",
                                        now=_ny(2026, 1, 15, 16, 0),
                                        events=[])["ok"])
+
+
+class TheLongShutEntryTests(SimpleTestCase):
+    """R29: the gate reused the Friday window alone, so the hour before a
+    US equity session closes into a shut of a day or more (a holiday's
+    eve, an early close) let new entries in. It is the weekend's refusal
+    now (position_care.long_shut_ahead), with the shut and the reopening
+    named."""
+
+    def test_the_hour_before_a_holiday_shut_refuses_a_us_entry(self):
+        cases = (((2026, 12, 24, 12, 30), "Thursday 18:00 UTC", "92.5 hours",
+                  "Monday 14:30 UTC"),
+                 ((2026, 11, 25, 15, 30), "Wednesday 21:00 UTC",
+                  "41.5 hours", "Friday 14:30 UTC"),
+                 ((2026, 12, 31, 15, 30), "Thursday 21:00 UTC", "89.5 hours",
+                  "Monday 14:30 UTC"))
+        with _on():
+            for at, close, hours, reopens in cases:
+                for sym, cls, ex in (("AAPL", "stock", "NASDAQ"),
+                                     ("SPY", "etf", ""),
+                                     ("SPX500", "stock", "")):
+                    with self.subTest(at=at, sym=sym):
+                        v = et.verdict(sym, cls, exchange=ex, now=_ny(*at),
+                                       events=[])
+                        self.assertFalse(v["ok"])
+                        self.assertEqual(v["code"], et.WEEKEND)
+                        self.assertIn(close, v["why"])
+                        self.assertIn(hours, v["why"])
+                        self.assertIn(f"after it reopens {reopens}",
+                                      v["why"])
+                        self.assertIsNone(v["until"])
+
+    def test_the_index_class_is_not_promised_a_reopening(self):
+        """S3: an index CFD is not in SHUT_CLASSES (its venue trades nearly
+        round the clock), so after the cash close it enters again: its
+        words name the cash session's close and promise no reopening."""
+        with _on():
+            v = et.verdict("SPX500", "index", now=_ny(2026, 12, 24, 11, 45),
+                           events=[])
+            self.assertEqual(v["code"], et.WEEKEND)
+            self.assertIn("US cash session closes at Thursday 18:00 UTC",
+                          v["why"])
+            self.assertNotIn("reopens", v["why"])
+            self.assertNotIn("resume", v["why"])
+            self.assertTrue(et.verdict("SPX500", "index",
+                                       now=_ny(2026, 12, 24, 13, 5),
+                                       events=[])["ok"])
+
+    def test_an_ordinary_thursday_and_the_hour_before_are_untouched(self):
+        with _on():
+            for at in ((2026, 12, 3, 15, 30), (2026, 12, 24, 11, 55),
+                       (2026, 11, 25, 14, 55)):
+                with self.subTest(at=at):
+                    self.assertTrue(et.verdict("AAPL", "stock",
+                                               exchange="NASDAQ",
+                                               now=_ny(*at),
+                                               events=[])["ok"])
+
+    def test_the_manual_ticket_is_warned_on_the_eve(self):
+        with _on():
+            a = et.advisory("AAPL", "stock", now=_ny(2026, 12, 24, 12, 30))
+        self.assertFalse(a["ok"])
+        self.assertEqual(a["code"], et.WEEKEND)
+        self.assertIn("92.5 hours", a["reason"])
+
+    def test_the_options_lane_is_still_not_judged_here(self):
+        with _on():
+            self.assertIsNone(et.clock_verdict(
+                "AAPL", "options", now=_ny(2026, 12, 24, 12, 30)))
+
+    def test_the_instruments_exchange_is_read(self):
+        """A Toronto share on a US eve keeps its own clock: the gate reads
+        the exchange it is given; without it the class's New York session
+        would refuse the entry."""
+        at = _ny(2026, 12, 24, 12, 30)
+        with _on():
+            self.assertIsNone(et.clock_verdict("SHOP", "stock",
+                                               exchange="TSX", now=at))
+            self.assertEqual(et.clock_verdict("SHOP", "stock",
+                                              now=at)["code"], et.WEEKEND)
+
+    def test_the_skip_advice_names_the_holiday_window(self):
+        """The bad_timing advice is a closed list of the clock's windows:
+        the holiday eve and the early close are in it, on the page and on
+        the phone."""
+        from types import SimpleNamespace
+        from bot_program.asset_engine import skips
+        from bot_program.telegram_eye import SKIP_WORDS
+        cfg = SimpleNamespace(extras={"skip_counts": {skips.BAD_TIMING: 3}})
+        words = skips.diagnose(cfg)
+        self.assertIn("the hour before a US share market shuts for a day "
+                      "or more (a holiday's eve, an early close)", words)
+        self.assertIn("a US holiday ahead", SKIP_WORDS[skips.BAD_TIMING])
+
+    def test_an_unreadable_long_shut_refuses_nothing_new(self):
+        from bot_program import position_care
+        with _on(), mock.patch.object(position_care, "long_shut_ahead",
+                                      side_effect=RuntimeError("down")):
+            self.assertTrue(et.verdict("AAPL", "stock", exchange="NASDAQ",
+                                       now=_ny(2026, 12, 24, 12, 30),
+                                       events=[])["ok"])
+            # and the Friday window still stands
+            self.assertEqual(et.verdict("AAPL", "stock", exchange="NASDAQ",
+                                        now=_ny(*WINTER_FRI, 15, 10),
+                                        events=[])["code"], et.WEEKEND)
 
 
 class ThePrintTests(SimpleTestCase):

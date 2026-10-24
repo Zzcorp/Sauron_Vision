@@ -632,6 +632,200 @@ class TheCarePlanTests(SimpleTestCase):
         self.assertEqual(market_hours(fri, mon, "crypto"), 72.0)
 
 
+# ── THE LONG SHUT (R29): a US market holiday is a weekend ───────────────
+
+def _ny(y, m, d, hh, mm):
+    """An aware UTC instant from New York wall time (DST follows)."""
+    from zoneinfo import ZoneInfo
+    return datetime(y, m, d, hh, mm,
+                    tzinfo=ZoneInfo("America/New_York")).astimezone(dt_tz.utc)
+
+
+#: The eves of 2026 the care missed before: the hour before each US equity
+#: session closes into a shut of a day or more on a day the Friday window
+#: does not cover (Thanksgiving's eve, its early-close Friday, Christmas
+#: Eve's early close, New Year's Eve).
+EVES_2026 = ((2026, 11, 25, 15, 30), (2026, 11, 27, 12, 30),
+             (2026, 12, 24, 12, 30), (2026, 12, 31, 15, 30))
+
+
+def _sym(row, symbol):
+    row.symbol = symbol
+    return row
+
+
+class TheLongShutTests(SimpleTestCase):
+    """R29: the Friday window read no calendar, so the hour before a US
+    holiday's shut (or an early close into one) was an ordinary hour: no
+    lock for a winner, no cut for a levered real loser."""
+
+    def test_the_eve_of_a_us_holiday_cuts_a_live_5x_stock_loser(self):
+        from bot_program.position_care import plan
+        for at in EVES_2026:
+            with self.subTest(at=at):
+                p = plan(_sym(_row(cls="stock", lev=5), "AAPL"), 99.5,
+                         now=_ny(*at), live=True)                # -0.25R
+                self.assertEqual((p["action"], p["care"]["exit"]),
+                                 ("close", "weekend cut"))
+                self.assertEqual(p["reason"], "SL")
+                self.assertNotIn("Friday evening", p["why"])
+                self.assertNotIn("weekend gap", p["why"])
+                self.assertIn("reopens", p["why"])
+                self.assertIn("hours", p["why"])
+                self.assertIn("5x loser (-0.25R)", p["why"])
+
+    def test_the_eve_of_a_us_holiday_locks_a_winner(self):
+        from bot_program.position_care import plan
+        for at in EVES_2026:
+            for live in (True, False):
+                with self.subTest(at=at, live=live):
+                    p = plan(_sym(_row(cls="stock", paper=not live), "AAPL"),
+                             101.2, now=_ny(*at), live=live)     # +0.6R
+                    self.assertEqual(p["action"], "hold")
+                    self.assertEqual(p["care"]["soft_why"], "weekend lock")
+                    self.assertAlmostEqual(p["care"]["soft_stop"], 100.2)
+
+    def test_ordinary_nights_and_hours_outside_the_window_are_untouched(self):
+        from bot_program.position_care import long_shut_ahead, plan
+        for at in ((2026, 12, 3, 15, 30),      # an ordinary Thursday
+                   (2026, 12, 24, 11, 55),     # before Christmas Eve's hour
+                   (2026, 11, 25, 14, 55),     # before Thanksgiving eve's
+                   (2026, 12, 24, 13, 5),      # the market already shut
+                   (2026, 12, 2, 15, 30)):     # an ordinary Wednesday
+            with self.subTest(at=at):
+                self.assertIsNone(long_shut_ahead(_ny(*at), "stock", "AAPL"))
+                p = plan(_sym(_row(cls="stock", lev=5), "AAPL"), 99.5,
+                         now=_ny(*at), live=True)
+                self.assertEqual(p["action"], "hold")
+                self.assertNotIn("soft_stop", p["care"])
+                w = plan(_sym(_row(cls="stock"), "AAPL"), 101.2, now=_ny(*at),
+                         live=True)
+                self.assertNotIn("soft_stop", w["care"])
+        # the window's edges: the class's own hour before the 13:00 close
+        self.assertIsNotNone(long_shut_ahead(_ny(2026, 12, 24, 12, 0),
+                                             "stock", "AAPL"))
+        self.assertIsNotNone(long_shut_ahead(_ny(2026, 12, 24, 12, 59),
+                                             "stock", "AAPL"))
+        self.assertIsNotNone(long_shut_ahead(_ny(2026, 11, 25, 15, 0),
+                                             "etf", "SPY"))
+
+    def test_spx500_and_options_rows_follow_their_us_session(self):
+        from bot_program.position_care import long_shut_ahead, plan
+        at = _ny(2026, 12, 24, 12, 30)
+        # the cash index on its New York clock, filed in a stock config
+        p = plan(_sym(_row(cls="stock", lev=5), "SPX500"), 99.5, now=at,
+                 live=True)
+        self.assertEqual(p["care"]["exit"], "weekend cut")
+        # an options row keeps its underlying's venue (NYSE by default)
+        o = plan(_sym(_row(cls="options"), "AAPL"), 101.2, now=at)
+        self.assertEqual(o["care"]["soft_why"], "weekend lock")
+        # the index class keeps the default 1.5 h window: 11:30 to 13:00
+        self.assertIsNotNone(long_shut_ahead(_ny(2026, 12, 24, 11, 45),
+                                             "index", "SPX500"))
+        self.assertIsNone(long_shut_ahead(_ny(2026, 12, 24, 11, 45),
+                                          "stock", "SPX500"))
+        # the row's symbol is read: a London index row keeps the London
+        # clock on a US eve (no lock, no cut), where a symbol-less read
+        # would fall back to the class's New York session
+        ftse = _sym(_row(cls="index", lev=5), "FTSE100")
+        self.assertIsNone(long_shut_ahead(at, "index", "FTSE100"))
+        self.assertIsNotNone(long_shut_ahead(at, "index", ""))
+        self.assertEqual(plan(ftse, 99.5, now=at, live=True)["action"],
+                         "hold")
+
+    def test_crypto_forex_and_commodities_never_enter_the_long_shut(self):
+        from bot_program.position_care import long_shut_ahead, plan
+        at = _ny(2026, 12, 24, 12, 30)
+        for sym, cls in (("BTCUSD", "crypto"), ("EURUSD", "forex"),
+                         ("WHEATUSD", "commodity"), ("XAUUSD", "commodity")):
+            with self.subTest(sym=sym):
+                self.assertIsNone(long_shut_ahead(at, cls, sym))
+                p = plan(_sym(_row(cls=cls, lev=10), sym), 99.5, now=at,
+                         live=True)
+                self.assertEqual(p["action"], "hold")
+                self.assertNotIn("soft_stop", p["care"])
+
+    def test_the_manual_lane_gets_the_lock_never_the_cut(self):
+        from bot_program.position_care import plan
+        at = _ny(2026, 12, 24, 12, 30)
+        p = plan(_sym(_row(cls="stock", lev=10), "AAPL"), 99.5, now=at,
+                 live=True, manual=True)
+        self.assertEqual(p["action"], "hold", "never cut on a rule")
+        w = plan(_sym(_row(cls="stock", lev=10), "AAPL"), 101.2, now=at,
+                 live=True, manual=True)
+        self.assertEqual(w["care"]["soft_why"], "weekend lock")
+
+    def test_an_ordinary_friday_is_left_to_the_friday_window(self):
+        from bot_program.position_care import long_shut_ahead, plan
+        fri = _ny(2026, 12, 4, 15, 30)
+        self.assertIsNone(long_shut_ahead(fri, "stock", "AAPL"))
+        p = plan(_sym(_row(cls="stock", lev=5), "AAPL"), 99.5, now=fri,
+                 live=True)
+        self.assertEqual(p["care"]["exit"], "weekend cut")
+        self.assertIn("Friday evening", p["why"])
+        self.assertIn("weekend gap", p["why"])
+
+    def test_an_unreadable_clock_leaves_the_friday_window_standing(self):
+        from bot_program.position_care import long_shut_ahead, plan
+        with patch("core.exchange_status.market_clock",
+                   side_effect=RuntimeError("clock down")):
+            self.assertIsNone(long_shut_ahead(_ny(2026, 12, 24, 12, 30),
+                                              "stock", "AAPL"))
+            fri = plan(_sym(_row(cls="stock", lev=5), "AAPL"), 99.5,
+                       now=_ny(2026, 12, 4, 15, 30), live=True)
+            self.assertEqual(fri["care"]["exit"], "weekend cut")
+            eve = plan(_sym(_row(cls="stock", lev=5), "AAPL"), 99.5,
+                       now=_ny(2026, 12, 24, 12, 30), live=True)
+            self.assertEqual(eve["action"], "hold", "as before the fix")
+
+    def test_long_shut_ahead_names_the_shut(self):
+        from bot_program.position_care import LONG_SHUT_HOURS, long_shut_ahead
+        self.assertEqual(LONG_SHUT_HOURS, 24)
+        s = long_shut_ahead(_ny(2026, 12, 24, 12, 30), "stock", "AAPL")
+        self.assertEqual(s["at"], datetime(2026, 12, 24, 18, 0,
+                                           tzinfo=dt_tz.utc))
+        self.assertEqual(s["reopens"], datetime(2026, 12, 28, 14, 30,
+                                                tzinfo=dt_tz.utc))
+        self.assertEqual(s["hours"], 92.5)
+        self.assertEqual((s["at_words"], s["reopens_words"]),
+                         ("Thursday 18:00 UTC", "Monday 14:30 UTC"))
+        s = long_shut_ahead(_ny(2026, 11, 25, 15, 30), "stock", "AAPL")
+        self.assertEqual((s["at_words"], s["reopens_words"], s["hours"]),
+                         ("Wednesday 21:00 UTC", "Friday 14:30 UTC", 41.5))
+        s = long_shut_ahead(_ny(2026, 11, 27, 12, 30), "stock", "AAPL")
+        self.assertEqual((s["at_words"], s["hours"]),
+                         ("Friday 18:00 UTC", 68.5))
+
+    def test_the_holiday_table_cover_is_counted_on_fixed_dates(self):
+        """M6: no test that turns red on a date. The cover is a pure count
+        of days, pinned on fixed dates; the operator is told by the 07:10
+        report (TheHolidayCoverWarningTests)."""
+        from datetime import date
+
+        from core.exchange_status import (US_EQUITY_HOLIDAYS,
+                                          us_holiday_cover_days)
+        self.assertEqual(max(US_EQUITY_HOLIDAYS), date(2027, 12, 24))
+        self.assertEqual(us_holiday_cover_days(date(2026, 10, 24)), 426)
+        self.assertEqual(us_holiday_cover_days(date(2027, 11, 1)), 53)
+        self.assertEqual(us_holiday_cover_days(date(2027, 12, 24)), 0)
+        self.assertEqual(us_holiday_cover_days(date(2028, 1, 3)), 0)
+
+
+class TheHolidayCoverWarningTests(TestCase):
+
+    def test_the_daily_report_warns_when_the_table_runs_short(self):
+        from bot_program.aragorn import report_lines
+        late = datetime(2027, 11, 1, 7, 10, tzinfo=dt_tz.utc)
+        lines = report_lines(now=late)
+        warn = [ln for ln in lines if "US holiday table" in ln]
+        self.assertEqual(len(warn), 1, lines)
+        self.assertIn("ends 2027-12-24", warn[0])
+        self.assertIn("core/exchange_status.py", warn[0])
+        early = datetime(2026, 10, 24, 7, 10, tzinfo=dt_tz.utc)
+        self.assertFalse(any("US holiday table" in ln
+                             for ln in report_lines(now=early)))
+
+
 class TheCareTests(TestCase):
 
     def test_care_never_closes_what_the_venue_no_longer_shows(self):

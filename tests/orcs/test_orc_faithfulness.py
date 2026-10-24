@@ -283,6 +283,50 @@ class TheLiveTests(_Faith):
                          "the care's weekend cut")
         self.assertExitedTogether(lorc, live, FRI + timedelta(minutes=30))
 
+    def test_holiday_eve_lock_and_cut(self):
+        """R29: the long shut (position_care.long_shut_ahead) reads the
+        row's symbol; the ghost's shadow row carries it, so the shadow
+        care locks and cuts on a US holiday's eve with the real one."""
+        eve = datetime(2026, 12, 24, 17, 30, tzinfo=dt_tz.utc)  # 12:30 NY
+        cfg = _config(self.user, "stock", name="st")
+        row = _row(cfg, symbol="AAPL", cls="stock")
+        _open_at(row, eve - timedelta(hours=2))
+        orc = born(self, row)
+        drive(self, cfg, row, [(eve, "101.2")])
+        row.refresh_from_db()
+        self.assertEqual(row.metadata["care"]["soft_why"], "weekend lock")
+        self.assertFaithful(orc, row)
+        cfg2, live, bot, client = self._live(
+            cls="stock", symbol="MSFT", protected=False,
+            meta={"leverage": 5})
+        _open_at(live, eve - timedelta(hours=2))
+        lorc = born(self, live)
+        with patch.object(bot, "_close_trade", side_effect=_fake_close):
+            care_tick(self, bot, live, "99.5", client, eve)
+        live.refresh_from_db()
+        self.assertEqual(live.metadata.get("care_exit"), "weekend cut")
+        self.assertEqual(tracks_of(lorc)["care"].state["exit"]["why"],
+                         "the care's weekend cut")
+        self.assertExitedTogether(lorc, live, eve + timedelta(minutes=30))
+
+    def test_holiday_eve_reads_the_rows_own_symbol(self):
+        """The twin of the eve above on a London index row: the real care
+        keeps the London clock (no lock), and the shadow row, which
+        carries the symbol, agrees. A shadow or a care that dropped the
+        symbol would fall back to the class's New York session and lock."""
+        eve = datetime(2026, 12, 24, 17, 30, tzinfo=dt_tz.utc)  # 12:30 NY
+        cfg = _config(self.user, "stock", name="ix")
+        row = _row(cfg, symbol="FTSE100", cls="index")
+        _open_at(row, eve - timedelta(hours=2))
+        orc = born(self, row)
+        drive(self, cfg, row, [(eve, "101.2")])
+        row.refresh_from_db()
+        care = row.metadata.get("care") or {}
+        self.assertNotEqual(care.get("soft_why"), "weekend lock")
+        self.assertEqual(tracks_of(orc)["care"].state.get("soft_why"),
+                         care.get("soft_why"))
+        self.assertFaithful(orc, row)
+
     def test_event_lock_and_cut(self):
         from market_data.models import EconomicEvent
         at = WED + timedelta(minutes=30)

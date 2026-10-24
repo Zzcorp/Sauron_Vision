@@ -4556,12 +4556,19 @@ class AssetBot(ABC):
         stage = {"may_trade": True, "force_paper": False,
                  "live_size_factor": 1.0, "stage": "", "reason": ""}
         if decision.rule_name:
-            from signals.rule_actuator import stage_policy
+            from signals.rule_actuator import is_rule_active, stage_policy
             stage = stage_policy(decision.rule_name)
             if not stage["may_trade"]:
                 logger.info("[%s_bot] %s not traded: %s", self.asset_class,
                             symbol, stage["reason"])
                 return self._skip(symbol, skips.STAGE_BLOCKED, stage["reason"])
+            # a paused rule places no new entry, whatever its stage says
+            # (the pause stops new signals; this stops the ones before it)
+            if not is_rule_active(decision.rule_name):
+                logger.info("[%s_bot] %s not traded: %s is paused",
+                            self.asset_class, symbol, decision.rule_name)
+                return self._skip(symbol, skips.STAGE_BLOCKED,
+                                  "rule paused — no new entries")
 
         # ── ARAGORN AND THE POSTURE (2026-10-02) ─────────────────────
         # Both decide the VENUE or the SIZE of a real-money entry, never
@@ -4869,7 +4876,8 @@ class AssetBot(ABC):
                 return stage, meta
             pz = _posture.entry_posture(
                 self.user, symbol, self._instrument_class(symbol) or
-                self.asset_class, getattr(decision, "direction", "BUY"))
+                self.asset_class, getattr(decision, "direction", "BUY"),
+                cfg=self.cfg)
             meta["posture"] = {k: pz[k] for k in
                                ("level", "kind", "size", "live", "why")}
             if not pz["live"]:
@@ -8527,20 +8535,28 @@ class AssetBot(ABC):
         # the parent's live orders. The stage gate below only inspects the
         # single winning rule_name, so the filter must happen here, before
         # the consensus ever sees the row.
+        # A PAUSED rule casts no vote either (2026-10-24): a pause stops new
+        # signals, but the ones it fired before the pause stay active for
+        # max_signal_age_hours, and stage_policy never reads the pause, so
+        # they won the vote and entered at the stage's full size. An
+        # unread control casts no vote.
         may_vote: dict = {}
         for s in candidates:
             rn = s.rule_name or ""
             if rn and rn not in may_vote:
                 try:
-                    from signals.rule_actuator import stage_policy
-                    may_vote[rn] = bool(stage_policy(rn)["may_trade"])
+                    from signals.rule_actuator import (is_rule_active,
+                                                       stage_policy)
+                    may_vote[rn] = (bool(stage_policy(rn)["may_trade"])
+                                    and is_rule_active(rn))
                 except Exception:
-                    may_vote[rn] = True
+                    may_vote[rn] = False
         active = [s for s in candidates
                   if may_vote.get(s.rule_name or "", True)][:8]
         if not active:
             return BotDecision("HOLD", 0, [
-                "only research-stage signals — watched, not traded"])
+                "only research-stage or paused signals — watched, not "
+                "traded"])
 
         bullish = [s for s in active if s.direction == "bullish"
                    and s.score >= self.cfg.entry_score_min]

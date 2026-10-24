@@ -396,11 +396,16 @@ class OptionsBot(AssetBot):
         stage = {"may_trade": True, "force_paper": False,
                  "live_size_factor": 1.0, "stage": "", "reason": ""}
         if decision.rule_name:
-            from signals.rule_actuator import stage_policy
+            from signals.rule_actuator import is_rule_active, stage_policy
             stage = stage_policy(decision.rule_name)
             if not stage["may_trade"]:
                 logger.info("[options_bot] %s not traded: %s",
                             symbol, stage["reason"])
+                return None
+            # a paused rule places no new entry, whatever its stage says
+            if not is_rule_active(decision.rule_name):
+                logger.info("[options_bot] %s not traded: %s is paused",
+                            symbol, decision.rule_name)
                 return None
 
         # SIZE BY PROOF (2026-10-07, backtester/proving/proof.py): this lane

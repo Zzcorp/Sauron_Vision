@@ -222,7 +222,8 @@ def diagnose(cfg) -> str:
                     "the signal scan is running",
         STALE_SIGNALS: "signals exist but are older than the age window; the "
                        "lifecycle pass may be stuck for want of fresh quotes",
-        STAGE_BLOCKED: "the rule is not promoted far enough to place orders",
+        STAGE_BLOCKED: "the rule is not promoted far enough to place "
+                       "orders, or it is paused",
         PAPER_FALLBACK: "a live config has no working broker credentials",
         NO_PRICE: "the market-data client returns no usable price",
         COST_FILTER: "planned moves are too small to cover the round trip",
@@ -305,7 +306,9 @@ def diagnose(cfg) -> str:
         BAD_TIMING: "the clock refused the entry: the 17:00 New York "
                     "rollover, a market's first quarter hour, an "
                     "exchange's last minutes, Friday's last hour before "
-                    "the weekend, or a high-impact print on the "
+                    "the weekend, the hour before a US share market "
+                    "shuts for a day or more (a holiday's eve, an early "
+                    "close), or a high-impact print on the "
                     "instrument's currency — nothing is wrong with the "
                     "signal or the feed; the detail names the hour it "
                     "clears, and the same signal enters when it does",

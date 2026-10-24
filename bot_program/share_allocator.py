@@ -336,6 +336,76 @@ def governor_for(drawdown_pct) -> float:
     return 1.0 - (dd - DD_KNEE) / (DD_MAX - DD_KNEE) * (1.0 - DD_FLOOR)
 
 
+def carried_cut(user, cfg):
+    """THE GOVERNOR AN APPLIED PLAN ALREADY CARRIES (Gap 3, 2026-10-24):
+    the fraction an APPLIED share plan, still in force, cut `cfg`'s pool
+    to, credited no lower than that plan's own governor — or None.
+
+    The entry posture (posture.drawdown_scale) divides the drawdown
+    governor by this, so the governor is not applied twice to a pool a
+    plan already cut by it, and a drawdown that deepened since binds again.
+    None (nothing carried) when:
+      - `cfg` is None, or share_allocator_mode_live is OFF (today's
+        switch-OFF answer, unchanged);
+      - the newest plan that touched the shares (by its rollback, else its
+        apply) is not APPLIED — a rollback after it, out of order too;
+      - the config is not in its targets, or its share is no longer the
+        target (a hand edit since);
+      - the plan did not cut this pool (target >= the share before it).
+    The share before the plan is the apply-time explicit share
+    (previous_shares, read as a number), else the proposal-time one
+    (current_shares) — _applied_today's rule.
+
+    M2: under shared capital an automatic follower stands at 100% before
+    its first plan, so target/before credits the conversion to an
+    explicit share (and the evidence moves) as if it were the governor's
+    cut. Only the governor the plan applied is credited: max(target /
+    before, plan.governor). Never raises: any failure is None, the full
+    governor."""
+    try:
+        if cfg is None or not is_live_mode():
+            return None
+        from django.db.models.functions import Coalesce
+
+        from bot_program.capital_truth import SHARE_SLACK, account_share_pct
+        from bot_program.share_models import SharePlan
+        last = (SharePlan.objects
+                .filter(user=user, applied_at__isnull=False,
+                        state__in=(SharePlan.STATE_APPLIED,
+                                   SharePlan.STATE_ROLLED_BACK))
+                .annotate(touched=Coalesce("rolled_back_at", "applied_at"))
+                .order_by("-touched", "-pk").first())
+        if last is None or last.state != SharePlan.STATE_APPLIED:
+            return None
+        key = str(cfg.pk)
+        target = (last.targets or {}).get(key)
+        if target is None:
+            return None
+        target = float(target)
+        before = None
+        try:
+            prev = (last.previous_shares or {}).get(key)
+            before = float(prev) if prev is not None else None
+        except (TypeError, ValueError):
+            before = None
+        if before is None:
+            before = float((last.current_shares or {}).get(key))
+        now_share = account_share_pct(cfg)
+        if now_share is None or abs(now_share - target) > SHARE_SLACK:
+            return None
+        if before <= 0:
+            return None
+        r = target / before
+        if not 0.0 < r < 1.0:
+            return None
+        carried = max(r, float(last.governor or 1.0))
+        return carried if carried < 1.0 else None
+    except Exception as e:  # noqa: BLE001 — unread is not applied
+        logger.warning("[shares] the cut carried by a plan is unread for "
+                       "config %s: %s", getattr(cfg, "pk", "?"), e)
+        return None
+
+
 def _is_manual_lane(cfg) -> bool:
     """The config TAKE TRADE books hand-taken positions against: the
     reserved name and no symbols (core.context_processors._is_manual_config

@@ -9,8 +9,8 @@ from django.shortcuts import render
 def promotions_dashboard(request):
     from signals.models import RuleControl, PromotionEvent
     from signals.promotion_pipeline import (
-        is_eligible_for_promotion, is_due_for_demotion, _stats_since,
-        provenance_notes,
+        HOLD_UNREAD, LIVE_STAGES, is_eligible_for_promotion,
+        is_due_for_demotion, _stats_since, provenance_notes, stage_hold,
     )
 
     rules = list(RuleControl.objects.all().order_by("rule_name"))
@@ -28,7 +28,19 @@ def promotions_dashboard(request):
         # evidence says whether it has earned real money exposure.
         eligible = is_eligible_for_promotion(ctrl.rule_name)
         evidence_ok, evidence_reason = (None, "")
-        if eligible:
+        hold = ""
+        if eligible in LIVE_STAGES:
+            # THE HOLD (R22): the sweep and Aragorn keep a rule its owner
+            # demoted by hand, or a measured loser, off real money; the
+            # page says so beside the HQ ↑ that releases it, instead of
+            # "eligible to promote". An unread hold is a hold.
+            try:
+                hold = stage_hold(ctrl.rule_name)
+            except Exception:  # noqa: BLE001
+                hold = HOLD_UNREAD
+        if hold:
+            evidence_ok, evidence_reason = False, hold
+        elif eligible:
             from signals.promotion_evidence import gate_promotion
             evidence_ok, evidence_reason = gate_promotion(ctrl.rule_name, eligible)
 

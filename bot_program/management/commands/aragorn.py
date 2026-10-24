@@ -1,7 +1,8 @@
 """Aragorn and the crisis mode, from the shell (2026-10-02).
 
     python manage.py aragorn                       # posture, pairs, last 24 h
-    python manage.py aragorn run                   # what it would move now (plan)
+    python manage.py aragorn run                   # what it would move now (plan),
+                                                   # and what the hold keeps off real money
     python manage.py aragorn run --yes             # ... and move it
     python manage.py aragorn stress                # the market's stress, every input
     python manage.py aragorn posture crisis --hours 12   # force a posture
@@ -51,18 +52,25 @@ class Command(BaseCommand):
 
     def _run(self, o):
         from bot_program.aragorn import evaluate
-        moves = evaluate(apply=o["yes"])
+        held = []
+        moves = evaluate(apply=o["yes"], held=held)
         if not moves:
             self.stdout.write("Nothing to move.")
-            return
-        self.stdout.write(("APPLIED" if o["yes"] else
-                           "PLAN (nothing changed; --yes applies)") + ":")
+        else:
+            self.stdout.write(("APPLIED" if o["yes"] else
+                               "PLAN (nothing changed; --yes applies)") + ":")
         for m in moves:
             s = m.get("stats") or {}
             self.stdout.write(
                 f"  {m['kind']:<10} {m['rule']}/{m['asset_class'] or '-'}"
                 f" · n {s.get('n', '-')} · {m['reason']}"
                 + (f" · ERROR {m['error']}" if m.get("error") else ""))
+        # R22: what a proven paper record would have taken live and the
+        # hold keeps off real money, in both branches
+        for h in held:
+            self.stdout.write(
+                f"  {'held':<10} {h['rule']}/{h['asset_class'] or '-'}"
+                f" · {h['reason']}")
 
     def _stress(self, o):
         from bot_program.market_stress import evaluate
