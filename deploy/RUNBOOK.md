@@ -166,7 +166,14 @@ Leave OFF for now: `actuator_mode_live`, `meta_allocator_mode_live`,
   (reddit.com/prefs/apps no longer creates one; access is a manual
   request), so no keys is the expected state. With keys it covers
   r/wallstreetbets, r/investing, r/stocks, r/CryptoCurrency, r/Bitcoin.
-- `pipeline_sentiment_agg` — hourly aggregation into per-instrument scores.
+- `pipeline_sentiment_agg` — hourly aggregation into per-instrument scores,
+  from the raw StockTwits, Reddit and TradingView reads only. Before
+  2026-10-24 each hour summed its own earlier rows, so the stored
+  "aggregated" rows carry counts that doubled every hour. Rebuild them once:
+  `./deploy/dc exec -T web python manage.py rebuild_sentiment_aggregates` (a dry
+  run: what would change), then the same with `--apply`; or `--drop
+  --apply` to delete them all and let the next hourly run write fresh ones.
+  Raw reads are never touched.
 - `agent_news_analyst` — AI turns headlines into structured sentiment.
   Needs `ANTHROPIC_API_KEY` and spends tokens; enable deliberately.
 
@@ -223,8 +230,12 @@ history — next-bar fills, costs, a 30% holdout, a bootstrap bound — and
 says no. It refuses to judge a symbol on less than **540 days / 800 bars**
 of 4h history, and neither the scheduled refresh (the newest 200 bars) nor
 the backfill above (300) ever fetched that much, so every verdict read
-INSUFFICIENT. Run it once, in this order; nothing trades and no key is
-needed:
+INSUFFICIENT. Run it once, in this order; no key is needed. The backfill
+places no order, but a saved verdict (the `--save` step below, or the
+nightly judge once the switch is on) sizes real money from the next live
+entry: FAILED is refused on that class and side, PROVEN keeps full size,
+anything else trades at a quarter. Preview with `prove rules` (no --save)
+first:
 
 ```bash
 ./deploy/dc exec web python manage.py backfill_bars --proving     # every symbol the judge walks, 4h, 4000 bars deep (two years from Yahoo, more from Binance)
@@ -245,9 +256,10 @@ never settles on a level is left out of the run (BROKEN). A win past 20R
 is excluded and a loss past 20R is capped at -20R, never dropped; past 2%
 of a run past 20R the verdict is INSUFFICIENT. A `data:` line under a
 verdict says what was not read as stored. The
-verdicts are read by the setup memory and the ticket's odds today; the
-proof-first gate and the edge sizer that will read them are the next
-stage.
+verdicts are read by the setup memory and the ticket's odds, and, since
+size by proof (`backtester/proving/proof.py`), by every live bot entry,
+whether `proving_ground` is on or off: the switch runs the nightly judge
+that writes them, not the gate that reads them.
 
 Broker credentials are for **live trading** and for real-time marks that beat
 the delayed public feeds:
@@ -492,6 +504,21 @@ docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
 ```
 
 Migrations and seeding re-run automatically; both are idempotent.
+
+**Once, after the update of 2026-10-24** (no account figure reaches a
+reader who is not staff): a weekly review written before it was made from
+the book's value, cash and P&L in money, and it is both the waiting Sunday
+letter and what the Monday plan (every user's bell) reads; the plan reads
+only a review of the last eight days. If the Saturday 10:00 UTC review ran
+before the update, write a fresh one with `agent_weekly_review` on:
+
+```bash
+./deploy/dc exec -T web python manage.py shell -c "from ai_agents.tasks import generate_weekly_review as g; g()"
+```
+
+It cancels the older waiting edition unless a person approved, edited or
+rescheduled it; cancel that one on `/admin-dashboard/newsletters/`. Then
+rebuild the sentiment aggregates (`pipeline_sentiment_agg` in section 5).
 
 ## 10. Restoring
 

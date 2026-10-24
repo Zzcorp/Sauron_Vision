@@ -47,7 +47,8 @@ instrument of a traded class that already has 4h bars), at 4h, PROVING_BARS
 deep: Yahoo answers two years of hourly bars resampled to 4h (a US stock
 ~1,000 bars over 730 days, a forex pair ~3,100), Binance paginates. Retention
 for 1h/4h bars is three years, so the history stays. A hand-typed
---intervals or --bars still wins. Nothing trades; no key is needed.
+--intervals or --bars still wins. The backfill places no order and needs no
+key; the verdicts it feeds do size real money (backtester/proving/proof.py).
 
 Symbols are the platform's own spelling (BTCUSD), translated to the venue's
 (BTCUSDT) on the way out — the same mapping `market_data.quotes` uses, so a
@@ -235,7 +236,10 @@ class Command(BaseCommand):
                 f"`python manage.py prove data` says who is still short; "
                 f"`python manage.py component on proving_ground` arms the "
                 f"nightly judge (03:40 UTC); `python manage.py prove rules "
-                f"--save` judges the live rules now. Nothing trades.")
+                f"--save` judges the live rules now. A saved verdict binds "
+                f"real money from the next live entry: FAILED refuses the "
+                f"rule on that class and side, PROVEN allows full size. "
+                f"Preview first: `prove rules` without --save.")
         if not dry:
             self.stdout.write(
                 "Next: python manage.py shell -c "

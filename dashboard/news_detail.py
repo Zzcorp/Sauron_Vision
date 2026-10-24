@@ -289,7 +289,7 @@ def _instrument_rows(article, affected, now=None) -> list[dict]:
     """Per affected instrument (max 6): price move since publication and the
     latest sentiment snapshot. Missing pieces stay None for the em-dash."""
     from market_data.models import LiveQuote, PriceData
-    from scraping.models import SentimentSnapshot
+    from scraping.sentiment import latest as latest_sentiment
     now = now or timezone.now()
     rows = []
     for inst in affected[:6]:
@@ -335,8 +335,9 @@ def _instrument_rows(article, affected, now=None) -> list[dict]:
         if bar is not None and quote is not None:
             row["since_pct"] = _pct(quote.last, bar.close)
             row["since_tone"] = _tone(row["since_pct"])
-        snap = (SentimentSnapshot.objects.filter(instrument=inst)
-                .order_by("-timestamp").first())
+        # The fresh hourly aggregate, else the newest raw read: the same
+        # read as the positioning map (scraping/sentiment.py, 2026-10-24).
+        snap = latest_sentiment(inst, now=now)
         if snap is not None:
             row.update({
                 "sent_score": snap.composite_score,

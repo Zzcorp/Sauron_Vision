@@ -345,13 +345,52 @@ def digest_lines(digest) -> list:
     return lines or ["Nothing to report"]
 
 
+def digest_users():
+    """The active users in the order a scheduled digest is sent for them
+    (2026-10-24): staff and superusers first, each group by id.
+
+    A chat several users share gets ONE digest per run, the first user
+    met's (send_digest's chats_done), and that digest shows the user's
+    real account: equity, cash, used margin. The walk was an unordered
+    query, so the database chose whose account everyone in the chat read.
+    In this order a shared chat gets a staff member's digest when one
+    shares it (the lowest id), else the lowest-id user's; the digest names
+    whose it is (alerts/digest_book.owner_line). A chat of one user, and
+    every bell, are unchanged."""
+    from django.contrib.auth.models import User
+    from django.db.models import Case, IntegerField, Q, Value, When
+    return (User.objects.filter(is_active=True)
+            .annotate(digest_rank=Case(
+                When(Q(is_staff=True) | Q(is_superuser=True), then=Value(0)),
+                default=Value(1), output_field=IntegerField()))
+            .order_by("digest_rank", "pk"))
+
+
+#: The digest's sections about the account (alerts/digest_book.py, the
+#: daily P&L, the legacy portfolio block): its money.
+ACCOUNT_SECTIONS = ('real_money', 'simulated', 'portfolio', 'daily_pnl',
+                    'trades')
+
+
+def account_free_lines(digest) -> list:
+    """digest_lines without ACCOUNT_SECTIONS (2026-10-24): what the next
+    steps reader (ai_agents/next_steps.py) is handed. Its steps are shown
+    to any login on /briefing/#next-steps, so the book's value, cash and
+    P&L in money never reach the AI. The summary line is counts only."""
+    rest = {k: v for k, v in (digest.get('sections') or {}).items()
+            if k not in ACCOUNT_SECTIONS}
+    return digest_lines({**digest, 'sections': rest})
+
+
 def send_digest(digest, user=None, *, chats_done=None):
     """Send a generated digest via all configured channels.
 
     `chats_done` (2026-09-26): the set a scheduled run passes for all its
     users. A Telegram chat already in it is not posted again, so a chat
     several users share (the Sauron group) receives one digest per run;
-    the first user met speaks for it. The bell is still per user.
+    the first user met speaks for it, and the run meets them in
+    digest_users' order (a staff member first, 2026-10-24). The bell is
+    still per user.
     """
     from alerts.models import Notification
 

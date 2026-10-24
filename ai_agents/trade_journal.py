@@ -43,7 +43,7 @@ Symbol: {kwargs.get('symbol', 'Unknown')}
 Direction: {kwargs.get('direction', 'Unknown')}
 Entry Price: {kwargs.get('entry_price', 'Unknown')}
 Exit Price: {kwargs.get('exit_price', 'Unknown')}
-P&L: {kwargs.get('pnl', 'Unknown')} ({kwargs.get('pnl_pct', 'Unknown')}%)
+P&L: {kwargs.get('pnl_pct', 'Unknown')}%
 Duration: {kwargs.get('duration', 'Unknown')}
 Strategy: {kwargs.get('strategy', 'None')}
 Signal that triggered: {kwargs.get('signal_info', 'None')}
@@ -67,9 +67,9 @@ def generate_journal_entry(position):
     if not position.closed_at:
         return None
 
-    pnl = float(position.current_price - position.entry_price) * float(position.quantity)
-    if position.direction.lower() in ('short',):
-        pnl = -pnl
+    # In percent only (2026-10-24): the answer is kept on the AI ledger,
+    # which readers other than the position's owner see, so the prompt
+    # carries no P&L in money and no size.
     pnl_pct = float((position.current_price - position.entry_price) / position.entry_price * 100)
     if position.direction.lower() in ('short',):
         pnl_pct = -pnl_pct
@@ -87,7 +87,6 @@ def generate_journal_entry(position):
         direction=position.direction,
         entry_price=str(position.entry_price),
         exit_price=str(position.current_price),
-        pnl=f"{pnl:.2f}",
         pnl_pct=f"{pnl_pct:.2f}",
         duration=str(duration),
         strategy=position.strategy.name if position.strategy else "None",

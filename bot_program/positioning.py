@@ -20,8 +20,9 @@ see another desk's orders, and no number here is a probability that
                 volume           the flow of the last VOLUME_WINDOW bars:
                                  the share of volume on up-closes, half
                                  weight (flow, not positioning)
-                sentiment        the newest social snapshot
-                                 (scraping.SentimentSnapshot), half weight
+                sentiment        the social read: the fresh hourly
+                                 aggregate, else the newest raw read
+                                 (scraping/sentiment.py), half weight
               and its label: crowded long/short, leaning long/short,
               balanced, unread.
   THE STOPS   the pools above and below the mark (smart_money.living_levels:
@@ -170,15 +171,15 @@ def crowd_read(symbol, asset_class="", df=None, *, now=None) -> dict:
 
     try:
         from instruments.models import Instrument
-        from scraping.models import SentimentSnapshot
+        from scraping.sentiment import latest as latest_sentiment
         inst = Instrument.objects.filter(symbol=symbol).first()
         snap = None
         if inst is not None:
-            snap = (SentimentSnapshot.objects
-                    .filter(instrument=inst,
-                            timestamp__gte=now - timedelta(
-                                days=SENTIMENT_MAX_AGE_D))
-                    .order_by("-timestamp").first())
+            # The hourly aggregate while it is fresh, else the newest raw
+            # read (scraping/sentiment.py, 2026-10-24): on purpose, not
+            # whichever row happened to be newest.
+            snap = latest_sentiment(
+                inst, now=now, max_age=timedelta(days=SENTIMENT_MAX_AGE_D))
         if snap is not None:
             comps["sentiment"] = {
                 "score": round(_clip(float(snap.composite_score or 0)), 2),

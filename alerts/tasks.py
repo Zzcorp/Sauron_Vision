@@ -111,11 +111,13 @@ def check_all_price_alerts():
 @guarded_task("pipeline_digest")
 def send_morning_digest():
     """Scheduled: send morning market brief to all active users."""
-    from alerts.scheduled_digests import generate_morning_digest, send_digest
-    from django.contrib.auth.models import User
+    from alerts.scheduled_digests import (digest_users,
+                                          generate_morning_digest, send_digest)
 
-    told = set()  # a chat several users share gets one brief (2026-09-26)
-    for user in User.objects.filter(is_active=True):
+    # A chat several users share gets one brief (2026-09-26): a staff
+    # member's when one shares it, else the lowest id's (digest_users).
+    told = set()
+    for user in digest_users():
         try:
             digest = generate_morning_digest(user=user)
             send_digest(digest, user=user, chats_done=told)
@@ -129,11 +131,13 @@ def send_morning_digest():
 @guarded_task("pipeline_digest")
 def send_eod_digest():
     """Scheduled: send end-of-day summary to all active users."""
-    from alerts.scheduled_digests import generate_eod_digest, send_digest
-    from django.contrib.auth.models import User
+    from alerts.scheduled_digests import (digest_users, generate_eod_digest,
+                                          send_digest)
 
-    told = set()  # a chat several users share gets one summary (2026-09-26)
-    for user in User.objects.filter(is_active=True):
+    # A chat several users share gets one summary (2026-09-26): a staff
+    # member's when one shares it, else the lowest id's (digest_users).
+    told = set()
+    for user in digest_users():
         try:
             digest = generate_eod_digest(user=user)
             send_digest(digest, user=user, chats_done=told)
@@ -141,14 +145,16 @@ def send_eod_digest():
             logger.error(f"EOD digest failed for {user.username}: {e}")
 
     # Sauron reads the platform-wide digest too (ai_agents/next_steps.py,
-    # 2026-10-03): once, not per user. Never fails the digest.
+    # 2026-10-03): once, not per user, and without the account's sections
+    # (2026-10-24: the steps are shown to any login). Never fails the digest.
     try:
         from django.utils import timezone
 
         from ai_agents.next_steps import extract as _extract_steps
-        from alerts.scheduled_digests import digest_lines
+        from alerts.scheduled_digests import account_free_lines
         _extract_steps("eod_digest",
-                       "\n".join(digest_lines(generate_eod_digest(user=None))),
+                       "\n".join(account_free_lines(
+                           generate_eod_digest(user=None))),
                        source_ref=timezone.now().date().isoformat())
     except Exception as e:  # noqa: BLE001
         logger.warning("EOD next steps failed: %s", e)

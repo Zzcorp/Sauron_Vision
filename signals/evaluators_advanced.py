@@ -858,7 +858,9 @@ def _eval_crowd_extreme(params: dict, instrument, now: datetime) -> dict:
                         "panic" (extreme negative → contrarian long)
       window          — z-score window in snapshot count (default 30)
       z_threshold     — abs z (default 1.5)
-      source          — optional snapshot source filter
+      source          — optional snapshot source filter; without one,
+                        the raw reads (every source but the hourly
+                        aggregate, scraping/sentiment.py)
       lookback_days   — pool data from last N days (default 60)
     """
     direction = (params or {}).get("direction", "euphoric")
@@ -882,6 +884,11 @@ def _eval_crowd_extreme(params: dict, instrument, now: datetime) -> dict:
     ).order_by("timestamp")
     if source:
         qs = qs.filter(source=source)
+    else:
+        # The raw reads (2026-10-24): an hourly aggregate is the raw reads
+        # of the day summed again, a second copy of the same series.
+        from scraping.sentiment import raw
+        qs = raw(qs)
     scores = list(qs.values_list("composite_score", flat=True))
     if len(scores) < window + 1:
         return {"matched": False, "score": 0.0,

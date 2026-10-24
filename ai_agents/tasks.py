@@ -10,6 +10,32 @@ from ai_agents.calibration import (  # noqa: E402 — after the logger, like the
 )
 
 
+# NO ACCOUNT MONEY IN A PROMPT (2026-10-24). The morning briefing, the
+# Monday plan, the weekly review (the newsletter), the strategy advisor and
+# the trade journal reach readers who are not staff: the bell of every
+# active user, /briefing/, the letter, /ai/ and the AI ledger. Their prompts
+# used to carry the lowest-id book's value and cash, the snapshots' totals,
+# cash, daily P&L and exposure, the positions' sizes and P&L, all in money,
+# and an answer could repeat any of them. They carry percentages, R and
+# counts now; the account's size never reaches the model.
+
+
+def _shares_pct(exposure) -> dict:
+    """{key: its percent of the whole} for an exposure in money (a
+    snapshot's by-class or by-sector notionals): the book's shape without
+    its size. {} for anything else, or a whole of zero."""
+    if not isinstance(exposure, dict):
+        return {}
+    try:
+        values = {k: abs(float(v)) for k, v in exposure.items()}
+    except (TypeError, ValueError):
+        return {}
+    total = sum(values.values())
+    if total <= 0:
+        return {}
+    return {k: round(v / total * 100, 1) for k, v in values.items()}
+
+
 # ---------------------------------------------------------------------------
 # Inline helper agents (no dedicated module needed)
 # ---------------------------------------------------------------------------
@@ -537,13 +563,13 @@ def review_active_strategies():
                 }
     signals_list = list(signals_seen.values())
 
-    # Build portfolio snapshot from the first portfolio (main)
+    # Build portfolio snapshot from the first portfolio (main): its name,
+    # never its value, cash or a position's size or P&L in money (see
+    # _shares_pct above, 2026-10-24).
     portfolio_obj = Portfolio.objects.first()
     if portfolio_obj:
         portfolio_dict = {
             "name": portfolio_obj.name,
-            "current_value": str(portfolio_obj.current_value),
-            "cash_available": str(portfolio_obj.cash_available),
             "currency": portfolio_obj.currency,
         }
         positions = portfolio_obj.positions.select_related("instrument", "strategy").filter(closed_at__isnull=True)
@@ -552,10 +578,8 @@ def review_active_strategies():
             symbol = pos.instrument.symbol
             exposure_dict[symbol] = {
                 "direction": pos.direction,
-                "quantity": str(pos.quantity),
                 "entry_price": str(pos.entry_price),
                 "current_price": str(pos.current_price),
-                "unrealized_pnl": str(pos.unrealized_pnl),
                 "unrealized_pnl_pct": pos.unrealized_pnl_pct,
             }
     else:
@@ -568,7 +592,6 @@ def review_active_strategies():
             "id": s.id,
             "name": s.name,
             "time_horizon": s.time_horizon,
-            "pnl": str(s.pnl),
             "pnl_pct": s.pnl_pct,
             "max_drawdown": s.max_drawdown,
             "legs": [
@@ -638,7 +661,6 @@ def generate_daily_briefing():
     from strategies.models import Strategy
     from scraping.models import NewsArticle
     from market_data.models import EconomicEvent
-    from portfolio.models import Portfolio
     from alerts.models import Notification
 
     logger.info("Generating AI daily briefing")
@@ -653,16 +675,9 @@ def generate_daily_briefing():
         "title", "direction", "score", "urgency"
     ))
 
-    # Portfolio snapshot
-    portfolio_obj = Portfolio.objects.first()
-    portfolio_info = {}
-    if portfolio_obj:
-        portfolio_info = {
-            "name": portfolio_obj.name,
-            "current_value": str(portfolio_obj.current_value),
-            "cash_available": str(portfolio_obj.cash_available),
-            "currency": portfolio_obj.currency,
-        }
+    # NO PORTFOLIO SECTION (2026-10-24): the briefing goes to the bell of
+    # every active user, staff or not, and it was handed the lowest-id
+    # book's value and cash. Nothing about the account's money is given.
 
     # Recent news (last 24 h, AI-processed)
     since_yesterday = now - timezone.timedelta(hours=24)
@@ -683,7 +698,7 @@ def generate_daily_briefing():
     # Active strategies
     active_strategies = list(
         Strategy.objects.filter(status="active").values(
-            "name", "time_horizon", "pnl", "pnl_pct", "status"
+            "name", "time_horizon", "pnl_pct", "status"
         )
     )
 
@@ -691,7 +706,6 @@ def generate_daily_briefing():
         f"DATE: {today.strftime('%A, %d %B %Y')}\n\n"
         f"ACTIVE SIGNALS ({signal_count} total):\n"
         f"{json.dumps(top_signals, indent=2, default=str)}\n\n"
-        f"PORTFOLIO:\n{json.dumps(portfolio_info, indent=2, default=str)}\n\n"
         f"ACTIVE STRATEGIES:\n{json.dumps(active_strategies, indent=2, default=str)}\n\n"
         f"RECENT NEWS (last 24h):\n{json.dumps(recent_news, indent=2, default=str)}\n\n"
         f"UPCOMING ECONOMIC EVENTS:\n{json.dumps(upcoming_events, indent=2, default=str)}"
@@ -726,10 +740,31 @@ def generate_daily_briefing():
     }
 
 
+def _sizing_words(gap) -> str:
+    """risk_gate.sizing_gap's note as a ratio, never the money: the review
+    becomes the newsletter, and the note quoted the pools and the book
+    (2026-10-24). "" when the pools fit the book."""
+    if not gap.get("text"):
+        return ""
+    book = float(gap.get("book") or 0)
+    n = gap.get("configs") or 0
+    if book > 0:
+        size = (f"totalling {float(gap.get('pools') or 0) / book:,.1f} "
+                f"times the book")
+        research = float(gap.get("research_pools") or 0)
+        if research:
+            size += f" (and research pools of {research / book:,.1f} times it)"
+    else:
+        size = "against an empty book"
+    return (f"Sized by {n} paper pool{'' if n == 1 else 's'} {size} — the "
+            f"percentages and the drawdown measure the book, not the money "
+            f"that sized the positions.")
+
+
 def _sizing_notes(portfolio_names) -> dict:
-    """{portfolio name: sizing_gap text} for the books the review reads —
-    "" for a book whose paper pools fit it, or whose owner cannot be
-    named (the shared "Main" book has no owner). Never raises: a note
+    """{portfolio name: sizing note (_sizing_words)} for the books the
+    review reads — "" for a book whose paper pools fit it, or whose owner
+    cannot be named (the shared "Main" book has no owner). Never raises: a note
     that cannot be read is an empty note, not a missing review."""
     from django.contrib.auth import get_user_model
     from portfolio.models import Portfolio
@@ -745,7 +780,7 @@ def _sizing_notes(portfolio_names) -> dict:
                     username=username).first()
                 book = Portfolio.objects.filter(name=name).first()
                 if user is not None and book is not None:
-                    text = sizing_gap(user, book)["text"]
+                    text = _sizing_words(sizing_gap(user, book))
         except Exception as e:  # noqa: BLE001
             logger.warning("[weekly review] sizing note for %s unreadable: %s",
                            name, e)
@@ -1019,11 +1054,14 @@ def generate_weekly_review():
     # which book it is and, when that book's paper pools exceed it, that
     # its percentages measure the book and not the money that sized the
     # positions (risk_gate.sizing_gap).
+    # In percent (2026-10-24): the review becomes the newsletter, so no
+    # total, cash, daily P&L or exposure in money; the exposure is each
+    # class's and sector's share of the whole.
     snapshots = list(
         PortfolioSnapshot.objects.filter(date__gte=week_ago.date())
         .order_by("portfolio__name", "date")
         .values(
-            "portfolio__name", "date", "total_value", "cash", "daily_pnl",
+            "portfolio__name", "date",
             "daily_pnl_pct", "cumulative_pnl_pct", "max_drawdown",
             "sharpe_ratio", "exposure_by_asset_class", "exposure_by_sector",
         )
@@ -1032,6 +1070,10 @@ def generate_weekly_review():
     for s in snapshots:
         s["portfolio"] = s.pop("portfolio__name")
         s["sizing_note"] = notes.get(s["portfolio"], "")
+        s["exposure_by_asset_class_pct"] = _shares_pct(
+            s.pop("exposure_by_asset_class"))
+        s["exposure_by_sector_pct"] = _shares_pct(
+            s.pop("exposure_by_sector"))
 
     # THE LIVE BOOK (2026-10-08): what the bots and the hand lane closed,
     # live and paper apart; the scorecard per lane; the skips; the guards
@@ -1172,16 +1214,14 @@ def optimize_strategies():
     portfolio_dict = {}
     exposure_dict = {}
     if portfolio_obj:
+        # No value, cash or P&L in money (2026-10-24, see _shares_pct).
         portfolio_dict = {
-            "current_value": str(portfolio_obj.current_value),
-            "cash_available": str(portfolio_obj.cash_available),
             "currency": portfolio_obj.currency,
         }
         for pos in portfolio_obj.positions.select_related("instrument").filter(closed_at__isnull=True):
             exposure_dict[pos.instrument.symbol] = {
                 "direction": pos.direction,
                 "unrealized_pnl_pct": pos.unrealized_pnl_pct,
-                "unrealized_pnl": str(pos.unrealized_pnl),
             }
 
     engine = StrategyEngine()
@@ -1329,6 +1369,12 @@ def generate_daily_commentary():
     return {"status": "success", "length": len(commentary)}
 
 
+#: The oldest weekly review the Monday plan reads (2026-10-24): the
+#: Saturday review runs a day before the plan, so eight days covers one
+#: missed week's margin and never an old review fed back for months.
+REVIEW_MAX_AGE_DAYS = 8
+
+
 @shared_task
 @guarded_task("agent_monday_plan")
 def generate_monday_plan():
@@ -1351,11 +1397,11 @@ def generate_monday_plan():
     # Current portfolio state
     portfolio_obj = Portfolio.objects.first()
     portfolio_info = {}
+    # In percent (2026-10-24): the plan goes to the bell of every active
+    # user and /briefing/, so no value, cash, total or exposure in money.
     if portfolio_obj:
         portfolio_info = {
             "name": portfolio_obj.name,
-            "current_value": str(portfolio_obj.current_value),
-            "cash_available": str(portfolio_obj.cash_available),
             "currency": portfolio_obj.currency,
             "max_single_position_pct": portfolio_obj.max_single_position_pct,
             "max_daily_loss_pct": portfolio_obj.max_daily_loss_pct,
@@ -1368,18 +1414,19 @@ def generate_monday_plan():
         if latest_snapshot:
             portfolio_info["latest_snapshot"] = {
                 "date": str(latest_snapshot.date),
-                "total_value": str(latest_snapshot.total_value),
                 "daily_pnl_pct": latest_snapshot.daily_pnl_pct,
                 "cumulative_pnl_pct": latest_snapshot.cumulative_pnl_pct,
                 "max_drawdown": latest_snapshot.max_drawdown,
-                "exposure_by_asset_class": latest_snapshot.exposure_by_asset_class,
-                "exposure_by_sector": latest_snapshot.exposure_by_sector,
+                "exposure_by_asset_class_pct": _shares_pct(
+                    latest_snapshot.exposure_by_asset_class),
+                "exposure_by_sector_pct": _shares_pct(
+                    latest_snapshot.exposure_by_sector),
             }
 
     # Active strategies
     active_strategies = list(
         Strategy.objects.filter(status="active")
-        .values("name", "time_horizon", "pnl", "pnl_pct", "max_drawdown", "ai_reasoning")
+        .values("name", "time_horizon", "pnl_pct", "max_drawdown", "ai_reasoning")
     )
 
     # Economic events for the coming week
@@ -1397,8 +1444,16 @@ def generate_monday_plan():
     # letter was cancelled or failed on Sunday morning, and the Sunday
     # evening plan read a review a week older. An empty row (the model
     # answered nothing) and an admin-made edition are not the review.
+    #
+    # RECENT ONLY (2026-10-24): the newest of the last REVIEW_MAX_AGE_DAYS.
+    # A review written before 2026-10-24 was made from the book's value,
+    # cash, P&L and exposure in money, and the plan goes to the bell of
+    # every active user: an old review is never fed back, week after week,
+    # while agent_weekly_review is off.
     last_review = (
-        Newsletter.objects.filter(origin="weekly_review")
+        Newsletter.objects.filter(
+            origin="weekly_review",
+            created_at__gte=now - timedelta(days=REVIEW_MAX_AGE_DAYS))
         .exclude(content_markdown="")
         .order_by("-created_at", "-pk")
         .first()

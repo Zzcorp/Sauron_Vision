@@ -142,7 +142,8 @@
             <td class="num" data-label="Duration" style="font-family: var(--font-mono);">{{ t.duration_seconds|floatformat:1 }}s</td>
             <td class="num" data-label="In/Out Tokens" style="font-family: var(--font-mono); font-size: 11px;">{{ t.input_tokens }}/{{ t.output_tokens }}</td>
             <td class="num" data-label="Cost" style="font-family: var(--font-mono);">${{ t.cost_usd }}</td>
-            <td data-label="Summary" style="font-size: 12px;" title="{{ t.response_summary }}">{{ t.response_summary|truncatechars:80 }}</td>
+            {# Staff only (2026-10-24): an answer can quote account money. #}
+            {% if show_summaries %}<td data-label="Summary" style="font-size: 12px;" title="{{ t.response_summary }}">{{ t.response_summary|truncatechars:80 }}</td>{% else %}<td data-label="Summary" style="font-size: 12px; color: var(--text-muted);">—</td>{% endif %}
         </tr>
         {% endfor %}
         </tbody>
