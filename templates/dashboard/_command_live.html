@@ -134,7 +134,7 @@ Layered rendering:
                 {% for c in brain_top_concerns %}
                     <li>
                         <strong style="color:var(--accent);text-transform:uppercase;font-family:var(--font-mono);font-size:10px;letter-spacing:1px;">{{ c.kind }}</strong>
-                        · {{ c.text|truncatechars:120 }}
+                        · {% if show_text %}{{ c.text|truncatechars:120 }}{% else %}&mdash;{% endif %}
                         {% if c.severity %}<span style="color:var(--text-muted);font-size:11px;">(severity {{ c.severity|floatformat:2 }})</span>{% endif %}
                     </li>
                 {% endfor %}

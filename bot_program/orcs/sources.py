@@ -46,7 +46,6 @@ US10Y_DASH = ("— (no instrument for US10Y; the 10-year yield is DGS10 in the "
 STRESS_DASH = "— (not measured: crisis_mode off)"
 CALENDAR_DASH = "— (calendar unread)"
 FRED_FRESH_DAYS = 5
-MIND_FRESH_MIN = 75
 BRIEF_MAX_H = 30
 POSTURE_FRESH_H = 2.0
 BOARD_ATR_BARS = 15
@@ -343,7 +342,9 @@ def calendar_rows(rows, now) -> list:
 def mind(at) -> dict:
     """The Mind's newest usable report at `at`, read BY ITS ID: regime,
     confidence, health, concerns and themes (each fenced), the narrative's
-    first 300 characters as a view, its age. Over 75 min: overdue."""
+    first 300 characters as a view, its age. Past the contract's window
+    (brain.context.mind_fresh_minutes: 75 min on the hourly beat, the
+    window every bot reads the Mind by): overdue."""
     try:
         from bot_program.persona_mix import latest_report
         rep = latest_report(at)
@@ -351,7 +352,8 @@ def mind(at) -> dict:
         if rid is None:
             return dash("no Mind report")
         age = int(round(float(rep.get("age_minutes") or 0)))
-        if age > MIND_FRESH_MIN:
+        from brain.context import mind_fresh_minutes
+        if age > mind_fresh_minutes():
             return dash(f"overdue: last report {age} min ago")
         from brain.models import BrainReport
         row = BrainReport.objects.filter(pk=rid).only(

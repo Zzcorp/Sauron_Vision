@@ -60,9 +60,9 @@
     <div class="card" style="margin-bottom:14px;">
         <div class="card-header"><span class="card-title">Latest synthesis · {{ latest.created_at|date:"Y-m-d H:i" }} UTC</span></div>
         {% if latest.error %}
-            <div style="color:var(--down);">Synthesis error: {{ latest.error|truncatechars:200 }}</div>
+            <div style="color:var(--down);">Synthesis error{% if show_text %}: {{ latest.error|truncatechars:200 }}{% else %} (the detail is for staff){% endif %}</div>
         {% else %}
-            <div style="font-size:13px;line-height:1.5;white-space:pre-wrap;">{{ latest.narrative_md }}</div>
+            {% if show_text %}<div style="font-size:13px;line-height:1.5;white-space:pre-wrap;">{{ latest.narrative_md }}</div>{% else %}<div style="font-size:13px;color:var(--text-muted);">&mdash; the Mind's narrative is for staff</div>{% endif %}
             {% if concern_rows %}
                 <div style="margin-top:14px;">
                     <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Top concerns · act on them</div>
@@ -80,7 +80,7 @@
                                     {% endif %}
                                 </span>
                             </div>
-                            <div class="brain-concern-text">{{ c.text }}</div>
+                            <div class="brain-concern-text">{% if show_text %}{{ c.text }}{% else %}<span style="color:var(--text-muted);">&mdash;</span>{% endif %}</div>
                             <div class="brain-concern-actions">
                                 {% for r in c.rules %}
                                     {% include "dashboard/_brain_rule_lever.html" with r=r report=latest %}
@@ -155,7 +155,7 @@
     </div>
     {% else %}
         <div class="card" style="margin-bottom:14px;">
-            <p style="color:var(--text-muted);">No BrainReport yet. The synthesizer runs every 30 minutes; or trigger one manually below.</p>
+            <p style="color:var(--text-muted);">No BrainReport yet. The synthesizer runs every hour; or trigger one manually below.</p>
         </div>
     {% endif %}
 

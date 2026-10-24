@@ -3280,7 +3280,14 @@ def ai_insights(request):
         success=True
     ).first()
 
+    # THE BRIEFING TEXT IS STAFF-ONLY (2026-10-24), like the ledger's answers
+    # on /ai/tasks/: a review written before PR72 took money out of its
+    # prompt quotes the book in money. Everyone sees which agent wrote it,
+    # with what model and when.
+    from core.views_book import is_staff
+
     return render(request, "dashboard/ai_insights.html", {
+        "show_briefing": is_staff(request.user),
         "page_id": "ai",
         "tasks_24h": total_24h,
         "success_24h": success_24h,

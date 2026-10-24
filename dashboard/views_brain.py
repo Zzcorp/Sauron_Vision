@@ -204,17 +204,27 @@ def brain_dashboard(request):  # noqa: C901
         n_correct = 0
         accuracy = None
 
-    # Pending predictions.
+    # Pending predictions: those still waiting for a grade. A row closed
+    # ungraded, or linked to a claim the market settled, waits for nothing
+    # (2026-10-24, brain.calibration.awaiting_grade).
     try:
         from ai_agents.models import AgentPrediction
-        n_pending = AgentPrediction.objects.filter(
-            agent="sauron_mind", was_correct__isnull=True,
-        ).count()
+        from brain.calibration import awaiting_grade
+        n_pending = awaiting_grade(AgentPrediction.objects.filter(
+            agent="sauron_mind")).count()
     except Exception:
         n_pending = 0
 
+    # THE MIND'S PROSE IS STAFF-ONLY (2026-10-24): its narrative, its
+    # concerns' text and a failed synthesis's error (up to 200 characters
+    # of the model's raw answer) were written from snapshots that carried
+    # account money. Everyone sees the regime, the health, each concern's
+    # kind, severity and levers, and the timeline.
+    from core.views_book import is_staff
+
     context = {
         "page_id": "brain",
+        "show_text": is_staff(request.user),
         "latest": latest,
         "timeline": timeline,
         "obs_unconsumed": list(obs_unconsumed),

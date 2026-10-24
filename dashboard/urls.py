@@ -24,7 +24,7 @@ from .views_bot_console import bot_console, bot_pause
 from .views_brain import (brain_dashboard, brain_run_now, brain_propose,
                           brain_disable_manual)
 from .views_brain_phase38 import (
-    knowledge_dashboard, knowledge_node_history,
+    knowledge_dashboard, knowledge_node_history, knowledge_rule_state_clear,
     hypotheses_dashboard, consolidation_dashboard,
     consolidation_run_now, critic_run_now,
     briefing_dashboard, briefing_run_now,
@@ -597,6 +597,8 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
 
     # ── Phase 38: knowledge graph + hypothesis market ──────────────────────────
     path("knowledge/", knowledge_dashboard, name="knowledge_dashboard"),
+    path("knowledge/rule_state/<str:key>/clear/", knowledge_rule_state_clear,
+         name="knowledge_rule_state_clear"),
     path("knowledge/<str:kind>/<str:key>/", knowledge_node_history,
          name="knowledge_node_history"),
     path("hypotheses/", hypotheses_dashboard, name="hypotheses_dashboard"),

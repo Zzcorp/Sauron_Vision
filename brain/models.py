@@ -140,14 +140,6 @@ class BrainReport(models.Model):
         return (f"<BrainReport {self.regime_label}@{self.regime_confidence:.2f} "
                 f"{self.created_at:%Y-%m-%d %H:%M}>")
 
-    @property
-    def is_fresh(self) -> bool:
-        """True if valid_until is in the future (or unset and < 1h old)."""
-        now = timezone.now()
-        if self.valid_until:
-            return now <= self.valid_until
-        return (now - self.created_at).total_seconds() < 3600
-
 
 # Phase 38 models — re-exported so makemigrations picks them up.
 from .knowledge_models import (  # noqa: E402, F401

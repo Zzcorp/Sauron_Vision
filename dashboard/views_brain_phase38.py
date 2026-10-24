@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponseRedirect
+from django.http import Http404, HttpResponseForbidden, HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
@@ -27,6 +28,7 @@ def knowledge_dashboard(request):
     Adds: per-kind counts donut, avg confidence, version aggregates,
     last update timestamp, recently superseded count.
     """
+    from brain.consolidation import KEEP_OFF_WORDS
     from brain.knowledge_models import KnowledgeNode
 
     current_qs = (KnowledgeNode.objects
@@ -68,6 +70,9 @@ def knowledge_dashboard(request):
     return render(request, "dashboard/knowledge.html", {
         "page_id": "knowledge",
         "groups": dict(grouped),
+        "rule_rows": _rule_rows(grouped.get(KnowledgeNode.KIND_RULE_STATE)
+                                or [], request.user),
+        "keep_off_words": KEEP_OFF_WORDS,
         "n_current": n_current,
         "n_history": history_count,
         "n_kinds": len(grouped),
@@ -80,6 +85,96 @@ def knowledge_dashboard(request):
         "superseded_24h": superseded_24h,
         "kind_donut": kind_donut,
     })
+
+
+def _rule_rows(nodes, user) -> list:
+    """One row per rule_state node (2026-10-24): what the node itself says
+    and does, and what the rule's entries get NOW (the stricter of the node
+    and the fresh report, brain.context.brain_rule_advisory), with the
+    rule's stage. Names and statuses only. The clear form is offered to a
+    superuser on a node that pauses: a watch blocks nothing, and clearing
+    one would unmask a report pause rather than release anything."""
+    from brain.consolidation import rule_reach
+    from brain.context import EFFECT_WORDS, brain_rule_advisory, rule_state_view
+    rows = []
+    is_super = bool(getattr(user, "is_superuser", False))
+    for n in nodes:
+        view = rule_state_view(n)
+        now, why = brain_rule_advisory(n.key)
+        rows.append({
+            "key": n.key, "node": n, "view": view,
+            "now": now, "now_why": why, "now_effect": EFFECT_WORDS[now],
+            "reach": rule_reach(n.key),
+            "can_clear": is_super and view["status"] == "pause_recommended",
+        })
+    return rows
+
+
+@login_required
+@require_POST
+def knowledge_rule_state_clear(request, key: str):
+    """A superuser clears ONE of the Mind's remembered pauses with the
+    trading PIN (2026-10-24): an ACT door (core/trading_pin.py), because a
+    clear lets the rule's bot entries through again, real money included
+    where its stage allows. Writes an "allow" version (source operator)
+    and one audit row; never the PIN. It does not mute the Mind: a fresh
+    report pause still blocks, and the next scheduled pass writes the pause
+    again if the report still says so. No shell twin (core/switch_pin.py)."""
+    from brain.consolidation import AUDIT_CLEAR, rule_reach, write_rule_state
+    from brain.context import brain_rule_advisory, rule_state_view
+    from brain.knowledge_models import KnowledgeNode
+    from core.trading_pin import ACT, gate, refusal_of, sentence
+    if not request.user.is_superuser:
+        return HttpResponseForbidden("Superuser access required.")
+    node = KnowledgeNode.current(KnowledgeNode.KIND_RULE_STATE, key)
+    if node is None or rule_state_view(node)["status"] != "pause_recommended":
+        raise Http404("no remembered pause on this rule")
+    back = HttpResponseRedirect(reverse("knowledge_dashboard"))
+    pin_ok = gate(request, request.POST.get("pin", ""), door=ACT,
+                  act="clear a Mind pause on /knowledge/")
+    if not pin_ok:
+        verdict = refusal_of(pin_ok)
+        messages.error(request, sentence(
+            verdict, subject=f"Clearing the Mind's pause on {key}",
+            nothing="the pause stays") if verdict else
+            f"Clearing the Mind's pause on {key} takes your trading PIN: "
+            f"the pause stays.")
+        return back
+    was = dict(node.payload or {})
+    new = write_rule_state(
+        key, {"status": "allow", "as_of": timezone.now().isoformat(),
+              "misses": 0, "why": "cleared by a superuser on /knowledge/",
+              "was_status": str(was.get("status") or "")},
+        source="operator", confidence=1.0, expect_pk=node.pk)
+    if new is None:
+        messages.error(request, f"The Mind's memory of {key} changed while "
+                                f"you read it, so nothing was cleared: look "
+                                f"again.")
+        return back
+    reach = rule_reach(key)
+    try:
+        from bot_program.audit import record_event
+        record_event(AUDIT_CLEAR, {
+            "rule_name": key, "was_status": str(was.get("status") or ""),
+            "was_version": node.version, "now_version": new.version,
+            "promotion_stage": reach["stage"]}, user=request.user)
+    except Exception:  # noqa: BLE001 — the clear is written; the row is best effort
+        pass
+    now, _ = brain_rule_advisory(key)
+    if now == "pause_recommended":
+        after = ("The Mind's current report still pauses this rule, so its "
+                 "entries stay blocked until that report stops saying so.")
+    else:
+        after = (f"Nothing pauses it now: its bot entries are open again "
+                 f"({reach['words']}), still behind the stage, proof and "
+                 f"posture gates.")
+    messages.success(request, (
+        f"Cleared the Mind's pause on {key} (v{node.version} -> "
+        f"v{new.version} allow). This does not mute the Mind: a fresh pause "
+        f"in its hourly report still blocks the rule, and the next 03:00 "
+        f"consolidation writes the pause again if the report still says "
+        f"so. {after}"))
+    return back
 
 
 @login_required
@@ -273,14 +368,18 @@ def consolidation_dashboard(request):
 @staff_member_required
 @require_POST
 def consolidation_run_now(request):
+    """Staff, no PIN: a manual run adds and re-affirms the Mind's rule
+    pauses and never releases one (2026-10-24). Releases are the 03:00
+    beat's, or a superuser's clear with the PIN on /knowledge/."""
     from brain.consolidation import consolidate_now
     from brain.tasks import run_consolidation as _twin
-    from dashboard.run_async import maybe_dispatch_async
-    resp = maybe_dispatch_async(request, _twin, "Consolidation",
-                                reverse("consolidation_dashboard"))
+    from dashboard import run_async
+    resp = run_async.maybe_dispatch_async(
+        request, _twin, "Consolidation", reverse("consolidation_dashboard"),
+        kwargs={"manual": True})
     if resp is not None:
         return resp
-    request.session["consolidation_result"] = consolidate_now()
+    request.session["consolidation_result"] = consolidate_now(releases=False)
     return HttpResponseRedirect(reverse("consolidation_dashboard"))
 
 
@@ -584,6 +683,7 @@ def restore_rule_now(request, rule_name: str):
 
 @login_required
 def research_view(request):
+    from core.views_book import is_staff as staff_reader
     from brain.research_agent import get_or_create_active_conversation
     from brain.research_renderer import (
         render_markers, has_strategy_draft, extract_action_markers,
@@ -656,6 +756,8 @@ def research_view(request):
         "mind_trust_band": mind_trust_band,
         "mind_obs_unconsumed": mind_obs_unconsumed,
         "mind_top_concerns": mind_top_concerns[:4],
+        # The concerns' text is staff-only, as on /brain/ (2026-10-24).
+        "show_text": staff_reader(request.user),
     })
 
 

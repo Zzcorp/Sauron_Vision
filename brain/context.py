@@ -6,10 +6,42 @@ their own prompts / decisions. The returned object is INTENTIONALLY small
 
 Every consumer must handle `None` — the brain may have failed, or the
 report may be stale. No fresh report → agents work as today.
+
+THE MIND'S CONTRACT (2026-10-24). "The Mind says X about rule R" means
+exactly this, wherever it is read:
+
+1. The report. The newest error-free BrainReport younger than
+   `mind_fresh_minutes()` (the synthesis beat's widest gap plus
+   MIND_GRACE_MINUTES: 75 minutes on the hourly beat) is the Mind's
+   current word. A "low" trust band softens its pause to watch.
+2. The memory. The current `rule_state` KnowledgeNode is the Mind's
+   memory of a pause or a watch (brain/consolidation.py). Written by the
+   consolidation from a fresh report (the scheduled 03:00 pass, or the
+   staff "Run consolidation now" button, which only adds and
+   re-affirms); when no report is fresh, from the Mind's last report of
+   the past day, adding or tightening only; and by a superuser's clear.
+   It binds until it is released, and only these release it, each one a
+   written version with an audit row and a staff notice: the scheduled
+   pass seeing "active", or "watch" for a paused rule, in a fresh report;
+   the scheduled pass seeing three fresh reports on three nights in a row
+   (one miss a night, once per report) that no longer name the rule; a
+   superuser's clear with the trading PIN on /knowledge/. A releasing pass
+   runs at most once in 20 hours: any other run (the staff button, the
+   admin's "Run selected tasks") never releases or counts. A night with no
+   fresh report releases nothing, and the reader never ages a node out on
+   its own: a Mind that is down keeps its pauses. The node is not softened
+   by trust.
+3. Both. When the node and a fresh report both speak, the stricter one
+   wins (allow < watch < pause_recommended), the node on a tie. So a fresh
+   "active" does not release a node's pause before the next scheduled
+   pass, up to a day later: conservative on purpose.
+4. Failure. Each source is read on its own; a read that fails says
+   "allow" for that source alone, and nothing here ever raises.
 """
 from __future__ import annotations
 
 import logging
+import math
 from datetime import timedelta
 from typing import Optional
 
@@ -22,9 +54,41 @@ VENUE_LEGEND_LINE = ("Venues: live = real money, demo = eToro virtual "
                      "account, paper = platform simulator; a paper or demo "
                      "loss is never a live failure")
 
+#: The Mind's beat entry (config/celery.py) and the grace past its widest
+#: gap during which its last report is still its word (2026-10-24).
+MIND_BEAT_KEY = "sauron-mind-synthesize"
+MIND_GRACE_MINUTES = 15
+_FALLBACK_BEAT_MINUTES = 60
 
-def get_brain_context(*, max_age_minutes: int = 45) -> Optional[dict]:
+
+def mind_fresh_minutes() -> int:
+    """How long a clean BrainReport stays the Mind's current word: the
+    beat's widest gap, read from the loaded Celery app the way the
+    component digest reads it (core.day_of_sauron.widest_gap), plus
+    MIND_GRACE_MINUTES. 75 on today's hourly beat. An unreadable beat, or
+    one with no period, counts as an hour. Not cached: two dict reads.
+
+    The window used to be a literal 45 in two places, left from a
+    30-minute cadence, so from minute 45 until the next report landed a
+    live-evidence pause stopped blocking bot entries."""
+    beat_minutes = _FALLBACK_BEAT_MINUTES
+    try:
+        from config.celery import app
+        from core.day_of_sauron import widest_gap
+        seconds = widest_gap(app.conf.beat_schedule[MIND_BEAT_KEY]["schedule"])
+        if seconds is not None and seconds > 0:
+            beat_minutes = int(math.ceil(float(seconds) / 60.0))
+    except Exception:  # noqa: BLE001 — an unreadable beat is an hour
+        beat_minutes = _FALLBACK_BEAT_MINUTES
+    return beat_minutes + MIND_GRACE_MINUTES
+
+
+def get_brain_context(*, max_age_minutes: Optional[int] = None) -> Optional[dict]:
     """Return a compact dict from the latest fresh BrainReport.
+
+    Fresh means younger than `max_age_minutes`; None (the default) is the
+    contract's window, `mind_fresh_minutes()`. A caller that passes its own
+    window keeps it (the share allocator's regime read, the horizon).
 
     Shape:
       {
@@ -45,6 +109,8 @@ def get_brain_context(*, max_age_minutes: int = 45) -> Optional[dict]:
     except Exception:
         return None
 
+    if max_age_minutes is None:
+        max_age_minutes = mind_fresh_minutes()
     cutoff = timezone.now() - timedelta(minutes=max_age_minutes)
     report = (BrainReport.objects.filter(created_at__gte=cutoff, error="")
               .order_by("-created_at").first())
@@ -89,7 +155,17 @@ def get_brain_context(*, max_age_minutes: int = 45) -> Optional[dict]:
 
 def _brain_trust_score() -> Optional[float]:
     """Returns the rolling Brier-derived trust score for the brain agent
-    (from Phase-6 calibration). None if calibration data unavailable."""
+    (from Phase-6 calibration). None if calibration data unavailable.
+
+    THE NUMBER THE BOTS ACT ON (2026-10-24): its band softens a report
+    pause (brain_rule_advisory, so the bot entry gate in
+    bot_program/asset_engine/base.py and the review trigger on open
+    positions in brain/position_review.py), scales the theme squeeze
+    (brain_theme_pressure_multiplier: the orchestrator caps and the share
+    allocator), sets the share allocator's risk-off cut and the prompt
+    block (context_for_prompt). Each row has one grader (brain/
+    calibration.py's module docstring), so over linked rows it equals the
+    briefing's brain.hypotheses.agent_trust_score("sauron_mind")."""
     try:
         from ai_agents.models import AgentPrediction
     except Exception:
@@ -140,6 +216,108 @@ def brain_trust_band(score=None) -> str:
     return "low"
 
 
+#: allow < watch < pause_recommended: the order "the stricter one wins"
+#: reads (2026-10-24). Anything else is allow.
+STATUS_RANK = {"allow": 0, "watch": 1, "pause_recommended": 2}
+BINDING_STATUSES = ("watch", "pause_recommended")
+
+#: What each status does to a bot entry (bot_program/asset_engine/base.py
+#: skips on pause_recommended alone, on every config, paper and live).
+EFFECT_WORDS = {
+    "pause_recommended": "blocks bot entries (paper and live)",
+    "watch": "watch only (blocks nothing)",
+    "allow": "allow",
+}
+
+
+def _rank(status) -> int:
+    return STATUS_RANK.get(str(status or ""), 0)
+
+
+def _parse_iso(value):
+    """An aware datetime from an ISO string, or None."""
+    from datetime import datetime, timezone as dt_timezone
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    if timezone.is_naive(dt):
+        dt = dt.replace(tzinfo=dt_timezone.utc)
+    return dt
+
+
+def rule_state_view(node, *, now=None) -> dict:
+    """What one rule_state node says and does, for the readers, the
+    /knowledge/ page and `manage.py mind_contract` alike.
+
+    {status, effect, reason, version, affirmed_at, age_hours, misses,
+     venue, source}: `affirmed_at` is the last fresh report that named the
+    rule at this status (the payload's, else the version's own time), and
+    `misses` how many scheduled passes in a row have since seen a fresh
+    report that no longer names it (the third releases it,
+    brain/consolidation.py). A node never ages out here: the release is a
+    written version, or nothing."""
+    from .consolidation import RELEASE_AFTER_MISSES
+    now = now or timezone.now()
+    payload = getattr(node, "payload", None) or {}
+    if not isinstance(payload, dict):
+        payload = {}
+    status = str(payload.get("status") or "allow")
+    if status not in STATUS_RANK:
+        status = "allow"
+    affirmed = (_parse_iso(payload.get("affirmed_at"))
+                or _parse_iso(payload.get("as_of"))
+                or getattr(node, "created_at", None))
+    age_hours = (round((now - affirmed).total_seconds() / 3600.0, 1)
+                 if affirmed else None)
+    try:
+        misses = max(0, int(payload.get("misses") or 0))
+    except (TypeError, ValueError):
+        misses = 0
+    return {
+        "status": status,
+        "effect": EFFECT_WORDS[status],
+        "reason": f"knowledge_graph rule_state v{getattr(node, 'version', '?')}",
+        "version": getattr(node, "version", None),
+        "affirmed_at": affirmed,
+        "age_hours": age_hours,
+        "misses": misses,
+        "misses_to_release": RELEASE_AFTER_MISSES,
+        "venue": str(payload.get("venue") or ""),
+        "source": ", ".join(getattr(node, "source_agents", None) or []),
+    }
+
+
+def _node_advisory(rule_name: str) -> tuple[str, str]:
+    """The memory's word: the current rule_state node, at any age."""
+    from .knowledge_models import KnowledgeNode
+    node = KnowledgeNode.current(KnowledgeNode.KIND_RULE_STATE, rule_name)
+    if node is None:
+        return "allow", ""
+    view = rule_state_view(node)
+    if view["status"] not in BINDING_STATUSES:
+        return "allow", ""
+    return view["status"], view["reason"]
+
+
+def _report_advisory(rule_name: str, ctx) -> tuple[str, str]:
+    """The report's word: the fresh report's overlay entry for the rule,
+    a pause softened to watch when the trust band is low (Phase-47 — a
+    low-trust brain can't hard-pause via a report-only signal)."""
+    if not ctx or rule_name not in (ctx.get("rule_status_overlay") or {}):
+        return "allow", ""
+    status = ctx["rule_status_overlay"][rule_name]
+    if status not in BINDING_STATUSES:
+        return "allow", ""
+    band = brain_trust_band(ctx.get("trust_score"))
+    if band == "low" and status == "pause_recommended":
+        return "watch", (f"brain_report softened (trust=low, "
+                          f"regime={ctx.get('regime_label')})")
+    return status, f"brain_report (regime={ctx.get('regime_label')})"
+
+
 def brain_rule_advisory(rule_name: str) -> tuple[str, str]:
     """Return (status, reason) for a rule based on brain state.
 
@@ -148,42 +326,38 @@ def brain_rule_advisory(rule_name: str) -> tuple[str, str]:
       - "watch"               — proceed but be conservative
       - "pause_recommended"   — strong soft-pause advice from brain
 
-    Resolution order (most authoritative first):
-      1. KnowledgeNode `rule_state:<name>` (consolidation-promoted, persistent)
-      2. BrainReport.rule_status_overlay[<name>] (latest, recency-weighted)
-      3. otherwise → "allow"
+    The two sources (the module docstring is the contract):
+      1. the KnowledgeNode `rule_state:<name>`: the nightly copy of a
+         fresh report's word, kept until a written release; never
+         softened by trust;
+      2. the fresh BrainReport's overlay entry, its pause softened to
+         watch when the trust band is "low".
+    The stricter one wins (allow < watch < pause_recommended), the node on
+    a tie; when both pause, the reason names both, so clearing the node
+    is not mistaken for a release while the report still pauses.
 
-    Phase-47: when the brain's trust band is "low", `pause_recommended`
-    is downgraded to `watch` — a low-trust brain shouldn't have full
-    actuation power. KnowledgeNode-sourced advisories are NOT softened
-    because they came from consolidation (multi-source agreement).
-
-    Always returns gracefully — DB / brain-down → "allow".
+    Always returns gracefully: each source read in its own fence, a
+    failed read is that source's "allow", DB / brain down → "allow".
     """
     if not rule_name:
         return "allow", ""
+    node = ("allow", "")
     try:
-        from .knowledge_models import KnowledgeNode
-        node = KnowledgeNode.current(KnowledgeNode.KIND_RULE_STATE, rule_name)
-        if node is not None:
-            status = (node.payload or {}).get("status", "allow")
-            if status in ("watch", "pause_recommended"):
-                return status, f"knowledge_graph rule_state v{node.version}"
-    except Exception:
-        pass
-
-    ctx = get_brain_context()
-    if ctx and rule_name in (ctx.get("rule_status_overlay") or {}):
-        status = ctx["rule_status_overlay"][rule_name]
-        if status not in ("watch", "pause_recommended"):
-            return "allow", ""
-        # Phase-47 — low-trust brain can't hard-pause via report-only signal.
-        band = brain_trust_band(ctx.get("trust_score"))
-        if band == "low" and status == "pause_recommended":
-            return "watch", (f"brain_report softened (trust=low, "
-                              f"regime={ctx.get('regime_label')})")
-        return status, f"brain_report (regime={ctx.get('regime_label')})"
-    return "allow", ""
+        node = _node_advisory(rule_name)
+    except Exception:  # noqa: BLE001 — the memory unreadable: the report decides
+        node = ("allow", "")
+    report = ("allow", "")
+    try:
+        report = _report_advisory(rule_name, get_brain_context())
+    except Exception:  # noqa: BLE001 — the report unreadable: the node decides
+        report = ("allow", "")
+    if _rank(report[0]) > _rank(node[0]):
+        return report
+    if node[0] == "allow":
+        return "allow", ""
+    if node[0] == report[0] == "pause_recommended":
+        return node[0], f"{node[1]}; also {report[1]}"
+    return node
 
 
 def brain_theme_pressure_multiplier(theme: str, *, max_squeeze: float = 0.5) -> float:

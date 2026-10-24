@@ -40,12 +40,27 @@ logger = logging.getLogger(__name__)
 
 # ── Snapshot builder ─────────────────────────────────────────────────────
 
-def _build_research_snapshot() -> dict:
+#: The agents whose hypothesis claims are prose written from snapshots that
+#: carried account money (2026-10-24): withheld from a non-staff asker.
+PROSE_AGENTS = ("strategist", "sauron_mind")
+
+def _build_research_snapshot(*, staff: bool = True) -> dict:
     """Aggregate Sauron state for the research agent. Compact — meant for
-    a Q&A turn, not a synthesis cycle."""
+    a Q&A turn, not a synthesis cycle.
+
+    `staff` False (2026-10-24): an asker who is not staff, or a Telegram
+    thread (its group can hold people who are not staff), is handed none
+    of the prose the Mind and the strategist wrote from snapshots that
+    carried account money: no report narrative, no concern text, no
+    briefing outlook, no watchlist "what to watch", no idea summary, and
+    no claim text or resolution notes on the hypotheses those two posted
+    (PROSE_AGENTS; a strategist idea's claim is its summary). The kinds,
+    refs, statuses, regimes and numbers of the market stay. Other agents'
+    hypothesis claims stay: they are open to every login on /hypotheses/.
+    The stored briefing is still shown on /briefing/ (D6, a later PR)."""
     snap: dict = {"as_of": timezone.now().isoformat()}
 
-    # Latest 6 brain reports (≈3h history at 30-min cadence).
+    # Latest 6 brain reports (≈6h of history at the hourly cadence).
     try:
         from .models import BrainReport
         reports = list(
@@ -58,6 +73,12 @@ def _build_research_snapshot() -> dict:
         )
         for r in reports:
             r["created_at"] = r["created_at"].isoformat()
+            if not staff:
+                r.pop("narrative_md", None)
+                r["top_concerns"] = [
+                    {k: v for k, v in c.items() if k != "text"}
+                    for c in (r.get("top_concerns") or [])
+                    if isinstance(c, dict)]
         snap["recent_brain_reports"] = reports
     except Exception:
         snap["recent_brain_reports"] = []
@@ -97,6 +118,12 @@ def _build_research_snapshot() -> dict:
             h["resolution_deadline"] = (
                 h["resolution_deadline"].isoformat()
                 if h["resolution_deadline"] else None)
+        if not staff:
+            for h in (snap["recent_resolved_hypotheses"]
+                      + snap["pending_hypotheses"]):
+                if h.get("source_agent") in PROSE_AGENTS:
+                    h.pop("claim_text", None)
+                    h.pop("resolution_notes", None)
     except Exception:
         snap["recent_resolved_hypotheses"] = []
         snap["pending_hypotheses"] = []
@@ -106,11 +133,18 @@ def _build_research_snapshot() -> dict:
         from .briefing_models import StrategistBriefing
         b = StrategistBriefing.objects.first()
         if b is not None:
+            watchlist, ideas = b.watchlist, b.ideas
+            if not staff:
+                watchlist = [{k: v for k, v in w.items()
+                              if k != "what_to_watch"}
+                             for w in (watchlist or []) if isinstance(w, dict)]
+                ideas = [{k: v for k, v in i.items() if k != "summary"}
+                         for i in (ideas or []) if isinstance(i, dict)]
             snap["latest_briefing"] = {
                 "posture": b.posture,
-                "outlook_md": b.outlook_md,
-                "watchlist": b.watchlist,
-                "ideas": b.ideas,
+                "outlook_md": b.outlook_md if staff else "",
+                "watchlist": watchlist,
+                "ideas": ideas,
                 "created_at": b.created_at.isoformat(),
             }
     except Exception:
@@ -566,7 +600,10 @@ def complete_ask(pending_message_id: int, *, channel: str = "web") -> dict:
                 "user_message_id": pending.replies_to_id}
 
     history = _conversation_history_for_prompt(conversation)
-    snapshot = _build_research_snapshot()
+    from core.views_book import is_staff
+    snapshot = _build_research_snapshot(
+        staff=(channel == "web" and not _is_telegram_thread(conversation)
+               and is_staff(getattr(conversation, "user", None))))
     lore_block = (_lore_block_for_ask(conversation, question, snapshot, pending)
                   if channel == "web" and not _is_telegram_thread(conversation)
                   else None)

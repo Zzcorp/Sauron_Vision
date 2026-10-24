@@ -62,7 +62,6 @@ BATTLE_DAYS = 30
 SNAPSHOT_DAYS = 30
 SNAPSHOT_ROWS = 60
 FACTS_MAX = 900
-OVERDUE_MIN = 75
 LINE_MAX = 300
 REASONS_MAX = 5
 RULINGS_MAX = 3
@@ -1677,9 +1676,12 @@ def _thinks(P, now) -> dict:
     parts = [head, posture, f"the people: {level}"]
     if reg["report"]:
         age = reg["age_min"]
+        # Overdue past the Mind's own freshness window (brain/context.py),
+        # the span every reader still takes its last report as its word.
+        from brain.context import mind_fresh_minutes
         parts.append(f"Mind read {_ago(age)}"
-                     + (" (overdue)" if age is not None and age > OVERDUE_MIN
-                        else ""))
+                     + (" (overdue)" if age is not None
+                        and age > mind_fresh_minutes() else ""))
     return {"t": " · ".join(parts)}
 
 

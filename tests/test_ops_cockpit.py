@@ -168,7 +168,13 @@ class RegistryTests(TestCase):
                           # 2026-10-03: reads the bars and the proving
                           # ground's trades, writes nothing, no broker
                           # call; prints R and verdicts, no money.
-                          "thesis"})
+                          "thesis",
+                          # 2026-10-24: reads the Mind's reports, its
+                          # rule_state nodes and its grades, writes nothing,
+                          # no broker call; prints rule names, statuses,
+                          # ages, bands and counts, no money
+                          # (tests/test_mind_rule_state_contract.py).
+                          "mind_contract"})
         self.assertIsNone(ops_commands.get("nope"))
         self.assertEqual([k for k, _l, _r in ops_commands.by_category()],
                          ["read", "decide", "ops"])

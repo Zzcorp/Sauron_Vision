@@ -55,8 +55,9 @@ DEFER = _Defer()
 REGIME_NOT_MEASURED = "unknown"
 
 # How long past a claim's deadline we still accept a BrainReport as the
-# witness of that moment. Synthesis runs every 30min, so this is generous
-# slack for a stalled beat — past it, nothing observed the deadline.
+# witness of that moment. Synthesis runs hourly (config/celery.py), so this
+# is generous slack for a stalled beat — past it, nothing observed the
+# deadline.
 REPORT_GRACE_HOURS = 12
 
 # An average R over one or two trades is noise, not a measurement of a rule's
@@ -75,6 +76,15 @@ RULE_VENUES = ("live", "demo", "paper")
 #: Theorist (2026-10-08) is model-written too and argues real money only.
 VENUE_REQUIRED_FROM = ("strategist", "sauron_mind", "critic",
                        "council_theorist")
+
+
+def claim_window_since(created_at, window_days, *, now=None):
+    """Where a claim's measurement window starts: the claim itself, or
+    `window_days` back from now when the claim is older than that. Only
+    trades closed after the claim can grade it (2026-10-24: one helper for
+    the market's resolver and the Mind's hourly pass)."""
+    now = now or timezone.now()
+    return max(created_at, now - timedelta(days=window_days))
 
 
 def rule_rows_for(rule: str, *, venue: str = "", **kw) -> list:
@@ -492,7 +502,7 @@ def _resolve_rule_avg_r_threshold(hyp):
     # reading a negative record resolved true on that same record.
     #
     # `since` already exists in the signature; nothing needed building.
-    since = max(hyp.created_at, timezone.now() - timedelta(days=window))
+    since = claim_window_since(hyp.created_at, window)
     # THE VENUE THE CLAIM NAMES (2026-10-08): a claim about live trades is
     # graded on live trades alone. None is the pooled record a legacy claim
     # was made on.
@@ -732,6 +742,14 @@ def resolve_due() -> dict:
 def agent_trust_score(agent: str, *, lookback_n: int = 50) -> Optional[float]:
     """1 - 2 * Brier over the last `lookback_n` resolved hypotheses by `agent`.
     None if no resolved data.
+
+    THE BRIEFING'S NUMBER (2026-10-24). Read by the strategist
+    (strategist.py agent_trust_scores), the critic (critic.py), the
+    hypotheses leaderboard (dashboard/views_brain_phase38.py) and
+    agent_combined_trust. No bot reads it: the bots act on
+    brain.context._brain_trust_score, which since one grader per row
+    equals this one for "sauron_mind" over linked predictions and differs
+    only by the claims the market refused (orphans).
 
     This is the OBJECTIVE trust signal — pure calibration. For the blended
     score (objective + operator override), use `agent_combined_trust`.
