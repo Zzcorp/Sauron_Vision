@@ -548,7 +548,7 @@ SCHEMA_HINT = """{
      "venue": "live|demo|paper|", "text": "string"}
   ],
   "theme_pressures": {"<theme_name>": 0.0..1.0},
-  "rule_status_overlay": {"<rule_name>": "active|watch|pause_recommended"},
+  "rule_status_overlay": {"<rule_name: the bare name as in rule_track_records, never with a class or venue suffix such as /stock or :forex; one key per rule, and its word covers the rule on every class and venue>": "active|watch|pause_recommended"},
   "narrative_md": "1-3 short paragraphs in markdown. Tell, don't lecture.",
   "predictions": [
     {"prediction_type": "regime_persistence|rule_decay_continues|rule_recovers|...",
@@ -848,6 +848,11 @@ def _persist_report(parsed: dict, snapshot: dict, *, model: str,
     overlay = parsed.get("rule_status_overlay")
     if not isinstance(overlay, dict):
         overlay = {}
+    # A class key ("<rule>/stock", "<rule>:forex") is kept as the Mind
+    # wrote it, for /brain/ to show: no rule gate reads one (brain.context.
+    # split_rule_key) and the consolidation never memorises one. It is NOT
+    # folded onto the bare rule, which would widen a one-class pause to
+    # every class, real money included (2026-10-24).
     cleaned_overlay = {
         str(k): v for k, v in overlay.items()
         if isinstance(v, str) and v in ALLOWED_RULE_STATUSES

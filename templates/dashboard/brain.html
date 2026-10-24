@@ -132,6 +132,7 @@
                                     {% if r.status == "pause_recommended" %}<span style="color:var(--down);">{{ r.status }}</span>
                                     {% elif r.status == "watch" %}<span style="color:var(--accent);">{{ r.status }}</span>
                                     {% else %}{{ r.status }}{% endif %}
+                                    {% if not r.read_by_gates %}<span style="color:var(--text-muted);font-size:11px;">(a class key: no rule gate reads it, its readers ask for {{ r.bare_rule }}; the trade debate still sees it as text)</span>{% endif %}
                                 </td>
                                 <td>
                                     {% if r.action %}

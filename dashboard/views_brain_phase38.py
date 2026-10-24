@@ -93,19 +93,25 @@ def _rule_rows(nodes, user) -> list:
     and the fresh report, brain.context.brain_rule_advisory), with the
     rule's stage. Names and statuses only. The clear form is offered to a
     superuser on a node that pauses: a watch blocks nothing, and clearing
-    one would unmask a report pause rather than release anything."""
+    one would unmask a report pause rather than release anything.
+
+    A class key ("<rule>/stock", brain.context.split_rule_key) is read by
+    no gate: the rule's entries and its stage are asked by the bare name,
+    as its readers ask, and no clear is offered, since clearing it would
+    change nothing (2026-10-24)."""
     from brain.consolidation import rule_reach
     from brain.context import EFFECT_WORDS, brain_rule_advisory, rule_state_view
     rows = []
     is_super = bool(getattr(user, "is_superuser", False))
     for n in nodes:
         view = rule_state_view(n)
-        now, why = brain_rule_advisory(n.key)
+        now, why = brain_rule_advisory(view["rule"])
         rows.append({
             "key": n.key, "node": n, "view": view,
             "now": now, "now_why": why, "now_effect": EFFECT_WORDS[now],
-            "reach": rule_reach(n.key),
-            "can_clear": is_super and view["status"] == "pause_recommended",
+            "reach": rule_reach(view["rule"]),
+            "can_clear": (is_super and view["read_by_gates"]
+                          and view["status"] == "pause_recommended"),
         })
     return rows
 
@@ -119,7 +125,11 @@ def knowledge_rule_state_clear(request, key: str):
     where its stage allows. Writes an "allow" version (source operator)
     and one audit row; never the PIN. It does not mute the Mind: a fresh
     report pause still blocks, and the next scheduled pass writes the pause
-    again if the report still says so. No shell twin (core/switch_pin.py)."""
+    again if the report still says so. No shell twin (core/switch_pin.py).
+
+    A class key's pause ("<rule>/stock") is refused like a watch: no gate
+    reads it, so a clear would be a version that changes nothing
+    (2026-10-24)."""
     from brain.consolidation import AUDIT_CLEAR, rule_reach, write_rule_state
     from brain.context import brain_rule_advisory, rule_state_view
     from brain.knowledge_models import KnowledgeNode
@@ -127,8 +137,10 @@ def knowledge_rule_state_clear(request, key: str):
     if not request.user.is_superuser:
         return HttpResponseForbidden("Superuser access required.")
     node = KnowledgeNode.current(KnowledgeNode.KIND_RULE_STATE, key)
-    if node is None or rule_state_view(node)["status"] != "pause_recommended":
-        raise Http404("no remembered pause on this rule")
+    view = rule_state_view(node) if node is not None else {}
+    if (node is None or view["status"] != "pause_recommended"
+            or not view["read_by_gates"]):
+        raise Http404("no remembered pause a gate reads on this rule")
     back = HttpResponseRedirect(reverse("knowledge_dashboard"))
     pin_ok = gate(request, request.POST.get("pin", ""), door=ACT,
                   act="clear a Mind pause on /knowledge/")
