@@ -427,6 +427,175 @@ class TheStagesTests(SimpleTestCase):
         self.assertEqual(d["stages"]["london"]["state"], "upcoming")
 
 
+#: The three sessions of 2026-09-15 as the chart is sent them (2026-10-24),
+#: read at OFF: Asia from 20:00 New York the evening before to midnight,
+#: London and New York at the stages' own epochs (STAGES). Two epochs a
+#: window, nothing else: the chart reads nothing else.
+SEP15 = {"date": "2026-09-15",
+         "asia": {"opened": 1789430400, "closed": 1789444800},
+         "london": {k: STAGES["london"][k] for k in ("opened", "closed")},
+         "new_york": {k: STAGES["new_york"][k] for k in ("opened", "closed")}}
+
+
+def _span(w):
+    return (w["opened"], w["closed"])
+
+
+class TheSessionDaysTests(SimpleTestCase):
+    """Every day's three sessions for the chart (2026-10-24). The operator:
+    "I still only have on chart the Asia session marked, not the 2
+    others" — London and New York were drawn only as the evidence of a
+    stage (a faint column once the day had run an Asian edge, New York on
+    a distribution day alone), and only for the day of the read.
+    session_days is the calendar the chart now marks every day by: the
+    sessions table's own windows (ICT_SESSIONS_NY), New York wall clock to
+    UTC epoch seconds, no bar read and no query. Display only."""
+
+    # SD1
+    def test_each_day_carries_its_three_windows_by_the_sessions_table(self):
+        days = P3.session_days(OFF)
+        self.assertEqual(len(days), P3.SESSION_DAYS)
+        self.assertEqual([d["date"] for d in days],
+                         [(date(2026, 9, 15) - timedelta(days=P3.SESSION_DAYS - 1 - i)).isoformat()
+                          for i in range(P3.SESSION_DAYS)], "every calendar day, oldest first")
+        self.assertEqual(days[-1], SEP15)
+        # the stages' own windows, the same numbers
+        self.assertEqual((_span(days[-1]["london"]), _span(days[-1]["new_york"])),
+                         (_span(STAGES["london"]), _span(STAGES["new_york"])))
+        # the read's Asian box is the same Asia (TheDayTests)
+        a = P3.read_day(day_frame(), [], now=OFF)["asia"]
+        self.assertEqual(_span(days[-1]["asia"]), (a["opened"], a["closed"]))
+        now = int(OFF.timestamp())
+        for d in days:
+            for name in ("asia", "london", "new_york"):
+                # two epochs, nothing else: the chart reads nothing else
+                self.assertEqual(set(d[name]), {"opened", "closed"}, (d["date"], name))
+            self.assertEqual(d["asia"]["closed"] - d["asia"]["opened"], 4 * 3600, d["date"])
+            self.assertLess(d["asia"]["closed"], d["london"]["opened"])
+            self.assertLess(d["london"]["closed"], d["new_york"]["opened"])
+        self.assertTrue(all(d[n]["closed"] <= now for d in days[:-1]
+                            for n in ("asia", "london", "new_york")), "every day before is over")
+
+    # SD2
+    def test_the_newest_day_turns_at_the_asian_open(self):
+        """The trading day is the date London and New York open on; its
+        Asia opens at 20:00 New York the evening before."""
+        t = pd.Timestamp("2026-09-15 23:59", tz="UTC")                      # 19:59 New York
+        before = P3.session_days(t)
+        self.assertEqual(before[-1]["date"], "2026-09-15")
+        self.assertLessEqual(before[-1]["new_york"]["closed"], int(t.timestamp()), "its New York is over")
+        t = pd.Timestamp("2026-09-16 00:00", tz="UTC")                      # 20:00 New York
+        new = P3.session_days(t)[-1]
+        self.assertEqual(new["date"], "2026-09-16")
+        self.assertEqual(new["asia"]["opened"], int(t.timestamp()), "its Asia opens now")
+        self.assertGreater(new["london"]["opened"], int(t.timestamp()))
+        t = pd.Timestamp("2026-09-16 14:00", tz="UTC")                      # 10:00 New York
+        mid = P3.session_days(t)[-1]
+        self.assertEqual(mid["date"], "2026-09-16")
+        self.assertLess(mid["london"]["closed"], int(t.timestamp()))
+        self.assertLess(mid["new_york"]["opened"], int(t.timestamp()))
+        self.assertGreater(mid["new_york"]["closed"], int(t.timestamp()), "New York is open")
+
+    # SD3
+    def test_the_windows_follow_new_york_through_the_clock_changes(self):
+        def by_date(now):
+            return {d["date"]: d for d in P3.session_days(pd.Timestamp(now, tz="UTC"))}
+
+        span = _span
+        fall = by_date("2026-11-03 18:00")
+        # Friday on daylight time: Asia 00:00-04:00 UTC, London 06:00-09:00,
+        # New York 12:30-20:00
+        fri = fall["2026-10-30"]
+        self.assertEqual([span(fri[n]) for n in ("asia", "london", "new_york")],
+                         [(1793318400, 1793332800), (1793340000, 1793350800), (1793363400, 1793390400)])
+        # the fall-back Sunday: London at 02:00 EST, 07:00 UTC
+        self.assertEqual(span(fall["2026-11-01"]["london"]), (1793516400, 1793527200))
+        # Monday on standard time: an hour later in UTC, Asia from Sunday 20:00 EST
+        mon = fall["2026-11-02"]
+        self.assertEqual([span(mon[n]) for n in ("asia", "london", "new_york")],
+                         [(1793581200, 1793595600), (1793602800, 1793613600), (1793626200, 1793653200)])
+        spring = by_date("2026-03-09 18:00")
+        # the spring-forward Sunday: 02:00 does not exist, London opens at
+        # 03:00 EDT and lasts two hours, as the stages say (S6)
+        self.assertEqual(span(spring["2026-03-08"]["london"]), (1772953200, 1772960400))
+        self.assertEqual(span(spring["2026-03-08"]["asia"]), (1772931600, 1772946000))
+        self.assertEqual(span(spring["2026-03-09"]["asia"]), (1773014400, 1773028800))
+        # four hours of Asia, three of London, seven and a half of New York,
+        # every day but the spring-forward Sunday's London
+        for d in list(fall.values()) + list(spring.values()):
+            got = [d[n]["closed"] - d[n]["opened"] for n in ("asia", "london", "new_york")]
+            want = [4 * 3600, (2 if d["date"] == "2026-03-08" else 3) * 3600, 27000]
+            self.assertEqual(got, want, d["date"])
+
+    # SD4
+    def test_bounded_and_plain_json(self):
+        days = P3.session_days(OFF, days=3)
+        self.assertEqual([d["date"] for d in days], ["2026-09-13", "2026-09-14", "2026-09-15"])
+        json.dumps(days)
+        for d in days:
+            for name in ("asia", "london", "new_york"):
+                self.assertIs(type(d[name]["opened"]), int)
+                self.assertIs(type(d[name]["closed"]), int)
+        self.assertEqual(P3.session_days(OFF, days=0), [])
+        self.assertLessEqual(P3.SESSION_DAYS, 90, "a bounded calendar, never the whole tape")
+        # the chart's reply, refetched every minute, stays small
+        self.assertLess(len(json.dumps(P3.session_days(OFF))), 15_000)
+
+    # SD7
+    def test_the_calendar_reaches_the_oldest_bar_of_an_exchange_hours_tape(self):
+        """240 1h bars of a market open seven hours a day (a US stock or
+        cash index, 09:30 to 15:30 New York; an exchange on London's
+        morning) are about 35 trading days, seven weeks of calendar: every
+        one of their days has its sessions, not the last two weeks alone."""
+        now = pd.Timestamp("2026-10-24 12:00", tz="UTC")
+        tz = "America/New_York"
+        days, d = [], pd.Timestamp("2026-10-23", tz=tz)
+        while sum(len(x) for x in days) < 240:
+            if d.weekday() < 5:
+                days.insert(0, [d + pd.Timedelta(minutes=570 + 60 * k) for k in range(7)])
+            d -= pd.Timedelta(days=1)
+        bars = [b for day in days for b in day][-240:]
+        trading = sorted({b.date().isoformat() for b in bars})
+        self.assertGreaterEqual(len(trading), 34)
+        sent = {x["date"]: x for x in P3.session_days(now)}
+        self.assertEqual([t for t in trading if t not in sent], [], "a trading day with no window sent")
+        for b in bars:
+            w = sent[b.date().isoformat()]["new_york"]
+            self.assertTrue(w["opened"] - 3600 < int(b.timestamp()) < w["closed"], b)
+
+    # SD5
+    def test_no_tz_database_no_sessions(self):
+        with patch("signals.smc.sessions.new_york_timezone", return_value=None):
+            self.assertEqual(P3.session_days(OFF), [])
+
+    # SD6
+    def test_power_of_three_carries_the_sessions_read_or_not(self):
+        """The calendar rides beside the read, never inside it: a day the
+        read cannot say (the weekend, a frame that fails) still marks the
+        days before; read_day keeps its keys; the calendar failing costs
+        the read nothing."""
+        day = P3.power_of_three("X", now=OFF, bars=(day_frame(), [], "1h"))
+        self.assertEqual(day["sessions"], P3.session_days(OFF))
+        self.assertEqual(day["stages"], STAGES, "the stages untouched")
+        self.assertNotIn("sessions", P3.read_day(day_frame(), [], now=OFF))
+        late = pd.Timestamp("2026-09-20 12:00", tz="UTC")       # a Sunday: no Asian range today
+        day = P3.power_of_three("X", now=late, bars=(day_frame(), [], "1h"))
+        self.assertFalse(day["ok"])
+        self.assertIsNone(day["stages"])
+        self.assertEqual(day["sessions"], P3.session_days(late))
+        sep15 = [d for d in day["sessions"] if d["date"] == "2026-09-15"][0]
+        self.assertEqual(sep15, SEP15)
+        with patch.object(P3, "_frame", side_effect=RuntimeError("down")):
+            day = P3.power_of_three("X", now=OFF)
+        self.assertFalse(day["ok"])
+        self.assertEqual(day["sessions"], P3.session_days(OFF))
+        with patch.object(P3, "session_days", side_effect=RuntimeError("boom")):
+            day = P3.power_of_three("X", now=OFF, bars=(day_frame(), [], "1h"))
+        self.assertIsNone(day["sessions"])
+        self.assertEqual((day["phase"], day["direction"]), ("distribution", "up"))
+        self.assertEqual(day["stages"], STAGES)
+
+
 class TheFamilyTests(SimpleTestCase):
 
     def test_the_first_bar_back_inside_after_one_side_was_run_fires(self):
@@ -601,6 +770,80 @@ class TheMapTests(TestCase):
         self.assertNotIn("stages", keys)
         self.assertNotIn("po3_stages", keys)
         self.assertNotIn("sweeps", keys)
+
+    # ── Every day's sessions reach the chart alone (2026-10-24) ──────────
+    def _with_sessions(self, stages=True):
+        day = self._canned(stages=stages)
+        day["sessions"] = [copy.deepcopy(SEP15)]
+        return day
+
+    # M4
+    def test_the_sessions_ride_beside_the_day_and_nothing_that_trades(self):
+        from bot_program import positioning as P
+        from tests.test_positioning import _seed, _tape
+        _seed("PO3SES", _tape(), asset_class="forex")
+        with patch("bot_program.power_of_three.power_of_three",
+                   return_value=self._with_sessions()):
+            pm = P.positioning_map("PO3SES", asset_class="forex", direction="BUY")
+        with patch("bot_program.power_of_three.power_of_three",
+                   return_value=self._canned()):
+            bare = P.positioning_map("PO3SES", asset_class="forex", direction="BUY")
+        self.assertEqual(pm["po3_sessions"], [SEP15])
+        self.assertNotIn("sessions", pm["po3"])
+        self.assertIsNone(bare["po3_sessions"])
+        c = P.compact(pm)
+        self.assertNotIn("sessions", c["po3"])
+        self.assertNotIn("po3_sessions", c)
+        self.assertEqual(c, P.compact(bare), "compact() is the same map with or without sessions")
+        self.assertEqual(pm["words"], bare["words"])
+        self.assertEqual(P.side_read(pm, "SELL")["words"], P.side_read(bare, "SELL")["words"])
+
+    # M5
+    def test_the_chart_reply_carries_the_sessions(self):
+        from django.contrib.auth.models import User
+        from django.core.cache import cache
+
+        from tests.test_positioning import _seed, _tape
+        _seed("PO3SCH", _tape(), asset_class="forex")
+        self.client.force_login(User.objects.create_user("po3_sessions", password="x"))
+        cache.delete("chart:positioning:PO3SCH")
+        cache.delete("chart:levels:PO3SCH")
+        # an unread day (the weekend): the sessions still ride, the stages are None
+        unread = dict(self._with_sessions(stages=False), ok=False, phase="unread", direction=None,
+                      asia=None, run=None, stages=None)
+        for day, stages in ((self._with_sessions(), STAGES), (unread, None)):
+            cache.delete("chart:positioning:PO3SCH")
+            with patch("bot_program.power_of_three.power_of_three", return_value=day):
+                reply = self.client.get("/api/chart-data/", {
+                    "symbol": "PO3SCH", "timeframe": "1d", "overlays": "1"}).json()
+            self.assertTrue(reply["positioning"]["ok"], reply.get("positioning"))
+            self.assertEqual(reply["positioning"]["po3"]["sessions"], [SEP15])
+            self.assertEqual(reply["positioning"]["po3"]["stages"], stages)
+            self.assertNotIn("po3_sessions", reply["positioning"])
+        cache.delete("chart:positioning:PO3SCH")
+
+    # M6
+    def test_the_ticket_and_the_reviewer_read_no_sessions(self):
+        from bot_program import manual_trade
+        from brain import position_review
+        from brain.position_review_agent import build_snapshot
+        from tests.test_positioning import _seed, _tape
+        _seed("PO3STK", _tape(), asset_class="forex")
+        with patch("bot_program.power_of_three.power_of_three",
+                   return_value=self._with_sessions()):
+            ticket = manual_trade._positioning("PO3STK", "forex", "BUY")
+            facts = {"symbol": "PO3STK", "asset_class": "forex", "side": "BUY"}
+            review = position_review._positioning({}, facts)
+        self.assertNotIn("sessions", ticket["po3"])
+        self.assertNotIn("sessions", review["po3"])
+        snap = build_snapshot({
+            "position": {"book": "bot", "position_id": 1, "symbol": "PO3STK",
+                         "side": "long", "asset_class": "forex"},
+            "facts": dict(facts, positioning=review), "triggers": []})
+        keys = [k for _p, k in self._walk(snap)]
+        self.assertIn("po3", keys)
+        for absent in ("sessions", "po3_sessions", "new_york", "london"):
+            self.assertNotIn(absent, keys)
 
 
 PURE_RUN = r"""

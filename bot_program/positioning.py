@@ -400,7 +400,9 @@ def positioning_map(symbol, *, asset_class="", direction=None,
                 # The day's stages as the chart draws them (2026-10-08):
                 # beside `po3`, never in it, so compact() — the ticket's and
                 # the position reviewer's map — never carries a drawing.
-                "po3_stages": day.get("stages")})
+                "po3_stages": day.get("stages"),
+                # Every day's three sessions (2026-10-24), the same way.
+                "po3_sessions": day.get("sessions")})
     if direction:
         out["side"] = side_read(out, direction)
     return out

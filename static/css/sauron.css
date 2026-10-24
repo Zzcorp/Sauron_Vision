@@ -27,6 +27,8 @@
                card-containment section further down takes tokens only. */
             --lvl-swing: var(--accent-blue);   /* chart swings */
             --lvl-session: #a878f0;            /* chart Asian range: 6.4:1 on the void; --accent-purple is 3.5:1 */
+            --lvl-session-london: #d870e0;     /* chart London session (2026-10-24): the violet's orchid */
+            --lvl-session-ny: #7c88f8;         /* chart New York session: the violet's periwinkle */
             --danger: #d03030;
             --success: #00e868;
             --warning: #d89020;
@@ -644,6 +646,8 @@
                the session violet at the platform's own purple. */
             --lvl-swing: #1f6fb2;                 /* the glow #30a0e8 is 2.6:1 on this ground */
             --lvl-session: var(--accent-purple);  /* #8840d0, 5.1:1 */
+            --lvl-session-london: #a03aa8;        /* the sessions' orchid as an ink */
+            --lvl-session-ny: #4a48c8;            /* the sessions' periwinkle as an ink */
         }
         body.light-mode .sidebar {
             background: linear-gradient(180deg, #e8ece8 0%, #f0f2f0 100%);
