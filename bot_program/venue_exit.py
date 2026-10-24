@@ -173,7 +173,9 @@ def said_open(trade, client, *, where: str, now=None) -> None:
                   f"position is still OPEN. Nothing was booked: the row "
                   f"stays open and the platform asks again at every pass. "
                   f"Check the position in the eToro app."),
-            url="/positions/")
+            url="/positions/",
+            # the row is open: its close dialog (2026-10-24)
+            close_trade_id=trade.id)
         merge_meta(trade, {OPEN_ALERTED_KEY: now.isoformat()})
     except Exception as e:  # noqa: BLE001
         logger.warning("[venue exit] #%s: the alert could not be sent: %s",
