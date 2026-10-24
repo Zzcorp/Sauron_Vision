@@ -345,10 +345,14 @@ DEFAULT_COMPONENTS = [
      "description": "Off (default). On: every LIVE bot entry is argued by two AI agents before its order — why it fails, why it works — and the verdicts ride the row. Shadow for the first 30 graded live trades; then the Executioner may cut or veto, and an elite entry needs the Champion to win.",
      "category": "system"},
     # THE PROVING GROUND (2026-10-02, backtester/proving): backtests that
-    # can say no. Writes verdicts only; moves no money. Description
-    # measured at 287 chars (< 300).
+    # can say no. Since size by proof (2026-10-07, backtester/proving/
+    # proof.py) its saved verdicts size every live bot entry, switch or
+    # not: the switch runs the nightly judge that writes them (2026-10-24:
+    # the text said "Verdicts only; nothing trades"). "On or off": the
+    # gate reads proof.GATE, never this switch. Description measured at
+    # 299 chars (< 300).
     {"key": "proving_ground", "name": "Proving Ground (backtests that say no)",
-     "description": "Off (default). On: every live rule and its short mirror is judged nightly, and a generated shortlist weekly, on all stored 4h history — next-bar fills, ATR levels, costs, position care, a 30% holdout, a bootstrap bound corrected for the candidates tried. Verdicts only; nothing trades.",
+     "description": "Off (default). On: each live rule and its short mirror is judged nightly (a shortlist weekly) on 4h history, costs and a holdout. On or off, saved verdicts size live bot entries: FAILED refuses the rule on that class and side, PROVEN allows full size, others a quarter unless their record proves it.",
      "category": "system"},
     # De-risk fast, re-risk slow (2026-09-12): the third switch. Off by
     # default; needs LIVE mode too. Description counted under 300 chars.
@@ -452,9 +456,11 @@ DEFAULT_COMPONENTS = [
     # deliveries are retried. OFF on arrival like everything that sends
     # to people: after the deploy, `manage.py component on
     # newsletter_send`. The admin's "Send now" does not wait for it.
-    # Description measured under 300 chars.
+    # The audience is newsletter_service.audience: the weekly-newsletter
+    # preference is ON by default, so it is opt-out (2026-10-24: the text
+    # said "opted in"). Description measured at 297 chars (< 300).
     {"key": "newsletter_send", "name": "Weekly Newsletter (scheduled send)",
-     "description": "Every 15 min: sends each newsletter edition whose time has come (the Saturday review goes out Sunday 08:00 Paris unless cancelled) to the users who opted in, and retries failed deliveries. OFF on arrival: turning it on SENDS email and Telegram to people.",
+     "description": "Every 15 min: sends each due edition (the Saturday review goes out Sunday 08:00 Paris unless cancelled) to every active non-investor account with an email that has not unticked Weekly newsletter (on by default: opt-out), and retries failures. OFF on arrival: it SENDS email and Telegram to people.",
      "category": "pipeline"},
     {"key": "agent_commentator", "name": "Market Commentator",
      "description": "Daily market commentary from the commentator agent. OFF on arrival: it costs model spend on every run.",

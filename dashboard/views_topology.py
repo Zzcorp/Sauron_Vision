@@ -109,7 +109,12 @@ WIRING = {
                                "note": "Feeds the bot's ATR sizing only. The signal rules do NOT read this table — they load their own bars."},
     "agent_news_analyst":     {"task": "ai_agents.tasks.process_unanalyzed_news", "layer": "enrich", "writes": ["NewsArticle.ai_*"], "feeds": ["pipeline_opportunity_scanner"],
                                "note": "Needs ANTHROPIC_API_KEY. Instrument tagging also happens keylessly at ingest."},
-    "pipeline_sentiment_agg": {"task": "scraping.tasks.aggregate_sentiment", "layer": "enrich", "writes": ["SentimentSnapshot"], "feeds": ["pipeline_opportunity_scanner"]},
+    # No scanner edge (2026-10-24): the setup conditions (sentiment_snapshot,
+    # crowd_extreme) read the raw rows unless a setup names a source, and no
+    # seeded one does. The aggregate is read by people and agents.
+    "pipeline_sentiment_agg": {"task": "scraping.tasks.aggregate_sentiment", "layer": "enrich", "writes": ["SentimentSnapshot"], "feeds": [],
+                               "pages": ["/instruments/", "/news/"],
+                               "note": "Read while under 2h old through scraping/sentiment.latest: the positioning map's crowd score (the instrument chart, the manual ticket, the council, the position review) and the news page. The scanner's sentiment conditions read the raw rows, so this switch changes none of them."},
     # The Big Money Board (2026-10-09, bigmoney/): twice a day on crontabs,
     # so the daily cadence is declared here.
     "big_money_board":        {"task": "bigmoney.tasks.compute_big_money_board", "cadence": 86400, "layer": "enrich",

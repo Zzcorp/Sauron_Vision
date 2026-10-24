@@ -875,7 +875,8 @@ def _eval_sentiment_snapshot(params: dict, instrument, now: datetime) -> dict:
       threshold      — composite_score cutoff
       lookback_days  — default 3
       min_count      — default 2 snapshots required
-      source         — optional filter ("reddit", "stocktwits", ...)
+      source         — optional filter ("reddit", "stocktwits", ...);
+                       without one, every source but the hourly aggregate
     """
     direction = (params or {}).get("direction", "above")
     try:
@@ -898,6 +899,11 @@ def _eval_sentiment_snapshot(params: dict, instrument, now: datetime) -> dict:
     )
     if source:
         qs = qs.filter(source=source)
+    else:
+        # The raw reads (2026-10-24): an hourly aggregate averaged in would
+        # count the day's raw reads a second time.
+        from scraping.sentiment import raw
+        qs = raw(qs)
     n = qs.count()
     if n < min_count:
         return {"matched": False, "score": 0.0,

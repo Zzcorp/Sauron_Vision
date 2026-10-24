@@ -346,8 +346,10 @@ class TheReviewTests(TestCase):
         own.save()
         _config(user, name="manual", capital=Decimal("10000"))
         notes = _sizing_notes({own.name, "Main", "nobody_main"})
-        self.assertIn("Sized by 1 paper pool totalling 10,000.00 against a "
-                      "500.00 book", notes[own.name])
+        # A ratio, never the money (2026-10-24): the review becomes the
+        # newsletter (tests/test_no_account_figures_broadcast.py).
+        self.assertIn("Sized by 1 paper pool totalling 20.0 times the book",
+                      notes[own.name])
         self.assertEqual(notes["Main"], "")
         self.assertEqual(notes["nobody_main"], "")
 

@@ -1064,12 +1064,20 @@ class WeeklyReviewTests(_Base):
         self.assertIn("Weekly letter not ready",
                       post.call_args.kwargs["json"]["text"])
 
-    def plan_context(self):
+    def plan_context(self, now=None):
+        """The Monday plan's prompt, at `now` (the real clock when None).
+        The plan reads only a review of the last eight days (2026-10-24),
+        so a review written on the SATURDAY test clock is read by a plan on
+        the Sunday after it, as on the beat (Sunday 18:00 UTC)."""
+        from contextlib import nullcontext
+
         from ai_agents.tasks import MondayPlanAgent, generate_monday_plan
         provider = _Provider("## Plan\nHold.")
+        clock = (mock.patch("django.utils.timezone.now", return_value=now)
+                 if now is not None else nullcontext())
         with mock.patch.object(MondayPlanAgent, "_get_provider",
                                lambda self, name: provider), \
-                mock.patch("requests.post", return_value=_ok()):
+                mock.patch("requests.post", return_value=_ok()), clock:
             generate_monday_plan.__wrapped__.__wrapped__()
         return provider.seen[0]["user_message"]
 
@@ -1098,7 +1106,7 @@ class WeeklyReviewTests(_Base):
                  origin="admin", content_markdown="ADMIN TEXT")
         _edition(title="Y", status="failed", origin="weekly_review",
                  content_markdown="")
-        context = self.plan_context()
+        context = self.plan_context(now=SATURDAY + timedelta(hours=32))
         self.assertIn("LAST WEEKLY REVIEW:\n# Market Overview", context)
         self.assertNotIn("OLDER REVIEW TEXT", context)
         self.assertNotIn("ADMIN TEXT", context)

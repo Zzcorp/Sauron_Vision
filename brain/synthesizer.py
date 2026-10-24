@@ -322,7 +322,12 @@ def _build_world_snapshot(*, max_obs: int = 80) -> dict:
                 "asset_class": getattr(p.instrument, "asset_class", ""),
                 "side": getattr(p, "side", ""),
                 "rule_name": getattr(p.strategy, "name", "") if p.strategy else "",
-                "unrealized_r": float(p.unrealized_pnl or 0),
+                # In percent, named so (2026-10-24): this was the legacy
+                # row's unrealized_pnl, a money amount labelled R, and the
+                # brain's narrative reaches the strategist briefing and
+                # /brain/, which readers who are not staff see.
+                "unrealized_pnl_pct": round(
+                    float(p.unrealized_pnl_pct or 0), 2),
                 "book": "portfolio",
             })
     except Exception:

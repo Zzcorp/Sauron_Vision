@@ -3395,8 +3395,17 @@ def ai_tasks_list(request):
     max_day_cost = max((r["value"] for r in cost_trend), default=0)
     max_day_cost_display = "${:.4f}".format(max_day_cost)
 
+    # THE ANSWERS ARE STAFF-ONLY (2026-10-24), like /api/ai/tasks/
+    # (dashboard/api/ai_views.py). Every agent writes its answer here, the
+    # staff-only ones too: the close advisor answers from a position's
+    # P&L, committed and freed capital in money (brain/close_advice.py),
+    # the trade debate from its risk at the stop. A login that is not
+    # staff reads the ledger's counts, costs and times, never the Summary.
+    from core.views_book import is_staff
+
     return render(request, "dashboard/ai_tasks_list.html", {
         "page_id": "ai_tasks",
+        "show_summaries": is_staff(request.user),
         "tasks": AgentTask.objects.order_by("-created_at")[:200],
         "n_24h": n_24h,
         "n_ok_24h": n_ok_24h,

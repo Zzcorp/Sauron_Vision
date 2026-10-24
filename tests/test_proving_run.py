@@ -90,7 +90,11 @@ class TheProvingRunTests(TestCase):
         self.assertIn("prove data", out)
         self.assertIn("component on proving_ground", out)
         self.assertIn("prove rules --save", out)
-        self.assertIn("Nothing trades", out)
+        # Not "Nothing trades" (2026-10-24): a saved verdict sizes real
+        # money (backtester/proving/proof.py).
+        self.assertNotIn("Nothing trades", out)
+        self.assertIn("A saved verdict binds real money from the next live "
+                      "entry", out)
         from market_data.models import PriceData
         self.assertEqual(PriceData.objects.filter(instrument=self.msft).count(),
                          0, "a dry run writes nothing")
@@ -138,7 +142,17 @@ class TheRunbookTests(SimpleTestCase):
         positions = [text.index(s) for s in steps]
         self.assertEqual(positions, sorted(positions), "the five steps in order")
         self.assertIn("540 days / 800 bars", text)
-        self.assertIn("nothing trades", text.lower())
+        # Not "nothing trades" (2026-10-24): the section ends with `prove
+        # rules --save`, and a saved verdict sizes real money whether
+        # proving_ground is on or off (backtester/proving/proof.py).
+        section = text[text.index("### The proving run"):
+                       text.index("Broker credentials are for")]
+        self.assertNotIn("nothing trades", section.lower())
+        self.assertNotIn("are the next\nstage", section)
+        self.assertIn("sizes real money from the next live\nentry", section)
+        self.assertIn("whether `proving_ground` is on or off", section)
+        self.assertIn("Preview with `prove rules` (no --save)\nfirst",
+                      section)
 
     def test_prove_data_prints_the_thresholds(self):
         import inspect

@@ -81,8 +81,12 @@ class SentimentIndex:
     def _social_sentiment(self, instrument, cutoff):
         """Get social media sentiment score (-1 to 1)."""
         from scraping.models import SentimentSnapshot
+        from scraping.sentiment import raw
 
-        qs = SentimentSnapshot.objects.filter(timestamp__gte=cutoff)
+        # The raw reads (2026-10-24): an hourly aggregate carries the day's
+        # volume summed, and weighted by it, it outweighed the reads it
+        # was made from.
+        qs = raw(SentimentSnapshot.objects.filter(timestamp__gte=cutoff))
         if instrument:
             qs = qs.filter(instrument=instrument)
 

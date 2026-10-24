@@ -470,41 +470,23 @@ def check_economic_calendar():
 @shared_task
 @guarded_task("pipeline_sentiment_agg")
 def aggregate_sentiment():
-    """Tier 3: Aggregate sentiment scores across all sources."""
-    from scraping.models import SentimentSnapshot
+    """Tier 3: one cross-source sentiment row per watchlist instrument per
+    hour, from the RAW reads of the last 24 hours (scraping/sentiment.py).
+
+    It used to sum every row of the window, its own earlier aggregates
+    included, so the counts doubled every hour (2026-10-24). A second run
+    in the same clock hour rewrites that hour's row."""
     from instruments.models import Instrument
     from django.utils import timezone
-    from datetime import timedelta
-    from django.db.models import Avg, Sum
+    from scraping.sentiment import write_aggregate
 
-    cutoff = timezone.now() - timedelta(hours=24)
+    now = timezone.now()
     instruments = Instrument.objects.filter(is_active=True, is_watchlist=True)
     aggregated = 0
 
     for inst in instruments:
-        snapshots = SentimentSnapshot.objects.filter(
-            instrument=inst, timestamp__gte=cutoff
-        )
-        if not snapshots.exists():
-            continue
-
-        agg = snapshots.aggregate(
-            avg_score=Avg("composite_score"),
-            total_volume=Sum("volume"),
-            total_bullish=Sum("bullish_count"),
-            total_bearish=Sum("bearish_count"),
-        )
-        SentimentSnapshot.objects.create(
-            instrument=inst,
-            source="aggregated",
-            timestamp=timezone.now(),
-            composite_score=agg["avg_score"] or 0,
-            volume=agg["total_volume"] or 0,
-            bullish_count=agg["total_bullish"] or 0,
-            bearish_count=agg["total_bearish"] or 0,
-            trending=bool(agg["total_volume"] and agg["total_volume"] > 100),
-        )
-        aggregated += 1
+        if write_aggregate(inst, now) is not None:
+            aggregated += 1
 
     return {"status": "success", "instruments_aggregated": aggregated}
 

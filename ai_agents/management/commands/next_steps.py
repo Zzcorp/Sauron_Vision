@@ -77,8 +77,12 @@ def _latest_report_text(kind) -> str:
                   "weekly_review": ("weekly_reviewer", "review"),
                   "monday_plan": ("monday_plan", "plan")}.get(kind, (None, None))
     if agent is None:
-        from alerts.scheduled_digests import digest_lines, generate_eod_digest
-        return "\n".join(digest_lines(generate_eod_digest(user=None)))
+        # Without the account's sections, as the Celery path reads it
+        # (alerts/tasks.send_eod_digest, 2026-10-24): the steps are shown
+        # to any login.
+        from alerts.scheduled_digests import (account_free_lines,
+                                              generate_eod_digest)
+        return "\n".join(account_free_lines(generate_eod_digest(user=None)))
     row = (AgentTask.objects.filter(agent=agent, success=True)
            .order_by("-created_at").first())
     return str((row.structured_output or {}).get(key) or "") if row else ""

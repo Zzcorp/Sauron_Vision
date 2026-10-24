@@ -533,7 +533,8 @@ app.conf.beat_schedule = {
     # ── The proving ground (2026-10-02, backtester/proving): the live
     #    rules and their mirrors judged nightly on all stored 4h history,
     #    the generator's shortlist weekly, before the Sunday 04:00
-    #    generator. Component proving_ground; verdicts only.
+    #    generator. Component proving_ground; its saved verdicts size live
+    #    bot entries (backtester/proving/proof.py).
     "proving-ground-rules": {
         "task": "backtester.tasks.run_proving_ground",
         "schedule": crontab(hour=3, minute=40),
