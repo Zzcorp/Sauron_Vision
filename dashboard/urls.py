@@ -14,6 +14,7 @@ from .views_livecheck import live_selftest
 from .views_newsletter import (admin_newsletters, newsletter_archive,
                                newsletter_detail, newsletter_unsubscribe)
 from .views_passation import passation_letter
+from .views_orcs import orc_detail, orc_thesis, orcs_list, orcs_seats
 from .views_admin_bots import (
     admin_bots_panel, admin_bot_toggle, admin_bot_shadow,
     admin_bot_reset_circuit, admin_bot_reconcile,
@@ -238,6 +239,13 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     # and on its slow sweep. Additive — the page URLs are unchanged.
     path("portfolio/live/", views.portfolio_live, name="portfolio_live"),
     path("positions/live/", views.positions_live, name="positions_live"),
+    # THE ORCS (O1d, spec §9.2): the journals, read by code. /orcs/<id>/
+    # takes the idea's root trade id (its label); the one write is the
+    # operator's own thesis, while the orcs switch is ON.
+    path("orcs/", orcs_list, name="orcs_list"),
+    path("orcs/seats/", orcs_seats, name="orcs_seats"),
+    path("orcs/<int:trade_id>/", orc_detail, name="orc_detail"),
+    path("orcs/<int:trade_id>/thesis/", orc_thesis, name="orc_thesis"),
     path("ai/", views.ai_insights, name="ai_insights"),
     path("ai/tasks/", views.ai_tasks_list, name="ai_tasks_list"),
     path("ai/chat/", views.ai_chat_page, name="ai_chat"),

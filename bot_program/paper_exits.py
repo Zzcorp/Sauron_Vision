@@ -778,12 +778,13 @@ def _write_stamp(trade, update: dict) -> None:
     trade.metadata = meta
 
 
-def stamp(trade, result: dict, *, now) -> None:
-    """Write the row's managed-tick stamp from a replay `result` (metadata
-    only, under the row's lock)."""
+def stamp_value(result: dict, *, now) -> dict:
+    """The managed-tick stamp a replay `result` leaves, as a value (pure):
+    what `stamp` writes on the row, and what the Orcs' care ghost keeps on
+    its own state for a replay of its own levels (bot_program/orcs/ghost)."""
     cursor = _parse(result.get("bars_through"))
     moves = _prune(list(result.get("moves") or []), cursor)
-    _write_stamp(trade, {
+    return {
         "tick_at": now.isoformat(),
         "seen_at": now.isoformat(),
         "bars_through": result.get("bars_through"),
@@ -792,7 +793,13 @@ def stamp(trade, result: dict, *, now) -> None:
         "moves": [[_iso(at), s, t] for at, s, t in moves],
         "ref": result.get("ref"),
         "basis": result.get("basis"),
-    })
+    }
+
+
+def stamp(trade, result: dict, *, now) -> None:
+    """Write the row's managed-tick stamp from a replay `result` (metadata
+    only, under the row's lock)."""
+    _write_stamp(trade, stamp_value(result, now=now))
 
 
 def seen(trade, *, now) -> bool:

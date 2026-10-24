@@ -63,13 +63,33 @@ def _body(request):
 def close_position_preview(request, trade_id):
     """POST — the facts the CLOSE confirm popup shows: what closes, at what
     mark, the P&L and the R it realises against the ENTRY stop. Nothing is
-    executed and nothing is claimed here."""
+    executed and nothing is claimed here.
+
+    A row an Orc follows also carries `orc`, its note (O1d: rank, state,
+    plan, thesis and last fact), beside the early-close warning and only
+    while the orcs switch is ON. Information only: it is added here, after
+    preview_close, so preview_close, close-all and the close itself are
+    exactly what they were, and a note that cannot be read is no note."""
     from bot_program.manual_close import preview_close
 
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
     trade = _trade_for(request, trade_id)
-    return JsonResponse(preview_close(request.user, trade))
+    out = preview_close(request.user, trade)
+    note = _orc_note(request.user, trade)
+    if note:
+        out["orc"] = note
+    return JsonResponse(out)
+
+
+def _orc_note(user, trade):
+    try:
+        from bot_program.orcs.notes import close_note_for
+        return close_note_for(trade, user=user)
+    except Exception:  # noqa: BLE001 — the preview never fails on the Orcs
+        logger.warning("[close] the Orc note for #%s could not be read",
+                       getattr(trade, "pk", "?"), exc_info=True)
+        return None
 
 
 @login_required

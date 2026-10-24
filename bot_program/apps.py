@@ -11,3 +11,6 @@ class BotProgramConfig(AppConfig):
         # or the worker child ends — see bot_program/engine/ibkr_sessions.
         from .engine.ibkr_sessions import install_signal_handlers
         install_signal_handlers()
+        # THE ORCS (bot_program/orcs/lifecycle.py): the receiver that ends
+        # an idea when its last leg closes. No query for a row with no Orc.
+        from .orcs import lifecycle  # noqa: F401

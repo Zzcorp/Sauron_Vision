@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}{{ slot.label }} — Sauron Vision{% endblock %}
+{% block page_title %}{{ slot.label }} · {{ orc.symbol }} {% if orc.side == "BUY" %}LONG{% else %}SHORT{% endif %}{% endblock %}
+
+{% block content %}
+{# One Orc (O1d, spec §9.2): its thesis, plan, journal, arms, wakes and #}
+{# grade, read by code. The one form is the operator's own thesis. #}
+<div class="orc-page">
+<div style="margin-bottom:12px;"><a href="{% url 'orcs_list' %}" class="orc-muted">← every Orc</a></div>
+{% if messages %}<ul class="orc-messages">{% for m in messages %}<li class="card">{{ m }}</li>{% endfor %}</ul>{% endif %}
+
+<div class="card fade-in-up orc-head" style="margin-bottom:18px;">
+    <div class="orc-kv"><span class="k">State</span><span>{{ slot.state_t }}</span></div>
+    <div class="orc-kv"><span class="k">Rank</span><span>{{ slot.authority.level_t }} · {{ slot.lineage.provisional_t }} · {{ slot.lineage.venue_t }}</span></div>
+    <div class="orc-kv"><span class="k">Commission</span><span>{{ slot.authority.commission_t }}</span></div>
+    <div class="orc-kv"><span class="k">Army</span><span>{{ slot.army.type_t }}{% if slot.army.overlay_t %} ({{ slot.army.overlay_t }}){% endif %}</span></div>
+    <div class="orc-kv"><span class="k">Risk</span><span>{{ slot.risk_line|default:"—" }}</span></div>
+    <div class="orc-kv"><span class="k">Beside the care</span><span>{{ slot.care_compare.t }}</span></div>
+    <div class="orc-kv"><span class="k">Next wake</span><span>{{ slot.next_wake_t }}</span></div>
+    <div class="orc-kv"><span class="k">Complexity</span><span>{% if slot.intellect %}{{ slot.intellect.score_t }} · the day {{ slot.intellect.day_class|default:"—" }} · {{ slot.intellect.rung_t }}{% else %}Not read yet: no wake has been detected.{% endif %}</span></div>
+    <div class="orc-kv"><span class="k">Dossier</span><span>{% if slot.integrity %}{{ slot.integrity.t }}{% else %}Not read yet: no wake has been detected.{% endif %}</span></div>
+    {% if slot.latest_note %}<div class="orc-kv"><span class="k">Last reading</span><span>{{ slot.latest_note }}</span></div>{% endif %}
+</div>
+
+<div class="card fade-in-up" id="orc-thesis" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Thesis · {{ source_t }}</span></div>
+    {% if reconstructed %}
+    <p>Reconstructed from the row: it was open before the Orcs.{% if thesis.reason %} The entry's reason: {{ thesis.reason }}{% endif %}</p>
+    <div class="orc-kv"><span class="k">Stop moves</span><span>{{ reconstructed.stop_moves_n }}</span></div>
+    <div class="orc-kv"><span class="k">Thesis check</span><span>{{ reconstructed.thesis_verdict|default:"—" }}</span></div>
+    <div class="orc-kv"><span class="k">Last review</span><span>{{ reconstructed.last_review_verdict|default:"—" }}</span></div>
+    {% if reconstructed.setup_memory.words %}<div class="orc-kv"><span class="k">Setup memory</span><span>{{ reconstructed.setup_memory.words }}</span></div>{% endif %}
+    {% else %}
+    <p>{{ thesis.reason|default:"The entry recorded no reason." }}</p>
+    {% endif %}
+    <div class="orc-kv"><span class="k">Rule</span><span>{{ thesis.rule|default:"—" }}</span></div>
+    <div class="orc-kv"><span class="k">Horizon</span><span>{% if thesis.horizon_market_h %}{{ thesis.horizon_market_h|floatformat:0 }} market hours{% else %}—{% endif %}</span></div>
+    <h4 class="orc-h">What invalidates it (checked by code)</h4>
+    {% if slot.thesis.invalidation_t %}
+    <ul class="orc-list">{% for t in slot.thesis.invalidation_t %}<li>{{ t }}</li>{% endfor %}</ul>
+    {% else %}<p class="orc-muted">No invalidation is written.</p>{% endif %}
+</div>
+
+<div class="card fade-in-up" id="orc-yours" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Your thesis</span></div>
+    {% if mine %}<blockquote class="orc-yours-text">{{ mine.t }}</blockquote>{% if mine_at %}<p class="orc-muted">Written {{ mine_at|date:"Y-m-d H:i" }} UTC.</p>{% endif %}{% endif %}
+    {% if can_write %}
+    <form method="post" action="{% url 'orc_thesis' orc.root_trade_id %}">
+        {% csrf_token %}
+        <label class="form-label" for="orc-thesis-text">{{ thesis_form }}</label>
+        <textarea id="orc-thesis-text" name="thesis" class="form-input" rows="3" maxlength="{{ thesis_max }}" required></textarea>
+        <button type="submit" class="btn btn-primary" style="margin-top:8px;">Keep my thesis</button>
+    </form>
+    {% else %}
+    <p class="orc-muted">This idea has ended.</p>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" id="orc-plan" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Plan</span></div>
+    <p>{{ slot.plan_line }}</p>
+    <h4 class="orc-h">Intents</h4>
+    <p class="orc-muted">{{ intents_none }}</p>
+</div>
+
+<div class="card fade-in-up" id="orc-journal" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Journal (newest first)</span></div>
+    <p class="orc-muted"><span class="orc-j orc-j--fact">fact</span> written by code · <span class="orc-j orc-j--note">note</span> an Orc's reading · <span class="orc-j orc-j--yours">yours</span> your own words</p>
+    {% if journal %}
+    <ol class="orc-journal">
+    {% for e in journal %}
+        <li class="orc-j orc-j--{{ e.style }}"><time datetime="{{ e.at|date:'c' }}">{{ e.at|date:"Y-m-d H:i" }}</time> <span class="orc-j-who">{{ e.author }}{% if e.fact_id %} · {{ e.fact_id }}{% endif %}</span> {{ e.t }}</li>
+    {% endfor %}
+    </ol>
+    {% else %}<p class="orc-muted">No entry yet.</p>{% endif %}
+</div>
+
+<div class="card fade-in-up" id="orc-arms" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">The arms (counterfactuals, on the same marks)</span></div>
+    {% if arms %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack orc-table">
+        <thead><tr><th>Arm</th><th>Walking</th><th class="num">Stop</th><th class="num">Exit</th><th class="num">R</th><th>Why</th></tr></thead>
+        <tbody>
+        {% for a in arms %}
+        <tr>
+            <td data-label="Arm">{{ a.name }}</td>
+            <td data-label="Walking">{% if a.open %}open{% else %}closed{% if a.capped %} at its tail cap{% endif %}{% endif %}</td>
+            <td data-label="Stop" class="num">{{ a.stop_t }}</td>
+            <td data-label="Exit" class="num">{{ a.exit_t|default:"—" }}</td>
+            <td data-label="R" class="num">{{ a.exit_r_t|default:"—" }}</td>
+            <td data-label="Why">{{ a.why|default:"—" }}</td>
+        </tr>
+        {% if a.path %}
+        <tr><td colspan="6" class="orc-muted">The position's stops: {% for p in a.path %}{{ p.at|slice:"11:16" }} soft {{ p.soft }} · venue {{ p.stop }}{% if not forloop.last %}; {% endif %}{% endfor %}</td></tr>
+        {% endif %}
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}<p class="orc-muted">No arm is seeded.</p>{% endif %}
+</div>
+
+<div class="card fade-in-up" id="orc-wakes" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Wakes detected (recorded only: no model is called)</span></div>
+    {% if wakes %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack orc-table">
+        <thead><tr><th>At</th><th>Kind</th><th class="num">Score</th><th>Band</th><th>Day</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for w in wakes %}
+        <tr>
+            <td data-label="At" class="nowrap">{{ w.created_at|date:"Y-m-d H:i" }}</td>
+            <td data-label="Kind">{{ w.kind|default:"—" }}</td>
+            <td data-label="Score" class="num">{% if w.score is not None %}{{ w.score|floatformat:0 }}{% else %}—{% endif %}</td>
+            <td data-label="Band">{{ w.band|default:"—" }}</td>
+            <td data-label="Day">{{ w.day_class|default:"—" }}</td>
+            <td data-label="Status">{{ w.status }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}<p class="orc-muted">No wake has been detected.</p>{% endif %}
+</div>
+
+<div class="card fade-in-up" id="orc-grade" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Grade</span></div>
+    {% if grade %}
+    <p>Graded (shadow, no Orc action): {{ grade_t }}.</p>
+    <p class="orc-muted">Bar source {{ grade.bar_source|default:"—" }} · {% if grade.counts_for_seat %}counts for its seat{% else %}does not count for its seat{% endif %}.</p>
+    {% else %}<p class="orc-muted">Not graded yet: an idea is graded once it has ended and every arm has walked out.</p>{% endif %}
+</div>
+</div>
+
+<style>
+.orc-messages { list-style: none; margin: 0 0 12px; padding: 0; }
+.orc-messages li { padding: 8px 12px; font-size: 12px; margin-bottom: 6px; }
+.orc-muted { color: var(--text-muted); font-size: 11px; }
+.orc-head { padding: 12px 14px; }
+.orc-kv { display: flex; gap: 10px; font-size: 12px; padding: 2px 0; }
+.orc-kv .k { min-width: 120px; color: var(--text-muted); font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.orc-h { margin: 12px 0 4px; font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; }
+.orc-list { margin: 0; padding-left: 18px; font-size: 12px; }
+.orc-journal { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+.orc-journal li { padding: 4px 8px; margin-bottom: 3px; border-left: 3px solid var(--border); }
+.orc-journal time, .orc-j-who { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+.orc-j--fact { border-left-color: var(--border); }
+.orc-j--note { border-left-color: var(--accent-blue); font-style: italic; }
+.orc-j--yours { border-left-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.orc-yours-text { margin: 0 0 6px; padding: 6px 10px; border-left: 3px solid var(--accent); font-size: 12px; white-space: pre-wrap; }
+.orc-table td { vertical-align: top; }
+</style>
+{% endblock %}

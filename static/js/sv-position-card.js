@@ -448,6 +448,23 @@
                       + "writing one, or was opened by hand.");
         if (!reason) body.className += " sv-unknown";
 
+        /* ── The Orc that follows the row (O1d) ──
+         * Only on a row the server stamped with one (data-pos-orc-*): its
+         * plan line, the position beside the care ghost so far, and its
+         * last three journal lines. All of it text, set through el(), read
+         * by code: no Orc decides anything here. */
+        var orcLabel = val(row, "orc-label");
+        if (orcLabel) {
+            var orcBox = el(pop, "div", "pos-pop-grid pos-pop-orc");
+            cap(orcBox, "the Orc · " + orcLabel.replace(/^Orc /, ""));
+            kv(orcBox, "Plan", val(row, "orc-plan"));
+            kv(orcBox, "So far", val(row, "orc-compare"));
+            ["orc-j1", "orc-j2", "orc-j3"].forEach(function (key, i) {
+                var line = val(row, key);
+                if (line) kv(orcBox, i ? "" : "Journal", line);
+            });
+        }
+
         /* ── Actions ──
          * tabindex="-1" throughout: the card is aria-hidden (see SV.dwell),
          * so a focusable control on it would be reachable by keyboard but
@@ -471,6 +488,13 @@
                           "FULL DETAIL ›");
             open.href = href;
             open.tabIndex = -1;
+        }
+        var orcHref = val(row, "orc-href");
+        if (orcLabel && orcHref.charAt(0) === "/" && orcHref.charAt(1) !== "/") {
+            var orcOpen = el(actions, "a", "sr-pop-btn pos-pop-orc-open",
+                             "JOURNAL ›");
+            orcOpen.href = orcHref;
+            orcOpen.tabIndex = -1;
         }
         var rowClose = row.querySelector("[data-sv-close-trade]");
         if (rowClose) {

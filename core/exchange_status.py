@@ -645,6 +645,88 @@ def _prev_close_utc(code: str, now_utc):
     return None
 
 
+def _forex_next_close(now_utc):
+    """The first FX week close after `now_utc`, as an aware UTC datetime:
+    this week's Friday close, or next week's once it has passed
+    (_forex_edges's rule)."""
+    now = now_utc.astimezone(pytz.UTC)
+    sunday = now.date() - timedelta(days=(now.weekday() + 1) % 7)
+    closes = _forex_edges(sunday)[1]
+    if closes > now:
+        return closes
+    return _forex_edges(sunday + timedelta(days=7))[1]
+
+
+def _next_close_utc(code: str, now_utc):
+    """The first instant after `now_utc` that session `code` CLOSES, as an
+    aware UTC datetime, or None when nothing here models it (CRYPTO never
+    shuts). The forward mirror of _prev_close_utc (2026-10-16, the Orcs'
+    session calendar, bot_program/orcs/sessions.py): asked while open it is
+    when the running session ends; asked while shut, the close after the
+    next open. Walks at most ten days ahead, in the session's own zone,
+    past the US equity holidays and onto their early closes."""
+    product = _PRODUCT_BY_CODE.get(code)
+    if product is not None:
+        tz = pytz.timezone(product["tz"])
+        local_now = now_utc.astimezone(tz)
+        ends = []
+        for seg in product["segments"]:
+            for offset in range(-1, 9):
+                day = local_now.date() + timedelta(days=offset)
+                if day.weekday() not in seg["weekdays"]:
+                    continue
+                _start, end = _segment_window(seg, day, tz)
+                if end > local_now:
+                    ends.append(end)
+                    break
+        return min(ends).astimezone(pytz.UTC) if ends else None
+    if code == "FOREX":
+        return _forex_next_close(now_utc)
+    ex = next((e for e in EXCHANGES if e["code"] == code), None)
+    if ex is None:
+        return None
+    tz = pytz.timezone(ex["tz"])
+    local_now = now_utc.astimezone(tz)
+    if code == "CME":
+        # Globex closes at 16:00 CT Monday through Friday: the daily break
+        # on four of them, the weekend on Friday.
+        weekdays, at = (0, 1, 2, 3, 4), time(16, 0)
+    else:
+        weekdays, at = ex["weekdays"], ex["close"]
+    for offset in range(0, 11):
+        day = local_now.date() + timedelta(days=offset)
+        if day.weekday() not in weekdays:
+            continue
+        if code in _US_EQUITY_SESSIONS and day in US_EQUITY_HOLIDAYS:
+            continue
+        close_at = at
+        if code in _US_EQUITY_SESSIONS:
+            close_at = US_EQUITY_EARLY_CLOSES.get(day) or at
+        end = tz.localize(datetime.combine(day, close_at))
+        if end > local_now:
+            return end.astimezone(pytz.UTC)
+    return None
+
+
+def next_close_utc(asset_class: str, exchange: str = "", symbol: str = "",
+                   now_utc=None):
+    """When this instrument's market next CLOSES, as an aware UTC datetime:
+    the end of the running session while open, the close after the next
+    open while shut. None for crypto (it never shuts) and for a class with
+    no modelled hours. Built on the same session code market_clock reads,
+    with the same US equity holidays and early closes; market_clock itself
+    is unchanged."""
+    if now_utc is None:
+        now_utc = datetime.now(pytz.UTC)
+    cls = (asset_class or "").strip().lower()
+    if cls not in MODELLED_CLASSES:
+        return None
+    code = session_code_for(cls, exchange or "", symbol or "")
+    if code == "CRYPTO":
+        return None
+    return _next_close_utc(code, now_utc)
+
+
 def market_clock(asset_class: str, exchange: str = "", symbol: str = "",
                  now_utc=None) -> dict:
     """Is this instrument's market open NOW, and when does it next open?

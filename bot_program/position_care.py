@@ -569,6 +569,7 @@ def care(bot, trade, price, client, *, now=None) -> str:
     close — the caller then moves on either way (a close in flight must
     never meet the SL/TP check below it the same tick)."""
     from bot_program import aragorn
+    _stash(trade, None)
     if not aragorn.is_on():
         return ""
     now = now or timezone.now()
@@ -608,6 +609,10 @@ def care(bot, trade, price, client, *, now=None) -> str:
                         logger.info("[care] %s #%s: crowd levels unread (%s)",
                                     trade.symbol, trade.id, e)
                         return None
+        if crowd is not None:
+            # read at most once a tick, whoever asks (the care's plan, the
+            # Orc's care ghost on the same inputs): the same object back
+            crowd = _Once(crowd)
         # The scale-out is asked of a PAPER bot row only (the docstring:
         # eToro closes whole; the manual lane is the operator's).
         scale = bool(trade.paper) and not manual and scale_out_on()
@@ -622,6 +627,12 @@ def care(bot, trade, price, client, *, now=None) -> str:
         decision = plan(trade, price, now=now, posture_level=level, kind=kind,
                         live=not trade.paper, manual=manual, crowd=crowd,
                         scale=scale, event=event)
+        # THE CARE'S INPUTS, IN MEMORY ONLY (the Orcs, spec §3.3): the care
+        # ghost replays plan() on its own state with exactly these. Never
+        # saved, never sent; nothing in the care reads it back.
+        _stash(trade, {"now": now, "posture_level": level, "kind": kind,
+                       "live": not trade.paper, "manual": manual,
+                       "crowd": crowd, "scale": scale, "event": event})
     except Exception as e:  # noqa: BLE001 — care that fails changes nothing
         logger.warning("[care] %s #%s not cared for: %s", trade.symbol,
                        trade.id, e)
@@ -634,6 +645,9 @@ def care(bot, trade, price, client, *, now=None) -> str:
             logger.info("[care] %s #%s: holding unread (%s)", trade.symbol,
                         trade.id, e)
             held = False
+        tick = getattr(trade, "_care_tick", None)
+        if isinstance(tick, dict):
+            tick["venue_listed"] = bool(held)
         if not held:
             logger.info("[care] %s #%s: %s — not sent: the venue does not "
                         "show the position (or closes by order), "
@@ -670,6 +684,30 @@ def care(bot, trade, price, client, *, now=None) -> str:
     logger.info("[care] %s #%s %s: %s", trade.symbol, trade.id,
                 "closed" if closed else "close pending", decision["why"])
     return "closed" if closed else "attempted"
+
+
+class _Once:
+    """A crowd read paid for once: the first call reads, every later call
+    returns the very same object (None included)."""
+
+    def __init__(self, read):
+        self._read = read
+        self._done = False
+        self._value = None
+
+    def __call__(self):
+        if not self._done:
+            self._done = True
+            self._value = self._read()
+        return self._value
+
+
+def _stash(trade, value) -> None:
+    """trade._care_tick, on the object in memory only; never raises."""
+    try:
+        trade._care_tick = value
+    except Exception:  # noqa: BLE001 — a row that takes no attribute
+        pass
 
 
 def _scale_out(bot, trade, price, decision) -> bool:

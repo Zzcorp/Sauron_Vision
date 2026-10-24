@@ -17,6 +17,9 @@ app.conf.imports = (
     "market_data.cleanup_tasks",
     "market_data.funding_alerts",
     "signals.tasks_lifecycle",
+    # The Orcs (bot_program/orcs/tasks.py): a package below the app, so
+    # autodiscover_tasks does not find it.
+    "bot_program.orcs.tasks",
 )
 
 # ============================================================
@@ -83,6 +86,28 @@ app.conf.task_routes = {
     # 2026-10-15 -- the crypto daily close: one Binance klines call per
     # crypto instrument at 00:10 UTC, never in front of the quote poller.
     "market_data.tasks.fetch_eod_crypto": {"queue": "slow"},
+    # 2026-10-16 -- the Orcs' census (bot_program/orcs): database reads and
+    # the Orc tables only, no broker, no model, beside the Morgul guards.
+    # No orcs.* glob: the `orcs` queue and its worker arrive with O2.
+    "bot_program.orcs.tasks.orc_census": {"queue": "fast"},
+    # 2026-10-16 -- the Orcs' arms and grades (O1b): bars and the Orc tables
+    # only, no broker, no model. On `slow` (worker-slow serves slow,ai) by
+    # exact name until O2 ships the `orcs` queue and worker-orc: a glob to
+    # a queue no worker consumes would strand them.
+    "bot_program.orcs.tasks.track_ghosts": {"queue": "slow"},
+    "bot_program.orcs.tasks.grade_closed": {"queue": "slow"},
+    "bot_program.orcs.tasks.shadow_audit": {"queue": "slow"},
+    # 2026-10-22 -- the Orcs' dossier (O1c): the day roll, the session
+    # close and the hourly read write the Orc tables only (no broker, no
+    # model), on `slow` by exact name like the O1b tasks. The Mercenaries'
+    # tape (market_data.tasks.refresh_orc_tape_task) rides the
+    # market_data.tasks.* glob to `fast`, beside the bar refresh.
+    "bot_program.orcs.tasks.orc_day_roll": {"queue": "slow"},
+    "bot_program.orcs.tasks.orc_session_close": {"queue": "slow"},
+    "bot_program.orcs.tasks.orc_hourly": {"queue": "slow"},
+    # 2026-10-23 -- a recorded wake's score, weather and dossier, rendered
+    # off the tick (the tick writes the wake and its reasons only).
+    "bot_program.orcs.tasks.orc_render_wakes": {"queue": "slow"},
 }
 
 # ============================================================
@@ -428,6 +453,65 @@ app.conf.beat_schedule = {
         # behind a slow one (tick_all_asset_bots also holds a pass lock).
         # expire_seconds beside expires (2026-10-07): the database
         # scheduler keeps only the former, so "expires" alone was lost.
+        "options": {"expires": 280, "expire_seconds": 280},
+    },
+    # THE ORCS (2026-10-16, bot_program/orcs): the census every 5 min,
+    # behind the orcs switch (OFF on arrival): births the entry hooks
+    # missed, the deaths no receiver saw, the reviews and pending closes
+    # as facts. A pass not started within the beat is dropped.
+    "orc-census": {
+        "task": "bot_program.orcs.tasks.orc_census",
+        "schedule": 300.0,
+        "options": {"expires": 280, "expire_seconds": 280},
+    },
+    # THE ORCS' ARMS (2026-10-16, O1b, bot_program/orcs/ghost.py): every
+    # 15 min the arms that outlive their row walk the venue's bars; hourly
+    # the dead ideas are graded against the care; weekly the care ghost is
+    # checked against the care's own exits. Behind the orcs switch; each is
+    # idempotent and catch-up safe.
+    "orc-track-ghosts": {
+        "task": "bot_program.orcs.tasks.track_ghosts",
+        "schedule": 900.0,
+        "options": {"expires": 840, "expire_seconds": 840},
+    },
+    "orc-grade-closed": {
+        "task": "bot_program.orcs.tasks.grade_closed",
+        "schedule": crontab(minute=40),
+    },
+    "orc-shadow-audit": {
+        "task": "bot_program.orcs.tasks.shadow_audit",
+        "schedule": crontab(hour=5, minute=40, day_of_week="sunday"),
+    },
+    # THE ORCS' DOSSIER (2026-10-22, O1c, spec §5.2a, §7.5.3, §10.7). UTC
+    # crontabs covering both sides of the clock change, every pass
+    # idempotent (a zone-aware crontab has no precedent here): the day
+    # rolls at 17:00 New York (21:00 or 22:00 UTC); the five sessions end
+    # at 00:00, 05:00, 11:00, 13:00 and 16:00 New York, and each block is
+    # written at :14, once the session's last 1h bar is final (its end
+    # plus bars.BAR_FINAL_AFTER, 12 min); the hourly read at :06. The
+    # recorded wakes rendered every 2 min. The Mercenaries' tape every 5
+    # min, behind orcs_tape, orcs and the headroom measurement; it stands
+    # aside while a bar pass runs, and yields to one at every read.
+    "orc-day-roll": {
+        "task": "bot_program.orcs.tasks.orc_day_roll",
+        "schedule": crontab(minute=3, hour="21,22"),
+    },
+    "orc-session-close": {
+        "task": "bot_program.orcs.tasks.orc_session_close",
+        "schedule": crontab(minute=14, hour="4,5,9,10,15,16,17,18,20,21"),
+    },
+    "orc-hourly": {
+        "task": "bot_program.orcs.tasks.orc_hourly",
+        "schedule": crontab(minute=6),
+    },
+    "orc-render-wakes": {
+        "task": "bot_program.orcs.tasks.orc_render_wakes",
+        "schedule": 120.0,
+        "options": {"expires": 110, "expire_seconds": 110},
+    },
+    "orc-tape-mercenary": {
+        "task": "market_data.tasks.refresh_orc_tape_task",
+        "schedule": 300.0,
         "options": {"expires": 280, "expire_seconds": 280},
     },
     # THE CRISIS MODE AND ARAGORN (2026-10-02, bot_program/

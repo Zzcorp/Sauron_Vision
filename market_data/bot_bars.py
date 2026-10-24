@@ -99,6 +99,10 @@ CANDLE_GAP_S = 1.0
 CANDLE_PASS_MAX_S = 420.0
 BARS_PASS_MAX_S = 540.0
 YIELD_AFTER_LIVE_429_S = 120.0
+#: The headroom ramp's 429 (epoch seconds until which every candle pass
+#: yields): market_data/candle_headroom.py writes it, _etoro_refusing reads
+#: it. Nothing else sets it, so with the ramp never run it is never there.
+HEADROOM_429_KEY = "bars:yield_until"
 INCREMENT_SPARE_BARS = 2
 
 
@@ -150,6 +154,15 @@ def _etoro_refusing(world: str) -> str:
             return (f"the trading lane met eToro's HTTP 429 "
                     f"({hits[-1].get('where') or '?'}) within the last "
                     f"{YIELD_AFTER_LIVE_429_S:.0f}s")
+        # the headroom ramp (market_data/candle_headroom.py, an operator's
+        # command) provoked a 429 on purpose: background 429s are never
+        # noted on the venue's health, so it leaves this marker for
+        # YIELD_AFTER_LIVE_429_S and the next passes yield instead of
+        # meeting the same 429
+        until = cache.get(HEADROOM_429_KEY)
+        if until and float(until) > time.time():
+            return ("the candle headroom ramp met eToro's HTTP 429 within "
+                    f"the last {YIELD_AFTER_LIVE_429_S:.0f}s")
     except Exception:  # noqa: BLE001 — an unreadable memory refuses nothing
         return ""
     return ""
@@ -196,11 +209,25 @@ class _CandlePass:
         # watchlist's to fill (refresh_bot_bars).
         self.reached: set = set()
         self.cut: set = set()
+        # A pass that must give way (the Orcs' Mercenary tape, O1c): a
+        # callable read before EVERY candle read; truthy ends eToro for
+        # this pass. The bar pass leaves it None (unchanged).
+        self.yield_to = None
 
     def past_deadline(self) -> bool:
         return _mono() - self.started >= BARS_PASS_MAX_S
 
     def may_ask(self, world: str) -> bool:
+        if self.yield_to is not None:
+            try:
+                why = self.yield_to()
+            except Exception:  # noqa: BLE001 — unreadable: give way
+                why = "the lock it yields to is unreadable"
+            if why:
+                self.stopped.setdefault(
+                    world, why if isinstance(why, str)
+                    else "a bar pass started")
+                return False
         if world in self.stopped:
             return False
         if self.last_get is not None:
@@ -518,19 +545,28 @@ def _stamp_venue_rows(client, symbol, interval, rows) -> int:
 
 def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                             limit=DEFAULT_LIMIT, pass_state=None,
-                            cut=True) -> dict:
+                            cut=True, stamp_marks=True,
+                            venue_only=False) -> dict:
     """Fetch and persist bars for every symbol on one bot config.
 
     `pass_state` (2026-10-07) is the refresh pass this config belongs to
     (_CandlePass: the dedup, the eToro pacing and stop); a call without
     one is a pass of its own. `cut=False` keeps every symbol past the
     pass's deadline: the held real rows (_held_real_rows) are never cut.
-    Each symbol lands in the pass's `reached` or `cut` set."""
+    Each symbol lands in the pass's `reached` or `cut` set. `stamp_marks`
+    False (the Orcs' parts, 2026-10-16) writes the bars and stamps no
+    venue mark on any row: the Orcs' bars are evidence, never a price for
+    a row. `venue_only` (the Orcs' tape, O1c) asks eToro alone: a symbol
+    whose client is not eToro's is skipped (counted under
+    "venue_only_skipped"), and no public-feed fallback runs in either
+    branch: a 15m or 5m frame is the venue's or nothing."""
     from instruments.models import Instrument
 
     state = pass_state if pass_state is not None else _CandlePass()
     out = {"symbols": 0, "bars": 0, "skipped": 0, "errors": 0, "no_client": 0,
            "fallback": 0, "deduped": 0, "not_reached": 0}
+    if venue_only:
+        out["venue_only_skipped"] = 0
     for symbol in (cfg.symbols or []):
         if cut and state.past_deadline():
             out["not_reached"] += 1
@@ -558,6 +594,9 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
 
         source = _source_tag(client)
         world = _etoro_world(client)
+        if venue_only and not world:
+            out["venue_only_skipped"] += 1
+            continue
         out["symbols"] += 1
         fetch_symbol = _venue_symbol(client, symbol)
         fetched = False
@@ -632,7 +671,7 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                     inst, interval, rows, source)
                 out["bars"] += written
                 out["skipped"] += skipped
-                if written:
+                if written and stamp_marks:
                     _stamp_venue_rows(client, symbol, interval, rows)
                 if evicted:
                     logger.info("[bars] %s %s: %s answered — %d public-feed "
@@ -645,6 +684,8 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                                    "instead", symbol, interval, source,
                                    len(rows))
 
+            if not written and venue_only:
+                continue                  # the venue's frame or nothing
             if not written:
                 # THE VENUE IS MUTE, NOT THE MARKET. An execution venue
                 # that answers a bar request with nothing — a historical
@@ -682,7 +723,8 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                     out["skipped"] += s2
                 continue
 
-            stale_age = _venue_window_is_stale(inst, interval, rows)
+            stale_age = (None if venue_only else
+                         _venue_window_is_stale(inst, interval, rows))
             if stale_age is not None:
                 # A VENUE THAT ANSWERS WITH THE PAST. A window whose newest
                 # bar the market has long left behind (a history farm that
@@ -830,7 +872,8 @@ WATCHLIST_BAR_CAP = 30
 
 def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
                            limit=DEFAULT_LIMIT, covered=None,
-                           starred=True, stop=None, unreached=None) -> dict:
+                           starred=True, stop=None, unreached=None,
+                           also=()) -> dict:
     """Bars for HELD and STARRED instruments no enabled bot already covers.
 
     The star used to bring quotes and signal scans but not bars — so a
@@ -854,7 +897,10 @@ def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
     the next starred symbol; the held part is never cut. `unreached` are
     config symbols the pass's deadline cut: their venue owns the series,
     so the keyless rows go only after the venue's newest bar, as for a
-    mute venue (_after_the_venues_last_bar).
+    mute venue (_after_the_venues_last_bar). `also` (O1c, the Orcs' board
+    of market symbols, only while `orcs` is ON and the pass is not late)
+    runs after the starred part, cut by `stop` like it; the held part is
+    exactly what it is without it.
     """
     from brain.synthesizer import _held_symbols
     from instruments.models import Instrument
@@ -878,12 +924,24 @@ def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
                                  asset_class__in=classes)
                          .order_by("symbol"))
              if i.symbol not in skip][:WATCHLIST_BAR_CAP] if starred else []
-    for n, inst in enumerate(held + stars):
+    # THE ORCS' BOARD (O1c) runs LAST, after the starred part and cut by
+    # the same deadline: never in the held part, whose order and whose
+    # never-cut promise (the fallback bars of the config symbols a late
+    # pass cut) stay exactly what they are with `orcs` OFF.
+    board = []
+    if also:
+        skip.update(i.symbol for i in stars)
+        order = {sym: n for n, sym in enumerate(also)}
+        board = sorted((i for i in Instrument.objects.filter(
+            symbol__in=list(also), asset_class__in=classes)
+            if i.symbol not in skip),
+            key=lambda i: order.get(i.symbol, len(order)))
+    for n, inst in enumerate(held + stars + board):
         # THE STARRED PART STOPS SYMBOL BY SYMBOL (2026-10-07): read once
         # before it, the deadline let thirty starred symbols run past the
         # task's hard limit, which kills the pass before its last line.
         if n >= len(held) and stop is not None and stop():
-            out["not_reached"] = len(held) + len(stars) - n
+            out["not_reached"] = len(held) + len(stars) + len(board) - n
             logger.warning("[bars] the starred watchlist stopped at the "
                            "pass's deadline: %d starred symbol(s) not "
                            "reached", out["not_reached"])
@@ -966,6 +1024,254 @@ def _held_real_rows(live_covered) -> list:
         return []
 
 
+class _OrcHeld(_HeldRows):
+    """An Orc's symbol (bot_program/orcs, O1b): a row's config, the
+    intervals the Orc reads, the config's own mode (a real row's is
+    "live"); it stamps no venue mark."""
+
+    def __init__(self, cfg, symbol, asset_class, *, mode, intervals):
+        super().__init__(cfg, symbol, asset_class)
+        self.mode = mode
+        self.intervals = tuple(intervals)
+
+
+def _orcs_on() -> bool:
+    """The `orcs` switch, read once a pass; unreadable reads OFF."""
+    try:
+        from bot_program.orcs.switches import orcs_on
+        return bool(orcs_on())
+    except Exception:  # noqa: BLE001 — the Orcs never cost a bar
+        return False
+
+
+def _orc_held(part) -> list:
+    """The Orcs' symbols the bar refresh fetches, by part (2026-10-16, O1b;
+    spec §5.2, §6.1), 4h and 1h only:
+
+      "real"   a real idea whose row has CLOSED while an arm still walks
+               its bars (no other part refreshes it then); an open real
+               row is the configs' and the held rows' to refresh
+      "paper"  the LIVING paper ideas, at most the Orcs' paper cap of
+               (config, symbol) pairs, oldest first (2026-10-22: the cap
+               bounds the living ideas, §5.2), then the dead paper ideas
+               whose arms still walk their tail, on top
+
+    An idea whose arms should all be out (a bar of the multi-ghost's
+    timeframe past its tail cap: ghost.step_bars closes them there) asks
+    nothing more, so an idea that could not end never holds a request
+    for ever. No 1d candle (2026-10-22): the Orcs' daily frame is the
+    venue's 4h bars by UTC day (bot_program/orcs/bars.py), so no second
+    daily grid sits beside the nightly EOD bars. The caller reads the
+    switch. Never raises."""
+    try:
+        from django.utils import timezone
+
+        from bot_program.orcs.bars import BAR_FINAL_AFTER, span_of
+        from bot_program.orcs.birth import paper_cap
+        from bot_program.orcs.constants import (LEG_DONE_STATUSES,
+                                                MULTI_GHOST_TF, STATE_DEAD)
+        from bot_program.orcs.ghost import tail_cap
+        from bot_program.orcs.models import Orc
+        now = timezone.now()
+        paper = part == "paper"
+        base = (Orc.objects.filter(paper=paper)
+                .select_related("root_trade", "config__user")
+                .order_by("born_at", "pk"))
+        tailing = base.filter(state=STATE_DEAD, tracks__open=True).distinct()
+        if paper:
+            living = list(base.exclude(state=STATE_DEAD))
+            orcs = living + list(tailing)
+            cap_left = max(0, int(paper_cap()))
+        else:
+            orcs = list(base.exclude(state=STATE_DEAD)) + list(tailing)
+            cap_left = None
+
+        def done(orc):
+            try:
+                cap = tail_cap(orc, orc.root_trade, now)
+            except Exception:  # noqa: BLE001 — an unread cap holds the bars
+                return False
+            return cap is not None and now >= (cap + span_of(MULTI_GHOST_TF)
+                                               + BAR_FINAL_AFTER)
+
+        out, seen = [], set()
+        for orc in orcs:
+            row = orc.root_trade
+            dead = orc.state == STATE_DEAD
+            if not paper and row.status not in LEG_DONE_STATUSES:
+                continue
+            if (dead or not paper) and done(orc):
+                continue
+            key = (orc.config_id, orc.symbol)
+            if key in seen:
+                continue
+            if paper and not dead:
+                if cap_left <= 0:
+                    continue
+                cap_left -= 1
+            seen.add(key)
+            cfg = orc.config
+            out.append(_OrcHeld(cfg, orc.symbol, orc.asset_class,
+                                mode="live" if not paper
+                                else getattr(cfg, "mode", "paper"),
+                                intervals=DEFAULT_INTERVALS))
+        return out
+    except Exception as e:  # noqa: BLE001 — the Orcs never cost a bar
+        logger.warning("[bars] the Orcs' symbols could not be listed: %s", e)
+        return []
+
+
+def _orc_board() -> list:
+    """The board's symbols (spec §5.2a MK2, BOARD_SYMBOLS) that have an
+    Instrument row, in the board's order: US10Y has none and drops
+    silently. One query. The caller reads the switch."""
+    try:
+        from bot_program.orcs.constants import BOARD_SYMBOLS
+        from instruments.models import Instrument
+        have = set(Instrument.objects.filter(symbol__in=BOARD_SYMBOLS)
+                   .values_list("symbol", flat=True))
+        return [s for s in BOARD_SYMBOLS if s in have]
+    except Exception as e:  # noqa: BLE001 — the Orcs never cost a bar
+        logger.warning("[bars] the Orcs' board could not be listed: %s", e)
+        return []
+
+
+def tape_ready() -> tuple:
+    """(ready, why, per_pass): the Orcs' 15m and 5m eToro candles run only
+    with `orcs` ON, `orcs_tape` ON AND a recorded headroom measurement
+    (manage.py etoro_candle_headroom --yes), within its budget per pass.
+    Never raises."""
+    try:
+        if not _orcs_on():
+            return False, "the orcs switch is OFF", 0
+        from core.platform_control import is_component_enabled
+
+        from bot_program.orcs.constants import HEADROOM_KEY, TAPE_SWITCH
+        from bot_program.orcs.models import OrcSetting
+        if not is_component_enabled(TAPE_SWITCH):
+            return False, "the orcs_tape switch is OFF", 0
+        rec = OrcSetting.get(HEADROOM_KEY) or {}
+        per_pass = int((rec or {}).get("tape_per_pass") or 0)
+        if per_pass <= 0:
+            return False, ("eToro's candle headroom is not measured "
+                           "(manage.py etoro_candle_headroom)"), 0
+        return True, "", per_pass
+    except Exception as e:  # noqa: BLE001
+        return False, f"unread: {type(e).__name__}", 0
+
+
+def _orc_tape_held(*, mercenaries_only=False) -> list:
+    """The tape's symbols, 15m and 5m: the LIVING Orcs' symbols first
+    (oldest first, one per config and symbol), then the board's, carried
+    by the oldest living Orc's config; the Mercenaries' own beat reads
+    theirs only. Never raises."""
+    try:
+        from bot_program.orcs.constants import (STATE_DEAD,
+                                                TAPE_INTERVALS)
+        from bot_program.orcs.models import Orc
+        orcs = list(Orc.objects.exclude(state=STATE_DEAD)
+                    .filter(root_trade__status__in=("OPEN",
+                                                    "CLOSE_PENDING"))
+                    .select_related("config__user")
+                    .order_by("born_at", "pk"))
+        if mercenaries_only:
+            orcs = [o for o in orcs if o.army_type == "mercenaries"]
+        out, seen = [], set()
+        for orc in orcs:
+            if orc.symbol in seen:
+                continue
+            seen.add(orc.symbol)
+            out.append(_OrcHeld(orc.config, orc.symbol, orc.asset_class,
+                                mode="live" if not orc.paper else getattr(
+                                    orc.config, "mode", "paper"),
+                                intervals=TAPE_INTERVALS))
+        if mercenaries_only or not orcs:
+            return out
+        from instruments.models import Instrument
+        classes = dict(Instrument.objects.filter(symbol__in=_orc_board())
+                       .values_list("symbol", "asset_class"))
+        carrier = orcs[0].config
+        for sym in _orc_board():
+            if sym in seen:
+                continue
+            seen.add(sym)
+            out.append(_OrcHeld(carrier, sym, classes.get(sym, ""),
+                                mode=getattr(carrier, "mode", "paper"),
+                                intervals=TAPE_INTERVALS))
+        return out
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[bars] the Orcs' tape could not be listed: %s", e)
+        return []
+
+
+def _tape_pass(state, held_list, per_pass, *, limit=DEFAULT_LIMIT) -> dict:
+    """Ask eToro the tape of `held_list` in this pass: cut by the deadline,
+    within `per_pass` candle reads, stopping at the first 429 (the pass's
+    own stop), never a fallback, never a venue mark."""
+    from bot_program.orcs.constants import TAPE_INTERVALS
+    out = {"symbols": 0, "bars": 0, "asked": 0, "errors": 0,
+           "venue_only_skipped": 0, "not_reached": 0, "budget": per_pass}
+    start, left = state.asked, state.left
+    for held in held_list:
+        if state.asked - start + len(TAPE_INTERVALS) > per_pass:
+            out["not_reached"] += 1
+            continue
+        try:
+            res = refresh_bars_for_config(
+                held, intervals=held.intervals, limit=limit,
+                pass_state=state, stamp_marks=False, venue_only=True)
+        except Exception as e:  # noqa: BLE001
+            logger.exception("[bars] the Orcs' tape %s failed: %s",
+                             held.symbols, e)
+            out["errors"] += 1
+            continue
+        for k in ("symbols", "bars", "errors", "venue_only_skipped",
+                  "not_reached"):
+            out[k] += res.get(k, 0)
+    out["asked"] = state.asked - start
+    # a tape read eToro was not asked goes nowhere (no fallback): it is
+    # counted here, never in the pass's "sent to the public feed"
+    out["not_asked"] = state.left - left
+    state.left = left
+    return out
+
+
+def _bar_pass_running():
+    """Why the Mercenaries' tape must give way now ("" when it need not):
+    a bar pass holds its lock (market_data.tasks.BARS_LOCK_KEY)."""
+    from market_data.tasks import BARS_LOCK_KEY
+    return "a bar pass started" if cache.get(BARS_LOCK_KEY) else ""
+
+
+def refresh_orc_tape(now=None) -> dict:
+    """The Mercenaries' tape on its own 5-minute beat (spec §1.6): a pass
+    of its own, their symbols only, within the measured budget. It gives
+    way to a bar pass at EVERY read (yield_to), not only at its start: two
+    candle loops on one account key would ask eToro twice the measured
+    pace, outside TAPE_SHARE.
+
+    The task is the only writer of the `orcs_tape` row, so every outcome
+    but the lock stand-aside (the task's own) is a counted pass
+    (core/task_gate.py): a pass with no Mercenary holding a position is a
+    success that read nothing, an unmeasured headroom a warning in words."""
+    ready, why, per_pass = tape_ready()
+    if not ready:
+        if why.startswith("the orcs switch"):
+            return {"status": "skipped", "reason": "orcs_disabled"}
+        return {"status": "warning", "reason": f"the tape asks nothing: "
+                                               f"{why}"}
+    held = _orc_tape_held(mercenaries_only=True)
+    if not held:
+        return {"status": "success", "symbols": 0,
+                "why": "no Mercenary holds a position"}
+    state = _CandlePass()
+    state.yield_to = _bar_pass_running
+    out = _tape_pass(state, held, per_pass)
+    out["status"] = "success"
+    out["etoro_stopped"] = state.words()
+    return out
+
+
 def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dict:
     """Refresh bars for every enabled AssetBotConfig, then for held and
     starred instruments the fleet does not already cover.
@@ -976,7 +1282,19 @@ def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dic
     BARS_PASS_MAX_S, symbol by symbol; the held part is never cut, and a
     held symbol on a config the deadline cut is the watchlist's. eToro's
     candles follow _CandlePass, and their summary is said before the
-    watchlist."""
+    watchlist.
+
+    THE ORCS (2026-10-16, O1b; only while the `orcs` switch is ON, else
+    the pass is exactly as before): their parts come LAST (2026-10-22),
+    after every config and after the cut symbols are settled, so
+    every config asks exactly what it asks OFF. An Orc's 429 or eToro
+    budget can then never send a config's decision bars to the public
+    feed, and an Orc fetch never takes a config's dedup slot (its
+    venue-mark stamp with it). The parts are cut by the deadline like a
+    config, stamp no venue mark, and are counted apart under "orcs"
+    (_orc_held). The watchlist gets the very `unreached` it gets OFF, and
+    a `covered` that also holds every symbol an Orc part reached
+    (2026-10-22): the venue owns that series, as a config's."""
     from bot_program.models import AssetBotConfig
 
     totals = {"configs": 0, "symbols": 0, "bars": 0, "skipped": 0, "errors": 0,
@@ -1036,6 +1354,49 @@ def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dic
                        "not reached and the starred watchlist skipped; held "
                        "symbols are still refreshed", BARS_PASS_MAX_S,
                        totals["not_reached"])
+    # THE ORCS' PARTS, LAST (O1b, 2026-10-22): every config has
+    # asked what it asks OFF and the cut symbols are settled above, so
+    # nothing here changes a config's bars, its venue-mark stamp or the
+    # watchlist's `unreached`; `covered` gains what an Orc part reached.
+    # Cut by the deadline like a config; counted apart.
+    orcs_on_now = _orcs_on()
+    if orcs_on_now:
+        orcs = dict.fromkeys(keys, 0)
+        for part in ("real", "paper"):
+            for held in _orc_held(part):
+                try:
+                    res = refresh_bars_for_config(
+                        held, intervals=held.intervals, limit=limit,
+                        pass_state=state, stamp_marks=False)
+                except Exception as e:  # noqa: BLE001
+                    logger.exception("[bars] the Orcs' %s failed: %s",
+                                     held.symbols, e)
+                    orcs["errors"] += 1
+                    continue
+                for k in keys:
+                    orcs[k] += res.get(k, 0)
+                # THE VENUE OWNS WHAT AN ORC PART REACHED (2026-10-22), as
+                # a config's symbol: else the watchlist's held part wrote
+                # the public feed's bars over it in this same pass (a
+                # symbol held by a row no config lists), and the next pass
+                # asked eToro the whole window again. A 429 already falls
+                # back to the public feed in the part itself; a symbol the
+                # deadline cut stays the watchlist's.
+                covered.update(s for s in held.symbols
+                               if s in state.reached)
+        totals["orcs"] = orcs
+        # THE ORCS' TAPE (O1c, spec §5.2a item 3): eToro's 15m and 5m
+        # candles of the living Orcs' symbols, then the board's, only with
+        # `orcs_tape` ON and a recorded headroom measurement; after
+        # everything else of the pass, cut by its deadline, within the
+        # measured budget, stopping at the first 429, the venue's or
+        # nothing (no fallback), no venue mark. Never in `covered`.
+        ready, why, per_pass = tape_ready()
+        if ready:
+            totals["orcs_tape"] = _tape_pass(state, _orc_tape_held(),
+                                             per_pass, limit=limit)
+        else:
+            logger.info("[bars] the Orcs' tape is not asked: %s", why)
     # eToro's part of the pass is over: its summary is said BEFORE the
     # watchlist (review, 2026-10-07), whose held part is never cut, so a
     # hard kill there cannot drop the lines operator checks #3 and #4 read.
@@ -1048,10 +1409,16 @@ def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dic
                        "feed instead; %d asked", state.words(), state.left,
                        state.asked)
     try:
+        # THE ORCS' BOARD (O1c): the market's symbols the dossier's MK2
+        # reads, after the watchlist's starred part (the keyless feed, 4h
+        # and 1h), cut by the deadline, skipped in a late pass, only while
+        # `orcs` is ON; OFF the call is as before.
+        board = _orc_board() if orcs_on_now and not late else []
+        extra = {"also": board} if board else {}
         wl = refresh_watchlist_bars(intervals=intervals, limit=limit,
                                     covered=covered, starred=not late,
                                     stop=state.past_deadline,
-                                    unreached=unreached)
+                                    unreached=unreached, **extra)
         for k in ("symbols", "bars", "skipped", "errors", "no_client",
                   "fallback"):
             totals[k] += wl.get(k, 0)

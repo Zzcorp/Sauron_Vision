@@ -789,3 +789,9 @@ from .withdrawal_models import WithdrawalRequest  # noqa: F401
 from .aragorn_models import (  # noqa: F401
     MarketStressReading, PairVerdict, AragornAction, AragornSetting,
 )
+# THE ORCS (2026-10-16, bot_program/orcs): one trader agent per open
+# position, journaled by code (O1: no model, no order).
+from .orcs.models import (  # noqa: F401
+    OrcSeat, Orc, OrcLeg, OrcWake, OrcJournal, OrcTrack, OrcGrade,
+    OrcSetting, OrcDossierBlock, OrcDayBaseline, OrcDrum,
+)

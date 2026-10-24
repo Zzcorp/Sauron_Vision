@@ -76,7 +76,8 @@ KNOWN_AGENT_KEYS = {name for _, rows in AGENT_GROUPS for name, _, _ in rows}
 # pinned ladder (catalog.ORC_LADDER_V1, versioned from O2), never
 # resolve_agent, so an override row here would persist and be read by
 # nothing — exactly what KNOWN_AGENT_KEYS exists to refuse. Their spend
-# is the Orcs' budget line (ai_agents/spend.py). No Orc exists before O2.
+# is the Orcs' budget line (ai_agents/spend.py). No Orc calls a model
+# before O2.
 ORC_AGENT_KEYS = (
     ("orc", "The Orc (one per open position)"),
     ("orc_confirm", "The Orc's confirm wake"),

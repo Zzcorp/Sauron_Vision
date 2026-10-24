@@ -738,7 +738,7 @@ def care_levels(symbol, side, price, *, timeframe=TIMEFRAME) -> dict:
 LIVING_REACH_ATR = 3.0 + HUNT_DEPTH_ATR + MAX_WIDEN_ATR
 
 
-def living_levels(symbol, price=None, *, timeframe=TIMEFRAME):
+def living_levels(symbol, price=None, *, timeframe=TIMEFRAME, bars=None):
     """{"price", "atr", "timeframe", "levels": [{price, kind, side, pool,
     atr_away}]} — the crowd's levels on BOTH sides of `price` (the newest
     close when None), for a chart to draw. None without bars or an ATR.
@@ -762,8 +762,12 @@ def living_levels(symbol, price=None, *, timeframe=TIMEFRAME):
     The chart's anchors (2026-10-07, _anchor_levels): where each level
     formed and the zone around it, ADDED to the rows for the drawing only;
     the five fields above are what every other reader reads, unchanged.
+
+    `bars` = (df, swings) for a caller that already read them (the Orcs'
+    menu reads the venue's own frame, bot_program/orcs/menu.py); None, the
+    default, loads them exactly as before.
     """
-    df, swings = _bars(symbol, timeframe)
+    df, swings = bars if bars is not None else _bars(symbol, timeframe)
     if df is None or len(df) <= 15:
         return None
     from signals.smc.pivots import atr as _atr

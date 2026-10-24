@@ -2588,9 +2588,14 @@ def _pos_committed_pct(committed, trade):
     return _pos_fmt(float(committed) / capital * 100, 1)
 
 
-def _position_card_details(user, positions):
+def _position_card_details(user, positions, *, orcs=False):
     """One dict per position with everything the hover card shows that the
     ROW cannot carry — aligned with `positions`, same order.
+
+    `orcs` (the open book only): a row an Orc follows also carries `orc`,
+    its line under the symbol and the dwell card's lines (bot_program.
+    orcs.notes.for_trades: no query when no row carries the Orc stamp,
+    nothing while the orcs switch is OFF). A failed read adds nothing.
 
     The positions table renders portfolio.services.UnifiedPosition, a
     __slots__-bound shape that deliberately exposes only the columns the
@@ -2874,7 +2879,25 @@ def _position_card_details(user, positions):
             # rather than offering a link that 404s.
             "href": reverse("forensics_detail", args=[trade.id]) if trade else "",
         })
+    if orcs and trades:
+        _orc_lines(user, positions, details, trades)
     return details
+
+
+def _orc_lines(user, positions, details, trades):
+    """details[i]["orc"] for each row an Orc follows (read only; the Orc
+    package decides, from the row's own stamp and the switch)."""
+    try:
+        from bot_program.orcs.notes import for_trades, line_dict
+        slots = for_trades(list(trades.values()), user=user)
+    except Exception:  # noqa: BLE001 — the page never fails on the Orcs
+        logger.warning("[positions] the Orc lines could not be read",
+                       exc_info=True)
+        return
+    for p, d in zip(positions, details):
+        sl = slots.get(getattr(p, "trade_id", None))
+        if sl:
+            d["orc"] = line_dict(sl)
 
 
 def _render_positions(request, live_only):
@@ -3012,7 +3035,8 @@ def _render_positions(request, live_only):
     open_view = build_view(
         request.GET if tab == "open" else {},
         list(zip(open_rows,
-                 _position_card_details(request.user, open_objects))),
+                 _position_card_details(request.user, open_objects,
+                                        orcs=True))),
         keep={"tab": "open"}, base_url=positions_url)
     closed_view = build_view(
         request.GET if tab == "history" else {},

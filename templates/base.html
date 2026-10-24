@@ -3034,6 +3034,9 @@
         facts.push(['Failed closes', String(p.attempts || 0)]);
         facts.push(['At the broker', 'STILL OPEN']);
       }
+      /* The Orc that follows this row (O1d): its note, beside the early
+         warning; information only, the choice stays the operator's. */
+      if (p.orc && p.orc.label && p.orc.t) facts.push([String(p.orc.label), String(p.orc.t)]);
       /* Cutting a winner short of its target (2026-10-02): said above the
          button, never a gate — the last word stays the operator's. */
       var early = (!p.pending && p.early_close && p.early_close.warn)

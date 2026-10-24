@@ -20,6 +20,10 @@ the answer is English all the same.
     /stop ID  /stopall                  THE BRAKE: bots OFF, never ON;
                                         their unfilled orders withdrawn;
                                         what is open stays managed
+    /orc NUMBER  /orcs [CLASS]          the Orcs' journals, by code (no
+                                        LLM, no write): only while the
+                                        `orcs` switch is ON, else chatter
+                                        (bot_program/orcs/surfaces.py)
 
 WHAT IT REFUSES
   * Any chat but the configured one. A message counts only when its chat
@@ -196,6 +200,10 @@ _COMMANDS = {
     "stop": "stop", "stopall": "stopall",
     "ask": "ask", "q": "ask",
 }
+#: THE ORCS (O1d, spec §9.1): parsed only while the `orcs` switch is ON
+#: (parse(orcs=True)); while it is OFF "/orc 12" is chatter and a quoted
+#: "orc 12" a question, exactly as before.
+_ORC_COMMANDS = {"orc": "orc", "orcs": "orcs"}
 _STATUS_PHRASES = {"status", "etat des lieux"}
 _OPEN_QUOTES = "\"“«„"
 _CLOSE_QUOTES = "\"”»“"
@@ -611,9 +619,11 @@ def _unquote(text: str):
     return None
 
 
-def parse(text: str) -> tuple:
+def parse(text: str, *, orcs: bool = False) -> tuple:
     """(command, argument), or (None, "") for anything not addressed to
-    Sauron: ordinary chatter is never answered."""
+    Sauron: ordinary chatter is never answered. `orcs` (the switch, read
+    by the caller) adds /orc, /orcs and a quoted "orc 12"; False, the
+    default, parses exactly as before the Orcs."""
     raw = str(text or "").strip()
     if not raw:
         return None, ""
@@ -621,6 +631,8 @@ def parse(text: str) -> tuple:
         parts = raw.split(None, 1)
         word = _fold(parts[0][1:].split("@", 1)[0])
         command = _COMMANDS.get(word)
+        if command is None and orcs:
+            command = _ORC_COMMANDS.get(word)
         if command is None:
             return None, ""
         return command, (parts[1].strip() if len(parts) > 1 else "")
@@ -628,9 +640,35 @@ def parse(text: str) -> tuple:
     phrase = _fold(inner if inner is not None else raw).strip(" .!?")
     if phrase in _STATUS_PHRASES:
         return "status", ""
+    if inner and orcs:
+        # parse() runs before handle()'s fence: a quoted message never
+        # raises out of here; unread, it stays a question to Sauron
+        try:
+            from bot_program.orcs.surfaces import parse_quoted
+            said = parse_quoted(inner)
+        except Exception:  # noqa: BLE001
+            logger.warning("[telegram eye] a quoted orc command could not "
+                           "be read", exc_info=True)
+            said = None
+        if said is not None:
+            return said
     if inner:
         return "ask", inner
     return None, ""
+
+
+def _orcs_asked(text) -> bool:
+    """True when `text` names the Orcs (/orc, /orcs, a quoted "orc 12")
+    AND the `orcs` switch is ON. Any other text reads no switch at all;
+    an unreadable switch or package reads OFF."""
+    try:
+        from bot_program.orcs.surfaces import names_orcs
+        if not names_orcs(text):
+            return False
+        from bot_program.orcs.switches import orcs_on
+        return bool(orcs_on())
+    except Exception:  # noqa: BLE001 — the Orcs unread are the Orcs OFF
+        return False
 
 
 # ── the answers ──────────────────────────────────────────────────────────
@@ -909,6 +947,20 @@ def build_why(user, symbol: str, *, now=None) -> Reply:
     return Reply(MARK_WHY, f"Sauron — why no trade on {sym}", _cap(lines))
 
 
+def _orc_help() -> list:
+    """The Orcs' two commands, while the `orcs` switch is ON; nothing
+    otherwise (and nothing when the switch or the package cannot be
+    read)."""
+    try:
+        from bot_program.orcs.switches import orcs_on
+        if not orcs_on():
+            return []
+        from bot_program.orcs.surfaces import help_lines
+        return [f"{BULLET}{line}" for line in help_lines()]
+    except Exception:  # noqa: BLE001 — the help never fails on the Orcs
+        return []
+
+
 def build_help() -> Reply:
     lines = [
         heading("Commands"),
@@ -919,6 +971,7 @@ def build_help() -> Reply:
         f"quotes)",
         f"{BULLET}/stop ID — stop one bot (numbers are in /status)",
         f"{BULLET}/stopall — stop every running bot",
+        *_orc_help(),
         f"{BULLET}/help — this list (also /aide)",
         heading("Good to know"),
         "Replies are always in English.",
@@ -1402,6 +1455,12 @@ def route(command: str, arg: str, user, chat_id, *, now=None,
                            withdraw=True)
     if command == "ask":
         return ask_question(user, chat_id, arg, now=now)
+    if command in _ORC_COMMANDS:
+        # O1d: read by code from the Orc tables; nothing is written
+        from bot_program.orcs import surfaces
+        if command == "orc":
+            return surfaces.orc_reply(user, arg, now=now)
+        return surfaces.orcs_reply(user, arg, now=now)
     return build_help()
 
 
@@ -1468,7 +1527,8 @@ def handle(update, *, chats=None, ambiguous=None, now=None,
     if (sender.get("is_bot")
             and str(sender_chat.get("id", "")).strip() != chat_id):
         return "ignored"
-    command, arg = parse(msg.get("text") or "")
+    text = msg.get("text") or ""
+    command, arg = parse(text, orcs=_orcs_asked(text))
     if command is None:
         return "chatter"
     logger.info("[telegram eye] chat %s · %s · sender %s", chat_id, command,

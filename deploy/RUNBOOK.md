@@ -1294,6 +1294,371 @@ platform.
 
 ---
 
+## The Orcs (O1: journals, no model)
+
+An Orc follows one open position from its birth to its close and keeps
+its journal. In O1 every line of that journal is written by code: the
+birth (the entry and its stop, so what 1R means), the thesis (the entry's
+own record, or a reconstruction for a row that was open before the Orcs),
+the army type and why, the care's and the venue's stop moves, a hand
+levels edit, an event window, the reviewer's verdicts, the thesis checks,
+a pending close and the close itself. **No model is called, no order is
+sent and no stop is moved.** The Orcs write their own tables and one stamp
+on the trade row (`metadata["orc"]`), nothing else.
+
+**OFF on arrival.** The switch `orcs` (System) arrives OFF. While it is
+OFF the platform behaves exactly as before: no Orc is born, no journal
+line is written, the census beat (`orc-census`, every 5 min, fast queue)
+skips. It is not a live-money switch, so the System group's "all on"
+turns it on with the rest.
+
+To switch it on:
+
+```bash
+./deploy/dc exec web python manage.py component on orcs
+```
+
+Within 5 minutes the census adopts every open position that may have an
+Orc (adoption: the entry moment was missed, so the thesis is rebuilt from
+the row). To see the plan first, or to adopt now:
+
+```bash
+./deploy/dc exec web python manage.py orcs adopt --open          # the plan: each open row, adopted or why not
+./deploy/dc exec web python manage.py orcs adopt --open --yes    # adopt now (refused while the switch is OFF)
+./deploy/dc exec web python manage.py orcs                       # the live Orcs and their last journal lines
+```
+
+Each adopted **real-money** position sends one line to its owner's own
+channel (never the alarm group), for example "Orc #N adopted XAUUSD long
+(advise). Its thesis is reconstructed; state yours on its page." Quiet
+hours apply. Paper and eToro demo positions get journal lines only, and at
+most 10 Orcs outside real money (paper and demo together) live at once
+(`OrcSetting` `max_paper_orcs`). An eToro demo row sits on its own `demo`
+seat, never on the real-money one, so its evidence is never pooled with
+real money.
+
+Rows that get no Orc: an entry still working at the venue (it is born at
+its fill), an options row, and a row on a config no tick manages (a
+config stopped by hand keeps its paper rows managed, and those get one).
+
+**Switching it OFF** stops new births, new journal lines and the census at
+the next tick; the Orcs already born keep what they wrote.
+
+**The kill switch ends every idea** in its scope, whatever the orcs switch
+says: each Orc is marked dead with no re-entry window before the sweep
+closes its rows.
+
+### O1b: the arms and the grade (still no model)
+
+Each Orc now carries five counterfactual arms in its own table, priced by
+one function from the same tick or venue bar: the **care ghost** (the
+position care replayed on its own state, the reference), the **playbook**
+(the care plus code rules on the menu of levels), the **Orc arm** (the
+real row, recorded; after a hand act it carries on as a shadow), and two
+mechanical exits from the proving ground (`chandelier3`, `staged`) walked
+on the venue's 4h bars. Arms move only on the tick (the hook after the
+care) and on bars; they never move a stop, send an order or call a model.
+While the row is open the tick alone moves them; once it has closed, the
+`orc-track-ghosts` beat alone does, so the two never overwrite each other.
+An arm walks only the bars after its birth: an adopted row's history is
+never replayed. An arm reads a bar only once it is final: the bar refresh
+stores the bar still forming and rewrites it on its next pass, so a bar
+that has just ended counts once that pass has stored the next one, or 12
+minutes after its end. When the row closes, the arms that are still open
+keep walking the venue's 1h bars, from the first bar that opens after
+their last tick, up to a cap (a bot row: the later of its close and its
+birth plus 1.5 times the class's no-progress hours; the manual lane: its
+close plus 30 days). They are marked to market at the close of the bar
+that spans the cap; a bar after the cap, every arm still open is closed at
+the newest price known, so no idea outlives its cap. On those bars the
+care-like arms run the care with the context the tick last gave them (a
+manual-lane idea keeps the manual lane's care, which never cuts on a
+clock), and the playbook keeps its own rules, every frame cut at the
+bar's close: the thesis exit, the structure trail, and the draw trim on
+paper. Each arm walks on its own: one that fails is logged and waits, and
+the others go on. A row with no stop has no R: its two proving-ground
+arms close at once and the idea is graded without numbers. An Orc arm
+whose real exit nobody priced (the row's exit price unknown) is closed at
+the cap on its last tick and flagged as inferred.
+
+Three beats, all on the `slow` queue by exact name, all behind `orcs`:
+
+- `orc-track-ghosts` every 15 min: the arms that outlive their row walk
+  new bars; a pass with no new bar changes nothing.
+The thesis's bar predicates read final bars only. The time predicate
+needs the care's best excursion: while the care is off it reads
+"unchecked", and the journal says so once.
+
+- `orc-grade-closed` hourly at :40: a dead idea whose arms are all closed
+  gets one grade (R only: the Orc against the care ghost and the playbook,
+  the capture, won / honourable defeat / fault, and whether it counts for
+  a seat). It counts when the Orc arm and the care ghost both resolved
+  with an R, its arms were not seeded late, and the care ghost stayed
+  faithful (its soft stop matched the care's on every tick the Orc arm
+  recorded). A stretch with no tick is flagged on the grade, never
+  excluded. No seat reads it in O1. The grade is journaled; nothing is
+  sent.
+- `orc-shadow-audit` Sundays 05:40 UTC: the care ghost of each idea that
+  died in the last 7 days checked against the care's own exits, one
+  journal line per idea, written once.
+
+The same audit by hand, and the graded ideas grouped (never pooled):
+
+```bash
+./deploy/dc exec web python manage.py orcs shadow-audit --days 7             # prints only
+./deploy/dc exec web python manage.py orcs shadow-audit --days 7 --journal   # and journals each line once
+./deploy/dc exec web python manage.py scorecard --by orc                     # class, venue, bar source, level
+```
+
+With `orcs` ON the bar refresh also fetches the Orcs' symbols, 4h and 1h
+only: a living paper idea's (at most the paper cap of them, oldest first),
+a dead paper idea's whose arms still walk their tail, and a real idea's
+whose row has closed while an arm still walks its bars. An idea a bar past
+its cap asks nothing more. These requests come last in the pass, after
+every config, so every config asks exactly what it asks OFF and an eToro
+429 there stops only the Orcs' part. They are cut by the pass's deadline
+like a config, stamp no mark on any row, and are counted apart (`orcs` in
+the pass's result). A symbol an Orc part reached is the venue's for the
+rest of the pass: the watchlist does not write the public feed's bars
+over it. No 1d candle is asked: an Orc's daily
+bars are the venue's 4h bars grouped by UTC day, built in memory, so the
+1d table keeps the nightly EOD bars alone. A stock, ETF or Olog-hai idea
+born once 60 such fresh days exist reads its thesis on 1d closes; one born
+before reads 4h. OFF, the pass requests exactly what it did before.
+Morgul's duplicate check (G8) reads the idea of a row's Orc stamp: the
+legs of one idea are one position; there is no second leg before O5.
+
+### O1c: the dossier, the day's weather and the war drums (still no model)
+
+Each Orc now notices when something happens to its position, and writes
+down what it would have seen. **Nothing is sent to a model, no order is
+sent and no stop is moved**; only the Orc tables are written.
+
+**Wakes are detected and recorded.** Right after the care, the tick looks
+for a reason to think: the birth, a closed bar of the decision timeframe,
+the mark near an invalidation level, +1R, +2R, +3R, -0.5R and -0.75R first
+reached, half the best given back, the care moving or closing, the venue
+refusing a stop, a met predicate, a hand edit of the levels, a close or an
+entry in doubt, the metronome (every 4 hours while the market is open), a
+high-impact print (3 hours and 1 hour before, 15 minutes after), a change
+of the daily-loss mode, open risk at 80% of its limit, a change of the
+posture, a close pending at the venue. The book is read in the Orc's own
+money world: a real Orc counts real-money rows only (the gates also count
+a demo row, eToro demo, Saxo SIM, OANDA practice or Alpaca paper, with
+real money; the Orc never does), and a demo Orc has no book of its own,
+so it never wakes on one. Urgent reasons are recorded at
+once; the others at most every 15 minutes. A reason read from a state
+(+1R reached, a close in doubt) fires once for the life of the position.
+The tick only records the wake and its reasons (a quiet tick costs no
+query, a recorded wake a handful); every 2 minutes the slow queue
+(`orc-render-wakes`) renders each recorded wake as of its moment: its
+complexity score (0 to 100, with its band: routine, material, complex,
+extreme), the day's weather for its class (calm, eventful, stormy) and its
+dossier. Its status reads `skipped` ("no model before O2"), or `quiet`
+when only a bar or the metronome woke it and nothing it watches moved: the
+Orc then writes a one-line reading ("Nothing new: +0.4R, care breakeven at
+1.0832, 4h structure unchanged"), which is also its latest note. A wake
+whose render fails is marked `failed` in its components and is not
+retried; the worker log says why.
+
+**The dossier** is what a model will read from O2: the market's day (a
+header at the roll, then one block per closed session: the board of 11
+symbols, the prints, the regime, the posture, the Mind's report, the
+strategist's brief, up to six headlines; each block reads the prints and
+headlines from the previous session's end, so nothing between two
+sessions is lost), the instrument (its frames,
+structure, levels with their ids, positioning, COT, gaps), the position
+(in R only, never money) and the tail (the session in progress, today's
+tape, the menu and the candidates, the integrity verdict). Headlines and
+calendar titles are fenced as untrusted text, a model's words as views;
+instruction-like text is withheld; no news body is read. Every block is
+stored once and a wake keeps the list, so any dossier can be printed
+again:
+
+```bash
+./deploy/dc exec web python manage.py orcs dossier ROOT_ID             # the latest wake's dossier
+./deploy/dc exec web python manage.py orcs dossier ROOT_ID --wake 2    # the wake before
+./deploy/dc exec web python manage.py orcs actuals --days 14           # how many past prints carry an actual
+./deploy/dc exec web python manage.py orcs actuals --days 14 --record  # ... and record it
+```
+
+When the venue's mark is older than 120 s (or not the venue's), the
+decision frame's bars are stale, or the row cannot be read, the verdict is
+critical and the Orc's menu holds no exit, trim, waiver or add: hold, a
+plan revision and a tighten only. A posture that is not measured (with
+`crisis_mode` OFF it never is), a blind news analyst or an unread calendar
+only print a dash and never stop anything.
+
+**Four beats, on the `slow` queue by exact name, behind `orcs`**, on UTC
+times that cover both sides of the clock change (each pass does nothing a
+second time):
+
+- `orc-day-roll` at 21:03 and 22:03 UTC (17:00 New York): the day header
+  per model family (Haiku, Sonnet, Opus, Fable: each tokenizer gets a
+  block sized for it), the day's weather per user and class, the actuals
+  measured;
+- `orc-session-close` at :14 after each session's close, once the
+  session's last 1h bar is final: that session's block per model family (a
+  closed session is never rewritten, so a late article does not change
+  it);
+- `orc-hourly` at :06: the instruments' blocks, the class's hourly terms,
+  the level-break and sweep drums (read on final 4h bars only);
+- `orc-render-wakes` every 2 minutes: the recorded wakes' scores and
+  dossiers.
+
+With `orcs` ON the bar refresh also asks the keyless feed for the board's
+symbols that exist as instruments (US10Y does not: the 10-year yield is
+DGS10 in the macro line), 4h and 1h, after the watchlist's starred part,
+cut by the pass's deadline and skipped in a late pass: about ten symbols.
+The watchlist's held part is untouched. OFF, the pass asks exactly what it
+asked before.
+
+**The war drums** are published by code from facts it already writes (a
+leg closed by its stop, break-even or a lock set, the mirror refused, a
+turned thesis, a 4h close beyond a level, a sweep, an urgent headline the
+price confirmed within 15 minutes, a print far from its forecast) and
+routed by the census within one user's book only: to the same symbol, a
+measured correlate (|rho| >= 0.7; an unmeasured pair never), a shared
+currency leg or commodity complex, or the declared USD factor. Each Orc
+reached gets one journal line per wave, "DR3: a stop at 1.08320 was hit on
+EURUSD at 14:05 UTC; the price is 0.6 x ATR(1h) beyond it (same symbol,
+hop 0)." Prices and ATR only: never another position's R or money, and
+never a calendar title (a print is named by its currency and its calendar
+row, "the USD print C412"). A level break listing several symbols reaches
+the Orcs of each of them. In O1 a drum wakes nobody: the switch
+`orcs_drums` (System, OFF on arrival) changes nothing until O2, where it
+lets a drum wake the Orcs it reaches; the drums are journaled either way
+while `orcs` is ON.
+
+#### eToro's candle headroom, before the 15m and 5m candles
+
+The Orcs' tape (eToro's 15m and 5m candles of the living Orcs' symbols,
+then the board's) shares eToro's quota with the trading lane, so it sends
+nothing until eToro's headroom is measured AND the switch `orcs_tape`
+(System, OFF on arrival) is ON. The System group's "all on" alone sends
+nothing. Measure first, on the demo account or in quiet hours:
+
+```bash
+./deploy/dc exec web python manage.py etoro_candle_headroom                     # a dry run: the plan, nothing sent
+./deploy/dc exec web python manage.py etoro_candle_headroom --yes               # run the ramp (demo, or quiet hours)
+./deploy/dc exec web python manage.py etoro_candle_headroom --yes --live        # ... on a live account
+```
+
+The ramp asks 2-bar candles with a gap that starts at 2 s and halves every
+10 reads down to 0.25 s, and stops at eToro's first 429 or after 60 reads.
+It is refused on a live account without `--live`, while eToro is sick,
+within two minutes of a trading-lane 429, and while a bar pass or a
+Mercenary tape pass is running. While it runs it holds the tape's lock;
+if a bar pass starts, the ramp stops at once and records nothing (run it
+again in a quiet minute). Its reads are background reads, never noted on
+eToro's health, so after its 429 it leaves a two-minute marker every
+candle pass yields to instead of meeting the same 429. It records the
+clean rate, the rate at the 429, eToro's quota headers and the tape's
+budget per bar pass (a quarter of the clean rate over the pass's candle
+window). Then:
+
+```bash
+./deploy/dc exec web python manage.py component on orcs_tape
+```
+
+The tape runs last in each bar pass, cut by its deadline, within that
+budget, stopping at the first 429, with no public-feed fallback and no
+venue mark stamped on any row. The Mercenaries' own symbols are also
+refreshed every 5 minutes (`orc-tape-mercenary`, fast queue), which stands
+aside while a bar pass is running and gives way, at its next candle read,
+to one that starts. Every pass of it is counted on the `orcs_tape` row (a
+pass with no Mercenary holding a position is a success that read nothing;
+an unmeasured headroom is a warning in words). To stop it:
+`component off orcs_tape`.
+
+### O1d: where the Orcs are seen (still no model)
+
+Everything below is read by code from the Orc tables, only while the
+switch `orcs` is ON. No new switch, no new beat, no new queue and no tick
+hook: switching `orcs` OFF puts every page back to what it was before the
+Orcs, byte for byte, and `/orcs/`, `/orcs/<number>/` and `/orcs/seats/`
+answer 404 as they did before (the record stays in the tables and reads
+again once the switch is ON). The route probe (`manage.py probe_routes`)
+counts those two argument-free pages under "off" while the switch is
+OFF, never under "missing", so the forge does not report them. Nothing
+here sends an order, moves a stop, calls a model or notifies anyone.
+
+**On Telegram** (your own Eye chat, never the alarm group):
+
+```
+/orc 12            one Orc: rank, state, R at the last tick and best, the
+                   stops its venue and the care hold (once the position is
+                   closed: where it closed and the R it booked, never a
+                   stop), its thesis and what invalidates it, its latest
+                   note, the last fact written by code, the next wake, the
+                   care beside the position, its army, and its page. A
+                   leg's number works too.
+/orcs              every Orc on watch, one line each (20 at most)
+/orcs forex        the same, one class
+```
+
+R and prices only: never a balance, an amount or a quantity. Your own
+thesis shows as you wrote it, or "Withheld: this line may name an amount
+of money." when it names one; the Horde and the positions page say the
+same. The stops line names the row's own venue (eToro, eToro demo, OANDA
+practice, Saxo simulation...). While
+`orcs` is OFF, `/orc` is ignored like any unknown command and a quoted
+"orc 12" goes to Sauron as a question, as before. `/orc 12 <question>`,
+`/orc 12 stand down` and `/orcs off` answer in words and change nothing:
+no Orc reasons or acts in this release.
+
+**On the platform:**
+
+- **The Horde.** Each seat with an Orc shows its label and "L0 · Snaga"
+  at the card's foot; the dossier's THE ORC box shows its state, thesis,
+  what invalidates it, the risk at the venue's stop, the care beside the
+  position, the complexity score of its last detected wake ("No model
+  (code only)"), the dossier's integrity, its journal, the drums it heard
+  and a link to its page. Each class band shows the day's weather. The
+  answer's `v` is 2 while `orcs` is ON, 1 while OFF.
+- **The positions page.** One muted line under the symbol of an open row
+  an Orc follows ("Orc #12 · L0 · Snaga, class · invalidates on a 4h close
+  below … · no plan yet · "Nothing new: +0.4R…" 14:05 · risk 1.0R of
+  2R": the rank and the commission, the first invalidation, the plan, the
+  latest note and its time, the risk at the stop the venue holds); the
+  dwell card adds its plan, the comparison with the care and its last
+  three journal lines. The comparison prices the position and the care
+  ghost on the same tick, at the closing side of the spread, with what
+  each banked, so two arms that took the same steps read the same R. The
+  history tab is unchanged.
+- **The close dialog.** A row an Orc follows shows its note beside the
+  early-close warning: its rank, state and plan, the thesis, the latest
+  note and the last fact written by code (your own thesis is never shown
+  as a fact). Information only: the close itself, its PIN rule and
+  close-all are unchanged.
+- **`/orcs/`** lists your Orcs on watch, those that ended in the last 30
+  days with their grade, and the seats they sit on. Staff also see the AI
+  spend lines there.
+- **`/orcs/<number>/`** is one Orc: its thesis (the entry's, or the one
+  reconstructed for a row that was open before the Orcs) and its
+  predicates, your own thesis, the plan, the journal (facts written by
+  code and notes drawn apart, your words marked as yours), the arms, the
+  detected wakes and the grade. A leg's number opens its idea.
+- **Your thesis.** The form on an Orc's page keeps your thesis beside the
+  entry's, in your words (600 characters at most). It is journaled as
+  yours, never as a fact, and changes nothing the care does. It is
+  refused while `orcs` is OFF and on an idea that has ended.
+- **`/orcs/seats/`** (staff only) shows every seat by bar source, never
+  pooled: graded ideas, the mean Δ against the care with its 80% bounds,
+  and the capture; then each army type by venue, class and bar source,
+  with its n, mean Δ and 80% bounds. Only the grades that count for their
+  seat enter a statistic. In this release no Orc takes a step, so Δ
+  measures the care ghost against the care, and no seat holds any power.
+
+The adoption line sent for a real-money row now opens that Orc's page.
+
+To check, with `orcs` ON:
+
+```bash
+./deploy/dc exec web python manage.py orcs                  # the live Orcs, their numbers
+# then open /orcs/ and /orcs/<number>/, and send /orc <number> on Telegram
+```
+
 ## Operating notes
 
 **Going live is deliberate.** Bots ship in paper mode; flipping one to live

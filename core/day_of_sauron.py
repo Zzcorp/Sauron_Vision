@@ -128,6 +128,22 @@ STAGE_OF = {
     "track-record-decay-check": ("watch", "track-record decay"),
     "watch-evidence-chain": ("watch", "the evidence chain watched"),
     "alarm-sentinel": ("watch", "the alarm sentinel"),
+    "orc-census": ("watch", "open positions journaled"),
+    # The Orcs' arms and grades (O1b): through the day, every 15 min and
+    # hourly, so WATCH (LEARN reads as the night's clock)
+    "orc-track-ghosts": ("watch", "closed positions followed on their "
+                                  "mechanical counterfactual"),
+    "orc-grade-closed": ("watch", "closed positions graded against the "
+                                  "mechanical care"),
+    # The Orcs' dossier (O1c): the market day written down at the roll and
+    # at each session's close, read through the day; the short candles of
+    # the quick strikes beside the bars.
+    "orc-day-roll": ("see", "the trading day's header and weather"),
+    "orc-session-close": ("see", "each closed session written down"),
+    "orc-hourly": ("watch", "open positions' instruments read each hour"),
+    "orc-render-wakes": ("watch", "what each open position noticed, written "
+                                  "down"),
+    "orc-tape-mercenary": ("see", "short candles for quick strikes"),
     # ── TELL: the voices ────────────────────────────────────────────────
     "poll-telegram-eye": ("tell", "the Eye reads its Telegram group"),
     "poll-telegram-alarm": ("tell", "the alarm bot reads its group"),
@@ -170,6 +186,9 @@ STAGE_OF = {
     "mine-patterns": ("learn", "patterns mined"),
     "weekly-portfolio-rebalance-suggestions": ("learn", "rebalancing suggested"),
     "ai-monday-game-plan": ("learn", "the Monday plan"),
+    # The Orcs' weekly audit (O1b): public words, plain, with no slash.
+    "orc-shadow-audit": ("learn", "the counterfactual checked against the "
+                                  "care's own exits"),
 }
 
 #: The counts each stage shows off the Wall's own facts (core.wall_facts):

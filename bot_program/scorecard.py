@@ -84,6 +84,10 @@ REGULAR_OPEN_NY, REGULAR_CLOSE_NY = dtime(9, 30), dtime(16, 0)
 def exit_of(trade) -> str:
     """Which exit closed the row, from what the row recorded (never re-derived from
     prices), first match wins:
+      "orc: <action>"      metadata["orc_exit"]: an Orc's own exit (O3 on; spec
+                           §6.8, no row carries it in O1)
+      "orc stop: <why>"    metadata["care_exit"] starting with "orc": the care
+                           closed at an Orc's stop (O3 on)
       "by hand"            HAND_CLOSE_TAG in trade.reason
       "care: <lock>"       metadata["care_exit"] (care's own close: trail, breakeven,
                            weekend lock, event lock, structure, no progress, weekend cut,
@@ -98,9 +102,15 @@ def exit_of(trade) -> str:
                            break-even or trail knobs, an operator's level
       "other: <outcome>"   anything else ("other: ungraded" when no outcome)"""
     meta = trade.metadata if isinstance(trade.metadata, dict) else {}
+    orc_exit = meta.get("orc_exit")
+    if isinstance(orc_exit, dict) and str(orc_exit.get("action") or "").strip():
+        return f"orc: {str(orc_exit['action']).strip()}"
+    lock = str(meta.get("care_exit") or "").strip()
+    if lock.lower().startswith("orc"):
+        why = lock[3:].lstrip(" :").strip()
+        return f"orc stop: {why or 'its stop'}"
     if HAND_CLOSE_TAG in (trade.reason or ""):
         return "by hand"
-    lock = str(meta.get("care_exit") or "").strip()
     if lock:
         return f"care: {lock}"
     outcome = trade.outcome or ""
@@ -197,8 +207,15 @@ def _inferred_exit(meta) -> bool:
                                   EXIT_SOURCE_VENUE_TARGET)
 
 
-def row_of(trade) -> dict:
-    """The fields the scorecard reads, from one AssetBotTrade."""
+#: row_of's ghost R when the caller read none (the care ghost's R comes
+#: from the Orcs' grade, read in one query by `rows`).
+_UNSET = object()
+
+
+def row_of(trade, *, ghost_r=_UNSET) -> dict:
+    """The fields the scorecard reads, from one AssetBotTrade. `ghost_r`:
+    the care ghost's R when the idea was graded (the Orcs, spec §6.8);
+    `shadow_r` is the row's own R otherwise."""
     from bot_program.manual_trade import MANUAL_RULE
     meta = trade.metadata or {}
     care = meta.get("care") or {}
@@ -229,8 +246,10 @@ def row_of(trade) -> dict:
         "exit": exit_of(trade),
         "policy": ((policy.get("key") if isinstance(policy, dict) else None)
                    or "care"),
-        # care's shadow arrives with PR51b; until then the row is its own
-        "shadow_r": trade.realized_r,
+        # the care ghost's R once the Orcs graded the idea (spec §6.8);
+        # until then, and for every row with no Orc, the row is its own
+        "shadow_r": (trade.realized_r if ghost_r is _UNSET or ghost_r is None
+                     else ghost_r),
         "inferred": _inferred_exit(meta),
         "at_venue": _closed_at_the_venue(trade, meta),
         # (lo, hi) as the reconcile wrote it: the close lies in
@@ -260,7 +279,84 @@ def rows(*, days=30, user=None, venue=None, now=None, world=None) -> list:
     if world is not None:
         from dashboard.position_summary import world_of
         trades = [t for t in trades if world_of(t) == world]
-    return [row_of(t) for t in trades]
+    else:
+        trades = list(trades)
+    ghosts = _ghost_rs(trades)
+    if ghosts is None:
+        return [row_of(t) for t in trades]
+    return [row_of(t, ghost_r=ghosts.get(t.pk)) for t in trades]
+
+
+def _ghost_rs(trades):
+    """{root trade id: the care ghost's R} from the Orcs' grades, in one
+    query, ONLY while the `orcs` switch is ON (None otherwise: no Orc table
+    is read)."""
+    try:
+        from bot_program.orcs.switches import orcs_on
+        if not orcs_on() or not trades:
+            return None
+        from bot_program.orcs.models import OrcGrade
+        return dict(OrcGrade.objects
+                    .filter(orc__root_trade_id__in=[t.pk for t in trades])
+                    .values_list("orc__root_trade_id", "ghost_r"))
+    except Exception:  # noqa: BLE001 — an unread grade is the row's own R
+        return None
+
+
+# ── the Orcs (spec §6.8): scorecard --by orc ─────────────────────────────
+
+def orc_rows(*, days=30, venue=None, user=None, now=None) -> list:
+    """One row per Orc grade written in the window: its class, venue, bar
+    source and seat level, its deltas and captures, the AI cost in R, and
+    whether its root's exit price was inferred. R only, never money."""
+    from django.utils import timezone
+
+    from bot_program.orcs.models import OrcGrade
+    now = now or timezone.now()
+    qs = (OrcGrade.objects.filter(graded_at__gte=now - timedelta(days=days))
+          .select_related("orc", "orc__root_trade"))
+    if venue in ("live", "paper", "demo"):
+        qs = qs.filter(venue=venue)
+    if user is not None:
+        qs = qs.filter(orc__user=user)
+    out = []
+    for g in qs.order_by("graded_at"):
+        root = g.orc.root_trade
+        rm = float(g.r_money) if g.r_money else None
+        meta = root.metadata if isinstance(root.metadata, dict) else {}
+        out.append({
+            "orc": g.orc_id, "root": g.orc.root_trade_id,
+            "asset_class": g.orc.asset_class, "venue": g.venue or "",
+            "bar_source": g.bar_source or "platform",
+            "level": int(g.level_at_birth or 0),
+            "delta_care": g.delta_care, "delta_play": g.delta_play,
+            "r_avail": g.r_avail, "capture_orc": g.capture_orc,
+            "capture_ghost": g.capture_ghost, "capture_play": g.capture_play,
+            "ai_cost_r": (float(g.ai_cost_usd or 0) / rm) if rm else None,
+            "fell": g.fell, "counts": g.counts_for_seat,
+            "hand_touched": g.hand_touched,
+            "inferred": _inferred_exit(meta)})
+    return out
+
+
+def summarize_orc(rows_) -> dict:
+    """One group of Orc grades: n, the mean deltas, the captures over the
+    ideas that offered at least CAPTURE_MIN_AVAIL_R, the AI cost per idea."""
+    from bot_program.orcs.constants import CAPTURE_MIN_AVAIL_R
+    avail = [r for r in rows_ if r.get("r_avail") is not None
+             and r["r_avail"] >= CAPTURE_MIN_AVAIL_R]
+
+    def mean(key, of):
+        xs = [float(r[key]) for r in of if r.get(key) is not None]
+        return _mean(xs)
+    return {"n": len(rows_),
+            "delta_care": mean("delta_care", rows_),
+            "delta_play": mean("delta_play", rows_),
+            "capture_orc": mean("capture_orc", avail),
+            "capture_ghost": mean("capture_ghost", avail),
+            "capture_play": mean("capture_play", avail),
+            "with_avail": len(avail),
+            "ai_cost_r": mean("ai_cost_r", rows_)}
 
 
 def _mean(xs):

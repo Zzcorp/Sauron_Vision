@@ -22,13 +22,19 @@ answer:
                the same path, which means the view never ran and the page
                was not measured
 
-and two it does NOT probe, counted rather than hidden:
+and three it does NOT probe, counted rather than hidden:
 
     skipped    patterns with a converter (<int:pk>) — need a fixture
     excluded   routes whose NAME says they mutate (run, toggle, save,
                delete, arm, flatten, ...) — a GET must never be the thing
                that finds out a view has side effects. The names are
                printed so the exclusion can be audited.
+    off        routes served only while their switch is ON, while it is
+               OFF: the view says so itself (a `switch_gate` attribute, a
+               callable that reads the switch), and its 404 is the page
+               as it was before the feature, by design, never "missing"
+               (the Orcs' pages, dashboard/views_orcs.py). ON, they are
+               probed like any other.
 
 It stores the tally in the cache under PROBE_KEY so the forge can show it,
 with the time it ran; the forge reads "never run" as a dash, not a zero.
@@ -109,10 +115,22 @@ def _https_twin(resp, path: str) -> bool:
     return target.scheme == "https" and target.path == path
 
 
+def _switched_off(path: str) -> bool:
+    """True when the route's view is served only while a switch is ON
+    (its `switch_gate`, a zero-argument callable) and that switch reads
+    OFF. A gate that cannot be read leaves the page to be probed."""
+    from django.urls import resolve
+    try:
+        gate = getattr(resolve(path).func, "switch_gate", None)
+        return gate is not None and not gate()
+    except Exception:  # noqa: BLE001 — unread, the page is probed
+        return False
+
+
 def probe(client, host: str):
     """Walk and bucket. Returns the tally dict the command prints and stores."""
     tally = {"ok": [], "forbidden": [], "missing": [], "broken": [],
-             "skipped": [], "excluded": []}
+             "skipped": [], "excluded": [], "off": []}
     for name, route, probeable in free_routes():
         label = name or route
         if not probeable:
@@ -122,6 +140,9 @@ def probe(client, host: str):
             tally["excluded"].append(label)
             continue
         path = "/" + route.lstrip("^").lstrip("/")
+        if _switched_off(path):
+            tally["off"].append(label)
+            continue
         try:
             # As Caddy forwards it: https, with the proxy header the
             # settings trust. Plain http is answered 301 by
@@ -193,7 +214,7 @@ class Command(BaseCommand):
         w(f"ROUTE PROBE — as {user.username} — host {host} — {took:.1f}s")
         w("=" * 70)
         for bucket in ("ok", "forbidden", "missing", "broken", "skipped",
-                       "excluded"):
+                       "excluded", "off"):
             rows = tally[bucket]
             w(f"  {bucket:<10} {len(rows):>4}")
             if rows and (opts["show"] or bucket in ("missing", "broken")):
@@ -207,8 +228,9 @@ class Command(BaseCommand):
               f"{len(tally['missing'])} answer 404, out of {n_probed} probed.")
         else:
             w(f"Every one of the {n_probed} probed routes answers. "
-              f"{len(tally['skipped'])} parameterised and "
-              f"{len(tally['excluded'])} mutating routes were NOT probed — "
+              f"{len(tally['skipped'])} parameterised, "
+              f"{len(tally['excluded'])} mutating and "
+              f"{len(tally['off'])} switched-off routes were NOT probed — "
               f"that is a count, not a pass.")
         cache.set(PROBE_KEY, {
             "state": "ran", "at": started, "host": host, "as": user.username,

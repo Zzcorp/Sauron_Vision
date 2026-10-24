@@ -386,6 +386,18 @@ def _stamp_desk_keys(trade_id, *, plan, decision, cand):
     except Exception as e:  # noqa: BLE001 — the row matters, the stamp does not
         logger.warning("[desk] could not stamp desk keys on trade %s: %s",
                        trade_id, e)
+        return
+    # THE ORCS (bot_program/orcs, O1): the idea was born inside
+    # execute_entry, before these keys existed; its thesis gains the desk's
+    # multiplier and lane once, here. A row with no Orc (every row while
+    # the orcs switch is OFF) costs no query; the Orc tables only; never
+    # stops the pass.
+    try:
+        from bot_program.orcs.thesis import complete_provenance
+        complete_provenance(trade)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[desk] trade %s: the Orc's thesis did not take "
+                       "the desk's keys: %s", trade_id, e)
 
 
 def _propose_phase(cfg, *, signal_stats, candidates, not_desked, summaries):
