@@ -120,6 +120,73 @@ class TheChoicesTests(TestCase):
         self.assertFalse(out["control"])
         self.assertIn("carries extras['leverage']", out["why"])
 
+    # ── A SHORT DEFAULTS TO WHAT A SHORT HAS BEEN MEASURED AT (2026-10-31) ─
+    # No eToro short above 1x has ever been measured (the AAPL and EURUSD
+    # SELLs of 2026-10-01 went at 1x). A SELL ticket defaults to the
+    # highest choice at or under ETORO_PROVEN_SHORT_LEVERAGE for its class
+    # (1 when absent); the selector still offers every multiplier eToro
+    # allows, and says that only that much is measured for shorts.
+
+    def _ask_sell(self, asked=None, **kw):
+        from bot_program.manual_trade import _ticket_leverage
+        with patch(ADAPTER, return_value="etoro"), \
+                patch(CAPABLE, return_value=True), \
+                patch(JUDGE, side_effect=_judge(20)), \
+                patch(INSTRUMENT, return_value=""), \
+                patch.object(type(self.bot), "_instrument_class",
+                             return_value="forex"):
+            return _ticket_leverage(self.bot, self.cfg, _client(), "EURUSD",
+                                    "SELL", 1.13, 1.14, asked=asked)
+
+    def test_a_short_defaults_to_one_x_and_still_offers_the_list(self):
+        out = self._ask_sell()
+        self.assertEqual(out["choices"], [1, 2, 5, 10, 20])
+        self.assertEqual((out["max"], out["chosen"]), (20, 1))
+        self.assertEqual(out["short_measured"], 1)
+        self.assertEqual(out["short_note"],
+                         "Only 1x is measured for shorts on forex at eToro: "
+                         "a short above it has not been measured, so the "
+                         "ticket defaults to 1x.")
+        self.assertEqual(self._ask_sell(5)["chosen"], 5,
+                         "the operator's pick is taken")
+        self.assertNotIn("short_note", self._ask())
+
+    def test_a_short_measured_at_l_defaults_to_l(self):
+        with patch("bot_program.asset_engine.base."
+                   "ETORO_PROVEN_SHORT_LEVERAGE", {"forex": 5}):
+            out = self._ask_sell()
+        self.assertEqual((out["chosen"], out["short_measured"]), (5, 5))
+        self.assertIn("Only 5x is measured for shorts on forex",
+                      out["short_note"])
+        with patch("bot_program.asset_engine.base."
+                   "ETORO_PROVEN_SHORT_LEVERAGE", {"forex": 30}):
+            out = self._ask_sell()
+        self.assertEqual(out["chosen"], 20)
+        self.assertNotIn("short_note", out)
+
+    def test_the_preview_note_says_it(self):
+        """The ticket's leverage note carries the short's words."""
+        from tests.test_take_trade_live import _fake_live_client
+        from bot_program.manual_trade import _preview
+        self.cfg.mode = "live"
+        self.cfg.save(update_fields=["mode"])
+        _components_on()
+        inst = _quote("EURUSD", 1.13, asset_class="forex")
+        ticket = {"choices": [1, 2, 5], "max": 5, "chosen": 1, "why": "",
+                  "error": "", "control": True, "short_measured": 1,
+                  "short_note": "Only 1x is measured for shorts on forex "
+                                "at eToro: a short above it has not been "
+                                "measured, so the ticket defaults to 1x."}
+        fake = _fake_live_client()
+        fake.ticker.return_value = {"lastPrice": "1.13"}
+        with patch(ROUTER, return_value=fake), \
+                patch(TICKET, return_value=ticket):
+            p = _preview(self.user, inst, "SELL")
+        self.assertNotIn("error", p, p)
+        self.assertEqual(p["leverage"]["chosen"], 1)
+        self.assertIn("Only 1x is measured for shorts on forex",
+                      p["leverage"]["note"])
+
 
 def _ticket(chosen=5, choices=(1, 2, 5), control=True):
     return {"choices": list(choices), "max": max(choices), "chosen": chosen,

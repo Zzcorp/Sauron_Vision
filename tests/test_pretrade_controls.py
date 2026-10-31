@@ -196,6 +196,104 @@ class FundingSelectionTests(TestCase):
         bot_pos.refresh_from_db()
         self.assertEqual(bot_pos.status, "OPEN")
 
+    # ── NO FUNDING CLOSE BEFORE A REFUSAL (2026-10-31) ───────────────────
+    # A funding close is irreversible and realises P&L. Every check that
+    # can still refuse the ticket runs BEFORE the first close, against the
+    # pool the selection will leave; a refusal that can only come after
+    # them says which closes were realised, in the answer and the audit.
+
+    def _assert_nothing_closed(self, out):
+        self.assertIn("error", out, out)
+        self.assertEqual(out.get("closed"), [])
+        for pos in (self.big, self.small):
+            pos.refresh_from_db()
+            self.assertEqual(pos.status, "OPEN", pos.symbol)
+        from bot_program.models import AssetBotTrade
+        self.assertFalse(AssetBotTrade.objects.filter(
+            config=self.cfg, symbol="BTCUSD").exists())
+
+    def test_a_size_past_the_risk_cap_closes_nothing(self):
+        from bot_program.manual_trade import execute_take_trade
+        out = execute_take_trade(self.user, _signal(self.inst),
+                                 close_ids=[self.big.id], qty=5)
+        self.assertIn("risks", out.get("error", ""))
+        self._assert_nothing_closed(out)
+
+    def test_a_stop_on_the_wrong_side_closes_nothing(self):
+        from bot_program.manual_trade import execute_take_trade
+        out = execute_take_trade(self.user, _signal(self.inst),
+                                 close_ids=[self.big.id], stop=61000)
+        self.assertIn("BUY stop must sit BELOW", out.get("error", ""))
+        self._assert_nothing_closed(out)
+
+    def test_a_selection_that_does_not_cover_the_gap_closes_nothing(self):
+        """A tiny close that frees less than the gap: the shortfall is
+        known before anything is closed, so nothing is."""
+        from bot_program.manual_trade import execute_take_trade
+        _quote("XRPUSD", 60000)
+        tiny = _manual_position(self.cfg, qty="0.001", symbol="XRPUSD")
+        out = execute_take_trade(self.user, _signal(self.inst),
+                                 close_ids=[tiny.id])
+        self.assertIn("short", out.get("error", ""))
+        tiny.refresh_from_db()
+        self.assertEqual(tiny.status, "OPEN")
+        self._assert_nothing_closed(out)
+
+    def test_a_close_with_no_price_closes_none_of_the_others(self):
+        """Every selected close is priced before the first one runs: one
+        with no mark refuses the whole selection, with nothing closed."""
+        from bot_program.manual_trade import execute_take_trade
+        from market_data.models import LiveQuote
+        LiveQuote.objects.filter(instrument__symbol="SOLUSD").delete()
+        out = execute_take_trade(self.user, _signal(self.inst),
+                                 close_ids=[self.big.id, self.small.id])
+        self.assertIn("Cannot close SOLUSD", out.get("error", ""))
+        self.assertIn("nothing was closed", out["error"])
+        self._assert_nothing_closed(out)
+
+    def test_a_refusal_after_the_closes_says_which_were_realised(self):
+        """What can only refuse after the closes (the book read again under
+        the lock) names the closes already realised — in the answer
+        (`closed`, `closes_realised`, the error's own words) and in an
+        audit row (kind "funded_refusal")."""
+        from unittest.mock import patch
+
+        from bot_program import manual_trade
+        from bot_program.models import AuditLogEntry
+        real = manual_trade._preview
+
+        def preview(*a, **kw):
+            # the lock's preview is the one asked as of the instant before
+            # the closes (gate_now set): it refuses, the others are real
+            if kw.get("gate_now") is None:
+                return real(*a, **kw)
+            return {"error": "the book moved under the lock"}
+
+        with patch.object(manual_trade, "_preview", side_effect=preview):
+            out = manual_trade.execute_take_trade(
+                self.user, _signal(self.inst), close_ids=[self.big.id])
+        self.assertTrue(out["error"].startswith(
+            "the book moved under the lock"), out["error"])
+        self.assertIn(f"Already closed to fund it: ETHUSD #{self.big.id}",
+                      out["error"])
+        self.assertEqual(out["closed"], ["ETHUSD"])
+        (done,) = out["closes_realised"]
+        self.big.refresh_from_db()
+        self.assertEqual(self.big.status, "CLOSED")
+        self.assertEqual((done["trade_id"], done["symbol"], done["side"]),
+                         (self.big.id, "ETHUSD", "BUY"))
+        self.assertAlmostEqual(done["pnl"], float(self.big.pnl), places=4)
+        self.assertAlmostEqual(done["exit_price"],
+                               float(self.big.exit_price), places=6)
+        entry = AuditLogEntry.objects.get(kind="funded_refusal")
+        self.assertEqual(entry.user, self.user)
+        self.assertEqual(entry.data["symbol"], "BTCUSD")
+        self.assertEqual(entry.data["side"], "BUY")
+        self.assertEqual(entry.data["reason"],
+                         "the book moved under the lock")
+        self.assertEqual([c["trade_id"] for c in entry.data["closes"]],
+                         [self.big.id])
+
 
 class StopControlTests(TestCase):
     """The stop is adjustable, and the size follows it."""

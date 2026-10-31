@@ -398,9 +398,11 @@ CHAPTERS = [
              "off never asks for it."),
             ("Real money has to prove itself twice. A family of investments "
              "may trade at eToro only after one of its orders has filled "
-             "and closed there, and {proof_classes} families have; a sell "
-             "needs a proof of its own, which {short_classes} families "
-             "have. A rule, for its part, keeps its full size on real money "
+             "and closed there, and {proof_classes} families have; a bot's "
+             "sell needs a proof of its own, which {short_classes} families "
+             "have, while a sell taken by hand goes on every family eToro "
+             "allows, warned before the PIN and read back at the fill. A "
+             "rule, for its part, keeps its full size on real money "
              "only once the proving ground, or its own graded record, has "
              "said yes."),
         ],
@@ -730,10 +732,12 @@ CHAPTERS = [
                       "the first proof, on the real account: measured on 26 "
                       "September, written into the code on the 27th. By 29 "
                       "September every other family Sauron trades at eToro "
-                      "had earned its own in demo. A sell waits for a proof "
-                      "of its own: shares and currencies earned theirs on 1 "
-                      "October, while the venue refused the index sells sent "
-                      "that evening.")},
+                      "had earned its own in demo. A bot's sell waits for a "
+                      "proof of its own: shares and currencies earned theirs "
+                      "on 1 October, while the venue refused the index sells "
+                      "sent that evening. A sell taken by hand now goes on "
+                      "every family eToro allows, warned before the PIN and "
+                      "read back at the fill.")},
             {"title": "The PIN guards real money",
              "text": ("On the pages, the trading PIN is asked for at these "
                       "gestures that open the way to real money: unticking "
@@ -1613,10 +1617,11 @@ GO_LIVE = [
     {"title": "A proof for every class, at eToro",
      "text": ("Each class earns its proof at eToro, most of them in the "
               "demo account and crypto on the real one: an order filled, "
-              "then closed, and written into the code with its test. A sell "
-              "waits for a proof of its own. The multiplier is not part of "
-              "the proof: with its switch on, the attack mode reads the "
-              "venue's own list.")},
+              "then closed, and written into the code with its test. A "
+              "bot's sell waits for a proof of its own; a sell by hand goes "
+              "without one, read back at the fill. The multiplier is not "
+              "part of the proof: with its switch on, the attack mode reads "
+              "the venue's own list.")},
     {"title": "Real money only with the PIN, in person",
      "text": ("Unticking the demo box is the switch to real money. It asks "
               "for the trading PIN, typed in person on the page and never "
@@ -1683,8 +1688,9 @@ LEXICON = [
     {"term": "Proof",
      "plain": ("An order filled and then closed, whose values are written "
                "into the code with their test. Without one, a class cannot "
-               "send any order to eToro, and a sell needs a proof of its "
-               "own.")},
+               "send any order to eToro, and a bot's sell needs a proof of "
+               "its own; a sell taken by hand goes without one, warned "
+               "before the PIN and read back at the fill.")},
     {"term": "The proving ground",
      "plain": ("The platform's own strict backtest: a rule's history "
                "replayed with the engine's costs and stops and judged on "

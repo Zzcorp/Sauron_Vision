@@ -51,8 +51,9 @@ def _gate(client, symbol="AAPL", side="BUY", icls="stock", **kw):
 class TheSetAsShippedTests(SimpleTestCase):
     """What the tree says: no class was proven on 2026-09-24; since
     2026-09-26 crypto is, at 1x, off the BTC round trip measured on the
-    REAL account (test_proof_crypto); since 2026-09-29 every class is, and
-    no short is."""
+    REAL account (test_proof_crypto); since 2026-09-29 every class is;
+    since 2026-10-01 the stock and forex shorts are (ETORO_SHORT_PROVEN),
+    and the global "short" is not."""
 
     def test_every_class_is_in_the_set_and_the_short_is_not(self):
         """crypto since 2026-09-26 (the real BTC round trip); etf since
@@ -62,8 +63,13 @@ class TheSetAsShippedTests(SimpleTestCase):
         test_proof_forex and test_proof_forex_at_5x); stock, index and
         commodity since 2026-09-29 (the demo AAPL, SPX500 and WHEAT.FUT
         round trips, test_proof_stock, test_proof_index,
-        test_proof_commodity). "short" is NOT: no eToro SELL has ever
-        filled, demo or real, and the gate refuses every one."""
+        test_proof_commodity). The global "short" is NOT (it would lift
+        every class's short at once): the AAPL and EURUSD SELLs filled on
+        the demo segment on 2026-10-01 (test_proof_short_stock,
+        test_proof_short_forex), so ETORO_SHORT_PROVEN names stock and
+        forex. The bots' gate refuses a SELL of any other class; since
+        2026-10-31 the TAKE TRADE lane sends one, warned before the PIN and
+        read back at the fill (tests/test_manual_shorts.py)."""
         from bot_program.asset_engine.base import (ETORO_PROVEN,
                                                    ETORO_PROVEN_LEVERAGE)
         self.assertIsInstance(ETORO_PROVEN, frozenset)
@@ -177,6 +183,43 @@ class TheGateTests(SimpleTestCase):
         with mock.patch(PROVEN, frozenset({"stock", "short"})), \
                 mock.patch(SHORTS, frozenset()):
             self.assertEqual(_gate(t, side="SELL"), ("", ""))
+
+    def test_the_bots_keep_the_short_proof_and_only_the_hand_lane_waives_it(self):
+        """THE HAND-TAKEN SHORT (2026-10-31; the operator: "je veux les
+        short possible entierement svp", shorts fully possible). The bots'
+        call — no keyword, execute_entry and the legacy tick — still
+        refuses a SELL whose class has no short proof pinned: a crypto
+        short names short_crypto. The TAKE TRADE lane's call
+        (waive_short_proof=True) clears step 1 — the SHORT token only: a
+        class whose own fill-and-close is not pinned is refused all the
+        same, and every later step stands."""
+        from bot_program.asset_engine import skips
+        t, _ = _etoro_client([])
+        code, why = _gate(t, symbol="BTCUSD", side="SELL", icls="crypto")
+        self.assertEqual(code, skips.GATE_BLOCKED)
+        self.assertIn("['short_crypto']", why)
+        self.assertEqual(_gate(t, symbol="BTCUSD", side="SELL",
+                               icls="crypto", waive_short_proof=True),
+                         ("", ""))
+        with mock.patch(PROVEN, frozenset({"stock"})):
+            code, why = _gate(t, symbol="BTCUSD", side="SELL",
+                              icls="crypto", waive_short_proof=True)
+        self.assertEqual(code, skips.GATE_BLOCKED)
+        self.assertIn("['crypto']", why)
+        self.assertNotIn("short_crypto", why)
+        # a waived BUY is a BUY: nothing to waive
+        self.assertEqual(_gate(t, symbol="BTCUSD", side="BUY", icls="crypto",
+                               waive_short_proof=True), ("", ""))
+
+    def test_the_take_trade_lane_is_the_only_caller_that_waives(self):
+        """grep: waive_short_proof=True is passed at one call site, the
+        TAKE TRADE lane's (bot_program/manual_trade.py); the asset bots'
+        execute_entry and the legacy tick never pass it."""
+        root = Path(settings.BASE_DIR)
+        hits = [str(p.relative_to(root)) for p in root.joinpath(
+                    "bot_program").rglob("*.py")
+                if "waive_short_proof=True" in p.read_text(encoding="utf-8")]
+        self.assertEqual(hits, ["bot_program/manual_trade.py"])
 
     def test_missing_proofs_names_what_a_lane_still_lacks(self):
         from bot_program.asset_engine.base import missing_proofs

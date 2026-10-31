@@ -4540,3 +4540,56 @@ class ThePlainWordsTests(TestCase):
         small = pw.money_marks([2.5])
         self.assertTrue(small.search("2.50 goes with it"))
         self.assertFalse(small.search("2 sweeps, 3 breaks"))
+
+
+@override_settings(CACHES=LOCMEM)
+class TheShortReadBackTests(_Base):
+    """THE SHORT READ-BACK (2026-10-31, bot_program/short_readback.py): a
+    hand-taken short on a class nobody has measured at eToro is read back
+    from eToro at the fill. A read that found something else flags the
+    row (metadata["short_readback"] ok False): the seat's light says it as
+    an ALARM, and the care's box in the dossier says it too."""
+
+    FLAG = {"ok": False, "state": "mismatch",
+            "facts": ["eToro holds it as a long, not a short"]}
+
+    def _short(self, flag):
+        _quote("BTCUSD", 60000, cls="crypto")
+        cfg = _manual(self.user, cls="crypto")
+        return _real(cfg, "BTCUSD", side="SELL", entry="60000",
+                     stop="60900", target="58200", rule="manual_take",
+                     meta={"manual": True, "short_readback": flag})
+
+    def test_the_light_table_entry(self):
+        from dashboard.horde import light
+        facts = TheTruthTests._calm(None, short_readback=self.FLAG)
+        got = light(facts)
+        (why,) = [w for w in got["why"] if w["code"] == "short_readback"]
+        self.assertEqual(got["tone"], "alarm")
+        self.assertEqual(why["t"], "Read back from eToro after the fill: "
+                                   "eToro holds it as a long, not a short.")
+        clean = {"ok": True, "state": "clean", "facts": []}
+        self.assertNotIn("short_readback",
+                         [w["code"] for w in light(TheTruthTests._calm(
+                             None, short_readback=clean))["why"]])
+
+    def test_the_seat_and_the_care_say_it(self):
+        t = self._short(self.FLAG)
+        seat = _seat(self.board(), f"bot:{t.id}")
+        self.assertIn("short_readback", [w["code"] for w in seat["light"]["why"]])
+        self.assertEqual(seat["light"]["tone"], "alarm")
+        care = self.seat(f"bot:{t.id}")["voice"]["care"]
+        self.assertEqual(care["readback"],
+                         "Read back from eToro after the fill: eToro holds "
+                         "it as a long, not a short.")
+
+    def test_a_clean_read_back_says_nothing(self):
+        t = self._short({"ok": True, "state": "clean", "facts": []})
+        seat = _seat(self.board(), f"bot:{t.id}")
+        self.assertNotIn("short_readback",
+                         [w["code"] for w in seat["light"]["why"]])
+        self.assertIsNone(self.seat(f"bot:{t.id}")["voice"]["care"]["readback"])
+
+    def test_the_script_paints_it_in_the_care_box(self):
+        src = _read("static", "js", "sv-horde.js")
+        self.assertIn("c.readback", src)

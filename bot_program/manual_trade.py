@@ -125,14 +125,31 @@ MANUAL_RULE = "manual_take"
 # the window ends, so the deliberate case is a wait, not a mystery.
 MANUAL_REPEAT_WINDOW_SECONDS = 60
 
-# Instrument.asset_class -> AssetBotConfig.asset_class. Indices are absent
-# on purpose: no execution class exists for them (the tradeable proxy would
-# be a CFD, which has no bot either), and pretending otherwise here would
-# manufacture positions nothing can manage.
+# Instrument.asset_class -> AssetBotConfig.asset_class. An index rides the
+# STOCK pool since 2026-10-31 (the operator: "je veux les short possible
+# entierement svp"): the pool the bots already trade SPX500 from — the
+# eToro stocks box carries "index" (EtoroAccount.is_primary_for), and
+# StockBot manages the row like any other (marks, stops, the care,
+# reconcile). The gate keys on the INSTRUMENT's class ("index"), the
+# notional cap too (CAP_CLASSES); VENUE_QUOTE_UNMEASURED stays refused at
+# the gate's step 1b. A class absent here (a bond) has no lane.
 EXECUTABLE_CLASS = {
-    "stock": "stock", "etf": "stock",
+    "stock": "stock", "etf": "stock", "index": "stock",
     "forex": "forex", "commodity": "commodity", "crypto": "crypto",
 }
+
+#: The instrument classes sized under their OWN notional cap inside the
+#: pool they ride (sizing.MAX_NOTIONAL_FRACTION, the bots' cap_class rule,
+#: E2.5 2026-09-26): an index in the stock pool sizes under 2.0, which
+#: reaches eToro's 1,000 USD index floor, while its risk stays the pool's.
+#: An ETF keeps the stock cap, as it always has on this lane.
+CAP_CLASSES = frozenset({"index"})
+
+
+def _cap_class(inst, cls: str) -> str:
+    """The class this ticket's notional cap is read on (CAP_CLASSES)."""
+    icls = str(getattr(inst, "asset_class", "") or "")
+    return icls if icls in CAP_CLASSES else cls
 
 # Cash a position ties up, per dollar of notional, BY CLASS — the table's
 # shape is OANDA's: forex margined 30:1 at the broker (sizing.py's 4.0
@@ -206,6 +223,14 @@ def _ticket_leverage(bot, cfg, client, symbol: str, side: str, price: float,
     not a choice is an `error` naming the choices: nothing is resized or
     clamped behind their back. Only on an eToro carrier; a manual config
     carrying extras['leverage'] keeps the lane's own refusal at the order.
+
+    A SHORT (2026-10-31): no eToro short above 1x has been measured (the
+    stock and forex SELLs of 2026-10-01 went at 1x), so a SELL with no
+    pick defaults to the highest choice at or under what its class's
+    short has been measured at (base.ETORO_PROVEN_SHORT_LEVERAGE, 1 when
+    absent; `short_measured`), never the highest. The choices are still
+    every multiplier eToro allows, and when they go above it
+    `short_note` says that only that much is measured for shorts.
     """
     from types import SimpleNamespace
 
@@ -253,8 +278,24 @@ def _ticket_leverage(bot, cfg, client, symbol: str, side: str, price: float,
         out["why"] = (passed_over[-1] if passed_over else
                       f"eToro's LIVE list for {symbol} carries nothing above "
                       f"1 today, or it could not be read")
+    default = out["max"]
+    if str(side or "").upper() == "SELL":
+        from bot_program.asset_engine import base as _base
+        try:
+            measured = int((getattr(_base, "ETORO_PROVEN_SHORT_LEVERAGE",
+                                    None) or {}).get(icls, 1) or 1)
+        except (TypeError, ValueError):
+            measured = 1
+        out["short_measured"] = measured
+        default = max(c for c in out["choices"] if c <= max(measured, 1))
+        if out["max"] > measured:
+            from bot_program.short_readback import class_words
+            out["short_note"] = (
+                f"Only {measured}x is measured for shorts on "
+                f"{class_words(icls)} at eToro: a short above it has not "
+                f"been measured, so the ticket defaults to {default}x.")
     if asked in (None, ""):
-        out["chosen"] = out["max"]
+        out["chosen"] = default
         return out
     try:
         pick = int(asked)
@@ -789,7 +830,7 @@ def _venue_min_qty(client, symbol: str, price: float, vpu: float,
 
 
 def judge_qty(cfg, *, asset_class, qty, entry, stop, value_per_unit,
-              available, leverage=None, carrier: str = ""):
+              available, leverage=None, carrier: str = "", cap_class=None):
     """Why this size may not be sent, or None.
 
     The three gates that keep the book solvent and 1R comparable —
@@ -806,7 +847,9 @@ def judge_qty(cfg, *, asset_class, qty, entry, stop, value_per_unit,
                 its full settlement.
 
     — refusing WITH the arithmetic, never silently clamping to something
-    the operator did not ask for.
+    the operator did not ask for. `cap_class` (2026-10-31) is the class
+    the notional cap is read on (_cap_class: an index in the stock pool);
+    None is `asset_class`.
 
     Lifted out of validate_qty_override so the LEVEL override can reach
     them too. A tightened stop buys more units per dollar of risk, so an
@@ -837,7 +880,8 @@ def judge_qty(cfg, *, asset_class, qty, entry, stop, value_per_unit,
             f"the ${capital:,.2f} {asset_class} pool). Size down, or raise "
             f"the pool's capital.")
 
-    notional_cap = capital * max_notional_fraction(cfg, asset_class)
+    notional_cap = capital * max_notional_fraction(cfg,
+                                                   cap_class or asset_class)
     if notional > notional_cap + 1e-9:
         return (
             f"{qty:g} units is ${notional:,.2f} of notional — past the "
@@ -853,7 +897,7 @@ def judge_qty(cfg, *, asset_class, qty, entry, stop, value_per_unit,
 
 def validate_qty_override(cfg, *, asset_class, raw, entry, stop,
                           value_per_unit, available, round_qty,
-                          leverage=None, carrier: str = ""):
+                          leverage=None, carrier: str = "", cap_class=None):
     """The operator's size, re-derived and re-judged server-side.
 
     Returns (qty, None) or (None, reason). Never trust the number in the
@@ -885,7 +929,7 @@ def validate_qty_override(cfg, *, asset_class, raw, entry, stop,
     why = judge_qty(cfg, asset_class=asset_class, qty=qty, entry=entry,
                     stop=stop, value_per_unit=value_per_unit,
                     available=available, leverage=leverage,
-                    carrier=carrier)
+                    carrier=carrier, cap_class=cap_class)
     return (None, why) if why else (qty, None)
 
 
@@ -1520,6 +1564,9 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
     if cls is None:
         return {"error": f"{inst.asset_class} instruments have no execution "
                          f"path — nothing could manage the position"}
+    # The notional cap's class (2026-10-31, _cap_class): an index in the
+    # stock pool sizes under its own cap, the bots' rule.
+    cap_cls = _cap_class(inst, cls)
 
     cfg = manual_config_for(user, cls)
     err = _config_error(cfg)
@@ -1665,7 +1712,8 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
 
     vpu = float(bot._value_per_unit(inst.symbol))
     sizing = size_position(cfg, asset_class=cls, entry=price, stop=stop,
-                           direction=side, value_per_unit=vpu)
+                           direction=side, value_per_unit=vpu,
+                           cap_class=cap_cls)
     qty = bot._round_qty(sizing["qty"], price)
     if qty <= 0:
         return {"error": "Sized to zero — the risk budget does not cover "
@@ -1873,7 +1921,7 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
     if risk_per_unit > 0:
         caps.append(capital * MAX_RISK_FRACTION / risk_per_unit)
     if notional_per_unit > 0:
-        caps.append(capital * max_notional_fraction(cfg, cls)
+        caps.append(capital * max_notional_fraction(cfg, cap_cls)
                     / notional_per_unit)
     if capital_use_per_unit > 0:
         caps.append(pool_free / capital_use_per_unit)
@@ -1972,7 +2020,7 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
     # forex ticket at 1 ties up its full notional (measured), so it reads
     # 1:1 — the table's 30:1 is OANDA's shape.
     lev = _leverage(cls, **ticket_stamp)
-    max_notional = round(capital * max_notional_fraction(cfg, cls), 2)
+    max_notional = round(capital * max_notional_fraction(cfg, cap_cls), 2)
     leverage = {
         "effective": round(lev, 4),
         "adjustable": False,
@@ -2015,8 +2063,22 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
                 f"risk is the stop's, whatever the multiplier. Open for "
                 f"this ticket: {', '.join(f'{c}x' for c in ticket_lev['choices'])}."
                 + (f" Nothing above 1x: {ticket_lev['why']}"
-                   if ticket_lev["max"] == 1 and ticket_lev["why"] else "")),
+                   if ticket_lev["max"] == 1 and ticket_lev["why"] else "")
+                # A SHORT (2026-10-31): the default is what a short has
+                # been measured at, and the note says so.
+                + (f" {ticket_lev['short_note']}"
+                   if ticket_lev.get("short_note") else "")),
         })
+
+    # THE FIRST SHORTS ON A CLASS (2026-10-31; the operator: "je veux les
+    # short possible entierement svp"): a live eToro SELL whose class has
+    # no short round trip pinned is sent — the bots' gate is waived for
+    # this lane alone — and the ticket says so BEFORE the PIN. A warning,
+    # never a refusal; recorded at entry (short_advisory_at_entry), and the
+    # position is read back at the fill (bot_program/short_readback.py).
+    from bot_program.short_readback import ticket_advisory
+    short_advisory = ticket_advisory(_client, inst.asset_class or cls, side,
+                                     live=live)
 
     return {
         "symbol": inst.symbol, "side": side, "qty": qty,
@@ -2050,6 +2112,9 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         "requires_pin": live,
         # Sizing bounds — the override control's whole vocabulary.
         "asset_class": cls,
+        # The class the notional cap is read on (2026-10-31, _cap_class):
+        # `_execute` re-judges a size on it.
+        "cap_class": cap_cls,
         "value_per_unit": vpu,
         "qty_step": step,
         "risk_per_unit": risk_per_unit,
@@ -2117,6 +2182,9 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         # market's first quarter hour or last minutes, the weekend's last
         # hour, a print near. The bots refuse on it; this lane WARNS only.
         "timing_advisory": timing_advisory(inst),
+        # THE FIRST SHORTS ON A CLASS AT eTORO (2026-10-31): the warning
+        # before the PIN; the popup prints it, nothing reads it to gate.
+        "short_advisory": short_advisory,
         # SIZE BY PROOF on the ticket (2026-10-07): the proving ground's
         # verdict on the signal's rule, this class and this side. The bots
         # refuse a FAILED rule's live entry and cut an unproven one; this
@@ -2207,6 +2275,252 @@ def preview_asset_trade(user, inst, side, leverage=None) -> dict:
     if side not in ("BUY", "SELL"):
         return {"error": f"Unknown side {side!r}"}
     return _preview(user, inst, side, leverage=leverage)
+
+
+def _judge_ticket(user, cfg, inst, side, cls, preview, *, live,
+                  qty_override=None, stop_override=None,
+                  target_override=None, available, dup_seen=None,
+                  log_size=True) -> dict:
+    """EVERY CHECK THAT CAN STILL REFUSE A TICKET THE PREVIEW PASSED, in
+    one place (2026-10-31): the pool's sufficiency for an automatic size,
+    the operator's stop, target and levels against the fill, the size (the
+    risk cap, the notional cap, the pool, the broker's minimum), MAX
+    SINGLE POSITION and a holder of the same bet the ticket did not show
+    (`dup_seen`, _unseen_holder_error; the duplicate itself is a warning
+    on this lane). {"error"} or the ticket as it will be sent: bot,
+    ticket_l, ticket_stamp, fill, vpu, stop, target, level_overrides,
+    overridden, qty, dist, risk_dollars, notional, notional_fraction,
+    capital_use, and dup (duplicate_state's answer, 2026-11-01).
+
+    `_execute` asks it TWICE: before any funding close, against the pool
+    the selection will leave (`available` + what the selected closes
+    free) — so a ticket these checks refuse closes nothing — and again
+    under the lock, on the fresh preview's own pool. The operator's
+    numbers are judged the same way both times; only the book can have
+    moved in between. `log_size` False keeps the first, silent pass from
+    logging a hand-sized ticket twice."""
+    from bot_program.asset_engine.base import make_bot
+    from bot_program.asset_engine.risk_levels import paper_fill_price
+    # Only the wholly AUTOMATIC ticket is gated on the preview's own
+    # sufficiency flag, which is computed for the preview's own size at
+    # the preview's own stop. Anything the operator moved is judged
+    # against the pool on its own terms below — a smaller size, or a
+    # wider stop, legitimately fits where the risk-derived default did
+    # not, and refusing here would tell the operator to close positions
+    # to make room for a trade that already fits.
+    #
+    # The message carries the shortfall now because the closes are a
+    # SELECTION: "the funding closes did not cover it" reads as a
+    # platform failure when what actually happened is that the operator
+    # kept a position open, which is a decision they are entitled to
+    # make and entitled to see the price of.
+    if (qty_override is None and stop_override is None
+            and not preview["capital_use"] <= available):
+        short = round(preview["capital_use"] - available, 2)
+        return {"error": (f"This trade ties up "
+                          f"${preview['capital_use']:,.2f} but only "
+                          f"${available:,.2f} is free in the "
+                          f"{cls} pool — ${short:,.2f} short. Close more "
+                          f"of the book, or size down.")}
+
+    bot = make_bot(cfg)
+    # The ticket's stamp, the preview's own pair (2026-09-26): every
+    # pool and MAX SINGLE POSITION judgement below charges it.
+    from bot_program.asset_engine.base import AssetBot
+    from bot_program.engine.broker_router import broker_name_for_symbol
+    # The live ticket's multiplier (2026-10-01): the one the preview
+    # under this lock judged, the operator's pick or the highest.
+    ticket_l = int((preview.get("leverage") or {}).get("chosen") or 1) \
+        if live else 1
+    ticket_stamp = {
+        "leverage": (ticket_l if ticket_l > 1
+                     else AssetBot._leverage_hint_of(cfg.extras)),
+        "carrier": broker_name_for_symbol(user, inst.symbol, cfg)}
+    # Fill FIRST, size from the fill — the bot entry path's ordering.
+    # Sizing off the free raw mark and then filling adversely overshoots
+    # the risk budget by half the round-trip cost every time.
+    #
+    # LIVE works from the raw mark instead: the adverse model prices
+    # only the rehearsal — the broker will report the real fill, and
+    # the row is booked from THAT below, exactly like a bot entry.
+    fill = (float(preview["entry"]) if live
+            else paper_fill_price(cfg, inst.symbol, preview["entry"],
+                                  side))
+    # No `or 1.0` fallback here: ForexBot returns 0.0 as its deliberate
+    # no-fresh-rate sentinel ("size to zero rather than to a wrong
+    # number"), and flattening it to 1.0 would size at the wrong rate
+    # AND write value_per_unit=1.0 into metadata, mis-converting every
+    # later P&L, grading and capital calculation. vpu 0 → dist 0 → the
+    # refusal below, exactly matching the preview path's behaviour.
+    vpu = float(bot._value_per_unit(inst.symbol))
+
+    # ── The operator's levels, re-derived against the real fill ──────
+    # Against the FILL, not the mark the browser was shown: the fill is
+    # where the position opens, so it is the price the stop's side, the
+    # stop's distance and the reward:risk have to be true of. A stop
+    # that clears the mark by a tick and not the fill is a stop that was
+    # never really below the entry.
+    stop = preview["stop"]
+    target = float(preview["target"])
+    level_overrides = []
+    if stop_override is not None:
+        stop, why = validate_stop_override(
+            cfg, asset_class=cls, raw=stop_override, entry=fill, side=side)
+        if why:
+            return {"error": why}
+        level_overrides.append("stop")
+    if target_override is not None:
+        target, why = validate_target_override(
+            raw=target_override, entry=fill, side=side)
+        if why:
+            return {"error": why}
+        level_overrides.append("target")
+    if level_overrides:
+        why = validate_levels(cfg, inst.symbol, entry=fill, stop=stop,
+                              target=target)
+        if why:
+            return {"error": why}
+
+    dist = abs(fill - stop) * vpu
+    overridden = qty_override is not None
+    # The broker's minimum the preview read (_venue_min_qty): the
+    # automatic size re-derived at the fill must not slip under it.
+    vmin = preview.get("venue_min_qty")
+    floor_raised = False
+    if not overridden:
+        qty = bot._round_qty(preview["risk_dollars"] / dist, fill) \
+            if dist > 0 else 0
+        if qty <= 0:
+            return {"error": "Sized to zero at the adjusted fill price"}
+        if vmin and qty < float(vmin) - 1e-9:
+            qty = float(vmin)
+            floor_raised = True
+            why = judge_qty(cfg, asset_class=cls, qty=qty, entry=fill,
+                            stop=stop, value_per_unit=vpu,
+                            available=available,
+                            cap_class=preview.get("cap_class"),
+                            **ticket_stamp)
+            if why:
+                return {"error": why}
+        if stop_override is not None:
+            # A hand-placed stop re-denominates the risk budget, so the
+            # size it derives is not the size the preview was judged
+            # for — a stop half as wide buys twice the position. The
+            # caps have to bite on what is actually sent.
+            why = judge_qty(cfg, asset_class=cls, qty=qty, entry=fill,
+                            stop=stop, value_per_unit=vpu,
+                            available=available,
+                            cap_class=preview.get("cap_class"),
+                            **ticket_stamp)
+            if why:
+                return {"error": why}
+    elif dist <= 0:
+        # Same sentinel as above: no usable rate, so no size is legal —
+        # including one the operator typed.
+        return {"error": "Sized to zero at the adjusted fill price"}
+    else:
+        # Re-derived against the ACTUAL fill and the post-close pool,
+        # not against whatever the preview the browser saw contained.
+        qty, why = validate_qty_override(
+            cfg, asset_class=cls, raw=qty_override, entry=fill, stop=stop,
+            value_per_unit=vpu, available=available,
+            round_qty=bot._round_qty, cap_class=preview.get("cap_class"),
+            **ticket_stamp)
+        if why:
+            return {"error": why}
+        if vmin and qty < float(vmin) - 1e-9:
+            return {"error": (
+                f"The broker's minimum for {inst.symbol} is {vmin:g} "
+                f"units (about {float(vmin) * fill * vpu:,.0f} "
+                f"{cfg.base_currency}); this ticket is {qty:g}. Raise "
+                f"the size to at least {vmin:g} — nothing was sent")}
+        if log_size:
+            logger.info("[take-trade] %s sized %s %s by hand: %s units "
+                        "(automatic size was %s)", user.username, side,
+                        inst.symbol, qty,
+                        bot._round_qty(preview["risk_dollars"] / dist, fill))
+
+    # An operator-sized trade carries the R it actually carries — qty x
+    # the stop distance — not the config's risk budget. Writing the
+    # budget would denominate this trade's realized_r against money that
+    # was never at risk, which is the one thing sizing.py exists to
+    # prevent. A hand-placed STOP resizes the position for the same
+    # reason, so the money figures are re-derived there too; the
+    # preview's own numbers are for its own stop and its own size.
+    # With nothing overridden every one of them is the preview's
+    # verbatim, so an untouched trade is byte-for-byte what it was
+    # before any of this existed.
+    resized = overridden or stop_override is not None or floor_raised
+    if resized:
+        notional = qty * fill * vpu
+        capital = float(preview["capital"])
+        risk_dollars = round(qty * dist, 6)
+        notional_fraction = round(notional / capital, 6) if capital else 0.0
+        capital_use = round(_capital_use(cls, notional,
+                                         **ticket_stamp), 2)
+    else:
+        notional = float(preview["notional"])
+        risk_dollars = preview["risk_dollars"]
+        notional_fraction = (preview["notional"] / preview["capital"]
+                             if preview["capital"] else 0.0)
+        capital_use = preview["capital_use"]
+
+    # MAX SINGLE POSITION from /setup/, on the notional actually being
+    # sent — after any override and at the real fill, because a ceiling
+    # that judges the number the browser was shown is a ceiling on a trade
+    # nobody placed. The preview only bounded the control; this is the
+    # refusal, and it carries the arithmetic so the operator can see
+    # whether to size down or to raise the book's limit.
+    from portfolio.risk_gate import limits_book, single_position_state
+    single = single_position_state(limits_book(), asset_class=cls,
+                                   notional=notional,
+                                   capital_base=float(cfg.capital or 0),
+                                   base_label="manual pool",
+                                   lane_limit_pct=(
+                                       lane_single_position_pct(cfg)),
+                                   **ticket_stamp)
+    if not single["ok"]:
+        return {"error": single["reason"]}
+
+    # The duplicate rule, re-asked at the moment of the order — a bot
+    # may have opened this exact bet between the preview and the click.
+    # A warning on this lane since 2026-10-31 (see _preview), never a
+    # refusal once shown: the answer is handed back for the trade's
+    # duplicate_at_entry. Funding closes need no credit: they liquidate
+    # this config's own tickets, and this config's tickets were never
+    # duplication.
+    from portfolio.risk_gate import duplicate_state
+    dup = duplicate_state(user, symbol=inst.symbol, side=side,
+                          config_id=cfg.id, paper=not live)
+    # ...and taken past it only when the ticket showed every holder
+    # (2026-10-31, review): one that appeared since refuses.
+    _unseen = _unseen_holder_error(dup, dup_seen, side, inst.symbol)
+    if _unseen:
+        return {"error": _unseen + (" — nothing was sent" if live
+                                    else " — nothing was booked")}
+    return {"bot": bot, "ticket_l": ticket_l, "ticket_stamp": ticket_stamp,
+            "fill": fill, "vpu": vpu, "stop": stop, "target": target,
+            "level_overrides": level_overrides, "overridden": overridden,
+            "qty": qty, "dist": dist, "risk_dollars": risk_dollars,
+            "notional": notional, "notional_fraction": notional_fraction,
+            "capital_use": capital_use, "dup": dup}
+
+
+def _realised_closes(rows) -> list:
+    """The funding closes a refused ticket already realised (2026-10-31),
+    each as its row now reads: id, symbol, side, units, exit price, P&L."""
+    out = []
+    for t in rows:
+        try:
+            t.refresh_from_db()
+        except Exception:  # noqa: BLE001 — the row as this request saw it
+            pass
+        out.append({"trade_id": t.id, "symbol": t.symbol, "side": t.side,
+                    "qty": float(t.qty),
+                    "exit_price": (float(t.exit_price)
+                                   if t.exit_price is not None else None),
+                    "pnl": float(t.pnl or 0), "status": t.status})
+    return out
 
 
 def _execute(user, inst, side, close_ids=None, signal=None,
@@ -2389,10 +2703,35 @@ def _execute(user, inst, side, close_ids=None, signal=None,
     _conc_guard = _concentration_guard(user, inst, side, cls, cfg, close_ids)
 
     closed = []
+    # The funding closes this request realised, as rows (2026-10-31): a
+    # refusal after them names each one (_refused below).
+    closed_rows = []
     # The instant the book-level limits are judged as of. None while this
     # request has done nothing irreversible, and the live clock is then the
     # right reading; set at the capture below, where that stops being true.
     gate_now = None
+
+    def _refused(out):
+        """This request's refusal. Once funding closes have run it names
+        the closes realised — `closes_realised` and the error's own words —
+        and leaves an audit row (audit.record_funded_refusal): they are
+        irreversible, and the money moved for a trade that never opened
+        (2026-10-31)."""
+        out = dict(out)
+        out["closed"] = list(closed)
+        if closed_rows:
+            done = _realised_closes(closed_rows)
+            reason = str(out.get("error") or "")
+            out["closes_realised"] = done
+            out["error"] = (
+                reason.rstrip(". ") + ". Already closed to fund it: "
+                + ", ".join(f"{d['symbol']} #{d['trade_id']}" for d in done)
+                + " — those closes are realised and stay closed.")
+            from bot_program.audit import record_funded_refusal
+            record_funded_refusal(user, asset_class=cls, symbol=inst.symbol,
+                                  side=side, reason=reason, closes=done)
+        return out
+
     if close_ids:
         # Nothing may be closed for a trade that was never going to preview
         # clean — full preview first, closes second.
@@ -2400,6 +2739,48 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                            leverage=leverage, ask_reread=False)
         if preview.get("error"):
             return preview
+
+        # NO FUNDING CLOSE BEFORE A REFUSAL (2026-10-31). Every check that
+        # can still refuse this ticket runs NOW, before the first close,
+        # against the pool the operator's selection will leave: the pool's
+        # sufficiency, the operator's levels and size, MAX SINGLE POSITION
+        # and a holder the ticket did not show (_judge_ticket, asked again
+        # under the lock).
+        # Then every selected close is priced. A close is irreversible and
+        # realises P&L; refusing after one cost the operator the position
+        # AND the trade for one click. What can still refuse after them —
+        # the book read again under the lock, a close that fails — says
+        # which closes were realised (_refused).
+        funding = list(AssetBotTrade.objects.filter(
+            id__in=list(close_ids), config=cfg, status="OPEN"))
+        freed = sum(_trade_capital_use(t) for t in funding)
+        early = _judge_ticket(
+            user, cfg, inst, side, cls, preview,
+            live=(getattr(cfg, "mode", "paper") == "live"),
+            qty_override=qty_override, stop_override=stop_override,
+            target_override=target_override,
+            available=round(float(preview["available"]) + freed, 2),
+            dup_seen=dup_seen, log_size=False)
+        if early.get("error"):
+            return {"error": early["error"], "closed": []}
+        priced = []
+        for trade in funding:
+            price, client, _delayed = _mark_for(user, trade.config,
+                                                trade.symbol)
+            if price is None:
+                # A paper row's missing mark may be the clock, not the feed
+                # (2026-09-26): say which.
+                why = "no price mark"
+                if trade.paper:
+                    from bot_program.engine.paper_trader import (
+                        paper_market_shut)
+                    why = paper_market_shut(trade.symbol,
+                                            trade.asset_class) or why
+                return {"error": f"Cannot close {trade.symbol} — {why}; "
+                                 f"nothing was closed and nothing was "
+                                 f"opened",
+                        "closed": []}
+            priced.append((trade, price, client))
 
         # Frozen BEFORE the first liquidation, and handed to the gate that
         # runs after them.
@@ -2422,46 +2803,33 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         from django.utils import timezone as _tz
         gate_now = _tz.now()
 
-        for trade in AssetBotTrade.objects.filter(
-                id__in=list(close_ids), config=cfg, status="OPEN"):
+        for trade, price, client in priced:
             t_bot = make_bot(trade.config)
-            price, client, _delayed = _mark_for(user, trade.config, trade.symbol)
-            if price is None:
-                # A paper row's missing mark may be the clock, not the feed
-                # (2026-09-26): say which.
-                why = "no price mark"
-                if trade.paper:
-                    from bot_program.engine.paper_trader import (
-                        paper_market_shut)
-                    why = paper_market_shut(trade.symbol,
-                                            trade.asset_class) or why
-                return {"error": f"Cannot close {trade.symbol} — {why}; "
-                                 f"nothing was opened",
-                        "closed": closed}
             if t_bot._close_trade(trade, Decimal(str(price)), client,
                                   reason="FUNDING · take-trade"):
                 closed.append(trade.symbol)
+                closed_rows.append(trade)
             else:
-                return {"error": f"Closing {trade.symbol} failed — "
-                                 f"nothing was opened", "closed": closed}
+                return _refused({"error": f"Closing {trade.symbol} failed — "
+                                          f"nothing was opened"})
 
     with transaction.atomic():
         cfg = AssetBotConfig.objects.select_for_update().get(pk=cfg.pk)
         err = _config_error(cfg)
         if err:
-            return {"error": err, "closed": closed}
+            return _refused({"error": err})
         dup = _dup()
         if dup is not None:
-            return {"error": _dup_error(dup), "closed": closed}
+            return _refused({"error": _dup_error(dup)})
 
         # The PIN, re-asked against the mode the LOCK read — the config
         # could have been armed between the cheap guard and here, and a
         # ticket that started paper must not finish live unconfirmed.
         live = (getattr(cfg, "mode", "paper") == "live")
         if live and not pin_ok:
-            return {"error": ("This is a LIVE order — real funds move. "
-                              "Enter your trading PIN to confirm"),
-                    "closed": closed}
+            return _refused({"error": ("This is a LIVE order — real funds "
+                                       "move. Enter your trading PIN to "
+                                       "confirm")})
 
         # Fresh preview under the lock — it sees the post-close book, and
         # no competing execute can insert between this read and the create.
@@ -2474,211 +2842,38 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         if preview.get("error"):
             # The closes already happened — the caller must see them even
             # though the open did not follow.
-            preview.setdefault("closed", closed)
-            return preview
+            return _refused(preview)
 
-        # Only the wholly AUTOMATIC ticket is gated on the preview's own
-        # sufficiency flag, which is computed for the preview's own size at
-        # the preview's own stop. Anything the operator moved is judged
-        # against the pool on its own terms below — a smaller size, or a
-        # wider stop, legitimately fits where the risk-derived default did
-        # not, and refusing here would tell the operator to close positions
-        # to make room for a trade that already fits.
-        #
-        # The message carries the shortfall now because the closes are a
-        # SELECTION: "the funding closes did not cover it" reads as a
-        # platform failure when what actually happened is that the operator
-        # kept a position open, which is a decision they are entitled to
-        # make and entitled to see the price of.
-        if (qty_override is None and stop_override is None
-                and not preview["sufficient"]):
-            short = round(preview["capital_use"] - preview["available"], 2)
-            return {"error": (f"This trade ties up "
-                              f"${preview['capital_use']:,.2f} but only "
-                              f"${preview['available']:,.2f} is free in the "
-                              f"{cls} pool — ${short:,.2f} short. Close more "
-                              f"of the book, or size down."),
-                    "closed": closed}
-
-        bot = make_bot(cfg)
-        # The ticket's stamp, the preview's own pair (2026-09-26): every
-        # pool and MAX SINGLE POSITION judgement below charges it.
-        from bot_program.asset_engine.base import AssetBot
-        from bot_program.engine.broker_router import broker_name_for_symbol
-        # The live ticket's multiplier (2026-10-01): the one the preview
-        # under this lock judged, the operator's pick or the highest.
-        ticket_l = int((preview.get("leverage") or {}).get("chosen") or 1) \
-            if live else 1
-        ticket_stamp = {
-            "leverage": (ticket_l if ticket_l > 1
-                         else AssetBot._leverage_hint_of(cfg.extras)),
-            "carrier": broker_name_for_symbol(user, inst.symbol, cfg)}
-        # Fill FIRST, size from the fill — the bot entry path's ordering.
-        # Sizing off the free raw mark and then filling adversely overshoots
-        # the risk budget by half the round-trip cost every time.
-        #
-        # LIVE works from the raw mark instead: the adverse model prices
-        # only the rehearsal — the broker will report the real fill, and
-        # the row is booked from THAT below, exactly like a bot entry.
-        fill = (float(preview["entry"]) if live
-                else paper_fill_price(cfg, inst.symbol, preview["entry"],
-                                      side))
-        # No `or 1.0` fallback here: ForexBot returns 0.0 as its deliberate
-        # no-fresh-rate sentinel ("size to zero rather than to a wrong
-        # number"), and flattening it to 1.0 would size at the wrong rate
-        # AND write value_per_unit=1.0 into metadata, mis-converting every
-        # later P&L, grading and capital calculation. vpu 0 → dist 0 → the
-        # refusal below, exactly matching the preview path's behaviour.
-        vpu = float(bot._value_per_unit(inst.symbol))
-
-        # ── The operator's levels, re-derived against the real fill ──────
-        # Against the FILL, not the mark the browser was shown: the fill is
-        # where the position opens, so it is the price the stop's side, the
-        # stop's distance and the reward:risk have to be true of. A stop
-        # that clears the mark by a tick and not the fill is a stop that was
-        # never really below the entry.
-        stop = preview["stop"]
-        target = float(preview["target"])
-        level_overrides = []
-        if stop_override is not None:
-            stop, why = validate_stop_override(
-                cfg, asset_class=cls, raw=stop_override, entry=fill, side=side)
-            if why:
-                return {"error": why, "closed": closed}
-            level_overrides.append("stop")
-        if target_override is not None:
-            target, why = validate_target_override(
-                raw=target_override, entry=fill, side=side)
-            if why:
-                return {"error": why, "closed": closed}
-            level_overrides.append("target")
-        if level_overrides:
-            why = validate_levels(cfg, inst.symbol, entry=fill, stop=stop,
-                                  target=target)
-            if why:
-                return {"error": why, "closed": closed}
-
-        dist = abs(fill - stop) * vpu
-        overridden = qty_override is not None
-        # The broker's minimum the preview read (_venue_min_qty): the
-        # automatic size re-derived at the fill must not slip under it.
-        vmin = preview.get("venue_min_qty")
-        floor_raised = False
-        if not overridden:
-            qty = bot._round_qty(preview["risk_dollars"] / dist, fill) \
-                if dist > 0 else 0
-            if qty <= 0:
-                return {"error": "Sized to zero at the adjusted fill price",
-                        "closed": closed}
-            if vmin and qty < float(vmin) - 1e-9:
-                qty = float(vmin)
-                floor_raised = True
-                why = judge_qty(cfg, asset_class=cls, qty=qty, entry=fill,
-                                stop=stop, value_per_unit=vpu,
-                                available=preview["available"],
-                                **ticket_stamp)
-                if why:
-                    return {"error": why, "closed": closed}
-            if stop_override is not None:
-                # A hand-placed stop re-denominates the risk budget, so the
-                # size it derives is not the size the preview was judged
-                # for — a stop half as wide buys twice the position. The
-                # caps have to bite on what is actually sent.
-                why = judge_qty(cfg, asset_class=cls, qty=qty, entry=fill,
-                                stop=stop, value_per_unit=vpu,
-                                available=preview["available"],
-                                **ticket_stamp)
-                if why:
-                    return {"error": why, "closed": closed}
-        elif dist <= 0:
-            # Same sentinel as above: no usable rate, so no size is legal —
-            # including one the operator typed.
-            return {"error": "Sized to zero at the adjusted fill price",
-                    "closed": closed}
-        else:
-            # Re-derived against the ACTUAL fill and the post-close pool,
-            # not against whatever the preview the browser saw contained.
-            qty, why = validate_qty_override(
-                cfg, asset_class=cls, raw=qty_override, entry=fill, stop=stop,
-                value_per_unit=vpu, available=preview["available"],
-                round_qty=bot._round_qty, **ticket_stamp)
-            if why:
-                return {"error": why, "closed": closed}
-            if vmin and qty < float(vmin) - 1e-9:
-                return {"error": (
-                    f"The broker's minimum for {inst.symbol} is {vmin:g} "
-                    f"units (about {float(vmin) * fill * vpu:,.0f} "
-                    f"{cfg.base_currency}); this ticket is {qty:g}. Raise "
-                    f"the size to at least {vmin:g} — nothing was sent"),
-                    "closed": closed}
-            logger.info("[take-trade] %s sized %s %s by hand: %s units "
-                        "(automatic size was %s)", user.username, side,
-                        inst.symbol, qty,
-                        bot._round_qty(preview["risk_dollars"] / dist, fill))
-
-        # An operator-sized trade carries the R it actually carries — qty x
-        # the stop distance — not the config's risk budget. Writing the
-        # budget would denominate this trade's realized_r against money that
-        # was never at risk, which is the one thing sizing.py exists to
-        # prevent. A hand-placed STOP resizes the position for the same
-        # reason, so the money figures are re-derived there too; the
-        # preview's own numbers are for its own stop and its own size.
-        # With nothing overridden every one of them is the preview's
-        # verbatim, so an untouched trade is byte-for-byte what it was
-        # before any of this existed.
-        resized = overridden or stop_override is not None or floor_raised
-        if resized:
-            notional = qty * fill * vpu
-            capital = float(preview["capital"])
-            risk_dollars = round(qty * dist, 6)
-            notional_fraction = round(notional / capital, 6) if capital else 0.0
-            capital_use = round(_capital_use(cls, notional,
-                                             **ticket_stamp), 2)
-        else:
-            notional = float(preview["notional"])
-            risk_dollars = preview["risk_dollars"]
-            notional_fraction = (preview["notional"] / preview["capital"]
-                                 if preview["capital"] else 0.0)
-            capital_use = preview["capital_use"]
-
-        # MAX SINGLE POSITION from /setup/, on the notional actually being
-        # sent — after any override and at the real fill, because a ceiling
-        # that judges the number the browser was shown is a ceiling on a trade
-        # nobody placed. The preview only bounded the control; this is the
-        # refusal, and it carries the arithmetic so the operator can see
-        # whether to size down or to raise the book's limit.
-        from portfolio.risk_gate import limits_book, single_position_state
-        single = single_position_state(limits_book(), asset_class=cls,
-                                       notional=notional,
-                                       capital_base=float(cfg.capital or 0),
-                                       base_label="manual pool",
-                                       lane_limit_pct=(
-                                           lane_single_position_pct(cfg)),
-                                       **ticket_stamp)
-        if not single["ok"]:
-            return {"error": single["reason"], "closed": closed}
-
+        # The same checks the funding closes waited on, on the pool the
+        # lock reads now (_judge_ticket).
+        judged = _judge_ticket(user, cfg, inst, side, cls, preview,
+                               live=live, qty_override=qty_override,
+                               stop_override=stop_override,
+                               target_override=target_override,
+                               available=preview["available"],
+                               dup_seen=dup_seen)
+        if judged.get("error"):
+            return _refused({"error": judged["error"]})
+        bot, ticket_l = judged["bot"], judged["ticket_l"]
+        fill, vpu = judged["fill"], judged["vpu"]
+        stop, target = judged["stop"], judged["target"]
+        level_overrides = judged["level_overrides"]
+        overridden, qty = judged["overridden"], judged["qty"]
+        risk_dollars = judged["risk_dollars"]
+        notional_fraction = judged["notional_fraction"]
+        capital_use = judged["capital_use"]
         # The duplicate rule, re-asked at the moment of the order — a bot
         # may have opened this exact bet between the preview and the click.
         # A warning on this lane since 2026-10-31 (see _preview): recorded
         # on the trade as it stood at the order (duplicate_at_entry), so
-        # a second author taken past is reviewable. Funding closes need no
-        # credit: they liquidate this config's own tickets, and this
-        # config's tickets were never duplication.
-        from portfolio.risk_gate import duplicate_state, theme_state
-        dup = duplicate_state(user, symbol=inst.symbol, side=side,
-                              config_id=cfg.id, paper=not live)
-        # ...and taken past it only when the ticket showed every holder
-        # (2026-10-31, review): one that appeared since refuses.
-        _unseen = _unseen_holder_error(dup, dup_seen, side, inst.symbol)
-        if _unseen:
-            return {"error": _unseen + (" — nothing was sent" if live
-                                        else " — nothing was booked"),
-                    "closed": closed}
+        # a second author taken past is reviewable. A holder the ticket
+        # did not show refused in _judge_ticket.
+        dup = judged["dup"]
         if not dup["ok"]:
             logger.info("[take-trade] %s: %s %s taken past the duplicate "
                         "warning — %s", user.username, side, inst.symbol,
                         dup["reason"])
+        from portfolio.risk_gate import theme_state
         theme_now = theme_state(user, symbol=inst.symbol, side=side,
                                 asset_class=cls, paper=not live)
         rr_now = reward_risk_advisory(side, fill, stop, target)
@@ -2759,6 +2954,13 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             meta["duplicate_at_entry"] = {
                 "ok": False, "reason": str(dup["reason"])[:600],
                 "holders": list(dup.get("holders") or [])[:10]}
+        _sa = preview.get("short_advisory")
+        if isinstance(_sa, dict) and _sa.get("ok") is False:
+            # taken past the first-shorts warning (2026-10-31): recorded,
+            # as the other overridden warnings are
+            meta["short_advisory_at_entry"] = {
+                "ok": False, "class": str(_sa.get("class") or ""),
+                "reason": str(_sa.get("reason") or "")}
         if level_overrides:
             # Only when something moved: an untouched ticket keeps the exact
             # metadata shape it had before the levels became adjustable, so
@@ -2852,6 +3054,7 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         if not live:
             trade = _book_row(fill, qty, True)
 
+    readback = None
     if live:
         # ── The broker leg, OUTSIDE any transaction ─────────────────────
         # Holding the config's row lock across a network call would stall
@@ -2894,8 +3097,13 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             if _unseen:
                 return {"error": _unseen + " — nothing was sent"}
             # THE eToro GATE, the bots' own (AssetBot._etoro_entry_refusal,
-            # 2026-09-24): a class — or a short — with no demo fill-and-
-            # close proof pinned sends nothing from this lane either.
+            # 2026-09-24): a class with no demo fill-and-close proof pinned
+            # sends nothing from this lane either. A SHORT is the
+            # operator's own since 2026-10-31 ("je veux les short possible
+            # entierement svp"): waive_short_proof lets a SELL through on a
+            # class whose short is not pinned — the ticket warned before
+            # the PIN (short_advisory) and the position is read back at
+            # the fill below — and nothing else: every other step stands.
             # Judged on the INSTRUMENT's class (an ETF is "etf", the key
             # the bot lane uses), never the execution class `cls`; a
             # non-eToro carrier passes at the first line. horizon_hours
@@ -2908,7 +3116,7 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                 str(inst.asset_class or cls),
                 leverage_hint=(ticket_l if ticket_l > 1 else
                                AssetBot._leverage_hint_of(cfg.extras)),
-                horizon_hours=None)
+                horizon_hours=None, waive_short_proof=True)
             if _code:
                 return {"error": (f"eToro refusal ({_code}): {_why} — "
                                   f"nothing was sent")}
@@ -2965,6 +3173,19 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                         f"eToro refusal ({_skips.LEVERAGE_REFUSED}): at "
                         f"{ticket_l}x: {_room}{_reread_words(_gate)} — "
                         f"nothing was sent")}
+            # THE SHORT READ-BACK is due (2026-10-31, short_readback): a
+            # SELL eToro carries on a class whose short nobody measured.
+            # Asked of the client that sends, after every refusal above.
+            try:
+                from bot_program import short_readback
+                readback_due = short_readback.unmeasured(
+                    client, str(inst.asset_class or cls), side)
+            except Exception as e:  # noqa: BLE001 — unsure is due
+                logger.warning("[take-trade] %s: the short proof set was "
+                               "unread (%s); the fill is read back",
+                               inst.symbol, e)
+                readback_due = str(side).upper() == "SELL"
+            qty_sent = float(qty)
             client_order_id = make_client_order_id(
                 cfg.id, inst.symbol,
                 signal_id=(str(signal.id) if signal is not None
@@ -3176,6 +3397,33 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             etoro_cells.refresh_for_client(user, client, why="take trade")
             if fill_qty > 0:
                 qty = fill_qty
+            # THE SHORT READ-BACK (2026-10-31, bot_program/short_readback):
+            # the position eToro holds, read back now against the side,
+            # units, multiplier and position the order was sent with —
+            # off the Filled orders:lookup body market_order has just
+            # polled (fill_reading), so no second GET spends the quota;
+            # with no such body in hand, one orders:lookup by the order
+            # id. Clean: recorded as a measured short. Anything else: the
+            # row is flagged and Morgul sounds at once; a read eToro did
+            # not answer is read once more on the next tick first. A
+            # WORKING order is read back when it fills.
+            if readback_due:
+                try:
+                    if working:
+                        readback = short_readback.mark_pending(
+                            trade, icls=str(inst.asset_class or cls),
+                            sent_units=qty_sent, sent_leverage=ticket_l)
+                    else:
+                        held = short_readback.fill_reading(res)
+                        readback = short_readback.after_fill(
+                            trade, client, icls=str(inst.asset_class or cls),
+                            sent_units=qty_sent, sent_leverage=ticket_l,
+                            position_id=res.get("positionId"),
+                            **({"reading": held} if held is not None
+                               else {}))
+                except Exception as e:  # noqa: BLE001 — never undoes a fill
+                    logger.error("[take-trade] %s #%s: the short read-back "
+                                 "failed: %s", inst.symbol, trade.id, e)
         finally:
             cache.delete(claim)
 
@@ -3222,6 +3470,16 @@ def _execute(user, inst, side, close_ids=None, signal=None,
            "managed": preview.get("managed", False),
            "venue": "live" if live else "paper",
            "closed": closed}
+    if readback is not None:
+        # The read-back's verdict (2026-10-31), and in words when eToro
+        # holds something else: the confirmation says it where the
+        # operator is looking.
+        out["short_readback"] = {k: readback.get(k)
+                                 for k in ("ok", "state", "facts")}
+        from bot_program.short_readback import ticket_note
+        note = ticket_note(readback)
+        if note:
+            out["readback_note"] = note
     if (trade.metadata or {}).get("entry_working"):
         # Nothing filled: the broker is holding the order (a market order
         # outside regular hours queues for the next open). Saying "opened"

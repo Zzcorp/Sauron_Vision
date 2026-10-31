@@ -187,6 +187,25 @@ def record_trade_close(user, *, trade) -> None:
         logger.warning("audit record_trade_close failed: %s", e)
 
 
+def record_funded_refusal(user, *, asset_class: str, symbol: str, side: str,
+                          reason: str, closes: list) -> None:
+    """THE FUNDING CLOSES OF A REFUSED TICKET (2026-10-31): a TAKE TRADE
+    ticket refused AFTER its funding closes ran (manual_trade._execute
+    runs every check it can before the first close; what is left can only
+    be judged after them). The closes are irreversible and realised P&L:
+    the row names each one — id, symbol, side, units, exit price, P&L —
+    beside the refusal, so a review can see the money moved for a trade
+    that never opened. Kind "funded_refusal" (a data kind, never
+    KIND_CHOICES: a choices change is a migration)."""
+    try:
+        record_event("funded_refusal", {
+            "asset_class": asset_class, "symbol": symbol, "side": side,
+            "reason": str(reason or "")[:500], "closes": list(closes or []),
+        }, user=user)
+    except Exception as e:
+        logger.warning("audit record_funded_refusal failed: %s", e)
+
+
 def record_gate_reject(user, *, asset_class: str, symbol: str, side: str,
                         right: str, reason: str,
                         exposure_before: dict, exposure_after: dict,

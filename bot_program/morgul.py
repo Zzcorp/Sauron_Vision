@@ -45,6 +45,15 @@ WHAT A GUARD IS
     G12 Stop overshoot         critical          a real-money close of the
                                                  last 24 h past -1.2R: a stop
                                                  that did not hold
+    G13 Short read-back        critical          an open hand-taken eToro
+                                                 short on a class nobody has
+                                                 measured whose read-back at
+                                                 the fill found something
+                                                 else (bot_program/
+                                                 short_readback.py), said AT
+                                                 ONCE by the lane (say_now);
+                                                 a read eToro did not answer
+                                                 only after a second one
 
   THE WORLDS. A row is paper (the simulator), demo (paper=False routed to
   eToro's virtual segment, metadata broker_env "paper") or live (real
@@ -210,7 +219,7 @@ BOOKED_STATUSES = ("OPEN", "CLOSE_PENDING", "CLOSED")
 #: is a natural remedy there. Not G1 or G4 (a past booking), G3 (a close
 #: already in flight, the retry drain's), G12 (already closed), nor the
 #: account-wide guards.
-CLOSE_GUARDS = ("no_stop", "proofs")
+CLOSE_GUARDS = ("no_stop", "proofs", "short_readback")
 _TRADE_SUBJECT = re.compile(r"^trade:(\d+)(?::|$)")
 #: One run at a time: a worker back from an outage drains the queued runs
 #: two at a time, and both would read the same memory before either wrote.
@@ -817,6 +826,14 @@ def check_proofs(ctx, g) -> list:
             continue
         cls, _exchange, _pk = ctx.instrument(trade.symbol, trade.asset_class)
         missing = base.missing_proofs(cls, trade.side)
+        if _hand_taken(trade):
+            # THE HAND-TAKEN SHORT (2026-10-31; the operator: "je veux les
+            # short possible entierement svp"): the TAKE TRADE lane sends a
+            # short on a class with no short proof, warned before the PIN
+            # and read back at the fill. It is never "past its proof"; a
+            # read-back that found something else is G13's. A class proof
+            # and the ceiling still bind it here.
+            missing = [m for m in missing if m != f"short_{cls}"]
         facts = []
         if missing:
             facts.append("No fill-and-close proof pinned for: " + ", ".join(
@@ -836,6 +853,76 @@ def check_proofs(ctx, g) -> list:
                 user=trade.config.user, configs=[trade.config_id],
                 # an order still waiting: no "Close position" (2026-10-24)
                 closable=not meta.get("entry_working")))
+    return out
+
+
+def _hand_taken(trade) -> bool:
+    """A row of the TAKE TRADE lane (manual_trade.MANUAL_RULE, or its
+    metadata's "manual")."""
+    return (str(getattr(trade, "rule_name", "") or "") == "manual_take"
+            or _meta(trade).get("manual") is True)
+
+
+# ── G13: a hand-taken short eToro holds otherwise (2026-10-31) ───────────
+
+#: G13's title by what the read-back found (2026-10-31). The alarm chat
+#: hears the title and the label alone (alarm._finding_alarm), so each
+#: says what was found: a read eToro did not answer is never "eToro holds
+#: a short other than the one sent". The guard's own title is the first.
+READBACK_TITLES = {
+    "mismatch": "Morgul — eToro holds a short other than the one sent",
+    "missing": "Morgul — eToro shows no position for a short just sent",
+    "unread": "Morgul — a short just sent could not be read back from "
+              "eToro",
+}
+
+
+def short_readback_finding(trade, guard=None):
+    """G13's finding about one row whose read-back at the fill found
+    something else (metadata["short_readback"], bot_program/
+    short_readback.py): its facts as the read-back said them, then what
+    to do, under the title of what it found (READBACK_TITLES). Never
+    brakes (the position is the operator's own). Offers the row's "Close
+    position" when eToro is known to hold it otherwise, or not at all;
+    never for a read eToro did not answer (2026-10-31: nothing is known
+    to be wrong with that short). A read-back still waiting for its
+    second read (ok None) is said in the words of no read again."""
+    from bot_program import short_readback as rbk
+    g = guard or GUARD["short_readback"]
+    rb = _meta(trade).get("short_readback")
+    rb = rb if isinstance(rb, dict) else {}
+    state = str(rb.get("state") or "")
+    facts = [str(f) for f in rb.get("facts") or [] if str(f).strip()]
+    if rb.get("ok") is None and state == rbk.UNREAD:
+        facts = [rbk.late_words()]
+    facts = facts or ["eToro holds something else than was sent"]
+    facts.append("Check the position at eToro: nothing was closed or "
+                 "changed")
+    return g.finding(f"trade:{trade.pk}", label=_trade_label(trade),
+                     facts=facts, user=trade.config.user,
+                     title=READBACK_TITLES.get(state, g.title),
+                     closable=state != rbk.UNREAD)
+
+
+def check_short_readback(ctx, g) -> list:
+    """An OPEN real row (CLOSE_PENDING included) whose short read-back is
+    flagged (ok False), or still waits for the second read of an
+    unanswered one READ_AGAIN_GRACE_S after the first (2026-10-31: a lane
+    that no longer ticks never reads it again). Standing while the row is
+    open; "back to normal" once it closes or a later read is clean. Said
+    at once by the lane itself (say_now): this beat keeps it said every
+    three hours. No broker is asked."""
+    from bot_program import short_readback as rbk
+    from bot_program.asset_models import AssetBotTrade
+    rows = (AssetBotTrade.objects.filter(paper=False,
+                                         status__in=OPEN_STATUSES)
+            .select_related("config", "config__user").order_by("pk"))
+    out = []
+    for trade in rows:
+        rb = _meta(trade).get("short_readback")
+        if isinstance(rb, dict) and (rb.get("ok") is False
+                                     or rbk.read_again_late(rb, ctx.now)):
+            out.append(short_readback_finding(trade, g))
     return out
 
 
@@ -1562,6 +1649,11 @@ GUARDS = [
     # is to find out why its stop did not hold.
     Guard("stop_overshoot", "Stop overshoot", "critical",
           "Morgul — a real-money stop did not hold", check_stop_overshoot),
+    # Never a brake (2026-10-31): the short is the operator's own, taken
+    # by hand with the PIN; what is left to do is to look at eToro. Each
+    # finding carries the title of what was found (READBACK_TITLES).
+    Guard("short_readback", "Short read-back", "critical",
+          READBACK_TITLES["mismatch"], check_short_readback),
 ]
 GUARD = {g.key: g for g in GUARDS}
 
@@ -2245,6 +2337,61 @@ def cycle(*, now=None, send=False, guards=None) -> Report:
     finally:
         if send:
             _unlock()
+
+
+def say_now(finding, *, now=None) -> dict:
+    """ONE critical finding said AT ONCE, outside the beat (2026-10-31):
+    the short read-back's alarm (bot_program/short_readback.py), which
+    cannot wait five minutes for the beat. To the staff chats (recipients,
+    the Eye's own _send, the beat's own words: build_messages) and to the
+    alarm chat (alarm.relay_now, on the alarm bot's own memory), whatever
+    the beat's switch: the switch gates the beat, and a real-money short
+    eToro holds otherwise is said by the lane that sent it. Its memory is
+    written under the run lock when a chat took it, so the beat's next
+    run does not say it again for REMIND_S; with the lock held by a run,
+    the beat may say it once more — twice is better than never. Writes
+    the cache only. Never raises: {"delivered", "alarm"}."""
+    from django.utils import timezone
+    now = now or timezone.now()
+    out = {"delivered": 0, "alarm": {}}
+    try:
+        replies = build_messages([finding], {}, now)
+        people = recipients()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[morgul] %s could not be said at once (%s)",
+                       getattr(finding, "key", "?"), type(e).__name__)
+        replies, people = [], []
+    for user in people:
+        for reply in replies:
+            try:
+                if eye._send(user, reply):
+                    out["delivered"] += 1
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[morgul] a message could not be sent (%s)",
+                               type(e).__name__)
+    if out["delivered"] and _lock():
+        try:
+            stamp = now.isoformat()
+            state = _load(STATE_KEY)
+            entry = dict(state.get(finding.key) or {})
+            entry.setdefault("first", stamp)
+            entry.update(sent=stamp, guard=finding.guard.key,
+                         name=finding.guard.name, label=finding.label,
+                         subject=finding.subject, severity=finding.severity,
+                         event=finding.event)
+            state[finding.key] = entry
+            _store(STATE_KEY, state)
+        finally:
+            _unlock()
+    try:
+        from bot_program import alarm
+        out["alarm"] = alarm.relay_now([finding], now=now)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[morgul] the alarm chat was not told of %s (%s)",
+                       getattr(finding, "key", "?"), type(e).__name__)
+    logger.warning("[morgul] said at once: %s (%s), delivered %s",
+                   finding.title, finding.label, out["delivered"])
+    return out
 
 
 def run_guards(*, now=None) -> dict:

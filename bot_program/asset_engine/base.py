@@ -477,8 +477,13 @@ LEVERAGE_SWITCH_KEY = "etoro_leverage_live"
 #: 500s — AAPL 4 units (order 384798829, settlementType REAL, a 1.00 fee),
 #: SPX500 1 unit (order 384769149, CFD), WHEATUSD as WHEAT.FUT 2 units
 #: (order 384769151, CFD). At 1x only: ETORO_PROVEN_LEVERAGE has no entry
-#: for them. "short" stays OUT: no eToro SELL has ever been measured, so a
-#: SELL of any class is still refused. "index" lifts the USD-quoted
+#: for them. "short" stays OUT: it would lift every class's short at once,
+#: and a SELL clears the gate by its class instead (ETORO_SHORT_PROVEN
+#: below: the stock and forex SELLs filled on the demo segment on
+#: 2026-10-01). Since 2026-10-31 the TAKE TRADE lane alone sends a SELL on
+#: a class with no short proof, warned before the PIN and read back at the
+#: fill (_etoro_entry_refusal's waive_short_proof, bot_program/
+#: short_readback.py); the bots keep this gate. "index" lifts the USD-quoted
 #: indices (SPX500, NSDQ100, DJ30); VENUE_QUOTE_UNMEASURED stays refused
 #: whatever this set holds. "commodity" lifts the gate only: the router
 #: sends a commodity to eToro only with eToro's commodities box ticked.
@@ -501,7 +506,10 @@ ETORO_PROVEN = frozenset({"commodity", "crypto", "etf", "forex", "index",
 #: 1x filled at 21:17 UTC, order 385673393, position 3608631633, CFD, no
 #: fee, the legs held as sent, closed by position id. SPX500 and NSDQ100
 #: were rejected 749 again at 1x and 2x at 21:17: "index" stays out until
-#: its own SELL fills.
+#: its own SELL fills (both rejections fell inside the US index futures'
+#: 17:00-18:00 New York break, entry_timing.INDEX_BREAK_NY, so they prove
+#: nothing either way). THE BOTS read this set as a gate; the TAKE TRADE
+#: lane reads it for its warning and its read-back only (2026-10-31).
 ETORO_SHORT_PROVEN = frozenset({"forex", "stock"})
 
 
@@ -541,11 +549,18 @@ def missing_proofs(icls, side) -> list:
 #: every other class still reads 1.
 ETORO_PROVEN_LEVERAGE = {"forex": 5}
 
-#: THE MULTIPLIER EACH CLASS'S SHORT HAS BEEN PROVEN AT (2026-10-02): the
-#: leverage proofs above were measured on LONGS, and the short proofs
-#: (ETORO_SHORT_PROVEN) at 1x — so the attack mode's chooser picks 1 for a
-#: short until a short round trip at L is pinned here, class -> L. Binds the
-#: chooser alone, exactly as ETORO_PROVEN_LEVERAGE does.
+#: THE MULTIPLIER EACH CLASS'S SHORT HAS BEEN MEASURED AT (2026-10-02):
+#: the leverage proofs above were measured on LONGS, and the short proofs
+#: (ETORO_SHORT_PROVEN) at 1x, so no short above 1x has been measured;
+#: class -> L, an entry only in the commit that pins its short round trip
+#: at L. It bound the attack mode's chooser until 2026-10-05, when the
+#: operator lifted that bound ("pas de limite à l'attaque",
+#: tests/test_attack_mode.py: a short's pick follows the LIVE list). Since
+#: 2026-10-31 its one reader is the TAKE TRADE ticket: a SELL defaults to
+#: the highest open multiplier at or under this (1 when absent), and the
+#: selector still offers every multiplier eToro allows, saying that only
+#: this much is measured for shorts (manual_trade._ticket_leverage). Read
+#: at CALL time.
 ETORO_PROVEN_SHORT_LEVERAGE = {}
 
 #: THE ATTACK MODE (2026-09-26; the operator: "je veux surtout que ce mode
@@ -1114,6 +1129,23 @@ class AssetBot(ABC):
                 if (trade.metadata or {}).get("entry_working"):
                     self._poll_working_entry(trade, client)
                     continue
+
+                # THE SHORT READ-BACK, READ ONCE MORE (2026-10-31, bot_
+                # program/short_readback.py): a hand-taken short whose
+                # read-back at the fill eToro did not answer (a 5xx, a
+                # 429) is read again here, ONCE, by its order id. Clean:
+                # the row is clean and nothing sounds. Unanswered again,
+                # or another position: the row is flagged and Morgul
+                # sounds. It reads and records; it never closes or sends.
+                if not trade.paper:
+                    try:
+                        from bot_program import short_readback
+                        if short_readback.read_again_due(trade):
+                            short_readback.after_fill(trade, client)
+                    except Exception as e:  # noqa: BLE001 — never stops a tick
+                        logger.warning("[%s_bot] %s: the short read-back "
+                                       "was not read again: %s",
+                                       self.asset_class, trade.symbol, e)
 
                 # A PAPER POSITION WAITS WHOLE WHILE ITS MARKET IS SHUT
                 # (2026-09-26) — and for the settling quarter hour after it
@@ -2319,6 +2351,22 @@ class AssetBot(ABC):
             # no fill message names the rewritten stop: the staff alert is
             # the one message (2026-09-27)
             self._alert_stop_rewrite(trade, STOP_ALERT_UNTOLD)
+        # THE SHORT READ-BACK (2026-10-31, bot_program/short_readback.py): a
+        # hand-taken short on a class nobody measured at eToro, booked
+        # WORKING with its read-back pending, is read back now, off this
+        # fill's own reading (`venue`, one orders:lookup) — no second GET;
+        # with no reading in hand, one order_status GET by the order id.
+        if is_manual and ((meta.get("short_readback") or {}).get("state")
+                          == "pending"):
+            try:
+                from bot_program import short_readback
+                short_readback.after_fill(
+                    trade, client,
+                    **({"reading": venue} if isinstance(venue, dict)
+                       else {}))
+            except Exception as e:  # noqa: BLE001 — never stops a fill
+                logger.warning("[%s_bot] %s: the short read-back failed: %s",
+                               self.asset_class, trade.symbol, e)
         # THE ORCS (bot_program/orcs, O1): the position is born an Orc once
         # the fill is booked. The Orc tables and the row's stamp only.
         try:
@@ -6896,7 +6944,8 @@ class AssetBot(ABC):
     @classmethod
     def _etoro_entry_refusal(cls, client, symbol: str, side: str, qty: float,
                              price: float, icls: str, now_utc=None,
-                             leverage_hint=None, horizon_hours=None) -> tuple:
+                             leverage_hint=None, horizon_hours=None,
+                             waive_short_proof: bool = False) -> tuple:
         """THE eToro refusals, in order, for EVERY lane that reaches
         market_order: execute_entry, manual_trade's TAKE TRADE and the
         legacy tick (engine/runner.py). ("", "") when nothing refuses,
@@ -6922,7 +6971,17 @@ class AssetBot(ABC):
         quote currency is unread (etoro_client.VENUE_QUOTE_UNMEASURED),
         whatever ETORO_PROVEN holds. `icls` is the INSTRUMENT's class
         (_instrument_class; the lane passes inst.asset_class): an ETF in
-        a stock config is gated on "etf"."""
+        a stock config is gated on "etf".
+
+        `waive_short_proof` (2026-10-31; the operator: "je veux les short
+        possible entierement svp") is the TAKE TRADE lane's alone
+        (manual_trade._execute; tests/test_etoro_proofs.py greps for the
+        one call site): a SELL whose class has no short proof pinned
+        (short_<class>) clears step 1 there — the ticket warned before the
+        PIN, and the position is read back at the fill
+        (bot_program/short_readback.py). Only that token: a class whose
+        own fill-and-close is not pinned is refused all the same, and
+        every later step stands. The bots never pass it."""
         from bot_program.asset_engine import skips
         from bot_program.engine.capabilities import adapter_key as _ak
         # step 0 — THE COMMODITY CARRIER (2026-09-26). CommodityBot stopped
@@ -6944,6 +7003,8 @@ class AssetBot(ABC):
         # off the module: a test states a token by patching that name. A
         # SELL also needs its class's short proof (ETORO_SHORT_PROVEN).
         _missing = missing_proofs(icls, side)
+        if waive_short_proof:
+            _missing = [m for m in _missing if m != f"short_{icls}"]
         if _missing:
             # verdict first: skips.record keeps 200 characters
             return skips.GATE_BLOCKED, (

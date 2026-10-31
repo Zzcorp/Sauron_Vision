@@ -203,6 +203,17 @@ L_TICK = "Its bot last ticked {age} ago."
 # that holds it (the Metrics "Last tick" line says the same, 2026-10-16).
 L_TICK_HAND = "The engine last ticked the lane that holds your ticket {age} ago."
 L_CALM = "Held; nothing flagged."
+
+
+def short_readback_words(record) -> str:
+    """THE SHORT READ-BACK's sentence for a flagged hand-taken short
+    (2026-10-31, bot_program/short_readback.words: "Read back from eToro
+    after the fill: ..."; "Not read back from eToro after the fill: ..."
+    when eToro answered neither read), or "" for none, a pending one, one
+    still waiting for its second read (2026-10-31) or a clean one. No
+    money figure and no id rides it. Imported at call time."""
+    from bot_program.short_readback import words
+    return words(record)
 INERT_WORDS = {
     "broker_protected": "the stop rests at the broker, which no client can "
                         "modify yet",
@@ -939,6 +950,11 @@ def light(facts) -> dict:
         add("reviewer_exit", "alarm", L_REVIEWER.format(verdict="EXIT"))
     if real and facts.get("holder_by") == "nothing" and not facts.get("protected"):
         add("unheld_real", "alarm", L_UNHELD_REAL.format(world=real_word))
+    # THE SHORT READ-BACK (2026-10-31, bot_program/short_readback.py): a
+    # hand-taken short eToro holds otherwise than it was sent.
+    readback = short_readback_words(facts.get("short_readback"))
+    if readback:
+        add("short_readback", "alarm", readback)
     # ORDER
     if facts.get("working"):
         add("working", "order", L_WORKING)
@@ -1299,6 +1315,8 @@ def _bot_seat(book, trade, up, row, sides_book, now):
         "time_stop_left_s": tleft, "asset_class": cls, "vpu_stamped": stamped,
         "tick_overdue": tick_overdue, "tick_age_t": tick_age_t, "legacy": False,
         "hand": hand,
+        # the read-back of a hand-taken short at its fill (2026-10-31)
+        "short_readback": meta.get("short_readback"),
     }
     lt = light(lf)
 
@@ -3042,7 +3060,11 @@ def _bot_detail(seat, trade, up, quote, row, hand, signal, actions, notices,
                  "event": (f"Event ahead: {care['event'].get('title')} at "
                            f"{_hhmm(care['event'].get('at'))} UTC"
                            if isinstance(care.get("event"), dict) else None),
-                 "none_t": "" if care else CARE_NONE},
+                 "none_t": "" if care else CARE_NONE,
+                 # THE SHORT READ-BACK (2026-10-31): what eToro was found
+                 # holding at the fill, when it is not what was sent
+                 "readback": short_readback_words(
+                     meta.get("short_readback")) or None},
         "notes": {"stored": False, "t": NOTES_NONE},
         "orc": seat.get("orc"),
         "orc_block": _orc_block(seat),
@@ -3173,7 +3195,8 @@ def _legacy_detail(seat, p, reviews, book, peers, chips, now):
                                     seat["instrument_class"], sym),
         "thesis": {"word": None, "t": THESIS_LEGACY},
         "care": {"words": seat["holder"]["words"], "suffix": "", "soft_t": None,
-                 "venue_t": None, "refusal": "", "event": None, "none_t": ""},
+                 "venue_t": None, "refusal": "", "event": None, "none_t": "",
+                 "readback": None},
         "notes": {"stored": False, "t": NOTES_NONE},
         "orc": None, "orc_block": _orc_block(seat),
     }

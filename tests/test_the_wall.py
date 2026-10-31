@@ -911,6 +911,16 @@ class WallSafeguardsSectionTests(TestCase):
         self.assertIn(f"none of the {self.wall['money_switches']} switches", block)
         self.assertIn(f"&mdash; {self.wall['proof_classes']} have &mdash;", block)
         self.assertIn(f"{self.wall['short_classes']} have one", block)
+        # 2026-10-31: the BOTS' sell needs its own proof; a sell by hand
+        # goes without one, warned before the PIN and read back at the fill
+        self.assertIn("a bot's sell needs a proof of its own: "
+                      f"{self.wall['short_classes']} have one. A sell taken "
+                      "by hand goes on every class eToro allows, warned "
+                      "before the PIN and read back at the fill.", block)
+        self.assertIn("written into the code with its test; a bot's sell "
+                      "needs its own, a sell by hand is read back at the "
+                      "fill.", block)
+        self.assertNotIn("and a sell needs a proof of its own", block)
         # The spine's closing paragraph carries the count since 2026-10-08.
         spine = self._block('id="spine"')
         self.assertIn(f"the {self.wall['money_switches']} switches the platform "

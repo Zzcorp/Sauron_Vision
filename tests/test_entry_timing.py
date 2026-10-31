@@ -95,9 +95,11 @@ class TheRolloverTests(SimpleTestCase):
                         self.assertEqual(v["code"], et.ROLLOVER)
                         self.assertIn("rolls over at 17:00 New York", v["why"])
                         # a commodity clears when CME reopens from its
-                        # 16:00-17:00 CT break (18:00 New York) and settles
+                        # 16:00-17:00 CT break (18:00 New York) and settles;
+                        # since 2026-10-31 a US index too: its futures
+                        # pause 17:00-18:00 New York (INDEX_BREAK_NY)
                         from datetime import time as dtime
-                        want = (dtime(18, 15) if cls == "commodity"
+                        want = (dtime(18, 15) if cls in ("commodity", "index")
                                 else et.ROLLOVER_NY[1])
                         self.assertEqual(v["until"].astimezone(NY).time(),
                                          want)
@@ -293,6 +295,98 @@ class TheCloseGuardTests(SimpleTestCase):
             self.assertTrue(et.verdict("EURUSD", "forex", exchange="FOREX",
                                        now=_ny(2026, 1, 15, 16, 0),
                                        events=[])["ok"])
+
+
+class TheIndexBreakTests(SimpleTestCase):
+    """THE US INDEX BREAK (2026-10-31). CME's equity index futures pause
+    17:00-18:00 New York every weekday, and eToro's US index CFDs follow
+    them: the demo index SELLs of 2026-10-01 (21:01 and 21:17 UTC, New
+    York summer time) were refused inside it, while the rollover window
+    (16:50-17:10) let 17:10-18:00 through. A US index waits from 17:00
+    until the reopening has settled (18:15 New York), DST following; the
+    bots refuse (BAD_TIMING), the ticket warns."""
+
+    def test_the_window_and_its_symbols(self):
+        from datetime import time as dtime
+        self.assertEqual(et.INDEX_BREAK_NY, (dtime(17, 0), dtime(18, 0)))
+        self.assertEqual(et.US_INDEX_FUTURES, frozenset({
+            "SPX500", "NSDQ100", "DJ30", "RUSSELL2000"}))
+        self.assertEqual(et.INDEX_BREAK, "INDEX_BREAK")
+
+    def test_a_us_index_waits_through_the_break_winter_and_summer(self):
+        from datetime import time as dtime
+        with _on():
+            for day in (WINTER_TUE, SUMMER_TUE):
+                for sym in sorted(et.US_INDEX_FUTURES):
+                    with self.subTest(day=day, sym=sym):
+                        v = et.verdict(sym, "index", now=_ny(*day, 17, 30),
+                                       events=[])
+                        self.assertFalse(v["ok"])
+                        self.assertEqual(v["code"], et.INDEX_BREAK)
+                        self.assertEqual(v["until"].astimezone(NY).time(),
+                                         dtime(18, 15))
+                        self.assertTrue(v["why"].startswith(
+                            "US index futures pause 17:00-18:00 New York — "
+                            "new entries resume "), v["why"])
+                        self.assertIn("UTC", v["why"][:88],
+                                      "the resume hour is in the 88 "
+                                      "characters why_no_trade prints")
+                        self.assertEqual(et.skip_code(v), "bad_timing")
+            # in UTC: 21:00-22:00 in summer, 22:00-23:00 in winter
+            summer = datetime(2026, 7, 14, 21, 30, tzinfo=UTC)
+            winter = datetime(2026, 1, 13, 22, 30, tzinfo=UTC)
+            for at in (summer, winter):
+                self.assertEqual(et.verdict("SPX500", "index", now=at,
+                                            events=[])["code"],
+                                 et.INDEX_BREAK)
+            self.assertNotEqual(et.verdict(
+                "SPX500", "index", now=datetime(2026, 1, 13, 21, 30,
+                                                tzinfo=UTC),
+                events=[])["code"], et.INDEX_BREAK,
+                "16:30 New York in winter is before the break")
+
+    def test_the_edges_and_the_rollover_before_it(self):
+        with _on():
+            at = lambda hh, mm: et.verdict("NSDQ100", "index",
+                                           now=_ny(*WINTER_TUE, hh, mm),
+                                           events=[])
+            self.assertEqual(at(17, 10)["code"], et.INDEX_BREAK)
+            self.assertEqual(at(18, 14)["code"], et.INDEX_BREAK)
+            self.assertNotEqual(at(18, 15)["code"], et.INDEX_BREAK)
+            self.assertNotEqual(at(16, 49)["code"], et.INDEX_BREAK)
+            v = at(16, 55)
+            self.assertEqual(v["code"], et.ROLLOVER)
+            self.assertIn("once the index futures reopen and settle",
+                          v["why"])
+
+    def test_not_a_us_index_and_not_a_weekday(self):
+        with _on():
+            tue = _ny(*WINTER_TUE, 17, 30)
+            self.assertNotEqual(et.verdict("FTSE100", "index", now=tue,
+                                           events=[])["code"],
+                                et.INDEX_BREAK)
+            self.assertNotEqual(et.verdict("AAPL", "stock",
+                                           exchange="NASDAQ", now=tue,
+                                           events=[])["code"],
+                                et.INDEX_BREAK)
+            self.assertNotEqual(et.verdict("SPX500", "index",
+                                           now=_ny(*WINTER_FRI, 17, 30),
+                                           events=[])["code"],
+                                et.INDEX_BREAK,
+                                "Friday 17:00 is the weekend's, not a break")
+            # an index on CME's exchange that is not in the set follows it
+            self.assertEqual(et.verdict("SOMEINDEX", "index",
+                                        exchange="CME", now=tue,
+                                        events=[])["code"], et.INDEX_BREAK)
+
+    def test_the_ticket_warns(self):
+        with _on(), mock.patch.object(et, "event_verdict",
+                                      return_value={"refusal": None,
+                                                    "attack": None}):
+            adv = et.advisory("SPX500", "index", now=_ny(*SUMMER_TUE, 17, 30))
+        self.assertFalse(adv["ok"])
+        self.assertEqual(adv["code"], et.INDEX_BREAK)
+        self.assertIn("US index futures pause", adv["reason"])
 
 
 class TheLongShutEntryTests(SimpleTestCase):

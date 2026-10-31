@@ -1648,6 +1648,46 @@ class TheBookFollowsTheCode(SimpleTestCase):
         self.assertIn("shares and currencies earned theirs",
                       self._text("principles", "One proof per family"))
 
+    def test_a_sell_by_hand_needs_no_short_proof(self):
+        """2026-10-31: the TAKE TRADE lane waives the short token alone
+        (waive_short_proof=True); the bots keep it. Every sentence that
+        says a sell needs its own proof says it of the bots' sell."""
+        from pathlib import Path
+        src = Path(settings.BASE_DIR, "bot_program", "manual_trade.py").read_text()
+        self.assertIn("waive_short_proof=True", src,
+                      "the hand lane keeps the short gate again: rewrite the "
+                      "safeguards' third paragraph, 'One proof per family', "
+                      "the lexicon's 'Proof' and the road's first step")
+        hand = "warned before the PIN and read back at the fill"
+        principle = [p for p in self._text("safeguards")["paragraphs"]
+                     if "{short_classes}" in p][0]
+        self.assertIn("a bot's sell needs a proof of its own, which "
+                      "{short_classes} families have, while a sell taken by "
+                      "hand goes on every family eToro allows, " + hand,
+                      principle)
+        self.assertIn("and a bot's sell needs a proof of its own; a sell "
+                      "taken by hand goes without one, " + hand,
+                      self._lexicon("Proof"))
+        family = self._text("principles", "One proof per family")
+        self.assertIn("A bot's sell waits for a proof of its own", family)
+        self.assertIn("A sell taken by hand now goes on every family eToro "
+                      "allows, " + hand, family)
+        road = [r for r in book.GO_LIVE
+                if r["title"] == "A proof for every class, at eToro"][0]
+        self.assertIn("A bot's sell waits for a proof of its own; a sell by "
+                      "hand goes without one, read back at the fill.",
+                      road["text"])
+        public = " ".join([p for c in book.CHAPTERS
+                           for p in c.get("paragraphs", [])]
+                          + [i["text"] for c in book.CHAPTERS
+                             for i in c.get("items", []) if "text" in i]
+                          + [r["plain"] for r in book.LEXICON]
+                          + [r["text"] for r in book.GO_LIVE])
+        for stale in ("; a sell needs a proof of its own",
+                      "and a sell needs a proof of its own",
+                      ". A sell waits for a proof of its own"):
+            self.assertNotIn(stale, public)
+
     def test_every_switch_called_off_on_arrival_ships_off(self):
         from core.platform_control import (BULK_ENABLE_EXEMPT, DEFAULT_COMPONENTS,
                                            LIVE_MONEY_SWITCHES)

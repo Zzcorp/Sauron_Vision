@@ -550,16 +550,30 @@ def unproven_note(carried) -> str:
     carried_classes = [t for box, tokens in ETORO_BOX_TOKENS
                        if box in carried for t in tokens]
     unshorted = [t for t in carried_classes if t not in shorts]
+    # The BOTS' short (2026-10-31): a hand-taken short goes on every class
+    # eToro allows, warned before the PIN and read back at the fill
+    # (bot_program/short_readback.py); the bots wait for the proof. The
+    # waiver lifts the short token, never the class token: the note names
+    # the hand-taken short only on the classes whose own proof is pinned,
+    # and says nothing of it when none is.
+    by_hand = [t for t in unshorted if t in proven]
+    if not by_hand:
+        hand = "."
+    elif len(by_hand) == len(unshorted):
+        hand = "; a hand-taken short goes, read back at the fill."
+    else:
+        hand = (f"; a hand-taken short goes on {', '.join(by_hand)}, read "
+                f"back at the fill.")
     if unshorted and len(unshorted) == len(carried_classes):
-        note += (" Every short is refused as well until the short proof "
-                 "is pinned." if missing else
-                 " Every short is refused until the short proof is "
-                 "pinned.")
+        note += (" Every bot short is refused as well until the short "
+                 "proof is pinned" + hand if missing else
+                 " Every bot short is refused until the short proof is "
+                 "pinned" + hand)
     elif unshorted:
         note += (f" Shorts are proven on "
                  f"{', '.join(t for t in carried_classes if t in shorts)} "
-                 f"only: a short on {', '.join(unshorted)} is refused until "
-                 f"its own proof is pinned.")
+                 f"only: a bot short on {', '.join(unshorted)} is refused "
+                 f"until its own proof is pinned" + hand)
     return note
 
 

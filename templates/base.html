@@ -2448,6 +2448,20 @@
                        'to send.') + '</div>';
       }
 
+      /* THE FIRST SHORTS ON A CLASS AT eTORO (2026-10-31): a live eToro
+         SELL on a class whose short round trip nobody has measured goes
+         from this lane (the bots wait for the proof), and is read back
+         right after the fill. Said here, BEFORE the PIN; the button is
+         unchanged. */
+      var shortAdv = p.short_advisory || {};
+      if (shortAdv.ok === false && shortAdv.reason) {
+        warnHtml += '<div class="sz-warn sz-warn--book"><b>FIRST SHORT ON THIS CLASS AT eTORO</b>' +
+          esc(shortAdv.reason) +
+          '<br>' + esc('A warning, not a block: the bots short this class ' +
+                       'only once its short is proven; this ticket is ' +
+                       'yours to send.') + '</div>';
+      }
+
       /* The entry timing (2026-10-06): the 17:00 New York rollover, a
          market's first quarter hour, an exchange's last minutes, Friday's
          last hour before the weekend, a high-impact print near. The bots
@@ -3091,6 +3105,9 @@
               /* The one honest degradation, said where the operator is
                  looking: entry in, bracket not resting. */
               (res.protection_note ? '  ·  ⚠ ' + res.protection_note : '') +
+              /* The short read-back (2026-10-31): eToro holds something
+                 else than this short was sent as; Morgul was sounded. */
+              (res.readback_note ? '  ·  ⚠ ' + res.readback_note : '') +
               (res.closed && res.closed.length
                 ? ' — closed first: ' + res.closed.join(', ') : '')
           });

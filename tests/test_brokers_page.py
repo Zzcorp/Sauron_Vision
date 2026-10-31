@@ -1263,7 +1263,7 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
         self.assertIn("No demo fill-and-close proof is pinned for stock, "
                       "index", body)
         self.assertIn("gate_blocked", body)
-        self.assertIn("Every short is refused as well", body)
+        self.assertIn("Every bot short is refused as well", body)
         self.assertNotIn("now the book", body)
         self.assertTrue(EtoroAccount.objects.get(user=self.user)
                         .is_primary_for_stocks)
@@ -1273,7 +1273,7 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
             body = self._save(primary_stocks="on")
         self.assertIn("saved and verified", body)
         self.assertNotIn("No demo fill-and-close proof", body)
-        self.assertNotIn("Every short is refused", body)
+        self.assertNotIn("Every bot short is refused", body)
 
     def test_a_stock_proof_alone_still_names_etf_and_index(self):
         with mock.patch(self.PROVEN, frozenset({"stock"})):
@@ -1284,6 +1284,22 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
                       "(gate_blocked), by the bots and by TAKE TRADE, each "
                       "until its own proof lands; nothing is sent in the "
                       "meantime.", body)
+        # 2026-10-31: no class short goes by hand without its class proof
+        self.assertIn("a bot short on etf, index, crypto is refused until "
+                      "its own proof is pinned.", body)
+        self.assertNotIn("hand-taken short goes", body)
+
+    def test_a_hand_taken_short_is_named_only_where_its_class_proof_is(self):
+        """The waiver lifts the short token, never the class token
+        (2026-10-31): the note names the hand-taken short only on the
+        classes whose own proof is pinned."""
+        with mock.patch(self.PROVEN, frozenset({"stock", "etf"})), \
+                mock.patch(self.SHORTS, frozenset({"stock"})):
+            body = self._save(primary_stocks="on")
+        self.assertIn("Shorts are proven on stock only: a bot short on etf, "
+                      "index is refused until its own proof is pinned; a "
+                      "hand-taken short goes on etf, read back at the "
+                      "fill.", body)
 
     def test_a_stock_short_proof_names_the_box_classes_still_refused(self):
         """The stocks box carries stock, etf and index; a stock short
@@ -1291,10 +1307,12 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
         with mock.patch(self.PROVEN, self.ALL_STOCKS - {"short"}), \
                 mock.patch(self.SHORTS, frozenset({"stock"})):
             body = self._save(primary_stocks="on")
-        self.assertIn("Shorts are proven on stock only: a short on etf, "
-                      "index is refused until its own proof is pinned.",
+        # 2026-10-31: the BOTS' short; a hand-taken one goes, read back
+        self.assertIn("Shorts are proven on stock only: a bot short on etf, "
+                      "index is refused until its own proof is pinned; a "
+                      "hand-taken short goes, read back at the fill.",
                       body)
-        self.assertNotIn("Every short is refused", body)
+        self.assertNotIn("Every bot short is refused", body)
 
     def test_a_proven_class_with_shorts_unproven_names_only_the_short(self):
         """Every ticked class proven, "short" not: the note names the short
@@ -1302,15 +1320,16 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
         with mock.patch(self.PROVEN, frozenset({"crypto"})):
             body = self._save(primary_crypto="on")
         self.assertNotIn("No demo fill-and-close proof", body)
-        self.assertIn("Every short is refused until the short proof is "
-                      "pinned.", body)
+        self.assertIn("Every bot short is refused until the short proof "
+                      "is pinned; a hand-taken short goes, read back at the "
+                      "fill.", body)
         self.assertNotIn("refused as well", body)
 
     def test_a_save_that_ticks_nothing_says_nothing_about_proofs(self):
         body = self._save()
         self.assertIn("saved and verified", body)
         self.assertNotIn("No demo fill-and-close proof", body)
-        self.assertNotIn("Every short is refused", body)
+        self.assertNotIn("Every bot short is refused", body)
 
     def test_a_refused_save_carries_both_notes(self):
         # commodity unproven, as it was until 2026-09-29.
@@ -1323,5 +1342,7 @@ class TheEtoroBoxesSayWhatIsMeasuredAndProvenTests(TestCase):
         self.assertIn("every eToro entry of that class is refused "
                       "(gate_blocked), by the bots and by TAKE TRADE, until "
                       "its proof lands; nothing is sent in the meantime. "
-                      "Every short is refused as well until the short proof "
-                      "is pinned.", body)
+                      "Every bot short is refused as well until the short "
+                      "proof is pinned.", body)
+        # 2026-10-31: a hand-taken short on commodity is refused too
+        self.assertNotIn("hand-taken short goes", body)
