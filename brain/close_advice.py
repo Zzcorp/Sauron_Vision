@@ -375,6 +375,15 @@ def fresh_signals(symbol: str, side: str, *, now=None) -> dict:
                             hours=SIGNAL_WINDOW_HOURS))
                 .order_by("-score")
                 .values("id", "direction", "score", "rule_name", "title"))
+    # A born-at-research rule still at research is watched, not advice
+    # (2026-10-31, signals/rule_birth).
+    try:
+        from signals.rule_birth import still_at_research
+        watched = still_at_research()
+    except Exception:  # noqa: BLE001
+        watched = set()
+    if watched:
+        rows = [r for r in rows if (r["rule_name"] or "") not in watched]
     agree = [r for r in rows if r["direction"] == want]
     oppose = [r for r in rows if r["direction"] == against]
 

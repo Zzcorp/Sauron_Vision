@@ -480,7 +480,12 @@ class TheEtfRunTests(TestCase):
                       text)
         self.assertIn("DEADETF left out: broken from", text)
         rows = list(ProvingVerdict.objects.all())
-        self.assertEqual(len(rows), len(F.live_rule_cases()))
+        # the index-only and COT-only bearish families write no verdict on
+        # an ETF class with neither (2026-10-31, run.eligible_view)
+        data = R.load_class(["CLEANETF", "SPLITETF", "ZEROETF", "DEADETF"],
+                            "4h", "etf")
+        self.assertEqual(len(rows), len(R.judged_cases(data, "etf")))
+        self.assertEqual(len(rows), len(F.live_rule_cases()) - 2)
         for v in rows:
             self.assertNotEqual(v.verdict, "proven", v.live_rule)
             self.assertEqual(v.symbols_n, 3)

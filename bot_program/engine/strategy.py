@@ -85,10 +85,16 @@ def _score_sauron_signals(symbol: str) -> tuple[float, list[str]]:
         from signals.models import Signal
         from django.utils import timezone
         from datetime import timedelta
+        # BORN AT RESEARCH (2026-10-31, signals/rule_birth): a new rule's
+        # signals are watched, not voted — a hand-run tick of this legacy
+        # blend must not read them either. The live set: a born name counts
+        # here only from a live stage.
+        from signals.rule_birth import voteless
         recent = Signal.objects.filter(
             instrument__symbol__icontains=symbol.replace("USDT",""),
             created_at__gte=timezone.now() - timedelta(hours=6),
-        ).order_by("-created_at")[:10]
+        ).exclude(rule_name__in=sorted(voteless(live=True))
+                  ).order_by("-created_at")[:10]
         if not recent: return (0, [])
         agg = 0.0
         for s in recent:

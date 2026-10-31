@@ -97,7 +97,18 @@ def announce_new_signal(signal) -> dict:
         logger.exception("notify_new_signal failed for signal pk=%s", pk)
         out["bell"] = "failed"
 
-    # 3. Telegram, email, WhatsApp.
+    # 3. Telegram, email, WhatsApp — not for a born-at-research rule still
+    # at research (2026-10-31, signals/rule_birth): ten new rules across
+    # the whole universe would spend the 20-an-hour Telegram budget before
+    # the signals a bot trades reach the phone. Stored, graded, on the
+    # banner and the bell; the channels wait for the ladder.
+    try:
+        from signals.rule_birth import is_still_at_research
+        if is_still_at_research(getattr(signal, "rule_name", "") or ""):
+            out["channels"] = "quiet: born at research, no bot trades it"
+            return out
+    except Exception:  # noqa: BLE001 — an unread stage announces as before
+        pass
     try:
         from alerts.dispatch import dispatch_signal_alert
         sent = dispatch_signal_alert(signal)

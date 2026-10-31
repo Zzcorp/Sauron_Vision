@@ -4517,11 +4517,16 @@ class AssetBot(ABC):
         # every instrument and in every regime, and it makes realized_r
         # incomparable across the book. Falls back to the configured
         # percentages when no ATR is available, so this never returns None.
+        # A rule whose proving-ground family pins its bars (po3_london:
+        # 1h, 2026-11-01) takes the ATR of those bars — the stop its verdict
+        # simulated and its signal was graded on; every other rule keeps the
+        # config's atr_timeframe.
         from bot_program.asset_engine.risk_levels import (
             passes_cost_filter, stop_and_target,
         )
         sl, tp, level_meta = stop_and_target(
-            self.cfg, symbol, price, decision.direction)
+            self.cfg, symbol, price, decision.direction,
+            rule_name=decision.rule_name or "")
 
         # ── THE SMART MONEY (2026-10-02, bot_program/smart_money.py) ─────
         # The stop leaves the crowd's hunt zone BEFORE the cost filter and
@@ -8524,7 +8529,29 @@ class AssetBot(ABC):
         # they cannot vote from would silently crowd tradeable signals out
         # of the consensus. Per-rule dedupe keeps the real row count near
         # the rule count; 32 merely bounds pathological data.
-        candidates = list(qs.order_by("-score")[:32])
+        # BORN AT RESEARCH (2026-10-31, signals/rule_birth): a new rule's
+        # signals leave the window BEFORE the slice — the stage filter below
+        # runs after it, and many high-score research rows on one instrument
+        # could push a votable row out of the 32. Only born names are
+        # excluded, so every existing rule keeps today's window. On a LIVE
+        # config a born name votes only from a live stage: a paper-stage
+        # born rule's vote would otherwise count toward a live-stage rule's
+        # real order, or cancel it (aggregation nets the sides and counts
+        # independent sources across stages; the stage gate after decide()
+        # reads only the winner).
+        try:
+            from signals.rule_birth import voteless
+            unvoted = voteless(live=self.cfg.mode != "paper")
+        except Exception:  # noqa: BLE001 — fail closed on the born names
+            from signals.rule_birth import BORN_AT_RESEARCH
+            unvoted = set(BORN_AT_RESEARCH)
+        candidates = list(qs.exclude(rule_name__in=sorted(unvoted))
+                          .order_by("-score")[:32])
+        if not candidates and unvoted and qs.filter(
+                rule_name__in=sorted(unvoted)).exists():
+            return BotDecision("HOLD", 0, [
+                "only research-stage or paused signals — watched, not "
+                "traded"])
         if not candidates:
             stale = Signal.objects.filter(instrument=inst, is_active=True).count()
             if stale:

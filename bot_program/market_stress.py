@@ -164,24 +164,34 @@ def _macro(series, now):
 
 def _vix_term(now):
     """VIX / VIX3M on the newest day both were published, within
-    MACRO_FRESH_DAYS; None when either is missing."""
+    MACRO_FRESH_DAYS; None when either is missing (vix_term_ratio's
+    value)."""
+    return vix_term_ratio(now)[0]
+
+
+def vix_term_ratio(now=None):
+    """(ratio, date) — VIX / VIX3M on the newest day both were published
+    within MACRO_FRESH_DAYS, and that day; (None, None) when either series
+    is missing or stale. _vix_term's read with its date, for the words of
+    a rule that cites it (signals/rules/bearish_rules.py)."""
     from market_data.models import MacroIndicator, MacroObservation
+    now = now or timezone.now()
     since = now.date() - timedelta(days=MACRO_FRESH_DAYS)
     vals = {}
     for series in (VIX_SERIES, VIX3M_SERIES):
         ind = MacroIndicator.objects.filter(series_id=series).first()
         if ind is None:
-            return None
+            return None, None
         vals[series] = dict(MacroObservation.objects.filter(
             indicator=ind, date__gte=since).values_list("date", "value"))
     common = sorted(set(vals[VIX_SERIES]) & set(vals[VIX3M_SERIES]),
                     reverse=True)
     if not common:
-        return None
+        return None, None
     v3 = float(vals[VIX3M_SERIES][common[0]])
     if v3 <= 0:
-        return None
-    return round(float(vals[VIX_SERIES][common[0]]) / v3, 3)
+        return None, None
+    return round(float(vals[VIX_SERIES][common[0]]) / v3, 3), common[0]
 
 
 def read_components(now=None) -> tuple:

@@ -34,7 +34,8 @@ money, the admin and allocator lanes, the correlation taper and the elite
 scale still multiply on top, exactly as they do for a live_small rule.
 
 The verdict is read per key: the newest rules- row (RULES_RUN_PREFIX) for
-that (live_rule, asset_class, direction) at the live rules' own timeframe,
+that (live_rule, asset_class, direction) at the live rule's own timeframe
+(timeframe_for: 4h, or 1h for a family that trades 1h bars),
 exit policy and filter — so a one-class `prove rules --class X --save`
 does not unjudge the other classes, the compare_exits rows (whose "care"
 rows carry the same live_rule strings) never count, and bollinger's short
@@ -101,15 +102,40 @@ def side_of(direction) -> str:
     return ""
 
 
-def _rules_rows(**filters):
+def pinned_timeframe(rule_name: str) -> str:
+    """The first of `timeframes` of the family whose live rule this is, when
+    the family pins its bars (po3_london: 1h), else "". families is
+    imported here, never at module level; unread is "" (the live rules'
+    bars)."""
+    try:
+        from backtester.proving import families
+        hit = families.family_of(rule_name)
+    except Exception:  # noqa: BLE001 — unread is the live rules' bars
+        return ""
+    if hit is None or not hit[0].timeframes:
+        return ""
+    return str(hit[0].timeframes[0])
+
+
+def timeframe_for(rule_name: str) -> str:
+    """The bars the rule trades, and so the verdict read for it: the
+    timeframe its family pins (pinned_timeframe — po3_london: 1h), else
+    TIMEFRAME. The bot's entry reads the ATR of the same bars for such a
+    rule (risk_levels.stop_and_target), so the trade a verdict sizes is
+    the trade it simulated."""
+    return pinned_timeframe(rule_name) or TIMEFRAME
+
+
+def _rules_rows(timeframe=TIMEFRAME, **filters):
     """The saved live-rules verdicts: prove_live_rules' whole-class rows
     only (the rules- prefix, generated False; a --symbols run's rulesub-
-    rows never), at the live rules' timeframe, exit policy and filter."""
+    rows never), at the live rule's timeframe (timeframe_for), exit policy
+    and filter."""
     from backtester.models_proving import ProvingVerdict
     from backtester.proving.run import RULES_RUN_PREFIX
     return ProvingVerdict.objects.filter(
         generated=False, run_id__startswith=RULES_RUN_PREFIX,
-        timeframe=TIMEFRAME, policy=POLICY, filter=FILTER, **filters)
+        timeframe=timeframe, policy=POLICY, filter=FILTER, **filters)
 
 
 def newest_verdict(rule_name: str, asset_class: str, side: str):
@@ -122,8 +148,8 @@ def newest_verdict(rule_name: str, asset_class: str, side: str):
     a long-only rule off "<family> (short mirror)" and gives bollinger's
     short its own row. Never memory.rule_case: it returns the FIRST match,
     which is the long."""
-    return (_rules_rows(live_rule=rule_name, asset_class=asset_class,
-                        direction=side)
+    return (_rules_rows(timeframe_for(rule_name), live_rule=rule_name,
+                        asset_class=asset_class, direction=side)
             .order_by("-created_at").first())
 
 
@@ -153,12 +179,20 @@ def proven_cases_for(rule_names, *, cache: dict | None = None) -> dict:
         return {}
     try:
         seen, out = set(), {n: [] for n in names}
-        for rule, cls, side, verdict in (
-                _rules_rows(live_rule__in=names)
+        # one query per timeframe the names trade (timeframe_for): today
+        # one, 4h; the 1h rule reads its 1h rows
+        by_tf: dict = {}
+        for n in names:
+            by_tf.setdefault(timeframe_for(n), []).append(n)
+        rows = []
+        for tf, group in sorted(by_tf.items()):
+            rows.extend(
+                _rules_rows(tf, live_rule__in=group)
                 .order_by("live_rule", "asset_class", "direction",
                           "-created_at")
                 .values_list("live_rule", "asset_class", "direction",
-                             "verdict")):
+                             "verdict"))
+        for rule, cls, side, verdict in rows:
             if (rule, cls, side) in seen:
                 continue
             seen.add((rule, cls, side))

@@ -151,10 +151,19 @@ def _collect_rule_stats(lookback_days: int) -> dict:
         .values_list("rule_name", flat=True)
     )
 
+    # A rule born at research and still there (signals/rule_birth,
+    # 2026-11-01) is graded but never traded: no capital to allocate, and
+    # counted here it would move every trading rule's multiplier (the
+    # uniform share is 1/N) and the sample tier (the worst rule's n).
+    from signals.rule_birth import still_at_research
+    watched = still_at_research()
+
     stats = {}
     for rn, rs in by_rule.items():
         if rn in controlled and rn not in running_rules:
             # Governed, and its governor says it is not running.
+            continue
+        if rn in watched:
             continue
         if not rs:
             continue
@@ -392,6 +401,7 @@ def propose_allocation(lookback_days: int = 180) -> "MetaAllocation":
 def apply_allocation(allocation_id: int, user) -> "MetaAllocation":
     """Promote a shadow allocation. Snapshots previous allocator_weights for rollback."""
     from signals.models import MetaAllocation, RuleControl
+    from signals.rule_birth import birth_defaults
 
     if not is_live_mode():
         raise AllocatorError("Meta-allocator is in shadow mode — apply is disabled.")
@@ -405,10 +415,13 @@ def apply_allocation(allocation_id: int, user) -> "MetaAllocation":
 
     previous = {}
     for rule_name, new_mult in multipliers.items():
+        # birth_defaults: a born-at-research name is created at research,
+        # never at the model's live_full default (signals/rule_birth).
         ctrl, _ = RuleControl.objects.select_for_update().get_or_create(
             rule_name=rule_name,
             defaults={"status": RuleControl.STATUS_ACTIVE,
-                      "weight_multiplier": 1.0, "allocator_weight": 1.0},
+                      "weight_multiplier": 1.0, "allocator_weight": 1.0,
+                      **birth_defaults(rule_name)},
         )
         # Only touch rules that are RUNNING — an admin pause still in force takes
         # precedence. `is_effectively_active()` and not `status == "active"`, so

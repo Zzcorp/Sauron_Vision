@@ -10,7 +10,8 @@ This module is where rules opt in. Importing it populates both
 registries; `signals.evolution` imports it lazily before any proposal
 work so the worker that proposes is always the worker that registered.
 
-First (and so far only) resident: the golden-cross family. It is the
+First resident: the golden-cross family; the second (2026-10-31) its
+short mirror, the death cross, over the same schema. It is the
 cleanest possible candidate — every one of its constants is a real
 parameter, and its logic re-runs exactly from bars, which makes its
 walk-forward evaluator honest rather than a proxy.
@@ -185,6 +186,112 @@ def golden_cross_evaluator(params: dict, start, end,
     return rs
 
 
+# ── the death cross (2026-10-31): the golden cross's short mirror ───────
+
+#: The same mutation space as the golden cross, referenced, never copied:
+#: the two sides of one detector evolve over the same bounds.
+DEATH_CROSS_SCHEMA = GOLDEN_CROSS_SCHEMA
+
+
+def _dc_universe() -> list[int]:
+    """_gc_universe for the death cross: the symbols it fired for, topped
+    up with the watchlist, capped."""
+    from instruments.models import Instrument
+    from signals.models import Signal
+
+    ids: list[int] = list(
+        Signal.objects.filter(rule_name__startswith="death_cross")
+        .values_list("instrument_id", flat=True)
+        .distinct().order_by("instrument_id")[:GC_UNIVERSE_CAP])
+    if len(ids) < GC_UNIVERSE_CAP:
+        extra = (Instrument.objects.filter(is_watchlist=True, is_active=True)
+                 .exclude(id__in=ids).order_by("id")
+                 .values_list("id", flat=True)[:GC_UNIVERSE_CAP - len(ids)])
+        ids.extend(extra)
+    return ids
+
+
+def _dc_universe_at(start) -> list[int]:
+    """_gc_universe_at for the death cross: the candidate set with full
+    warm-up (the schema's maximum `slow`) before `start`."""
+    from market_data.models import PriceData
+    return [iid for iid in _dc_universe()
+            if PriceData.objects.filter(
+                instrument_id=iid, timeframe=GC_TIMEFRAME,
+                timestamp__lt=start).count() >= GC_WARMUP_BARS]
+
+
+def death_cross_evaluator(params: dict, start, end,
+                          universe=None) -> list[float]:
+    """golden_cross_evaluator's mirror: a fast-SMA-under-slow-SMA cross
+    opens a SHORT at that bar's close with stop entry*(1+stop_pct) and
+    target entry*(1-target_pct); later bars resolve it — the stop first
+    when a bar's high reaches it (pessimistic), then the target when its
+    low does — and a position still open at the window end is marked
+    (entry - last close) / risk. One position at a time per instrument."""
+    import pandas as pd
+    from market_data.models import PriceData
+
+    fast = int(params.get("fast", 50))
+    slow = int(params.get("slow", 200))
+    stop_pct = float(params.get("stop_pct", 0.05))
+    target_pct = float(params.get("target_pct", 0.10))
+    if fast >= slow or stop_pct <= 0:
+        return []
+
+    rs: list[float] = []
+    for inst_id in (universe if universe is not None else _dc_universe()):
+        warm = list(PriceData.objects.filter(
+            instrument_id=inst_id, timeframe=GC_TIMEFRAME,
+            timestamp__lt=start)
+            .order_by("-timestamp")
+            .values_list("timestamp", "high", "low", "close")[:slow])
+        if len(warm) < slow:
+            continue
+        warm.reverse()
+        window = list(PriceData.objects.filter(
+            instrument_id=inst_id, timeframe=GC_TIMEFRAME,
+            timestamp__gte=start, timestamp__lte=end)
+            .order_by("timestamp")
+            .values_list("timestamp", "high", "low", "close"))
+        if len(window) < 2:
+            continue
+        rows = warm + window
+        highs = [float(r[1]) for r in rows]
+        lows = [float(r[2]) for r in rows]
+        closes = pd.Series([float(r[3]) for r in rows])
+        sma_f = closes.rolling(fast).mean()
+        sma_s = closes.rolling(slow).mean()
+
+        i = len(warm)
+        n = len(rows)
+        while i < n:
+            crossed = (sma_f.iloc[i - 1] >= sma_s.iloc[i - 1]
+                       and sma_f.iloc[i] < sma_s.iloc[i])
+            if not crossed:
+                i += 1
+                continue
+            entry = closes.iloc[i]
+            stop = entry * (1 + stop_pct)
+            target = entry * (1 - target_pct)
+            risk = stop - entry
+            r = None
+            j = i + 1
+            while j < n:
+                if highs[j] >= stop:
+                    r = -1.0
+                    break
+                if lows[j] <= target:
+                    r = target_pct / stop_pct
+                    break
+                j += 1
+            if r is None:
+                r = (entry - closes.iloc[n - 1]) / risk
+            rs.append(float(r))
+            i = (j + 1) if j < n else n
+    return rs
+
+
 def register() -> None:
     """Fill any registry gaps. Callable any number of times:
     `_ensure_rules_registered` invokes THIS, not just the import — import
@@ -201,6 +308,12 @@ def register() -> None:
         register_evaluator("golden_cross", golden_cross_evaluator)
     if "golden_cross" not in UNIVERSE_REGISTRY:
         register_universe("golden_cross", _gc_universe_at)
+    if not has_schema("death_cross"):
+        register_schema("death_cross", DEATH_CROSS_SCHEMA)
+    if "death_cross" not in EVALUATOR_REGISTRY:
+        register_evaluator("death_cross", death_cross_evaluator)
+    if "death_cross" not in UNIVERSE_REGISTRY:
+        register_universe("death_cross", _dc_universe_at)
 
 
 register()

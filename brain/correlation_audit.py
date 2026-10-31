@@ -329,10 +329,20 @@ def detect_realized_return_correlation(*,
     except Exception:
         return out
 
-    # Active rules with a registered RuleControl entry.
+    # Active rules with a registered RuleControl entry — less the rules born
+    # at research and still there (2026-11-01, signals/rule_birth). The
+    # window is the first `max_rules` names in order, taken before any
+    # trade is read, and the bearish pack's names sort into it: each row
+    # its first stored signal writes would push one trading rule out, that
+    # rule would lose its pairs, and rule_clusters would count two
+    # correlated rules as two independent sources — a looser quorum on a
+    # live entry, from rules that never vote. A born rule enters the window
+    # when the ladder moves it off research.
+    from signals.rule_birth import still_at_research
     rules = list(
         RuleControl.objects
         .filter(status="active")
+        .exclude(rule_name__in=sorted(still_at_research()))
         .order_by("rule_name")[:max_rules]
         .values_list("rule_name", flat=True)
     )

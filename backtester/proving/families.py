@@ -21,6 +21,24 @@ more that closes back inside, the claim the positioning map makes
 first bar back inside, the distribution's start the session read names
 (bot_program/power_of_three.py).
 
+THE BEARISH PACK (2026-10-31): seven short-only families, each the ONE
+detector its live rule (signals/rules/bearish_rules.py) calls on its own
+closed bars, so the rule fires where the family fires — bull_trap (a
+close above a swing high and back under it), po3_london (London runs the
+Asian high, New York closes back under it; judged on 1h bars),
+range_breakdown (a tight range's low broken, with follow-through),
+trend_rally (a rejected rally to the EMA20 in a downtrend, a lower high),
+exhaustion_short (a rejection wick on a relief rally under the SMA200),
+vix_term_breakdown (the index under its 10-bar low with VIX/VIX3M at 1 or
+more) and crowded_long (the speculators at the top of their COT range and
+the top's swing low broken). Each takes `detail=True` for (fires,
+{invalidation, quality, ...}), and each fires only when its invalidation
+price sits at least CONTAIN_MARGIN_ATR inside the bot's 1.5 ATR stop: a
+stop inside the pattern is not this trade. Two read a context column
+(backtester/proving/context.py) and fire nothing without it. None of them
+joins the weekly generator (Family.in_generate), so its Sidak bar and its
+shortlist do not move.
+
 FILTERS, applied on top of any family (the operator's question "and ICT,
 fair value gaps?" answered with numbers):
   none      as the rule fires
@@ -414,6 +432,448 @@ def rsi2_pullback(df, direction, *, period=2, low=10.0, trend=200):
     return out.fillna(False).to_numpy(dtype=bool)
 
 
+# ── the bearish pack (2026-10-31) ───────────────────────────────────────
+
+#: A short fires only when its invalidation price X sits at least this many
+#: ATRs inside the bot's stop: X <= close + (DEFAULT_ATR_STOP_MULT -
+#: CONTAIN_MARGIN_ATR) x ATR, so the 1.5 ATR stop (risk_levels) sits beyond
+#: the pattern. A stop inside the pattern is not this trade.
+CONTAIN_MARGIN_ATR = 0.1
+#: A COT index this high is the speculators at the top of their range
+#: (bot_program.smart_money.COT_EXTREME, which the rule imports).
+COT_EXTREME = 90.0
+
+
+def contain_atr() -> float:
+    """The containment multiple: the bot's stop multiple less the margin
+    (1.5 - 0.1 = 1.4), read from risk_levels, never typed."""
+    from bot_program.asset_engine.risk_levels import DEFAULT_ATR_STOP_MULT
+    return float(DEFAULT_ATR_STOP_MULT) - CONTAIN_MARGIN_ATR
+
+
+def _nan(n):
+    return np.full(n, np.nan)
+
+
+def _done(out, info, detail):
+    return (out, info) if detail else out
+
+
+def _clip01(x):
+    return float(min(1.0, max(0.0, x)))
+
+
+def bull_trap(df, direction, *, left=3, right=3, lookback=60, recovery=3,
+              detail=False):
+    """The failed breakout at a swing high. At closed bar t: L is the high
+    of the most recent fractal swing high confirmed before t (idx + right
+    <= t - 1) and formed within `lookback` bars; k is the FIRST close above
+    L after it (an accepted close, not a wick), 1 to `recovery` bars ago;
+    every close from k to t - 1 held above L and bar t closes back under
+    it — the buyers above are trapped. Invalid above X, the high of k..t.
+    One fire per level by construction. Short only."""
+    n = len(df)
+    out = _false(n)
+    info = {"invalidation": _nan(n), "quality": _nan(n), "level": _nan(n),
+            "bars_above": _nan(n)}
+    if direction != SHORT or n < left + right + 3:
+        return _done(out, info, detail)
+    from signals.smc.pivots import get_swings
+    swings = [sw for sw in get_swings(df, left, right) if sw["type"] == "H"]
+    if not swings:
+        return _done(out, info, detail)
+    h = df["high"].to_numpy(dtype=float)
+    c = df["close"].to_numpy(dtype=float)
+    a = atr(df).to_numpy()
+    lim = contain_atr()
+    first_above = {}
+    for sw in swings:
+        i = sw["idx"]
+        above = np.flatnonzero(c[i + 1:] > h[i])
+        first_above[i] = (i + 1 + int(above[0])) if len(above) else None
+    ptr, cur = 0, None
+    for t in range(n):
+        while ptr < len(swings) and swings[ptr]["idx"] + right <= t - 1:
+            cur = swings[ptr]
+            ptr += 1
+        if cur is None or cur["idx"] < t - lookback:
+            continue
+        si = cur["idx"]
+        k = first_above[si]
+        if k is None or not 1 <= t - k <= recovery:
+            continue
+        lvl = h[si]
+        if not c[t] < lvl or not np.all(c[k:t] >= lvl):
+            continue
+        at = a[t]
+        if not (np.isfinite(at) and at > 0):
+            continue
+        x = float(h[k:t + 1].max())
+        if x > c[t] + lim * at:
+            continue
+        out[t] = True
+        info["invalidation"][t] = x
+        info["quality"][t] = _clip01((lvl - c[t]) / (0.5 * at))
+        info["level"][t] = lvl
+        info["bars_above"][t] = t - k
+    return _done(out, info, detail)
+
+
+def po3_london(df, direction, *, detail=False):
+    """London sweeps the Asian high, New York distributes lower. Per New
+    York trading day D (the Asian window opened at 20:00 NY on D - 1): AH
+    and AL are the high and low of the Asian window's bars (three or more);
+    the FIRST bar to trade over AH must open inside London (02:00-05:00
+    NY), and no bar from the Asian close on may trade under AL (both sides
+    run is no clean day); the fire is the first bar at or after that run to
+    close back under AH, opening no later than 10:00 NY on D (the last 1h
+    bar of NY AM's window). Invalid above X, the high from the run to the
+    fire. One fire per day; no tz database, no fires. Honest on 1h bars
+    only (Family.timeframes). Short only."""
+    from datetime import time as dtime
+    from datetime import timedelta
+    n = len(df)
+    out = _false(n)
+    info = {"invalidation": _nan(n), "quality": _nan(n),
+            "asian_high": _nan(n), "asian_low": _nan(n)}
+    if direction != SHORT or n < 5:
+        return _done(out, info, detail)
+    from signals.smc.sessions import (ICT_SESSIONS_NY, new_york_index,
+                                      session_windows)
+    ny = new_york_index(df)
+    if ny is None:
+        return _done(out, info, detail)
+    windows = session_windows(df, "asia", ny_index=ny)
+    if not windows:
+        return _done(out, info, detail)
+    lon_start, lon_end = ICT_SESSIONS_NY["london"]
+    last_open = dtime(10, 0)
+    times, dates = ny.time, ny.date
+    lows = df["low"].to_numpy(dtype=float)
+    highs = df["high"].to_numpy(dtype=float)
+    closes = df["close"].to_numpy(dtype=float)
+    a = atr(df).to_numpy()
+    lim = contain_atr()
+    for k, w in enumerate(windows):
+        pos = w["positions"]
+        if len(pos) < 3:
+            continue
+        day = w["date"] + timedelta(days=1)
+        ah, al = float(highs[pos].max()), float(lows[pos].min())
+        if not ah > al:
+            continue
+        start = pos[-1] + 1
+        stop = windows[k + 1]["positions"][0] if k + 1 < len(windows) else n
+        r = None
+        for j in range(start, stop):
+            if dates[j] != day or times[j] > last_open:
+                break
+            if lows[j] < al:
+                break                       # the lows were run: unclear
+            if r is None:
+                if not highs[j] > ah:
+                    continue
+                if not lon_start <= times[j] < lon_end:
+                    break                   # the highs run outside London
+                r = j
+            if closes[j] < ah:
+                at = a[j]
+                x = float(highs[r:j + 1].max())
+                if np.isfinite(at) and at > 0 and x <= closes[j] + lim * at:
+                    out[j] = True
+                    info["invalidation"][j] = x
+                    info["quality"][j] = _clip01((ah - closes[j]) / (ah - al))
+                    info["asian_high"][j] = ah
+                    info["asian_low"][j] = al
+                break                       # one candidate a day
+    return _done(out, info, detail)
+
+
+def range_breakdown(df, direction, *, n=30, max_width_atr=4.0,
+                    min_break_atr=0.25, detail=False):
+    """The low of a tight range broken, with follow-through. At closed bar
+    t: RH and RL are the high and low of the `n` bars [t-n-1, t-2], no
+    wider than `max_width_atr` ATR (a consolidation, not a trend leg); bar
+    t-1 closes `min_break_atr` ATR or more under RL; bar t closes under
+    t-1's close with a lower low. Invalid above X, the higher of the last
+    two highs. One fire per range: none within `n` bars of the last.
+    Short only."""
+    size = len(df)
+    out = _false(size)
+    info = {"invalidation": _nan(size), "quality": _nan(size),
+            "range_high": _nan(size), "range_low": _nan(size)}
+    if direction != SHORT or size < n + 3:
+        return _done(out, info, detail)
+    h = df["high"].to_numpy(dtype=float)
+    lo = df["low"].to_numpy(dtype=float)
+    c = df["close"].to_numpy(dtype=float)
+    rh = df["high"].rolling(n).max().to_numpy()
+    rl = df["low"].rolling(n).min().to_numpy()
+    a = atr(df).to_numpy()
+    lim = contain_atr()
+    last = None
+    for t in range(n + 1, size):
+        if last is not None and t - last <= n:
+            continue
+        top, bottom = rh[t - 2], rl[t - 2]
+        a2, a1, at = a[t - 2], a[t - 1], a[t]
+        if not (np.isfinite(top) and np.isfinite(bottom)
+                and np.isfinite(a2) and np.isfinite(a1) and np.isfinite(at)
+                and a2 > 0 and a1 > 0 and at > 0):
+            continue
+        if top - bottom > max_width_atr * a2:
+            continue
+        if not c[t - 1] < bottom - min_break_atr * a1:
+            continue
+        if not (c[t] < c[t - 1] and lo[t] < lo[t - 1]):
+            continue
+        x = float(max(h[t - 1], h[t]))
+        if x > c[t] + lim * at:
+            continue
+        out[t] = True
+        last = t
+        info["invalidation"][t] = x
+        info["quality"][t] = _clip01((bottom - c[t]) / at)
+        info["range_high"][t] = top
+        info["range_low"][t] = bottom
+    return _done(out, info, detail)
+
+
+def trend_rally(df, direction, *, fast=20, mid=50, slow=200, left=3,
+                right=3, rally=5, detail=False):
+    """The trend's continuation short: below the long average, a rally to
+    the short EMA rejected under the last swing high. At closed bar t:
+    EMA`fast` < EMA`mid` < SMA`slow` and the close under SMA`slow` (the
+    slow line is a SIMPLE mean, exact on any window of `slow` bars, so the
+    live rule's 600 bars read what the whole history reads); the bar's high
+    reaches the EMA`fast` and it closes under it, red; the high of the last
+    `rally` bars stays under P1, the most recent fractal swing high
+    confirmed by t — a lower high. Invalid above that rally high. One fire
+    per swing high P1. Short only."""
+    size = len(df)
+    out = _false(size)
+    info = {"invalidation": _nan(size), "quality": _nan(size),
+            "swing_high": _nan(size)}
+    if direction != SHORT or size < slow + 1:
+        return _done(out, info, detail)
+    from signals.smc.pivots import get_swings
+    swings = [sw for sw in get_swings(df, left, right) if sw["type"] == "H"]
+    c = df["close"]
+    ef = c.ewm(span=fast, adjust=False).mean().to_numpy()
+    em = c.ewm(span=mid, adjust=False).mean().to_numpy()
+    ss = c.rolling(slow).mean().to_numpy()
+    o = df["open"].to_numpy(dtype=float)
+    h = df["high"].to_numpy(dtype=float)
+    cl = c.to_numpy(dtype=float)
+    a = atr(df).to_numpy()
+    lim = contain_atr()
+    used = set()
+    ptr, cur = 0, None
+    for t in range(size):
+        while ptr < len(swings) and swings[ptr]["idx"] + right <= t:
+            cur = swings[ptr]
+            ptr += 1
+        if t < slow or cur is None or cur["idx"] in used:
+            continue
+        if not (np.isfinite(ss[t]) and ef[t] < em[t] < ss[t]
+                and cl[t] < ss[t]):
+            continue
+        if not (h[t] >= ef[t] and cl[t] < ef[t] and cl[t] < o[t]):
+            continue
+        p1 = h[cur["idx"]]
+        xr = float(h[max(0, t - rally + 1):t + 1].max())
+        if not xr < p1:
+            continue
+        at = a[t]
+        if not (np.isfinite(at) and at > 0) or xr > cl[t] + lim * at:
+            continue
+        out[t] = True
+        used.add(cur["idx"])
+        info["invalidation"][t] = xr
+        info["quality"][t] = _clip01((p1 - xr) / at)
+        info["swing_high"][t] = p1
+    return _done(out, info, detail)
+
+
+def exhaustion_short(df, direction, *, trend=200, rally=10,
+                     min_rally_atr=2.5, wick=0.5, rsi_min=55.0,
+                     detail=False):
+    """The exhaustion short on a relief rally in a down tape. At closed bar
+    t: the close under its SMA`trend`; the bar's high is the high of the
+    last `rally` bars, `min_rally_atr` ATR or more over their low; an upper
+    wick of `wick` of the bar's range or more, a red bar, RSI14 at
+    `rsi_min` or more. Invalid above the bar's high. The live rule adds a
+    regime gate (the Mind's risk_off, or the stress level) that this
+    replay does not read: the Mind's labels and the stress readings have
+    no multi-year history, so every live fire is a subset of the judged
+    fires. Short only."""
+    size = len(df)
+    out = _false(size)
+    info = {"invalidation": _nan(size), "quality": _nan(size),
+            "wick_share": _nan(size), "rally_atr": _nan(size)}
+    if direction != SHORT or size < max(trend, rally) + 1:
+        return _done(out, info, detail)
+    o, h, lo, c = (df[k] for k in ("open", "high", "low", "close"))
+    a = atr(df)
+    sma = c.rolling(trend).mean()
+    hh = h.rolling(rally).max()
+    ll = lo.rolling(rally).min()
+    r = rsi(c, 14)
+    rng = (h - lo).replace(0, np.nan)
+    upper = h - np.maximum(o, c)
+    share = upper / rng
+    lim = contain_atr()
+    cond = ((c < sma) & (h >= hh) & ((h - ll) >= min_rally_atr * a)
+            & (share >= wick) & (c < o) & (r >= rsi_min)
+            & (h <= c + lim * a) & (a > 0))
+    out = cond.fillna(False).to_numpy(dtype=bool)
+    info["invalidation"] = np.where(out, h.to_numpy(dtype=float), np.nan)
+    info["quality"] = np.where(
+        out, np.clip((share.to_numpy() - wick) / 0.3, 0.0, 1.0), np.nan)
+    info["wick_share"] = np.where(out, share.to_numpy(), np.nan)
+    info["rally_atr"] = np.where(out, ((h - ll) / a).to_numpy(), np.nan)
+    return _done(out, info, detail)
+
+
+def vix_term_breakdown(df, direction, *, inverted=1.0, n=10, detail=False):
+    """The index risk-off short: VIX/VIX3M at `inverted` or more on the
+    bar's context (the `vix_term` column, the PREVIOUS New York day's
+    published ratio — backtester/proving/context.py) and the FIRST close
+    under the low of the last `n` bars. Invalid above the bar's high. No
+    column, no fires. Short only."""
+    size = len(df)
+    out = _false(size)
+    info = {"invalidation": _nan(size), "quality": _nan(size),
+            "vix_term": _nan(size)}
+    if direction != SHORT or "vix_term" not in df.columns or size < n + 2:
+        return _done(out, info, detail)
+    h, c = df["high"], df["close"]
+    v = pd.to_numeric(df["vix_term"], errors="coerce")
+    low_n = df["low"].rolling(n).min().shift(1)
+    a = atr(df)
+    lim = contain_atr()
+    cond = ((v >= inverted) & (c < low_n) & (c.shift(1) >= low_n.shift(1))
+            & (h <= c + lim * a) & (a > 0))
+    out = cond.fillna(False).to_numpy(dtype=bool)
+    info["invalidation"] = np.where(out, h.to_numpy(dtype=float), np.nan)
+    info["quality"] = np.where(
+        out, np.clip((v.to_numpy(dtype=float) - inverted) / 0.10, 0.0, 1.0),
+        np.nan)
+    info["vix_term"] = np.where(out, v.to_numpy(dtype=float), np.nan)
+    return _done(out, info, detail)
+
+
+def crowded_long_trigger(df, *, left=3, right=3, top=60, near=30):
+    """The price half of crowded_long, without the crowd: (fires, detail).
+    At closed bar t: HH is the high of the last `top` bars, made at bar h
+    within `near` bars; s is the most recent fractal swing low after h,
+    confirmed before t; bar t is the FIRST close under its low — the top's
+    structure breaks. Invalid above X, the high from s to t."""
+    size = len(df)
+    out = _false(size)
+    info = {"invalidation": _nan(size), "swing_low": _nan(size),
+            "top": _nan(size)}
+    if size < max(top, left + right + 3):
+        return out, info
+    from signals.smc.pivots import get_swings
+    swings = [sw for sw in get_swings(df, left, right) if sw["type"] == "L"]
+    if not swings:
+        return out, info
+    h = df["high"].to_numpy(dtype=float)
+    lo = df["low"].to_numpy(dtype=float)
+    c = df["close"].to_numpy(dtype=float)
+    a = atr(df).to_numpy()
+    lim = contain_atr()
+    ptr, cur = 0, None
+    for t in range(1, size):
+        while ptr < len(swings) and swings[ptr]["idx"] + right <= t - 1:
+            cur = swings[ptr]
+            ptr += 1
+        if cur is None or t < top - 1:
+            continue
+        win = h[t - top + 1:t + 1]
+        hi_at = t - top + 1 + (len(win) - 1 - int(np.argmax(win[::-1])))
+        if t - hi_at > near or not cur["idx"] > hi_at:
+            continue
+        sl = lo[cur["idx"]]
+        if not (c[t] < sl and c[t - 1] >= sl):
+            continue
+        at = a[t]
+        x = float(h[cur["idx"]:t + 1].max())
+        if not (np.isfinite(at) and at > 0) or x > c[t] + lim * at:
+            continue
+        out[t] = True
+        info["invalidation"][t] = x
+        info["swing_low"][t] = sl
+        info["top"][t] = h[hi_at]
+    return out, info
+
+
+def crowded_long(df, direction, *, left=3, right=3, top=60, near=30,
+                 cot_extreme=COT_EXTREME, detail=False):
+    """The contrarian short at an extreme crowded long: the speculators'
+    COT index at `cot_extreme` or more on the bar (the `cot_spec_index`
+    column, each report read from its publication — backtester/proving/
+    context.cot_released_at) and crowded_long_trigger's break of the
+    top's swing low. A market no COT report maps is
+    positioning_crowd_reversal_short's, a rule of its own: no history
+    replays the positioning map's crowd score, so no family judges it. No
+    column, no fires. Short only."""
+    size = len(df)
+    out = _false(size)
+    info = {"invalidation": _nan(size), "quality": _nan(size),
+            "spec_index": _nan(size)}
+    if direction != SHORT or "cot_spec_index" not in df.columns:
+        return _done(out, info, detail)
+    fires, trig = crowded_long_trigger(df, left=left, right=right, top=top,
+                                       near=near)
+    spec = pd.to_numeric(df["cot_spec_index"],
+                         errors="coerce").to_numpy(dtype=float)
+    with np.errstate(invalid="ignore"):
+        gate = np.nan_to_num(spec >= cot_extreme, nan=False).astype(bool)
+    out = fires & gate
+    info["invalidation"] = np.where(out, trig["invalidation"], np.nan)
+    info["quality"] = np.where(
+        out, np.clip((spec - cot_extreme) / 10.0, 0.0, 1.0), np.nan)
+    info["spec_index"] = np.where(out, spec, np.nan)
+    return _done(out, info, detail)
+
+
+# ── which markets a bearish family's live rule fires on ─────────────────
+
+def session_markets(symbol, asset_class) -> bool:
+    """po3_london: the markets with 1h bars inside the Asian and London
+    windows. Stocks and ETFs have none."""
+    return str(asset_class or "").lower() in ("forex", "commodity", "index",
+                                              "crypto")
+
+
+def risk_on_short_market(symbol, asset_class) -> bool:
+    """A SELL of a risk asset (bot_program.posture.classify): stocks,
+    non-haven ETFs, indices, crypto, non-haven commodities. Never gold,
+    silver, treasuries, the dollar index, nor forex."""
+    from bot_program.posture import RISK_ON_SHORT, classify
+    return classify(symbol, asset_class, "SELL") == RISK_ON_SHORT
+
+
+def index_market(symbol, asset_class) -> bool:
+    """An index, or a US index ETF (bearish_rules.INDEX_ETFS), as a risk
+    asset."""
+    from signals.rules.bearish_rules import INDEX_ETFS
+    cls = str(asset_class or "").lower()
+    sym = str(symbol or "").upper()
+    if cls == "index" or (cls == "etf" and sym in INDEX_ETFS):
+        return risk_on_short_market(symbol, asset_class)
+    return False
+
+
+def cot_market(symbol, asset_class) -> bool:
+    """A market a COT report maps (scraping.COTReport rows): the only
+    markets whose crowd the proving ground can replay."""
+    from scraping.models import COTReport
+    return COTReport.objects.filter(instrument__symbol=symbol).exists()
+
+
 # ── filters ──────────────────────────────────────────────────────────────
 
 def apply_filter(df, fires, direction, flt, timeframe="4h"):
@@ -440,7 +900,8 @@ def apply_filter(df, fires, direction, flt, timeframe="4h"):
 
 class Family:
     def __init__(self, key, fn, defaults, grid, *, live_rules=None,
-                 directions=(LONG, SHORT)):
+                 directions=(LONG, SHORT), timeframes=None, eligible=None,
+                 in_generate=True):
         self.key = key
         self.fn = fn
         self.defaults = dict(defaults)
@@ -448,6 +909,26 @@ class Family:
         #: {direction: the live rule this family IS at its defaults}
         self.live_rules = dict(live_rules or {})
         self.directions = tuple(directions)
+        #: The timeframes its live rule trades: None is every run's own
+        #: (today's meaning); ("1h",) is judged by the 1h pass only.
+        self.timeframes = tuple(timeframes) if timeframes else None
+        #: callable(symbol, asset_class) -> bool: the markets its live rule
+        #: can fire on. A class verdict pools only those (run.eligible_view).
+        self.eligible = eligible
+        #: False keeps the family out of the weekly generator's default
+        #: grid (its Sidak bar and shortlist); `--families` still asks.
+        self.in_generate = bool(in_generate)
+
+    def judged_on(self, timeframe) -> bool:
+        return self.timeframes is None or timeframe in self.timeframes
+
+    def is_eligible(self, symbol, asset_class) -> bool:
+        if self.eligible is None:
+            return True
+        try:
+            return bool(self.eligible(symbol, asset_class))
+        except Exception:  # noqa: BLE001 — unread is not a market it fires on
+            return False
 
     def fires(self, df, direction, params=None, flt="none", timeframe="4h"):
         p = dict(self.defaults, **(params or {}))
@@ -460,15 +941,17 @@ FAMILIES = {f.key: f for f in (
            {"period": 14, "gate": 35.0, "window": 30},
            [{"window": 20}, {"window": 30}, {"window": 30, "gate": 30.0},
             {"window": 45}],
-           live_rules={LONG: "rsi_bull_divergence"}),
+           live_rules={LONG: "rsi_bull_divergence",
+                       SHORT: "rsi_bear_divergence"}),
     Family("macd_cross", macd_cross,
            {"fast": 12, "slow": 26, "signal": 9},
            [{"fast": 8, "slow": 21, "signal": 5}, {},
             {"fast": 19, "slow": 39, "signal": 9}],
-           live_rules={LONG: "macd_bullish_crossover"}),
+           live_rules={LONG: "macd_bullish_crossover",
+                       SHORT: "macd_bearish_crossover"}),
     Family("ma_cross", ma_cross, {"fast": 50, "slow": 200},
            [{"fast": 10, "slow": 50}, {"fast": 20, "slow": 100}, {}],
-           live_rules={LONG: "golden_cross"}),
+           live_rules={LONG: "golden_cross", SHORT: "death_cross"}),
     Family("bb_squeeze", bb_squeeze,
            {"period": 20, "k": 2.0, "quantile": 0.2, "lookback": 120,
             "expand": 1.1},
@@ -492,15 +975,73 @@ FAMILIES = {f.key: f for f in (
     Family("rsi2_pullback", rsi2_pullback,
            {"period": 2, "low": 10.0, "trend": 200},
            [{}, {"low": 5.0}, {"period": 3, "low": 15.0}]),
+    # the bearish pack (2026-10-31): short only, born at research, out of
+    # the weekly generator
+    Family("bull_trap", bull_trap,
+           {"left": 3, "right": 3, "lookback": 60, "recovery": 3}, [{}],
+           live_rules={SHORT: "bull_trap_swing_high"}, directions=(SHORT,),
+           in_generate=False),
+    Family("po3_london", po3_london, {}, [{}],
+           live_rules={SHORT: "po3_london_sweep_short"}, directions=(SHORT,),
+           timeframes=("1h",), eligible=session_markets, in_generate=False),
+    Family("range_breakdown", range_breakdown,
+           {"n": 30, "max_width_atr": 4.0, "min_break_atr": 0.25}, [{}],
+           live_rules={SHORT: "range_breakdown_short"}, directions=(SHORT,),
+           in_generate=False),
+    Family("trend_rally", trend_rally,
+           {"fast": 20, "mid": 50, "slow": 200, "left": 3, "right": 3,
+            "rally": 5}, [{}],
+           live_rules={SHORT: "trend_continuation_short"},
+           directions=(SHORT,), in_generate=False),
+    Family("exhaustion_short", exhaustion_short,
+           {"trend": 200, "rally": 10, "min_rally_atr": 2.5, "wick": 0.5,
+            "rsi_min": 55.0}, [{}],
+           live_rules={SHORT: "risk_off_exhaustion_short"},
+           directions=(SHORT,), eligible=risk_on_short_market,
+           in_generate=False),
+    Family("vix_term_breakdown", vix_term_breakdown,
+           {"inverted": 1.0, "n": 10}, [{}],
+           live_rules={SHORT: "vix_inversion_index_short"},
+           directions=(SHORT,), eligible=index_market, in_generate=False),
+    Family("crowded_long", crowded_long,
+           {"left": 3, "right": 3, "top": 60, "near": 30,
+            "cot_extreme": 90.0}, [{}],
+           live_rules={SHORT: "crowded_long_reversal_short"},
+           directions=(SHORT,), eligible=cot_market, in_generate=False),
 )}
 
 
-def live_rule_cases():
-    """[(family, direction)] — every live rule as it trades today, and its
-    short mirror, at the family's defaults with no filter."""
+def live_rule_cases(timeframe="4h", *, pinned_only=False):
+    """[(family, direction)] — every live rule as it trades today, and the
+    short mirror of a family that maps no short rule, at the family's
+    defaults with no filter: the families judged on `timeframe` (a family
+    with no `timeframes` is judged on every run's own). `pinned_only`
+    keeps only the families that NAME `timeframe` — the nightly 1h pass,
+    which must not re-judge the 4h rules on 1h bars."""
     out = []
     for fam in FAMILIES.values():
-        if fam.live_rules:
-            for d in fam.directions:
-                out.append((fam, d))
+        if not fam.live_rules:
+            continue
+        if pinned_only and not (fam.timeframes and timeframe in fam.timeframes):
+            continue
+        if not fam.judged_on(timeframe):
+            continue
+        for d in fam.directions:
+            out.append((fam, d))
     return out
+
+
+def family_of(rule_name):
+    """(family, direction) whose live rule is `rule_name` (a fork reads its
+    root's), or None."""
+    name = str(rule_name or "")
+    try:
+        from signals.rule_birth import root_name
+        root = root_name(name)
+    except Exception:  # noqa: BLE001
+        root = name
+    for fam in FAMILIES.values():
+        for d, live in fam.live_rules.items():
+            if live in (name, root):
+                return fam, d
+    return None

@@ -95,9 +95,11 @@ class Command(BaseCommand):
     def _show(self, rule):
         from signals.rule_actuator import _control_for
         self.stdout.write(self._line(rule))
+        from signals.rule_birth import born_at_research
         ctrl = _control_for(rule)
         if ctrl is None:
-            self.stdout.write("  no RuleControl row — `set` creates one at the paper stage")
+            stage = "research" if born_at_research(rule) else "paper"
+            self.stdout.write(f"  no RuleControl row — `set` creates one at the {stage} stage")
         else:
             self.stdout.write(f"  row: status {ctrl.status} · stage {ctrl.promotion_stage} "
                               f"· scope {ctrl.scope or {}}")
@@ -106,14 +108,20 @@ class Command(BaseCommand):
     def _row(self, rule):
         from django.utils import timezone
         from signals.models_control import RuleControl
+        from signals.rule_birth import birth_defaults
         # A row created here must not promote the rule: no row means
-        # PAPER (rule_actuator.stage_policy), so the row says paper too.
+        # PAPER (rule_actuator.stage_policy), so the row says paper too —
+        # and RESEARCH for a born-at-research name (signals/rule_birth),
+        # which reads research with no row.
+        born = birth_defaults(rule)
+        stage = born.get("promotion_stage", RuleControl.STAGE_PAPER)
         ctrl, created = RuleControl.objects.get_or_create(
             rule_name=rule,
             defaults={"status": RuleControl.STATUS_ACTIVE, "weight_multiplier": 1.0,
-                      "promotion_stage": RuleControl.STAGE_PAPER,
+                      "promotion_stage": stage,
                       "stage_entered_at": timezone.now(),
-                      "notes": "Created by rule_scope; paper stage, as a rule with no row."})
+                      "notes": (f"Created by rule_scope; {stage} stage, as a "
+                                f"rule with no row."), **born})
         return ctrl, created
 
     def _set(self, rule, opts):
