@@ -2239,7 +2239,9 @@ class AssetBot(ABC):
                         body=(f"Trade #{trade.id} filled from a held order and "
                               f"the venue reports no stop on the position. "
                               f"Bot-side exits manage it; read it at eToro."),
-                        url="/positions/")
+                        url="/positions/",
+                        # a filled position: its close dialog (2026-10-24)
+                        close_trade_id=trade.id)
                 except Exception as e:  # noqa: BLE001
                     logger.warning("[%s_bot] no-stop alert failed: %s",
                                    self.asset_class, e)
@@ -8370,7 +8372,11 @@ class AssetBot(ABC):
                       f". {why} The loss at this stop is not the risk the "
                       f"entry was sized for; read the position at eToro "
                       f"(trade #{trade.id} on the platform)."),
-                url=page_url("forensics_detail", trade.id) or "/positions/")
+                url=page_url("forensics_detail", trade.id) or "/positions/",
+                # its close dialog (2026-10-24), once there is a position:
+                # an order still waiting has nothing to close yet
+                close_trade_id=(None if is_entry_working(trade)
+                                else trade.id))
         except Exception as e:  # noqa: BLE001
             logger.warning("[%s_bot] stop-rewrite alert failed: %s",
                            self.asset_class, e)

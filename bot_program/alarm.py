@@ -81,6 +81,15 @@ WHAT IT OBEYS: the alarm chat, and nothing else
                                 this chat's, and what the stopped bots
                                 hold stays managed (asset_engine/disarm)
     /help  /aide  /start        the two commands
+  THE ONE BUTTON (2026-10-24): a single critical Morgul finding about one
+  open real position (G2, no stop at the broker; G5, past its proof or
+  ceiling, once the order has filled: morgul.close_button) carries a
+  "Close position" URL button.
+  It is a link to the platform's close dialog for that row, which asks
+  the login that opens it for the trading PIN and shows nothing of a row
+  that is not its own; nothing is done from this chat but /stopall. A
+  bundle, the brake, an abandoned close (C) and every other alarm carry
+  none, and the link holds the row's number alone, never an amount.
   Another chat, another bot's command (/cmd@OtherBot, against getMe),
   anything else: no reply. The Eye's order, kept whole: one batch at a
   time under an advisory lock of its own (BATCH_LOCK_ID), a stale or
@@ -204,16 +213,19 @@ MAX_PROBLEMS_LISTED = 12
 
 class Alarm:
     """One critical problem: its stable key (the dedupe's), the words
-    after PREFIX, its lines, and its kind (STANDING, FAULT or EVENT)."""
+    after PREFIX, its lines, its kind (STANDING, FAULT or EVENT), and
+    its URL button or None (2026-10-24: Morgul's "Close position" under
+    one finding about one open row, morgul.close_button)."""
 
-    __slots__ = ("key", "words", "lines", "kind")
+    __slots__ = ("key", "words", "lines", "kind", "button")
 
-    def __init__(self, key, words, lines=(), *, kind=STANDING):
+    def __init__(self, key, words, lines=(), *, kind=STANDING, button=None):
         assert kind in REMIND_S, kind
         self.key = str(key)
         self.words = str(words)
         self.lines = [str(ln) for ln in lines if str(ln or "").strip()]
         self.kind = kind
+        self.button = button
 
     @property
     def title(self) -> str:
@@ -330,23 +342,30 @@ def _deliver(token, chat, reply) -> bool:
     (message_parts: HTML, every field escaped, under 4,096; fit first, so
     the brake's closing words stay whole). True when Telegram took it.
     Never raises: a refusal is logged with Telegram's own words, a
-    transport error without the token."""
+    transport error without the token. A reply's meta "button" (a URL to
+    the platform, 2026-10-24) rides under it; refused for the button, it
+    goes again without, the page as a line (post_message)."""
     from alerts.channels.telegram_alert import (SEND_TIMEOUT_S,
                                                 message_parts, post_message)
     title = str(getattr(reply, "title", ""))[:120]
     try:
         reply = eye.fit(reply)
-        text, _markup, _fallback = message_parts(
+        text, markup, fallback = message_parts(
             reply.title, reply.body, lines=reply.lines or None,
-            mark=reply.mark)
-        answer, _refused = post_message(
+            mark=reply.mark, button=reply.meta.get("button"))
+        answer, refused = post_message(
             token, {"chat_id": chat, "text": text, "parse_mode": "HTML",
                     "disable_web_page_preview": True},
-            timeout=SEND_TIMEOUT_S)
+            timeout=SEND_TIMEOUT_S, markup=markup, fallback_text=fallback)
     except Exception as e:  # noqa: BLE001 (an alarm never breaks its caller)
         logger.warning("[telegram alarm] %r not sent: %s", title,
                        _clean(e, token)[:200])
         return False
+    if refused is not None:
+        logger.warning("[telegram alarm] the button was refused (%s) %r: "
+                       "%s; sent again without it",
+                       getattr(refused, "status_code", "?"), title,
+                       _clean(getattr(refused, "text", ""), token)[:200])
     if not getattr(answer, "ok", False):
         logger.warning("[telegram alarm] refused (%s) %r: %s",
                        getattr(answer, "status_code", "?"), title,
@@ -355,11 +374,12 @@ def _deliver(token, chat, reply) -> bool:
     return True
 
 
-def send_alarm(title, lines=()) -> bool:
+def send_alarm(title, lines=(), *, button=None) -> bool:
     """One alarm to the alarm chat: True when Telegram took it. Nothing
     while the switch is off or the configuration is refused (said at
     WARNING once an hour). No quiet hours, no bot-alert preference, no
-    Notification row: this chat is the whole of it."""
+    Notification row: this chat is the whole of it. `button` (2026-10-24)
+    is one URL button to the platform, or None."""
     if not enabled():
         logger.debug("[telegram alarm] off: %r not sent", str(title)[:120])
         return False
@@ -367,7 +387,8 @@ def send_alarm(title, lines=()) -> bool:
     if why:
         _note("config", f"nothing sent: {why}")
         return False
-    return _deliver(token, chat, eye.Reply(MARK, title, list(lines)))
+    return _deliver(token, chat, eye.Reply(MARK, title, list(lines),
+                                           meta={"button": button}))
 
 
 # ── the memory ───────────────────────────────────────────────────────────
@@ -467,11 +488,15 @@ def _settle(source, alarms, now) -> dict:
                              kind=EVENT))
     sent = failed = 0
     if len(due) > MAX_MESSAGES:
+        # one message naming many: no button (a button names one row)
         batches = [(due, _bundle(due, now))]
     else:
-        batches = [([a], eye.Reply(MARK, a.title, a.lines)) for a in due]
+        batches = [([a], eye.Reply(MARK, a.title, a.lines,
+                                   meta={"button": a.button}))
+                   for a in due]
     for said, reply in batches:
-        if send_alarm(reply.title, reply.lines):
+        if send_alarm(reply.title, reply.lines,
+                      button=reply.meta.get("button")):
             for a in said:
                 cur[a.key]["sent"] = stamp
             sent += 1
@@ -518,7 +543,8 @@ def morgul_alarms(report) -> list:
             continue
         out.append(Alarm(f"morgul|{f.key}", _morgul_words(f.title),
                          [f.label, "Morgul watches it; details on /health/."],
-                         kind=EVENT if f.event else STANDING))
+                         kind=EVENT if f.event else STANDING,
+                         button=morgul.close_button(f)))
     for key, outcome in (report.outcomes or {}).items():
         if (not outcome or outcome[0] not in ("stopped", "earlier")
                 or not outcome[1]):

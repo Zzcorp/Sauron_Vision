@@ -54,9 +54,17 @@ def _fenced(name, reader, default):
 
 
 def the_wall(request):
-    """/wall/ — the public front door. A signed-in visitor goes home."""
+    """/wall/ — the public front door. A signed-in visitor goes home.
+
+    A Telegram button's link (2026-10-24) reaches the Wall as `next` when
+    its reader is not signed in: the login form carries it back, and a
+    signed-in visitor goes straight to it. Only the two id-only shapes of
+    alerts.links.DEEP_LINK_PATHS are echoed; any other `next` is dropped,
+    so no word of the query string reaches this public page."""
+    from alerts.links import deep_link_next
+    login_next = deep_link_next(request.GET.get("next"))
     if request.user.is_authenticated:
-        return redirect("dashboard")
+        return redirect(login_next or "dashboard")
     wall = wall_facts()
     context = {
         "wall": wall,
@@ -76,6 +84,9 @@ def the_wall(request):
         "canonical_url": request.build_absolute_uri(request.path),
         # For the three {% csrf_token %} of the login and PIN forms.
         "csrf_token": get_token(request),
+        # Where the login form returns (2026-10-24): a Telegram button's
+        # page, id-only, or "" for the intro.
+        "login_next": login_next,
     }
     body = render_to_string("landing/the_wall.html", context)
     # THE LEAK WALK (2026-10-14, core/leak_walk.py): an answer that carries

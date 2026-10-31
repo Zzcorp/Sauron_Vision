@@ -11,10 +11,31 @@ from django.views.decorators.cache import never_cache
 from django.utils.decorators import method_decorator
 
 PENDING_KEY = "sauron_pending_user_id"
+NEXT_KEY = "sauron_pending_next"
 
 
 def _is_ajax(request):
     return request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+
+def safe_next(request, value) -> str:
+    """`value` when it is a path on this site, else "" (2026-10-24).
+
+    The login's `next` comes from the form, so from whoever wrote the
+    link: until 2026-10-24 the PIN step stored it unchecked and followed
+    it after the PIN, so a crafted link could send a fresh login to any
+    address. A path only: it starts with one "/", carries no backslash,
+    and Django's own check finds no other host or scheme in it."""
+    from django.utils.http import url_has_allowed_host_and_scheme
+    text = str(value or "").strip()
+    if (not text.startswith("/") or text.startswith("//")
+            or "\\" in text):
+        return ""
+    if not url_has_allowed_host_and_scheme(
+            text, allowed_hosts={request.get_host()},
+            require_https=request.is_secure()):
+        return ""
+    return text
 
 
 @method_decorator(never_cache, name="dispatch")
@@ -22,8 +43,11 @@ class SauronLoginView(LoginView):
     template_name = "registration/login.html"
 
     def get_success_url(self):
-        """After login, show the intro loading sequence."""
-        return reverse_lazy("intro")
+        """After login, the page the login came for (a Telegram button's
+        link, 2026-10-24, through safe_next), else the intro loading
+        sequence."""
+        return (safe_next(self.request, self.request.POST.get("next"))
+                or reverse_lazy("intro"))
 
     def form_valid(self, form):
         """Username+password is good → stash user id, send to PIN page."""
@@ -37,7 +61,10 @@ class SauronLoginView(LoginView):
             return response
         # PIN required — stash user id, signal frontend / redirect to PIN page
         self.request.session[PENDING_KEY] = user.id
-        self.request.session["sauron_pending_next"] = self.request.POST.get("next") or "/intro/"
+        # where the PIN step returns: a path on this site only (safe_next)
+        self.request.session[NEXT_KEY] = (
+            safe_next(self.request, self.request.POST.get("next"))
+            or "/intro/")
         if _is_ajax(self.request):
             return JsonResponse({"status": "pin_required", "username": user.username})
         return redirect("login_pin")
@@ -77,7 +104,10 @@ def login_pin(request):
         verdict = check_login_pin(request, user, request.POST.get("pin", ""))
         if verdict.ok:
             auth_login(request, user)
-            next_url = request.session.pop("sauron_pending_next", "/intro/") or "/intro/"
+            # checked again: a session written before 2026-10-24 stored it
+            # unchecked
+            next_url = (safe_next(request, request.session.pop(NEXT_KEY, ""))
+                        or "/intro/")
             request.session.pop(PENDING_KEY, None)
             # login() keeps the pending session's data: never carry the
             # login step's count into the logged-in session.

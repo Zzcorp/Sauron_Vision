@@ -1430,6 +1430,8 @@
 
 <div class="page-content fade-in">
             {% if passation_card %}{% include "_partials/passation_card.html" %}{% endif %}
+            {# A Telegram button's page (2026-10-24): what the link opens. #}
+            {% if deep_link %}{% include "_partials/deep_link_note.html" %}{% endif %}
             {% block content %}{% endblock %}
         </div>
     </main>
@@ -3114,6 +3116,61 @@
     e.stopPropagation();
     closeFlow(btn);
   });
+  /* A Telegram "Close position" link's page (2026-10-24): the same flow
+     as the row's own button, for the row's id. The page's row when it
+     shows one (so a close retires it), else a detached button carrying
+     the id; the preview, the confirm and the PIN are closeFlow's. */
+  window.svCloseTrade = function (id) {
+    var digits = String(id === null || id === undefined ? '' : id).replace(/[^0-9]/g, '');
+    if (!digits) return;
+    var sel = '[data-sv-close-trade="' + digits + '"]';
+    var btn = document.querySelector('.page-content ' + sel) || document.querySelector(sel);
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-sv-close-trade', digits);
+    }
+    closeFlow(btn);
+  };
+})();
+
+/* ── A TELEGRAM BUTTON'S PAGE (2026-10-24) ─────────────────────────────
+   /signals/<id>/ticket/ and /positions/<id>/close-dialog/
+   (dashboard/views_links.py) render their page with #svDeepLink: what to
+   open, by id. Read once, after the deferred scripts (SV.overlay), and
+   opened through the page's own doors only: the TAKE TRADE ticket
+   (svTakeTrade, svTakeTradeAsset) or the close dialog (svCloseTrade).
+   Their previews execute nothing; an order or a close goes only from the
+   dialog's own confirm, with its trading PIN on real money. This runner
+   fetches nothing itself. `auto` false (no manual lane yet): the note's
+   button is the click. */
+(function () {
+  function read() {
+    var el = document.getElementById('svDeepLink');
+    if (!el) return null;
+    try { return JSON.parse(el.textContent || 'null'); } catch (e) { return null; }
+  }
+  function open(d) {
+    if (d.open === 'signal' && window.svTakeTrade) {
+      window.svTakeTrade(d.signal_id);
+    } else if (d.open === 'asset' && window.svTakeTradeAsset) {
+      window.svTakeTradeAsset(d.symbol, d.side);
+    } else if (d.open === 'close' && window.svCloseTrade) {
+      window.svCloseTrade(d.trade_id);
+    }
+  }
+  function run() {
+    var d = read();
+    if (!d || !d.open) return;
+    var again = document.getElementById('svDeepLinkOpen');
+    if (again) again.addEventListener('click', function () { open(d); });
+    if (d.auto) open(d);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', run);
+  } else {
+    run();
+  }
 })();
 
 /* ── Mini-sidebar JS-portal tooltip ──────────────────────────────

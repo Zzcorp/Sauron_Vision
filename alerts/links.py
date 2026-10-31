@@ -13,6 +13,8 @@ plausible enough to be clicked twice.
 """
 from __future__ import annotations
 
+import re
+
 
 def page_url(route: str, arg) -> str:
     """The stored url for a one-argument route, or "" if it has none.
@@ -54,3 +56,37 @@ def instrument_url(symbol: str) -> str:
     if not known:
         return ""
     return page_url("instrument_detail", known)
+
+
+# ── The Telegram buttons that prepare an act (2026-10-24) ────────────────
+# "Prepare ticket" under a signal and "Close position" under an alert
+# about one position open a platform page that READS: the TAKE TRADE
+# ticket filled from the signal, the close dialog of the position. The
+# link carries the row's id and nothing else (never a price, a side, a
+# size or a token): the page reads every fact from the database for the
+# login that opens it, and the platform's own confirm, with its trading
+# PIN for real money, stays the only way to act
+# (dashboard/views_links.py).
+
+def ticket_path(signal_id) -> str:
+    """/signals/<id>/ticket/: the TAKE TRADE ticket of one signal, or ""."""
+    return page_url("signal_ticket", signal_id)
+
+
+def close_path(trade_id) -> str:
+    """/positions/<id>/close-dialog/: the close dialog of one
+    AssetBotTrade, or "". Never a legacy BotTrade's or a portfolio
+    Position's id: the same integer names a different row there."""
+    return page_url("close_dialog", trade_id)
+
+
+#: The only shapes a login may come back to from the Wall: ids, no
+#: query, no free text (the Wall is public and echoes it in its form).
+DEEP_LINK_PATHS = (re.compile(r"^/signals/\d{1,12}/ticket/$"),
+                   re.compile(r"^/positions/\d{1,12}/close-dialog/$"))
+
+
+def deep_link_next(value) -> str:
+    """`value` when it is exactly one of DEEP_LINK_PATHS, else ""."""
+    text = str(value or "")
+    return text if any(p.fullmatch(text) for p in DEEP_LINK_PATHS) else ""

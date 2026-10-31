@@ -2900,12 +2900,17 @@ def _orc_lines(user, positions, details, trades):
             d["orc"] = line_dict(sl)
 
 
-def _render_positions(request, live_only):
+def _render_positions(request, live_only, *, deep_link=None):
     """Phase 63 — enriched positions dashboard, now live.
 
     Open exposure totals, direction donut, asset-class breakdown, monthly
     P&L bars, profit factor, avg W/L — and an open book marked to live
     quotes, each row carrying the R multiple it is currently running at.
+
+    `deep_link` (2026-10-24) is what a Telegram "Close position" link
+    asks the page to open (dashboard/views_links.close_link): a note and
+    the close dialog of one row, run by base.html's own close script.
+    The full page only; the live regions never carry it.
     """
     from collections import defaultdict
     from portfolio.services import (get_or_create_default_portfolio,
@@ -3075,6 +3080,9 @@ def _render_positions(request, live_only):
         "n_priced": n_priced,
         "direction_donut": direction_donut,
         "asset_breakdown": asset_breakdown,
+        # A "Close position" link's note and dialog (2026-10-24): the full
+        # page only, so the live refresh never opens it a second time.
+        "deep_link": None if live_only else deep_link,
     }
 
     if not live_only:
@@ -4683,14 +4691,22 @@ def _chart_signal_marks(signals, decimals=None):
 @login_required
 def instrument_detail(request, symbol):
     """Instrument detail page with chart, indicators, signals, news."""
-    import json
     from instruments.models import Instrument
+
+    instrument = get_object_or_404(Instrument, symbol=symbol)
+    return _instrument_page(request, instrument)
+
+
+def _instrument_page(request, instrument, *, deep_link=None):
+    """The instrument page for `instrument`. `deep_link` (2026-10-24) is
+    what a Telegram "Prepare ticket" link asks the page to open
+    (dashboard/views_links.ticket_link): a note and the TAKE TRADE ticket,
+    run by base.html's own scripts. Reads only, like the page itself."""
+    import json
     from market_data.models import PriceData, LiveQuote
     from indicators.models import TechnicalIndicator
     from signals.models import Signal
     from scraping.models import NewsArticle
-
-    instrument = get_object_or_404(Instrument, symbol=symbol)
 
     # Chart data — daily candles, synthesized from intraday bars when no
     # real 1d rows exist yet (see _daily_chart_bars).
@@ -4779,6 +4795,9 @@ def instrument_detail(request, symbol):
         # a filter the other does not.
         "chart_positions_rows": chart_positions,
         "chart_signals": chart_signals,
+        # A Telegram "Prepare ticket" link's note and ticket (2026-10-24);
+        # None on every other visit.
+        "deep_link": deep_link,
     })
 
 

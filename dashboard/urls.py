@@ -44,6 +44,7 @@ from .views_close import (close_position_preview, close_position_execute,
                           close_all_preview, close_all_execute,
                           close_advice, close_selected_preview,
                           close_selected_execute)
+from .views_links import close_dialog, signal_ticket
 from .views_signals_htmx import signal_cards_htmx, signal_performance_htmx
 from .views_performance import performance_dashboard
 from .views_risk import risk_dashboard, risk_dashboard_live
@@ -194,10 +195,18 @@ urlpatterns = [
          name="hq_toggle_investor"),
     path("signals/<int:signal_id>/take-trade/preview/", views.take_trade_preview, name="take_trade_preview"),
     path("signals/<int:signal_id>/take-trade/", views.take_trade_execute, name="take_trade_execute"),
+    # A Telegram "Prepare ticket" button lands here (2026-10-24): the
+    # instrument page with that signal's ticket opened. A GET that reads;
+    # the ticket's own POSTs above stay the only way to act.
+    path("signals/<int:signal_id>/ticket/", signal_ticket, name="signal_ticket"),
     # The way out. TAKE TRADE opened positions the operator could only
     # leave by stop, target, or the kill switch flattening everything.
     path("positions/<int:trade_id>/close/preview/", close_position_preview, name="close_position_preview"),
     path("positions/<int:trade_id>/close/", close_position_execute, name="close_position_execute"),
+    # A Telegram "Close position" button lands here (2026-10-24): the
+    # positions page with that row's close dialog opened. A GET that
+    # reads; the close pair above stays the only way to act.
+    path("positions/<int:trade_id>/close-dialog/", close_dialog, name="close_dialog"),
     # Moving a stop is a money decision on one row — same shape as the
     # close above, same PIN rule, refused with a reason rather than a code.
     path("positions/<int:trade_id>/levels/", position_levels, name="position_levels"),
