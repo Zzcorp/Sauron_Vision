@@ -44,16 +44,21 @@ class DailyBriefingAgent:
     """Generates a concise morning briefing from daily market context."""
 
     agent_name = "daily_briefing"
-    default_tier = "balanced"
+    default_tier = "balanced"   # at effort high: catalog.AGENT_EFFORT_DEFAULTS
 
     def __init__(self):
         from django.conf import settings
         ai_config = settings.AI_CONFIG
         provider_name = ai_config["default_provider"]
-        from ai_agents.catalog import resolve_agent
+        from ai_agents.catalog import resolve_agent, resolve_effort
         model = resolve_agent(self.agent_name, self.default_tier)
         self._provider_name = provider_name
         self._model = model
+        # Resolved like BaseAgent's: the agent's own row on /ai-models/,
+        # then its own default (high, catalog.AGENT_EFFORT_DEFAULTS), which
+        # the tier's row does not override.
+        self._effort = resolve_effort(model, self.default_tier,
+                                      self.agent_name)
         self._provider = self._get_provider(provider_name)
 
     def _get_provider(self, provider_name):
@@ -90,6 +95,7 @@ class DailyBriefingAgent:
                 system_prompt=system_prompt,
                 user_message=context,
                 model=self._model,
+                effort=self._effort,
                 record=False,
             )
             duration = time.time() - start
@@ -132,16 +138,21 @@ class MondayPlanAgent:
     """Generates a weekly game plan every Sunday evening."""
 
     agent_name = "monday_plan"
-    default_tier = "balanced"
+    default_tier = "balanced"   # at effort high: catalog.AGENT_EFFORT_DEFAULTS
 
     def __init__(self):
         from django.conf import settings
         ai_config = settings.AI_CONFIG
         provider_name = ai_config["default_provider"]
-        from ai_agents.catalog import resolve_agent
+        from ai_agents.catalog import resolve_agent, resolve_effort
         model = resolve_agent(self.agent_name, self.default_tier)
         self._provider_name = provider_name
         self._model = model
+        # Resolved like BaseAgent's: the agent's own row on /ai-models/,
+        # then its own default (high, catalog.AGENT_EFFORT_DEFAULTS), which
+        # the tier's row does not override.
+        self._effort = resolve_effort(model, self.default_tier,
+                                      self.agent_name)
         self._provider = self._get_provider(provider_name)
 
     def _get_provider(self, provider_name):
@@ -183,6 +194,7 @@ class MondayPlanAgent:
                 system_prompt=system_prompt,
                 user_message=context,
                 model=self._model,
+                effort=self._effort,
                 record=False,
             )
             duration = time.time() - start

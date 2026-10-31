@@ -1309,6 +1309,7 @@ class CloseAdvisorAgent(BaseAgent):
     is narrow — the deep tier is for work that reasons across the platform."""
 
     agent_name = "close_advisor"
+    # Effort high, not the tier's medium: catalog.AGENT_EFFORT_DEFAULTS.
     default_tier = "balanced"
 
     def get_system_prompt(self) -> str:
@@ -1456,6 +1457,7 @@ def _model_pass(user, answer: dict) -> None:
             user_message=user_message,
             model=agent.model,
             agent_name=agent.agent_name,
+            effort=getattr(agent, "effort", None),
             # Which question this cost answered, for the ledger — the user
             # and the rows, never anything a person could act on.
             source_ref=("close_advice:user=%s:trades=%s"

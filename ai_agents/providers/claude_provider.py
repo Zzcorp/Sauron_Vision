@@ -19,11 +19,12 @@ _TRANSIENT_MARKERS = ("overloaded", "internal_server_error",
 # tripling the worst-case request time.
 _MAX_ATTEMPTS = 2
 
-# Where a declined request re-runs. The frontier model runs safety
-# classifiers that can decline a request outright (stop_reason "refusal")
-# — not an outage, not an answer. The deep tier's model does not run the
-# same classifiers; one re-run there is the platform's own fallback, and
-# it never chains (a decline on the fallback is returned as it is).
+# Where a declined request re-runs. A model's safety classifiers can
+# decline a request outright (stop_reason "refusal") — not an outage, not
+# an answer. Opus 5 runs classifiers too and can decline as well; they are
+# narrower than Opus 5.5's, which suits a rescue model. One re-run there
+# is the platform's own fallback, and it never chains (a decline on the
+# fallback is returned as it is).
 REFUSAL_FALLBACK_MODEL = "claude-opus-5"
 # The tiers whose caller cleared the deep reserve BEFORE calling:
 # spend.can_spend keys DEEP_TIER_SHARE off "deep" and "frontier" alike, so

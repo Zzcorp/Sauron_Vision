@@ -11,7 +11,7 @@ connectors); ours reads our own DB so the operator can ask:
 
 Architecture:
   _build_research_snapshot()  → aggregates 6h-7d of brain/graph/hypotheses
-  ResearchAgent               → BaseAgent subclass, deep tier (Opus 4.7)
+  ResearchAgent               → BaseAgent subclass, deep tier (Opus 5 on 2026-10-31)
   begin_ask(conv, question)   → persists the question + a PENDING answer
   complete_ask(pending_id)    → fills that pending row in place (worker)
   ask(conversation, question) → both halves, synchronously (fallback path)
@@ -239,7 +239,7 @@ class ResearchAgent(BaseAgent):
     """Conversational Q&A over Sauron state."""
 
     agent_name = "research"
-    default_tier = "deep"  # Opus 4.7
+    default_tier = "deep"
 
     def get_system_prompt(self, *, lore: bool = False) -> str:
         """The system prompt; with `lore=True` two fixed strings are added
@@ -619,6 +619,7 @@ def complete_ask(pending_message_id: int, *, channel: str = "web") -> dict:
             system_prompt=system_prompt, user_message=context,
             model=agent.model,
             agent_name=agent.agent_name,
+            effort=getattr(agent, "effort", None),
             # The pending row exists BEFORE this call, so its created_at
             # predates the ledger row this call writes — a backfill that
             # cut on timestamps alone would copy the cost twice. The ref

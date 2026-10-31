@@ -454,9 +454,13 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AI_CONFIG = {
     "default_provider": os.getenv("AI_DEFAULT_PROVIDER", "claude"),
     "models": {
+        # A variable set but blank (.env.production.example ships them so)
+        # falls through to ai_agents.catalog.TIER_DEFAULTS, not to these:
+        # a tier move edits both. claude-sonnet-4-20250514 retired
+        # 2026-06-15 (404s) and sonnet-5 replaced it. The current Haiku,
+        # Sonnet and Opus are haiku-5-5, sonnet-5-5 and opus-5-5, a
+        # generation past these three; moving a tier is the operator's call.
         "fast": os.getenv("AI_MODEL_FAST", "claude-haiku-4-5-20251001"),
-        # claude-sonnet-4-20250514 retired 2026-06-15 (404s); sonnet-5 is the
-        # designated drop-in. opus-5 is the current Opus at the same price as 4.8.
         "balanced": os.getenv("AI_MODEL_BALANCED", "claude-sonnet-5"),
         "deep": os.getenv("AI_MODEL_DEEP", "claude-opus-5"),
         "frontier": os.getenv("AI_MODEL_FRONTIER", "claude-fable-5-1"),

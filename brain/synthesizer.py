@@ -564,14 +564,14 @@ SCHEMA_HINT = """{
 class SauronMindAgent(BaseAgent):
     """Central coordination synthesizer.
 
-    Uses the `deep` tier (Opus 4.7) — this agent is THE central coordinator;
-    every downstream agent inherits its mistakes. Quality > frequency-
-    optimized cost. Hourly (config/celery.py); cheap insurance against
+    Uses the `deep` tier (Opus 5 on 2026-10-31; /ai-models/ shows what it
+    runs on) — this agent is THE central coordinator; every downstream
+    agent inherits its mistakes. Quality > frequency-optimized cost. Hourly (config/celery.py); cheap insurance against
     one bad correlated decision propagating across all rules.
     """
 
     agent_name = "sauron_mind"
-    default_tier = "deep"  # Opus 4.7
+    default_tier = "deep"
 
     def get_system_prompt(self) -> str:
         return (
@@ -1123,6 +1123,7 @@ def synthesize_now() -> dict:
             user_message=context,
             model=agent.model,
             agent_name=agent.agent_name,
+            effort=getattr(agent, "effort", None),
         )
         parsed = agent.parse_response(raw)
     except Exception as e:

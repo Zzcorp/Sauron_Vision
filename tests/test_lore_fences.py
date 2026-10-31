@@ -25,9 +25,11 @@ READERS = {
 }
 
 #: Never readers: a size, a gate or a binding vote sits one hop away.
+#: (ai_agents/consensus.py left the list with the module, removed unused
+#: on 2026-10-31.)
 NEVER = ("bot_program", "portfolio", "brain/synthesizer.py", "brain/horizon.py",
          "ai_agents/agents/trade_debate.py", "ai_agents/agents/weekly_reviewer.py",
-         "ai_agents/tasks.py", "ai_agents/next_steps.py", "ai_agents/consensus.py")
+         "ai_agents/tasks.py", "ai_agents/next_steps.py")
 
 SCAN_DIRS = ("ai_agents", "brain", "dashboard", "bot_program", "core", "signals",
              "portfolio", "market_data", "scraping", "alerts", "strategies",

@@ -43,6 +43,12 @@
     <p style="padding:0 16px; color:var(--text-muted); font-size:13px;">
         Every agent runs on a tier unless it has its own override below.
         Resolution order: agent override → tier setting → environment variable → code default.
+        Effort: agent override → the agent's own default → tier setting → the tier's default.
+        The ten agents that call the model directly (the Mind, the critic, the strategist,
+        the earnings reviewer, the research chat, the strategy generator, the position reviewer,
+        the close advisor, the morning briefing, the Monday plan) carry their own default, high,
+        the API's default on the models they ran on: a tier's effort does not move them; their own override does.
+        Each agent row below shows the model and the effort its calls are sent with.
     </p>
     <div class="table-wrapper">
     <table class="sv-perf-table">

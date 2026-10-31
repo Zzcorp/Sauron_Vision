@@ -178,6 +178,7 @@ class PositionReviewerAgent(BaseAgent):
     agent_name = "position_reviewer"
     # Balanced, not deep: layer 1 already did the measuring, and this is a
     # narrow question over a small snapshot. See the module docstring.
+    # Effort high, not the tier's medium: catalog.AGENT_EFFORT_DEFAULTS.
     default_tier = "balanced"
 
     def get_system_prompt(self) -> str:
@@ -662,6 +663,7 @@ def review_one(verdict: dict, review) -> dict:
             user_message=agent.build_context(snapshot=snapshot),
             model=agent.model,
             agent_name=agent.agent_name,
+            effort=getattr(agent, "effort", None),
             # Layer 1 wrote `review` BEFORE this call — the ref keeps a
             # timestamp-cut backfill from booking this cost twice.
             source_ref=f"PositionReview:{review.pk}",

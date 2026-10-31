@@ -1,7 +1,8 @@
 """Phase 40 — Strategist Briefing Agent.
 
-Daily 06:00 UTC, Opus 4.7. Reads everything Sauron has learned in the last
-24-72h and produces a human-readable briefing:
+Daily 06:00 UTC, on the deep tier (Opus 5 on 2026-10-31). Reads everything
+Sauron has learned in the last 24-72h and produces a human-readable
+briefing:
 
   - **Outlook**     — 1-3 paragraphs of plain English
   - **Posture**     — defensive | balanced | aggressive
@@ -16,7 +17,7 @@ Each Idea is *also* posted as a Hypothesis so the Strategist's
 recommendations get graded over time (Phase-6 calibration applies).
 Bad strategists earn lower trust and get weighted down.
 
-Cost target: ~$0.30/day (1 run × ~10K input + ~2K output Opus 4.7).
+Cost target: ~$0.30/day (1 run × ~10K input + ~2K output on the deep tier).
 """
 from __future__ import annotations
 
@@ -369,7 +370,7 @@ class StrategistAgent(BaseAgent):
     """Daily synthesis & user-facing briefing."""
 
     agent_name = "strategist"
-    default_tier = "deep"  # Opus 4.7
+    default_tier = "deep"
 
     def get_system_prompt(self, *, lore: bool = False) -> str:
         """With `lore=True` the library's background rule is inserted before
@@ -710,6 +711,7 @@ def run_strategist_now() -> dict:
             system_prompt=system_prompt, user_message=context,
             model=agent.model,
             agent_name=agent.agent_name,
+            effort=getattr(agent, "effort", None),
         )
         parsed = agent.parse_response(raw)
     except Exception as e:

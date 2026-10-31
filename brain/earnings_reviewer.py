@@ -4,7 +4,7 @@ Modeled after Anthropic's May-2026 Earnings Reviewer template: a deep-dive
 AI agent that reads an earnings event for a held instrument and produces
 structured analysis (themes, risks, direction, suggested action).
 
-Uses our existing BaseAgent / Opus 4.7 infrastructure rather than the
+Uses our existing BaseAgent / deep-tier infrastructure rather than the
 Managed Agents API — keeps cost in our budget and lets the agent read
 our own database directly (positions, news, AI sentiment, regime context)
 instead of going through MCP connectors that require enterprise data
@@ -205,7 +205,7 @@ class EarningsReviewerAgent(BaseAgent):
     """Deep-dive earnings analysis for a held instrument."""
 
     agent_name = "earnings_reviewer"
-    default_tier = "deep"  # Opus 4.7
+    default_tier = "deep"
 
     def get_system_prompt(self) -> str:
         return (
@@ -381,6 +381,7 @@ def review_one_event(instrument, event) -> Optional[dict]:
             system_prompt=system_prompt, user_message=context,
             model=agent.model,
             agent_name=agent.agent_name,
+            effort=getattr(agent, "effort", None),
         )
         parsed = agent.parse_response(raw)
     except Exception as e:

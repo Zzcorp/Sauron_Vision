@@ -37,7 +37,8 @@ def resolve_brain_predictions() -> dict:
 @spend_guard(tier="deep", estimated_usd=0.4)
 def run_critic_pass(*, max_n: int = 5) -> dict:
     """Beat task — every 30 min. Audits up to `max_n` pending hypotheses
-    via the Opus 4.7 critic agent. Bounded cost ($0.50-1.50/day target)."""
+    via the critic agent, on the deep tier. Bounded cost ($0.50-1.50/day
+    target)."""
     from .critic import run_critic_pass as run
     return run(max_n=max_n)
 
@@ -107,7 +108,7 @@ def run_auto_demoter() -> dict:
 @spend_guard(tier="deep", estimated_usd=0.2)
 def run_earnings_reviewer() -> dict:
     """Beat task — every 4h. Walks recent earnings events for held symbols
-    and dispatches the EarningsReviewerAgent (Opus 4.7) to produce a deep
+    and dispatches the EarningsReviewerAgent (deep tier) to produce a deep
     AI review per (instrument, event)."""
     from .earnings_reviewer import scan_due_earnings_now
     return scan_due_earnings_now()

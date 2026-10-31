@@ -33,6 +33,9 @@ AGENT_GROUPS = [
         ("debate_champion", "The Champion (trade debate)", "fast"),
         ("signal_journal", "Signal Journal", "fast"),
         ("trade_journal", "Trade Journal", "fast"),
+        # Layer 2 of the open-position watcher: one call per flagged
+        # position (brain/position_review_agent.py).
+        ("position_reviewer", "Position Reviewer", "balanced"),
         # "Is it a good idea to close?" on the positions pages — one call
         # per question, only when the operator asks for the AI's reasoning.
         ("close_advisor", "Close Advisor", "balanced"),
@@ -54,16 +57,28 @@ AGENT_GROUPS = [
         ("council_awakened", "The Awakened", "fast"),
         ("council_theorist", "The Theorist", "fast"),
     ]),
+    # The briefings and the reports (2026-10-31): they read the same
+    # override rows as everyone else and were not listed, so they could
+    # be neither seen nor set here.
+    ("Briefings and reports", [
+        ("daily_briefing", "Morning Briefing", "balanced"),
+        ("monday_plan", "Monday Game Plan", "balanced"),
+        ("next_steps", "Next Steps (from a report)", "fast"),
+        ("newsletter_writer", "Newsletter Writer", "fast"),
+    ]),
     # Keys MUST equal each agent's runtime agent_name — the resolver looks
     # up overrides by that value, so a friendly-but-wrong key writes a row
-    # nothing ever reads.
+    # nothing ever reads. The tier MUST be the agent class's default_tier:
+    # four rows here had drifted from it and showed Sonnet 5 for agents
+    # that run on Opus 5, and Opus 5 for the one on Fable 5.1
+    # (tests/test_ai_models_truth.py).
     ("Sauron's Mind", [
-        ("sauron_mind", "Synthesizer", "balanced"),
+        ("sauron_mind", "Synthesizer", "deep"),
         ("critic", "Critic", "deep"),
         ("strategist", "Strategist", "deep"),
-        ("strategy_generator", "Strategy Generator", "deep"),
-        ("earnings_reviewer", "Earnings Reviewer", "balanced"),
-        ("research", "Research Chat", "balanced"),
+        ("strategy_generator", "Strategy Generator", "frontier"),
+        ("earnings_reviewer", "Earnings Reviewer", "deep"),
+        ("research", "Research Chat", "deep"),
         ("horizon", "Horizon (5-10y sectors)", "frontier"),
     ]),
 ]
@@ -90,11 +105,29 @@ ORC_AGENT_KEYS = (
 )
 
 
+def agent_choice(name: str, tier: str) -> tuple:
+    """(model, effort or None) the agent `name` runs on, resolved the way
+    the agent resolves itself when it is built: BaseAgent.__init__, the
+    two inline agents of ai_agents/tasks.py, and the debate's and the
+    council's DEBATE_MODEL, which answer on their own model and never on
+    their tier (trade_debate._agent_model, 2026-10-08)."""
+    from ai_agents.agents.council import COUNCIL_AGENT_NAMES
+    from ai_agents.agents.trade_debate import (DEBATE_AGENT_NAMES,
+                                               effective_model)
+    from ai_agents.catalog import resolve_agent, resolve_effort
+
+    if name in DEBATE_AGENT_NAMES + COUNCIL_AGENT_NAMES:
+        model = effective_model(name)
+    else:
+        model = resolve_agent(name, tier)
+    return model, resolve_effort(model, tier, name)
+
+
 @staff_member_required
 def ai_models_dashboard(request):
     from ai_agents.catalog import (
         MODELS, TIERS, EFFORT_LEVELS, TIER_DEFAULTS, TIER_EFFORT_DEFAULTS,
-        resolve_tier, resolve_agent, resolve_effort, known_model,
+        resolve_tier, resolve_effort, known_model,
     )
     from ai_agents.models import AIModelSetting, AgentTask
 
@@ -150,26 +183,19 @@ def ai_models_dashboard(request):
             "unknown": not known_model(resolved),
         })
 
-    # The debate's and the council's agents answer on DEBATE_MODEL unless a
-    # row says otherwise (trade_debate._agent_model), never on their tier:
-    # the page shows what they actually run on (2026-10-08).
-    from ai_agents.agents.council import COUNCIL_AGENT_NAMES
-    from ai_agents.agents.trade_debate import (DEBATE_AGENT_NAMES,
-                                               effective_model)
-    pinned = set(DEBATE_AGENT_NAMES + COUNCIL_AGENT_NAMES)
-
+    # Each row as the agent resolves itself at run time (agent_choice),
+    # so the page shows the model and the effort the call is sent with.
     agent_groups = []
     for group_name, agents in AGENT_GROUPS:
         rows = []
         for name, label, tier in agents:
             row = overrides.get(("agent", name))
-            resolved = (effective_model(name) if name in pinned
-                        else resolve_agent(name, tier))
+            resolved, effort = agent_choice(name, tier)
             rows.append({
                 "name": name, "label": label, "tier": tier,
                 "resolved": resolved,
                 "model_label": MODELS.get(resolved, {}).get("label", resolved),
-                "effort": resolve_effort(resolved, tier, name) or "—",
+                "effort": effort or "—",
                 "override": row,
                 "unknown": not known_model(resolved),
             })

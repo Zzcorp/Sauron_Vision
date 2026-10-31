@@ -321,6 +321,27 @@ class GeneratedDashboardTests(TestCase):
         r = self.client.get("/generated/")
         self.assertEqual(r.status_code, 200)
 
+    def test_the_cost_strip_names_the_model_the_generator_runs_on(self):
+        """It said "opus 4.7 generation" while the generator ran on the
+        frontier tier's Fable 5.1 (2026-10-31): the page now names what
+        the generator resolves to, and follows an override."""
+        from django.conf import settings
+        from django.test import override_settings
+        from ai_agents.models import AIModelSetting
+        u = User.objects.create_user(username="g_model", password="x")
+        self.client.force_login(u)
+        blank = {**settings.AI_CONFIG, "models": {
+            t: "" for t in ("fast", "balanced", "deep", "frontier")}}
+        with override_settings(AI_CONFIG=blank):
+            r = self.client.get("/generated/")
+            self.assertContains(r, "Claude Fable 5.1 generation")
+            self.assertNotContains(r, "opus 4.7")
+            AIModelSetting.objects.create(scope="agent",
+                                          key="strategy_generator",
+                                          model_id="claude-opus-5-5")
+            self.assertContains(self.client.get("/generated/"),
+                                "Claude Opus 5.5 generation")
+
 
 class GeneratedAdminTests(TestCase):
     def _create_pending(self):

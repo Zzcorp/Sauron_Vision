@@ -199,25 +199,43 @@ class TheOpsLaneKnowsIt(TestCase):
         self.assertIn("probe_routes", ops_commands.runnable_names())
 
 
-class TheFirstThingTheProbeFound(TestCase):
-    """dashboard.views.ai_chat_stream imported StreamingHttpResponse and
-    not JsonResponse, so its two refusals — empty message, no API key —
-    raised NameError and answered 500. probe_routes found it on its first
-    run; nothing else had ever visited the page. Both refusals are pinned
-    here, and neither reaches the network."""
+class TheEndpointsTheProbeFirstFoundAreGone(TestCase):
+    """dashboard.views.ai_chat_stream was the probe's first find
+    (2026-09-23): it imported StreamingHttpResponse and not JsonResponse,
+    so its two refusals raised NameError and answered 500, and nothing
+    else had ever visited it. The two tests that pinned those refusals
+    went with it on 2026-10-31, when it and ai_chat_api were removed: no
+    page reached either (ai_chat_page redirects to /research/, and the
+    template that called them was rendered by no view), and both posted to
+    the Messages API by hand, outside the ledger and the daily budget, on
+    a hardcoded Haiku 4.5 and anthropic-version 2023-06-01. The old chat
+    page's URL still redirects, so a bookmark lands somewhere."""
 
     def setUp(self):
         self.u = User.objects.create_user("chat", "c@x", "x")
         self.client.force_login(self.u)
 
-    def test_an_empty_message_is_refused_with_json_not_a_raise(self):
-        r = self.client.get("/api/ai-chat/stream/")
-        self.assertEqual(r.status_code, 400)
-        self.assertEqual(r.json()["error"], "Empty message")
-
-    def test_a_missing_key_is_refused_with_json_not_a_raise(self):
+    def test_neither_endpoint_answers_any_more(self):
         import os
-        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": ""}):
-            r = self.client.get("/api/ai-chat/stream/", {"message": "hi"})
-        self.assertEqual(r.status_code, 500)
-        self.assertEqual(r.json()["error"], "API key not configured")
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}), \
+                mock.patch("requests.post") as post:
+            for url in ("/api/ai-chat/", "/api/ai-chat/stream/"):
+                self.assertEqual(
+                    self.client.get(url, {"message": "hi"}).status_code, 404,
+                    url)
+                self.assertEqual(self.client.post(
+                    url, data='{"message": "hi"}',
+                    content_type="application/json").status_code, 404, url)
+        post.assert_not_called()
+
+    def test_their_route_names_are_gone(self):
+        from django.urls import NoReverseMatch, reverse
+        for name in ("ai_chat_api", "ai_chat_stream"):
+            with self.assertRaises(NoReverseMatch):
+                reverse(name)
+
+    def test_the_old_chat_page_still_redirects_to_research(self):
+        from django.urls import reverse
+        r = self.client.get("/ai/chat/")
+        self.assertRedirects(r, reverse("research_view"),
+                             fetch_redirect_response=False)

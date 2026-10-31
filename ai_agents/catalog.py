@@ -8,10 +8,13 @@ resolves through here.
 
 Resolution order for a tier (first hit wins):
   1. AIModelSetting DB row for that tier      (runtime, editable in the UI)
-  2. AI_MODEL_FAST / _BALANCED / _DEEP env var (deploy-time)
+  2. AI_MODEL_FAST / _BALANCED / _DEEP / _FRONTIER env var (deploy-time)
   3. The tier default below                    (code)
 
-Per-agent overrides use the same DB table with scope="agent".
+Per-agent overrides use the same DB table with scope="agent". Effort
+resolves through the same rows, first hit wins: the agent's row, the
+agent's own default (AGENT_EFFORT_DEFAULTS), the tier's row, the tier's
+default.
 """
 from __future__ import annotations
 
@@ -228,8 +231,14 @@ MODELS = {
         "server_fallback": None,
         "notes": "Older Opus; adaptive thinking must be set explicitly.",
     },
+    # RETIRING. Deprecated 2026-09-30, it retires on 2026-11-30, and from
+    # that day a pin to it would 404 on every call. No tier defaults to
+    # it. The row stays until then because a pin to it is a served model
+    # today and a saved override may name it; remove it before the date,
+    # and _validated then refuses such a pin and falls back to the tier.
     "claude-sonnet-4-5": {
-        "label": "Claude Sonnet 4.5",
+        "label": "Claude Sonnet 4.5 (retires 2026-11-30)",
+        "retires": "2026-11-30",
         "tier_hint": "balanced",
         "pricing": {"input": 3.0, "output": 15.0},
         "context": 1_000_000,
@@ -241,7 +250,8 @@ MODELS = {
         "per_message_effort": False,
         "task_budget": False,
         "server_fallback": None,
-        "notes": "Legacy Sonnet; no effort parameter.",
+        "notes": "Legacy Sonnet; no effort parameter. Retires 2026-11-30; "
+                 "Anthropic names claude-sonnet-5-5 as its replacement.",
     },
     "claude-haiku-5-5": {
         "label": "Claude Haiku 5.5",
@@ -320,6 +330,30 @@ TIER_EFFORT_DEFAULTS = {
     "balanced": "medium",
     "deep": "high",
     "frontier": "high",
+}
+
+# An agent's own default effort, read after the agent's own row on
+# /ai-models/ and before its tier's row (resolve_effort). These ten call
+# the provider directly and sent no effort until 2026-10-31, so they ran
+# at their model's API default, high, whatever /ai-models/ held: a tier's
+# effort row never reached them. The balanced tier's "medium" would have
+# cut the four balanced ones the day they started sending one, and a tier
+# row saved earlier for the BaseAgent agents would have moved all ten,
+# down or up. Only a row saved for the agent itself moves it.
+AGENT_EFFORT_DEFAULTS = {
+    # balanced, Sonnet 5's default
+    "position_reviewer": "high",
+    "close_advisor": "high",
+    "daily_briefing": "high",
+    "monday_plan": "high",
+    # deep, Opus 5's default; their tier's default is high too
+    "sauron_mind": "high",
+    "critic": "high",
+    "strategist": "high",
+    "earnings_reviewer": "high",
+    "research": "high",
+    # frontier, Fable 5.1's default; its tier's default is high too
+    "strategy_generator": "high",
 }
 
 
@@ -521,17 +555,26 @@ def resolve_agent(agent_name: str, tier: str) -> str:
 
 
 def resolve_effort(model_id: str, tier: str, agent_name: str = "") -> str | None:
-    """Effort level for a call, or None when the model doesn't support it."""
+    """Effort level for a call, or None when the model doesn't support it.
+
+    First hit wins: the agent's DB row, the agent's own default
+    (AGENT_EFFORT_DEFAULTS), the tier's DB row, the tier's default. An
+    agent with its own default therefore moves only by its own row."""
     if not supports_effort(model_id):
         return None
-    for scope, key in (("agent", agent_name), ("tier", tier)):
-        if not key:
-            continue
-        try:
-            from ai_agents.models import AIModelSetting
-            row = AIModelSetting.objects.filter(scope=scope, key=key).first()
-            if row and row.effort:
-                return row.effort
-        except Exception:
-            pass
-    return TIER_EFFORT_DEFAULTS.get(tier, "medium")
+    return (_effort_row("agent", agent_name)
+            or AGENT_EFFORT_DEFAULTS.get(agent_name)
+            or _effort_row("tier", tier)
+            or TIER_EFFORT_DEFAULTS.get(tier, "medium"))
+
+
+def _effort_row(scope: str, key: str) -> str:
+    """The effort saved on /ai-models/ for (scope, key), or ""."""
+    if not key:
+        return ""
+    try:
+        from ai_agents.models import AIModelSetting
+        row = AIModelSetting.objects.filter(scope=scope, key=key).first()
+        return (row.effort if row else "") or ""
+    except Exception:
+        return ""   # table may not exist yet (migrations), or DB unavailable

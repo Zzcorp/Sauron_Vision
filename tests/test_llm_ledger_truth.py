@@ -55,7 +55,8 @@ BYPASS_SITES = {
     "brain/research_agent.py": "agent.agent_name",
     "brain/horizon.py": "agent.agent_name",
     "brain/close_advice.py": "agent.agent_name",
-    "ai_agents/consensus.py": '"consensus"',
+    # ai_agents/consensus.py ('"consensus"') was removed on 2026-10-31:
+    # nothing imported it.
     # The provider smoke (PR O0a): the operator's own measurement, run by
     # hand on the server, booked like every other call.
     "ai_agents/management/commands/claude_smoke.py": '"claude_smoke"',

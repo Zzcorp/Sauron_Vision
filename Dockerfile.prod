@@ -18,9 +18,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# requirements.txt pins every direct requirement (==; what those pull in
+# is resolved at build time, see its header) and names gunicorn and
+# uvicorn[standard] itself. They were wheeled a second time here by bare
+# name, which resolves to that day's newest: beside the pinned wheels, the
+# next release of either would put two versions in /wheels, and the
+# runtime stage installs /wheels/*.whl. tests/test_dependency_lock.py
+# refuses a package named outside the lock.
 COPY requirements.txt ./
-RUN pip wheel --no-cache-dir --wheel-dir=/build/wheels -r requirements.txt \
-    && pip wheel --no-cache-dir --wheel-dir=/build/wheels gunicorn uvicorn[standard]
+RUN pip wheel --no-cache-dir --wheel-dir=/build/wheels -r requirements.txt
 
 
 # ── Runtime stage ───────────────────────────────────────────────────────

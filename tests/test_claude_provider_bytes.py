@@ -23,9 +23,15 @@ from unittest.mock import MagicMock, patch
 from django.conf import settings
 from django.test import TestCase, override_settings
 
-try:  # anthropic 1.x is built on httpx2; 0.x on httpx
+# The SDK's own HTTP library, chosen by the SDK's major: 1.x and 2.x are
+# built on httpx2, 0.x on httpx. Not by whether httpx2 imports: a 0.x
+# install with httpx2 also present mis-picked it, and the client refused
+# the mock transport (requirements.txt pins 2.x, tests.test_dependency_lock).
+import anthropic as _anthropic
+
+if int(_anthropic.__version__.split(".")[0]) >= 1:
     import httpx2 as httpx
-except ImportError:  # pragma: no cover — depends on the installed SDK
+else:  # pragma: no cover — depends on the installed SDK
     import httpx
 
 
