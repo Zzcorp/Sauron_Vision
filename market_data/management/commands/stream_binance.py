@@ -26,6 +26,8 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 from asgiref.sync import sync_to_async
 
+from market_data.stream_writes import LatestPerSymbol
+
 log = logging.getLogger("stream_binance")
 
 BINANCE_WS_BASE = "wss://stream.binance.com:9443/stream?streams="
@@ -61,6 +63,12 @@ def _fire(coro):
     _PENDING.add(task)
     task.add_done_callback(_PENDING.discard)
     return task
+
+
+#: One write in flight per symbol, the newest tick behind it
+#: (market_data.stream_writes, 2026-10-31): the read loop never waits on a
+#: database write.
+LATEST = LatestPerSymbol(_fire)
 
 
 def _report_failure(where: str, symbol: str, exc: Exception, count: int):
@@ -246,11 +254,25 @@ async def run(override_symbols: list[str] | None):
                         bid = float(d.get("b") or 0)
                         ask = float(d.get("a") or 0)
                         volume = float(d.get("v") or 0)         # base volume 24h
-                        # DB write in the background, owned until it
-                        # finishes; broadcast inline.
-                        _fire(update_live_quote(sym, last, change_pct, bid,
-                                                ask, volume))
-                        await broadcast(sym, last, change_pct, bid, ask, volume)
+                        # ONLY A TICK THE ONE WRITER ACCEPTED REACHES THE
+                        # BROWSER (2026-10-31, skeptic M2). Every tick was
+                        # broadcast whether write_quote took it or not, so
+                        # the rail and the headband painted a price the
+                        # row (and the hero, and the chart) never carried:
+                        # three numbers for one symbol, no fault anywhere.
+                        # The write is still owned until it finishes, and
+                        # it and its broadcast run behind the loop, one per
+                        # symbol in flight (LATEST): a loop that awaited
+                        # each write stopped reading the socket under load,
+                        # and the keepalive closed it.
+                        async def _tick(sym=sym, last=last,
+                                        change_pct=change_pct, bid=bid,
+                                        ask=ask, volume=volume):
+                            if await _fire(update_live_quote(sym, last, change_pct,
+                                                             bid, ask, volume)):
+                                await broadcast(sym, last, change_pct, bid,
+                                                ask, volume)
+                        LATEST.submit(sym, _tick)
                     except Exception as e:
                         log.debug("tick parse failed: %s", e)
         except Exception as e:

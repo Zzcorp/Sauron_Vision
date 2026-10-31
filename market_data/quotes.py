@@ -145,13 +145,23 @@ def write_quote(symbol: str, *, last, source: str, change_pct=None,
                      inst.symbol, source, existing.source)
         return False
 
-    defaults = {"last": price, "source": source}
+    # THE SIDES ARE THE WRITER'S OR NONE (2026-10-31). bid and ask were
+    # written only when the new source supplied them and never cleared, so
+    # a row could carry `last` from yfinance under bid/ask an OANDA stream
+    # wrote hours before, served as fresh (the row's write time) on the
+    # ticket's buttons. A write without sides now clears them: the ticket
+    # prints an em dash, which is the truth.
+    defaults = {"last": price, "source": source,
+                "bid": _dec(bid) if bid is not None else None,
+                "ask": _dec(ask) if ask is not None else None}
     if change_pct is not None:
         defaults["change_pct"] = _dec(round(float(change_pct), 4)) or Decimal("0")
-    if bid is not None:
-        defaults["bid"] = _dec(bid)
-    if ask is not None:
-        defaults["ask"] = _dec(ask)
+        # WHOSE DAY CHANGE (2026-10-31, skeptic M3). A writer without one
+        # (a stream's trade print) leaves the poller's column in place, on
+        # purpose (tests/test_feed_change_truth); the row now says which
+        # feed measured it, so the hero's chip never pairs a stream's price
+        # with another feed's change as if they were one reading.
+        defaults["change_source"] = source
     if volume is not None:
         try:
             defaults["volume"] = int(float(volume))

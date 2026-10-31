@@ -343,6 +343,28 @@ Optional page data (json_script blocks the widget picks up when present):
     color: var(--text-secondary, #7aaa8a);
 }
 .sv-pos-legend[hidden] { display: none; }
+/* Whose candles these are (2026-10-31): the feed in words, what the
+   series left out or marks, whose prices the position lines are, and why
+   the live quote is not drawn when it is not. The first line under the
+   chart, in the voice of the captions below it. */
+.sv-src-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px 8px;
+    margin-top: 6px;
+    padding: 0 2px;
+    font-family: var(--font-mono, monospace);
+    font-size: 10px;
+    letter-spacing: .02em;
+    line-height: 1.5;
+    color: var(--text-secondary, #7aaa8a);
+}
+.sv-src-legend[hidden], .sv-src-legend [hidden] { display: none; }
+.sv-src-legend-title { color: var(--text-primary, #daf0e6); }
+.sv-src-legend .sv-src-notes:empty { display: none; }
+.sv-src-legend .sv-src-positions,
+.sv-src-legend .sv-src-tick { color: var(--accent-gold-ink, var(--accent-gold, #d8b020)); }
 /* The levels' key (2026-10-07): the live answer, one switch per kind. */
 .sv-lvl-legend {
     display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;
@@ -758,6 +780,21 @@ Optional page data (json_script blocks the widget picks up when present):
     <div class="sv-chart-error-overlay" id="{{ chart_id }}-error">
         <div style="font-family:monospace;font-size:11px;color:var(--accent-red,#dc3232);letter-spacing:1px;text-align:center;padding:16px;"></div>
     </div>
+</div>
+
+{% comment %}Whose candles these are (2026-10-31, dashboard.chart_source): the
+reply's `source` in words, its notes (older history from another feed not
+drawn, today's forming candle, suspect bars drawn hollow), whose prices the
+position lines are when they sit over another feed's candles, and why the
+live quote was not drawn on the last candle when it was not. Outside the
+container like the keys below, so it costs the canvas no rows; hidden until
+the first reply names its feed.{% endcomment %}
+<div class="sv-src-legend" id="{{ chart_id }}-src" hidden>
+    <span class="sv-src-legend-title">Candles:</span>
+    <span class="sv-src-feed" data-role="feed"></span>
+    <span class="sv-src-notes" data-role="notes"></span>
+    <span class="sv-src-positions" data-role="positions" hidden></span>
+    <span class="sv-src-tick" data-role="tick" aria-live="polite" hidden></span>
 </div>
 
 {% comment %}The signal dots' key, under the chart (2026-09-27). Outside the
@@ -2717,6 +2754,7 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
     var sigLegendEl = document.getElementById(CHART_ID + '-sig-legend');
     var posLegendEl = document.getElementById(CHART_ID + '-pos-legend');
     var lvlLegendEl = document.getElementById(CHART_ID + '-lvl-legend');
+    var srcLegendEl = document.getElementById(CHART_ID + '-src');
 
     if (!container || !canvasEl) return;
 
@@ -2819,6 +2857,36 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         });
         posLegendEl.title = said.join('\n');
         posLegendEl.hidden = !words;
+    }
+
+    /* WHOSE CANDLES THESE ARE (2026-10-31, dashboard.chart_source). The
+       reply's `source`: the feed in words, the notes (older history from
+       another feed not drawn, today's forming candle, suspect bars drawn
+       hollow, unreadable bars left out) and whose prices the position
+       lines are when they sit over another feed's candles. A reply
+       without the key leaves the caption as it was. A new series clears
+       the live quote's last reason (2026-10-31): it was about the
+       candles before, and under "Candles: Yahoo ..." it still named
+       eToro's until the next quote poll, or for good on a hidden tab. */
+    var SOURCE = null;
+    function srcRole(name) {
+        return srcLegendEl ? srcLegendEl.querySelector('[data-role="' + name + '"]') : null;
+    }
+    function applySource(src) {
+        if (!src || typeof src !== 'object') return;
+        SOURCE = src;
+        var feed = srcRole('feed'), notes = srcRole('notes'), pos = srcRole('positions');
+        if (feed) feed.textContent = String(src.words || src.label || '');
+        if (notes) {
+            var n = Array.isArray(src.notes) ? src.notes.map(String) : [];
+            notes.textContent = n.length ? '· ' + n.join(' · ') : '';
+        }
+        if (pos) {
+            pos.textContent = String(src.positions || '');
+            pos.hidden = !src.positions;
+        }
+        if (srcLegendEl) srcLegendEl.hidden = !(src.words || src.label);
+        tickNote('');
     }
 
     // ── Theme colours ────────────────────────────────────────────────────
@@ -3816,6 +3884,7 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
            the operator's money, dashed an idea, dotted the tape's price. */
         if (type === 'candlestick' || type === 'heikin') {
             mainSeries = chart.addCandlestickSeries({
+                autoscaleInfoProvider: type === 'candlestick' ? suspectAwareAutoscale : undefined,
                 upColor:        c.accent,
                 downColor:      c.red,
                 borderUpColor:  c.accent,
@@ -3852,27 +3921,81 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
 
     /* Heikin-Ashi: each candle averages the raw bar and the previous HA
        candle, so trends read as runs of one colour. Computed here from
-       the raw bars — the API keeps serving what actually traded. */
+       the raw bars — the API keeps serving what actually traded.
+       A SUSPECT BAR ENTERS FROM ITS BODY (2026-10-31): averaged as it
+       was, a low of 0 made a solid HA candle with its body a quarter of
+       the price down and a wick to zero, carried into the next candles,
+       and the scale ran from below zero, under a legend saying "drawn
+       hollow". Its high and low are taken as its body's, and its HA
+       candle is drawn hollow (candleRow's styling). */
     function heikinAshi(bars) {
         var out = [], prev = null;
         for (var i = 0; i < bars.length; i++) {
             var b = bars[i];
-            var close = (b.open + b.high + b.low + b.close) / 4;
+            var hi = b.suspect ? Math.max(b.open, b.close) : b.high;
+            var lo = b.suspect ? Math.min(b.open, b.close) : b.low;
+            var close = (b.open + hi + lo + b.close) / 4;
             var open = prev ? (prev.open + prev.close) / 2 : (b.open + b.close) / 2;
             var ha = { time: b.time, open: open, close: close,
-                       high: Math.max(b.high, open, close),
-                       low: Math.min(b.low, open, close) };
-            out.push(ha);
-            prev = ha;
+                       high: Math.max(hi, open, close),
+                       low: Math.min(lo, open, close) };
+            prev = { open: open, close: close };
+            out.push(b.suspect ? hollow(ha) : ha);
         }
         return out;
     }
 
+    /* A SUSPECT BAR IS DRAWN HOLLOW (2026-10-31): a bar the server says
+       cannot have traded, or a spike from another feed (`suspect`, its
+       words; market_data.bar_shape). Drawn, never hidden — hiding could
+       hide a real flash move — with an empty body and a muted outline,
+       and its words in the crosshair legend. */
+    function candleRow(b) {
+        var row = { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close };
+        return b.suspect ? hollow(row) : row;
+    }
+    function hollow(row) {
+        var c = getThemeColors();
+        row.color = 'rgba(0,0,0,0)';
+        row.borderColor = c.neutral;
+        row.wickColor = c.neutral;
+        return row;
+    }
+
+    /* ...and its impossible extreme never sets the price scale: a wick to
+       zero, drawn, still laid the whole tape flat along the top of the
+       pane. The scale over the visible bars is built from every other
+       bar's range and a suspect bar's BODY; its wick runs off the pane,
+       still drawn. With no suspect bar, the library's own answer. */
+    function suspectAwareAutoscale(original) {
+        var res = original();
+        if (!res || !res.priceRange || !lastBars.some(function (b) { return b.suspect; })) return res;
+        var r = null;
+        try { r = chart.timeScale().getVisibleLogicalRange(); } catch (e) { r = null; }
+        var n = lastBars.length;
+        var from = r ? Math.max(0, Math.floor(r.from)) : 0;
+        var to = r ? Math.min(n - 1, Math.ceil(r.to)) : n - 1;
+        var lo = Infinity, hi = -Infinity;
+        for (var i = from; i <= to; i++) {
+            var b = lastBars[i];
+            if (!b) continue;
+            var bl = b.suspect ? Math.min(b.open, b.close) : b.low;
+            var bh = b.suspect ? Math.max(b.open, b.close) : b.high;
+            if (isFinite(bl) && bl > 0) lo = Math.min(lo, bl);
+            if (isFinite(bh)) hi = Math.max(hi, bh);
+        }
+        /* the live quote welded onto the last candle counts as drawn */
+        if (tickWork && to === n - 1) {
+            lo = Math.min(lo, tickWork.low);
+            hi = Math.max(hi, tickWork.high);
+        }
+        if (!(isFinite(lo) && isFinite(hi) && hi >= lo)) return res;
+        return { priceRange: { minValue: lo, maxValue: hi }, margins: res.margins };
+    }
+
     function seriesData(bars) {
         if (chartType === 'candlestick') {
-            return bars.map(function(b) {
-                return { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close };
-            });
+            return bars.map(candleRow);
         }
         if (chartType === 'heikin') return heikinAshi(bars);
         return bars.map(function(b) { return { time: b.time, value: b.close }; });
@@ -5562,6 +5685,20 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
     }
 
     // ── Crosshair legend ─────────────────────────────────────────────────
+    /* The bar as the server served it at `time` (its forming and suspect
+       words ride there, never on the series row). */
+    function servedBarAt(time) {
+        var e = barEpoch(time);
+        for (var i = lastBars.length - 1; i >= 0; i--) {
+            if (barEpoch(lastBars[i].time) === e) return lastBars[i];
+        }
+        return null;
+    }
+    function escapeText(t) {
+        return String(t).replace(/[&<>"']/g, function (ch) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch];
+        });
+    }
     function onCrosshair(param) {
         if (!param || !param.time || !param.seriesData || !mainSeries) {
             legendEl.textContent = '';
@@ -5604,6 +5741,16 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                 '<span style="color:var(--text-muted,#5a7a5a);">' + d + '</span>&nbsp; ' +
                 '<b style="color:' + c.accent + ';">' + (val ? val.toFixed(priceDecimals(0)) : '—') + '</b>' +
                 (vol ? '&nbsp; V <span style="color:var(--text-muted,#5a7a5a);">' + Number(vol.value).toLocaleString() + '</span>' : '');
+        }
+        /* What the server said of this bar (2026-10-31): today's forming
+           daily candle, or a suspect bar drawn hollow. */
+        var served = servedBarAt(param.time);
+        if (served && served.forming) {
+            html += '<span class="sv-ind-val" style="color:var(--text-muted,#5a7a5a);">FORMING</span>';
+        }
+        if (served && served.suspect) {
+            html += '<span class="sv-ind-val" style="color:' + c.gold + ';">'
+                  + escapeText(served.suspect) + '</span>';
         }
         /* Active overlays read at the same bar. BB reports its three
            bands; a bar before an indicator's warm-up shows nothing for
@@ -5921,15 +6068,22 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
 
                 if (json.error) {
                     if (overlayFresh && hasData) { applyPositions(lastBars); applyLevels(); }
+                    resetTick();
                     if (!quiet || !hasData) showError(json.error);
                     return;
                 }
                 var bars = json.bars || [];
                 if (!bars.length) {
                     if (overlayFresh && hasData) { applyPositions(lastBars); applyLevels(); }
+                    resetTick();
                     if (!quiet || !hasData) showError('No data available for ' + SYMBOL);
                     return;
                 }
+                /* Whose candles these are: adopted with the bars they
+                   describe, so a caption never names a feed the chart
+                   is not drawing. */
+                applySource(json.source);
+                tickWork = null;
                 var keepRange = null;
                 if (quiet && hasData) {
                     try { keepRange = chart.timeScale().getVisibleLogicalRange(); }
@@ -5967,6 +6121,11 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             .catch(function(e) {
                 if (seq !== loadSeq) return;
                 loadingEl.style.display = 'none';
+                /* A failed refresh keeps the last bars, and the served
+                   last bar comes back from under the welded quotes (the
+                   skeptic's M5: the tick kept widening one candle's wick
+                   for as long as the refreshes failed). */
+                resetTick();
                 if (e && e.svQuiet) return;
                 if (!quiet || !hasData) showError('Failed to load chart data');
             });
@@ -6348,12 +6507,91 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         }
     }
 
+    // ── The live quote on the last candle ───────────────────────────────
+    /* THE TICK WELDS ONLY WHAT BELONGS TO THE CANDLE (2026-10-31). Every
+       15 seconds sv-instrument-live.js hands over the platform quote and
+       this used to weld it onto the last candle, whatever it was: on a
+       gold chart of eToro's candles the Yahoo future grew a wick the
+       60-second refresh took away again, a minute later the same, and
+       the axis label jumped with it — "spikes for no reason". Now the
+       quote is drawn only when
+         * its feed is the candles' feed, or neither is a stand-in (the
+           same instrument from two feeds: an OANDA EURUSD on eToro's) and
+           the candles take another feed at all: crypto candles take their
+           own feed's alone (`source.same_feed_only`, 2026-10-31), since
+           Binance's BTCUSDT is another exchange's, quoted in USDT;
+         * the last candle is the forming one: an intraday bar whose
+           period has not ended, a daily bar the server built as today's
+           forming candle (`forming`);
+         * it is fresh (STALE_S) and was taken inside that bar;
+         * it moves the candle's close by no more than the class's jump
+           bar (`source.tick_bar`, bot_program.mark_sanity.bar_for);
+       and the welded candle is rebuilt from the bar the server SERVED,
+       so a failed refresh puts that bar back (resetTick). Otherwise
+       nothing is drawn and the caption under the chart says why. */
+    var STALE_S = 900;
+    var tickWork = null;   /* the served last bar with the quotes welded on */
+
+    function tickNote(text) {
+        var el = srcRole('tick');
+        if (!el) return;
+        el.textContent = text || '';
+        el.hidden = !text;
+    }
+
+    function resetTick() {
+        if (!tickWork || !mainSeries || chartType !== 'candlestick') { tickWork = null; return; }
+        var base = lastBars.length ? lastBars[lastBars.length - 1] : null;
+        tickWork = null;
+        if (!base) return;
+        try { mainSeries.update(candleRow(base)); } catch (e) { /* the next refresh redraws it */ }
+    }
+
+    function ageWords(s) {
+        if (s < 90) return Math.round(s) + ' s';
+        if (s < 5400) return Math.round(s / 60) + ' min';
+        return Math.round(s / 3600) + ' h';
+    }
+
+    /* '' when `price` (the quote `q`) may be welded onto the served bar
+       `bar`, else the caption's words for why not. */
+    function tickRefusal(price, q, bar) {
+        var who = (q && (q.source_words || q.source)) || 'an unnamed feed';
+        if (!q || !SOURCE || !q.source_family) return 'live quote not drawn: its feed is not known';
+        var sameFeed = q.source_family === SOURCE.family;
+        var sameInstrument = !q.stand_in && !SOURCE.stand_in && !SOURCE.same_feed_only;
+        if (!sameFeed && !sameInstrument) {
+            return 'live quote not drawn: it is ' + who + ', another feed than these candles ('
+                 + (SOURCE.label || SOURCE.family) + ')';
+        }
+        var nowS = Date.now() / 1000;
+        var opened = barEpoch(bar.time);
+        var forming = isIntraday(currentTf)
+            ? (isFinite(opened) && nowS < opened + (TF_SECONDS[currentTf] || 0))
+            : !!bar.forming;
+        if (!forming) return 'live quote not drawn: the last candle has closed';
+        if (bar.suspect) return 'live quote not drawn: the last candle is suspect';
+        var age = Number(q.quote_age_seconds);
+        if (q.quote_age_seconds == null || !isFinite(age)) {
+            return 'live quote not drawn: its age is not known';
+        }
+        if (age > STALE_S) return 'live quote not drawn: it is ' + ageWords(age) + ' old';
+        if (nowS - age < opened) return 'live quote not drawn: it was taken before this candle opened';
+        var limit = Number(SOURCE.tick_bar) || 0;
+        if (limit > 0 && bar.close > 0 && Math.abs(price / bar.close - 1) > limit) {
+            return 'live quote not drawn: ' + (Math.abs(price / bar.close - 1) * 100).toFixed(1)
+                 + '% from the candle\'s close, past the ' + (limit * 100).toFixed(1).replace(/\.0$/, '')
+                 + '% bar for this class';
+        }
+        return '';
+    }
+
     // ── Live handle ─────────────────────────────────────────────
     // The widget registers itself so page-level pollers can keep it
     // honest without reaching into its closure: refresh() refetches the
     // ACTIVE timeframe (the chart used to load once and freeze under a
-    // moving market), tick(price) nudges the last candle's close between
-    // refreshes so the tape visibly moves with the quote loop. tick
+    // moving market), tick(price, quote) welds the live quote onto the
+    // last candle between refreshes when it belongs there (above). tick
     // touches candlestick mode only — a line/area repaint comes from
     // refresh, and inventing a bar for it would draw a price at a time
     // the API never served; Heikin-Ashi candles are averages, so a raw
@@ -6363,28 +6601,24 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
     window.svCharts = window.svCharts || {};
     window.svCharts[CHART_ID] = {
         refresh: function () { if (chart) loadData(currentTf, {background: true}); },
-        tick: function (price) {
-            if (!chart || chartType !== 'candlestick' || !mainSeries) return;
-            if (typeof price !== 'number' || !isFinite(price)) return;
-            if (!mainSeries.data) return; /* older lib: refresh still covers it */
-            var bars = mainSeries.data();
-            if (!bars || !bars.length) return;
-            var last = bars[bars.length - 1];
-            /* Daily-family bars carry date-string times. Grafting a live
-               price onto one falsifies a COMPLETED session unless that
-               bar IS today — then it is the forming candle and the tick
-               is exactly what keeps it honest. Intraday bars (epoch
-               times) always end in the forming bar. */
-            if (typeof last.time === 'string') {
-                var today = new Date().toISOString().slice(0, 10);
-                if (last.time !== today) return;
-            }
-            mainSeries.update({
-                time: last.time, open: last.open,
-                high: Math.max(last.high, price),
-                low: Math.min(last.low, price),
+        tick: function (price, q) {
+            /* A chart that takes no tick says no reason (2026-10-31): the
+               line, area or Heikin-Ashi chart kept the candles' last one. */
+            if (!chart || chartType !== 'candlestick' || !mainSeries) { tickNote(''); return; }
+            if (typeof price !== 'number' || !isFinite(price) || !(price > 0)) return;
+            var bar = lastBars.length ? lastBars[lastBars.length - 1] : null;
+            if (!bar) return;
+            var why = tickRefusal(price, q, bar);
+            tickNote(why);
+            if (why) return;
+            var w = tickWork || candleRow(bar);
+            tickWork = {
+                time: bar.time, open: bar.open,
+                high: Math.max(w.high, price),
+                low: Math.min(w.low, price),
                 close: price,
-            });
+            };
+            mainSeries.update(tickWork);
         },
     };
 

@@ -536,6 +536,26 @@ It cancels the older waiting edition unless a person approved, edited or
 rescheduled it; cancel that one on `/admin-dashboard/newsletters/`. Then
 rebuild the sentiment aggregates (`pipeline_sentiment_agg` in section 5).
 
+**Once, straight after the update of 2026-10-31** (Yahoo's 4h on one UTC
+grid): the public feed now builds Yahoo's 4h bars at 00, 04, 08... UTC.
+For Yahoo series in the London, Berlin or Tokyo zone (Yahoo's forex
+pairs, the European and Asian indices) the stored 4h bars sit on another
+grid, and the first bar pass after the update writes the new grid BESIDE
+them (the timestamp is part of the key). Until the prune below runs, the
+newest stretch of those series holds both grids, twice the bars, and the
+bots read them: the ATR stops, the swings and the 4h indicators. Wait for
+the first bar pass (ten minutes), read the dry run, then delete what it
+listed:
+
+```bash
+./deploy/dc exec -T web python manage.py prune_offgrid_4h         # the list, nothing deleted
+./deploy/dc exec -T web python manage.py prune_offgrid_4h --yes   # delete what the list named
+```
+
+It deletes only the public feed's off-grid 4h rows that overlap an
+on-grid row of the same instrument; off-grid history with nothing beside
+it stays, and a venue's own bars are never touched.
+
 ## 10. Restoring
 
 Dumps live inside the `backups` volume, not on the host, so copy one out

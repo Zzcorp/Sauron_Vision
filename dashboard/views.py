@@ -4435,6 +4435,9 @@ def _chart_positions(user, instrument):
             "age_s": _age(pos.opened_at),
             "leverage": _pos_leverage(instrument.asset_class or ""),
             "soft_stop": None, "soft_stop_text": None, "thesis": None,
+            # Whose prices the lines are (2026-10-31): a book row's venue
+            # is not recorded.
+            "venue": "",
         })
     for t in AssetBotTrade.objects.filter(
             config__user=user, symbol=instrument.symbol,
@@ -4488,6 +4491,10 @@ def _chart_positions(user, instrument):
             "thesis": ({"verdict": th.get("verdict"),
                         "words": str(th.get("words") or "")[:200]}
                        if th.get("verdict") else None),
+            # Whose prices the entry, stop and target are (2026-10-31,
+            # skeptic M4): the chart's legend says so when they sit over
+            # candles of another feed (dashboard.chart_source).
+            "venue": str(meta.get("broker") or ""),
         })
     return out
 
@@ -4722,6 +4729,20 @@ def _instrument_page(request, instrument, *, deep_link=None):
     except Exception:
         pass
 
+    # Whose price the hero prints (2026-10-31, dashboard.chart_source): the
+    # feed, its age, the stand-in words, whether the day change is the same
+    # feed's, and the venue's last known price beside it — the same facts
+    # the preview API repaints every 15 seconds.
+    hero = None
+    try:
+        from dashboard import chart_source
+        hero = chart_source.quote_facts(
+            instrument, quote,
+            route=chart_source.route_of(request.user, instrument))
+    except Exception as e:  # noqa: BLE001 — words beside a price never 500
+        logger.warning("[instrument page] %s: whose-price facts failed: %s",
+                       instrument.symbol, e)
+
     # Get latest technicals
     technicals = TechnicalIndicator.objects.filter(instrument=instrument).first()
 
@@ -4777,6 +4798,7 @@ def _instrument_page(request, instrument, *, deep_link=None):
         "page_id": "instruments",
         "instrument": instrument,
         "quote": quote,
+        "hero": hero,
         "lane_mode": lane_mode,
         "technicals": technicals,
         "signals": signals,
@@ -5659,7 +5681,7 @@ def instrument_preview_api(request, symbol):
     # Count signals
     active_signals = Signal.objects.filter(instrument=inst, is_active=True).count()
 
-    return JsonResponse({
+    out = {
         "symbol": inst.symbol,
         "name": inst.name,
         "asset_class": inst.asset_class,
@@ -5672,7 +5694,26 @@ def instrument_preview_api(request, symbol):
         "spread": spread,
         "quote_age_seconds": age,
         "active_signals": active_signals,
-    })
+    }
+    # WHOSE PRICE THIS IS (2026-10-31, dashboard.chart_source.quote_facts):
+    # the feed and its words ("Yahoo GC=F, the front-month future"), the
+    # stand-in, whose bid/ask ride the ticket, whether the day change is
+    # the same feed's, the class's jump bar the chart's tick is held to,
+    # the page's decimal count, and for a venue-routed instrument the
+    # venue's last known price with its age and the gap to this quote —
+    # from what the platform already holds, never a new venue request.
+    try:
+        from dashboard import chart_source
+        facts = chart_source.quote_facts(
+            inst, getattr(inst, "live_quote", None),
+            route=chart_source.route_of(request.user, inst))
+        facts["decimals"] = _chart_decimals(inst)
+        facts.pop("quote_age_seconds", None)   # the one computed above
+        out.update(facts)
+    except Exception as e:  # noqa: BLE001 — the price itself still goes out
+        logger.warning("[instrument_preview_api] %s: whose-price facts "
+                       "failed: %s", symbol, e)
+    return JsonResponse(out)
 
 
 @login_required
@@ -5968,7 +6009,7 @@ def intro_page(request):
 
 # ── Chart Data API ──────────────────────────────────────────────────────────
 
-def _daily_chart_bars(instrument, since=None, limit=None):
+def _daily_chart_bars(instrument, since=None, limit=None, route=""):
     """Daily OHLCV dicts for a chart, synthesized from intraday bars when
     no real daily rows exist.
 
@@ -5978,115 +6019,31 @@ def _daily_chart_bars(instrument, since=None, limit=None):
     an empty table and rendered blank while the data to draw it sat one
     timeframe over. A daily candle IS the aggregate of its day's intraday
     bars, so the synthesis is exact for the hours the platform has.
+
+    One feed per series, today's forming candle and the suspect-bar marks
+    (2026-10-31): dashboard.chart_source.daily_series, whose source words
+    the chart's reply carries.
     """
-    from market_data.models import PriceData
-
-    def _rows(tf):
-        qs = PriceData.objects.filter(instrument=instrument, timeframe=tf)
-        if since is not None:
-            qs = qs.filter(timestamp__gte=since)
-        return qs.order_by("timestamp")
-
-    bars = [{
-        "time":   p.timestamp.strftime("%Y-%m-%d"),
-        "open":   float(p.open),
-        "high":   float(p.high),
-        "low":    float(p.low),
-        "close":  float(p.close),
-        "volume": float(p.volume) if p.volume else 0,
-    } for p in _rows("1d")]
-
-    if not bars:
-        for intraday_tf in ("4h", "1h"):
-            days = {}
-            for p in _rows(intraday_tf):
-                key = p.timestamp.strftime("%Y-%m-%d")
-                d = days.get(key)
-                if d is None:
-                    days[key] = {
-                        "time": key, "open": float(p.open),
-                        "high": float(p.high), "low": float(p.low),
-                        "close": float(p.close),
-                        "volume": float(p.volume) if p.volume else 0,
-                    }
-                else:
-                    d["high"] = max(d["high"], float(p.high))
-                    d["low"] = min(d["low"], float(p.low))
-                    d["close"] = float(p.close)
-                    d["volume"] += float(p.volume) if p.volume else 0
-            if days:
-                bars = [days[k] for k in sorted(days)]
-                break
-
-    if limit:
-        bars = bars[-int(limit):]
-    return bars
+    from dashboard.chart_source import daily_series
+    return daily_series(instrument, since=since, limit=limit,
+                        route=route)[0]
 
 
-def _intraday_chart_bars(instrument, interval, limit=240):
-    """Intraday OHLCV dicts, freshest first source wins.
+def _intraday_chart_bars(instrument, interval, limit=240, route=""):
+    """Intraday OHLCV dicts of ONE feed (2026-10-31).
 
-    1h/4h come from PriceData (the bot/watchlist passes keep them warm).
+    1h/4h come from PriceData (the bot/watchlist passes keep them warm),
+    the routed venue's rows when it has them, else the public feed's: a
+    series used to mix eToro's bars with Yahoo's stand-ins bar by bar.
     Finer resolutions are not stored anywhere — persisting minute bars for
     every instrument would bloat the table for a chart click — so they are
     fetched LIVE from the keyless public feed and cached for a minute.
     `time` is epoch seconds: lightweight-charts needs numeric time for
-    intraday resolution.
+    intraday resolution. dashboard.chart_source.intraday_series.
     """
-    from django.core.cache import cache
-    from market_data.models import PriceData
-
-    if interval in ("1h", "4h"):
-        rows = (PriceData.objects.filter(instrument=instrument,
-                                         timeframe=interval)
-                .order_by("-timestamp")[:limit])
-        bars = [{
-            "time":   int(p.timestamp.timestamp()),
-            "open":   float(p.open), "high": float(p.high),
-            "low":    float(p.low), "close": float(p.close),
-            "volume": float(p.volume) if p.volume else 0,
-        } for p in reversed(list(rows))]
-        if bars:
-            return bars
-        # No stored rows (instrument outside the fleet/watchlist) — fall
-        # through to the live fetch below.
-
-    cache_key = f"chart:{instrument.symbol}:{interval}"
-    try:
-        cached = cache.get(cache_key)
-    except Exception:  # noqa: BLE001
-        cached = None
-    if cached is not None:
-        return cached
-
-    from market_data.public_feed import public_feed_for
-    client = public_feed_for(instrument.asset_class)
-    if client is None:
-        return []
-    fetch_symbol = instrument.symbol
-    if instrument.asset_class == "crypto":
-        from market_data.management.commands.backfill_bars import venue_symbol
-        fetch_symbol = venue_symbol(instrument.symbol)
-
-    bars = []
-    try:
-        for row in client.klines(fetch_symbol, interval=interval,
-                                 limit=limit) or []:
-            if not row or len(row) < 6:
-                continue
-            bars.append({
-                "time":   int(int(row[0]) / 1000),
-                "open":   float(row[1]), "high": float(row[2]),
-                "low":    float(row[3]), "close": float(row[4]),
-                "volume": float(row[5] or 0),
-            })
-    except Exception:  # noqa: BLE001 — a dead feed is an empty chart, not a 500
-        bars = []
-    try:
-        cache.set(cache_key, bars, 60)
-    except Exception:  # noqa: BLE001
-        pass
-    return bars
+    from dashboard.chart_source import intraday_series
+    return intraday_series(instrument, interval, route=route,
+                           limit=limit)[0]
 
 
 # Live-fetched resolutions. 1h/4h are handled from stored bars first.
@@ -6186,12 +6143,30 @@ def chart_data_api(request):
             # saying the overlay had stopped updating.
             extra = {"overlays_error": str(e)[:200]}
 
+    # ONE FEED PER SERIES, NAMED (2026-10-31, dashboard.chart_source). The
+    # venue the operator's orders on this instrument go to — a read of his
+    # own settings, no request — decides whose stored candles draw the
+    # series; `source` carries the words the legend prints, the class's
+    # jump bar the live tick is held to, and the notes (older history cut,
+    # today's forming candle, suspect bars). When the overlay is asked for,
+    # it also says when the position lines (the venue's prices) sit over
+    # another feed's candles.
+    from dashboard import chart_source
+    route = chart_source.route_of(request.user, instrument)
+
+    def _said(source):
+        if overlays and isinstance(extra.get("positions"), list):
+            source["positions"] = chart_source.positions_words(
+                extra["positions"], source)
+        return source
+
     # The UI sends "1min"/"5min"/"15min" (never bare "1m", which has
     # always meant ONE MONTH here — the legacy range value keeps working).
     interval = {"1min": "1m", "5min": "5m", "15min": "15m",
                 "1h": "1h", "4h": "4h"}.get(timeframe)
     if interval:
-        bars = _intraday_chart_bars(instrument, interval)
+        bars, source = chart_source.intraday_series(instrument, interval,
+                                                    route=route)
         if not bars:
             # The overlay rides even here: the positions are real whether or
             # not this venue can serve minute bars, and dropping them would
@@ -6199,9 +6174,10 @@ def chart_data_api(request):
             return JsonResponse({
                 "symbol": symbol, "timeframe": timeframe, "bars": [],
                 "error": f"No intraday source for {symbol} at {timeframe}",
-                **extra})
+                "source": _said(source), **extra})
         return JsonResponse({"symbol": symbol, "timeframe": timeframe,
-                             "bars": bars, **extra})
+                             "bars": bars, "source": _said(source),
+                             **extra})
 
     # UI timeframe -> how far back to look. These views draw daily candles.
     # An indicator can only be as honest as its window. SMA50 needs
@@ -6216,9 +6192,10 @@ def chart_data_api(request):
     days_back = DAYS_BACK.get(timeframe, 90)
     since = timezone.now() - timedelta(days=days_back)
 
-    bars = _daily_chart_bars(instrument, since=since)
+    bars, source = chart_source.daily_series(instrument, since=since,
+                                             route=route)
     return JsonResponse({"symbol": symbol, "timeframe": timeframe,
-                         "bars": bars, **extra})
+                         "bars": bars, "source": _said(source), **extra})
 
 
 # ── Dashboard Preset APIs ───────────────────────────────────────────────────
