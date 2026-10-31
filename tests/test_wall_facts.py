@@ -819,6 +819,25 @@ class SafeguardFactsTests(TestCase):
             self.assertGreater(wall[key], 0, f"{key} is not a database count")
 
 
+class CouncilFactsTests(TestCase):
+    """The council's graded calls are not a public count (review,
+    2026-10-31). The council sits on a real-money bot order and on a
+    real-money ticket alone, and a rehearsal sitting is closed ungraded,
+    so a count of its graded claims that moves on the Wall would tell
+    anyone who watches it when the operator's money was argued."""
+
+    def test_no_fact_counts_the_councils_claims(self):
+        import inspect
+
+        import core.wall_facts as wf
+        self.assertNotIn("CouncilClaim", inspect.getsource(wf))
+        self.assertNotIn("CouncilSession", inspect.getsource(wf))
+        cache.clear()
+        facts = wall_facts()
+        self.assertEqual([k for k in facts if "council" in k], [])
+        self.assertEqual([k for k in FALLBACK_FACTS if "council" in k], [])
+
+
 class WallFactsFencingTests(TestCase):
     """The login gateway stays open through a database or cache failure."""
 

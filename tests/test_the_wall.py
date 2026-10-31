@@ -807,6 +807,18 @@ class WallClaimsFollowTheCodeTests(TestCase):
         # reflow rule).
         self.assertNotIn("Every action that can move capital", self.src)
         self.assertIn("unticking the demo box", self.body)
+        # Since 2026-10-23 (core/switch_pin.py) a live-money switch is one.
+        self.assertIn("turning on a switch that moves real money", self.body)
+        # Review (2026-10-31): the broker settings' venue doors (Saxo SIM
+        # to LIVE, a new eToro row saved live, ...) still take no PIN, so
+        # the gate names its gestures and never says a password gets no
+        # money at all.
+        from core import switch_pin
+        self.assertIn("the venue doors that make an armed live config's next order real",
+                      " ".join(switch_pin.__doc__.split()))
+        self.assertNotIn("It does not get you money", self.src)
+        self.assertIn("A password gets you a session. It does not get you these: unticking the demo box,",
+                      self.body)
 
     def test_the_router_says_where_an_unflagged_class_goes(self):
         from pathlib import Path
@@ -958,6 +970,12 @@ class WallSafeguardsSectionTests(TestCase):
         src = (Path(settings.BASE_DIR) / "templates" / "landing"
                / "the_wall.html").read_text(encoding="utf-8")
         self.assertNotIn("levered real-money loser", src, rewrite)
+        # The long shut (2026-10-24, R29): the eve of a US holiday is a
+        # weekend for the care, on a US share market's rows alone.
+        self.assertEqual(care.LONG_SHUT_HOURS, 24, rewrite)
+        self.assertIn("before a weekend or a high-impact print, or on a US share market before its holiday",
+                      card, rewrite)
+        self.assertNotIn("a US market holiday", src, rewrite)
 
     def test_its_cadence_is_the_beats(self):
         from config.celery import app
@@ -1079,6 +1097,358 @@ class WallLatestStepsTests(TestCase):
         self.assertNotIn("not-a-day", body)
         self.assertNotIn("abcdef0", body)
         self.assertNotIn("<li>", block)
+
+
+class WallThirdEditionTests(TestCase):
+    """The third edition (2026-10-31): the council of ten, the Horde, the
+    PIN at every door, the day's three sessions, the Telegram links, the
+    Mind's one word and the model tiers, each held to the code that makes
+    it true. Every fragment pinned here sits on ONE source line (the
+    reflow rule). Literal template text is served as typed (Django escapes
+    variables only), so every pin below carries the raw apostrophe."""
+
+    def setUp(self):
+        _clear_cache()
+        self.response = self.client.get("/wall/")
+        self.body = self.response.content.decode("utf-8", errors="ignore")
+        self.wall = self.response.context["wall"]
+        self.src = (Path(settings.BASE_DIR) / "templates" / "landing"
+                    / "the_wall.html").read_text(encoding="utf-8")
+
+    def _block(self, anchor):
+        start = self.body.index(anchor)
+        return self.body[start:self.body.index("</section>", start)]
+
+    def test_the_council_stands_in_the_pages_shell(self):
+        idx = self.body.index('id="council"')
+        self.assertIn('class="wall-section"', self.body[idx - 200:idx])
+        self.assertLess(self.body.index('id="agents"'), idx)
+        self.assertLess(idx, self.body.index('id="pipeline"'))
+        block = self._block('id="council"')
+        for marker in ("section-label", "new-pill", "section-title", "features-grid",
+                       "feature-icon", "reveal delay-1"):
+            self.assertIn(marker, block, marker)
+        self.assertEqual(block.count('class="feature-card'), 3)
+        self.assertIn('href="#council"', self._block('id="agents"'))
+        # Reached from #agents, as #evolution is: the nav gains no link.
+        self.assertNotIn('href="#council"', re.search(
+            r'<nav class="wall-nav" id="wallNav">(.*?)</nav>', self.body, re.S).group(1))
+        for scheme in ("http://", "https://", "//cdn", 'src="//'):
+            self.assertNotIn(scheme, block)
+        self.assertNotIn("svCouncilBand", self.body)
+
+    def test_the_councils_words_are_its_code(self):
+        from ai_agents.agents import council
+        from core.platform_control import DEFAULT_COMPONENTS, LIVE_MONEY_SWITCHES
+        rewrite = "rewrite the Wall's #council"
+        self.assertEqual(len(council.COUNCIL_VOICES), 8, rewrite + " ('sit eight more')")
+        self.assertIn("emperor", council.COUNCIL_VOICES, rewrite + " ('the Emperor in the chair')")
+        self.assertEqual(council.COUNCIL_MIN_N, 10, rewrite + " ('until ten of its calls')")
+        self.assertEqual(council.COUNCIL_HAND_MIN_N, 30, rewrite + " ('thirty of its calls')")
+        self.assertEqual(council.COUNCIL_BOT_SITTINGS_PER_DAY, 12, rewrite + " ('twelve times a day')")
+        rows = {c["key"]: c for c in DEFAULT_COMPONENTS}
+        for key in (council.COUNCIL_BOT_SWITCH, council.COUNCIL_TICKET_SWITCH):
+            self.assertNotIn(key, LIVE_MONEY_SWITCHES, rewrite + ": a council switch moves money")
+            self.assertFalse(rows[key].get("is_enabled"), rewrite + " ('With their own switches on')")
+        block = self._block('id="council"')
+        for words in ("Beside the trade debate's two voices sit eight more, the Emperor in the chair.",
+                      "With their own switches on",
+                      "a voice weighs exactly one until ten of its calls are graded",
+                      "once thirty of its calls in that cell are graded",
+                      "The bot lane sits at most twelve times a day, within the day's AI budget",
+                      "paper and the venue's demo are never argued",
+                      "none of them moves an order, a size, a stop or a limit",
+                      "keep only the debate's own powers",
+                      "may only counsel caution, never boldness"):
+            self.assertIn(words, block, words)
+        # Review (2026-10-31): the council sits on real money alone, so a
+        # count of its graded calls that moves would tell when the
+        # operator's money was argued. The section counts nothing.
+        self.assertNotIn("count-up", block)
+        self.assertNotIn("data-target", block)
+        self.assertNotIn("council_calls_graded", self.src)
+        self.assertNotIn("council_calls_graded", self.wall)
+
+    def test_the_council_opening_fits_a_phone(self):
+        """Finding 6 of the lost edition: its opening ran nineteen lines at
+        390 px. At about eight words a line, sixty words is the twelve-line
+        ceiling; a heading half over fourteen characters wraps at 390 px."""
+        block = self._block('id="council"')
+        desc = re.search(r'<p class="section-desc[^"]*"[^>]*>(.*?)</p>', block, re.S).group(1)
+        self.assertLessEqual(len(re.sub(r"<[^>]+>", " ", desc).split()), 60)
+        title = re.search(r'<h2 class="section-title[^"]*"[^>]*>(.*?)</h2>', block, re.S).group(1)
+        for half in title.split("<br>"):
+            self.assertLessEqual(len(half.strip()), 14, half)
+
+    def test_the_horde_counts_demo_as_the_gate_does_and_says_so(self):
+        """Finding 1 of the lost edition: the Horde's REAL ACCOUNT head
+        counts a broker's demo rows with the real ones, as the entry gate
+        does, so no line of the Wall says the worlds are never added."""
+        from dashboard import horde
+        rewrite = "rewrite the Wall's Horde card and strip"
+        self.assertEqual(horde.DEMO_NOTE,
+                         "Demo rows are counted here, as the entry gate counts them.", rewrite)
+        self.assertEqual(horde.SIDE_LABELS["live"], "REAL ACCOUNT", rewrite)
+        ops = self._block('id="operations"')
+        self.assertEqual(ops.count('class="feature-card'), 3)
+        self.assertIn("counts a broker's demo rows on the real side, and says so", ops)
+        self.assertIn("None of its commands sends an order", ops)
+        self.assertIn("REAL ACCOUNT &middot; demo rows counted as the entry gate counts them", ops)
+        low = self.body.lower()
+        for stale in ("never added together", "never summed", "worlds are kept apart"):
+            self.assertNotIn(stale, low, stale)
+        self.assertNotIn("svHorde", self.body)
+
+    def test_an_orc_is_one_per_idea(self):
+        """One Orc per open IDEA the platform looks after (its legs share
+        it), options aside, real money uncapped, simulation and demo capped
+        together by default."""
+        from bot_program import orcs
+        from bot_program.orcs import birth, constants
+        rewrite = "rewrite the Wall's Horde card ('Each open idea the platform looks after')"
+        self.assertIn("per IDEA", orcs.__doc__, rewrite)
+        self.assertEqual(constants.MAX_PAPER_ORCS, 10, rewrite + " ('up to ten')")
+        self.assertTrue(birth.SKIP_OPTIONS, rewrite + " ('options aside')")
+        self.assertTrue(birth.SKIP_WORKING and birth.SKIP_UNTICKED,
+                        rewrite + " ('open', 'the platform looks after')")
+        ops = self._block('id="operations"')
+        # Review (2026-10-31): its owner may add a thesis in free text
+        # (dashboard/views_orcs.py orc_thesis), so not "by code alone".
+        self.assertIn("each a journal of one open idea whose every fact is written by code, "
+                      "beside a thesis its owner may add in their own words.", ops)
+        self.assertNotIn("code alone", self.src)
+        self.assertIn("Each open idea the platform looks after, options aside, gets one: every "
+                      "real-money idea, and by default up to ten at once in simulation and demo "
+                      "together.", ops)
+        for stale in ("journal per open trade", "Every real-money idea has one"):
+            self.assertNotIn(stale, self.src, stale)
+
+    def test_the_horde_strip_is_legible_on_a_phone(self):
+        """Finding 6 of the lost edition: its picture drew the world tags
+        as SVG text at about 6 px on a phone; here they are HTML at 11 px,
+        in the words the Horde's own seat pill says
+        (dashboard.position_summary.WORLD_WORDS)."""
+        from dashboard.position_summary import WORLD_WORDS
+        ops = self._block('id="operations"')
+        for world in ("live", "demo", "paper"):
+            word = WORLD_WORDS[world]
+            self.assertRegex(ops, r'<span class="ops-world %s">%s</span>' % (world, word),
+                             "the Horde's seat says %r: redraw the strip" % word)
+            self.assertNotRegex(ops, r"<text[^>]*>%s<" % word)
+        self.assertIn("marked REAL MONEY, DEMO or PAPER", ops)
+        # Review (2026-10-31): a seat from the hand-kept book is NO VENUE
+        # (dashboard/horde.py _legacy_seat), in the card and the picture.
+        import inspect
+
+        from dashboard import horde
+        self.assertEqual(horde.NO_VENUE, "NO VENUE")
+        self.assertIn('"world_word": NO_VENUE', inspect.getsource(horde._legacy_seat))
+        self.assertIn("or NO VENUE for a row recorded by hand that does not say which", ops)
+        self.assertIn('aria-label="The Horde: one seat per open trade, each marked real money, '
+                      'demo or paper, or no venue for a row recorded by hand"', ops)
+        rule = re.search(r"\.ops-world \{([^}]*)\}", self.body).group(1)
+        self.assertGreaterEqual(int(re.search(r"font-size:\s*(\d+)px", rule).group(1)), 11)
+        seats = re.findall(r'<div class="ops-seat">(.*?)</div>', ops)
+        self.assertEqual(len(seats), 3)
+        for seat in seats:
+            self.assertNotRegex(seat, r"\d", "a figure in the Horde picture")
+        # On paper: the seat is a light panel, and the REAL MONEY tag prints
+        # red ink with no ground, never --bg (#fff there) on nothing.
+        from tests.test_the_book import _block as css_block
+        from tests.test_the_book import _rules
+        rules = dict(_rules(css_block(self.body, r"@media print")))
+        panels = next(k for k in rules if ".ops-band-cell" in k and ".feature-card" in k)
+        self.assertIn(".ops-seat", panels)
+        live = next(v for k, v in rules.items() if k.endswith(".ops-world.live"))
+        self.assertIn("color: var(--accent-red) !important", live)
+        tags = next(v for k, v in rules.items() if k.endswith(".ops-world"))
+        self.assertIn("background: none !important", tags)
+
+    def test_the_sessions_card_is_display_only(self):
+        """Finding 5 of the lost edition: a role's stub may cross one of the
+        trade's lines, so the card says nothing about labels covering."""
+        ops = self._block('id="operations"')
+        self.assertIn("box the day's Asia, London and New York sessions over their own bars", ops)
+        self.assertIn("Display only: nothing that trades reads any of it.", ops)
+        low = self.body.lower()
+        for stale in ("no label ever covers", "never covers the trade", "never covered"):
+            self.assertNotIn(stale, low, stale)
+
+    def test_the_telegram_links_act_nothing(self):
+        import inspect
+
+        from alerts import links
+        from alerts.channels import telegram_alert
+        rewrite = "rewrite the Wall's 'Links That Act Nothing' card"
+        self.assertEqual(len(links.DEEP_LINK_PATHS), 2, rewrite)
+        for shape in links.DEEP_LINK_PATHS:
+            self.assertIn(r"\d{1,12}", shape.pattern, rewrite + " ('the row's number and nothing else')")
+        self.assertNotIn("callback_data", inspect.getsource(telegram_alert),
+                         "a Telegram button acts now: " + rewrite)
+        ops = self._block('id="operations"')
+        self.assertIn("The link carries the row's number and nothing else", ops)
+        self.assertIn("Nothing is bought or closed from Telegram", ops)
+        self.assertIn("with the trading PIN on real money", ops)
+
+    def test_the_pin_counts_on_one_counter_at_every_door(self):
+        from core import switch_pin, trading_pin
+        from core.platform_control import LIVE_MONEY_SWITCHES
+        rewrite = "rewrite the Second Gate, the PIN pillars and the safeguards' lede"
+        self.assertEqual(trading_pin.MAX_ATTEMPTS, 5, rewrite + " ('the fifth wrong answer')")
+        self.assertEqual((trading_pin.STOP, trading_pin.ACT), ("stop", "act"), rewrite)
+        for key in LIVE_MONEY_SWITCHES:
+            self.assertTrue(switch_pin.needs_pin(key, was_on=False, want_on=True), key)
+            self.assertFalse(switch_pin.needs_pin(key, was_on=True, want_on=False), key)
+        # The login step keeps its own count: "Once you are signed in".
+        self.assertNotEqual(trading_pin.LOGIN_ATTEMPTS_KEY, trading_pin.ATTEMPTS_KEY, rewrite)
+        trust = self._block('id="trust"')
+        self.assertIn("Once you are signed in, every door that asks for that PIN counts wrong answers on one counter",
+                      trust)
+        self.assertIn("never ends it and always obeys the right PIN", trust)
+        self.assertIn("arming a live bot from any page takes the PIN, every time", trust)
+        self.assertNotIn("and arming live takes", self.src)
+        safeguards = self._block('id="safeguards"')
+        self.assertIn("each is turned on alone, by a person, with the trading PIN", safeguards)
+        self.assertIn("with the trading PIN; turning one off stays free", safeguards)
+
+    def test_new_money_claims_are_never_in_the_faintest_ink(self):
+        """Finding 6 of the lost edition: --text3 reads about 3:1 on the
+        page's black; a PIN or real-money claim sits in --text2 or
+        brighter."""
+        rule = re.search(r"\.pillar-desc\.pillar-claim \{([^}]*)\}", self.body).group(1)
+        self.assertIn("color: var(--text2)", rule)
+        for label in ("Real-Money Switches", "PIN to Go Live"):
+            at = self.body.index(f'<div class="pillar-lbl">{label}</div>')
+            self.assertIn('class="pillar-desc pillar-claim"', self.body[at:at + 160], label)
+        self.assertIn("color: var(--text2)", re.search(r"\.latest-bench \{([^}]*)\}", self.body).group(1))
+
+    def test_the_clock_names_the_us_holiday(self):
+        """The long shut binds a US share market's rows alone, never every
+        bot (bot_program/position_care.py long_shut_ahead)."""
+        import inspect
+
+        from bot_program import position_care as care
+        from core import exchange_status as es
+        rewrite = "rewrite 'The Clock' and the care card ('on a US share market, before its holiday')"
+        self.assertEqual(care.LONG_SHUT_HOURS, 24, rewrite)
+        self.assertEqual(es._US_EQUITY_SESSIONS, frozenset({"NYSE", "NASDAQ"}), rewrite)
+        self.assertIn("_US_EQUITY_SESSIONS", inspect.getsource(care.long_shut_ahead), rewrite)
+        self.assertIn("in a share's last minutes, before a weekend or, on a US share market, before its holiday,",
+                      self._block('id="safeguards"'))
+
+    def test_the_minds_snapshot_and_word_are_the_codes(self):
+        import inspect
+
+        from brain import consolidation, context, synthesizer
+        self.assertEqual(context.MIND_GRACE_MINUTES, 15, "rewrite the Knowledge Graph card")
+        self.assertEqual(consolidation.RELEASE_AFTER_MISSES, 3)
+        world = inspect.getsource(synthesizer._build_world_snapshot)
+        self.assertNotIn('"exposure"', world, "rewrite 'Brain Synthesis'")
+        for key in ("open_positions", "track_record_venues", "regime_probes", "unresolved_decay_alerts"):
+            self.assertIn(key, world, "rewrite 'Brain Synthesis' (%s)" % key)
+        mind = self._block('id="mind"')
+        self.assertIn("the shape of the open trades, each rule's track record venue by venue", mind)
+        self.assertNotIn("exposure, rule track records", self.src)
+        # Finding 4 of the lost edition: the one window is for what the Mind
+        # says ABOUT A RULE.
+        self.assertIn("What the Mind says about a rule means one thing wherever it is read", mind)
+
+    def test_ask_sauron_says_what_it_reads(self):
+        import inspect
+
+        from brain import research_agent
+        src = inspect.getsource(research_agent._build_research_snapshot)
+        for model in ("AssetBotTrade", "RuleTrackRecord"):
+            self.assertNotIn(model, src, "the research agent reads trades now: rewrite #research")
+        self.assertIn("[:6]", src, "rewrite #research ('the Mind's latest reports')")
+        research = self._block('id="research"')
+        self.assertIn("It reads no trade on its own: asked from a seat", research)
+        self.assertIn("Read from the platform's own reports, graph and decisions", research)
+        for stale in ("with the rows it used", "the last 72h of reports", "It holds no trade"):
+            self.assertNotIn(stale, research, stale)
+        self.assertNotIn("rule track records, your book", self.src)
+        self.assertNotIn("Retrieval over your real history", self.src)
+
+    def test_the_agents_claim_no_consensus_nobody_runs(self):
+        """Model choices, read 2026-10-31: every agent is Claude by default,
+        on a catalogue tier (ai_agents/catalog.py); Horizon runs on the
+        frontier tier; ai_agents/consensus.py's ConsensusEngine is called by
+        nothing, and ai_agents/rag.py is a search no page, script or model
+        calls, so the page names neither."""
+        from ai_agents.catalog import TIER_DEFAULTS, TIERS
+        from brain.horizon import HorizonAgent
+        self.assertEqual(tuple(TIERS), ("fast", "balanced", "deep", "frontier"))
+        for tier, model in TIER_DEFAULTS.items():
+            self.assertTrue(model.startswith("claude-"), tier)
+        self.assertEqual(HorizonAgent.default_tier, "frontier", "rewrite #horizon ('a frontier-model pass')")
+        root = Path(settings.BASE_DIR)
+        callers = [str(p.relative_to(root))
+                   for app in ("ai_agents", "brain", "bot_program", "dashboard", "signals", "core")
+                   for p in (root / app).rglob("*.py")
+                   if p.name != "consensus.py"
+                   and "ConsensusEngine(" in p.read_text(encoding="utf-8", errors="ignore")]
+        self.assertEqual(callers, [], "a consensus runs now: the Wall may say so again")
+        agents = self._block('id="agents"')
+        self.assertNotIn("multi-model consensus", agents)
+        self.assertIn("each on the model tier its work calls for", agents)
+        for stale in ("RAG-augmented", "RAG over"):
+            self.assertNotIn(stale, self.src, stale)
+        self.assertIn("Per-agent Brier-calibration scoring", agents)
+
+
+class WallBenchTests(TestCase):
+    """The bench (2026-10-31): the Book's IN_PROGRESS titles under the
+    latest steps, read off core.views_book.bench_titles at render time,
+    the same list in the same order, said as not yet landed."""
+
+    def setUp(self):
+        _clear_cache()
+        self.response = self.client.get("/wall/")
+        self.body = self.response.content.decode("utf-8", errors="ignore")
+
+    def _block(self, body=None):
+        body = self.body if body is None else body
+        start = body.index('id="latest"')
+        return body[start:body.index("</section>", start)]
+
+    def test_the_bench_is_the_books_bench(self):
+        from django.utils.html import escape
+
+        from core import book_content as book
+        from core.views_book import bench_titles
+        titles = [row["title"] for row in book.IN_PROGRESS]
+        self.assertTrue(titles, "the Book's bench is empty: the Wall's line is gone")
+        self.assertEqual(self.response.context["bench"], titles)
+        self.assertEqual(bench_titles(), titles)
+        block = self._block()
+        tail = block[block.index("On the bench, not yet landed:"):]
+        at = [tail.index(escape(t)) for t in titles]
+        self.assertEqual(at, sorted(at))
+        self.assertIn('href="/book/#in-progress"', tail)
+        self.assertEqual(self.body.count('href="/book/"'), 2)
+        self.assertIn('id="in-progress"', self.client.get("/book/").content.decode("utf-8"))
+        for claim in (" has landed", " is live", " is done", " shipped"):
+            self.assertNotIn(claim, tail)
+
+    def test_an_empty_bench_says_nothing(self):
+        from unittest.mock import patch
+        with patch("core.book_content.IN_PROGRESS", []):
+            _clear_cache()
+            r = self.client.get("/wall/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context["bench"], [])
+        self.assertNotIn("On the bench", r.content.decode("utf-8", errors="ignore"))
+
+    def test_a_broken_bench_still_serves_the_wall(self):
+        from unittest.mock import patch
+        with patch("core.book_content.IN_PROGRESS", [{"text": "no title here"}]):
+            _clear_cache()
+            with self.assertLogs("core.views_book", "WARNING") as logs:
+                r = self.client.get("/wall/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context["bench"], [])
+        self.assertNotIn("no title here", r.content.decode("utf-8", errors="ignore"))
+        self.assertNotIn("no title here", " ".join(logs.output))
 
 
 class TheWallStaysOpenTests(TestCase):

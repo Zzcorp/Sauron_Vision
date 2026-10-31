@@ -153,6 +153,19 @@ def latest_steps(n=4) -> list:
         return []
 
 
+def bench_titles() -> list:
+    """The titles on the Book's bench (book.IN_PROGRESS), in order, for a
+    page that points at it (the Wall's latest steps, 2026-10-31). Read at
+    call time and never raising, like latest_steps: a page that merely
+    points at the bench must not fall with it."""
+    try:
+        return [str(row["title"]) for row in book.IN_PROGRESS]
+    except Exception as exc:  # noqa: BLE001 — the pointing page stays up
+        logger.warning("the book's bench could not be read (%s)",
+                       type(exc).__name__)
+        return []
+
+
 def build(facts: dict) -> dict:
     """Everything the template draws, out of the book and the facts."""
     words = {key: shown(value) for key, value in facts.items()}

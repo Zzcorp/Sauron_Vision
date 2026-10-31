@@ -3,8 +3,9 @@
 Anyone may read it; a signed-in visitor is sent to the dashboard. Every
 figure on it is a count out of core.wall_facts (cached, fenced, never
 raising), the session pills are clock arithmetic, the ring is the beat
-schedule read at render time and the latest steps are the Book's newest
-milestones. Nothing here reads the database on a warm request.
+schedule read at render time, and the latest steps and the bench are the
+Book's own: its newest milestones and the titles of its work in progress.
+Nothing here reads the database on a warm request.
 
 The page renders WITHOUT the request's context processors (2026-10-08).
 Rendered through `render()`, the front door paid for every panel of the
@@ -22,7 +23,8 @@ get_token() is what makes the middleware set the cookie).
 Every reader this view calls is fenced on its own, so one of them failing
 costs its part of the page and never the door: a schedule that cannot be
 read draws an empty ring, a session clock that throws leaves the pill row
-empty, and a road the Book cannot read shows the door to the Book alone.
+empty, and a road or a bench the Book cannot read shows the door to the
+Book alone.
 
 Read-only: no write, no broker, no order, no secret.
 """
@@ -35,7 +37,7 @@ from django.template.loader import render_to_string
 
 from core import leak_walk
 from core.day_of_sauron import safe_page_scheme
-from core.views_book import latest_steps
+from core.views_book import bench_titles, latest_steps
 from core.wall_facts import market_sessions, wall_facts
 
 logger = logging.getLogger(__name__)
@@ -60,7 +62,8 @@ def the_wall(request):
     its reader is not signed in: the login form carries it back, and a
     signed-in visitor goes straight to it. Only the two id-only shapes of
     alerts.links.DEEP_LINK_PATHS are echoed; any other `next` is dropped,
-    so no word of the query string reaches this public page."""
+    so no word of the query string reaches this public page, and the
+    leak walk reads the page without the one that is."""
     from alerts.links import deep_link_next
     login_next = deep_link_next(request.GET.get("next"))
     if request.user.is_authenticated:
@@ -78,6 +81,9 @@ def the_wall(request):
         # The latest steps (2026-10-08): the Book's newest four milestones,
         # read off core.book_content at render time and never raising.
         "latest": latest_steps(4),
+        # The bench (2026-10-31): the Book's work in progress, by title,
+        # read at render time and never raising.
+        "bench": bench_titles(),
         # For {% static_abs %} alone: no context processor runs.
         "request": request,
         # The og:url: the page's own path, never the visitor's query string.
@@ -94,7 +100,15 @@ def the_wall(request):
     # out and staff is told. The request goes along so the host the visitor
     # typed is not read as the page's. Fenced: a walk that raises publishes
     # the page.
-    held = leak_walk.withhold_if_private("wall", body, request)
+    #
+    # The `next` echoed into the login form is the visitor's too (review,
+    # 2026-10-31): its digits are whatever the address carried, so it is
+    # blanked from the text walked, never from the page served. Read as the
+    # page's, a guessed digit run put there came back as the placeholder or
+    # as the page: a verdict on the guess, and a staff incident anyone
+    # could raise.
+    walked = body.replace(login_next, " ") if login_next else body
+    held = leak_walk.withhold_if_private("wall", walked, request)
     if held is not None:
         return held
     return HttpResponse(body)
