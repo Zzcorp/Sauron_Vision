@@ -38,6 +38,10 @@ class LiveQuote(models.Model):
     volume = models.BigIntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
     source = models.CharField(max_length=50)
+    # The feed that measured `change_pct` (2026-10-31): a writer without a
+    # day change keeps the previous one, which is then another feed's. ""
+    # on a row written before the field: unknown.
+    change_source = models.CharField(max_length=50, blank=True, default="")
 
     @property
     def spread(self):

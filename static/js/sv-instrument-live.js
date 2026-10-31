@@ -1,5 +1,11 @@
 /* Live instrument page — the price hero moves, and so does the chart.
  *
+ * (2026-10-31) It also says whose price it is: the feed, its age and the
+ * stand-in words under the hero, the venue's last known price beside it,
+ * at the page's own decimal count; the "Latest Quote" card is repainted
+ * with it; and the chart is handed the whole quote, so it welds only a
+ * quote that belongs on its last candle.
+ *
  * The page rendered a price and a chart once and froze; the market badge
  * next to them was live, which made the frozen number read as current —
  * the worst combination. Two loops fix it:
@@ -31,6 +37,33 @@
      the hero spans exist only once a quote does, and may not yet. */
   var lastEl = document.querySelector('.dtl-last');
   var chgEl = document.querySelector('.dtl-chg');
+  /* Whose price it is (2026-10-31): the feed, its age and the stand-in
+     words under the hero, and the venue's last known price beside it. */
+  var srcEl = document.querySelector('[data-hero="src"]');
+  var venueEl = document.querySelector('[data-hero="venue"]');
+
+  /* THE PAGE'S ONE DECIMAL COUNT (2026-10-31). The hero was repainted
+     with toFixed(4) from the first poll: "1.0835" over a chart printing
+     "1.08345", "258.4000" beside "258.40", and a token under 0.0001 as
+     "0.0000" — a zero on the hero. The server's count rides the element
+     (data-decimals, as on the ticket); this mirrors base.html's
+     svDecimals when it is absent. */
+  function decimalsFor(el, v) {
+    var holder = el && el.closest && el.closest('[data-decimals]');
+    if (holder) {
+      var n = parseInt(holder.getAttribute('data-decimals'), 10);
+      if (isFinite(n) && n >= 0 && n <= 10) return n;
+    }
+    var a = Math.abs(v);
+    if (a >= 1) return 2;
+    if (a >= 0.01) return 4;
+    if (a >= 0.0001) return 6;
+    return 8;
+  }
+  function priceText(el, v) {
+    var n = Number(v);
+    return n.toFixed(decimalsFor(el, n));
+  }
 
   function flash(el) {
     if (!el) return;
@@ -87,6 +120,70 @@
     });
   }
 
+  /* The day change, when it is the price's own feed's (2026-10-31,
+     skeptic M3). A stream's trade print carries none, so the row keeps
+     the poller's: printed beside the stream's price as one reading, its
+     arrow and colour could contradict the price. Another feed's change
+     prints a muted dash, and its title says whose it is. */
+  function paintChange(el, d, withArrow) {
+    if (!el) return;
+    if (d.change_same_feed === false) {
+      el.classList.remove('up', 'down');
+      el.classList.add('dtl-chg--other');
+      el.textContent = '—';
+      el.title = d.change_words || '';
+      return;
+    }
+    if (d.change_pct == null) return;
+    var up = Number(d.change_pct) >= 0;
+    el.classList.remove('dtl-chg--other');
+    el.classList.toggle('up', up);
+    el.classList.toggle('down', !up);
+    el.title = '';
+    el.textContent = (withArrow ? (up ? '▲ +' : '▼ ') : (up ? '+' : '')) +
+      Number(d.change_pct).toFixed(2) + '%';
+  }
+
+  /* Under the hero: whose price, how old, the stand-in words; beside it,
+     the venue's last known price, its age and the gap to the quote. */
+  function paintWho(d) {
+    if (srcEl && d.source_words) {
+      srcEl.textContent = d.source_words +
+        (d.age_words ? ' · ' + d.age_words + ' old' : '');
+    }
+    if (venueEl) {
+      var v = d.venue;
+      if (v && v.price_text) {
+        venueEl.textContent = v.label + ' ' + v.price_text + ' · ' +
+          v.age_words + ' old' + (d.gap_words ? ' · ' + d.gap_words : '');
+        venueEl.hidden = false;
+      } else {
+        venueEl.textContent = '';
+        venueEl.hidden = true;
+      }
+    }
+  }
+
+  /* The "Latest Quote" card, which was rendered once and never again:
+     its LAST disagreed with the hero from the first tick. */
+  function paintCard(d) {
+    var el = document.querySelector('[data-lq="last"]');
+    if (el && d.price != null) el.textContent = priceText(el, d.price);
+    paintChange(document.querySelector('[data-lq="change"]'), d, false);
+    el = document.querySelector('[data-lq="sides"]');
+    if (el) {
+      var side = function (v) {
+        return (v == null || v === '') ? '—' : priceText(el, v);
+      };
+      el.textContent = side(d.bid) + ' / ' + side(d.ask);
+      el.title = d.sides_words ? 'Bid and ask from ' + d.sides_words : '';
+    }
+    el = document.querySelector('[data-lq="source"]');
+    if (el && d.source_words) el.textContent = d.source_words;
+    el = document.querySelector('[data-lq="updated"]');
+    if (el && d.age_words) el.textContent = d.age_words + ' ago';
+  }
+
   function paintQuote(d) {
     if (!d || d.error) return;
     /* BEFORE the price guard below. A row can carry a bid and an ask with
@@ -94,28 +191,25 @@
        missing last suppress them would freeze the only numbers on the
        buttons. */
     paintDq(d);
+    paintWho(d);
+    paintCard(d);
     if (d.price == null) return;
     var price = Number(d.price);
-    /* toFixed matches the server's floatformat:4 byte for byte — the
-       first poll must not rewrite an unchanged price into a different
-       spelling and fire a lie of a flash. */
-    var txt = price.toFixed(4);
     if (lastEl) {
+      /* At the page's own count, the spelling the server rendered: the
+         first poll must not rewrite an unchanged price into another
+         spelling and fire a lie of a flash. */
+      var txt = priceText(lastEl, price);
       var changed = prevPrice !== null && price !== prevPrice;
       lastEl.textContent = txt;
       if (changed) flash(lastEl);
     }
     prevPrice = price;
-    if (chgEl && d.change_pct != null) {
-      var up = Number(d.change_pct) >= 0;
-      chgEl.classList.toggle('up', up);
-      chgEl.classList.toggle('down', !up);
-      chgEl.textContent = (up ? '▲ +' : '▼ ') +
-        Number(d.change_pct).toFixed(2) + '%';
-    }
-    /* Nudge the chart's last candle so the tape ticks between refreshes. */
+    paintChange(chgEl, d, true);
+    /* The chart's last candle, when the quote belongs on it: the chart
+       decides from the quote's feed, age and size (chart_widget tick). */
     var chart = window.svCharts && window.svCharts['instrument-main-chart'];
-    if (chart && chart.tick) chart.tick(Number(d.price));
+    if (chart && chart.tick) chart.tick(price, d);
   }
 
   function guard(r) {

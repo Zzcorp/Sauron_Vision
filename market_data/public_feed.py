@@ -286,11 +286,23 @@ class YFinanceFeed:
             return []
 
         if interval in RESAMPLE_FROM:
+            # ONE FIXED UTC GRID (2026-10-31). Resampled at the window's
+            # first midnight in the exchange's zone (origin="start_day"),
+            # the grid moved by an hour in UTC whenever the ~200-day window
+            # started across a daylight-saving change, and both grids stayed
+            # in the table (the timestamp is part of the key): pairs of
+            # near-identical 4h candles an hour apart. In UTC, from the
+            # epoch, a 4h bar opens at 00, 04, 08... UTC whatever the
+            # season and whatever the window. The duplicates already stored
+            # are listed by `manage.py prune_offgrid_4h` (dry run first).
             rule = PANDAS_RULE[interval]
-            df = (df.resample(rule, origin="start_day")
-                    .agg({"Open": "first", "High": "max", "Low": "min",
-                          "Close": "last", "Volume": "sum"})
-                    .dropna())
+            idx = df.index
+            utc = (df.tz_convert("UTC") if getattr(idx, "tz", None) is not None
+                   else df.tz_localize("UTC"))
+            df = (utc.resample(rule, origin="epoch")
+                     .agg({"Open": "first", "High": "max", "Low": "min",
+                           "Close": "last", "Volume": "sum"})
+                     .dropna())
 
         if limit:
             df = df.tail(int(limit))

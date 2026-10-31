@@ -84,8 +84,19 @@ def save_history_to_db(symbol, period="3mo", fetch_symbol=None):
     `fetch_symbol` is the Yahoo spelling when it differs from the platform
     one (CORNUSD -> ZC=F, SPX500 -> ^GSPC) — without it, only identity-
     mapped classes (stocks, ETFs) could ever get daily bars.
+
+    THE LAST TWO DAYS ARE REWRITTEN (2026-10-31). Every bar was written
+    with get_or_create, so the bar the 22:30 UTC pass took of a session
+    still trading (forex round the clock, a future that reopens at 22:00 or
+    23:00 UTC) stood for good as that day's bar, and the chart gapped to
+    the next open. The two newest bars Yahoo serves are now updated to its
+    figures each night; older days are history and stay as written.
+
+    A bar that cannot have traded (market_data.bar_shape.possible) is not
+    written at all.
     """
     from instruments.models import Instrument
+    from market_data.bar_shape import possible
     from market_data.models import PriceData
 
     history = fetch_history(fetch_symbol or symbol, period=period, interval="1d")
@@ -97,24 +108,35 @@ def save_history_to_db(symbol, period="3mo", fetch_symbol=None):
     except Instrument.DoesNotExist:
         return 0
 
+    history = sorted(history, key=lambda b: b["timestamp"])
+    rewrite_from = len(history) - REWRITE_LAST_BARS
     created = 0
-    for bar in history:
-        _, was_created = PriceData.objects.get_or_create(
-            instrument=instrument,
-            timeframe="1d",
-            timestamp=bar["timestamp"],
-            defaults={
-                "open": bar["open"],
-                "high": bar["high"],
-                "low": bar["low"],
-                "close": bar["close"],
-                "volume": bar["volume"],
-                "source": "yfinance",
-            }
-        )
+    for i, bar in enumerate(history):
+        if not possible(bar["open"], bar["high"], bar["low"], bar["close"]):
+            logger.warning("yfinance %s: the daily bar of %s cannot have "
+                           "traded (o %s h %s l %s c %s) and is not written",
+                           symbol, bar.get("date"), bar["open"], bar["high"],
+                           bar["low"], bar["close"])
+            continue
+        values = {
+            "open": bar["open"],
+            "high": bar["high"],
+            "low": bar["low"],
+            "close": bar["close"],
+            "volume": bar["volume"],
+            "source": "yfinance",
+        }
+        write = (PriceData.objects.update_or_create if i >= rewrite_from
+                 else PriceData.objects.get_or_create)
+        _, was_created = write(instrument=instrument, timeframe="1d",
+                               timestamp=bar["timestamp"], defaults=values)
         if was_created:
             created += 1
     return created
+
+
+#: How many of the newest daily bars the EOD pass rewrites (2026-10-31).
+REWRITE_LAST_BARS = 2
 
 
 def save_quote_to_db(symbol):

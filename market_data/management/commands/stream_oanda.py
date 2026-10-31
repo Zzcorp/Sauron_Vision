@@ -12,6 +12,8 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 from asgiref.sync import sync_to_async
 
+from market_data.stream_writes import LatestPerSymbol
+
 log = logging.getLogger("stream_oanda")
 
 # A FEED THAT WRITES NOTHING MUST NOT LOOK LIKE A QUIET MARKET (2026-10-06).
@@ -47,6 +49,12 @@ def _fire(coro):
     _PENDING.add(task)
     task.add_done_callback(_PENDING.discard)
     return task
+
+
+#: One write in flight per symbol, the newest tick behind it
+#: (market_data.stream_writes, 2026-10-31): the read loop never waits on a
+#: database write.
+LATEST = LatestPerSymbol(_fire)
 
 
 def _report_failure(where: str, symbol: str, exc: Exception, count: int):
@@ -383,11 +391,21 @@ async def run(api_key, account_id, env, override):
                             sym, bid, ask = got
                             mid = (bid + ask) / 2
                             STATS["ticks"] += 1
-                            _fire(update_live_quote(sym, bid, ask))
                             # None, not 0: a hardcoded zero painted
                             # "+0.00%" over the real day change in the
                             # headband and the rail on every tick.
-                            await broadcast(sym, mid, None, bid, ask)
+                            # Only a price write_quote accepted reaches
+                            # the browser (2026-10-31, skeptic M2): a
+                            # refused one painted the rail a price the
+                            # row never carried. The write and its
+                            # broadcast run behind the loop, one per pair
+                            # in flight (LATEST): the read never waits on
+                            # the database.
+                            async def _tick(sym=sym, bid=bid, ask=ask,
+                                            mid=mid):
+                                if await _fire(update_live_quote(sym, bid, ask)):
+                                    await broadcast(sym, mid, None, bid, ask)
+                            LATEST.submit(sym, _tick)
                         except Exception as e:
                             # Was log.debug, i.e. discarded in production.
                             STATS["tick_errors"] += 1

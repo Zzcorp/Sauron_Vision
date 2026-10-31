@@ -36,9 +36,13 @@ def _cfg(user, *, asset_class="stock", mode="live", enabled=True,
 
 
 def _klines(n=3, start_ms=1_700_000_000_000, step_ms=14_400_000):
-    """Binance-style rows: [openTime, o, h, l, c, v, ...]."""
+    """Binance-style rows: [openTime, o, h, l, c, v, ...].
+
+    Each bar's high holds its close (2026-10-31): the writer refuses a bar
+    that cannot have traded (market_data.bar_shape), and the third bar of
+    this fixture closed at 102 under a high of 101."""
     return [
-        [start_ms + i * step_ms, "100.0", "101.0", "99.0",
+        [start_ms + i * step_ms, "100.0", str(max(101, 100 + i)), "99.0",
          str(100 + i), "1000", start_ms + (i + 1) * step_ms,
          "0", 0, "0", "0", "0"]
         for i in range(n)

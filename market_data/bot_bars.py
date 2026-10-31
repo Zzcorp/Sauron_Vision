@@ -24,7 +24,7 @@ import logging
 import math
 import time
 from datetime import datetime, timezone as dt_tz
-from decimal import Decimal, InvalidOperation
+from decimal import InvalidOperation
 
 from django.core.cache import cache
 
@@ -310,6 +310,44 @@ def last_answer(symbol: str, interval: str) -> "dict | None":
         return None
 
 
+# THE VENUE'S OWN ANSWER (2026-10-31). The note above is any source's: the
+# public feed's fallback and the watchlist pass refresh it too, so it
+# cannot say when the VENUE last answered. The hero dates a venue
+# candle's close by it (dashboard.chart_source.venue_last): dated by the
+# shared note, eToro's forming 4h close read "0 s old" for hours after
+# eToro went quiet. This one is written only from a venue's answer, keyed
+# by its source tag, and names the newest bar the writer accepted.
+def _venue_answer_key(source: str, symbol: str, interval: str) -> str:
+    return f"bars:venue_answered:{source}:{symbol}:{interval}"
+
+
+def _note_venue_answer(source: str, symbol: str, interval: str, rows,
+                       at=None) -> None:
+    """Remember that venue `source` answered `rows` (the bars the writer
+    accepted) for (symbol, interval) at `at` (epoch seconds, now by
+    default). No rows, no note."""
+    try:
+        newest = max(int(r[0]) for r in (rows or []) if r and len(r) >= 6)
+    except (ValueError, TypeError):
+        return
+    try:
+        cache.set(_venue_answer_key(source, symbol, interval),
+                  {"at": float(at if at is not None else time.time()),
+                   "newest_ms": newest}, ANSWER_MEMO_S)
+    except Exception:  # noqa: BLE001 — a dead cache costs the note only
+        pass
+
+
+def last_venue_answer(source: str, symbol: str,
+                      interval: str) -> "dict | None":
+    """{"at", "newest_ms"} of venue `source`'s last answer for (symbol,
+    interval), or None."""
+    try:
+        return cache.get(_venue_answer_key(source, symbol, interval)) or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _client_for(user, symbol, cfg):
     """Market-data client for a symbol, or None when only paper is available.
 
@@ -427,30 +465,35 @@ def _upsert_rows(inst, interval, rows, source) -> tuple[int, int]:
     """Persist Binance-style kline rows. Returns (written, skipped).
 
     A row the database refuses is skipped and said, never raised: one
-    unwritable bar used to abort the refresh of the whole config."""
+    unwritable bar used to abort the refresh of the whole config.
+
+    A bar that cannot have traded is skipped too (2026-10-31,
+    market_data.bar_shape.parse): a price that is not a finite number, or
+    one outside 0 < low <= min(open, close) <= max(open, close) <= high.
+    Only `ts <= 0` and `close <= 0` were refused, so a bar with a low of 0
+    or a high under its open was stored, drawn as a wick to zero and read
+    by every ATR stop on the symbol. A real bar always passes."""
     from django.db import DatabaseError
 
+    from market_data.bar_shape import parse
     from market_data.models import PriceData
 
     written = skipped = 0
     refused = None
     for row in rows or []:
         try:
-            if not row or len(row) < 6:
+            bar = parse(row)
+            if bar is None:
                 skipped += 1
                 continue
-            ts_ms = int(row[0])
-            close = Decimal(str(row[4]))
-            if ts_ms <= 0 or close <= 0:
-                skipped += 1
-                continue
+            ts_ms, open_, high, low, close = bar
             PriceData.objects.update_or_create(
                 instrument=inst, timeframe=interval,
                 timestamp=datetime.fromtimestamp(ts_ms / 1000, tz=dt_tz.utc),
                 defaults={
-                    "open": Decimal(str(row[1])),
-                    "high": Decimal(str(row[2])),
-                    "low": Decimal(str(row[3])),
+                    "open": open_,
+                    "high": high,
+                    "low": low,
                     "close": close,
                     "volume": _volume(row[5]),
                     "source": source,
@@ -469,6 +512,24 @@ def _upsert_rows(inst, interval, rows, source) -> tuple[int, int]:
     return written, skipped
 
 
+def _every_bar_impossible(rows) -> bool:
+    """True when `rows` is a non-empty answer none of whose bars could have
+    traded (market_data.bar_shape.parse refuses every one)."""
+    from market_data.bar_shape import parse
+    return bool(rows) and all(parse(r) is None for r in rows)
+
+
+def _possible_rows(rows) -> list:
+    """The rows of an answer the writer accepts (market_data.bar_shape
+    .parse), in order (2026-10-31). The venue's window, its staleness and
+    its mark are read from these alone: a refused newest bar (eToro's
+    forming candle with no low) still widened the eviction over the
+    public stand-in in its slot, and its stamp made the window look
+    fresh, so the slot was emptied and nothing filled it."""
+    from market_data.bar_shape import parse
+    return [r for r in (rows or []) if parse(r) is not None]
+
+
 def _write_venue_window(inst, interval, rows, source) -> tuple[int, int, int]:
     """Write a venue's answer, THEN give its window back to it.
 
@@ -481,13 +542,17 @@ def _write_venue_window(inst, interval, rows, source) -> tuple[int, int, int]:
     nothing after, so an armed bot read a 4h candle 33 days old. A venue
     answer that writes nothing now evicts nothing, and the caller falls
     back to the public feed as for a mute venue.
+
+    The window is the WRITTEN bars' (2026-10-31, _possible_rows): a bar
+    the writer refused leaves its slot to the stand-in already there.
     """
     from django.db import DatabaseError, transaction
 
     try:
         with transaction.atomic():
             written, skipped = _upsert_rows(inst, interval, rows, source)
-            evicted = (_evict_stand_in_rows(inst, interval, rows)
+            evicted = (_evict_stand_in_rows(inst, interval,
+                                            _possible_rows(rows))
                        if written else 0)
     except DatabaseError as e:
         logger.warning("[bars] %s %s: writing %s's window failed, nothing "
@@ -661,18 +726,23 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                 continue
 
             written = 0
+            good = _possible_rows(rows)
             if rows:
                 # THE VENUE ANSWERED: ITS WINDOW IS ITS OWN. Its bars are
                 # written, then the stand-in rows inside the window it
                 # returned go, so that window holds one grid, the venue's.
                 # History behind the window (a backfilled year) stays, and
                 # so does anything newer than it (see _evict_stand_in_rows).
+                # The window, the mark and the staleness below are the
+                # accepted bars' (`good`, 2026-10-31).
                 written, skipped, evicted = _write_venue_window(
                     inst, interval, rows, source)
                 out["bars"] += written
                 out["skipped"] += skipped
+                if written:
+                    _note_venue_answer(source, symbol, interval, good)
                 if written and stamp_marks:
-                    _stamp_venue_rows(client, symbol, interval, rows)
+                    _stamp_venue_rows(client, symbol, interval, good)
                 if evicted:
                     logger.info("[bars] %s %s: %s answered — %d public-feed "
                                 "stand-in bars in its window gave way to "
@@ -683,6 +753,16 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                                    "none could be written — the public feed "
                                    "instead", symbol, interval, source,
                                    len(rows))
+                    # AN ANSWER OF BARS THAT CANNOT HAVE TRADED IS "NOT
+                    # NOW", NEVER "NO BARS HERE" (2026-10-31). The writer
+                    # refuses such a bar (market_data.bar_shape); an answer
+                    # of nothing else used to mute the venue for this
+                    # series for MUTE_VENUE_MEMO_S, and for six hours the
+                    # bots read the stand-in (for gold, the future). Like
+                    # a 429 it mutes nothing: the public feed fills this
+                    # pass and the venue is asked again the next.
+                    if _every_bar_impossible(rows):
+                        refused = True
 
             if not written and venue_only:
                 continue                  # the venue's frame or nothing
@@ -724,7 +804,7 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                 continue
 
             stale_age = (None if venue_only else
-                         _venue_window_is_stale(inst, interval, rows))
+                         _venue_window_is_stale(inst, interval, good))
             if stale_age is not None:
                 # A VENUE THAT ANSWERS WITH THE PAST. A window whose newest
                 # bar the market has long left behind (a history farm that
@@ -897,7 +977,9 @@ def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
     the next starred symbol; the held part is never cut. `unreached` are
     config symbols the pass's deadline cut: their venue owns the series,
     so the keyless rows go only after the venue's newest bar, as for a
-    mute venue (_after_the_venues_last_bar). `also` (O1c, the Orcs' board
+    mute venue (_after_the_venues_last_bar). Since 2026-10-31 every symbol
+    gets that guard (skeptic M1), so `unreached` changes nothing here; it
+    is kept for its callers. `also` (O1c, the Orcs' board
     of market symbols, only while `orcs` is ON and the pass is not late)
     runs after the starred part, cut by `stop` like it; the held part is
     exactly what it is without it.
@@ -910,7 +992,6 @@ def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
     out = {"symbols": 0, "bars": 0, "skipped": 0, "errors": 0, "no_client": 0,
            "not_reached": 0}
     covered = covered or set()
-    unreached = set(unreached or ())
     classes = sorted(SUPPORTED_ASSET_CLASSES | {"crypto"})
     skip = set(covered) | set(YF_UNAVAILABLE)
     held = [i for i in (Instrument.objects
@@ -963,8 +1044,16 @@ def refresh_watchlist_bars(*, intervals=DEFAULT_INTERVALS,
                 out["errors"] += 1
                 continue
             _note_answer(inst.symbol, interval, rows)
-            if inst.symbol in unreached:
-                rows = _after_the_venues_last_bar(inst, interval, rows)
+            # THE VENUE'S BARS ARE NEVER WRITTEN OVER (2026-10-31, skeptic
+            # M1). Only a symbol the deadline cut was guarded, so a symbol
+            # a venue wrote bars for earlier and no config covers now (a
+            # closed TAKE TRADE, a disabled config, a starred symbol) had
+            # the feed's whole window written over the venue's bars where
+            # the timestamps met and beside them where they did not: the
+            # recent 1h/4h flipped to the future or the cash index. Every
+            # symbol gets the guard; one no venue ever wrote is unchanged
+            # (_after_the_venues_last_bar keeps every row then).
+            rows = _after_the_venues_last_bar(inst, interval, rows)
             written, skipped = _upsert_rows(inst, interval, rows, source)
             out["bars"] += written
             out["skipped"] += skipped

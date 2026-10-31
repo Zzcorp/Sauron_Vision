@@ -1600,6 +1600,15 @@ class EtoroTrader:
                     f"a row with neither a 'candles' list nor a 'close' — "
                     f"got {shape}. An unmeasured shape; measure the GET "
                     f"before trusting a bar here.")
+        def _px(c, key):
+            # A MISSING PRICE IS NONE, NEVER "0" (2026-10-31): a candle
+            # without its low was stored with a low of 0, a wick to zero
+            # on the chart and in every ATR stop. None is refused by the
+            # bar writer (market_data.bar_shape), as is any bar that
+            # cannot have traded.
+            v = c.get(key)
+            return None if v is None else str(v)
+
         rows = []
         for c in candles:
             ts = _iso_to_ms(str(c.get("fromDate") or c.get("date") or ""))
@@ -1608,8 +1617,8 @@ class EtoroTrader:
             volume = c.get("volume")
             rows.append([
                 ts,
-                str(c.get("open", "0")), str(c.get("high", "0")),
-                str(c.get("low", "0")), str(c.get("close", "0")),
+                _px(c, "open"), _px(c, "high"),
+                _px(c, "low"), _px(c, "close"),
                 str(volume if volume is not None else 0),
                 ts + span_ms,
                 "0", 0, "0", "0", "0",
