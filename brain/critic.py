@@ -1,7 +1,8 @@
 """Phase 38.3 — Critic / Red-team agent.
 
-Reviews a hypothesis from another agent. Runs Opus 4.7 (the user explicitly
-asked for quality on dissent — this is exactly where reasoning depth pays).
+Reviews a hypothesis from another agent. Runs on the deep tier (Opus 5.5
+from 2026-11-01; the user explicitly asked for quality on dissent — this is
+exactly where reasoning depth pays).
 
 Output: structured vote (`co_sign | dissent | refine`) + reasoning. The
 vote is persisted via `brain.hypotheses.vote()`; if the critic's
@@ -98,7 +99,7 @@ class CriticAgent(BaseAgent):
     """Red-team agent that audits another agent's hypothesis."""
 
     agent_name = "critic"
-    default_tier = "deep"  # Opus 4.7 — dissent quality matters most here.
+    default_tier = "deep"  # dissent quality matters most here.
 
     def get_system_prompt(self) -> str:
         return (
@@ -271,6 +272,7 @@ def review_hypothesis(hypothesis) -> Optional[dict]:
             system_prompt=system_prompt, user_message=context,
             model=agent.model,
             agent_name=agent.agent_name,
+            effort=getattr(agent, "effort", None),
         )
         parsed = agent.parse_response(raw)
     except Exception as e:

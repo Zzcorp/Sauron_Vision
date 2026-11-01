@@ -19,11 +19,12 @@ _TRANSIENT_MARKERS = ("overloaded", "internal_server_error",
 # tripling the worst-case request time.
 _MAX_ATTEMPTS = 2
 
-# Where a declined request re-runs. The frontier model runs safety
-# classifiers that can decline a request outright (stop_reason "refusal")
-# — not an outage, not an answer. The deep tier's model does not run the
-# same classifiers; one re-run there is the platform's own fallback, and
-# it never chains (a decline on the fallback is returned as it is).
+# Where a declined request re-runs. A model's safety classifiers can
+# decline a request outright (stop_reason "refusal") — not an outage, not
+# an answer. Opus 5 runs classifiers too and can decline as well; they are
+# narrower than Opus 5.5's, which suits a rescue model. One re-run there
+# is the platform's own fallback, and it never chains (a decline on the
+# fallback is returned as it is).
 REFUSAL_FALLBACK_MODEL = "claude-opus-5"
 # The tiers whose caller cleared the deep reserve BEFORE calling:
 # spend.can_spend keys DEEP_TIER_SHARE off "deep" and "frontier" alike, so
@@ -48,6 +49,26 @@ FAST_MODE_BETA = "fast-mode-2026-02-01"
 MAX_CACHE_BREAKPOINTS = 4
 TASK_BUDGET_MIN = 20_000
 _CACHE_TTLS = ("5m", "1h")
+
+# max_tokens when the caller names no bound. It caps thinking AND the
+# answer together, and the current models think by default, before the
+# text: a bound sized for the answer alone can end at max_tokens with no
+# text at all. ANSWER_TOKENS is the room for the answer itself: the bound
+# every call had before the thinking models, and what a model without
+# thinking still gets. A model that thinks by default gets THINKING_TOKENS
+# more on top: 8,192 + 23,808 is the 32,000 every thinking call had.
+ANSWER_TOKENS = 8192
+THINKING_TOKENS = 32000 - ANSWER_TOKENS
+
+
+def max_tokens_for(model: str, answer_tokens: int = None) -> int:
+    """The max_tokens a call on `model` gets when the caller names none:
+    the answer's room (ANSWER_TOKENS, or the caller's longer
+    `answer_tokens`) plus THINKING_TOKENS on a model that thinks by
+    default. A short answer never lowers it below the bound of before."""
+    from ai_agents.catalog import supports_thinking
+    answer = max(ANSWER_TOKENS, answer_tokens or 0)
+    return answer + THINKING_TOKENS if supports_thinking(model) else answer
 
 # The provider's clock for duration_seconds, patchable in tests without
 # touching the time module every other library reads.
@@ -150,7 +171,7 @@ def build_request(*, model: str, system_prompt: str = "",
                   turn_effort: str = None, output_schema: dict = None,
                   max_tokens: int = None, fallbacks=None,
                   timeout_s: float = None, task_budget: int = None,
-                  speed: str = None) -> dict:
+                  speed: str = None, answer_tokens: int = None) -> dict:
     """The exact keyword arguments complete() hands the SDK's stream(),
     after every check: {"beta": bool, "kwargs": {...}, "summary": str,
     "ttls": [...]}. Raises ValueError, before anything is sent, on a
@@ -161,7 +182,7 @@ def build_request(*, model: str, system_prompt: str = "",
     from ai_agents.catalog import (EFFORT_LEVELS, fast_pricing_for,
                                    server_fallback, supports_effort,
                                    supports_per_message_effort,
-                                   supports_task_budget, supports_thinking)
+                                   supports_task_budget)
 
     # ── which slots, and not two ways of filling one ─────────────────
     if system_blocks is not None and system_prompt:
@@ -194,6 +215,14 @@ def build_request(*, model: str, system_prompt: str = "",
                                    or max_tokens < 1):
         raise ValueError(f"max_tokens must be a positive int, not "
                          f"{max_tokens!r}")
+    if answer_tokens is not None:
+        if (not isinstance(answer_tokens, int)
+                or isinstance(answer_tokens, bool) or answer_tokens < 1):
+            raise ValueError(f"answer_tokens must be a positive int, not "
+                             f"{answer_tokens!r}")
+        if max_tokens is not None:
+            raise ValueError("pass max_tokens (the whole bound) OR "
+                             "answer_tokens (the answer's room), not both")
     if task_budget is not None:
         if (not isinstance(task_budget, int) or isinstance(task_budget, bool)
                 or task_budget < TASK_BUDGET_MIN):
@@ -249,10 +278,12 @@ def build_request(*, model: str, system_prompt: str = "",
     # ── the request ──────────────────────────────────────────────────
     # max_tokens caps thinking AND response text together, and adaptive
     # thinking is on by default on the current models — a budget sized
-    # for the answer alone truncates it. Thinking models get headroom. A
-    # caller's own bound (the Orcs' per-wake cap, spec §7.3) replaces it.
+    # for the answer alone truncates it. Thinking models get headroom
+    # (max_tokens_for), on top of a longer answer when the caller expects
+    # one (`answer_tokens`). A caller's own bound (the Orcs' per-wake cap,
+    # spec §7.3) replaces it.
     if max_tokens is None:
-        max_tokens = 32000 if supports_thinking(model) else 8192
+        max_tokens = max_tokens_for(model, answer_tokens)
     kwargs = {"model": model, "max_tokens": max_tokens, "system": system,
               "messages": messages}
     output_config = {}
@@ -300,7 +331,7 @@ class ClaudeProvider:
         return self.client
 
     def complete(self, system_prompt: str = "", user_message: str = "",
-                 model: str = "claude-sonnet-5", effort: str = None,
+                 model: str = "claude-sonnet-5-5", effort: str = None,
                  agent_name: str = "unattributed",
                  record: bool = True,
                  source_ref: str = "", *,
@@ -316,9 +347,13 @@ class ClaudeProvider:
                  client_refusal_rerun: bool = True,
                  timeout_s: float = None,
                  task_budget: int = None,
-                 speed: str = None) -> tuple:
+                 speed: str = None,
+                 answer_tokens: int = None) -> tuple:
         """
         Call Claude API and return (response_text, usage_dict).
+
+        `model`'s default is the balanced tier's code default
+        (catalog.TIER_DEFAULTS); every caller of today names its model.
 
         `effort` (low|medium|high|xhigh|max) controls thinking depth and
         token spend on models that support it; it is dropped for models
@@ -341,7 +376,9 @@ class ClaudeProvider:
         source-pins that it does not. The usage dict names the `model`
         that answered: after a refusal re-run that is the fallback, not
         the model asked for, and the opt-out caller's own row must say
-        whose rate it was billed at.
+        whose rate it was billed at. A record=False caller still passes
+        its `agent_name`: the declined call a refusal re-run replaces is
+        booked here, by nobody else, under that name.
 
         THE KEYWORD-ONLY ARGUMENTS (PR O0a, 2026-10-15; the Orcs spec
         §7.3, §7.5.8, §5.2a). No caller of today passes one, and with all
@@ -371,6 +408,19 @@ class ClaudeProvider:
           call passes False and relies on `fallbacks` alone.
         * `timeout_s`, `task_budget` (beta, >= 20,000 tokens) and
           `speed="fast"` (beta, Opus only, the fast price): off by default.
+        * `answer_tokens` (2026-11-01): the longest answer the caller
+          expects, when it is longer than ANSWER_TOKENS. max_tokens is
+          then that plus THINKING_TOKENS on a thinking model
+          (max_tokens_for), sized again for the refusal re-run's model.
+          Not with `max_tokens`, which is the whole bound.
+
+        READING THE ANSWER. The current models put their thinking blocks
+        before the text, and a thinking block's `thinking` is "" with the
+        default display. The answer is the text blocks, in order, and
+        nothing else. A refusal (stop_reason "refusal") is re-run once on
+        REFUSAL_FALLBACK_MODEL, or raised billed; a max_tokens stop with no
+        text (the bound all spent thinking) raises billed; any other
+        empty answer raises billed. None of them returns "".
 
         The cost is cache-aware (catalog.cost_usd): cache reads at the
         model's cache price, 5-minute writes at 1.25x and 1-hour writes at
@@ -393,7 +443,8 @@ class ClaudeProvider:
             private_user_blocks=private_user_blocks, turn_effort=turn_effort,
             output_schema=output_schema, max_tokens=max_tokens,
             fallbacks=fallbacks, timeout_s=timeout_s,
-            task_budget=task_budget, speed=speed)
+            task_budget=task_budget, speed=speed,
+            answer_tokens=answer_tokens)
         call = request["kwargs"]
         bound = call["max_tokens"]
 
@@ -441,10 +492,12 @@ class ClaudeProvider:
                 time.sleep(wait)
         duration = round(_monotonic() - started, 3)
 
-        # Adaptive-thinking models may put a thinking block before the text
-        # block, and a safety refusal can return no text at all — never index
-        # content[0] blindly.
-        text = next((b.text for b in response.content if b.type == "text"), "")
+        # The current models put their thinking blocks BEFORE the text (with
+        # display omitted, the default, a block's `thinking` is ""), and a
+        # refusal or a max_tokens stop can return no text at all. The
+        # answer is every text block, in order, and nothing else: never
+        # content[0], never a thinking block's summary.
+        text = "".join(b.text for b in response.content if b.type == "text")
 
         # Usage FIRST, before any verdict on the response: a refused or
         # empty generation was still generated, Anthropic still billed it,
@@ -600,6 +653,19 @@ class ClaudeProvider:
         # success: without this every caller's parse_response would swallow
         # it and log success=True with no output.
         if stop_reason == "max_tokens":
+            if not text:
+                # Thinking counts toward max_tokens: the whole bound can go
+                # on thinking before a word of the answer is written. A
+                # failed call, billed at what it cost, never an empty
+                # answer.
+                logger.warning(
+                    "Claude reached max_tokens before any text (%s, bound "
+                    "%s, output_tokens %s): its thinking used the whole "
+                    "bound", model, bound, output_tokens)
+                _raise_billed(
+                    f"Claude reached max_tokens ({bound}) before any text "
+                    f"(model={model}, output_tokens={output_tokens}): "
+                    "thinking counts toward max_tokens")
             logger.warning("Claude response truncated at max_tokens (%s, %s)",
                            model, bound)
         elif stop_reason == "refusal":
@@ -644,7 +710,7 @@ class ClaudeProvider:
                         max_tokens=max_tokens, fallbacks=fallbacks,
                         line=line, client_refusal_rerun=client_refusal_rerun,
                         timeout_s=timeout_s, task_budget=task_budget,
-                        speed=speed)
+                        speed=speed, answer_tokens=answer_tokens)
                 declined += f"; not re-run on {REFUSAL_FALLBACK_MODEL}: {held}"
             _raise_billed(declined)
         if not text:

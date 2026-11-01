@@ -22,6 +22,24 @@ class CatalogTests(TestCase):
                    "claude-3-5-sonnet-20241022", "claude-3-7-sonnet-20250219"}
         self.assertEqual(set(MODELS) & retired, set())
 
+    def test_a_model_with_a_retirement_date_says_so_where_it_is_picked(self):
+        """Sonnet 4.5 is deprecated and retires on 2026-11-30. Its row
+        stays until then, because a pin to it is a served model today
+        (tests/test_review_fixes.py) and a saved override may name it; it
+        must say its date in the label the /ai-models/ pickers show, and
+        no tier may default to it."""
+        from ai_agents.catalog import MODELS, TIER_DEFAULTS
+        row = MODELS["claude-sonnet-4-5"]
+        self.assertEqual(row["retires"], "2026-11-30")
+        self.assertIn("retires 2026-11-30", row["label"])
+        self.assertIn("claude-sonnet-5-5", row["notes"])
+        self.assertNotIn("claude-sonnet-4-5", TIER_DEFAULTS.values())
+        dated = {m for m, meta in MODELS.items() if meta.get("retires")}
+        self.assertEqual(dated, {"claude-sonnet-4-5"})
+        for model_id in dated:
+            self.assertIn(f"retires {MODELS[model_id]['retires']}",
+                          MODELS[model_id]["label"], model_id)
+
     def test_every_catalog_model_has_pricing(self):
         from ai_agents.catalog import MODELS, pricing_for
         for model_id in MODELS:
@@ -398,13 +416,17 @@ class CachePricesAndNewModelsTests(TestCase):
         self.assertEqual(default_effort("claude-sonnet-5-5"), "high")
         self.assertIsNone(default_effort("claude-haiku-4-5"))
 
-    def test_the_tier_defaults_did_not_move(self):
-        """O0a adds models; it moves no tier (the router reads its own
-        pinned ladder from O2, never the resolver)."""
+    def test_the_tier_defaults_are_the_current_generation(self):
+        """O0a added models and moved no tier (the router reads its own
+        pinned ladder from O2, never the resolver). The three below the
+        frontier moved on 2026-11-01, on the operator's decision of
+        2026-10-31: Haiku 4.5, Sonnet 5 and Opus 5 to their same-tier
+        successors (tests/test_tier_models.py). The tier efforts did not
+        move."""
         from ai_agents.catalog import TIER_DEFAULTS, TIER_EFFORT_DEFAULTS
         self.assertEqual(TIER_DEFAULTS, {
-            "fast": "claude-haiku-4-5", "balanced": "claude-sonnet-5",
-            "deep": "claude-opus-5", "frontier": "claude-fable-5-1"})
+            "fast": "claude-haiku-5-5", "balanced": "claude-sonnet-5-5",
+            "deep": "claude-opus-5-5", "frontier": "claude-fable-5-1"})
         self.assertEqual(TIER_EFFORT_DEFAULTS, {
             "fast": "low", "balanced": "medium", "deep": "high",
             "frontier": "high"})
@@ -432,16 +454,18 @@ class CachePricesAndNewModelsTests(TestCase):
 
 class NoModelIdOutsideTheCatalogTests(SimpleTestCase):
     """Hard rule of PR O0: a model id lives in ai_agents/catalog.py (and
-    the AI_CONFIG env defaults in config/settings.py). The seven quoted
-    ids that predate the rule are allowlisted by file and count, so a new
-    one fails here."""
+    the AI_CONFIG env defaults in config/settings.py). The quoted ids that
+    predate the rule are allowlisted by file and count, so a new one fails
+    here. Four of the seven left on 2026-10-31 with the code that quoted
+    them, nothing having reached it: ai_agents/consensus.py (two) and the
+    raw-HTTP chat endpoints of dashboard/views.py (two)."""
 
     ALLOWED = {
         ("ai_agents/agents/trade_debate.py", "claude-opus-5-5"): 1,
-        ("ai_agents/consensus.py", "claude-haiku-4-5-20251001"): 2,
         ("ai_agents/providers/claude_provider.py", "claude-opus-5"): 1,
-        ("ai_agents/providers/claude_provider.py", "claude-sonnet-5"): 1,
-        ("dashboard/views.py", "claude-haiku-4-5-20251001"): 2,
+        # complete()'s default model= (the balanced tier's code default,
+        # tests/test_tier_models.py); no caller reaches it.
+        ("ai_agents/providers/claude_provider.py", "claude-sonnet-5-5"): 1,
     }
 
     # Not the platform's code: the tests, a virtualenv by any of the names

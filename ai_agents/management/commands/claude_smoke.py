@@ -349,7 +349,7 @@ class Command(BaseCommand):
                             help="send: count_tokens (free), then two calls "
                                  "per model, within the printed bound")
         parser.add_argument("--with-fable", action="store_true",
-                            help="add the frontier model (about 2x Opus)")
+                            help="add the frontier model (2.5x Opus 5.5)")
         parser.add_argument("--models", default="",
                             help="comma-separated catalog ids instead of "
                                  "the default three")
@@ -430,9 +430,9 @@ class Command(BaseCommand):
             from anthropic.resources.beta.messages import Messages
             params = inspect.signature(Messages.stream).parameters
             missing = [p for p in ("betas", "fallbacks") if p not in params]
-            why = (f"client.beta.messages.stream has no {missing}: upgrade "
-                   f"the anthropic SDK (requirements.txt pins only "
-                   f"anthropic>=0.40)") if missing else ""
+            why = (f"client.beta.messages.stream has no {missing}: this is "
+                   f"not the anthropic SDK requirements.txt pins; rebuild "
+                   f"the image from the lock") if missing else ""
             return getattr(anthropic, "__version__", "?"), why
         except Exception as e:  # noqa: BLE001 — said, never raised
             return "?", f"the anthropic SDK cannot be inspected ({e})"

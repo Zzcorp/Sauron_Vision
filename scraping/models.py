@@ -22,6 +22,14 @@ class NewsArticle(models.Model):
     ai_summary = models.TextField(blank=True)
     ai_affected_instruments = models.ManyToManyField(Instrument, blank=True, related_name="news_articles")
     ai_processed_at = models.DateTimeField(null=True, blank=True)
+    # When the model declined to read the article (stop_reason "refusal",
+    # after the provider's one re-run where it ran). A decline of the same
+    # text does not go away on a retry, so the five-minute queue
+    # (ai_agents.tasks.process_unanalyzed_news) never sends the article
+    # again; before 2026-11-01 it went out on every pass, billed each time.
+    # ai_processed_at stays empty: the article was never analysed, and no
+    # reader of the analyst's work counts it.
+    ai_declined_at = models.DateTimeField(null=True, blank=True)
 
     scraped_at = models.DateTimeField(auto_now_add=True)
 

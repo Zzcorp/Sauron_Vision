@@ -585,8 +585,16 @@ def generated_dashboard(request):
                 "pct": round(v / max(n_total, 1) * 100, 1),
             })
 
+    # The model the generator runs on, as it resolves itself (it read
+    # "opus 4.7" here, hardcoded, while it ran on the frontier tier).
+    from ai_agents.catalog import MODELS, resolve_agent
+    from brain.strategy_generator import StrategyGeneratorAgent
+    gen_model = resolve_agent(StrategyGeneratorAgent.agent_name,
+                              StrategyGeneratorAgent.default_tier)
+
     return render(request, "dashboard/generated.html", {
         "page_id": "generated",
+        "gen_model_label": MODELS.get(gen_model, {}).get("label", gen_model),
         "pending": pending,
         "history": history,
         "demotions": demotions,

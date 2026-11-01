@@ -1,8 +1,9 @@
 """Phase 41 — Autonomous strategy generator.
 
-Once a week (Sunday 04:00 UTC), Opus 4.7 reads the system's track record +
-knowledge graph + pattern history and PROPOSES new OpportunitySetups by
-composing existing registered evaluators in novel ways.
+Once a week (Sunday 04:00 UTC), the frontier tier's model (Fable 5.1 on
+2026-10-31) reads the system's track record + knowledge graph + pattern
+history and PROPOSES new OpportunitySetups by composing existing
+registered evaluators in novel ways.
 
 Hard safety rails:
   1. Generated setups must reference ONLY registered evaluator kinds —
@@ -630,6 +631,7 @@ def generate_strategies_now(*, max_proposals: int = 3) -> dict:
             system_prompt=system_prompt, user_message=context,
             model=agent.model,
             agent_name=agent.agent_name,
+            effort=getattr(agent, "effort", None),
         )
         parsed = agent.parse_response(raw)
     except Exception as e:

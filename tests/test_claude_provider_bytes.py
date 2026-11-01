@@ -23,9 +23,15 @@ from unittest.mock import MagicMock, patch
 from django.conf import settings
 from django.test import TestCase, override_settings
 
-try:  # anthropic 1.x is built on httpx2; 0.x on httpx
+# The SDK's own HTTP library, chosen by the SDK's major: 1.x and 2.x are
+# built on httpx2, 0.x on httpx. Not by whether httpx2 imports: a 0.x
+# install with httpx2 also present mis-picked it, and the client refused
+# the mock transport (requirements.txt pins 2.x, tests.test_dependency_lock).
+import anthropic as _anthropic
+
+if int(_anthropic.__version__.split(".")[0]) >= 1:
     import httpx2 as httpx
-except ImportError:  # pragma: no cover — depends on the installed SDK
+else:  # pragma: no cover — depends on the installed SDK
     import httpx
 
 
@@ -153,6 +159,22 @@ class DefaultRequestBytesTests(TestCase):
         })
 
     def test_the_deep_tier_default_with_high_effort(self):
+        """Opus 5.5, the deep tier's default since 2026-11-01, at the high
+        the deep agents send (tests/test_tier_models.py)."""
+        wire, _ = self._one("claude-opus-5-5", "high")
+        self._plain_wire(wire)
+        self.assertEqual(wire.body(), {
+            "max_tokens": 32000,
+            "messages": [{"role": "user", "content": "q"}],
+            "model": "claude-opus-5-5",
+            "output_config": {"effort": "high"},
+            "system": "sys",
+            "stream": True,
+        })
+
+    def test_opus_5_with_high_effort(self):
+        """The deep tier's default until 2026-11-01, and still the
+        refusal re-run's model: its bytes are those of 6d57b6e."""
         wire, _ = self._one("claude-opus-5", "high")
         self._plain_wire(wire)
         self.assertEqual(wire.body(), {

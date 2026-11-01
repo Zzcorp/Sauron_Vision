@@ -454,11 +454,14 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AI_CONFIG = {
     "default_provider": os.getenv("AI_DEFAULT_PROVIDER", "claude"),
     "models": {
-        "fast": os.getenv("AI_MODEL_FAST", "claude-haiku-4-5-20251001"),
-        # claude-sonnet-4-20250514 retired 2026-06-15 (404s); sonnet-5 is the
-        # designated drop-in. opus-5 is the current Opus at the same price as 4.8.
-        "balanced": os.getenv("AI_MODEL_BALANCED", "claude-sonnet-5"),
-        "deep": os.getenv("AI_MODEL_DEEP", "claude-opus-5"),
+        # A variable set but blank (.env.production.example ships them so)
+        # falls through to ai_agents.catalog.TIER_DEFAULTS, not to these:
+        # a tier move edits both. The current Haiku, Sonnet and Opus since
+        # 2026-11-01 (the operator's decision): they replaced
+        # haiku-4-5-20251001, sonnet-5 and opus-5, which stay valid pins.
+        "fast": os.getenv("AI_MODEL_FAST", "claude-haiku-5-5"),
+        "balanced": os.getenv("AI_MODEL_BALANCED", "claude-sonnet-5-5"),
+        "deep": os.getenv("AI_MODEL_DEEP", "claude-opus-5-5"),
         "frontier": os.getenv("AI_MODEL_FRONTIER", "claude-fable-5-1"),
     },
     "providers": {

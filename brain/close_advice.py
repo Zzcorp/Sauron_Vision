@@ -186,6 +186,18 @@ ESTIMATE_MARGIN = 1.5
 MIN_ESTIMATED_USD = 0.02
 
 
+def answer_tokens_for(n_positions: int) -> int:
+    """The longest answer one question is expected to cost, in output
+    tokens: a base, and a few sentences of reasoning per position. The
+    cost estimate prices it, and the call hands it to the provider as
+    `answer_tokens` (2026-11-01): max_tokens is then this plus the
+    thinking room. A selection of fifty answers in ~22,000 tokens; on the
+    32,000 every call had, its thinking at high effort would have had
+    10,000 left."""
+    return OUTPUT_TOKENS_BASE + OUTPUT_TOKENS_PER_POSITION * max(
+        0, int(n_positions))
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # The rules — written down, because an operator will ask "why close?"
 # ══════════════════════════════════════════════════════════════════════════
@@ -1296,8 +1308,7 @@ def estimated_usd(user_message: str, n_positions: int, *,
     price = pricing_for(model or "")
     tokens_in = (len(SYSTEM_PROMPT) + len(user_message or "")) \
         / CHARS_PER_TOKEN
-    tokens_out = (OUTPUT_TOKENS_BASE
-                  + OUTPUT_TOKENS_PER_POSITION * max(0, int(n_positions)))
+    tokens_out = answer_tokens_for(n_positions)
     usd = (tokens_in * price["input"]
            + tokens_out * price["output"]) / 1_000_000
     return round(max(MIN_ESTIMATED_USD, usd * ESTIMATE_MARGIN), 4)
@@ -1309,6 +1320,7 @@ class CloseAdvisorAgent(BaseAgent):
     is narrow — the deep tier is for work that reasons across the platform."""
 
     agent_name = "close_advisor"
+    # Effort high, not the tier's medium: catalog.AGENT_EFFORT_DEFAULTS.
     default_tier = "balanced"
 
     def get_system_prompt(self) -> str:
@@ -1456,6 +1468,9 @@ def _model_pass(user, answer: dict) -> None:
             user_message=user_message,
             model=agent.model,
             agent_name=agent.agent_name,
+            effort=getattr(agent, "effort", None),
+            # Room for every position's answer, and the thinking on top.
+            answer_tokens=answer_tokens_for(len(answer["positions"])),
             # Which question this cost answered, for the ledger — the user
             # and the rows, never anything a person could act on.
             source_ref=("close_advice:user=%s:trades=%s"

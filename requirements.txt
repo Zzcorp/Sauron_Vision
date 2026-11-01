@@ -1,76 +1,103 @@
 # ============================================================
 # SAURON VISION — Python Dependencies (Production)
 # ============================================================
+#
+# THE LOCK (2026-10-31). Every requirement is pinned exactly, to the
+# version the CI suite (.github/workflows/tests.yml, Python 3.12) resolved
+# on 2026-10-31. The ranged pins this file had before (anthropic>=0.40 and
+# the rest) let the production image's cached pip layer keep whatever was
+# newest the first time it was built, so the box could be on anthropic
+# 0.x, 1.x or 2.x, and editing any one line moved every unpinned package
+# to that day's newest at once. tests/test_dependency_lock.py refuses a
+# ranged or unbounded pin.
+#
+# WHAT IS NOT LOCKED. Only the 46 packages named below are pinned; each
+# of them moves only when its own line does. The 86 they pull in (132
+# installed on Python 3.12) are not: httpx2 and httpcore2, which carry
+# every anthropic and openai request, pydantic and jiter, kombu, amqp and
+# billiard under Celery, Twisted under daphne, certifi, urllib3, and the
+# build backend of ta's sdist among them. Whenever the image's pip layer
+# is rebuilt (any edit to this file, or --no-cache), pip resolves those
+# again to that day's newest within their parents' ranges, so a rebuild
+# matches the set CI ran on only while nothing newer has been released.
+# Pinning them here too is the operator's call; the Dockerfiles and CI
+# read only this file, and the lock test accepts == lines.
 
 # Django & Web
-Django>=5.1,<6.0
-djangorestframework>=3.15
-django-cors-headers>=4.4
-django-filter>=24.3
-dj-database-url>=2.2
-channels>=4.1
-channels-redis>=4.2
-daphne>=4.1
-whitenoise>=6.7
-gunicorn>=22.0
+Django==5.2.18
+djangorestframework==3.18.3
+django-cors-headers==4.9.0
+django-filter==26.2
+dj-database-url==3.1.2
+channels==4.3.2
+channels-redis==4.3.0
+daphne==4.2.3
+whitenoise==6.12.0
+gunicorn==26.2.0
 
 # Database
-psycopg2-binary>=2.9
+psycopg2-binary==2.9.13
 
 # Celery & Task Queue
-celery>=5.4,<6
-django-celery-beat>=2.7
-django-celery-results>=2.5
-redis>=5.1
+celery==5.6.3
+django-celery-beat==2.9.0
+django-celery-results==2.6.0
+redis==8.1.0
 
 # Market Data APIs
-alpha-vantage>=3.0
-yfinance>=0.2
-finnhub-python>=2.4
-forex-python>=1.9
-fredapi>=0.5
+alpha-vantage==3.0.0
+yfinance==1.7.0
+finnhub-python==2.4.29
+forex-python==1.9.2
+fredapi==0.5.2
 
 # Web Scraping
-requests>=2.32
-beautifulsoup4>=4.12
-selenium>=4.25
-lxml>=5.3
-praw>=7.7
-feedparser>=6.0
+requests==2.34.2
+beautifulsoup4==4.15.0
+selenium==4.52.0
+lxml==6.1.3
+praw==8.0.3
+feedparser==6.0.14
 
 # Data Analysis
-pandas>=2.2
-numpy>=1.26,<3.0
-ta>=0.11
-pandas-ta-classic>=0.4
+pandas==3.1.0
+# numpy 2.5 needs Python 3.12, which the image and CI run; a Python 3.11
+# virtualenv takes 2.4.6.
+numpy==2.5.4; python_version >= "3.12"
+numpy==2.4.6; python_version < "3.12"
+ta==0.11.0
+pandas-ta-classic==0.9.0
 
 # AI Providers
-anthropic>=0.40
-openai>=1.50
-ollama>=0.4
+# anthropic 2.3.0 sends anthropic-version 2026-10-21 and authenticates with
+# Authorization: Bearer; the provider's suites pass on it, and no request
+# the platform sends is one that version refuses.
+anthropic==2.3.0
+openai==3.42.0
+ollama==0.6.3
 
 # Utilities
-python-dotenv>=1.0
-python-dateutil>=2.9
-pytz>=2024.2
-Pillow>=10.4
+python-dotenv==1.2.4
+python-dateutil==3.0.0
+pytz==2026.6
+Pillow==13.0.0
 
-twilio>=9.0
-cryptography>=41
-websockets>=12
-aiohttp>=3.9
-uvicorn[standard]>=0.30
+twilio==9.12.0
+cryptography==50.0.2
+websockets==17.4
+aiohttp==3.14.5
+uvicorn[standard]==0.54.0
 
 # PDF Generation
-reportlab>=4.2
+reportlab==5.1.0
 
 # Phase 33 — Production observability (Sentry).
 # Auto-instruments Django + Celery + Redis when SENTRY_DSN is set.
-sentry-sdk[django,celery]>=2.0
-PyYAML>=6.0
+sentry-sdk[django,celery]==2.73.0
+PyYAML==6.0.3
 
 # IBKR. bot_program/engine/ibkr_client.py, broker_router.py and
 # ibkr_data_feed.py import this; without it the import fails, the
 # router falls through to PaperTrader, and a bot the UI labels 'ibkr'
 # quietly records paper fills as if they were real.
-ib_insync>=0.9.86
+ib_insync==0.9.86
