@@ -1,0 +1,14 @@
+# Hold Saxo closes in doubt in the kill switch and the bot lane
+
+On Saxo, EMERGENCY FLATTEN and the bot lane can still send a second close over a close that came back 202 (accepted, may still execute) or timed out, because Saxo declares no position-list lag (PORTFOLIO_LAG_S). No Saxo row is live today; the router checks Saxo first (VENUE_PRECEDENCE in bot_program/engine/broker_router.py), so these paths go live once a Saxo account is primary for a class. All three sent before S3 too; S3's docstrings now say Saxo is not held.
+
+(a) Bot lane 202 -> close_in_doubt {reference, at}, no close_order_working. kill_switch._settle_close_in_doubt asks reconcile_asset.venue_lag_window(doubt=True), "" on a no-lag client, so a held read seconds after the 202 drops the marker and sends a full close. AssetBot._close_trade's `held is True` branch does the same. AssetBot._settle_in_doubt (entries) keeps the note on a no-lag venue.
+(b) Drain's/switch's own 202 -> close_in_doubt with the OrderId + close_order_working + close_working_order_id. kill_switch._in_doubt_unguarded exempts it; pending_closes._cancel_working_close cancels the OrderId and, on True, the switch sends a second close while close_in_doubt stands. The drain refuses this row (retry_trade_close, "A CLOSE THE VENUE NEVER CONFIRMED OUTRANKS EVERY MOVE BELOW").
+(c) The switch's own close raising SaxoOrderInDoubt writes no marker; "Do not resend it", yet a second press sends again.
+
+Fix, tests first (each failing before; never weaken a test):
+1. kill_switch._close_asset_trade: every real row with close_in_doubt goes through the doubt check before _cancel_working_close; book on the venue's word or a flat book, else send nothing and name the reference. eToro's marker stays refused as today.
+2. _settle_close_in_doubt and AssetBot._close_trade's held branch: clear a close doubt on a held read only when the client declares a lag (as _settle_in_doubt). tests/test_close_path.py AnInDoubtCloseIsResolvedNotRepeatedTests.test_a_broker_that_still_holds_it_means_it_did_not_land pins today's no-lag behaviour: give its client a lag and backdate the marker, keep its assertions; add a no-lag-keeps-its-doubt test. Decide what resolves a no-lag venue's doubt (order read, flat book, a human), and alert the staff so a Saxo position is never stuck silently.
+3. When the switch's own close raises in_doubt, write close_in_doubt before re-raising.
+4. Update the docstrings that say Saxo is not held (kill_switch._in_doubt_unguarded, _settle_close_in_doubt, reconcile_asset.venue_lag_window, the lag comment in AssetBot._close_trade).
+Drive tests through the REAL SaxoTrader with only its HTTP session faked (FifoEndOfDay, a book listing the long, 202 + OrderId on every order POST, DELETE 200), as tests/test_saxo_client.py and tests/test_saxo_end_to_end.py do. Never call a venue. Money direction: protective only.
