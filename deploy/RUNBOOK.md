@@ -1760,8 +1760,8 @@ breathes between symbols, so the default budget of 150 is safe.
 **The weekly imagination pass runs on the frontier model.** The Strategy
 Generator (Sunday 04:00 UTC, at most three proposals) is the one call on
 the platform where imagination is the product, and it alone runs on the
-`frontier` tier — Claude Fable 5.1, twice the Opus price, thinking always
-on. Every other agent stays on its tier; change any of them on `/ai-models/`
+`frontier` tier — Claude Fable 5.1, 2.5 times the deep tier's Opus 5.5
+price, thinking always on. Every other agent stays on its tier; change any of them on `/ai-models/`
 (or `AI_MODEL_FRONTIER` in `.env`). The generator reads the evidence
 ledger — what each rule has proven in paper and live — and cites it. Its
 proposals land as draft setups in RESEARCH stage; switch
@@ -1769,7 +1769,7 @@ proposals land as draft setups in RESEARCH stage; switch
 scanner grades their signals, the stage gate keeps every bot from trading
 them, the promotion ladder decides the rest, and the brain page still lets
 you reject one. A safety refusal by the frontier model is not an outage:
-the provider re-runs the call once on Opus and says so in the log. An
+the provider re-runs the call once on Opus 5 and says so in the log. An
 idea the validator refuses is not lost either: it lands in the history
 on `/generated/` as REJECTED by `validator`, with the reason in the
 "why" column — the run's `n_validation_rejected` counts those rows. The

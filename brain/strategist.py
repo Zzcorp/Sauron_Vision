@@ -1,6 +1,6 @@
 """Phase 40 — Strategist Briefing Agent.
 
-Daily 06:00 UTC, on the deep tier (Opus 5 on 2026-10-31). Reads everything
+Daily 06:00 UTC, on the deep tier (Opus 5.5 from 2026-11-01). Reads everything
 Sauron has learned in the last 24-72h and produces a human-readable
 briefing:
 

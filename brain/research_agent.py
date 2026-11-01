@@ -11,7 +11,7 @@ connectors); ours reads our own DB so the operator can ask:
 
 Architecture:
   _build_research_snapshot()  → aggregates 6h-7d of brain/graph/hypotheses
-  ResearchAgent               → BaseAgent subclass, deep tier (Opus 5 on 2026-10-31)
+  ResearchAgent               → BaseAgent subclass, deep tier (Opus 5.5 from 2026-11-01)
   begin_ask(conv, question)   → persists the question + a PENDING answer
   complete_ask(pending_id)    → fills that pending row in place (worker)
   ask(conversation, question) → both halves, synchronously (fallback path)

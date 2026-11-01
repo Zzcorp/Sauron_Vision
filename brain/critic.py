@@ -1,7 +1,7 @@
 """Phase 38.3 — Critic / Red-team agent.
 
-Reviews a hypothesis from another agent. Runs on the deep tier (Opus 5 on
-2026-10-31; the user explicitly asked for quality on dissent — this is
+Reviews a hypothesis from another agent. Runs on the deep tier (Opus 5.5
+from 2026-11-01; the user explicitly asked for quality on dissent — this is
 exactly where reasoning depth pays).
 
 Output: structured vote (`co_sign | dissent | refine`) + reasoning. The

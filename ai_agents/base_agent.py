@@ -24,6 +24,12 @@ class BaseAgent(ABC):
     # agent whose caller turns a raised error into a different decision
     # on an order path opts out: see PreTradeSanityAgent.
     total_budget_gate: bool = True
+    # The longest answer the agent is expected to write, in tokens, when
+    # it is longer than the provider's ANSWER_TOKENS (8,192): the provider
+    # then sizes max_tokens as that plus the thinking room
+    # (claude_provider.max_tokens_for). None, every agent but the weekly
+    # reviewer: the provider's default bound.
+    answer_tokens: int = None
 
     def __init__(self, provider: str = None, model: str = None):
         from .catalog import resolve_agent, resolve_effort
@@ -118,17 +124,27 @@ class BaseAgent(ABC):
             # the provider's built-in ledger write would double-count
             # every BaseAgent call. This is the ONE sanctioned opt-out;
             # tests/test_llm_ledger_truth.py pins that nothing else uses it.
+            #
+            # agent_name even so (2026-11-01): the provider still writes
+            # ONE row itself, for a declined call its refusal re-run
+            # replaces (no caller writes that one), and it books it under
+            # this name. Without it that row read "unattributed", and the
+            # agent's decline was missing from its own failures and cost
+            # on /ai/.
             call = dict(
                 system_prompt=system_prompt,
                 user_message=context,
                 model=self.model,
                 effort=getattr(self, "effort", None),
+                agent_name=self.agent_name,
                 record=False,
             )
             # Only when there is one: a default run hands the provider
-            # exactly the keywords it always did.
+            # the keywords above and nothing else.
             if source_ref:
                 call["source_ref"] = source_ref
+            if self.answer_tokens:
+                call["answer_tokens"] = self.answer_tokens
             raw_response, usage = self.provider.complete(**call)
 
             result = self.parse_response(raw_response)

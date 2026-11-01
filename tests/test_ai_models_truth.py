@@ -244,11 +244,13 @@ class ThePageShowsWhatRunsTests(TestCase):
                 for row in group["rows"]}
 
     def test_the_four_that_drifted_show_their_real_tier_and_model(self):
+        """Their tier's model since 2026-11-01: the deep tier is Opus 5.5
+        (tests/test_tier_models.py), at the high they ran at on Opus 5."""
         rows = self._rows()
         for name, tier, model, effort in (
-                ("sauron_mind", "deep", "claude-opus-5", "high"),
-                ("research", "deep", "claude-opus-5", "high"),
-                ("earnings_reviewer", "deep", "claude-opus-5", "high"),
+                ("sauron_mind", "deep", "claude-opus-5-5", "high"),
+                ("research", "deep", "claude-opus-5-5", "high"),
+                ("earnings_reviewer", "deep", "claude-opus-5-5", "high"),
                 ("strategy_generator", "frontier", "claude-fable-5-1",
                  "high")):
             with self.subTest(agent=name):
@@ -257,13 +259,16 @@ class ThePageShowsWhatRunsTests(TestCase):
                                  (tier, model, effort))
 
     def test_the_five_that_were_missing_show_their_model_and_effort(self):
+        """On the tiers' models since 2026-11-01. The fast tier's Haiku 5.5
+        takes effort (Haiku 4.5 took none, and showed "—"): the tier's
+        low."""
         rows = self._rows()
         for name, model, effort in (
-                ("position_reviewer", "claude-sonnet-5", "high"),
-                ("daily_briefing", "claude-sonnet-5", "high"),
-                ("monday_plan", "claude-sonnet-5", "high"),
-                ("next_steps", "claude-haiku-4-5", "—"),
-                ("newsletter_writer", "claude-haiku-4-5", "—")):
+                ("position_reviewer", "claude-sonnet-5-5", "high"),
+                ("daily_briefing", "claude-sonnet-5-5", "high"),
+                ("monday_plan", "claude-sonnet-5-5", "high"),
+                ("next_steps", "claude-haiku-5-5", "low"),
+                ("newsletter_writer", "claude-haiku-5-5", "low")):
             with self.subTest(agent=name):
                 self.assertEqual((rows[name]["resolved"],
                                   rows[name]["effort"]), (model, effort))

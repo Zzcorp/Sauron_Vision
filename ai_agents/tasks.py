@@ -91,11 +91,14 @@ class DailyBriefingAgent:
             # record=False: this inline agent writes its own richer
             # AgentTask row just below — the provider's built-in ledger
             # write would double-count it (same opt-out as BaseAgent.run).
+            # agent_name: the one row the provider still writes, for a
+            # declined call its refusal re-run replaces, is this agent's.
             raw, usage = self._provider.complete(
                 system_prompt=system_prompt,
                 user_message=context,
                 model=self._model,
                 effort=self._effort,
+                agent_name=self.agent_name,
                 record=False,
             )
             duration = time.time() - start
@@ -190,11 +193,14 @@ class MondayPlanAgent:
             # record=False: this inline agent writes its own richer
             # AgentTask row just below — the provider's built-in ledger
             # write would double-count it (same opt-out as BaseAgent.run).
+            # agent_name: the one row the provider still writes, for a
+            # declined call its refusal re-run replaces, is this agent's.
             raw, usage = self._provider.complete(
                 system_prompt=system_prompt,
                 user_message=context,
                 model=self._model,
                 effort=self._effort,
+                agent_name=self.agent_name,
                 record=False,
             )
             duration = time.time() - start
@@ -239,19 +245,44 @@ class MondayPlanAgent:
 # Tasks
 # ---------------------------------------------------------------------------
 
+def _declined(error) -> bool:
+    """True when `error` is the model declining the request: the provider
+    raises a billed RuntimeError carrying the call's usage, and BaseAgent
+    .run re-raises that same object. After the provider's one re-run on
+    claude-opus-5, the usage is the re-run's; with the deep reserve
+    holding the re-run back, the declined call's own."""
+    usage = getattr(error, "usage", None)
+    return isinstance(usage, dict) and usage.get("stop_reason") == "refusal"
+
+
 @shared_task
 @guarded_task("agent_news_analyst")
 def process_unanalyzed_news():
-    """Tier 1: Process news with AI sentiment analysis."""
+    """Tier 1: Process news with AI sentiment analysis.
+
+    A DECLINE IS FINAL (2026-11-01). An article the model declines is
+    marked ai_declined_at and never sent again. The queue is the ten
+    newest articles without an ai_processed_at, every five minutes, and
+    only a success stamps one; a decline of the same text does not go
+    away on a retry. Declines are new on the fast tier (Haiku 5.5;
+    Haiku 4.5 had none), and an article Haiku 5.5 and its re-run on Opus
+    5 both declined went out again on every pass, two billed calls each
+    time, with no end. Every other failure (an outage, a missing key)
+    leaves the article queued, as before."""
+    from django.utils import timezone
+
     from scraping.models import NewsArticle
     from ai_agents.agents.news_analyst import NewsAnalystAgent
 
-    unprocessed = NewsArticle.objects.filter(ai_processed_at__isnull=True).order_by("-published_at")[:10]
+    unprocessed = (NewsArticle.objects
+                   .filter(ai_processed_at__isnull=True,
+                           ai_declined_at__isnull=True)
+                   .order_by("-published_at")[:10])
     if not unprocessed:
         return {"status": "no_unprocessed_news"}
 
     agent = NewsAnalystAgent()
-    processed = 0
+    processed = declined = 0
 
     for article in unprocessed:
         try:
@@ -261,7 +292,6 @@ def process_unanalyzed_news():
                 "published_at": str(article.published_at),
                 "content": article.content_summary or article.raw_content[:2000],
             })
-            from django.utils import timezone
             article.ai_sentiment_score = result.get("sentiment_score", 0)
             article.ai_urgency = result.get("urgency", "low")
             article.ai_summary = result.get("summary", "")
@@ -269,7 +299,14 @@ def process_unanalyzed_news():
             article.save()
             processed += 1
         except Exception as e:
-            logger.error(f"Failed to process article {article.id}: {e}")
+            if _declined(e):
+                article.ai_declined_at = timezone.now()
+                article.save(update_fields=["ai_declined_at"])
+                declined += 1
+                logger.warning("Article %s declined by the model, not sent "
+                               "again: %s", article.id, e)
+            else:
+                logger.error(f"Failed to process article {article.id}: {e}")
 
     # Speak the counts `core.task_gate.judge_result` already reads, instead of
     # a bare adjective. Until 2026-09-13 this returned {"status": "success",
@@ -284,9 +321,13 @@ def process_unanalyzed_news():
     #
     # judge_result's WORK_KEYS/DONE_KEYS turn "attempted 10, stored 0" into a
     # warning by itself — the machinery was there, this caller just never used
-    # its vocabulary. `processed` is kept for any existing reader.
+    # its vocabulary. `processed` is kept for any existing reader. `declined`
+    # (2026-11-01): the articles of this pass now marked ai_declined_at; it
+    # is in neither vocabulary, so a pass that only met a decline still
+    # reads "stored none", once.
     return {"status": "success", "processed": processed,
-            "attempted": len(unprocessed), "stored": processed}
+            "attempted": len(unprocessed), "stored": processed,
+            "declined": declined}
 
 
 # An agent's answer is unbounded and the detail card is a popup, not a

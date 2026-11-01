@@ -1130,9 +1130,10 @@ class ModelPassTests(_Case):
                                         estimated_usd)
         a = self.advise(self.t1)
         snap = build_snapshot(a)
-        one = estimated_usd(context_for(snap), 1, model="claude-sonnet-5")
+        one = estimated_usd(context_for(snap), 1, model="claude-sonnet-5-5")
         snap["positions"] = snap["positions"] * 50
-        fifty = estimated_usd(context_for(snap), 50, model="claude-sonnet-5")
+        fifty = estimated_usd(context_for(snap), 50,
+                              model="claude-sonnet-5-5")
         self.assertGreaterEqual(fifty, 0.30)
         self.assertGreater(fifty, 5 * one)
         # And the text the estimate priced is the text that is sent.

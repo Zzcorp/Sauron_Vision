@@ -267,7 +267,10 @@ class SonnetFiveIsPricedAtItsOwnRateTests(SimpleTestCase):
         self.assertLess(new["input"], old["input"])
         self.assertLess(new["output"], old["output"])
 
-    def test_the_other_two_tier_defaults_are_unchanged(self):
+    def test_the_other_two_former_tier_defaults_keep_their_prices(self):
+        """Opus 5 and Haiku 4.5 were the deep and fast defaults until
+        2026-11-01 (tests/test_tier_models.py); a pin to either still
+        books at its own card."""
         from ai_agents.catalog import pricing_for
         self.assertEqual(pricing_for("claude-opus-5"),
                          {"input": 5.0, "output": 25.0})

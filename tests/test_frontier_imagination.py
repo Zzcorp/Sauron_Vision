@@ -235,11 +235,13 @@ class TheProviderSurvivesARefusalTests(TestCase):
         where guarded at all — as Haiku money. Their re-run is Opus money,
         late in the day exactly what DEEP_TIER_SHARE holds back: the deep
         tier's own question is asked first, and a no leaves the refusal a
-        refusal — ledgered and raised, no Opus call."""
+        refusal — ledgered and raised, no Opus call. On the fast tier's
+        Haiku 5.5 (2026-11-01), whose safety classifiers are new to the
+        tier and which has no server-side fallback."""
         from ai_agents import spend
         from ai_agents.models import AgentTask
         provider, calls = self._provider({
-            "claude-haiku-4-5": _response(stop_reason="refusal",
+            "claude-haiku-5-5": _response(stop_reason="refusal",
                                           category="cyber"),
             "claude-opus-5": _response(text="would have answered")})
         with patch.object(spend, "daily_budget", return_value=15.0), \
@@ -247,28 +249,28 @@ class TheProviderSurvivesARefusalTests(TestCase):
                              return_value=15.0 * spend.DEEP_TIER_SHARE + 0.01):
             with self.assertRaises(RuntimeError) as ctx:
                 provider.complete(system_prompt="s", user_message="u",
-                                  model="claude-haiku-4-5",
+                                  model="claude-haiku-5-5",
                                   agent_name="news_analyst")
-        self.assertEqual([c["model"] for c in calls], ["claude-haiku-4-5"])
+        self.assertEqual([c["model"] for c in calls], ["claude-haiku-5-5"])
         self.assertIn("reserve", str(ctx.exception))
-        self.assertEqual(ctx.exception.usage["model"], "claude-haiku-4-5")
+        self.assertEqual(ctx.exception.usage["model"], "claude-haiku-5-5")
         row = AgentTask.objects.get()
-        self.assertEqual(row.model, "claude-haiku-4-5")
+        self.assertEqual(row.model, "claude-haiku-5-5")
         self.assertFalse(row.success)
         self.assertIn("reserve", row.error)
 
     def test_a_fast_tier_refusal_re_runs_once_the_deep_tier_agrees(self):
         from ai_agents import spend
         provider, calls = self._provider({
-            "claude-haiku-4-5": _response(stop_reason="refusal",
+            "claude-haiku-5-5": _response(stop_reason="refusal",
                                           category="cyber"),
             "claude-opus-5": _response(text="fine")})
         with patch.object(spend, "can_spend", wraps=spend.can_spend) as asked:
             _, usage = provider.complete(system_prompt="s", user_message="u",
-                                         model="claude-haiku-4-5",
+                                         model="claude-haiku-5-5",
                                          agent_name="news_analyst")
         self.assertEqual([c["model"] for c in calls],
-                         ["claude-haiku-4-5", "claude-opus-5"])
+                         ["claude-haiku-5-5", "claude-opus-5"])
         asked.assert_called_once()
         self.assertEqual(asked.call_args.kwargs["tier"], "deep")
         self.assertEqual(usage["model"], "claude-opus-5")

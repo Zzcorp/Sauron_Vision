@@ -25,7 +25,7 @@ def _mock_claude(response_dict, input_tokens=120, output_tokens=80):
     usage = {"input_tokens": input_tokens, "output_tokens": output_tokens, "cost_usd": 0.001}
 
     def fake_complete(self, system_prompt, user_message,
-                       model="claude-sonnet-5", effort=None,
+                       model="claude-sonnet-5-5", effort=None,
                        agent_name="unattributed", record=True,
                        source_ref=""):
         # Mirrors the real contract, ledger kwargs included — a stub

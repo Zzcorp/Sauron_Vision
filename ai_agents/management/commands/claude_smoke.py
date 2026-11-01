@@ -349,7 +349,7 @@ class Command(BaseCommand):
                             help="send: count_tokens (free), then two calls "
                                  "per model, within the printed bound")
         parser.add_argument("--with-fable", action="store_true",
-                            help="add the frontier model (about 2x Opus)")
+                            help="add the frontier model (2.5x Opus 5.5)")
         parser.add_argument("--models", default="",
                             help="comma-separated catalog ids instead of "
                                  "the default three")

@@ -5,6 +5,16 @@ from ai_agents.base_agent import BaseAgent
 class WeeklyReviewerAgent(BaseAgent):
     agent_name = "weekly_reviewer"
     default_tier = "deep"
+    # THE LONGEST ANSWER ON THE PLATFORM (2026-11-01). Ten sections, and
+    # the tables run as long as the input lets them: WEEK_MAX_ROWS (40)
+    # rows a table (ai_agents/tasks.py) — each book's rules in two tables
+    # (performance and grades, three books), the skips, the findings and
+    # the brakes, nine tables at ~40 tokens a row (14,400), plus the prose
+    # sections. On the 32,000 every call had, its thinking at high effort
+    # would share what such an answer leaves; the provider now adds the
+    # thinking room on top of this (max_tokens 40,192 on a thinking
+    # model). Billed only when written.
+    answer_tokens = 16384
 
     def get_system_prompt(self) -> str:
         from ai_agents.calibration import CALLS_INSTRUCTION as _ci

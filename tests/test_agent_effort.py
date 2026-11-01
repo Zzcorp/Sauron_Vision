@@ -19,6 +19,12 @@ that very agent does. The table at the end pins every agent's effort as
 it runs today, and the class after it pins that no saved tier row puts a
 direct caller below the effort it ran at.
 
+The tiers moved on 2026-11-01 (Haiku 5.5, Sonnet 5.5, Opus 5.5;
+tests/test_tier_models.py) and no effort moved with them: the ten keep
+high on Sonnet 5.5 and Opus 5.5 (whose API default is medium), the
+BaseAgent agents keep their tier's effort, and the fast tier's low now
+reaches the wire, Haiku 5.5 taking effort where Haiku 4.5 took none.
+
 Run with:  python manage.py test tests.test_agent_effort
 """
 import re
@@ -156,12 +162,12 @@ class EveryDirectCallerSendsItsAgentsEffortTests(TestCase):
         return kw["model"], kw.get("effort")
 
     def _deep(self, drive):
-        self.assertEqual(self._sent(drive), ("claude-opus-5", "high"))
+        self.assertEqual(self._sent(drive), ("claude-opus-5-5", "high"))
 
     def _balanced(self, drive):
-        self.assertEqual(self._sent(drive), ("claude-sonnet-5", "high"))
+        self.assertEqual(self._sent(drive), ("claude-sonnet-5-5", "high"))
 
-    # ── the deep tier: Opus 5 at high, as before, now sent ─────────────
+    # ── the deep tier: Opus 5.5 at high, the high they ran at on Opus 5 ─
     def test_the_mind(self):
         from brain.synthesizer import synthesize_now
         self._deep(synthesize_now)
@@ -203,7 +209,7 @@ class EveryDirectCallerSendsItsAgentsEffortTests(TestCase):
         self.assertEqual(self._sent(generate_strategies_now),
                          ("claude-fable-5-1", "high"))
 
-    # ── the balanced four: Sonnet 5 at high, NOT the tier's medium ─────
+    # ── the balanced four: Sonnet 5.5 at high, NOT the tier's medium ───
     def test_the_position_reviewer(self):
         from brain.position_review_agent import review_open_positions_now
         from tests.test_position_review import _quote, _trade
@@ -250,12 +256,12 @@ class EveryDirectCallerSendsItsAgentsEffortTests(TestCase):
         AIModelSetting.objects.create(scope="agent", key="daily_briefing",
                                       effort="xhigh")
         self.assertEqual(self._sent(synthesize_now),
-                         ("claude-opus-5", "max"))
+                         ("claude-opus-5-5", "max"))
 
         def drive():
             with self.assertRaises(_Stop):
                 DailyBriefingAgent().run("the day")
-        self.assertEqual(self._sent(drive), ("claude-sonnet-5", "xhigh"))
+        self.assertEqual(self._sent(drive), ("claude-sonnet-5-5", "xhigh"))
 
 
 @override_settings(AI_CONFIG=PROD_LIKE)
@@ -267,12 +273,12 @@ class TheBalancedCallOnTheWireTests(TestCase):
         from ai_agents.providers.claude_provider import ClaudeProvider
         from ai_agents.tasks import DailyBriefingAgent
         from tests.test_claude_provider_bytes import _sse, _Wire
-        wire = _Wire(_sse(model="claude-sonnet-5", text="The briefing."))
+        wire = _Wire(_sse(model="claude-sonnet-5-5", text="The briefing."))
         with patch.object(ClaudeProvider, "_get_client",
                           return_value=wire.client):
             DailyBriefingAgent().run("the day")
         body = wire.body()
-        self.assertEqual(body["model"], "claude-sonnet-5")
+        self.assertEqual(body["model"], "claude-sonnet-5-5")
         self.assertEqual(body["output_config"], {"effort": "high"})
 
 
@@ -308,22 +314,23 @@ class EveryDirectCallSiteNamesTheEffortTests(TestCase):
 @override_settings(AI_CONFIG=PROD_LIKE)
 class NoAgentsEffortDropsTests(TestCase):
     """Every agent's (model, effort) with nothing overridden, as it runs
-    from this commit. Each row is the effort the agent ran at before:
+    from 2026-11-01. Each effort is the one the agent ran at before:
     BaseAgent.run sent the tier's effort, a direct caller ran at the
-    model's API default (high on Opus 5, Fable 5.1 and Sonnet 5), and
-    Haiku 4.5 takes no effort at all."""
+    model's API default (high on Opus 5, Fable 5.1 and Sonnet 5). The
+    one change is the fast tier: Haiku 4.5 took no effort and ran without
+    thinking; Haiku 5.5 takes the tier's low."""
 
     EXPECTED = {
-        # fast tier, Haiku 4.5: no effort parameter
-        "news_analyst": ("claude-haiku-4-5", None),
-        "anomaly_detector": ("claude-haiku-4-5", None),
-        "market_commentator": ("claude-haiku-4-5", None),
-        "speech_analyst": ("claude-haiku-4-5", None),
-        "pretrade_sanity": ("claude-haiku-4-5", None),
-        "signal_journal": ("claude-haiku-4-5", None),
-        "trade_journal": ("claude-haiku-4-5", None),
-        "next_steps": ("claude-haiku-4-5", None),
-        "newsletter_writer": ("claude-haiku-4-5", None),
+        # fast tier, Haiku 5.5: the tier's low (Haiku 4.5 took none)
+        "news_analyst": ("claude-haiku-5-5", "low"),
+        "anomaly_detector": ("claude-haiku-5-5", "low"),
+        "market_commentator": ("claude-haiku-5-5", "low"),
+        "speech_analyst": ("claude-haiku-5-5", "low"),
+        "pretrade_sanity": ("claude-haiku-5-5", "low"),
+        "signal_journal": ("claude-haiku-5-5", "low"),
+        "trade_journal": ("claude-haiku-5-5", "low"),
+        "next_steps": ("claude-haiku-5-5", "low"),
+        "newsletter_writer": ("claude-haiku-5-5", "low"),
         # the debate and the council: their own model, the fast tier's low
         "debate_executioner": ("claude-opus-5-5", "low"),
         "debate_champion": ("claude-opus-5-5", "low"),
@@ -336,23 +343,23 @@ class NoAgentsEffortDropsTests(TestCase):
         "council_awakened": ("claude-opus-5-5", "low"),
         "council_theorist": ("claude-opus-5-5", "low"),
         # balanced, through BaseAgent.run: the tier's medium, as sent before
-        "macro_interpreter": ("claude-sonnet-5", "medium"),
-        "earnings_analyst": ("claude-sonnet-5", "medium"),
-        "decay_investigator": ("claude-sonnet-5", "medium"),
-        "strategy_advisor": ("claude-sonnet-5", "medium"),
-        "strategy_mutator": ("claude-sonnet-5", "medium"),
-        # balanced, direct: Sonnet 5's API default, now sent
-        "position_reviewer": ("claude-sonnet-5", "high"),
-        "close_advisor": ("claude-sonnet-5", "high"),
-        "daily_briefing": ("claude-sonnet-5", "high"),
-        "monday_plan": ("claude-sonnet-5", "high"),
-        # deep: high, sent before (weekly reviewer) or now
-        "weekly_reviewer": ("claude-opus-5", "high"),
-        "sauron_mind": ("claude-opus-5", "high"),
-        "critic": ("claude-opus-5", "high"),
-        "strategist": ("claude-opus-5", "high"),
-        "earnings_reviewer": ("claude-opus-5", "high"),
-        "research": ("claude-opus-5", "high"),
+        "macro_interpreter": ("claude-sonnet-5-5", "medium"),
+        "earnings_analyst": ("claude-sonnet-5-5", "medium"),
+        "decay_investigator": ("claude-sonnet-5-5", "medium"),
+        "strategy_advisor": ("claude-sonnet-5-5", "medium"),
+        "strategy_mutator": ("claude-sonnet-5-5", "medium"),
+        # balanced, direct: Sonnet 5's API default, sent
+        "position_reviewer": ("claude-sonnet-5-5", "high"),
+        "close_advisor": ("claude-sonnet-5-5", "high"),
+        "daily_briefing": ("claude-sonnet-5-5", "high"),
+        "monday_plan": ("claude-sonnet-5-5", "high"),
+        # deep: high, as on Opus 5 (Opus 5.5's API default is medium)
+        "weekly_reviewer": ("claude-opus-5-5", "high"),
+        "sauron_mind": ("claude-opus-5-5", "high"),
+        "critic": ("claude-opus-5-5", "high"),
+        "strategist": ("claude-opus-5-5", "high"),
+        "earnings_reviewer": ("claude-opus-5-5", "high"),
+        "research": ("claude-opus-5-5", "high"),
         # frontier: high, sent before (Horizon) or now
         "strategy_generator": ("claude-fable-5-1", "high"),
         "horizon": ("claude-fable-5-1", "high"),

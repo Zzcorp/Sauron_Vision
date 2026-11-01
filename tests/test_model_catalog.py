@@ -416,13 +416,17 @@ class CachePricesAndNewModelsTests(TestCase):
         self.assertEqual(default_effort("claude-sonnet-5-5"), "high")
         self.assertIsNone(default_effort("claude-haiku-4-5"))
 
-    def test_the_tier_defaults_did_not_move(self):
-        """O0a adds models; it moves no tier (the router reads its own
-        pinned ladder from O2, never the resolver)."""
+    def test_the_tier_defaults_are_the_current_generation(self):
+        """O0a added models and moved no tier (the router reads its own
+        pinned ladder from O2, never the resolver). The three below the
+        frontier moved on 2026-11-01, on the operator's decision of
+        2026-10-31: Haiku 4.5, Sonnet 5 and Opus 5 to their same-tier
+        successors (tests/test_tier_models.py). The tier efforts did not
+        move."""
         from ai_agents.catalog import TIER_DEFAULTS, TIER_EFFORT_DEFAULTS
         self.assertEqual(TIER_DEFAULTS, {
-            "fast": "claude-haiku-4-5", "balanced": "claude-sonnet-5",
-            "deep": "claude-opus-5", "frontier": "claude-fable-5-1"})
+            "fast": "claude-haiku-5-5", "balanced": "claude-sonnet-5-5",
+            "deep": "claude-opus-5-5", "frontier": "claude-fable-5-1"})
         self.assertEqual(TIER_EFFORT_DEFAULTS, {
             "fast": "low", "balanced": "medium", "deep": "high",
             "frontier": "high"})
@@ -459,7 +463,9 @@ class NoModelIdOutsideTheCatalogTests(SimpleTestCase):
     ALLOWED = {
         ("ai_agents/agents/trade_debate.py", "claude-opus-5-5"): 1,
         ("ai_agents/providers/claude_provider.py", "claude-opus-5"): 1,
-        ("ai_agents/providers/claude_provider.py", "claude-sonnet-5"): 1,
+        # complete()'s default model= (the balanced tier's code default,
+        # tests/test_tier_models.py); no caller reaches it.
+        ("ai_agents/providers/claude_provider.py", "claude-sonnet-5-5"): 1,
     }
 
     # Not the platform's code: the tests, a virtualenv by any of the names

@@ -564,7 +564,7 @@ SCHEMA_HINT = """{
 class SauronMindAgent(BaseAgent):
     """Central coordination synthesizer.
 
-    Uses the `deep` tier (Opus 5 on 2026-10-31; /ai-models/ shows what it
+    Uses the `deep` tier (Opus 5.5 from 2026-11-01; /ai-models/ shows what it
     runs on) — this agent is THE central coordinator; every downstream
     agent inherits its mistakes. Quality > frequency-optimized cost. Hourly (config/celery.py); cheap insurance against
     one bad correlated decision propagating across all rules.

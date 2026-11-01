@@ -159,6 +159,22 @@ class DefaultRequestBytesTests(TestCase):
         })
 
     def test_the_deep_tier_default_with_high_effort(self):
+        """Opus 5.5, the deep tier's default since 2026-11-01, at the high
+        the deep agents send (tests/test_tier_models.py)."""
+        wire, _ = self._one("claude-opus-5-5", "high")
+        self._plain_wire(wire)
+        self.assertEqual(wire.body(), {
+            "max_tokens": 32000,
+            "messages": [{"role": "user", "content": "q"}],
+            "model": "claude-opus-5-5",
+            "output_config": {"effort": "high"},
+            "system": "sys",
+            "stream": True,
+        })
+
+    def test_opus_5_with_high_effort(self):
+        """The deep tier's default until 2026-11-01, and still the
+        refusal re-run's model: its bytes are those of 6d57b6e."""
         wire, _ = self._one("claude-opus-5", "high")
         self._plain_wire(wire)
         self.assertEqual(wire.body(), {

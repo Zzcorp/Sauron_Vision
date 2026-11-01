@@ -70,7 +70,7 @@ AGENT_GROUPS = [
     # up overrides by that value, so a friendly-but-wrong key writes a row
     # nothing ever reads. The tier MUST be the agent class's default_tier:
     # four rows here had drifted from it and showed Sonnet 5 for agents
-    # that run on Opus 5, and Opus 5 for the one on Fable 5.1
+    # that ran on Opus 5, and Opus 5 for the one on Fable 5.1
     # (tests/test_ai_models_truth.py).
     ("Sauron's Mind", [
         ("sauron_mind", "Synthesizer", "deep"),

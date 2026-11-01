@@ -81,10 +81,11 @@ MODELS = {
         "server_fallback": "both",
         "notes": "Anthropic's most capable widely released model. Thinking "
                  "is always on (the provider never sends a thinking "
-                 "parameter), effort low..max, twice the Opus price — the "
-                 "weekly imagination pass, never the five-minute loop. A "
-                 "safety refusal comes back as stop_reason=refusal and the "
-                 "provider re-runs the call on Opus.",
+                 "parameter), effort low..max, 2.5 times the deep tier's "
+                 "Opus 5.5 price — the weekly imagination pass, never the "
+                 "five-minute loop. A safety refusal comes back as "
+                 "stop_reason=refusal and the provider re-runs the call on "
+                 "Opus 5.",
     },
     "claude-opus-5-5": {
         "label": "Claude Opus 5.5",
@@ -100,10 +101,12 @@ MODELS = {
         "task_budget": True,
         "server_fallback": "both",
         "fast_pricing": {"input": 8.0, "output": 40.0},
-        "notes": "The current Opus, below Opus 5's price. Thinking cannot be "
+        "notes": "The current Opus, below Opus 5's price, and the deep "
+                 "tier's default since 2026-11-01. Thinking cannot be "
                  "disabled (the provider never sends a thinking parameter); "
-                 "effort low..max is the control. The trade debate's "
-                 "Executioner and Champion answer on it.",
+                 "effort low..max is the control, and its API default is "
+                 "medium, so every deep agent sends its own (high). The "
+                 "trade debate and the council answer on it.",
     },
     "claude-opus-5": {
         "label": "Claude Opus 5",
@@ -119,7 +122,10 @@ MODELS = {
         "task_budget": True,
         "server_fallback": "both",
         "fast_pricing": {"input": 10.0, "output": 50.0},
-        "notes": "Strongest agentic/coding model. Thinking on by default.",
+        "notes": "Previous-generation Opus: the deep tier's default until "
+                 "2026-11-01, and still the provider's refusal re-run "
+                 "(REFUSAL_FALLBACK_MODEL). Thinking on by default, API "
+                 "effort default high.",
     },
     "claude-opus-4-8": {
         "label": "Claude Opus 4.8",
@@ -158,7 +164,9 @@ MODELS = {
         "per_message_effort": False,
         "task_budget": False,
         "server_fallback": None,
-        "notes": "Near-Opus quality at Sonnet cost. Good default workhorse.",
+        "notes": "Previous-generation Sonnet: the balanced tier's default "
+                 "until 2026-11-01. Thinking on by default, API effort "
+                 "default high.",
     },
     "claude-sonnet-5-5": {
         "label": "Claude Sonnet 5.5",
@@ -178,10 +186,12 @@ MODELS = {
         # Only the "default" form of `fallbacks`, and only on the Claude
         # API (the reference); the list form is a 400 here.
         "server_fallback": "default",
-        "notes": "The current Sonnet ($2/$10, cache reads $0.10). Thinking "
-                 "cannot be disabled; effort low..max, default high (levels "
-                 "recalibrated from Sonnet 5). Added for the Orcs (PR O0a); "
-                 "no tier points at it.",
+        "notes": "The current Sonnet ($2/$10, cache reads $0.10) and the "
+                 "balanced tier's default since 2026-11-01. Thinking is on "
+                 "by default and the provider never sends a thinking "
+                 "parameter ({type: disabled} is a 400 here); effort "
+                 "low..max, default high, levels recalibrated from Sonnet "
+                 "5. The Orcs' r0 and r1 rungs.",
     },
     "claude-sonnet-4-6": {
         "label": "Claude Sonnet 4.6",
@@ -272,11 +282,14 @@ MODELS = {
         # ALL of its tokens (pricing page, "Long context pricing").
         "long_context": {"above_prompt_tokens": 100_000,
                          "input": 0.50, "output": 2.50, "cache_read": 0.05},
-        "notes": "The current Haiku: $0.10/$0.50 up to 100K prompt tokens, "
+        "notes": "The current Haiku and the fast tier's default since "
+                 "2026-11-01: $0.10/$0.50 up to 100K prompt tokens, "
                  "$0.50/$2.50 beyond; cache reads $0.01. Thinking on by "
-                 "default, effort default medium. Its tokenizer counts about "
-                 "30% more tokens than Haiku 4.5's on the same text. Added "
-                 "for the Orcs (PR O0a); no tier points at it.",
+                 "default (billed as output), effort default medium; the "
+                 "fast tier sends low. Its tokenizer counts about 30% more "
+                 "tokens than Haiku 4.5's on the same text. No server-side "
+                 "refusal fallback: a decline re-runs once on Opus 5 when "
+                 "the deep reserve allows it.",
     },
     "claude-haiku-4-5": {
         "label": "Claude Haiku 4.5",
@@ -291,7 +304,8 @@ MODELS = {
         "per_message_effort": False,
         "task_budget": False,
         "server_fallback": None,
-        "notes": "Cheapest + fastest. Classification, short prose, journals.",
+        "notes": "Previous-generation Haiku: the fast tier's default until "
+                 "2026-11-01. No thinking and no effort parameter.",
     },
     "claude-haiku-4-5-20251001": {
         "label": "Claude Haiku 4.5 (pinned)",
@@ -306,15 +320,22 @@ MODELS = {
         "per_message_effort": False,
         "task_budget": False,
         "server_fallback": None,
-        "notes": "Date-pinned Haiku 4.5 — same model, frozen id.",
+        "notes": "Date-pinned Haiku 4.5 — same model, frozen id. "
+                 "Previous-generation: settings.py's fast default until "
+                 "2026-11-01.",
     },
 }
 
-# Tier → model when nothing overrides it.
+# Tier → model when nothing overrides it. The current generation since
+# 2026-11-01 (the operator's decision of 2026-10-31): Haiku 4.5, Sonnet 5
+# and Opus 5 before it. Each successor is the same tier, better, and costs
+# the same or less per token; the three it replaced stay in MODELS above,
+# so a saved override or an AI_MODEL_* value naming one still runs.
+# config/settings.py's AI_MODEL_* defaults name the same three ids.
 TIER_DEFAULTS = {
-    "fast": "claude-haiku-4-5",
-    "balanced": "claude-sonnet-5",
-    "deep": "claude-opus-5",
+    "fast": "claude-haiku-5-5",
+    "balanced": "claude-sonnet-5-5",
+    "deep": "claude-opus-5-5",
     # The frontier tier exists for the few calls where imagination is the
     # product — the weekly strategy generator — and nowhere the platform
     # calls every five minutes. It shares the deep tier's budget reserve.
@@ -340,13 +361,18 @@ TIER_EFFORT_DEFAULTS = {
 # cut the four balanced ones the day they started sending one, and a tier
 # row saved earlier for the BaseAgent agents would have moved all ten,
 # down or up. Only a row saved for the agent itself moves it.
+#
+# The tiers moved on 2026-11-01 and these did not: each keeps the effort
+# it ran at on the old model. On the deep tier that matters most: Opus
+# 5.5's API default is medium, a level below Opus 5's high.
 AGENT_EFFORT_DEFAULTS = {
-    # balanced, Sonnet 5's default
+    # balanced: Sonnet 5's API default, kept on Sonnet 5.5
     "position_reviewer": "high",
     "close_advisor": "high",
     "daily_briefing": "high",
     "monday_plan": "high",
-    # deep, Opus 5's default; their tier's default is high too
+    # deep: Opus 5's API default, kept on Opus 5.5 (whose default is
+    # medium); their tier's default is high too
     "sauron_mind": "high",
     "critic": "high",
     "strategist": "high",

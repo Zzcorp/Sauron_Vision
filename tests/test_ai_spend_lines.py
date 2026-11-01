@@ -420,13 +420,18 @@ class BaseAgentTotalCheckTests(TestCase):
         agent.provider.complete.assert_called_once()
 
     @_cfg(10.0)
-    def test_a_default_run_calls_the_provider_exactly_as_before(self):
+    def test_a_default_run_calls_the_provider_as_before_with_its_name(self):
+        """The keywords of before, plus the agent's name (2026-11-01): the
+        one row the provider writes for a record=False caller, a declined
+        call its refusal re-run replaces, is booked under that name, not
+        "unattributed"."""
         from ai_agents.models import AgentTask
         agent = _probe_agent()
         agent.run(x=1)
         self.assertEqual(agent.provider.complete.call_args.kwargs, {
             "system_prompt": "sys", "user_message": "context x",
-            "model": agent.model, "effort": agent.effort, "record": False})
+            "model": agent.model, "effort": agent.effort,
+            "agent_name": "probe_agent", "record": False})
         self.assertEqual(agent.seen, {"x": 1})
         row = AgentTask.objects.get(agent="probe_agent")
         self.assertEqual(row.structured_output, {"raw": "answer"})
