@@ -555,6 +555,19 @@ def command_tab_live(request):
         context["live_deployed_pct"] = DASH
         context["live_cash_pct"] = DASH
 
+    # THE LIVE WORLD AS eToro STATES IT (2026-10-31). DEPLOYED above is
+    # both books' notional against the cash typed on /setup/; eToro's own
+    # used, available and total, from the sync's cells with their age,
+    # stand beside it (bot_program.etoro_used). View layer only:
+    # services.live_book_value, which the gates divide by, is not touched.
+    try:
+        from bot_program.etoro_used import account_used
+        context["live_etoro"] = account_used(user)
+    except Exception as e:  # noqa: BLE001 — the strip renders without it
+        logger.warning("Op Center eToro figures unavailable: %s", e,
+                       exc_info=True)
+        context["live_etoro"] = None
+
     # Today's gate activity (Phase 15 orchestrator).
     #
     # This cell used to lead with an accept rate, and the rate was not one.

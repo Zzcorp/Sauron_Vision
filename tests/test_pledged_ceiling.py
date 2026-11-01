@@ -92,8 +92,11 @@ class MorgulFollowsTheCeilingTests(_Case):
         self.cfg = _cfg(self.user, "Stocks live", "stock", mode="live")
 
     def _acct(self, used):
+        # one sync's reading: the equity and the cells under one stamp (G6
+        # dates the equity apart since 2026-10-31)
         return _etoro(self.user, demo=False, is_primary_for_stocks=True,
                       last_equity=Decimal("100"), last_equity_currency="USD",
+                      last_equity_at=self.now - timedelta(minutes=5),
                       last_used_margin=Decimal(str(used)),
                       last_margin_at=self.now - timedelta(minutes=5),
                       last_margin_world="live")

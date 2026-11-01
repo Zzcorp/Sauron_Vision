@@ -34,6 +34,8 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 from asgiref.sync import sync_to_async
 
+from market_data.stream_writes import LatestPerSymbol
+
 log = logging.getLogger("stream_finnhub")
 
 #: How often the heartbeat speaks, in seconds. Ten minutes rather than the
@@ -61,6 +63,12 @@ def _fire(coro):
     _PENDING.add(task)
     task.add_done_callback(_PENDING.discard)
     return task
+
+
+#: One write in flight per symbol, the newest tick behind it
+#: (market_data.stream_writes, 2026-10-31): the read loop never waits on a
+#: database write.
+LATEST = LatestPerSymbol(_fire)
 
 
 def _report_failure(where: str, symbol: str, exc: Exception, count: int):
@@ -235,8 +243,18 @@ async def run(api_key, override):
                             # open, so there is no day change to send.
                             # None leaves the column as the poller set
                             # it; 0 painted "+0.00%" over it.
-                            _fire(update_live_quote(sym, last, vol))
-                            await broadcast(sym, last, None, vol)
+                            # Only a print write_quote accepted reaches
+                            # the browser (2026-10-31, skeptic M2): a
+                            # refused one painted the rail a price the
+                            # row never carried. The write and its
+                            # broadcast run behind the loop (LATEST): a
+                            # loop that awaited each write stopped
+                            # reading the socket, and the keepalive
+                            # closed it under an open's load.
+                            async def _tick(sym=sym, last=last, vol=vol):
+                                if await _fire(update_live_quote(sym, last, vol)):
+                                    await broadcast(sym, last, None, vol)
+                            LATEST.submit(sym, _tick)
                     except Exception as e:
                         # Was log.debug, i.e. discarded in production. A
                         # tick this process cannot parse is a tick it does

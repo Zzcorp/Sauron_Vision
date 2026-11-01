@@ -514,6 +514,29 @@ EOD_CRYPTO_BARS = 5
 #: CRYPTO_SYMBOLS): a night without them is a warning on the EOD row.
 EOD_CRYPTO_CORE = ("BTCUSD", "ETHUSD")
 
+_DAY_MS = 86_400_000
+
+
+def _closed_daily_klines(rows, now_ms=None) -> list:
+    """The daily klines whose day has ENDED (open + 1 day <= now).
+
+    THE 00:10 STUB (2026-10-31). The five klines asked at 00:10 UTC end
+    with today's, ten minutes old: written, it stood as today's daily bar
+    until the next night (the chart drew a stub, a daily reader read a
+    ten-minute bar as today's). A row whose open cannot be read is kept:
+    the writer refuses it on its own."""
+    import time
+    now_ms = now_ms if now_ms is not None else int(time.time() * 1000)
+    out = []
+    for row in rows or []:
+        try:
+            if int(row[0]) + _DAY_MS > now_ms:
+                continue
+        except (TypeError, ValueError, IndexError):
+            pass
+        out.append(row)
+    return out
+
 
 @shared_task
 @guarded_task("scraper_eod")
@@ -555,6 +578,7 @@ def fetch_eod_crypto():
             logger.warning("[eod crypto] klines(%s, 1d) failed: %s",
                            inst.symbol, e)
             rows = []
+        rows = _closed_daily_klines(rows)
         written, _skipped = _upsert_rows(inst, "1d", rows, "binance_public") \
             if rows else (0, 0)
         if written:

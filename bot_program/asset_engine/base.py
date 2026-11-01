@@ -3691,6 +3691,13 @@ class AssetBot(ABC):
                     logger.warning("[%s_bot] WS push (close_pending) failed: %s",
                                    self.asset_class, e)
                 return False
+            # THE ACCOUNT IS READ AGAIN (2026-10-31): the close answered,
+            # and the cash it frees at eToro is in the margin cells within
+            # the second. Every close of a row comes through here (the
+            # tick's stop, target and time exits, the care close, the
+            # CLOSE button, the funding closes); a partial fill frees
+            # something too.
+            self._reread_account_soon(client, why="close")
 
         # ── Book the exit ────────────────────────────────────────────────
         # The two venues differ here, deliberately. A LIVE exit is read back
@@ -6665,6 +6672,10 @@ class AssetBot(ABC):
             paper=paper, broker_order_id=order_id,
             metadata=entry_meta,
         )
+        # THE ACCOUNT IS READ AGAIN (2026-10-31): the margin this order
+        # took is eToro's own figure a few seconds from now, not the
+        # estimate _pledged_since charges until then.
+        self._reread_account_soon(client, why="entry")
 
         # Phase-20: notify on open — unless the entry is still WORKING at
         # the broker. "Opened" is then a claim about the future; the poll
@@ -7412,8 +7423,9 @@ class AssetBot(ABC):
         return ""
 
     def _pledged_since(self, at, carrier: str) -> float:
-        """Cash this user's LIVE rows on `carrier` opened after `at` pledge
-        — the sync's reading can be 900 s old and one tick opens several.
+        """Cash this user's LIVE rows on `carrier` opened at or after `at`
+        (or less than etoro_cells.SETTLE_S before it, below) pledge — the
+        reading can be minutes old and one tick opens several.
         A row that recorded the leverage it was sent at is charged
         notional / L; a row on this carrier that recorded none is charged
         its FULL notional (the venue's margin at leverage 1 IS the full
@@ -7421,12 +7433,34 @@ class AssetBot(ABC):
         exposure; the class table's forex 1/30 is the dangerous direction
         here); a
         row stamped for another broker is not this account's cash and is
-        skipped; an unstamped row counts, in full."""
+        skipped; an unstamped row counts, in full.
+
+        `at` is last_margin_at, which the sync and the post-order re-read
+        stamp BEFORE their GET (2026-10-31), and a row is written only
+        after its order answered: a fill missing from the cells was booked
+        after the stamp and is charged here. One the payload already
+        carried is charged twice until the next read, which the booking
+        itself queues (bot_program.etoro_cells) — the safe way round.
+
+        AND A ROW BOOKED LESS THAN etoro_cells.SETTLE_S BEFORE IT (review,
+        2026-10-31): eToro's cells move within the second of a fill, not
+        at once, and the read that covers a booking starts SETTLE_S or
+        more after it (etoro_cells.request_refresh). A read that started
+        sooner — another booking's, a pass's, the sync's — may not carry
+        that fill, and with the stamp alone the row was in neither the
+        cells nor the charge until the next read. Charged here on top of
+        that read (twice, until the booking's own read, when it did carry
+        it). The booking's own read starts SETTLE_S after the booking
+        committed, so it never charges its own row twice."""
+        from datetime import timedelta
+
         from bot_program.asset_models import AssetBotTrade
+        from bot_program.etoro_cells import SETTLE_S
         from portfolio.services import value_per_unit
         total = 0.0
         for t in AssetBotTrade.objects.filter(
-                config__user=self.user, paper=False, opened_at__gt=at,
+                config__user=self.user, paper=False,
+                opened_at__gt=at - timedelta(seconds=SETTLE_S),
                 status__in=("OPEN", "CLOSE_PENDING")):
             meta = t.metadata or {}
             stamped = str(meta.get("broker") or "")
@@ -7459,7 +7493,9 @@ class AssetBot(ABC):
         path.
 
         Refused, each a sentence with both numbers: either cell never
-        stored; older than TRACKING_FRESH_SECONDS; read in the OTHER
+        stored; older than TRACKING_FRESH_SECONDS; the equity undated or
+        older than that (2026-10-31: a re-read moves the cells alone, see
+        _cash_gate); read in the OTHER
         world (the same key pair answers both, EtoroAccount.demo alone
         picks the segment; the sync stamps last_margin_world — "" is
         refused too); a currency other than the pool's (nothing here
@@ -7480,27 +7516,116 @@ class AssetBot(ABC):
         resized and never answered by closing anything. A reserve that
         cannot be read is refused too — reserved cash is not a number to
         guess.
+
+        The arithmetic is _cash_gate's (2026-10-31), which the TAKE TRADE
+        preview asks too, so the ticket shows the refusal the send would
+        give before the PIN is typed; this answers its refusal alone.
         """
+        return self._cash_gate(client, symbol, qty=qty, price=price,
+                               leverage=leverage)["refusal"] or None
+
+    def _reread_account_soon(self, client, *, why: str) -> None:
+        """Ask for the eToro account's cells to be read again a few seconds
+        after this booking commits (2026-10-31, bot_program.etoro_cells):
+        an order or a close moves them within the second, and the next
+        order is judged on them. Only when `client` is the eToro adapter;
+        never raises, never reads the broker here."""
+        try:
+            from bot_program import etoro_cells
+            etoro_cells.refresh_for_client(self.user, client, why=why)
+        except Exception as e:  # noqa: BLE001 — beside the trade
+            logger.warning("[%s_bot] account re-read not asked: %s",
+                           self.asset_class, e)
+
+    def _cash_gate(self, client, symbol: str, *, qty: float, price: float,
+                   leverage: int) -> dict:
+        """_leverage_headroom's judgement with its numbers (2026-10-31).
+
+        {"refusal": the sentence or "", "asked": False when the carrier is
+        not eToro (no cells to judge by: the refusal is the headroom's
+        answer for that, and the ticket shows nothing), "account_pk",
+        "cash", "used",
+        "equity", "currency", "at", "age_s", "equity_at", "equity_age_s",
+        "world", "pledged", "held",
+        "free", "need", "after", "ceiling", "room"} — every number None
+        until the step that reads it. `room` is the most margin one more
+        order may take: the smaller of the free cash and what the pledge
+        ceiling leaves (ceiling x equity - used - pledged), floored at 0.
+        Same reads and the same order of refusals as before, with the
+        equity's own age judged beside the cells' (2026-10-31); nothing
+        here reads the broker.
+
+        THE EQUITY IS DATED TOO (review, 2026-10-31). The hour rule read
+        the cells' stamp alone while the pledge ratio divides by the
+        equity: the sync wrote both in one save, so one age covered both.
+        The re-read after an order (tasks.refresh_etoro_cells) writes the
+        cells and never the equity, so with the sync stopped (celery beat
+        down, its entry off, a payload with no total) every re-read made
+        the cells look fresh and MAX ACCOUNT PLEDGED was judged against an
+        equity of any age — looser on a book that has lost since. Refused
+        now when the equity carries no reading time or one older than
+        TRACKING_FRESH_SECONDS; judged before the cells' age, which never
+        exceeds it in a real sync (a re-read only moves the cells')."""
         from bot_program.capital_truth import TRACKING_FRESH_SECONDS
         from bot_program.engine.capabilities import adapter_key
         from bot_program.models import EtoroAccount
+        out = {"refusal": "", "asked": False, "account_pk": None,
+               "cash": None, "used": None, "equity": None, "currency": "",
+               "at": None, "age_s": None, "equity_at": None,
+               "equity_age_s": None, "world": "", "pledged": None,
+               "held": None, "free": None, "need": None, "after": None,
+               "ceiling": None, "room": None}
+
+        def refuse(words):
+            out["refusal"] = words
+            return out
+
         carrier = adapter_key(client)
+        if carrier == "etoro":
+            out["asked"] = True
         acct = (EtoroAccount.objects.filter(user_id=self.user.id).first()
                 if carrier == "etoro" else None)
         cash = getattr(acct, "last_available_cash", None)
         used = getattr(acct, "last_used_margin", None)
         at = getattr(acct, "last_margin_at", None)
         equity = getattr(acct, "last_equity", None)
+        eq_at = getattr(acct, "last_equity_at", None)
+        now = timezone.now()
+        out.update({"account_pk": getattr(acct, "pk", None),
+                    "cash": None if cash is None else float(cash),
+                    "used": None if used is None else float(used),
+                    "equity": None if equity is None else float(equity),
+                    "at": at,
+                    "equity_at": eq_at,
+                    "equity_age_s": (None if eq_at is None
+                                     else (now - eq_at).total_seconds()),
+                    "currency": str(getattr(acct, "last_equity_currency", "")
+                                    or "").upper(),
+                    "world": str(getattr(acct, "last_margin_world", "")
+                                 or "")})
         if acct is None or cash is None or used is None or at is None:
-            return ("the account's available cash / used margin have never "
-                    "been stored by the sync — refused; margin is not a "
-                    "number to guess")
+            return refuse("the account's available cash / used margin have "
+                          "never been stored by the sync — refused; margin "
+                          "is not a number to guess")
         if equity is None:
-            return "the account's equity has never been stored — refused"
-        age = (timezone.now() - at).total_seconds()
+            return refuse("the account's equity has never been stored — "
+                          "refused")
+        age = (now - at).total_seconds()
+        out["age_s"] = age
+        if eq_at is None:
+            return refuse("the account's equity carries no reading time — "
+                          "refused; the pledge ceiling is not judged "
+                          "against an equity of unknown age")
+        eq_age = out["equity_age_s"]
+        if eq_age > TRACKING_FRESH_SECONDS:
+            return refuse(f"equity reading {eq_age / 3600:.1f}h old (limit "
+                          f"{TRACKING_FRESH_SECONDS / 3600:.0f}h): only the "
+                          f"eToro sync writes it, a re-read after an order "
+                          f"does not — refused until the sync reads the "
+                          f"account again")
         if age > TRACKING_FRESH_SECONDS:
-            return (f"cash reading {age / 3600:.1f}h old (limit "
-                    f"{TRACKING_FRESH_SECONDS / 3600:.0f}h) — refused")
+            return refuse(f"cash reading {age / 3600:.1f}h old (limit "
+                          f"{TRACKING_FRESH_SECONDS / 3600:.0f}h) — refused")
         # THE CELLS' WORLD (2026-09-26): the same key pair answers both
         # worlds and EtoroAccount.demo alone picks the segment, so a row
         # unticked demo -> live keeps the DEMO reading (six figures, doc §5)
@@ -7511,16 +7636,18 @@ class AssetBot(ABC):
         world = "demo" if acct.demo else "live"
         stamped = str(getattr(acct, "last_margin_world", "") or "")
         if stamped != world:
-            return (f"cash read in the {stamped or '?'} world; this row now "
-                    f"trades {world} — refused until the sync re-reads")
+            return refuse(f"cash read in the {stamped or '?'} world; this row "
+                          f"now trades {world} — refused until the sync "
+                          f"re-reads")
         ccy = str(getattr(acct, "last_equity_currency", "") or "").upper()
         pool_ccy = str(self.cfg.base_currency or "").upper()
         if ccy != pool_ccy:
-            return (f"pool in {pool_ccy or '?'} against cash read in "
-                    f"{ccy or '?'} — nothing here converts; refused")
+            return refuse(f"pool in {pool_ccy or '?'} against cash read in "
+                          f"{ccy or '?'} — nothing here converts; refused")
         need = (float(qty) * float(price) * self._value_per_unit(symbol)
                 / float(leverage))
         pledged = self._pledged_since(at, carrier)
+        out.update({"need": need, "pledged": pledged})
         # THE RESERVE IS THE BOOK'S, AND IN ITS CURRENCY (review,
         # 2026-09-28). A withdrawal request is filed against the book —
         # the account the reading comes from — and the router hands each
@@ -7546,33 +7673,40 @@ class AssetBot(ABC):
         except Exception as e:  # noqa: BLE001
             logger.warning("[%s_bot] withdrawal reserve unreadable: %s",
                            self.asset_class, e)
-            return ("the withdrawal reserve could not be read — refused; "
-                    "reserved cash is not a number to guess")
+            return refuse("the withdrawal reserve could not be read — "
+                          "refused; reserved cash is not a number to guess")
         if other:
             listed = ", ".join(f"{float(v):,.2f} {c or '?'}"
                                for c, v in sorted(other.items()))
-            return (f"{listed} is held for withdrawals against cash read in "
-                    f"{ccy or '?'} — nothing here converts; refused until "
-                    f"that request is cancelled or filed again in "
-                    f"{ccy or '?'}")
+            return refuse(f"{listed} is held for withdrawals against cash "
+                          f"read in {ccy or '?'} — nothing here converts; "
+                          f"refused until that request is cancelled or filed "
+                          f"again in {ccy or '?'}")
         free = float(cash) - pledged - held
+        ceiling = pledged_ceiling()
+        out.update({"held": held, "free": free, "ceiling": ceiling,
+                    "room": max(0.0, min(
+                        free, ceiling * float(equity) - float(used)
+                        - pledged))})
         if need > free + 1e-9:
             kept = (f", less {held:,.2f} held for withdrawals" if held > 0
                     else "")
-            return (f"{symbol} needs {need:,.2f} {ccy} of margin and "
-                    f"{free:,.2f} is free ({float(cash):,.2f} read "
-                    f"{age / 60:.0f} min ago, less {pledged:,.2f} pledged "
-                    f"since{kept}) — refused before the venue refuses it")
+            return refuse(f"{symbol} needs {need:,.2f} {ccy} of margin and "
+                          f"{free:,.2f} is free ({float(cash):,.2f} read "
+                          f"{age / 60:.0f} min ago, less {pledged:,.2f} "
+                          f"pledged since{kept}) — refused before the venue "
+                          f"refuses it")
         after = (float(used) + pledged + need) / max(float(equity), 1e-9)
-        ceiling = pledged_ceiling()
+        out["after"] = after
         if after > ceiling + 1e-9:
-            return (f"the account would be {after:.0%} pledged after "
-                    f"{symbol} ({float(used):,.2f} used + {pledged:,.2f} "
-                    f"since + {need:,.2f}) against {float(equity):,.2f} "
-                    f"equity; the ceiling is {ceiling:.0%} (MAX ACCOUNT "
-                    f"PLEDGED on /setup/; a belief: eToro's close-out rule "
-                    f"is unmeasured) — refused")
-        return None
+            return refuse(f"the account would be {after:.0%} pledged after "
+                          f"{symbol} ({float(used):,.2f} used + "
+                          f"{pledged:,.2f} since + {need:,.2f}) against "
+                          f"{float(equity):,.2f} equity; the ceiling is "
+                          f"{ceiling:.0%} (MAX ACCOUNT PLEDGED on /setup/; a "
+                          f"belief: eToro's close-out rule is unmeasured) — "
+                          f"refused")
+        return out
 
     # ── live-mode paper-fallback guard ───────────────────────────────────
 

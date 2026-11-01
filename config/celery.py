@@ -65,6 +65,11 @@ app.conf.task_routes = {
     # 2026-09-26 -- the Morgul guards: database reads every 5 min, beside
     # the quote poller like the eye's poll; no LLM, no broker call.
     "bot_program.tasks.run_morgul_guards": {"queue": "fast"},
+    # 2026-10-31 -- the eToro account re-read after the platform's own
+    # orders and closes (bot_program/etoro_cells.py): one aggregate GET,
+    # a few seconds after the booking, paced to one per account per 20 s.
+    # Beside the quote poller: the next order is judged on what it reads.
+    "bot_program.tasks.refresh_etoro_cells": {"queue": "fast"},
     "bot_program.tasks.answer_telegram_question": {"queue": "ai"},
     # 2026-09-28 -- the alarm bot (bot_program/alarm.py). Its poll beside
     # the eye's: one HTTP round trip when idle, and a /stopall must not
@@ -596,9 +601,22 @@ app.conf.beat_schedule = {
     # is the venue and its world, not the class (reconcile_asset._state_key).
     # A manual reconcile_user while one venue is keyed out is run with the
     # pipeline_asset_bots component off: there is no longer a quiet hour.
+    # EVERY 5 MINUTES (2026-10-31, the operator: "wait 15min to make another
+    # trade"): a stop or a target eToro filled is booked within five minutes
+    # instead of fifteen, so the row stops counting as open — in the pool,
+    # in already_open, in the duplicate rule — and its close asks the
+    # account's cells to be read again (bot_program/etoro_cells.py). The
+    # rules that stop a lagging read from booking a false close are not
+    # cadence-bound: the 60 s lag window (PORTFOLIO_LAG_S) and the
+    # order-read wait (venue_exit.UNPROVEN_WAIT_S, 3300 s, at least four
+    # asks) hold at any beat; four asks are simply reached sooner. One book
+    # read per pass per user and world is two GETs of /portfolio per five
+    # minutes, inside the client's own pacing (portfolio is no pause site;
+    # a 429 there counts on the venue's health, three in 180 s make it
+    # sick — a rate this beat alone cannot reach).
     "reconcile-asset-bot-trades": {
         "task": "bot_program.tasks.reconcile_all_asset_bot_trades",
-        "schedule": crontab(minute="*/15"),
+        "schedule": crontab(minute="*/5"),
     },
 
     # Every 15 min around the clock, like the reconcile above: an ISA
@@ -610,14 +628,30 @@ app.conf.beat_schedule = {
         "task": "bot_program.tasks.sync_broker_account",
         "schedule": 900.0,
     },
-    # 2026-09-17 — the eToro twin: same cadence, same component switch
+    # 2026-09-17 — the eToro twin: same component switch
     # (broker_account_sync), a separate task so the IBKR loop's session
     # leasing and 2FA guards are never touched. Both are plain intervals,
     # so they may coincide; each is one HTTP round trip per account and
     # the fast queue has two workers, which is contention nobody will see.
+    # EVERY 300 s (2026-10-31, the operator: "The 15min etoro refresh is
+    # way too long"): the cash and the used margin the order gate reads
+    # are at most five minutes old even when nothing the platform did
+    # moved them (a close at the venue, a deposit, a hand in the eToro
+    # app); the platform's own orders and closes ask a re-read at once
+    # (bot_program/etoro_cells.py). One pass is one aggregate-portfolio
+    # GET (account_snapshot, the second read folded away the same day)
+    # and one /portfolio GET per account; the names come from the pinned
+    # ids and the /search memo, so a pass sends no /search once the book
+    # is named. Neither endpoint is a pause site and no 429 has ever been
+    # recorded on either; a failure counts on the venue's health, where
+    # three in 180 s make eToro sick for ten minutes — two reads per five
+    # minutes cannot reach that on their own. Three missed passes (now
+    # fifteen minutes, BROKER_MISS_ALERT_AFTER) raise the stall alert,
+    # still once per six hours. The history rows grow three-fold, inside
+    # the 400-day prune (EQUITY_HISTORY_DAYS).
     "sync-etoro-accounts": {
         "task": "bot_program.tasks.sync_etoro_accounts",
-        "schedule": 900.0,
+        "schedule": 300.0,
     },
     # 2026-09-17 — Saxo's OAuth session keeper. UNGATED: the refresh token
     # lives forty minutes and rotates, so a session that died because a
@@ -627,7 +661,9 @@ app.conf.beat_schedule = {
     # tests/test_saxo_oauth.py.
     # 2026-09-19 — the third broker the book can be. Same cadence and
     # same switch as the eToro walk; offset by nothing, because each loop
-    # reads a different broker and they do not contend.
+    # reads a different broker and they do not contend. It keeps 900 s
+    # (2026-10-31): the eToro walk moved to 300 s on the operator's word
+    # about eToro; nothing was asked of Saxo.
     "sync-saxo-accounts": {
         "task": "bot_program.tasks.sync_saxo_accounts",
         "schedule": 900.0,

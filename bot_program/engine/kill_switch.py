@@ -16,6 +16,8 @@ from decimal import Decimal
 
 from django.utils import timezone
 
+from bot_program.etoro_cells import one_read_per_pass
+
 logger = logging.getLogger(__name__)
 
 
@@ -38,8 +40,13 @@ def _push_close_event(user, trade, kind):
         logger.warning("[KILL SWITCH] eye push failed: %s", e)
 
 
+@one_read_per_pass()
 def execute_kill_switch(user=None, reason="manual"):
     """Emergency: disable all bots and close all open positions.
+
+    The account is read again once the sweep has finished, one read per
+    eToro account however many rows it flattened (2026-10-31,
+    bot_program.etoro_cells): never between two of its closes.
 
     Args:
         user: if given, scope the sweep to this user; otherwise platform-wide.
@@ -864,3 +871,9 @@ def _close_asset_trade(trade, now):
         trade.pnl = pnl
         trade.save(update_fields=["exit_price", "closed_at", "status",
                                   "outcome", "pnl", "metadata"])
+        # The account is read again once this commits (2026-10-31,
+        # bot_program.etoro_cells): the sweep holds the ask, and asks one
+        # read per account however many rows it flattens, once it has
+        # finished (execute_kill_switch). Fenced inside.
+        from bot_program import etoro_cells
+        etoro_cells.refresh_for_trade(trade, why="kill switch")

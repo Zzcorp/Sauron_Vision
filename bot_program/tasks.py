@@ -287,8 +287,9 @@ def reconcile_all_asset_bot_trades():
     """Walk every user with an open live AssetBotTrade and verify the broker
     still agrees the position is open. Closes orphans + grades them.
 
-    Beat-scheduled every 15 min around the clock (since 2026-10-06: eToro's
-    forex, commodity and crypto stops fire at night). Tests should call
+    Beat-scheduled around the clock (since 2026-10-06: eToro's forex,
+    commodity and crypto stops fire at night), every 5 min since
+    2026-10-31 (every 15 before). Tests should call
     `reconcile_all_users()` directly to bypass the guard.
     """
     from .reconcile_asset import reconcile_all_users
@@ -993,77 +994,84 @@ def sync_etoro_accounts():
     from .engine.etoro_client import EtoroTrader
     from .models import EtoroAccount
 
-    out = {"attempted": 0, "stored": 0, "unreachable": 0}
+    out = {"attempted": 0, "stored": 0, "unreachable": 0, "cells_unread": 0}
     for acct in EtoroAccount.objects.exclude(api_key_enc=""):
         user = acct.user
         k, u = acct.get_credentials()
         if not (k and u):
             continue
         out["attempted"] += 1
-        reading, rows = None, None
+        reading, rows, margin, cells = None, None, None, CELLS_UNOFFERED
+        read_at = None
         try:
-            margin = None
             client = EtoroTrader(k, u, env="demo" if acct.demo else "live")
-            reading = client.net_liquidation()
+            # THE STAMP IS TAKEN BEFORE THE READ (2026-10-31). The cells
+            # are dated by the instant the GET left, not by the end of the
+            # pass: AssetBot._pledged_since charges every row opened AFTER
+            # last_margin_at, so a fill whose row landed between the read
+            # and a later stamp was in neither the cells nor the charge.
+            # Stamped first, such a row is charged (and, when the payload
+            # already carried it, counted twice until the next read — the
+            # safe way round).
+            read_at = timezone.now()
+            reading, margin, cells = _read_etoro_aggregate(client)
             _warm_etoro_names(client, user, acct.demo)
             rows = client.broker_portfolio()
-            # The margin cells, duck-typed and three-state: an adapter (or
-            # a test double) that answers no dict leaves the cells alone.
-            _mc = getattr(client, "margin_cells", None)
-            _m = _mc() if callable(_mc) else None
-            margin = _m if isinstance(_m, dict) else None
         except Exception as e:  # noqa: BLE001 — one account must not stop the rest
             logger.warning("broker sync: %s (etoro) unreadable: %s",
                            acct.label, e)
             reading, rows = None, None
+            if cells == CELLS_READ:
+                # the aggregate answered and a later read raised: the cells
+                # in hand are a measurement, but this pass is a miss
+                margin, cells = None, CELLS_UNOFFERED
 
         if reading is None and rows is None:
             out["unreachable"] += 1
             _note_broker_miss(acct, user)
             continue
-        _clear_broker_miss(acct)
+        if cells == CELLS_FAILED:
+            # A pass whose cash and used margin did not answer is a MISSED
+            # sync for the stall alert too (2026-10-31): those are the
+            # cells every eToro order is judged on, and a holdings list
+            # that answered beside them used to clear the count, so a
+            # failing aggregate read never reached the operator. Said as
+            # what it is (review, 2026-10-31): eToro answered this pass,
+            # so the alert names the cells, never "unreachable" or keys.
+            _note_broker_miss(acct, user, cells_only=True,
+                              holdings_answered=rows is not None)
+        else:
+            _clear_broker_miss(acct)
 
-        now = timezone.now()
+        now = read_at or timezone.now()
         fields = []
+        if cells == CELLS_FAILED:
+            # THE CASH AND THE MARGIN DID NOT ANSWER (2026-10-31): the
+            # equity and last_sync are not refreshed alone. Refreshing
+            # them made every page that dates the account by last_sync
+            # read current while the cash gate went on judging from cells
+            # one, two, four syncs old, up to the hour that refuses every
+            # eToro order. The holdings snapshot keeps its own stamp.
+            out["cells_unread"] += 1
+            reading = None
+            logger.warning(
+                "broker sync: %s (etoro) answered no cash / used margin "
+                "this pass — the equity, the cells and last_sync stay at "
+                "their last reading", acct.label)
         if reading is not None:
             value, currency = reading
-            acct.last_equity = value
-            acct.last_equity_currency = currency
-            acct.last_equity_at = now
-            fields += ["last_equity", "last_equity_currency",
-                       "last_equity_at"]
+            fields += _etoro_equity_fields(acct, reading, now)
         if rows is not None:
             acct.broker_positions = rows
             acct.broker_positions_at = now
             fields += ["broker_positions", "broker_positions_at"]
         acct.connected = True
-        acct.last_sync = now
-        fields += ["connected", "last_sync"]
+        fields.append("connected")
+        if cells != CELLS_FAILED:
+            acct.last_sync = now
+            fields.append("last_sync")
         if margin is not None:
-            # THE MARGIN CELLS (2026-09-23), each on its own: a payload that
-            # carries one figure and not the other writes one cell and
-            # leaves the other None. Same save and same `now` as the equity,
-            # so the headroom gate's age test reads one clock.
-            if margin.get("available_cash") is not None:
-                acct.last_available_cash = margin["available_cash"]
-                fields.append("last_available_cash")
-            if margin.get("used_margin") is not None:
-                acct.last_used_margin = margin["used_margin"]
-                fields.append("last_used_margin")
-            if (margin.get("available_cash") is not None
-                    or margin.get("used_margin") is not None):
-                acct.last_margin_at = now
-                fields.append("last_margin_at")
-                # THE WORLD THE CELLS WERE READ IN (2026-09-26): the
-                # client's own (`EtoroTrader.demo`, the segment it POSTs
-                # to); the row's when a double states none — the client
-                # above was built from acct.demo, so on a real read the
-                # two never differ. Read by _leverage_headroom.
-                _demo = getattr(client, "demo", None)
-                if not isinstance(_demo, bool):
-                    _demo = bool(acct.demo)
-                acct.last_margin_world = "demo" if _demo else "live"
-                fields.append("last_margin_world")
+            fields += _etoro_margin_fields(acct, client, margin, now)
         acct.save(update_fields=fields)
 
         if reading is not None:
@@ -1089,17 +1097,223 @@ def sync_etoro_accounts():
                     and book.pk == acct.pk:
                 _follow_the_account(user, value, currency)
                 _shock_trigger(user, now)
+    if out["cells_unread"]:
+        # Said on the component row in words: the holdings may have landed,
+        # but the cells the cash gate reads did not (2026-10-31).
+        out["status"] = "warning"
+        out["reason"] = (f"{out['cells_unread']} eToro account(s) answered "
+                         f"no cash / used margin; their equity, cells and "
+                         f"last sync stay at the last reading")
     return out
 
 
-def _note_broker_miss(acct, user) -> None:
+# ── The account's money cells, from one aggregate read (2026-10-31) ──────
+#: What _read_etoro_aggregate learnt about the cash and the used margin:
+#: read (a dict with at least one figure), failed (the one read failed, or
+#: answered neither figure), or unoffered (an adapter, or a test double,
+#: that states no cells at all: the equity is written as before).
+CELLS_READ = "read"
+CELLS_FAILED = "failed"
+CELLS_UNOFFERED = "unoffered"
+#: The rest of the aggregate payload, by the margin dict's key and the
+#: EtoroAccount cell it is stored in (2026-10-31): display only, written
+#: with the cells and never read by a gate.
+DISPLAY_FIGURES = {"pnl": "last_pnl", "frozen_cash": "last_frozen_cash",
+                   "balance": "last_balance"}
+
+
+def _read_etoro_aggregate(client):
+    """(reading, margin, state) from ONE aggregate-portfolio GET.
+
+    The adapter's account_snapshot answers both from one payload. An
+    adapter or a double without it is asked net_liquidation and
+    margin_cells, as the sync asked before; a margin_cells that answers
+    None there is a failed read, and anything else that is not a dict
+    states no cells. Raises what the reads raise."""
+    snap_fn = getattr(client, "account_snapshot", None)
+    snap = snap_fn() if callable(snap_fn) else ...
+    if snap is None:
+        return None, None, CELLS_FAILED
+    if isinstance(snap, dict) and "reading" in snap and "margin" in snap:
+        reading = snap.get("reading")
+        reading = (tuple(reading) if isinstance(reading, (tuple, list))
+                   and len(reading) == 2 else None)
+        margin = snap.get("margin")
+        margin = margin if isinstance(margin, dict) else None
+        # THE REST OF THE SAME PAYLOAD (2026-10-31): the P&L, the frozen
+        # cash and the balance travel with the cells, so _etoro_margin_
+        # fields writes them under the cells' one stamp. Display only.
+        figures = snap.get("figures")
+        if margin is not None and isinstance(figures, dict):
+            margin = dict(margin, **{k: figures.get(k)
+                                     for k in DISPLAY_FIGURES})
+    else:
+        reading = client.net_liquidation()
+        _mc = getattr(client, "margin_cells", None)
+        margin = _mc() if callable(_mc) else ...
+        if margin is ...:
+            return reading, None, CELLS_UNOFFERED
+        if margin is not None and not isinstance(margin, dict):
+            return reading, None, CELLS_UNOFFERED
+    if not isinstance(margin, dict) or (
+            margin.get("available_cash") is None
+            and margin.get("used_margin") is None):
+        return reading, None, CELLS_FAILED
+    return reading, margin, CELLS_READ
+
+
+def _etoro_equity_fields(acct, reading, at) -> list:
+    """Write the equity cells of `reading` on `acct`; the fields to save."""
+    value, currency = reading
+    acct.last_equity = value
+    acct.last_equity_currency = currency
+    acct.last_equity_at = at
+    return ["last_equity", "last_equity_currency", "last_equity_at"]
+
+
+def _etoro_margin_fields(acct, client, margin, at) -> list:
+    """Write the margin cells of `margin` on `acct`; the fields to save.
+
+    THE MARGIN CELLS (2026-09-23), each on its own: a payload that carries
+    one figure and not the other writes one cell and leaves the other
+    None. In the sync, the same save and the same `at` as the equity; the
+    re-read after an order writes them alone under its own stamp, so the
+    headroom gate dates the equity by last_equity_at as well (2026-10-31)."""
+    fields = []
+    if margin.get("available_cash") is not None:
+        acct.last_available_cash = margin["available_cash"]
+        fields.append("last_available_cash")
+    if margin.get("used_margin") is not None:
+        acct.last_used_margin = margin["used_margin"]
+        fields.append("last_used_margin")
+    if fields:
+        acct.last_margin_at = at
+        fields.append("last_margin_at")
+        # THE WORLD THE CELLS WERE READ IN (2026-09-26): the client's own
+        # (`EtoroTrader.demo`, the segment it POSTs to); the row's when a
+        # double states none — the client was built from acct.demo, so on
+        # a real read the two never differ. Read by _leverage_headroom.
+        _demo = getattr(client, "demo", None)
+        if not isinstance(_demo, bool):
+            _demo = bool(acct.demo)
+        acct.last_margin_world = "demo" if _demo else "live"
+        fields.append("last_margin_world")
+        # THE P&L, THE FROZEN CASH AND THE BALANCE (2026-10-31), from the
+        # same payload and dated by the same stamp, so a figure this read
+        # did not carry is written None rather than an older one left
+        # under a new date. Only when the reader states them at all (the
+        # adapter's account_snapshot does; a double without them leaves
+        # the cells as they were). Display only (bot_program.etoro_used).
+        for key, cell in DISPLAY_FIGURES.items():
+            if key in margin:
+                setattr(acct, cell, margin.get(key))
+                fields.append(cell)
+    return fields
+
+
+@shared_task
+def refresh_etoro_cells(account_pk: int, why: str = "") -> dict:
+    """Re-read ONE eToro account's money right after the platform's own
+    order or close (2026-10-31, bot_program.etoro_cells queues it).
+
+    The operator: "wait 15min to make another trade". A close frees cash
+    at eToro within the same second (MEASURED 2026-09-23: the margin
+    cells move with the fill), and the gate that judges the next order
+    (AssetBot._leverage_headroom) read it only from the sync's cells, up
+    to a sync old: the freed cash was refused until the next beat.
+
+    ONE aggregate-portfolio GET (account_snapshot), the sync's own read,
+    and only that: the cash, the used margin and their world, written in
+    one save under one stamp taken BEFORE the GET (the sync's rule). NOT
+    the equity or its stamp: the pools that follow the account are
+    retuned from that reading by the sync alone, and their entries freeze
+    on its age (capital_truth.tracking_freeze_reason), so a re-read that
+    refreshed it would hide a sync that stopped retuning them. The gate's
+    pledge ratio divides by the sync's equity and dates it by its own
+    stamp (review, 2026-10-31): past TRACKING_FRESH_SECONDS the gate
+    refuses whatever the cells' age (AssetBot._cash_gate), so a re-read
+    never makes an old equity pass there either — the equity is a beat
+    old only while the sync runs.
+    Not /portfolio, which lags fills and closes by about 60 s
+    (PORTFOLIO_LAG_S): a holdings snapshot read 3 s after a close would
+    still list it; the sync's beat reads it. Not last_sync, the history
+    row or the shock plan: those stay the sync's too.
+
+    Under the sync's own switches (platform_master, broker_account_sync),
+    asked inline rather than through guarded_task: the component's row is
+    the sync's verdict, and a re-read every few seconds must not overwrite
+    it. A failed read writes nothing: the old cells keep their age, never
+    a zero. Never raises."""
+    from django.utils import timezone
+
+    from core.platform_control import is_component_enabled
+
+    from .models import EtoroAccount
+
+    out = {"account": account_pk, "why": str(why or "")[:40], "read": False}
+    try:
+        if not (is_component_enabled("platform_master")
+                and is_component_enabled("broker_account_sync")):
+            out["skipped"] = "broker_account_sync is off"
+            return out
+        from . import etoro_cells
+        etoro_cells.note_read_started(account_pk)
+        acct = EtoroAccount.objects.filter(pk=account_pk).exclude(
+            api_key_enc="").first()
+        if acct is None:
+            out["skipped"] = "no keyed eToro account"
+            return out
+        k, u = acct.get_credentials()
+        if not (k and u):
+            out["skipped"] = "the stored key could not be read"
+            return out
+        from .engine.etoro_client import EtoroTrader
+        client = EtoroTrader(k, u, env="demo" if acct.demo else "live")
+        at = timezone.now()                # BEFORE the GET (see the sync)
+        _reading, margin, cells = _read_etoro_aggregate(client)
+        if cells != CELLS_READ or margin is None:
+            logger.warning("eToro re-read (%s): %s answered no cash / used "
+                           "margin — the cells keep their last reading",
+                           out["why"] or "after an order", acct.label)
+            return out
+        fields = _etoro_margin_fields(acct, client, margin, at)
+        # a save of the cells alone, never the whole row: the sync may be
+        # writing the holdings at the same moment
+        EtoroAccount.objects.filter(pk=acct.pk).update(
+            **{f: getattr(acct, f) for f in fields})
+        out["read"] = True
+        logger.info("eToro re-read (%s): %s cash %s, used %s", out["why"]
+                    or "after an order", acct.label,
+                    margin.get("available_cash"), margin.get("used_margin"))
+    except Exception as e:  # noqa: BLE001 — a re-read is beside the trade
+        logger.warning("eToro re-read of account %s failed: %s",
+                       account_pk, e)
+    return out
+
+
+def _note_broker_miss(acct, user, *, cells_only=False,
+                      holdings_answered=False) -> None:
+    """Count one missed sync of `acct`, log it, and on the third running
+    send the stall alert.
+
+    `cells_only` (eToro, 2026-10-31, review): the account answered this
+    pass but its cash and used margin did not. It counts as a miss like
+    any other, and is said as what it is: the log line and the alert name
+    the cells and their age, and send nobody to re-save keys that just
+    answered. A run with one pass that answered nothing at all keeps the
+    unreachable alert, keys and all."""
     from django.core.cache import cache
 
-    from .notifications import notify_broker_unreachable
+    from .notifications import (notify_broker_cells_unanswered,
+                                notify_broker_unreachable)
 
     key = f"broker_sync:miss:{_broker_kind(acct)}:{acct.pk}"
     misses = int(cache.get(key) or 0) + 1
     cache.set(key, misses, 24 * 3600)
+    # whether a pass of this run answered nothing at all
+    silent_key = f"broker_sync:miss_silent:{_broker_kind(acct)}:{acct.pk}"
+    if not cells_only:
+        cache.set(silent_key, 1, 24 * 3600)
 
     # EVERY miss is written down, with its true consecutive number, before
     # any decision about alerting (2026-09-15).
@@ -1130,15 +1344,28 @@ def _note_broker_miss(acct, user) -> None:
         "etoro": "Re-save the keys on /brokers/ — the probe answers ok, "
                  "refused or unverified",
     }
-    logger.warning(
-        "broker sync: %s [%s] (%s) returned no equity AND no holdings — "
-        "consecutive miss %d. Neither read raised; both answered None, "
-        "which is what an unauthenticated session looks like at any of the "
-        "three venues. %s",
-        acct.label, _kind,
-        f"{getattr(acct, 'host', '')}:{getattr(acct, 'port', '')}"
-        if _kind == "ibkr" else "no socket — a session, a key or a sign-in",
-        misses, _WHERE.get(_kind, _WHERE["ibkr"]))
+    if cells_only:
+        _at = getattr(acct, "last_margin_at", None)
+        logger.warning(
+            "broker sync: %s [%s] answered no cash / used margin — "
+            "consecutive miss %d. %s, so the keys answered; the cells every "
+            "eToro order is judged on stay at their last reading (%s), and "
+            "past an hour every eToro order is refused.",
+            acct.label, _kind, misses,
+            "The holdings answered beside them" if holdings_answered
+            else "The aggregate read answered without them",
+            _at.isoformat() if _at else "never read")
+    else:
+        logger.warning(
+            "broker sync: %s [%s] (%s) returned no equity AND no holdings — "
+            "consecutive miss %d. Neither read raised; both answered None, "
+            "which is what an unauthenticated session looks like at any of "
+            "the three venues. %s",
+            acct.label, _kind,
+            f"{getattr(acct, 'host', '')}:{getattr(acct, 'port', '')}"
+            if _kind == "ibkr"
+            else "no socket — a session, a key or a sign-in",
+            misses, _WHERE.get(_kind, _WHERE["ibkr"]))
 
     if misses < BROKER_MISS_ALERT_AFTER:
         return
@@ -1146,10 +1373,16 @@ def _note_broker_miss(acct, user) -> None:
     if cache.get(gate):
         return
     try:
-        notify_broker_unreachable(user, label=acct.label,
-                                  host=getattr(acct, "host", "api"),
-                                  port=getattr(acct, "port", 0),
-                                  misses=misses, broker=_kind)
+        if cells_only and not cache.get(silent_key):
+            notify_broker_cells_unanswered(
+                user, label=acct.label, misses=misses,
+                cells_at=getattr(acct, "last_margin_at", None),
+                broker=_kind, holdings_answered=holdings_answered)
+        else:
+            notify_broker_unreachable(user, label=acct.label,
+                                      host=getattr(acct, "host", "api"),
+                                      port=getattr(acct, "port", 0),
+                                      misses=misses, broker=_kind)
         cache.set(gate, 1, BROKER_MISS_ALERT_COOLDOWN)
     except Exception as e:  # noqa: BLE001 — an alert must never fail the sync
         logger.warning("broker sync: stall alert failed for %s: %s",
@@ -1160,6 +1393,7 @@ def _clear_broker_miss(acct) -> None:
     from django.core.cache import cache
 
     cache.delete(f"broker_sync:miss:{_broker_kind(acct)}:{acct.pk}")
+    cache.delete(f"broker_sync:miss_silent:{_broker_kind(acct)}:{acct.pk}")
     cache.delete(f"broker_sync:alerted:{_broker_kind(acct)}:{acct.pk}")
 
 

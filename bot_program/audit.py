@@ -558,6 +558,30 @@ def record_config_rearmed(cfg, lifted: dict, *, who: str = "",
         logger.warning("audit record_config_rearmed failed: %s", e)
 
 
+#: A manual lane's own knobs set from its card on /admin-dashboard/
+#: (2026-10-31, manual_trade.set_lane_knobs, behind the trading PIN).
+#: 14 characters in the 20-wide column; a constant, never KIND_CHOICES.
+LANE_KNOBS_SET = "lane_knobs_set"
+
+
+def record_lane_knobs(cfg, *, before: dict, after: dict, who: str = "",
+                      user=None) -> None:
+    """The lane's knobs as they were and as they are now (each None when
+    the key is absent: the default stands), with who set them and the
+    lane's mode at the time. Never raises: the save stands either way."""
+    try:
+        linked = user if getattr(user, "is_authenticated", False) and \
+            getattr(user, "pk", None) else getattr(cfg, "user", None)
+        data = dict(_config_facts(cfg), **{
+            "who": str(who or "")[:80],
+            "before": {str(k)[:40]: v for k, v in (before or {}).items()},
+            "after": {str(k)[:40]: v for k, v in (after or {}).items()},
+        })
+        record_event(LANE_KNOBS_SET, data, user=linked)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("audit record_lane_knobs failed: %s", e)
+
+
 def record_desk_plan(plan, extra: dict = None) -> None:
     """Hook from the capital desk — one row per plan, taken or refused.
 

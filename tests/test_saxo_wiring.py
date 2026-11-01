@@ -370,13 +370,20 @@ class TheSyncTests(TestCase):
         self.assertIn("SaxoAccount.objects.exclude(app_key_enc=\"\")",
                       block[:2000])
 
-    def test_the_beat_schedules_it_at_the_etoro_cadence(self):
+    def test_the_beat_schedules_it_at_the_broker_walks_cadence(self):
+        """At the eToro cadence until 2026-10-31, when the eToro walk moved
+        to 300 s on the operator's word about eToro ("the 15min etoro
+        refresh is way too long"); nothing was asked of Saxo, which keeps
+        the IBKR walk's 900 s."""
         from config.celery import app
         entry = app.conf.beat_schedule.get("sync-saxo-accounts")
         self.assertIsNotNone(entry)
         self.assertEqual(entry["task"], "bot_program.tasks.sync_saxo_accounts")
         self.assertEqual(entry["schedule"],
-                         app.conf.beat_schedule["sync-etoro-accounts"]["schedule"])
+                         app.conf.beat_schedule["sync-broker-account"]["schedule"])
+        self.assertEqual(entry["schedule"], 900.0)
+        self.assertEqual(
+            app.conf.beat_schedule["sync-etoro-accounts"]["schedule"], 300.0)
 
 
 class ThePageClaimsClassesTests(TestCase):

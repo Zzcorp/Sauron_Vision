@@ -23,11 +23,27 @@
             flash), and nudges the chart's last candle — the price used to
             render once and freeze under a live market badge, the worst
             combination.{% endcomment %}
-            <div class="dtl-price">
+            {% comment %}Whose price this is (2026-10-31, dashboard.chart_source):
+            the feed, its age and the stand-in words under it ("Yahoo GC=F,
+            the front-month future"), and for a venue-routed instrument the
+            venue's last known price beside it, from what the platform
+            already holds. data-decimals is the page's one count, so the
+            15-second repaint prints what this first paint prints. A day
+            change measured by another feed than the price's is a dash,
+            its title says whose.{% endcomment %}
+            <div class="dtl-price" data-decimals="{{ quote_decimals }}">
                 <span class="dtl-last">{% px quote.last instrument.asset_class instrument.symbol %}</span>
+                {% if hero and hero.change_same_feed is False %}
+                <span class="dtl-chg dtl-chg--other" title="{{ hero.change_words }}">—</span>
+                {% else %}
                 <span class="dtl-chg {% if quote.change_pct >= 0 %}up{% else %}down{% endif %}">
                     {% if quote.change_pct >= 0 %}▲ +{% else %}▼ {% endif %}{{ quote.change_pct|floatformat:2 }}%
                 </span>
+                {% endif %}
+            </div>
+            <div class="dtl-who">
+                <span class="dtl-src" data-hero="src">{{ hero.source_words|default:quote.source }}{% if hero.age_words %} · {{ hero.age_words }} old{% endif %}</span>
+                <span class="dtl-venue" data-hero="venue"{% if not hero.venue %} hidden{% endif %}>{% if hero.venue %}{{ hero.venue.label }} {{ hero.venue.price_text }} · {{ hero.venue.age_words }} old{% if hero.gap_words %} · {{ hero.gap_words }}{% endif %}{% endif %}</span>
             </div>
             {% endif %}
             {% if market %}
@@ -136,6 +152,19 @@
     .wl-star:hover, .wl-star:focus-visible { color:var(--accent-gold); border-color:var(--accent-gold); outline:none; }
     .wl-star.on { color:var(--accent-gold); border-color:var(--accent-gold); }
     .dtl-price { display:flex; align-items:baseline; gap:10px; }
+    /* Whose price it is (2026-10-31): a line of its own under the title
+       row (`order` puts it after the market badge, so the badge keeps its
+       place beside the price), small and muted, never louder than the
+       price. The venue's part in the gold the captions under the chart
+       use for the venue's prices. */
+    .dtl-who { order:10; flex-basis:100%; display:flex; flex-wrap:wrap;
+        gap:0 14px; margin-top:-6px;
+        font-family:var(--font-mono); font-size:10px; line-height:1.45;
+        letter-spacing:.02em; color:var(--text-muted); }
+    .dtl-who [hidden] { display:none; }
+    .dtl-venue { color:var(--accent-gold-ink, var(--accent-gold)); }
+    .dtl-chg.dtl-chg--other { color:var(--text-muted); background:transparent;
+        border:1px dashed var(--border); }
     .dtl-last { font-family:var(--font-display); font-size:26px; font-weight:700;
         color:var(--text-primary); letter-spacing:0.5px; }
     .dtl-chg { font-family:var(--font-mono); font-size:13px; font-weight:700;
@@ -162,6 +191,9 @@
     /* Key-value rows: the raw 8-decimal values were unreadable — the
        label column gets a fixed rhythm and the values a mono face. */
     .kv-list .value { font-family:var(--font-mono); }
+    .kv-list .value.up { color:var(--accent); }
+    .kv-list .value.down { color:var(--accent-red); }
+    .kv-list .value.dtl-chg--other { color:var(--text-muted); }
 </style>
 
 <!-- TradingView Lightweight Chart (chart widget) -->
@@ -250,13 +282,16 @@ exactly what a second queryset built for a table would eventually do.
     <div class="card fade-in-up delay-2">
         <div class="card-header"><span class="card-title">Latest Quote</span></div>
         {% if quote %}
-        <ul class="kv-list">
-            <li><span class="label">LAST</span><span class="value" style="font-size:18px;font-weight:700;">{% px quote.last instrument.asset_class instrument.symbol %}</span></li>
-            <li><span class="label">CHANGE 24H</span><span class="value" style="color:{% if quote.change_pct >= 0 %}var(--accent){% else %}var(--accent-red){% endif %}">{% if quote.change_pct >= 0 %}+{% endif %}{{ quote.change_pct|floatformat:2 }}%</span></li>
-            <li><span class="label">BID / ASK</span><span class="value">{% px quote.bid instrument.asset_class instrument.symbol %} / {% px quote.ask instrument.asset_class instrument.symbol %}</span></li>
+        {% comment %}Repainted by sv-instrument-live.js with the hero
+        (2026-10-31, data-lq): rendered once, its LAST disagreed with the
+        hero from the first tick. SOURCE in words, the stand-in said.{% endcomment %}
+        <ul class="kv-list" data-decimals="{{ quote_decimals }}">
+            <li><span class="label">LAST</span><span class="value" data-lq="last" style="font-size:18px;font-weight:700;">{% px quote.last instrument.asset_class instrument.symbol %}</span></li>
+            <li><span class="label">CHANGE 24H</span>{% if hero and hero.change_same_feed is False %}<span class="value dtl-chg--other" data-lq="change" title="{{ hero.change_words }}">—</span>{% else %}<span class="value {% if quote.change_pct >= 0 %}up{% else %}down{% endif %}" data-lq="change">{% if quote.change_pct >= 0 %}+{% endif %}{{ quote.change_pct|floatformat:2 }}%</span>{% endif %}</li>
+            <li><span class="label">BID / ASK</span><span class="value" data-lq="sides"{% if hero.sides_words %} title="Bid and ask from {{ hero.sides_words }}"{% endif %}>{% px quote.bid instrument.asset_class instrument.symbol %} / {% px quote.ask instrument.asset_class instrument.symbol %}</span></li>
             <li><span class="label">VOLUME</span><span class="value">{% if quote.volume %}{{ quote.volume|floatformat:0 }}{% else %}—{% endif %}</span></li>
-            <li><span class="label">SOURCE</span><span class="value" style="color:var(--accent);">{{ quote.source|default:"—" }}</span></li>
-            <li><span class="label">UPDATED</span><span class="value">{{ quote.updated_at|timesince }} ago</span></li>
+            <li><span class="label">SOURCE</span><span class="value" data-lq="source" style="color:var(--accent);">{{ hero.source_words|default:quote.source|default:"—" }}</span></li>
+            <li><span class="label">UPDATED</span><span class="value" data-lq="updated">{{ quote.updated_at|timesince }} ago</span></li>
         </ul>
         {% else %}
         <div class="empty-state" style="padding:30px;"><p>NO QUOTE DATA YET</p></div>

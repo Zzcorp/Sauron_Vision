@@ -379,6 +379,25 @@ COMMANDS = [
         "category": "read",
     },
     {
+        "name": "legacy_positions",
+        "title": "Legacy positions",
+        "purpose": "Every open legacy portfolio position (the /setup/ eToro sync button, the /setup/ 'add position' form, the chat trader) by symbol, with its book, writer, age and the admin page that closes it by hand (no bot or reconcile closes one) — each one counts as a real-money holder in the duplicate rule.",
+        "usage": [
+            "python manage.py legacy_positions",
+            "python manage.py legacy_positions --symbol AAPL",
+            "python manage.py legacy_positions --user <username>",
+        ],
+        "mirrors": "/positions/",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+        # Read-only, but the Run lane's set is pinned as a security
+        # decision (tests/test_ops_cockpit.py): a terminal command until
+        # that set is widened on purpose (2026-10-31).
+        "runnable": False,
+        "runnable_reason": "terminal only: the Run lane's set is pinned",
+    },
+    {
         "name": "scorecard",
         "title": "Scorecard",
         "purpose": "Win rate, average win, average loss and expectancy of the closed book, split by lane, rule, class or venue — and which of the three is losing the money: winners closed by hand, losers that had been +1R, stops that did not hold.",

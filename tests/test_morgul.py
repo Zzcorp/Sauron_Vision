@@ -694,13 +694,41 @@ class MarginTests(_Case):
         self.cfg = _cfg(self.user, "Stocks live", "stock", mode="live")
 
     def _acct(self, **fields):
+        # one sync's reading: the equity and the cells under one stamp
         base = dict(demo=False, is_primary_for_stocks=True,
                     last_equity=Decimal("100"), last_equity_currency="USD",
+                    last_equity_at=self.now - timedelta(minutes=5),
                     last_used_margin=Decimal("40"),
                     last_margin_at=self.now - timedelta(minutes=5),
                     last_margin_world="live")
         base.update(fields)
         return _etoro(self.user, **base)
+
+    def test_fresh_cells_on_an_old_equity_neither_brake_nor_hide_it(self):
+        """The re-read after an order dates the cells and never the equity
+        (review, 2026-10-31): G6 paired the fresh used margin with an
+        equity of any age for its brake, and dated "the margin reading is
+        stale" by the cells alone, so the re-reads silenced it."""
+        acct = self._acct(last_used_margin=Decimal("60"),
+                          last_margin_at=self.now - timedelta(seconds=10),
+                          last_equity_at=self.now - timedelta(hours=3))
+        by = _by_subject(_check("margin", self.now)[1])
+        pledged = by[f"account:{acct.pk}:pledged"]
+        self.assertEqual(pledged.severity, "warning")
+        self.assertFalse(pledged.brakes)
+        self.assertIn("A warning only, and no brake: equity read 3 h ago",
+                      pledged.facts)
+        self.assertIn("Equity read: 3 h ago", pledged.facts)
+        stale = by[f"account:{acct.pk}:stale"]
+        self.assertIn("Equity read: 3 h ago", stale.facts)
+
+    def test_an_equity_with_no_reading_time_never_brakes(self):
+        acct = self._acct(last_used_margin=Decimal("60"), last_equity_at=None)
+        f = _by_subject(_check("margin", self.now)[1])[
+            f"account:{acct.pk}:pledged"]
+        self.assertEqual(f.severity, "warning")
+        self.assertIn("A warning only, and no brake: no equity reading time "
+                      "recorded", f.facts)
 
     def test_pledged_past_the_fraction_and_five_points_is_critical(self):
         # the brake's reach is every enabled live config of the user, the
@@ -1574,11 +1602,14 @@ class CommandTests(_Case):
 
     def _pledged_past_the_limit(self):
         """A braking finding (G6) — the daily loss stopped braking on
-        2026-10-01."""
+        2026-10-01. One sync's reading: the equity and the cells under one
+        stamp (G6 dates the equity apart since 2026-10-31)."""
+        read = timezone.now() - timedelta(minutes=5)
         _etoro(self.user, demo=False, is_primary_for_stocks=True,
                last_equity=Decimal("100"), last_equity_currency="USD",
+               last_equity_at=read,
                last_used_margin=Decimal("90"),
-               last_margin_at=timezone.now() - timedelta(minutes=5),
+               last_margin_at=read,
                last_margin_world="live")
 
     def test_it_prints_the_findings_and_sends_and_stops_nothing(self):

@@ -2045,6 +2045,26 @@ def _capital_or_none(user):
         return None
 
 
+def _etoro_cell(etoro):
+    """eToro's OWN used figure as a strip cell (2026-10-31), or None with
+    no eToro row (the caller then adds no cell: every cell of a strip
+    carries its tooltip): what the account holds as eToro states it, from
+    the sync's cells, with what is available, the total and the age under
+    it (bot_program.etoro_used, carried by capital_summary). The view
+    layer only: the strip's other cells and services.live_book_value are
+    as they were, and nothing here moves a gate's number.
+
+    The line under it is etoro_used's own (cell_t, 2026-10-31), the total
+    with its own age when it is older than the cells: the re-read after
+    an order moves the cells and never the total, and the line built here
+    said "read 20 s ago" over an equity three hours old."""
+    if not etoro:
+        return None
+    sub = etoro.get("cell_t") or etoro.get("t") or LIVE_DASH
+    return _live_cell(etoro.get("used_t") or LIVE_DASH, sub=sub,
+                      title=etoro.get("title") or "")
+
+
 def _render_portfolio(request, live_only):
     """Phase 63 — enriched portfolio dashboard, now live.
 
@@ -2260,13 +2280,24 @@ def _render_portfolio(request, live_only):
     pf_view = build_view(request.GET, [(row, None) for row in open_rows],
                          limit=8, base_url=reverse("portfolio_overview"))
 
+    # THE LIVE WORLD READS eToro's CELLS (2026-10-31). ALLOCATED and FREE
+    # above are both books against the cash typed on /setup/; eToro's own
+    # used, available and total stand beside them in their own cell, with
+    # the split under the strip. The view layer only: live_book_value (the
+    # gate denominator's writer) is not touched.
+    capital = _capital_or_none(request.user)
+    etoro = (capital or {}).get("etoro")
+    if etoro:
+        strip["etoro"] = _etoro_cell(etoro)
+
     context = {
         "page_id": "portfolio", "portfolio": portfolio,
         # Pools / used / free / cash — the money question, answered by ONE
         # service so this page, the positions page and the headband popups
         # can never quote three different answers. See
         # portfolio.services.capital_summary for what the two economies are.
-        "capital": _capital_or_none(request.user),
+        "capital": capital,
+        "etoro": etoro,
         "strip": strip,
         "open_positions_count": n_open,
         # The rows the table shows, in the view's order; the cap moved
@@ -3049,13 +3080,21 @@ def _render_positions(request, live_only, *, deep_link=None):
                  _position_card_details(request.user, closed_positions))),
         history=True, keep={"tab": "history"}, base_url=positions_url)
 
+    # eToro's OWN used figure heads the strip (2026-10-31): see
+    # _etoro_cell; the split rides under the strip.
+    capital = _capital_or_none(request.user)
+    etoro = (capital or {}).get("etoro")
+    if etoro:
+        strip["etoro"] = _etoro_cell(etoro)
+
     context = {
         "page_id": "positions",
         # Pools / used / free / cash — the money question, answered by ONE
         # service so this page, the positions page and the headband popups
         # can never quote three different answers. See
         # portfolio.services.capital_summary for what the two economies are.
-        "capital": _capital_or_none(request.user),
+        "capital": capital,
+        "etoro": etoro,
         "tab": tab,
         "strip": strip,
         "positions": open_rows,
@@ -3160,7 +3199,20 @@ def _render_positions(request, live_only, *, deep_link=None):
     from bot_program.capital_truth import broker_view
     from bot_program.models import AssetBotTrade
     broker = broker_view(request.user)
-    if broker and broker.get("positions"):
+    if broker and broker.get("positions") and broker.get("kind") == "etoro":
+        # BY POSITION AT eTORO (2026-10-31): eToro holds every position
+        # apart, so a symbol a row holds no longer claims every eToro
+        # position on it — a second NVDA opened in the eToro app read
+        # CLAIMED. One row per position, claimed as the outside list on
+        # /treasury/ claims (etoro_used.mark_holdings): the account's
+        # world, a close Sauron stopped trying said STOPPED, a leg closed
+        # inside eToro's list lag still Sauron's, a row that records no
+        # broker said apart; a row stamped for another broker claims
+        # nothing here.
+        from bot_program.etoro_used import mark_holdings
+        mark_holdings(request.user, broker["positions"]["rows"],
+                      broker["positions"]["at"])
+    elif broker and broker.get("positions"):
         claimed = {
             str(s).upper()
             for s in AssetBotTrade.objects.filter(
@@ -4227,11 +4279,24 @@ def admin_dashboard(request):
     # way the broker credential forms are.
     from bot_program.capital_truth import (allocate_shares, followers_of,
                                            share_label, tracks_broker)
-    from bot_program.manual_trade import EXECUTABLE_CLASS, manual_config_for
+    from bot_program.manual_trade import (EXECUTABLE_CLASS, LANE_KNOBS,
+                                          LANE_KNOB_WORDS, lane_knob_defaults,
+                                          lane_knobs, manual_config_for)
     try:
         _plan = allocate_shares(followers_of(request.user))["plan"]
     except Exception:  # noqa: BLE001 — the card must render regardless
         _plan = {}
+
+    def _knob_rows(lane):
+        """The lane's own knobs (2026-10-31): stored value, or "" and the
+        default it falls back to, for the card's PIN-guarded form."""
+        stored, defaults = lane_knobs(lane), lane_knob_defaults(lane)
+        return [{"key": k, "words": LANE_KNOB_WORDS[k],
+                 "value": "" if stored[k] is None else f"{stored[k]:g}",
+                 "default": ("—" if defaults[k] is None
+                             else f"{defaults[k]:g}")}
+                for k in LANE_KNOBS]
+
     context["manual_lanes"] = [
         {"asset_class": cls, "mode": lane.mode,
          "capital": float(lane.capital),
@@ -4247,7 +4312,8 @@ def admin_dashboard(request):
          "tracks": bool((lane.extras or {}).get("capital_tracks_broker")),
          # The SHARE of the account this lane takes when it follows —
          # explicit, or the automatic split it currently gets.
-         "share": share_label(lane, _plan) if tracks_broker(lane) else ""}
+         "share": share_label(lane, _plan) if tracks_broker(lane) else "",
+         "knobs": _knob_rows(lane)}
         for cls in sorted(set(EXECUTABLE_CLASS.values()))
         for lane in [manual_config_for(request.user, cls)]
     ]
@@ -4435,6 +4501,9 @@ def _chart_positions(user, instrument):
             "age_s": _age(pos.opened_at),
             "leverage": _pos_leverage(instrument.asset_class or ""),
             "soft_stop": None, "soft_stop_text": None, "thesis": None,
+            # Whose prices the lines are (2026-10-31): a book row's venue
+            # is not recorded.
+            "venue": "",
         })
     for t in AssetBotTrade.objects.filter(
             config__user=user, symbol=instrument.symbol,
@@ -4488,6 +4557,10 @@ def _chart_positions(user, instrument):
             "thesis": ({"verdict": th.get("verdict"),
                         "words": str(th.get("words") or "")[:200]}
                        if th.get("verdict") else None),
+            # Whose prices the entry, stop and target are (2026-10-31,
+            # skeptic M4): the chart's legend says so when they sit over
+            # candles of another feed (dashboard.chart_source).
+            "venue": str(meta.get("broker") or ""),
         })
     return out
 
@@ -4722,6 +4795,20 @@ def _instrument_page(request, instrument, *, deep_link=None):
     except Exception:
         pass
 
+    # Whose price the hero prints (2026-10-31, dashboard.chart_source): the
+    # feed, its age, the stand-in words, whether the day change is the same
+    # feed's, and the venue's last known price beside it — the same facts
+    # the preview API repaints every 15 seconds.
+    hero = None
+    try:
+        from dashboard import chart_source
+        hero = chart_source.quote_facts(
+            instrument, quote,
+            route=chart_source.route_of(request.user, instrument))
+    except Exception as e:  # noqa: BLE001 — words beside a price never 500
+        logger.warning("[instrument page] %s: whose-price facts failed: %s",
+                       instrument.symbol, e)
+
     # Get latest technicals
     technicals = TechnicalIndicator.objects.filter(instrument=instrument).first()
 
@@ -4777,6 +4864,7 @@ def _instrument_page(request, instrument, *, deep_link=None):
         "page_id": "instruments",
         "instrument": instrument,
         "quote": quote,
+        "hero": hero,
         "lane_mode": lane_mode,
         "technicals": technicals,
         "signals": signals,
@@ -4885,7 +4973,8 @@ def take_trade_execute(request, signal_id):
                              stop=body["stop"],
                              target=body["target"],
                              leverage=body["leverage"],
-                             pin_ok=pin_ok)
+                             pin_ok=pin_ok,
+                             dup_seen=body["dup_seen"])
     res = _ticket_pin_words(res, pin_ok)
     # THE COUNCIL (2026-10-08): a sitting the owner asked about is linked
     # to the trade AFTER it was taken. It can only follow a trade, never
@@ -4994,6 +5083,16 @@ def _parse_trade_body(request):
         if council_session is not None and council_session <= 0:
             council_session = None
     parsed["council_session"] = council_session
+
+    # THE HOLDERS THE TICKET SHOWED (2026-10-31): its preview's
+    # duplicate.holder_ids, sent back so the send refuses a bot that opened
+    # the same bet since (manual_trade._execute). Absent is None — nothing
+    # shown; a list keeps its strings and drops anything else.
+    raw_seen = body.get("dup_seen")
+    if raw_seen is not None and not isinstance(raw_seen, list):
+        return None, "dup_seen must be a list"
+    parsed["dup_seen"] = (None if raw_seen is None else
+                          [s for s in raw_seen if isinstance(s, str)][:50])
 
     return {"close_ids": close_ids,
             "side": str(body.get("side", "")).upper(),
@@ -5313,7 +5412,8 @@ def asset_trade_execute(request, symbol):
                               stop=body["stop"],
                               target=body["target"],
                               leverage=body["leverage"],
-                              pin_ok=pin_ok)
+                              pin_ok=pin_ok,
+                              dup_seen=body["dup_seen"])
     res = _ticket_pin_words(res, pin_ok)
     # THE COUNCIL (2026-10-08): linked after the trade, as above.
     if isinstance(res, dict) and res.get("ok") and body.get("council_session"):
@@ -5369,6 +5469,49 @@ def take_trade_arm(request):
                                                   "LIVE",
                                        nothing="the lane stays as it was"),
                    pin_required=True, logged_out=bool(v.logged_out))
+    return JsonResponse(res)
+
+
+@login_required
+def take_trade_lane_knobs(request):
+    """POST {asset_class, pin, risk_per_trade_pct?, max_single_position_pct?,
+    max_notional_fraction?} — the manual lane's own knobs, the operator's
+    own lanes (2026-10-31). A number sets a knob, "" removes it (its
+    default stands), an absent key is left alone. Always the trading PIN
+    (an ACT door, core/trading_pin.py), asked after the numbers are
+    checked; every money question is manual_trade.set_lane_knobs's."""
+    from django.http import HttpResponseNotAllowed, JsonResponse
+
+    from bot_program.manual_trade import LANE_KNOBS, set_lane_knobs
+
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    import json as _json
+    try:
+        body = _json.loads(request.body.decode() or "{}")
+    except ValueError:
+        return JsonResponse({"error": "Body must be JSON"}, status=400)
+    if not isinstance(body, dict):
+        return JsonResponse({"error": "Body must be a JSON object"},
+                            status=400)
+    from core.trading_pin import ACT, refusal_of, sentence
+    from dashboard.views_close import _pin_ok as _trading_pin_ok
+    pin_ok = _trading_pin_ok(request, body, door=ACT,
+                             act="set the manual lane's knobs")
+    knobs = {k: v for k, v in body.items()
+             if k not in ("asset_class", "pin")}
+    res = set_lane_knobs(request.user,
+                         asset_class=str(body.get("asset_class", "") or ""),
+                         knobs=knobs, pin_ok=pin_ok,
+                         who=request.user.username)
+    v = refusal_of(pin_ok)
+    if v is not None and isinstance(res, dict) and res.get("error"):
+        res = dict(res, error=sentence(v, subject="Setting the manual lane's "
+                                                  "knobs",
+                                       nothing="nothing was saved"),
+                   pin_required=True, logged_out=bool(v.logged_out))
+    if isinstance(res, dict) and res.get("ok"):
+        res["keys"] = list(LANE_KNOBS)
     return JsonResponse(res)
 
 
@@ -5659,7 +5802,7 @@ def instrument_preview_api(request, symbol):
     # Count signals
     active_signals = Signal.objects.filter(instrument=inst, is_active=True).count()
 
-    return JsonResponse({
+    out = {
         "symbol": inst.symbol,
         "name": inst.name,
         "asset_class": inst.asset_class,
@@ -5672,7 +5815,26 @@ def instrument_preview_api(request, symbol):
         "spread": spread,
         "quote_age_seconds": age,
         "active_signals": active_signals,
-    })
+    }
+    # WHOSE PRICE THIS IS (2026-10-31, dashboard.chart_source.quote_facts):
+    # the feed and its words ("Yahoo GC=F, the front-month future"), the
+    # stand-in, whose bid/ask ride the ticket, whether the day change is
+    # the same feed's, the class's jump bar the chart's tick is held to,
+    # the page's decimal count, and for a venue-routed instrument the
+    # venue's last known price with its age and the gap to this quote —
+    # from what the platform already holds, never a new venue request.
+    try:
+        from dashboard import chart_source
+        facts = chart_source.quote_facts(
+            inst, getattr(inst, "live_quote", None),
+            route=chart_source.route_of(request.user, inst))
+        facts["decimals"] = _chart_decimals(inst)
+        facts.pop("quote_age_seconds", None)   # the one computed above
+        out.update(facts)
+    except Exception as e:  # noqa: BLE001 — the price itself still goes out
+        logger.warning("[instrument_preview_api] %s: whose-price facts "
+                       "failed: %s", symbol, e)
+    return JsonResponse(out)
 
 
 @login_required
@@ -5968,7 +6130,7 @@ def intro_page(request):
 
 # ── Chart Data API ──────────────────────────────────────────────────────────
 
-def _daily_chart_bars(instrument, since=None, limit=None):
+def _daily_chart_bars(instrument, since=None, limit=None, route=""):
     """Daily OHLCV dicts for a chart, synthesized from intraday bars when
     no real daily rows exist.
 
@@ -5978,115 +6140,31 @@ def _daily_chart_bars(instrument, since=None, limit=None):
     an empty table and rendered blank while the data to draw it sat one
     timeframe over. A daily candle IS the aggregate of its day's intraday
     bars, so the synthesis is exact for the hours the platform has.
+
+    One feed per series, today's forming candle and the suspect-bar marks
+    (2026-10-31): dashboard.chart_source.daily_series, whose source words
+    the chart's reply carries.
     """
-    from market_data.models import PriceData
-
-    def _rows(tf):
-        qs = PriceData.objects.filter(instrument=instrument, timeframe=tf)
-        if since is not None:
-            qs = qs.filter(timestamp__gte=since)
-        return qs.order_by("timestamp")
-
-    bars = [{
-        "time":   p.timestamp.strftime("%Y-%m-%d"),
-        "open":   float(p.open),
-        "high":   float(p.high),
-        "low":    float(p.low),
-        "close":  float(p.close),
-        "volume": float(p.volume) if p.volume else 0,
-    } for p in _rows("1d")]
-
-    if not bars:
-        for intraday_tf in ("4h", "1h"):
-            days = {}
-            for p in _rows(intraday_tf):
-                key = p.timestamp.strftime("%Y-%m-%d")
-                d = days.get(key)
-                if d is None:
-                    days[key] = {
-                        "time": key, "open": float(p.open),
-                        "high": float(p.high), "low": float(p.low),
-                        "close": float(p.close),
-                        "volume": float(p.volume) if p.volume else 0,
-                    }
-                else:
-                    d["high"] = max(d["high"], float(p.high))
-                    d["low"] = min(d["low"], float(p.low))
-                    d["close"] = float(p.close)
-                    d["volume"] += float(p.volume) if p.volume else 0
-            if days:
-                bars = [days[k] for k in sorted(days)]
-                break
-
-    if limit:
-        bars = bars[-int(limit):]
-    return bars
+    from dashboard.chart_source import daily_series
+    return daily_series(instrument, since=since, limit=limit,
+                        route=route)[0]
 
 
-def _intraday_chart_bars(instrument, interval, limit=240):
-    """Intraday OHLCV dicts, freshest first source wins.
+def _intraday_chart_bars(instrument, interval, limit=240, route=""):
+    """Intraday OHLCV dicts of ONE feed (2026-10-31).
 
-    1h/4h come from PriceData (the bot/watchlist passes keep them warm).
+    1h/4h come from PriceData (the bot/watchlist passes keep them warm),
+    the routed venue's rows when it has them, else the public feed's: a
+    series used to mix eToro's bars with Yahoo's stand-ins bar by bar.
     Finer resolutions are not stored anywhere — persisting minute bars for
     every instrument would bloat the table for a chart click — so they are
     fetched LIVE from the keyless public feed and cached for a minute.
     `time` is epoch seconds: lightweight-charts needs numeric time for
-    intraday resolution.
+    intraday resolution. dashboard.chart_source.intraday_series.
     """
-    from django.core.cache import cache
-    from market_data.models import PriceData
-
-    if interval in ("1h", "4h"):
-        rows = (PriceData.objects.filter(instrument=instrument,
-                                         timeframe=interval)
-                .order_by("-timestamp")[:limit])
-        bars = [{
-            "time":   int(p.timestamp.timestamp()),
-            "open":   float(p.open), "high": float(p.high),
-            "low":    float(p.low), "close": float(p.close),
-            "volume": float(p.volume) if p.volume else 0,
-        } for p in reversed(list(rows))]
-        if bars:
-            return bars
-        # No stored rows (instrument outside the fleet/watchlist) — fall
-        # through to the live fetch below.
-
-    cache_key = f"chart:{instrument.symbol}:{interval}"
-    try:
-        cached = cache.get(cache_key)
-    except Exception:  # noqa: BLE001
-        cached = None
-    if cached is not None:
-        return cached
-
-    from market_data.public_feed import public_feed_for
-    client = public_feed_for(instrument.asset_class)
-    if client is None:
-        return []
-    fetch_symbol = instrument.symbol
-    if instrument.asset_class == "crypto":
-        from market_data.management.commands.backfill_bars import venue_symbol
-        fetch_symbol = venue_symbol(instrument.symbol)
-
-    bars = []
-    try:
-        for row in client.klines(fetch_symbol, interval=interval,
-                                 limit=limit) or []:
-            if not row or len(row) < 6:
-                continue
-            bars.append({
-                "time":   int(int(row[0]) / 1000),
-                "open":   float(row[1]), "high": float(row[2]),
-                "low":    float(row[3]), "close": float(row[4]),
-                "volume": float(row[5] or 0),
-            })
-    except Exception:  # noqa: BLE001 — a dead feed is an empty chart, not a 500
-        bars = []
-    try:
-        cache.set(cache_key, bars, 60)
-    except Exception:  # noqa: BLE001
-        pass
-    return bars
+    from dashboard.chart_source import intraday_series
+    return intraday_series(instrument, interval, route=route,
+                           limit=limit)[0]
 
 
 # Live-fetched resolutions. 1h/4h are handled from stored bars first.
@@ -6186,12 +6264,30 @@ def chart_data_api(request):
             # saying the overlay had stopped updating.
             extra = {"overlays_error": str(e)[:200]}
 
+    # ONE FEED PER SERIES, NAMED (2026-10-31, dashboard.chart_source). The
+    # venue the operator's orders on this instrument go to — a read of his
+    # own settings, no request — decides whose stored candles draw the
+    # series; `source` carries the words the legend prints, the class's
+    # jump bar the live tick is held to, and the notes (older history cut,
+    # today's forming candle, suspect bars). When the overlay is asked for,
+    # it also says when the position lines (the venue's prices) sit over
+    # another feed's candles.
+    from dashboard import chart_source
+    route = chart_source.route_of(request.user, instrument)
+
+    def _said(source):
+        if overlays and isinstance(extra.get("positions"), list):
+            source["positions"] = chart_source.positions_words(
+                extra["positions"], source)
+        return source
+
     # The UI sends "1min"/"5min"/"15min" (never bare "1m", which has
     # always meant ONE MONTH here — the legacy range value keeps working).
     interval = {"1min": "1m", "5min": "5m", "15min": "15m",
                 "1h": "1h", "4h": "4h"}.get(timeframe)
     if interval:
-        bars = _intraday_chart_bars(instrument, interval)
+        bars, source = chart_source.intraday_series(instrument, interval,
+                                                    route=route)
         if not bars:
             # The overlay rides even here: the positions are real whether or
             # not this venue can serve minute bars, and dropping them would
@@ -6199,9 +6295,10 @@ def chart_data_api(request):
             return JsonResponse({
                 "symbol": symbol, "timeframe": timeframe, "bars": [],
                 "error": f"No intraday source for {symbol} at {timeframe}",
-                **extra})
+                "source": _said(source), **extra})
         return JsonResponse({"symbol": symbol, "timeframe": timeframe,
-                             "bars": bars, **extra})
+                             "bars": bars, "source": _said(source),
+                             **extra})
 
     # UI timeframe -> how far back to look. These views draw daily candles.
     # An indicator can only be as honest as its window. SMA50 needs
@@ -6216,9 +6313,10 @@ def chart_data_api(request):
     days_back = DAYS_BACK.get(timeframe, 90)
     since = timezone.now() - timedelta(days=days_back)
 
-    bars = _daily_chart_bars(instrument, since=since)
+    bars, source = chart_source.daily_series(instrument, since=since,
+                                             route=route)
     return JsonResponse({"symbol": symbol, "timeframe": timeframe,
-                         "bars": bars, **extra})
+                         "bars": bars, "source": _said(source), **extra})
 
 
 # ── Dashboard Preset APIs ───────────────────────────────────────────────────

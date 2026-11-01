@@ -898,6 +898,18 @@
       }
     });
     ['live', 'paper'].forEach(function (k) { if (sides[k]) add(tableEl, paintSide(k, sides[k])); });
+    /* eToro's OWN figures, ahead of the pools (2026-10-31): used,
+       available, P&L and total from the sync's cells with their age, then
+       the split against Sauron's own eToro rows. Both sentences are the
+       server's (bot_program/etoro_used.py); the pools below are the pools'
+       arithmetic. */
+    if (hd.etoro && hd.etoro.t) {
+      var acct = add(tableEl, el('div', 'hd-cell hd-small'));
+      add(add(acct, el('div', 'hd-cell-title')), el('span', '', W('etoro_cell')));
+      line(acct, hd.etoro.read ? '' : 'hd-muted').textContent = dots(hd.etoro.t);
+      if (hd.etoro.split_t) line(acct, 'hd-muted').textContent = dots(hd.etoro.split_t);
+      acct.title = hd.etoro.title || '';
+    }
     if (hd.pools) {
       var pools = add(tableEl, el('div', 'hd-cell hd-small'));
       add(add(pools, el('div', 'hd-cell-title')), el('span', '', W('pools')));

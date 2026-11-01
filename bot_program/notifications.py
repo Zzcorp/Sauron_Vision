@@ -1944,7 +1944,8 @@ def notify_protection_vanished(user, *, asset_class: str, symbol: str,
 UNCLAIMED_REMIND_S = 3 * 3600
 
 
-def notify_unclaimed_position(user, *, symbols: list, venue: str) -> bool:
+def notify_unclaimed_position(user, *, symbols: list, venue: str,
+                              count=None, key=None) -> bool:
     """A position the broker holds that no row in this platform claims.
 
     Deliberately a notification and NOT an auto-close. The operator may
@@ -1953,25 +1954,38 @@ def notify_unclaimed_position(user, *, symbols: list, venue: str) -> bool:
     dangerous than one that reports them.
 
     ONCE PER STANDING CONDITION, AGAIN EVERY THREE HOURS (2026-10-06
-    review). The reconcile runs every 15 minutes around the clock, and one
-    position opened by hand in the eToro app rang the phone four times an
-    hour all night. The title (venue, count) and the body (every symbol,
+    review). The reconcile runs around the clock (every 15 minutes then,
+    every 5 since 2026-10-31), and one position opened by hand in the eToro
+    app rang the phone four times an hour all night. The title (venue,
+    count) and the body (every symbol,
     sorted) are the key: a changed set is said at once; the same set is
     said again after UNCLAIMED_REMIND_S, while it stands. Returns False
     when the bell already says it.
+
+    POSITIONS, NOT NAMES (2026-10-31). eToro's sweep counts every position
+    apart and names them grouped ("NVDA ×2", "NVDA (+1 beside Sauron's
+    1)"), and the title and the phone's summary counted the names: two
+    positions nothing guards read "1 position ... holds a position".
+    `count` is how many positions there are (len(symbols) when not
+    given) and `key` the standing condition (the names when not given):
+    the sweep hands the outside positions alone, each symbol with its
+    count, so Sauron's own rows opening or closing beside them, which the
+    names say, do not ring the same position again inside the window.
     """
     names = sorted(str(x) for x in symbols)
     listed = ", ".join(names[:6])
     more = f" (+{len(names) - 6} more)" if len(names) > 6 else ""
-    one = len(symbols) == 1
-    title = (f"▲ {len(symbols)} "
+    n = len(symbols) if count is None else int(count)
+    one = n == 1
+    title = (f"▲ {n} "
              f"position{'' if one else 's'} at {venue} "
              f"that no row claims")
     body = (f"{listed}{more}. These are invisible to every exposure and "
             f"daily-loss gate, carry no bot-side stop, and the kill "
             f"switch cannot flatten them — it walks database rows. "
             f"Check the broker.")
-    said = f"{venue}|{','.join(names)}"
+    standing = names if key is None else sorted(str(x) for x in key)
+    said = f"{venue}|{','.join(standing)}"
     try:
         from datetime import timedelta as _td
         from django.utils import timezone as _tz
@@ -2568,11 +2582,16 @@ def notify_broker_unreachable(user, *, label: str, host: str, port: int,
     first real Gateway sat behind a notice dialog IBC could not read for
     three hours while `ps` said "Up 3 hours" — a container that is up is
     not a Gateway that is logged in, and nothing on the platform said so.
-    The sync task is the one thing that asks every 15 minutes, so it is
-    the one thing that can.
+    The sync task is the one thing that asks on a beat, so it is the one
+    thing that can. The minutes are that broker's own walk's
+    (broker_vision.sync_minutes, 2026-10-31): eToro's walks every 5
+    minutes, IBKR's and Saxo's every 15, and three eToro misses are fifteen
+    minutes, not forty-five.
     """
     remedy, url = BROKER_REMEDY.get(broker or "ibkr",
                                     BROKER_REMEDY["ibkr"])
+    from bot_program.broker_vision import sync_minutes
+    silent_min = misses * sync_minutes(broker or "ibkr")
     # A socket only where there is one. Saxo and eToro have no host and no
     # port, and "api:0 has not answered" is a fact about nothing.
     where = f"{host}:{port}" if (broker or "ibkr") == "ibkr" else label
@@ -2580,18 +2599,72 @@ def notify_broker_unreachable(user, *, label: str, host: str, port: int,
         user, "system_health",
         title=f"▲ {label}: broker unreachable for {misses} syncs running",
         body=(f"{where} has not answered the account sync since "
-              f"{misses * 15} minutes ago. {remedy} Equity and holdings on "
+              f"{silent_min} minutes ago. {remedy} Equity and holdings on "
               f"every page are showing their last reading with its age, not "
               f"a live one."),
         url=url,
         row_data={"items": [
             f"Account: {label}",
             f"Not answering: {where}",
-            f"Silent for {misses} syncs running (about {misses * 15} minutes)",
+            f"Silent for {misses} syncs running (about {silent_min} minutes)",
             f"What to do: {remedy.replace('`', '')}",
             "Equity and holdings on every page show their last reading, "
             "with its age"],
             "mark": NOTIFY_MARKS["broker_unreachable"]},
+    )
+
+
+def notify_broker_cells_unanswered(user, *, label: str, misses: int,
+                                   cells_at=None, broker: str = "etoro",
+                                   holdings_answered: bool = True) -> bool:
+    """The eToro sync reached the account, and its cash and used margin
+    did not answer, several passes running (review, 2026-10-31).
+
+    Such a pass counts as a missed sync since 2026-10-31 — those cells are
+    what every eToro order is judged on — and it raised
+    notify_broker_unreachable: "broker unreachable", "re-save them on
+    /brokers/", "Equity and holdings on every page are showing their last
+    reading", while /portfolio had answered on the same keys and the
+    holdings had just been written. The operator was sent to re-save keys
+    that work, and the cells were never named. This says what happened:
+    which read did not answer, how old the cells are, and that past an
+    hour every eToro order is refused. No key remedy: the keys answered.
+    """
+    from django.utils import timezone
+
+    from bot_program.broker_vision import sync_minutes
+    silent_min = misses * sync_minutes(broker or "etoro")
+    if cells_at is None:
+        age, cells = "never read", "have never been read"
+    else:
+        s = max(0.0, (timezone.now() - cells_at).total_seconds())
+        age = (f"{s / 60:.0f} min old" if s < 5400
+               else f"{s / 3600:.1f} h old")
+        cells = f"are {age}"
+    beside = ("the holdings answered beside them" if holdings_answered
+              else "the aggregate read answered without them")
+    return dispatch_notification(
+        user, "system_health",
+        title=(f"▲ {label}: eToro answered no cash or used margin for "
+               f"{misses} syncs running"),
+        body=(f"For about {silent_min} minutes the account sync reached "
+              f"{label} and {beside}, but the available cash and the used "
+              f"margin did not answer: the cells every eToro order is "
+              f"judged on {cells}, and past an hour every eToro order is "
+              f"refused. The keys answered, so there is nothing to save on "
+              f"/brokers/; check eToro's own status, and the worker log for "
+              f"'answered no cash / used margin'."),
+        url="/brokers/",
+        row_data={"items": [
+            f"Account: {label}",
+            f"Cash and used margin: not answered for {misses} syncs running "
+            f"(about {silent_min} minutes)",
+            f"Cells every eToro order is judged on: {age}",
+            ("Holdings: answered and written" if holdings_answered
+             else "Holdings: not answered either"),
+            "What to do: the keys answered; check eToro's status and the "
+            "worker log"],
+            "mark": NOTIFY_MARKS["system_health"]},
     )
 
 

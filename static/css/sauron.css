@@ -7592,6 +7592,11 @@ body.light-mode .gollum-fab .gl-lid { fill: var(--bg-elev); }
     border-radius: 3px; border: 1px solid var(--border); color: var(--text-muted); }
 .bkp-claim--unclaimed { color: var(--accent-gold-ink, var(--accent-gold));
     border-color: var(--accent-gold-ink, var(--accent-gold)); }
+/* eToro's own claims (2026-10-31): a close Sauron stopped trying that
+   eToro still lists, and a live row on the symbol that records no broker. */
+.bkp-claim--stopped { color: var(--accent-red); border-color: var(--accent-red); }
+.bkp-claim--nobroker { color: var(--accent-gold-ink, var(--accent-gold));
+    border-style: dashed; }
 
 /* ── A Telegram button's page (2026-10-24) ───────────────────────────────
    /signals/<id>/ticket/ and /positions/<id>/close-dialog/ say in one line

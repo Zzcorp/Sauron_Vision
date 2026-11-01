@@ -20,11 +20,19 @@ Layered rendering:
         <span class="oc-strip-value">{% if gate_asked %}{{ gate_n_reject }}{% else %}—{% endif %}</span>
         <span class="oc-strip-sub">refused · {{ gate_n_allow }} allow logged (sampled)</span>
     </div>
-    <div class="oc-strip-cell">
+    <div class="oc-strip-cell" title="Notional of both books at live marks, against the cash typed on /setup/ — the platform's own arithmetic, not eToro's.">
         <span class="oc-strip-label">DEPLOYED</span>
         <span class="oc-strip-value">{{ live_deployed|floatformat:0 }}</span>
         <span class="oc-strip-sub">{{ live_deployed_pct }}% · cash {{ live_cash_pct }}%</span>
     </div>
+    {# eToro's OWN used margin, available and total from the sync's cells (2026-10-31, bot_program.etoro_used): the live world as eToro states it. The line under it is etoro_used's cell_t, the total with its own age when it is older than the cells; it wraps (oc-strip-sub--wrap, as on /positions/ and /portfolio/): on one line the ellipsis cut the total and the age at every width. #}
+    {% if live_etoro %}
+    <div class="oc-strip-cell" title="{{ live_etoro.title }}">
+        <span class="oc-strip-label"><span class="sv-venue {{ live_etoro.venue_class }}">{{ live_etoro.world_word }}</span> ETORO USED</span>
+        <span class="oc-strip-value">{{ live_etoro.used_t }}</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap">{{ live_etoro.cell_t }}</span>
+    </div>
+    {% endif %}
     <div class="oc-strip-cell">
         <span class="oc-strip-label">OPEN POS</span>
         <span class="oc-strip-value">{{ live_opens }}</span>

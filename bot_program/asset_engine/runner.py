@@ -46,11 +46,18 @@ never a real row; the summaries come back as out["paper_only"].
 import logging
 import uuid
 
+from bot_program.etoro_cells import one_read_per_pass
+
 from .base import make_bot
 
 logger = logging.getLogger(__name__)
 
 
+# ONE ACCOUNT READ PER PASS (2026-10-31, bot_program.etoro_cells): the
+# exits and entries a tick books hold their eToro re-read asks, and the
+# pass asks one per account once it has finished, never beside its own
+# closes and their proofs. The fleet pass holds over every config's tick.
+@one_read_per_pass()
 def run_asset_bot_tick(config_id: int) -> dict:
     """Run one tick for the given AssetBotConfig. Returns the bot's summary dict
     (or an error dict if the config is missing / disabled). A config a
@@ -297,6 +304,7 @@ def _manage_braked_pass() -> list:
     return out
 
 
+@one_read_per_pass()
 def run_all_asset_bots() -> dict:
     """Tick every enabled AssetBotConfig. Returns aggregate summary.
 

@@ -521,7 +521,9 @@ def _concentration_guard(user, inst, side, cls, cfg, close_ids):
     from portfolio.risk_gate import capital_at_work, concentration_state
     from portfolio.services import value_per_unit
 
-    probe = _preview(user, inst, side, signal=None)
+    # Asked inside _execute only: the probe queues no account re-read
+    # (the booking's own ask is the read that covers it, 2026-10-31).
+    probe = _preview(user, inst, side, signal=None, ask_reread=False)
     notional = probe.get("notional")
     if probe.get("error") or not notional:
         # Nothing to judge yet — the ordinary preview below will report
@@ -794,8 +796,9 @@ def judge_qty(cfg, *, asset_class, qty, entry, stop, value_per_unit,
 
       risk      MAX_RISK_FRACTION is documented in sizing.py as "a hard
                 cap, not a target". The default budget is 0.25%; an
-                override may reach the 1.0% ceiling and not a cent past
-                it, or realized_r stops being one unit across the book.
+                override may reach the 7% ceiling (the operator's written
+                choice, 2026-09-26) and not a cent past it, or realized_r
+                stops being one unit across the book.
       notional  max_notional_fraction — 20% for most classes, 4.0 for FX
                 because that cap presumes the broker's leverage.
       pool      the free capital in THIS class's pool, margin-aware, so
@@ -1308,12 +1311,194 @@ def _funding_proposal(open_trades, deficit):
             for t in chosen]
 
 
+def _duplicate_advisory(dup) -> dict:
+    """risk_gate.duplicate_state's answer as the ticket's warning
+    (2026-10-31): {"ok", "reason", "holders", "holder_ids", "legacy"}.
+    Never a refusal on this lane once shown; the bots still refuse on the
+    same answer. `holder_ids` is what the dialog sends back (dup_seen):
+    the send refuses a holder it never showed (_unseen_holder_error)."""
+    dup = dup or {}
+    ok = bool(dup.get("ok", True))
+    return {"ok": ok, "reason": "" if ok else str(dup.get("reason") or ""),
+            "holders": list(dup.get("holders") or []),
+            "holder_ids": list(dup.get("holder_ids") or []),
+            "legacy": list(dup.get("legacy") or [])}
+
+
+def _unseen_holder_error(dup, seen, side, symbol) -> str:
+    """The refusal for a holder of this bet the ticket never showed, or
+    "" (review, 2026-10-31).
+
+    The operator made the same-asset refusal a warning on this lane: his
+    decision, with the holder named on the ticket. A bot that opened the
+    same symbol and side between the preview and the click was taken past
+    a warning nobody showed — the live order went out on a PIN typed
+    against a dialog that said nothing. `seen` is the holders the dialog
+    displayed (duplicate.holder_ids, sent back as dup_seen), by row:
+    names repeat, rows do not. None — an older dialog, or any caller that
+    says nothing of what was shown — is nothing shown."""
+    if not dup or dup.get("ok", True):
+        return ""
+    shown = set(str(s) for s in (seen or []))
+    names = [name for name, hid in zip(dup.get("holders") or [],
+                                       dup.get("holder_ids") or [])
+             if hid not in shown]
+    if not names:
+        return ""
+    direction = "long" if str(side or "").upper() in ("BUY", "LONG") \
+        else "short"
+    who = ", ".join(sorted(set(names)))
+    head = (f"{symbol.upper()} {direction} was opened by {who} since this "
+            f"ticket was shown" if seen is not None else
+            f"{symbol.upper()} {direction} is held by {who}, and this send "
+            f"names none of the holders its ticket showed")
+    return (f"{head} — open the ticket again to read the warning before "
+            f"taking a second one")
+
+
+def _age_words(seconds) -> str:
+    """'12 s', '4 min', '1.5 h': how old a reading is, for a sentence."""
+    if seconds is None:
+        return "?"
+    s = max(0.0, float(seconds))
+    if s < 90:
+        return f"{s:.0f} s"
+    if s < 5400:
+        return f"{s / 60:.0f} min"
+    return f"{s / 3600:.1f} h"
+
+
+def _reread_cannot_lift(gate) -> bool:
+    """True when the gate's equity is missing, undated or past
+    TRACKING_FRESH_SECONDS (2026-10-31, review): a re-read writes the
+    cells and never the equity, so it cannot lift that refusal, and the
+    ticket must neither ask one for it nor promise one."""
+    from bot_program.capital_truth import TRACKING_FRESH_SECONDS
+    g = gate or {}
+    eq_age = g.get("equity_age_s")
+    return (g.get("equity") is None or eq_age is None
+            or float(eq_age) > TRACKING_FRESH_SECONDS)
+
+
+def _reread_words(gate) -> str:
+    """When a cash refusal was judged on cells older than
+    etoro_cells.TICKET_FRESH_S (or never stored), ask the account to be
+    read again and say when that read lands; "" otherwise, when nothing
+    could be asked, and when the equity is what refuses (a re-read never
+    writes it: _reread_cannot_lift) (2026-10-31)."""
+    from bot_program import etoro_cells
+    pk = (gate or {}).get("account_pk")
+    age = (gate or {}).get("age_s")
+    if not pk or (age is not None and age <= etoro_cells.TICKET_FRESH_S):
+        return ""
+    if _reread_cannot_lift(gate):
+        return ""
+    eta = etoro_cells.request_refresh(pk, why="ticket refused")
+    if eta is None:
+        return ""
+    when = math.ceil(max(float(eta), 0.0))
+    old = ("never stored" if age is None
+           else f"{_age_words(age)} old")
+    return (f"; the account's cells are {old}, so a fresh read of the "
+            f"eToro account was asked: it lands in about {when} s — send "
+            f"again after it")
+
+
+def _cash_gate_advisory(bot, client, symbol, *, qty, price, leverage, vpu,
+                        step, ask_reread=True) -> dict:
+    """The send's cash and pledge check (AssetBot._cash_gate), asked at the
+    ticket's default size, for the ticket (2026-10-31).
+
+    {"asked", "ok", "reason", "cash", "used", "equity", "currency",
+    "read_at", "age_s", "age_words", "equity_read_at", "equity_age_s",
+    "equity_age_words", "pledged", "held", "free", "room",
+    "ceiling", "margin_per_unit", "max_qty", "refresh"}. `max_qty` is the
+    size the gate leaves room for (its free cash and the pledge ceiling,
+    at this ticket's multiplier), None when nothing could be computed:
+    the browser caps the size control at it. The equity carries its own
+    age: the re-read after an order dates the cells, never the equity.
+    Cells older than etoro_cells.TICKET_FRESH_S ask the account to be read
+    again — unless `ask_reread` is False (_execute's own previews: the
+    booking's ask is the read that covers its order) or the equity is what
+    refuses (_reread_cannot_lift); `refresh` says whether that was asked
+    and in how many seconds it starts. Information only: _execute asks
+    the gate again at the send."""
+    from bot_program import etoro_cells
+    out = {"asked": False, "ok": True, "reason": "", "max_qty": None,
+           "refresh": {"asked": False, "in_s": None}}
+    try:
+        g = bot._cash_gate(client, symbol, qty=float(qty), price=float(price),
+                           leverage=max(int(leverage or 1), 1))
+    except Exception as e:  # noqa: BLE001 — the send asks it again
+        logger.warning("[take-trade] %s: the cash check could not run on "
+                       "the ticket: %s", symbol, e)
+        out.update({"asked": True, "ok": False,
+                    "reason": ("the cash check could not be run on the "
+                               "ticket; the send asks it again")})
+        return out
+    if not g.get("asked"):
+        return out
+    mpu = float(price) * float(vpu or 0) / max(int(leverage or 1), 1)
+    room = g.get("room")
+    max_qty = None
+    if room is not None and mpu > 0:
+        max_qty = (_floor_to_step(float(room) / mpu, step) if step > 0
+                   else float(room) / mpu)
+    at = g.get("at")
+    age = g.get("age_s")
+    eq_at = g.get("equity_at")
+    eq_age = g.get("equity_age_s")
+    out.update({
+        "asked": True, "ok": not g.get("refusal"),
+        "reason": str(g.get("refusal") or ""),
+        "cash": g.get("cash"), "used": g.get("used"),
+        "equity": g.get("equity"), "currency": g.get("currency") or "",
+        "read_at": at.isoformat() if at is not None else None,
+        "age_s": None if age is None else round(float(age), 1),
+        "age_words": _age_words(age) if age is not None else "",
+        "equity_read_at": eq_at.isoformat() if eq_at is not None else None,
+        "equity_age_s": None if eq_age is None else round(float(eq_age), 1),
+        "equity_age_words": (_age_words(eq_age) if eq_age is not None
+                             else ""),
+        "pledged": g.get("pledged"), "held": g.get("held"),
+        "free": g.get("free"), "room": room, "ceiling": g.get("ceiling"),
+        "after": g.get("after"), "margin_per_unit": mpu,
+        "max_qty": max_qty, "leverage": max(int(leverage or 1), 1)})
+    # eToro's OWN P&L, its total and the split (2026-10-31): the ticket's
+    # capital line headlines eToro's figures (bot_program.etoro_used), the
+    # gate's free (`free` above: the cash less what was pledged since and
+    # any withdrawal hold) beside the pool's own `available`, which is
+    # untouched. Display only: the send asks the gate again.
+    try:
+        from bot_program.etoro_used import account_used
+        acct = account_used(bot.user) or {}
+    except Exception as e:  # noqa: BLE001 — the ticket renders without it
+        logger.warning("[take-trade] %s: eToro's figures unavailable on the "
+                       "ticket: %s", symbol, e)
+        acct = {}
+    out.update({"pnl": acct.get("pnl"), "total": g.get("equity"),
+                "split_t": acct.get("split_t") or "",
+                "etoro_t": acct.get("t") or ""})
+    pk = g.get("account_pk")
+    if (ask_reread and pk and (age is None or age > etoro_cells.TICKET_FRESH_S)
+            and not _reread_cannot_lift(g)):
+        eta = etoro_cells.request_refresh(pk, why="ticket")
+        if eta is not None:
+            out["refresh"] = {"asked": True,
+                              "in_s": math.ceil(max(float(eta), 0.0))}
+    return out
+
+
 def _preview(user, inst, side, signal=None, *, gate_now=None,
-             leverage=None) -> dict:
+             leverage=None, ask_reread=True) -> dict:
     """Everything the confirm popup needs, or {"error": ...}.
 
     `leverage` is the live ticket's multiplier as the operator picked it
     (_ticket_leverage); None is the highest the instrument allows.
+
+    `ask_reread` False is _execute's own previews (2026-10-31): they ask
+    no eToro re-read, so the read that covers the order is the one its
+    booking asks, SETTLE_S after the fill (bot_program.etoro_cells).
 
     The funding proposal ("close these to free enough") considers ONLY
     open manual trades in this class — closing a bot's position from a
@@ -1587,22 +1772,26 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         # would send, on the carrier that would carry it
         **ticket_stamp)
 
-    # A DUPLICATE EXPRESSION is refused even on this path, where the money
-    # limits only warn — because it is not appetite. Appetite is how much
-    # of their own book an operator puts behind a decision; this is a
-    # SECOND AUTHOR already holding the same bet under a rule the popup
-    # does not show them managing. The operator who wants this entry
-    # anyway has a real move available — close the other leg — and the
-    # refusal names it. Tickets from this manual config itself are exempt:
-    # adding to your own expression is sizing, and the ceilings above
-    # already govern it.
+    # A DUPLICATE EXPRESSION — another config (a bot), or a legacy
+    # portfolio position, already holds this symbol on this side. WARNED,
+    # NOT REFUSED, since 2026-10-31. The operator: "we cant open new trade
+    # on same assets". It was refused here as "not appetite": a second
+    # author holding the same bet. It is the same posture as concentration
+    # now — the ticket names the holder and what the second ticket does to
+    # the bet, the live ticket still takes the PIN, the trade records it
+    # (duplicate_at_entry) — because on this path a present human decides.
+    # The bots keep it as a refusal, and keep refusing a symbol their own
+    # config holds; the 60-second double-click window and the same-signal
+    # guard in _execute stay refusals, and so does a holder this preview
+    # did not show (one that opened since: _unseen_holder_error). Tickets
+    # from this manual config itself were never duplication: adding to
+    # your own expression is sizing, and the ceilings above govern it.
     from portfolio.risk_gate import duplicate_state, theme_state
     # Judged on THIS ticket's venue's book only (2026-10-01): a paper
     # bot's long doubles no real-money bet, and the reverse.
     dup = duplicate_state(user, symbol=inst.symbol, side=side,
                           config_id=cfg.id, paper=not live)
-    if not dup["ok"]:
-        return {"error": dup["reason"]}
+    duplicate = _duplicate_advisory(dup)
     # The currency-theme crowd, as information on this path: stacking a
     # fourth deliberate EUR leg is a call a present human is entitled to
     # make, and the bots take it as a hard cap because nobody is there to
@@ -1702,6 +1891,22 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
             f"{max_qty:g} now (its pool, its single-position ceiling and "
             f"the risk cap) — free some of the pool or raise its ceiling. "
             f"Nothing was sent")}
+
+    # ── The send's own cash check, on the ticket (2026-10-31) ───────────
+    # The operator met eToro's free cash only after the PIN: _execute asks
+    # AssetBot._leverage_headroom before the order and the preview never
+    # did, so the ticket looked takeable and was refused at the send. The
+    # same judgement (_cash_gate) is asked here on the default size, with
+    # the cells and their age, and the size control is capped at what it
+    # leaves free. New fields only: `available` and `deficit` above are the
+    # pool's and stay the pool's (they drive this lane's refusals and its
+    # funding proposals).
+    cash_gate = None
+    if live:
+        cash_gate = _cash_gate_advisory(
+            bot, _client, inst.symbol, qty=float(qty), price=float(price),
+            leverage=(int(ticket_lev["chosen"]) if ticket_lev else 1),
+            vpu=vpu, step=step, ask_reread=ask_reread)
 
     # ── What the funding choice is allowed to be ────────────────────────
     # EVERY open position in this pool, with the proposal's picks flagged —
@@ -1873,6 +2078,14 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         # is measured against. Enforced in `_execute`; shown here so the
         # refusal is never a surprise at the moment of pressing the button.
         "concentration": concentration,
+        # Another author already on this symbol and side (2026-10-31): a
+        # warning naming the holder, never a refusal on this path.
+        "duplicate": duplicate,
+        # The send's own cash and pledge check on eToro (2026-10-31): the
+        # cells, their age, the verdict at the default size and the size
+        # it caps the control at. None on a paper ticket; "asked" False on
+        # another carrier.
+        "cash_gate": cash_gate,
         # The currency-theme crowd this ticket joins. A warning here and a
         # record at entry, never a manual refusal — see the note above.
         "theme": theme,
@@ -1998,9 +2211,17 @@ def preview_asset_trade(user, inst, side, leverage=None) -> dict:
 
 def _execute(user, inst, side, close_ids=None, signal=None,
              qty_override=None, stop_override=None,
-             target_override=None, pin_ok=False, leverage=None) -> dict:
+             target_override=None, pin_ok=False, leverage=None,
+             dup_seen=None) -> dict:
     """Close the funding positions (if any), then open the trade. Paper is
     synchronous, so the whole chain settles before this returns.
+
+    `dup_seen` is the holders of this bet the dialog showed (its preview's
+    duplicate.holder_ids; None when the caller says nothing). Another
+    config holding the same symbol and side is a warning on this lane —
+    once shown: a holder the ticket did not show refuses the send, before
+    anything irreversible, under the lock and once more before a live
+    order leaves (_unseen_holder_error, 2026-10-31).
 
     `pin_ok` is the view's verdict on the trading PIN (the view owns the
     check, same split as manual_close.execute_close). It is demanded only
@@ -2127,6 +2348,20 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         if frozen:
             return {"error": f"LIVE entries are frozen — {frozen}"}
 
+    # A HOLDER THE TICKET DID NOT SHOW (2026-10-31, review), before
+    # anything is liquidated; asked again under the lock and before the
+    # live order. The same-asset warning is the operator's decision only
+    # where it was shown.
+    from portfolio.risk_gate import duplicate_state
+    _cheap_paper = getattr(cfg, "mode", "paper") != "live"
+    _unseen = _unseen_holder_error(
+        duplicate_state(user, symbol=inst.symbol, side=side,
+                        config_id=cfg.id, paper=_cheap_paper),
+        dup_seen, side, inst.symbol)
+    if _unseen:
+        return {"error": _unseen + (" — nothing was booked" if _cheap_paper
+                                    else " — nothing was sent")}
+
     # CONCENTRATION — before anything is liquidated, and measured on the book
     # as it will stand AFTER the closes the operator picked.
     #
@@ -2162,7 +2397,7 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         # Nothing may be closed for a trade that was never going to preview
         # clean — full preview first, closes second.
         preview = _preview(user, inst, side, signal=signal,
-                           leverage=leverage)
+                           leverage=leverage, ask_reread=False)
         if preview.get("error"):
             return preview
 
@@ -2232,9 +2467,10 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         # no competing execute can insert between this read and the create.
         # The one thing it deliberately does NOT see is this request's own
         # funding closes in the daily-loss window: `gate_now` is the instant
-        # before they ran.
+        # before they ran. It asks no eToro re-read (2026-10-31): one asked
+        # here started a second after the fill and was taken for its read.
         preview = _preview(user, inst, side, signal=signal, gate_now=gate_now,
-                           leverage=leverage)
+                           leverage=leverage, ask_reread=False)
         if preview.get("error"):
             # The closes already happened — the caller must see them even
             # though the open did not follow.
@@ -2422,17 +2658,27 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         if not single["ok"]:
             return {"error": single["reason"], "closed": closed}
 
-        # The duplicate refusal, re-asked at the moment of the order — a
-        # bot may have opened this exact bet between the preview and the
-        # click, and a stale answer here is how one idea gets booked
-        # twice. Funding closes need no credit: they liquidate this
-        # config's own tickets, and this config's tickets were never
-        # duplication.
+        # The duplicate rule, re-asked at the moment of the order — a bot
+        # may have opened this exact bet between the preview and the click.
+        # A warning on this lane since 2026-10-31 (see _preview): recorded
+        # on the trade as it stood at the order (duplicate_at_entry), so
+        # a second author taken past is reviewable. Funding closes need no
+        # credit: they liquidate this config's own tickets, and this
+        # config's tickets were never duplication.
         from portfolio.risk_gate import duplicate_state, theme_state
         dup = duplicate_state(user, symbol=inst.symbol, side=side,
                               config_id=cfg.id, paper=not live)
+        # ...and taken past it only when the ticket showed every holder
+        # (2026-10-31, review): one that appeared since refuses.
+        _unseen = _unseen_holder_error(dup, dup_seen, side, inst.symbol)
+        if _unseen:
+            return {"error": _unseen + (" — nothing was sent" if live
+                                        else " — nothing was booked"),
+                    "closed": closed}
         if not dup["ok"]:
-            return {"error": dup["reason"], "closed": closed}
+            logger.info("[take-trade] %s: %s %s taken past the duplicate "
+                        "warning — %s", user.username, side, inst.symbol,
+                        dup["reason"])
         theme_now = theme_state(user, symbol=inst.symbol, side=side,
                                 asset_class=cls, paper=not live)
         rr_now = reward_risk_advisory(side, fill, stop, target)
@@ -2507,6 +2753,12 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                     "signals", []),
             },
         }
+        if not dup["ok"]:
+            # And who else held this bet when it was taken (2026-10-31).
+            # Only when someone did: an ordinary ticket keeps its shape.
+            meta["duplicate_at_entry"] = {
+                "ok": False, "reason": str(dup["reason"])[:600],
+                "holders": list(dup.get("holders") or [])[:10]}
         if level_overrides:
             # Only when something moved: an untouched ticket keeps the exact
             # metadata shape it had before the levels became adjustable, so
@@ -2633,6 +2885,14 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                 return {"error": (f"LIVE route unavailable — {cls} orders "
                                   f"have no live broker to go to. Nothing "
                                   f"was sent")}
+            # ...and whether another config opened this bet since the
+            # ticket was shown (2026-10-31, review)
+            _unseen = _unseen_holder_error(
+                duplicate_state(user, symbol=inst.symbol, side=side,
+                                config_id=cfg.id, paper=False),
+                dup_seen, side, inst.symbol)
+            if _unseen:
+                return {"error": _unseen + " — nothing was sent"}
             # THE eToro GATE, the bots' own (AssetBot._etoro_entry_refusal,
             # 2026-09-24): a class — or a short — with no demo fill-and-
             # close proof pinned sends nothing from this lane either.
@@ -2692,13 +2952,19 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                                       f"nothing was sent")}
             if adapter_key(client) == "etoro":
                 from bot_program.asset_engine import skips as _skips
-                _room = bot._leverage_headroom(
+                # _leverage_headroom's own judgement, with its numbers
+                # (_cash_gate, 2026-10-31): a refusal judged on cells more
+                # than a minute old asks the account to be read again and
+                # says when that read lands.
+                _gate = bot._cash_gate(
                     client, inst.symbol, qty=float(qty), price=float(fill),
                     leverage=ticket_l)
+                _room = _gate["refusal"]
                 if _room:
                     return {"error": (
                         f"eToro refusal ({_skips.LEVERAGE_REFUSED}): at "
-                        f"{ticket_l}x: {_room} — nothing was sent")}
+                        f"{ticket_l}x: {_room}{_reread_words(_gate)} — "
+                        f"nothing was sent")}
             client_order_id = make_client_order_id(
                 cfg.id, inst.symbol,
                 signal_id=(str(signal.id) if signal is not None
@@ -2903,6 +3169,11 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                                   fill_qty if fill_qty > 0 else qty,
                                   False, extra,
                                   broker_order_id=str(res.get("orderId") or ""))
+            # The account is read again a few seconds from now (2026-10-31,
+            # bot_program.etoro_cells): the next ticket is judged on the
+            # margin eToro took for this one, not on an estimate.
+            from bot_program import etoro_cells
+            etoro_cells.refresh_for_client(user, client, why="take trade")
             if fill_qty > 0:
                 qty = fill_qty
         finally:
@@ -3003,14 +3274,16 @@ def _execute(user, inst, side, close_ids=None, signal=None,
 
 
 def execute_take_trade(user, signal, close_ids=None, qty=None, stop=None,
-                       target=None, pin_ok=False, leverage=None) -> dict:
+                       target=None, pin_ok=False, leverage=None,
+                       dup_seen=None) -> dict:
     """Execute a signal's TAKE TRADE.
 
     Every keyword None is "the platform's answer": the risk-derived size,
     the signal's own stop and target. Each is independent — a hand-placed
     stop with an automatic size is the ordinary case, not an exotic one.
     `pin_ok` is the view's verdict on the trading PIN, demanded only when
-    the manual config is LIVE.
+    the manual config is LIVE. `dup_seen` is the holders the dialog
+    showed (_execute).
     """
     if signal.direction not in ("bullish", "bearish"):
         return {"error": f"'{signal.direction}' signals carry no trade "
@@ -3019,17 +3292,19 @@ def execute_take_trade(user, signal, close_ids=None, qty=None, stop=None,
     side = "BUY" if signal.direction == "bullish" else "SELL"
     return _execute(user, signal.instrument, side, close_ids=close_ids,
                     signal=signal, qty_override=qty, stop_override=stop,
-                    target_override=target, pin_ok=pin_ok, leverage=leverage)
+                    target_override=target, pin_ok=pin_ok, leverage=leverage,
+                    dup_seen=dup_seen)
 
 
 def execute_asset_trade(user, inst, side, close_ids=None, qty=None, stop=None,
-                        target=None, pin_ok=False, leverage=None) -> dict:
+                        target=None, pin_ok=False, leverage=None,
+                        dup_seen=None) -> dict:
     """Execute a signal-less LONG/SHORT from an instrument popup."""
     if side not in ("BUY", "SELL"):
         return {"error": f"Unknown side {side!r}"}
     return _execute(user, inst, side, close_ids=close_ids, qty_override=qty,
                     stop_override=stop, target_override=target,
-                    pin_ok=pin_ok, leverage=leverage)
+                    pin_ok=pin_ok, leverage=leverage, dup_seen=dup_seen)
 
 
 # ── Arming — the moment a chart button can move real funds ──────────────
@@ -3313,3 +3588,150 @@ def arm_manual_lane(user, *, asset_class, mode, capital=None,
     return {"ok": True, "asset_class": cls, "mode": mode,
             "capital": float(cfg.capital), "tracks_broker": want_track,
             "share_pct": (want_share if want_track else None)}
+
+
+# ── The lane's own knobs (2026-10-31) ─────────────────────────────────────
+# Three keys of the manual config's extras that only a Django shell could
+# set: the default risk per ticket, the lane's own MAX SINGLE POSITION
+# (lane_single_position_pct) and the lane's notional cap
+# (sizing.max_notional_fraction). The card on /admin-dashboard/ sets them
+# behind the trading PIN (an ACT door), one audit row per save. Blank
+# removes a key and its default stands; nothing here raises a default.
+# The HQ asset-bot form is not this form: it rewrites the whole row
+# (capital, mode, symbols) and refuses crypto.
+def _knob_bounds():
+    from bot_program.asset_engine.sizing import (MAX_NOTIONAL_FRACTION,
+                                                 MAX_RISK_FRACTION)
+    return {
+        # percent: 0.25 is 0.25 %; never past the 7 % ceiling judge_qty
+        # enforces on every ticket
+        "risk_per_trade_pct": (0.0, MAX_RISK_FRACTION * 100.0),
+        # percent of the manual pool, as lane_single_position_pct reads it
+        "max_single_position_pct": (0.0, 100.0),
+        # a fraction of the pool (0.20 is 20 %), replacing the class
+        # table for this lane; never past the widest the table carries
+        "max_notional_fraction": (0.0, max(MAX_NOTIONAL_FRACTION.values())),
+    }
+
+
+LANE_KNOBS = ("risk_per_trade_pct", "max_single_position_pct",
+              "max_notional_fraction")
+
+LANE_KNOB_WORDS = {
+    "risk_per_trade_pct": "risk per ticket (% of the pool)",
+    "max_single_position_pct": "max single position (% of the pool)",
+    "max_notional_fraction": "max notional per ticket (x the pool)",
+}
+
+
+def lane_knobs(cfg) -> dict:
+    """The lane's knobs as stored: {key: number or None (the default)}."""
+    ex = getattr(cfg, "extras", None) or {}
+    out = {}
+    for key in LANE_KNOBS:
+        raw = ex.get(key)
+        try:
+            out[key] = (None if raw is None or isinstance(raw, bool)
+                        else float(raw))
+        except (TypeError, ValueError):
+            out[key] = None
+    return out
+
+
+def lane_knob_defaults(cfg) -> dict:
+    """What each knob is when it is blank: the 0.25 % default risk, the
+    book's MAX SINGLE POSITION (/setup/) and the class table's notional
+    cap. Read-only."""
+    from bot_program.asset_engine.sizing import (DEFAULT_RISK_FRACTION,
+                                                 MAX_NOTIONAL_FRACTION,
+                                                 DEFAULT_MAX_NOTIONAL_FRACTION)
+    try:
+        from portfolio.risk_gate import _limit_pct, limits_book
+        book_single = _limit_pct(limits_book(), "max_single_position_pct")
+    except Exception:  # noqa: BLE001 — a dash on the card, never a guess
+        book_single = None
+    return {
+        "risk_per_trade_pct": DEFAULT_RISK_FRACTION * 100.0,
+        "max_single_position_pct": book_single,
+        "max_notional_fraction": MAX_NOTIONAL_FRACTION.get(
+            getattr(cfg, "asset_class", ""), DEFAULT_MAX_NOTIONAL_FRACTION),
+    }
+
+
+def set_lane_knobs(user, *, asset_class, knobs, pin_ok=False,
+                   who: str = "") -> dict:
+    """Set this user's manual lane's own knobs (2026-10-31).
+
+    `knobs` maps any of LANE_KNOBS to a number (set), "" or None (remove:
+    the default stands); a key that is absent is left alone. Every value
+    is checked before the PIN is asked, so a typo never costs a PIN
+    attempt; then the trading PIN (`pin_ok`, the view's lazy verdict at an
+    ACT door), whatever the lane's mode: a value set on paper applies the
+    moment the lane is armed. One audit row (lane_knobs_set) per save that
+    changed something. The 7 % risk ceiling, the notional and pool caps
+    and the eToro cash gate are judged on every ticket as before."""
+    from django.db import transaction
+
+    from bot_program.models import AssetBotConfig
+
+    cls = str(asset_class or "")
+    if cls not in set(EXECUTABLE_CLASS.values()):
+        return {"error": f"Unknown asset class {cls!r} — the manual lane "
+                         f"covers stock, forex, commodity and crypto"}
+    if not isinstance(knobs, dict):
+        return {"error": "The knobs must be an object"}
+    bounds = _knob_bounds()
+    want = {}
+    for key in LANE_KNOBS:
+        if key not in knobs:
+            continue
+        raw = knobs[key]
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            want[key] = None
+            continue
+        if isinstance(raw, bool):
+            return {"error": f"{LANE_KNOB_WORDS[key]} must be a number"}
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return {"error": f"{LANE_KNOB_WORDS[key]} must be a number"}
+        lo, hi = bounds[key]
+        if not math.isfinite(value) or value <= lo or value > hi + 1e-12:
+            return {"error": (f"{LANE_KNOB_WORDS[key]} must be above {lo:g} "
+                              f"and at most {hi:g}; nothing was saved")}
+        want[key] = value
+    unknown = sorted(set(knobs) - set(LANE_KNOBS) - {"asset_class", "pin"})
+    if unknown:
+        return {"error": f"Unknown knob(s) {', '.join(unknown)}; nothing was "
+                         f"saved"}
+
+    cfg = manual_config_for(user, cls)
+    if cfg.symbols:
+        return {"error": ("A bot config named 'manual' with its own symbols "
+                          "already exists for this class — rename that bot "
+                          "first")}
+    if not pin_ok:
+        return {"error": ("Setting the manual lane's knobs takes the trading "
+                          "PIN; nothing was saved"), "pin_required": True}
+
+    with transaction.atomic():
+        cfg = AssetBotConfig.objects.select_for_update().get(pk=cfg.pk)
+        before = lane_knobs(cfg)
+        ex = dict(cfg.extras or {})
+        for key, value in want.items():
+            if value is None:
+                ex.pop(key, None)
+            else:
+                ex[key] = value
+        if ex == (cfg.extras or {}):
+            return {"ok": True, "asset_class": cls, "changed": False,
+                    "knobs": before}
+        cfg.extras = ex
+        cfg.save(update_fields=["extras"])
+        after = lane_knobs(cfg)
+    from bot_program.audit import record_lane_knobs
+    record_lane_knobs(cfg, before=before, after=after,
+                      who=who or getattr(user, "username", ""), user=user)
+    logger.info("[take-trade] %s manual lane %s knobs %s -> %s",
+                getattr(user, "username", "?"), cls, before, after)
+    return {"ok": True, "asset_class": cls, "changed": True, "knobs": after}

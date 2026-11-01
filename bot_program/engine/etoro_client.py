@@ -1600,6 +1600,15 @@ class EtoroTrader:
                     f"a row with neither a 'candles' list nor a 'close' — "
                     f"got {shape}. An unmeasured shape; measure the GET "
                     f"before trusting a bar here.")
+        def _px(c, key):
+            # A MISSING PRICE IS NONE, NEVER "0" (2026-10-31): a candle
+            # without its low was stored with a low of 0, a wick to zero
+            # on the chart and in every ATR stop. None is refused by the
+            # bar writer (market_data.bar_shape), as is any bar that
+            # cannot have traded.
+            v = c.get(key)
+            return None if v is None else str(v)
+
         rows = []
         for c in candles:
             ts = _iso_to_ms(str(c.get("fromDate") or c.get("date") or ""))
@@ -1608,8 +1617,8 @@ class EtoroTrader:
             volume = c.get("volume")
             rows.append([
                 ts,
-                str(c.get("open", "0")), str(c.get("high", "0")),
-                str(c.get("low", "0")), str(c.get("close", "0")),
+                _px(c, "open"), _px(c, "high"),
+                _px(c, "low"), _px(c, "close"),
                 str(volume if volume is not None else 0),
                 ts + span_ms,
                 "0", 0, "0", "0", "0",
@@ -1660,21 +1669,11 @@ class EtoroTrader:
         block = info.get("accountTotals")
         return block if isinstance(block, dict) else {}
 
-    def margin_cells(self) -> "dict | None":
-        """{"available_cash", "used_margin", "currency"} from ONE aggregate
-        read, or None when the read failed. Each figure is None when the
-        payload lacks its key — three states; a 0 is a measurement. The
-        KEY NAMES were measured 2026-09-22 (accountAvailableCash,
-        accountTotalUsedMargin under accountTotals, see the comment above
-        `_totals`); their arithmetic (available + used + pnl = total) is
-        the public reference's claim, unmeasured. One more GET per sync;
-        nothing on an entry path calls this — the gate reads the cells."""
-        try:
-            info = self.account()
-        except Exception as e:  # noqa: BLE001
-            log.warning("eToro margin_cells failed: %s", e)
-            return None
-        totals = self._totals(info)
+    @classmethod
+    def _cells_of(cls, info) -> dict:
+        """The margin figures of one aggregate payload (margin_cells'
+        shape): each None when the payload lacks its key."""
+        totals = cls._totals(info)
 
         def _num(key):
             raw = totals.get(key)
@@ -1685,7 +1684,84 @@ class EtoroTrader:
 
         return {"available_cash": _num("accountAvailableCash"),
                 "used_margin": _num("accountTotalUsedMargin"),
-                "currency": str(info.get("accountCurrency") or "")}
+                "currency": str((info or {}).get("accountCurrency") or "")
+                if isinstance(info, dict) else ""}
+
+    @classmethod
+    def _figures_of(cls, info) -> dict:
+        """The rest of one aggregate payload (2026-10-31): {"pnl"
+        (accountCurrentPnl), "frozen_cash" (accountFrozenCash), "balance"
+        (accountBalance)}, each None when the payload lacks its key. The
+        key names are the ones measured 2026-09-22 (the comment above
+        `_totals`); a frozen cash beside a HELD order was measured once
+        (used margin 42.5 and accountFrozenCash 42.5, doc §4 D2b-i), the
+        P&L and the balance are printed and unmeasured. Display only: no
+        gate reads them, so they ride the snapshot and never margin_cells,
+        whose shape the gate and its tests read."""
+        totals = cls._totals(info)
+
+        def _num(key):
+            raw = totals.get(key)
+            try:
+                return None if raw is None else float(raw)
+            except (TypeError, ValueError):
+                return None
+
+        return {"pnl": _num("accountCurrentPnl"),
+                "frozen_cash": _num("accountFrozenCash"),
+                "balance": _num("accountBalance")}
+
+    @classmethod
+    def _reading_of(cls, info) -> "tuple[float, str] | None":
+        """(total value, currency) of one aggregate payload, or None
+        (net_liquidation's rule: a zero or a missing figure is None)."""
+        try:
+            value = float(cls._totals(info).get("accountTotalValue"))
+        except (TypeError, ValueError):
+            return None
+        if value <= 0:
+            return None
+        return value, str(info.get("accountCurrency") or "")
+
+    def account_snapshot(self) -> "dict | None":
+        """{"reading": net_liquidation's answer, "margin": margin_cells'
+        answer, "figures": _figures_of's} from ONE aggregate-portfolio GET,
+        or None when that GET failed (2026-10-31).
+
+        The sync asked net_liquidation() and margin_cells() one after the
+        other, and each sent its own GET of the same payload: two reads of
+        one quantity seconds apart, and when only the second failed (a
+        429, a 5xx) the equity and last_sync moved while the cash and the
+        used margin kept aging. One read now serves both, so they land
+        together or not at all. The post-order re-read
+        (bot_program.etoro_cells) asks this too. `figures` (the P&L, the
+        frozen cash, the balance) is the rest of the same payload, for
+        the pages (bot_program.etoro_used)."""
+        try:
+            info = self.account()
+        except Exception as e:  # noqa: BLE001
+            log.warning("eToro account_snapshot failed: %s", e)
+            return None
+        return {"reading": self._reading_of(info),
+                "margin": self._cells_of(info),
+                "figures": self._figures_of(info)}
+
+    def margin_cells(self) -> "dict | None":
+        """{"available_cash", "used_margin", "currency"} from ONE aggregate
+        read, or None when the read failed. Each figure is None when the
+        payload lacks its key — three states; a 0 is a measurement. The
+        KEY NAMES were measured 2026-09-22 (accountAvailableCash,
+        accountTotalUsedMargin under accountTotals, see the comment above
+        `_totals`); their arithmetic (available + used + pnl = total) is
+        the public reference's claim, unmeasured. Nothing on an entry path
+        calls this — the gate reads the cells; the sync reads them with
+        the equity through account_snapshot (one GET, 2026-10-31)."""
+        try:
+            info = self.account()
+        except Exception as e:  # noqa: BLE001
+            log.warning("eToro margin_cells failed: %s", e)
+            return None
+        return self._cells_of(info)
 
     def balance_usdt(self) -> float:
         """Available cash in the ACCOUNT currency, not USDT — the name is the
@@ -1727,13 +1803,7 @@ class EtoroTrader:
         except Exception as e:  # noqa: BLE001
             log.warning("eToro net_liquidation failed: %s", e)
             return None
-        try:
-            value = float(self._totals(info).get("accountTotalValue"))
-        except (TypeError, ValueError):
-            return None
-        if value <= 0:
-            return None
-        return value, str(info.get("accountCurrency") or "")
+        return self._reading_of(info)
 
     def _open_positions(self) -> list:
         r = self._read("GET", self._v1_info("portfolio"),
@@ -1835,6 +1905,27 @@ class EtoroTrader:
                         row["leverage"] = int(float(lev))
                 except (TypeError, ValueError):
                     pass
+            # EACH POSITION'S OWN FIGURES (2026-10-31), so what eToro holds
+            # outside Sauron's rows is listed position by position, never
+            # inferred: the venue's position id (positionID, measured, the
+            # handle a Sauron row records as broker_position_id), the
+            # invested `amount` (MEASURED at 1x: 84.8 = units × openRate;
+            # at 2x unmeasured on this list) and `netProfit` (the public
+            # reference's name, unmeasured on this account). A row that
+            # does not carry one keeps None — never 0, which would read as
+            # a position with nothing invested or flat.
+            pid = p.get("positionID") or p.get("positionId")
+            row["position_id"] = (str(pid) if isinstance(pid, (int, str))
+                                  and not isinstance(pid, bool)
+                                  and str(pid).strip() else None)
+            for key, name in (("amount", "amount"),
+                              ("net_profit", "netProfit")):
+                raw = p.get(name)
+                try:
+                    row[key] = (None if raw is None or isinstance(raw, bool)
+                                else float(raw))
+                except (TypeError, ValueError):
+                    row[key] = None
             out.append(row)
         return out
 

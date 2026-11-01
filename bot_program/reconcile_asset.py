@@ -23,6 +23,8 @@ from decimal import Decimal
 
 from django.utils import timezone
 
+from bot_program.etoro_cells import one_read_per_pass
+
 logger = logging.getLogger(__name__)
 
 #: How long a row that just CLOSED keeps claiming its symbol for the sweep
@@ -221,33 +223,49 @@ def _broker_open_symbols(client, *, asset_class: str, warm=()) -> dict:
     # be judged by it, and an unnamed book stops being a reason to keep a
     # closed position open for twelve hours (a real forex row, 2026-10-03).
     position_ids: set = set()
+    # EVERY POSITION, NOT ONLY THE SET OF NAMES (2026-10-31): eToro holds
+    # each position apart, and a set of symbols read a second position on
+    # a symbol a row holds as claimed (the sweep counts by position there,
+    # reconcile_unknown_positions). An unnamed one rides with no symbol:
+    # only its id can pair it.
+    rows: list = []
     for p in positions:
         if isinstance(p, dict):
             sym, sec = p.get("symbol"), p.get("sec_type")
             unresolved = p.get("symbol_unresolved") is True
             pid = p.get("position_id")
+            side, qty = p.get("side"), p.get("qty")
         else:
             sym, sec = getattr(p, "symbol", None), getattr(p, "sec_type", None)
             unresolved = getattr(p, "symbol_unresolved", None) is True
             pid = getattr(p, "position_id", None)
+            side, qty = getattr(p, "side", None), getattr(p, "qty", None)
+        handle = ""
         if isinstance(pid, (str, int)) and not isinstance(pid, bool) \
                 and str(pid).strip():
-            position_ids.add(str(pid).strip())
+            handle = str(pid).strip()
+            position_ids.add(handle)
         # `is True` and not a truth test: a MagicMock answers any attribute
         # with a truthy object, and a reader that believed it would report
         # every position in every test as unnameable.
         if not sym or unresolved:
             unnamed += 1
+            rows.append({"symbol": "", "side": side if isinstance(side, str)
+                         else "", "qty": qty, "position_id": handle,
+                         "unnamed": True})
             continue
         sym = str(sym).upper()
         symbols.add(sym)
+        rows.append({"symbol": sym, "side": side if isinstance(side, str)
+                     else "", "qty": qty, "position_id": handle,
+                     "unnamed": False})
         if sec is not None:
             has_sec_types = True
             if str(sec).upper() == "OPT":
                 opt_underlyings.add(sym)
     return {"symbols": symbols, "opt_underlyings": opt_underlyings,
             "has_sec_types": has_sec_types, "unnamed": unnamed,
-            "position_ids": position_ids}
+            "position_ids": position_ids, "positions": rows}
 
 
 def _options_row_open_at_broker(trade, state: dict):
@@ -278,8 +296,9 @@ def _state_key(client, asset_class: str) -> tuple:
     in one portfolio and `_broker_open_symbols` never reads the class, so a
     key per (class, venue) asked GET /portfolio once per class: with forex,
     stock, commodity and crypto armed, four reads where one answers all,
-    every 15 minutes around the clock. Other venues keep the class in the
-    key (options and sec-typed books read differently per class)."""
+    every pass around the clock (every 5 minutes since 2026-10-31). Other
+    venues keep the class in the key (options and sec-typed books read
+    differently per class)."""
     venue = type(client).__name__
     if venue == "EtoroTrader":
         world = getattr(client, "_world", None)
@@ -287,6 +306,7 @@ def _state_key(client, asset_class: str) -> tuple:
     return (asset_class, venue)
 
 
+@one_read_per_pass()                # one account read when the walk ends
 def reconcile_user(user) -> dict:
     """Reconcile one user's open AssetBotTrade rows against broker state.
 
@@ -811,6 +831,11 @@ def _close_as_orphan(trade, *, venue_said: str = "",
             return False
         trade.save(update_fields=["exit_price", "pnl", "status", "closed_at",
                                     "reason", "metadata"])
+        # The account is read again once this booking commits (2026-10-31,
+        # bot_program.etoro_cells): the venue closed it, and the cash that
+        # freed is what the next order is judged on. Fenced inside.
+        from bot_program import etoro_cells
+        etoro_cells.refresh_for_trade(trade, why="venue close")
 
     # Grade it. The module docstring has always claimed this happened and it
     # never did: outcome was hardcoded to "manual_close" and realized_r was
@@ -880,6 +905,62 @@ def _close_as_orphan(trade, *, venue_said: str = "",
     return True
 
 
+def _unclaimed_at(state: dict, by_position: bool, claimed: set,
+                  claimers: list) -> tuple:
+    """(unclaimed symbols, the names the alert says, the alert's key) for
+    one venue's read.
+
+    BY POSITION AT eTORO (2026-10-31). The sweep compared the set of the
+    broker's symbols with the set of the rows' symbols, so a second eToro
+    position on a symbol a row holds — opened in the eToro app beside
+    Sauron's — read as claimed. eToro holds every
+    position apart (an opposite order opens a second one), so there each
+    row claims ONE position (etoro_used.match_positions: the position id
+    the row records, else one by one by symbol, side and the closest
+    units), and each position left is reported. A row stamped for another
+    venue claims nothing there; an unstamped one may. A position the
+    client could not name is paired by its id only, and is counted as
+    unnamed as before, never reported by a name it does not have.
+
+    Every other venue keeps the symbol sets: some net a symbol into one
+    row (IBKR, Alpaca), where a count would read two rows on one net
+    position as one too many, and none of their lists was measured for
+    this. A read that lists no positions (a reader that states only the
+    symbols) keeps them too.
+
+    THE KEY IS THE OUTSIDE POSITIONS ALONE (2026-10-31): each symbol with
+    its count ("NVDA", "NVDA ×2"), never Sauron's own beside them. The
+    names said "NVDA (+1 beside Sauron's k)" and were the alert's key, so
+    one hand-placed position rang again inside the three-hour window each
+    time a row on its symbol opened or closed. Sauron's k is the rows that
+    took a position at this read; a row closed inside the grace whose
+    position eToro no longer lists is not one."""
+    rows = state.get("positions") if isinstance(state, dict) else None
+    if by_position and isinstance(rows, list):
+        from collections import Counter
+
+        from .etoro_used import claim_row, match_positions
+        mine = [claim_row(r) for r in claimers
+                if str((r.metadata or {}).get("broker") or "").strip().lower()
+                in ("etoro", "")]
+        pairs, left, _ours = match_positions(
+            [r for r in rows if isinstance(r, dict)], mine)
+        unclaimed = sorted(str(h["symbol"]).upper() for h in left
+                           if h.get("symbol") and not h.get("unnamed"))
+        held_by_rows = Counter(str(h.get("symbol") or "").upper()
+                               for h, _mine in pairs)
+        names, key = [], []
+        for sym, n in sorted(Counter(unclaimed).items()):
+            key.append(f"{sym} ×{n}" if n > 1 else sym)
+            k = held_by_rows.get(sym, 0)
+            names.append(f"{sym} (+{n} beside Sauron's {k})" if k
+                         else key[-1])
+        return unclaimed, names, key
+    held = {str(x).upper() for x in (state.get("symbols") or set())}
+    unclaimed = sorted(held - claimed)
+    return unclaimed, unclaimed, unclaimed
+
+
 def reconcile_unknown_positions(user) -> dict:
     """Positions the BROKER holds that no AssetBotTrade row claims.
 
@@ -912,17 +993,21 @@ def reconcile_unknown_positions(user) -> dict:
     # Every symbol this user's rows currently claim, in one query. Options
     # are claimed under their OCC symbol, which is what the broker reports.
     claimed = set()
+    # And the rows themselves (2026-10-31): at eToro, which holds every
+    # position apart, each row claims ONE position (_unclaimed_at).
+    claimers = []
     from .asset_engine.base import is_entry_working
     for row in (AssetBotTrade.objects
                 .filter(config__user=user,
                         status__in=("OPEN", "CLOSE_PENDING"), paper=False)
-                .only("symbol", "metadata")):
+                .only("symbol", "metadata", "side", "qty")):
         # A WORKING row claims a symbol it holds NOTHING of: its order is
         # still queued. Counting it here would mask the very position that
         # order creates when it fills — the sweep exists to find units no
         # row accounts for, and an unfilled order accounts for none.
         if row.symbol and not is_entry_working(row):
             claimed.add(str(row.symbol).upper())
+            claimers.append(row)
     # A ROW CLOSED SECONDS AGO STILL CLAIMS ITS SYMBOL HERE (the lag; see
     # SWEEP_CLOSED_GRACE_S). Report-only, every venue.
     from datetime import timedelta as _td
@@ -930,9 +1015,10 @@ def reconcile_unknown_positions(user) -> dict:
                 .filter(config__user=user, status="CLOSED", paper=False,
                         closed_at__gte=timezone.now()
                         - _td(seconds=SWEEP_CLOSED_GRACE_S))
-                .only("symbol")):
+                .only("symbol", "metadata", "side", "qty")):
         if row.symbol:
             claimed.add(str(row.symbol).upper())
+            claimers.append(row)
 
     configs = (AssetBotConfig.objects
                .filter(user=user, enabled=True)
@@ -995,8 +1081,8 @@ def reconcile_unknown_positions(user) -> dict:
                          "could not name — that part of the book is "
                          "unreadable, not clean", venue, state["unnamed"])
 
-        held = {str(x).upper() for x in (state.get("symbols") or set())}
-        unclaimed = sorted(held - claimed)
+        unclaimed, names, key = _unclaimed_at(
+            state, venue == "EtoroTrader", claimed, claimers)
         if not unclaimed:
             continue
 
@@ -1004,10 +1090,13 @@ def reconcile_unknown_positions(user) -> dict:
         out["symbols"].extend(unclaimed)
         logger.error("unknown-position sweep: %s holds %d position(s) no "
                      "row claims: %s", venue, len(unclaimed),
-                     ", ".join(unclaimed[:8]))
+                     ", ".join(names[:8]))
         try:
             from bot_program.notifications import notify_unclaimed_position
-            notify_unclaimed_position(user, symbols=unclaimed, venue=venue)
+            # The positions counted, not the names (2026-10-31): two on
+            # one symbol are "NVDA ×2", one name.
+            notify_unclaimed_position(user, symbols=names, venue=venue,
+                                      count=len(unclaimed), key=key)
         except Exception as e:  # noqa: BLE001
             logger.warning("unknown-position sweep: alert failed: %s", e)
             out["errors"] += 1
@@ -1122,9 +1211,8 @@ def reconcile_unknown_positions(user) -> dict:
                                        "sweep of a book nobody could read",
                                        venue_name, acct.label)
                     else:
-                        held = {str(x).upper()
-                                for x in (state.get("symbols") or set())}
-                        unclaimed = sorted(held - claimed)
+                        unclaimed, names, key = _unclaimed_at(
+                            state, _kind == "etoro", claimed, claimers)
                         if unclaimed:
                             out["unclaimed"] += len(unclaimed)
                             out["symbols"].extend(unclaimed)
@@ -1132,13 +1220,14 @@ def reconcile_unknown_positions(user) -> dict:
                                 "unknown-position sweep: %s %s holds %d "
                                 "position(s) no row claims: %s", venue_name,
                                 acct.label, len(unclaimed),
-                                ", ".join(unclaimed[:8]))
+                                ", ".join(names[:8]))
                             try:
                                 from bot_program.notifications import (
                                     notify_unclaimed_position)
                                 notify_unclaimed_position(
-                                    user, symbols=unclaimed,
-                                    venue=f"{venue_name} {acct.label}")
+                                    user, symbols=names,
+                                    venue=f"{venue_name} {acct.label}",
+                                    count=len(unclaimed), key=key)
                             except Exception as e:  # noqa: BLE001
                                 logger.warning("unknown-position sweep: alert "
                                                "failed: %s", e)
@@ -1147,8 +1236,13 @@ def reconcile_unknown_positions(user) -> dict:
     return out
 
 
+@one_read_per_pass()
 def reconcile_all_users() -> dict:
-    """Walk every user with at least one open live AssetBotTrade."""
+    """Walk every user with at least one open live AssetBotTrade.
+
+    The venue closes this walk books ask the eToro account to be read
+    again once the walk has finished, one read per account however many
+    rows it closed (2026-10-31, bot_program.etoro_cells)."""
     from django.contrib.auth.models import User
     from .models import AssetBotTrade
 

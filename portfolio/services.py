@@ -340,7 +340,7 @@ def pnl_on_capital_pct(pnl, asset_class, notional, *, leverage=None,
     return round(float(pnl) / cap * 100, 2)
 
 
-def capital_summary(user):
+def capital_summary(user, *, shared=None):
     """Pools, used, free, cash — the money question, answered once.
 
     Two economies live on this platform and the summary keeps them
@@ -357,9 +357,32 @@ def capital_summary(user):
 
     Every figure is a measurement; a book that cannot be read returns
     None for its keys rather than a confident 0.
+
+    A DISPLAY, AND ONLY THAT (2026-10-31). Its readers are the Horde head,
+    the portfolio and positions pages and the header dropdown; no gate,
+    limit or size reads it (tests.test_used_is_etoros scans the source for
+    a reader). So two things here change what a page says and nothing a
+    gate judges:
+
+      * ONE ACCOUNT, COUNTED ONCE. With shared_capital_live ON every pool
+        that follows the account carries the whole account (or its own
+        ceiling of it), and summed, three followers read three accounts.
+        The totals pool them through capital_truth.combined_capital, as
+        Morgul's daily stop and the preflight's armed total already do;
+        each class row says `shared`. Off, the slices sum as before.
+        `shared` is that switch when the caller has read it already (the
+        Horde reads its switches in one batch, never through
+        is_component_enabled); None reads it here
+        (capital_truth.shared_capital).
+      * `etoro`: eToro's own used, available, P&L and total with their
+        age, and the split against Sauron's own eToro rows
+        (bot_program.etoro_used.account_used): the pages headline it, the
+        pool arithmetic below it.
     """
     from collections import defaultdict
 
+    from bot_program.capital_truth import (combined_capital, shared_capital,
+                                           tracks_broker)
     from bot_program.models import AssetBotConfig, AssetBotTrade
     from dashboard.position_summary import venue_of
     from portfolio.risk_gate import capital_at_work
@@ -368,9 +391,25 @@ def capital_summary(user):
     # one bucket of deployable money — summing them advertised "free"
     # capital that no live entry could actually draw on, and the sizing
     # engine never consults such a sum.
+    if shared is None:
+        shared = shared_capital()
+    shared = bool(shared)
+    cfgs = list(AssetBotConfig.objects.filter(user=user, enabled=True))
+    groups = defaultdict(list)
+    for cfg in cfgs:
+        groups[(cfg.asset_class, cfg.mode)].append(cfg)
     pools = defaultdict(float)
-    for cfg in AssetBotConfig.objects.filter(user=user, enabled=True):
-        pools[(cfg.asset_class, cfg.mode)] += float(cfg.capital or 0)
+    for key, group in groups.items():
+        pools[key] = combined_capital(group, shared=shared)
+    # THE ACCOUNT ONCE PER WORLD (2026-10-31): a mode's total is its pools
+    # combined, not the sum of its classes — under shared capital the
+    # stock, crypto and forex followers are one account, not three.
+    mode_pool = {mode: combined_capital([c for c in cfgs if c.mode == mode],
+                                        shared=shared)
+                 for mode in {c.mode for c in cfgs}}
+    one_pool = {key for key, group in groups.items()
+                if shared and any(tracks_broker(c) and c.mode != "paper"
+                                  for c in group)}
 
     used = defaultdict(float)
     # ENGAGED, keyed by the ROW's world (2026-09-28). `used` charges the
@@ -410,10 +449,17 @@ def capital_summary(user):
             # (a disabled config's trades still open, a pool shrunk under
             # its book) is exactly the state the operator needs to see.
             "free": round(pool - spent, 2),
+            # Part of the ONE shared account (2026-10-31): this row's free
+            # is the whole account less this class alone; the totals count
+            # the account once.
+            "shared": (ac, mode) in one_pool,
         })
 
     def _mode_total(table, mode):
         return round(sum(v for (ac, m), v in table.items() if m == mode), 2)
+
+    def _mode_pool(mode):
+        return round(mode_pool.get(mode, 0.0), 2)
 
     cash = book_value = None
     try:
@@ -423,15 +469,27 @@ def capital_summary(user):
     except Exception:  # noqa: BLE001 — None reads as unmeasured, 0 as a lie
         pass
 
+    # eToro's own figures, beside the pools (2026-10-31): fenced, so an
+    # unreadable account costs these keys, never the pools.
+    etoro = None
+    try:
+        from bot_program.etoro_used import account_used
+        etoro = account_used(user)
+    except Exception:  # noqa: BLE001 — a page renders without it
+        logger.warning("capital_summary: eToro's figures unavailable",
+                       exc_info=True)
+
+    pool_total = sum(mode_pool.values())
     return {
         "classes": classes,
-        "pool_total": round(sum(pools.values()), 2),
+        "shared": bool(one_pool),
+        "pool_total": round(pool_total, 2),
         "used_total": round(sum(used.values()), 2),
-        "free_total": round(sum(pools.values()) - sum(used.values()), 2),
+        "free_total": round(pool_total - sum(used.values()), 2),
         # The paper/live split, because the totals above mix simulated and
         # real pools — one number that no live entry could deploy in full.
-        "pool_live": _mode_total(pools, "live"),
-        "pool_paper": _mode_total(pools, "paper"),
+        "pool_live": _mode_pool("live"),
+        "pool_paper": _mode_pool("paper"),
         # COMMITTED per venue, added 2026-09-13 to complete the set. The
         # split had pool and free but not used, so a caller wanting "how
         # much real money is engaged right now" had to re-derive it from
@@ -447,12 +505,12 @@ def capital_summary(user):
         # draw. Two questions; they need not sum to the pool.
         "used_live": round(engaged.get("live", 0.0), 2),
         "used_paper": round(engaged.get("paper", 0.0), 2),
-        "free_live": round(_mode_total(pools, "live")
-                           - _mode_total(used, "live"), 2),
-        "free_paper": round(_mode_total(pools, "paper")
+        "free_live": round(_mode_pool("live") - _mode_total(used, "live"), 2),
+        "free_paper": round(_mode_pool("paper")
                             - _mode_total(used, "paper"), 2),
         "cash": cash,
         "book_value": book_value,
+        "etoro": etoro,
     }
 
 

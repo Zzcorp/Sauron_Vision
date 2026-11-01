@@ -57,6 +57,20 @@ honest.{% endcomment %}
         <span class="oc-strip-value {{ strip.free.tone }}" data-sv-live-key="pf.free">{{ strip.free.text }}</span>
         <span class="oc-strip-sub" data-sv-live-key="pf.free.sub">{{ strip.free.sub }}</span>
     </div>
+    {% comment %}
+    THE LIVE WORLD AS eToro STATES IT (2026-10-31). ALLOCATED and FREE are
+    both books against the cash typed on /setup/; this cell is eToro's own
+    used margin, with what is available, the total and the age, from the
+    sync's cells (bot_program.etoro_used) — and the split rides under the
+    strip. View layer only: nothing the gates divide by moved.
+    {% endcomment %}
+    {% if strip.etoro %}
+    <div class="oc-strip-cell" title="{{ strip.etoro.title }}">
+        <span class="oc-strip-label"><span class="sv-venue {{ etoro.venue_class }}">{{ etoro.world_word }}</span> ETORO USED</span>
+        <span class="oc-strip-value" data-sv-live-key="pf.etoro">{{ strip.etoro.text }}</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap" data-sv-live-key="pf.etoro.sub">{{ strip.etoro.sub }}</span>
+    </div>
+    {% endif %}
     <div class="oc-strip-cell" title="{{ strip.exposure.title }}">
         <span class="oc-strip-label">EXPOSURE</span>
         <span class="oc-strip-value {{ strip.exposure.tone }}" data-sv-live-key="pf.exposure">{{ strip.exposure.text }}</span>
@@ -119,6 +133,9 @@ honest.{% endcomment %}
     {# grid-column spans the whole strip: .oc-strip is a grid, so without it #}
     {# the sentence is squeezed into one 11rem cell beside the numbers. #}
     <p class="oc-strip-sub sv-unknown" style="grid-column:1/-1;white-space:normal;margin:0;" data-sv-live-key="pf.coverage">{{ book_coverage }}</p>
+    {% endif %}
+    {% if etoro %}
+    <p class="oc-strip-sub" style="grid-column:1/-1;white-space:normal;margin:0;" title="{{ etoro.title }}" data-sv-live-key="pf.etoro.split">{{ etoro.split_t }}.</p>
     {% endif %}
 </div>
 

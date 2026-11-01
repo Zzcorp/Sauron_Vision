@@ -24,8 +24,22 @@ The strip's numbers are formatted in the view (dashboard.views): the em-dash
 rule for an unmeasured value then lives in one place instead of in eight
 template branches, each a fresh chance to print a confident zero.
 {% endcomment %}
-{# ── 1. Top stat strip — 8 cells ────────────────────────────────── #}
+{# ── 1. Top stat strip — 8 cells, eToro's own used figure first ────── #}
 <div class="oc-strip" style="margin-bottom:18px;" data-sv-live="pos-strip">
+    {% comment %}
+    eToro's OWN used figure heads the strip (2026-10-31): the margin eToro
+    holds as its cells say, with what is available, the total and the age
+    (bot_program.etoro_used through capital_summary), and the split under
+    the strip. EXPOSURE beside it is the notional of Sauron's rows at live
+    marks; a position opened in the eToro app is in eToro's figure only.
+    {% endcomment %}
+    {% if strip.etoro %}
+    <div class="oc-strip-cell" title="{{ strip.etoro.title }}">
+        <span class="oc-strip-label"><span class="sv-venue {{ etoro.venue_class }}">{{ etoro.world_word }}</span> ETORO USED</span>
+        <span class="oc-strip-value" data-sv-live-key="pos.etoro">{{ strip.etoro.text }}</span>
+        <span class="oc-strip-sub oc-strip-sub--wrap" data-sv-live-key="pos.etoro.sub">{{ strip.etoro.sub }}</span>
+    </div>
+    {% endif %}
     <div class="oc-strip-cell" title="{{ strip.open.title }}">
         <span class="oc-strip-label">OPEN</span>
         <span class="oc-strip-value {{ strip.open.tone }}" data-sv-live-key="pos.open">{{ strip.open.text }}</span>
@@ -66,6 +80,10 @@ template branches, each a fresh chance to print a confident zero.
         <span class="oc-strip-value" data-sv-live-key="pos.avg_wl">{{ strip.avg_wl.text }}</span>
         <span class="oc-strip-sub">{{ strip.avg_wl.sub }}</span>
     </div>
+    {% if etoro %}
+    {# grid-column spans the whole strip: the split is a sentence, not a cell. #}
+    <p class="oc-strip-sub" style="grid-column:1/-1;white-space:normal;margin:0;" title="{{ etoro.title }}" data-sv-live-key="pos.etoro.split">{{ etoro.split_t }}.</p>
+    {% endif %}
 </div>
 
 {% if broker %}
@@ -75,7 +93,13 @@ Sauron row exists for the symbol; UNCLAIMED is a position opened by hand
 in TWS or an orphan — real exposure the platform did not open, which an
 ISA will legitimately carry. Outside the live regions on purpose: the
 rows are written by the 15-min broker sync, and the age stamp is the
-honest freshness claim.{% endcomment %}
+honest freshness claim.
+
+At eToro each position is claimed apart, as /treasury/'s outside list
+claims it (2026-10-31, etoro_used.mark_holdings): STOPPED is a close
+Sauron gave up on that eToro still lists, NO BROKER a live row on the
+symbol that records no broker (the split counts it apart), and UNCLAIMED
+says it in eToro's words.{% endcomment %}
 <div class="card" style="margin-bottom:18px;">
     <div class="card-header">
         <span class="card-title">⌂ At the broker · {{ broker.name }} {{ broker.label }} · {{ broker.env }}</span>
@@ -106,7 +130,7 @@ honest freshness claim.{% endcomment %}
                 <td data-label="Value">{{ row.market_value|floatformat:2 }}</td>
                 <td data-label="Unreal P&amp;L" class="{% if row.unrealized_pnl >= 0 %}bkp-up{% else %}bkp-down{% endif %}">{{ row.unrealized_pnl|floatformat:2 }}</td>
                 <td data-label="Ccy">{{ row.currency }}</td>
-                <td data-label="Claim">{% if row.claimed %}<span class="bkp-claim">CLAIMED</span>{% else %}<span class="bkp-claim bkp-claim--unclaimed" title="No Sauron row matches this symbol — opened by hand in TWS, or an orphan. Real exposure the platform did not open and does not manage.">UNCLAIMED</span>{% endif %}</td>
+                <td data-label="Claim">{% if row.claim == "stopped" %}<span class="bkp-claim bkp-claim--stopped" title="Sauron stopped trying to close this position and eToro still lists it: close it at eToro.">STOPPED</span>{% elif row.claim == "no_broker" %}<span class="bkp-claim bkp-claim--nobroker" title="A live Sauron row on this symbol records no broker, so it is not counted as eToro's: it may be this position.">NO BROKER</span>{% elif row.claimed %}<span class="bkp-claim">CLAIMED</span>{% elif broker.kind == "etoro" %}<span class="bkp-claim bkp-claim--unclaimed" title="No Sauron row accounts for this position: opened in the eToro app, a second position beside Sauron's, or an orphan. Real exposure the platform does not manage.">UNCLAIMED</span>{% else %}<span class="bkp-claim bkp-claim--unclaimed" title="No Sauron row matches this symbol — opened by hand in TWS, or an orphan. Real exposure the platform did not open and does not manage.">UNCLAIMED</span>{% endif %}</td>
             </tr>{% endspaceless %}
             {% endfor %}
             </tbody>

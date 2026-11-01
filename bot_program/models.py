@@ -398,7 +398,11 @@ class EtoroAccount(models.Model):
     # broker_backed() call sites read these five names and nothing that is
     # IBKR-specific, so an eToro row wearing them is a book the pages, the
     # preflight and the drawdown governor can read without change. Written
-    # only by sync_etoro_accounts, from one broker call, with its age.
+    # only by sync_etoro_accounts, from one broker call, with its age (the
+    # re-read after the platform's own orders and closes, 2026-10-31,
+    # writes the margin cells below and never these: the pools that follow
+    # the account are retuned from this equity by the sync, and freeze on
+    # its age).
     last_equity = models.DecimalField(max_digits=18, decimal_places=2,
                                       null=True, blank=True)
     last_equity_currency = models.CharField(max_length=8, blank=True,
@@ -407,7 +411,11 @@ class EtoroAccount(models.Model):
     broker_positions = models.JSONField(default=list, blank=True)
     broker_positions_at = models.DateTimeField(null=True, blank=True)
     # THE MARGIN CELLS (2026-09-23), from the same aggregate read as the
-    # equity, written only by sync_etoro_accounts (EtoroTrader.margin_cells).
+    # equity, written by sync_etoro_accounts and, since 2026-10-31, by the
+    # re-read after the platform's own orders and closes
+    # (tasks.refresh_etoro_cells; one GET, EtoroTrader.account_snapshot,
+    # stamped before it). After a re-read last_margin_at is newer than
+    # last_equity_at until the next sync.
     # `last_available_cash` is what the venue will lend against next;
     # `last_used_margin` is what it already holds. None = never read (three
     # states; 0 is a measurement). Read by asset_engine/base.py
@@ -427,6 +435,20 @@ class EtoroAccount(models.Model):
                                            null=True, blank=True)
     last_margin_at = models.DateTimeField(null=True, blank=True)
     last_margin_world = models.CharField(max_length=8, default="", blank=True)
+    # THE REST OF THE SAME READ (2026-10-31): accountCurrentPnl (the open
+    # P&L), accountFrozenCash (cash held for pending orders) and
+    # accountBalance, from the aggregate payload the cells above come
+    # from, written with them under last_margin_at and its world by the
+    # sync and the re-read. DISPLAY ONLY: eToro's own figures headline
+    # wherever a page says used or free (bot_program.etoro_used); no gate,
+    # limit or size reads them. None = this read did not carry it (three
+    # states; 0 is a measurement).
+    last_pnl = models.DecimalField(max_digits=18, decimal_places=2,
+                                   null=True, blank=True)
+    last_frozen_cash = models.DecimalField(max_digits=18, decimal_places=2,
+                                           null=True, blank=True)
+    last_balance = models.DecimalField(max_digits=18, decimal_places=2,
+                                       null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     @property
