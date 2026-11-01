@@ -3657,6 +3657,8 @@ RISK_LIMIT_BOUNDS = {
     # asset_engine.base.pledged_ceiling, which uses the same bounds). 100
     # lets one gap take the whole account — the operator asked for it
     # (2026-10-05) knowing that; under 10 refuses almost any real order.
+    # At exactly 100 no ratio is judged and eToro's free cash decides
+    # alone (2026-11-01, base.free_cash_decides_alone).
     "max_pledged_pct": (10.0, 100.0, "Max account pledged"),
     # What the open positions of one venue may lose together at their
     # stops (2026-10-01, risk_gate.open_risk_state). Under 1 refuses
@@ -6167,9 +6169,23 @@ def _intraday_chart_bars(instrument, interval, limit=240, route=""):
                            limit=limit)[0]
 
 
-# Live-fetched resolutions. 1h/4h are handled from stored bars first.
-INTRADAY_INTERVALS = {"1m": "1m", "5m": "5m", "15m": "15m",
-                      "1h": "1h", "4h": "4h"}
+# Live-fetched resolutions. 1h/4h are handled from stored bars first, and
+# 2h is folded from the stored 1h rows (2026-11-01); the chart's own table
+# of what it serves is dashboard.chart_source.WIRE_INTERVALS.
+INTRADAY_INTERVALS = {"1m": "1m", "5m": "5m", "10m": "10m", "15m": "15m",
+                      "30m": "30m", "1h": "1h", "2h": "2h", "4h": "4h"}
+
+# UI range -> how far back the daily candles go. An indicator can only be
+# as honest as its window. SMA50 needs fifty daily closes before it draws
+# anything at all, and at the old 90-day cap it consumed more than half the
+# chart — while SMA200, which the toolbar offers, could never render a
+# single point and read as a broken button. These are the depths that let
+# every offered overlay say something true; the series are small and the
+# rows already exist. Each range reads twice its name (2026-11-01): 1W read
+# 730 days, the same two years of daily candles as 1Y, under a button the
+# toolbar now names a range beside the weekly candle; it reads two weeks.
+DAILY_DAYS_BACK = {"1d": 420, "1w": 14, "1m": 60, "1mo": 60,
+                   "3m": 180, "1y": 730}
 
 
 @login_required
@@ -6181,20 +6197,27 @@ def chart_data_api(request):
     Response: { "bars": [{"time": ..., "open": ..., "high": ..., "low": ...,
                           "close": ..., "volume": ...}, ...] }
 
-    Two families of timeframe:
-      * Ranges of DAILY candles ("1d", "1w", "1mo"/"1m", "3m", "1y") —
-        `time` is a date string.
-      * Intraday RESOLUTIONS ("1min", "5min", "15min", "1h", "4h") —
-        `time` is epoch seconds; minute bars are fetched live from the
-        keyless public feed and cached for a minute.
+    Three families of timeframe:
+      * DAILY candles: the daily view ("1d") and the ranges ("1w",
+        "1mo"/"1m", "3m", "1y") — `time` is a date string.
+      * WEEKLY candles ("1wk", 2026-11-01) — `time` is the ISO week's
+        Monday as a date string, folded from one feed's days.
+      * Intraday RESOLUTIONS ("1min", "5min", "10min", "15min", "30min",
+        "1h", "2h", "4h") — `time` is epoch seconds; minute bars are
+        fetched live from the keyless public feed and cached for a minute,
+        2h folded from the stored 1h rows.
+    Any other timeframe is refused with a 400 (2026-11-01): it drew 90 days
+    of daily candles for any word.
     """
     from django.http import JsonResponse
     from instruments.models import Instrument
     from django.utils import timezone
     from datetime import timedelta
 
+    from dashboard import chart_source
+
     symbol    = request.GET.get("symbol", "").strip().upper()
-    timeframe = request.GET.get("timeframe", "1d").strip().lower()
+    timeframe = (request.GET.get("timeframe") or "1d").strip().lower()
     # The operator's open bets and the signals' entries, on the SAME response
     # as the bars they are drawn over.
     #
@@ -6219,6 +6242,18 @@ def chart_data_api(request):
         instrument = Instrument.objects.get(symbol=symbol)
     except Instrument.DoesNotExist:
         return JsonResponse({"error": f"Symbol '{symbol}' not found", "bars": []})
+
+    # A timeframe the chart does not serve is refused (2026-11-01): any
+    # word drew 90 days of daily candles, so a typo, or "10m" read as ten
+    # minutes where a bare "m" has always meant a month here, answered with
+    # a chart of something else. Before the overlays: nothing is built.
+    if not (timeframe in chart_source.WIRE_INTERVALS
+            or timeframe == chart_source.WEEKLY
+            or timeframe in DAILY_DAYS_BACK):
+        return JsonResponse({"symbol": symbol, "timeframe": timeframe,
+                             "bars": [],
+                             "error": f"Unknown timeframe '{timeframe}'"},
+                            status=400)
 
     extra = {}
     if overlays:
@@ -6272,7 +6307,6 @@ def chart_data_api(request):
     # today's forming candle, suspect bars). When the overlay is asked for,
     # it also says when the position lines (the venue's prices) sit over
     # another feed's candles.
-    from dashboard import chart_source
     route = chart_source.route_of(request.user, instrument)
 
     def _said(source):
@@ -6281,10 +6315,9 @@ def chart_data_api(request):
                 extra["positions"], source)
         return source
 
-    # The UI sends "1min"/"5min"/"15min" (never bare "1m", which has
+    # The UI sends "1min"/"5min"/"10min"/... (never bare "1m", which has
     # always meant ONE MONTH here — the legacy range value keeps working).
-    interval = {"1min": "1m", "5min": "5m", "15min": "15m",
-                "1h": "1h", "4h": "4h"}.get(timeframe)
+    interval = chart_source.WIRE_INTERVALS.get(timeframe)
     if interval:
         bars, source = chart_source.intraday_series(instrument, interval,
                                                     route=route)
@@ -6300,18 +6333,18 @@ def chart_data_api(request):
                              "bars": bars, "source": _said(source),
                              **extra})
 
-    # UI timeframe -> how far back to look. These views draw daily candles.
-    # An indicator can only be as honest as its window. SMA50 needs
-    # fifty daily closes before it draws anything at all, and at the old
-    # 90-day cap it consumed more than half the chart — while SMA200,
-    # which the toolbar offers, could never render a single point and
-    # read as a broken button. These are the depths that let every
-    # offered overlay say something true; the series are small and the
-    # rows already exist.
-    DAYS_BACK = {"1d": 420, "1w": 730, "1m": 60, "1mo": 60,
-                 "3m": 180, "1y": 730}
-    days_back = DAYS_BACK.get(timeframe, 90)
-    since = timezone.now() - timedelta(days=days_back)
+    # The weekly candle (2026-11-01): one feed's days folded by ISO week,
+    # five years of them (chart_source.weekly_series).
+    if timeframe == chart_source.WEEKLY:
+        since = timezone.now() - timedelta(days=chart_source.WEEKLY_DAYS)
+        bars, source = chart_source.weekly_series(instrument, since=since,
+                                                  route=route)
+        return JsonResponse({"symbol": symbol, "timeframe": timeframe,
+                             "bars": bars, "source": _said(source), **extra})
+
+    # UI timeframe -> how far back to look (DAILY_DAYS_BACK). These views
+    # draw daily candles.
+    since = timezone.now() - timedelta(days=DAILY_DAYS_BACK[timeframe])
 
     bars, source = chart_source.daily_series(instrument, since=since,
                                              route=route)

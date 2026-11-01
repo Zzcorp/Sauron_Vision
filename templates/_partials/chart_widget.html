@@ -6,7 +6,9 @@ Parameters:
   chart_id   — unique HTML id for this widget (default: sv-chart-widget)
   symbol     — ticker symbol (default: "")
   height     — height in px (default: 400)
-  timeframe  — initial timeframe: 1d, 1w, 1m, 3m, 1y (default: 1d)
+  timeframe  — initial timeframe (default: 1d): a candle size, 1min, 5min,
+               10min, 15min, 30min, 1h, 2h, 4h, 1d or 1wk (weekly), or a
+               range of daily candles, 1w, 1mo (1m), 3m or 1y
 Optional page data (json_script blocks the widget picks up when present):
   <chart_id>-positions — [{id, source, side, entry, stop, tp, qty, opened_at, label}]
   <chart_id>-signals   — [{id, price, at, direction, label} plus each dot's
@@ -91,6 +93,40 @@ Optional page data (json_script blocks the widget picks up when present):
     display: flex;
     gap: 3px;
     align-items: center;
+    /* A group wider than the card wraps inside the card (2026-11-01). On
+       a phone the indicator group ran 130 px past the card's edge, and the
+       container clips: POSITIONS and LEVELS were unreachable there. */
+    flex-wrap: wrap;
+}
+/* Each timeframe group names itself (2026-11-01): candle SIZES, then
+   RANGES of daily candles, so the weekly candle (W) and the two-week range
+   (1W) never read as one control. The pane labels' voice. */
+.sv-tf-cap {
+    font-family: var(--font-mono, monospace);
+    font-size: 9px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-muted, #5a7a5a);
+    margin-right: 2px;
+    white-space: nowrap;
+    user-select: none;
+}
+/* On a phone the ten candle sizes and their name keep one row, with less
+   air in each button: from a 360 px screen up, in the fallback monospace
+   too, wider than Share Tech Mono (2026-11-01). There the toolbar holds
+   284 px, and the group needs about 277 with 4 px of air in each button
+   and 1 px between them (261 in Share Tech Mono). With 5 px and 2 px it
+   needed 307 (291), and W, or D and W, wrapped onto a line of their own
+   directly above RANGE 1W: below 383 px in the fallback font, below 367
+   in Share Tech Mono (tests.test_chart_divisions
+   .ThePhoneToolbarMeasuredTests). */
+@media (max-width: 480px) {
+    .sv-chart-timeframes .sv-tf-btn { padding: 2px 5px; }
+    .sv-chart-timeframes { gap: 2px; }
+}
+@media (max-width: 400px) {
+    .sv-chart-timeframes .sv-tf-btn { padding: 2px 4px; }
+    .sv-chart-timeframes { gap: 1px; }
 }
 .sv-tf-sep {
     width: 1px; height: 14px; margin: 0 3px;
@@ -625,22 +661,34 @@ Optional page data (json_script blocks the widget picks up when present):
     <div class="sv-chart-toolbar">
         <div class="sv-chart-symbol-badge">{{ symbol }}</div>
 
-        {% comment %}Two families: intraday RESOLUTIONS (fetched live from
-        the keyless feed, down to the minute) and RANGES of daily candles.
-        The separator communicates the split. "1min" etc. on the wire —
-        never bare "1m", which has always meant one month here.{% endcomment %}
-        <div class="sv-chart-timeframes">
-            <button class="sv-tf-btn {% if timeframe == '1min' %}active{% endif %}" data-tf="1min">1m</button>
-            <button class="sv-tf-btn {% if timeframe == '5min' %}active{% endif %}" data-tf="5min">5m</button>
-            <button class="sv-tf-btn {% if timeframe == '15min' %}active{% endif %}" data-tf="15min">15m</button>
-            <button class="sv-tf-btn {% if timeframe == '1h' %}active{% endif %}" data-tf="1h">1H</button>
-            <button class="sv-tf-btn {% if timeframe == '4h' %}active{% endif %}" data-tf="4h">4H</button>
-            <span class="sv-tf-sep" aria-hidden="true"></span>
-            <button class="sv-tf-btn {% if timeframe == '1d' %}active{% endif %}" data-tf="1d">1D</button>
-            <button class="sv-tf-btn {% if timeframe == '1w' %}active{% endif %}" data-tf="1w">1W</button>
-            <button class="sv-tf-btn {% if timeframe == '1m' or timeframe == '1mo' %}active{% endif %}" data-tf="1mo">1M</button>
-            <button class="sv-tf-btn {% if timeframe == '3m' %}active{% endif %}" data-tf="3m">3M</button>
-            <button class="sv-tf-btn {% if timeframe == '1y' %}active{% endif %}" data-tf="1y">1Y</button>
+        {% comment %}Two groups, each named (2026-11-01). CANDLE sizes:
+        intraday resolutions (fetched live from the keyless feed down to the
+        minute, 10m folded from its 5-minute bars; 1H and 4H stored, 2H
+        folded from the stored 1-hour rows), the daily candle and the weekly
+        candle. Then RANGES of daily candles. 1W, 1M, 3M and 1Y have always
+        drawn daily candles: beside a weekly candle, unnamed, 1W read as
+        one. "1min" etc. on the wire — never bare "1m", which has always
+        meant one month here — and "1wk" for the weekly candle, apart from
+        the "1w" range.{% endcomment %}
+        <div class="sv-chart-timeframes" role="group" aria-label="Candle size">
+            <span class="sv-tf-cap" aria-hidden="true">Candle</span>
+            <button class="sv-tf-btn {% if timeframe == '1min' %}active{% endif %}" data-tf="1min" title="1-minute candles">1m</button>
+            <button class="sv-tf-btn {% if timeframe == '5min' %}active{% endif %}" data-tf="5min" title="5-minute candles">5m</button>
+            <button class="sv-tf-btn {% if timeframe == '10min' %}active{% endif %}" data-tf="10min" title="10-minute candles, folded from the feed's 5-minute bars">10m</button>
+            <button class="sv-tf-btn {% if timeframe == '15min' %}active{% endif %}" data-tf="15min" title="15-minute candles">15m</button>
+            <button class="sv-tf-btn {% if timeframe == '30min' %}active{% endif %}" data-tf="30min" title="30-minute candles">30m</button>
+            <button class="sv-tf-btn {% if timeframe == '1h' %}active{% endif %}" data-tf="1h" title="1-hour candles">1H</button>
+            <button class="sv-tf-btn {% if timeframe == '2h' %}active{% endif %}" data-tf="2h" title="2-hour candles, folded from the same feed's 1-hour candles">2H</button>
+            <button class="sv-tf-btn {% if timeframe == '4h' %}active{% endif %}" data-tf="4h" title="4-hour candles">4H</button>
+            <button class="sv-tf-btn {% if timeframe == '1d' %}active{% endif %}" data-tf="1d" title="Daily candles">D</button>
+            <button class="sv-tf-btn {% if timeframe == '1wk' %}active{% endif %}" data-tf="1wk" title="Weekly candles, Monday 00:00 to Sunday 24:00 UTC">W</button>
+        </div>
+        <div class="sv-chart-timeframes sv-chart-ranges" role="group" aria-label="Range of daily candles">
+            <span class="sv-tf-cap" aria-hidden="true">Range</span>
+            <button class="sv-tf-btn {% if timeframe == '1w' %}active{% endif %}" data-tf="1w" title="Daily candles over the last two weeks">1W</button>
+            <button class="sv-tf-btn {% if timeframe == '1m' or timeframe == '1mo' %}active{% endif %}" data-tf="1mo" title="Daily candles over the last two months">1M</button>
+            <button class="sv-tf-btn {% if timeframe == '3m' %}active{% endif %}" data-tf="3m" title="Daily candles over the last six months">3M</button>
+            <button class="sv-tf-btn {% if timeframe == '1y' %}active{% endif %}" data-tf="1y" title="Daily candles over the last two years">1Y</button>
         </div>
 
         <!-- Chart type buttons -->
@@ -685,7 +733,7 @@ Optional page data (json_script blocks the widget picks up when present):
             <button class="sv-ind-btn" data-ind="macd" title="MACD 12/26/9 in its own pane">MACD</button>
             <button class="sv-ind-btn" data-ind="volume" title="Volume histogram">VOL</button>
             <button class="sv-ind-btn active" data-ind="positions" title="Open positions, stops, targets and signal entries on the tape">POSITIONS</button>
-            <button class="sv-ind-btn active" data-ind="levels" title="Where the crowd keeps its stops, read off the 4h bars: liquidity pools (gold areas from their first touch), swings (blue ticks on the candle that printed them; the nearest each side runs to now), round numbers (grey dots) and the Power of Three in violet (every day's Asia, London and New York sessions as boxes in three violet tones on 1h and finer charts, as strips along the chart's foot on 4h; A the Asian box, M the run of one of its sides, D the move back the other way). The key under the chart names the hunt and the draw and switches each kind. Recomputed every minute: a level the price trades through disappears">LEVELS</button>
+            <button class="sv-ind-btn active" data-ind="levels" title="Where the crowd keeps its stops, read off the 4h bars: liquidity pools (gold areas from their first touch), swings (blue ticks on the candle that printed them; the nearest each side runs to now), round numbers (grey dots) and the Power of Three in violet (every day's Asia, London and New York sessions as boxes in three violet tones on 1h and finer charts, as strips along the chart's foot on 2h and 4h; A the Asian box, M the run of one of its sides, D the move back the other way). The key under the chart names the hunt and the draw and switches each kind. Recomputed every minute: a level the price trades through disappears">LEVELS</button>
         </div>
 
         <!-- View controls -->
@@ -2739,8 +2787,14 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
     var CHART_HEIGHT = parseInt('{{ height }}', 10) || 400;
     var TOOLBAR_H    = 36;
     var PANE_LABEL_H = 0;   /* labels float over the pane, costing no rows */
-    var INTRADAY     = ['1min', '5min', '15min', '1h', '4h'];
-    var TF_SECONDS   = { '1min': 60, '5min': 300, '15min': 900, '1h': 3600, '4h': 14400 };
+    var INTRADAY     = ['1min', '5min', '10min', '15min', '30min', '1h', '2h', '4h'];
+    var TF_SECONDS   = { '1min': 60, '5min': 300, '10min': 600, '15min': 900, '30min': 1800, '1h': 3600, '2h': 7200, '4h': 14400 };
+    /* The weekly candle (2026-11-01) is a daily-family frame, handled the
+       way 1d is: its bar is dated by the ISO week's Monday ('YYYY-MM-DD'),
+       the server marks this week's candle `forming` as it does today's,
+       and `no_tick` when it holds no forming day of today, and no
+       bar-close countdown runs. Its bar holds seven days. */
+    var WEEKLY_TF    = '1wk';
 
     var container   = document.getElementById(CHART_ID + '-container');
     var canvasEl    = document.getElementById(CHART_ID);
@@ -4214,12 +4268,14 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
     }
     /* How long a bar of this series holds, in seconds: a day for a
        daily-family bar (a 'YYYY-MM-DD' string, or the library's
-       {year, month, day} — every daily range draws daily candles), the
-       frame's seconds for an intraday one. A frame with no known width
-       holds nothing past its open. */
+       {year, month, day} — every daily range draws daily candles), seven
+       for the weekly candle's (2026-11-01: a position opened on Wednesday
+       fell past a day-long Monday bar and was drawn nowhere), the frame's
+       seconds for an intraday one. A frame with no known width holds
+       nothing past its open. */
     function barSpan(bars) {
         var t = bars[bars.length - 1].time;
-        if (typeof t === 'string' || (t && t.year)) return 86400;
+        if (typeof t === 'string' || (t && t.year)) return (currentTf === WEEKLY_TF ? 7 : 1) * 86400;
         return TF_SECONDS[currentTf] || 0;
     }
     /* The count the SERVER decided, passed in by the including page —
@@ -4825,7 +4881,7 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
         if (!TOUCH_POINTER) {
             var last = lastBars.length ? lastBars[lastBars.length - 1] : null, dp = priceDecimals(0);
             var p = (last ? String(Math.floor(Math.abs(last.high))).length : 1) + (dp ? dp + 1 : 0);
-            var chars = (isIntraday(currentTf) ? 20 : 10) + (chartType === 'heikin' ? 3 : 0), px = 0;
+            var chars = (isIntraday(currentTf) ? 20 : currentTf === WEEKLY_TF ? 18 : 10) + (chartType === 'heikin' ? 3 : 0), px = 0;
             chars += (chartType === 'candlestick' || chartType === 'heikin') ? 16 + 4 * p : 2 + p;
             if (volumeSeries && activeInds.volume && volHas) {
                 if (lvlVolOf !== lastBars) {
@@ -5255,8 +5311,10 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
                           && POSMAP.po3.sessions.length && (!tfs || tfs > 3600));
             se.hidden = !said;
             se.textContent = said ? (lvlPhone ? '· boxes on 1h' : '· session boxes on 1h or finer') : '';
-            se.title = said ? 'A 4h bar straddles the sessions (Asia closes and London opens inside one, '
-                + 'New York opens at 08:30), so no box can stand over a session\'s bars: a 4h chart marks '
+            /* (2026-11-01) The 2h frame is wider than 1h too: it marks the
+               sessions by time as 4h does, and the words say so. */
+            se.title = said ? 'A 2h or 4h bar straddles the sessions (Asia closes and London opens inside one, '
+                + 'New York opens at 08:30), so no box can stand over a session\'s bars: a 2h or 4h chart marks '
                 + 'each session by time, a strip in its tone along the foot of the chart; the boxes are '
                 + 'drawn on 1h and finer charts.' : '';
         }
@@ -5725,6 +5783,9 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             : intraday
                 ? new Date(param.time * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'
                 : new Date(param.time * 1000).toISOString().slice(0, 10);
+        /* A weekly bar is dated by its Monday: the legend says it is the
+           week, not that day (2026-11-01). */
+        if (currentTf === WEEKLY_TF && !intraday) d = 'week of ' + d;
 
         var html;
         if (chartType === 'candlestick' || chartType === 'heikin') {
@@ -6522,7 +6583,8 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
            Binance's BTCUSDT is another exchange's, quoted in USDT;
          * the last candle is the forming one: an intraday bar whose
            period has not ended, a daily bar the server built as today's
-           forming candle (`forming`);
+           forming candle (`forming`), this week's candle while it holds
+           that day (2026-11-01: the server's `no_tick` says why not);
          * it is fresh (STALE_S) and was taken inside that bar;
          * it moves the candle's close by no more than the class's jump
            bar (`source.tick_bar`, bot_program.mark_sanity.bar_for);
@@ -6570,6 +6632,10 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
             ? (isFinite(opened) && nowS < opened + (TF_SECONDS[currentTf] || 0))
             : !!bar.forming;
         if (!forming) return 'live quote not drawn: the last candle has closed';
+        /* A forming bar the server says takes no tick, in its words
+           (2026-11-01): this week's candle without today's forming day.
+           `forming` keeps the legend's FORMING, the week still runs. */
+        if (bar.no_tick) return 'live quote not drawn: ' + bar.no_tick;
         if (bar.suspect) return 'live quote not drawn: the last candle is suspect';
         var age = Number(q.quote_age_seconds);
         if (q.quote_age_seconds == null || !isFinite(age)) {

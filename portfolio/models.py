@@ -49,7 +49,9 @@ class Portfolio(models.Model):
     # 2026-10-01: one manual forex ticket at 1x already pledged nearly
     # half of a small account and refused every stock ticket after it; he
     # chose 80, then 90 and 100 (2026-10-05). Bounds 10-100 on the card;
-    # at 100 one gap can take the whole account, and he was told so.
+    # at 100 one gap can take the whole account, and he was told so. At
+    # exactly 100 no ratio is judged: eToro's free cash decides alone
+    # (2026-11-01, asset_engine.base.free_cash_decides_alone).
     max_pledged_pct = models.FloatField(default=50)
     # The most the open positions of one venue may lose TOGETHER at their
     # stops — the sum over every open row of qty x |entry - stop| (a row

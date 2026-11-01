@@ -398,6 +398,19 @@ MAX_PLEDGED_FRACTION = 0.5
 #: 100 since 2026-10-05: the operator asked for the whole account ("même
 #: 100% de cap"), told that one gap can then take all of it, and kept it.
 PLEDGED_PCT_BOUNDS = (10.0, 100.0)
+#: AT EXACTLY 100%, eToro's FREE CASH DECIDES ALONE (2026-11-01). The
+#: operator, 2026-10-31, answered "3 oui" to "at a 100% account pledge
+#: ceiling, eToro's free cash decides alone". The ratio above divides by
+#: eToro's equity, open P&L included, so an account carrying open losses
+#: was refused orders its free cash covered. At this ceiling no ratio is
+#: computed for an eToro order: the gate (_cash_gate, the bots and the
+#: TAKE TRADE ticket) refuses only what the free cash does not cover, and
+#: Morgul's G6 still files a margin past the equity as critical (the alarm
+#: chat hears it) and never brakes on it. Below it,
+#: everything as before; an unreadable or out-of-bounds setting reads
+#: MAX_PLEDGED_FRACTION, never this. The cells' and the equity's age rules
+#: stay: they are data health (the sync has stopped), not the pledge limit.
+CASH_ALONE_CEILING = 1.0
 
 
 def pledged_ceiling() -> float:
@@ -407,7 +420,10 @@ def pledged_ceiling() -> float:
     The operator's number when it reads and sits inside PLEDGED_PCT_BOUNDS;
     otherwise MAX_PLEDGED_FRACTION, the old constant, and the failure is
     logged. Never looser than the operator set, never a guess: a book that
-    cannot be read answers the default every gate was built under."""
+    cannot be read answers the default every gate was built under. 1.0
+    (exactly 100) is the one value at which no ratio is judged
+    (free_cash_decides_alone, 2026-11-01): eToro's free cash decides
+    alone."""
     try:
         from portfolio.risk_gate import limits_book
         raw = getattr(limits_book(), "max_pledged_pct", None)
@@ -424,6 +440,25 @@ def pledged_ceiling() -> float:
                        MAX_PLEDGED_FRACTION * 100)
         return MAX_PLEDGED_FRACTION
     return value / 100.0
+
+
+def free_cash_decides_alone(ceiling=None) -> bool:
+    """True when MAX ACCOUNT PLEDGED reads exactly 100% (2026-11-01,
+    CASH_ALONE_CEILING): eToro's free cash then decides alone and no pledge
+    ratio is judged.
+
+    `ceiling` is a value pledged_ceiling() already answered, so one
+    judgement reads the book once; None reads it here. pledged_ceiling()
+    answers 1.0 only for a stored 100 inside PLEDGED_PCT_BOUNDS: a book
+    that cannot be read, or a value outside them, answers
+    MAX_PLEDGED_FRACTION, so this is False for it. Anything unreadable
+    here is False too: the ratio is the stricter rule."""
+    if ceiling is None:
+        ceiling = pledged_ceiling()
+    try:
+        return float(ceiling) >= CASH_ALONE_CEILING
+    except (TypeError, ValueError):
+        return False
 
 #: The PlatformComponent that stays OFF until deploy/ETORO_DEPARTURE.md §4
 #: D2b (both sittings) is recorded in tests/test_etoro_client.py. A
@@ -7718,7 +7753,9 @@ class AssetBot(ABC):
         path.
 
         Refused, each a sentence with both numbers: either cell never
-        stored; older than TRACKING_FRESH_SECONDS; the equity undated or
+        stored, or a cash the last read did not carry (2026-11-01: written
+        None, never left older under the read's new stamp); older than
+        TRACKING_FRESH_SECONDS; the equity undated or
         older than that (2026-10-31: a re-read moves the cells alone, see
         _cash_gate); read in the OTHER
         world (the same key pair answers both, EtoroAccount.demo alone
@@ -7726,7 +7763,10 @@ class AssetBot(ABC):
         refused too); a currency other than the pool's (nothing here
         converts); notional / leverage plus what this tick already
         pledged exceeds the available cash; or the account would be
-        pledged past MAX_PLEDGED_FRACTION of its equity.
+        pledged past MAX ACCOUNT PLEDGED (pledged_ceiling) of its equity.
+        At exactly 100% (2026-11-01, CASH_ALONE_CEILING) that ratio is not
+        judged: eToro's free cash decides alone, and an equity not above
+        zero is refused instead.
         `notional / leverage` is the margin — MEASURED 2026-09-23 (doc
         §2, §5). Too strict sends nothing; too loose is answered by the
         venue's own refusal.
@@ -7772,13 +7812,27 @@ class AssetBot(ABC):
         "cash", "used",
         "equity", "currency", "at", "age_s", "equity_at", "equity_age_s",
         "world", "pledged", "held",
-        "free", "need", "after", "ceiling", "room"} — every number None
-        until the step that reads it. `room` is the most margin one more
-        order may take: the smaller of the free cash and what the pledge
-        ceiling leaves (ceiling x equity - used - pledged), floored at 0.
-        Same reads and the same order of refusals as before, with the
+        "free", "need", "after", "ceiling", "cash_alone", "room"} — every
+        number None until the step that reads it. `room` is the most margin
+        one more order may take: the smaller of the free cash and what the
+        pledge ceiling leaves (ceiling x equity - used - pledged), floored
+        at 0. Same reads and the same order of refusals as before, with the
         equity's own age judged beside the cells' (2026-10-31); nothing
         here reads the broker.
+
+        AT EXACTLY 100%, eToro's FREE CASH DECIDES ALONE (2026-11-01,
+        CASH_ALONE_CEILING; `cash_alone` True). No ratio is computed
+        (`after` stays None) and none refuses: the free cash (the cell,
+        less what was pledged since the reading and any withdrawal hold)
+        must cover this order's margin, the cash check unchanged, and
+        `room` is that free cash alone. An equity not above zero is still
+        refused (the ratio refused it, dividing by it: an account with
+        nothing above zero takes no order; its room is 0). The equity and
+        the cells must still be stored, dated, fresh and of this row's
+        world: data health (the sync has stopped), not the pledge limit.
+        Below 100%, and on a setting that cannot be read or sits outside
+        PLEDGED_PCT_BOUNDS (pledged_ceiling answers MAX_PLEDGED_FRACTION),
+        everything as before.
 
         THE EQUITY IS DATED TOO (review, 2026-10-31). The hour rule read
         the cells' stamp alone while the pledge ratio divides by the
@@ -7799,7 +7853,7 @@ class AssetBot(ABC):
                "at": None, "age_s": None, "equity_at": None,
                "equity_age_s": None, "world": "", "pledged": None,
                "held": None, "free": None, "need": None, "after": None,
-               "ceiling": None, "room": None}
+               "ceiling": None, "cash_alone": None, "room": None}
 
         def refuse(words):
             out["refusal"] = words
@@ -7828,6 +7882,18 @@ class AssetBot(ABC):
                                     or "").upper(),
                     "world": str(getattr(acct, "last_margin_world", "")
                                  or "")})
+        if acct is not None and at is not None and cash is None:
+            # A READ THAT CARRIED NO AVAILABLE CASH (review, 2026-11-01):
+            # tasks._etoro_margin_fields writes the cash None rather than
+            # leave an older one under the read's new stamp, where it read
+            # as seconds old (at 100% the cash is this gate's only money
+            # input). Refused at every ceiling until a read carries it.
+            read_s = max((now - at).total_seconds(), 0.0)
+            return refuse(f"eToro's last reading of the account "
+                          f"({read_s / 60:.0f} min ago) "
+                          f"carried no available cash figure — refused "
+                          f"until a reading carries one; margin is not a "
+                          f"number to guess")
         if acct is None or cash is None or used is None or at is None:
             return refuse("the account's available cash / used margin have "
                           "never been stored by the sync — refused; margin "
@@ -7838,9 +7904,16 @@ class AssetBot(ABC):
         age = (now - at).total_seconds()
         out["age_s"] = age
         if eq_at is None:
+            # at 100% no ratio is judged against it (2026-11-01): what an
+            # undated equity says is that the sync cannot be shown to run
             return refuse("the account's equity carries no reading time — "
-                          "refused; the pledge ceiling is not judged "
-                          "against an equity of unknown age")
+                          "refused; "
+                          + ("the sync that writes it cannot be shown to "
+                             "run (data health, not MAX ACCOUNT PLEDGED, "
+                             "which at 100% judges no ratio)"
+                             if free_cash_decides_alone() else
+                             "the pledge ceiling is not judged against an "
+                             "equity of unknown age"))
         eq_age = out["equity_age_s"]
         if eq_age > TRACKING_FRESH_SECONDS:
             return refuse(f"equity reading {eq_age / 3600:.1f}h old (limit "
@@ -7909,10 +7982,18 @@ class AssetBot(ABC):
                           f"again in {ccy or '?'}")
         free = float(cash) - pledged - held
         ceiling = pledged_ceiling()
+        # AT EXACTLY 100%, eToro's FREE CASH DECIDES ALONE (2026-11-01,
+        # CASH_ALONE_CEILING): no ratio of our own, so the room is the
+        # free cash itself (nothing on an equity not above zero, refused
+        # below). Under it, the smaller of the free cash and what the
+        # ceiling leaves, as before.
+        alone = free_cash_decides_alone(ceiling)
         out.update({"held": held, "free": free, "ceiling": ceiling,
-                    "room": max(0.0, min(
-                        free, ceiling * float(equity) - float(used)
-                        - pledged))})
+                    "cash_alone": alone,
+                    "room": max(0.0, (
+                        (free if float(equity) > 0 else 0.0) if alone
+                        else min(free, ceiling * float(equity) - float(used)
+                                 - pledged)))})
         if need > free + 1e-9:
             kept = (f", less {held:,.2f} held for withdrawals" if held > 0
                     else "")
@@ -7921,6 +8002,20 @@ class AssetBot(ABC):
                           f"{age / 60:.0f} min ago, less {pledged:,.2f} "
                           f"pledged since{kept}) — refused before the venue "
                           f"refuses it")
+        if alone:
+            # The ratio refused every order on an equity at or under zero
+            # (it divides by it, floored at 1e-9). Without it, an account
+            # with nothing above zero still takes no order, whatever its
+            # cash cell says: eToro's equity includes its available cash,
+            # so cells that say both cannot both be right.
+            if float(equity) <= 0:
+                return refuse(f"the account's equity reads "
+                              f"{float(equity):,.2f} {ccy}, not above zero — "
+                              f"refused: an account with nothing above zero "
+                              f"takes no order (data health, not MAX "
+                              f"ACCOUNT PLEDGED, which at 100% judges no "
+                              f"ratio)")
+            return out
         after = (float(used) + pledged + need) / max(float(equity), 1e-9)
         out["after"] = after
         if after > ceiling + 1e-9:

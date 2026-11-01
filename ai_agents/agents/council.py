@@ -1539,9 +1539,16 @@ def war_text(session) -> str:
     lines.append(_fenced("  elite entries", elite))
 
     def pledge():
-        from bot_program.asset_engine.base import pledged_ceiling
-        return (f"  pledge cap: {pledged_ceiling():.0%} of the account; the "
-                f"account's current pledge is not read here")
+        # at exactly 100% the cap binds nothing (2026-11-01): the council
+        # is told, or it names a limit no order meets
+        from bot_program.asset_engine.base import (free_cash_decides_alone,
+                                                   pledged_ceiling)
+        ceiling = pledged_ceiling()
+        return (f"  pledge cap: {ceiling:.0%} of the account"
+                + (" (at 100%, eToro's free cash decides alone: no ratio "
+                   "refuses an order)" if free_cash_decides_alone(ceiling)
+                   else "")
+                + "; the account's current pledge is not read here")
 
     lines.append(_fenced("  pledge cap", pledge))
 

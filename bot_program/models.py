@@ -418,7 +418,10 @@ class EtoroAccount(models.Model):
     # last_equity_at until the next sync.
     # `last_available_cash` is what the venue will lend against next;
     # `last_used_margin` is what it already holds. None = never read (three
-    # states; 0 is a measurement). Read by asset_engine/base.py
+    # states; 0 is a measurement; since 2026-11-01 a None cash beside a
+    # stamp is one the last read did not carry, never an older figure left
+    # under a newer stamp: tasks._etoro_margin_fields).
+    # Read by asset_engine/base.py
     # ::_leverage_headroom before every eToro order the asset bots and the
     # TAKE TRADE lane send (2026-09-26; at 1x the venue locks the FULL
     # notional — MEASURED 2026-09-23, used margin 84.8 on 84.8 of

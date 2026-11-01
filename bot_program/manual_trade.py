@@ -1426,13 +1426,15 @@ def _reread_cannot_lift(gate) -> bool:
 
 def _reread_words(gate) -> str:
     """When a cash refusal was judged on cells older than
-    etoro_cells.TICKET_FRESH_S (or never stored), ask the account to be
-    read again and say when that read lands; "" otherwise, when nothing
+    etoro_cells.TICKET_FRESH_S (or never stored, or on a read that carried
+    no available cash, 2026-11-01), ask the account to be read again and
+    say when that read lands; "" otherwise, when nothing
     could be asked, and when the equity is what refuses (a re-read never
     writes it: _reread_cannot_lift) (2026-10-31)."""
     from bot_program import etoro_cells
-    pk = (gate or {}).get("account_pk")
-    age = (gate or {}).get("age_s")
+    g = gate or {}
+    pk = g.get("account_pk")
+    age = g.get("age_s")
     if not pk or (age is not None and age <= etoro_cells.TICKET_FRESH_S):
         return ""
     if _reread_cannot_lift(gate):
@@ -1441,11 +1443,16 @@ def _reread_words(gate) -> str:
     if eta is None:
         return ""
     when = math.ceil(max(float(eta), 0.0))
-    old = ("never stored" if age is None
-           else f"{_age_words(age)} old")
-    return (f"; the account's cells are {old}, so a fresh read of the "
-            f"eToro account was asked: it lands in about {when} s — send "
-            f"again after it")
+    if age is not None:
+        cells = f"the account's cells are {_age_words(age)} old"
+    elif g.get("at") is not None and g.get("cash") is None:
+        # a read that carried no available cash (review, 2026-11-01): the
+        # cells were read, the cash was not in that read
+        cells = "the account's last reading carried no available cash"
+    else:
+        cells = "the account's cells are never stored"
+    return (f"; {cells}, so a fresh read of the eToro account was asked: "
+            f"it lands in about {when} s — send again after it")
 
 
 def _cash_gate_advisory(bot, client, symbol, *, qty, price, leverage, vpu,
@@ -1456,11 +1463,14 @@ def _cash_gate_advisory(bot, client, symbol, *, qty, price, leverage, vpu,
     {"asked", "ok", "reason", "cash", "used", "equity", "currency",
     "read_at", "age_s", "age_words", "equity_read_at", "equity_age_s",
     "equity_age_words", "pledged", "held", "free", "room",
-    "ceiling", "margin_per_unit", "max_qty", "refresh"}. `max_qty` is the
-    size the gate leaves room for (its free cash and the pledge ceiling,
-    at this ticket's multiplier), None when nothing could be computed:
-    the browser caps the size control at it. The equity carries its own
-    age: the re-read after an order dates the cells, never the equity.
+    "ceiling", "cash_alone", "margin_per_unit", "max_qty", "refresh"}.
+    `max_qty` is the size the gate leaves room for (its free cash and,
+    below 100%, the pledge ceiling, at this ticket's multiplier), None when
+    nothing could be computed: the browser caps the size control at it.
+    `cash_alone` is True at exactly 100% (2026-11-01): eToro's free cash
+    decides alone, no ratio is judged and `after` is None. The equity
+    carries its own age: the re-read after an order dates the cells, never
+    the equity.
     Cells older than etoro_cells.TICKET_FRESH_S ask the account to be read
     again — unless `ask_reread` is False (_execute's own previews: the
     booking's ask is the read that covers its order) or the equity is what
@@ -1506,6 +1516,7 @@ def _cash_gate_advisory(bot, client, symbol, *, qty, price, leverage, vpu,
                              else ""),
         "pledged": g.get("pledged"), "held": g.get("held"),
         "free": g.get("free"), "room": room, "ceiling": g.get("ceiling"),
+        "cash_alone": g.get("cash_alone"),
         "after": g.get("after"), "margin_per_unit": mpu,
         "max_qty": max_qty, "leverage": max(int(leverage or 1), 1)})
     # eToro's OWN P&L, its total and the split (2026-10-31): the ticket's
@@ -3148,7 +3159,8 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             # notional (MEASURED 2026-09-23: used margin 84.8 on 84.8 of
             # exposure) — so the sync's cells must show the cash: stored,
             # fresh, read in this row's world, in the pool's currency, and
-            # the account under MAX_PLEDGED_FRACTION after it. A refusal
+            # the account under MAX ACCOUNT PLEDGED after it (at exactly
+            # 100%, eToro's free cash decides alone, 2026-11-01). A refusal
             # sends nothing; any other carrier is not asked.
             # THE TICKET'S MULTIPLIER, judged once more on the stop actually
             # sent (the operator may have moved it since the preview) by the
