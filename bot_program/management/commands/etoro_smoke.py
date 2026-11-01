@@ -114,7 +114,9 @@ def _verdict(fn):
     neither is a verdict on the keys. _NoSuch is eToro's own no to a
     spelling. Everything else is 'unknown' and named by type — including a
     LookupError from the adapter's path table, whose message names the
-    tail itself.
+    tail itself — except a read the eToro request budget did not send
+    (2026-11-01, etoro_budget.Refused): 'unknown' in the budget's own
+    words, never a verdict on the keys.
     """
     import requests
     try:
@@ -136,6 +138,8 @@ def _verdict(fn):
                              f"been measured, so read the body: {body!r}")
         return UNKNOWN, f"HTTP {code or '?'} — not a verdict on the keys ({e})"
     except Exception as e:  # noqa: BLE001 — the point is to name it
+        if getattr(e, "budget_refused", False):
+            return UNKNOWN, str(e)          # the budget's skip, in its words
         return UNKNOWN, f"{type(e).__name__}: {e}"
 
 
@@ -298,6 +302,16 @@ class Command(BaseCommand):
                                  "re-measure")
 
     def handle(self, *args, **opts):
+        # P5 IN THE eTORO REQUEST BUDGET (2026-11-01, engine/etoro_budget):
+        # every read below is taken at the lowest priority, so a smoke run
+        # beside a busy tick leaves the marks, the proposals and the orders
+        # their tokens; a read the budget did not send prints as 'unknown'
+        # in the budget's words (_verdict), never as a verdict on the keys.
+        from bot_program.engine import etoro_budget
+        with etoro_budget.at(etoro_budget.P5, "etoro_smoke"):
+            return self._smoke(*args, **opts)
+
+    def _smoke(self, *args, **opts):
         from bot_program.engine import capabilities as cap
         from bot_program.engine.etoro_client import EtoroTrader
         from bot_program.models import AssetBotConfig

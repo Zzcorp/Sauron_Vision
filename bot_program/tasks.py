@@ -991,6 +991,7 @@ def sync_etoro_accounts():
     """
     from django.utils import timezone
 
+    from .engine import etoro_budget
     from .engine.etoro_client import EtoroTrader
     from .models import EtoroAccount
 
@@ -1014,10 +1015,24 @@ def sync_etoro_accounts():
             # already carried it, counted twice until the next read — the
             # safe way round).
             read_at = timezone.now()
-            reading, margin, cells = _read_etoro_aggregate(client)
-            _warm_etoro_names(client, user, acct.demo)
-            rows = client.broker_portfolio()
+            # P2 IN THE eTORO REQUEST BUDGET (2026-11-01, engine/
+            # etoro_budget): an account read, taken while the key's
+            # account minute keeps its floor for the drain and the orders.
+            with etoro_budget.at(etoro_budget.P2, "account sync"):
+                reading, margin, cells = _read_etoro_aggregate(client)
+                _warm_etoro_names(client, user, acct.demo)
+                rows = client.broker_portfolio()
         except Exception as e:  # noqa: BLE001 — one account must not stop the rest
+            if getattr(e, "budget_refused", False):
+                # THE BUDGET DID NOT SEND THE READ (2026-11-01): a
+                # deferral, never a miss. No stall count, no alert, no
+                # field written: the cells, the equity and last_sync keep
+                # their age, and the next pass reads them.
+                out["attempted"] -= 1
+                out["deferred"] = out.get("deferred", 0) + 1
+                logger.info("broker sync: %s (etoro) not read this pass — "
+                            "%s; it keeps its last reading", acct.label, e)
+                continue
             logger.warning("broker sync: %s (etoro) unreadable: %s",
                            acct.label, e)
             reading, rows = None, None
@@ -1104,6 +1119,20 @@ def sync_etoro_accounts():
         out["reason"] = (f"{out['cells_unread']} eToro account(s) answered "
                          f"no cash / used margin; their equity, cells and "
                          f"last sync stay at the last reading")
+    elif out.get("deferred") and not out["attempted"]:
+        # Every keyed account deferred by the budget (2026-11-01): NOT A
+        # RUN of the component, so the gate's `idle` (core/task_gate.
+        # guarded_task) and the reason in words. broker_account_sync is the
+        # row three walks share, and it keeps the verdict of the last pass
+        # that read an account: a "skipped" status here was judged a
+        # success (review), which turned an eToro error on that row green
+        # and cleared the digest's fault. A walk the budget defers for a
+        # whole day leaves the row unwritten, and the digest then says it
+        # stopped: it read nothing that day.
+        out["idle"] = (f"the eToro request budget deferred "
+                       f"{out['deferred']} account read(s) to the next "
+                       f"pass; each keeps its last reading")
+        out["reason"] = out["idle"]
     return out
 
 
@@ -1245,10 +1274,14 @@ def refresh_etoro_cells(account_pk: int, why: str = "") -> dict:
         if not (k and u):
             out["skipped"] = "the stored key could not be read"
             return out
+        from .engine import etoro_budget
         from .engine.etoro_client import EtoroTrader
         client = EtoroTrader(k, u, env="demo" if acct.demo else "live")
         at = timezone.now()                # BEFORE the GET (see the sync)
-        _reading, margin, cells = _read_etoro_aggregate(client)
+        # P2 in the eToro request budget (2026-11-01): a read the budget
+        # does not send writes nothing, and says so below.
+        with etoro_budget.at(etoro_budget.P2, "account re-read"):
+            _reading, margin, cells = _read_etoro_aggregate(client)
         if cells != CELLS_READ or margin is None:
             logger.warning("eToro re-read (%s): %s answered no cash / used "
                            "margin — the cells keep their last reading",
@@ -1264,6 +1297,13 @@ def refresh_etoro_cells(account_pk: int, why: str = "") -> dict:
                     or "after an order", acct.label,
                     margin.get("available_cash"), margin.get("used_margin"))
     except Exception as e:  # noqa: BLE001 — a re-read is beside the trade
+        if getattr(e, "budget_refused", False):
+            # not sent (2026-11-01): the cells keep their last reading and
+            # their age, as after a failed read, and nothing is noted
+            out["skipped"] = f"not asked: {getattr(e, 'why', '') or e}"
+            logger.info("eToro re-read of account %s %s — the cells keep "
+                        "their last reading", account_pk, out["skipped"])
+            return out
         logger.warning("eToro re-read of account %s failed: %s",
                        account_pk, e)
     return out

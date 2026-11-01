@@ -112,7 +112,7 @@ class _OrcBase(_Base):
         PriceData.objects.all().delete()
         cache.clear()
         venue_health.reset()
-        for memo in (ec._SEARCH_IDS, ec._SEARCH_NO, ec._RATE_PAUSE):
+        for memo in (ec._SEARCH_IDS, ec._SEARCH_NO):
             memo.clear()
         self.wire.calls = []
         self.feed.calls = []

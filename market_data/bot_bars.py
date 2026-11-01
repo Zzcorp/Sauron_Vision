@@ -95,6 +95,19 @@ def _remember_mute(source: str, symbol: str, interval: str) -> None:
 #     for a mute venue, and no series is muted for a 429;
 #   * its reads are background reads: never noted on the venue's health,
 #     never granting the adapter's 429 pause (EtoroTrader.klines).
+# AND INSIDE THE eTORO BUDGET (2026-11-01, bot_program/engine/etoro_budget):
+# its candles and the /search a cold id costs are taken at P5, the
+# lowest priority, which may take at most half the key's market-data
+# minute and skips while the shared 429 pause holds. A refused take sends
+# nothing: that series is filled from the public feed exactly as after a
+# 429 (no mute, not an error, nothing noted), and the pass YIELDS eToro
+# for the rest of that minute (`_CandlePass.yield_for`), asking again in
+# the next one. Live configs come first in the pass, so a paper research
+# config's series comes from the eToro key only from the tokens they left;
+# and once a series real money decides on (a live config's, a held real
+# row's) is refused, no paper or Orc series asks eToro for the rest of the
+# pass (`_CandlePass.money_refused`, 2026-11-01, review): the tokens of a
+# later minute never go to paper while a live series read the public feed.
 CANDLE_GAP_S = 1.0
 CANDLE_PASS_MAX_S = 420.0
 BARS_PASS_MAX_S = 540.0
@@ -213,11 +226,52 @@ class _CandlePass:
         # callable read before EVERY candle read; truthy ends eToro for
         # this pass. The bar pass leaves it None (unchanged).
         self.yield_to = None
+        # THE BUDGET'S YIELDS (2026-11-01): world -> the _mono() instant
+        # until which eToro is not asked, after a refused P5 take (the
+        # rest of that budget minute); and the refusals counted, with the
+        # last one's words, for the pass's summary.
+        self.yield_until: dict = {}
+        self.budget_refusals = 0
+        self.budget_words = ""
+        # THE MONEY SERIES FIRST, FOR THE WHOLE PASS (2026-11-01, review):
+        # whether a series real money decides on (a live config's, a held
+        # real row's: refresh_bars_for_config's `money`) was refused a P5
+        # take. From then on no other series (a paper config's, an Orc
+        # part's, the tape) asks eToro in this pass, in either world: one
+        # key opens both and spends one budget. A paper config reached in
+        # the next minute took the tokens a live series had gone without,
+        # and decided on eToro's bars while the live one read the public
+        # feed. Counted for the summary.
+        self.money_refused = False
+        self.held_back = 0
 
     def past_deadline(self) -> bool:
         return _mono() - self.started >= BARS_PASS_MAX_S
 
-    def may_ask(self, world: str) -> bool:
+    def yield_for(self, world: str, refusal, *, money: bool = True) -> None:
+        """A P5 take the budget refused (etoro_budget.Refused): eToro is
+        not asked for `world` until the budget's minute ends — never for
+        the rest of the pass, and never a stop reason: the next minute
+        asks again. The take sent nothing, so it is not counted asked. A
+        refused `money` series keeps every other series off eToro for the
+        rest of the pass (money_refused)."""
+        from bot_program.engine import etoro_budget
+        self.yield_until[world] = _mono() + etoro_budget.window_left_s()
+        self.budget_refusals += 1
+        self.budget_words = str(getattr(refusal, "why", "") or refusal)
+        self.asked = max(0, self.asked - 1)
+        if money:
+            self.money_refused = True
+
+    def may_ask(self, world: str, *, money: bool = True) -> bool:
+        """Whether this series may ask eToro now. `money`: a series real
+        money decides on (a live config's, a held real row's); any other
+        is not asked once one of those was refused this pass."""
+        if not money and self.money_refused:
+            self.held_back += 1
+            return False
+        if _mono() < self.yield_until.get(world, 0.0):
+            return False
         if self.yield_to is not None:
             try:
                 why = self.yield_to()
@@ -264,7 +318,15 @@ class _CandlePass:
                     said if isinstance(said, dict) and said else "none")
 
     def words(self) -> str:
-        return "; ".join(why for _w, why in sorted(self.stopped.items()))
+        said = [why for _w, why in sorted(self.stopped.items())]
+        if self.budget_refusals:
+            said.append(f"the eToro budget refused {self.budget_refusals} "
+                        f"candle take(s), each yielding the rest of its "
+                        f"minute (last: {self.budget_words})")
+        if self.held_back:
+            said.append(f"{self.held_back} paper or Orc series not asked "
+                        f"after a live series was refused")
+        return "; ".join(said)
 
 
 # WHAT THE SOURCE SAID, AND WHEN (2026-10-02). A 4h bar hours old while the
@@ -628,6 +690,12 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
     from instruments.models import Instrument
 
     state = pass_state if pass_state is not None else _CandlePass()
+    # A SERIES REAL MONEY DECIDES ON (2026-11-01, review): a live config's
+    # or a held real row's, both of which stamp the venue mark. A paper
+    # config's, an Orc part's and the tape's are not; once a money series
+    # is refused a P5 take in this pass, those ask eToro no more
+    # (_CandlePass.money_refused).
+    money = bool(stamp_marks) and getattr(cfg, "mode", "") == "live"
     out = {"symbols": 0, "bars": 0, "skipped": 0, "errors": 0, "no_client": 0,
            "fallback": 0, "deduped": 0, "not_reached": 0}
     if venue_only:
@@ -682,7 +750,7 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                 logger.info("[bars] %s %s: %s gave no bars within the last "
                             "%dh — public feed directly", symbol, interval,
                             source, MUTE_VENUE_MEMO_S // 3600)
-            elif world and not state.may_ask(world):
+            elif world and not state.may_ask(world, money=money):
                 # eToro is not asked for the rest of this pass: the public
                 # feed fills it below exactly as for a mute venue.
                 state.left += 1
@@ -695,10 +763,23 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                     rows = client.klines(fetch_symbol, interval=interval,
                                          limit=want)
                 except Exception as e:
-                    logger.warning("[bars] klines(%s, %s) failed: %s",
-                                   symbol, interval, e)
-                    out["errors"] += 1
                     rows = []
+                    if world and getattr(e, "budget_refused", False):
+                        # THE BUDGET SENT NOTHING (2026-11-01): not asked,
+                        # not an error, never a mute — the public feed
+                        # fills this series below exactly as after a 429,
+                        # and eToro is not asked again this minute (nor,
+                        # for the rest of the pass, by a series that is
+                        # not a money one, when this one is).
+                        asked, refused = False, True
+                        state.yield_for(world, e, money=money)
+                        state.left += 1
+                        logger.info("[bars] %s %s: %s — the public feed "
+                                    "instead", symbol, interval, e)
+                    else:
+                        logger.warning("[bars] klines(%s, %s) failed: %s",
+                                       symbol, interval, e)
+                        out["errors"] += 1
                     if world and _http_status(e) == 429:
                         refused = True
                         at = getattr(client, "last_read", "") or "candles"
@@ -1390,7 +1471,8 @@ def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dic
               "no_client": 0, "fallback": 0, "deduped": 0, "not_reached": 0}
     state = _CandlePass()
     # Live configs first: the eToro budget of the pass goes to the bars
-    # real money decides on before the paper fleet's.
+    # real money decides on before the paper fleet's (and to them alone,
+    # once one of theirs was refused: _CandlePass.money_refused).
     configs = sorted(AssetBotConfig.objects.filter(enabled=True)
                      .select_related("user"),
                      key=lambda c: getattr(c, "mode", "") != "live")
@@ -1497,6 +1579,13 @@ def refresh_bot_bars(*, intervals=DEFAULT_INTERVALS, limit=DEFAULT_LIMIT) -> dic
                        "(%s): %d candle read(s) not asked, sent to the public "
                        "feed instead; %d asked", state.words(), state.left,
                        state.asked)
+    elif state.budget_refusals:
+        # The budget's yields are its own (2026-11-01): a minute each, said
+        # once a pass, never a stop and never a warning.
+        logger.info("[bars] the eToro budget yielded %d minute(s) of this "
+                    "pass (%s): %d candle read(s) not asked, sent to the "
+                    "public feed instead; %d asked", state.budget_refusals,
+                    state.budget_words, state.left, state.asked)
     try:
         # THE ORCS' BOARD (O1c): the market's symbols the dossier's MK2
         # reads, after the watchlist's starred part (the keyless feed, 4h

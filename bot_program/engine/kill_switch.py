@@ -16,6 +16,7 @@ from decimal import Decimal
 
 from django.utils import timezone
 
+from bot_program.engine import etoro_budget
 from bot_program.etoro_cells import one_read_per_pass
 
 logger = logging.getLogger(__name__)
@@ -41,12 +42,19 @@ def _push_close_event(user, trade, kind):
 
 
 @one_read_per_pass()
+@etoro_budget.scoped(etoro_budget.P0, "kill switch")
 def execute_kill_switch(user=None, reason="manual"):
     """Emergency: disable all bots and close all open positions.
 
     The account is read again once the sweep has finished, one read per
     eToro account however many rows it flattened (2026-10-31,
     bot_program.etoro_cells): never between two of its closes.
+
+    P0 in the eToro request budget (2026-11-01, engine/etoro_budget): every
+    request of the sweep — its closes, their proofs, the cancels of
+    working entries and the marks its exits are booked at — is counted
+    once sent, never refused, never delayed and never held by the 429
+    pause; a family it takes past its rate logs the overrun once a minute.
 
     Args:
         user: if given, scope the sweep to this user; otherwise platform-wide.

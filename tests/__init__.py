@@ -11,6 +11,7 @@ clock for every path it pins.
 """
 from backtester.proving import proof as _proof
 from bot_program import entry_timing as _entry_timing
+from bot_program.engine import etoro_budget as _etoro_budget
 from bot_program.engine import etoro_client as _etoro_client
 from bot_program.engine import paper_trader as _paper_trader
 
@@ -33,6 +34,14 @@ _etoro_client.SEARCH_SHARED_MEMO = False  # its Redis copy (2026-10-07)
 # tests/test_etoro_rate_pause.py turns both back on.
 _etoro_client.RATE_PAUSE = False
 _etoro_client.SEARCH_NO_MEMO = False
+# THE eTORO REQUEST BUDGET (2026-11-01, etoro_budget.BUDGET): one budget
+# per user key per minute, kept in the cache. The suite's fake wires ask
+# eToro hundreds of times inside one process minute with the same few
+# keys, and LocMem is kept across tests, so with it on a mark or a
+# proposal would be refused for another test's reads. Off, every request
+# goes as it did before the budget. tests/test_etoro_budget.py turns it
+# back on.
+_etoro_budget.BUDGET = False
 # SIZE BY PROOF (2026-10-07, backtester/proving/proof.py): the proving
 # ground's verdict would cut or refuse every live entry this suite sizes —
 # hundreds of them, on rules no proving run here ever judged, each sized

@@ -250,6 +250,16 @@ def run_bot_tick(user_id: int):
             ok, reason = rm.can_open_new()
             if not ok: break
         except Exception as e:
+            if getattr(e, "budget_refused", False):
+                # THE eTORO BUDGET DID NOT SEND THE CANDLE READ (2026-11-01,
+                # engine/etoro_budget): this loop sets no scope, so its
+                # tickers are P1 and klines is P5, not asked while the key's
+                # market-data minute keeps its floor for the marks, the
+                # orders and the closes. A skip, said at INFO: nothing was
+                # sent and no entry is scored this tick — never "scan fail"
+                # with a traceback.
+                log.info("scan %s: not asked — %s", symbol, e)
+                continue
             log.exception("scan fail %s: %s", symbol, e)
 
 #: A `reason` column grows on every retry, and a row an operator leaves

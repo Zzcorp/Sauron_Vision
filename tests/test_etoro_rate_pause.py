@@ -4,9 +4,12 @@ On 2026-10-06 eToro's live world went SICK at 23:38:34 UTC on seven /search
 429s in one second, most likely asked by the bar refresh, and stayed held
 with words that read "0 failures in the last 3 min" and "?" for every time.
 
-  * after a 429 on a trading-lane read (/rates or /search), THIS PROCESS
-    grants itself one short pause per world (Retry-After, capped at 120 s;
-    30 s with none). The entry side (propose, execute, the last look) does
+  * after a 429 on a trading-lane read (/rates or /search), one short
+    pause is granted per key and world (Retry-After, capped at 120 s; 30 s
+    with none) — in THIS PROCESS's memory until 2026-11-01, in the shared
+    cache since (bot_program/engine/etoro_budget: every process sees it;
+    the fixtures' key is "user-k"; tests/test_etoro_budget.py pins the
+    sharing). The entry side (propose, execute, the last look) does
     not ask while it runs; the manage tick's marks, closes and the manual
     lane never read it. A world refused again within 450 s of its last
     pause's end gets none, so SICK stays reachable.
@@ -25,7 +28,10 @@ from unittest import mock
 import requests
 from django.test import SimpleTestCase
 
+from django.core.cache import cache
+
 from bot_program import venue_health as vh
+from bot_program.engine import etoro_budget as eb
 from bot_program.engine import etoro_client as ec
 from tests.test_etoro_client import (SEARCH_AAPL, _clear_eligibility, _client,
                                      _FakeSession, _Resp)
@@ -114,6 +120,27 @@ class _Clock:
         return self.t
 
 
+def _hold(world, seconds, clock, user_key="user-k"):
+    """The shared 429 pause of `user_key` in `world`, ending `seconds` from
+    the clock's now, as _grant_rate_pause stores it (2026-11-01: the pause
+    left this process's memory for the cache)."""
+    eb.pause_write(eb.key_hash(user_key), world, end=clock.t + seconds,
+                   at=clock.t, keep_s=seconds + ec.RATE_PAUSE_STREAK_S + 60,
+                   fresh=False)
+
+
+def _pauses() -> dict:
+    """Every shared pause this process wrote that the cache still holds:
+    {} is "no pause granted anywhere", what the per-process dict's
+    emptiness said before 2026-11-01."""
+    out = {}
+    for key in sorted(eb._PAUSE_KEYS):
+        held = cache.get(key)
+        if held is not None:
+            out[key] = held
+    return out
+
+
 class _PauseOn:
     def setUp(self):
         super().setUp()
@@ -122,12 +149,16 @@ class _PauseOn:
             p.start()
             self.addCleanup(p.stop)
         self.clock = _Clock()
-        p = mock.patch.object(ec, "_mono", self.clock)
-        p.start()
-        self.addCleanup(p.stop)
-        ec._RATE_PAUSE.clear()
+        # One clock for the /search "no" (_mono, per process) and for the
+        # 429 pause, which runs on the budget's wall-clock seam since it
+        # is shared across processes (2026-11-01).
+        for target, name in ((ec, "_mono"), (eb, "_now")):
+            p = mock.patch.object(target, name, self.clock)
+            p.start()
+            self.addCleanup(p.stop)
+        eb.forget_pauses()
         ec._SEARCH_NO.clear()
-        self.addCleanup(ec._RATE_PAUSE.clear)
+        self.addCleanup(eb.forget_pauses)
         self.addCleanup(ec._SEARCH_NO.clear)
         _clear_eligibility()
         self.addCleanup(_clear_eligibility)
@@ -197,7 +228,7 @@ class ThePauseTests(_PauseOn, SimpleTestCase):
         for header, want in (("600", 120.0), ("soon", 30.0),
                              ("Wed, 07 Oct 2026 07:28:00 GMT", 30.0)):
             with self.subTest(header=header):
-                ec._RATE_PAUSE.clear()
+                eb.forget_pauses()
                 vh.reset()
                 t, _ = _hclient([SEARCH_AAPL[:4],
                                  RATES_429 + ({"Retry-After": header},)])
@@ -235,7 +266,7 @@ class ThePauseTests(_PauseOn, SimpleTestCase):
                              level="WARNING"):
             t.eligibility("AAPL")
         self.assertEqual(t.rate_pause_s(), 0.0)
-        self.assertEqual(ec._RATE_PAUSE, {})
+        self.assertEqual(_pauses(), {})
 
     def test_a_5xx_and_a_timeout_pause_nothing(self):
         from tests.test_venue_health import _seq_client
@@ -246,7 +277,7 @@ class ThePauseTests(_PauseOn, SimpleTestCase):
                 with mock.patch("time.sleep"), self.assertRaises(Exception):
                     t.ticker("AAPL")
                 self.assertEqual(t.rate_pause_s(), 0.0)
-        self.assertEqual(ec._RATE_PAUSE, {})
+        self.assertEqual(_pauses(), {})
 
     def test_the_pause_ends_by_the_clock(self):
         t, _ = _hclient([SEARCH_AAPL[:4], RATES_429])
@@ -281,7 +312,8 @@ class ThePauseTests(_PauseOn, SimpleTestCase):
 
     def test_a_venue_that_keeps_refusing_still_goes_sick(self):
         """One pause, then the next pass's refusals reach the memory. Both
-        clocks move: the pause's (_mono) and the memory's (timezone.now)."""
+        clocks move: the pause's (etoro_budget._now, since 2026-11-01) and
+        the memory's (timezone.now)."""
         from datetime import timedelta
         from django.utils import timezone as djtz
         t, _ = _hclient([SEARCH_AAPL[:4], RATES_429])
@@ -307,13 +339,13 @@ class ThePauseTests(_PauseOn, SimpleTestCase):
             t, _ = _hclient([SEARCH_AAPL[:4], RATES_429])
             self._refuse(t)
             self.assertEqual(t.rate_pause_s(), 0.0)
-        self.assertEqual(ec._RATE_PAUSE, {})
+        self.assertEqual(_pauses(), {})
         self.assertEqual(len(vh._load(vh._key("etoro", "live"))["failures"]),
                          1, "still noted")
 
     def test_the_adapter_itself_never_refuses_a_read_for_it(self):
         t, fake = _hclient([SEARCH_AAPL[:4], RATES_OK[:4]])
-        ec._RATE_PAUSE["live"] = self.clock.t + 30
+        _hold("live", 30, self.clock)
         self.assertEqual(float(t.ticker("AAPL")["lastPrice"]), 100.0)
         self.assertEqual(len(_calls(fake, "/rates")), 1)
         self.assertEqual(len(_calls(fake, "/market-data/search")), 1)
@@ -346,7 +378,7 @@ class TheEngineReadsItTests(_PauseOn, SimpleTestCase):
     def test_pause_s_reads_only_a_real_number(self):
         from bot_program.engine.paper_trader import PaperTrader
         from tests.test_venue_min_size import _etoro_like
-        ec._RATE_PAUSE["live"] = self.clock.t + 30
+        _hold("live", 30, self.clock)
         t, _ = _client([], env="live")
         self.assertEqual(vh.pause_s(t), 30.0)
         self.assertEqual(vh.pause_s(_client([], env="demo")[0]), 0.0)
@@ -560,7 +592,7 @@ class TheBackgroundReadTests(_PauseOn, SimpleTestCase):
                 with self.assertRaises(requests.HTTPError):
                     t.klines("AAPL", interval="4h", limit=3)
                 self.assertEqual(t.rate_pause_s(), 0.0)
-                self.assertEqual(ec._RATE_PAUSE, {})
+                self.assertEqual(_pauses(), {})
                 self.assertFalse(t._background)
         self.assertEqual(self._memory(), {})
         # the trading lane's own /search 429 (ticker on a cold symbol)

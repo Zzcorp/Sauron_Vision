@@ -1174,17 +1174,43 @@ class AssetBot(ABC):
                 # own handler and skip the position whole — killing the clock
                 # exit for the very reason it exists. An unreadable mark is
                 # None, which is what everything below is written for.
+                #
+                # THE MARK IS P3 IN THE eTORO BUDGET (2026-11-01,
+                # engine/etoro_budget) for a row whose stop rests at eToro:
+                # it is not asked while the key's market-data minute keeps
+                # its floor for the last looks and the closes, or while the
+                # shared 429 pause holds. Such a mark was NEVER ASKED: the
+                # row is clock-managed this tick as when eToro answers
+                # nothing — its care and its broker-stop management wait a
+                # tick, its stop and target rest at eToro — keeps its last
+                # venue stamp and says its age, and
+                # it is no failure: nothing is noted on the venue's health.
+                # A LIVE ROW eToro HOLDS NO STOP FOR is marked at P1
+                # (review, _mark_priority): its bot-side stop below is the
+                # only one it has, so its mark is never refused or paused.
+                # Closes and stop moves this tick sends are P0 whatever
+                # this scope says.
                 mark_err = ""
+                mark_unasked = ""
                 try:
-                    price = self._mark_price(trade, client)
+                    from bot_program.engine import etoro_budget
+                    with etoro_budget.at(*self._mark_priority(trade)):
+                        price = self._mark_price(trade, client)
                 except Exception as e:  # noqa: BLE001 — unreadable is None
-                    logger.warning("[%s_bot] %s: the mark could not be read "
-                                   "(%s: %s) — the clock exit still runs",
-                                   self.asset_class, trade.symbol,
-                                   type(e).__name__, e)
-                    # kept for the skip note (2026-10-06): a refused or
-                    # failed read is not "the broker priced it at 0"
-                    mark_err = f"{type(e).__name__}: {e}"[:120]
+                    if getattr(e, "budget_refused", False):
+                        mark_unasked = str(getattr(e, "why", "") or e)
+                        logger.info("[%s_bot] %s #%s: the mark was not asked "
+                                    "(%s) — clock-managed this tick",
+                                    self.asset_class, trade.symbol,
+                                    trade.id, mark_unasked)
+                    else:
+                        logger.warning("[%s_bot] %s: the mark could not be "
+                                       "read (%s: %s) — the clock exit still "
+                                       "runs", self.asset_class, trade.symbol,
+                                       type(e).__name__, e)
+                        # kept for the skip note (2026-10-06): a refused or
+                        # failed read is not "the broker priced it at 0"
+                        mark_err = f"{type(e).__name__}: {e}"[:120]
                     price = None
 
                 # The time stop runs for protected trades too — AND FOR
@@ -1308,12 +1334,12 @@ class AssetBot(ABC):
                 # to cancel the last resting exit and hand the row to a
                 # bot-side stop that cannot compare anything either.
                 if price is None or price <= 0:
-                    logger.warning("[%s_bot] %s: no usable mark from the "
-                                   "broker — the clock exit ran, but NOTHING "
-                                   "price-based is managed on this position "
-                                   "this tick (no vanished-stop net, no stop "
-                                   "move, no bot-side SL/TP)",
-                                   self.asset_class, trade.symbol)
+                    (logger.info if mark_unasked else logger.warning)(
+                        "[%s_bot] %s: no usable mark from the broker — the "
+                        "clock exit ran, but NOTHING price-based is managed "
+                        "on this position this tick (no vanished-stop net, "
+                        "no stop move, no bot-side SL/TP)",
+                        self.asset_class, trade.symbol)
                     try:
                         # IMPORTED HERE. `skips` is not a module-level name in
                         # this file — every other user imports it locally — so
@@ -1326,13 +1352,25 @@ class AssetBot(ABC):
                         # 13:47 UTC when the read had FAILED (a refused
                         # /search during the redeploy). A failed read and
                         # a venue that answered no rate are two faults.
-                        _skips.record(
-                            self.cfg, trade.symbol, _skips.NO_PRICE,
-                            ("open position only clock-managed: the mark "
-                             f"could not be read ({mark_err})")
-                            if mark_err else
-                            ("open position only clock-managed: the "
-                             "broker priced it at 0"))
+                        # A third since 2026-11-01: a mark the budget did
+                        # not ask, said with the age of the stamp it kept.
+                        if mark_unasked:
+                            from bot_program import venue_mark as _vm
+                            _last = _vm.last(trade)
+                            _kept = (f"last venue stamp "
+                                     f"{_vm.age_words(_last['age_s'])} old"
+                                     if _last else "no venue stamp yet")
+                            _why = ("open position only clock-managed: the "
+                                    f"mark was not asked ({mark_unasked}); "
+                                    f"{_kept}")
+                        elif mark_err:
+                            _why = ("open position only clock-managed: the "
+                                    f"mark could not be read ({mark_err})")
+                        else:
+                            _why = ("open position only clock-managed: the "
+                                    "broker priced it at 0")
+                        _skips.record(self.cfg, trade.symbol,
+                                      _skips.NO_PRICE, _why)
                     except Exception as e:  # noqa: BLE001
                         logger.warning("[%s_bot] could not record the "
                                        "unpriced skip for %s: %s",
@@ -3113,6 +3151,30 @@ class AssetBot(ABC):
     # OptionsBot overrides all three: its trades are premium-denominated and
     # close via option orders, never by trading the underlying.
 
+    def _mark_priority(self, trade) -> tuple:
+        """(priority, why) of this row's mark in the eToro request budget
+        (2026-11-01, engine/etoro_budget; read by eToro's client alone).
+
+        P3 for a row whose stop rests at the venue. P1 — counted, never
+        refused, never paused: asked every tick, as every mark was before
+        the budget — for a LIVE row the venue holds NO stop for
+        (venue_exit.venue_levels: not protected, or a stop eToro never
+        showed): its bot-side stop in manage_positions is the only stop it
+        has, and a refused mark left the position with none for the tick
+        (review). Such rows are rare: a held order filled with no stop read
+        (_finish_working_entry's venue_stop_unread), a bracket that never
+        armed. Unreadable reads P1: the mark is asked. Never raises."""
+        from bot_program.engine import etoro_budget
+        if getattr(trade, "paper", False):
+            return etoro_budget.P3, "mark"
+        try:
+            from bot_program.venue_exit import venue_levels
+            if venue_levels(trade).get("stop"):
+                return etoro_budget.P3, "mark"
+        except Exception:  # noqa: BLE001 — unreadable: the mark is asked
+            pass
+        return etoro_budget.P1, "mark, no stop at the venue"
+
     def _mark_price(self, trade, client) -> Optional[Decimal]:
         """Current mark for SL/TP checks. Default: broker ticker last price.
         Return None to skip managing this trade on this tick."""
@@ -4425,9 +4487,19 @@ class AssetBot(ABC):
         _no = venue_health.kept_no(client, symbol)
         if _no:
             return self._skip(symbol, skips.NO_PRICE, f"{symbol}: {_no}")
+        # THE PROPOSAL'S RATE IS P4 IN THE eTORO BUDGET (2026-11-01,
+        # engine/etoro_budget): not asked while the key's market-data minute
+        # keeps its floor for the marks, the last looks and the closes, or
+        # while the shared 429 pause holds. A skip with the budget's words
+        # (NO_PRICE, "— not asked"), never a venue failure; the order's own
+        # reads below (the eligibility, the last look, the POST) are P1.
+        from bot_program.engine import etoro_budget
         try:
-            tk = client.ticker(symbol)
+            with etoro_budget.at(etoro_budget.P4, "proposal"):
+                tk = client.ticker(symbol)
         except Exception as e:
+            if getattr(e, "budget_refused", False):
+                return self._skip(symbol, skips.NO_PRICE, str(e))
             logger.warning("[%s_bot] ticker(%s) failed: %s",
                            self.asset_class, symbol, e)
             return self._skip(symbol, skips.NO_PRICE, f"ticker failed: {e}")
@@ -5120,8 +5192,9 @@ class AssetBot(ABC):
         try:
             tk = client.ticker(symbol)
         except Exception as e:  # noqa: BLE001
-            # EXCEPT a read that met eToro's 429, or failed inside this
-            # process's 429 pause (2026-10-07): "refused" — the caller sends
+            # EXCEPT a read that met eToro's 429, or failed inside the
+            # shared 429 pause (2026-10-07; shared by every process since
+            # 2026-11-01): "refused" — the caller sends
             # nothing (the POST would meet the same quota). Every other
             # unreadable look still lets the order go, as before. Keyed on
             # the adapter like the pause (2026-10-07, review): OANDA and
@@ -5814,10 +5887,11 @@ class AssetBot(ABC):
                 logger.warning("[%s_bot] %s HELD: %s", self.asset_class,
                                symbol, _sick_why)
                 return self._skip(symbol, _sick, _sick_why)
-            # AND NOTHING ASKED INSIDE THIS PROCESS'S 429 PAUSE (2026-10-07):
-            # the eligibility read, the last look and the POST below would
-            # meet the same quota. A decision, said; not VENUE_SICK — the
-            # venue is not sick, it asked for a breath.
+            # AND NOTHING ASKED INSIDE THE 429 PAUSE (2026-10-07; the shared
+            # one of the key and world since 2026-11-01, whichever process
+            # met the 429): the eligibility read, the last look and the POST
+            # below would meet the same quota. A decision, said; not
+            # VENUE_SICK — the venue is not sick, it asked for a breath.
             _pause = venue_health.pause_s(client)
             if _pause > 0:
                 return self._skip(

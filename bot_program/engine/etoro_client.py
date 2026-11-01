@@ -163,6 +163,8 @@ from typing import Optional
 
 import requests
 
+from bot_program.engine import etoro_budget
+
 log = logging.getLogger(__name__)
 
 BASE = "https://public-api.etoro.com"
@@ -419,16 +421,24 @@ def _rate_headers(r) -> dict:
 #: ask inside the same seconds meets it again. On 2026-10-06 eToro (live)
 #: went SICK at 23:38:34 UTC on seven /search 429s in one second, most
 #: likely asked by the bar refresh (a BACKGROUND read since PR50: never
-#: noted, never paused — see klines). After a trading-lane 429 this
-#: PROCESS grants itself ONE short pause per world: the ENTRY side
-#: (propose, execute, the last look) reads it through
-#: venue_health.pause_s and does not ask while it runs. The adapter itself
-#: never refuses a read for it: the manage tick's marks, closes, the kill
-#: switch, the reconcile, the TAKE TRADE lane and etoro_smoke go to the
-#: wire as before. ONE pause per episode: a world refused again within
+#: noted, never paused — see klines). After a trading-lane 429 ONE short
+#: pause is granted per world: the ENTRY side (propose, execute, the last
+#: look) reads it through venue_health.pause_s and does not ask while it
+#: runs. ONE pause per episode: a world refused again within
 #: RATE_PAUSE_STREAK_S of its last pause's END gets none, so a venue that
-#: keeps refusing is noted on every read and SICK stays reachable. Per
-#: process, keyed by world like _SEARCH_IDS; RATE_PAUSE is read at call
+#: keeps refusing is noted on every read and SICK stays reachable.
+#: SHARED SINCE 2026-11-01: the pause lived in this process's memory
+#: (_RATE_PAUSE, keyed by world), so the worker that met the 429 paused
+#: while the next one asked again. It now lives in the cache, Redis in
+#: production, keyed by the user key's hash and the world
+#: (etoro_budget.pause_*), so every process sees a 429 any process met;
+#: the cap, the fallback and the episode rule are unchanged. Its readers:
+#: the entry side as before, and the budget's P3 to P5 takes (the marks
+#: of rows whose stop rests at eToro, the proposals, the candles, the
+#: smoke and the ramp), which skip while it holds. P0 (closes, stop moves,
+#: proofs, cancels, the drain, the kill switch) never reads it; nor do P1
+#: (the orders, and the mark of a live row eToro holds no stop for) and
+#: P2. RATE_PAUSE is read at call
 #: time (tests/__init__.py turns it off).
 RATE_PAUSE = True
 #: A GUESS, said as one: eToro's 429 body and headers are unmeasured
@@ -445,13 +455,13 @@ RATE_PAUSE_STREAK_S = 450.0
 #: NOT the candles (a background read), the account, the portfolio or the
 #: eligibility.
 RATE_PAUSE_SITES = frozenset({"ticker", "search"})
-#: world -> _mono() at which the last pause granted ends.
-_RATE_PAUSE: dict = {}
 
 
 def _mono() -> float:
-    """The pause's clock (a seam: tests move it without moving every other
-    caller of time.monotonic)."""
+    """The /search "no" memo's clock (a seam: tests move it without moving
+    every other caller of time.monotonic). The 429 pause, shared across
+    processes since 2026-11-01, runs on the wall clock instead
+    (etoro_budget._now)."""
     return time.monotonic()
 
 
@@ -475,12 +485,22 @@ def _retry_after_s(r) -> tuple:
         return None, None
 
 
-def _grant_rate_pause(world: str, wait) -> str:
-    """Grant `world` its pause unless one runs or the last one ended less
-    than RATE_PAUSE_STREAK_S ago; the words say which. Never raises."""
+def _grant_rate_pause(budget_key: str, world: str, wait) -> str:
+    """Grant (budget_key, world) its shared pause unless one runs or the
+    last one ended less than RATE_PAUSE_STREAK_S ago; the words say which.
+    `budget_key` is the user key's hash (etoro_budget.key_hash), never the
+    key. Two processes meeting one 429 grant one pause: the first write
+    wins (etoro_budget.pause_write, fresh) and the other reads it as
+    running. Never raises."""
     try:
-        now = _mono()
-        end = _RATE_PAUSE.get(world)
+        now = etoro_budget._now()
+        held = etoro_budget.pause_read(budget_key, world)
+        end = None
+        if held is not None:
+            try:
+                end = float(held.get("end"))
+            except (TypeError, ValueError):
+                end = None
         if end is not None and now < end:
             return f"pause running ({end - now:.0f}s left)"
         if end is not None and now - end <= RATE_PAUSE_STREAK_S:
@@ -489,7 +509,13 @@ def _grant_rate_pause(world: str, wait) -> str:
                                                            RATE_PAUSE_MAX_S)
         if s <= 0:
             return "Retry-After 0: not paused"
-        _RATE_PAUSE[world] = now + s
+        if not etoro_budget.pause_write(
+                budget_key, world, end=now + s, at=now,
+                keep_s=s + RATE_PAUSE_STREAK_S + 60, fresh=held is None):
+            left = etoro_budget.pause_left(budget_key, world, now)
+            if left > 0:
+                return f"pause running ({left:.0f}s left)"
+            return "not paused: the shared pause could not be stored"
         return f"paused {s:.0f}s"
     except Exception:  # noqa: BLE001
         return ""
@@ -942,6 +968,10 @@ class EtoroTrader:
         # names the refused endpoint from the second.
         self.wire_reads = 0
         self.last_read = ""
+        # THE BUDGET'S NAME FOR THIS KEY (2026-11-01, etoro_budget): the
+        # user key's short hash keys the budget and the shared 429 pause;
+        # the key itself is never stored or logged there.
+        self._budget_key = etoro_budget.key_hash(user_key)
 
     # ── plumbing ───────────────────────────────────────────────────────────
 
@@ -993,14 +1023,55 @@ class EtoroTrader:
         except Exception as e:  # noqa: BLE001 — a lost note must not raise
             log.debug("eToro health note (%s) skipped: %s", where, e)
 
+    def _bkey(self) -> str:
+        """The user key's hash, the budget's and the shared pause's name
+        for this client (etoro_budget.key_hash)."""
+        k = getattr(self, "_budget_key", None)
+        if not k:
+            k = self._budget_key = etoro_budget.key_hash(
+                getattr(self, "user_key", ""))
+        return k
+
+    def _before(self, where: str) -> tuple:
+        """THE BUDGET, BEFORE A REQUEST TO `where` (2026-11-01): (priority,
+        why, taken). The priority is the caller's scope (etoro_budget.at),
+        P1 outside any. P2 to P5 take their token here and may be refused:
+        etoro_budget.Refused is raised and NOTHING IS SENT. P0 and P1 take
+        nothing here (taken False): they are never refused nor delayed,
+        and are counted once sent (_after)."""
+        p, why = etoro_budget.current(etoro_budget.P1)
+        if p <= etoro_budget.P1:
+            return p, why, False
+        etoro_budget.take(self._bkey(), etoro_budget.family_of(where), p,
+                          world=self._world(), where=where, why=why,
+                          pause=RATE_PAUSE)
+        return p, why, True
+
+    def _after(self, where: str, priority=None, why=None) -> None:
+        """Count one request to `where` ALREADY SENT: every P0 and P1
+        request and every retry (etoro_budget.spend). The priority is the
+        caller's scope unless given. Never raises and never waits: the
+        spend only queues the count for the budget's flusher thread, so no
+        cache call stands between a request and its answer, or the next
+        request (2026-11-01, review)."""
+        try:
+            if priority is None:
+                priority, why = etoro_budget.current(etoro_budget.P1)
+            etoro_budget.spend(self._bkey(), etoro_budget.family_of(where),
+                               priority, where=where, why=why or "")
+        except Exception as e:  # noqa: BLE001
+            log.debug("eToro budget: %s not counted (%s)", where,
+                      type(e).__name__)
+
     def _on_429(self, where: str, r) -> str:
         """A 429 at `where`: grant the pause when `where` is a pause site
         AND this is not a background read, log the quota headers (the
         measurement RATE_PAUSE_FALLBACK_S waits for), and return the words
-        for the health note. Never raises."""
+        for the health note. The pause is the shared one of this key and
+        world (2026-11-01). Never raises."""
         try:
             wait, raw = _retry_after_s(r)
-            said = (_grant_rate_pause(self._world(), wait)
+            said = (_grant_rate_pause(self._bkey(), self._world(), wait)
                     if RATE_PAUSE and where in RATE_PAUSE_SITES
                     and not getattr(self, "_background", False) else "")
             log.info("eToro %s answered 429 (%s; %s) quota headers %s",
@@ -1013,16 +1084,15 @@ class EtoroTrader:
             return ""
 
     def rate_pause_s(self) -> float:
-        """Seconds left of this process's 429 pause for this world; 0.0
-        when RATE_PAUSE is off or none runs. ticker(), instrument_id()
-        and every write NEVER read it: the callers that may wait do
-        (bot_program/venue_health.pause_s)."""
+        """Seconds left of the shared 429 pause of this key and world
+        (2026-11-01: any process's 429, read from the cache); 0.0 when
+        RATE_PAUSE is off, none runs or the cache cannot be read. Every
+        write NEVER reads it, nor a read at P0 to P2: the callers that may
+        wait do (bot_program/venue_health.pause_s), and the budget's P3 to
+        P5 takes skip while it holds (etoro_budget.take)."""
         if not RATE_PAUSE:
             return 0.0
-        end = _RATE_PAUSE.get(self._world())
-        if end is None:
-            return 0.0
-        return max(0.0, float(end) - _mono())
+        return etoro_budget.pause_left(self._bkey(), self._world())
 
     def search_no(self, symbol: str) -> str:
         """eToro's kept "no" for `symbol` in this world (the words), or ""
@@ -1063,7 +1133,15 @@ class EtoroTrader:
         through _on_429 (the pause, the quota's headers). A BACKGROUND
         read notes nothing and grants no pause. Every attempt counts in
         wire_reads; last_read names the site, last_rate_headers keeps the
-        last answer's quota-looking headers (2026-10-07)."""
+        last answer's quota-looking headers (2026-10-07).
+
+        THE BUDGET (2026-11-01, etoro_budget): at the caller's priority, a
+        read at P2 to P5 takes its token before it is sent and is refused
+        (etoro_budget.Refused, nothing sent, no health note, no wire_reads)
+        when the family keeps its floor for the priorities above, or, at
+        P3 to P5, while the shared 429 pause holds. A read at P0 or P1, and
+        the one retry of any read, are counted once sent, never refused."""
+        p, why, taken = self._before(where)
         fn = getattr(self._sess(), method.lower())
         last_exc = None
         self.last_read = where
@@ -1075,6 +1153,9 @@ class EtoroTrader:
                 last_exc = None
             except TRANSPORT as e:
                 last_exc = e
+            finally:
+                if attempt or not taken:
+                    self._after(where, p, why)
             if r is not None:
                 self.last_rate_headers = _rate_headers(r)
                 code = int(getattr(r, "status_code", 0) or 0)
@@ -1435,10 +1516,18 @@ class EtoroTrader:
     # ── market data ────────────────────────────────────────────────────────
 
     def ping(self) -> bool:
+        """One aggregate-portfolio GET: True on 200, False for anything
+        else, a budget refusal included (2026-11-01: an account read, at
+        the caller's priority)."""
         try:
-            r = self._sess().get(self._v1_info("aggregate-portfolio"),
-                                 headers=self._headers(),
-                                 timeout=self.timeout)
+            p, why, taken = self._before("account")
+            try:
+                r = self._sess().get(self._v1_info("aggregate-portfolio"),
+                                     headers=self._headers(),
+                                     timeout=self.timeout)
+            finally:
+                if not taken:
+                    self._after("account", p, why)
             return r.status_code == 200
         except Exception as e:  # noqa: BLE001
             log.warning("eToro ping failed: %s", e)
@@ -1541,12 +1630,19 @@ class EtoroTrader:
         return {"lastPrice": str(last), "symbol": symbol,
                 "bid": str(bid), "ask": str(ask)}
 
+    @etoro_budget.scoped(etoro_budget.P5, "candles")
     def klines(self, symbol: str, interval: str = "15m",
                limit: int = 200) -> list[list]:
         """Binance-style 12-element rows: [openTime, o, h, l, c, v,
         closeTime, quoteVol, trades, takerBase, takerQuote, ignore].
         Oldest first, like every other adapter. The runner reads only
-        o/h/l/c/v; the tail is parity padding."""
+        o/h/l/c/v; the tail is parity padding.
+
+        THE BUDGET'S LOWEST PRIORITY (2026-11-01): the candles and the
+        /search a cold id costs are taken at P5 unless a caller set a
+        higher priority; a refused take raises etoro_budget.Refused before
+        anything is sent (the bar refresh then fills from the public
+        feed, mutes nothing and notes nothing)."""
         enum = INTERVAL_MAP.get(interval, "FifteenMinutes")
         span_ms = INTERVAL_SECONDS.get(interval, 900) * 1000
         n = max(1, min(int(limit), CANDLES_MAX))
@@ -1710,10 +1806,17 @@ class EtoroTrader:
         429, a 5xx) the equity and last_sync moved while the cash and the
         used margin kept aging. One read now serves both, so they land
         together or not at all. The post-order re-read
-        (bot_program.etoro_cells) asks this too."""
+        (bot_program.etoro_cells) asks this too.
+
+        A BUDGET REFUSAL IS RAISED, NOT NONE (2026-11-01): None is "the
+        read failed", which the sync counts as a missed pass toward its
+        stall alert; a read the budget did not send (etoro_budget.Refused)
+        is a deferral, and the sync and the re-read file it as one."""
         try:
             info = self.account()
         except Exception as e:  # noqa: BLE001
+            if getattr(e, "budget_refused", False):
+                raise
             log.warning("eToro account_snapshot failed: %s", e)
             return None
         return {"reading": self._reading_of(info),
@@ -1728,10 +1831,17 @@ class EtoroTrader:
         `_totals`); their arithmetic (available + used + pnl = total) is
         the public reference's claim, unmeasured. Nothing on an entry path
         calls this — the gate reads the cells; the sync reads them with
-        the equity through account_snapshot (one GET, 2026-10-31)."""
+        the equity through account_snapshot (one GET, 2026-10-31).
+
+        A BUDGET REFUSAL IS RAISED, NOT NONE (2026-11-01, review), as in
+        account_snapshot: a read the budget did not send is a deferral,
+        never "the read failed" (the smoke said "the adapter swallowed the
+        failure"); every caller inside a P2 to P5 scope files it as one."""
         try:
             info = self.account()
         except Exception as e:  # noqa: BLE001
+            if getattr(e, "budget_refused", False):
+                raise
             log.warning("eToro margin_cells failed: %s", e)
             return None
         return self._cells_of(info)
@@ -1748,11 +1858,17 @@ class EtoroTrader:
         live broker as unmeasured, "this module cannot tell which" — so the
         gap is contained rather than corrected, and it is named here so the
         next reader meets it before they trust the number.
+
+        A read the budget did not send RAISES etoro_budget.Refused instead
+        (2026-11-01, review): a 0.0 would say an empty account of a read
+        nobody asked; the pool check catches it as "not measured".
         """
         try:
             return float(self._totals(self.account())
                          .get("accountAvailableCash") or 0)
         except Exception as e:  # noqa: BLE001
+            if getattr(e, "budget_refused", False):
+                raise
             log.warning("eToro balance fetch failed: %s", e)
             return 0.0
 
@@ -1770,10 +1886,17 @@ class EtoroTrader:
         empty account reads as unmeasured, which is this platform's
         convention and not eToro's peculiarity; changing it belongs in a
         change that moves every adapter at once.
+
+        A read the budget did not send RAISES etoro_budget.Refused
+        (2026-11-01, review), as account_snapshot does: None is "the read
+        failed", which the sync and the status report would say of a read
+        nobody asked.
         """
         try:
             info = self.account()
         except Exception as e:  # noqa: BLE001
+            if getattr(e, "budget_refused", False):
+                raise
             log.warning("eToro net_liquidation failed: %s", e)
             return None
         return self._reading_of(info)
@@ -1828,10 +1951,17 @@ class EtoroTrader:
         IBKRTrader's contract, for the portfolio views. Marks are not on
         the position row on eToro, so market_price is left 0 rather than
         invented; the aggregate endpoint has exposure per instrument if a
-        caller needs it."""
+        caller needs it.
+
+        A read the budget did not send RAISES etoro_budget.Refused
+        (2026-11-01, review): None counted the account unreachable in the
+        sync (a missed pass toward its "re-save the keys" alert) when the
+        aggregate had answered and the book was simply not asked."""
         try:
             positions = self._open_positions()
         except Exception as e:  # noqa: BLE001
+            if getattr(e, "budget_refused", False):
+                raise
             log.warning("eToro broker_portfolio failed: %s", e)
             return None
         out = []
@@ -2214,12 +2344,23 @@ class EtoroTrader:
         order read shows referenceID all zeros); `token=` -> 400. During a
         close in flight the same lookup answered 500 three times (~6 s),
         then 200 — a 500 is transient. Never raises.
+
+        THE BUDGET (2026-11-01): a lookup is counted once sent, at its
+        caller's priority — P0 for a close proof and a cancel, P1 for a
+        fill poll — so it is never refused nor delayed. A lookup a caller
+        put below P1 would take its token first; a refusal then reads as
+        could-not-ask (None, 0), nothing sent.
         """
         r = None
         try:
-            r = self._sess().get(self._v2_lookup(), params=params,
-                                 headers=self._headers(),
-                                 timeout=self.timeout)
+            p, why, taken = self._before("lookup")
+            try:
+                r = self._sess().get(self._v2_lookup(), params=params,
+                                     headers=self._headers(),
+                                     timeout=self.timeout)
+            finally:
+                if not taken:
+                    self._after("lookup", p, why)
             r.raise_for_status()
             return (r.json() or {}), int(getattr(r, "status_code", 0) or 0)
         except Exception as e:  # noqa: BLE001
@@ -2268,8 +2409,10 @@ class EtoroTrader:
                 return last
         return last
 
+    @etoro_budget.scoped(etoro_budget.P1, "fill lookup")
     def order_status(self, order_id: str) -> Optional[dict]:
         """The engine's working-entry vocabulary off ONE orders:lookup GET.
+        A fill lookup (2026-11-01): at least P1, never refused.
 
         MEASURED 2026-09-23 (demo): 11 WaitingForMarket -> working (the held
         order, positionExecutions []); 3 Filled -> filled with the units and
@@ -2340,11 +2483,13 @@ class EtoroTrader:
                 pass
         return out
 
+    @etoro_budget.scoped(etoro_budget.P0, "close proof")
     def position_state(self, order_id: str, *, until: Optional[str] = None,
                        attempts: int = CLOSE_PROOF_ATTEMPTS,
                        delay: float = CLOSE_PROOF_DELAY_S) -> Optional[str]:
         """"open" / "closed" — the venue's own word on the position an OPEN
         order created, read by that order's id — or None: could not ask.
+        A close proof (2026-11-01): P0, never refused, never paused.
 
         THE CLOSE PROOF (MEASURED 2026-09-23). The close order this venue
         answers with (orderType 19) is findable on no read path:
@@ -2389,9 +2534,15 @@ class EtoroTrader:
                 return last
         return last
 
+    @etoro_budget.scoped(etoro_budget.P1, "order")
     def market_order(self, symbol: str, side: str, quantity: float,
                      **kwargs) -> dict:
         """Open a position. side BUY -> `buy`, SELL -> `sellShort`.
+
+        P1 in the budget (2026-11-01), whatever the caller's scope: the
+        /search a cold id costs, the POST and its fill lookups are counted
+        once sent and never refused; the POST keeps its own fresh request
+        and timeout and is never retried.
 
         stop_loss / take_profit kwargs become stopLossRate / takeProfitRate,
         absolute prices held AT THE BROKER on fill. The fill itself is read
@@ -2489,11 +2640,16 @@ class EtoroTrader:
         # may try again; anything after the send is EtoroOrderInDoubt,
         # which the engine notes on the symbol and never resends blind.
         # Both are noted on the venue's health as an ORDER failure, which
-        # on its own holds new real entries for the quiet.
+        # on its own holds new real entries for the quiet. The budget
+        # counts the POST once it is sent (2026-11-01, P1): nothing stands
+        # between the order and the wire.
         try:
-            r = self._sess().post(self._v2_exec_orders(), json=body,
-                                  headers=self._headers(rid),
-                                  timeout=self.timeout)
+            try:
+                r = self._sess().post(self._v2_exec_orders(), json=body,
+                                      headers=self._headers(rid),
+                                      timeout=self.timeout)
+            finally:
+                self._after("order")
         except NEVER_SENT as e:
             self._note_health("order", detail=f"not sent: "
                                               f"{type(e).__name__}")
@@ -2648,12 +2804,18 @@ class EtoroTrader:
 
     # ── brackets ───────────────────────────────────────────────────────────
 
+    @etoro_budget.scoped(etoro_budget.P0, "stop or target move")
     def _patch_position(self, position_id: str, body: dict,
                         what: str) -> dict:
+        """The PATCH of one position's stop or target. P0 in the budget
+        (2026-11-01): counted once sent, never refused, never paused."""
         try:
-            r = self._sess().patch(self._v2(f"positions/{position_id}"),
-                                   json=body, headers=self._headers(),
-                                   timeout=self.timeout)
+            try:
+                r = self._sess().patch(self._v2(f"positions/{position_id}"),
+                                       json=body, headers=self._headers(),
+                                       timeout=self.timeout)
+            finally:
+                self._after("patch")
             if r.status_code in (200, 202):
                 return {"ok": True, "reason": ""}
             return {"ok": False,
@@ -2690,8 +2852,11 @@ class EtoroTrader:
 
     # ── orders (D3b) ───────────────────────────────────────────────────────────────
 
+    @etoro_budget.scoped(etoro_budget.P0, "order cancel")
     def cancel_order(self, order_id: str) -> Optional[bool]:
         """Withdraw a held ENTRY order - LOOKUP FIRST, DELETE, PROVE.
+        P0 in the budget (2026-11-01): the lookups and the DELETE are
+        counted once sent, never refused, never paused.
 
         MEASURED 2026-09-23 20:29 UTC (demo, order 383459788, WaitingForMarket):
         DELETE /api/v3/trading/execution/demo/orders/<id> -> 202
@@ -2758,8 +2923,11 @@ class EtoroTrader:
             return False
         url = self._v3_exec_order(oid)          # both worlds measured
         try:
-            r = self._sess().delete(url, headers=self._headers(),
-                                    timeout=self.timeout)
+            try:
+                r = self._sess().delete(url, headers=self._headers(),
+                                        timeout=self.timeout)
+            finally:
+                self._after("cancel")
             code2 = int(getattr(r, "status_code", 0) or 0)
             if code2 not in (200, 202, 204):
                 log.error("eToro cancel_order refused (%s): %s", code2,
@@ -2794,10 +2962,16 @@ class EtoroTrader:
         """
         return True
 
+    @etoro_budget.scoped(etoro_budget.P0, "close")
     def close_position(self, position_id: str, symbol: str,
                        units: Optional[float] = None, *,
                        open_order_id: str = "") -> dict:
         """Submit a market close and, given the OPEN order's id, PROVE it.
+
+        P0 in the budget (2026-11-01), whatever the caller's scope: the
+        /search a cold id costs, the POST and its proof lookups are
+        counted once sent, never refused, never paused; what is sent and
+        when is unchanged.
 
         MEASURED 2026-09-23 (demo): the POST answers {orderForClose:
         {positionID, instrumentID, orderID (orderType 19), statusID 1, CID,
@@ -2843,9 +3017,12 @@ class EtoroTrader:
         # row's units; on eToro a close is the whole position, so `units`
         # is accepted, reported back, and not sent.
         body = {"InstrumentID": self.instrument_id(symbol)}
-        r = self._sess().post(
-            self._v1_exec(f"market-close-orders/positions/{position_id}"),
-            json=body, headers=self._headers(), timeout=self.timeout)
+        try:
+            r = self._sess().post(
+                self._v1_exec(f"market-close-orders/positions/{position_id}"),
+                json=body, headers=self._headers(), timeout=self.timeout)
+        finally:
+            self._after("close")
         r.raise_for_status()
         data = r.json() or {}
         ofc = data.get("orderForClose") or {}

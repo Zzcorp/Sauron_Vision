@@ -23,6 +23,7 @@ from decimal import Decimal
 
 from django.utils import timezone
 
+from bot_program.engine import etoro_budget
 from bot_program.etoro_cells import one_read_per_pass
 
 logger = logging.getLogger(__name__)
@@ -212,8 +213,13 @@ def _broker_open_symbols(client, *, asset_class: str, warm=()) -> dict:
     try:
         positions = fn() or []
     except Exception as e:
-        logger.warning("reconcile: %s.get_positions() failed: %s",
-                       type(client).__name__, e)
+        # A book the eToro budget did not ask (2026-11-01) is no failure:
+        # said as not asked; unreadable for this pass all the same.
+        (logger.info if getattr(e, "budget_refused", False)
+         else logger.warning)("reconcile: %s.get_positions() %s: %s",
+                              type(client).__name__,
+                              "not asked" if getattr(e, "budget_refused",
+                                                     False) else "failed", e)
         return None
     symbols, opt_underlyings, has_sec_types = set(), set(), False
     unnamed = 0
@@ -291,10 +297,18 @@ def _state_key(client, asset_class: str) -> tuple:
 
 
 @one_read_per_pass()                # one account read when the walk ends
+@etoro_budget.scoped(etoro_budget.P2, "reconcile")
 def reconcile_user(user) -> dict:
     """Reconcile one user's open AssetBotTrade rows against broker state.
 
     Returns counts: {checked, closed_as_orphan, broker_unavailable, errors}.
+
+    P2 in the eToro request budget (2026-11-01, engine/etoro_budget): the
+    book read and the warm are account and market reads a full family
+    may defer — a book not read is "broker unavailable" for this pass,
+    nothing booked, read again on the next. The venue's own word on a
+    miss (position_state) and the booking of a venue close
+    (_close_as_orphan) are P0, never refused.
     """
     from .models import AssetBotTrade
     from .engine.broker_router import client_for_symbol
@@ -541,9 +555,12 @@ def _claim_orphan(trade_pk):
 UNPRICED_EXIT_KEY = "exit_price_unavailable"
 
 
+@etoro_budget.scoped(etoro_budget.P0, "reconcile venue close")
 def _close_as_orphan(trade, *, venue_said: str = "",
                      unproven: str = "") -> bool:
-    """Mark an orphan trade CLOSED at last-known price.
+    """Mark an orphan trade CLOSED at last-known price. Its reads (the
+    exit's mark, a leg's cancel) are P0 in the eToro request budget
+    (2026-11-01): a close's own booking is never refused.
 
     False, and nothing written, when the row is no longer OPEN or
     CLOSE_PENDING by the time the price is read: the reads below take
@@ -889,8 +906,10 @@ def _close_as_orphan(trade, *, venue_said: str = "",
     return True
 
 
+@etoro_budget.scoped(etoro_budget.P2, "unclaimed sweep")
 def reconcile_unknown_positions(user) -> dict:
-    """Positions the BROKER holds that no AssetBotTrade row claims.
+    """Positions the BROKER holds that no AssetBotTrade row claims. Its
+    book reads are P2 in the eToro request budget (2026-11-01).
 
     Reconciliation has only ever walked rows and asked the broker about
     each one. The other direction was never swept, so a position the broker
