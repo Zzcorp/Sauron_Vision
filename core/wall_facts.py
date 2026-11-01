@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 # tests/test_wall_facts.py counts the suite and fails when this drifts: the
 # first version of this module shipped a number its own commit had already
 # invalidated, which is exactly the failure it was written to prevent.
-TESTS_GREEN = 13924
+TESTS_GREEN = 13957
 
 # Broker adapters implemented under bot_program/engine/ — one module and one
 # client class each, all reachable from broker_router.client_for_symbol().
@@ -433,8 +433,9 @@ def _count_money_switches() -> int:
     (core.platform_control.LIVE_MONEY_SWITCHES).
 
     Every key there is exempt from the bulk "all on": each is turned on
-    alone, by a person. Read off the mapping, so a switch added to it is
-    counted the day it is.
+    alone, by a person, with the trading PIN (core/switch_pin.py,
+    2026-10-23), and turning one off is free. Read off the mapping, so a
+    switch added to it is counted the day it is.
     """
     from core.platform_control import LIVE_MONEY_SWITCHES
     return len(LIVE_MONEY_SWITCHES)

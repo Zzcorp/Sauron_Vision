@@ -15,7 +15,7 @@
     <link rel="icon" type="image/png" sizes="16x16" href="{% static 'logo/favicon-16.png' %}">
     <link rel="apple-touch-icon" href="{% static 'logo/apple-touch-icon.png' %}">
     <meta property="og:title" content="Sauron Vision — Institutional Trading Intelligence">
-    <meta property="og:description" content="AI-powered trading platform. Multi-asset signals, autonomous agents, and institutional-grade analytics.">
+    <meta property="og:description" content="AI-powered trading platform. Multi-asset signals, graded AI agents, and institutional-grade analytics.">
     {# ABSOLUTE, via static_abs. `{% static %}` yields "/static/..." and #}
     {# every scraper — Facebook, LinkedIn, Slack, X, iMessage — drops a #}
     {# relative og:image without a word, which is why links to this #}
@@ -29,7 +29,7 @@
     <meta property="og:url" content="{{ canonical_url }}">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Sauron Vision — Institutional Trading Intelligence">
-    <meta name="twitter:description" content="Multi-asset signals, autonomous agents, and institutional-grade analytics.">
+    <meta name="twitter:description" content="Multi-asset signals, graded AI agents, and institutional-grade analytics.">
     <meta name="twitter:image" content="{% static_abs 'logo/og-card.png' %}">
     {# --bg-void, the ground the page actually paints. It was the accent #}
     {# green here and a red from another project everywhere else. #}
@@ -529,6 +529,10 @@
         }
         .latest-more a { color: var(--accent); text-decoration: none; }
         .latest-more a:hover { text-shadow: 0 0 12px rgba(0,232,104,0.3); }
+        /* The bench (2026-10-31): the Book's work in progress, by title, said
+           as not yet landed, in the page's second ink, never its faintest. */
+        .latest-bench { max-width: 640px; margin: 22px auto 0; font-size: 15px; line-height: 1.6; color: var(--text2); }
+        .latest-bench a { color: var(--accent); text-decoration: none; }
 
         /* ══════════════════════════════════════════════════════════════ */
         /* TECHNOLOGY BADGES                                             */
@@ -1127,6 +1131,8 @@
             font-family: var(--font-h); font-size: 12px;
             color: var(--text3); margin-top: 8px; line-height: 1.5;
         }
+        /* A pillar that carries a PIN or real-money claim (2026-10-31): never in --text3, which reads about 3:1 on the page's black. Every pillar of #operations, #safeguards and #trust wears it, so a row reads in one ink. */
+        .pillar-desc.pillar-claim { color: var(--text2); }
         .pillar::after {
             content: ''; position: absolute; bottom: 0; left: 0; right: 0;
             height: 2px;
@@ -1586,6 +1592,19 @@
             color: var(--text2);
         }
 
+        /* The Horde strip (2026-10-31): drawn with no instrument and no
+           figure; the world tags are HTML at 11 px, never SVG text, so a
+           phone reads them at their own size. Real money is the only red. */
+        .ops-horde { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); text-align: left; }
+        .ops-horde-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 14px; font-family: var(--font-m); font-size: 11px; letter-spacing: 1.5px; color: var(--text2); text-transform: uppercase; }
+        .ops-horde-seats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .ops-seat { flex: 1 1 200px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(0,0,0,0.2); font-family: var(--font-m); font-size: 12px; color: var(--text2); }
+        .ops-world { font-size: 11px; letter-spacing: 1.5px; padding: 2px 6px; border-radius: 4px; border: 1px solid currentColor; white-space: nowrap; }
+        .ops-world.live { background: var(--accent-red); border-color: var(--accent-red); color: var(--bg); font-weight: 700; }
+        .ops-world.demo { color: var(--gold); }
+        .ops-world.paper { color: var(--blue); }
+        .ops-seat-r { margin-left: auto; }
+
         /* ══════════════════════════════════════════════════════════════ */
         /* PROMOTION LADDER — four rungs, promote up, demote back         */
         /* ══════════════════════════════════════════════════════════════ */
@@ -1902,13 +1921,19 @@
                not a token) print on a light one, so the words in them
                stay dark ink on something near white. */
             .wall-section:nth-child(even) { background: transparent !important; }
-            .feature-card, .visual-label, .demo-exposure-panel, .demo-log-panel, .ops-panel, .ops-inbox-row, .ops-band-cell, .ask-term, .desk-row, .demo-log-row { background: #f4f4f4 !important; backdrop-filter: none !important; }
+            .feature-card, .visual-label, .demo-exposure-panel, .demo-log-panel, .ops-panel, .ops-inbox-row, .ops-band-cell, .ops-seat, .ask-term, .desk-row, .demo-log-row { background: #f4f4f4 !important; backdrop-filter: none !important; }
             /* The pillar counts and the chain's last hash are drawn as a
                gradient clipped to their letters, with the colour itself
                transparent: a printer that leaves background graphics out,
                which is the browser default, would print an empty slot
                where the number stands. Plain ink here. */
             .pillar-num, .hash-block .hash-shimmer { background: none !important; -webkit-background-clip: border-box !important; background-clip: border-box !important; -webkit-text-fill-color: var(--accent) !important; color: var(--accent) !important; }
+            /* The Horde strip's world tags (2026-10-31): the real-money tag
+               is --bg on a red ground, and paper is white with no
+               background printed, the browser default; on paper the tags
+               are ink, real money still the only red. */
+            .ops-world { background: none !important; color: #333 !important; }
+            .ops-world.live { color: var(--accent-red) !important; border-color: var(--accent-red) !important; }
         }
     </style>
     {# The ring scheme's own sheet (2026-09-29): shared with the home page, so one drawing has one style. After the inline sheet, which owns the tokens it reads. #}
@@ -2293,8 +2318,8 @@
                 <h2 class="section-title">Calibrated AI<br>You Can Override</h2>
                 <div class="sep sep-left"></div>
                 <p class="section-desc" style="margin-bottom:0;">
-                    Specialised agents powered by Claude with multi-model consensus, RAG-augmented memory,
-                    and Brier-score calibration tracking. Every agent prediction is scored against
+                    Specialised agents powered by Claude, each on the model tier its work calls for, from the fastest to the frontier, with Brier-score calibration tracking.
+                    Every agent prediction is scored against
                     real outcomes &mdash; bad agents lose trust automatically.
                     AI never sends an order. With one switch on, it may argue against one: before a real-money bot order leaves,
                     the Executioner says why it fails and the Champion why it works, and after a first stretch in shadow
@@ -2302,13 +2327,86 @@
                 </p>
                 <ul class="check-list">
                     <li><span class="check-mark">&#x2713;</span>Executioner · Champion: the trade debate, shadow first, binding only on its graded record</li>
-                    <li><span class="check-mark">&#x2713;</span>Opportunist · Striker · Fixer · Gambler · Skeptic · Awakened · Theorist · Emperor: the council, shadow and graded, its weight earned only by its record</li>
+                    <li><span class="check-mark">&#x2713;</span><span>Opportunist · Striker · Fixer · Gambler · Skeptic · Awakened · Theorist · Emperor: <a href="#council" style="color:var(--accent);text-decoration:none;">the council</a>, shadow and graded, its weight earned only by its record</span></li>
                     <li><span class="check-mark">&#x2713;</span>PreTradeSanity · SignalJournal · DecayInvestigator · AnomalyDetector</li>
                     <li><span class="check-mark">&#x2713;</span>StrategyAdvisor · StrategyMutator · MacroInterpreter · NewsAnalyst</li>
                     <li><span class="check-mark">&#x2713;</span>WeeklyReviewer · MarketCommentator · EarningsAnalyst · SpeechAnalyst</li>
-                    <li><span class="check-mark">&#x2713;</span>RAG over historical signals + per-agent Brier-calibration scoring</li>
+                    <li><span class="check-mark">&#x2713;</span>Per-agent Brier-calibration scoring</li>
                     <li><span class="check-mark">&#x2713;</span>AI mutator (opt-in) proposes parameter tweaks grounded in track-record</li>
                 </ul>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<!-- THE COUNCIL (2026-10-31): eight more voices beside the debate, the -->
+<!-- Emperor in the chair (ai_agents/agents/council.py), graded on what -->
+<!-- the market did next and moving nothing. Every number is said in    -->
+<!-- words held to council.py by tests/test_the_wall.py. Its graded     -->
+<!-- calls are not counted here: the council sits on real money, so a   -->
+<!-- count that moves would tell when real money was argued. Each       -->
+<!-- pinned sentence sits on one source line. Reached from #agents,     -->
+<!-- with no link in the nav.                                           -->
+<!-- ═══════════════════════════════════════════════════════════════════ -->
+<section class="wall-section" id="council">
+    <div class="container" style="text-align: center;">
+        <div class="section-label reveal">The Council <span class="new-pill">SHADOW &middot; GRADED</span></div>
+        <h2 class="section-title reveal delay-1" style="margin-left:auto;margin-right:auto;">
+            Ten Voices.<br>All Graded.
+        </h2>
+        <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
+            Beside the trade debate's two voices sit eight more, the Emperor in the chair. With their own switches on, they sit on a real-money bot order once it has left, and on a real-money ticket when its owner asks; each is graded on what the market did next, and its record is its only weight.
+        </p>
+
+        <div class="features-grid" style="text-align: left; margin-top: 36px;">
+            <div class="feature-card reveal delay-1">
+                <div class="feature-icon">
+                    <!-- A ring with four seats and a diamond chair: the council around the Emperor -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">
+                        <circle cx="12" cy="12" r="8.5"/>
+                        <circle cx="12" cy="3.5" r="1.2" fill="var(--accent)" stroke="none"/>
+                        <circle cx="20.5" cy="12" r="1.2" fill="var(--accent)" stroke="none"/>
+                        <circle cx="12" cy="20.5" r="1.2" fill="var(--accent)" stroke="none"/>
+                        <circle cx="3.5" cy="12" r="1.2" fill="var(--accent)" stroke="none"/>
+                        <polygon points="12,8.5 15.5,12 12,15.5 8.5,12"/>
+                    </svg>
+                </div>
+                <div class="feature-title">Who Sits</div>
+                <div class="feature-text">
+                    The Opportunist, the Striker, the Fixer, the Gambler, the Skeptic, the Awakened and the Theorist argue in waves, and the Emperor reads them all, weighing each voice by its graded record.
+                    The bot lane sits at most twelve times a day, within the day's AI budget; paper and the venue's demo are never argued.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-2">
+                <div class="feature-icon gold">
+                    <!-- A rising line with its arrow: a record that grows with every graded call -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">
+                        <polyline points="3,17 9,11 13,15 21,7"/>
+                        <polyline points="16,7 21,7 21,12"/>
+                        <line x1="3" y1="21" x2="21" y2="21"/>
+                    </svg>
+                </div>
+                <div class="feature-title">Graded on What Came Next</div>
+                <div class="feature-text">
+                    Every voice, the Executioner and the Champion included, is graded on what the market did next, and a voice weighs exactly one until ten of its calls are graded.
+                    In each regime and class, the voice with the best record there, once thirty of its calls in that cell are graded and its record has earned trust, holds the Hand of the Emperor, and loses it the day another voice does better.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-3">
+                <div class="feature-icon purple">
+                    <!-- A square and its dashed shadow: the case recorded, the order untouched -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">
+                        <rect x="4" y="4" width="12" height="12"/>
+                        <rect x="8" y="8" width="12" height="12" stroke-dasharray="2 2"/>
+                    </svg>
+                </div>
+                <div class="feature-title">Shadow, Said Plainly</div>
+                <div class="feature-text">
+                    In this version the eight only record their case: none of them moves an order, a size, a stop or a limit, and the Executioner and the Champion keep only the debate's own powers.
+                    The chair also reads the people's mood, a gauge computed by code from the real-money book, which may only counsel caution, never boldness.
+                </div>
             </div>
         </div>
     </div>
@@ -3045,13 +3143,79 @@
                 <div class="ops-band-cell">Unread<b>—</b></div>
                 <div class="ops-band-cell">Drawdown<b>—</b></div>
             </div>
+
+            <!-- The Horde (2026-10-16): the band under the platform's pages, one seat per open trade, drawn with no instrument and no figure. The world tags are HTML at 11 px, never SVG text, so a phone reads them at their own size, in the words the Horde's own seat pill says. -->
+            <div class="ops-horde" role="img" aria-label="The Horde: one seat per open trade, each marked real money, demo or paper, or no venue for a row recorded by hand">
+                <div class="ops-horde-head"><span>The Horde</span><span>REAL ACCOUNT &middot; demo rows counted as the entry gate counts them</span></div>
+                <div class="ops-horde-seats">
+                    <div class="ops-seat"><span class="ops-world live">REAL MONEY</span><span>forex &middot; long</span><span class="ops-seat-r">R &mdash;</span></div>
+                    <div class="ops-seat"><span class="ops-world demo">DEMO</span><span>share &middot; short</span><span class="ops-seat-r">R &mdash;</span></div>
+                    <div class="ops-seat"><span class="ops-world paper">PAPER</span><span>crypto &middot; long</span><span class="ops-seat-r">R &mdash;</span></div>
+                </div>
+            </div>
+        </div>
+
+        {# The third edition (2026-10-31): the Horde, the day's three sessions and the Telegram links, each sentence on one source line, held to its code by tests/test_the_wall.py. #}
+        <div class="features-grid" style="text-align: left; max-width: 1080px; margin: 32px auto 0;">
+            <div class="feature-card reveal delay-1">
+                <div class="feature-icon red">
+                    <!-- Three seats on one line: the Horde, a seat for each open trade -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent-red)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">
+                        <rect x="2.5" y="9" width="5" height="8"/>
+                        <rect x="9.5" y="9" width="5" height="8"/>
+                        <rect x="16.5" y="9" width="5" height="8"/>
+                        <line x1="2" y1="20" x2="22" y2="20"/>
+                    </svg>
+                </div>
+                <div class="feature-title">The Horde</div>
+                <div class="feature-text">
+                    Under the platform's pages, a band gives each open trade a seat, marked REAL MONEY, DEMO or PAPER, or NO VENUE for a row recorded by hand that does not say which, with its mission, its stop, its R and the voices that read it.
+                    Its head reads the book's limits as the entry gate reads them and, like the gate, counts a broker's demo rows on the real side, and says so.
+                    None of its commands sends an order: each opens a dialog or a panel the platform already has, and one that acts keeps its own confirmation.
+                    With their switch on, the Orcs sit in its seats in shadow, each a journal of one open idea whose every fact is written by code, beside a thesis its owner may add in their own words.
+                    Each open idea the platform looks after, options aside, gets one: every real-money idea, and by default up to ten at once in simulation and demo together.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-2">
+                <div class="feature-icon blue">
+                    <!-- Three boxes of three heights: Asia, London and New York over their own bars -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">
+                        <rect x="2.5" y="10" width="5.5" height="6"/>
+                        <rect x="9.25" y="6" width="5.5" height="10"/>
+                        <rect x="16" y="8" width="5.5" height="12"/>
+                        <line x1="2" y1="22" x2="22" y2="22"/>
+                    </svg>
+                </div>
+                <div class="feature-title">Three Sessions, One Chart</div>
+                <div class="feature-text">
+                    On a market that trades through all three, the hourly chart and finer box the day's Asia, London and New York sessions over their own bars, on every day in view, and the four-hour chart lays each as a strip along its foot.
+                    The Power of Three's stages are named on the marks that prove them.
+                    Display only: nothing that trades reads any of it.
+                </div>
+            </div>
+            <div class="feature-card reveal delay-3">
+                <div class="feature-icon">
+                    <!-- A box with an arrow leaving it: a link that opens a page and acts nothing -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.2" stroke-linecap="square" stroke-linejoin="miter" aria-hidden="true">
+                        <rect x="3" y="7" width="14" height="14"/>
+                        <polyline points="13,3 21,3 21,11"/>
+                        <line x1="21" y1="3" x2="11" y2="13"/>
+                    </svg>
+                </div>
+                <div class="feature-title">Links That Act Nothing</div>
+                <div class="feature-text">
+                    Under a signal the platform could take, a Telegram link opens its ticket already filled in; under an alert about one open trade, a link opens that trade's close dialog.
+                    The link carries the row's number and nothing else: the page reads every fact for the login that opens it.
+                    Nothing is bought or closed from Telegram: the order or the close waits for its confirmation on the page, with the trading PIN on real money.
+                </div>
+            </div>
         </div>
 
         <div class="pillar-row reveal delay-5" style="max-width: 1080px; margin: 32px auto 0;">
             <div class="pillar">
                 <div class="pillar-num">1 CLICK</div>
                 <div class="pillar-lbl">Take Trade</div>
-                <div class="pillar-desc">A signal becomes a trade from the rail itself &mdash; sized from your risk
+                <div class="pillar-desc pillar-claim">A signal becomes a trade from the rail itself &mdash; sized from your risk
                 settings, then graded, reconciled, kill-switchable and audited exactly like a bot's.
                 Paper by default; a live ticket goes to the broker as one order with its stop and target, behind the trading PIN,
                 and warns of a reward under the risk, a trade no signal backs, a shut market, a bad entry hour or a sick venue &mdash; then leaves the last word to you.</div>
@@ -3059,13 +3223,13 @@
             <div class="pillar">
                 <div class="pillar-num"><span class="count-up" data-target="{{ wall.instruments }}">{{ wall.instruments }}</span></div>
                 <div class="pillar-lbl">Instruments Watched</div>
-                <div class="pillar-desc">Every one clickable through to its own page &mdash; candlesticks down to
+                <div class="pillar-desc pillar-claim">Every one clickable through to its own page &mdash; candlesticks down to
                 the minute, the signals that fired on it, and the news that moved it.</div>
             </div>
             <div class="pillar">
                 <div class="pillar-num"><span class="count-up" data-target="{{ wall.news_24h }}">{{ wall.news_24h }}</span></div>
                 <div class="pillar-lbl">Headlines · 24h</div>
-                <div class="pillar-desc">Ingested, scored and attached to the instruments they touch. A dash in
+                <div class="pillar-desc pillar-claim">Ingested, scored and attached to the instruments they touch. A dash in
                 the headband always means &ldquo;not measured yet&rdquo; &mdash; never a zero dressed up as data.</div>
             </div>
         </div>
@@ -3190,7 +3354,7 @@
         <div class="sep reveal delay-2"></div>
         <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;">
             A trade is surrounded on every side: checks that can stop it leaving, care while it is open, guards that watch the machine itself, and an alarm that rings when something is wrong.
-            Most of it ships switched off, and none of the {{ wall.money_switches }} switches the platform marks as real-money decisions is turned on by an all-on button.
+            Most of it ships switched off, and none of the {{ wall.money_switches }} switches the platform marks as real-money decisions is turned on by an all-on button: each is turned on alone, by a person, with the trading PIN, and turning one off stays free.
         </p>
 
         <div class="features-grid" style="text-align: left; margin-top: 36px;">
@@ -3224,7 +3388,7 @@
                 <div class="feature-title">The Clock</div>
                 <div class="feature-text">
                     No bot opens a real-money trade in a share, an ETF, a currency or a commodity while its exchange is shut.
-                    Crypto aside, which never shuts, no bot opens a new trade in the minutes around New York's five o'clock rollover, in a market's first quarter hour, in a share's last minutes or before a weekend, and none opens one around a high-impact print on its currency; the live ticket warns of each and leaves the last word to a person.
+                    Crypto aside, which never shuts, no bot opens a new trade in the minutes around New York's five o'clock rollover, in a market's first quarter hour, in a share's last minutes, before a weekend or, on a US share market, before its holiday, and none opens one around a high-impact print on its currency; the live ticket warns of each and leaves the last word to a person.
                     The gate and the guard read one clock, so they cannot disagree.
                 </div>
             </div>
@@ -3254,7 +3418,7 @@
                 <div class="feature-title">Care of the Open Trade</div>
                 <div class="feature-text">
                     With its switch on, a trade's stop goes to break-even at one R and trails past it, a trade that has done nothing for days is let go,
-                    and before a weekend or a high-impact print a winner up half an R or more is locked at break-even and a real-money loser at five times leverage or more is cut.
+                    and before a weekend or a high-impact print, or on a US share market before its holiday, a winner up half an R or more is locked at break-even and a real-money loser at five times leverage or more is cut.
                     A trade opened by hand keeps the locks and is never cut by a rule.
                     Every tighter stop on a real-money trade is copied onto the stop resting at eToro, so the lock outlives the platform.
                 </div>
@@ -3300,22 +3464,22 @@
             <div class="pillar">
                 <div class="pillar-num"><span class="count-up" data-target="{{ wall.guards }}">{{ wall.guards }}</span></div>
                 <div class="pillar-lbl">Guards in the Watchdog</div>
-                <div class="pillar-desc">With their switch on, together they read the platform and the venue every five minutes; a guard that cannot run is reported, never read as a healthy one.</div>
+                <div class="pillar-desc pillar-claim">With their switch on, together they read the platform and the venue every five minutes; a guard that cannot run is reported, never read as a healthy one.</div>
             </div>
             <div class="pillar">
                 <div class="pillar-num"><span class="count-up" data-target="{{ wall.money_switches }}">{{ wall.money_switches }}</span></div>
                 <div class="pillar-lbl">Real-Money Switches</div>
-                <div class="pillar-desc">Every one ships off, none is armed by an all-on button, and each is turned on alone, by a person.</div>
+                <div class="pillar-desc pillar-claim">Every one ships off, none is armed by an all-on button, and each is turned on alone, by a person, with the trading PIN; turning one off stays free.</div>
             </div>
             <div class="pillar">
                 <div class="pillar-num"><span class="count-up" data-target="{{ wall.proving_verdicts }}">{{ wall.proving_verdicts }}</span></div>
                 <div class="pillar-lbl">Proving Verdicts Written</div>
-                <div class="pillar-desc">Every verdict the proving ground has saved, whether it passed, failed or had too little to judge, counted whatever it said.</div>
+                <div class="pillar-desc pillar-claim">Every verdict the proving ground has saved, whether it passed, failed or had too little to judge, counted whatever it said.</div>
             </div>
             <div class="pillar">
                 <div class="pillar-num"><span class="count-up" data-target="{{ wall.proof_classes }}">{{ wall.proof_classes }}</span></div>
                 <div class="pillar-lbl">Classes Through the Venue</div>
-                <div class="pillar-desc">Classes with an order filled and closed at eToro, written into the code with its test; a sell needs its own.</div>
+                <div class="pillar-desc pillar-claim">Classes with an order filled and closed at eToro, written into the code with its test; a sell needs its own.</div>
             </div>
         </div>
     </div>
@@ -3778,10 +3942,8 @@
                 </div>
                 <div class="feature-title">Brain Synthesis</div>
                 <div class="feature-text">
-                    Every hour a structured world snapshot &mdash; observations, portfolio state,
-                    exposure, rule track records, regime probes &mdash; becomes one report with a regime
-                    call, a confidence and a handful of <em>falsifiable</em> predictions. If synthesis
-                    fails it says so; downstream agents degrade instead of guessing.
+                    Every hour a structured world snapshot &mdash; the fresh observations, the shape of the open trades, each rule's track record venue by venue, the regime probes and the decay alerts &mdash; becomes one report with a regime call, a confidence and a handful of <em>falsifiable</em> predictions.
+                    If synthesis fails it says so; downstream agents degrade instead of guessing.
                 </div>
             </div>
             <div class="feature-card reveal delay-2">
@@ -3805,6 +3967,7 @@
                     narrative threads &mdash; get promoted out of the raw observation queue into durable
                     nodes with a history you can walk. What the graph holds is what the agents are
                     allowed to treat as known.
+                    What the Mind says about a rule means one thing wherever it is read: its newest clean report counts for the hourly beat and a quarter hour more, a pause it remembers binds until a written and announced release ends it, and when both speak the stricter word wins.
                 </div>
             </div>
             <div class="feature-card reveal delay-3">
@@ -3963,8 +4126,7 @@
                 </div>
                 <div class="ask-line ask-q">What's your current read on the dollar?</div>
                 <div class="ask-line ask-a">
-                    Reading the last 72h of reports, graph nodes and open hypotheses &mdash; here is the
-                    posture, what changed, and the two claims that would falsify it.
+                    Reading the Mind's latest reports, the graph and the open hypotheses &mdash; here is the posture, what changed, and the two claims that would falsify it.
                 </div>
                 <div class="ask-line ask-q">Why did you pause that momentum rule?</div>
                 <div class="ask-line ask-a">
@@ -3978,14 +4140,13 @@
                 <h2 class="section-title">Interrogate Your<br>Own Machine.</h2>
                 <div class="sep sep-left"></div>
                 <p class="section-desc" style="margin-bottom:0;">
-                    A conversation with the platform about the platform. It reads Sauron's own accumulated
-                    state &mdash; brain reports, knowledge nodes, hypotheses, rule track records, your book
-                    &mdash; and answers in plain English with the rows it used. It has <strong>no tools to
-                    change anything</strong>: the research agent can only look. Press Ctrl+K on any page,
+                    A conversation with the platform about the platform. It reads Sauron's own accumulated state &mdash; the Mind's recent reports, the knowledge graph, the hypotheses, the latest briefing, the earnings reviews, the recent audit decisions and the open demotions &mdash; and answers in plain English.
+                    It reads no trade on its own: asked from a seat, it is given that seat's facts beside the question.
+                    It has <strong>no tools to change anything</strong>: the research agent can only look. Press Ctrl+K on any page,
                     or open the full conversation from AI Agents.
                 </p>
                 <ul class="check-list">
-                    <li><span class="check-mark">&#x2713;</span>Retrieval over your real history &mdash; not a general-purpose chatbot with a ticker</li>
+                    <li><span class="check-mark">&#x2713;</span>Read from the platform's own reports, graph and decisions &mdash; not a general-purpose chatbot with a ticker</li>
                     <li><span class="check-mark">&#x2713;</span>Intelligence hub: reports, graph, hypotheses and dissents in one reading room</li>
                     <li><span class="check-mark">&#x2713;</span>Daily strategist briefing: outlook, posture, watchlist and three actionable ideas</li>
                     <li><span class="check-mark">&#x2713;</span>Each briefing idea is posted as a hypothesis &mdash; the strategist gets graded too</li>
@@ -4130,37 +4291,36 @@
             The Audit Trail Guards the Past.<br>The PIN Guards the Present.
         </h2>
         <div class="sep reveal delay-2"></div>
+        <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;text-align:center;margin-bottom:16px;">
+            A password gets you a session. It does not get you these: unticking the demo box, arming a real bot, turning on a switch that moves real money, placing or closing a real order by hand and applying a capital plan each sit behind a second factor you hold, and a screen left unattended stops being a screen anyone can use.
+        </p>
         <p class="section-desc reveal delay-3" style="margin-left:auto;margin-right:auto;text-align:center;">
-            A password gets you a session. It does not get you money: unticking the demo box, arming a real bot,
-            placing or closing a real order by hand and applying a capital plan each sit behind a second factor you hold,
-            and a screen left unattended stops being a screen anyone can use.
+            Once you are signed in, every door that asks for that PIN counts wrong answers on one counter: the fifth wrong answer where money opens or moves ends the session, while a door that only stops, a close or the kill switch, never ends it and always obeys the right PIN.
         </p>
 
         <div class="pillar-row reveal delay-4" style="margin-top: 32px; text-align: center;">
             <div class="pillar">
                 <div class="pillar-num"><span class="count-up" data-target="{{ wall.chain_length }}">{{ wall.chain_length }}</span></div>
                 <div class="pillar-lbl">Audit Chain</div>
-                <div class="pillar-desc">Append-only entries, each hashed onto the last. Editing any past
+                <div class="pillar-desc pillar-claim">Append-only entries, each hashed onto the last. Editing any past
                 row breaks every hash after it, and verification names the break.</div>
             </div>
             <div class="pillar">
                 <div class="pillar-num">2ND GATE</div>
                 <div class="pillar-lbl">PIN on Login</div>
-                <div class="pillar-desc">Credentials accepted is not signed in. A 4-to-8 digit PIN stands
+                <div class="pillar-desc pillar-claim">Credentials accepted is not signed in. A 4-to-8 digit PIN stands
                 between the password and the terminal, throttled against guessing, with a
                 password-verified reset as the only way back.</div>
             </div>
             <div class="pillar">
                 <div class="pillar-num">ARMED</div>
                 <div class="pillar-lbl">PIN to Go Live</div>
-                <div class="pillar-desc">Bots run on paper until you arm them &mdash; and arming live takes
-                the PIN, every time. The emergency kill switch that disables every bot and flattens the
-                book is behind the same gate.</div>
+                <div class="pillar-desc pillar-claim">Bots run on paper until you arm them &mdash; and arming a live bot from any page takes the PIN, every time; on the server, an explicit confirmation stands in for it. The emergency kill switch that disables every bot and flattens the book is behind the same gate, and a wrong PIN there never locks you out.</div>
             </div>
             <div class="pillar">
                 <div class="pillar-num">IDLE</div>
                 <div class="pillar-lbl">Auto-Lock</div>
-                <div class="pillar-desc">After your chosen quiet period the session locks itself to a bare
+                <div class="pillar-desc pillar-claim">After your chosen quiet period the session locks itself to a bare
                 PIN screen &mdash; no shell, no data, no admin, no report. An unattended desk stops being
                 an open terminal.</div>
             </div>
@@ -4354,6 +4514,8 @@
             The last steps the Book records, newest first. Every one is dated, and every one has its own line in the Book.
         </p>
         {% if latest %}<ol class="check-list latest-steps reveal delay-4">{% for m in latest %}<li><span class="check-mark">&#x2713;</span><a href="{% url 'the_book' %}#{{ m.anchor }}"><time datetime="{{ m.date }}">{{ m.day }}</time> &middot; {{ m.title }}</a></li>{% endfor %}</ol>{% endif %}
+        {# The bench (2026-10-31): the Book's IN_PROGRESS titles, read off core.views_book.bench_titles; an empty or unreadable bench says nothing. #}
+        {% if bench %}<p class="latest-bench reveal delay-5">On the bench, not yet landed: {% for b in bench %}{{ b }}{% if not forloop.last %} &middot; {% endif %}{% endfor %}. <a href="{% url 'the_book' %}#in-progress">What is being built now &rarr;</a></p>{% endif %}
         <p class="latest-more reveal delay-5"><a href="{% url 'the_book' %}#road">Read the whole road in the Book &rarr;</a></p>
     </div>
 </section>

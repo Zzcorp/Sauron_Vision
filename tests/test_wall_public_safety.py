@@ -20,6 +20,10 @@ Four walks:
   3. no e-mail address, no IP address, no identifier-length digit run;
   4. no commit hash of the road.
 
+And one guard of the render-time walk itself (2026-10-31): the `next` a
+visitor puts in the address is echoed into the login form, and is never
+read as the page's.
+
 Run with:  python manage.py test tests.test_wall_public_safety
 """
 import re
@@ -115,3 +119,61 @@ class TheWallCarriesNothingPrivate(TestCase):
         shown = [commit for commit in sorted(hashes)
                  if re.search(r"(?<![0-9a-f])%s(?![0-9a-f])" % commit, self.whole)]
         self.assertEqual(shown, [], "the Wall shows the commit(s) %r" % shown)
+
+
+class TheVisitorsNextIsNotThePages(TestCase):
+    """(Review, 2026-10-31) The Wall echoes a Telegram link's `next` into
+    its login form, id-only (alerts.links.DEEP_LINK_PATHS), and those
+    digits are whatever the visitor typed. Read as the page's, a digit-run
+    private term guessed there came back as the placeholder, and a miss as
+    the whole Wall: a confirm-my-guess oracle against the server's list,
+    and a staff incident anyone could raise. The walk reads the page with
+    the echo blanked; the page served still carries it."""
+
+    PLANTED = "424242"
+
+    def setUp(self):
+        import os
+        from unittest import mock
+
+        from core import leak_walk
+        cache.clear()
+        leak_walk._terms_of.cache_clear()
+        self.addCleanup(leak_walk._terms_of.cache_clear)
+        patch = mock.patch.dict(os.environ, {leak_walk.PRIVATE_TERMS_ENV: self.PLANTED})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_a_guess_in_next_gets_the_whole_wall(self):
+        from unittest import mock
+
+        from core import leak_walk
+        for path in ("/signals/%s/ticket/" % self.PLANTED,
+                     "/positions/%s/close-dialog/" % self.PLANTED):
+            with self.subTest(next=path), \
+                    mock.patch.object(leak_walk, "withheld",
+                                      side_effect=AssertionError("withheld")):
+                response = self.client.get(WALL, {"next": path})
+                self.assertEqual(response.status_code, 200)
+                body = response.content.decode("utf-8")
+                self.assertIn('id="council"', body)
+                self.assertIn('name="next" value="%s"' % path, body)
+
+    def test_the_same_term_on_the_page_itself_is_still_held(self):
+        from unittest import mock
+
+        from django.contrib.auth.models import AnonymousUser
+        from django.test import RequestFactory
+
+        from core import leak_walk, views_wall
+        real = views_wall.render_to_string
+
+        def leaking(*args, **kwargs):
+            return real(*args, **kwargs).replace("</body>", "<p>%s</p></body>" % self.PLANTED)
+
+        request = RequestFactory().get(WALL, {"next": "/signals/%s/ticket/" % self.PLANTED})
+        request.user = AnonymousUser()
+        with mock.patch.object(views_wall, "render_to_string", side_effect=leaking), \
+                mock.patch.object(leak_walk, "withheld", return_value="HELD") as held:
+            self.assertEqual(views_wall.the_wall(request), "HELD")
+        held.assert_called_once_with("wall", [self.PLANTED])

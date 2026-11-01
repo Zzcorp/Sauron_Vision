@@ -26,10 +26,10 @@ What this file pins:
     stands in for it here): the repository is public;
   * clean English: no snake_case, no template artefact, no French;
   * the road so far is held to the history as it stood at each edition,
-    pasted below in two blocks, the first edition's up to 3994ffc and the
-    second's from there to 0bf225d (the container has no .git to ask):
-    every hash exists, every milestone is dated on its commit's day or up
-    to three days before it;
+    pasted below in three blocks, the first edition's up to 3994ffc, the
+    second's from there to 0bf225d and the third's from there to dbfe0a9
+    (the container has no .git to ask): every hash exists, every
+    milestone is dated on its commit's day or up to three days before it;
   * motion is optional: nothing is hidden unless the head script says
     motion is welcome, prefers-reduced-motion and print stop everything and
     show everything, the keyframes move only transform and opacity, no
@@ -626,15 +626,78 @@ be715d2 2026-09-28
 f44f94b 2026-09-28
 359a373 2026-09-28
 """
+#: The history since, as the same command printed it on 2026-10-31 for
+#: f0a0ade..dbfe0a9, merges included, less 0bf225d, which the second block
+#: already holds: the third edition's road.
+HISTORY_SINCE_0BF225D = """
+dbfe0a9 2026-11-01
+63ad93e 2026-10-24
+6b17273 2026-10-25
+02f8f47 2026-10-24
+51624fa 2026-10-25
+b279ac3 2026-10-24
+1ed21e8 2026-10-25
+a0ea17b 2026-10-24
+01e5c53 2026-10-25
+9755c64 2026-10-24
+6e30161 2026-10-24
+07ae049 2026-10-23
+db65695 2026-10-24
+f00dbc4 2026-10-24
+9b6917d 2026-10-24
+fd41a45 2026-10-23
+e519e0b 2026-10-23
+48b203f 2026-10-22
+d0a7b02 2026-10-22
+bbb503a 2026-10-16
+a58eda6 2026-10-23
+c962b4a 2026-10-23
+2d0ccc5 2026-10-23
+b972803 2026-10-23
+62c557e 2026-10-23
+a1ceeb8 2026-10-23
+70d4d1c 2026-10-23
+19f30d4 2026-10-22
+56ef336 2026-10-17
+6881bbc 2026-10-16
+55308cd 2026-10-16
+5436dec 2026-10-16
+30149bb 2026-10-16
+fd7ad74 2026-10-16
+0fdecf2 2026-10-16
+27348c3 2026-10-16
+8faa292 2026-10-16
+c1bcc73 2026-10-15
+6e8c675 2026-10-16
+b311602 2026-10-15
+555a64d 2026-10-16
+6034312 2026-10-16
+17fbc9b 2026-10-16
+1fb4741 2026-10-16
+d41620c 2026-10-16
+4e785a6 2026-10-15
+bcb0e42 2026-10-15
+5dae8af 2026-10-15
+41e6fb5 2026-10-15
+87a230e 2026-10-15
+d9e335c 2026-10-15
+f6ab206 2026-10-15
+24376b5 2026-10-15
+6d57b6e 2026-10-15
+3d5ce3f 2026-10-14
+74e6bc1 2026-10-09
+2239cc7 2026-10-08
+"""
 
 
 def _history(block):
     return dict(line.split() for line in block.split("\n") if line.strip())
 
 
-#: The first edition's history, and every commit either edition knows.
+#: The first edition's history, and every commit the three editions know.
 FIRST_EDITION = _history(HISTORY_AT_3994FFC)
-KNOWN_COMMITS = {**FIRST_EDITION, **_history(HISTORY_SINCE_3994FFC)}
+KNOWN_COMMITS = {**FIRST_EDITION, **_history(HISTORY_SINCE_3994FFC),
+                 **_history(HISTORY_SINCE_0BF225D)}
 
 #: The walk is core/leak_walk.py, the module the views call at render time;
 #: the names below are kept so every test here reads as it did. The
@@ -1532,7 +1595,18 @@ class TheBookFollowsTheCode(SimpleTestCase):
         for commit, day in second.items():
             self.assertRegex(commit, r"^[0-9a-f]{7}$")
             self.assertGreaterEqual(day, "2026-09-28", commit)
-        self.assertEqual(len(KNOWN_COMMITS), len(FIRST_EDITION) + len(second))
+        self.assertEqual(len(KNOWN_COMMITS),
+                         len(FIRST_EDITION) + len(second) + len(_history(HISTORY_SINCE_0BF225D)))
+
+    def test_the_third_history_block_continues_the_second(self):
+        third = _history(HISTORY_SINCE_0BF225D)
+        earlier = set(FIRST_EDITION) | set(_history(HISTORY_SINCE_3994FFC))
+        self.assertGreater(len(third), 50)
+        self.assertEqual(earlier & set(third), set())
+        for commit, day in third.items():
+            self.assertRegex(commit, r"^[0-9a-f]{7}$")
+            self.assertGreaterEqual(day, "2026-10-08", commit)
+        self.assertEqual(len(KNOWN_COMMITS), len(earlier) + len(third))
 
     def test_the_edition_days_are_written_in_words(self):
         self.assertEqual(book.WRITTEN_WORDS, views_book.day_words(book.WRITTEN))
@@ -1581,12 +1655,17 @@ class TheBookFollowsTheCode(SimpleTestCase):
                           "%s can be bulk-enabled: rewrite 'Every switch to real money is a person's'" % key)
         named = set(LIVE_MONEY_SWITCHES) | {
             "morgul_guards", "morgul_brake", "aragorn_scale_out",
-            "pipeline_promotion", "proving_ground", "telegram_alarm"}
+            "pipeline_promotion", "proving_ground", "telegram_alarm",
+            "council_bots", "council_ticket", "orcs", "big_money_board",
+            "lore_staff", "lore_background"}
         for key in named:
             self.assertIn(key, rows, "%s is no longer a component: rewrite the safeguards" % key)
             row = rows[key]
             self.assertFalse(row.get("is_enabled") or row.get("enabled"),
                              "%s ships on: rewrite every 'off on arrival'" % key)
+        for key in ("council_bots", "council_ticket", "orcs"):
+            self.assertNotIn(key, LIVE_MONEY_SWITCHES,
+                             "%s moves money now: rewrite 'The council', 'The Orcs' and the lexicon's 'Shadow'" % key)
 
     def test_a_brake_is_the_four_the_words_name(self):
         from bot_program.asset_engine import disarm
@@ -1908,6 +1987,20 @@ class TheBookFollowsTheCode(SimpleTestCase):
             ("AssetBotConfig.min_signals_for_entry",
              lambda: attr("bot_program.asset_models", "AssetBotConfig")._meta.get_field("min_signals_for_entry").default,
              1, "'The vote': a single strong signal can be enough"),
+            # THE THIRD EDITION (2026-10-31)
+            ("trading_pin.MAX_ATTEMPTS", lambda: attr("core.trading_pin", "MAX_ATTEMPTS"), 5,
+             "'The PIN guards real money': the fifth wrong answer"),
+            ("context.MIND_GRACE_MINUTES", lambda: attr("brain.context", "MIND_GRACE_MINUTES"), 15,
+             "'The Mind's word': the hourly beat and a quarter hour more"),
+            ("consolidation.RELEASE_AFTER_MISSES", lambda: attr("brain.consolidation", "RELEASE_AFTER_MISSES"), 3,
+             "'The Mind's word' and 'One word per rule': three fresh nights"),
+            ("council.COUNCIL_HAND_MIN_N (the milestone)", lambda: council.COUNCIL_HAND_MIN_N, 30,
+             "the 22 October milestone: thirty of its calls there"),
+            ("position_review_agent.NOTIFY_COOLDOWN_HOURS",
+             lambda: attr("brain.position_review_agent", "NOTIFY_COOLDOWN_HOURS"), 6,
+             "'What reaches the phone': not told the same call twice within six hours"),
+            ("orcs.MAX_PAPER_ORCS", lambda: attr("bot_program.orcs.constants", "MAX_PAPER_ORCS"), 10,
+             "'The Orcs' and the 23 October milestone: by default up to ten at once in simulation and demo"),
         ]
         for what, read, expected, sentence in table:
             with self.subTest(what=what):
@@ -1927,6 +2020,274 @@ class TheBookFollowsTheCode(SimpleTestCase):
             low = title.lower()
             for claim in self.WALL_FORBIDS:
                 self.assertNotIn(claim, low, title)
+
+    # ── The third edition (2026-10-31) ──────────────────────────────────
+
+    def test_the_pin_card_is_the_one_check(self):
+        """Since 23 October every door that asks for the trading PIN counts
+        on one session counter (core/trading_pin.py, 07ae049), and turning
+        on a live-money switch is one of them (core/switch_pin.py, c962b4a)."""
+        import inspect
+        from core import switch_pin, trading_pin
+        from core.platform_control import LIVE_MONEY_SWITCHES
+        rewrite = ("rewrite 'The PIN guards real money', the lexicon's 'Trading PIN' "
+                   "and the 23 October milestones")
+        self.assertEqual((trading_pin.STOP, trading_pin.ACT), ("stop", "act"), rewrite)
+        self.assertIn("Stopping must never be harder than starting",
+                      " ".join(inspect.getsource(trading_pin).split()), rewrite)
+        self.assertIn("trading_pin.ACT", inspect.getsource(switch_pin), rewrite)
+        for key in LIVE_MONEY_SWITCHES:
+            self.assertTrue(switch_pin.needs_pin(key, was_on=False, want_on=True), key)
+            self.assertFalse(switch_pin.needs_pin(key, was_on=True, want_on=False), key)
+        # The login step keeps its own count (finding 10 of the critic):
+        # hence "once signed in" before "every door".
+        self.assertNotEqual(trading_pin.LOGIN_ATTEMPTS_KEY, trading_pin.ATTEMPTS_KEY, rewrite)
+        card = self._text("principles", "The PIN guards real money")
+        for words in ("turning on a platform switch that moves real money",
+                      "once signed in, every door that asks for it",
+                      "counts wrong answers on one counter for the session",
+                      "the fifth wrong answer", "never ends it and always obeys the right PIN",
+                      "Stopping is never harder than starting"):
+            self.assertIn(words, card, rewrite)
+        self.assertIn("Once signed in, every door that asks for it counts wrong answers on one counter",
+                      self._lexicon("Trading PIN"))
+        self.assertIn("Once signed in, every door that asks for the trading PIN", self._milestone("07ae049"))
+        self.assertIn("taken with the trading PIN", self._text("safeguards")["paragraphs"][1])
+        # Review (2026-10-31): the venue doors of the broker settings pages
+        # (Saxo SIM to LIVE, a new eToro row saved live, OANDA, Alpaca and
+        # Binance unticked) still take no PIN, so no line says every door
+        # to money asks for it; the switches and the one counter do.
+        self.assertIn("the venue doors that make an armed live config's next order real",
+                      " ".join(switch_pin.__doc__.split()), rewrite + " (the venue doors take one now)")
+        everything = json.dumps([book.CHAPTERS, book.ERAS, book.MILESTONES, book.LEXICON]).lower()
+        self.assertNotIn("every door to money", everything)
+        self.assertNotIn("asked for at the gestures", card)
+        said = "the trading PIN at every real-money switch and one counter at every door that asks for it"
+        self.assertIn(said, " ".join(self._text("origin")["paragraphs"]))
+        self.assertIn(said, " ".join(self._text("road")["paragraphs"]))
+
+    def test_the_minds_word_is_its_contract(self):
+        """The Mind's contract (brain/context.py, a0ea17b): one window for
+        what it says ABOUT A RULE (finding 4: other readers keep their own),
+        a remembered pause until a written release, the stricter word."""
+        import inspect
+        from brain import context, synthesizer
+        from brain.context import MIND_BEAT_KEY
+        from config.celery import app
+        from core.day_of_sauron import schedule_words
+        self.assertEqual(schedule_words(app.conf.beat_schedule[MIND_BEAT_KEY]["schedule"])[0], "1 h",
+                         "the Mind's beat moved: rewrite 'The Mind's word' ('the hourly beat')")
+        self.assertTrue({"pnl", "qty", "broker_order_id"} <= set(synthesizer.MIND_HIDDEN_KEYS),
+                        "rewrite 'The Mind's word' ('It reads a trade by its prices, its R ...')")
+        # The four releases, as context.py lists them (critic 8).
+        said = " ".join(inspect.getsource(context).split())
+        self.assertIn('"watch" for a paused rule, in a fresh report', said,
+                      "the releases moved: rewrite 'The Mind's word'")
+        words = self._text("safeguards", "The Mind's word")
+        for phrase in ("What the Mind says about a rule means one thing wherever it is read",
+                       "the hourly beat and a quarter hour more",
+                       "the rule active again or a paused rule only watched",
+                       "three fresh nights in a row", "a clear typed with the trading PIN",
+                       "the stricter word wins", "binds nothing"):
+            self.assertIn(phrase, words)
+        self.assertIn("What the Mind says about a rule", self._milestone("a0ea17b"))
+
+    def test_the_horde_counts_as_the_gate_counts(self):
+        """Finding 1 of the lost edition: the Horde's REAL ACCOUNT head counts
+        a broker's demo rows with the real ones, as the entry gate does."""
+        from dashboard import horde
+        rewrite = "rewrite 'The Horde' (safeguards) and the Wall's Horde card"
+        self.assertEqual(horde.DEMO_NOTE,
+                         "Demo rows are counted here, as the entry gate counts them.", rewrite)
+        self.assertEqual(horde.SIDE_LABELS["live"], "REAL ACCOUNT", rewrite)
+        self.assertIn("a broker's demo rows count there on the real side, and it says so",
+                      self._text("safeguards", "The Horde"))
+        everything = json.dumps([book.CHAPTERS, book.ERAS, book.MILESTONES,
+                                 book.IN_PROGRESS, book.LEXICON]).lower()
+        for stale in ("never added together", "never summed", "worlds are kept apart"):
+            self.assertNotIn(stale, everything, stale)
+
+    def test_the_hordes_seats_and_commands_are_its_code(self):
+        """Review (2026-10-31): a seat from the hand-kept book is marked NO
+        VENUE (dashboard/horde.py _legacy_seat), and two commands open a
+        panel with nothing to confirm (static/js/sv-horde.js: Ask Sauron,
+        and the close advice with no close of its own), as the Wall says."""
+        import inspect
+        from pathlib import Path
+        from django.conf import settings
+        from dashboard import horde
+        rewrite = "rewrite 'The Horde' (safeguards), the lexicon's 'The Horde' and the 16 October milestone"
+        self.assertEqual(horde.NO_VENUE, "NO VENUE", rewrite)
+        self.assertIn("Recorded by hand or imported", horde.NO_VENUE_TITLE, rewrite)
+        self.assertIn('"world_word": NO_VENUE', inspect.getsource(horde._legacy_seat), rewrite)
+        js = (Path(settings.BASE_DIR) / "static" / "js" / "sv-horde.js").read_text(encoding="utf-8")
+        self.assertIn("window.askSauronAbout(cmd.ask.subject", js, rewrite)
+        self.assertIn("adv.setAttribute('data-sv-advice-no-close', '1');", js, rewrite)
+        for words in (self._text("safeguards", "The Horde"), self._milestone("30149bb"),
+                      self._lexicon("The Horde")):
+            self.assertIn("or NO VENUE for a row recorded by hand", words)
+            self.assertNotIn("with its own confirmation", words)
+        for words in (self._text("safeguards", "The Horde"), self._milestone("30149bb")):
+            self.assertIn("each opens a dialog or a panel the platform already has, and one that "
+                          "acts keeps its own confirmation", words)
+        self.assertIn("opens dialogs and panels that already exist", self._lexicon("The Horde"))
+
+    def test_what_reaches_the_phone_carries_no_account_figure(self):
+        """Finding 2: "from a reviewer given no account figure" holds only
+        while the reviewer's snapshot has no such field (the source here,
+        a built snapshot in TheReviewerIsGivenNoAccountFigure); "never in
+        money" is a prompt rule and is never said. Quiet hours are not the
+        only hold (critic 1), and only a bot-book row reaches the phone."""
+        import inspect
+        from bot_program import notifications
+        from brain import position_review_agent as pra
+        rewrite = "rewrite 'What reaches the phone' and the 15 October milestone"
+        self.assertEqual(notifications.DECIDE_SENTENCE, "Nothing has been closed or moved: you decide.")
+        src = inspect.getsource(pra.build_snapshot).lower()
+        for field in ("balance", "equity", "cash", "book_value"):
+            self.assertNotIn(field, src, "the reviewer is handed an account figure: " + rewrite)
+        self.assertIn("BOOK_BOT", inspect.getsource(pra._real_row),
+                      rewrite + " ('opened by a bot or a hand-placed ticket')")
+        self.assertIn("_thesis_notice_said", inspect.getsource(pra),
+                      rewrite + " ('an exit on a trade whose thesis')")
+        for words in (self._text("safeguards", "What reaches the phone"), self._milestone("41e6fb5")):
+            self.assertIn("from a reviewer given no account figure", words)
+            self.assertIn("nothing has been closed or moved", words)
+            self.assertIn("on a real-money trade opened by a bot or a hand-placed ticket", words)
+            self.assertNotIn("never in money", words)
+        card = self._text("safeguards", "What reaches the phone")
+        self.assertIn("the phone is not told the same call twice within six hours", card)
+        self.assertNotIn("Only the quiet hours", card)
+
+    def test_an_orc_is_one_per_idea(self):
+        """Critic 3: one Orc per open IDEA (its legs share it), options and
+        working entries aside, real money uncapped, simulation and demo
+        capped together by default."""
+        from bot_program import orcs
+        from bot_program.orcs import birth
+        rewrite = "rewrite 'The Orcs', the lexicon's 'Orc' and the 23 October milestone"
+        self.assertIn("per IDEA", orcs.__doc__, rewrite)
+        self.assertTrue(birth.SKIP_OPTIONS and birth.SKIP_WORKING, rewrite + " ('options aside')")
+        for words in (self._text("safeguards", "The Orcs"), self._milestone("fd41a45")):
+            self.assertIn("each open idea the platform looks after, options aside, gets an Orc", words)
+            self.assertIn("by default up to ten at once in simulation and demo", words)
+        self.assertIn("one open idea, its legs together", self._lexicon("Orc"))
+        everything = json.dumps([book.CHAPTERS, book.ERAS, book.MILESTONES, book.LEXICON]).lower()
+        for stale in ("each open trade gets an orc", "one open trade from its birth", "journal per open trade"):
+            self.assertNotIn(stale, everything, stale)
+
+    def test_an_orcs_owner_may_write_a_thesis(self):
+        """Review (2026-10-31): every FACT of an Orc's journal is written by
+        code, but its owner may add a thesis in free text
+        (dashboard/views_orcs.py orc_thesis, fd41a45), so no line says the
+        journal is written by code alone."""
+        import inspect
+        from dashboard import views_orcs
+        rewrite = "rewrite 'The Orcs', the 23 October milestone and the Wall's Horde card"
+        src = inspect.getsource(views_orcs.orc_thesis)
+        self.assertIn('journal.append(orc, "thesis", "Your thesis: "', src, rewrite)
+        self.assertIn('author="operator"', src, rewrite)
+        self.assertIn("in their own words", self._text("safeguards", "The Orcs"))
+        self.assertIn("beside a thesis its owner may add in their own words", self._milestone("fd41a45"))
+        everything = json.dumps([book.CHAPTERS, book.ERAS, book.MILESTONES, book.LEXICON]).lower()
+        self.assertNotIn("code alone", everything)
+
+    def test_the_long_shut_is_a_us_share_markets(self):
+        """Critic 9: the long shut binds a row whose clock is a US share
+        market's (NYSE, NASDAQ), never every bot."""
+        import inspect
+        from bot_program import position_care as care
+        from core import exchange_status as es
+        rewrite = "rewrite 'The care', 'The care of an open trade' and the Wall's clock and care cards"
+        self.assertEqual(es._US_EQUITY_SESSIONS, frozenset({"NYSE", "NASDAQ"}), rewrite)
+        self.assertIn("_US_EQUITY_SESSIONS", inspect.getsource(care.long_shut_ahead), rewrite)
+        for title in ("The care", "The care of an open trade"):
+            chapter = "circuit" if title == "The care" else "safeguards"
+            self.assertIn("or on a US share market before its holiday", self._text(chapter, title), title)
+        everything = json.dumps([book.CHAPTERS, book.ERAS, book.MILESTONES, book.LEXICON]).lower()
+        self.assertNotIn("a us market holiday", everything)
+
+    def test_the_telegram_links_act_nothing(self):
+        import inspect
+        from alerts import links
+        from alerts.channels import telegram_alert
+        rewrite = "rewrite 'The messages' and the 24 October milestone 'Links that act nothing'"
+        self.assertEqual(len(links.DEEP_LINK_PATHS), 2, rewrite)
+        self.assertNotIn("callback_data", inspect.getsource(telegram_alert),
+                         "a Telegram button acts now: " + rewrite)
+        self.assertIn("nothing is bought or closed from Telegram", self._text("machine", "The messages"))
+        self.assertIn("bought or closed from Telegram", self._milestone("63ad93e"))
+
+    def test_the_bench_is_not_on_main(self):
+        """The third edition's bench (2026-10-31): the Orcs' second release,
+        which the code on main names and does not yet run. The day it
+        lands, its line moves to the road with its hash."""
+        from core.platform_control import DEFAULT_COMPONENTS
+        self.assertEqual([row["title"] for row in book.IN_PROGRESS], ["The Orcs' shadow minds"])
+        drums = [c for c in DEFAULT_COMPONENTS if c["key"] == "orcs_drums"][0]
+        self.assertIn("from O2", drums["description"],
+                      "the Orcs' second release landed: move 'The Orcs' shadow minds' to the road")
+        # Review (2026-10-31): work with no code on main to point at (the
+        # volume profile, the order-flow footprint) has no line, so the
+        # kicker counts nothing: it speaks of the work below alone.
+        kicker = self._text("in-progress")["kicker"]
+        self.assertIn("the work below, which the platform's code already names, was on the bench", kicker)
+        for count in ("one piece of work", "two pieces", "the only work", "all the work"):
+            self.assertNotIn(count, kicker, count)
+
+    def test_the_third_edition_says_what_stands(self):
+        """Finding 7: a dated line says what stands, never what an earlier
+        text carried."""
+        lines = [w for d, _e, _t, w, _c in book.MILESTONES if d >= "2026-10-14"]
+        lines += [i["text"] for c in book.CHAPTERS for i in c.get("items", [])]
+        lines += [e["summary"] for e in book.ERAS]
+        for words in lines:
+            low = words.lower()
+            for stale in ("no longer handed", "was handed", "used to carry",
+                          "no longer carr", "once carried", "percentages and r"):
+                self.assertNotIn(stale, low, words[:60])
+
+
+class TheReviewerIsGivenNoAccountFigure(TestCase):
+    """Finding 2, walked on a built snapshot: "from a reviewer given no
+    account figure" holds only while no key of what the reviewer is
+    handed names one, at any depth. The one "equity" allowed is the
+    stock-market theme of the book's concentration (orchestrator
+    current_exposures: a count or a size weight of open trades, never
+    money)."""
+
+    FIGURES = ("balance", "cash", "book_value", "equity", "account", "pnl",
+               "net_liq", "portfolio_value")
+    THEME = ("what_changed", "concentration", "themes", "equity")
+
+    def _paths(self, node, path=()):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                yield path + (str(key),)
+                yield from self._paths(value, path + (str(key),))
+        elif isinstance(node, (list, tuple)):
+            for value in node:
+                yield from self._paths(value, path)
+
+    def test_a_built_snapshot_names_no_account_figure(self):
+        from brain.position_review import bot_position, measure
+        from brain.position_review_agent import build_snapshot
+        from tests.test_position_review import _quote, _trade
+        from tests.test_positioning import _canned_map
+        trade = _trade("ZZREV", entry="100", initial_stop="99", stop="99", target="103")
+        _quote("ZZREV", 101.0)
+        with mock.patch("bot_program.positioning.positioning_map", return_value=_canned_map()), \
+                mock.patch("brain.thesis_check.structure_read",
+                           return_value={"ok": False, "why": "none"}):
+            facts = measure(bot_position(trade))
+        snap = build_snapshot({"position": bot_position(trade), "facts": facts, "triggers": []})
+        paths = set(self._paths(snap))
+        self.assertIn(self.THEME, paths, "the walk no longer reaches the book's themes")
+        for path in sorted(paths - {self.THEME}):
+            for figure in self.FIGURES:
+                self.assertNotIn(figure, path[-1].lower(),
+                                 "%s: the reviewer is handed an account figure: rewrite 'What "
+                                 "reaches the phone' and the 15 October milestone" % "/".join(path))
 
 
 class TheRoadHasAnchors(TestCase):

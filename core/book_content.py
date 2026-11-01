@@ -16,8 +16,8 @@ has something to say adds a line here, not a page there:
   * ERAS and MILESTONES: the road so far. Every milestone carries the day
     it happened and the short hash of the commit it comes from;
     tests/test_the_book.py holds each hash to the history as it stood at
-    each edition, pasted there in two blocks, the first edition's and
-    this one's (the container has no .git to ask).
+    each edition, pasted there in three blocks, one per edition (the
+    container has no .git to ask).
   * IN_PROGRESS and GO_LIVE: the work on the bench, always said as in
     progress and never as done.
   * LEXICON: the words a plain reader meets on the way.
@@ -44,8 +44,8 @@ THE RULES THIS TEXT IS WRITTEN UNDER (the test file walks them):
 #: edition's day: both are re-read, and re-dated, with every edition.
 FIRST_WRITTEN = "2026-09-27"
 FIRST_WRITTEN_WORDS = "27 September 2026"
-WRITTEN = "2026-10-08"
-WRITTEN_WORDS = "8 October 2026"
+WRITTEN = "2026-10-31"
+WRITTEN_WORDS = "31 October 2026"
 
 HERO = {
     "badge": "First written %s · revised %s" % (FIRST_WRITTEN_WORDS,
@@ -124,8 +124,11 @@ CHAPTERS = [
              "one designed, reviewed and run against the whole suite of "
              "tests before it was merged. The first week of October brought "
              "the proving ground, the care of open trades, and a clock and "
-             "a venue check in front of every entry; the road below carries "
-             "each step with its day."),
+             "a venue check in front of every entry; the weeks that followed "
+             "brought the council of ten, the Horde under the platform's "
+             "pages, the Orcs' journals in shadow, the trading PIN at every "
+             "real-money switch and one counter at every door that asks for "
+             "it; the road below carries each step with its day."),
         ],
         "kind": "facts",
         "items": [
@@ -214,14 +217,20 @@ CHAPTERS = [
             {"glyph": "pages", "title": "The pages",
              "text": ("The Operations Center, with its live, portfolio, "
                       "history and bots tabs; the Treasury, which shows "
-                      "where the money is; each trade's own page; and the "
-                      "public Wall.")},
+                      "where the money is; each trade's own page; the "
+                      "Horde, a band under the platform's pages where each "
+                      "open trade has its seat; and the public Wall.")},
             {"glyph": "messages", "title": "The messages",
              "text": ("A Telegram group where Sauron announces what it does "
                       "(every opening, every closing, every refusal and every "
-                      "problem, in English) and answers what it is asked. A "
-                      "second bot, in a second group, rings only for a "
-                      "critical problem.")},
+                      "problem, in English) and answers what it is asked. "
+                      "Under a signal the platform could take, a link opens "
+                      "its ticket already filled in, and under an alert about "
+                      "one open trade, a link opens that trade's close "
+                      "dialog: nothing is bought or closed from Telegram, and "
+                      "on real money the page still asks for the trading "
+                      "PIN. A second bot, in a second group, rings only for "
+                      "a critical problem.")},
         ],
     },
     {
@@ -256,7 +265,8 @@ CHAPTERS = [
                       "results, and opposing views subtract. By default a "
                       "single strong signal can be enough. Rules still "
                       "“in research” are watched, but do not "
-                      "vote.")},
+                      "vote, and since 24 October neither does a paused "
+                      "rule.")},
             {"title": "The stop and the target",
              "text": ("The stop is the price at which the loss is cut; the "
                       "target, the price at which the gain is taken. Both "
@@ -315,7 +325,8 @@ CHAPTERS = [
                       "on, each turn looks after it: the stop moves to "
                       "break-even at +1R and trails behind the price from "
                       "+1.5R; a trade that has done nothing for days is let "
-                      "go; before a weekend, a US market holiday or a high-impact print, "
+                      "go; before a weekend or a high-impact print, "
+                      "or on a US share market before its holiday, "
                       "a winner up half a unit of risk or more is locked at break-even, "
                       "and a real-money loser at five times leverage or more is cut. "
                       "Every tighter stop on a real-money trade is copied "
@@ -377,13 +388,14 @@ CHAPTERS = [
              "can stop it leaving, the care it gets while it is open, the "
              "guards that watch the machine, and the alarm that rings when "
              "something is wrong. Most of it arrived between 28 September "
-             "and 7 October 2026, and most of it ships switched off, "
-             "waiting for a person to turn it on."),
+             "and 7 October 2026, the rest by 24 October, and most of it "
+             "ships switched off, waiting for a person to turn it on."),
             ("The platform counts {guards} guards in its watchdog and "
              "{money_switches} switches it marks as decisions about real "
              "money. Each of those switches is off on arrival, none of them "
              "is turned on by an “all on” button, and each one is a "
-             "decision of its own."),
+             "decision of its own, taken with the trading PIN; turning one "
+             "off never asks for it."),
             ("Real money has to prove itself twice. A family of investments "
              "may trade at eToro only after one of its orders has filled "
              "and closed there, and {proof_classes} families have; a sell "
@@ -451,8 +463,9 @@ CHAPTERS = [
              "text": ("When Aragorn's switch is on, every open trade is "
                       "looked after on each turn. Its stop goes to "
                       "break-even at +1R and trails from +1.5R; a trade that "
-                      "has gone nowhere for days is let go; before a weekend, "
-                      "a US market holiday or a high-impact print, "
+                      "has gone nowhere for days is let go; before a weekend "
+                      "or a high-impact print, "
+                      "or on a US share market before its holiday, "
                       "a winner up half a unit of risk or more is locked at break-even, "
                       "and a real-money loser at five times leverage or more is cut. "
                       "A trade opened by hand keeps the profit locks and is never cut by a rule. "
@@ -487,6 +500,22 @@ CHAPTERS = [
                       "by hand in the last seven days. A breakout that wins "
                       "a third of the time with a large payoff keeps its "
                       "place.")},
+            # The third edition (2026-10-31): the Mind's contract (a0ea17b)
+            # and its one word per rule (02f8f47).
+            {"title": "The Mind's word",
+             "text": ("What the Mind says about a rule means one thing "
+                      "wherever it is read. Its newest clean report counts "
+                      "for the hourly beat and a quarter hour more. A pause "
+                      "it remembers binds until a written and announced "
+                      "release ends it: the nightly pass seeing, in a fresh "
+                      "report, the rule active again or a paused rule only "
+                      "watched; three fresh nights in a row that no longer "
+                      "name it; or a clear typed with the trading PIN. When "
+                      "the report and the memory both speak, the stricter "
+                      "word wins. A word it once wrote about a rule on one "
+                      "class only binds nothing, and the page that lists "
+                      "what it remembers says so. It reads a trade by its "
+                      "prices, its R, its outcome and its venue.")},
             {"title": "The trade debate",
              "text": ("With its switch on, two AI agents argue every "
                       "real-money bot order just before it leaves: the "
@@ -497,8 +526,10 @@ CHAPTERS = [
                       "entry, and past the day's loss limit an exceptional "
                       "entry also needs the Champion to win. They speak once "
                       "every other gate has said yes, just before the last "
-                      "look at the price, and never on a simulated or demo "
-                      "trade.")},
+                      "look at the price, and never on a trade in Sauron's "
+                      "own simulation or in eToro's demo; one sent to "
+                      "another broker's practice account is argued, but "
+                      "never graded.")},
             {"title": "The council",
              "text": ("With their own switches on, eight more AI voices sit "
                       "on a real-money bot order once it has left (up to "
@@ -513,11 +544,12 @@ CHAPTERS = [
                       "graded. In each regime and class, the voice whose "
                       "record there is the best, once thirty of its calls "
                       "in that cell are graded and its record has earned "
-                      "trust, holds the Hand of the Emperor: the chair hears "
-                      "it first and says why when he overrules it, every "
-                      "overruling is graded, and the seat is lost the day "
-                      "another voice does better. The other voices still "
-                      "argue without seeing anyone's record; only the "
+                      "trust, holds the Hand of the Emperor: it is named to "
+                      "the chair, who is asked to hear it first and to say "
+                      "why when he goes against it; code decides when he "
+                      "did, every such call is graded, and the seat is lost "
+                      "the day another voice does better. The other voices "
+                      "still argue without seeing anyone's record; only the "
                       "Skeptic is told which voice is trusted most, to test "
                       "its evidence first. The chair also reads the "
                       "people's mood, a gauge computed by code from the "
@@ -528,6 +560,36 @@ CHAPTERS = [
                       "case: none of them moves an order, a size, a stop or a "
                       "limit, and the Executioner and the Champion keep only "
                       "the debate's own powers.")},
+            # The third edition: the Horde (fd7ad74, b972803) and the Orcs
+            # (bbb503a to fd41a45), both read-only for money.
+            {"title": "The Horde",
+             "text": ("Under the platform's pages, for a signed-in reader, the "
+                      "Horde gives each open trade a seat, marked live, demo "
+                      "or paper, or NO VENUE for a row recorded by hand or "
+                      "imported that does not say which, with its mission, "
+                      "its stop, its R and the voices that read it. Its head "
+                      "reads the book's limits as the entry gate reads them, "
+                      "so a broker's demo rows count there on the real side, "
+                      "and it says so. Its commands send no order: each opens "
+                      "a dialog or a panel the platform already has, and one "
+                      "that acts keeps its own confirmation. A "
+                      "reason that something did not run is said in fixed "
+                      "plain words, and a voice's text that may name an "
+                      "amount is held back whole.")},
+            {"title": "The Orcs",
+             "text": ("With their switch on, which ships off, each open idea "
+                      "the platform looks after, options aside, gets an Orc, "
+                      "the legs of one idea sharing it: every real-money "
+                      "idea, and by default up to ten at once in simulation "
+                      "and demo together. An Orc is a journal whose every "
+                      "fact is written by code, in prices and R: its birth, "
+                      "its thesis, the care's and the venue's stop moves, its "
+                      "reviews and its close; its owner may add a thesis of "
+                      "their own, in their own words. Beside it, code replays a few other ways of "
+                      "managing the same idea and grades them against what "
+                      "the care alone would have done, and builds the Orc's "
+                      "dossier. No model is called, and nothing an Orc writes "
+                      "sends an order or moves a stop.")},
             {"title": "The market's posture",
              "text": ("With its switch on, a stress score read every quarter "
                       "hour (the fall of the index, its volatility, the VIX, "
@@ -573,6 +635,21 @@ CHAPTERS = [
                       "Once it is set up, every five-minute turn pings a "
                       "watcher outside the server, which raises the alarm "
                       "when the pings stop.")},
+            # The third edition: what a person must act on (41e6fb5).
+            {"title": "What reaches the phone",
+             "text": ("An exit, tighten or take-part call from the reviewer "
+                      "of open trades, on a real-money trade opened by a bot "
+                      "or a hand-placed ticket, reaches its owner's phone "
+                      "with the stop in force and the R now, from a reviewer "
+                      "given no account figure, and says that nothing has "
+                      "been closed or moved: the decision is a person's. "
+                      "Quiet hours, when set, hold it back, the phone is not "
+                      "told the same call twice within six hours, and an "
+                      "exit on a trade whose thesis the phone has just heard "
+                      "is dead stays on the platform's own notices. The "
+                      "ladder's moves and the brakes, with who re-armed a "
+                      "bot, are written down and told, and the weekly review "
+                      "reads live, demo and paper apart.")},
             {"title": "Real money, unmistakable",
              "text": ("Real money is the platform's only solid red: a marker "
                       "on every row and every bot, a pill on every page "
@@ -658,13 +735,20 @@ CHAPTERS = [
                       "October, while the venue refused the index sells sent "
                       "that evening.")},
             {"title": "The PIN guards real money",
-             "text": ("On the pages, the trading PIN is asked for at the "
+             "text": ("On the pages, the trading PIN is asked for at these "
                       "gestures that open the way to real money: unticking "
                       "the broker's demo box, switching on a real bot, "
                       "placing or closing a real order by hand, applying a "
                       "capital plan, and since 23 October turning on a "
-                      "platform switch that moves real money. Switching a "
-                      "bot or a switch off never asks for it.")},
+                      "platform switch that moves real money. Since that "
+                      "day, once signed in, every door that asks for it "
+                      "counts wrong answers on one counter for the session: "
+                      "the fifth wrong answer at a door that opens or moves "
+                      "money ends the session, while a door that only "
+                      "stops, a close or the emergency stop, never ends it "
+                      "and always obeys the right PIN. Stopping is never "
+                      "harder than starting: switching a bot or a switch "
+                      "off never asks for it.")},
             {"title": "The guards watch the machine",
              "text": ("Since 27 September the platform has the Morgul "
                       "guards: a watchdog outside the engine that checks "
@@ -687,7 +771,9 @@ CHAPTERS = [
                       "market's posture, the stops beyond the crowd, and the "
                       "rest) is off on arrival and never turned on by an "
                       "“all on” button: each is a decision of its own, "
-                      "made by a person.")},
+                      "made by a person, and since 23 October turning one "
+                      "on takes that person's trading PIN on the page, while "
+                      "turning one off stays free.")},
             {"title": "An error kept on the cautious side",
              "text": ("One calculation of a share of capital is wrong, but "
                       "always towards “too small”. Every fix tried "
@@ -722,7 +808,12 @@ CHAPTERS = [
             ("October was the month of the safeguards: one account with its "
              "limits, guardians behind switches that ship off, backtests "
              "that can say no, the care of open trades, and a clock and a "
-             "check of the venue in front of every entry."),
+             "check of the venue in front of every entry. Its second half "
+             "brought the council of ten beside the debate, the Horde under "
+             "the platform's pages, the Orcs' journals in shadow, the "
+             "trading PIN at every real-money switch and one counter at "
+             "every door that asks for it, and one meaning for the Mind's "
+             "word."),
         ],
         "kind": "timeline",
     },
@@ -733,8 +824,10 @@ CHAPTERS = [
         "title": "What is being built now",
         # Re-dated with every edition: the bench empties as batches land,
         # and the empty bench has its own words (the test holds both).
-        "kicker": ("On %s the bench was empty: every batch written so far "
-                   "had landed on the road." % WRITTEN_WORDS),
+        "kicker": ("On %s the work below, which the platform's code "
+                   "already names, was on the bench, not yet landed; it is "
+                   "said as in progress until it lands on the road."
+                   % WRITTEN_WORDS),
         "paragraphs": [
             ("Every batch is first designed, then attacked, then checked by "
              "thousands of automated tests before it lands. Each line here "
@@ -901,6 +994,32 @@ ERAS = [
                  "chart's levels are redrawn, each kind told apart at a "
                  "glance, and a real trade is valued at its venue's own "
                  "price from its first minute.")},
+    # ── The third edition (2026-10-31): the merges of 14 to 24 October ──
+    {"id": "honest-record", "span": "14 – 16 October",
+     "title": "An honest record, and a seat for every trade",
+     "summary": ("The public pages are read once more before they leave. The "
+                 "chart names the day's three stages, a priced real close "
+                 "always counts against the day's stop, and the Mind reads "
+                 "real money, demo and simulation apart. What a person must "
+                 "act on reaches the phone, the cockpit's portfolio line "
+                 "leads with real money alone, and the Lore and the Big "
+                 "Money board arrive, information that no order reads. Under "
+                 "the platform's pages the Horde gives each open trade a "
+                 "seat, and the council of ten sits beside the debate, in "
+                 "shadow.")},
+    {"id": "one-counter", "span": "22 – 24 October",
+     "title": "One counter, one word, and links that act nothing",
+     "summary": ("The Emperor gains a Hand and reads the people's mood, and "
+                 "the council's band shows who has been right. The Horde "
+                 "says why in plain words. Turning on a switch that moves "
+                 "real money takes the trading PIN, and once signed in, "
+                 "every door on the pages that asks for it counts on one "
+                 "counter. The Orcs keep their journals, the crowd's read is "
+                 "counted once, the chart marks the day's three sessions, "
+                 "the Mind's word has one meaning, the gates honour a hand "
+                 "demotion, a pause, a US share market's holiday and a "
+                 "plan's cut, and Telegram's links open the platform's own "
+                 "pages and act nothing.")},
 ]
 
 #: One line per milestone: (day, era id, title, one or two sentences,
@@ -1320,15 +1439,171 @@ MILESTONES = [
      "price the page says it waits, and a close is never booked at a price "
      "too old to be the venue's.",
      "0bf225d"),
+    # ── The third edition (2026-10-31): the merges of 14 to 24 October ──
+    ("2026-10-14", "honest-record", "Read once more before it leaves",
+     "The Wall and this book are read once more just before they leave, and "
+     "a page that would carry a word the platform keeps private is held "
+     "back, a plain page going out in its place.",
+     "3d5ce3f"),
+    ("2026-10-15", "honest-record", "The Power of Three, drawn",
+     "On the price chart the day's three stages are named on the marks that "
+     "prove them: the Asian range, London's run beyond its edge and New "
+     "York's move back across it. A stage that has not happened draws "
+     "nothing, and nothing that trades reads any of it.",
+     "24376b5"),
+    ("2026-10-15", "honest-record", "A priced close always counts",
+     "A real close that was priced counts against the day's stop whichever "
+     "door closed it, and over a shut market a stale print prices a close "
+     "only when it is the venue's own price at the close.",
+     "d9e335c"),
+    ("2026-10-15", "honest-record", "The Mind reads each world apart",
+     "The Mind reads real money, demo and simulation apart, and a pause it "
+     "recommends rests on real-money evidence alone. A simulated stop is "
+     "booked at the stop, or at the open of a bar that gapped through it, "
+     "and a switched-off bot's simulated trades keep their exits.",
+     "87a230e"),
+    ("2026-10-15", "honest-record", "What must be acted on reaches the phone",
+     "An exit, tighten or take-part call from the reviewer of open trades, "
+     "on a real-money trade opened by a bot or a hand-placed ticket, reaches "
+     "its owner's phone with the stop in force and the R now, from a "
+     "reviewer given no account figure, and says that nothing has been "
+     "closed or moved. The ladder's moves and the brakes, with who re-armed "
+     "a bot, are written down and told.",
+     "41e6fb5"),
+    ("2026-10-15", "honest-record", "Real money read alone",
+     "The cockpit's portfolio cell gains a line that leads with the open "
+     "result and R of the real-money trades alone, with paper and demo said "
+     "apart after it on the same line; a dash means not measured, and says "
+     "why.",
+     "5dae8af"),
+    ("2026-10-15", "honest-record", "The Lore",
+     "A library of strategies, fund playbooks, episodes and concepts that "
+     "Sauron's agents read, with its switches on, only once a person has "
+     "reviewed each entry, and only as reference: it changes no rule, gate, "
+     "size or order.",
+     "bcb0e42"),
+    ("2026-10-15", "honest-record", "The Big Money board",
+     "With its switch on, a board reads the flows the large players are "
+     "obliged to make, at the month's end, around the London fix and in the "
+     "speculators' weekly report, and grades its reads against the prices "
+     "that followed. No order, size, stop or gate reads it.",
+     "4e785a6"),
+    ("2026-10-16", "honest-record", "A stop move writes only its own notes",
+     "When Sauron moves a stop at the broker it writes only its own notes "
+     "onto the trade, read fresh under a lock, so it never overwrites what "
+     "the care or a hand edit wrote in the meantime.",
+     "8faa292"),
+    ("2026-10-16", "honest-record", "Scripts that spell their names",
+     "The scripts of the Wall and of this book spell their names out in "
+     "whole words, so anyone who opens the page's source can read them.",
+     "0fdecf2"),
+    ("2026-10-16", "honest-record", "The Horde",
+     "Under the platform's pages, each open trade has a seat marked live, "
+     "demo or paper, or NO VENUE for a row recorded by hand that does not "
+     "say which, with its mission, its stop, its R and the voices that read "
+     "it. Its commands send no order: each opens a dialog or a panel the "
+     "platform already has, and one that acts keeps its own confirmation.",
+     "30149bb"),
+    ("2026-10-16", "honest-record", "The council of ten",
+     "Eight more AI voices sit beside the Executioner and the Champion, the "
+     "Emperor in the chair, each graded on what the market did next and "
+     "weighed by its record alone. In shadow: none of them moves an order, "
+     "a size, a stop or a limit.",
+     "6881bbc"),
+    ("2026-10-22", "one-counter", "The Hand of the Emperor",
+     "In each regime and class the voice with the best measured record, once "
+     "thirty of its calls there are graded and it has earned trust, is named "
+     "to the chair, who also reads the people's mood: a gauge computed by "
+     "code from the real-money book that may only counsel caution.",
+     "19f30d4"),
+    ("2026-10-23", "one-counter", "The council's band",
+     "For the people who run the platform, a band on the right edge of its "
+     "pages says what Sauron thinks, who disagrees and who has been right, "
+     "read from the council's record; it reads and never acts.",
+     "a1ceeb8"),
+    ("2026-10-23", "one-counter", "The Horde says why in plain words",
+     "A reason that something did not run is said in fixed plain words, "
+     "never an error's own text, and a voice's words are shown as written or "
+     "held back whole when they may name an amount.",
+     "b972803"),
+    ("2026-10-23", "one-counter", "The PIN on every real-money switch",
+     "Turning on a switch that moves real money takes the trading PIN on the "
+     "page, every turn on or off is written on the audit chain with who and "
+     "when, never the PIN, and turning one off stays free.",
+     "c962b4a"),
+    ("2026-10-23", "one-counter", "One counter at every PIN door",
+     "Once signed in, every door that asks for the trading PIN counts wrong "
+     "answers on one counter for the session: the fifth wrong answer at a "
+     "door that opens or moves money ends the session, while a door that "
+     "only stops never ends it and always obeys the right PIN. Arming a live "
+     "bot takes the PIN on every page that can do it.",
+     "07ae049"),
+    ("2026-10-23", "one-counter", "The Orcs keep their journals",
+     "With their switch on, each open idea the platform looks after, options "
+     "aside, gets an Orc, a journal whose every fact, from its birth to its "
+     "close, is written by code in prices and R, beside a thesis its owner "
+     "may add in their own words; every real-money idea gets one, and by "
+     "default up to ten at once in simulation and demo. A few other ways of managing it "
+     "are replayed and graded against what the care alone would have done; "
+     "no model is called, and nothing an Orc writes sends an order or moves "
+     "a stop.",
+     "fd41a45"),
+    ("2026-10-24", "one-counter", "The crowd, counted once",
+     "Each hour, the crowd's read of every watched instrument is summed from "
+     "its feeds' raw readings alone, and a second run in the same hour "
+     "rewrites its own row.",
+     "f00dbc4"),
+    ("2026-10-24", "one-counter", "The day's three sessions",
+     "On a market that trades through all three, the hourly chart and finer "
+     "box the day's Asia, London and New York sessions over their own bars "
+     "on every day in view, and the four-hour chart lays each as a strip "
+     "along its foot. Display only: nothing that trades reads it.",
+     "9755c64"),
+    ("2026-10-24", "one-counter", "The Mind's word, one meaning",
+     "What the Mind says about a rule means one thing wherever it is read: "
+     "its newest clean report counts for the hourly beat and a quarter hour "
+     "more, a pause it remembers binds until a written and announced "
+     "release ends it, and when both speak the stricter word wins.",
+     "a0ea17b"),
+    ("2026-10-24", "one-counter", "The gates honour what was set",
+     "A rule its owner took off real money by hand stays off, a paused rule "
+     "gets no vote and opens nothing new, the hour or so before a US share "
+     "market shuts for a day or more is treated like a weekend, and the "
+     "size governor gives way only to a cut that a share plan in force "
+     "really made.",
+     "b279ac3"),
+    ("2026-10-24", "one-counter", "One word per rule",
+     "The Mind keeps one word per rule, for every class and venue; an older "
+     "word written about a rule on one class only binds nothing, is released "
+     "on its third fresh night, and the page that lists what the Mind "
+     "remembers says so.",
+     "02f8f47"),
+    ("2026-10-24", "one-counter", "Links that act nothing",
+     "Under a signal the platform could take, a Telegram link opens its "
+     "ticket already filled in, and under an alert about one open trade a "
+     "link opens that trade's close dialog. Nothing is bought or closed from "
+     "Telegram: the order or the close still waits for its confirmation on "
+     "the page, with the trading PIN on real money.",
+     "63ad93e"),
 ]
 
 
 # ── The bench ───────────────────────────────────────────────────────────────
 
-#: Work written and reviewed but not landed on WRITTEN. Said as in
+#: Work written or designed but not landed on WRITTEN. Said as in
 #: progress; a line moves to MILESTONES, with its hash, the day it lands.
-#: The three lines of the first edition landed on 2026-09-28 (45a4c93).
-IN_PROGRESS = []
+#: The three lines of the first edition landed on 2026-09-28 (45a4c93);
+#: the bench stood empty on 2026-10-08. On 2026-10-31 it holds the Orcs'
+#: second release, which the code on main already names (orcs/wake.py,
+#: the War Drums switch, the AI budget's Orc line), and nothing else: a
+#: line without a commit or code to point at waits until it has one.
+IN_PROGRESS = [
+    {"title": "The Orcs' shadow minds",
+     "text": ("Each Orc already records, in code, when it should wake, and "
+              "keeps a dossier built by code. The work in progress gives each "
+              "Orc a model that reads that dossier when it wakes, in shadow, on "
+              "an AI budget line of its own that stays at zero until then.")},
+]
 
 #: The road a class travels to real money, in order: the same for every
 #: class, save where the text says otherwise (crypto's proof was measured
@@ -1420,7 +1695,10 @@ LEXICON = [
                "R.")},
     {"term": "Trading PIN",
      "plain": ("The code that authorises real-money actions on the pages. "
-               "Switching a bot off never asks for it.")},
+               "Once signed in, every door that asks for it counts wrong "
+               "answers on one counter for the session, and a door that "
+               "only stops never locks anyone out. Switching a bot off "
+               "never asks for it.")},
     {"term": "The brake",
      "plain": ("Stopping a bot from opening anything new. Since 7 October a "
                "brake (the guards', the group's, the alarm group's or one "
@@ -1429,7 +1707,7 @@ LEXICON = [
                "off by hand, or by the emergency stop, opens nothing: its "
                "real trades keep only the stop and target resting at the "
                "broker, and its paper trades, which rest nowhere, keep "
-               "their exits run by the platform (since 8 October).")},
+               "their exits run by the platform (since 15 October).")},
     {"term": "Morgul",
      "plain": ("The guards: a watchdog outside the engine that, with its "
                "switch on, looks every five minutes for what must never "
@@ -1442,4 +1720,26 @@ LEXICON = [
     {"term": "In doubt",
      "plain": ("An order whose answer never came back. It is looked for at "
                "the venue, and never sent again blind.")},
+    # The third edition (2026-10-31).
+    {"term": "Shadow",
+     "plain": ("A part that records what it would do, and is graded on it, "
+               "while nothing that trades reads what it writes.")},
+    {"term": "The council",
+     "plain": ("Eight AI voices beside the trade debate's two, the Emperor "
+               "in the chair. With their switches on they argue a "
+               "real-money bot order once it has left, or a real-money "
+               "ticket when its owner asks; each is graded on what the "
+               "market did next, and none of them moves an order, a size, "
+               "a stop or a limit.")},
+    {"term": "The Horde",
+     "plain": ("The band under the platform's pages where each open trade "
+               "has a seat marked live, demo or paper, or NO VENUE for a row "
+               "recorded by hand that does not say which. It reads, and "
+               "opens dialogs and panels that already exist; it sends no "
+               "order.")},
+    {"term": "Orc",
+     "plain": ("With its switch on, the journal that follows one open idea, "
+               "its legs together, from its birth to its close, written by "
+               "code in prices and R. It calls no model and sends no "
+               "order.")},
 ]
