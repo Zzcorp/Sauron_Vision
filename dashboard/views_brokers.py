@@ -133,8 +133,15 @@ def etoro_probe(api_key: str, user_key: str, demo: bool = True) -> tuple:
     their keys were bad. They were not: the paths were, and the 404 was the
     adapter composing /info/real/aggregate-portfolio, which eToro does not
     publish. Measured against the same key: the corrected path answers 200.
+
+    NO REDIRECT IS FOLLOWED (2026-11-01). requests follows one by default
+    and carries both keys with it, custom headers it never strips, to
+    wherever a 3xx points: allow_redirects is off here, and a 3xx is
+    "unknown", logged and said with its status and host only.
     """
-    from bot_program.engine.etoro_client import EtoroTrader
+    from bot_program.engine.etoro_client import (EtoroTrader,
+                                                 RedirectRefused,
+                                                 redirect_host)
     url = EtoroTrader(api_key, user_key,
                       env="demo" if demo else "live")._v1_info(
         "aggregate-portfolio")
@@ -144,13 +151,22 @@ def etoro_probe(api_key: str, user_key: str, demo: bool = True) -> tuple:
             url,
             headers={"x-api-key": api_key, "x-user-key": user_key,
                      "x-request-id": EtoroTrader._rid()},
-            timeout=ETORO_PROBE_TIMEOUT_S)
+            timeout=ETORO_PROBE_TIMEOUT_S, allow_redirects=False)
     except Exception as e:  # noqa: BLE001 — a network error is "unknown"
         return "unknown", f"{type(e).__name__}: {e}"
     if r.status_code == 200:
         return "ok", "200"
     if r.status_code in (401, 403):
         return "refused", str(r.status_code)
+    if 300 <= r.status_code < 400:
+        try:
+            location = str((r.headers or {}).get("Location") or "")
+        except Exception:  # noqa: BLE001 — the refusal stands without it
+            location = ""
+        words = RedirectRefused("GET", r.status_code,
+                                redirect_host(url, location)).words
+        logger.warning("eToro probe answered %s: not followed", words)
+        return "unknown", f"{words}: not followed"
     return "unknown", str(r.status_code)
 
 

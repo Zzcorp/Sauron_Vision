@@ -805,13 +805,17 @@ def _order_failed(client, row, e, now, start) -> dict:
     the box" is read off the adapter's own words only (2026-10-31): a
     ValueError is NOT_SENT when it says "eToro NOT SENT" (raised before
     the POST); any other, like requests' JSONDecodeError after a 2xx, may
-    follow an accepted order."""
+    follow an accepted order. A redirect is in doubt whichever layer says
+    it (2026-11-01): the wire's RedirectRefused, or the adapter's
+    EtoroOrderInDoubt carrying the session's refusal (`redirect`)."""
     from bot_program.engine.etoro_client import (RealSegmentRefused,
                                                  RedirectRefused)
     text = str(e)
-    if isinstance(e, RedirectRefused):
+    redirect = (e if isinstance(e, RedirectRefused)
+                else getattr(e, "redirect", None))
+    if isinstance(redirect, RedirectRefused):
         return _in_doubt(row, f"sent a sell answered with a redirect (HTTP "
-                              f"{e.status}), which was not followed: "
+                              f"{redirect.status}), which was not followed: "
                               f"whether eToro holds a position is unknown",
                          now, client=client, start=start)
     if getattr(e, "in_doubt", False):
@@ -987,6 +991,18 @@ def _close_step(client, row, now, *, start=None) -> dict:
                 "error": f"{row.symbol}: {row.refusal}; the next pass "
                          f"closes it again", "row": row.pk,
                 "requests": _spent(client, start)}
+    if isinstance(res, dict) and res.get("inDoubt"):
+        # THE ADAPTER'S OWN IN-DOUBT CLOSE (2026-11-01): a close POST
+        # answered with a redirect is answered UNKNOWN / inDoubt, never
+        # raised, so every closer holds it — here too: nothing is sent
+        # again
+        status = (res.get("redirect") or {}).get("status")
+        return _in_doubt(row, (f"was sent a close answered with a redirect "
+                               f"(HTTP {status}), which was not followed: "
+                               f"whether it closed is unknown" if status else
+                               "was sent a close eToro could not confirm: "
+                               "whether it closed is unknown"), now,
+                         client=client, start=start, prior=prior)
     row.close_order_id = str(res.get("orderId") or "")
     record["close"] = _scrub(res.get("raw") or {})
     row.close_lookup = record

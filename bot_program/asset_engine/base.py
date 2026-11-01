@@ -3459,9 +3459,17 @@ class AssetBot(ABC):
     #: position — and every tick is noise nobody reads.
     CLOSE_DOUBT_REALERT_HOURS = 1.0
 
-    def _warn_close_in_doubt_unresolved(self, trade, doubt) -> None:
+    def _warn_close_in_doubt_unresolved(
+            self, trade, doubt,
+            why: str = "the broker's positions cannot be read") -> None:
         """Say — and keep saying — that a close may be live and cannot be
-        proved either way. The row is NOT closed and no order is sent."""
+        proved either way. The row is NOT closed and no order is sent.
+
+        `why` (2026-11-01, the S3 review's second pass) says what stands in
+        the way: the book unreadable, or a book that still lists the
+        position read inside the venue's lag. That second one is said too,
+        because no retry task comes back to an OPEN row and the CLOSE button
+        pressed there sends nothing."""
         meta = dict(trade.metadata or {})
         last = meta.get("close_doubt_alerted_at")
         if last:
@@ -3475,19 +3483,19 @@ class AssetBot(ABC):
                 pass
         ref = (doubt or {}).get("reference") or "(none)"
         logger.error("[%s_bot] %s: a close MAY be live under reference %s and "
-                     "the broker cannot be read — nothing is sent and the row "
-                     "stays OPEN", self.asset_class, trade.symbol, ref)
+                     "%s — nothing is sent and the row stays OPEN",
+                     self.asset_class, trade.symbol, ref, why)
         try:
             from bot_program.notifications import notify_staff
             notify_staff(
                 title=f"⚠ {trade.symbol}: a close may be live and cannot be "
                       f"resolved",
                 body=(f"{self.asset_class.upper()} {trade.symbol}: the close "
-                      f"under reference {ref} did not come back, and the "
-                      f"broker's positions cannot be read — so the platform "
-                      f"cannot tell whether it filled. NOTHING is being sent "
-                      f"(a second close would reverse the position) and the "
-                      f"row stays OPEN. Check the broker by hand."),
+                      f"under reference {ref} did not come back, and {why} — "
+                      f"so the platform cannot tell whether it filled. "
+                      f"NOTHING is being sent (a second close would reverse "
+                      f"the position) and the row stays OPEN. Check the "
+                      f"broker by hand."),
                 url="/positions/")
         except Exception as e:  # noqa: BLE001
             logger.warning("[%s_bot] in-doubt close alert failed: %s",
@@ -3616,6 +3624,37 @@ class AssetBot(ABC):
                              (doubt or {}).get("reference") or "(none)")
                 return False
             if held is True:
+                # A READ INSIDE THE VENUE'S LAG IS NO ANSWER (2026-11-01, the
+                # S3 review). eToro's list keeps a closed position up to
+                # PORTFOLIO_LAG_S after the close (measured 2026-09-23), and
+                # the marker's own stamp is the close that did not come back:
+                # one "still held" read seconds after it (the CLOSE button
+                # pressed right after the "a close may be live" alert)
+                # cleared the marker and sent the close again. The marker
+                # stands and nothing is sent; a read past the lag decides.
+                # The staff are told (2026-11-01, the S3 review's second
+                # pass): the row stays OPEN, and no retry task comes back to
+                # an OPEN row, so a CLOSE pressed here is retried by nobody.
+                # A venue that declares no lag (Saxo) is not held by this:
+                # every read is past it (its own task).
+                try:
+                    from bot_program.reconcile_asset import venue_lag_window
+                    lag = venue_lag_window(trade, client, doubt=True)
+                except Exception as e:  # noqa: BLE001 — unreadable: wait
+                    lag = f"the venue's lag could not be read ({e})"
+                if lag:
+                    logger.warning(
+                        "[%s_bot] %s: the broker still lists the position, "
+                        "but its list was read inside the venue's lag (%s) "
+                        "— that does not resolve the close in doubt "
+                        "(reference %s); nothing is sent",
+                        self.asset_class, trade.symbol, lag,
+                        (doubt or {}).get("reference") or "(none)")
+                    self._warn_close_in_doubt_unresolved(
+                        trade, doubt,
+                        why="the broker still lists the position, but its "
+                            "list was read inside the venue's lag")
+                    return False
                 # It did NOT land. The marker goes, and the close proceeds
                 # exactly as any other — this is the only branch that may.
                 meta = dict(trade.metadata or {})

@@ -496,12 +496,18 @@ class TheRedirectTests(_Base):
                           redirect=redirect)
 
     def _clean(self):
+        from bot_program import venue_health as vh
         from bot_program.short_models import EtoroShortObservation
         EtoroShortObservation.objects.all().delete()
         self.alarm.reset_mock()
         self.notify.reset_mock()
+        # a redirected order is a write failure on the venue's health since
+        # 2026-11-01 (the demo world sick: asserted below); each subtest
+        # starts from a healthy venue, as the first does
+        vh.reset()
 
     def test_a_redirected_order_is_not_followed_and_stops_the_runner(self):
+        from bot_program import venue_health as vh
         from bot_program.engine.etoro_client import BASE
         host = urlsplit(BASE).netloc
         for code in (307, 308):
@@ -529,6 +535,9 @@ class TheRedirectTests(_Base):
                     self.assertIn(f"redirect (HTTP {code})", row.refusal)
                     self.assertIn("not followed", row.refusal)
                     self.alarm.assert_called_once()
+                    # and the demo world is sick: one write in doubt is
+                    # enough (2026-11-01, tests/test_etoro_no_redirect.py)
+                    self.assertIsNotNone(vh.sick("etoro", "demo"))
                     # stopped: the next run sends nothing at all
                     again = self._transport({})
                     out = _run(_demo_over(again), SUNDAY + timedelta(hours=1))

@@ -1618,7 +1618,13 @@ def _api(token: str, method: str, params: dict):
     A fault is logged at WARNING once an hour (_note), its end once."""
     url = API_URL.format(token=token, method=method)
     try:
-        r = requests.get(url, params=params, timeout=HTTP_TIMEOUT_S)
+        # NO REDIRECT IS FOLLOWED (2026-11-01). This module holds the eToro
+        # client (read_live_account), and the redirect pin holds every
+        # requests.* call of such a module to allow_redirects=False
+        # (tests/test_etoro_no_redirect.py). A 3xx is then a refusal,
+        # said as any other below.
+        r = requests.get(url, params=params, timeout=HTTP_TIMEOUT_S,
+                         allow_redirects=False)
     except Exception as e:  # noqa: BLE001
         why = f"{method} unreachable ({type(e).__name__})"
         _failing(method, f"{method}:unreachable", why)

@@ -1,6 +1,5 @@
 """eToro API adapter — portfolio sync, positions, trading."""
 import os
-import requests
 import logging
 
 logger = logging.getLogger(__name__)
@@ -13,8 +12,13 @@ class EtoroClient:
     """Client for eToro Public API."""
 
     def __init__(self, api_key=None):
+        # NO REDIRECT IS FOLLOWED (2026-11-01): the eToro client's own
+        # session (bot_program/engine/etoro_client.NoRedirectSession), so a
+        # 3xx is refused, logged with its status and host and read below as
+        # a failed fetch, and this key never travels to where it points.
+        from bot_program.engine.etoro_client import NoRedirectSession
         self.api_key = api_key or API_KEY
-        self.session = requests.Session()
+        self.session = NoRedirectSession()
         if self.api_key:
             self.session.headers.update({
                 "Authorization": f"Bearer {self.api_key}",

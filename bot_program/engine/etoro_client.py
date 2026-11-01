@@ -757,14 +757,22 @@ class EtoroOrderInDoubt(RuntimeError):
     in_doubt = True
 
     def __init__(self, reference: str, symbol: str, detail: str, *,
-                 client_order_id=None, answered=None):
+                 client_order_id=None, answered=None, redirect=None):
         # THE VERDICT FIRST: skips.record keeps 200 characters and
         # why_no_trade prints 88; a timeout string alone runs past both.
         # `answered` (2026-10-31): the 2xx status of a POST that DID come
         # back, with a body nobody could read (market_order).
-        what = (f"the order was answered HTTP {answered} with a body nobody "
-                f"could read ({detail})" if answered is not None else
-                f"the order request did not come back ({detail})")
+        # `redirect` (2026-11-01): the RedirectRefused of a POST answered
+        # with a redirect that was not followed (market_order); `answered`
+        # is then its 3xx and `detail` names the host it pointed at.
+        if redirect is not None:
+            what = (f"the order was answered HTTP {answered}, a redirect "
+                    f"({detail}) that was not followed,")
+        elif answered is not None:
+            what = (f"the order was answered HTTP {answered} with a body "
+                    f"nobody could read ({detail})")
+        else:
+            what = f"the order request did not come back ({detail})"
         super().__init__(
             f"{symbol}: {what} and MAY be live at eToro. Do not resend it: "
             f"check the broker's open orders and positions for {symbol} "
@@ -773,6 +781,138 @@ class EtoroOrderInDoubt(RuntimeError):
         self.symbol = symbol
         self.client_order_id = client_order_id
         self.answered = int(answered) if answered is not None else None
+        self.redirect = redirect
+
+
+# ── NO REDIRECT IS FOLLOWED, BY ANY eToro REQUEST (2026-11-01) ───────────
+#
+# requests follows a redirect by default, from inside Session.send
+# (resolve_redirects), where no check of this client sees it: a 301, 302 or
+# 303 as a GET, a 307 or a 308 with the same method and body. On the way it
+# drops Authorization when the host changes and keeps every other header —
+# and eToro's keys ARE other headers: x-api-key and x-user-key ride the
+# session (EtoroTrader._sess), the x-request-id rides each call. So one
+# redirect to another host handed both keys to that host, and an order POST
+# answered 307 was sent again there. Only the demo proof client refused
+# redirects (2026-10-31, _DemoOnlyWire below). Now every request of every eToro
+# client goes through ONE session that follows none (NoRedirectSession),
+# on both worlds and for every method; the requests.* call that reaches
+# eToro outside this module passes allow_redirects=False itself
+# (dashboard/views_brokers.etoro_probe), and the legacy market-data adapter
+# stands on this session (market_data/adapters/etoro_adapter.EtoroClient).
+# tests/test_etoro_no_redirect.py pins every site.
+#
+# A 3xx answer is a failure, logged with its status and the host it points
+# at, nothing more (no path, no query string, never a header), and nothing
+# is sent after it. The sites read it in their own words: a READ answered so
+# is a failed read, noted on the venue's health as a 5xx is (_read,
+# _lookup_once, ping); a WRITE answered so is IN DOUBT, never "not sent" —
+# the request reached something that answered for eToro and what it did
+# there is unknown — and is classified as an acceptance nobody could read
+# is (market_order, 2026-10-31): the order raises EtoroOrderInDoubt, the
+# close answers inDoubt, the PATCH answers inDoubt, the DELETE answers None,
+# each noted on the venue's health as a write (_write_in_doubt).
+
+
+def _location(resp) -> str:
+    """The Location an answer names, or "". Never raises."""
+    try:
+        return str((getattr(resp, "headers", None) or {}).get("Location")
+                   or "")
+    except Exception:  # noqa: BLE001 — an unreadable header names nothing
+        return ""
+
+
+def redirect_host(url, location) -> str:
+    """The HOST a redirect points at, and nothing else of it (2026-11-01):
+    never its path, its query string, a port or a user. A Location relative
+    to the request stays on the request's own host; no Location is ""."""
+    from urllib.parse import urljoin, urlsplit
+    if not location:
+        return ""
+    try:
+        return urlsplit(urljoin(str(url or ""), str(location))).hostname or ""
+    except Exception:  # noqa: BLE001 — an unreadable Location names no host
+        return ""
+
+
+class RedirectRefused(RuntimeError):
+    """An eToro request answered with a redirect (a 3xx) that was NOT
+    followed: the demo proof client's wire since 2026-10-31, every eToro
+    request since 2026-11-01 (NoRedirectSession). One request left the box,
+    what it did at the other end is unknown, and nothing was sent after it.
+    Says the method, the status and the HOST the redirect points at, never
+    more of it (no path, no query string, never a header).
+
+    `in_doubt` is the engine's duck-typed marker, as on EtoroOrderInDoubt
+    (asset_engine/base.py execute_entry and _close_trade): True for a
+    WRITE, whose request may have landed, so a write site nobody classified
+    still reads as in doubt and never as "not sent"; False for a read (and
+    _read sets it False for the eligibility read, a POST that changes
+    nothing). `reference` is the x-request-id the request carried, when the
+    session saw one. The demo proof runner reads an order or a close
+    answered so as in doubt, and a read answered so as unread
+    (bot_program/short_proofs.py)."""
+
+    #: The methods that change nothing at eToro.
+    READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+    def __init__(self, method, status, host="", *, reference=""):
+        self.method = str(method or "").upper()
+        self.status = int(status or 0)
+        self.host = str(host or "")
+        self.reference = str(reference or "")
+        self.in_doubt = self.method not in self.READ_METHODS
+        super().__init__(f"eToro {self.method} answered {self.words}: not "
+                         f"followed")
+
+    @property
+    def words(self) -> str:
+        """"HTTP <status>, a redirect to <host>": all a log line says."""
+        return (f"HTTP {self.status}, a redirect to "
+                f"{self.host or 'no named host'}")
+
+
+class NoRedirectSession(requests.Session):
+    """THE SESSION EVERY eToro REQUEST GOES THROUGH (2026-11-01): it follows
+    no redirect. Three locks, one place: a redirect target is never
+    computed (get_redirect_target answers None, so resolve_redirects never
+    turns, even for a caller that passes allow_redirects=True),
+    allow_redirects is forced off on every send, and max_redirects is 0.
+    A 3xx answer is then refused here: logged with its status and the host
+    it points at, and raised as RedirectRefused, so nothing is sent after
+    it and no reader takes its body for data. Built by EtoroTrader._sess
+    (the keys on its headers) and by the legacy market-data adapter."""
+
+    def __init__(self):
+        super().__init__()
+        self.max_redirects = 0
+
+    def get_redirect_target(self, resp):
+        return None
+
+    def send(self, request, **kwargs):
+        kwargs["allow_redirects"] = False
+        resp = super().send(request, **kwargs)
+        code = int(getattr(resp, "status_code", 0) or 0)
+        if not 300 <= code < 400:
+            return resp
+        try:
+            reference = str((getattr(request, "headers", None) or {})
+                            .get("x-request-id") or "")
+        except Exception:  # noqa: BLE001 — the refusal stands without it
+            reference = ""
+        refused = RedirectRefused(
+            getattr(request, "method", ""), code,
+            redirect_host(getattr(request, "url", ""), _location(resp)),
+            reference=reference)
+        log.error("eToro %s answered %s: not followed, nothing sent after "
+                  "it", refused.method, refused.words)
+        try:
+            resp.close()
+        except Exception:  # noqa: BLE001 — the refusal stands either way
+            pass
+        raise refused
 
 
 def _iso_to_ms(ts: str) -> int:
@@ -951,8 +1091,11 @@ class EtoroTrader:
     # ── plumbing ───────────────────────────────────────────────────────────
 
     def _sess(self) -> requests.Session:
+        """The one session of this client, keys on its headers: a
+        NoRedirectSession (2026-11-01), so no request of either world, by
+        any method, follows a redirect."""
         if self._session is None:
-            s = requests.Session()
+            s = NoRedirectSession()
             s.headers.update({"x-api-key": self.api_key,
                               "x-user-key": self.user_key,
                               "Content-Type": "application/json"})
@@ -997,6 +1140,36 @@ class EtoroTrader:
             note("etoro", self._world(), where, code=code, detail=detail)
         except Exception as e:  # noqa: BLE001 — a lost note must not raise
             log.debug("eToro health note (%s) skipped: %s", where, e)
+
+    def _read_redirected(self, where: str, refused) -> None:
+        """A READ answered with a redirect (2026-11-01): a failed read,
+        noted on the venue's health at `where` with its code, as a 5xx is
+        (a background read notes nothing, as it notes no 5xx), and asked no
+        more. Never in doubt: a read changes nothing at eToro (the
+        eligibility read is a POST). The session logged the refusal."""
+        refused.in_doubt = False
+        self._note_health(where, code=refused.status,
+                          detail=f"{refused.words}, not followed")
+
+    def _write_in_doubt(self, what: str, refused, *, about: str = "",
+                        reference: str = "") -> str:
+        """A WRITE answered with a redirect (2026-11-01) is IN DOUBT, never
+        "not sent": the request reached something that answered for eToro,
+        and what it did with the order, the close, the level or the
+        withdrawal is unknown — a resend could double it. Classified as an
+        acceptance nobody could read is (market_order, 2026-10-31): noted on
+        the venue's health as an ORDER failure (one is enough to hold new
+        real entries: the next write may be a double) and logged IN DOUBT
+        with the redirect's status and host, what it was about and the
+        reference. Returns the words for the caller's answer."""
+        words = f"{refused.words} that was not followed"
+        self._note_health("order", code=refused.status,
+                          detail=f"{what} in doubt: {refused.words}, not "
+                                 f"followed")
+        log.error("eToro %s IN DOUBT%s — %s; reference %s. NOT retried.",
+                  what, f" for {about}" if about else "", words,
+                  reference or "(none)")
+        return words
 
     def _on_429(self, where: str, r) -> str:
         """A 429 at `where`: grant the pause when `where` is a pause site
@@ -1068,7 +1241,10 @@ class EtoroTrader:
         through _on_429 (the pause, the quota's headers). A BACKGROUND
         read notes nothing and grants no pause. Every attempt counts in
         wire_reads; last_read names the site, last_rate_headers keeps the
-        last answer's quota-looking headers (2026-10-07)."""
+        last answer's quota-looking headers (2026-10-07). A REDIRECT
+        (2026-11-01) is never followed (NoRedirectSession): a failed read,
+        noted on the venue's health with its code as a 5xx is, and raised
+        at once as RedirectRefused — never asked again."""
         fn = getattr(self._sess(), method.lower())
         last_exc = None
         self.last_read = where
@@ -1078,6 +1254,12 @@ class EtoroTrader:
             try:
                 r = fn(url, timeout=self.timeout, **kw)
                 last_exc = None
+            except RedirectRefused as e:
+                # A REDIRECT IS A FAILED READ, ASKED NO MORE (2026-11-01):
+                # a second ask is a second request, and it would meet the
+                # same answer
+                self._read_redirected(where, e)
+                raise
             except TRANSPORT as e:
                 last_exc = e
             if r is not None:
@@ -1445,6 +1627,10 @@ class EtoroTrader:
                                  headers=self._headers(),
                                  timeout=self.timeout)
             return r.status_code == 200
+        except RedirectRefused as e:
+            # a failed read, noted with its code (2026-11-01)
+            self._read_redirected("ping", e)
+            return False
         except Exception as e:  # noqa: BLE001
             log.warning("eToro ping failed: %s", e)
             return False
@@ -2283,7 +2469,9 @@ class EtoroTrader:
         found for referenceId ..." (eToro keeps no client reference: the v1
         order read shows referenceID all zeros); `token=` -> 400. During a
         close in flight the same lookup answered 500 three times (~6 s),
-        then 200 — a 500 is transient. Never raises.
+        then 200 — a 500 is transient, and no failure here is noted on the
+        venue's health, but a REDIRECT (2026-11-01): never followed, and
+        noted with its code, as any read's is. Never raises.
         """
         r = None
         try:
@@ -2292,6 +2480,9 @@ class EtoroTrader:
                                  timeout=self.timeout)
             r.raise_for_status()
             return (r.json() or {}), int(getattr(r, "status_code", 0) or 0)
+        except RedirectRefused as e:
+            self._read_redirected("lookup", e)
+            return None, e.status
         except Exception as e:  # noqa: BLE001
             code = getattr(r, "status_code", 0)
             log.warning("eToro orders:lookup %s failed (%s): %s",
@@ -2582,6 +2773,19 @@ class EtoroTrader:
             raise EtoroOrderInDoubt(
                 rid, symbol, f"{type(e).__name__}: {str(e)[:100]}",
                 client_order_id=kwargs.get("client_order_id")) from e
+        except RedirectRefused as e:
+            # A REDIRECT IS IN DOUBT, NEVER "NOT SENT" (2026-11-01). The
+            # POST reached something that answered for eToro with a 3xx;
+            # followed, requests sent it on, keys included (a 307 or a 308
+            # with this same body). Not followed now (NoRedirectSession), so
+            # whether eToro took the order is unknown: classified as an
+            # acceptance nobody can read is, below, and never sent again.
+            self._write_in_doubt("order", e, about=f"{symbol} {side}",
+                                 reference=rid)
+            raise EtoroOrderInDoubt(
+                rid, symbol, f"to {e.host or 'no named host'}",
+                client_order_id=kwargs.get("client_order_id"),
+                answered=e.status, redirect=e) from e
         try:
             r.raise_for_status()
         except Exception as e:  # noqa: BLE001
@@ -2745,6 +2949,10 @@ class EtoroTrader:
 
     def _patch_position(self, position_id: str, body: dict,
                         what: str) -> dict:
+        """{"ok", "reason"} of one PATCH of the position's levels. A PATCH
+        answered with a redirect (2026-11-01) is IN DOUBT, never a refusal:
+        ok False with inDoubt True, because whether eToro moved the level
+        is unknown; the row keeps the level it had."""
         try:
             r = self._sess().patch(self._v2(f"positions/{position_id}"),
                                    json=body, headers=self._headers(),
@@ -2754,6 +2962,13 @@ class EtoroTrader:
             return {"ok": False,
                     "reason": f"eToro refused ({r.status_code}): "
                               f"{r.text[:160]}"}
+        except RedirectRefused as e:
+            words = self._write_in_doubt(what, e,
+                                         about=f"position {position_id}")
+            return {"ok": False, "inDoubt": True,
+                    "reason": f"in doubt: eToro answered {what} with "
+                              f"{words}; whether eToro moved the level is "
+                              f"unknown"}
         except Exception as e:  # noqa: BLE001
             log.error("eToro %s(%s) failed: %s", what, position_id, e)
             return {"ok": False, "reason": str(e)}
@@ -2814,7 +3029,11 @@ class EtoroTrader:
         answered at all. Status 5 (PartiallyFilled) is OPEN: the DELETE is
         sent and a 9 read proves it (belief - neither has met a key). Both
         worlds withdraw through this one path since the real spelling was
-        measured (above).
+        measured (above). A DELETE answered with a redirect (2026-11-01) is
+        None too, at once: in doubt, never "nothing sent", and no lookup is
+        asked after it (nothing is sent after a redirect); every caller
+        holds None as not proven (cancel_working_entry reads the order
+        itself before it books anything).
         """
         oid = str(order_id or "")
         if not oid:
@@ -2860,6 +3079,9 @@ class EtoroTrader:
                 log.error("eToro cancel_order refused (%s): %s", code2,
                           str(getattr(r, "text", "") or "")[:160])
                 return False
+        except RedirectRefused as e:
+            self._write_in_doubt("cancel", e, about=f"order {oid}")
+            return None
         except Exception as e:  # noqa: BLE001 - the DELETE may have landed
             log.warning("eToro cancel_order: DELETE %s raised (%s) - reading "
                         "the lookup anyway", oid, e)
@@ -2923,6 +3145,26 @@ class EtoroTrader:
           no open id  (a row with no broker_order_id): status PENDING,
                       executedQty "0.0", no lookup asked; the drain proves
                       it off the book past PORTFOLIO_LAG_S.
+          in doubt    (2026-11-01) the POST answered with a redirect, which
+                      is never followed: status UNKNOWN, inDoubt True,
+                      executedQty "0.0", the x-request-id it was sent with
+                      as `reference` and the redirect's status and host.
+                      SaxoTrader's 202 shape, which every closer already
+                      reads as a close that may be live: the bot lane
+                      (_submit_close_or_raise -> close_in_doubt), the drain
+                      and the kill switch (resolve_exit_fill ->
+                      close_in_doubt) send no second close while it stands,
+                      whichever lane wrote it: the kill switch settles the
+                      bot lane's marker before it sends anything
+                      (kill_switch._settle_close_in_doubt). The venue's own
+                      order read saying closed books the row, nothing sent;
+                      a book read past PORTFOLIO_LAG_S (measured from the
+                      marker) that no longer lists the position sends
+                      nothing either, and the row is booked on the
+                      venue_exit rule (that word, or an hour of unanswered
+                      asks); one that still lists it drops the marker, and
+                      a close is sent once more. No proof is polled after
+                      it.
         MEASURED 2026-09-23 17:43-17:58 UTC: a body carrying `UnitsToDeduct`
         is accepted and NEVER executes; InstrumentID alone executes. So the
         field is never sent and a close is always the whole position.
@@ -2938,9 +3180,20 @@ class EtoroTrader:
         # row's units; on eToro a close is the whole position, so `units`
         # is accepted, reported back, and not sent.
         body = {"InstrumentID": self.instrument_id(symbol)}
-        r = self._sess().post(
-            self._v1_exec(f"market-close-orders/positions/{position_id}"),
-            json=body, headers=self._headers(), timeout=self.timeout)
+        rid = self._rid()
+        try:
+            r = self._sess().post(
+                self._v1_exec(f"market-close-orders/positions/{position_id}"),
+                json=body, headers=self._headers(rid), timeout=self.timeout)
+        except RedirectRefused as e:
+            self._write_in_doubt("close", e, about=f"{symbol} position "
+                                                   f"{position_id}",
+                                 reference=rid)
+            return {"orderId": "", "positionId": str(position_id),
+                    "status": "UNKNOWN", "executedQty": "0.0",
+                    "inDoubt": True, "reference": rid,
+                    "redirect": {"status": e.status, "host": e.host},
+                    "raw": {}}
         r.raise_for_status()
         data = r.json() or {}
         ofc = data.get("orderForClose") or {}
@@ -2989,37 +3242,20 @@ class EtoroTrader:
 # inside Session.send, where no check of ours sees it. So the wire asks
 # for none (allow_redirects False on every call, max_redirects 0 on the
 # session) and refuses any 3xx answer (RedirectRefused, review
-# 2026-10-31). Market data carries no world (fact 2) and is read as every
-# client reads it. Not in capabilities.ADAPTER_CLASS_KEYS on purpose:
-# adapter_key answers "" for it, so no lane, gate, reconcile or venue map
-# can ever take it for the trading client.
+# 2026-10-31). Since 2026-11-01 the session under the wire refuses a
+# redirect too, as every eToro client's does (NoRedirectSession, above);
+# the wire keeps its own refusal on top, whatever session it is handed.
+# Market data carries no world (fact 2) and is read as every client reads
+# it. Not in capabilities.ADAPTER_CLASS_KEYS on purpose: adapter_key
+# answers "" for it, so no lane, gate, reconcile or venue map can ever take
+# it for the trading client.
 
 
 class RealSegmentRefused(RuntimeError):
     """A demo-only client was asked for something off eToro's demo
     segment: a URL of the real account, another host, or a live world.
-    Raised before the request is sent; nothing left the box."""
-
-
-class RedirectRefused(RuntimeError):
-    """A request of a demo-only client was answered with a redirect (a
-    3xx), and the redirect was NOT followed (2026-10-31): followed, a 307
-    or a 308 would resend the same order, keys included, to whatever
-    Location says, the real segment or another host. Unlike
-    RealSegmentRefused, one request DID leave the box, to the demo
-    segment, and what it did there is unknown: the demo proof runner
-    reads an order or a close answered so as in doubt, and a read
-    answered so as unread (bot_program/short_proofs.py)."""
-
-    def __init__(self, method, url, status, location=""):
-        super().__init__(
-            f"eToro {method} {url} answered HTTP {status}, a redirect "
-            f"(to {location or 'no Location'}): a demo-only client follows "
-            f"no redirect — not followed")
-        self.method = str(method)
-        self.url = str(url)
-        self.status = int(status or 0)
-        self.location = str(location or "")
+    Raised before the request is sent; nothing left the box. Unlike
+    RedirectRefused (above), where one request DID leave the box."""
 
 
 def demo_segment_url(url) -> bool:
@@ -3047,9 +3283,11 @@ class _DemoOnlyWire:
     redirect is ever followed (2026-10-31): allow_redirects is forced
     False on every call, whatever the caller passed, the session's
     max_redirects is 0, and a 3xx answer raises RedirectRefused, so the
-    one request that left is the one checked. Counts what it lets through
-    on the client (`wire_requests`), so a caller can record what a step
-    cost."""
+    one request that left is the one checked — its own refusal, on top of
+    the session's since 2026-11-01 (NoRedirectSession), and logged as the
+    session logs it: the status and the host, no more. Counts what it lets
+    through on the client (`wire_requests`), so a caller can record what a
+    step cost."""
 
     def __init__(self, inner, owner):
         self._inner = inner
@@ -3074,16 +3312,12 @@ class _DemoOnlyWire:
 
     @staticmethod
     def _redirected(method, url, resp) -> RedirectRefused:
-        code = int(getattr(resp, "status_code", 0) or 0)
-        try:
-            location = str((getattr(resp, "headers", None) or {})
-                           .get("Location") or "")
-        except Exception:  # noqa: BLE001 — the refusal stands without it
-            location = ""
-        log.error("eToro demo-only client REFUSED the redirect of %s %s "
-                  "(HTTP %s to %s): not followed", method, url, code,
-                  location or "no Location")
-        return RedirectRefused(method, url, code, location)
+        refused = RedirectRefused(
+            method, int(getattr(resp, "status_code", 0) or 0),
+            redirect_host(url, _location(resp)))
+        log.error("eToro demo-only client REFUSED a %s answered %s: not "
+                  "followed", refused.method, refused.words)
+        return refused
 
     def _send(self, method, url, call, kw):
         self._check(method, url)
