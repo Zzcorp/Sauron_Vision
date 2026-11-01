@@ -8,8 +8,9 @@ cold id costs) in propose_entry, only to be held at execute — and each 429
 among those asks pushed the quiet further. Now, keyed on the adapter
 (venue_health), so a MagicMock, a PaperTrader and a paper config propose
 as before:
-  * propose_entry asks nothing while the venue is sick, while THIS
-    PROCESS's 429 pause for that world runs (venue_health.pause_s), or for
+  * propose_entry asks nothing while the venue is sick, while the 429
+    pause for that key and world runs (venue_health.pause_s; this
+    process's own until 2026-11-01, shared by every process since), or for
     a symbol eToro said twice it does not know (venue_health.kept_no);
   * execute_entry holds before the eligibility read inside the pause
     (NO_PRICE, "nothing sent"; the venue is not sick);
@@ -33,13 +34,14 @@ import requests
 from django.test import SimpleTestCase, TestCase
 
 from bot_program import venue_health as vh
+from bot_program.engine import etoro_budget as eb
 from bot_program.engine import etoro_client as ec
 from tests.test_entry_quote import (POSTED, ROUTER, _account, _book, _etoro,
                                     _instrument, _live_cfg, _mock_client,
                                     _order_posts, _signal, _user)
 from tests.test_etoro_client import SEARCH_AAPL, _client, _Resp
 from tests.test_etoro_rate_pause import (RATES_429, RATES_OK, _hclient,
-                                         _PauseOn)
+                                         _hold, _PauseOn, _pauses)
 
 STAFF = "bot_program.notifications.notify_staff"
 
@@ -104,14 +106,14 @@ class TheEntrySideTests(_PauseOn, TestCase):
         with mock.patch(STAFF):
             vh.note("etoro", "demo", "order", code=503)
             vh.note("etoro", "live", "order", code=503)
-        ec._RATE_PAUSE["demo"] = self.clock.t + 25
-        ec._RATE_PAUSE["live"] = self.clock.t + 25
+        _hold("demo", 25, self.clock)
+        _hold("live", 25, self.clock)
         self._cand()
 
     def test_a_paused_world_proposes_nothing_and_asks_nothing(self):
         from bot_program.asset_engine import skips
         t, fake = _client([SEARCH_AAPL, RATES_OK])
-        ec._RATE_PAUSE["demo"] = self.clock.t + 25
+        _hold("demo", 25, self.clock)
         with mock.patch(ROUTER, return_value=t):
             self.assertIsNone(self._bot().propose_entry("AAPL"))
         self.assertEqual(fake.calls, [])
@@ -120,8 +122,8 @@ class TheEntrySideTests(_PauseOn, TestCase):
         self.assertEqual(note["detail"],
                          "eToro rate pause after a 429, 25s left — not asked")
         # the other world's pause holds nothing here (worlds never share)
-        ec._RATE_PAUSE.clear()
-        ec._RATE_PAUSE["live"] = self.clock.t + 25
+        eb.forget_pauses()
+        _hold("live", 25, self.clock)
         with mock.patch(ROUTER, return_value=t):
             self.assertIsNotNone(self._bot().propose_entry("AAPL"))
         self.assertTrue([c for c in fake.calls if "/rates" in c[1]])
@@ -148,7 +150,7 @@ class TheEntrySideTests(_PauseOn, TestCase):
         from bot_program.asset_engine import skips
         cand = self._cand()
         t, fake = _etoro()
-        ec._RATE_PAUSE["demo"] = self.clock.t + 25
+        _hold("demo", 25, self.clock)
         self.assertIsNone(self._execute(cand, t))
         self.assertEqual(fake.calls, [])
         note = self._note()
@@ -163,7 +165,7 @@ class TheEntrySideTests(_PauseOn, TestCase):
         err = requests.HTTPError("500 Server Error", response=_Resp(500))
 
         def _pause_then_500(*a, **k):
-            ec._RATE_PAUSE["demo"] = self.clock.t + 20
+            _hold("demo", 20, self.clock)
             raise err
         with mock.patch.object(type(t), "ticker",
                                side_effect=_pause_then_500):
@@ -213,7 +215,7 @@ class TheEntrySideTests(_PauseOn, TestCase):
             self.assertIsNone(self._execute(self._cand(), t))
         self.assertEqual(_order_posts(fake), [])
         self.assertEqual(len([c for c in fake.calls if "/rates" in c[1]]), 1)
-        self.assertEqual(ec._RATE_PAUSE, {})
+        self.assertEqual(_pauses(), {})
         self.assertEqual(self._note()["detail"], words)
 
     def test_a_sick_venue_after_an_unreadable_last_look_sends_nothing(self):

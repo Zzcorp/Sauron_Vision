@@ -1129,12 +1129,22 @@ class TheClockTests(_Base):
         venue_health.reset()
 
     def test_a_429_pause_holds_every_step(self):
+        """The pause is the key's SHARED one (2026-11-02): it left the
+        process's memory for the cache (engine/etoro_budget), so it is
+        seeded there, for the runner's key — the live lane's — as any
+        process's _grant_rate_pause stores it."""
+        from bot_program.engine import etoro_budget as eb
         from bot_program.engine import etoro_client as ec
+        kh = eb.key_hash("user-k")
+        self.addCleanup(eb.forget_pauses)
         for world in ("live", "demo"):
             with self.subTest(world=world), \
-                    mock.patch.object(ec, "RATE_PAUSE", True), \
-                    mock.patch.dict(ec._RATE_PAUSE,
-                                    {world: ec._mono() + 60}, clear=True):
+                    mock.patch.object(ec, "RATE_PAUSE", True):
+                eb.forget_pauses()
+                now = eb._now()
+                eb.pause_write(kh, world, end=now + 60, at=now,
+                               keep_s=60 + ec.RATE_PAUSE_STREAK_S + 60,
+                               fresh=False)
                 wire = _Wire(rows=[ROW_BTC], lookups={7001: _round_trip()})
                 out = _run(_demo(wire), SUNDAY)
                 self.assertEqual(out["status"], "skipped", out)
@@ -1152,6 +1162,125 @@ class TheClockTests(_Base):
         self.assertEqual(out["status"], "skipped", out)
         self.assertIn("Monday to Thursday only", out["reason"])
         self.assertEqual(wire.calls, [])
+
+
+class TheKeysBudgetTests(_Base):
+    """THE LIVE LANE'S OWN KEY (2026-11-02, engine/etoro_budget): one key
+    pair opens both worlds, so the runner spends the request budget of the
+    very key the live lane spends. It yields BEFORE a step while any family
+    of that budget holds what its lowest priority (P5) may take, and once a
+    step has begun none of its requests is refused: they count at P1,
+    named "demo short proofs", and the close and its proofs at P0."""
+
+    def setUp(self):
+        super().setUp()
+        from bot_program.engine import etoro_budget as eb
+        from bot_program.engine import etoro_client as ec
+        self.eb = eb
+        eb.reset()
+        for target, name in ((eb, "BUDGET"), (ec, "RATE_PAUSE")):
+            p = mock.patch.object(target, name, True)
+            p.start()
+            self.addCleanup(p.stop)
+        # one budget minute for the whole test (window 10000)
+        p = mock.patch.object(eb, "_now", lambda: 600_000.0)
+        p.start()
+        self.addCleanup(p.stop)
+        self.addCleanup(eb.reset)
+        self.kh = eb.key_hash("user-k")
+
+    def _fill(self, family, n):
+        """`n` requests of the live lane already sent on the key, counted
+        in the cache when this returns."""
+        for _ in range(int(n)):
+            self.eb.spend(self.kh, family, self.eb.P1, where="fill")
+        self.eb.flush()
+
+    def _wire(self):
+        return _Wire(rows=[ROW_BTC], lookups={7001: _round_trip()})
+
+    def test_the_runner_spends_the_live_lanes_key(self):
+        from bot_program import short_proofs
+        from bot_program.engine.etoro_client import EtoroTrader
+        live = EtoroTrader("api-k", "user-k", env="live")
+        self.assertEqual(short_proofs.budget_key(_demo(self._wire())),
+                         live._bkey())
+        self.assertEqual(short_proofs.budget_key(user=self.user),
+                         live._bkey())
+        self.assertEqual(short_proofs.budget_key(), live._bkey())
+
+    def test_a_family_at_its_lowest_prioritys_share_holds_every_step(self):
+        eb = self.eb
+        for family in eb.FAMILIES:
+            with self.subTest(family=family):
+                cache.clear()
+                eb.reset()
+                cap = eb.limit(family, eb.P5)
+                self._fill(family, cap)
+                wire = self._wire()
+                out = _run(_demo(wire), SUNDAY)
+                self.assertEqual(out["status"], "skipped", out)
+                self.assertIn(f"eToro's request budget is busy: {family} "
+                              f"{cap}/{eb.rate(family)} this minute",
+                              out["reason"])
+                self.assertIn("the live lane goes first", out["reason"])
+                self.assertEqual(wire.calls, [])
+
+    def test_one_below_that_share_the_step_is_asked(self):
+        eb = self.eb
+        for family in eb.FAMILIES:
+            self._fill(family, eb.limit(family, eb.P5) - 1)
+        wire = self._wire()
+        out = _run(_demo(wire), SUNDAY)
+        self.assertEqual(out["status"], "success", out)
+        self.assertTrue(wire.calls)
+
+    def test_a_budget_it_cannot_read_holds_every_step(self):
+        class _Down:
+            def __getattr__(self, name):
+                def boom(*args, **kwargs):
+                    raise ConnectionError("the cache is down")
+                return boom
+        wire = self._wire()
+        with mock.patch.object(self.eb, "_cache", lambda: _Down()):
+            out = _run(_demo(wire), SUNDAY)
+        self.assertEqual(out["status"], "skipped", out)
+        self.assertIn("eToro's request budget is unreadable "
+                      "(ConnectionError)", out["reason"])
+        self.assertEqual(wire.calls, [])
+
+    def test_inside_a_step_nothing_is_refused_and_every_request_counts(
+            self):
+        """Once refusing() let the step begin, the budget refuses none of
+        its requests, every family spent to its rate before it: a read
+        refused between a demo order and its close would leave that
+        position half read. One sell at P1, one close at P0, the reads at
+        P1, all on the live lane's key."""
+        from bot_program import short_proofs
+        eb = self.eb
+        for family in eb.FAMILIES:
+            self._fill(family, eb.rate(family))
+        wire = self._wire()
+        with mock.patch.object(short_proofs, "refusing", return_value=""):
+            out = _run(_demo(wire), SUNDAY)
+        self.assertEqual(out["status"], "success", out)
+        [row] = list(short_proofs._rows())
+        self.assertEqual(row.proof_state, "proven")
+        report = eb.report()
+        families = report["keys"][self.kh]["families"]
+        win = eb.window()
+        for family in eb.FAMILIES:
+            self.assertEqual(families[family][win]["refused"], {}, family)
+        by = {f: families[f][win]["by"] for f in eb.FAMILIES}
+        self.assertEqual(by[eb.EXECUTION][eb.P1],
+                         eb.rate(eb.EXECUTION) + 1, "one sell, at P1")
+        self.assertEqual(by[eb.EXECUTION][eb.P0], 1, "one close, at P0")
+        self.assertGreater(by[eb.ACCOUNT][eb.P1], eb.rate(eb.ACCOUNT),
+                           "the eligibility read, at P1")
+        self.assertGreater(by[eb.MARKET][eb.P1], eb.rate(eb.MARKET),
+                           "the rate read, at P1")
+        self.assertGreaterEqual(by[eb.LOOKUPS][eb.P0], 1,
+                                "the close's proof, at P0")
 
 
 class TheNightsTests(SimpleTestCase):

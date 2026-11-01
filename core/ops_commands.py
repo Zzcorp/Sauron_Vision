@@ -379,6 +379,23 @@ COMMANDS = [
         "category": "read",
     },
     {
+        "name": "etoro_budget",
+        "title": "eToro request budget",
+        "purpose": "The eToro request budget per key hash and family, for this minute and the one before: the takes by priority (P0 closes to P5 candles), the refusals with their reasons, the overruns of P0 and P1 (never refused) and whether the shared 429 pause holds for each world and until when. Read-only, asks no broker; no key and no account figure.",
+        "usage": [
+            "python manage.py etoro_budget",
+        ],
+        "mirrors": "",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+        # Read-only and asks no broker, but the Run lane's set is pinned as
+        # a security decision (tests/test_ops_cockpit.py): a terminal
+        # command until that set is widened on purpose (2026-11-01).
+        "runnable": False,
+        "runnable_reason": "terminal only: the Run lane's set is pinned",
+    },
+    {
         "name": "legacy_positions",
         "title": "Legacy positions",
         "purpose": "Every open legacy portfolio position (the /setup/ eToro sync button, the /setup/ 'add position' form, the chat trader) by symbol, with its book, writer, age and the admin page that closes it by hand (no bot or reconcile closes one) — each one counts as a real-money holder in the duplicate rule.",

@@ -688,13 +688,20 @@ def read_live_account(api_key: str, user_key: str, *,
     alerts/digest_book.py): the margin cells as well, under "cells" —
     available cash and used margin, EtoroTrader.margin_cells, one more GET
     of aggregate-portfolio (None when that read failed). The status report
-    keeps its two reads."""
+    keeps its two reads.
+
+    P2 in the eToro request budget (2026-11-01, engine/etoro_budget): an
+    account read; one the budget does not send raises etoro_budget.Refused
+    from get_positions (the equity and the cells read None), which the
+    status report and the digest say as "not asked", never as a failure."""
+    from bot_program.engine import etoro_budget
     from bot_program.engine.etoro_client import EtoroTrader
     client = EtoroTrader(api_key, user_key, env="live", timeout=5.0)
-    out = {"equity": client.net_liquidation(),
-           "positions": len(client.get_positions())}
-    if cells:
-        out["cells"] = client.margin_cells()
+    with etoro_budget.at(etoro_budget.P2, "status read"):
+        out = {"equity": client.net_liquidation(),
+               "positions": len(client.get_positions())}
+        if cells:
+            out["cells"] = client.margin_cells()
     return out
 
 
@@ -711,6 +718,11 @@ def _live_lines(acct) -> list:
                     if acct.api_key_enc else "Live account: no keys stored"]
         reading = read_live_account(api_key, user_key)
     except Exception as e:  # noqa: BLE001 (a status report never raises)
+        if getattr(e, "budget_refused", False):
+            # not asked (2026-11-01): the stored reading above stands
+            return ["Live account: not read now (the eToro request budget "
+                    "is spent this minute; the stored reading above "
+                    "stands)"]
         return [f"Live account: unreadable ({type(e).__name__})"]
     value, code = reading.get("equity") or (None, "")
     count = reading.get("positions")
