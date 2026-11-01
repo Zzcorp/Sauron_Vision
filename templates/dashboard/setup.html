@@ -181,6 +181,16 @@
                     whole amount at 1x. An order that would pass it is refused,
                     never shrunk. Bots and hand-taken tickets alike; 10 to 100
                     (at 100 one gap can take the whole account).
+                    {# 2026-11-01, the operator's choice: at exactly 100 #}
+                    {# no ratio is judged (base.free_cash_decides_alone). #}
+                    <br>Below 100 the ratio refuses;
+                    at 100%, eToro's free cash decides alone:
+                    no ratio is judged, eToro's available cash (less what was
+                    pledged since it was read and any withdrawal hold) must
+                    cover the order's margin.
+                    The margin watchdog still raises a critical alarm
+                    once the margin used passes the equity, and stops no bot.
+                    Stale eToro readings still refuse every order.
                 </div>
             </div>
             <div style="margin-bottom: 16px;">

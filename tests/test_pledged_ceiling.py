@@ -84,7 +84,11 @@ class TheReaderTests(TestCase):
 
 class MorgulFollowsTheCeilingTests(_Case):
     """G6 brakes at the ceiling + MARGIN_SLACK. It must read the same
-    ceiling the gate does, or an order the gate allows trips the brake."""
+    ceiling the gate does, or an order the gate allows trips the brake. At
+    exactly 100% the gate judges no ratio (2026-11-01, eToro's free cash
+    decides alone), so G6 never brakes there; past the equity it still
+    sounds, critical, for the alarm chat
+    (tests/test_free_cash_decides_alone.py)."""
 
     def setUp(self):
         super().setUp()
@@ -118,17 +122,32 @@ class MorgulFollowsTheCeilingTests(_Case):
     def test_at_the_whole_account_the_alarm_sounds_past_the_equity_not_never(self):
         """A ceiling of 100 plus five points would put the alarm at 105%
         of equity, which never comes: the alarm is clamped at the whole
-        account, quiet at 99%, critical the moment the margin exceeds it."""
+        account, quiet at 99%, critical the moment the margin exceeds it.
+        Since 2026-11-01 (the operator: at 100%, eToro's free cash decides
+        alone) it is still critical, so the alarm chat, which carries
+        critical findings only, hears it, but it carries no configs and
+        never brakes: the gate judges no ratio at 100%, so a brake on it
+        would stop every live bot the moment an order the gate allowed
+        filled."""
+        from bot_program import alarm, morgul
         _set(100)
         acct = self._acct(99)
         self.assertEqual(_check("margin", self.now)[1], [])
         acct.last_used_margin = Decimal("101")
         acct.save(update_fields=["last_used_margin"])
-        f = _by_subject(_check("margin", self.now)[1])[
-            f"account:{acct.pk}:pledged"]
+        ctx, found = _check("margin", self.now)
+        f = _by_subject(found)[f"account:{acct.pk}:pledged"]
         self.assertEqual(f.severity, "critical")
-        self.assertIn("Pledged: 101.0% of equity; the limit is 100.0%, the "
-                      "alarm 100.0%", f.facts)
+        self.assertFalse(f.brakes)
+        self.assertEqual(f.configs, [])
+        self.assertIn("Pledged: 101.0% of equity, past the whole account",
+                      f.facts)
+        self.assertIn("No brake: at 100%, eToro's free cash decides alone "
+                      "(MAX ACCOUNT PLEDGED on /setup/)", f.facts)
+        report = morgul.Report(ctx, [morgul.GUARD["margin"]], found, [],
+                               {"status": "success"}, [], {})
+        self.assertEqual([a.words for a in alarm.morgul_alarms(report)],
+                         ["the margin used is past the equity"])
 
 
 class TheCardTests(TestCase):

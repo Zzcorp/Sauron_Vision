@@ -16,7 +16,8 @@ were true, and no page said what it measured:
 
 The order gate already judges every eToro order on eToro's own cells
 (AssetBot._cash_gate: the available cash less what was pledged since and
-any withdrawal hold, and the pledge ceiling over the used margin). This
+any withdrawal hold, and, below 100%, the pledge ceiling over the used
+margin; at exactly 100% the free cash decides alone, 2026-11-01). This
 module makes the pages say the same thing: eToro's figures headline, read
 from the sync's cells with their age, and the split says how much of
 eToro's used Sauron's rows account for.

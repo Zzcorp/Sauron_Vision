@@ -1057,18 +1057,23 @@ class Command(BaseCommand):
                                                    combined_capital,
                                                    followers_of,
                                                    shared_capital, share_label)
-            from bot_program.asset_engine.base import pledged_ceiling
+            from bot_program.asset_engine.base import (
+                free_cash_decides_alone, pledged_ceiling)
             followers = followers_of(user)
             shared = shared_capital()
             if followers:
                 alloc = allocate_shares(followers, shared=shared)
                 if shared:
+                    # at exactly 100% no ratio binds (2026-11-01)
+                    _ceiling = pledged_ceiling()
                     w(f"   SHARED CAPITAL (shared_capital_live ON): these "
                       f"{len(followers)} pool(s) each draw on the whole "
                       f"account, first come first served; what binds is "
                       f"the account — MAX ACCOUNT PLEDGED "
-                      f"{pledged_ceiling():.0%}, the book's daily loss, the "
-                      f"single-position cap")
+                      f"{_ceiling:.0%}"
+                      + (" (eToro's free cash decides alone)"
+                         if free_cash_decides_alone(_ceiling) else "")
+                      + ", the book's daily loss, the single-position cap")
                 for cfg in followers:
                     w(f"   [{cfg.id}] {cfg.name:<20} follows the account · "
                       f"{share_label(cfg, alloc['plan'])}")

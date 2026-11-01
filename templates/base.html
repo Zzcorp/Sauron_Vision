@@ -2174,7 +2174,8 @@
                  (kept > 0 ? ' Tick another position to close, or size down.' : '');
         }
         /* The size control stops where eToro's cash check would refuse:
-           its free cash and the pledge ceiling, at this multiplier. */
+           its free cash and, below 100%, the pledge ceiling, at this
+           multiplier (at exactly 100% the free cash alone, 2026-11-01). */
         if (cashMax !== null && q > cashMax + 1e-9) {
           return units(q) + ' units needs ' +
                  acctMoney(q * Number(cg.margin_per_unit)) + ' of eToro margin; ' +

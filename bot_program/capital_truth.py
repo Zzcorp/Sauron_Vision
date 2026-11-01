@@ -527,8 +527,9 @@ def broker_view(user):
 # slice, so shares no longer have to fit in 100%, and a follower with no
 # number sizes from the whole account. What binds then is the account
 # itself, every order: the cash and MAX ACCOUNT PLEDGED read off the
-# sync's cells plus what was pledged since (AssetBot._leverage_headroom),
-# the book's daily loss (risk_gate.preflight), the single-position cap.
+# sync's cells plus what was pledged since (AssetBot._leverage_headroom;
+# at exactly 100% the cash alone, 2026-11-01), the book's daily loss
+# (risk_gate.preflight), the single-position cap.
 # Off, the slices above, unchanged.
 SHARE_SLACK = 1e-6
 SHARED_CAPITAL_SWITCH = "shared_capital_live"

@@ -1175,10 +1175,20 @@ def _etoro_margin_fields(acct, client, margin, at) -> list:
     """Write the margin cells of `margin` on `acct`; the fields to save.
 
     THE MARGIN CELLS (2026-09-23), each on its own: a payload that carries
-    one figure and not the other writes one cell and leaves the other
-    None. In the sync, the same save and the same `at` as the equity; the
-    re-read after an order writes them alone under its own stamp, so the
-    headroom gate dates the equity by last_equity_at as well (2026-10-31)."""
+    one figure and not the other writes the one it carries. In the sync,
+    the same save and the same `at` as the equity; the re-read after an
+    order writes them alone under its own stamp, so the headroom gate
+    dates the equity by last_equity_at as well (2026-10-31).
+
+    THE CASH A READ DID NOT CARRY IS WRITTEN None (review, 2026-11-01).
+    The stamp below dates both cells, so an older cash left under it read
+    as seconds old: at 100% (base.free_cash_decides_alone) the cash is
+    the gate's only money input, and a read that carried the used margin
+    alone let through an order eToro's free cash may no longer cover. The
+    gate refuses a cash its reading did not carry (AssetBot._cash_gate),
+    at every ceiling, until a read carries one. The used margin a read
+    did not carry still keeps its last figure (the ratio below 100% and
+    Morgul's G6 read it; unchanged here)."""
     fields = []
     if margin.get("available_cash") is not None:
         acct.last_available_cash = margin["available_cash"]
@@ -1187,6 +1197,9 @@ def _etoro_margin_fields(acct, client, margin, at) -> list:
         acct.last_used_margin = margin["used_margin"]
         fields.append("last_used_margin")
     if fields:
+        if "last_available_cash" not in fields:
+            acct.last_available_cash = None
+            fields.append("last_available_cash")
         acct.last_margin_at = at
         fields.append("last_margin_at")
         # THE WORLD THE CELLS WERE READ IN (2026-09-26): the client's own

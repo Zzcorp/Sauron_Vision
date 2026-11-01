@@ -32,7 +32,11 @@ WHAT A GUARD IS
     G6  Margin                 critical, brake   pledged past the fraction + 5
                                                  points on fresh cells of the
                                                  account's own world; stale or
-                                                 other-world cells (warnings)
+                                                 other-world cells (warnings);
+                                                 at exactly 100% past the
+                                                 equity, critical and never a
+                                                 brake: eToro's free cash
+                                                 decides alone (2026-11-01)
     G7  Daily loss             critical, brake   realized LIVE P&L, 24 h, past
                                                  the configs' daily stop
     G8  Duplicates             warning           two open live rows, one
@@ -183,6 +187,14 @@ TIMEFRAME_WORDS = {"1h": "one-hour", "4h": "four-hour"}
 #: G6: the alarm sits this far above MAX_PLEDGED_FRACTION.
 MARGIN_SLACK = 0.05
 MARGIN_STALE_S = 3600
+#: G6 at exactly 100% (2026-11-01): no ratio limit applies (eToro's free
+#: cash decides alone, base.free_cash_decides_alone), so a margin past the
+#: equity is said under this title: critical, so the alarm chat (critical
+#: findings only) still hears it, and with no configs, so it never brakes.
+MARGIN_PAST_EQUITY = "Morgul — the margin used is past the equity"
+#: ... and this fact says why it stops nothing (review, 2026-11-01).
+MARGIN_NO_BRAKE = ("No brake: at 100%, eToro's free cash decides alone "
+                   "(MAX ACCOUNT PLEDGED on /setup/)")
 #: G9: a row younger than this at the snapshot may not be listed yet, and
 #: a position no row claims is said once it has stood this long.
 DRIFT_AFTER_S = 900
@@ -934,7 +946,8 @@ def margin_alarm_fraction(ceiling: float) -> float:
     """Where G6 sounds: the ceiling plus MARGIN_SLACK, never above the
     whole account (2026-10-05: the operator set the ceiling to 100%, and
     an alarm at 105% of equity would never sound — at 100% it sounds the
-    moment the margin used exceeds the equity)."""
+    moment the margin used exceeds the equity; since 2026-11-01 it is
+    still critical there and never brakes, check_margin)."""
     try:
         return min(float(ceiling) + MARGIN_SLACK, 1.0)
     except (TypeError, ValueError):
@@ -957,10 +970,24 @@ def check_margin(ctx, g) -> list:
     equity, so the ratio pairs a fresh used margin with an equity read by
     the last sync. An equity older than MARGIN_STALE_S, or with no reading
     time, is a doubt (no brake) and makes the reading stale, as the cells'
-    own age does: the gate refuses on it too (AssetBot._cash_gate)."""
+    own age does: the gate refuses on it too (AssetBot._cash_gate).
+
+    AT EXACTLY 100%, eToro's FREE CASH DECIDES ALONE (2026-11-01,
+    base.free_cash_decides_alone): the gate judges no ratio there, so a
+    brake on it would stop every live bot the moment an order the gate
+    allowed filled. A margin past the equity, on cells the gate would
+    trust, is still CRITICAL, under MARGIN_PAST_EQUITY and with no
+    configs: it never brakes (Finding.brakes needs configs; its fact
+    MARGIN_NO_BRAKE says why), and the alarm chat, which carries critical
+    findings only (bot_program.alarm), still hears it, as it did before
+    2026-11-01 (review: as a warning it went quiet there). Its doubts make
+    it a warning, as below 100%. An equity not above zero is not a ratio
+    and still brakes (the gate refuses every order on it too). The stale
+    and other-world warnings are unchanged."""
     from bot_program.asset_engine import base
     from bot_program.models import EtoroAccount
     fraction = float(base.pledged_ceiling())
+    alone = base.free_cash_decides_alone(fraction)
     alarm = margin_alarm_fraction(fraction)
     out = []
 
@@ -981,10 +1008,16 @@ def check_margin(ctx, g) -> list:
         if used is not None and equity is not None:
             ratio = used / equity if equity > 0 else None
             if ratio is None or ratio > alarm:
+                # at 100% no ratio limit applies: past the equity is still
+                # critical (the alarm chat hears it) and carries no configs,
+                # so it never brakes (an equity not above zero still does)
+                past = alone and ratio is not None
                 facts = [f"Used margin: {eye.money(used, code)}",
                          f"Equity: {eye.money(equity, code)}",
                          ("Pledged: all of it, the equity is not above zero"
                           if ratio is None else
+                          f"Pledged: {eye.percent(ratio * 100)} of equity, "
+                          f"past the whole account" if past else
                           f"Pledged: {eye.percent(ratio * 100)} of equity; "
                           f"the limit is {eye.percent(fraction * 100)}, the "
                           f"alarm {eye.percent(alarm * 100)}"),
@@ -1008,10 +1041,14 @@ def check_margin(ctx, g) -> list:
                 if doubts:
                     facts.append("A warning only, and no brake: "
                                  + "; ".join(doubts))
+                if past:
+                    facts.append(MARGIN_NO_BRAKE)
                 out.append(g.finding(
                     f"account:{acct.pk}:pledged", label=label, facts=facts,
                     severity="warning" if doubts else None, user=acct.user,
-                    configs=[] if doubts else [c.pk for c in running]))
+                    configs=([] if doubts or past
+                             else [c.pk for c in running]),
+                    **({"title": MARGIN_PAST_EQUITY} if past else {})))
         elif routed:
             ctx.note(g, f"{label}: no margin cells stored yet")
         if routed and (_stale(at) or (eq_at != at and _stale(eq_at))):
