@@ -40,6 +40,44 @@ def _age(seconds) -> str:
     return f"{seconds / 3600:.1f}h"
 
 
+def _own_figures(h) -> str:
+    """'  amount 350.00  net +12.50  position 12' for an eToro holdings row
+    that carries them (2026-10-31); '' for a row that carries none."""
+    out = ""
+    if h.get("amount") is not None:
+        out += f"  amount {float(h['amount']):,.2f}"
+    if h.get("net_profit") is not None:
+        out += f"  net {float(h['net_profit']):+,.2f}"
+    if h.get("position_id"):
+        out += f"  position {h['position_id']}"
+    return out
+
+
+def _divergence_lines(w, d) -> None:
+    """The eToro comparison's own headings (2026-10-31): a row newer than
+    the snapshot, a closing row the broker no longer lists, a close Sauron
+    stopped trying, a pair whose units differ. Never PLATFORM ONLY."""
+    for a in d.get("agree") or []:
+        if a.get("units_differ"):
+            w(f"      UNITS DIFFER   {a['symbol']:<12} the broker holds "
+              f"{float(a['broker'].get('qty') or 0):.4f}, the row "
+              f"{float(a['platform'].get('qty') or 0):.4f}")
+    for p in d.get("newer") or []:
+        w(f"      NEWER          {p['symbol']:<12} {p['side']:<5} "
+          f"{p['qty']:.4f}  ({p['config']}) — booked after the holdings "
+          f"were read; the next sync compares it")
+    for p in d.get("closing_gone") or []:
+        w(f"      CLOSING        {p['symbol']:<12} {p['side']:<5} "
+          f"{p['qty']:.4f}  ({p['config']}) — the broker no longer reports "
+          f"it: the close is being booked")
+    for s in d.get("stopped") or []:
+        p = s["platform"]
+        w(f"      STOPPED        {p['symbol']:<12} {p['side']:<5} "
+          f"{p['qty']:.4f}  (#{p['id']}) — Sauron stopped closing it; "
+          + ("still open at the broker: close it there" if s.get("held")
+             else "the broker no longer lists it"))
+
+
 def _working_lines(w, d) -> None:
     """One line per WORKING entry under its own heading: an order the tick
     is polling, not a position — never PLATFORM ONLY, never a blocker."""
@@ -101,6 +139,15 @@ class Command(BaseCommand):
             # negative — capital_truth.equity_drawdown's own contract.
             dd_text = f"{dd['drawdown_pct'] * 100:.2f}%" if dd else DASH
             w(f"   high water {hw_text:<24} drawdown from it {dd_text}")
+        # eToro's own figures and the split (2026-10-31): the page's book
+        # card says the same, from bot_program.etoro_used.
+        e = v.get("etoro")
+        if e:
+            w(f"   {e['t']}")
+            w(f"   {e['split_t']}.")
+            if e.get("read") and e.get("frozen"):
+                w(f"   eToro holds {e['frozen_t']} as frozen cash for pending "
+                  f"orders (inside its used figure).")
 
         w("\n2. EVERY BROKER")
         w(f"   {'broker':<22} {'env':<6} {'capital':>18}  {'age':>6} "
@@ -131,12 +178,15 @@ class Command(BaseCommand):
             w(f"   {'symbol':<12} {'side':<5} {'qty':>14} {'entry':>14} "
               f"{'broker':<8} {'how':<9} {'lev':>4} state")
             for p in plat["live"]:
-                state = ("working" if p["working"] else
+                state = ("closing" if p.get("closing") else
+                         "working" if p["working"] else
                          "protected" if p["protected"] else "unprotected")
                 w(f"   {p['symbol']:<12} {p['side']:<5} {p['qty']:>14.4f} "
                   f"{p['entry']:>14.4f} {p['broker']:<8} "
                   f"{p['attribution']:<9} {_lev(p.get('leverage')):>4} "
-                  f"{state}")
+                  f"{state}"
+                  + (f"  unconverted {p['unconverted']}"
+                     if p.get("unconverted") else ""))
             w(f"   and {plat['paper_n']} paper row(s), counted apart")
 
         w("\n5. WHAT EACH BROKER SAYS IT HOLDS")
@@ -154,7 +204,37 @@ class Command(BaseCommand):
                   f"{float(h.get('qty') or 0):>14.4f} @ "
                   f"{float(h.get('avg_cost') or 0):>12.4f}  "
                   f"mark {float(mark):>12.4f}  "
-                  f"{h.get('currency') or ''}  lev {_lev(h.get('leverage'))}")
+                  f"{h.get('currency') or ''}  lev {_lev(h.get('leverage'))}"
+                  + _own_figures(h))
+
+        # What eToro holds outside Sauron's rows, position by position
+        # (2026-10-31): the page's "Outside Sauron at eToro" card.
+        out = (v.get("etoro") or {}).get("positions")
+        if out is not None:
+            w("\n5b. OUTSIDE SAURON AT eTORO, POSITION BY POSITION")
+            if not out["known"]:
+                w(f"   {DASH} eToro's holdings have never been read")
+            elif not out["rows"]:
+                w(f"   every position eToro lists is one of Sauron's rows "
+                  f"(holdings read {out['age_t']} ago)")
+            else:
+                for r in out["rows"]:
+                    est = " (estimated)" if r["estimated"] else ""
+                    pid = (f"position {r['position_id']}" if r["position_id"]
+                           else DASH)
+                    w(f"   {r['symbol']:<12} {r['side'] or DASH:<5} "
+                      f"{(r['qty'] or 0):>14.4f} @ {(r['avg_cost'] or 0):>12.4f}"
+                      f"  lev {_lev(r['leverage'])}  margin "
+                      f"{r['margin_t']}{est}  net {r['net_profit_t']}  {pid}")
+                w(f"   {out['n']} position(s), {out['margin_t']} of margin, "
+                  f"holdings read {out['age_t']} ago; matched by eToro's "
+                  f"position id, else by symbol, side and units")
+                # The page's footer, said here too (2026-10-31).
+                w("   section 1's outside figure is eToro's used minus "
+                  "Sauron's rows and the closes Sauron stopped trying that "
+                  "eToro still lists: pending orders, a row eToro no longer "
+                  "holds and the time between the two reads set the two "
+                  "apart")
 
         w("\n6. DIVERGENCE — THE BROKER AGAINST THE PLATFORM")
         for d in v["divergence"]:
@@ -179,7 +259,10 @@ class Command(BaseCommand):
             for h in d["only_broker"]:
                 w(f"      BROKER ONLY    {str(h.get('symbol')):<12} "
                   f"{str(h.get('side', '')):<5} "
-                  f"{float(h.get('qty') or 0):.4f}")
+                  f"{float(h.get('qty') or 0):.4f}"
+                  + (f"  position {h['position_id']}"
+                     if h.get("position_id") else ""))
+            _divergence_lines(w, d)
             _working_lines(w, d)
 
         w("\n" + "=" * 78)

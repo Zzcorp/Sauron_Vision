@@ -52,8 +52,64 @@ this render path. An em dash means NEVER MEASURED and is never a zero —
             </div>
         </div>
     {% endif %}
+    {% comment %}
+    eToro's OWN FIGURES AND THE SPLIT (2026-10-31, bot_program.etoro_used):
+    used, available, P&L and total as the sync's cells hold them, with
+    their age; then how much of eToro's used Sauron's own eToro rows of
+    this world account for at that read, a close Sauron stopped trying
+    that eToro still lists, and what is outside Sauron (eToro's used minus
+    both; said the other way round below zero), listed position by
+    position in the card below. The order gate judges every eToro order on
+    these cells.
+    {% endcomment %}
+    {% if v.etoro %}{% with e=v.etoro %}
+        <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);line-height:1.7;" title="{{ e.title }}">
+            <div><strong>{{ e.t }}</strong></div>
+            <div>{{ e.split_t }}.</div>
+            {% if e.read and e.frozen %}<div style="color:var(--text-muted);">eToro holds {{ e.frozen_t }} as frozen cash for pending orders (inside its used figure).</div>{% endif %}
+            <div style="color:var(--text-muted);">Outside Sauron is eToro's used minus what Sauron's own eToro rows tie up (entry value over their leverage) and minus the closes Sauron stopped trying that eToro still lists.</div>
+        </div>
+    {% endwith %}{% endif %}
     </div>
 </div>
+
+{% if v.etoro and v.etoro.positions %}{% with o=v.etoro.positions e=v.etoro %}
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">Outside Sauron at eToro — position by position</span></div>
+    {% if not o.known %}
+    <div style="padding:12px 16px;font-family:var(--font-mono);font-size:12px;color:var(--text-muted);">— eToro's holdings have never been read: the sync stores them on its next pass. Unread is not empty.</div>
+    {% elif not o.rows %}
+    <div style="padding:12px 16px;font-family:var(--font-mono);font-size:12px;color:var(--text-muted);">Every position eToro lists is one of Sauron's rows (holdings read {{ o.age_t }} ago).</div>
+    {% else %}
+    <div class="table-wrapper">
+    <table class="sv-stack" style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:12px;">
+        <thead><tr style="text-align:left;color:var(--text-muted);font-size:11px;">
+            <th style="padding:8px 10px;">Symbol</th><th>Side</th><th style="text-align:right;">Units</th>
+            <th style="text-align:right;">Open rate</th><th style="text-align:right;">Lev</th>
+            <th style="text-align:right;">Margin</th><th style="text-align:right;">Net profit</th><th>eToro id</th>
+        </tr></thead>
+        <tbody>
+        {% for r in o.rows %}
+            <tr style="border-top:1px solid var(--border);">
+                <td data-label="Symbol" style="padding:8px 10px;">{{ r.symbol }}</td>
+                <td data-label="Side">{{ r.side|default:"—" }}</td>
+                <td data-label="Units" style="text-align:right;">{% if r.qty is not None %}{{ r.qty|floatformat:4 }}{% else %}—{% endif %}</td>
+                <td data-label="Open rate" style="text-align:right;">{% if r.avg_cost is not None %}{{ r.avg_cost|floatformat:4 }}{% else %}—{% endif %}</td>
+                <td data-label="Lev" style="text-align:right;">{% if r.leverage %}{{ r.leverage }}x{% else %}—{% endif %}</td>
+                <td data-label="Margin" style="text-align:right;">{{ r.margin_t }}{% if r.estimated %} <span style="color:var(--accent-gold);" title="The row carries no amount: units × open rate over its leverage, the full notional when it states none (eToro's margin at 1x is the notional, measured).">estimated</span>{% endif %}</td>
+                <td data-label="Net profit" style="text-align:right;">{{ r.net_profit_t }}</td>
+                <td data-label="eToro id">{% if r.position_id %}position {{ r.position_id }}{% else %}—{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div style="padding:8px 16px 12px;font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
+        {{ o.n }} position(s), {{ o.margin_t }} of margin, holdings read {{ o.age_t }} ago{% if o.estimated_n %} ({{ o.estimated_n }} estimated){% endif %}. The outside figure above is eToro's used minus Sauron's rows and the closes Sauron stopped trying that eToro still lists: the two can differ by pending orders, which this list does not carry, by a row Sauron counts that eToro no longer holds (a stop or a close eToro filled before Sauron booked it), and by the time between the two reads. Each position was matched to Sauron's rows by eToro's position id, else by symbol, side and units.
+    </div>
+    {% endif %}
+</div>
+{% endwith %}{% endif %}
 
 <div class="card fade-in-up" style="margin-bottom:18px;">
     <div class="card-header"><span class="card-title">Every broker</span></div>
@@ -113,10 +169,10 @@ this render path. An em dash means NEVER MEASURED and is never a zero —
             <tr style="border-top:1px solid var(--border);">
                 <td style="padding:8px 10px;">{{ p.symbol }}</td><td>{{ p.side }}</td>
                 <td style="text-align:right;">{{ p.qty|floatformat:4 }}</td>
-                <td style="text-align:right;">{{ p.entry|floatformat:4 }}</td>
+                <td style="text-align:right;">{{ p.entry|floatformat:4 }}{% if p.unconverted %} <span style="color:var(--accent-gold);" title="Quoted in {{ p.unconverted }}: nothing here converts it, so its money is counted in {{ p.unconverted }} as if it were the account's currency.">unconverted {{ p.unconverted }}</span>{% endif %}</td>
                 <td>{{ p.broker }}</td>
                 <td style="color:{% if p.attribution == 'routing' %}var(--accent-gold){% else %}var(--text-muted){% endif %};">{{ p.attribution }}</td>
-                <td>{% if p.working %}working{% elif p.protected %}at the broker{% else %}<span style="color:var(--accent-gold);">bot-side</span>{% endif %}</td>
+                <td>{% if p.closing %}<span style="color:var(--accent-gold);">closing</span>{% elif p.working %}working{% elif p.protected %}at the broker{% else %}<span style="color:var(--accent-gold);">bot-side</span>{% endif %}</td>
                 <td style="color:var(--text-muted);">{{ p.config }}</td>
             </tr>
         {% endfor %}
@@ -139,12 +195,24 @@ this render path. An em dash means NEVER MEASURED and is never a zero —
                 {% if d.platform_n %}<span style="color:var(--accent-gold);"> · {{ d.platform_n }} live row(s) attributed to it</span>{% endif %}
             {% else %}
                 {{ d.agree|length }} agree · {{ d.only_broker|length }} only at the broker · {{ d.only_platform|length }} only in the platform{% if d.working %} · {{ d.working|length }} working (orders, not compared){% endif %}
-                <span style="color:var(--text-muted);">(snapshot {{ d.age_text }} old)</span>
+                <span style="color:var(--text-muted);">(snapshot {{ d.age_text }} old{% if d.by == "position" %}; compared position by position{% endif %})</span>
                 {% for p in d.only_platform %}
                 <div style="color:var(--danger,#c0392b);margin-left:14px;">PLATFORM ONLY · {{ p.symbol }} {{ p.side }} {{ p.qty|floatformat:4 }} ({{ p.config }}) — closed at the broker without the row being finalised, or never opened</div>
                 {% endfor %}
                 {% for h in d.only_broker %}
-                <div style="color:var(--accent-gold);margin-left:14px;">BROKER ONLY · {{ h.symbol }} {{ h.side }} {{ h.qty|floatformat:4 }} — hand-placed, or a leg left resting after a row closed</div>
+                <div style="color:var(--accent-gold);margin-left:14px;">BROKER ONLY · {{ h.symbol }} {{ h.side }} {{ h.qty|floatformat:4 }}{% if h.position_id %} · position {{ h.position_id }}{% endif %} — hand-placed, or a leg left resting after a row closed</div>
+                {% endfor %}
+                {% for a in d.agree %}{% if a.units_differ %}
+                <div style="color:var(--accent-gold);margin-left:14px;">UNITS DIFFER · {{ a.symbol }} — the broker holds {{ a.broker.qty|floatformat:4 }}, the row {{ a.platform.qty|floatformat:4 }}</div>
+                {% endif %}{% endfor %}
+                {% for p in d.newer %}
+                <div style="color:var(--text-muted);margin-left:14px;">NEWER THAN THE SNAPSHOT · {{ p.symbol }} {{ p.side }} {{ p.qty|floatformat:4 }} ({{ p.config }}) — booked after these holdings were read; the next sync compares it</div>
+                {% endfor %}
+                {% for p in d.closing_gone %}
+                <div style="color:var(--text-muted);margin-left:14px;">CLOSING · {{ p.symbol }} {{ p.side }} {{ p.qty|floatformat:4 }} ({{ p.config }}) — the broker no longer reports it: the close is being booked</div>
+                {% endfor %}
+                {% for s in d.stopped %}
+                <div style="color:{% if s.held %}var(--danger,#c0392b){% else %}var(--text-muted){% endif %};margin-left:14px;">SAURON STOPPED CLOSING · {{ s.platform.symbol }} {{ s.platform.side }} {{ s.platform.qty|floatformat:4 }} (#{{ s.platform.id }}) — {% if s.held %}still open at the broker: close it there{% else %}the broker no longer lists it{% endif %}</div>
                 {% endfor %}
             {% endif %}
             {% for p in d.working %}

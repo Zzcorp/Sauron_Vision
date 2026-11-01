@@ -435,6 +435,20 @@ class EtoroAccount(models.Model):
                                            null=True, blank=True)
     last_margin_at = models.DateTimeField(null=True, blank=True)
     last_margin_world = models.CharField(max_length=8, default="", blank=True)
+    # THE REST OF THE SAME READ (2026-10-31): accountCurrentPnl (the open
+    # P&L), accountFrozenCash (cash held for pending orders) and
+    # accountBalance, from the aggregate payload the cells above come
+    # from, written with them under last_margin_at and its world by the
+    # sync and the re-read. DISPLAY ONLY: eToro's own figures headline
+    # wherever a page says used or free (bot_program.etoro_used); no gate,
+    # limit or size reads them. None = this read did not carry it (three
+    # states; 0 is a measurement).
+    last_pnl = models.DecimalField(max_digits=18, decimal_places=2,
+                                   null=True, blank=True)
+    last_frozen_cash = models.DecimalField(max_digits=18, decimal_places=2,
+                                           null=True, blank=True)
+    last_balance = models.DecimalField(max_digits=18, decimal_places=2,
+                                       null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     @property

@@ -261,39 +261,168 @@ def _broker_for_row(user, trade, routes: dict) -> tuple:
     return routes.get(trade.asset_class, "paper"), "routing"
 
 
+def _platform_row(user, t, routes) -> dict:
+    """One platform row as the Treasury lists and compares it."""
+    from bot_program.etoro_used import row_handle
+    kind, how = _broker_for_row(user, t, routes)
+    meta = t.metadata or {}
+    return {
+        "id": t.id,
+        "symbol": (t.symbol or "").upper(), "side": t.side,
+        "qty": float(t.qty or 0), "entry": float(t.entry_price or 0),
+        "asset_class": t.asset_class, "config": t.config.name,
+        "broker": kind, "attribution": how,
+        "opened_at": t.opened_at, "closed_at": t.closed_at,
+        "status": t.status,
+        "closing": t.status == "CLOSE_PENDING",
+        "protected": bool(meta.get("protected")),
+        "working": bool(meta.get("entry_working")),
+        # The multiplier the ENTRY asked eToro for, off the row's own
+        # metadata; None when the row did not say — the renderers print
+        # the em dash, never 1, which would be a claim about margin.
+        "leverage": meta.get("leverage"),
+        # The venue's position id the row records (broker_position_id /
+        # protective_trade_id), "" when none: the eToro comparison pairs
+        # rows by it (2026-10-31).
+        "position_id": row_handle(t),
+    }
+
+
 def platform_positions(user) -> dict:
     """What the PLATFORM believes is open, live and paper counted apart.
 
     {"live": [...], "paper_n": int} — paper rows are counted, not listed:
     they are the campaign's business and they have no broker to disagree
     with.
+
+    OPEN AND CLOSING (2026-10-31). A CLOSE_PENDING row is still open at
+    its broker — every exposure reader and the capital summary count it —
+    and it was missing here, so its broker leg read "BROKER ONLY" beside a
+    platform list that had dropped it. Listed, with its status.
     """
     from bot_program.asset_models import AssetBotTrade
 
     routes = {r["asset_class"]: r["winner"] for r in routing(user)}
     qs = (AssetBotTrade.objects
-          .filter(config__user=user, status="OPEN")
+          .filter(config__user=user, status__in=("OPEN", "CLOSE_PENDING"))
           .select_related("config").order_by("symbol"))
     live, paper_n = [], 0
     for t in qs:
         if t.paper:
             paper_n += 1
             continue
-        kind, how = _broker_for_row(user, t, routes)
-        live.append({
-            "symbol": (t.symbol or "").upper(), "side": t.side,
-            "qty": float(t.qty or 0), "entry": float(t.entry_price or 0),
-            "asset_class": t.asset_class, "config": t.config.name,
-            "broker": kind, "attribution": how,
-            "opened_at": t.opened_at,
-            "protected": bool((t.metadata or {}).get("protected")),
-            "working": bool((t.metadata or {}).get("entry_working")),
-            # The multiplier the ENTRY asked eToro for, off the row's own
-            # metadata; None when the row did not say — the renderers print
-            # the em dash, never 1, which would be a claim about margin.
-            "leverage": (t.metadata or {}).get("leverage"),
-        })
+        live.append(_platform_row(user, t, routes))
+    _mark_unconverted(user, live)
     return {"live": live, "paper_n": paper_n}
+
+
+def _mark_unconverted(user, rows) -> None:
+    """`unconverted`: the quote currency of a row whose notional nothing
+    here converts, else "" (2026-10-31). services.value_per_unit is 1 for
+    every class but forex, so a stock quoted in EUR is counted in EUR as
+    if it were its broker's account currency (USD when the account has
+    not said). Said on the row; the arithmetic, which the gates share,
+    is left alone."""
+    from bot_program.etoro_used import _currencies
+    cands = [r for r in rows if r["asset_class"] != "forex"]
+    quotes = _currencies(sorted({r["symbol"] for r in cands}))
+    account = {}
+    for kind, attr, _name in BROKER_ROWS:
+        acct = getattr(user, attr, None)
+        account[kind] = str(getattr(acct, "last_equity_currency", "")
+                            or "").upper() or "USD"
+    for r in rows:
+        quote = quotes.get(r["symbol"], "") if r in cands else ""
+        r["unconverted"] = (quote if quote and quote
+                            != account.get(r["broker"], "USD") else "")
+
+
+def _etoro_claims(user, held_at) -> dict:
+    """The rows besides the open ones that can account for an eToro
+    holding (2026-10-31): a close Sauron gave up on (status ERROR, no
+    close time: pending_closes._give_up — it may still be open there),
+    and a row closed less than etoro_used.LIST_LAG_S before the snapshot
+    was read (eToro lists a closed position for up to a minute). Rows
+    stamped for another broker are not eToro's."""
+    from datetime import timedelta
+
+    from bot_program.asset_models import AssetBotTrade
+    from bot_program.etoro_used import LIST_LAG_S
+
+    out = {"stopped": [], "closed": []}
+    routes = None
+    qs = (AssetBotTrade.objects.filter(config__user=user, paper=False,
+                                       status="ERROR", closed_at__isnull=True)
+          .select_related("config"))
+    rows = list(qs)
+    if held_at is not None:
+        rows += list(AssetBotTrade.objects.filter(
+            config__user=user, paper=False, status="CLOSED",
+            closed_at__gte=held_at - timedelta(seconds=LIST_LAG_S))
+            .select_related("config"))
+    for t in rows:
+        if str((t.metadata or {}).get("broker") or "") not in ("etoro", ""):
+            continue
+        if routes is None:
+            routes = {r["asset_class"]: r["winner"] for r in routing(user)}
+        row = _platform_row(user, t, routes)
+        if row["broker"] != "etoro":
+            continue
+        out["stopped" if t.status == "ERROR" else "closed"].append(row)
+    return out
+
+
+def _etoro_by_position(user, row, mine, working) -> dict:
+    """The eToro divergence, position by position (2026-10-31).
+
+    eToro holds every position apart (an opposite order opens a second
+    one), so symbols compared as a set read a second position on a held
+    symbol as agreement: a second NVDA opened in the eToro app beside
+    Sauron's read "2 agree, 0 only at the broker". Here every holding is
+    paired with one row (etoro_used.match_positions: eToro's position id
+    first, then symbol, side and the closest units), with the list's lag
+    respected both ways: a row booked after the snapshot (less
+    LIST_LAG_S) cannot be in it and is NEWER, never a blocker; a row
+    closed inside the lag still accounts for the leg the list shows. A
+    close Sauron stopped trying accounts for its leg too, and is said
+    apart: STOPPED, still open at eToro or no longer listed."""
+    from datetime import timedelta
+
+    from bot_program.etoro_used import LIST_LAG_S, match_positions
+
+    held = [h for h in row["held"]["rows"] if isinstance(h, dict)]
+    at = row["held"]["at"]
+    cut = at - timedelta(seconds=LIST_LAG_S) if at is not None else None
+    extra = _etoro_claims(user, at)
+    ours = [p for p in mine if not p["working"]]
+    claim = ours + extra["stopped"] + extra["closed"]
+    # A working entry's fill may be listed before the poll books it: it
+    # takes a leg too, after every position row (never one of theirs).
+    pairs, only_held, left = match_positions(held, claim)
+    w_pairs, only_held, _ = match_positions(only_held, working)
+    reported = {id(p) for _h, p in w_pairs}
+    for p in working:
+        p["reported"] = id(p) in reported
+    paired = {id(p): h for h, p in pairs}
+    agree, stopped = [], []
+    for h, p in pairs:
+        if p in ours:
+            q_h, q_p = h.get("qty"), p.get("qty")
+            try:
+                differ = abs(float(q_h) - float(q_p)) > 1e-9
+            except (TypeError, ValueError):
+                differ = False
+            agree.append({"symbol": p["symbol"], "broker": h, "platform": p,
+                          "units_differ": differ})
+    for p in extra["stopped"]:
+        stopped.append({"platform": p, "held": paired.get(id(p))})
+    newer = [p for p in left if p in ours and cut is not None
+             and p["opened_at"] is not None and p["opened_at"] > cut]
+    gone = [p for p in left if p in ours and p not in newer]
+    return {"agree": agree, "only_broker": only_held,
+            "only_platform": [p for p in gone if not p["closing"]],
+            "closing_gone": [p for p in gone if p["closing"]],
+            "newer": newer, "stopped": stopped, "by": "position"}
 
 
 def divergence(user, rows=None, platform=None) -> list:
@@ -334,7 +463,18 @@ def divergence(user, rows=None, platform=None) -> list:
                                    "holdings snapshot for this broker"),
                         "only_broker": [], "only_platform": [],
                         "agree": [], "working": working,
+                        "newer": [], "stopped": [], "closing_gone": [],
                         "platform_n": len(mine)})
+            continue
+        _age = row["held"]["age_seconds"]
+        if row["kind"] == "etoro":
+            # By position, not by symbol (2026-10-31): see _etoro_by_position.
+            out.append(dict(
+                _etoro_by_position(user, row, mine, working),
+                kind=row["kind"], name=row["name"], known=True, reason="",
+                age_seconds=_age, age_text=row["held"]["age_text"],
+                stale=_age is not None and _age > STALE_AFTER_S,
+                working=working, platform_n=len(mine)))
             continue
         held = {}
         for h in row["held"]["rows"]:
@@ -344,9 +484,21 @@ def divergence(user, rows=None, platform=None) -> list:
         for p in working:
             p["reported"] = p["symbol"] in held
         queued = {p["symbol"] for p in working}
-        ours = {p["symbol"]: p for p in mine if not p["working"]}
+        # ONE ROW PER SYMBOL, AND A CLOSING ROW NEVER HIDES AN OPEN ONE
+        # (2026-10-31). The last row of a symbol stood for it, and the
+        # platform list is ordered by symbol only: a CLOSE_PENDING row
+        # listed after an OPEN one turned the open row's "does NOT report"
+        # blocker into the closing note, as the database happened to order
+        # them. A symbol is closing only when every row on it is.
+        ours = {}
+        for p in mine:
+            if p["working"]:
+                continue
+            kept = ours.get(p["symbol"])
+            if kept is None or kept["closing"] or not p["closing"]:
+                ours[p["symbol"]] = p
         both = sorted(set(held) & set(ours))
-        _age = row["held"]["age_seconds"]
+        gone = [ours[s] for s in sorted(set(ours) - set(held))]
         out.append({
             "kind": row["kind"], "name": row["name"], "known": True,
             "reason": "",
@@ -360,10 +512,14 @@ def divergence(user, rows=None, platform=None) -> list:
             "stale": _age is not None and _age > STALE_AFTER_S,
             "only_broker": [held[s] for s in
                             sorted(set(held) - set(ours) - queued)],
-            "only_platform": [ours[s] for s in sorted(set(ours) - set(held))],
+            # A CLOSING row the broker no longer reports is a close being
+            # booked, not a row never finalised (2026-10-31): said apart.
+            "only_platform": [p for p in gone if not p["closing"]],
+            "closing_gone": [p for p in gone if p["closing"]],
             "agree": [{"symbol": s, "broker": held[s], "platform": ours[s]}
                       for s in both],
             "working": working,
+            "newer": [], "stopped": [], "by": "symbol",
             "platform_n": len(mine),
         })
     return out
@@ -451,12 +607,35 @@ def vision(user) -> dict:
                 f"{', '.join(str(h.get('symbol')) for h in d['only_broker'][:6])}"
                 f". Hand-placed, or a row that closed while the broker's "
                 f"leg stayed.")
+        if d["known"] and d.get("closing_gone"):
+            notes.append(
+                f"{d['name']}: {len(d['closing_gone'])} closing row(s) the "
+                f"broker no longer reports — "
+                f"{', '.join(p['symbol'] for p in d['closing_gone'][:6])}: "
+                f"the close is being booked.")
+        stopped = [s for s in d.get("stopped") or [] if s.get("held")]
+        if d["known"] and stopped:
+            notes.append(
+                f"{d['name']}: Sauron stopped closing {len(stopped)} "
+                f"position(s) the broker still lists — "
+                f"{', '.join(s['platform']['symbol'] for s in stopped[:6])}: "
+                f"close them at the broker.")
     contested = [r for r in routing(user) if r["contested"]]
     for r in contested:
         notes.append(f"{r['asset_class']}: claimed by "
                      f"{', '.join(r['claimants'])} — {r['winner']} carries "
                      f"it. Two brokers claiming one class is a "
                      f"configuration mistake, not a strategy.")
+
+    # eToro's own used, available, P&L and total, the split against the
+    # platform's eToro rows and the outside part position by position
+    # (2026-10-31, bot_program.etoro_used): the book card's headline.
+    etoro = None
+    try:
+        from bot_program.etoro_used import account_used
+        etoro = account_used(user, positions=True)
+    except Exception:  # noqa: BLE001 — the page renders without it
+        etoro = None
 
     return {
         "brokers": rows,
@@ -466,6 +645,7 @@ def vision(user) -> dict:
         "routing": routing(user),
         "platform": plat,
         "divergence": div,
+        "etoro": etoro,
         "notes": notes, "blockers": blockers,
         "at": timezone.now(),
     }

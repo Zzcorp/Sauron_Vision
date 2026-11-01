@@ -1688,6 +1688,30 @@ class EtoroTrader:
                 if isinstance(info, dict) else ""}
 
     @classmethod
+    def _figures_of(cls, info) -> dict:
+        """The rest of one aggregate payload (2026-10-31): {"pnl"
+        (accountCurrentPnl), "frozen_cash" (accountFrozenCash), "balance"
+        (accountBalance)}, each None when the payload lacks its key. The
+        key names are the ones measured 2026-09-22 (the comment above
+        `_totals`); a frozen cash beside a HELD order was measured once
+        (used margin 42.5 and accountFrozenCash 42.5, doc §4 D2b-i), the
+        P&L and the balance are printed and unmeasured. Display only: no
+        gate reads them, so they ride the snapshot and never margin_cells,
+        whose shape the gate and its tests read."""
+        totals = cls._totals(info)
+
+        def _num(key):
+            raw = totals.get(key)
+            try:
+                return None if raw is None else float(raw)
+            except (TypeError, ValueError):
+                return None
+
+        return {"pnl": _num("accountCurrentPnl"),
+                "frozen_cash": _num("accountFrozenCash"),
+                "balance": _num("accountBalance")}
+
+    @classmethod
     def _reading_of(cls, info) -> "tuple[float, str] | None":
         """(total value, currency) of one aggregate payload, or None
         (net_liquidation's rule: a zero or a missing figure is None)."""
@@ -1701,8 +1725,8 @@ class EtoroTrader:
 
     def account_snapshot(self) -> "dict | None":
         """{"reading": net_liquidation's answer, "margin": margin_cells'
-        answer} from ONE aggregate-portfolio GET, or None when that GET
-        failed (2026-10-31).
+        answer, "figures": _figures_of's} from ONE aggregate-portfolio GET,
+        or None when that GET failed (2026-10-31).
 
         The sync asked net_liquidation() and margin_cells() one after the
         other, and each sent its own GET of the same payload: two reads of
@@ -1710,14 +1734,17 @@ class EtoroTrader:
         429, a 5xx) the equity and last_sync moved while the cash and the
         used margin kept aging. One read now serves both, so they land
         together or not at all. The post-order re-read
-        (bot_program.etoro_cells) asks this too."""
+        (bot_program.etoro_cells) asks this too. `figures` (the P&L, the
+        frozen cash, the balance) is the rest of the same payload, for
+        the pages (bot_program.etoro_used)."""
         try:
             info = self.account()
         except Exception as e:  # noqa: BLE001
             log.warning("eToro account_snapshot failed: %s", e)
             return None
         return {"reading": self._reading_of(info),
-                "margin": self._cells_of(info)}
+                "margin": self._cells_of(info),
+                "figures": self._figures_of(info)}
 
     def margin_cells(self) -> "dict | None":
         """{"available_cash", "used_margin", "currency"} from ONE aggregate
@@ -1878,6 +1905,27 @@ class EtoroTrader:
                         row["leverage"] = int(float(lev))
                 except (TypeError, ValueError):
                     pass
+            # EACH POSITION'S OWN FIGURES (2026-10-31), so what eToro holds
+            # outside Sauron's rows is listed position by position, never
+            # inferred: the venue's position id (positionID, measured, the
+            # handle a Sauron row records as broker_position_id), the
+            # invested `amount` (MEASURED at 1x: 84.8 = units × openRate;
+            # at 2x unmeasured on this list) and `netProfit` (the public
+            # reference's name, unmeasured on this account). A row that
+            # does not carry one keeps None — never 0, which would read as
+            # a position with nothing invested or flat.
+            pid = p.get("positionID") or p.get("positionId")
+            row["position_id"] = (str(pid) if isinstance(pid, (int, str))
+                                  and not isinstance(pid, bool)
+                                  and str(pid).strip() else None)
+            for key, name in (("amount", "amount"),
+                              ("net_profit", "netProfit")):
+                raw = p.get(name)
+                try:
+                    row[key] = (None if raw is None or isinstance(raw, bool)
+                                else float(raw))
+                except (TypeError, ValueError):
+                    row[key] = None
             out.append(row)
         return out
 

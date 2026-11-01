@@ -1464,6 +1464,21 @@ def _cash_gate_advisory(bot, client, symbol, *, qty, price, leverage, vpu,
         "free": g.get("free"), "room": room, "ceiling": g.get("ceiling"),
         "after": g.get("after"), "margin_per_unit": mpu,
         "max_qty": max_qty, "leverage": max(int(leverage or 1), 1)})
+    # eToro's OWN P&L, its total and the split (2026-10-31): the ticket's
+    # capital line headlines eToro's figures (bot_program.etoro_used), the
+    # gate's free (`free` above: the cash less what was pledged since and
+    # any withdrawal hold) beside the pool's own `available`, which is
+    # untouched. Display only: the send asks the gate again.
+    try:
+        from bot_program.etoro_used import account_used
+        acct = account_used(bot.user) or {}
+    except Exception as e:  # noqa: BLE001 — the ticket renders without it
+        logger.warning("[take-trade] %s: eToro's figures unavailable on the "
+                       "ticket: %s", symbol, e)
+        acct = {}
+    out.update({"pnl": acct.get("pnl"), "total": g.get("equity"),
+                "split_t": acct.get("split_t") or "",
+                "etoro_t": acct.get("t") or ""})
     pk = g.get("account_pk")
     if (ask_reread and pk and (age is None or age > etoro_cells.TICKET_FRESH_S)
             and not _reread_cannot_lift(g)):

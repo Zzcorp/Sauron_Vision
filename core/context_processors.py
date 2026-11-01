@@ -416,6 +416,19 @@ def _book_truth(user, portfolio):
         out["panel_free_paper"] = f"{cap['free_paper']:,.0f}"
         out["panel_free_live_neg"] = cap["free_live"] < 0
         out["panel_free_paper_neg"] = cap["free_paper"] < 0
+        # eToro's OWN figures headline the LIVE line (2026-10-31): used,
+        # available, P&L and total from the sync's cells with their age,
+        # and the split against Sauron's own eToro rows
+        # (bot_program.etoro_used, carried by capital_summary). The pool's
+        # ENGAGED and FREE stay beside them as the pools' arithmetic.
+        acct = cap.get("etoro")
+        if acct:
+            out["panel_etoro"] = {
+                k: acct.get(k) for k in (
+                    "world", "world_word", "venue_class", "read", "currency",
+                    "used", "available", "pnl", "total", "used_t",
+                    "available_t", "pnl_t", "total_t", "total_own_age_t",
+                    "age_t", "t", "split_t", "title")}
     except Exception as e:  # noqa: BLE001
         logger.debug(f"Panel pools unavailable: {e}")
 

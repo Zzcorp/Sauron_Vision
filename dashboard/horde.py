@@ -241,6 +241,9 @@ HEAD_UNREADABLE = "The book limits could not be read. The seats below are live."
 POOLS_LINE = "{world} {used} of {pool} used · {free} free"
 POOLS_TITLE = ("Pools are what the bots may draw on; they are not the book. "
                "Per class: {classes}")
+#: A class whose pool is the ONE shared account (shared_capital_live, the
+#: capital summary counts it once in the totals, 2026-10-31).
+POOLS_SHARED = " (one shared account, counted once in the total)"
 SWITCH_TICK_OFF = ("The 5-minute tick is off: the platform enforces no stop "
                    "or target.")
 SWITCH_CARE_OFF = "The care is switched off: no soft stops, trails or locks run."
@@ -757,6 +760,23 @@ def _head_key(user, fp):
     return f"sv:horde:head:{user.pk}:{_digest(fp)}"
 
 
+#: The pools' one switch (2026-10-31): with it on, the capital summary
+#: counts the account the followers share once.
+SHARED_SWITCH_KEY = "shared_capital_live"
+
+
+def _shared_switch() -> bool:
+    """shared_capital_live, read as _switches reads every switch here: one
+    query, a missing row off, never through is_component_enabled (rule 5).
+    Unreadable reads off, as capital_truth.shared_capital answers it."""
+    try:
+        from core.platform_control import PlatformComponent
+        return bool(PlatformComponent.objects.filter(key=SHARED_SWITCH_KEY)
+                    .values_list("is_enabled", flat=True).first())
+    except Exception:  # noqa: BLE001 — the slices, as the switch's reader
+        return False
+
+
 def _head_raw(user, fp, now):
     """Block B: the gate's two sides, the elite allowance, the pools and the
     broker view, cached KEPT_S on the fingerprint. Raises what it raises:
@@ -773,7 +793,7 @@ def _head_raw(user, fp, now):
         "paper": risk_gate.preflight(user, venue="paper"),
         "elite_live": risk_gate.elite_entries_since(user, paper=False),
         "elite_paper": risk_gate.elite_entries_since(user, paper=True),
-        "capital": capital_summary(user),
+        "capital": capital_summary(user, shared=_shared_switch()),
         "broker": capital_truth.broker_view(user),
         "at": _iso(now),
     }
@@ -1934,7 +1954,17 @@ def _head(raw, seats, book):
     classes = "; ".join(
         f"{c.get('asset_class')} {c.get('mode')}: pool {_money(c.get('pool')) or DASH}, "
         f"used {_money(c.get('used')) or DASH}, free {_money(c.get('free')) or DASH}"
+        + (POOLS_SHARED if c.get("shared") else "")
         for c in cap.get("classes") or []) or DASH
+    # eToro's OWN figures headline the pools (2026-10-31): used, available,
+    # P&L and total from the sync's cells with their age, and the split
+    # against Sauron's own eToro rows (bot_program.etoro_used). The pool
+    # line below them is the pools' arithmetic, which the bots size by.
+    acct = cap.get("etoro") or None
+    etoro = ({"t": acct.get("t") or "", "split_t": acct.get("split_t") or "",
+              "title": acct.get("title") or "", "read": bool(acct.get("read")),
+              "world": acct.get("world") or ""}
+             if acct else None)
     real = [s for s in seats if s["world"] in ("live", "demo")]
     paper = [s for s in seats if s["world"] == "paper"]
     marks = {"venue": sum(1 for s in real if s["mark"]["source"] == "venue"),
@@ -1970,6 +2000,7 @@ def _head(raw, seats, book):
     return {
         "as_of": (raw or {}).get("at"), "kept_s": KEPT_S, "readable": True, "t": "",
         "sides": sides,
+        "etoro": etoro,
         "pools": {"live_t": live_t, "live_neg": live_neg, "paper_t": paper_t,
                   "paper_neg": paper_neg, "classes_t": POOLS_TITLE.format(classes=classes)},
         "marks": marks, "switch_lines": lines, "tones": tones,
@@ -1990,8 +2021,8 @@ def _unreadable_head(book, seats):
     tones = {t: sum(1 for s in seats if s["light"]["tone"] == t) for t in TONE_ORDER}
     tones["alarm"] += len(book.stragglers)
     return {"as_of": None, "kept_s": KEPT_S, "readable": False, "t": HEAD_UNREADABLE,
-            "sides": {}, "pools": None, "marks": None, "switch_lines": [],
-            "tones": tones}
+            "sides": {}, "etoro": None, "pools": None, "marks": None,
+            "switch_lines": [], "tones": tones}
 
 
 # ── the answers ──────────────────────────────────────────────────────────

@@ -2045,6 +2045,26 @@ def _capital_or_none(user):
         return None
 
 
+def _etoro_cell(etoro):
+    """eToro's OWN used figure as a strip cell (2026-10-31), or None with
+    no eToro row (the caller then adds no cell: every cell of a strip
+    carries its tooltip): what the account holds as eToro states it, from
+    the sync's cells, with what is available, the total and the age under
+    it (bot_program.etoro_used, carried by capital_summary). The view
+    layer only: the strip's other cells and services.live_book_value are
+    as they were, and nothing here moves a gate's number.
+
+    The line under it is etoro_used's own (cell_t, 2026-10-31), the total
+    with its own age when it is older than the cells: the re-read after
+    an order moves the cells and never the total, and the line built here
+    said "read 20 s ago" over an equity three hours old."""
+    if not etoro:
+        return None
+    sub = etoro.get("cell_t") or etoro.get("t") or LIVE_DASH
+    return _live_cell(etoro.get("used_t") or LIVE_DASH, sub=sub,
+                      title=etoro.get("title") or "")
+
+
 def _render_portfolio(request, live_only):
     """Phase 63 — enriched portfolio dashboard, now live.
 
@@ -2260,13 +2280,24 @@ def _render_portfolio(request, live_only):
     pf_view = build_view(request.GET, [(row, None) for row in open_rows],
                          limit=8, base_url=reverse("portfolio_overview"))
 
+    # THE LIVE WORLD READS eToro's CELLS (2026-10-31). ALLOCATED and FREE
+    # above are both books against the cash typed on /setup/; eToro's own
+    # used, available and total stand beside them in their own cell, with
+    # the split under the strip. The view layer only: live_book_value (the
+    # gate denominator's writer) is not touched.
+    capital = _capital_or_none(request.user)
+    etoro = (capital or {}).get("etoro")
+    if etoro:
+        strip["etoro"] = _etoro_cell(etoro)
+
     context = {
         "page_id": "portfolio", "portfolio": portfolio,
         # Pools / used / free / cash — the money question, answered by ONE
         # service so this page, the positions page and the headband popups
         # can never quote three different answers. See
         # portfolio.services.capital_summary for what the two economies are.
-        "capital": _capital_or_none(request.user),
+        "capital": capital,
+        "etoro": etoro,
         "strip": strip,
         "open_positions_count": n_open,
         # The rows the table shows, in the view's order; the cap moved
@@ -3049,13 +3080,21 @@ def _render_positions(request, live_only, *, deep_link=None):
                  _position_card_details(request.user, closed_positions))),
         history=True, keep={"tab": "history"}, base_url=positions_url)
 
+    # eToro's OWN used figure heads the strip (2026-10-31): see
+    # _etoro_cell; the split rides under the strip.
+    capital = _capital_or_none(request.user)
+    etoro = (capital or {}).get("etoro")
+    if etoro:
+        strip["etoro"] = _etoro_cell(etoro)
+
     context = {
         "page_id": "positions",
         # Pools / used / free / cash — the money question, answered by ONE
         # service so this page, the positions page and the headband popups
         # can never quote three different answers. See
         # portfolio.services.capital_summary for what the two economies are.
-        "capital": _capital_or_none(request.user),
+        "capital": capital,
+        "etoro": etoro,
         "tab": tab,
         "strip": strip,
         "positions": open_rows,
@@ -3160,7 +3199,20 @@ def _render_positions(request, live_only, *, deep_link=None):
     from bot_program.capital_truth import broker_view
     from bot_program.models import AssetBotTrade
     broker = broker_view(request.user)
-    if broker and broker.get("positions"):
+    if broker and broker.get("positions") and broker.get("kind") == "etoro":
+        # BY POSITION AT eTORO (2026-10-31): eToro holds every position
+        # apart, so a symbol a row holds no longer claims every eToro
+        # position on it — a second NVDA opened in the eToro app read
+        # CLAIMED. One row per position, claimed as the outside list on
+        # /treasury/ claims (etoro_used.mark_holdings): the account's
+        # world, a close Sauron stopped trying said STOPPED, a leg closed
+        # inside eToro's list lag still Sauron's, a row that records no
+        # broker said apart; a row stamped for another broker claims
+        # nothing here.
+        from bot_program.etoro_used import mark_holdings
+        mark_holdings(request.user, broker["positions"]["rows"],
+                      broker["positions"]["at"])
+    elif broker and broker.get("positions"):
         claimed = {
             str(s).upper()
             for s in AssetBotTrade.objects.filter(

@@ -1115,6 +1115,11 @@ def sync_etoro_accounts():
 CELLS_READ = "read"
 CELLS_FAILED = "failed"
 CELLS_UNOFFERED = "unoffered"
+#: The rest of the aggregate payload, by the margin dict's key and the
+#: EtoroAccount cell it is stored in (2026-10-31): display only, written
+#: with the cells and never read by a gate.
+DISPLAY_FIGURES = {"pnl": "last_pnl", "frozen_cash": "last_frozen_cash",
+                   "balance": "last_balance"}
 
 
 def _read_etoro_aggregate(client):
@@ -1135,6 +1140,13 @@ def _read_etoro_aggregate(client):
                    and len(reading) == 2 else None)
         margin = snap.get("margin")
         margin = margin if isinstance(margin, dict) else None
+        # THE REST OF THE SAME PAYLOAD (2026-10-31): the P&L, the frozen
+        # cash and the balance travel with the cells, so _etoro_margin_
+        # fields writes them under the cells' one stamp. Display only.
+        figures = snap.get("figures")
+        if margin is not None and isinstance(figures, dict):
+            margin = dict(margin, **{k: figures.get(k)
+                                     for k in DISPLAY_FIGURES})
     else:
         reading = client.net_liquidation()
         _mc = getattr(client, "margin_cells", None)
@@ -1186,6 +1198,16 @@ def _etoro_margin_fields(acct, client, margin, at) -> list:
             _demo = bool(acct.demo)
         acct.last_margin_world = "demo" if _demo else "live"
         fields.append("last_margin_world")
+        # THE P&L, THE FROZEN CASH AND THE BALANCE (2026-10-31), from the
+        # same payload and dated by the same stamp, so a figure this read
+        # did not carry is written None rather than an older one left
+        # under a new date. Only when the reader states them at all (the
+        # adapter's account_snapshot does; a double without them leaves
+        # the cells as they were). Display only (bot_program.etoro_used).
+        for key, cell in DISPLAY_FIGURES.items():
+            if key in margin:
+                setattr(acct, cell, margin.get(key))
+                fields.append(cell)
     return fields
 
 

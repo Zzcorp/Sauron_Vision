@@ -1944,7 +1944,8 @@ def notify_protection_vanished(user, *, asset_class: str, symbol: str,
 UNCLAIMED_REMIND_S = 3 * 3600
 
 
-def notify_unclaimed_position(user, *, symbols: list, venue: str) -> bool:
+def notify_unclaimed_position(user, *, symbols: list, venue: str,
+                              count=None, key=None) -> bool:
     """A position the broker holds that no row in this platform claims.
 
     Deliberately a notification and NOT an auto-close. The operator may
@@ -1960,19 +1961,31 @@ def notify_unclaimed_position(user, *, symbols: list, venue: str) -> bool:
     sorted) are the key: a changed set is said at once; the same set is
     said again after UNCLAIMED_REMIND_S, while it stands. Returns False
     when the bell already says it.
+
+    POSITIONS, NOT NAMES (2026-10-31). eToro's sweep counts every position
+    apart and names them grouped ("NVDA ×2", "NVDA (+1 beside Sauron's
+    1)"), and the title and the phone's summary counted the names: two
+    positions nothing guards read "1 position ... holds a position".
+    `count` is how many positions there are (len(symbols) when not
+    given) and `key` the standing condition (the names when not given):
+    the sweep hands the outside positions alone, each symbol with its
+    count, so Sauron's own rows opening or closing beside them, which the
+    names say, do not ring the same position again inside the window.
     """
     names = sorted(str(x) for x in symbols)
     listed = ", ".join(names[:6])
     more = f" (+{len(names) - 6} more)" if len(names) > 6 else ""
-    one = len(symbols) == 1
-    title = (f"▲ {len(symbols)} "
+    n = len(symbols) if count is None else int(count)
+    one = n == 1
+    title = (f"▲ {n} "
              f"position{'' if one else 's'} at {venue} "
              f"that no row claims")
     body = (f"{listed}{more}. These are invisible to every exposure and "
             f"daily-loss gate, carry no bot-side stop, and the kill "
             f"switch cannot flatten them — it walks database rows. "
             f"Check the broker.")
-    said = f"{venue}|{','.join(names)}"
+    standing = names if key is None else sorted(str(x) for x in key)
+    said = f"{venue}|{','.join(standing)}"
     try:
         from datetime import timedelta as _td
         from django.utils import timezone as _tz
