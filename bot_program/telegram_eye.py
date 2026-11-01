@@ -804,6 +804,19 @@ def _proof_words() -> str:
               + [f"short_{c}" for c in
                  sorted(getattr(base, "ETORO_SHORT_PROVEN", ()) or ())])
     words = [proof_word(t) for t in tokens]
+    # THE SHORTS THE PLATFORM PROVED ITSELF on eToro's demo account
+    # (2026-10-31, bot_program/short_proofs.py): at the multipliers measured
+    # there, for the classes no code pins
+    for cls in sorted(CLASS_WORDS):
+        try:
+            if base.short_pinned(cls):
+                continue
+            levels = sorted(base.demo_short_leverages(cls))
+        except Exception:  # noqa: BLE001 — a status report never raises
+            levels = []
+        if levels:
+            words.append(f"{proof_word('short_' + cls)} on the demo account "
+                         f"at {', '.join(f'{v}x' for v in levels)}")
     return ", ".join(words) if words else "none yet"
 
 

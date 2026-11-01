@@ -510,19 +510,57 @@ ETORO_PROVEN = frozenset({"commodity", "crypto", "etf", "forex", "index",
 #: 17:00-18:00 New York break, entry_timing.INDEX_BREAK_NY, so they prove
 #: nothing either way). THE BOTS read this set as a gate; the TAKE TRADE
 #: lane reads it for its warning and its read-back only (2026-10-31).
+#: Since 2026-10-31 the bots' gate also reads the shorts the platform
+#: proves itself on eToro's DEMO account (bot_program/short_proofs.py,
+#: demo_short_leverages): a class named here is open at every multiplier
+#: the LIVE list, the ceiling and the band allow; a class proven there
+#: only, at the multipliers measured there only (missing_proofs).
 ETORO_SHORT_PROVEN = frozenset({"forex", "stock"})
 
 
-def missing_proofs(icls, side) -> list:
+def short_pinned(icls) -> bool:
+    """Whether a SELL of `icls` is proven IN THE CODE (the global "short"
+    in ETORO_PROVEN, or the class in ETORO_SHORT_PROVEN), read at call
+    time. A short pinned in the code answers to eToro's LIVE list, the
+    ceiling and the band at every multiplier (the operator, 2026-10-05:
+    "pas de limite à l'attaque")."""
+    return "short" in ETORO_PROVEN or str(icls) in ETORO_SHORT_PROVEN
+
+
+def demo_short_leverages(icls) -> frozenset:
+    """THE SHORTS THE PLATFORM PROVED ITSELF (2026-10-31; the operator: "je
+    veux les short possible entierement svp"): the multipliers a SELL of
+    `icls` has a fill-and-close recorded at on eToro's demo account by the
+    demo proof runner (bot_program/short_proofs.py: EtoroShortObservation
+    rows marked demo_proven, never revoked). Read from the database at
+    call time; empty when there is none and when the read fails, so an
+    unreadable record opens nothing."""
+    try:
+        from bot_program.short_proofs import proven_leverages
+        return frozenset(proven_leverages(str(icls)))
+    except Exception as e:  # noqa: BLE001 — fail closed: nothing opens
+        logger.debug("[proofs] the demo short proofs of %s are unread: %s",
+                     icls, type(e).__name__)
+        return frozenset()
+
+
+def missing_proofs(icls, side, leverage=None) -> list:
     """The proof tokens an eToro entry of instrument class `icls` on `side`
     still lacks, sorted; [] when the proof gate lets it go. A class
-    unproven names itself; a SELL whose class has no short proof (and no
-    global "short") names "short_<class>". Read at call time."""
+    unproven names itself; a SELL names "short_<class>" unless its short is
+    pinned in the code (short_pinned) OR proven by the platform itself on
+    the demo account AT `leverage` (demo_short_leverages, 2026-10-31: a
+    class the runner proved opens at the measured multiplier only; None
+    reads as 1, the unlevered order). Read at call time."""
     icls = str(icls)
     missing = [] if icls in ETORO_PROVEN else [icls]
-    if (str(side or "").upper() == "SELL" and "short" not in ETORO_PROVEN
-            and icls not in ETORO_SHORT_PROVEN):
-        missing.append(f"short_{icls}")
+    if str(side or "").upper() == "SELL" and not short_pinned(icls):
+        try:
+            lev = int(leverage) if leverage is not None else 1
+        except (TypeError, ValueError):
+            lev = 0
+        if lev < 1 or lev not in demo_short_leverages(icls):
+            missing.append(f"short_{icls}")
     return sorted(missing)
 
 #: THE MULTIPLIER EACH eToro CLASS HAS BEEN PROVEN AT (2026-09-26): class
@@ -4760,11 +4798,27 @@ class AssetBot(ABC):
         # on the candidate so execute_entry rounds by the same answer.
         # Three states; None is whole shares for stocks, as before.
         fractional = self._venue_fractional_units(client, symbol)
+        # The horizon the desk grades a displaced candidate over. The
+        # config's time stop is the honest bound; 0.0 means "off" and a
+        # counterfactual with no bound would never resolve. Read BEFORE the
+        # smart money's fee check (2026-10-31): execute_entry charges a
+        # measured short's overnight fee for every night of it
+        # (_venue_fee_refusal), and the check that keeps the moved stop
+        # charges the same nights, or a stop it kept was refused there,
+        # tick after tick.
+        try:
+            from bot_program.asset_engine.candidates import (
+                DEFAULT_HORIZON_HOURS,
+            )
+            horizon = (float(self.cfg.time_stop_setting()["hours"] or 0.0)
+                       or DEFAULT_HORIZON_HOURS)
+        except Exception:  # noqa: BLE001 — a horizon must never cost an entry
+            horizon = 168.0
         if sm_read is not None and sm_read["moved"]:
             qty, sl, sizing, level_meta = self._smart_money_fee_check(
                 client, symbol, decision, stage, sm_read, qty=qty,
                 price=price, tp=tp, sl=sl, sizing=sizing,
-                level_meta=level_meta, charge=charge)
+                level_meta=level_meta, charge=charge, horizon_hours=horizon)
         qty = self._round_qty(qty, price, fractional=fractional)
 
         # Steps M-O: the ceiling, the single-position cap, the duplicate and
@@ -4780,17 +4834,7 @@ class AssetBot(ABC):
             return None
 
         # ── The candidate: everything decided, nothing sent ──────────────
-        # The horizon the desk grades a displaced candidate over. The
-        # config's time stop is the honest bound; 0.0 means "off" and a
-        # counterfactual with no bound would never resolve.
-        try:
-            from bot_program.asset_engine.candidates import (
-                DEFAULT_HORIZON_HOURS,
-            )
-            horizon = (float(self.cfg.time_stop_setting()["hours"] or 0.0)
-                       or DEFAULT_HORIZON_HOURS)
-        except Exception:  # noqa: BLE001 — a horizon must never cost an entry
-            horizon = 168.0
+        # (its horizon was read above, before the smart money's fee check)
         # The same value_per_unit the sizer used and the ceiling above
         # re-derived, so risk_dollars_default is the number the ceiling
         # judged, not a second opinion of it.
@@ -4854,7 +4898,7 @@ class AssetBot(ABC):
 
     def _smart_money_fee_check(self, client, symbol, decision, stage, read, *,
                                qty, price, tp, sl, sizing, level_meta,
-                               charge):
+                               charge, horizon_hours=None):
         """(qty, stop, sizing, level_meta): a moved stop kept, or, when the
         venue's own per-order fee (eToro's flat 1.00 USD a side on a stock)
         refuses it at this final size, the stop the levels computed, the
@@ -4862,11 +4906,15 @@ class AssetBot(ABC):
         scale on a real-money entry. A wider stop is a smaller position,
         and a flat fee is a bigger share of a smaller one: without this the
         moved stop passed the proposal and was refused by execute_entry,
-        tick after tick, where the computed stop would have been sent."""
+        tick after tick, where the computed stop would have been sent.
+        `horizon_hours` is the candidate's own (2026-10-31): a measured
+        short pays its overnight fee for every night of it here as it does
+        in execute_entry."""
         try:
             _fee, why = self._venue_fee_refusal(
                 client, symbol, qty=qty, price=price, target=tp, stop=sl,
-                charge=charge)
+                charge=charge, side=decision.direction,
+                horizon_hours=horizon_hours)
             if not why:
                 return qty, sl, sizing, level_meta
             from bot_program.smart_money import CROWDED_STOP_SCALE
@@ -5895,7 +5943,9 @@ class AssetBot(ABC):
             # size, so a refusal the proof's cut caused is led by its note.
             _fee, _fee_why = self._venue_fee_refusal(
                 client, symbol, qty=float(qty), price=float(price),
-                target=float(tp), stop=float(sl), charge=charge)
+                target=float(tp), stop=float(sl), charge=charge,
+                side=decision.direction,
+                horizon_hours=getattr(cand, "horizon_hours", None))
             if _fee_why:
                 _fee_why = _cut_note + _fee_why
                 logger.info("[%s_bot] skipping %s — %s", self.asset_class,
@@ -6148,7 +6198,9 @@ class AssetBot(ABC):
                     # multiplier's minimum margin was judged at the old size
                     _fee, _fee_why = self._venue_fee_refusal(
                         client, symbol, qty=float(qty), price=float(price),
-                        target=float(tp), stop=float(sl), charge=charge)
+                        target=float(tp), stop=float(sl), charge=charge,
+                        side=decision.direction,
+                        horizon_hours=getattr(cand, "horizon_hours", None))
                     if _fee_why:
                         return self._skip(symbol, skips.COST_FILTER,
                                           _cut_note
@@ -6886,7 +6938,8 @@ class AssetBot(ABC):
 
     def _venue_fee_refusal(self, client, symbol: str, *, qty: float,
                            price: float, target: float, stop: float,
-                           charge=None) -> tuple:
+                           charge=None, side=None,
+                           horizon_hours=None) -> tuple:
         """(fee fraction, refusal words or "") — the cost filter asked again
         at the FINAL size with the venue's own per-order fee on top
         (risk_levels.venue_fee_fraction: eToro's 1% a side on crypto, its
@@ -6907,7 +6960,15 @@ class AssetBot(ABC):
         a second, different filter. So: the GROSS edge (the planned move
         against the whole cost, stop-free) must cover the fee; and the net
         reward:risk refuses only when it passes without the fee and fails
-        with it."""
+        with it.
+
+        THE MEASURED SHORT (2026-10-31): an eToro SELL of a class whose
+        short the platform measured on the demo account
+        (bot_program/short_proofs.measured_short_fees) is charged that
+        short's fees, its overnight fee for every night of `horizon_hours`
+        (one when none is given), never less than the fee charged before
+        (risk_levels.venue_fee_fraction). `side` is the decision's; when a
+        caller gives none, a target under the price is a SELL."""
         from bot_program.asset_engine.risk_levels import (
             passes_cost_filter, round_trip_cost_fraction, venue_fee_fraction,
         )
@@ -6917,9 +6978,22 @@ class AssetBot(ABC):
                         * float(self._value_per_unit(symbol) or 1.0))
         except (TypeError, ValueError):
             notional = 0.0
-        fee, words = venue_fee_fraction(adapter_key(client),
-                                        self._instrument_class(symbol),
-                                        notional)
+        carrier = adapter_key(client)
+        icls = self._instrument_class(symbol)
+        side = str(side or "").upper()
+        if side not in ("BUY", "SELL"):
+            try:
+                side = "SELL" if float(target) < float(price) else "BUY"
+            except (TypeError, ValueError):
+                side = "BUY"
+        short_fees, nights = None, 1
+        if side == "SELL" and carrier == "etoro":
+            from bot_program.short_proofs import (measured_short_fees,
+                                                  nights_of)
+            short_fees = measured_short_fees(icls)
+            nights = nights_of(horizon_hours)
+        fee, words = venue_fee_fraction(carrier, icls, notional, side=side,
+                                        short_fees=short_fees, nights=nights)
         if fee <= 0:
             return 0.0, ""
         base = (float(charge["fraction"]) if charge and charge.get("fraction")
@@ -7001,8 +7075,11 @@ class AssetBot(ABC):
             return "", ""
         # step 1 — the proof. ETORO_PROVEN is read HERE, at call time,
         # off the module: a test states a token by patching that name. A
-        # SELL also needs its class's short proof (ETORO_SHORT_PROVEN).
-        _missing = missing_proofs(icls, side)
+        # SELL also needs its class's short proof: ETORO_SHORT_PROVEN, or
+        # one the platform recorded on the demo account at this order's
+        # multiplier (2026-10-31; the hint, None read as 1 — the final
+        # multiplier is judged again in _order_leverage).
+        _missing = missing_proofs(icls, side, leverage=leverage_hint)
         if waive_short_proof:
             _missing = [m for m in _missing if m != f"short_{icls}"]
         if _missing:
@@ -7147,6 +7224,9 @@ class AssetBot(ABC):
                                                    price, stop)
         if inst_why:
             return None, inst_why
+        short_why = self._short_proof_leverage(client, symbol, side, eff)
+        if short_why:
+            return None, short_why
         if lev is None or lev <= 1:
             return lev, ""
         note = self._leverage_refusal_note(symbol)
@@ -7156,6 +7236,30 @@ class AssetBot(ABC):
                           f"quiet for {self.LEVERAGE_QUIET_HOURS}h — nothing "
                           f"sent, not at {lev}, not at 1")
         return lev, ""
+
+    def _short_proof_leverage(self, client, symbol: str, side: str,
+                              eff: int) -> str:
+        """THE MEASURED MULTIPLIER OF A SHORT (2026-10-31): why an eToro
+        SELL may not go at `eff`, or "". A short pinned in the code
+        (short_pinned) answers "" at every multiplier; a short the platform
+        proved itself on the demo account (bot_program/short_proofs.py)
+        goes only at a multiplier it measured there — the proof gate's step
+        1 read the config's hint, and this is the multiplier the body will
+        carry. Refused, not lowered: a multiplier is the operator's or the
+        chooser's, and the chooser already stays on the measured ones."""
+        from bot_program.engine.capabilities import adapter_key
+        if str(side or "").upper() != "SELL" or adapter_key(client) != "etoro":
+            return ""
+        icls = self._instrument_class(symbol)
+        if f"short_{icls}" not in missing_proofs(icls, "SELL", leverage=eff):
+            return ""
+        measured = sorted(demo_short_leverages(icls))
+        if measured:
+            return (f"a short on {icls} is proven on the demo account at "
+                    f"{', '.join(f'{m}x' for m in measured)} only — nothing "
+                    f"sent at {eff}x")
+        return (f"no short proof for {icls} at {eff}x, in the code or on the "
+                f"demo account — nothing sent")
 
     def _choose_auto_leverage(self, client, symbol: str, side: str,
                               price=None, stop=None, qty=None) -> tuple:
@@ -7264,6 +7368,24 @@ class AssetBot(ABC):
             settle_up = None
         up_vals = _live(settle_up)
         listed = sorted(v for v in (up_vals or []) if v > 1)
+        # THE MEASURED SHORT (2026-10-31): a short the platform proved on
+        # the demo account, and that no code pins, goes only at a
+        # multiplier measured there (_short_proof_leverage refuses any
+        # other). The chooser stays on those, so an attack-mode short of
+        # such a class goes at the highest one measured instead of being
+        # refused for a pick nobody measured. A short pinned in the code
+        # keeps the operator's "pas de limite à l'attaque".
+        demo_bound = ""
+        if direction == "short" and not short_pinned(icls):
+            measured = demo_short_leverages(icls)
+            if measured:
+                kept = [v for v in listed if v in measured]
+                if kept != listed:
+                    demo_bound = (
+                        f"the short on {icls} is proven on the demo account "
+                        f"at {', '.join(f'{m}x' for m in sorted(measured))}"
+                        f" only")
+                listed = kept
         passed_over = []
         for lev in sorted(listed, reverse=True):
             if lev > ceiling:
@@ -7303,6 +7425,7 @@ class AssetBot(ABC):
                 f"margin, inside {headroom:.0%} of the {band:g}% band"
                 + (" (assumed from the one measured band)" if assumed
                    else " (printed)")
+                + (f"; {demo_bound}" if demo_bound else "")
                 + (f"; passed over: {'; '.join(passed_over)}"
                    if passed_over else ""))
         # an UNREAD LIVE list is not a measured absence: the words tell
@@ -7323,6 +7446,8 @@ class AssetBot(ABC):
         elif up_vals is None:
             reason = (f"eToro's LIVE {direction}/{settle_up} list for "
                       f"{symbol} is {unread}")
+        elif demo_bound and not listed:
+            reason = demo_bound
         elif not listed:
             reason = (f"eToro's LIVE {direction} list for {symbol} carries "
                       f"nothing above 1")

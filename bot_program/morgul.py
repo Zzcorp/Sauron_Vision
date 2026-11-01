@@ -825,7 +825,10 @@ def check_proofs(ctx, g) -> list:
         if meta.get("broker") != "etoro":
             continue
         cls, _exchange, _pk = ctx.instrument(trade.symbol, trade.asset_class)
-        missing = base.missing_proofs(cls, trade.side)
+        lev = _leverage(meta)
+        # at the row's own multiplier (2026-10-31): a short the platform
+        # proved on the demo account is proven at the multiplier measured
+        missing = base.missing_proofs(cls, trade.side, leverage=lev)
         if _hand_taken(trade):
             # THE HAND-TAKEN SHORT (2026-10-31; the operator: "je veux les
             # short possible entierement svp"): the TAKE TRADE lane sends a
@@ -838,7 +841,6 @@ def check_proofs(ctx, g) -> list:
         if missing:
             facts.append("No fill-and-close proof pinned for: " + ", ".join(
                 eye.proof_word(m) for m in missing))
-        lev = _leverage(meta)
         try:
             ceiling = int(ceilings.get(cls, 1))
         except (TypeError, ValueError):

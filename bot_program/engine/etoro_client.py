@@ -757,17 +757,22 @@ class EtoroOrderInDoubt(RuntimeError):
     in_doubt = True
 
     def __init__(self, reference: str, symbol: str, detail: str, *,
-                 client_order_id=None):
+                 client_order_id=None, answered=None):
         # THE VERDICT FIRST: skips.record keeps 200 characters and
         # why_no_trade prints 88; a timeout string alone runs past both.
+        # `answered` (2026-10-31): the 2xx status of a POST that DID come
+        # back, with a body nobody could read (market_order).
+        what = (f"the order was answered HTTP {answered} with a body nobody "
+                f"could read ({detail})" if answered is not None else
+                f"the order request did not come back ({detail})")
         super().__init__(
-            f"{symbol}: the order request did not come back ({detail}) and "
-            f"MAY be live at eToro. Do not resend it: check the broker's "
-            f"open orders and positions for {symbol} first (reference "
-            f"{reference}).")
+            f"{symbol}: {what} and MAY be live at eToro. Do not resend it: "
+            f"check the broker's open orders and positions for {symbol} "
+            f"first (reference {reference}).")
         self.reference = reference
         self.symbol = symbol
         self.client_order_id = client_order_id
+        self.answered = int(answered) if answered is not None else None
 
 
 def _iso_to_ms(ts: str) -> int:
@@ -1850,6 +1855,23 @@ class EtoroTrader:
             out.append(row)
         return out
 
+    def position_row(self, position_id) -> "dict | None":
+        """The /portfolio row of ONE position, exactly as eToro printed it,
+        or None when the book lists no such position (2026-10-31, the demo
+        short proofs: the overnight fee is read off the held row before
+        its close; which key carries it is UNMEASURED, so the row rides
+        whole). Raises when the book could not be read, as get_positions
+        does: an unread book is not an absent position."""
+        want = str(position_id or "")
+        if not want:
+            return None
+        for p in self._open_positions():
+            if not isinstance(p, dict):
+                continue
+            if str(p.get("positionID") or p.get("positionId") or "") == want:
+                return dict(p)
+        return None
+
     def broker_portfolio(self) -> "list[dict] | None":
         """Holdings as the broker values them, or None when unreadable —
         IBKRTrader's contract, for the portfolio views. Marks are not on
@@ -2575,7 +2597,32 @@ class EtoroTrader:
             log.error("eToro order failed: %s", r.text)
             raise RuntimeError(f"eToro refused ({r.status_code}): "
                                f"{str(r.text)[:160]}") from e
-        accepted = r.json() or {}
+        # AN ACCEPTANCE NOBODY CAN READ IS IN DOUBT (2026-10-31). A 2xx is
+        # an acceptance (fact 1), so a body that is not a JSON object (an
+        # empty 202, an HTML page, a list) may stand for an order eToro
+        # holds, with no orderId to find it by. requests raises
+        # JSONDecodeError for it, a ValueError: it rode out bare, the bot
+        # lane booked "live order failed" and the next tick could send the
+        # same order again, and the demo proof runner read it as "nothing
+        # left the box". Noted on the venue's health as an ORDER failure,
+        # like the POST that did not come back.
+        try:
+            accepted = r.json()
+            unread = ("" if isinstance(accepted, dict)
+                      else f"a JSON {type(accepted).__name__}")
+        except Exception as e:  # noqa: BLE001 — the body is the unknown
+            accepted, unread = None, type(e).__name__
+        if unread:
+            code = int(getattr(r, "status_code", 0) or 0)
+            self._note_health("order", detail=f"in doubt: HTTP {code}, "
+                                              f"{unread}")
+            log.error("eToro order IN DOUBT for %s %s — HTTP %s with a body "
+                      "nobody could read (%s); reference %s. NOT retried.",
+                      symbol, side, code, unread, rid)
+            raise EtoroOrderInDoubt(
+                rid, symbol, unread,
+                client_order_id=kwargs.get("client_order_id"),
+                answered=code)
         order_id = str(accepted.get("orderId") or "")
         reference = str(accepted.get("referenceId") or rid)
 
@@ -2914,3 +2961,204 @@ class EtoroTrader:
         else:
             out.pop("executedQty")
         return out
+
+
+# ── THE DEMO SEGMENT, AND NOTHING ELSE (2026-10-31) ──────────────────────
+#
+# HOW THIS CLIENT PICKS ITS WORLD (fact 2 above): `demo`, set once from
+# `env` in __init__, writes "demo/" into every trading URL (_seg, _v2,
+# _v2_exec_orders, _v2_lookup, _v3_exec_order), and the eligibility
+# readers take a `world` that DEFAULTS TO "live" (leverage_values,
+# max_stop_loss_pct, min_amount: only the live lists prove anything for
+# the real account). One eToro key pair opens both worlds (MEASURED
+# 2026-09-23), so the segment in the URL is the whole of the difference
+# between a demo order and a real one.
+#
+# The platform's own demo short proofs (bot_program/short_proofs.py) send
+# orders on their own, on a schedule, with the operator's keys. Their
+# client must not be able to reach the real segment whatever the eToro
+# row's demo flag says, so it is not built from that flag at all:
+# DemoOnlyEtoroTrader pins `demo` (a write of False raises), refuses a
+# "live" world on every reader before the URL is composed, and sends every
+# request through _DemoOnlyWire, which refuses, before anything leaves the
+# box, a URL that is not on eToro's host or that names the trading API
+# without its demo segment, AND follows no redirect: requests follows one
+# by default and, on a 307 or a 308, sends the same method and body again,
+# the session's x-api-key and x-user-key with them (requests strips only
+# Authorization when the host changes), to whatever Location says, from
+# inside Session.send, where no check of ours sees it. So the wire asks
+# for none (allow_redirects False on every call, max_redirects 0 on the
+# session) and refuses any 3xx answer (RedirectRefused, review
+# 2026-10-31). Market data carries no world (fact 2) and is read as every
+# client reads it. Not in capabilities.ADAPTER_CLASS_KEYS on purpose:
+# adapter_key answers "" for it, so no lane, gate, reconcile or venue map
+# can ever take it for the trading client.
+
+
+class RealSegmentRefused(RuntimeError):
+    """A demo-only client was asked for something off eToro's demo
+    segment: a URL of the real account, another host, or a live world.
+    Raised before the request is sent; nothing left the box."""
+
+
+class RedirectRefused(RuntimeError):
+    """A request of a demo-only client was answered with a redirect (a
+    3xx), and the redirect was NOT followed (2026-10-31): followed, a 307
+    or a 308 would resend the same order, keys included, to whatever
+    Location says, the real segment or another host. Unlike
+    RealSegmentRefused, one request DID leave the box, to the demo
+    segment, and what it did there is unknown: the demo proof runner
+    reads an order or a close answered so as in doubt, and a read
+    answered so as unread (bot_program/short_proofs.py)."""
+
+    def __init__(self, method, url, status, location=""):
+        super().__init__(
+            f"eToro {method} {url} answered HTTP {status}, a redirect "
+            f"(to {location or 'no Location'}): a demo-only client follows "
+            f"no redirect — not followed")
+        self.method = str(method)
+        self.url = str(url)
+        self.status = int(status or 0)
+        self.location = str(location or "")
+
+
+def demo_segment_url(url) -> bool:
+    """True for a URL a demo-only client may send: on eToro's host, and
+    either eToro's market data (which carries no world) or its trading API
+    WITH the demo segment and without the real one. Everything else is
+    False: the real segment, another host, a scheme that is not https."""
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(str(url))
+        host = urlsplit(BASE).netloc
+    except Exception:  # noqa: BLE001 — an unreadable URL is not demo
+        return False
+    if parts.scheme != "https" or parts.netloc != host:
+        return False
+    segs = [s for s in parts.path.split("/") if s]
+    if "trading" in segs:
+        return "demo" in segs and "real" not in segs
+    return len(segs) >= 3 and segs[0] == "api" and segs[2] == "market-data"
+
+
+class _DemoOnlyWire:
+    """Every request of a DemoOnlyEtoroTrader, through ONE check: the URL
+    must be on the demo segment (demo_segment_url) or nothing is sent. No
+    redirect is ever followed (2026-10-31): allow_redirects is forced
+    False on every call, whatever the caller passed, the session's
+    max_redirects is 0, and a 3xx answer raises RedirectRefused, so the
+    one request that left is the one checked. Counts what it lets through
+    on the client (`wire_requests`), so a caller can record what a step
+    cost."""
+
+    def __init__(self, inner, owner):
+        self._inner = inner
+        self._owner = owner
+        if isinstance(inner, requests.Session):
+            inner.max_redirects = 0
+
+    @property
+    def headers(self):
+        return self._inner.headers
+
+    def _check(self, method, url):
+        if not demo_segment_url(url):
+            log.error("eToro demo-only client REFUSED %s %s: not on the "
+                      "demo segment — nothing sent", method, url)
+            raise RealSegmentRefused(
+                f"eToro {method} {url}: not on the demo segment — the demo "
+                f"proof runner reaches eToro's demo account only; nothing "
+                f"sent")
+        self._owner.wire_requests = getattr(self._owner, "wire_requests",
+                                            0) + 1
+
+    @staticmethod
+    def _redirected(method, url, resp) -> RedirectRefused:
+        code = int(getattr(resp, "status_code", 0) or 0)
+        try:
+            location = str((getattr(resp, "headers", None) or {})
+                           .get("Location") or "")
+        except Exception:  # noqa: BLE001 — the refusal stands without it
+            location = ""
+        log.error("eToro demo-only client REFUSED the redirect of %s %s "
+                  "(HTTP %s to %s): not followed", method, url, code,
+                  location or "no Location")
+        return RedirectRefused(method, url, code, location)
+
+    def _send(self, method, url, call, kw):
+        self._check(method, url)
+        kw["allow_redirects"] = False
+        try:
+            resp = call(url, **kw)
+        except requests.exceptions.TooManyRedirects as e:
+            # max_redirects 0: requests raises this on any redirect, even
+            # unfollowed, once the one request has been answered
+            raise self._redirected(method, url,
+                                   getattr(e, "response", None)) from e
+        if 300 <= int(getattr(resp, "status_code", 0) or 0) < 400:
+            raise self._redirected(method, url, resp)
+        return resp
+
+    def get(self, url, **kw):
+        return self._send("GET", url, self._inner.get, kw)
+
+    def post(self, url, **kw):
+        return self._send("POST", url, self._inner.post, kw)
+
+    def patch(self, url, **kw):
+        return self._send("PATCH", url, self._inner.patch, kw)
+
+    def delete(self, url, **kw):
+        return self._send("DELETE", url, self._inner.delete, kw)
+
+    def request(self, method, url, **kw):
+        return self._send(str(method).upper(), url,
+                          lambda u, **k: self._inner.request(method, u, **k),
+                          kw)
+
+
+class DemoOnlyEtoroTrader(EtoroTrader):
+    """eToro's DEMO segment and nothing else (2026-10-31): the client of
+    the platform's own short proofs (bot_program/short_proofs.py). See
+    the block above for how the world is pinned."""
+
+    def __init__(self, api_key: str, user_key: str, *, timeout: float = 10.0):
+        super().__init__(api_key, user_key, env="demo", timeout=timeout)
+        self.wire_requests = 0
+
+    @property
+    def demo(self) -> bool:
+        return True
+
+    @demo.setter
+    def demo(self, value) -> None:
+        if value is not True:
+            raise RealSegmentRefused("a demo-only eToro client stays on the "
+                                     "demo segment")
+
+    @property
+    def env(self) -> str:
+        return "demo"
+
+    @env.setter
+    def env(self, value) -> None:
+        if str(value or "").lower() != "demo":
+            raise RealSegmentRefused("a demo-only eToro client stays on the "
+                                     "demo segment")
+
+    @staticmethod
+    def _demo_world(world) -> str:
+        if world and str(world).lower() != "demo":
+            raise RealSegmentRefused(
+                f"a demo-only eToro client reads the demo world only, not "
+                f"{world!r} — nothing sent")
+        return "demo"
+
+    def _sess(self):
+        return _DemoOnlyWire(super()._sess(), self)
+
+    def _v2_info(self, tail: str, world: str = "") -> str:
+        return super()._v2_info(tail, self._demo_world(world))
+
+    def _elig_key(self, symbol: str, world: str = "") -> tuple:
+        return super()._elig_key(symbol, self._demo_world(world))

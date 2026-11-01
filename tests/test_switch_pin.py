@@ -846,8 +846,12 @@ class SeedNeverArmsTests(TestCase):
             row = PlatformComponent.objects.filter(key=key).first()
             self.assertIsNotNone(row, f"{key} is not seeded")
             self.assertFalse(row.is_enabled, key)
-        self.assertFalse([c["key"] for c in DEFAULT_COMPONENTS
-                          if "is_enabled" in c])
+        # One row ships ON, on the operator's word (2026-10-31): the demo
+        # short proofs, which only ever touch eToro's demo account. It is
+        # no live-money switch, so no seed arms real money.
+        self.assertEqual([c["key"] for c in DEFAULT_COMPONENTS
+                          if "is_enabled" in c], ["short_proofs_demo"])
+        self.assertNotIn("short_proofs_demo", _live())
 
     def test_a_reseed_leaves_an_armed_switch_armed(self):
         from core.platform_control import seed_components

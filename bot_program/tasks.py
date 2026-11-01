@@ -1597,6 +1597,24 @@ def run_morgul_guards() -> dict:
     return report.result
 
 
+# ── The demo short proofs (2026-10-31) ───────────────────────────────────
+# The platform proves each unproven class's short itself, on eToro's DEMO
+# account only (bot_program/short_proofs.py), one step a run.
+
+@shared_task
+@guarded_task("short_proofs_demo")
+def run_short_proofs_demo() -> dict:
+    """Every 15 min on the slow queue: ONE step of the demo short proofs —
+    close a demo position the runner holds, or prove the next class whose
+    short no code pins (a SELL of the venue minimum, filled, closed and
+    recorded) while its market is open and the live lane leaves eToro's
+    quota free. Gated by short_proofs_demo, ON by default (it only ever
+    touches the demo account). A step in doubt answers "error": the
+    runner stays stopped until a superuser clears it on /short-proofs/."""
+    from .short_proofs import run_once
+    return run_once()
+
+
 # ── The Telegram eye (2026-09-26) ────────────────────────────────────────
 # The group "Sauron Vision" asks, Sauron answers: in English, to the
 # configured chat only, and its one write is the brake (bots OFF, never

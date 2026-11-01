@@ -492,10 +492,22 @@ class WallDoesNotOverclaimTests(TestCase):
 
         shipped_on = [c["key"] for c in DEFAULT_COMPONENTS
                       if c.get("is_enabled")]
+        # The one row that ships ON (2026-10-31): the demo short proofs,
+        # which reach eToro's demo account only — no real order, no money.
+        # The page's "ships off" sentences name real orders and the money.
         self.assertEqual(
-            shipped_on, [],
+            shipped_on, ["short_proofs_demo"],
             "a component now ships enabled — the wall's 'switch it on' "
             "wording may need to change with it")
+        self.assertIn("like every switch here that can reach a real order",
+                      self.body)
+        self.assertNotIn("like every switch here that can reach an order",
+                         self.body)
+        # The page's broadest claim, "And every switch ships off", now
+        # names the switches that can reach a real order.
+        self.assertNotIn("And every switch ships off;", self.body)
+        self.assertIn("And every switch that can reach a real order ships "
+                      "off;", self.body)
         self.assertNotIn("Both run on every tick", self.body)
         # Each of the three sections names the switch rather than assuming it.
         self.assertIn("it ships off", self.body)
@@ -934,8 +946,11 @@ class WallSafeguardsSectionTests(TestCase):
 
     def test_it_names_the_switch_before_the_mechanism(self):
         from core.platform_control import DEFAULT_COMPONENTS
+        # The demo short proofs ship ON (2026-10-31) and are no safeguard
+        # of this section: they reach eToro's demo account only.
         self.assertEqual(
-            [c["key"] for c in DEFAULT_COMPONENTS if c.get("is_enabled")], [],
+            [c["key"] for c in DEFAULT_COMPONENTS if c.get("is_enabled")],
+            ["short_proofs_demo"],
             "a component now ships enabled — the section's 'with its switch "
             "on' hedges may need to change with it")
         block = self._block('id="safeguards"')

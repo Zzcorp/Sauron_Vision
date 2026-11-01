@@ -101,28 +101,32 @@ def class_words(icls) -> str:
     return CLASS_WORDS.get(cls, cls or "this class")
 
 
-def unmeasured(client, icls, side) -> bool:
+def unmeasured(client, icls, side, leverage=None) -> bool:
     """Whether a hand-taken order is a short eToro has not been measured
     on: an eToro carrier, a SELL, and short_<class> among the proofs the
-    bots' gate still lacks (base.missing_proofs, read at call time)."""
+    bots' gate still lacks at the ticket's multiplier (base.missing_proofs,
+    read at call time: a short the platform proved on the demo account at
+    1x is measured at 1x only, 2026-10-31; None reads as 1)."""
     if str(side or "").upper() != "SELL":
         return False
     from bot_program.asset_engine.base import missing_proofs
     from bot_program.engine.capabilities import adapter_key
     if adapter_key(client) != "etoro":
         return False
-    return f"short_{icls}" in missing_proofs(str(icls), "SELL")
+    return f"short_{icls}" in missing_proofs(str(icls), "SELL",
+                                             leverage=leverage)
 
 
-def ticket_advisory(client, icls, side, *, live=True) -> dict:
+def ticket_advisory(client, icls, side, *, live=True, leverage=None) -> dict:
     """{"ok", "class", "reason"} for the TAKE TRADE preview: the warning
-    before the PIN for an unmeasured short (unmeasured), else ok. A
-    warning, never a refusal; a paper ticket is never warned."""
+    before the PIN for an unmeasured short (unmeasured, at the ticket's
+    multiplier), else ok. A warning, never a refusal; a paper ticket is
+    never warned."""
     quiet = {"ok": True, "class": "", "reason": ""}
     if not live:
         return quiet
     try:
-        if not unmeasured(client, icls, side):
+        if not unmeasured(client, icls, side, leverage=leverage):
             return quiet
     except Exception as e:  # noqa: BLE001 — an unread proof warns of nothing
         logger.warning("[short-readback] proof set unread for %s: %s",
@@ -420,21 +424,33 @@ def after_fill(trade, client, *, icls=None, sent_units=None,
     return record
 
 
-def _observe(trade, client, reading, icls, units, now):
-    """The clean read-back as an EtoroShortObservation."""
-    from bot_program.short_models import EtoroShortObservation
+def scrub(value):
+    """`value` with the account's own keys (PRIVATE_KEYS) taken out at
+    every depth: what a record may keep of an eToro body."""
+    if isinstance(value, dict):
+        return {k: scrub(v) for k, v in value.items()
+                if k not in PRIVATE_KEYS}
+    if isinstance(value, list):
+        return [scrub(v) for v in value]
+    return value
+
+
+def observation_facts(reading, *, units=0, order_id="") -> dict:
+    """The fields of an EtoroShortObservation off an order_status reading
+    (2026-10-31, shared by the read-back and the demo proof runner): the
+    venue's spelling and id, the side, the settlement, the multiplier, the
+    units, the order and position ids, the open rate, the fees, the legs
+    held, the times, and the lookup body less the account's own keys.
+    `units` and `order_id` stand in where the body prints none."""
     raw, asset, first, opening = _execution(reading)
-    lookup = {k: v for k, v in raw.items() if k not in PRIVATE_KEYS}
-    return EtoroShortObservation.objects.create(
-        trade=trade, asset_class=icls, symbol=trade.symbol,
+    return dict(
         venue_symbol=str(asset.get("symbol") or ""),
         instrument_id=_int(asset.get("instrumentId")),
-        world="demo" if getattr(client, "demo", False) else "live",
         side=str(asset.get("side") or "").lower(),
         settlement=str(asset.get("settlementType") or ""),
         leverage=_int(asset.get("leverage")) or 1,
         units=Decimal(str(_num(opening.get("units")) or units)),
-        order_id=str(raw.get("orderId") or trade.broker_order_id or ""),
+        order_id=str(raw.get("orderId") or order_id or ""),
         position_id=str(first.get("positionId") or first.get("positionID")
                         or ""),
         open_rate=_dec(opening.get("avgPrice")),
@@ -445,4 +461,15 @@ def _observe(trade, client, reading, icls, units, now):
         target_held=_dec(first.get("takeProfitRate")),
         opened_at=_when(opening.get("openTime")),
         executed_at=_when(opening.get("executionTime")),
-        read_at=now, lookup=lookup)
+        lookup={k: v for k, v in raw.items() if k not in PRIVATE_KEYS})
+
+
+def _observe(trade, client, reading, icls, units, now):
+    """The clean read-back as an EtoroShortObservation."""
+    from bot_program.short_models import EtoroShortObservation
+    return EtoroShortObservation.objects.create(
+        trade=trade, asset_class=icls, symbol=trade.symbol,
+        world="demo" if getattr(client, "demo", False) else "live",
+        read_at=now,
+        **observation_facts(reading, units=units,
+                            order_id=trade.broker_order_id or ""))

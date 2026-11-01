@@ -860,7 +860,14 @@ commodity symbol reads `route=etoro` before its config is enabled.
   warned before the PIN and read back at the fill,
   bot_program/short_readback.py) and any leverage above 1x but forex's 5x
   (a short above 1x has never been measured; the ticket defaults a SELL to
-  1x). What the proofs do not lift: an index in
+  1x). Since 2026-10-31 the platform proves these shorts itself, on eToro's
+  DEMO account only (bot_program/short_proofs.py, the short_proofs_demo
+  switch, ON by default; `manage.py short_proofs_demo --dry-run` prints
+  its plan): a SELL of the venue minimum per class at 1x, then 2x and 5x
+  where the demo row lists them, filled, closed and recorded; a clean one
+  opens that class to the bots at that multiplier only, and /short-proofs/
+  revokes it with the trading PIN. Pinning one in ETORO_SHORT_PROVEN (§10)
+  stays the stronger proof. What the proofs do not lift: an index in
   VENUE_QUOTE_UNMEASURED, a commodity while eToro's commodities box is
   unticked (the router sends it elsewhere), and the 1,000 USD floor per
   order on indices and commodities.
@@ -1002,7 +1009,9 @@ retirement then continues at deploy/IBKR_RETIREMENT.md Stage 3.
   same commit, and never tick a class whose token is absent: every lane
   (the asset-bot tick, TAKE TRADE and the legacy tick) refuses every
   eToro entry of that class — and every bot short of a class until its
-  own short proof is in ETORO_SHORT_PROVEN — as `gate_blocked`, before the
+  own short proof is in ETORO_SHORT_PROVEN, or recorded on the demo
+  account by bot_program/short_proofs.py at the order's multiplier
+  (2026-10-31) — as `gate_blocked`, before the
   floor and before any POST, until the proof lands (2026-09-24). A
   hand-taken short is the one exception (2026-10-31): TAKE TRADE sends it
   on a class with no short proof, warned before the PIN and read back at

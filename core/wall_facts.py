@@ -453,10 +453,21 @@ def _count_proof_classes() -> int:
 
 
 def _count_short_classes() -> int:
-    """Families with a proof of their own for a sell
-    (bot_program.asset_engine.base.ETORO_SHORT_PROVEN)."""
-    from bot_program.asset_engine.base import ETORO_SHORT_PROVEN
-    return len(ETORO_SHORT_PROVEN)
+    """Families with a proof of their own for a bot's sell: pinned in the
+    code (bot_program.asset_engine.base.ETORO_SHORT_PROVEN, short_pinned)
+    or, since 2026-10-31, proven by the platform itself on eToro's demo
+    account at one multiplier at least (base.demo_short_leverages, the
+    gate's own read: standing proofs only, nothing when unread).
+
+    Counted over the families with an eToro proof of their own
+    (ETORO_PROVEN, less its "every short at once" token): the gate refuses
+    any other family's entry, sell or buy, whatever proves its short.
+    """
+    from bot_program.asset_engine.base import (
+        ETORO_PROVEN, demo_short_leverages, short_pinned,
+    )
+    return sum(1 for cls in ETORO_PROVEN - {"short"}
+               if short_pinned(cls) or demo_short_leverages(cls))
 
 
 def _count_proving_verdicts() -> int:

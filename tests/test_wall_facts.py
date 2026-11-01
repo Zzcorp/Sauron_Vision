@@ -785,6 +785,34 @@ class SafeguardFactsTests(TestCase):
         for key in self.NEW[:4]:
             self.assertGreater(facts[key], 0, f"{key} read an empty registry")
 
+    def test_a_short_proved_on_the_demo_account_counts(self):
+        """The bots short a class the platform proved on eToro's demo
+        account (base.missing_proofs, 2026-10-31). The Wall's "a bot's sell
+        needs a proof of its own: N have one" and the Book's "which N
+        families have" count it beside the code's pins: once a class, and
+        not once revoked."""
+        from bot_program.asset_engine.base import ETORO_SHORT_PROVEN
+        from bot_program.short_models import EtoroShortObservation
+
+        def proof(cls, lev=1, **kw):
+            kw.setdefault("proof_state", "proven")
+            kw.setdefault("demo_proven", True)
+            return EtoroShortObservation.objects.create(
+                source="proof_runner", world="demo", side="short",
+                asset_class=cls, symbol="X", leverage=lev,
+                units=Decimal("1"), order_id="1", position_id="2", **kw)
+        pinned = len(ETORO_SHORT_PROVEN)
+        self.assertEqual(wall_facts()["short_classes"], pinned)
+        proof("crypto")
+        proof("crypto", 2)
+        cache.clear()
+        self.assertEqual(wall_facts()["short_classes"], pinned + 1)
+        proof("stock")                       # the code pins it already
+        proof("etf", revoked_at=timezone.now())
+        proof("index", demo_proven=False, proof_state="mismatch")
+        cache.clear()
+        self.assertEqual(wall_facts()["short_classes"], pinned + 1)
+
     def test_a_saved_verdict_moves_its_count(self):
         from backtester.models_proving import ProvingVerdict
         self.assertEqual(wall_facts()["proving_verdicts"], 0)

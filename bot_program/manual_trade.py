@@ -2076,9 +2076,13 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
     # this lane alone — and the ticket says so BEFORE the PIN. A warning,
     # never a refusal; recorded at entry (short_advisory_at_entry), and the
     # position is read back at the fill (bot_program/short_readback.py).
+    # At the ticket's own multiplier (2026-10-31): a short the platform
+    # proved on the demo account is measured at the multiplier it was
+    # proven at, and no other.
     from bot_program.short_readback import ticket_advisory
-    short_advisory = ticket_advisory(_client, inst.asset_class or cls, side,
-                                     live=live)
+    short_advisory = ticket_advisory(
+        _client, inst.asset_class or cls, side, live=live,
+        leverage=(ticket_lev["chosen"] if ticket_lev else None))
 
     return {
         "symbol": inst.symbol, "side": side, "qty": qty,
@@ -3179,7 +3183,8 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             try:
                 from bot_program import short_readback
                 readback_due = short_readback.unmeasured(
-                    client, str(inst.asset_class or cls), side)
+                    client, str(inst.asset_class or cls), side,
+                    leverage=ticket_l)
             except Exception as e:  # noqa: BLE001 — unsure is due
                 logger.warning("[take-trade] %s: the short proof set was "
                                "unread (%s); the fill is read back",

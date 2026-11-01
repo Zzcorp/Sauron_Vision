@@ -521,7 +521,25 @@ def etoro_proof_states() -> dict:
         out["short"] = f"shorts proven on {', '.join(sorted(shorts))} only"
     else:
         out["short"] = "no short proven"
+    demo = _demo_short_words(shorts)
+    if demo and "short" not in proven:
+        out["short"] += f"; on the demo account by the platform: {demo}"
     return out
+
+
+def _demo_short_words(pinned) -> str:
+    """The shorts the platform proved itself on eToro's demo account
+    (2026-10-31, bot_program/short_proofs.py), for the classes the code
+    does not pin: "etf at 1x, 2x", or "". The bots short those classes at
+    those multipliers only (base.missing_proofs)."""
+    from bot_program.asset_engine import base
+    parts = []
+    for cls in sorted({t for _box, ts in ETORO_BOX_TOKENS for t in ts}
+                      - set(pinned)):
+        levels = sorted(base.demo_short_leverages(cls))
+        if levels:
+            parts.append(f"{cls} at {', '.join(f'{v}x' for v in levels)}")
+    return "; ".join(parts)
 
 
 def unproven_note(carried) -> str:

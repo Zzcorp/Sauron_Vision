@@ -412,6 +412,49 @@ class TheOrderThatDidNotComeBackTests(SimpleTestCase):
                 self.assertIsNotNone(s)
                 self.assertEqual(s["failures"][-1]["code"], status)
 
+    def test_an_accepted_post_whose_body_nobody_can_read_is_in_doubt(self):
+        """A 2xx is an acceptance (fact 1 of the client). When its body is
+        not a JSON object (an empty 202, an HTML page, a list), the order
+        MAY be live and nothing names it: in doubt, never a plain error
+        the engine books as "live order failed" (the review of 2026-10-31:
+        requests' JSONDecodeError, a ValueError, rode out bare)."""
+
+        class _NotJson(_Resp):
+            def json(self):
+                raise requests.exceptions.JSONDecodeError(
+                    "Expecting value", self.text, 0)
+
+        for status, answer in ((202, _NotJson(202, {}, text=" ")),
+                               (200, _NotJson(200, {}, text="<html>ok")),
+                               (200, _Resp(200, [1, 2]))):
+            with self.subTest(status=status, body=answer.text):
+                vh.reset()
+                t, fake = _client([SEARCH_AAPL])
+                routed = fake._hit
+
+                def hit(method, url, _answer=answer, _routed=routed,
+                        _fake=fake, **kw):
+                    if method == "POST" and ORDERS in url:
+                        _fake.calls.append((method, url, kw))
+                        return _answer
+                    return _routed(method, url, **kw)
+                fake._hit = hit
+                with self.assertRaises(EtoroOrderInDoubt) as cm:
+                    self._order(t)
+                e = cm.exception
+                self.assertTrue(getattr(e, "in_doubt", False))
+                self.assertEqual(e.answered, status)
+                self.assertTrue(str(e).startswith(
+                    f"AAPL: the order was answered HTTP {status} with a body "
+                    f"nobody could read"), str(e))
+                self.assertIn("Do not resend it", str(e))
+                self.assertEqual(len(_calls(fake, "POST", ORDERS)), 1)
+                self.assertEqual(_calls(fake, "GET", "orders:lookup"), [])
+                s = vh.sick("etoro", "demo")
+                self.assertIsNotNone(s, "an order nobody can read is the "
+                                        "venue's failure")
+                self.assertIn("in doubt", s["failures"][-1]["detail"])
+
     def test_a_4xx_refusal_is_the_orders_fault_not_the_venues(self):
         t, fake = _client([SEARCH_AAPL, ("POST", ORDERS, 400, {"m": "x"})])
         with self.assertRaises(RuntimeError) as cm:

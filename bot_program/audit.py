@@ -454,6 +454,49 @@ def record_pin(kind: str, *, who: str, door: str, act: str,
                        type(e).__name__)
 
 
+# ── The demo short proofs (2026-10-31, bot_program/short_proofs.py) ─────
+# A superuser revoked a short the platform proved on eToro's demo account
+# (the bots' gate reads it no more), or cleared the runner's in-doubt stop
+# (it goes on), with the trading PIN on /short-proofs/. Constants only,
+# never KIND_CHOICES; the same 20-wide column. Never an order id, a
+# position id or an amount.
+
+#: A recorded demo short proof revoked.
+SHORT_PROOF_REVOKED = "short_proof_revoked"
+#: The demo proofs' in-doubt stop cleared.
+SHORT_PROOF_CLEARED = "short_proof_cleared"
+
+AUDIT_KINDS_SHORT_PROOF = (SHORT_PROOF_REVOKED, SHORT_PROOF_CLEARED)
+
+
+def record_short_proof(kind: str, *, row, who: str, reason: str = "",
+                       user=None, rows=None) -> None:
+    """One revoke or clear on the chain: the row's number, its class,
+    instrument, multiplier, world and step, whether it was the overnight
+    hold, who, and why; and `rows`, the numbers of every row the act
+    marked (a revoke marks every standing proof of the class at that
+    multiplier, 2026-10-31). Never raises."""
+    try:
+        linked = user if getattr(user, "is_authenticated", False) and \
+            getattr(user, "pk", None) else None
+        data = {
+            "row": int(row.pk),
+            "rows": [int(r.pk) for r in (rows or [row])][:50],
+            "asset_class": str(row.asset_class or "")[:12],
+            "symbol": str(row.symbol or "")[:40],
+            "leverage": int(row.leverage or 1),
+            "world": str(row.world or "")[:8],
+            "state": str(row.proof_state or "")[:16],
+            "overnight": bool(row.overnight),
+            "who": str(who or "")[:80],
+            "reason": str(reason or "")[:120],
+        }
+        record_event(kind, data, user=linked)
+    except Exception as e:
+        logger.warning("audit record_short_proof(%s) failed (%s)", kind,
+                       type(e).__name__)
+
+
 def record_legacy_bot(cfg, *, on: bool, via: str, who: str,
                       user=None) -> None:
     """A legacy crypto BotConfig turned on in LIVE mode, or a live one

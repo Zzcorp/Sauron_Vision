@@ -71,6 +71,10 @@ app.conf.task_routes = {
     # Beside the quote poller: the next order is judged on what it reads.
     "bot_program.tasks.refresh_etoro_cells": {"queue": "fast"},
     "bot_program.tasks.answer_telegram_question": {"queue": "ai"},
+    # 2026-10-31 -- the demo short proofs (bot_program/short_proofs.py): one
+    # demo round trip polls eToro for up to ~20 s, never in front of the
+    # quote poller.
+    "bot_program.tasks.run_short_proofs_demo": {"queue": "slow"},
     # 2026-09-28 -- the alarm bot (bot_program/alarm.py). Its poll beside
     # the eye's: one HTTP round trip when idle, and a /stopall must not
     # queue behind anything slower. Its sentinel reads the platform every
@@ -734,6 +738,20 @@ app.conf.beat_schedule = {
         # A backlog never drains a queue of stale runs (the module also
         # holds a lock: one run at a time).
         "options": {"expires": 240},
+    },
+
+    # 2026-10-31 -- the demo short proofs (bot_program/short_proofs.py): ONE
+    # step a run on eToro's DEMO account only (a class at a time, 25 min
+    # apart, while its market is open and the live lane leaves eToro's
+    # quota free). Off the quarter hours the 5-min tick and the syncs fire
+    # on. Gated by short_proofs_demo, ON by default; the module holds a
+    # lock, so a late run never overlaps the next.
+    "short-proofs-demo": {
+        "task": "bot_program.tasks.run_short_proofs_demo",
+        "schedule": crontab(minute="7,22,37,52"),
+        # a run not started within 10 min is dropped, never queued behind
+        # a slow one (expire_seconds: the database scheduler's spelling)
+        "options": {"expires": 600, "expire_seconds": 600},
     },
 
     "auto-evaluate-promotions": {
