@@ -1941,6 +1941,19 @@
       var def = Number(p.qty);
       var L = p.levels || {};
       var lever = p.leverage || {};
+      /* THE SEND'S OWN CASH CHECK (2026-10-31, manual_trade.
+         _cash_gate_advisory): eToro's available cash and used margin as
+         the order gate reads them, their age, and the size they leave room
+         for. The pool line above stays the pool's. */
+      var cg = (p.cash_gate && p.cash_gate.asked) ? p.cash_gate : null;
+      var cashMax = (cg && cg.max_qty !== null && cg.max_qty !== undefined
+                     && isFinite(Number(cg.max_qty))) ? Number(cg.max_qty) : null;
+      function acctMoney(n) {
+        var v = Number(n);
+        if (n === null || n === undefined || !isFinite(v)) return '—';
+        return v.toLocaleString(undefined, { minimumFractionDigits: 2,
+          maximumFractionDigits: 2 }) + (cg && cg.currency ? ' ' + cg.currency : '');
+      }
       /* Two reference prices, deliberately. The MONEY runs off the quoted
          mark, because every per-unit number the server sent was computed
          there and the pre-filled size reads exactly its risk budget
@@ -2140,6 +2153,15 @@
                  (freed() > 0 ? ' after the closes ticked above' : '') + '.' +
                  (kept > 0 ? ' Tick another position to close, or size down.' : '');
         }
+        /* The size control stops where eToro's cash check would refuse:
+           its free cash and the pledge ceiling, at this multiplier. */
+        if (cashMax !== null && q > cashMax + 1e-9) {
+          return units(q) + ' units needs ' +
+                 acctMoney(q * Number(cg.margin_per_unit)) + ' of eToro margin; ' +
+                 'the account leaves room for ' + acctMoney(cg.room) + ', ' +
+                 units(cashMax) + ' units (cells read ' + (cg.age_words || '?') +
+                 ' ago). The send would refuse it — size down.';
+        }
         return '';
       }
 
@@ -2157,6 +2179,20 @@
         facts.push(['Target', String(p.target)]);
       }
       facts.push(['Capital free', money(avail) + ' of ' + money(capital)]);
+      if (cg) {
+        /* eToro's own cells, as the send's cash check reads them. The
+           equity carries its own age (2026-10-31): the re-read after an
+           order dates the cells, never the equity. */
+        facts.push(['eToro cash', (cg.cash === null || cg.cash === undefined)
+          ? 'never read'
+          : acctMoney(cg.free) + ' free · ' + acctMoney(cg.cash) + ' available, ' +
+            acctMoney(cg.used) + ' used · cells read ' +
+            (cg.age_words || '?') + ' ago' +
+            ' · equity ' + acctMoney(cg.equity) + ', read ' +
+            (cg.equity_age_words || '?') + ' ago' +
+            (Number(cg.pledged) > 0 ? ' · ' + acctMoney(cg.pledged) +
+              ' pledged since' : '')]);
+      }
       if (lever.chosen != null) {
         /* The live ticket's own multiplier (2026-10-01): the operator's
            pick, the highest open by default — the control below. */
@@ -2206,6 +2242,54 @@
           (conc.ok === false
             ? '<br>' + esc('Refused at this size — size down or close some of it first.')
             : '') + '</div>';
+      }
+
+      /* THE SAME ASSET, A SECOND AUTHOR (2026-10-31). A bot — or a legacy
+         portfolio position — already holds this symbol on this side. It
+         used to refuse this ticket outright; it warns now, names the
+         holder, and the trade records it. A legacy row's own sentence says
+         what it is and where it is closed. */
+      var dupl = p.duplicate || {};
+      /* A second ticket on a bet another config holds (2026-10-31, review):
+         the dialog opens on this box (data-sv-focus below) and repeats it
+         beside the PIN and the go button — focused on the size, the body
+         opened scrolled past every warning at 1280x800 and 390x844. */
+      var second = dupl.ok === false && !!dupl.reason;
+      var sideWord = p.side === 'SELL' ? 'short' : 'long';
+      if (second) {
+        warnHtml += '<div class="sz-warn sz-warn--book" data-role="dupwarn" tabindex="-1"><b>' + esc(p.symbol) +
+          ' IS ALREADY HELD ON THIS SIDE (' + esc((dupl.holders || []).join(', ')) +
+          ')</b>' + esc(dupl.reason) +
+          '<br>' + esc('A warning, not a block: this ticket doubles that bet if ' +
+                       'you send it' + (live ? ' (your trading PIN still decides)' : '') +
+                       '. Your bots refuse it. Taking it is recorded with the holder.') +
+          '</div>';
+      }
+
+      /* THE SEND'S CASH CHECK, on the ticket (2026-10-31): the refusal the
+         order would meet, before the PIN; and when the cells are older
+         than a minute, the fresh read the preview asked for. */
+      /* A refusal of the TICKET (no room figure) has no size verdict under
+         the size field to show it: the dialog opens on it (review). */
+      var cashStop = !!(cg && cg.ok === false && cg.reason && cashMax === null);
+      if (cg && cg.ok === false && cg.reason) {
+        /* No room figure: the refusal is not about the size (cells over an
+           hour old, another world, another currency, an unreadable
+           reserve), so the title does not say it is. */
+        warnHtml += '<div class="sz-warn sz-warn--stop" data-role="cashwarn" tabindex="-1"><b>eTORO\'S CASH CHECK ' +
+          'WOULD REFUSE THIS ' + (cashMax !== null ? 'SIZE' : 'TICKET') +
+          '</b>' + esc(cg.reason) +
+          (cashMax !== null && cashMax > 0
+            ? '<br>' + esc('It leaves room for ' + units(cashMax) + ' units at this ' +
+                           'multiplier — the size control stops there.')
+            : '') + '</div>';
+      }
+      if (cg && cg.refresh && cg.refresh.asked) {
+        warnHtml += '<div class="sz-note"><b>ACCOUNT RE-READ ASKED</b> ' + esc(
+          'eToro\'s cells are ' + (cg.age_words ? cg.age_words + ' old' : 'not stored') +
+          '; a fresh read of the account lands in about ' +
+          Number(cg.refresh.in_s || 0).toFixed(0) + ' s. Open the ticket again ' +
+          'to judge this size against it.') + '</div>';
       }
 
       /* The brain's standing verdict on hand-taken entries. Advice, not a
@@ -2524,9 +2608,29 @@
           '</fieldset>'
         : '';
 
-      var title = live
+      /* Another config's holding is not "this position": the ticket books
+         its own row with its own stop and target (2026-10-31, review). */
+      var title = second
+        ? 'Take a second ' + p.symbol + ' ' + sideWord + (live ? ' with REAL funds?' : '?')
+        : live
         ? (held.length ? 'Add to this LIVE position?' : 'Take this trade with REAL funds?')
         : (held.length ? 'Add to this position?' : 'Take this trade?');
+      /* Beside the PIN and the go button: what the box at the top says, in
+         one line, for an operator who scrolled straight to the size. */
+      var sideNotes = '';
+      if (second) {
+        sideNotes += '<div class="sz-warn sz-warn--book" data-role="dupnotice">' + esc(
+          'Second ticket on ' + p.symbol + ' ' + sideWord + ' — ' +
+          (dupl.holders || []).join(', ') +
+          ((dupl.holders || []).length > 1 ? ' already hold it' : ' already holds it') +
+          ' (the warning at the top).') +
+          '</div>';
+      }
+      if (cashStop) {
+        sideNotes += '<div class="sz-warn sz-warn--stop" data-role="cashnotice">' + esc(
+          'eToro\'s cash check would refuse this ticket — the reason is at the top.') +
+          '</div>';
+      }
       var host = document.createElement('div');
       host.className = 'sv-dialog sz-dialog' + ((funding || live) ? ' sv-dialog--danger' : '');
       host.setAttribute('data-sv-overlay', 'dialog');
@@ -2553,7 +2657,7 @@
              own button is clicked, and okBtn never reads it. */
           ((live && p.council_on) ? '<div data-role="council" aria-live="polite"></div>' : '') +
           '<div class="sv-dialog-facts">' + factsHtml + '</div>' +
-          fundHtml + lvlHtml + levHtml + sizeHtml + pinHtml +
+          fundHtml + lvlHtml + levHtml + sizeHtml + sideNotes + pinHtml +
         '</div>' +
         '<div class="sv-dialog-foot">' +
           '<button type="button" class="sv-dialog-btn" data-role="cancel">Cancel</button>' +
@@ -2730,7 +2834,8 @@
         var n = chosenCount();
         okBtn.textContent = (n
           ? ('CLOSE ' + n + ' + TAKE')
-          : (live ? 'TAKE LIVE TRADE' : (held.length ? 'ADD' : 'TAKE TRADE'))) +
+          : (live ? 'TAKE LIVE TRADE'
+                  : ((held.length && !second) ? 'ADD' : 'TAKE TRADE'))) +
           (rrLow ? ' ANYWAY' : '');
         okBtn.classList.toggle('is-danger', n > 0 || live);
         host.classList.toggle('sv-dialog--danger', n > 0 || live);
@@ -2841,7 +2946,10 @@
           pin: pinIn ? pinIn.value : null,
           /* the multiplier this ticket was previewed at, so the order is
              judged at the same one */
-          leverage: lever.chosen != null ? Number(lever.chosen) : null
+          leverage: lever.chosen != null ? Number(lever.chosen) : null,
+          /* the holders this ticket showed (2026-10-31): the send refuses
+             one it did not show — a bot that opened this bet since */
+          dup_seen: (dupl.holder_ids || []).slice()
         });
       });
       host.querySelector('[data-role="cancel"]')
@@ -2849,9 +2957,14 @@
 
       /* Focus the size, not the go button: the numbers are the decision,
          and a stray Enter on a pre-focused OK is how a default gets taken
-         by accident. */
+         by accident. A second ticket on a held bet, or a ticket eToro's
+         cash check refuses outright, opens on its warning instead
+         (2026-10-31, review): focused on the size, the body opened
+         scrolled past every warning box. */
       host.setAttribute('data-sv-focus',
-                        sizable ? '[data-role="qty"]' : '[data-role="cancel"]');
+                        second ? '[data-role="dupwarn"]'
+                        : cashStop ? '[data-role="cashwarn"]'
+                        : sizable ? '[data-role="qty"]' : '[data-role="cancel"]');
       SV.overlay.open(host, null);
     });
   }
@@ -2894,6 +3007,7 @@
         if (choice.stop !== null) body.stop = choice.stop;
         if (choice.target !== null) body.target = choice.target;
         if (choice.pin) body.pin = choice.pin;
+        if (choice.dup_seen) body.dup_seen = choice.dup_seen;
         if (choice.council) body.council_session = choice.council;
         fetch(executeUrl, {
           method: 'POST', credentials: 'same-origin',

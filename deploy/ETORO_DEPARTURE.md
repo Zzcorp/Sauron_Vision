@@ -136,9 +136,9 @@ operator closes in the IBKR app instead, the rows are settled the way #95 was
 before `reconcile_user`, re-key), with the beat reconcile paused:
 `./deploy/dc exec worker-fast python manage.py component off pipeline_asset_bots`
 first and `component on pipeline_asset_bots` after (the tick pauses with it
-for those minutes). Since 2026-10-06 the reconcile runs every 15 minutes
-around the clock, so the old "outside 13:00-21:59 UTC" window no longer
-exists.
+for those minutes). Since 2026-10-06 the reconcile runs around the clock
+(every 15 minutes then, every 5 since 2026-10-31), so the old "outside
+13:00-21:59 UTC" window no longer exists.
 
 An alternative for a future row whose carrier is provable: write
 `metadata["broker"] = "ibkr"` on it, so the guard's FIRST refusal protects it

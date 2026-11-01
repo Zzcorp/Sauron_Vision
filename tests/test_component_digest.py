@@ -369,10 +369,12 @@ class TheBeatDecidesWhoCanBeSilentTests(_ComponentsOnly):
         self.assertEqual([f["key"] for f in silent], ["scraper_sec"])
         self.assertIn("last ran 2d ago (daily)", silent[0]["message"])
 
-    def test_the_fifteen_minute_sync_keeps_the_daily_floor(self):
+    def test_the_five_minute_sync_keeps_the_daily_floor(self):
         """Real fault, kept up, and no sooner: all three broker walks
         stopping is reported once the row has been quiet past the 26-hour
-        floor, never on a single missed beat."""
+        floor, never on a single missed beat. (The fifteen-minute sync
+        until 2026-10-31: the eToro walk, the row's most frequent, beats
+        every 300 s since.)"""
         from core.component_digest import collect_faults
         row = _component("broker_account_sync", category="pipeline",
                          last_run_at=timezone.now() - timedelta(hours=20))
@@ -381,7 +383,7 @@ class TheBeatDecidesWhoCanBeSilentTests(_ComponentsOnly):
         row.save(update_fields=["last_run_at"])
         silent = collect_faults()["silent"]
         self.assertEqual([f["key"] for f in silent], ["broker_account_sync"])
-        self.assertIn("every 15 minutes", silent[0]["message"])
+        self.assertIn("every 5 minutes", silent[0]["message"])
 
     def test_a_night_task_that_missed_one_run_is_in_the_next_digest(self):
         """Real fault, kept up, and no later than before: the rule actuator
@@ -476,7 +478,9 @@ class TheCadenceMapIsReadOffTheBeatTests(TestCase):
         self.assertEqual(p["agent_horizon"], 744.0)
         self.assertEqual(p["scraper_eod"], 24.0)
         self.assertAlmostEqual(p["scraper_calendar"], 0.5)
-        self.assertAlmostEqual(p["broker_account_sync"], 0.25)
+        # 2026-10-31: the eToro walk beats every 300 s (0.25 h before), and
+        # the row's most frequent beat sets its period
+        self.assertAlmostEqual(p["broker_account_sync"], 300 / 3600)
 
     def test_the_most_frequent_beat_sets_a_shared_row_s_period(self):
         """The row moves whenever any of its tasks runs."""

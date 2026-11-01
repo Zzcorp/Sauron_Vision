@@ -268,9 +268,12 @@ class ExposureWarningTests(TestCase):
     "the fact whose absence let one symbol be booked twice" — and then
     the book got booked twice anyway, fourteen anomaly flags in a day,
     because a fact an operator can read past is not a gate. The SAME
-    side from another author now refuses outright
-    (`risk_gate.duplicate_state`, tests.test_one_bet_one_ticket); the
-    report remains for the cases that still preview."""
+    side from another author then refused outright
+    (`risk_gate.duplicate_state`, tests.test_one_bet_one_ticket) — until
+    2026-10-31, when the operator ("we cant open new trade on same
+    assets") made it a warning on this hand lane, naming the holder and
+    recorded on the trade (tests.test_same_asset_ticket); the bots still
+    refuse. The report remains beside it."""
 
     @classmethod
     def setUpTestData(cls):
@@ -280,14 +283,18 @@ class ExposureWarningTests(TestCase):
         self.inst = _quote("BTCUSD", 60000)
         self.cfg = _bot_config(self.user)
 
-    def test_a_same_side_bot_position_refuses_the_preview_outright(self):
-        """The upgrade from told to stopped: this exact scenario used to
-        return a payload with the duplicate listed in it."""
+    def test_a_same_side_bot_position_warns_the_preview(self):
+        """Was ..._refuses_the_preview_outright: stopped from 2026-08 to
+        2026-10-31, told again since — now as a warning that names the
+        holder (`duplicate`), beside the holding itself."""
         from bot_program.manual_trade import preview_take_trade
-        _bot_trade(self.cfg)
+        trade = _bot_trade(self.cfg)
         p = preview_take_trade(self.user, _signal(self.inst))
-        self.assertIn("error", p)
-        self.assertIn("acted_rule", p["error"])
+        self.assertNotIn("error", p, p)
+        self.assertFalse(p["duplicate"]["ok"])
+        self.assertIn("acted_rule", p["duplicate"]["reason"])
+        self.assertEqual([h["trade_id"] for h in p["existing_exposure"]],
+                         [trade.id])
 
     def test_the_opposite_side_still_previews_and_reports_the_holding(self):
         """A short against an open long is not a duplicate — and the

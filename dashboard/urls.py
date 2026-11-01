@@ -172,6 +172,10 @@ urlpatterns = [
     # Arming the manual lane live is its own deliberate, PIN-confirmed act —
     # never a side effect of saving anything else.
     path("take-trade/arm/", views.take_trade_arm, name="take_trade_arm"),
+    # The lane's own knobs (2026-10-31): risk per ticket, its own single
+    # position ceiling and notional cap — PIN-confirmed, audited.
+    path("take-trade/lane-knobs/", views.take_trade_lane_knobs,
+         name="take_trade_lane_knobs"),
     path("partials/signal-rail/", views.signal_rail_partial, name="signal_rail_partial"),
     path("partials/ticker/", views.ticker_partial, name="ticker_partial"),
     path("partials/notif-items/", views.notif_items_partial, name="notif_items_partial"),

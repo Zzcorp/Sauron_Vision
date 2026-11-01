@@ -861,12 +861,24 @@ def check_margin(ctx, g) -> list:
     an account a running live bot routes to. Otherwise the same numbers
     are a warning that says why it does not brake. Cells older than an
     hour while a live eToro bot runs, or read in the other world, are
-    warnings of their own."""
+    warnings of their own.
+
+    THE EQUITY IS DATED APART (review, 2026-10-31): the re-read after an
+    order (tasks.refresh_etoro_cells) writes the cells and never the
+    equity, so the ratio pairs a fresh used margin with an equity read by
+    the last sync. An equity older than MARGIN_STALE_S, or with no reading
+    time, is a doubt (no brake) and makes the reading stale, as the cells'
+    own age does: the gate refuses on it too (AssetBot._cash_gate)."""
     from bot_program.asset_engine import base
     from bot_program.models import EtoroAccount
     fraction = float(base.pledged_ceiling())
     alarm = margin_alarm_fraction(fraction)
     out = []
+
+    def _stale(moment):
+        return (moment is None
+                or (ctx.now - moment).total_seconds() > MARGIN_STALE_S)
+
     for acct in (EtoroAccount.objects.exclude(api_key_enc="")
                  .select_related("user").order_by("pk")):
         world = "demo" if acct.demo else "live"
@@ -874,6 +886,7 @@ def check_margin(ctx, g) -> list:
         running = _live_configs(acct.user)
         routed = [c for c in running if acct.is_primary_for(c.asset_class)]
         at, code = acct.last_margin_at, acct.last_equity_currency
+        eq_at = acct.last_equity_at
         stamped = str(acct.last_margin_world or "")
         used, equity = _float(acct.last_used_margin), _float(acct.last_equity)
         if used is not None and equity is not None:
@@ -887,10 +900,16 @@ def check_margin(ctx, g) -> list:
                           f"the limit is {eye.percent(fraction * 100)}, the "
                           f"alarm {eye.percent(alarm * 100)}"),
                          f"Read: {eye.ago(at, ctx.now)}"]
+                if eq_at != at:
+                    facts.append(f"Equity read: {eye.ago(eq_at, ctx.now)}")
                 doubts = []
-                if at is None or (ctx.now - at).total_seconds() > MARGIN_STALE_S:
+                if _stale(at):
                     doubts.append(f"read {eye.ago(at, ctx.now)}" if at
                                   else "no reading time recorded")
+                if eq_at != at and _stale(eq_at):
+                    doubts.append(f"equity read {eye.ago(eq_at, ctx.now)}"
+                                  if eq_at
+                                  else "no equity reading time recorded")
                 if stamped != world:
                     doubts.append(f"read in the {stamped} world while the "
                                   f"account is now {world}" if stamped
@@ -906,16 +925,20 @@ def check_margin(ctx, g) -> list:
                     configs=[] if doubts else [c.pk for c in running]))
         elif routed:
             ctx.note(g, f"{label}: no margin cells stored yet")
-        if routed and (at is None
-                       or (ctx.now - at).total_seconds() > MARGIN_STALE_S):
+        if routed and (_stale(at) or (eq_at != at and _stale(eq_at))):
             out.append(g.finding(
                 f"account:{acct.pk}:stale", severity="warning",
                 title="Morgul — the margin reading is stale", label=label,
                 facts=[f"Margin read: {eye.ago(at, ctx.now)}"
-                       if at else "Margin read: never",
-                       f"Live bots routed here: {len(routed)}",
-                       "The broker sync writes it every 15 minutes; check "
-                       "that the sync runs"],
+                       if at else "Margin read: never"]
+                + ([f"Equity read: {eye.ago(eq_at, ctx.now)}"
+                    if eq_at else "Equity read: never"]
+                   if eq_at != at else [])
+                + [f"Live bots routed here: {len(routed)}",
+                   "The eToro sync writes the equity and the cells every 5 "
+                   "minutes, and the cells again a few seconds after each "
+                   "of the platform's orders and closes; check that the "
+                   "sync runs"],
                 user=acct.user))
         if at is not None and stamped != world:
             out.append(g.finding(

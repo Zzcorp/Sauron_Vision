@@ -21,8 +21,9 @@ Two new answers in `portfolio.risk_gate`, pinned here:
   `theme_state` — open forex tickets sharing a same-direction currency
   with the candidate are counted, and at `max_theme_legs` (the new card
   field; 0 = off) the next one is refused. Bots take both as hard
-  refusals; the manual path refuses duplicates (a second author is not
-  appetite) but only warns on theme, and records the override.
+  refusals; the manual path warns on both and records the override (the
+  duplicate refused it until 2026-10-31, when the operator made it his
+  call: tests/test_same_asset_ticket.py).
 
 Run with:  python manage.py test tests.test_one_bet_one_ticket
 """
@@ -441,7 +442,9 @@ class NLTraderGateTests(TestCase):
 
 
 class ManualPathTests(TestCase):
-    """Duplicate refuses even the human path; theme warns and is recorded."""
+    """Duplicate WARNS on the human path since 2026-10-31 (the operator:
+    "we cant open new trade on same assets") and is recorded; theme warns
+    and is recorded. The bots keep both as refusals (BotPathTests)."""
 
     @classmethod
     def setUpTestData(cls):
@@ -457,30 +460,48 @@ class ManualPathTests(TestCase):
             instrument=self.inst,
             defaults={"last": Decimal("50000"), "source": "binance_public"})
 
-    def test_preview_refuses_a_bet_a_bot_already_holds(self):
+    def test_preview_warns_on_a_bet_a_bot_already_holds(self):
+        """Was test_preview_refuses_a_bet_a_bot_already_holds: the refusal
+        became the operator's call on 2026-10-31. The ticket still names
+        the holder, in a warning, instead of closing on an error."""
         from bot_program.manual_trade import preview_asset_trade
         holder = _config(self.user, asset_class="crypto", name="momentum")
         _open(holder, "BTCUSD", rule="golden_cross", asset_class="crypto")
 
         out = preview_asset_trade(self.user, self.inst, "BUY")
-        self.assertIn("error", out)
-        self.assertIn("golden_cross", out["error"])
+        self.assertNotIn("error", out, out)
+        self.assertFalse(out["duplicate"]["ok"])
+        self.assertIn("golden_cross", out["duplicate"]["reason"])
+        self.assertIn("doubles the bet", out["duplicate"]["reason"])
 
-    def test_execute_refuses_it_too(self):
-        """The preview is advice; the execute-side re-ask under the lock
-        is the enforcement — a bot may have opened this exact bet between
-        the popup and the click."""
-        from bot_program.manual_trade import execute_asset_trade
+    def test_execute_books_it_and_records_the_holder(self):
+        """Was test_execute_refuses_it_too. The execute-side re-ask under
+        the lock is still made — a bot may have opened this exact bet
+        between the popup and the click: a holder the ticket did not show
+        refuses (2026-10-31, review; tests.test_same_asset_ticket) — and
+        what it found is recorded on a ticket taken past the warning it
+        showed, so that ticket is reviewable."""
+        from bot_program.manual_trade import (execute_asset_trade,
+                                              preview_asset_trade)
+        from bot_program.models import AssetBotTrade
         holder = _config(self.user, asset_class="crypto", name="momentum2")
         _open(holder, "BTCUSD", rule="golden_cross", asset_class="crypto")
 
-        out = execute_asset_trade(self.user, self.inst, "BUY")
-        self.assertIn("error", out)
-        self.assertIn("golden_cross", out["error"])
-        from bot_program.models import AssetBotTrade
+        unshown = execute_asset_trade(self.user, self.inst, "BUY", dup_seen=[])
+        self.assertIn("golden_cross", unshown.get("error", ""))
         self.assertFalse(AssetBotTrade.objects.filter(
-            symbol="BTCUSD", status="OPEN",
-            metadata__manual=True).exists())
+            symbol="BTCUSD", status="OPEN", metadata__manual=True).exists())
+
+        shown = preview_asset_trade(self.user, self.inst, "BUY")["duplicate"]
+        out = execute_asset_trade(self.user, self.inst, "BUY",
+                                  dup_seen=shown["holder_ids"])
+        self.assertNotIn("error", out, out)
+        trade = AssetBotTrade.objects.get(id=out["trade_id"])
+        self.assertTrue(trade.metadata["manual"])
+        dup = trade.metadata["duplicate_at_entry"]
+        self.assertFalse(dup["ok"])
+        self.assertIn("golden_cross", dup["reason"])
+        self.assertEqual(dup["holders"], ["golden_cross"])
 
     def test_the_short_side_of_the_same_symbol_is_still_takeable(self):
         from bot_program.manual_trade import preview_asset_trade

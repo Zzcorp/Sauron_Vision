@@ -1669,21 +1669,11 @@ class EtoroTrader:
         block = info.get("accountTotals")
         return block if isinstance(block, dict) else {}
 
-    def margin_cells(self) -> "dict | None":
-        """{"available_cash", "used_margin", "currency"} from ONE aggregate
-        read, or None when the read failed. Each figure is None when the
-        payload lacks its key — three states; a 0 is a measurement. The
-        KEY NAMES were measured 2026-09-22 (accountAvailableCash,
-        accountTotalUsedMargin under accountTotals, see the comment above
-        `_totals`); their arithmetic (available + used + pnl = total) is
-        the public reference's claim, unmeasured. One more GET per sync;
-        nothing on an entry path calls this — the gate reads the cells."""
-        try:
-            info = self.account()
-        except Exception as e:  # noqa: BLE001
-            log.warning("eToro margin_cells failed: %s", e)
-            return None
-        totals = self._totals(info)
+    @classmethod
+    def _cells_of(cls, info) -> dict:
+        """The margin figures of one aggregate payload (margin_cells'
+        shape): each None when the payload lacks its key."""
+        totals = cls._totals(info)
 
         def _num(key):
             raw = totals.get(key)
@@ -1694,7 +1684,57 @@ class EtoroTrader:
 
         return {"available_cash": _num("accountAvailableCash"),
                 "used_margin": _num("accountTotalUsedMargin"),
-                "currency": str(info.get("accountCurrency") or "")}
+                "currency": str((info or {}).get("accountCurrency") or "")
+                if isinstance(info, dict) else ""}
+
+    @classmethod
+    def _reading_of(cls, info) -> "tuple[float, str] | None":
+        """(total value, currency) of one aggregate payload, or None
+        (net_liquidation's rule: a zero or a missing figure is None)."""
+        try:
+            value = float(cls._totals(info).get("accountTotalValue"))
+        except (TypeError, ValueError):
+            return None
+        if value <= 0:
+            return None
+        return value, str(info.get("accountCurrency") or "")
+
+    def account_snapshot(self) -> "dict | None":
+        """{"reading": net_liquidation's answer, "margin": margin_cells'
+        answer} from ONE aggregate-portfolio GET, or None when that GET
+        failed (2026-10-31).
+
+        The sync asked net_liquidation() and margin_cells() one after the
+        other, and each sent its own GET of the same payload: two reads of
+        one quantity seconds apart, and when only the second failed (a
+        429, a 5xx) the equity and last_sync moved while the cash and the
+        used margin kept aging. One read now serves both, so they land
+        together or not at all. The post-order re-read
+        (bot_program.etoro_cells) asks this too."""
+        try:
+            info = self.account()
+        except Exception as e:  # noqa: BLE001
+            log.warning("eToro account_snapshot failed: %s", e)
+            return None
+        return {"reading": self._reading_of(info),
+                "margin": self._cells_of(info)}
+
+    def margin_cells(self) -> "dict | None":
+        """{"available_cash", "used_margin", "currency"} from ONE aggregate
+        read, or None when the read failed. Each figure is None when the
+        payload lacks its key — three states; a 0 is a measurement. The
+        KEY NAMES were measured 2026-09-22 (accountAvailableCash,
+        accountTotalUsedMargin under accountTotals, see the comment above
+        `_totals`); their arithmetic (available + used + pnl = total) is
+        the public reference's claim, unmeasured. Nothing on an entry path
+        calls this — the gate reads the cells; the sync reads them with
+        the equity through account_snapshot (one GET, 2026-10-31)."""
+        try:
+            info = self.account()
+        except Exception as e:  # noqa: BLE001
+            log.warning("eToro margin_cells failed: %s", e)
+            return None
+        return self._cells_of(info)
 
     def balance_usdt(self) -> float:
         """Available cash in the ACCOUNT currency, not USDT — the name is the
@@ -1736,13 +1776,7 @@ class EtoroTrader:
         except Exception as e:  # noqa: BLE001
             log.warning("eToro net_liquidation failed: %s", e)
             return None
-        try:
-            value = float(self._totals(info).get("accountTotalValue"))
-        except (TypeError, ValueError):
-            return None
-        if value <= 0:
-            return None
-        return value, str(info.get("accountCurrency") or "")
+        return self._reading_of(info)
 
     def _open_positions(self) -> list:
         r = self._read("GET", self._v1_info("portfolio"),

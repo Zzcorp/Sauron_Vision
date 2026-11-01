@@ -394,10 +394,16 @@ def day_live_payload(user, now=None) -> dict:
         comp = mapping.get(t["key"])
         if comp:
             writers.setdefault(comp, []).append(t)
+    # A TIE goes to the plain interval beat (2026-10-31): the reconcile's
+    # crontab moved to every 5 minutes, the bot tick's own 300 s, and the
+    # row is still the tick's to answer for — the name alone would have
+    # handed it to the reconcile.
     owner = {}
     for comp, ts in writers.items():
         cands = [t for t in ts if t["key"] not in IDLE_WRITERS] or ts
-        owner[comp] = min(cands, key=lambda t: (t.get("widest") or float("inf"), t["key"]))
+        owner[comp] = min(cands, key=lambda t: (
+            t.get("widest") or float("inf"),
+            0 if t.get("kind") == "interval" else 1, t["key"]))
 
     # Every row judged once: against its owner's widest gap when the beat
     # writes it; a row nothing schedules (a switch, a per-event gate) can

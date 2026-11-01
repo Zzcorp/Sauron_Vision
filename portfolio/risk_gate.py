@@ -336,7 +336,8 @@ def gate_book_value(user, portfolio) -> float | None:
 
 
 #: How old the broker's equity reading may be and still size the LIVE
-#: limits (the sync runs every 15 minutes; two hours is eight missed syncs).
+#: limits (two hours is eight missed 15-minute syncs; the eToro walk beats
+#: every 300 s since 2026-10-31, twenty-four of its passes).
 LIVE_EQUITY_MAX_AGE_S = 2 * 3600
 
 
@@ -1624,44 +1625,128 @@ def duplicate_state(user, *, symbol: str, side: str,
     `paper` (2026-10-01) names the asker's venue: only that venue's
     holders count (_one_venue; legacy Positions are live). A paper long
     doubles no real bet, and a real one doubles no simulated one.
+
+    `holder_ids` (2026-10-31, review) names each holder by its row,
+    "trade:<pk>" or "position:<pk>", in the order of `holders`: names
+    repeat (two bots on one rule), rows do not. The TAKE TRADE ticket
+    sends back the ones it showed, and a holder it did not show refuses
+    the send (manual_trade._execute).
     """
     from bot_program.models import AssetBotTrade
     from portfolio.models import Position
 
     want_long = str(side or "").upper() in ("BUY", "LONG")
     holders: list[str] = []
+    holder_ids: list[str] = []
 
     qs = _one_venue(AssetBotTrade.objects.filter(
         config__user=user, symbol__iexact=symbol,
         status__in=("OPEN", "CLOSE_PENDING")), paper).select_related("config")
     if config_id is not None:
         qs = qs.exclude(config_id=config_id)
-    for trade in qs:
+    for trade in qs.order_by("pk"):
         if _holder_is_long(trade) != want_long:
             continue
         holders.append(trade.rule_name or trade.config.name or "another bot")
+        holder_ids.append(f"trade:{trade.pk}")
 
     legacy = (Position.objects.filter(
         portfolio_id__in=_position_books(user, portfolio),
         closed_at__isnull=True, instrument__symbol__iexact=symbol)
+        .select_related("portfolio", "instrument", "strategy")
+        .order_by("pk")
         if _legacy_rows_count(paper) else Position.objects.none())
+    legacy_rows = []
     for pos in legacy:
         if (str(pos.direction or "").lower() in ("long", "buy")) != want_long:
             continue
-        holders.append(getattr(pos.strategy, "name", "") or "portfolio position")
+        # the row itself, first (2026-10-31, review): "portfolio position"
+        # named no row, and the bots' skip keeps 200 characters
+        strategy = getattr(pos.strategy, "name", "") or ""
+        holders.append(f"legacy portfolio position #{pos.pk}"
+                       + (f" ({strategy})" if strategy else ""))
+        holder_ids.append(f"position:{pos.pk}")
+        legacy_rows.append(legacy_position_words(pos))
 
-    state = {"ok": True, "holders": holders, "n": len(holders), "reason": ""}
+    state = {"ok": True, "holders": holders, "holder_ids": holder_ids,
+             "n": len(holders), "reason": "", "legacy": legacy_rows}
     if holders:
         direction = "long" if want_long else "short"
         state["ok"] = False
         book = ("" if paper is None
                 else " paper" if paper else " real-money")
+        shown = legacy_rows[:3]
+        # WHICH ROW, AND WHERE IT GOES (2026-10-31). A legacy Position
+        # counts as a live holder and no bot or reconcile closes one: the
+        # operator met "via portfolio position" and could not tell what
+        # it was or where to remove it. The row's id leads and its page
+        # follows at once, so the bots' recorded skip (skips.record keeps
+        # 200 characters, why_no_trade 88) carries both; the row's full
+        # sentence comes after.
+        where = "".join(f"; #{r['id']} is a legacy row, closed by hand at "
+                        f"{r['remove_at']}" for r in shown)
         state["reason"] = (
             f"{symbol.upper()} {direction} is already on the{book} book via "
-            f"{', '.join(sorted(set(holders)))} — a second ticket doubles "
-            f"the bet, it does not diversify it; close that leg first if "
-            f"this entry should replace it")
+            f"{', '.join(sorted(set(holders)))}{where} — a second ticket "
+            f"doubles the bet, it does not diversify it; close that leg "
+            f"first if this entry should replace it")
+        if legacy_rows:
+            state["reason"] += ". " + " ".join(r["words"] for r in shown)
+            if len(legacy_rows) > len(shown):
+                state["reason"] += (f" ({len(legacy_rows) - len(shown)} more: "
+                                    f"manage.py legacy_positions lists them)")
     return state
+
+
+#: Where a legacy portfolio.Position row is closed or removed by hand: the
+#: Django admin's change page (set "Closed at", or delete the row). It
+#: closes a row with no stop or target too (portfolio.admin, 2026-10-31).
+#: No bot or reconcile closes one; the chat trader's 'close' and the kill
+#: switch close the rows of a user's own `<username>_main` book.
+LEGACY_POSITION_ADMIN_URL = "/admin/portfolio/position/{pk}/change/"
+
+
+def legacy_position_origin(pos) -> str:
+    """Which writer can have made this legacy row, from its book alone
+    (the row records no writer): the shared "Main" book is the /setup/
+    eToro sync button's (sync_etoro_positions, run with no user), and a
+    hand entry of /setup/ made before hand entries moved to the user's
+    own book; a `<username>_main` book is the /setup/ 'add position' form
+    or the chat trader (nl_trader)."""
+    name = str(getattr(getattr(pos, "portfolio", None), "name", "") or "")
+    if name == "Main":
+        return ("the /setup/ eToro sync button, or an older /setup/ "
+                "'add position'")
+    if name.endswith("_main"):
+        return "the /setup/ 'add position' form or the chat trader"
+    return "a writer this book does not name"
+
+
+def legacy_position_words(pos, now=None) -> dict:
+    """One legacy holder, said so the operator can find and remove it:
+    {"id", "book", "origin", "age_days", "remove_at", "words"}."""
+    from django.utils import timezone
+    now = now or timezone.now()
+    opened = getattr(pos, "opened_at", None)
+    age_days = (None if opened is None
+                else max(0, (now - opened).days))
+    book = str(getattr(getattr(pos, "portfolio", None), "name", "") or "?")
+    origin = legacy_position_origin(pos)
+    where = LEGACY_POSITION_ADMIN_URL.format(pk=pos.pk)
+    sym = str(getattr(getattr(pos, "instrument", None), "symbol", "") or "")
+    age = ("of unknown age" if age_days is None
+           else "dated today" if age_days == 0
+           else f"dated {age_days} day{'s' if age_days != 1 else ''} ago")
+    # "nothing closes it" was untrue (review, 2026-10-31): the chat
+    # trader's 'close' and the kill switch close <username>_main rows.
+    words = (f"It is legacy portfolio position #{pos.pk} ({sym.upper()} "
+             f"{str(pos.direction or '').lower()} on the {book} book, "
+             f"written by {origin}, {age}): no bot or reconcile closes it. "
+             f"If eToro no longer holds it, close it at {where} (set Closed "
+             f"at, or delete the row there); manage.py legacy_positions "
+             f"lists every one.")
+    return {"id": pos.pk, "book": book, "origin": origin,
+            "age_days": age_days, "remove_at": where, "words": words}
 
 
 # The currencies the platform's seeded forex universe actually quotes —

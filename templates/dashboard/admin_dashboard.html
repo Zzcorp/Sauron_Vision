@@ -81,13 +81,56 @@ six scrapers could sit green with zero rows between them.
         {% endfor %}
         </tbody>
     </table></div>
+    {% comment %}
+    ARM LIVE's own line, directly under its table (review, 2026-10-31): the
+    knob rows below each say their own refusal beside their button.
+    {% endcomment %}
     <div data-lane-msg style="font-family:var(--font-mono);font-size:11px;margin-top:8px;color:var(--text-muted);"></div>
+    {% comment %}
+    THE LANE'S OWN KNOBS (2026-10-31): three keys of each lane's extras only
+    a Django shell could set. Blank = the default shown in the field. Behind
+    the trading PIN whatever the venue, one audit row per save
+    (manual_trade.set_lane_knobs). Every ticket is still judged against the
+    7% risk ceiling, the pool, the notional cap and eToro's cash. Outside
+    the table so a phone wraps it instead of scrolling it sideways.
+    {% endcomment %}
+    <div style="font-family:var(--font-display);font-size:12px;font-weight:700;letter-spacing:2px;margin:16px 0 4px;">LANE KNOBS — THE SIZE OF ONE HAND-TAKEN TICKET</div>
+    <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-bottom:8px;">
+        Blank uses the default shown. Risk per ticket is capped at 7% of the pool; the notional cap is a multiple of the pool (0.2 = 20%); the single-position ceiling replaces the book's for this lane only. Saving takes your trading PIN and is recorded.
+    </div>
+    {% for lane in manual_lanes %}
+    <div data-knobs-row="{{ lane.asset_class }}" style="display:flex;flex-wrap:wrap;gap:6px 12px;align-items:flex-end;padding:8px 0;border-top:1px solid var(--border);font-family:var(--font-mono);">
+        <span style="font-size:12px;min-width:86px;padding-bottom:6px;">{{ lane.asset_class|upper }}</span>
+        {% for k in lane.knobs %}
+        <label style="display:flex;flex-direction:column;font-size:10px;color:var(--text-muted);gap:2px;flex:1 1 150px;max-width:220px;">
+            <span>{{ k.words }}</span>
+            <input type="number" step="any" min="0" data-knob="{{ k.key }}" data-knob-lane="{{ lane.asset_class }}" value="{{ k.value }}" placeholder="default {{ k.default }}" style="width:100%;font-size:11px;padding:4px 6px;">
+        </label>
+        {% endfor %}
+        <span style="display:flex;gap:6px;align-items:flex-end;">
+            <input type="password" placeholder="PIN" data-knob-pin="{{ lane.asset_class }}" style="width:70px;font-size:11px;padding:4px 6px;" autocomplete="off">
+            <button type="button" class="btn" data-knob-save="{{ lane.asset_class }}" style="font-size:11px;padding:4px 10px;">SAVE KNOBS</button>
+        </span>
+        <div data-knob-msg="{{ lane.asset_class }}" role="status" style="flex-basis:100%;font-size:11px;color:var(--text-muted);"></div>
+    </div>
+    {% endfor %}
 </div>
 <script>
 (function () {
   var msg = document.querySelector('[data-lane-msg]');
   if (!msg) return;
-  function post(body) {
+  /* A refusal is said where its button is, named by its lane, and
+     brought into view (2026-10-31, review: on a phone the line sat about
+     700 px under the button that wrote it). A refused PIN is cleared: a
+     second tap then sends a blank PIN, which is refused and never counted
+     (core/trading_pin.py), instead of costing another attempt. */
+  function refused(el, text, pinEl) {
+    el.textContent = 'ERR ' + text; el.style.color = 'var(--accent-red)';
+    if (pinEl) pinEl.value = '';
+    if (el.scrollIntoView) el.scrollIntoView({block: 'nearest'});
+  }
+  function post(body, cls) {
+    var pinEl = cls ? document.querySelector('[data-lane-pin="' + cls + '"]') : null;
     fetch('{% url "take_trade_arm" %}', {
       method: 'POST', credentials: 'same-origin',
       headers: {'X-CSRFToken': (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '',
@@ -95,7 +138,7 @@ six scrapers could sit green with zero rows between them.
       body: JSON.stringify(body)
     }).then(function (r) { return r.json(); }).then(function (res) {
       if (res.error) {
-        msg.textContent = 'ERR ' + res.error; msg.style.color = 'var(--accent-red)';
+        refused(msg, cls.toUpperCase() + ': ' + res.error, pinEl);
         /* Five wrong PINs ended the session (core/trading_pin.py). */
         if (res.logged_out) {
           SV.overlay.alert({ title: 'Session ended', message: res.error })
@@ -104,7 +147,7 @@ six scrapers could sit green with zero rows between them.
         return;
       }
       window.location.reload();
-    }).catch(function (e) { msg.textContent = 'ERR ' + e; msg.style.color = 'var(--accent-red)'; });
+    }).catch(function (e) { refused(msg, cls.toUpperCase() + ': ' + e, null); });
   }
   document.querySelectorAll('[data-lane-arm]').forEach(function (btn) {
     btn.addEventListener('click', function () {
@@ -117,12 +160,48 @@ six scrapers could sit green with zero rows between them.
       if (trkEl) body.track = !!trkEl.checked;
       var shEl = document.querySelector('[data-lane-share="' + cls + '"]');
       if (shEl && shEl.value) body.share = Number(shEl.value);
-      post(body);
+      post(body, cls);
     });
   });
   document.querySelectorAll('[data-lane-disarm]').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      post({asset_class: btn.getAttribute('data-lane-disarm'), mode: 'paper'});
+      var cls = btn.getAttribute('data-lane-disarm');
+      post({asset_class: cls, mode: 'paper'}, cls);
+    });
+  });
+  /* The lane's own knobs (2026-10-31): every field is sent, a blank one
+     as "" (back to its default); the server checks the numbers, then the
+     PIN, and follows a session that the PIN ended. Each row answers on
+     its own line, beside its SAVE KNOBS. */
+  document.querySelectorAll('[data-knob-save]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var cls = btn.getAttribute('data-knob-save');
+      var pinEl = document.querySelector('[data-knob-pin="' + cls + '"]');
+      var line = document.querySelector('[data-knob-msg="' + cls + '"]') || msg;
+      var body = {asset_class: cls, pin: pinEl ? pinEl.value : ''};
+      document.querySelectorAll('[data-knob-lane="' + cls + '"]').forEach(function (el) {
+        body[el.getAttribute('data-knob')] = el.value;
+      });
+      fetch('{% url "take_trade_lane_knobs" %}', {
+        method: 'POST', credentials: 'same-origin',
+        headers: {'X-CSRFToken': (document.cookie.match(/csrftoken=([^;]+)/) || [])[1] || '',
+                  'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+      }).then(function (r) { return r.json(); }).then(function (res) {
+        if (res.error) {
+          refused(line, cls.toUpperCase() + ': ' + res.error, pinEl);
+          if (res.logged_out) {
+            SV.overlay.alert({ title: 'Session ended', message: res.error })
+              .then(function () { window.location.assign('/wall/'); });
+          }
+          return;
+        }
+        line.textContent = 'OK ' + cls.toUpperCase() + ' lane knobs ' +
+          (res.changed ? 'saved' : 'unchanged');
+        line.style.color = 'var(--accent)';
+        if (pinEl) pinEl.value = '';
+        if (res.changed) window.location.reload();
+      }).catch(function (e) { refused(line, cls.toUpperCase() + ': ' + e, null); });
     });
   });
 })();

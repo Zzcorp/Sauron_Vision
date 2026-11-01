@@ -97,7 +97,8 @@ def guarded_task(component_key):
     session" — says this pass had nothing to do, and the gate does not
     call mark_run for it: the row keeps whatever the last real run wrote.
     One row can be written by several tasks. broker_account_sync is the
-    switch of three walks (IBKR, Saxo, eToro), each every fifteen minutes,
+    switch of three walks (IBKR, Saxo, eToro), each every fifteen minutes
+    (eToro's every five since 2026-10-31),
     and the two with nothing to read returned attempted 0 / stored 0,
     which judge_result rightly calls "ran and produced nothing". On the
     shared row that verdict overwrote eToro's success — the daily digest

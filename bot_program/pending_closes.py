@@ -36,6 +36,8 @@ from typing import Optional
 
 from django.utils import timezone
 
+from bot_program.etoro_cells import one_read_per_pass
+
 logger = logging.getLogger(__name__)
 
 # Alert again after this many consecutive failed retries.
@@ -1399,6 +1401,11 @@ def _finalise_closed(trade, *, fill: dict, reason: str) -> None:
     trade.reason = ((trade.reason or "") + f" | closed:{reason}").strip()[:1000]
     _record_attempt(trade, ok=True)
     trade.save()
+    # The account is read again a few seconds after this booking commits
+    # (2026-10-31, bot_program.etoro_cells): the cash the close freed is
+    # what the next order is judged on. Fenced inside.
+    from bot_program import etoro_cells
+    etoro_cells.refresh_for_trade(trade, why="close retry")
 
     # Grade + audit + tax lots, same as a first-attempt close. Never fatal.
     try:
@@ -1923,9 +1930,14 @@ def _claim_for_retry(trade_pk):
     return trade
 
 
+@one_read_per_pass()
 def retry_all_pending_closes() -> dict:
     """Retry every CLOSE_PENDING live trade. Paper rows never reach this
     state (they have no broker order to fail).
+
+    The closes this drain books ask the eToro account to be read again
+    once the drain has finished, one read per account (2026-10-31,
+    bot_program.etoro_cells), never beside the next row's close.
 
     One row at a time, each claimed first — see `_claim_for_retry`. A row
     somebody else is already closing counts as STILL PENDING rather than as

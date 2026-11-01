@@ -167,7 +167,9 @@ class TheCadencesAreTheSchedulesOwnWordsTests(SimpleTestCase):
         self.assertEqual(_when(scheme, "fetch-live-quotes-watchlist"), "60 s")
         self.assertEqual(_when(scheme, "tick-asset-bots"), "5 min")
         self.assertEqual(_when(scheme, "refresh-bot-bars"), "10 min")
-        self.assertEqual(_when(scheme, "sync-etoro-accounts"), "15 min")
+        # 2026-10-31: 300 s, the operator's "the 15min etoro refresh is
+        # way too long" (config/celery.py).
+        self.assertEqual(_when(scheme, "sync-etoro-accounts"), "5 min")
         self.assertEqual(_when(scheme, "sauron-mind-synthesize"), "1 h")
         self.assertEqual(_when(scheme, "sauron-critic-pass"), "2 h")
         self.assertEqual(_when(scheme, "fetch-tradingview-ideas"), "6 h")
@@ -181,8 +183,9 @@ class TheCadencesAreTheSchedulesOwnWordsTests(SimpleTestCase):
         self.assertEqual(_when(scheme, "sauron-horizon-monthly"), "1st 04:45")
         self.assertEqual(_when(scheme, "propose-share-plans"), "every 4 h at :05")
         self.assertEqual(_when(scheme, "refresh-option-chains"), "hourly 13:15–20:15")
+        # 2026-10-31: */5, beside the eToro sync's 300 s
         self.assertEqual(_when(scheme, "reconcile-asset-bot-trades"),
-                         "every 15 min")
+                         "every 5 min")
 
     def test_a_changed_cadence_changes_the_words(self):
         entry = dict(app.conf.beat_schedule["tick-asset-bots"])
@@ -252,7 +255,7 @@ class TheCadencesAreTheSchedulesOwnWordsTests(SimpleTestCase):
         rec = next(t for s in scheme["stages"] for t in s["tasks"]
                    if t["key"] == "reconcile-asset-bot-trades")
         self.assertEqual((rec["seconds"], rec["widest"]),
-                         (15 * 60.0, 15 * 60.0))
+                         (5 * 60.0, 5 * 60.0))
         eye = next(t for s in scheme["stages"] for t in s["tasks"]
                    if t["key"] == "poll-telegram-eye")
         self.assertEqual(eye["widest"], 15.0)
