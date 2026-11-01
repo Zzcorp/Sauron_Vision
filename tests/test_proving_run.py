@@ -6,8 +6,10 @@ history; refresh_bot_bars keeps 200 bars and backfill_bars fetched 600
 (100 days), so every verdict read INSUFFICIENT. `backfill_bars --proving`
 takes every symbol the judge would walk — the enabled bots', the open
 positions', every active instrument of a traded class with 4h bars — at
-4h, PROVING_BARS deep, and says the thresholds and the next step. A
-hand-typed --intervals or --bars still wins. Nothing trades.
+4h, PROVING_BARS deep, and says the thresholds (since 2026-11-01 those
+of the interval it filled, and the step that sizes real money as the
+operator's decision, never as a routine next one). A hand-typed
+--intervals or --bars still wins. Nothing trades.
 
 Run with:  python manage.py test tests.test_proving_run
 """
@@ -88,8 +90,15 @@ class TheProvingRunTests(TestCase):
         self.assertIn("The proving ground needs 540 days and 800 bars at 4h "
                       "per symbol.", out)
         self.assertIn("prove data", out)
-        self.assertIn("component on proving_ground", out)
+        # Said, not invited (2026-11-01): the nightly judge runs on its own
+        # while the switch is on, and `prove rules --save` sizes real
+        # money, the operator's decision, never a routine "Next:" step.
+        self.assertIn("The nightly judge (03:40 UTC) runs on its own while "
+                      "the proving_ground component is on", out)
         self.assertIn("prove rules --save", out)
+        self.assertIn("It is the operator's decision, never a routine next "
+                      "step", out)
+        self.assertNotIn("Next: `python manage.py prove", out)
         # Not "Nothing trades" (2026-10-24): a saved verdict sizes real
         # money (backtester/proving/proof.py).
         self.assertNotIn("Nothing trades", out)
