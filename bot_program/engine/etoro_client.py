@@ -160,8 +160,11 @@ spelling eToro refused and nobody has replaced sits in
 """
 from __future__ import annotations
 
+import http.cookiejar
 import logging
 import math
+import os
+import threading
 import time
 import uuid
 import zlib
@@ -405,6 +408,157 @@ LEVERAGE_MAX = 30
 #: eToro is sick.
 READ_RETRIES = 1
 READ_RETRY_DELAY_S = 0.8
+
+#: THE READ POOL (2026-11-01, plan item 7). The router builds a new
+#: EtoroTrader, and with it a new requests.Session, on every
+#: client_for_symbol call (broker_router), so every read opened its own TCP
+#: and TLS connection: each candle of the bar refresh, each mark, each
+#: proposal's rates, each account read. A GET the budget may refuse — P2 to
+#: P5 (engine/etoro_budget): the account reads, the marks of rows whose stop
+#: rests at eToro, the proposals, the candles, the Orcs' tape, the smoke,
+#: the ramp — now rides ONE pooled Session per process and user key (its
+#: short hash, etoro_budget.key_hash; never the key), shared by every client
+#: of that key: the manage tick's marks and proposals at the shorter
+#: connect below (SHORT_CONNECT_AT), every other pooled GET at the client's
+#: own timeout. It carries no credential and keeps no cookie: each request
+#: sends its own client's headers, so the pool shares sockets and nothing
+#: else. It follows no redirect: a NoRedirectSession, as the client's own
+#: session is (_new_read_session; tests/test_etoro_no_redirect.py).
+#:
+#: EVERYTHING ELSE KEEPS THE CLIENT'S OWN SESSION AND TODAY'S TIMEOUT, as
+#: before the pool: every WRITE (the order POST, the close POST, the PATCH,
+#: the DELETE) — a stale pooled socket failing after the send would make an
+#: order IN DOUBT (EtoroOrderInDoubt, the 12 h quiet), never NOT SENT; the
+#: orders:lookup (the fill polls and the close proofs ride the write they
+#: read); ping; the eligibility POST (a read, but not a GET); and every read
+#: at P0 or P1 (the closes' and the drain's marks, the kill switch's, the
+#: last look before an order, the mark of a row eToro holds no stop for, a
+#: read no caller classified), which the budget never refuses nor delays: a
+#: stale pooled socket would cost them the retry's wait. A client method
+#: that writes sets P0 or P1 itself, the /search a cold id costs inside it
+#: included, so no request on a write's path reaches the pool.
+#:
+#: A STALE SOCKET: a pooled GET that raises a transport error drops its
+#: pooled Session, so today's one retry (READ_RETRIES) goes on a fresh
+#: connection: the same two attempts as before, never a third. A Session
+#: idle READ_POOL_IDLE_S is replaced before it is used again: a burst
+#: reuses its connection (the bar refresh asks a candle a second; the marks
+#: and the proposals go back to back), and a read after a quiet beat opens
+#: its own, as every read did before. A forked worker starts its own pool.
+#: Read at call time: tests/__init__.py turns it off for the suite, whose
+#: fake wires ride each client's own session.
+READ_POOL = True
+#: (connect, read) seconds of a pooled GET at SHORT_CONNECT_AT, each capped
+#: by the client's own timeout. The client's 10 s was both: a connect that
+#: failed cost 10 s and its retry 10 more, so a failing mark held the manage
+#: tick about 21 s; now about 9.
+#:
+#: WHAT IT COSTS, SAID (2026-11-01, review): a connect that takes 4 to 10 s
+#: now fails where it answered, after its one retry, as any failed read. The
+#: row is only clock-managed for that tick, its stop resting at eToro; the
+#: proposal is skipped, an entry deferred and never sent more often; and the
+#: failure is noted on the venue's health, so three inside 180 s
+#: (venue_health.SICK_BURST, BURST_WINDOW_S) make eToro sick and hold every
+#: new real entry 10 minutes past the last (VENUE_QUIET_MINUTES; closes and
+#: stop moves are never held). Protective, and the tick waits on these reads.
+READ_CONNECT_TIMEOUT_S = 4.0
+READ_TIMEOUT_S = 10.0
+#: The priorities whose pooled GETs take READ_CONNECT_TIMEOUT_S /
+#: READ_TIMEOUT_S: the marks of rows whose stop rests at eToro (P3) and the
+#: proposals (P4), the manage tick's own reads. Every other pooled GET keeps
+#: the client's own timeout, today's 10 s (Telegram /status: 5 s): the
+#: account reads (P2: the sync, the re-read, the reconcile, /status, the
+#: digests) and the candles, the tape, the smoke and the ramp (P5). Nothing
+#: in the tick waits on those, and a shorter connect failing there would
+#: cost what today's never did: a note toward SICK for each account read; a
+#: sync that misses its pass (no fresh cells nor equity; three misses are
+#: the stall alert, an hour without cells refuses every eToro order); and a
+#: live config's series written from the public feed with eToro muted for
+#: it six hours (market_data/bot_bars MUTE_VENUE_MEMO_S), where a live
+#: series stays eToro's.
+SHORT_CONNECT_AT = frozenset({etoro_budget.P3, etoro_budget.P4})
+#: A pooled Session idle this long is replaced before its next GET: under
+#: the usual server keep-alive (a minute or more) and NAT idle timeouts
+#: (minutes; neither measured at eToro), above the gaps inside a burst.
+READ_POOL_IDLE_S = 30.0
+
+#: key hash -> [the pooled Session, the pid that built it, the monotonic
+#: instant of its last use]. Never a key.
+_POOL: dict = {}
+_POOL_LOCK = threading.Lock()
+
+
+def _pool_mono() -> float:
+    """The pool's idle clock (a seam: tests move it)."""
+    return time.monotonic()
+
+
+def _new_read_session() -> requests.Session:
+    """A pooled read Session: no credential of its own (each request
+    carries its client's), a cookie policy that keeps none, and NO
+    REDIRECT FOLLOWED: a NoRedirectSession (below), as every eToro
+    request's session is (2026-11-01). Each pooled GET carries both keys
+    in its own headers, so one followed redirect would hand them to
+    whatever host it named; a 3xx is refused here as on the client's own
+    session, and _read reads it as a failed read."""
+    s = NoRedirectSession()
+    s.cookies.set_policy(http.cookiejar.DefaultCookiePolicy(
+        allowed_domains=[]))
+    return s
+
+
+def _close_quietly(sess) -> None:
+    try:
+        sess.close()
+    except Exception:  # noqa: BLE001 — a socket that will not close is gone
+        pass
+
+
+def pooled_session(kh: str) -> requests.Session:
+    """The pooled read Session of key hash `kh` in this process: built on
+    first use, rebuilt when it sat idle past READ_POOL_IDLE_S or was built
+    by another process (a fork). Thread-safe; never raises."""
+    now, pid = _pool_mono(), os.getpid()
+    old = None
+    with _POOL_LOCK:
+        held = _POOL.get(kh)
+        if held is not None and (held[1] != pid
+                                 or now - held[2] > READ_POOL_IDLE_S):
+            # another process's sockets are never closed here, only left
+            old = held[0] if held[1] == pid else None
+            held = None
+        if held is None:
+            held = _POOL[kh] = [_new_read_session(), pid, now]
+        held[2] = now
+        sess = held[0]
+    if old is not None:
+        _close_quietly(old)
+    return sess
+
+
+def drop_pooled_session(kh: str, sess) -> None:
+    """Forget `sess` as key hash `kh`'s pooled Session after a transport
+    failure on it, and close its idle sockets: the next pooled GET, the
+    retry first, opens a fresh connection. A Session another read has
+    already replaced is closed and the newer one kept."""
+    with _POOL_LOCK:
+        held = _POOL.get(kh)
+        if held is not None and held[0] is sess:
+            del _POOL[kh]
+    _close_quietly(sess)
+
+
+def _pool_after_fork() -> None:
+    """A forked child (a Celery or gunicorn worker) never uses its parent's
+    sockets: it starts its own pool, and its own lock (one held at the fork
+    would never be released here)."""
+    global _POOL_LOCK
+    _POOL.clear()
+    _POOL_LOCK = threading.Lock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_pool_after_fork)
 
 #: Header names that may carry eToro's quota (2026-10-07). Nothing in the
 #: tree has recorded one: the 429's headers and body are STILL UNMEASURED
@@ -833,11 +987,13 @@ class EtoroOrderInDoubt(RuntimeError):
 # redirect to another host handed both keys to that host, and an order POST
 # answered 307 was sent again there. Only the demo proof client refused
 # redirects (2026-10-31, _DemoOnlyWire below). Now every request of every eToro
-# client goes through ONE session that follows none (NoRedirectSession),
-# on both worlds and for every method; the requests.* call that reaches
-# eToro outside this module passes allow_redirects=False itself
-# (dashboard/views_brokers.etoro_probe), and the legacy market-data adapter
-# stands on this session (market_data/adapters/etoro_adapter.EtoroClient).
+# client goes through a session that follows none (NoRedirectSession),
+# on both worlds and for every method — the client's own, or the pooled
+# read Session of its key (READ_POOL above), a NoRedirectSession too; the
+# requests.* call that reaches eToro outside this module passes
+# allow_redirects=False itself (dashboard/views_brokers.etoro_probe), and
+# the legacy market-data adapter stands on this session
+# (market_data/adapters/etoro_adapter.EtoroClient).
 # tests/test_etoro_no_redirect.py pins every site.
 #
 # A 3xx answer is a failure, logged with its status and the host it points
@@ -1234,6 +1390,15 @@ class EtoroTrader:
         self.demo = self.env != "live"
         self.timeout = timeout
         self._session: Optional[requests.Session] = None
+        # The session _sess() built itself, told apart from one handed in
+        # from outside (a shell's, a test's fake wire), which carries every
+        # request, reads included (_supplied, 2026-11-01).
+        self._own_session: Optional[requests.Session] = None
+        # A callable run before every READ this client sends (_read, ping),
+        # or None: etoro_smoke's one request a second (2026-11-01). A write
+        # and a lookup never read it, so nothing that closes, moves a stop
+        # or proves a close is ever delayed by it.
+        self.read_pace = None
         # symbol -> instrumentId, and the reverse for reading positions back.
         self._ids: dict = {}
         self._symbols: dict = {}
@@ -1261,16 +1426,66 @@ class EtoroTrader:
     # ── plumbing ───────────────────────────────────────────────────────────
 
     def _sess(self) -> requests.Session:
-        """The one session of this client, keys on its headers: a
+        """The client's OWN session, keys on its headers: a
         NoRedirectSession (2026-11-01), so no request of either world, by
-        any method, follows a redirect."""
+        any method, follows a redirect. Every write, every lookup, ping,
+        the eligibility POST and every read at P0 or P1 ride it, at today's
+        timeout (READ_POOL, 2026-11-01); the pooled GETs ride a
+        NoRedirectSession of their own (_new_read_session)."""
         if self._session is None:
             s = NoRedirectSession()
-            s.headers.update({"x-api-key": self.api_key,
-                              "x-user-key": self.user_key,
-                              "Content-Type": "application/json"})
+            s.headers.update(self._auth_headers())
             self._session = s
+            self._own_session = s
         return self._session
+
+    def _auth_headers(self) -> dict:
+        """The headers every request of this client carries: its own
+        session sets them, and a pooled GET sends them per request."""
+        return {"x-api-key": self.api_key, "x-user-key": self.user_key,
+                "Content-Type": "application/json"}
+
+    def _supplied(self) -> bool:
+        """True when a transport was handed to this client from outside —
+        an assigned `_session`, or `_sess` replaced (a shell's, a test's
+        fake wire): it then carries every request, reads included, at
+        today's timeout, as before the pool (2026-11-01)."""
+        s = getattr(self, "_session", None)
+        if s is not None and s is not getattr(self, "_own_session", None):
+            return True
+        return ("_sess" in vars(self)
+                or getattr(type(self), "_sess", None) is not _OWN_SESS)
+
+    def _pooled_read(self, method: str, priority: int) -> bool:
+        """Whether one read rides the pooled Session (READ_POOL): a GET, at
+        P2 to P5, on a client whose transport is its own."""
+        return (bool(READ_POOL) and str(method).upper() == "GET"
+                and int(priority) >= etoro_budget.P2
+                and not self._supplied())
+
+    def _read_timeout(self, priority):
+        """The timeout of one pooled GET at `priority`: at SHORT_CONNECT_AT
+        (the manage tick's marks and proposals, P3 and P4), (connect, read)
+        seconds READ_CONNECT_TIMEOUT_S and READ_TIMEOUT_S, neither longer
+        than the client's own timeout; at any other (P2, P5), the client's
+        own timeout, today's (2026-11-01, review)."""
+        if int(priority) not in SHORT_CONNECT_AT:
+            return self.timeout
+        try:
+            cap = float(self.timeout)
+        except (TypeError, ValueError):
+            cap = READ_TIMEOUT_S
+        return (min(READ_CONNECT_TIMEOUT_S, cap), min(READ_TIMEOUT_S, cap))
+
+    def _pace(self) -> None:
+        """This client's read pace, when one was set (read_pace). Never
+        raises."""
+        pace = getattr(self, "read_pace", None)
+        if callable(pace):
+            try:
+                pace()
+            except Exception as e:  # noqa: BLE001 — a pace never stops a read
+                log.debug("eToro read pace skipped (%s)", type(e).__name__)
 
     @staticmethod
     def _rid(client_order_id: Optional[str] = None) -> str:
@@ -1462,16 +1677,37 @@ class EtoroTrader:
         when the family keeps its floor for the priorities above, or, at
         P3 to P5, while the shared 429 pause holds. A read at P0 or P1, and
         the one retry of any read, are counted once sent, never refused —
-        a redirected one included: it was sent."""
+        a redirected one included: it was sent.
+
+        THE CONNECTION (2026-11-01, READ_POOL): a GET at P2 to P5 rides the
+        pooled Session of this key, at _read_timeout(p) (the 4 s connect at
+        P3 and P4 alone, SHORT_CONNECT_AT; self.timeout at P2 and P5), with
+        this client's own headers; a transport failure on it drops that
+        Session, so the one retry goes on a fresh connection — never a third
+        attempt. A 5xx is retried on the same connection (it answered), and
+        a redirect is refused on it as on the client's own: the pooled
+        Session is a NoRedirectSession too (_new_read_session). Every other
+        read (a POST, a read at P0 or P1, a client handed its transport)
+        rides the client's own session at self.timeout, as before. The read
+        pace (read_pace) runs before each attempt."""
         p, why, taken = self._before(where)
-        fn = getattr(self._sess(), method.lower())
+        pooled = self._pooled_read(method, p)
+        fn = None if pooled else getattr(self._sess(), method.lower())
         last_exc = None
         self.last_read = where
         for attempt in range(1 + READ_RETRIES):
             r = None
             self.wire_reads = getattr(self, "wire_reads", 0) + 1
+            self._pace()
+            sess = pooled_session(self._bkey()) if pooled else None
             try:
-                r = fn(url, timeout=self.timeout, **kw)
+                if pooled:
+                    r = getattr(sess, method.lower())(
+                        url, timeout=self._read_timeout(p),
+                        **dict(kw, headers={**self._auth_headers(),
+                                            **(kw.get("headers") or {})}))
+                else:
+                    r = fn(url, timeout=self.timeout, **kw)
                 last_exc = None
             except RedirectRefused as e:
                 # A REDIRECT IS A FAILED READ, ASKED NO MORE (2026-11-01):
@@ -1481,6 +1717,10 @@ class EtoroTrader:
                 raise
             except TRANSPORT as e:
                 last_exc = e
+                if pooled:
+                    # A STALE POOLED SOCKET, or any transport failure on
+                    # the pool: the retry below opens a fresh connection.
+                    drop_pooled_session(self._bkey(), sess)
             finally:
                 if attempt or not taken:
                     self._after(where, p, why)
@@ -1870,9 +2110,12 @@ class EtoroTrader:
     def ping(self) -> bool:
         """One aggregate-portfolio GET: True on 200, False for anything
         else, a budget refusal included (2026-11-01: an account read, at
-        the caller's priority)."""
+        the caller's priority). On the client's own session at today's
+        timeout: it has no retry for a stale pooled socket to ride
+        (READ_POOL). Paced by read_pace when one is set."""
         try:
             p, why, taken = self._before("account")
+            self._pace()
             try:
                 r = self._sess().get(self._v1_info("aggregate-portfolio"),
                                      headers=self._headers(),
@@ -2424,10 +2667,21 @@ class EtoroTrader:
                 or (data.get("clientPortfolio") or {}).get("positions")
                 or [])
 
-    def get_positions(self) -> list[dict]:
+    def portfolio_rows(self) -> list:
+        """eToro's raw /portfolio positions, ONE GET, unnamed (2026-11-01):
+        the read reconcile_asset makes once per pass per key and world, and
+        hands to each reader's get_positions(book=...) to name with that
+        reader's own warm. Raises what the read raises."""
+        return self._open_positions()
+
+    def get_positions(self, book=None) -> list[dict]:
         """Open positions — Phase-33 reconciliation shape. Raises on
         transport errors so reconcile counts the broker unavailable rather
         than assuming flat (the same rule as OANDA and IBKR).
+
+        `book` (2026-11-01): the raw rows portfolio_rows() already read in
+        this pass — named here, off this client's own map, and nothing is
+        sent; None reads the book now, as before.
 
         /portfolio LAGS (MEASURED 2026-09-23, `PORTFOLIO_LAG_S`): a filled
         position is ABSENT here ~2 s after the fill and a closed one STILL
@@ -2439,7 +2693,7 @@ class EtoroTrader:
         the camel spellings are read as a courtesy and have not been seen.
         """
         out = []
-        for p in self._open_positions():
+        for p in (self._open_positions() if book is None else book):
             qty = float(p.get("units") or 0)
             if qty == 0:
                 continue
@@ -3686,6 +3940,14 @@ class EtoroTrader:
         else:
             out.pop("executedQty")
         return out
+
+
+#: The client's own _sess (2026-11-01): a class whose _sess was replaced (a
+#: test's fake wire, patched on the class) has a transport handed in from
+#: outside, and EtoroTrader._supplied reads it so. So does
+#: DemoOnlyEtoroTrader (below), whose _sess is its demo wire: none of its
+#: reads rides the pooled Session, and every one meets the wire's check.
+_OWN_SESS = EtoroTrader.__dict__["_sess"]
 
 
 # ── THE DEMO SEGMENT, AND NOTHING ELSE (2026-10-31) ──────────────────────

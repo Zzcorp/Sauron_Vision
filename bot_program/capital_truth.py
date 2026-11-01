@@ -27,6 +27,7 @@ edit. The value is in the seeing.
 """
 import logging
 import math
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,86 @@ CACHE_SECONDS = 900
 # saying otherwise is noise an operator learns to ignore.
 TOLERANCE_PCT = 5.0
 
+# THE POOL CHECK'S READING, SAID WHERE PRODUCTION WRITES (2026-11-01,
+# review). Production runs bot_program at INFO (core/logging_config, DEBUG
+# off), so a DEBUG line is never written there; and can_open_new asks for
+# every live config every tick. An eToro reading, with its age, or why none
+# stands, is said at INFO the first time its user and reason come up in
+# CACHE_SECONDS in this process, and at DEBUG in between (_say_once).
+# (user id, reason) -> the _said_mono() instant it was last said at INFO.
+_SAID: dict = {}
+
+
+def _said_mono() -> float:
+    """The clock of _SAID (a seam: tests move it)."""
+    return time.monotonic()
+
+
+def _say_once(user, reason: str, msg: str, *args) -> None:
+    """Log `msg` at INFO the first time (user, reason) comes up in
+    CACHE_SECONDS in this process, at DEBUG in between; at INFO when the
+    memory cannot be read (better twice than never). Never raises."""
+    level = logging.INFO
+    try:
+        key, now = (getattr(user, "id", None), str(reason)), _said_mono()
+        last = _SAID.get(key)
+        if last is not None and now - last < CACHE_SECONDS:
+            level = logging.DEBUG
+        else:
+            _SAID[key] = now
+    except Exception:  # noqa: BLE001 — unreadable: said at INFO
+        pass
+    logger.log(level, msg, *args)
+
+
+def etoro_stored_equity(user, now=None) -> dict:
+    """The eToro account's equity AS THE SYNC STORED IT (2026-11-01, plan
+    item 8), with its age: {"value", "currency", "at", "age_s"} when it may
+    stand for the account — stored, above 0, read in the world the row
+    trades now, and younger than CACHE_SECONDS (the pool check's freshness
+    since 2026-09: 15 minutes) — else {"why": why it may not, "reason": a
+    short name of that why, "age_s" when it has one}. One database row;
+    asks eToro nothing.
+
+    The value is the account's total value (accountTotalValue, the
+    reading net_liquidation answers), written by sync_etoro_accounts
+    every 300 s from its one aggregate read, and never by the re-read
+    after an order (tasks.refresh_etoro_cells writes the cells alone). The
+    world is the cells' stamp of the same save (last_margin_world, the
+    cash gate's own rule); an environment flip drops the equity
+    (dashboard/views_brokers._WORLD_CELLS)."""
+    from django.utils import timezone
+
+    from bot_program.models import EtoroAccount
+
+    acct = EtoroAccount.objects.filter(user_id=user.id).first()
+    if acct is None:
+        return {"why": "no eToro row", "reason": "no row"}
+    value, at = acct.last_equity, acct.last_equity_at
+    if value is None or at is None:
+        return {"why": "no equity stored by the sync", "reason": "none stored"}
+    age = ((now or timezone.now()) - at).total_seconds()
+    if not age < CACHE_SECONDS:
+        return {"why": f"the sync's equity is {age / 60:.1f} min old "
+                       f"(limit {CACHE_SECONDS // 60} min)",
+                "reason": "stale", "age_s": age}
+    world = "demo" if acct.demo else "live"
+    stamped = str(acct.last_margin_world or "")
+    if stamped != world:
+        return {"why": f"the equity was read in the {stamped or '?'} world "
+                       f"and the row trades {world}",
+                "reason": "other world", "age_s": age}
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return {"why": "a stored equity that is not a number",
+                "reason": "not a number", "age_s": age}
+    if not math.isfinite(v) or v <= 0:
+        return {"why": "a stored equity that is not above 0",
+                "reason": "not above 0", "age_s": age}
+    return {"value": v, "currency": str(acct.last_equity_currency or ""),
+            "at": at, "age_s": age}
+
 
 def broker_equity(user, cfg):
     """The broker's own equity for this config's account, or None.
@@ -47,6 +128,20 @@ def broker_equity(user, cfg):
     account to ask, and a failed call is an unknown — booking either as
     zero would report the account as empty, which is both alarming and
     false.
+
+    eTORO READS THE SYNC'S EQUITY (2026-11-01, plan item 8): a config whose
+    first symbol routes to eToro is answered off the account's equity as
+    sync_etoro_accounts stored it (etoro_stored_equity), under today's
+    15-minute freshness; one stored equity serves every config, where each
+    live config sent its own aggregate GET every 15 minutes. Its age, or
+    why none stands, is said in the log at INFO, the level production
+    writes, once per user, reason and 15 minutes in a process, and at
+    DEBUG in between (_say_once). A missing, stale, other-world or
+    non-positive equity is None, as a failed call was. Nothing is sent and
+    nothing is cached in the config's extras (the reading has its own
+    stamp). No fallback to
+    the available cash either: that is not the account's value (the
+    2026-10-02 note below). Saxo and IBKR keep their own read.
     """
     from django.utils import timezone
 
@@ -78,6 +173,24 @@ def broker_equity(user, cfg):
         logger.debug("capital_truth: no client for %s: %s",
                      getattr(cfg, "name", "?"), e)
         return None
+
+    try:
+        from bot_program.engine.capabilities import adapter_key
+        etoro = adapter_key(client) == "etoro"
+    except Exception:  # noqa: BLE001 — an unknown adapter asks its own
+        etoro = False
+    if etoro:
+        got = etoro_stored_equity(user)
+        if "value" not in got:
+            _say_once(user, got.get("reason") or got["why"],
+                      "capital_truth: %s pool check not measured — %s",
+                      getattr(cfg, "name", "?"), got["why"])
+            return None
+        _say_once(user, "stored",
+                  "capital_truth: %s pool check reads eToro's equity as the "
+                  "sync stored it, %.0f s old",
+                  getattr(cfg, "name", "?"), got["age_s"])
+        return got["value"]
 
     # THE ACCOUNT'S TOTAL VALUE, the number the sync sizes every follower
     # from (tasks: base = deployable(net liquidation) x share), so the pool

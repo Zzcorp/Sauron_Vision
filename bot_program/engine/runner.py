@@ -7,7 +7,7 @@ to PaperTrader. See `bot_program.engine.broker_router`.
 from __future__ import annotations
 import logging
 import re
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from django.utils import timezone
 from ..models import BotConfig, BotTrade, BinanceAccount
 from .binance_client import BinanceClient
@@ -40,6 +40,23 @@ def _client_for(user, cfg=None):
     if cfg is not None and getattr(cfg, "market_type", "spot") == "futures":
         return BinanceFuturesClient(k, s, testnet=False)
     return BinanceClient(k, s, testnet=False)
+
+def _live_mark(tk) -> tuple:
+    """(the mark, "") when the ticker's lastPrice is a finite number above
+    0, else (None, what it said) — the live rows' rule (2026-11-01). Parsed
+    as the tick always parsed it, Decimal(lastPrice), so a price that reads
+    reads the same. Never raises."""
+    raw = tk.get("lastPrice") if isinstance(tk, dict) else None
+    try:
+        price = Decimal(raw)
+    except (InvalidOperation, TypeError, ValueError):
+        return None, f"lastPrice {raw!r} is not a number"
+    if not price.is_finite():
+        return None, f"lastPrice {raw!r} is not a finite number"
+    if price <= 0:
+        return None, f"lastPrice {raw!r}, the venue's no-price sentinel"
+    return price, ""
+
 
 def _parse_klines(raw: list[list]) -> list[list]:
     # [openTime, open, high, low, close, volume, closeTime, ...]
@@ -121,14 +138,31 @@ def run_bot_tick(user_id: int):
             if not t.paper and _settle_working_close(t, sym_client):
                 continue
             tk = sym_client.ticker(t.symbol)
-            price = Decimal(tk["lastPrice"])
+            if not t.paper:
+                # A LIVE ROW IS NEVER MANAGED ON NO PRICE (2026-11-01, the
+                # zero gap): "0" is the venues' no-price sentinel (eToro's
+                # shut market, an empty rates answer), and a live BUY read
+                # it as its stop hit, a SELL as its target, and a market
+                # close went out. Below 0, not a number, not finite or
+                # missing is the same: nothing is judged and nothing sent.
+                price, said = _live_mark(tk)
+                if price is None:
+                    log.warning("legacy live #%s %s: no usable mark (%s) — "
+                                "not managed this tick: no stop, target or "
+                                "close is judged on it and nothing is sent; "
+                                "the row stays OPEN", t.id, t.symbol, said)
+                    continue
+            else:
+                price = Decimal(tk["lastPrice"])
             if not price.is_finite() or price <= 0:
                 # No usable price — a stale quote, a market that only just
                 # reopened, a venue that answered 0: nothing to compare and
                 # nothing to book. A BUY's "stop" at 0 was an exit at 0
                 # (2026-09-26). On EVERY row since 2026-10-31: a LIVE row
                 # was guarded by nothing, and its stop read as crossed sent
-                # a real close at market on a price nobody quoted.
+                # a real close at market on a price nobody quoted (a live
+                # row's mark is judged by _live_mark above since 2026-11-01,
+                # and never reaches here without a usable price).
                 log.info("legacy %s #%s %s: no usable price (%s) — no exit "
                          "this tick; the row stays OPEN",
                          "paper" if t.paper else "live", t.id, t.symbol,
