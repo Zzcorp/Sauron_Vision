@@ -138,13 +138,26 @@ def etoro_probe(api_key: str, user_key: str, demo: bool = True) -> tuple:
     and carries both keys with it, custom headers it never strips, to
     wherever a 3xx points: allow_redirects is off here, and a 3xx is
     "unknown", logged and said with its status and host only.
+
+    THROUGH THE eTORO REQUEST BUDGET (2026-11-01, engine/etoro_budget): an
+    account read at P2, keyed by the user key's hash. One the budget does
+    not send answers "unknown" with the budget's words (save again in a
+    minute), never "refused": nothing was asked.
     """
+    from bot_program.engine import etoro_budget
     from bot_program.engine.etoro_client import (EtoroTrader,
                                                  RedirectRefused,
                                                  redirect_host)
     url = EtoroTrader(api_key, user_key,
                       env="demo" if demo else "live")._v1_info(
         "aggregate-portfolio")
+    try:
+        etoro_budget.take(etoro_budget.key_hash(user_key),
+                          etoro_budget.ACCOUNT, etoro_budget.P2,
+                          world="demo" if demo else "live", where="probe",
+                          why="key probe")
+    except etoro_budget.Refused as e:
+        return "unknown", str(e)
     try:
         import requests
         r = requests.get(

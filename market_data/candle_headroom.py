@@ -24,6 +24,12 @@ bot_bars.HEADROOM_429_KEY for YIELD_AFTER_LIVE_429_S, and every candle
 pass yields to it (bot_bars._etoro_refusing) instead of meeting the same
 429. The command (manage.py etoro_candle_headroom) is a dry run unless
 --yes.
+
+Inside the eToro request budget since 2026-11-01 (bot_program/engine/
+etoro_budget): its reads are P5, which takes at most half the key's
+market-data minute; a refused take ends the ramp as `aborted` with the
+budget's words, and nothing is recorded (the run met the platform's own
+ceiling, not eToro's).
 """
 import math
 import time
@@ -129,6 +135,14 @@ def run(client, symbols, *, max_requests=DEFAULT_MAX_REQUESTS) -> dict:
                 client.klines(_venue_symbol(client, sym), interval=interval,
                               limit=BARS_PER_READ)
             except Exception as e:  # noqa: BLE001
+                if getattr(e, "budget_refused", False):
+                    # THE BUDGET'S P5 SHARE, NOT eTORO'S LIMIT (2026-11-01,
+                    # engine/etoro_budget): nothing was sent, so this run
+                    # measured the platform's own ceiling, not the
+                    # venue's — no measure, nothing recorded.
+                    aborted = (f"the eToro budget refused a candle read "
+                               f"({getattr(e, 'why', '') or e})")
+                    break
                 if _http_status(e) == 429:
                     hit = True
                     # background 429s are never noted on the venue's

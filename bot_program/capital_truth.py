@@ -90,11 +90,18 @@ def broker_equity(user, cfg):
     #
     # A PaperTrader answers neither, and its answer would be a simulation:
     # asking it would compare a real pool against an imaginary account.
+    #
+    # P2 IN THE eTORO REQUEST BUDGET (2026-11-01, engine/etoro_budget): the
+    # pool check is an account read; one the budget does not send answers
+    # nothing here, which is "not measured" (None), as a failed read is —
+    # at once, with no second take for the balance behind it.
+    from bot_program.engine import etoro_budget
     equity = None
     nl = getattr(client, "net_liquidation", None)
     if callable(nl):
         try:
-            got = nl()
+            with etoro_budget.at(etoro_budget.P2, "pool check"):
+                got = nl()
             # the (value, currency) pair every adapter documents; anything
             # else is not a reading
             from decimal import Decimal
@@ -105,12 +112,15 @@ def broker_equity(user, cfg):
         except Exception as e:  # noqa: BLE001
             logger.debug("capital_truth: net liquidation unreadable for "
                          "%s: %s", getattr(cfg, "name", "?"), e)
+            if getattr(e, "budget_refused", False):
+                return None
     if equity is None:
         fn = getattr(client, "balance_usdt", None)
         if not callable(fn):
             return None
         try:
-            equity = float(fn() or 0)
+            with etoro_budget.at(etoro_budget.P2, "pool check"):
+                equity = float(fn() or 0)
         except Exception as e:  # noqa: BLE001
             logger.debug("capital_truth: balance unreadable for %s: %s",
                          getattr(cfg, "name", "?"), e)

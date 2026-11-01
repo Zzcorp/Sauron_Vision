@@ -36,6 +36,7 @@ from typing import Optional
 
 from django.utils import timezone
 
+from bot_program.engine import etoro_budget
 from bot_program.etoro_cells import one_read_per_pass
 
 logger = logging.getLogger(__name__)
@@ -1662,8 +1663,14 @@ def venue_position_state(trade, client):
     return state if state in ("open", "closed") else None
 
 
+@etoro_budget.scoped(etoro_budget.P0, "pending-close drain")
 def retry_trade_close(trade) -> bool:
-    """Retry one CLOSE_PENDING trade. True when it ended CLOSED."""
+    """Retry one CLOSE_PENDING trade. True when it ended CLOSED.
+
+    P0 in the eToro request budget (2026-11-01, engine/etoro_budget), for
+    the drain and for the CLOSE button's retry alike: its book reads, its
+    marks, its close and its proofs are counted once sent, never refused,
+    never delayed and never held by the 429 pause."""
     from bot_program.engine.broker_router import client_for_symbol
 
     client = client_for_symbol(trade.config.user, trade.symbol, trade.config)
@@ -1931,6 +1938,7 @@ def _claim_for_retry(trade_pk):
 
 
 @one_read_per_pass()
+@etoro_budget.scoped(etoro_budget.P0, "pending-close drain")
 def retry_all_pending_closes() -> dict:
     """Retry every CLOSE_PENDING live trade. Paper rows never reach this
     state (they have no broker order to fail).

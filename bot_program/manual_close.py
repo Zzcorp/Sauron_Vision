@@ -54,6 +54,8 @@ from decimal import Decimal
 
 from django.utils import timezone
 
+from bot_program.engine import etoro_budget
+
 logger = logging.getLogger(__name__)
 
 CLOSE_REASON = "MANUAL"
@@ -288,8 +290,11 @@ def requires_pin(trade) -> bool:
     return not bool(trade.paper)
 
 
+@etoro_budget.scoped(etoro_budget.P0, "CLOSE button")
 def preview_close(user, trade) -> dict:
-    """Everything the confirm popup needs, or {"error": ...}.
+    """Everything the confirm popup needs, or {"error": ...}. Its venue
+    read is P0 in the eToro request budget (2026-11-01): the CLOSE button
+    is a close, never refused, never held by the 429 pause.
 
     Nothing is executed and nothing is claimed here — a preview that
     mutated the row would make hovering the button a trading action.
@@ -468,8 +473,11 @@ def _release(trade_pk) -> None:
                        trade_pk, e)
 
 
+@etoro_budget.scoped(etoro_budget.P0, "CLOSE button")
 def execute_close(user, trade, *, pin_ok: bool = False) -> dict:
     """Close one position now. Returns {"ok": True, ...} or {"error": ...}.
+    P0 in the eToro request budget (2026-11-01): its mark, its close and
+    its proofs are counted once sent, never refused, never paused.
 
     `pin_ok` is the caller's verdict on the trading PIN — the view owns
     checking it, this owns REQUIRING it, so a future caller (a bot console,

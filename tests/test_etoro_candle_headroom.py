@@ -64,7 +64,7 @@ class _Headroom(TestCase):
         venue_health.reset()
         self.addCleanup(venue_health.reset)
         self.addCleanup(cache.clear)
-        for memo in (ec._SEARCH_IDS, ec._SEARCH_NO, ec._RATE_PAUSE):
+        for memo in (ec._SEARCH_IDS, ec._SEARCH_NO):
             memo.clear()
             self.addCleanup(memo.clear)
         for s in ("EURUSD", "GBPUSD"):

@@ -291,14 +291,18 @@ def refusal(client, symbol: str = "", now=None) -> tuple:
 
 
 def pause_s(client) -> float:
-    """Seconds left of the ADAPTER's own 429 pause for the client's world
-    (EtoroTrader.rate_pause_s, 2026-10-07), else 0.0. Keyed on the adapter
-    like refusal(): a MagicMock, a PaperTrader, or a test fake NAMED
+    """Seconds left of the ADAPTER's 429 pause for the client's key and
+    world (EtoroTrader.rate_pause_s, 2026-10-07; shared by every process
+    since 2026-11-01, etoro_budget), else 0.0. Keyed on the adapter like
+    refusal(): a MagicMock, a PaperTrader, or a test fake NAMED
     EtoroTrader with no such method or a non-number answer reads 0.0.
-    Read by the entry side only (propose, execute, the last look); the
-    manage tick, closes, the reconcile, the TAKE TRADE lane and the bar
-    refresh never read it (the bars yield on recent_refusals instead).
-    Never raises."""
+    Read here by the entry side only (propose, execute, the last look);
+    closes, the reconcile and the TAKE TRADE lane never read it. The
+    budget's own P3 to P5 takes (the marks of rows whose stop rests at
+    eToro, the proposals' rates, the candles, the smoke, the ramp) skip
+    while it holds, inside the adapter (etoro_budget.take); the mark of a
+    live row eToro holds no stop for is P1 and never does. Never
+    raises."""
     try:
         import math
         from bot_program.engine.capabilities import adapter_key

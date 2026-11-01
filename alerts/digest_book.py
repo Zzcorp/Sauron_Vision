@@ -82,6 +82,9 @@ NO_POSITIONS = "No open positions."
 DEMO_LINE = ("Sauron trades on the demo account; the real account is read, "
              "not traded.")
 READ_FAILED = "the live read did not answer"
+#: The eToro request budget did not send the live read (2026-11-01): not a
+#: failure, said as what it is.
+READ_DEFERRED = "the live read was not asked (the eToro request budget)"
 NO_KEY = "no key is stored for a live read"
 KEY_UNREADABLE = "the stored key could not be read"
 WORLD_UNKNOWN = "the stored reading does not say which account it came from"
@@ -258,8 +261,14 @@ def real_account(acct, now) -> tuple:
         try:
             reading = eye.read_live_account(api_key, user_key, cells=True)
         except Exception as e:  # noqa: BLE001 — the digest goes out anyway
-            logger.warning("digest: the live eToro read for user %s did not "
-                           "answer (%s)", acct.user_id, type(e).__name__)
+            if getattr(e, "budget_refused", False):
+                why = READ_DEFERRED
+                logger.info("digest: the live eToro read for user %s was "
+                            "not asked: %s", acct.user_id, e)
+            else:
+                logger.warning("digest: the live eToro read for user %s "
+                               "did not answer (%s)", acct.user_id,
+                               type(e).__name__)
             reading = None
     equity = (reading or {}).get("equity")
     if equity:
