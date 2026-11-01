@@ -1113,16 +1113,28 @@ class TheMinutesFollowEachWalkTests(TestCase):
 class TheCadencesTests(TestCase):
     """The operator asked for both on 2026-10-31: the eToro sync every
     300 s (900 s before) and the reconcile every 5 minutes (*/15 before);
-    the re-read rides the fast queue."""
+    the re-read rides the fast queue. Both are still every five minutes,
+    and on the clock since 2026-11-01, off the bot tick's beat: the sync
+    at minute 1 of every five (a 300 s interval before, which beat started
+    with the tick's), the reconcile at minute 3 (*/5 before:
+    tests/test_etoro_cheaper_reads.py)."""
 
     def test_the_beats_and_the_route(self):
         from celery.schedules import crontab
 
         from config.celery import app
+        from core.day_of_sauron import schedule_words
         beat = app.conf.beat_schedule
-        self.assertEqual(beat["sync-etoro-accounts"]["schedule"], 300.0)
+        self.assertEqual(beat["sync-etoro-accounts"]["schedule"],
+                         crontab(minute="1-59/5"))
+        self.assertEqual(
+            schedule_words(beat["sync-etoro-accounts"]["schedule"])[1],
+            300.0)
         self.assertEqual(beat["reconcile-asset-bot-trades"]["schedule"],
-                         crontab(minute="*/5"))
+                         crontab(minute="3-59/5"))
+        self.assertEqual(
+            schedule_words(beat["reconcile-asset-bot-trades"]["schedule"])[1],
+            300.0)
         self.assertEqual(
             app.conf.task_routes["bot_program.tasks.refresh_etoro_cells"],
             {"queue": "fast"})

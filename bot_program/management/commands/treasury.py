@@ -10,6 +10,8 @@ Run with:
     python manage.py treasury
     python manage.py treasury --user <you>
 """
+import math
+
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 
@@ -28,6 +30,20 @@ def _lev(value) -> str:
         return f"{int(value)}x"
     except (TypeError, ValueError):
         return DASH
+
+
+def _mark(value) -> str:
+    """The broker's mark to four places, or the em dash when it read none
+    (2026-11-01): eToro's /portfolio rows carry no mark, so its holdings
+    come with market_price 0.0 (EtoroTrader.broker_portfolio), and a 0, a
+    negative, a missing or a non-finite mark is never a price."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return DASH
+    if isinstance(value, bool) or not math.isfinite(v) or v <= 0:
+        return DASH
+    return f"{v:.4f}"
 
 
 def _age(seconds) -> str:
@@ -148,12 +164,11 @@ class Command(BaseCommand):
             if not r["held"]["rows"]:
                 w("      flat — measured, and zero")
             for h in r["held"]["rows"]:
-                mark = h.get("market_price") or 0
                 w(f"      {str(h.get('symbol')):<12} "
                   f"{str(h.get('side', '')):<5} "
                   f"{float(h.get('qty') or 0):>14.4f} @ "
                   f"{float(h.get('avg_cost') or 0):>12.4f}  "
-                  f"mark {float(mark):>12.4f}  "
+                  f"mark {_mark(h.get('market_price')):>12}  "
                   f"{h.get('currency') or ''}  lev {_lev(h.get('leverage'))}")
 
         w("\n6. DIVERGENCE — THE BROKER AGAINST THE PLATFORM")

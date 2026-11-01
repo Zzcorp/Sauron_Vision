@@ -18,6 +18,8 @@ Per-user; iterate all users with at least one OPEN AssetBotTrade.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import logging
 from decimal import Decimal
 
@@ -34,6 +36,75 @@ logger = logging.getLogger(__name__)
 #: claiming for twice that, at every venue, costs nothing and stops a page
 #: saying "UNCLAIMED" about a position that is closing.
 SWEEP_CLOSED_GRACE_S = 120
+
+#: THE PASS'S ONE READ OF eToro'S BOOK (2026-11-01): {(key hash, world):
+#: {"rows": the raw /portfolio rows, or "error": what that read raised,
+#: "at": the instant before its GET}}, while one_book_per_pass holds.
+_BOOKS: contextvars.ContextVar = contextvars.ContextVar(
+    "reconcile_asset_books", default=None)
+
+
+@contextlib.contextmanager
+def one_book_per_pass():
+    """eToro's book read ONCE for every reader inside (2026-11-01, plan
+    item 1): reconcile_all_users holds it around each user's row walk and
+    unclaimed sweep, which read GET /portfolio twice a pass before, seconds
+    apart, for one answer. Each reader still warms its own names and names
+    the raw rows with its own client (get_positions(book=...)), so the
+    sweep sees every position its own warm can name; a read that failed or
+    that the budget did not send is the pass's answer, never asked twice;
+    and the sweep's grace runs from that read (reconcile_unknown_positions).
+    The row walk is the first reader, so its read, its lag window and its
+    stamps are what they were. Nested, the outer pass holds."""
+    if _BOOKS.get() is not None:
+        yield
+        return
+    token = _BOOKS.set({})
+    try:
+        yield
+    finally:
+        _BOOKS.reset(token)
+
+
+def _book_key(client):
+    """(key hash, world) of an eToro client whose book a pass may share,
+    or None (every other venue, and a stand-in without the raw read)."""
+    if type(client).__name__ != "EtoroTrader" \
+            or not callable(getattr(client, "portfolio_rows", None)):
+        return None
+    try:
+        return (str(client._bkey()), str(client._world()))
+    except Exception:  # noqa: BLE001 — unnamed: read as before
+        return None
+
+
+def _positions(client, fn) -> list:
+    """`fn()` — the client's named open positions — except inside
+    one_book_per_pass, where eToro's book is read once per key and world
+    and named by this client after its own warm. Raises what the read
+    raised (a failure, a budget refusal), to every reader of the pass."""
+    books = _BOOKS.get()
+    key = _book_key(client) if books is not None else None
+    if key is None:
+        return fn() or []
+    held = books.get(key)
+    if held is None:
+        at = timezone.now()                 # before the GET
+        try:
+            held = {"rows": client.portfolio_rows(), "at": at}
+        except Exception as e:  # noqa: BLE001 — the pass's answer
+            held = {"error": e, "at": at}
+        books[key] = held
+    if "error" in held:
+        raise held["error"]
+    return client.get_positions(book=held["rows"]) or []
+
+
+def _books_read_since():
+    """The earliest instant a book this pass shares was read, or None."""
+    books = _BOOKS.get() or {}
+    stamps = [h["at"] for h in books.values() if h.get("at") is not None]
+    return min(stamps) if stamps else None
 
 
 def keyed_venue_count(user) -> int:
@@ -211,7 +282,8 @@ def _broker_open_symbols(client, *, asset_class: str, warm=()) -> dict:
     if not callable(fn):
         return None
     try:
-        positions = fn() or []
+        # once per pass per key and world inside one_book_per_pass
+        positions = _positions(client, fn)
     except Exception as e:
         # A book the eToro budget did not ask (2026-11-01) is no failure:
         # said as not asked; unreadable for this pass all the same.
@@ -960,11 +1032,19 @@ def reconcile_unknown_positions(user) -> dict:
         if row.symbol and not is_entry_working(row):
             claimed.add(str(row.symbol).upper())
     # A ROW CLOSED SECONDS AGO STILL CLAIMS ITS SYMBOL HERE (the lag; see
-    # SWEEP_CLOSED_GRACE_S). Report-only, every venue.
+    # SWEEP_CLOSED_GRACE_S). Report-only, every venue. The grace runs from
+    # the earliest book this pass shares (one_book_per_pass, 2026-11-01):
+    # a book the row walk read a minute ago still lists what closed a
+    # minute before THAT read, so a grace counted from now would call a
+    # closing position unclaimed.
     from datetime import timedelta as _td
+    since = timezone.now()
+    _read_at = _books_read_since()
+    if _read_at is not None and _read_at < since:
+        since = _read_at
     for row in (AssetBotTrade.objects
                 .filter(config__user=user, status="CLOSED", paper=False,
-                        closed_at__gte=timezone.now()
+                        closed_at__gte=since
                         - _td(seconds=SWEEP_CLOSED_GRACE_S))
                 .only("symbol")):
         if row.symbol:
@@ -1189,7 +1269,11 @@ def reconcile_all_users() -> dict:
 
     The venue closes this walk books ask the eToro account to be read
     again once the walk has finished, one read per account however many
-    rows it closed (2026-10-31, bot_program.etoro_cells)."""
+    rows it closed (2026-10-31, bot_program.etoro_cells).
+
+    Each user's row walk and unclaimed sweep share ONE read of eToro's
+    book per world (one_book_per_pass, 2026-11-01): one GET of /portfolio
+    a pass where there were two."""
     from django.contrib.auth.models import User
     from .models import AssetBotTrade
 
@@ -1226,28 +1310,34 @@ def reconcile_all_users() -> dict:
             u = User.objects.get(id=uid)
         except User.DoesNotExist:
             continue
-        try:
-            r = reconcile_user(u)
-            totals["users"] += 1
-            for k in ("checked", "closed_as_orphan",
-                       "broker_unavailable", "errors"):
-                totals[k] += r.get(k, 0)
-            for k in ("venue_says_open", "venue_unanswered"):
-                if r.get(k):
-                    totals[k] = totals.get(k, 0) + r[k]
-        except Exception as e:
-            logger.warning("reconcile_all_users: user=%s failed: %s", uid, e)
-            totals["errors"] += 1
-
-        # The other direction. Separately guarded: a failure here must not
-        # cost the row-driven reconciliation that already succeeded.
-        try:
-            u2 = reconcile_unknown_positions(u)
-            totals["unclaimed"] += u2.get("unclaimed", 0)
-            totals["broker_unavailable"] += u2.get("broker_unavailable", 0)
-            totals["errors"] += u2.get("errors", 0)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("unknown-position sweep: user=%s failed: %s",
-                           uid, e)
-            totals["errors"] += 1
+        with one_book_per_pass():
+            _reconcile_one(u, uid, totals)
     return totals
+
+
+def _reconcile_one(u, uid, totals) -> None:
+    """One user's row walk, then the sweep, into `totals`."""
+    try:
+        r = reconcile_user(u)
+        totals["users"] += 1
+        for k in ("checked", "closed_as_orphan",
+                  "broker_unavailable", "errors"):
+            totals[k] += r.get(k, 0)
+        for k in ("venue_says_open", "venue_unanswered"):
+            if r.get(k):
+                totals[k] = totals.get(k, 0) + r[k]
+    except Exception as e:
+        logger.warning("reconcile_all_users: user=%s failed: %s", uid, e)
+        totals["errors"] += 1
+
+    # The other direction. Separately guarded: a failure here must not
+    # cost the row-driven reconciliation that already succeeded.
+    try:
+        u2 = reconcile_unknown_positions(u)
+        totals["unclaimed"] += u2.get("unclaimed", 0)
+        totals["broker_unavailable"] += u2.get("broker_unavailable", 0)
+        totals["errors"] += u2.get("errors", 0)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("unknown-position sweep: user=%s failed: %s",
+                       uid, e)
+        totals["errors"] += 1

@@ -374,16 +374,23 @@ class TheSyncTests(TestCase):
         """At the eToro cadence until 2026-10-31, when the eToro walk moved
         to 300 s on the operator's word about eToro ("the 15min etoro
         refresh is way too long"); nothing was asked of Saxo, which keeps
-        the IBKR walk's 900 s."""
+        the IBKR walk's 900 s. The eToro walk is still every five minutes,
+        on the clock since 2026-11-01 (minute 1 of every five, off the bot
+        tick's beat: tests/test_etoro_cheaper_reads.py), so its period is
+        read through the schedule's own words rather than as a number."""
+        from celery.schedules import crontab
+
         from config.celery import app
+        from core.day_of_sauron import schedule_words
         entry = app.conf.beat_schedule.get("sync-saxo-accounts")
         self.assertIsNotNone(entry)
         self.assertEqual(entry["task"], "bot_program.tasks.sync_saxo_accounts")
         self.assertEqual(entry["schedule"],
                          app.conf.beat_schedule["sync-broker-account"]["schedule"])
         self.assertEqual(entry["schedule"], 900.0)
-        self.assertEqual(
-            app.conf.beat_schedule["sync-etoro-accounts"]["schedule"], 300.0)
+        etoro = app.conf.beat_schedule["sync-etoro-accounts"]["schedule"]
+        self.assertEqual(etoro, crontab(minute="1-59/5"))
+        self.assertEqual(schedule_words(etoro)[1], 300.0)
 
 
 class ThePageClaimsClassesTests(TestCase):

@@ -76,12 +76,46 @@ Run with:
 Deliberately NOT runnable from the ops page: it presents the operator's
 eToro keys to an external service and prints the account's balance.
 """
+import time
+
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 
 User = get_user_model()
 
 OK, REFUSED, NOSUCH, UNKNOWN = "ok", "refused", "no-such", "unknown"
+
+#: THE SMOKE'S PACE (2026-11-01, plan item 9): at least this many seconds
+#: between two requests of one run, its retries and both worlds' clients
+#: included. It ran unpaced: a dozen reads or more in a second on the
+#: operator's own key (every config's symbols: an id, a rate and the bars
+#: each), beside the tick's marks; P5 in the budget already kept it from
+#: their tokens. Read at call time (tests/__init__.py runs the suite at 0).
+SMOKE_GAP_S = 1.0
+
+
+def _mono() -> float:
+    return time.monotonic()
+
+
+def _sleep(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+class _Pace:
+    """SMOKE_GAP_S between two requests of one run: the clients' read_pace
+    (etoro_client.EtoroTrader._pace), run before each read they send."""
+
+    def __init__(self):
+        self.last = None
+
+    def __call__(self) -> None:
+        gap = float(SMOKE_GAP_S or 0)
+        if gap > 0 and self.last is not None:
+            wait = gap - (_mono() - self.last)
+            if wait > 0:
+                _sleep(wait)
+        self.last = _mono()
 
 #: The classes an EtoroAccount row can claim, in is_primary_for()'s own
 #: vocabulary — the same four save_etoro_credentials reads back.
@@ -307,6 +341,7 @@ class Command(BaseCommand):
         # beside a busy tick leaves the marks, the proposals and the orders
         # their tokens; a read the budget did not send prints as 'unknown'
         # in the budget's words (_verdict), never as a verdict on the keys.
+        # And paced at SMOKE_GAP_S, one request a second (_Pace).
         from bot_program.engine import etoro_budget
         with etoro_budget.at(etoro_budget.P5, "etoro_smoke"):
             return self._smoke(*args, **opts)
@@ -364,6 +399,10 @@ class Command(BaseCommand):
               "environment flip)")
 
         t = EtoroTrader(k, u, env=env)
+        # ONE REQUEST A SECOND (2026-11-01): one pace for every client of
+        # the run, so the other world's ping waits its turn too
+        pace = _Pace()
+        t.read_pace = pace
         tally = {OK: 0, REFUSED: 0, NOSUCH: 0, UNKNOWN: 0}
 
         def line(name, fn):
@@ -464,6 +503,7 @@ class Command(BaseCommand):
 
         if opts["other_world"]:
             t2 = EtoroTrader(k, u, env=other)
+            t2.read_pace = pace
             line(f"{other} ping with the SAME pair (measurement)",
                  lambda: f"200 — this pair opens the {other} world too · keys: "
                          + ", ".join(sorted(t2.account().keys())))
