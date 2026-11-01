@@ -444,25 +444,28 @@ class AnEtoroCarrierMeetsTheSharedGateTests(TestCase):
         self.assertEqual(_order_posts(fake), [])
         self.assertFalse(AssetBotTrade.objects.filter(config=self.cfg).exists())
 
-    def test_a_short_needs_its_own_token(self):
-        """"crypto" stated proven, a bearish signal (SELL): the gate still
-        refuses, naming the class's short alone (short_crypto: only a
-        stock short is proven, ETORO_SHORT_PROVEN)."""
+    def test_a_short_with_no_short_proof_goes_from_this_lane(self):
+        """"crypto" stated proven, a bearish signal (SELL), no crypto short
+        pinned (ETORO_SHORT_PROVEN is stock and forex). Until 2026-10-31
+        the gate refused it here, after the PIN, naming short_crypto. The
+        operator ("je veux les short possible entierement svp"): the hand
+        lane now sends it — warned before the PIN and read back at the
+        fill (tests/test_manual_shorts.py) — while the bots keep the gate
+        (tests/test_etoro_proofs.py)."""
         from bot_program.manual_trade import execute_take_trade
         self._proven("crypto")
-        t, fake = self._etoro()
-        with patch.object(t, "market_order", wraps=t.market_order) as spy, \
+        self._cells()
+        t, _fake = self._etoro()
+        with patch.object(t, "market_order", return_value=_filled_response(
+                side="SELL", positionId="900001")) as mo, \
                 patch(ROUTER, return_value=t):
             out = execute_take_trade(
                 self.user, _signal(self.inst, direction="bearish",
                                    entry=60000, stop=60900, target=58200),
                 pin_ok=True)
-        self.assertIn("error", out, out)
-        self.assertIn("eToro refusal (gate_blocked)", out["error"])
-        self.assertIn("BTCUSD (crypto, SELL)", out["error"])
-        self.assertIn("['short_crypto']", out["error"])
-        spy.assert_not_called()
-        self.assertEqual(_order_posts(fake), [])
+        self.assertTrue(out.get("ok"), out)
+        mo.assert_called_once()
+        self.assertEqual(mo.call_args.args[:2], ("BTCUSD", "SELL"))
 
     def test_the_venues_own_row_refuses_the_lane_too(self):
         """"crypto" stated proven and the eligibility row answering

@@ -390,6 +390,197 @@ def _locked_merge(trade, ours: dict, *, closing: bool):
     return merged
 
 
+def _in_doubt_unguarded(meta) -> bool:
+    """Does `meta` carry a close in doubt that the working-close guard
+    (pending_closes._cancel_working_close) cannot see? close_in_doubt with
+    no close_order_working: the shape AssetBot._close_trade leaves
+    (2026-11-01). The drain's and this switch's own close in doubt carry
+    close_order_working and are left to that guard, as before: eToro's
+    in-doubt close names no order id, so the guard refuses it.
+
+    eToro only (2026-11-01, the S3 review's second pass). A Saxo 202 names
+    its OrderId: the guard cancels it and, the cancel answered, the switch
+    sends a second close while close_in_doubt stands, as it did before this
+    date. A cancel proves nothing for a 202 (the drain refuses that row), so
+    Saxo is not held here yet; that hold is its own task, and no Saxo row is
+    live."""
+    from bot_program.pending_closes import (CLOSE_IN_DOUBT_KEY,
+                                            CLOSE_ORDER_WORKING_KEY)
+    if not isinstance(meta, dict):
+        return False
+    doubt = meta.get(CLOSE_IN_DOUBT_KEY)
+    return (isinstance(doubt, dict) and bool(doubt)
+            and not meta.get(CLOSE_ORDER_WORKING_KEY))
+
+
+def _settle_close_in_doubt(trade, client) -> bool:
+    """A CLOSE ANOTHER LANE LEFT IN DOUBT, settled before this switch sends
+    anything for the row (2026-11-01, the S3 review).
+
+    AssetBot._close_trade (the tick's exits, the CLOSE button, the TAKE
+    TRADE funding closes, position_care, the options expiry) answers a
+    close that did not come back (a Saxo 202, an eToro redirect) by leaving
+    the row OPEN with close_in_doubt and no close_order_working. The
+    working-close guard let that row through, and the switch sent a second
+    full close over one that may have landed, then reported "broker filled
+    only 0.0" — whatever the book said, even when it could not be read.
+    The rules are the two other lanes' own:
+
+      * the venue's own word says closed (pending_closes.
+        venue_position_state), or a book read past the venue's lag
+        (reconcile_asset.venue_lag_window, measured from
+        close_in_doubt["at"] too) no longer lists the position: the close
+        landed. The row is booked the way the drain books it
+        (_book_flat_in_doubt), the venue_exit rule included: on eToro a
+        list that no longer shows it books only once the order read says
+        closed or an hour of asks went unanswered. Nothing is sent. True.
+      * a book read past the lag still lists it, as
+        AssetBot._broker_still_holds says "held" (the row's whole size,
+        never an option): the close did not land. The marker goes, as
+        AssetBot._close_trade drops it, and the switch sends its close as
+        for any other row. False.
+      * anything else (the book unreadable, read inside the lag, or not
+        attributable to this row; a list holding less than the row, or an
+        option; the venue's order read saying open beside a list that
+        does not show it; the first unanswered ask): RAISES. Nothing is
+        sent, and the sweep's errors name the row and the reference the
+        close may be live under.
+
+    WHAT THIS HOLDS (2026-11-01, the S3 review's second pass): eToro's
+    close in doubt, eToro being the one venue that declares a lag. A venue
+    that declares none (Saxo today) has every read past its lag
+    (venue_lag_window answers ""), so a book that still lists the position
+    seconds after a Saxo 202, an accepted order that may yet execute, drops
+    the marker here and the switch sends a second close, as it did before
+    this date. Holding a Saxo close in doubt is its own task; no Saxo row
+    is live.
+    """
+    from bot_program import venue_exit
+    from bot_program.pending_closes import (CLOSE_IN_DOUBT_KEY, POS_FLAT,
+                                            POS_HELD, broker_exposure,
+                                            dust_qty, residual_qty,
+                                            venue_position_state)
+    from bot_program.reconcile_asset import venue_lag_window
+    doubt = (trade.metadata or {}).get(CLOSE_IN_DOUBT_KEY) or {}
+    ref = str(doubt.get("reference") or "") or "(none)"
+
+    def nothing_sent(why):
+        return RuntimeError(
+            f"trade {trade.id} ({trade.symbol}): a close may already be live "
+            f"at the venue under reference {ref} (sent before this switch "
+            f"and never answered), so the switch sent NOTHING for it — "
+            f"{why}; check the position at the venue")
+
+    proof = venue_position_state(trade, client)
+    if proof == "closed":
+        return _book_flat_in_doubt(
+            trade, client, ref=ref, venue_said="closed",
+            reason="KILL_SWITCH_VENUE_PROVED_CLOSED")
+    exposure = broker_exposure(trade, client)
+    state = exposure["state"]
+    if state in (POS_FLAT, POS_HELD):
+        lag = venue_lag_window(trade, client, doubt=True)
+        if lag:
+            raise nothing_sent(f"one read of its position list cannot answer "
+                               f"yet: {lag}")
+    if state == POS_HELD:
+        # "STILL HELD" AS AssetBot._broker_still_holds SAYS IT: never for an
+        # option (a list cannot tell one contract from another on the same
+        # underlying), and only with the row's whole size listed. Less is
+        # part of the close in doubt having filled, not proof it did not
+        # land, and a close sent over the rest is a second close.
+        held, owed = exposure.get("qty"), residual_qty(trade)
+        if trade.asset_class == "options" or held is None:
+            raise nothing_sent("a position list cannot tell this option from "
+                               "another contract on the same underlying")
+        if held + dust_qty(trade.asset_class) < owed:
+            raise nothing_sent(f"its position list holds {held} of the row's "
+                               f"{owed}: part of the close in doubt may have "
+                               f"filled")
+        venue_exit.merge_meta(
+            trade, {"close_in_doubt_resolved": "the broker still held it"},
+            pop=(CLOSE_IN_DOUBT_KEY,))
+        logger.warning("[KILL SWITCH] trade %s (%s): the close in doubt "
+                       "(reference %s) did NOT land — a book read past the "
+                       "venue's lag still lists the position; the marker "
+                       "goes and the close is sent once more",
+                       trade.id, trade.symbol, ref)
+        return False
+    if state == POS_FLAT:
+        if proof == "open":
+            raise nothing_sent("the venue's own order read says the position "
+                               "is OPEN and its position list does not show "
+                               "it")
+        unproven = ""
+        if proof is None and venue_exit.can_ask(trade, client):
+            verdict, unproven = venue_exit.after_no_answer(trade)
+            if verdict == "wait":
+                raise nothing_sent(f"its position list no longer shows it "
+                                   f"and {unproven}")
+        return _book_flat_in_doubt(trade, client, ref=ref, unproven=unproven,
+                                   reason="KILL_SWITCH_ALREADY_FLAT")
+    raise nothing_sent(exposure.get("why")
+                       or "its position list could not say")
+
+
+def _book_flat_in_doubt(trade, client, *, ref, reason, venue_said="",
+                        unproven="") -> bool:
+    """Book a row whose close in doubt LANDED, the way the drain books one
+    (pending_closes._finalise_flat: nothing sent, the mark, the close hooks)
+    under the close claim (manual_close.CLAIM_KEY, taken under the row lock
+    as the reconcile takes it, released whatever happens). True: booked, or
+    closed elsewhere meanwhile (that close keeps its own words). Raises
+    when another close holds the row, and when no price can be read to book
+    it: the row then waits CLOSE_PENDING for the drain, which books it once
+    a price returns (the drain's own unpriced rule and alert). 2026-11-01."""
+    from django.db import transaction
+
+    from bot_program.manual_close import CLAIM_KEY, _release
+    from bot_program.pending_closes import _finalise_flat
+    model = type(trade)
+    with transaction.atomic():
+        fresh = (model.objects.select_for_update()
+                 .select_related("config", "config__user")
+                 .filter(pk=trade.pk).first())
+        if fresh is None or fresh.status not in ("OPEN", "CLOSE_PENDING"):
+            logger.info("[KILL SWITCH] trade %s was closed elsewhere while "
+                        "its close in doubt was being settled — left as that "
+                        "close wrote it", trade.id)
+            return True
+        if _claim_in_flight(fresh.metadata):
+            raise RuntimeError(
+                f"trade {trade.id} ({trade.symbol}): its close in doubt "
+                f"(reference {ref}) landed at the venue, and another close "
+                f"holds the row right now — the switch sent nothing and "
+                f"booked nothing; that close books it")
+        meta = dict(fresh.metadata or {})
+        meta[CLAIM_KEY] = timezone.now().isoformat()
+        fresh.metadata = meta
+        fresh.save(update_fields=["metadata"])
+    try:
+        if _finalise_flat(fresh, client, reason=reason, venue_said=venue_said,
+                          unproven=unproven):
+            logger.warning("[KILL SWITCH] trade %s (%s): the close in doubt "
+                           "(reference %s) landed — booked without sending "
+                           "anything (%s)", trade.id, trade.symbol, ref,
+                           reason)
+            return True
+        with transaction.atomic():
+            row = (model.objects.select_for_update()
+                   .filter(pk=trade.pk, status="OPEN").first())
+            if row is not None:
+                row.status = "CLOSE_PENDING"
+                row.save(update_fields=["status"])
+        raise RuntimeError(
+            f"trade {trade.id} ({trade.symbol}): its close in doubt "
+            f"(reference {ref}) landed at the venue, but no price could be "
+            f"read to book it — nothing was sent, and the row waits "
+            f"CLOSE_PENDING for the retry task, which books it once a price "
+            f"returns")
+    finally:
+        _release(trade.pk)
+
+
 def _kill_order_id(trade) -> str:
     """A stable name for "flatten THIS row", so a repeat is a copy."""
     from bot_program.engine.idempotency import make_client_order_id
@@ -599,6 +790,22 @@ def _close_asset_trade(trade, now):
             f"trade {trade.id} ({trade.symbol}) is an unfilled entry that "
             f"could not be withdrawn — it may still fill; cancel the order "
             f"at the broker by hand")
+
+    # A CLOSE ANOTHER LANE LEFT IN DOUBT IS SETTLED BEFORE ANYTHING IS SENT
+    # (2026-11-01, the S3 review): booked when it landed, the marker dropped
+    # when a settled book still lists the position, and nothing sent
+    # otherwise (_settle_close_in_doubt). Read off the row as the database
+    # holds it now, not the snapshot the sweep loaded: a close in flight
+    # when the switch was pressed may have written the marker since. A row
+    # carrying close_order_working (the drain's and this switch's own close
+    # in doubt) is left to the working-close guard below, as before.
+    if not trade.paper:
+        _live = (type(trade).objects.filter(pk=trade.pk)
+                 .values_list("metadata", flat=True).first())
+        if _in_doubt_unguarded(_live):
+            trade.metadata = dict(_live)
+            if _settle_close_in_doubt(trade, client):
+                return
 
     # A LEFTOVER VERDICT NEVER DECIDES THIS ATTEMPT (2026-10-15, re-check):
     # a CLOSE_PENDING row may carry the flag an earlier attempt wrote (the

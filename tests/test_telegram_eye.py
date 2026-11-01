@@ -153,10 +153,13 @@ class FakeTelegram:
         self.honour_offset = honour_offset
         self.calls = []
 
-    def get(self, url, params=None, timeout=None):
+    def get(self, url, params=None, timeout=None, allow_redirects=True):
+        # telegram_eye._api follows no redirect (2026-11-01): the redirect
+        # pin's eToro-module rule (tests/test_etoro_no_redirect.py)
         assert url.endswith("/getUpdates"), url
         params = dict(params or {})
         self.calls.append(params)
+        self.allow_redirects = allow_redirects
         if "offset" in params and self.honour_offset:
             self.updates = [u for u in self.updates
                             if u["update_id"] >= params["offset"]]

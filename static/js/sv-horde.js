@@ -1659,7 +1659,9 @@
     b = voiceBox(sec, W('v_care'));
     add(b, el('div', '', c.words));
     if (c.suffix) add(b, el('div', 'hd-muted', c.suffix));
-    [c.soft_t, c.venue_t, c.refusal, c.event, c.none_t].forEach(function (t) {
+    /* c.readback (2026-10-31): a hand-taken short eToro holds otherwise
+       than it was sent, read back at the fill. */
+    [c.readback, c.soft_t, c.venue_t, c.refusal, c.event, c.none_t].forEach(function (t) {
       if (t) add(b, el('div', '', t));
     });
     b = voiceBox(sec, W('v_notes'));

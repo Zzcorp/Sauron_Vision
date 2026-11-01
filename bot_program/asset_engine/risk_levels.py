@@ -19,6 +19,7 @@ the old behaviour while it is being re-tuned.
 from __future__ import annotations
 
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -389,15 +390,93 @@ ETORO_CRYPTO_FEE_PER_SIDE = 0.01
 ETORO_STOCK_FEE_USD_PER_SIDE = 1.00
 
 
+def short_fee_fraction(short_fees, notional, *, nights=1) -> tuple:
+    """(fraction of `notional`, the words) of a short the platform MEASURED
+    on eToro's demo account (2026-10-31, bot_program/short_proofs
+    .measured_short_fees: the open fee and notional of a demo round trip,
+    the overnight fee and nights of its one overnight hold), or (0.0, "").
+
+    ONE measurement cannot tell a flat fee from a share of the notional,
+    so the open fee is read both ways and the stricter one charged, twice
+    (the close is assumed to cost what the open did, as the stock's flat
+    1.00 a side does). The overnight fee is a share of the measured
+    notional per night, for `nights` nights; a credit is never a discount.
+    Pure."""
+    if not isinstance(short_fees, dict):
+        return 0.0, ""
+
+    def _f(key):
+        raw = short_fees.get(key)
+        if raw is None or isinstance(raw, bool):
+            return None
+        try:
+            val = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return val if math.isfinite(val) else None
+
+    try:
+        notional = float(notional)
+    except (TypeError, ValueError):
+        return 0.0, ""
+    measured = _f("notional")
+    if notional <= 0 or not measured or measured <= 0:
+        return 0.0, ""
+    open_fee = max(0.0, _f("open_fee") or 0.0)
+    round_trip = max(2 * open_fee / measured, 2 * open_fee / notional)
+    night = _f("overnight_fee")
+    per_night = 0.0
+    if night is not None and night > 0:
+        held = _f("overnight_notional")
+        held = held if held and held > 0 else measured
+        per_night = night / held / max(1, int(_f("nights") or 1))
+    try:
+        nights = max(1, int(nights or 1))
+    except (TypeError, ValueError):
+        nights = 1
+    total = round_trip + per_night * nights
+    if total <= 0:
+        return 0.0, ""
+    where = str(short_fees.get("symbol") or "").strip()
+    words = ("eToro's short as measured on the demo account"
+             + (f" ({where})" if where else "")
+             + f": {open_fee:.2f} USD to open {measured:,.2f}, charged both "
+               f"ways as the stricter of a flat fee and a share")
+    if per_night:
+        words += (f", plus {per_night * 100:.4f}% a night for {nights} "
+                  f"night{'s' if nights != 1 else ''}")
+    return total, words
+
+
 def venue_fee_fraction(carrier: str, instrument_class: str,
-                       notional: float) -> tuple:
+                       notional: float, *, side: str = "BUY",
+                       short_fees=None, nights=1) -> tuple:
     """(round-trip fee as a fraction of notional, the words), or (0.0, "").
 
     `carrier` is capabilities.adapter_key(client); `instrument_class` is the
     INSTRUMENT's class, the key the proof gate uses. A crypto order at a
     multiplier above 1 is a CFD, whose fee eToro has not been measured
     charging; the 1% is charged there too, the stricter reading of
-    unmeasured."""
+    unmeasured.
+
+    A SELL with `short_fees` (2026-10-31: a short the platform measured on
+    eToro's demo account, short_fee_fraction) is charged the measured
+    short when it costs more than this table, and never less than it:
+    the table's own answer stands whenever the measurement is cheaper."""
+    base, words = _venue_fee_table(carrier, instrument_class, notional)
+    if (carrier or "") == "etoro" and str(side or "").upper() == "SELL" \
+            and short_fees:
+        measured, said = short_fee_fraction(short_fees, notional,
+                                            nights=nights)
+        if measured > base:
+            return measured, said
+    return base, words
+
+
+def _venue_fee_table(carrier: str, instrument_class: str,
+                     notional: float) -> tuple:
+    """The per-class table of venue_fee_fraction (the measured crypto and
+    stock fees), side-blind."""
     if (carrier or "") != "etoro":
         return 0.0, ""
     if instrument_class == "crypto":

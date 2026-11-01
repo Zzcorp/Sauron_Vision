@@ -541,10 +541,7 @@ def morgul_alarms(report) -> list:
             continue
         if f.severity != "critical":
             continue
-        out.append(Alarm(f"morgul|{f.key}", _morgul_words(f.title),
-                         [f.label, "Morgul watches it; details on /health/."],
-                         kind=EVENT if f.event else STANDING,
-                         button=morgul.close_button(f)))
+        out.append(_finding_alarm(f))
     for key, outcome in (report.outcomes or {}).items():
         if (not outcome or outcome[0] not in ("stopped", "earlier")
                 or not outcome[1]):
@@ -556,6 +553,39 @@ def morgul_alarms(report) -> list:
             morgul.brake_lines([outcome])
             + [f"{when}: {eye.when(report.ctx.now)}"], kind=EVENT))
     return out
+
+
+def _finding_alarm(f) -> Alarm:
+    """One critical Morgul finding as this chat hears it: its title and
+    its label, never its facts."""
+    return Alarm(f"morgul|{f.key}", _morgul_words(f.title),
+                 [f.label, "Morgul watches it; details on /health/."],
+                 kind=EVENT if f.event else STANDING,
+                 button=morgul.close_button(f))
+
+
+def relay_now(findings, *, now=None) -> dict:
+    """Morgul's findings said AT ONCE (morgul.say_now, 2026-10-31: the
+    short read-back), on the same memory and keys as relay_morgul, so the
+    beat's relay does not say them again inside their window. Critical
+    only. send_alarm itself says nothing while the switch is off or the
+    configuration is refused; with the relay's lock held by a pass, the
+    alarm is sent with no memory (said twice is better than never)."""
+    from django.utils import timezone
+    now = now or timezone.now()
+    alarms = [_finding_alarm(f) for f in findings
+              if getattr(f, "severity", "") == "critical"]
+    if not alarms:
+        return {}
+    if not _lock("morgul"):
+        sent = sum(1 for a in alarms
+                   if send_alarm(a.title, a.lines, button=a.button))
+        return {"problems": len(alarms), "due": len(alarms), "sent": sent,
+                "failed": len(alarms) - sent}
+    try:
+        return _settle("morgul", alarms, now)
+    finally:
+        _unlock("morgul")
 
 
 def relay_morgul(report) -> dict:

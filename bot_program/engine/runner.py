@@ -122,12 +122,17 @@ def run_bot_tick(user_id: int):
                 continue
             tk = sym_client.ticker(t.symbol)
             price = Decimal(tk["lastPrice"])
-            if t.paper and price <= 0:
-                # No usable paper price — a stale quote, or a market that
-                # only just reopened: nothing to compare and nothing to
-                # book. A BUY's "stop" at 0 was an exit at 0 (2026-09-26).
-                log.info("legacy paper #%s %s: no usable price — no paper "
-                         "exit this tick; the row stays OPEN", t.id, t.symbol)
+            if not price.is_finite() or price <= 0:
+                # No usable price — a stale quote, a market that only just
+                # reopened, a venue that answered 0: nothing to compare and
+                # nothing to book. A BUY's "stop" at 0 was an exit at 0
+                # (2026-09-26). On EVERY row since 2026-10-31: a LIVE row
+                # was guarded by nothing, and its stop read as crossed sent
+                # a real close at market on a price nobody quoted.
+                log.info("legacy %s #%s %s: no usable price (%s) — no exit "
+                         "this tick; the row stays OPEN",
+                         "paper" if t.paper else "live", t.id, t.symbol,
+                         price)
                 continue
             hit_sl = (t.side == "BUY" and price <= t.stop_loss) or (t.side == "SELL" and price >= t.stop_loss)
             hit_tp = (t.side == "BUY" and price >= t.take_profit) or (t.side == "SELL" and price <= t.take_profit)

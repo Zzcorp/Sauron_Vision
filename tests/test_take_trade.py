@@ -146,10 +146,34 @@ class TakeTradeEngineTests(TestCase):
         self.assertEqual(old.status, "CLOSED")
         self.assertIsNotNone(old.realized_r)
 
-    def test_an_index_signal_is_refused_with_the_reason(self):
-        from bot_program.manual_trade import preview_take_trade
+    def test_an_index_ticket_previews_and_books_from_the_stock_pool(self):
+        """(2026-10-31) An index had no manual lane ("index instruments
+        have no execution path"). It rides the STOCK manual pool now — the
+        pool the bots already trade SPX500 from (the stocks box carries
+        "index"; StockBot manages the row: marks, stops, the care,
+        reconcile) — sized under the index's own notional cap (2.0, the
+        bots' cap_class rule) while its risk is the pool's."""
+        from bot_program.manual_trade import (execute_take_trade,
+                                              preview_take_trade)
+        from bot_program.models import AssetBotTrade
         idx = _quote("SPX500", 7800, asset_class="index")
-        p = preview_take_trade(self.user, _signal(idx))
+        sig = _signal(idx, entry=7800, stop=7700, target=8000)
+        p = preview_take_trade(self.user, sig)
+        self.assertNotIn("error", p, p)
+        self.assertEqual(p["asset_class"], "stock")
+        self.assertEqual(p["max_notional"], 20000.0,
+                         "the index cap (2.0 of the pool), not the stock 0.20")
+        out = execute_take_trade(self.user, sig)
+        self.assertTrue(out.get("ok"), out)
+        row = AssetBotTrade.objects.get(pk=out["trade_id"])
+        self.assertEqual((row.symbol, row.config.asset_class,
+                          row.config.name), ("SPX500", "stock", "manual"))
+
+    def test_a_class_with_no_lane_is_still_refused_with_the_reason(self):
+        from bot_program.manual_trade import preview_take_trade
+        bond = _quote("SOMEBOND", 100, asset_class="bond")
+        p = preview_take_trade(self.user, _signal(bond, entry=100, stop=99,
+                                                  target=102))
         self.assertIn("error", p)
         self.assertIn("execution path", p["error"])
 

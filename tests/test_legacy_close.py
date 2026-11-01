@@ -520,3 +520,52 @@ class TheTickPollsARestingClose(TestCase):
         trade.refresh_from_db()
         self.assertEqual(trade.status, "CLOSED")
         self.assertEqual(trade.exit_price, Decimal("94"))
+
+
+class NoPriceIsNoExitOnAnyRow(TestCase):
+    """(2026-10-31) The legacy tick guarded a PAPER row against a price of
+    0 or less, and only a paper row: a LIVE BUY whose venue answered a
+    lastPrice of 0 read its stop as crossed (0 <= stop) and was sent to
+    market at a price nobody quoted. A price that is not positive — or
+    not a number — closes nothing, on any row; the row stays OPEN."""
+
+    def test_a_live_row_is_never_closed_on_a_price_that_is_not_positive(self):
+        from bot_program.engine import runner
+        for n, price in enumerate(("0", "-1", "NaN")):
+            with self.subTest(price=price):
+                trade = _row(qty=str(60 + n))
+                cfg = trade.config
+                cfg.enabled = True
+                cfg.symbols = []
+                cfg.save()
+                client = _client()
+                client.ticker.return_value = {"lastPrice": price}
+                with mock.patch.object(runner, "client_for_symbol",
+                                       return_value=client), \
+                        mock.patch.object(runner, "_settle_working_close",
+                                          return_value=False), \
+                        mock.patch.object(runner, "_close") as close:
+                    runner.run_bot_tick(cfg.user_id)
+                close.assert_not_called()
+                client.market_order.assert_not_called()
+                trade.refresh_from_db()
+                self.assertEqual(trade.status, "OPEN")
+                self.assertIsNone(trade.exit_price)
+
+    def test_the_control_a_real_price_through_the_stop_closes(self):
+        from bot_program.engine import runner
+        trade = _row(qty="70")
+        cfg = trade.config
+        cfg.enabled = True
+        cfg.symbols = []
+        cfg.save()
+        client = _client()
+        client.ticker.return_value = {"lastPrice": "94"}
+        with mock.patch.object(runner, "client_for_symbol",
+                               return_value=client), \
+                mock.patch.object(runner, "_settle_working_close",
+                                  return_value=False), \
+                mock.patch.object(runner, "_close") as close:
+            runner.run_bot_tick(cfg.user_id)
+        close.assert_called_once()
+        self.assertEqual(close.call_args.args[3], "SL")

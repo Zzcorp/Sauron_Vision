@@ -669,9 +669,28 @@ COMMANDS = [
         "category": "ops",
     },
     {
+        "name": "short_proofs_demo",
+        "title": "Demo short proofs",
+        "purpose": "One step of the platform's own short proofs on eToro's DEMO account (never the real one, whatever the eToro row says): a short of the venue minimum on a class no code proves, filled, closed and recorded; a clean one lets the bots short that class at that multiplier. --dry-run prints the plan and sends nothing.",
+        "usage": [
+            "python manage.py short_proofs_demo --dry-run                 # the plan: nothing sent",
+            "python manage.py short_proofs_demo                           # one step now, as the beat runs it",
+            "python manage.py short_proofs_demo --class etf --leverage 2  # that step now",
+            "python manage.py short_proofs_demo --class index --overnight # hold one across the close",
+        ],
+        "mirrors": "/short-proofs/",
+        "read_only": False,
+        "run_args": [],
+        "category": "ops",
+        # Not the web's to run: it presents the operator's eToro keys to an
+        # external service and places orders on the demo account.
+        "runnable": False,
+        "runnable_reason": "places orders on eToro's demo account with the operator's keys",
+    },
+    {
         "name": "seed_components",
         "title": "Seed components",
-        "purpose": "Register all platform components — every switch the code knows, created OFF where it does not yet exist in the database.",
+        "purpose": "Register all platform components — every switch the code knows, created OFF where it does not yet exist in the database (short_proofs_demo alone arrives ON: it only ever touches eToro's demo account).",
         "usage": [
             "python manage.py seed_components",
         ],

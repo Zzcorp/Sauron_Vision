@@ -108,7 +108,7 @@ def unattributable(trade, client, *, keyed: int) -> str:
     return ""
 
 
-def venue_lag_window(trade, client) -> str:
+def venue_lag_window(trade, client, *, doubt: bool = False) -> str:
     """Why ONE read of this venue's position list cannot yet speak for
     `trade`, or "".
 
@@ -124,6 +124,22 @@ def venue_lag_window(trade, client) -> str:
     stamp is refused, not localised. Three states: the reason, or "" —
     never a guess about which way the list is wrong. Read by reconcile_user
     and by pending_closes.retry_trade_close.
+
+    `doubt` (2026-11-01): the stamp of a close that did not come back
+    (close_in_doubt["at"]) counts too, as "sent a close in doubt". The bot
+    lane writes that marker and no close_sent_at (its close raised; nothing
+    was answered), so without it a list read seconds after that close looked
+    settled, and one "still held" read cleared the marker and sent the
+    close again. Asked with it by the two readers that decide whether a
+    second close may go over the marker: AssetBot._close_trade and the kill
+    switch (kill_switch._settle_close_in_doubt). The drain's own close in
+    doubt carries close_sent_at already, and on eToro, the one venue that
+    declares a lag, the reconcile books a miss only on the venue's own word
+    or after an hour of unanswered asks (venue_exit), so they ask without it.
+    It holds a venue that declares a lag, eToro, and no other: for one that
+    declares none (Saxo) every read is past it, so a "still held" read
+    seconds after a Saxo 202 still clears the marker in both readers, as it
+    did before (2026-11-01; holding that is its own task).
     """
     from datetime import datetime as _dt
     lag = getattr(client, "PORTFOLIO_LAG_S", 0)
@@ -136,6 +152,10 @@ def venue_lag_window(trade, client) -> str:
               ("filled", meta.get("entry_filled_at")),
               ("sent a close", meta.get("close_sent_at")),
               ("retried a close", meta.get("close_retry_last_at")))
+    if doubt:
+        held = meta.get("close_in_doubt")
+        stamps += (("sent a close in doubt",
+                    held.get("at") if isinstance(held, dict) else None),)
     for what, raw in stamps:
         if not raw:
             continue

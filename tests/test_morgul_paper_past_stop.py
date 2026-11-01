@@ -140,8 +140,9 @@ class PaperFarPastItsStopTests(TestCase):
         self.assertEqual(len(self._notes(ctx)), 5)
         self.assertTrue(any(re.search(r"\+2 more", n) for n in ctx.notes))
 
-    def test_still_eleven_guards_and_g12_never_brakes(self):
-        self.assertEqual(len(morgul.GUARDS), 11)
+    def test_still_twelve_guards_and_g12_never_brakes(self):
+        # twelve since G13, the short read-back (2026-10-31)
+        self.assertEqual(len(morgul.GUARDS), 12)
         self.assertFalse(morgul.GUARD["stop_overshoot"].brake)
 
     def test_a_note_is_never_sent(self):

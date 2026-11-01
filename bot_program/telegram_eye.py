@@ -804,6 +804,19 @@ def _proof_words() -> str:
               + [f"short_{c}" for c in
                  sorted(getattr(base, "ETORO_SHORT_PROVEN", ()) or ())])
     words = [proof_word(t) for t in tokens]
+    # THE SHORTS THE PLATFORM PROVED ITSELF on eToro's demo account
+    # (2026-10-31, bot_program/short_proofs.py): at the multipliers measured
+    # there, for the classes no code pins
+    for cls in sorted(CLASS_WORDS):
+        try:
+            if base.short_pinned(cls):
+                continue
+            levels = sorted(base.demo_short_leverages(cls))
+        except Exception:  # noqa: BLE001 — a status report never raises
+            levels = []
+        if levels:
+            words.append(f"{proof_word('short_' + cls)} on the demo account "
+                         f"at {', '.join(f'{v}x' for v in levels)}")
     return ", ".join(words) if words else "none yet"
 
 
@@ -1605,7 +1618,13 @@ def _api(token: str, method: str, params: dict):
     A fault is logged at WARNING once an hour (_note), its end once."""
     url = API_URL.format(token=token, method=method)
     try:
-        r = requests.get(url, params=params, timeout=HTTP_TIMEOUT_S)
+        # NO REDIRECT IS FOLLOWED (2026-11-01). This module holds the eToro
+        # client (read_live_account), and the redirect pin holds every
+        # requests.* call of such a module to allow_redirects=False
+        # (tests/test_etoro_no_redirect.py). A 3xx is then a refusal,
+        # said as any other below.
+        r = requests.get(url, params=params, timeout=HTTP_TIMEOUT_S,
+                         allow_redirects=False)
     except Exception as e:  # noqa: BLE001
         why = f"{method} unreachable ({type(e).__name__})"
         _failing(method, f"{method}:unreachable", why)

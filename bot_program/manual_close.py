@@ -568,12 +568,18 @@ def execute_close(user, trade, *, pin_ok: bool = False) -> dict:
         # paper exit cost and the per-class P&L multiplier all live in
         # _close_trade, and a live failure lands in CLOSE_PENDING for the
         # retry task exactly as a bot-tick close would.
+        doubt_before = (trade.metadata or {}).get("close_in_doubt")
         closed = bot._close_trade(trade, Decimal(str(mark)), client,
                                   reason=CLOSE_REASON)
     finally:
         _release(trade.pk)
 
     trade.refresh_from_db()
+    # A close in doubt was neither refused nor queued: it says what it is.
+    if not closed and not trade.paper and trade.status == "OPEN":
+        in_doubt = _close_in_doubt_words(trade, doubt_before)
+        if in_doubt:
+            return in_doubt
     if not closed and trade.paper and trade.status == "OPEN":
         # A PAPER close the engine declined booked nothing and left the row
         # OPEN: there is no broker, no CLOSE_PENDING and no retry task for
@@ -603,6 +609,45 @@ def execute_close(user, trade, *, pin_ok: bool = False) -> dict:
         "r": trade.realized_r,
         "outcome": trade.outcome or "",
     }
+
+
+def _close_in_doubt_words(trade, doubt_before) -> dict | None:
+    """The answer for a LIVE row the engine left OPEN with a close in doubt
+    (close_in_doubt), or None for any other row (2026-11-01, the S3
+    review's second pass).
+
+    The generic refusal said "The broker rejected the close ... the row is
+    CLOSE_PENDING and the retry task will keep trying every 5 minutes". Over
+    a close in doubt none of it is true: nothing was refused, the row is
+    OPEN, and the drain (pending_closes.retry_all_pending_closes) reads
+    CLOSE_PENDING rows only, so no retry comes back to it. Two cases, told
+    apart by the marker the row carried before the press (`doubt_before`):
+
+      * the same marker: an earlier close may be live, and the engine sent
+        NOTHING (the book unreadable, read inside the venue's lag, or no
+        longer listing the position, AssetBot._close_trade);
+      * a new marker: THIS press's close did not come back, so it was sent
+        and may be live, and it is never sent again blind.
+
+    In doubt, never pending: no promise of a retry nobody runs."""
+    doubt = (trade.metadata or {}).get("close_in_doubt")
+    if not isinstance(doubt, dict) or not doubt:
+        return None
+    ref = str(doubt.get("reference") or "") or "(none)"
+    if doubt == doubt_before:
+        error = (f"NOTHING was sent for {trade.symbol} and the row stays "
+                 f"OPEN: a close sent earlier may already be live at the "
+                 f"broker under reference {ref}, and the platform cannot "
+                 f"prove yet whether it filled; check the position at the "
+                 f"venue, or press CLOSE again in a minute")
+    else:
+        error = (f"The close of {trade.symbol} did not come back: it MAY be "
+                 f"live at the broker under reference {ref}. Nothing is sent "
+                 f"again and the row stays OPEN; check the position at the "
+                 f"venue before closing it again, since a second close "
+                 f"reverses the position")
+    return {"error": error, "in_doubt": True, "reference": ref,
+            "trade_id": trade.id}
 
 
 def _retry_pending(user, trade) -> dict:

@@ -116,6 +116,11 @@ STAGE_OF = {
     "retry-pending-closes": ("act", "pending closes retried, confirmed by the venue"),
     "refresh-saxo-sessions": ("act", "Saxo sessions refreshed"),
     "reconcile-asset-bot-trades": ("act", "trades reconciled against the venue"),
+    # The demo short proofs (2026-10-31): orders, on eToro's demo account
+    # only, that open a class's short to the bots once measured clean (the
+    # Wall forbids the word "proven" in public copy).
+    "short-proofs-demo": ("act", "a class's short measured on eToro's "
+                                 "demo account before a bot may take it"),
     # ── WATCH: the guards, the syncs ────────────────────────────────────
     # No typed count of guards here: the Wall's numbers are counted, and
     # "ten" would drift the day an eleventh guard lands.

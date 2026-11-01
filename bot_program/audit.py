@@ -187,6 +187,25 @@ def record_trade_close(user, *, trade) -> None:
         logger.warning("audit record_trade_close failed: %s", e)
 
 
+def record_funded_refusal(user, *, asset_class: str, symbol: str, side: str,
+                          reason: str, closes: list) -> None:
+    """THE FUNDING CLOSES OF A REFUSED TICKET (2026-10-31): a TAKE TRADE
+    ticket refused AFTER its funding closes ran (manual_trade._execute
+    runs every check it can before the first close; what is left can only
+    be judged after them). The closes are irreversible and realised P&L:
+    the row names each one — id, symbol, side, units, exit price, P&L —
+    beside the refusal, so a review can see the money moved for a trade
+    that never opened. Kind "funded_refusal" (a data kind, never
+    KIND_CHOICES: a choices change is a migration)."""
+    try:
+        record_event("funded_refusal", {
+            "asset_class": asset_class, "symbol": symbol, "side": side,
+            "reason": str(reason or "")[:500], "closes": list(closes or []),
+        }, user=user)
+    except Exception as e:
+        logger.warning("audit record_funded_refusal failed: %s", e)
+
+
 def record_gate_reject(user, *, asset_class: str, symbol: str, side: str,
                         right: str, reason: str,
                         exposure_before: dict, exposure_after: dict,
@@ -432,6 +451,49 @@ def record_pin(kind: str, *, who: str, door: str, act: str,
         record_event(kind, data, user=linked)
     except Exception as e:
         logger.warning("audit record_pin(%s) failed (%s)", kind,
+                       type(e).__name__)
+
+
+# ── The demo short proofs (2026-10-31, bot_program/short_proofs.py) ─────
+# A superuser revoked a short the platform proved on eToro's demo account
+# (the bots' gate reads it no more), or cleared the runner's in-doubt stop
+# (it goes on), with the trading PIN on /short-proofs/. Constants only,
+# never KIND_CHOICES; the same 20-wide column. Never an order id, a
+# position id or an amount.
+
+#: A recorded demo short proof revoked.
+SHORT_PROOF_REVOKED = "short_proof_revoked"
+#: The demo proofs' in-doubt stop cleared.
+SHORT_PROOF_CLEARED = "short_proof_cleared"
+
+AUDIT_KINDS_SHORT_PROOF = (SHORT_PROOF_REVOKED, SHORT_PROOF_CLEARED)
+
+
+def record_short_proof(kind: str, *, row, who: str, reason: str = "",
+                       user=None, rows=None) -> None:
+    """One revoke or clear on the chain: the row's number, its class,
+    instrument, multiplier, world and step, whether it was the overnight
+    hold, who, and why; and `rows`, the numbers of every row the act
+    marked (a revoke marks every standing proof of the class at that
+    multiplier, 2026-10-31). Never raises."""
+    try:
+        linked = user if getattr(user, "is_authenticated", False) and \
+            getattr(user, "pk", None) else None
+        data = {
+            "row": int(row.pk),
+            "rows": [int(r.pk) for r in (rows or [row])][:50],
+            "asset_class": str(row.asset_class or "")[:12],
+            "symbol": str(row.symbol or "")[:40],
+            "leverage": int(row.leverage or 1),
+            "world": str(row.world or "")[:8],
+            "state": str(row.proof_state or "")[:16],
+            "overnight": bool(row.overnight),
+            "who": str(who or "")[:80],
+            "reason": str(reason or "")[:120],
+        }
+        record_event(kind, data, user=linked)
+    except Exception as e:
+        logger.warning("audit record_short_proof(%s) failed (%s)", kind,
                        type(e).__name__)
 
 

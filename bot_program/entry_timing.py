@@ -18,6 +18,13 @@ calendar the open-position care already reads (position_care):
                 the daily swap, when every CFD venue re-prices (eToro
                 answers error 749 at 21:01 UTC, measured) and the spread
                 is at its widest.
+  INDEX BREAK   (2026-10-31) a US index (US_INDEX_FUTURES, or an index on
+                CME's exchange): no new entry from INDEX_BREAK_NY[0] New
+                York, Monday to Thursday, until the futures reopen at
+                INDEX_BREAK_NY[1] and settle OPEN_SETTLE_MINUTES — CME's
+                equity index futures pause then, and eToro's US index
+                CFDs follow them (the demo index SELLs of 2026-10-01 were
+                refused inside it, at 21:01 and 21:17 UTC).
   OPEN SETTLE   a market that opened less than OPEN_SETTLE_MINUTES ago:
                 its first quotes are the previous session's (the paper
                 venue's REOPEN_SETTLE_SECONDS rule, for every venue).
@@ -40,8 +47,9 @@ calendar the open-position care already reads (position_care):
                 attack tier is capped at STANDARD (base.py _attack_tier)
                 — the risk is sized, never raised, into a print.
 
-A verdict is a dict: {"ok", "code" (ROLLOVER/SHUT/OPEN_SETTLE/
-CLOSE_GUARD/WEEKEND/EVENT or ""), "why" (one sentence, no money), "until"
+A verdict is a dict: {"ok", "code" (ROLLOVER/INDEX_BREAK/SHUT/
+OPEN_SETTLE/CLOSE_GUARD/WEEKEND/EVENT or ""), "why" (one sentence, no
+money), "until"
 (an aware UTC datetime when the clock knows it, else None), "attack"
 ({"cap": "STANDARD", "why"} or None)}. The bot lane refuses on it
 (skips.BAD_TIMING, or skips.MARKET_SHUT for SHUT — skip_code; at
@@ -89,6 +97,18 @@ ROLLOVER_CLASSES = frozenset({"forex", "commodity", "index"})
 #: The classes whose modelled session is the venue's own, so a rollover
 #: that ends inside the venue's break clears at its reopening (+ settle).
 VENUE_BREAK_CLASSES = frozenset({"commodity"})
+#: THE US INDEX BREAK (2026-10-31), New York time (DST follows: 21:00-22:00
+#: UTC in summer, 22:00-23:00 in winter). CME's equity index futures pause
+#: every weekday from 17:00 to 18:00 New York, and eToro's US index CFDs
+#: follow them: the demo SPX500 and NSDQ100 SELLs of 2026-10-01 were
+#: refused (errorCode 749) at 21:01 and 21:17 UTC, inside it, while the
+#: rollover window above let 17:10-18:00 through. A US index enters again
+#: once the futures reopen and settle (OPEN_SETTLE_MINUTES). Monday to
+#: Thursday: from Friday 17:00 the futures are shut for the weekend.
+INDEX_BREAK_NY = (dtime(17, 0), dtime(18, 0))
+#: The index CFDs that follow CME's equity index futures (instruments.
+#: services' CME indices); an index on the "CME" exchange counts too.
+US_INDEX_FUTURES = frozenset({"SPX500", "NSDQ100", "DJ30", "RUSSELL2000"})
 #: Minutes after an open before a new entry.
 OPEN_SETTLE_MINUTES = 15
 #: Minutes before an exchange close with no new entry, and the classes
@@ -121,6 +141,7 @@ OPTIONS_SHUT_CLASSES = SHUT_CLASSES | {"options"}
 
 ROLLOVER, OPEN_SETTLE, CLOSE_GUARD, WEEKEND, EVENT, SHUT = (
     "ROLLOVER", "OPEN_SETTLE", "CLOSE_GUARD", "WEEKEND", "EVENT", "SHUT")
+INDEX_BREAK = "INDEX_BREAK"
 
 _CLASS_WORDS = {"etf": "ETF"}
 
@@ -147,6 +168,51 @@ def _utc_words(moment) -> str:
         return utc_words(moment)
     except Exception:  # noqa: BLE001
         return "?"
+
+
+def us_index(asset_class, symbol="", exchange="") -> bool:
+    """Whether this instrument follows CME's equity index futures: an
+    index named in US_INDEX_FUTURES, or an index on the CME exchange
+    (2026-10-31)."""
+    return (str(asset_class or "").strip().lower() == "index"
+            and (str(symbol or "").strip().upper() in US_INDEX_FUTURES
+                 or str(exchange or "").strip().upper() == "CME"))
+
+
+def _index_break_end(ny):
+    """The aware UTC instant a US index enters again after the break of
+    the New York date of `ny`: the reopening plus its settling quarter
+    hour."""
+    end = INDEX_BREAK_NY[1]
+    return (ny.replace(hour=end.hour, minute=end.minute, second=0,
+                       microsecond=0)
+            + timedelta(minutes=OPEN_SETTLE_MINUTES)).astimezone(
+                dt_timezone.utc)
+
+
+def index_break(now, asset_class, *, exchange="", symbol="") -> dict | None:
+    """THE US INDEX BREAK (2026-10-31): INDEX_BREAK's refusal for a US
+    index (us_index) from INDEX_BREAK_NY[0] New York, Monday to Thursday,
+    until the futures reopen and settle; None otherwise. The resume hour
+    comes first in the words: why_no_trade prints 88 characters of a
+    skip's detail."""
+    if not us_index(asset_class, symbol, exchange):
+        return None
+    ny = now.astimezone(NY)
+    if ny.weekday() >= 4:
+        return None
+    start = ny.replace(hour=INDEX_BREAK_NY[0].hour,
+                       minute=INDEX_BREAK_NY[0].minute, second=0,
+                       microsecond=0).astimezone(dt_timezone.utc)
+    until = _index_break_end(ny)
+    if not (start <= now.astimezone(dt_timezone.utc) < until):
+        return None
+    return {"ok": False, "code": INDEX_BREAK,
+            "why": (f"US index futures pause 17:00-18:00 New York — new "
+                    f"entries resume {_utc_words(until)}, once they reopen "
+                    f"and settle (CME's daily break, which eToro's US "
+                    f"index CFDs follow)"),
+            "until": until, "attack": None}
 
 
 def rollover(now, asset_class, *, exchange="", symbol="") -> dict | None:
@@ -185,6 +251,11 @@ def rollover(now, asset_class, *, exchange="", symbol="") -> dict | None:
         except Exception as e:  # noqa: BLE001 — the window's end stands
             logger.warning("[timing] venue clock unread for %s: %s",
                            symbol, e)
+    # A US index (2026-10-31): the window's end falls inside the futures'
+    # daily break, so it clears when they reopen and settle.
+    if us_index(cls, symbol, exchange):
+        until = _index_break_end(ny)
+        reopens_note = ", once the index futures reopen and settle"
     return {"ok": False, "code": ROLLOVER,
             "why": (f"the {_class_words(cls)} market rolls over at 17:00 New "
                     f"York — new entries resume {_utc_words(until)}"
@@ -346,7 +417,8 @@ def _g1_would_flag(cls, exchange, symbol, now) -> bool:
 
 
 def clock_verdict(symbol, asset_class, *, exchange="", now=None) -> dict | None:
-    """The clock's refusal — the rollover, a shut exchange (SHUT:
+    """The clock's refusal — the rollover, a US index's daily break
+    (INDEX_BREAK, 2026-10-31), a shut exchange (SHUT:
     SHUT_CLASSES on Morgul G1's own clock), Friday's last hour before the
     weekend or the window before a US holiday's long shut (WEEKEND), a
     market's first quarter hour, an exchange's last minutes — in that
@@ -357,6 +429,12 @@ def clock_verdict(symbol, asset_class, *, exchange="", now=None) -> dict | None:
     if cls in NEVER_SHUTS or cls == "options":
         return None
     got = rollover(now, cls, exchange=exchange, symbol=symbol)
+    if got is not None:
+        return got
+    # THE US INDEX BREAK (2026-10-31): after the rollover, whose words keep
+    # its own first ten minutes; an index is not a SHUT class, so this is
+    # the only hour of the night a US index waits.
+    got = index_break(now, cls, exchange=exchange, symbol=symbol)
     if got is not None:
         return got
     # THE SHUT EXCHANGE (2026-10-07): the clock is read once, before the

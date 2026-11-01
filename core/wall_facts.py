@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 # tests/test_wall_facts.py counts the suite and fails when this drifts: the
 # first version of this module shipped a number its own commit had already
 # invalidated, which is exactly the failure it was written to prevent.
-TESTS_GREEN = 14527
+TESTS_GREEN = 14694
 
 # Broker adapters implemented under bot_program/engine/ — one module and one
 # client class each, all reachable from broker_router.client_for_symbol().
@@ -453,10 +453,21 @@ def _count_proof_classes() -> int:
 
 
 def _count_short_classes() -> int:
-    """Families with a proof of their own for a sell
-    (bot_program.asset_engine.base.ETORO_SHORT_PROVEN)."""
-    from bot_program.asset_engine.base import ETORO_SHORT_PROVEN
-    return len(ETORO_SHORT_PROVEN)
+    """Families with a proof of their own for a bot's sell: pinned in the
+    code (bot_program.asset_engine.base.ETORO_SHORT_PROVEN, short_pinned)
+    or, since 2026-10-31, proven by the platform itself on eToro's demo
+    account at one multiplier at least (base.demo_short_leverages, the
+    gate's own read: standing proofs only, nothing when unread).
+
+    Counted over the families with an eToro proof of their own
+    (ETORO_PROVEN, less its "every short at once" token): the gate refuses
+    any other family's entry, sell or buy, whatever proves its short.
+    """
+    from bot_program.asset_engine.base import (
+        ETORO_PROVEN, demo_short_leverages, short_pinned,
+    )
+    return sum(1 for cls in ETORO_PROVEN - {"short"}
+               if short_pinned(cls) or demo_short_leverages(cls))
 
 
 def _count_proving_verdicts() -> int:

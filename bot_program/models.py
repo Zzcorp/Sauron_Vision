@@ -817,3 +817,6 @@ from .orcs.models import (  # noqa: F401
     OrcSeat, Orc, OrcLeg, OrcWake, OrcJournal, OrcTrack, OrcGrade,
     OrcSetting, OrcDossierBlock, OrcDayBaseline, OrcDrum,
 )
+# THE SHORTS MEASURED BY HAND (2026-10-31, bot_program/short_readback.py):
+# a hand-taken eToro short read back clean at its fill.
+from .short_models import EtoroShortObservation  # noqa: F401

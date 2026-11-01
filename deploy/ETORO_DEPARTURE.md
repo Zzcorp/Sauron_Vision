@@ -853,8 +853,21 @@ commodity symbol reads `route=etoro` before its config is enabled.
   notional each side on crypto, 1.00 USD each side on a stock whatever its
   size (0.05 AAPL's round trip cost 1.98 of 16.86). A trade whose planned
   move does not cover them sends nothing (cost_filter).
-  STILL UNPROVEN: "short" (no eToro SELL has filled, so every SELL is
-  refused) and any leverage above 1x but forex's 5x. What the proofs do not lift: an index in
+  STILL UNPROVEN: a short on etf, index, commodity and crypto (the AAPL
+  and EURUSD SELLs filled on the demo segment on 2026-10-01, so
+  ETORO_SHORT_PROVEN names stock and forex; the bots refuse a SELL of any
+  other class, and since 2026-10-31 a hand-taken SELL goes on every class,
+  warned before the PIN and read back at the fill,
+  bot_program/short_readback.py) and any leverage above 1x but forex's 5x
+  (a short above 1x has never been measured; the ticket defaults a SELL to
+  1x). Since 2026-10-31 the platform proves these shorts itself, on eToro's
+  DEMO account only (bot_program/short_proofs.py, the short_proofs_demo
+  switch, ON by default; `manage.py short_proofs_demo --dry-run` prints
+  its plan): a SELL of the venue minimum per class at 1x, then 2x and 5x
+  where the demo row lists them, filled, closed and recorded; a clean one
+  opens that class to the bots at that multiplier only, and /short-proofs/
+  revokes it with the trading PIN. Pinning one in ETORO_SHORT_PROVEN (§10)
+  stays the stronger proof. What the proofs do not lift: an index in
   VENUE_QUOTE_UNMEASURED, a commodity while eToro's commodities box is
   unticked (the router sends it elsewhere), and the 1,000 USD floor per
   order on indices and commodities.
@@ -995,9 +1008,14 @@ retirement then continues at deploy/IBKR_RETIREMENT.md Stage 3.
   without its `test_proof_<token>` in tests/test_etoro_client.py in the
   same commit, and never tick a class whose token is absent: every lane
   (the asset-bot tick, TAKE TRADE and the legacy tick) refuses every
-  eToro entry of that class — and every short until "short" is pinned —
-  as `gate_blocked`, before the floor and before any POST, until the
-  proof lands (2026-09-24).
+  eToro entry of that class — and every bot short of a class until its
+  own short proof is in ETORO_SHORT_PROVEN, or recorded on the demo
+  account by bot_program/short_proofs.py at the order's multiplier
+  (2026-10-31) — as `gate_blocked`, before the
+  floor and before any POST, until the proof lands (2026-09-24). A
+  hand-taken short is the one exception (2026-10-31): TAKE TRADE sends it
+  on a class with no short proof, warned before the PIN and read back at
+  the fill; a class proof is never waived.
 - Never flip fractional_units_live before D2c's pins are in
   tests/test_etoro_client.py, and never with more than one config enabled
   until the 20-per-60-s quota's 429 shape is written down (D2c-4).

@@ -470,6 +470,30 @@ class TheEntryTests(TestCase):
         self.assertIsNotNone(cand)
         self.assertNotIn("smart_money", cand.level_meta)
 
+    def test_the_moved_stop_is_charged_the_candidates_horizon(self):
+        """execute_entry charges a measured short's overnight fee for every
+        night of the candidate's horizon (the config's time stop, else
+        DEFAULT_HORIZON_HOURS); the fee check that keeps or reverts the
+        moved stop before it charges the same nights. With one night here
+        and seven or more there, a stop kept here was refused there, tick
+        after tick (the review of 2026-10-31)."""
+        from bot_program.asset_engine.base import AssetBot
+        _switch()
+        asked = []
+
+        def fee(bot, client, symbol, **kw):
+            asked.append(kw.get("horizon_hours"))
+            return 0.0, ""
+
+        with patch.object(AssetBot, "_venue_fee_refusal", fee):
+            cand = self._propose()
+        self.assertIsNotNone(cand)
+        self.assertTrue(cand.level_meta["smart_money"]["stop_moved"])
+        self.assertEqual(cand.horizon_hours,
+                         self.cfg.time_stop_setting()["hours"])
+        self.assertGreater(cand.horizon_hours, 24.0)
+        self.assertEqual(asked, [cand.horizon_hours])
+
 
 # ── 6. the operator ───────────────────────────────────────────────────────
 

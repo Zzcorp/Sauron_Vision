@@ -316,6 +316,15 @@ class TheSignalTicketButtonTests(_Env):
             ("Open instrument", "/instruments/MSFT/"),
             ("Prepare ticket", f"/signals/{sig.pk}/ticket/")))
 
+    def test_an_index_signal_carries_prepare_ticket_since_it_has_a_lane(self):
+        """2026-10-31: an index rides the stock manual pool, so its signal
+        is one the platform can take."""
+        sig = _signal(_instrument("SPX500", "index"), direction="bearish")
+        (p,) = self._sent(sig)
+        self.assertEqual(p["reply_markup"], _row(
+            ("Open instrument", "/instruments/SPX500/"),
+            ("Prepare ticket", f"/signals/{sig.pk}/ticket/")))
+
     def test_a_link_carries_an_id_and_nothing_else(self):
         sig = _signal(_instrument("MSFT"), direction="bearish")
         (p,) = self._sent(sig)
@@ -332,7 +341,8 @@ class TheSignalTicketButtonTests(_Env):
         from alerts.dispatch import signal_extras
         cases = {
             "neutral": _signal(_instrument("MSFT"), direction="neutral"),
-            "an index": _signal(_instrument("SPX", "index")),
+            # an index has a lane since 2026-10-31 (the stock pool)
+            "a class with no lane": _signal(_instrument("SOMEBOND", "bond")),
             "an instrument off": _signal(_instrument("OFF", active=False)),
             "no page": _signal(_instrument("BTC/USD", "crypto")),
         }
@@ -827,7 +837,7 @@ class TheTicketPageTests(_Pages):
 
     def test_a_signal_without_a_trade_says_so_and_opens_nothing(self):
         for sig in (_signal(self.inst, direction="neutral"),
-                    _signal(_instrument("SPX", "index"))):
+                    _signal(_instrument("SOMEBOND", "bond"))):
             with self.subTest(sig.pk):
                 body = self.get(f"/signals/{sig.pk}/ticket/").content.decode()
                 self.assertIsNone(_run(body))

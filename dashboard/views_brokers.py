@@ -133,8 +133,15 @@ def etoro_probe(api_key: str, user_key: str, demo: bool = True) -> tuple:
     their keys were bad. They were not: the paths were, and the 404 was the
     adapter composing /info/real/aggregate-portfolio, which eToro does not
     publish. Measured against the same key: the corrected path answers 200.
+
+    NO REDIRECT IS FOLLOWED (2026-11-01). requests follows one by default
+    and carries both keys with it, custom headers it never strips, to
+    wherever a 3xx points: allow_redirects is off here, and a 3xx is
+    "unknown", logged and said with its status and host only.
     """
-    from bot_program.engine.etoro_client import EtoroTrader
+    from bot_program.engine.etoro_client import (EtoroTrader,
+                                                 RedirectRefused,
+                                                 redirect_host)
     url = EtoroTrader(api_key, user_key,
                       env="demo" if demo else "live")._v1_info(
         "aggregate-portfolio")
@@ -144,13 +151,22 @@ def etoro_probe(api_key: str, user_key: str, demo: bool = True) -> tuple:
             url,
             headers={"x-api-key": api_key, "x-user-key": user_key,
                      "x-request-id": EtoroTrader._rid()},
-            timeout=ETORO_PROBE_TIMEOUT_S)
+            timeout=ETORO_PROBE_TIMEOUT_S, allow_redirects=False)
     except Exception as e:  # noqa: BLE001 — a network error is "unknown"
         return "unknown", f"{type(e).__name__}: {e}"
     if r.status_code == 200:
         return "ok", "200"
     if r.status_code in (401, 403):
         return "refused", str(r.status_code)
+    if 300 <= r.status_code < 400:
+        try:
+            location = str((r.headers or {}).get("Location") or "")
+        except Exception:  # noqa: BLE001 — the refusal stands without it
+            location = ""
+        words = RedirectRefused("GET", r.status_code,
+                                redirect_host(url, location)).words
+        logger.warning("eToro probe answered %s: not followed", words)
+        return "unknown", f"{words}: not followed"
     return "unknown", str(r.status_code)
 
 
@@ -521,7 +537,25 @@ def etoro_proof_states() -> dict:
         out["short"] = f"shorts proven on {', '.join(sorted(shorts))} only"
     else:
         out["short"] = "no short proven"
+    demo = _demo_short_words(shorts)
+    if demo and "short" not in proven:
+        out["short"] += f"; on the demo account by the platform: {demo}"
     return out
+
+
+def _demo_short_words(pinned) -> str:
+    """The shorts the platform proved itself on eToro's demo account
+    (2026-10-31, bot_program/short_proofs.py), for the classes the code
+    does not pin: "etf at 1x, 2x", or "". The bots short those classes at
+    those multipliers only (base.missing_proofs)."""
+    from bot_program.asset_engine import base
+    parts = []
+    for cls in sorted({t for _box, ts in ETORO_BOX_TOKENS for t in ts}
+                      - set(pinned)):
+        levels = sorted(base.demo_short_leverages(cls))
+        if levels:
+            parts.append(f"{cls} at {', '.join(f'{v}x' for v in levels)}")
+    return "; ".join(parts)
 
 
 def unproven_note(carried) -> str:
@@ -550,16 +584,30 @@ def unproven_note(carried) -> str:
     carried_classes = [t for box, tokens in ETORO_BOX_TOKENS
                        if box in carried for t in tokens]
     unshorted = [t for t in carried_classes if t not in shorts]
+    # The BOTS' short (2026-10-31): a hand-taken short goes on every class
+    # eToro allows, warned before the PIN and read back at the fill
+    # (bot_program/short_readback.py); the bots wait for the proof. The
+    # waiver lifts the short token, never the class token: the note names
+    # the hand-taken short only on the classes whose own proof is pinned,
+    # and says nothing of it when none is.
+    by_hand = [t for t in unshorted if t in proven]
+    if not by_hand:
+        hand = "."
+    elif len(by_hand) == len(unshorted):
+        hand = "; a hand-taken short goes, read back at the fill."
+    else:
+        hand = (f"; a hand-taken short goes on {', '.join(by_hand)}, read "
+                f"back at the fill.")
     if unshorted and len(unshorted) == len(carried_classes):
-        note += (" Every short is refused as well until the short proof "
-                 "is pinned." if missing else
-                 " Every short is refused until the short proof is "
-                 "pinned.")
+        note += (" Every bot short is refused as well until the short "
+                 "proof is pinned" + hand if missing else
+                 " Every bot short is refused until the short proof is "
+                 "pinned" + hand)
     elif unshorted:
         note += (f" Shorts are proven on "
                  f"{', '.join(t for t in carried_classes if t in shorts)} "
-                 f"only: a short on {', '.join(unshorted)} is refused until "
-                 f"its own proof is pinned.")
+                 f"only: a bot short on {', '.join(unshorted)} is refused "
+                 f"until its own proof is pinned" + hand)
     return note
 
 

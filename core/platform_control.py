@@ -494,6 +494,21 @@ DEFAULT_COMPONENTS = [
      "description": "Off (default): a typed extras['leverage'] above 1 is REFUSED at the tick and by preflight_live; 'auto' goes at 1x. On: up to 20x (forex, index; commodity 10x, stock 5x, crypto 2x) if in the instrument's LIVE leverageValues and its class is in the proven set; 'auto' is held to its proven multiplier.",
      "category": "system"},
 
+    # ── The demo short proofs (2026-10-31, bot_program/short_proofs.py) ──
+    # The operator: "je veux les short possible entierement svp". A beat
+    # every 15 min sends at most ONE step, 25 min after the last, on
+    # eToro's DEMO account (its client cannot reach the real one, whatever
+    # the eToro row says): a short of the venue minimum on a class whose
+    # short no code pins, filled, closed and recorded as a proof that opens
+    # that class to the bots at that multiplier. THE ONE ROW SEEDED ON
+    # (is_enabled below): it never touches real money, and a proof it
+    # records still meets every gate. Not a live-money switch; "all off"
+    # turns it off like any other. Description measured at 288 chars
+    # (< 300).
+    {"key": "short_proofs_demo", "name": "Demo Short Proofs (eToro demo)",
+     "description": "On (default): at most one step every 25 min, on eToro's DEMO account only, never the real one: a short of the venue minimum on a class no code proves, filled, closed and recorded; a clean one lets the bots short that class at that multiplier. Off: nothing is sent. /short-proofs/ revokes.",
+     "category": "pipeline", "is_enabled": True},
+
     # ── The Big Money Board (2026-10-09, bigmoney/) ─────────────────────
     # Information only: no order, size, stop or gate reads it, so it is not
     # in LIVE_MONEY_SWITCHES and the Wall's live-money count does not move.

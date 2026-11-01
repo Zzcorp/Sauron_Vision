@@ -126,6 +126,8 @@ from .views_brokers import (  # noqa: E402 — 2026-09-17, the brokers page
     brokers_page, disconnect_etoro, disconnect_saxo, save_etoro_credentials,
     save_saxo_credentials, saxo_callback, saxo_connect)
 from .views_treasury import treasury_page  # noqa: E402 — 2026-09-19
+from .views_short_proofs import (  # noqa: E402 — 2026-10-31
+    short_proof_revoke, short_proofs_page)
 from .views_withdrawals import (  # noqa: E402 — 2026-09-28
     withdrawal_cancel, withdrawal_correct, withdrawal_create,
     withdrawal_mark_paid, withdrawals_page)
@@ -308,6 +310,12 @@ path("risk/live/", risk_dashboard_live, name="risk_dashboard_live"),
     path("treasury/", treasury_page, name="treasury_page"),
     # Withdrawals asked for in advance (2026-09-28): the reserve is held back
     #    from new sizing, nothing is sold; every act takes the trading PIN.
+    # ── The demo short proofs (2026-10-31, bot_program/short_proofs.py):
+    # what the platform proved on eToro's demo account, and a superuser's
+    # revoke (or clear of an in-doubt stop) with the trading PIN.
+    path("short-proofs/", short_proofs_page, name="short_proofs"),
+    path("short-proofs/<int:pk>/revoke/", short_proof_revoke,
+         name="short_proof_revoke"),
     path("withdrawals/", withdrawals_page, name="withdrawals"),
     path("withdrawals/request/", withdrawal_create, name="withdrawal_create"),
     path("withdrawals/<int:pk>/paid/", withdrawal_mark_paid, name="withdrawal_mark_paid"),
