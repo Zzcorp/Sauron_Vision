@@ -109,19 +109,44 @@ def atr_for(symbol: str, timeframe: str = "4h", period: int = DEFAULT_ATR_PERIOD
         return None
 
 
-def stop_and_target(cfg, symbol: str, price: float, direction: str) -> tuple:
+def rule_atr_timeframe(rule_name) -> str:
+    """The bars whose ATR sets a rule's levels when the rule pins them, or
+    "" (2026-11-01): the timeframe its proving-ground family pins
+    (backtester.proving.proof.pinned_timeframe — po3_london_sweep_short
+    trades 1h bars). The proving ground judges such a rule, and its signal
+    is graded, on that ATR; a stop on the config's 4h ATR, about twice as
+    wide, would be a trade the verdict never simulated, sized by it. ""
+    for every other rule, and on an unread family: the config's
+    atr_timeframe, as before."""
+    if not rule_name:
+        return ""
+    try:
+        from backtester.proving.proof import pinned_timeframe
+        return pinned_timeframe(str(rule_name))
+    except Exception as e:  # noqa: BLE001 — unread is the config's bars
+        logger.debug("[risk_levels] %s: pinned timeframe unread: %s",
+                     rule_name, e)
+        return ""
+
+
+def stop_and_target(cfg, symbol: str, price: float, direction: str, *,
+                    rule_name: str = "") -> tuple:
     """Return (stop, target, meta) for an entry.
 
     Volatility-normalised when an ATR is available; otherwise the config's
     percentages, so a missing indicator degrades to the old behaviour
-    rather than blocking the trade.
+    rather than blocking the trade. The ATR is the config's atr_timeframe
+    (4h by default), unless `rule_name` pins its own bars
+    (rule_atr_timeframe), which the meta then names (atr_timeframe).
     """
     extras = _extras(cfg)
     use_atr = extras.get("use_atr_levels", True)
     stop_mult = float(extras.get("atr_stop_mult", DEFAULT_ATR_STOP_MULT))
     target_mult = float(extras.get("atr_target_mult", DEFAULT_ATR_TARGET_MULT))
 
-    atr = atr_for(symbol, extras.get("atr_timeframe", "4h")) if use_atr else None
+    pinned = rule_atr_timeframe(rule_name)
+    timeframe = pinned or extras.get("atr_timeframe", "4h")
+    atr = atr_for(symbol, timeframe) if use_atr else None
     meta = {"levels_source": "pct"}
     lo, hi = stop_band(getattr(cfg, "asset_class", ""))
 
@@ -133,6 +158,8 @@ def stop_and_target(cfg, symbol: str, price: float, direction: str) -> tuple:
             meta = {"levels_source": "atr", "atr": round(atr, 8),
                     "atr_stop_mult": stop_mult, "atr_target_mult": target_mult,
                     "stop_fraction": round(fraction, 6)}
+            if pinned:
+                meta["atr_timeframe"] = pinned
             if direction == "BUY":
                 return price - stop_distance, price + target_distance, meta
             return price + stop_distance, price - target_distance, meta
@@ -150,6 +177,8 @@ def stop_and_target(cfg, symbol: str, price: float, direction: str) -> tuple:
         meta["levels_fallback_reason"] = "atr_out_of_band"
         meta["atr_stop_fraction"] = round(fraction, 6)
         meta["stop_band"] = [lo, hi]
+        if pinned:
+            meta["atr_timeframe"] = pinned
 
     sl_pct = cfg.stop_loss_pct / 100.0
     tp_pct = cfg.take_profit_pct / 100.0

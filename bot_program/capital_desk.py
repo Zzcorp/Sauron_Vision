@@ -231,15 +231,21 @@ def _signal_rs(*, rule, cutoff):
 
     The weakest lane and the last one tried. A Signal's R is what the RULE
     would have paid with no execution at all — no spread, no slippage, no
-    partial — so it carries the same haircut as paper.
+    partial — so it carries the same haircut as paper. A rule whose one
+    event fires on many instruments at once (the yield-curve flip,
+    promotion_pipeline.EVENT_KEYED_RULES) gives one R per event, so one
+    flip's correlated shorts never clear DESK_MIN_N alone.
     """
     from signals.models import Signal
+    from signals.promotion_pipeline import EVENT_KEYED_RULES, event_rs
 
-    return list(Signal.objects
-                .filter(is_active=False, rule_name=rule,
-                        realized_r__isnull=False,
-                        expired_at__gte=cutoff)
-                .values_list("realized_r", flat=True))
+    qs = (Signal.objects
+          .filter(is_active=False, rule_name=rule,
+                  realized_r__isnull=False,
+                  expired_at__gte=cutoff))
+    if rule in EVENT_KEYED_RULES:
+        return event_rs(rule, qs)
+    return list(qs.values_list("realized_r", flat=True))
 
 
 def _paper_factor(rule, asset_class) -> tuple:

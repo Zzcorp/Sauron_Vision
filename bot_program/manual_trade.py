@@ -1212,18 +1212,22 @@ def signal_backing_advisory(user, inst, side, signal=None, *,
     for the last word to stay theirs. A signal ticket is backed by
     definition; an instrument-view ticket is backed when an active signal
     in its direction fired on this instrument in the last
-    SIGNAL_BACKING_HOURS."""
+    SIGNAL_BACKING_HOURS — never by a rule born at research and still
+    there (signals/rule_birth, 2026-11-01): watched and graded, never
+    traded, it does not silence the warning on a real-money ticket."""
     if signal is not None:
         return {"ok": True, "signals": [signal.rule_name], "reason": ""}
     from datetime import timedelta as _td
     from django.utils import timezone as _tz
 
     from signals.models import Signal
+    from signals.rule_birth import still_at_research
     now = now or _tz.now()
     direction = "bullish" if side == "BUY" else "bearish"
     rules = list(Signal.objects.filter(
         instrument=inst, direction=direction, is_active=True,
         created_at__gte=now - _td(hours=SIGNAL_BACKING_HOURS))
+        .exclude(rule_name__in=sorted(still_at_research()))
         .order_by("-score").values_list("rule_name", flat=True)[:5])
     if rules:
         return {"ok": True, "signals": rules, "reason": ""}

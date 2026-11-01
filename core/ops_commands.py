@@ -394,6 +394,25 @@ COMMANDS = [
         "category": "read",
     },
     {
+        "name": "side_scorecard",
+        "title": "Scorecard by side",
+        "purpose": "Long against short, per rule and class: graded signals (n, hit rate, average and summed R), paper and live fills, the proving ground's newest verdict per side or why there is none, and the stage — the table /evidence/ shows. Display only: no gate reads it.",
+        "usage": [
+            "python manage.py side_scorecard                     # every rule, every class",
+            "python manage.py side_scorecard --rule death_cross",
+            "python manage.py side_scorecard --class stock",
+        ],
+        "mirrors": "/evidence/",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+        # Read-only, and still the shell's: the Run lane's set is pinned
+        # (tests/test_ops_cockpit.py), each addition a security decision of
+        # its own, and none was taken for this one.
+        "runnable": False,
+        "runnable_reason": "not on the Run lane: its set is pinned, each addition a security decision",
+    },
+    {
         "name": "thesis",
         "title": "Thesis check",
         "purpose": "Is the reason for each open trade still alive: the structure on the bars (a sweep with or against it, the bias, a displaced break), the proving ground's odds of coming back from this deep, and the verdict — hold, adjust (the stop under the sweep, applied by the position care), exit (a proposal) — plus how the past verdicts graded.",

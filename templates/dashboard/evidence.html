@@ -55,6 +55,50 @@
 </div>
 
 <div class="card fade-in-up" style="margin-bottom: 24px;">
+    <div class="card-header"><span class="card-title">By side — long against short, per rule and class</span></div>
+    <p style="color: var(--text-muted); padding: 0 16px 8px; max-width: 88ch;">Each rule's record split by the side it took: graded signals (by the instrument's class), paper and live fills (by the config's class, as Aragorn reads them; an option's side is the decision it bought premium on), and the proving ground's newest verdict for that class and side. The gap is the short's average R less the long's, shown once each side has {{ gap_min }} graded signals. Display only: no gate reads this table.</p>
+    {% if sides_error %}
+    <p style="font-size: 12px; color: var(--accent-red, #c33); padding: 0 16px 16px;">{{ sides_error }}</p>
+    {% elif sides %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack">
+      <thead><tr>
+        <th>Rule</th><th>Class</th><th>Stage</th>
+        <th class="num">Long graded</th><th class="num">Long hit</th><th class="num">Long avg R</th><th class="num">Long paper</th><th class="num">Long live</th><th>Long verdict</th>
+        <th class="num">Short graded</th><th class="num">Short hit</th><th class="num">Short avg R</th><th class="num">Short paper</th><th class="num">Short live</th><th>Short verdict</th>
+        <th class="num" title="Short average R less long average R">Gap</th>
+      </tr></thead>
+      <tbody>
+      {% for r in sides %}
+        <tr>
+          <td class="sv-ident" data-label="Rule">{{ r.rule }}</td>
+          <td data-label="Class">{{ r.asset_class }}</td>
+          <td data-label="Stage"><span class="badge">{{ r.stage }}</span></td>
+          <td class="num" data-label="Long graded">{{ r.long.sig_n }}</td>
+          <td class="num" data-label="Long hit">{% if r.long.sig_hit is not None %}{{ r.long.sig_hit|floatformat:2 }}{% else %}—{% endif %}</td>
+          <td class="num {% if r.long.sig_avg and r.long.sig_avg > 0 %}up{% elif r.long.sig_avg and r.long.sig_avg < 0 %}down{% endif %}" data-label="Long avg R">{% if r.long.sig_avg is not None %}{{ r.long.sig_avg|floatformat:2 }}{% else %}—{% endif %}</td>
+          <td class="num" data-label="Long paper">{% if r.long.paper_n %}{{ r.long.paper_avg|floatformat:2 }} <span style="font-size: 10px; color: var(--text-muted);">({{ r.long.paper_n }})</span>{% else %}—{% endif %}</td>
+          <td class="num" data-label="Long live">{% if r.long.live_n %}{{ r.long.live_avg|floatformat:2 }} <span style="font-size: 10px; color: var(--text-muted);">({{ r.long.live_n }})</span>{% else %}—{% endif %}</td>
+          <td data-label="Long verdict">{% if r.long.verdict %}{{ r.long.verdict.verdict|upper }} <span style="font-size: 10px; color: var(--text-muted);">{% if r.long.verdict.expectancy is not None %}{{ r.long.verdict.expectancy|floatformat:2 }}R · {% endif %}{{ r.long.verdict.trades_n }} trades</span>{% else %}<span style="font-size: 10px; color: var(--text-muted);" title="{{ r.long.unjudged }}">unjudged</span>{% endif %}</td>
+          <td class="num" data-label="Short graded">{{ r.short.sig_n }}</td>
+          <td class="num" data-label="Short hit">{% if r.short.sig_hit is not None %}{{ r.short.sig_hit|floatformat:2 }}{% else %}—{% endif %}</td>
+          <td class="num {% if r.short.sig_avg and r.short.sig_avg > 0 %}up{% elif r.short.sig_avg and r.short.sig_avg < 0 %}down{% endif %}" data-label="Short avg R">{% if r.short.sig_avg is not None %}{{ r.short.sig_avg|floatformat:2 }}{% else %}—{% endif %}</td>
+          <td class="num" data-label="Short paper">{% if r.short.paper_n %}{{ r.short.paper_avg|floatformat:2 }} <span style="font-size: 10px; color: var(--text-muted);">({{ r.short.paper_n }})</span>{% else %}—{% endif %}</td>
+          <td class="num" data-label="Short live">{% if r.short.live_n %}{{ r.short.live_avg|floatformat:2 }} <span style="font-size: 10px; color: var(--text-muted);">({{ r.short.live_n }})</span>{% else %}—{% endif %}</td>
+          <td data-label="Short verdict">{% if r.short.verdict %}{{ r.short.verdict.verdict|upper }} <span style="font-size: 10px; color: var(--text-muted);">{% if r.short.verdict.expectancy is not None %}{{ r.short.verdict.expectancy|floatformat:2 }}R · {% endif %}{{ r.short.verdict.trades_n }} trades</span>{% else %}<span style="font-size: 10px; color: var(--text-muted);" title="{{ r.short.unjudged }}">unjudged</span>{% endif %}</td>
+          <td class="num {% if r.gap and r.gap > 0 %}up{% elif r.gap and r.gap < 0 %}down{% endif %}" data-label="Gap">{% if r.gap is not None %}{{ r.gap|floatformat:2 }}{% else %}—{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><div class="empty-icon" aria-hidden="true">&#9676;</div>
+        <p>NO GRADED SIDE YET — a rule appears here once a signal of it is graded or a fill of it closes.</p></div>
+    {% endif %}
+</div>
+
+<div class="card fade-in-up" style="margin-bottom: 24px;">
     <div class="card-header"><span class="card-title">Configs — what each pool did, and what it would have done in shadow</span></div>
     {% if configs %}
     <div class="table-wrapper">

@@ -426,6 +426,35 @@ def cot_scale(direction, spec_idx, comm_idx) -> tuple:
     return scale, why
 
 
+def cot_spec_values(rows, sign) -> list:
+    """The speculators' net, in the instrument's own frame, over the open
+    interest — one value per row with an open interest, in the rows'
+    order. cot_read's computation, shared with cot_spec_history and the
+    proving ground's COT column (backtester/proving/context.py)."""
+    return [sign * (r.non_commercial_long - r.non_commercial_short)
+            / r.open_interest for r in rows if r.open_interest]
+
+
+def cot_spec_history(symbol) -> list:
+    """[(report_date, speculators' net over open interest or None)] for
+    every COT report of `symbol`, OLDEST first, in the instrument's own
+    frame (cot_sign) — None where a report carries no open interest. The
+    proving ground's COT column replays cot_read's spec_index from it,
+    bar by bar. [] without an instrument or a report."""
+    from instruments.models import Instrument
+    from scraping.models import COTReport
+    from signals.opportunity_scanner import cot_sign
+    inst = Instrument.objects.filter(symbol=symbol).first()
+    if inst is None:
+        return []
+    sign = cot_sign(inst)
+    out = []
+    for r in COTReport.objects.filter(instrument=inst).order_by("report_date"):
+        vals = cot_spec_values([r], sign)
+        out.append((r.report_date, vals[0] if vals else None))
+    return out
+
+
 def cot_read(symbol, direction, now=None) -> dict:
     """{scale, spec_index, comm_index, weeks, why} from the COT reports of
     `symbol`, in its own frame (cot_sign: a USD-base pair reads the
@@ -465,8 +494,7 @@ def cot_read(symbol, direction, now=None) -> dict:
                           f"interest: unread")
             return out
         sign = cot_sign(inst)
-        spec = [sign * (r.non_commercial_long - r.non_commercial_short)
-                / r.open_interest for r in rows if r.open_interest]
+        spec = cot_spec_values(rows, sign)
         comm = [sign * (r.commercial_long - r.commercial_short)
                 / r.open_interest for r in rows if r.open_interest]
         out["spec_index"] = cot_index(spec)

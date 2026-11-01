@@ -84,6 +84,10 @@ DEFAULT_RULE_SCOPE = {
     "rsi_bull_divergence": {
         "exclude": {"asset_classes": ["commodity"], "groups": ["miners"]},
     },
+    # One flip, one short per symbol (2026-10-31): a curve dancing around
+    # zero must not re-short the book daily. A row's own cooldown_hours
+    # decides instead.
+    "yield_curve_inversion_flip": {"cooldown_hours": 720},
 }
 
 SCOPE_KEYS = ("asset_classes", "sectors", "symbols", "groups")

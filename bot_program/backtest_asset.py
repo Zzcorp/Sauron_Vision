@@ -171,12 +171,18 @@ def run_backtest(params: BacktestParams) -> BacktestResult:
                               skipped={"reason": "no_instruments_found"})
     sym_to_inst = {i.symbol: i for i in insts}
 
-    # All qualifying signals in window — match the live `entry_score_min` gate.
+    # All qualifying signals in window — match the live `entry_score_min` gate,
+    # and decide()'s born-at-research exclusion (signals/rule_birth,
+    # 2026-11-01): a born name that may not vote on this config is no trade
+    # the bot could have taken (voteless fails closed on an unread row).
+    from signals.rule_birth import voteless
+    unvoted = voteless(live=cfg.mode != "paper")
     sigs = (Signal.objects
             .filter(instrument__in=insts,
                     created_at__gte=params.start,
                     created_at__lte=params.end,
                     score__gte=cfg.entry_score_min)
+            .exclude(rule_name__in=sorted(unvoted))
             .select_related("instrument")
             .order_by("created_at"))
 

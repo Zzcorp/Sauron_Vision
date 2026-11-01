@@ -491,11 +491,21 @@ from core.task_gate import guarded_task  # noqa: E402
 def run_proving_ground(mode="rules"):
     """Judge the live rules and their short mirrors (`rules`, nightly) or
     the generator's shortlist per class (`generate`, weekly) on every
-    stored 4h bar, and save the verdicts (ProvingVerdict). Writes nothing
-    else; touches no broker. Read with `manage.py prove show`."""
+    stored 4h bar — and the 1h families on 1h bars — and save the
+    verdicts (ProvingVerdict). Writes nothing else; touches no broker.
+    Read with `manage.py prove show`."""
     from backtester.proving import run as pr
-    rows = pr.generate(save=True) if mode == "generate" \
-        else pr.prove_live_rules(save=True)
+    if mode == "generate":
+        rows = pr.generate(save=True)
+    else:
+        rows = pr.prove_live_rules(save=True)
+        # THE 1H PASS (2026-10-31): the families whose live rule trades 1h
+        # bars (po3_london) are judged on 1h, under the same run id — one
+        # night is one run, so _save's RUNS_KEPT counts nights. Today's 4h
+        # rules are not re-judged on 1h (pinned_only).
+        run_id = rows[0]["run_id"] if rows else None
+        rows = rows + pr.prove_live_rules(timeframe="1h", save=True,
+                                          pinned_only=True, run_id=run_id)
     by = {}
     for r in rows:
         by[r["verdict"]] = by.get(r["verdict"], 0) + 1

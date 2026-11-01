@@ -251,8 +251,18 @@ class GenerateStrategiesNowTests(TestCase):
                 "min_match_score": 0.6, "suggested_horizon_days": 5,
             })
         with _stub_generator_provider({"proposals": proposals}):
-            generate_strategies_now(max_proposals=2)
+            out = generate_strategies_now(max_proposals=2)
+        # the cap slices first (2 of the 6 are read); the bearish share
+        # (2026-10-31) then holds one of the two slots for a bearish
+        # proposal, so one bullish is persisted and the other is recorded
+        # as rejected with the quota's reason
         self.assertEqual(GeneratedSetupProposal.objects.count(), 2)
+        self.assertEqual(out["n_persisted"], 1)
+        self.assertEqual(out["n_quota_dropped"], 1)
+        dropped = GeneratedSetupProposal.objects.get(
+            status=GeneratedSetupProposal.STATUS_REJECTED)
+        self.assertEqual(dropped.proposed_name, "valid_1")
+        self.assertIn("bearish quota", dropped.review_notes)
 
 
 # ── Approve / Reject / Expire ─────────────────────────────────────────────

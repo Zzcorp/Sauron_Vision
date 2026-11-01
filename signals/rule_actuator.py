@@ -105,6 +105,16 @@ def stage_policy(rule_name: str) -> dict:
 
     ctrl = _control_for(rule_name) if rule_name else None
     stage = getattr(ctrl, "promotion_stage", None)
+    if ctrl is None and rule_name:
+        # BORN AT RESEARCH (2026-10-31, signals/rule_birth): a new rule
+        # with no row yet is watched, not traded — its first stored signal
+        # writes the row at research.
+        from signals.rule_birth import born_at_research
+        if born_at_research(rule_name):
+            return {"stage": "research", "may_trade": False,
+                    "force_paper": True, "live_size_factor": 0.0,
+                    "reason": ("born at research — watched and graded, no "
+                               "orders, until the ladder promotes it")}
     if ctrl is None or stage not in STAGE_ORDER:
         return {"stage": "paper", "may_trade": True, "force_paper": True,
                 "live_size_factor": 0.0,
@@ -378,6 +388,7 @@ class ActuatorError(Exception):
 def apply_action(action_id: int, user) -> "RuleAction":
     """Apply a proposed action. Snapshots the previous RuleControl state for rollback."""
     from signals.models import RuleAction, RuleControl
+    from signals.rule_birth import birth_defaults
 
     if not is_live_mode():
         raise ActuatorError("Actuator is in shadow mode — apply is disabled.")
@@ -393,9 +404,12 @@ def apply_action(action_id: int, user) -> "RuleAction":
             f"Try again later or raise the cap."
         )
 
+    # birth_defaults: a born-at-research name is created at research,
+    # never at the model's live_full default (signals/rule_birth).
     ctrl, _ = RuleControl.objects.select_for_update().get_or_create(
         rule_name=action.rule_name,
-        defaults={"status": RuleControl.STATUS_ACTIVE, "weight_multiplier": 1.0},
+        defaults={"status": RuleControl.STATUS_ACTIVE, "weight_multiplier": 1.0,
+                  **birth_defaults(action.rule_name)},
     )
     # An enforcement already in effect is not applied twice. 2026-09-11:
     # the page had paused macd_bullish_crossover (#11) and the next apply
@@ -464,14 +478,18 @@ def _enforcement_in_effect(ctrl, action: str) -> str:
 def rollback_action(action_id: int, user) -> "RuleAction":
     """Restore the RuleControl snapshot taken at apply-time."""
     from signals.models import RuleAction, RuleControl
+    from signals.rule_birth import birth_defaults
 
     action = RuleAction.objects.select_for_update().get(id=action_id)
     if action.state != RuleAction.STATE_APPLIED:
         raise ActuatorError(f"Action #{action_id} is in state {action.state} — cannot rollback.")
 
+    # birth_defaults: a born-at-research name is created at research,
+    # never at the model's live_full default (signals/rule_birth).
     ctrl, _ = RuleControl.objects.select_for_update().get_or_create(
         rule_name=action.rule_name,
-        defaults={"status": RuleControl.STATUS_ACTIVE, "weight_multiplier": 1.0},
+        defaults={"status": RuleControl.STATUS_ACTIVE, "weight_multiplier": 1.0,
+                  **birth_defaults(action.rule_name)},
     )
     ctrl.status = action.previous_status or RuleControl.STATUS_ACTIVE
     ctrl.weight_multiplier = action.previous_weight if action.previous_weight is not None else 1.0

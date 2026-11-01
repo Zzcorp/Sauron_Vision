@@ -8,6 +8,10 @@ and left out, never padded.
 
 prove_live_rules  every live rule as it trades today, and its short
                   mirror: one candidate each, judged with no correction.
+                  A family that names its markets (Family.eligible) pools
+                  only those (eligible_view); one that names its timeframes
+                  (Family.timeframes) is judged on those only — the nightly
+                  1h pass (pinned_only) judges po3_london and nothing else.
 generate          every family x parameter set x direction x filter of a
                   class: chosen on the IN-SAMPLE span only (a bootstrap
                   lower bound, Sidak-corrected for the whole grid), then the
@@ -22,6 +26,7 @@ import uuid
 
 import numpy as np
 
+from backtester.proving import context as pctx
 from backtester.proving import data as pdata
 from backtester.proving import judge as pj
 from backtester.proving.families import FAMILIES, FILTERS, apply_filter, \
@@ -73,7 +78,8 @@ def universe(asset_class=None, timeframe="4h", symbols=None) -> dict:
     return out
 
 
-def load_class(symbols, timeframe="4h", asset_class=None) -> dict:
+def load_class(symbols, timeframe="4h", asset_class=None, *,
+               context_cache=None) -> dict:
     """{included: [(symbol, df, labels)], excluded: [(symbol, reason)],
     dropped: {symbol: bars}, broken: [(symbol, reason)], adjusted:
     {symbol: [words]}, held: {symbol: moves}, start, end} — the class's
@@ -81,9 +87,12 @@ def load_class(symbols, timeframe="4h", asset_class=None) -> dict:
     they cover together. A broken series is left out of the run and named;
     the bad bars and spikes dropped from a judged series, the splits it was
     adjusted for and the held moves kept as a market are named per
-    symbol."""
+    symbol. Each judged frame carries its context columns
+    (backtester/proving/context.py: the VIX term structure and the COT
+    index, as published by each bar)."""
     included, excluded, dropped, broken = [], [], {}, []
     adjusted, held = {}, {}
+    ctx_cache = context_cache if isinstance(context_cache, dict) else {}
     for sym in symbols:
         df, check = pdata.sanitize(
             pdata.load_history(sym, timeframe, raw=True), asset_class)
@@ -101,6 +110,7 @@ def load_class(symbols, timeframe="4h", asset_class=None) -> dict:
             adjusted[sym] = list(check["adjusted"])
         if check.get("held"):
             held[sym] = int(check["held"])
+        df = pctx.attach(df, sym, asset_class, cache=ctx_cache)
         included.append((sym, df, regimes(df)))
     start = min((df.index[0] for _s, df, _l in included), default=None)
     end = max((df.index[-1] for _s, df, _l in included), default=None)
@@ -146,6 +156,42 @@ def data_words(data_detail) -> str:
     for sym, why in d.get("broken") or []:
         parts.append(f"{sym} left out: {why}")
     return " · ".join(parts)
+
+
+def eligible_view(family, data, asset_class):
+    """`data` restricted to the symbols `family`'s live rule can fire on
+    (Family.eligible), with its span recomputed from them and every other
+    symbol named in `excluded` — or None when no symbol of the class is
+    one (no verdict is written for a market the rule never trades). The
+    same `data` for a family that names no markets."""
+    if family.eligible is None:
+        return data
+    names = ([s for s, _df, _l in data["included"]]
+             + [s for s, _why in data["excluded"]])
+    ok = {s: family.is_eligible(s, asset_class) for s in names}
+    if not any(ok.values()):
+        return None
+    included = [x for x in data["included"] if ok[x[0]]]
+    out = dict(data)
+    out["included"] = included
+    out["excluded"] = list(data["excluded"]) + [
+        (s, f"not a market {family.key} fires on")
+        for s, _df, _l in data["included"] if not ok[s]]
+    out["start"] = min((df.index[0] for _s, df, _l in included), default=None)
+    out["end"] = max((df.index[-1] for _s, df, _l in included), default=None)
+    return out
+
+
+def judged_cases(data, asset_class, timeframe="4h", *, pinned_only=False):
+    """[(family, direction, data view)] — live_rule_cases at `timeframe`
+    that write a verdict for this class: every case whose eligible_view is
+    not None."""
+    out = []
+    for fam, d in live_rule_cases(timeframe, pinned_only=pinned_only):
+        view = eligible_view(fam, data, asset_class)
+        if view is not None:
+            out.append((fam, d, view))
+    return out
 
 
 def _pool(family, direction, params, flt, data, asset_class, timeframe,
@@ -242,25 +288,40 @@ _EPOCH = _epoch()
 
 
 def prove_live_rules(*, asset_class=None, timeframe="4h", symbols=None,
-                     save=False, run_id=None) -> list:
-    """Every live rule and its short mirror, per class: [row dict]."""
+                     save=False, run_id=None, pinned_only=False) -> list:
+    """Every live rule and its short mirror, per class: [row dict].
+
+    `pinned_only` judges only the families whose `timeframes` name
+    `timeframe` (the nightly 1h pass), and loads only the symbols one of
+    them can fire on. `run_id` lets that pass write under the 4h run's id,
+    so one night is one run (_save keeps the trades of RUNS_KEPT runs)."""
     # RULES_RUN_PREFIX (2026-10-07): the prefix the live entry path reads
     # its verdicts by (backtester/proving/proof.py) — on a whole-class run
     # only. A run restricted to `symbols` is RULES_SUBSET_PREFIX: judged on
     # the named symbols, it is never a class's verdict on real money.
     prefix = RULES_SUBSET_PREFIX if symbols else RULES_RUN_PREFIX
     run_id = run_id or f"{prefix}{uuid.uuid4().hex[:10]}"
+    cases = live_rule_cases(timeframe, pinned_only=pinned_only)
     rows = []
+    if not cases:
+        return rows
+    ctx_cache = {}
     for cls, syms in universe(asset_class, timeframe, symbols).items():
-        data = load_class(syms, timeframe, cls)
+        if pinned_only:
+            syms = [s for s in syms
+                    if any(f.is_eligible(s, cls) for f, _d in cases)]
+            if not syms:
+                continue
+        data = load_class(syms, timeframe, cls, context_cache=ctx_cache)
         cache = {}
-        for fam, direction in live_rule_cases():
-            trades, _open, skipped = _pool(fam, direction, {}, "none", data,
+        for fam, direction, view in judged_cases(data, cls, timeframe,
+                                                 pinned_only=pinned_only):
+            trades, _open, skipped = _pool(fam, direction, {}, "none", view,
                                            cls, timeframe, cache)
-            judged = _judge_pool(trades, data, 1)
+            judged = _judge_pool(trades, view, 1)
             live = fam.live_rules.get(direction, "")
             rows.append(_verdict_row(
-                run_id, fam, direction, {}, "none", cls, timeframe, data,
+                run_id, fam, direction, {}, "none", cls, timeframe, view,
                 judged, generated=False,
                 live_rule=live or f"{fam.key} (short mirror)",
                 skipped=skipped))
@@ -274,14 +335,20 @@ def generate(*, asset_class=None, timeframe="4h", symbols=None,
              shortlist=SHORTLIST) -> list:
     """The generator, per class: [row dict] of the judged shortlist."""
     run_id = run_id or f"gen-{uuid.uuid4().hex[:10]}"
-    fams = [FAMILIES[k] for k in (families or FAMILIES)]
+    # Family.in_generate (2026-10-31): the bearish pack stays out of the
+    # default grid, so its Sidak bar and its weekly shortlist do not move;
+    # `--families bull_trap` still judges one on request.
+    fams = [FAMILIES[k] for k in (families or [
+        key for key, f in FAMILIES.items() if f.in_generate])]
     rows = []
+    ctx_cache = {}
     for cls, syms in universe(asset_class, timeframe, symbols).items():
-        data = load_class(syms, timeframe, cls)
+        data = load_class(syms, timeframe, cls, context_cache=ctx_cache)
         if not data["included"]:
             continue
-        cands = [(f, d, p, flt) for f in fams for d in f.directions
-                 for p in f.grid for flt in FILTERS]
+        views = {f.key: eligible_view(f, data, cls) for f in fams}
+        cands = [(f, d, p, flt) for f in fams if views[f.key] is not None
+                 for d in f.directions for p in f.grid for flt in FILTERS]
         k = len(cands)
         level = pj.sidak(pj.ALPHA, k)
         split = data["start"] + (data["end"] - data["start"]) * \
@@ -289,7 +356,8 @@ def generate(*, asset_class=None, timeframe="4h", symbols=None,
         cache, scored = {}, []
         for fam, direction, params, flt in cands:
             trades, _open, skipped = _pool(fam, direction, params, flt,
-                                           data, cls, timeframe, cache)
+                                           views[fam.key], cls, timeframe,
+                                           cache)
             # chosen on the trades the judge will read: past the last
             # guard, a win is not a market's and must not pick a leader,
             # and a loss is read capped
@@ -302,7 +370,8 @@ def generate(*, asset_class=None, timeframe="4h", symbols=None,
         scored.sort(key=lambda x: x[0], reverse=True)
         for lower, fam, direction, params, flt, trades, skipped \
                 in scored[:shortlist]:
-            judged = _judge_pool(trades, data, k)
+            view = views[fam.key]
+            judged = _judge_pool(trades, view, k)
             if lower == -np.inf or lower <= 0:
                 judged["verdict"] = (pj.INSUFFICIENT
                                      if judged["verdict"] == pj.INSUFFICIENT
@@ -311,7 +380,7 @@ def generate(*, asset_class=None, timeframe="4h", symbols=None,
                                  f"{level:.4f} over {k} candidates — "
                                  + judged["why"])
             rows.append(_verdict_row(run_id, fam, direction, params, flt,
-                                     cls, timeframe, data, judged,
+                                     cls, timeframe, view, judged,
                                      generated=True, skipped=skipped))
     if save:
         _save(rows)
@@ -336,12 +405,16 @@ def compare_exits(*, asset_class=None, timeframe="4h", symbols=None,
         cases = [(FAMILIES[f], d) for f in families
                  for d in FAMILIES[f].directions]
     else:
-        cases = live_rule_cases()
+        cases = live_rule_cases(timeframe)
     rows = []
+    ctx_cache = {}
     for cls, syms in universe(asset_class, timeframe, symbols).items():
-        data = load_class(syms, timeframe, cls)
+        data = load_class(syms, timeframe, cls, context_cache=ctx_cache)
         cache = {}
         for fam, direction in cases:
+            view = eligible_view(fam, data, cls)
+            if view is None:
+                continue
             if fam.live_rules:
                 live = fam.live_rules.get(direction) \
                     or f"{fam.key} (short mirror)"
@@ -349,11 +422,11 @@ def compare_exits(*, asset_class=None, timeframe="4h", symbols=None,
                 live = fam.key
             for key in keys:
                 trades, _open, skipped = _pool(fam, direction, {}, "none",
-                                               data, cls, timeframe, cache,
+                                               view, cls, timeframe, cache,
                                                policy=key)
-                judged = _judge_pool(trades, data, len(keys))
+                judged = _judge_pool(trades, view, len(keys))
                 rows.append(_verdict_row(
-                    run_id, fam, direction, {}, "none", cls, timeframe, data,
+                    run_id, fam, direction, {}, "none", cls, timeframe, view,
                     judged, generated=False, live_rule=live, policy=key,
                     skipped=skipped))
     if save:

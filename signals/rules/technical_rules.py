@@ -26,6 +26,54 @@ def _load_df(instrument, timeframe="4h", bars=300):
     return symbol, df
 
 
+def _sane(df, instrument):
+    """THE BAR SANITY on a rule's own frame (backtester/proving/data.
+    sanitize, 2026-10-31): the frame the proving ground judges, so the rule
+    never fires on a bar the judge refuses to read. An unadjusted forward
+    split reads as a crash, and a crash is exactly what a short rule fires
+    on. None when the series is broken or the sanity dropped the newest
+    bar (the bar the rule would fire on is not a market)."""
+    if df is None or len(df) == 0:
+        return df
+    from backtester.proving.data import sanitize
+    clean, check = sanitize(df, getattr(instrument, "asset_class", None))
+    if check.get("broken") or clean is None or len(clean) == 0:
+        return None
+    if clean.index[-1] != df.index[-1]:
+        return None
+    return clean
+
+
+def closed_frame(df, timeframe="4h", now=None):
+    """`df` without its last row when that bar is still open: its open plus
+    the bar's length is after `now`. PriceData stamps a bar's OPEN
+    (market_data/bot_bars.py; eToro's newest candle may be stored while
+    forming, and the public feed resamples a partial bin), and a family
+    fires on the close of bar t."""
+    if df is None or len(df) == 0:
+        return df
+    import pandas as pd
+    from django.utils import timezone
+
+    from backtester.proving.data import BAR_HOURS
+    now = pd.Timestamp(now or timezone.now())
+    if now.tz is None:
+        now = now.tz_localize("UTC")
+    last = pd.Timestamp(df.index[-1])
+    if last.tz is None:
+        last = last.tz_localize("UTC")
+    if last + pd.Timedelta(hours=BAR_HOURS.get(timeframe, 4.0)) > now:
+        return df.iloc[:-1]
+    return df
+
+
+def _closed_sane(df, instrument, timeframe="4h"):
+    """The frame a short mirror reads: its closed bars (closed_frame) after
+    the bar sanity (_sane) — the frame its proving-ground family judges,
+    which fires on the close of bar t."""
+    return _sane(closed_frame(df, timeframe), instrument)
+
+
 def _rsi(close, period=14):
     delta = close.diff()
     gain = delta.where(delta > 0, 0.0)
@@ -114,6 +162,49 @@ class RSIDivergenceRule(BaseRule):
         return None
 
 
+class RSIBearDivergenceRule(BaseRule):
+    """RSI bearish divergence: price higher-high, RSI lower-high, RSI > 65
+    (100 - RSI_THRESHOLD) — the short mirror of rsi_bull_divergence
+    (2026-10-31), its own name so every layer judges the short apart, born
+    at research (signals/rule_birth). The proving ground replays it as
+    rsi_divergence short, which fires on the close of bar t: it reads its
+    CLOSED bars (closed_frame — the newest stored bar may still be
+    forming) through the bar sanity, and fires on the last of them."""
+    name = "rsi_bear_divergence"
+
+    def evaluate(self, instrument):
+        symbol, df = _load_df(instrument)
+        df = _closed_sane(df, instrument)
+        if df is None or len(df) < 60:
+            return None
+        rsi = _rsi(df["close"])
+        last_rsi = float(rsi.iloc[-1])
+        if last_rsi <= 100.0 - RSI_THRESHOLD:
+            return None
+        recent_high_idx = df["high"].iloc[-30:].idxmax()
+        prior_high_idx = df["high"].iloc[-60:-30].idxmax()
+        if df["high"].loc[recent_high_idx] > df["high"].loc[prior_high_idx] and \
+           rsi.loc[recent_high_idx] < rsi.loc[prior_high_idx]:
+            close = float(df["close"].iloc[-1])
+            return {
+                "symbol": symbol,
+                "rule": self.name,
+                "direction": "SHORT",
+                # the mirror of the long's scale: 0.55 at RSI 65, 0.70 at 80+
+                "score": rsi_divergence_score(100.0 - last_rsi),
+                "sub_scores": {"rsi": round(last_rsi, 1)},
+                "headline": f"{symbol} SHORT · RSI bearish divergence",
+                "thesis": (
+                    f"Price made a higher high while RSI made a lower high "
+                    f"(RSI={last_rsi:.0f}). Momentum exhaustion."
+                ),
+                "entry": close,
+                "stop": close * 1.015,
+                "target": close * 0.97,
+            }
+        return None
+
+
 class MACDCrossoverRule(BaseRule):
     """MACD bullish crossover (line crosses above signal) with hist accel."""
     name = "macd_bullish_crossover"
@@ -136,6 +227,39 @@ class MACDCrossoverRule(BaseRule):
                 "entry": close,
                 "stop": close * 0.98,
                 "target": close * 1.04,
+            }
+        return None
+
+
+class MACDBearishCrossoverRule(BaseRule):
+    """MACD bearish crossover (line crosses under signal) with the
+    histogram falling — the short mirror of macd_bullish_crossover
+    (2026-10-31), born at research. Its twin's constant 0.55: like its
+    twin it never votes at entry_score_min 0.60 (choice left to the
+    operator), and it still builds a graded record by side. Its CLOSED
+    bars through the bar sanity (_closed_sane): macd_cross short, which
+    judges it, fires on the close of bar t, never on an intrabar cross."""
+    name = "macd_bearish_crossover"
+
+    def evaluate(self, instrument):
+        symbol, df = _load_df(instrument)
+        df = _closed_sane(df, instrument)
+        if df is None or len(df) < 40:
+            return None
+        line, sig, hist = _macd(df["close"])
+        if line.iloc[-2] >= sig.iloc[-2] and line.iloc[-1] < sig.iloc[-1] \
+                and hist.iloc[-1] < hist.iloc[-2]:
+            close = float(df["close"].iloc[-1])
+            return {
+                "symbol": symbol,
+                "rule": self.name,
+                "direction": "SHORT",
+                "score": 0.55,
+                "headline": f"{symbol} SHORT · MACD bearish crossover",
+                "thesis": "MACD line crossed under signal with histogram falling.",
+                "entry": close,
+                "stop": close * 1.02,
+                "target": close * 0.96,
             }
         return None
 
@@ -187,6 +311,55 @@ class GoldenCrossRule(BaseRule):
                 "entry": close,
                 "stop": close * (1 - stop_pct),
                 "target": close * (1 + target_pct),
+            }
+        return None
+
+
+class DeathCrossRule(BaseRule):
+    """Fast SMA crosses under slow SMA — the parameter-aware short mirror
+    of GoldenCrossRule (2026-10-31), born at research with its forks
+    (death_cross_evolved_vN). The same parameters and the same brackets,
+    mirrored: stop above by stop_pct, target below by target_pct. Its
+    CLOSED bars go through the bar sanity (_closed_sane): an unadjusted
+    forward split is a death cross on raw bars, and ma_cross short, which
+    judges it, fires on the close of bar t."""
+    name = "death_cross"
+    DEFAULTS = {"fast": 50, "slow": 200, "stop_pct": 0.05, "target_pct": 0.10}
+
+    def __init__(self, name=None, params=None):
+        if name:
+            self.name = name
+        self.params = {**self.DEFAULTS, **(params or {})}
+
+    def evaluate(self, instrument):
+        p = self.params
+        try:
+            fast, slow = int(p["fast"]), int(p["slow"])
+            stop_pct, target_pct = float(p["stop_pct"]), float(p["target_pct"])
+        except (KeyError, TypeError, ValueError):
+            fast, slow, stop_pct, target_pct = 50, 200, 0.05, 0.10
+        if fast >= slow or stop_pct <= 0 or target_pct <= 0:
+            # A degenerate mutant must go silent, not trade nonsense.
+            return None
+        symbol, df = _load_df(instrument, bars=slow + 100)
+        df = _closed_sane(df, instrument)
+        if df is None or len(df) < slow + 10:
+            return None
+        sma_fast = df["close"].rolling(fast).mean()
+        sma_slow = df["close"].rolling(slow).mean()
+        if sma_fast.iloc[-2] >= sma_slow.iloc[-2] and sma_fast.iloc[-1] < sma_slow.iloc[-1]:
+            close = float(df["close"].iloc[-1])
+            return {
+                "symbol": symbol,
+                "rule": self.name,
+                "direction": "SHORT",
+                "score": 0.6,
+                "headline": f"{symbol} SHORT · Death cross",
+                "thesis": (f"SMA{fast} crossed under SMA{slow} — "
+                           f"long-term trend flip down."),
+                "entry": close,
+                "stop": close * (1 + stop_pct),
+                "target": close * (1 - target_pct),
             }
         return None
 
@@ -249,12 +422,38 @@ def _golden_cross_family():
     return [GoldenCrossRule(params=base_params)] + forks
 
 
+def _death_cross_family():
+    """The death cross as _golden_cross_family loads the golden: the base
+    rule with its row's parameters, plus one instance per effectively
+    active `death_cross_evolved_v*` row. Fenced the same way."""
+    base_params = {}
+    forks = []
+    try:
+        from signals.models import RuleControl
+        base = RuleControl.objects.filter(rule_name="death_cross").first()
+        if base and base.parameters:
+            base_params = dict(base.parameters)
+        forks = [
+            DeathCrossRule(name=rc.rule_name, params=rc.parameters or {})
+            for rc in RuleControl.objects.filter(
+                rule_name__startswith="death_cross_evolved_v")
+            if rc.is_effectively_active()
+        ]
+    except Exception as e:  # noqa: BLE001
+        logger.debug("death cross family load failed: %s", e)
+    return [DeathCrossRule(params=base_params)] + forks
+
+
 def get_rules():
-    """Return all technical rules — including evolved golden-cross forks,
-    each running its own parameters under its own rule name."""
+    """Return all technical rules — including evolved golden-cross and
+    death-cross forks, each running its own parameters under its own rule
+    name — and the three short mirrors (2026-10-31), born at research."""
     return [
         RSIDivergenceRule(),
+        RSIBearDivergenceRule(),
         MACDCrossoverRule(),
+        MACDBearishCrossoverRule(),
         *_golden_cross_family(),
+        *_death_cross_family(),
         BollingerSqueezeRule(),
     ]

@@ -42,7 +42,11 @@ def opportunity_density(*, hours_flags=DEFAULT_HOURS_FLAGS,
     was raised names the class and counts for nothing, since the
     instrument is not in the universe it would be measured against.
     Signals the scanner itself raised (sub_scores["opportunity_setup"])
-    are excluded so a flag is not counted twice through its linked Signal.
+    are excluded so a flag is not counted twice through its linked Signal,
+    and so are the signals of a rule born at research and still there
+    (signals/rule_birth, 2026-11-01): watched and graded, never traded, so
+    no opportunity for a pool to take — the share allocator would lean its
+    proposals toward the classes where unproven shorts fire.
     """
     from django.db.models import Count
 
@@ -78,11 +82,13 @@ def opportunity_density(*, hours_flags=DEFAULT_HOURS_FLAGS,
         flagged.setdefault(ac, set()).add(inst_id)
 
     signalled: dict = {}
+    from signals.rule_birth import still_at_research
     signals = (Signal.objects
                .filter(is_active=True,
                        created_at__gte=now - timedelta(hours=hours_signals),
                        score__gte=min_signal_score)
                .exclude(sub_scores__has_key="opportunity_setup")
+               .exclude(rule_name__in=sorted(still_at_research()))
                .values_list("instrument_id", "instrument__asset_class",
                             "instrument__is_active"))
     for inst_id, ac, active in signals:

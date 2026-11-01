@@ -81,7 +81,9 @@ class TheConstantsTests(SimpleTestCase):
         from signals.rule_scope import DEFAULT_RULE_SCOPE, GROUPS
         self.assertEqual(DEFAULT_RULE_SCOPE, {
             RSI: {"exclude": {"asset_classes": ["commodity"],
-                              "groups": ["miners"]}}})
+                              "groups": ["miners"]}},
+            # one flip, one short per symbol (2026-10-31)
+            "yield_curve_inversion_flip": {"cooldown_hours": 720}})
         self.assertEqual(GROUPS, ("miners",))
 
     def test_the_rsi_score_constants(self):

@@ -41,6 +41,84 @@ logger = logging.getLogger(__name__)
 #: Rows per venue in the generator's top-performing table (2026-10-08).
 TOP_RULES_PER_VENUE = 5
 
+#: THE BEARISH SHARE (2026-10-31): at least this share of a cycle's slots
+#: is held for a bearish proposal. The book had been long by construction
+#: (every starter setup bullish); a cycle that proposes only bullish ideas
+#: keeps it so.
+BEARISH_SHARE = 1 / 3
+#: Weeks of past proposals the snapshot's direction balance counts.
+BALANCE_WEEKS = 8
+#: Each evaluator's bearish reading — {kind: {param: value}} — for the
+#: model to build a bearish proposal from. Checked against the registry's
+#: closed choices (tests/test_generator_bearish_quota.py).
+BEARISH_BRANCHES = {
+    "liquidity_sweep": {"direction": "bearish_sweep"},
+    "fakeout_pattern": {"direction": "bull_trap"},
+    "cot_report": {"direction": "long_extreme"},
+    "market_structure_break": {"direction": "bearish"},
+    "anchoring_zone": {"mode": "prior_swing_high"},
+    "parabolic_exhaustion": {"direction": "exhaustion_up"},
+    "crowd_extreme": {"direction": "euphoric"},
+    "price_pattern": {"pattern": "breakout_low"},
+    "fair_value_gap": {"direction": "bearish"},
+    "order_block": {"direction": "bearish"},
+    "session_break": {"direction": "below"},
+    "anchored_vwap_break": {"direction": "below"},
+    "news_price_divergence": {"sentiment_dir": "bullish_news_bearish_price"},
+}
+
+
+def bearish_min(n: int) -> int:
+    """The bearish proposals a cycle of `n` slots must hold: ceil(n x
+    BEARISH_SHARE), so 1 of 3."""
+    import math
+    return int(math.ceil(max(0, int(n)) * BEARISH_SHARE - 1e-9))
+
+
+def _direction_balance() -> dict:
+    """{active_setups, proposals_last_8_weeks, graded_by_side}: how long
+    the book leans, for the prompt's bearish share."""
+    from django.db.models import Avg, Count
+
+    out = {"active_setups": {"bullish": 0, "bearish": 0},
+           "proposals_last_8_weeks": {"bullish": 0, "bearish": 0},
+           "graded_by_side": {"long": {"n": 0, "avg_r": None},
+                              "short": {"n": 0, "avg_r": None}}}
+    try:
+        from signals.models_opportunity import OpportunitySetup
+        for d, n in (OpportunitySetup.objects.filter(is_active=True)
+                     .values_list("direction").annotate(n=Count("id"))):
+            if d in out["active_setups"]:
+                out["active_setups"][d] = int(n)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from .generator_models import GeneratedSetupProposal
+        since = timezone.now() - timedelta(weeks=BALANCE_WEEKS)
+        for d, n in (GeneratedSetupProposal.objects
+                     .filter(created_at__gte=since)
+                     .values_list("direction").annotate(n=Count("id"))):
+            if d in out["proposals_last_8_weeks"]:
+                out["proposals_last_8_weeks"][d] = int(n)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from signals.models import Signal
+        for d, n, avg in (Signal.objects.filter(is_active=False)
+                          .exclude(outcome="")
+                          .exclude(realized_r__isnull=True)
+                          .values_list("direction")
+                          .annotate(n=Count("id"), avg=Avg("realized_r"))
+                          .values_list("direction", "n", "avg")):
+            side = {"bullish": "long", "bearish": "short"}.get(d)
+            if side:
+                out["graded_by_side"][side] = {
+                    "n": int(n), "avg_r": (round(float(avg), 4)
+                                           if avg is not None else None)}
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
 
 def _build_generation_snapshot() -> dict:
     """Aggregate inputs for the generator: top-performing setups, evaluator
@@ -146,6 +224,10 @@ def _build_generation_snapshot() -> dict:
         "account, not money) included; paper_n/paper_r are the platform "
         "simulator. top_performing_rules names each row's venue apart: "
         "live (real money), demo, paper.")
+    # 7. THE BEARISH SHARE (2026-10-31): how long the book leans, and each
+    # evaluator's bearish reading to build the short side from.
+    snap["direction_balance"] = _direction_balance()
+    snap["bearish_branches"] = {k: dict(v) for k, v in BEARISH_BRANCHES.items()}
 
     return snap
 
@@ -218,7 +300,15 @@ class StrategyGeneratorAgent(BaseAgent):
             "fills and their R, and `regret_r`, paper R nothing has taken "
             "live. Build on rules with proven paper R; do not re-propose "
             "what has already failed there; when you cite the ledger, cite "
-            "its numbers.\n\n"
+            "its numbers.\n"
+            f"8. At least {bearish_min(3)} of your proposals MUST have "
+            "direction `bearish`: a setup that profits when the instrument "
+            "falls. The book has been long-only by construction "
+            "(`direction_balance` counts it). Build bearish proposals from "
+            "`bearish_branches`. If the snapshot holds no honest bearish "
+            "idea, do not invent one: propose fewer bullish setups instead. "
+            "The platform holds that slot for the short side and drops any "
+            "bullish proposal past it.\n\n"
             "Inspirations to look for:\n"
             "- Pair a top-performing rule's evaluators with a regime filter "
             "(hurst_regime / volatility_regime).\n"
@@ -227,7 +317,14 @@ class StrategyGeneratorAgent(BaseAgent):
             "- Compose a microstructure pattern (liquidity_sweep / "
             "fair_value_gap) with a relative_volume filter.\n"
             "- Build a contrarian setup if the brain says regime is "
-            "blow_off (parabolic_exhaustion + crowd_extreme:euphoric).\n\n"
+            "blow_off (parabolic_exhaustion + crowd_extreme:euphoric).\n"
+            "- A failed breakout at resistance: fakeout_pattern:bull_trap "
+            "with liquidity_sweep:bearish_sweep and "
+            "anchoring_zone:prior_swing_high.\n"
+            "- A crowded long turning: cot_report:long_extreme with "
+            "market_structure_break:bearish. long_extreme is the "
+            "contrarian read here; a seeded bullish setup reads the same "
+            "value the other way, so cite which one you build.\n\n"
             f"Respond ONLY with valid JSON:\n{GENERATOR_SCHEMA}\n\n"
             "No code fences, no surrounding text."
         )
@@ -647,7 +744,35 @@ def generate_strategies_now(*, max_proposals: int = 3) -> dict:
     armed_ids = []
     rejected_count = 0
     auto_research = _auto_research_enabled()
-    for p in proposals[:max_proposals]:
+    # THE BEARISH SHARE (2026-10-31): the cap slices first, then the quota
+    # applies to that slice — bearish_min(max_proposals) slots are held for
+    # bearish proposals. The valid bearish ones are persisted first; the
+    # bullish ones fill what is left, in the model's order, and each one
+    # past it is recorded as rejected with the quota's reason.
+    batch = [p for p in proposals[:max_proposals]]
+    k = bearish_min(max_proposals)
+
+    def _is_bearish(p):
+        return isinstance(p, dict) and p.get("direction") == "bearish"
+
+    valid_bearish = sum(1 for p in batch
+                        if _is_bearish(p) and validate_proposal(p)[0])
+    bullish_room = max(0, max_proposals - max(k, valid_bearish))
+    ordered = ([p for p in batch if _is_bearish(p)]
+               + [p for p in batch if not _is_bearish(p)])
+    quota_dropped = 0
+    bullish_kept = 0
+    for p in ordered:
+        bearish = _is_bearish(p)
+        if not bearish and validate_proposal(p)[0]:
+            if bullish_kept >= bullish_room:
+                quota_dropped += 1
+                _record_rejection(
+                    p, (f"bearish quota: {valid_bearish} of {k} bearish "
+                        f"proposals this cycle — a slot is held for the "
+                        f"short side"), model=agent.model)
+                continue
+            bullish_kept += 1
         row = _persist_proposal(
             p, model=agent.model,
             tokens_in=usage.get("input_tokens", 0),
@@ -656,7 +781,12 @@ def generate_strategies_now(*, max_proposals: int = 3) -> dict:
         )
         if row:
             persisted_ids.append(row.id)
-            if auto_research and approve_proposal(
+            # A BEARISH proposal is never armed automatically: an armed
+            # research bearish setup can silence a bullish setup that
+            # trades on the same instrument in the same scan pass (the
+            # scanner's contradiction guard ignores the stage). It waits
+            # for the operator's approve.
+            if auto_research and not bearish and approve_proposal(
                     row, reviewed_by="auto:research",
                     notes="armed automatically in research stage — the "
                           "scanner grades it, no bot trades it"):
@@ -672,6 +802,7 @@ def generate_strategies_now(*, max_proposals: int = 3) -> dict:
         "n_persisted": len(persisted_ids),
         "n_armed_research": len(armed_ids),
         "n_validation_rejected": rejected_count,
+        "n_quota_dropped": quota_dropped,
         "n_expired": n_expired,
         "proposal_ids": persisted_ids,
         "proposal_ids_armed": armed_ids,

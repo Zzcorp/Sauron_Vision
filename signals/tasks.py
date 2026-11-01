@@ -21,6 +21,7 @@ def _create_signals_and_notify(results):
     from signals.rule_actuator import (_control_for, is_rule_active,
                                        rule_size_multiplier)
     from signals.rule_adapter import flatten, normalise
+    from signals.rule_birth import born_at_research, ensure_research_row
     from signals.rule_scope import (capped, cooldown_hours, cooldown_reason,
                                     exclusion_reason, record_sentence,
                                     rule_records, urgency_cap)
@@ -129,6 +130,13 @@ def _create_signals_and_notify(results):
                                           f"{record_sentence(record, cap)}"
                                           ).strip()}
         result = {**result, "sub_scores": sub_scores}
+
+        # BORN AT RESEARCH (2026-10-31, signals/rule_birth): the first
+        # stored signal of a new rule writes its RuleControl row at
+        # research, so the nightly ladder sweep and Aragorn's research
+        # step can walk it. Never touches an existing row.
+        if ctrl is None and born_at_research(rule_name):
+            ctrl = controls[rule_name] = ensure_research_row(rule_name)
 
         signal = Signal.objects.create(is_active=True, **{
             **fields, "sub_scores": result.get("sub_scores") or {},

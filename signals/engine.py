@@ -15,7 +15,8 @@ class SignalEngine:
     def _load_rules(self):
         """Load all signal rule definitions."""
         from signals.rules import (
-            technical_rules, macro_rules, flow_rules, smc_engine_rule,
+            bearish_rules, technical_rules, macro_rules, flow_rules,
+            smc_engine_rule,
         )
         # NO RULE WITHOUT A SOURCE (2026-10-07). sentiment_velocity_spike
         # and earnings_surprise were loaded here from 2026-04-09 (a10b2c9)
@@ -35,6 +36,10 @@ class SignalEngine:
         self.rules.extend(macro_rules.get_rules())
         self.rules.extend(flow_rules.get_rules())
         self.rules.extend(smc_engine_rule.get_rules())
+        # The bearish pack (2026-10-31): eight short-only rules, each born
+        # at research (signals/rule_birth) — watched and graded, no vote,
+        # until the ladder promotes it on proof.
+        self.rules.extend(bearish_rules.get_rules())
 
     def scan_instrument(self, instrument) -> list:
         """Run all rules against a single instrument."""

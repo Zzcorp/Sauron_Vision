@@ -137,6 +137,24 @@ LOSER_HIT_MAX = 0.35
 LOSER_THIN_EDGE_R = 0.10
 MANUAL_DWELL_DAYS = 7
 
+# ONE EVENT, MANY SIGNALS (2026-11-01). A rule whose one event fires on
+# every instrument it argues in the same pass: the 2s10s un-inversion
+# shorts some 127 catalogue instruments on one flip, and those shorts
+# resolve together within days. Counted as independent signals, one flip
+# would cross LOSER_MIN_N on its own — proven_record would lift every
+# later live entry from REDUCED to full size (proof.LIVE_PROVEN), the floor
+# could bar the rule and rule_weight weigh its votes up to 1.5x, all on one
+# observation. Such a rule's graded record counts EVENTS: n is the number
+# of distinct events (the sub_scores key that names one), and each event
+# weighs once — its hit rate and expectancy are its own signals' averages,
+# averaged over the events. Every consumer of n reads events: the ladder,
+# the floor, the proof's record, the rule weight's signal lane and the
+# capital desk's signal lane.
+#: {rule: (the sub_scores key of the event, the word for one, for many)}
+EVENT_KEYED_RULES = {
+    "yield_curve_inversion_flip": ("paired_on", "flip", "flips"),
+}
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -146,7 +164,9 @@ def _control(rule_name: str):
 
 
 def _stats_since(rule_name: str, since=None, days_window: Optional[int] = None) -> dict:
-    """Closed-signal stats for `rule_name` since the given datetime (or by window)."""
+    """Closed-signal stats for `rule_name` since the given datetime (or by
+    window). An EVENT_KEYED_RULES rule's are counted by event
+    (_event_stats)."""
     from signals.models import Signal
     from django.db.models import Avg, Count
     qs = Signal.objects.filter(
@@ -156,6 +176,8 @@ def _stats_since(rule_name: str, since=None, days_window: Optional[int] = None) 
         qs = qs.filter(expired_at__gte=since)
     elif days_window is not None:
         qs = qs.filter(expired_at__gte=timezone.now() - timedelta(days=days_window))
+    if rule_name in EVENT_KEYED_RULES:
+        return _event_stats(qs, EVENT_KEYED_RULES[rule_name][0])
     n = qs.count()
     if n == 0:
         return {"n": 0, "expectancy": None, "hit_rate": None}
@@ -166,6 +188,64 @@ def _stats_since(rule_name: str, since=None, days_window: Optional[int] = None) 
         "expectancy": float(expectancy) if expectancy is not None else None,
         "hit_rate": round(hits / n, 4) if n > 0 else 0,
     }
+
+
+def _events(qs, key: str) -> dict:
+    """{event: [signals, hits, summed R]} of the graded signals `qs` by the
+    value of sub_scores[key]; the signals that lack it are one event
+    together — never more independence than the record shows."""
+    events: dict = {}
+    for subs, outcome, r in qs.values_list("sub_scores", "outcome",
+                                           "realized_r"):
+        event = str(subs.get(key) or "") if isinstance(subs, dict) else ""
+        tally = events.setdefault(event, [0, 0, 0.0])
+        tally[0] += 1
+        tally[1] += outcome == "hit_target"
+        tally[2] += float(r)
+    return events
+
+
+def event_rs(rule_name: str, qs) -> list:
+    """One R per event — its signals' average — for an EVENT_KEYED_RULES
+    rule's graded signals `qs` (the capital desk's signal lane)."""
+    key = EVENT_KEYED_RULES[rule_name][0]
+    return [t[2] / t[0] for t in _events(qs, key).values()]
+
+
+def _event_stats(qs, key: str) -> dict:
+    """_stats_since's shape over the graded signals `qs`, counted by event
+    (_events): n the events, hit_rate and expectancy each event's own
+    average, averaged over the events, and `signals` the graded signals
+    behind them."""
+    events = _events(qs, key)
+    n = len(events)
+    if n == 0:
+        return {"n": 0, "expectancy": None, "hit_rate": None, "signals": 0}
+    return {
+        "n": n,
+        "expectancy": sum(t[2] / t[0] for t in events.values()) / n,
+        "hit_rate": round(sum(t[1] / t[0] for t in events.values()) / n, 4),
+        "signals": sum(t[0] for t in events.values()),
+    }
+
+
+def count_words(rule_name: str, s: dict) -> str:
+    """"20 graded signals", or for an EVENT_KEYED_RULES rule "1 flip over 25
+    graded signals": what n counts, in the words of every sentence that
+    quotes a record."""
+    n = int((s or {}).get("n") or 0)
+    event = EVENT_KEYED_RULES.get(rule_name)
+    if event is None:
+        return f"{n} graded signals"
+    return (f"{n} {event[1] if n == 1 else event[2]} over "
+            f"{int((s or {}).get('signals') or 0)} graded signals")
+
+
+def needs_words(rule_name: str) -> str:
+    """What the floor's LOSER_MIN_N counts for this rule: "20" signals, or
+    "20 flips" for an EVENT_KEYED_RULES rule."""
+    event = EVENT_KEYED_RULES.get(rule_name)
+    return f"{LOSER_MIN_N} {event[2]}" if event else f"{LOSER_MIN_N}"
 
 
 def _venue_stats(rule_name: str, venue: str, since) -> dict:
@@ -352,7 +432,8 @@ def measured_loser(rule_name: str, stats: dict | None = None) -> str:
     exp = float(exp)
     low_hit = hit is not None and float(hit) < LOSER_HIT_MAX
     hit_w, exp_w = loser_numbers(hit, exp)
-    head = f"{n} graded signals all time: hit {hit_w}, expectancy {exp_w}"
+    head = (f"{count_words(rule_name, s)} all time: hit {hit_w}, "
+            f"expectancy {exp_w}")
     if exp <= 0:
         return f"{head} — expectancy at or under zero"
     if low_hit and exp < LOSER_THIN_EDGE_R:
@@ -391,7 +472,7 @@ def proven_record(rule_name: str, *, cache: dict | None = None) -> dict:
 
 #: proven_record of a graded record that could not be read: no proof.
 _UNREAD_RECORD = {"proven": False, "n": 0, "hit_rate": None,
-                  "expectancy": None, "loser": ""}
+                  "expectancy": None, "loser": "", "count": "0 graded signals"}
 #: _stats_since of a rule with no graded signal.
 _NO_STATS = {"n": 0, "expectancy": None, "hit_rate": None}
 
@@ -407,7 +488,8 @@ def _record_of(rule_name: str, s: dict) -> dict:
     proven = (n >= LOSER_MIN_N and exp is not None
               and exp >= LOSER_THIN_EDGE_R and not loser)
     return {"proven": bool(proven), "n": n, "hit_rate": s.get("hit_rate"),
-            "expectancy": exp, "loser": loser}
+            "expectancy": exp, "loser": loser,
+            "count": count_words(rule_name, s)}
 
 
 def _stats_by_rule(rule_names) -> dict:
@@ -420,6 +502,13 @@ def _stats_by_rule(rule_names) -> dict:
     from signals.models import Signal
     names = sorted(set(rule_names or ()))
     out = {name: dict(_NO_STATS) for name in names}
+    if not names:
+        return out
+    # a rule counted by event reads its own (one more query each)
+    for name in names:
+        if name in EVENT_KEYED_RULES:
+            out[name] = _stats_since(name)
+    names = [name for name in names if name not in EVENT_KEYED_RULES]
     if not names:
         return out
     # order_by on the grouped column, never Signal's own -created_at
@@ -552,8 +641,9 @@ def _provenance_of(stage: str, ev, rec: dict, cases: list) -> dict:
             if rec.get("proven"):
                 _h, _e = loser_numbers(rec.get("hit_rate"),
                                        rec["expectancy"])
-                words += (f"; proven since: {rec['n']} graded "
-                          f"signals all time, expectancy {_e}")
+                count = rec.get("count") or f"{rec['n']} graded signals"
+                words += (f"; proven since: {count} all time, "
+                          f"expectancy {_e}")
             if cases:
                 words += (f"; the proving ground proves it on "
                           f"{', '.join(cases)}")
@@ -624,6 +714,13 @@ def provenance_notes(rule_names, *, controls=None, stats=None) -> dict:
         try:
             graded = (stats if stats is not None
                       else _stats_by_rule(live_names))
+            # a page's own map counts signals; a rule counted by event
+            # reads its own record
+            if stats is not None:
+                graded = dict(graded)
+                for name in live_names:
+                    if name in EVENT_KEYED_RULES:
+                        graded[name] = _stats_since(name)
         except Exception as e:  # noqa: BLE001 — unread is unproven
             logger.warning("[promotion] graded record unread for %d live "
                            "rule(s) (%s) — not proof", len(live_names), e)

@@ -280,11 +280,20 @@ class TheDoorTests(TestCase):
         self.assertEqual(ProvingVerdict.objects.count(), 0)
         text = out.getvalue()
         self.assertIn("rsi_bull_divergence · long", text)
-        self.assertIn("rsi_divergence (short mirror) · short", text)
+        # the short side is its own live rule now (2026-10-31)
+        self.assertIn("rsi_bear_divergence · short", text)
+        self.assertNotIn("(short mirror)", text)
         call_command("prove", "rules", "--class", "crypto", "--save",
                      stdout=StringIO())
         n = ProvingVerdict.objects.count()
-        self.assertEqual(n, len(F.live_rule_cases()))
+        # every case that writes a crypto verdict: the bearish families
+        # that name their markets (an index, a COT-mapped market) write
+        # none on a crypto class without one
+        from backtester.proving import run as R
+        judged = R.judged_cases(R.load_class(["PROVUSD"], "4h", "crypto"),
+                                "crypto")
+        self.assertEqual(n, len(judged))
+        self.assertEqual(len(judged), len(F.live_rule_cases()) - 2)
         row = ProvingVerdict.objects.get(live_rule="golden_cross")
         self.assertEqual((row.asset_class, row.symbols_n), ("crypto", 1))
         self.assertIn(row.verdict, dict(ProvingVerdict.VERDICTS))
