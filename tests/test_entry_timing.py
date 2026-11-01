@@ -1122,14 +1122,24 @@ class TheAttackIsCappedBeforeAPrintTests(TestCase):
 class TheWiringTests(SimpleTestCase):
 
     def test_the_gate_sits_after_the_quote_and_before_the_cost(self):
+        """2026-11-01 (the eToro rates, engine/etoro_rates): a LIVE
+        client's gate sits BEFORE the proposal's rates read, so a shut
+        market costs no rates read for an entry; a PAPER client's stays
+        after the quote, so it still hears the paper venue first. Both
+        come before the cost."""
         import inspect
         from bot_program.asset_engine.base import AssetBot
         src = inspect.getsource(AssetBot.propose_entry)
+        read = src.index("tk = self._proposal_tick(client, symbol)")
         quote = src.index("self._entry_quote_gate(symbol, tk, client)")
-        gate = src.index("self._entry_timing_gate(symbol)")
+        live_gate = src.index("self._entry_timing_gate(symbol)")
+        paper_gate = src.rindex("self._entry_timing_gate(symbol)")
         cost = src.index("charge = cost_to_charge(self.cfg, symbol, tk)")
-        self.assertLess(quote, gate)
-        self.assertLess(gate, cost)
+        self.assertLess(live_gate, read)
+        self.assertLess(quote, paper_gate)
+        self.assertLess(paper_gate, cost)
+        self.assertNotEqual(live_gate, paper_gate)
+        self.assertEqual(src.count("self._entry_timing_gate(symbol)"), 2)
         src = inspect.getsource(AssetBot.execute_entry)
         # before the billed debate (review 2026-10-06), and again on the
         # fresh clock after the last look, just before the order
@@ -1175,7 +1185,10 @@ class TheWiringTests(SimpleTestCase):
         self.assertIn("no live entry", SKIP_WORDS["market_shut"])
         src = (inspect.getsource(AssetBot.propose_entry)
                + inspect.getsource(AssetBot.execute_entry))
-        self.assertEqual(src.count("entry_timing.skip_code(_timing)"), 3)
+        # 4 since 2026-11-01: the proposal refuses on the clock at two
+        # places, before the rates read for a live client and after the
+        # quote for a paper one, each through skip_code
+        self.assertEqual(src.count("entry_timing.skip_code(_timing)"), 4)
         self.assertNotIn("skips.BAD_TIMING, _timing", src)
         # Review 2026-10-07: the order is read off the CALLS (ast), never
         # the first textual match, which a comment satisfies: the

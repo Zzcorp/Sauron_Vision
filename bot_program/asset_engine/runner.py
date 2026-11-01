@@ -321,7 +321,15 @@ def run_all_asset_bots() -> dict:
     THEN THE PAPER-ONLY PASS (2026-10-08): the PAPER rows of every config
     off by any other stop, exits only (manage_stopped_paper). Its
     summaries are out["paper_only"].
+
+    BEFORE ALL OF IT, THE MARKS' BATCHED SNAPSHOT (2026-11-01,
+    base.prefetch_fleet_marks, engine/etoro_rates): ONE batched rates read
+    per eToro key for the open real rows whose stop rests at eToro, so the
+    pass's marks are read off it instead of one GET a row. It sends no
+    order, moves no stop and never stops the pass.
     """
+    from .base import prefetch_fleet_marks
+    prefetch_fleet_marks()
     braked = _manage_braked_pass()
     paper_only = _manage_stopped_paper_pass()
     try:

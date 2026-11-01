@@ -64,6 +64,12 @@ FROZEN_MINUTES = 45
 VENUE_SOURCES = ("etoro",)
 #: Classes never judged.
 NEVER_JUDGED = frozenset({"options"})
+#: The care keys `judge` writes: the sanity's whole state, read back by
+#: the next mark (2026-11-01: the wire's read that confirms a cached mark
+#: is judged against the state from before that cached mark,
+#: AssetBot._confirm_mark).
+CARE_KEYS = ("last_mark", "last_mark_at", "mark_same_since", "mark_suspect",
+             "mark_frozen_alerted_at")
 
 
 def _f(x):

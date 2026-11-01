@@ -1084,6 +1084,15 @@ class AssetBot(ABC):
         rows = AssetBotTrade.objects.filter(config=self.cfg, status="OPEN")
         if paper_only:
             rows = rows.filter(paper=True)
+        # THE BATCHED SNAPSHOT (2026-11-01, engine/etoro_rates): the rows of
+        # this walk whose mark may be read off ONE batched rates read — real,
+        # carried by eToro, not a working entry, their stop resting at eToro
+        # (a P3 mark) — instead of one GET each. A live row eToro holds no
+        # stop for keeps its own read on the wire every tick (P1), and a
+        # mark read off the cache never acts alone: a stop move, a care
+        # close or a change of the care's state is decided again on one
+        # fresh read of the wire first (_confirm_mark).
+        self._marks_snapshot = self._mark_snapshot_rows(rows)
         for trade in rows:
             try:
                 protected = bool((trade.metadata or {}).get("protected"))
@@ -1190,6 +1199,16 @@ class AssetBot(ABC):
                 # only one it has, so its mark is never refused or paused.
                 # Closes and stop moves this tick sends are P0 whatever
                 # this scope says.
+                #
+                # AND A SHUT MARKET IS READ ONCE PER HALF HOUR (2026-11-01,
+                # engine/etoro_rates.shut_max_age): the mark of a row whose
+                # stop rests at eToro, through a weekend or a holiday shut
+                # of a forex or commodity market whose clock is known, is
+                # read off the newest answer received since the shut began
+                # while it is younger than 30 minutes, until 10 minutes
+                # before the reopen — the row is marked and managed on the
+                # shut market's own price every tick, its stamp dated at
+                # the read.
                 mark_err = ""
                 mark_unasked = ""
                 try:
@@ -1399,9 +1418,13 @@ class AssetBot(ABC):
                     from bot_program.engine.capabilities import adapter_key
                     _tk = (getattr(self, "_last_ticks", None) or {}).get(
                         trade.symbol) or {}
+                    # a mark read off the shared rates cache is dated at
+                    # its read, not now (2026-11-01): the stamp says its age
                     venue_mark.stamp(trade, price, source=adapter_key(client),
                                      via="tick", bid=_tk.get("bid"),
-                                     ask=_tk.get("ask"))
+                                     ask=_tk.get("ask"),
+                                     at=(_tk.get("read_at")
+                                         if _tk.get("cached") else None))
                     # THE CROSSING (2026-10-07, bot_program/venue_exit
                     # .note_crossing): the first accepted mark beyond the
                     # stop or target eToro holds since it last showed the
@@ -1433,6 +1456,12 @@ class AssetBot(ABC):
                 # aragorn switch OFF: nothing here.
                 from bot_program.position_care import care as _care
                 _cared = _care(self, trade, price, client)
+                # a care that decided on the wire's fresh read (a cached
+                # mark never acts alone, 2026-11-01): the rest of the row's
+                # tick reads that read too
+                _acted = self._confirm_mark(trade, price, client, read=False)
+                if _acted is not None:
+                    price = _acted
                 # THE ORCS (bot_program/orcs, O1): the row's Orc journals
                 # what the care just did, as code facts in its own tables.
                 # A row with no Orc costs no query; nothing here moves a
@@ -1489,6 +1518,9 @@ class AssetBot(ABC):
             except Exception as e:
                 logger.warning("[%s_bot] manage(%s) failed: %s",
                                self.asset_class, trade.symbol, e)
+        # the snapshot belongs to this walk: a mark read after it (the
+        # CLOSE button prices through _mark_price) asks the wire
+        self._marks_snapshot = None
         return closed
 
     def _paper_resting_exit(self, trade, client, *,
@@ -2630,12 +2662,25 @@ class AssetBot(ABC):
         leaves the database claiming a level the venue never accepted,
         which is worse than not moving it: the operator would read a
         protected position at a stop that exists nowhere but here.
+
+        A CACHED MARK NEVER MOVES A STOP ALONE (2026-11-01, review;
+        engine/etoro_rates): a move judged on this tick's mark read off
+        the shared rates cache is judged again, from scratch, on one fresh
+        read of the wire (_confirm_mark) — the level sent is the row's own
+        read's, as before the cache, and it goes this tick when that read
+        still asks for it; a read that cannot price the row moves nothing.
+        A move the cached mark does not ask for waits for the next tick's
+        read, as one the market reaches between two ticks always has.
         """
         breakeven_at_r = self._extras_float("breakeven_at_r")
         trail_pct = self._extras_float("trail_pct")
         if breakeven_at_r <= 0 and trail_pct <= 0:
             return False
         if trade.stop_loss is None:
+            return False
+        # the wire's read when the care already asked for one this tick
+        price = self._confirm_mark(trade, price, client, read=False)
+        if price is None:
             return False
 
         try:
@@ -2694,6 +2739,12 @@ class AssetBot(ABC):
             logger.warning("[%s_bot] stop rules failed for %s: %s",
                            self.asset_class, trade.symbol, e)
             return False
+        fresh = self._confirm_mark(trade, price, client)
+        if fresh is None:
+            return False
+        if fresh is not price:
+            # judged on a cached mark: judged again on the wire's read
+            return self._manage_broker_stop(trade, fresh, client)
         return self._move_broker_stop(trade, price, client, candidate, why)
 
     def _move_broker_stop(self, trade, price, client, candidate,
@@ -3177,8 +3228,27 @@ class AssetBot(ABC):
 
     def _mark_price(self, trade, client) -> Optional[Decimal]:
         """Current mark for SL/TP checks. Default: broker ticker last price.
-        Return None to skip managing this trade on this tick."""
-        tk = client.ticker(trade.symbol)
+        Return None to skip managing this trade on this tick.
+
+        THE BATCHED SNAPSHOT (2026-11-01, engine/etoro_rates): inside the
+        manage walk, a row of the walk's snapshot is read off the shared
+        rates cache (an answer up to MARK_MAX_AGE_S old) or off ONE batched
+        read carrying the walk's other rows (_mark_tick); every other row,
+        and every caller outside the walk (the CLOSE button), asks
+        ticker() as before. The care, the vanished-stop net, the trailing
+        move and the bot-side SL/TP read the answer exactly as they read
+        the single one, the "0" sentinel included. A cached mark keeps its
+        age on the row object for the close that books it
+        (_cached_mark_info), and never acts alone: a stop move, a care
+        close or a change of the care's state decided on it is decided
+        again on one fresh read of the wire first (_confirm_mark)."""
+        tk = (self._mark_tick(trade, client)
+              if getattr(self, "_marks_snapshot", None)
+              else client.ticker(trade.symbol))
+        try:
+            trade._mark_confirm = None    # this tick's mark: none confirmed
+        except Exception:  # noqa: BLE001 — a record, never a decision
+            pass
         # Kept for the venue mark's closing side (venue_mark.stamp: a long
         # is shown at the bid, as the venue shows it). Display only.
         try:
@@ -3187,7 +3257,218 @@ class AssetBot(ABC):
         except Exception:  # noqa: BLE001 — a cache, never a decision
             pass
         price = Decimal(str(tk.get("lastPrice", "0") or "0"))
+        try:
+            trade._cached_mark = (
+                (price, float(tk.get("age_s") or 0.0))
+                if price > 0 and isinstance(tk, dict) and tk.get("cached")
+                else None)
+            # the mark sanity's state before this cached mark is judged:
+            # the wire's read that confirms it is judged against this, as
+            # the row's own read was before the cache (_confirm_mark)
+            from bot_program.mark_sanity import CARE_KEYS
+            _care = (trade.metadata or {}).get("care") or {}
+            trade._sanity_before = (
+                {k: _care.get(k) for k in CARE_KEYS}
+                if trade._cached_mark and isinstance(_care, dict) else None)
+        except Exception:  # noqa: BLE001 — a record, never a decision
+            pass
         return price if price > 0 else None
+
+    def _mark_tick(self, trade, client):
+        """The rates answer this row's mark is read off (2026-11-01,
+        engine/etoro_rates). A row of this walk's snapshot
+        (_mark_snapshot_rows) through an eToro client: the shared cache up
+        to the row's age (_mark_age: MARK_MAX_AGE_S, or on a market the
+        shut-market cadence holds, the newest answer since it shut within
+        the half hour), else ONE batched read carrying it and the walk's
+        rows the cache does not answer (etoro_rates.quote: a failed or
+        refused batch is raised for every row of it, never asked again row
+        by row; a row the batch left out, or an unproven batch, is read
+        alone). Anything else: ticker(), as before."""
+        snap = getattr(self, "_marks_snapshot", None)
+        pk = getattr(trade, "pk", None)
+        if not snap or pk not in snap:
+            return client.ticker(trade.symbol)
+        from bot_program.engine import etoro_rates
+        from bot_program.engine.capabilities import adapter_key
+        symbol, cls = snap.pop(pk)
+        if adapter_key(client) != "etoro":
+            return client.ticker(trade.symbol)
+
+        def _rest():
+            # the walk's other rows the cache does not answer at their age:
+            # a shut market's half hour is never re-read by another row's
+            # batch (2026-11-01, review)
+            out = []
+            for s, c in dict.fromkeys(snap.values()):
+                age = self._mark_age(s, c)
+                if age > etoro_rates.MARK_MAX_AGE_S and etoro_rates.cached(
+                        client, s, max_age_s=age) is not None:
+                    continue
+                out.append(s)
+            return out
+        return etoro_rates.quote(client, trade.symbol,
+                                 max_age_s=self._mark_age(symbol, cls),
+                                 refill=_rest)
+
+    def _marks_batchable(self, trade) -> bool:
+        """A row whose mark may be read off the batched snapshot
+        (2026-11-01): real, carried by eToro (its carrier stamp), not a
+        working entry, its stop resting at eToro (a P3 mark,
+        _mark_priority). Never raises."""
+        try:
+            if getattr(trade, "paper", True):
+                return False
+            meta = trade.metadata or {}
+            if meta.get("entry_working") or meta.get("broker") != "etoro":
+                return False
+            from bot_program.engine import etoro_budget
+            return self._mark_priority(trade)[0] == etoro_budget.P3
+        except Exception:  # noqa: BLE001 — unreadable: its own read
+            return False
+
+    def _mark_snapshot_rows(self, rows) -> Optional[dict]:
+        """{pk: (symbol, asset_class)} of the rows of this walk whose mark
+        may come from the batched snapshot (_marks_batchable), or None with
+        etoro_rates.CACHE off (every row then asks ticker(), as before)."""
+        from bot_program.engine import etoro_rates
+        if not etoro_rates.CACHE:
+            return None
+        out = {}
+        for trade in rows:
+            if self._marks_batchable(trade):
+                out[trade.pk] = (trade.symbol, trade.asset_class)
+        return out
+
+    def _mark_age(self, symbol, asset_class) -> int:
+        """The oldest answer a snapshot row's mark of `symbol` may be read
+        off this tick (2026-11-01, engine/etoro_rates): MARK_MAX_AGE_S, or
+        the shut-market cadence's (etoro_rates.shut_max_age: at most the
+        half hour, never an answer from before the shut), read once a tick
+        per symbol."""
+        from bot_program.engine import etoro_rates
+        cache = getattr(self, "_tick_broker_cache", None)
+        key = ("mark_age", str(symbol or "").upper())
+        if isinstance(cache, dict) and key in cache:
+            return cache[key]
+        age = max(etoro_rates.MARK_MAX_AGE_S,
+                  etoro_rates.shut_max_age(symbol, asset_class))
+        if isinstance(cache, dict):
+            cache[key] = age
+        return age
+
+    def _confirm_mark(self, trade, price, client, *, read=True):
+        """A CACHED MARK NEVER ACTS ALONE (2026-11-01, review;
+        engine/etoro_rates). `price` itself, unless it is this tick's mark
+        of `trade` read off the shared rates cache (_mark_price's
+        _cached_mark): then ONE fresh read of the row's rate on the wire,
+        at the row's own priority in the budget (_mark_priority), judged
+        by the mark sanity as the row's own read was before the cache —
+        against the sanity's state from before this tick's cached mark
+        (_sanity_before), never against the cached print itself, so a
+        print the jump bar would hold is held and one it would pass is
+        passed, whatever the cached print between them — stamped as the
+        venue's mark and noted for the crossing: the price a stop move, a
+        care close or a change of the care's state is then decided on, as
+        it was on the row's own read before the cache. None when that read
+        cannot price the row (refused by the budget, failed, a "0", a
+        suspect print): nothing price-based acts on the row for the rest
+        of this tick, and nothing was sent. Asked at most once a row a
+        tick (the answer is kept on the row object, `_mark_confirm`);
+        `read` False only answers what was asked. Never raises."""
+        done = getattr(trade, "_mark_confirm", None)
+        try:
+            if isinstance(done, dict):
+                if price is not None and Decimal(str(price)) == done["cached"]:
+                    return done["fresh"]
+                return price
+            held = getattr(trade, "_cached_mark", None)
+            if not (isinstance(held, tuple) and len(held) == 2) \
+                    or price is None or Decimal(str(price)) != held[0]:
+                return price
+        except Exception:  # noqa: BLE001 — not a cached mark: as before
+            return price
+        if not read:
+            return price
+        fresh = None
+        try:
+            from bot_program.engine import etoro_budget
+            with etoro_budget.at(*self._mark_priority(trade)):
+                tk = client.ticker(trade.symbol)
+            p = Decimal(str((tk or {}).get("lastPrice", "0") or "0"))
+            from bot_program import mark_sanity
+            if p > 0:
+                self._sanity_as_before(trade)
+            if p > 0 and mark_sanity.check(self, trade, p, client)["ok"]:
+                fresh = p
+                self._last_ticks = getattr(self, "_last_ticks", None) or {}
+                self._last_ticks[trade.symbol] = tk
+                if not trade.paper:
+                    from bot_program import venue_exit, venue_mark
+                    from bot_program.engine.capabilities import adapter_key
+                    venue_mark.stamp(trade, p, source=adapter_key(client),
+                                     via="tick", bid=tk.get("bid"),
+                                     ask=tk.get("ask"))
+                    venue_exit.note_crossing(trade, p)
+            else:
+                logger.info("[%s_bot] %s #%s: the wire's read before acting "
+                            "gave no usable price — nothing price-based "
+                            "acts on the row this tick", self.asset_class,
+                            trade.symbol, trade.id)
+        except Exception as e:  # noqa: BLE001 — unread: nothing acts
+            logger.info("[%s_bot] %s #%s: the wire's read before acting "
+                        "could not be made (%s) — nothing price-based acts "
+                        "on the row this tick", self.asset_class,
+                        trade.symbol, trade.id, str(e)[:120])
+        try:
+            trade._mark_confirm = {"cached": held[0], "fresh": fresh}
+            # a close the tick books now books the fresh read, with no
+            # cached age (_cached_mark_info)
+            trade._cached_mark = None
+        except Exception:  # noqa: BLE001
+            pass
+        return fresh
+
+    @staticmethod
+    def _sanity_as_before(trade) -> None:
+        """Put the mark sanity's state from before this tick's cached mark
+        (_mark_price's _sanity_before) back on the row object, in memory
+        only, so the wire's read that confirms it is judged as the row's
+        own read was before the cache: the check that follows writes its
+        verdict (2026-11-01, review). The care's other keys are kept as
+        they are. Never raises: unread, the cached print stays the last
+        one accepted."""
+        before = getattr(trade, "_sanity_before", None)
+        if not isinstance(before, dict):
+            return
+        try:
+            from bot_program.mark_sanity import CARE_KEYS
+            meta = dict(trade.metadata or {})
+            care = {k: v for k, v in dict(meta.get("care") or {}).items()
+                    if k not in CARE_KEYS}
+            care.update({k: v for k, v in before.items()
+                         if k in CARE_KEYS and v is not None})
+            meta["care"] = care
+            trade.metadata = meta
+        except Exception:  # noqa: BLE001
+            pass
+
+    @staticmethod
+    def _cached_mark_info(trade, price) -> Optional[dict]:
+        """{exit_mark_cached_age_s: n} when `price` is this tick's mark of
+        `trade` and was read off the shared rates cache (2026-11-01): the
+        age a close booked at it carries (pending_closes.resolve_exit_fill).
+        None otherwise."""
+        held = getattr(trade, "_cached_mark", None)
+        if not held or price is None:
+            return None
+        try:
+            if Decimal(str(price)) != held[0]:
+                return None
+            from bot_program.pending_closes import MARK_CACHED_AGE_KEY
+            return {MARK_CACHED_AGE_KEY: int(round(float(held[1])))}
+        except Exception:  # noqa: BLE001
+            return None
 
     def _trade_pnl(self, trade, price: Decimal) -> Decimal:
         """Realised pnl for closing `trade` at `price` (config base_currency)
@@ -3799,7 +4080,11 @@ class AssetBot(ABC):
             fill = paper_exit_fill(trade, Decimal(str(modelled)))
         else:
             paper_exit = None  # a real close: never read
-            fill = resolve_exit_fill(trade, close_result, mark=price)
+            # a mark read off the shared rates cache books its age
+            # (2026-11-01, engine/etoro_rates); any other mark, nothing new
+            fill = resolve_exit_fill(
+                trade, close_result, mark=price,
+                mark_info=self._cached_mark_info(trade, price))
         # AN EXIT AFTER AN UNMANAGED STRETCH (2026-10-15): a paper row
         # nothing ran for a day or more, whose bars could not cover the
         # stretch, booked from this tick's mark (base._paper_resting_exit
@@ -4487,16 +4772,36 @@ class AssetBot(ABC):
         _no = venue_health.kept_no(client, symbol)
         if _no:
             return self._skip(symbol, skips.NO_PRICE, f"{symbol}: {_no}")
+        # THE CLOCK BEFORE THE RATE (2026-11-01, engine/etoro_rates): a LIVE
+        # client's entry timing (below) is judged BEFORE its rates read, so a
+        # shut market, or any window the clock refuses, costs no rates read
+        # for an entry — on a Saturday every live symbol with a signal used
+        # to ask eToro, only to be refused MARKET_SHUT a line later. The
+        # verdict does not read the quote, so the same entries are refused,
+        # with the same words. A PAPER client still hears the paper venue
+        # first (its quote is the platform's own and costs no request): its
+        # clock is judged after the quote, as before.
+        _clock_first = not self._is_paper_client(client)
+        if _clock_first:
+            _timing = self._entry_timing_gate(symbol)
+            if not _timing["ok"]:
+                logger.warning("[%s_bot] %s: entry refused on the clock — %s",
+                               self.asset_class, symbol, _timing["why"])
+                return self._skip(symbol, entry_timing.skip_code(_timing),
+                                  _timing["why"])
         # THE PROPOSAL'S RATE IS P4 IN THE eTORO BUDGET (2026-11-01,
         # engine/etoro_budget): not asked while the key's market-data minute
         # keeps its floor for the marks, the last looks and the closes, or
         # while the shared 429 pause holds. A skip with the budget's words
         # (NO_PRICE, "— not asked"), never a venue failure; the order's own
         # reads below (the eligibility, the last look, the POST) are P1.
+        # Through eToro it is read off ONE batched snapshot of this config's
+        # symbols past the clock (2026-11-01, _proposal_tick); the last look
+        # before the order is always the wire.
         from bot_program.engine import etoro_budget
         try:
             with etoro_budget.at(etoro_budget.P4, "proposal"):
-                tk = client.ticker(symbol)
+                tk = self._proposal_tick(client, symbol)
         except Exception as e:
             if getattr(e, "budget_refused", False):
                 return self._skip(symbol, skips.NO_PRICE, str(e))
@@ -4547,12 +4852,15 @@ class AssetBot(ABC):
         # paper venue already gives above — and never as a bad hour; on
         # 2026-10-06 a live config shorted a share 22 minutes before the
         # NYSE open and eToro filled it, which is what SHUT now refuses.
-        _timing = self._entry_timing_gate(symbol)
-        if not _timing["ok"]:
-            logger.warning("[%s_bot] %s: entry refused on the clock — %s",
-                           self.asset_class, symbol, _timing["why"])
-            return self._skip(symbol, entry_timing.skip_code(_timing),
-                              _timing["why"])
+        # Here for a PAPER client only since 2026-11-01: a live client's
+        # clock was judged before its rates read (_clock_first, above).
+        if not _clock_first:
+            _timing = self._entry_timing_gate(symbol)
+            if not _timing["ok"]:
+                logger.warning("[%s_bot] %s: entry refused on the clock — %s",
+                               self.asset_class, symbol, _timing["why"])
+                return self._skip(symbol, entry_timing.skip_code(_timing),
+                                  _timing["why"])
 
         # A paper entry used to be recorded at the raw ticker, because the
         # order block below sits inside `if not paper:` and PaperTrader is
@@ -4601,6 +4909,15 @@ class AssetBot(ABC):
         )
         sl, tp, level_meta = stop_and_target(
             self.cfg, symbol, price, decision.direction)
+        # THE SNAPSHOT'S AGE (2026-11-01, engine/etoro_rates): a proposal
+        # priced off the shared rates cache says how old that answer was,
+        # one priced off a batch says so (review); the row carries it
+        # (execute_entry's entry metadata), and its last look fails closed.
+        if isinstance(tk, dict) and tk.get("cached"):
+            level_meta = dict(level_meta or {},
+                              proposal_quote_age_s=tk.get("age_s"))
+        elif isinstance(tk, dict) and tk.get("batched"):
+            level_meta = dict(level_meta or {}, proposal_quote_batched=True)
 
         # ── THE SMART MONEY (2026-10-02, bot_program/smart_money.py) ─────
         # The stop leaves the crowd's hunt zone BEFORE the cost filter and
@@ -5026,6 +5343,55 @@ class AssetBot(ABC):
                     f"planned reward is gone — nothing sent")
         return ""
 
+    def _proposal_tick(self, client, symbol):
+        """The proposal's rates answer (2026-11-01, engine/etoro_rates).
+        Through eToro it is read off ONE batched snapshot of this config's
+        symbols past the clock gate: the shared cache up to
+        PROPOSAL_MAX_AGE_S old, else one batched read carrying this symbol
+        and the config's later symbols that route to eToro and pass the
+        clock (_proposal_refill); a symbol the batch leaves out is read
+        alone, and a failed or refused batch answers every symbol of it.
+        Any other client, or etoro_rates.CACHE off: ticker(), as before.
+        Never an order's price: the last look reads the wire."""
+        from bot_program.engine import etoro_rates
+        if not etoro_rates.CACHE:
+            return client.ticker(symbol)
+        return etoro_rates.quote(
+            client, symbol, max_age_s=etoro_rates.PROPOSAL_MAX_AGE_S,
+            refill=lambda: self._proposal_refill(symbol))
+
+    def _proposal_refill(self, symbol) -> list:
+        """The config's symbols after `symbol`, in its own order, that the
+        proposal's batch may carry beside it (2026-11-01): routed to eToro
+        (broker_router.broker_name_for_symbol, no client built) and past
+        the clock gate (_entry_timing_gate, which the symbol's own proposal
+        asks again). Read once a tick per symbol. Never raises."""
+        syms = [str(s) for s in (self.cfg.symbols or [])]
+        try:
+            after = syms[syms.index(symbol) + 1:]
+        except ValueError:
+            after = syms
+        cache = getattr(self, "_tick_broker_cache", None)
+        out = []
+        for s in after:
+            key = ("proposal_batchable", s)
+            try:
+                if isinstance(cache, dict) and key in cache:
+                    ok = cache[key]
+                else:
+                    from bot_program.engine.broker_router import (
+                        broker_name_for_symbol)
+                    ok = (broker_name_for_symbol(self.user, s, self.cfg)
+                          == "etoro"
+                          and bool(self._entry_timing_gate(s).get("ok", True)))
+                    if isinstance(cache, dict):
+                        cache[key] = ok
+            except Exception:  # noqa: BLE001 — unread: read on its own turn
+                ok = False
+            if ok:
+                out.append(s)
+        return out
+
     def _entry_timing_gate(self, symbol: str, *, now=None) -> dict:
         """THE ENTRY TIMING (2026-10-06, bot_program/entry_timing.verdict)
         for `symbol` on the INSTRUMENT's class and venue (the router's own
@@ -5174,13 +5540,15 @@ class AssetBot(ABC):
         caller sends nothing. Both are keyed on the adapter (eToro only):
         another carrier's 429 refuses nothing, as before. Never raises.
 
-        `fail_closed` (PR O0b, for a caller that ADDS risk; no caller passes
-        it yet, the entry keeps the default): every path above that refuses
-        nothing (a look that could not be read, a tick that is not a quote,
-        a quote with no price, a drift that could not be read, an entry
-        quote gate that could not judge the quote) sets "refused" with its
-        words instead. The 429 and the pause answer as they do at the
-        default."""
+        `fail_closed` (PR O0b, for a caller that ADDS risk): every path
+        above that refuses nothing (a look that could not be read, a tick
+        that is not a quote, a quote with no price, a drift that could not
+        be read, an entry quote gate that could not judge the quote) sets
+        "refused" with its words instead. The 429 and the pause answer as
+        they do at the default. execute_entry passes it for a proposal
+        priced off the shared rates cache or a batch (2026-11-01,
+        engine/etoro_rates: an order is never priced off a cache or a batch
+        snapshot alone) and keeps the default for one read on the wire."""
         from bot_program import mark_sanity
         from bot_program.asset_engine import skips
         out = {"skip": "", "why": "", "quote": None}
@@ -6224,9 +6592,17 @@ class AssetBot(ABC):
             # past ENTRY_SLIPPAGE_MAX_R of the stop distance: WIDE_SPREAD,
             # the sized risk would be understated). Unreadable passes,
             # said. The quote read rides the row (entry_quote).
+            # EXCEPT A PROPOSAL PRICED OFF THE SHARED RATES CACHE OR A BATCH
+            # (2026-11-01, review; engine/etoro_rates): an order is never
+            # priced off a cache or a batch snapshot alone — its look fails
+            # closed, so a look that cannot read the quote, or reads one
+            # with no price, sends nothing (_last_look's fail_closed).
+            _snapshot_priced = isinstance(level_meta, dict) and bool(
+                level_meta.get("proposal_quote_age_s") is not None
+                or level_meta.get("proposal_quote_batched"))
             _look = self._last_look(client, symbol, decision.direction,
                                     float(price), float(sl), float(tp),
-                                    cand=cand)
+                                    cand=cand, fail_closed=_snapshot_priced)
             if _look.get("skip"):
                 logger.warning("[%s_bot] %s: the last look refused the "
                                "order — %s", self.asset_class, symbol,
@@ -6236,7 +6612,9 @@ class AssetBot(ABC):
             # the risk) — EXCEPT when the read met eToro's 429 or ran inside
             # its pause (2026-10-07): the POST would meet the same quota, and
             # a 429 on the POST makes the venue sick at once
-            # (venue_health.WRITE_SITES) for an order never placed.
+            # (venue_health.WRITE_SITES) for an order never placed; and
+            # when the proposal was priced off the cache or a batch
+            # (2026-11-01, above): no wire read would stand behind the order.
             if _look.get("refused"):
                 logger.warning("[%s_bot] %s HELD: %s", self.asset_class,
                                symbol, _look["refused"])
@@ -9036,3 +9414,69 @@ def make_bot(config) -> AssetBot:
             f"No AssetBot implementation for asset_class={config.asset_class!r}. "
             f"Implemented: {', '.join(sorted(cls_map))}")
     return cls(config)
+
+
+def prefetch_fleet_marks() -> dict:
+    """THE MARKS' BATCHED SNAPSHOT AT THE TOP OF THE FLEET PASS (2026-11-01,
+    engine/etoro_rates; runner.run_all_asset_bots): ONE batched rates read
+    (chunks of twenty) per eToro key for every open real row the pass will
+    mark from the snapshot (AssetBot._marks_batchable: carried by eToro,
+    its stop resting there), of every config the pass manages (enabled,
+    or stopped by a brake), at P3 in the budget. The rows read it off the
+    shared cache while it is MARK_MAX_AGE_S young; a config reached later
+    batches its own rows again (AssetBot._mark_tick). A symbol the
+    shut-market cadence holds is left out while the cache keeps an answer
+    of it received since its market shut, within the half hour
+    (etoro_rates.shut_max_age): every row of it, however late the pass
+    reaches it, reads that answer. Returns {symbol: answer}. Never raises:
+    a prefetch that fails leaves every row to ask as it comes."""
+    from bot_program.engine import etoro_rates
+    if not etoro_rates.CACHE:
+        return {}
+    out = {}
+    try:
+        from bot_program.asset_engine import disarm
+        from bot_program.engine import etoro_budget
+        from bot_program.engine.broker_router import client_for_symbol
+        from bot_program.engine.capabilities import adapter_key
+        from bot_program.models import AssetBotTrade
+        bots, groups = {}, {}
+        rows = (AssetBotTrade.objects.filter(status="OPEN", paper=False)
+                .select_related("config", "config__user").order_by("pk"))
+        for trade in rows:
+            cfg = trade.config
+            try:
+                if not (cfg.enabled or disarm.keeps_managing(cfg)):
+                    continue
+                bot = bots.get(cfg.pk)
+                if bot is None:
+                    bot = bots[cfg.pk] = make_bot(cfg)
+                if bot._marks_batchable(trade):
+                    groups.setdefault(cfg.user_id, []).append((bot, trade))
+            except Exception as e:  # noqa: BLE001 — that row asks for itself
+                logger.debug("[asset_bot] %s #%s not prefetched: %s",
+                             trade.symbol, trade.pk, e)
+        for members in groups.values():
+            bot, first = members[0]
+            try:
+                client = client_for_symbol(bot.user, first.symbol, bot.cfg)
+                if adapter_key(client) != "etoro":
+                    continue
+                symbols = []
+                for _b, t in members:
+                    age = etoro_rates.shut_max_age(t.symbol, t.asset_class)
+                    if age and etoro_rates.cached(
+                            client, t.symbol, max_age_s=age) is not None:
+                        continue      # the shut market's half hour serves it
+                    symbols.append(t.symbol)
+                symbols = list(dict.fromkeys(symbols))
+                with etoro_budget.at(etoro_budget.P3, "marks, batched"):
+                    out.update(etoro_rates.prefetch(client, symbols))
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[asset_bot] the marks' batched prefetch for "
+                               "%s failed (%s) — its rows ask as they come",
+                               bot.user, type(e).__name__)
+    except Exception as e:  # noqa: BLE001 — never stops the pass
+        logger.warning("[asset_bot] the marks' batched prefetch failed (%s) "
+                       "— every row asks as it comes", type(e).__name__)
+    return out

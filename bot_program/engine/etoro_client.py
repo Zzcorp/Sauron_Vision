@@ -28,6 +28,13 @@ instrument per UTC day once read; an unread row is asked again on every ask.
                                                  demo, and 2026-09-26 22:03 UTC,
                                                  real; order_status is in no tier)
     order_status, account, balance_usdt         (used, not a tier on their own)
+    tickers, rates_raw                          (used, not a tier: the batched
+                                                 rates read, 2026-11-01,
+                                                 engine/etoro_rates; its shape
+                                                 is UNMEASURED: the batch is
+                                                 sent from the first pass, and
+                                                 an answer it does not trust
+                                                 turns it off for a day)
 
 NOT declared, on purpose — see "What it refuses to claim" below.
 
@@ -164,10 +171,13 @@ from typing import Optional
 import requests
 
 from bot_program.engine import etoro_budget
+from bot_program.engine import etoro_rates
 
 log = logging.getLogger(__name__)
 
 BASE = "https://public-api.etoro.com"
+#: The rates endpoint: ONE id for ticker(), a comma list for tickers().
+RATES_URL = f"{BASE}/api/v1/market-data/instruments/rates"
 
 #: Platform timeframe -> eToro candle interval enum.
 INTERVAL_MAP = {
@@ -453,8 +463,10 @@ RATE_PAUSE_MAX_S = 120.0
 RATE_PAUSE_STREAK_S = 450.0
 #: The reads whose 429 grants the pause: trading-lane market data only.
 #: NOT the candles (a background read), the account, the portfolio or the
-#: eligibility.
-RATE_PAUSE_SITES = frozenset({"ticker", "search"})
+#: eligibility. "rates" (2026-11-01) is the batched rates read
+#: (EtoroTrader.tickers): the same trading-lane read as one ticker, for
+#: many ids in one request, so its 429 grants the same pause.
+RATE_PAUSE_SITES = frozenset({"ticker", "search", "rates"})
 
 
 def _mono() -> float:
@@ -936,6 +948,134 @@ def _status_of(polled) -> tuple:
     except (TypeError, ValueError):
         sid = 0
     return sid, words
+
+
+# ── the rates rows, one and many (2026-11-01) ─────────────────────────────
+
+def _rate_tick(p, symbol: str) -> dict:
+    """ONE rate row as the ticker dict — the single read's and the batch's
+    (2026-11-01: one rule for both, so a row read in a batch can never
+    read differently from the same row asked alone). {lastPrice, symbol,
+    bid, ask}, or the platform's "0" sentinel {lastPrice "0", symbol} when
+    the believed keys are all 0/None. Raises ValueError or TypeError on a
+    value that is not a number, as ticker() always has."""
+    bid = float(p.get("bid") or 0)
+    ask = float(p.get("ask") or 0)
+    last = float(p.get("lastExecution") or 0)
+    if not last:
+        last = (bid + ask) / 2 if bid and ask else (bid or ask)
+    if not last:
+        return {"lastPrice": "0", "symbol": symbol}
+    return {"lastPrice": str(last), "symbol": symbol,
+            "bid": str(bid), "ask": str(ask)}
+
+
+#: The keys a rate row is believed to carry its OWN instrument id under.
+#: The /search item and the candle group spell it instrumentId, the candle
+#: bar instrumentID (MEASURED 2026-09-23 on those reads); the rates row's
+#: own spelling is UNMEASURED — `manage.py etoro_rates_shape` measures it.
+#: The batch is sent from the first pass: the first answer whose row
+#: carries none of these turns it off for a day (etoro_rates.mark_unproven),
+#: and every symbol is read alone meanwhile.
+RATE_ROW_ID_KEYS = ("instrumentId", "instrumentID")
+RATE_ROW_PRICE_KEYS = frozenset({"bid", "ask", "lastExecution"})
+
+
+class _Untrusted(Exception):
+    """A batched rates answer this adapter does not trust: `why` in words,
+    `shape` its keys only (_rates_shape)."""
+
+    def __init__(self, why: str, shape: str):
+        super().__init__(why)
+        self.why, self.shape = why, shape
+
+
+def _rates_shape(data) -> str:
+    """The SHAPE of a rates answer, for the one line an untrusted answer
+    writes: its keys, the type and length of `rates`, each distinct row's
+    sorted keys. Never a value, so never a price, an id or an account
+    figure. Never raises."""
+    try:
+        if not isinstance(data, dict):
+            return f"a {type(data).__name__}, not an object"
+        top = sorted(str(k) for k in data)
+        rates = data.get("rates")
+        if not isinstance(rates, list):
+            return f"keys {top}; rates is {type(rates).__name__}"
+        rows = sorted({tuple(sorted(str(k) for k in r)) if isinstance(r, dict)
+                       else (f"<{type(r).__name__}>",) for r in rates})
+        return (f"keys {top}; rates: a list of {len(rates)}; row keys "
+                f"{[list(r) for r in rows]}")
+    except Exception:  # noqa: BLE001
+        return "unreadable"
+
+
+def _row_id(p) -> "int | None":
+    """The row's OWN instrument id, or None: absent, not a whole positive
+    number, or two spellings that disagree."""
+    found = set()
+    for k in RATE_ROW_ID_KEYS:
+        if k not in p:
+            continue
+        v = p[k]
+        if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+            return None
+        found.add(v)
+    return found.pop() if len(found) == 1 else None
+
+
+def _parse_rates_batch(data, asked) -> dict:
+    """{iid: ticker dict} off a batched rates answer for the ids `asked`,
+    each row matched by its OWN id, never by its position. An asked id
+    with no row is simply absent: its symbol raises alone (RowMissing) and
+    is read by itself. Raises _Untrusted for a shape the parser does not
+    know, a row that is not an object or carries no id of its own, an id
+    that was not asked, the same id twice, more rows than ids asked, a row
+    with none of bid/ask/lastExecution, a rate that is not a number — and,
+    since 2026-11-01 (review), NO ROW AT ALL for two ids or more: the
+    empty list ticker() reads as "no rate" for one id is no answer to a
+    comma list, and trusted it would cost every pass a batch and then
+    each row's single read, the batch never turning off. A row of zeros
+    is a row (a shut market's "0" sentinel), never this. The ticks carry
+    no symbol: the caller names them."""
+    asked = set(asked)
+    if not isinstance(data, dict) or "rates" not in data:
+        raise _Untrusted("a shape the parser does not know",
+                         _rates_shape(data))
+    rates = data.get("rates")
+    if rates is None:
+        rates = []
+    if not isinstance(rates, list):
+        raise _Untrusted("a shape the parser does not know",
+                         _rates_shape(data))
+    if not rates and len(asked) > 1:
+        raise _Untrusted(f"no row came back for any of the {len(asked)} "
+                         f"ids asked", _rates_shape(data))
+    if len(rates) > len(asked):
+        raise _Untrusted(f"{len(rates)} rows for {len(asked)} ids asked",
+                         _rates_shape(data))
+    out = {}
+    for p in rates:
+        if not isinstance(p, dict):
+            raise _Untrusted("a row that is not an object",
+                             _rates_shape(data))
+        iid = _row_id(p)
+        if iid is None:
+            raise _Untrusted("a row with no instrumentId of its own",
+                             _rates_shape(data))
+        if iid not in asked:
+            raise _Untrusted("an id that was not asked", _rates_shape(data))
+        if iid in out:
+            raise _Untrusted("the same id twice", _rates_shape(data))
+        if not (RATE_ROW_PRICE_KEYS & set(p)):
+            raise _Untrusted("a row with none of bid/ask/lastExecution",
+                             _rates_shape(data))
+        try:
+            out[iid] = _rate_tick(p, "")
+        except (TypeError, ValueError):
+            raise _Untrusted("a rate that is not a number",
+                             _rates_shape(data)) from None
+    return out
 
 
 class EtoroTrader:
@@ -1513,6 +1653,30 @@ class EtoroTrader:
             return False
         return iid in self._symbols or iid in PINNED_SYMBOL
 
+    def _known_id(self, symbol) -> "int | None":
+        """The id of `symbol` this client can name WITHOUT the wire, or
+        None (2026-11-01, the batched rates): this instance's ids, the
+        pins, this process's /search memo, the shared one. A batch carries
+        only these, so it never costs a /search; a cold id is read by its
+        own request, as before. Never raises."""
+        try:
+            key = str(symbol or "").upper()
+            if key in self._ids:
+                return self._ids[key]
+            if key in VENUE_ID_PINS:
+                return VENUE_ID_PINS[key]
+            memo_key = (self._world(), key)
+            if SEARCH_MEMO:
+                hit = _SEARCH_IDS.get(memo_key)
+                if hit:
+                    return hit[1]
+            shared = _search_shared_get(memo_key, key,
+                                        VENUE_SPELLING.get(key, key),
+                                        then="read by its own request")
+            return shared[0] if shared is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
     # ── market data ────────────────────────────────────────────────────────
 
     def ping(self) -> bool:
@@ -1553,11 +1717,16 @@ class EtoroTrader:
         public reference; this GET was not among the reads measured on
         2026-09-22. Record the measured keys here the day it meets a real
         key, as _V1_INFO_REAL_SEG records its status codes.
+
+        ALWAYS THE WIRE (2026-11-01): ticker() never reads the shared rates
+        cache, so the last look before an order, the order's own reads, the
+        kill switch and the CLOSE button price on a fresh answer. It WRITES
+        the cache (engine/etoro_rates: every answer, the "0" one too, for
+        the readers that may take one up to their own age). Its row is read
+        by _rate_tick, the batch's rule.
         """
         iid = self.instrument_id(symbol)
-        r = self._read("GET", f"{BASE}/api/v1/market-data/instruments/rates",
-                       params={"instrumentIds": str(iid)},
-                       headers=self._headers(), where="ticker")
+        r = self._rates_get([iid], where="ticker")
         r.raise_for_status()
         data = r.json()
         if not isinstance(data, dict) or "rates" not in data:
@@ -1601,12 +1770,9 @@ class EtoroTrader:
                 f"bid/ask/lastExecution — got {row}. Measure the row's keys "
                 f"before trusting a 0 here."
             )
-        bid = float(p.get("bid") or 0)
-        ask = float(p.get("ask") or 0)
-        last = float(p.get("lastExecution") or 0)
-        if not last:
-            last = (bid + ask) / 2 if bid and ask else (bid or ask)
-        if not last:
+        tick = _rate_tick(p, symbol)
+        etoro_rates.put(self._world(), iid, tick)
+        if tick["lastPrice"] == "0":
             # THE VENUE ANSWERED: nothing — an empty list, or a row whose
             # believed keys are all 0/None. lastPrice "0" is the platform's
             # no-price sentinel: ibkr_client, oanda_client, paper_trader and
@@ -1626,9 +1792,138 @@ class EtoroTrader:
                      "which every reader skips on", symbol, iid,
                      "empty rates list" if not rates
                      else "bid/ask/lastExecution all empty")
-            return {"lastPrice": "0", "symbol": symbol}
-        return {"lastPrice": str(last), "symbol": symbol,
-                "bid": str(bid), "ask": str(ask)}
+        return tick
+
+    def _rates_get(self, iids, *, where: str):
+        """The rates GET for `iids` (one, or a comma list), through _read at
+        the caller's priority: ticker()'s, tickers()' and rates_raw's one
+        request. (The shut-market cadence keeps no memo of a read since
+        2026-11-01, review: the answer, in the shared cache, is its
+        memory.)"""
+        return self._read("GET", RATES_URL,
+                          params={"instrumentIds": ",".join(
+                              str(int(i)) for i in iids)},
+                          headers=self._headers(), where=where)
+
+    def tickers(self, symbols) -> dict:
+        """THE BATCHED RATES READ (2026-11-01, engine/etoro_rates): {symbol:
+        answer} for every symbol asked, in ONE GET per BATCH_MAX_IDS ids,
+        instrumentIds as a comma list, at the caller's priority in the
+        budget (one token a request, never one an id).
+
+        Every row is matched to its symbol by the row's OWN instrumentId,
+        never by its position, and each symbol keeps ticker()'s three
+        states: the ticker dict ticker() would answer (a price, or the "0"
+        sentinel for a zero row), or the exception for that symbol ALONE —
+        RowMissing when a trusted answer carried no row for it (its caller
+        takes the single read), the id's own error, BatchUnproven while the
+        batch is unproven (nothing sent: the single read), BatchFailed when
+        its GET failed at the venue (a 429, a 5xx after its retry, a
+        transport failure: one request, so ONE note on the venue's health,
+        made by _read), or the budget's Refused (nothing sent, no failure).
+
+        An answer it does not trust — a row with no instrumentId of its
+        own, more rows than ids asked, an id that was not asked, no row at
+        all for two ids or more, a 4xx, a body or a shape the parser does
+        not know (_parse_rates_batch) — is logged once with its keys only
+        and marks the batch unproven for a day (etoro_rates.mark_unproven):
+        this chunk and every later one answer BatchUnproven. Every trusted
+        row writes the shared cache. Never raises."""
+        out, by_id, order, seen = {}, {}, [], set()
+        for s in symbols or []:
+            key = str(s or "").upper()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            try:
+                iid = self.instrument_id(key)
+            except Exception as e:  # noqa: BLE001 — that symbol's own answer
+                out[key] = e
+                continue
+            if iid in by_id:
+                by_id[iid].append(key)
+                continue
+            by_id[iid] = [key]
+            order.append(iid)
+        world = self._world()
+
+        def _all(chunk, answer):
+            for i in chunk:
+                for k in by_id[i]:
+                    out[k] = answer
+        n = etoro_rates.BATCH_MAX_IDS
+        for start in range(0, len(order), n):
+            chunk = order[start:start + n]
+            held = etoro_rates.unproven()
+            if held:
+                _all(chunk, etoro_rates.BatchUnproven(
+                    f"eToro's batched rates are unproven "
+                    f"({held.get('why') or 'an untrusted answer'}) — read "
+                    f"alone"))
+                continue
+            try:
+                r = self._rates_get(chunk, where="rates")
+            except Exception as e:  # noqa: BLE001
+                if getattr(e, "budget_refused", False):
+                    _all(chunk, e)
+                else:
+                    _all(chunk, etoro_rates.BatchFailed(
+                        f"{type(e).__name__}: {str(e)[:80]}", len(chunk)))
+                continue
+            code = int(getattr(r, "status_code", 0) or 0)
+            if code == 429 or code >= 500:
+                _all(chunk, etoro_rates.BatchFailed(f"HTTP {code}",
+                                                    len(chunk)))
+                continue
+            try:
+                if not 200 <= code < 300:
+                    raise _Untrusted(f"HTTP {code} to a batched read",
+                                     f"HTTP {code}")
+                try:
+                    data = r.json()
+                except ValueError:
+                    raise _Untrusted("a body that is not JSON",
+                                     "not JSON") from None
+                rows = _parse_rates_batch(data, chunk)
+            except _Untrusted as u:
+                etoro_rates.mark_unproven(u.why, u.shape)
+                _all(chunk, etoro_rates.BatchUnproven(
+                    f"eToro's batched rates answered {u.why} — the batch "
+                    f"is unproven; read alone"))
+                continue
+            for i in chunk:
+                tick = rows.get(i)
+                for k in by_id[i]:
+                    if tick is None:
+                        out[k] = etoro_rates.RowMissing(
+                            f"eToro's batched rates carried no row for {k} "
+                            f"(id {i}) — read alone")
+                    else:
+                        out[k] = dict(tick, symbol=k)
+            etoro_rates.put_many(world, rows)
+        return out
+
+    def rates_raw(self, instrument_ids) -> tuple:
+        """ONE batched rates GET for `instrument_ids` as given, answered
+        RAW: (HTTP status, the JSON body or None). For the operator's
+        measurement of the batch's shape (manage.py etoro_rates_shape):
+        nothing here is parsed, cached or marked unproven, and — a
+        BACKGROUND read, as the candles are (2026-11-01, review) — a 429,
+        a 5xx or a transport failure is noted on no venue's health and
+        grants no 429 pause: a measurement never holds an entry. A 5xx or
+        a transport failure is asked once more, as every read is
+        (READ_RETRIES). At the caller's priority in the budget; raises
+        what _read raises (a refusal, a transport failure)."""
+        was, self._background = getattr(self, "_background", False), True
+        try:
+            r = self._rates_get(instrument_ids, where="rates")
+        finally:
+            self._background = was
+        try:
+            body = r.json()
+        except ValueError:
+            body = None
+        return int(getattr(r, "status_code", 0) or 0), body
 
     @etoro_budget.scoped(etoro_budget.P5, "candles")
     def klines(self, symbol: str, interval: str = "15m",

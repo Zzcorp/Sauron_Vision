@@ -93,8 +93,11 @@ MARKET, ACCOUNT, EXECUTION, LOOKUPS = "market", "account", "execution", \
 FAMILIES = (MARKET, ACCOUNT, EXECUTION, LOOKUPS)
 #: The family of each request site the adapter names (EtoroTrader._read's
 #: `where`, and the writes and lookups it sends itself). A site this map
-#: does not know is market data.
-FAMILY_OF = {"ticker": MARKET, "search": MARKET, "candles": MARKET,
+#: does not know is market data. "rates" is the batched rates read
+#: (2026-11-01, EtoroTrader.tickers): one token a request, whatever the
+#: number of ids it carries.
+FAMILY_OF = {"ticker": MARKET, "rates": MARKET, "search": MARKET,
+             "candles": MARKET,
              "account": ACCOUNT, "portfolio": ACCOUNT, "pnl": ACCOUNT,
              "eligibility": ACCOUNT, "probe": ACCOUNT,
              "order": EXECUTION, "close": EXECUTION, "patch": EXECUTION,

@@ -624,6 +624,9 @@ def _close_as_orphan(trade, *, venue_said: str = "",
     else:
         try:
             client = client_for_symbol(trade.config.user, trade.symbol, trade.config)
+            # ALWAYS THE WIRE (2026-11-01): a P0 read, so never the shared
+            # rates cache (engine/etoro_rates; engine/etoro_budget's rule
+            # for P0: no cache round trip a stalled cache could hold).
             tk = client.ticker(trade.symbol) or {}
             last = float(tk.get("lastPrice", 0) or 0)
             if last > 0:
@@ -761,6 +764,11 @@ def _close_as_orphan(trade, *, venue_said: str = "",
     meta.pop("exit_mark_age_s", None)
     if priced and not measured and stale_mark_age is not None:
         meta["exit_mark_age_s"] = int(round(stale_mark_age))
+    # the age of a cached mark an earlier attempt booked (2026-11-01,
+    # pending_closes.MARK_CACHED_AGE_KEY) never rides this booking, which
+    # reads the wire
+    from .pending_closes import MARK_CACHED_AGE_KEY
+    meta.pop(MARK_CACHED_AGE_KEY, None)
     # INFERRED only when it really was. A fill read from the broker is a
     # measurement, and flagging it as an estimate would understate the one
     # part of the track record that is not one.

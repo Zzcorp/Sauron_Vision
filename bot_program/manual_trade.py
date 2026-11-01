@@ -386,7 +386,7 @@ def _mark_for(user, cfg, symbol):
     return _mark_for_detail(user, cfg, symbol)[:3]
 
 
-def _mark_for_detail(user, cfg, symbol):
+def _mark_for_detail(user, cfg, symbol, *, max_age_s=0):
     """(price, client, delayed, reason, tick) — `_mark_for` with the
     venue's own words when there is no price, and the raw tick read (the
     bid/ask the quote advisory judges, 2026-10-05; {} when none).
@@ -397,12 +397,22 @@ def _mark_for_detail(user, cfg, symbol):
     by the client that will fill it, and eToro's adapter had raised
     "eToro knows no instrument spelled 'ADAUSD'". The preview blamed the
     wrong thing. `reason` carries the exception's text (a raise), or
-    "answered no rate" (a 0 the venue returned), or "" with a price."""
+    "answered no rate" (a 0 the venue returned), or "" with a price.
+
+    `max_age_s` (2026-11-01, engine/etoro_rates): the dialog's own preview
+    passes PREVIEW_MAX_AGE_S and may then be shown eToro's answer from the
+    shared rates cache (the tick says "cached" and its "age_s"); every
+    other caller — the send's own previews under the lock, the funding
+    closes' marks — passes nothing and reads the wire."""
     from bot_program.engine.broker_router import client_for_symbol
 
     client = client_for_symbol(user, symbol, cfg)
     try:
-        tk = client.ticker(symbol) or {}
+        if max_age_s:
+            from bot_program.engine import etoro_rates
+            tk = etoro_rates.quote(client, symbol, max_age_s=max_age_s) or {}
+        else:
+            tk = client.ticker(symbol) or {}
         price = float(tk.get("lastPrice", 0) or 0)
         delayed = bool(tk.get("delayed"))
     except Exception as e:  # noqa: BLE001
@@ -1471,7 +1481,7 @@ def _cash_gate_advisory(bot, client, symbol, *, qty, price, leverage, vpu,
 
 
 def _preview(user, inst, side, signal=None, *, gate_now=None,
-             leverage=None, ask_reread=True) -> dict:
+             leverage=None, ask_reread=True, quote_max_age_s=0) -> dict:
     """Everything the confirm popup needs, or {"error": ...}.
 
     `leverage` is the live ticket's multiplier as the operator picked it
@@ -1480,6 +1490,12 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
     `ask_reread` False is _execute's own previews (2026-10-31): they ask
     no eToro re-read, so the read that covers the order is the one its
     booking asks, SETTLE_S after the fill (bot_program.etoro_cells).
+
+    `quote_max_age_s` (2026-11-01, engine/etoro_rates): the dialog's
+    preview (preview_take_trade, preview_asset_trade) may show eToro's
+    answer from the shared rates cache up to PREVIEW_MAX_AGE_S old, and
+    then says how old it is (mark_cached_age_s). _execute's own previews
+    pass nothing: the send reads the wire.
 
     The funding proposal ("close these to free enough") considers ONLY
     open manual trades in this class — closing a bot's position from a
@@ -1554,7 +1570,7 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
                              f"Nothing was booked", "market_shut": True}
 
     price, _client, mark_delayed, no_mark, _tick = _mark_for_detail(
-        user, cfg, inst.symbol)
+        user, cfg, inst.symbol, max_age_s=quote_max_age_s)
     if price is None:
         # Said by whoever was asked (2026-10-04): the paper venue reads the
         # platform's quotes; a live venue answers in its own words, and
@@ -2026,6 +2042,14 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         # the whole hazard, and the operator must meet it in the dialog
         # rather than in the trade's metadata afterwards.
         "mark_delayed": bool(mark_delayed),
+        # THE AGE OF A CACHED PRICE (2026-11-01, engine/etoro_rates): the
+        # seconds since eToro answered the price shown, when the dialog's
+        # preview took it from the shared rates cache (at most
+        # PREVIEW_MAX_AGE_S); None when it was read for this preview. The
+        # send reads its own.
+        "mark_cached_age_s": (_tick.get("age_s")
+                              if isinstance(_tick, dict)
+                              and _tick.get("cached") else None),
         # The dialog's cue to collect the trading PIN — the same
         # live-only asymmetry the close path wears (requires_pin there).
         "requires_pin": live,
@@ -2178,8 +2202,9 @@ def preview_take_trade(user, signal, leverage=None) -> dict:
                          f"direction — only bullish and bearish signals "
                          f"are executable"}
     side = "BUY" if signal.direction == "bullish" else "SELL"
+    from bot_program.engine.etoro_rates import PREVIEW_MAX_AGE_S
     return _preview(user, signal.instrument, side, signal=signal,
-                    leverage=leverage)
+                    leverage=leverage, quote_max_age_s=PREVIEW_MAX_AGE_S)
 
 
 def preview_asset_trade(user, inst, side, leverage=None) -> dict:
@@ -2187,7 +2212,9 @@ def preview_asset_trade(user, inst, side, leverage=None) -> dict:
     levels come from the engine's ATR machinery."""
     if side not in ("BUY", "SELL"):
         return {"error": f"Unknown side {side!r}"}
-    return _preview(user, inst, side, leverage=leverage)
+    from bot_program.engine.etoro_rates import PREVIEW_MAX_AGE_S
+    return _preview(user, inst, side, leverage=leverage,
+                    quote_max_age_s=PREVIEW_MAX_AGE_S)
 
 
 def _execute(user, inst, side, close_ids=None, signal=None,

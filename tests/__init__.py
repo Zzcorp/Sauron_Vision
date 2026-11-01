@@ -13,6 +13,7 @@ from backtester.proving import proof as _proof
 from bot_program import entry_timing as _entry_timing
 from bot_program.engine import etoro_budget as _etoro_budget
 from bot_program.engine import etoro_client as _etoro_client
+from bot_program.engine import etoro_rates as _etoro_rates
 from bot_program.engine import paper_trader as _paper_trader
 
 _paper_trader.MARKET_HOURS_GATE = False
@@ -42,6 +43,18 @@ _etoro_client.SEARCH_NO_MEMO = False
 # goes as it did before the budget. tests/test_etoro_budget.py turns it
 # back on.
 _etoro_budget.BUDGET = False
+# THE SHARED RATES CACHE AND THE BATCHED MARKS (2026-11-01,
+# etoro_rates.CACHE): every eToro rates answer is kept 30 s in the cache,
+# keyed (world, instrument id), and the marks and the proposals read one
+# batched snapshot. The suite's fake wires hand every test the same few
+# ids and count each read, and LocMem is kept across tests, so with it on
+# a mark would be read off another test's answer. Off, every reader asks
+# ticker() as it did before the batch. And THE SHUT-MARKET CADENCE
+# (etoro_rates.SHUT_CADENCE) reads the wall clock: a live row managed on a
+# Saturday would not be asked. tests/test_etoro_rates_batch.py turns both
+# back on.
+_etoro_rates.CACHE = False
+_etoro_rates.SHUT_CADENCE = False
 # SIZE BY PROOF (2026-10-07, backtester/proving/proof.py): the proving
 # ground's verdict would cut or refuse every live entry this suite sizes —
 # hundreds of them, on rules no proving run here ever judged, each sized

@@ -396,6 +396,26 @@ COMMANDS = [
         "runnable_reason": "terminal only: the Run lane's set is pinned",
     },
     {
+        "name": "etoro_rates_shape",
+        "title": "eToro batched rates shape",
+        "purpose": "The operator's measurement of the batched rates read: ONE GET of eToro's rates with two instrument ids on a chosen world (demo by default; a 5xx or a transport failure is asked once more, as every read is), through the request budget at P5, printing the HTTP status, the row keys, the order the rows came back in, which fields each row carries and of what kind, whether the adapter's parser trusts the answer (and for a 429 or a 5xx, what the batch does with one), and whether the batch is unproven today. Read-only: nothing cached or marked, no order, and a background read: a failed answer is noted on no world's health and starts no 429 pause; no price, no account figure, no key.",
+        "usage": [
+            "python manage.py etoro_rates_shape --user <you>",
+            "python manage.py etoro_rates_shape --user <you> --world live",
+            "python manage.py etoro_rates_shape --user <you> --ids 18,100005",
+        ],
+        "mirrors": "",
+        "read_only": True,
+        # No run_args: --user needs a value, and the Run lane cannot ask
+        # for one. Not web-runnable either (below).
+        "run_args": [],
+        "category": "read",
+        # Read-only, and still not the web's to run: it presents the
+        # operator's eToro keys to an external service (etoro_smoke's rule).
+        "runnable": False,
+        "runnable_reason": "presents the operator's eToro keys to an external service",
+    },
+    {
         "name": "legacy_positions",
         "title": "Legacy positions",
         "purpose": "Every open legacy portfolio position (the /setup/ eToro sync button, the /setup/ 'add position' form, the chat trader) by symbol, with its book, writer, age and the admin page that closes it by hand (no bot or reconcile closes one) — each one counts as a real-money holder in the duplicate rule.",
