@@ -1,12 +1,12 @@
 # Sauron Vision — handoff for the next Claude session
 
-Read this first, whichever Claude account runs the session. It holds the state of every open line of work, the operator's standing decisions, and the house rules. It is kept on branch `claude/handoff` (never merged), and is updated at each milestone. Last update: 2026-11-01 ~20:10 UTC, by the session working since 2026-10-31.
+Read this first, whichever Claude account runs the session. It holds the state of every open line of work, the operator's standing decisions, and the house rules. It is kept on branch `claude/handoff` (never merged), and is updated at each milestone. Last update: 2026-11-01 ~21:15 UTC, by the session working since 2026-10-31.
 
 Nothing private lives here. The repository is public. The operator's account figures, positions, personal or family matters, and any partner or investor document never enter git. Those live in the operator's own claude.ai documents and in files he keeps.
 
 ## 1. How to resume
 
-1. **Clone `Zzcorp/Sauron_Vision`.** Then `git fetch origin` and read `git log --oneline -1 origin/main`. At this update, main is `49b6b57`: PR #82 is merged.
+1. **Clone `Zzcorp/Sauron_Vision`.** Then `git fetch origin` and read `git log --oneline -1 origin/main`. At this update, main is `ec54dd5`: PR #83 is merged.
 2. **For each branch in §3, check out its worktree:** `git worktree add .claude/worktrees/<name> origin/claude/<name>`. Check where it stands against §3 with `git log --oneline origin/main..HEAD`.
 3. **Set up the tests.**
    - Run `DB_ENGINE=sqlite python manage.py test <modules> --parallel 4`. The full suite takes 20 to 35 minutes on 4 cores.
@@ -51,7 +51,6 @@ Nothing private lives here. The repository is public. The operator's account fig
 | Branch | Base | Commits | State | Next |
 |---|---|---|---|---|
 | `claude/usedfix` | 6562ddb (in main) | U1 8e1d248 | U2 building | U2: a queued close spends no attempt while nothing is sent; `client_for_row` for the drain, the kill switch, the CLOSE button, the reconcile and the manage tick; ERROR rows eToro still lists stay counted. Then U2b and U3 (spec `plans/usedfix_spec.md`). Rebase onto main (conflicts with #82 expected), full suite, PR. |
-| `claude/chartpledge` | 6562ddb | U4 7d2456f, U5 84d1e49 | U5 review fix, then full suite | U4: at a 100% pledge ceiling, eToro's free cash decides alone. U5: chart candles of 10m, 30m, 2h and 1w, one feed each. Rebase onto main, PR, sheet. |
 | `claude/barsguard` | 9d74a19 | B1 5a33424 | B2 building | B1: `backfill_bars` never writes the public feed over or beside a venue's bars. B2: `prune_offgrid_4h` clears overlapping off-grid public pairs (CET-zone indices). Suite, rebase, PR. Then the sheet that finally gives the po3 1h backfill (`backfill_bars --proving --intervals 1h --bars 9000`, `--dry-run` first). |
 | `claude/etbudget` | ba71a9f (old C2) | E1 e8bc2f2, E2 4ffde5e | E2 fix, then E3, then the full suite | The eToro request budget: one budget per key with priorities, a shared 429 pause, a batched rates read, pooled connections. When done: `git rebase --onto origin/main ba71a9f`, recount, suite, PR. |
 | Orcs O2 "shadow minds" | — | — | Spec being rebuilt: maps done in `plans/orcs2/`, design next | O2a wakes and the mind, O2b routing, O2c honor, temperaments, Captains, the Emperor and the drums, O2d seats, ranks, the council of war, Q&A and the post-mortem. Then the French plan for the operator with the daily cost and a proposed `ORC_DAILY_BUDGET_USD`, and the builds. |
@@ -87,5 +86,6 @@ Nothing private lives here. The repository is public. The operator's account fig
 | #80 | 62a2a18 | bearish |
 | #81 | 9d74a19 | chart feeds, eToro pace and re-reads, eToro's own used figure |
 | #82 | 49b6b57 | shorts everywhere, demo short proofs (`short_proofs_demo` arrives ON, demo only), no eToro request follows a redirect |
+| #83 | ec54dd5 | at a 100% pledge ceiling eToro's free cash decides alone; chart candles of 10m, 30m, 2h and 1w |
 
-The sheets for #81 and #82 were sent.
+The sheets for #81, #82 and #83 were sent. Small follow-ups from the #83 sheet review: the alarm group's G6-at-100% line should say it stops nothing; the ticket says 'never read' / 'not stored' when the last read carried no available cash; the chart's remembered frame is one click behind (pre-existing).
