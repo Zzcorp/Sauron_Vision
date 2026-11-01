@@ -209,6 +209,56 @@ def proven_cases_for(rule_names, *, cache: dict | None = None) -> dict:
     return out
 
 
+def newest_verdicts_for(rule_names) -> dict:
+    """{(rule, asset_class, side): {verdict, expectancy, trades_n,
+    created_at}} — the newest live-rules row of every key of `rule_names`,
+    each rule at its own timeframe, in one query per timeframe (the side
+    scorecard, bot_program/evidence.side_rows). {} on a failed read, with
+    a warning."""
+    names = sorted({str(n or "") for n in rule_names or ()} - {""})
+    if not names:
+        return {}
+    by_tf: dict = {}
+    for n in names:
+        by_tf.setdefault(timeframe_for(n), []).append(n)
+    out = {}
+    try:
+        for tf, group in sorted(by_tf.items()):
+            for rule, cls, side, verdict, exp, n, at in (
+                    _rules_rows(tf, live_rule__in=group)
+                    .order_by("live_rule", "asset_class", "direction",
+                              "-created_at")
+                    .values_list("live_rule", "asset_class", "direction",
+                                 "verdict", "expectancy", "trades_n",
+                                 "created_at")):
+                out.setdefault((rule, cls, side), {
+                    "verdict": str(verdict or ""), "expectancy": exp,
+                    "trades_n": int(n or 0), "created_at": at})
+    except Exception as e:  # noqa: BLE001 — a scorecard never breaks a page
+        logger.warning("[proof] the side scorecard's verdicts unread (%s)", e)
+        return {}
+    return out
+
+
+def unjudged_reason(rule_name: str, side: str) -> str:
+    """Why no verdict exists for this rule and side, without a query:
+    proof_for's words for a rule no family replays, or replays on the
+    other side only; else "no saved verdict"."""
+    try:
+        from backtester.proving import families
+        replayed = {d for fam in families.FAMILIES.values()
+                    for d, live in fam.live_rules.items()
+                    if live == rule_name}
+    except Exception:  # noqa: BLE001
+        replayed = set()
+    if not replayed:
+        return f"the proving ground replays no family for {rule_name}"
+    if side not in replayed:
+        return (f"the proving ground replays {rule_name} "
+                f"{'/'.join(sorted(replayed))} only")
+    return "no saved live-rules verdict for this class"
+
+
 def _r(x) -> str:
     return "unmeasured" if x is None else f"{float(x):+.2f}R"
 
@@ -330,10 +380,14 @@ def proof_for(rule_name: str, asset_class: str, direction: str, *,
             f"{_r(out['lower_bound'])} over {out['trades_n']} trades "
             f"(proving run of {date}) — full size")
     else:
+        # the record counts what the floor counts: signals, or for a rule
+        # whose one event fires many (promotion_pipeline.EVENT_KEYED_RULES,
+        # the yield-curve flip) its events — one flip is one observation
         from signals.promotion_pipeline import (
-            LOSER_MIN_N, LOSER_THIN_EDGE_R, loser_numbers, proven_record)
+            LOSER_THIN_EDGE_R, loser_numbers, needs_words, proven_record)
         rec = proven_record(rule, cache=cache)
         n = int(rec.get("n") or 0)
+        count = rec.get("count") or f"{n} graded signals"
         out["record"] = {"n": n, "hit_rate": rec.get("hit_rate"),
                          "expectancy": rec.get("expectancy"),
                          "proven": bool(rec.get("proven"))}
@@ -344,14 +398,14 @@ def proof_for(rule_name: str, asset_class: str, direction: str, *,
         if rec.get("proven"):
             out["tier"] = LIVE_PROVEN
             out["words"] = (
-                f"{head} — but its own record proves it: {n} graded signals "
-                f"all time (both sides, every class), hit {h}, expectancy "
-                f"{e} — full size")
+                f"{head} — but its own record proves it: {count} all time "
+                f"(both sides, every class), hit {h}, expectancy {e} — full "
+                f"size")
         else:
             out["tier"] = UNPROVEN
             out["words"] = (
-                f"{head}: {reason} — its own record does not prove it ({n} "
-                f"graded signals, expectancy {e}; proof needs {LOSER_MIN_N} "
+                f"{head}: {reason} — its own record does not prove it "
+                f"({count}, expectancy {e}; proof needs {needs_words(rule)} "
                 f"at {LOSER_THIN_EDGE_R:+.2f}R) — entered at {REDUCED:g}x")
     out["multiplier"] = MULTIPLIER[out["tier"]]
     if isinstance(cache, dict):

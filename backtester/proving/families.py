@@ -851,8 +851,11 @@ def session_markets(symbol, asset_class) -> bool:
 def risk_on_short_market(symbol, asset_class) -> bool:
     """A SELL of a risk asset (bot_program.posture.classify): stocks,
     non-haven ETFs, indices, crypto, non-haven commodities. Never gold,
-    silver, treasuries, the dollar index, nor forex."""
+    silver (their EUR and GBP crosses included, which classify reads as
+    risk assets), treasuries, the dollar index, nor forex."""
     from bot_program.posture import RISK_ON_SHORT, classify
+    if str(symbol or "").upper().startswith(("XAU", "XAG")):
+        return False
     return classify(symbol, asset_class, "SELL") == RISK_ON_SHORT
 
 

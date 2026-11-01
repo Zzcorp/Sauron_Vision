@@ -149,11 +149,16 @@ def rule_weight(rule_name: str, asset_class: str = "",
             "skipped (pooled paper+live would misweigh either venue)",
             rule_name, asset_class)
 
-    # Signal record as a fallback/complement — a much larger sample.
+    # Signal record as a fallback/complement — a much larger sample. A rule
+    # whose one event fires on many instruments at once (the yield-curve
+    # flip, promotion_pipeline.EVENT_KEYED_RULES) needs MIN_SAMPLES EVENTS:
+    # one flip's correlated shorts are one observation, not 127.
     try:
         if signal_stats is None:
             signal_stats = _signal_stats()
         row = (signal_stats or {}).get(rule_name)
+        if row:
+            row = _event_row(rule_name) or row
         if row and (row.get("n_closed") or 0) >= MIN_SAMPLES:
             expectancy = row.get("expectancy_r")
             if expectancy is not None:
@@ -167,6 +172,19 @@ def rule_weight(rule_name: str, asset_class: str = "",
     if not matched:
         return 1.0
     return max(MIN_WEIGHT, min(MAX_WEIGHT, weight))
+
+
+def _event_row(rule_name: str) -> dict | None:
+    """For a rule counted by event (promotion_pipeline.EVENT_KEYED_RULES),
+    the signal lane's row over the same 180 days as calculate_signal_stats:
+    n_closed its graded EVENTS, expectancy_r their average. None for every
+    other rule."""
+    from signals.promotion_pipeline import EVENT_KEYED_RULES, _stats_since
+    if rule_name not in EVENT_KEYED_RULES:
+        return None
+    s = _stats_since(rule_name, days_window=180)
+    return {"n_closed": int(s.get("n") or 0),
+            "expectancy_r": s.get("expectancy")}
 
 
 def _signal_stats() -> dict:

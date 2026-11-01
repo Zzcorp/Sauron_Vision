@@ -137,6 +137,11 @@ class TheEligibilityTests(TestCase):
             "AAPL", "stock"))
         self.assertFalse(F.FAMILIES["exhaustion_short"].is_eligible(
             "XAUUSD", "commodity"))
+        # gold and silver in EUR or GBP, which posture.classify reads as
+        # risk assets, are havens here too
+        for cross in ("XAUEUR", "XAUGBP", "XAGEUR"):
+            self.assertFalse(F.FAMILIES["exhaustion_short"].is_eligible(
+                cross, "commodity"), cross)
         self.assertFalse(F.FAMILIES["exhaustion_short"].is_eligible(
             "EURUSD", "forex"))
         self.assertTrue(F.FAMILIES["exhaustion_short"].is_eligible(

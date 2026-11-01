@@ -100,6 +100,160 @@ def rule_rows(*, with_provenance: bool = False) -> list:
     return rows
 
 
+# ── THE SCORECARD BY SIDE (2026-10-31) ──────────────────────────────────
+#
+# Long against short, per rule and class: the bearish pack gave the book
+# its first rules that are short by definition, and the ledger above
+# pools both sides of a rule into one row. Display only — no gate reads
+# it; the ladder, Aragorn and the proof keep their own keys.
+
+SIDES = ("long", "short")
+#: Signal.direction -> side (neutral is no side).
+SIGNAL_SIDE = {"bullish": "long", "bearish": "short"}
+#: AssetBotTrade.side -> side, the bot lane.
+TRADE_SIDE = {"BUY": "long", "SELL": "short"}
+
+
+def trade_side(side, asset_class, metadata) -> str:
+    """The side a closed bot trade argued. The options lane always BUYS
+    premium (side "BUY"): a put bought on a SELL decision is a short, read
+    from metadata.underlying_signal_direction, else from the contract's
+    right ("P")."""
+    if str(asset_class or "").lower() == "options":
+        meta = metadata if isinstance(metadata, dict) else {}
+        under = str(meta.get("underlying_signal_direction") or "").upper()
+        if under in TRADE_SIDE:
+            return TRADE_SIDE[under]
+        right = str(meta.get("right") or "").upper()
+        if right in ("P", "PUT"):
+            return "short"
+        if right in ("C", "CALL"):
+            return "long"
+    return TRADE_SIDE.get(str(side or "").upper(), "")
+
+
+def _side_blank() -> dict:
+    return {"sig_n": 0, "sig_hits": 0, "sig_hit": None, "sig_r": 0.0,
+            "sig_avg": None, "paper_n": 0, "paper_r": 0.0, "paper_avg": None,
+            "live_n": 0, "live_r": 0.0, "live_avg": None, "verdict": None,
+            "unjudged": ""}
+
+
+def side_rows(*, rule=None, asset_class=None) -> list:
+    """One row per (rule, asset_class) with any evidence on either side:
+    {rule, asset_class, stage, long: {...}, short: {...}, gap}.
+
+    Per side: graded signals (Signal rows closed with an outcome and a
+    realized_r, by direction and the instrument's class: n, hit rate,
+    average and summed R); closed bot fills with a realized_r (by side,
+    paper or live, and the config's class — Aragorn's key: n and average
+    R); the proving ground's newest live-rules verdict for (rule, class,
+    side), or why there is none. `gap` is the short's average R less the
+    long's, shown only when each side has RECORD_MIN_RESOLVED graded
+    signals or more. `rule` and `asset_class` narrow it."""
+    from backtester.proving import proof
+    from bot_program.models import AssetBotTrade
+    from signals.models import Signal
+    from signals.models_control import RuleControl
+    from signals.rule_birth import born_at_research
+    from signals.rule_scope import RECORD_MIN_RESOLVED
+
+    rows: dict = {}
+
+    def cell(name, cls, side):
+        row = rows.setdefault((name or "?", cls or "?"), {
+            "rule": name or "?", "asset_class": cls or "?",
+            "long": _side_blank(), "short": _side_blank()})
+        return row[side]
+
+    graded = (Signal.objects.filter(is_active=False)
+              .exclude(outcome="").exclude(realized_r__isnull=True)
+              .filter(direction__in=list(SIGNAL_SIDE)))
+    if rule:
+        graded = graded.filter(rule_name=rule)
+    if asset_class:
+        graded = graded.filter(instrument__asset_class=asset_class)
+    for g in (graded.values("rule_name", "direction",
+                            "instrument__asset_class")
+              .annotate(n=Count("id"),
+                        hits=Count("id", filter=Q(outcome="hit_target")),
+                        r_sum=Sum("realized_r"), r_avg=Avg("realized_r"))):
+        c = cell(g["rule_name"], g["instrument__asset_class"],
+                 SIGNAL_SIDE[g["direction"]])
+        n = int(g["n"] or 0)
+        c["sig_n"], c["sig_hits"] = n, int(g["hits"] or 0)
+        c["sig_hit"] = (c["sig_hits"] / n) if n else None
+        c["sig_r"] = float(g["r_sum"] or 0.0)
+        c["sig_avg"] = float(g["r_avg"]) if g["r_avg"] is not None else None
+
+    fills = AssetBotTrade.objects.filter(status="CLOSED",
+                                         realized_r__isnull=False)
+    if rule:
+        fills = fills.filter(rule_name=rule)
+    if asset_class:
+        fills = fills.filter(asset_class=asset_class)
+    # the bot lane in one aggregate; the options lane row by row (its side
+    # is in the metadata)
+    for f in (fills.exclude(asset_class="options")
+              .values("rule_name", "side", "paper", "asset_class")
+              .annotate(n=Count("id"), r_sum=Sum("realized_r"))):
+        side = TRADE_SIDE.get(str(f["side"] or "").upper())
+        if not side:
+            continue
+        c = cell(f["rule_name"], f["asset_class"], side)
+        lane = "paper" if f["paper"] else "live"
+        c[f"{lane}_n"] += int(f["n"] or 0)
+        c[f"{lane}_r"] += float(f["r_sum"] or 0.0)
+    for name, side_word, paper, cls, meta, r in (
+            fills.filter(asset_class="options")
+            .values_list("rule_name", "side", "paper", "asset_class",
+                         "metadata", "realized_r")):
+        side = trade_side(side_word, cls, meta)
+        if not side:
+            continue
+        c = cell(name, cls, side)
+        lane = "paper" if paper else "live"
+        c[f"{lane}_n"] += 1
+        c[f"{lane}_r"] += float(r or 0.0)
+
+    names = {rn for rn, _c in rows}
+    verdicts = proof.newest_verdicts_for(names)
+    for (rn, cls, side), v in verdicts.items():
+        if asset_class and cls != asset_class:
+            continue
+        if rule and rn != rule:
+            continue
+        cell(rn, cls, side)["verdict"] = v
+    controls = {c.rule_name: c for c in RuleControl.objects.filter(
+        rule_name__in=sorted({rn for rn, _c in rows}))}
+
+    out = []
+    for (rn, cls), row in rows.items():
+        ctrl = controls.get(rn)
+        if ctrl is not None:
+            row["stage"] = ctrl.promotion_stage or "—"
+        elif born_at_research(rn):
+            row["stage"] = "born at research"
+        else:
+            row["stage"] = "no row (paper)"
+        for side in SIDES:
+            c = row[side]
+            for lane in ("paper", "live"):
+                n = c[f"{lane}_n"]
+                c[f"{lane}_avg"] = (c[f"{lane}_r"] / n) if n else None
+            if c["verdict"] is None:
+                c["unjudged"] = proof.unjudged_reason(rn, side)
+        lo, sh = row["long"], row["short"]
+        row["gap"] = (sh["sig_avg"] - lo["sig_avg"]
+                      if lo["sig_n"] >= RECORD_MIN_RESOLVED
+                      and sh["sig_n"] >= RECORD_MIN_RESOLVED
+                      and lo["sig_avg"] is not None
+                      and sh["sig_avg"] is not None else None)
+        out.append(row)
+    out.sort(key=lambda r: (r["rule"], r["asset_class"]))
+    return out
+
+
 def shadow_agent_for(cfg) -> str:
     """The calibration's name for a config in shadow mode. The id keeps
     six configs called "manual" apart; the name keeps the ledger readable.

@@ -83,12 +83,45 @@ class MacroSeriesIsGoneTests(TestCase):
                 self.assertNotIn("MacroSeries.objects", source)
 
 
+def _bars(n=60):
+    """Closed 4h bars (ATR 2 on a 100 close) for the rule's levels."""
+    import pandas as pd
+    idx = pd.date_range("2026-01-05", periods=n, freq="4h", tz="UTC")
+    return pd.DataFrame({"open": 100.0, "high": 101.0, "low": 99.0,
+                         "close": 100.0, "volume": 1.0}, index=idx)
+
+
+def _dated_series(series_id, values_by_offset):
+    """Observations at today - offset days."""
+    from market_data.models import MacroIndicator, MacroObservation
+    indicator, _ = MacroIndicator.objects.get_or_create(
+        series_id=series_id,
+        defaults={"name": series_id, "category": "macro", "frequency": "daily"})
+    for offset, value in values_by_offset.items():
+        MacroObservation.objects.update_or_create(
+            indicator=indicator, date=date.today() - timedelta(days=offset),
+            defaults={"value": Decimal(str(value))})
+
+
 class YieldCurveRuleTests(TestCase):
-    """The rule now reads MacroObservation, so it can actually fire."""
+    """The rule now reads MacroObservation, so it can actually fire — on the
+    dates both legs share, while they are fresh, and only on what an
+    un-inversion argues (2026-10-31)."""
 
     def _rule(self):
         from signals.rules.macro_rules import YieldCurveInversionRule
         return YieldCurveInversionRule()
+
+    def _flip(self):
+        """Yesterday 2s10s was -0.30, today it is +0.10."""
+        _series("DGS10", [4.20, 4.00])
+        _series("DGS2", [4.10, 4.30])
+
+    def _eval(self, symbol, asset_class, bars=True):
+        with patch("signals.smc.dataframe.load_ohlcv",
+                   return_value=_bars() if bars else None):
+            return self._rule().evaluate(_instrument(symbol,
+                                                     asset_class=asset_class))
 
     def test_the_rule_can_read_an_observation(self):
         _series("DGS10", [4.20, 4.00])
@@ -97,23 +130,234 @@ class YieldCurveRuleTests(TestCase):
                          [Decimal("4.200000"), Decimal("4.000000")])
 
     def test_an_un_inversion_fires_the_signal(self):
-        """Yesterday 2s10s was -0.30, today it is +0.10. This is the entire
-        point of the rule and it had never once produced a dict."""
-        _series("DGS10", [4.20, 4.00])
-        _series("DGS2", [4.10, 4.30])
-        out = self._rule().evaluate(_instrument("SPY", asset_class="etf"))
+        """This is the entire point of the rule and it had never once
+        produced a dict — and now it is graded: an entry, a stop above it
+        and a target under it, 2R."""
+        self._flip()
+        out = self._eval("SPY", "etf")
         self.assertIsNotNone(out, "the yield-curve rule is still inert")
         self.assertEqual(out["rule"], "yield_curve_inversion_flip")
         self.assertEqual(out["direction"], "SHORT")
         self.assertIn("SPY", out["symbol"])
+        self.assertEqual(out["entry"], 100.0)
+        self.assertAlmostEqual(out["stop"], 103.0)
+        self.assertAlmostEqual(out["target"], 94.0)
+        self.assertIn("flipped from -0.30 to +0.10 (paired on "
+                      f"{date.today():%Y-%m-%d})", out["thesis"])
+
+    def test_it_shorts_what_the_inversion_argues(self):
+        self._flip()
+        for symbol, cls in (("USDJPY", "forex"), ("AUDJPY", "forex"),
+                            ("USDCHF", "forex"), ("AUDUSD", "forex"),
+                            ("QQQ", "etf"), ("SPX500", "index"),
+                            ("AAPL", "stock"), ("BTCUSD", "crypto"),
+                            ("WTIUSD", "commodity"), ("HGUSD", "commodity")):
+            with self.subTest(symbol=symbol):
+                self.assertIsNotNone(self._eval(symbol, cls))
+
+    def test_it_never_shorts_a_haven_nor_what_the_flip_does_not_argue(self):
+        self._flip()
+        for symbol, cls in (("XAUUSD", "commodity"), ("XAUEUR", "commodity"),
+                            ("XAGUSD", "commodity"), ("GLD", "etf"),
+                            ("TLT", "etf"), ("DXY", "index"),
+                            ("USDCAD", "forex"), ("EURUSD", "forex"),
+                            ("GBPUSD", "forex"), ("EURGBP", "forex"),
+                            ("WHEATUSD", "commodity"),
+                            ("COFFEEUSD", "commodity")):
+            with self.subTest(symbol=symbol):
+                self.assertIsNone(self._eval(symbol, cls))
+
+    def test_short_havens_on_the_row_lets_a_haven_through(self):
+        from signals.models import RuleControl
+        self._flip()
+        RuleControl.objects.create(rule_name="yield_curve_inversion_flip",
+                                   promotion_stage="paper",
+                                   parameters={"short_havens": True})
+        self.assertIsNotNone(self._eval("GLD", "etf"))
+        self.assertIsNone(self._eval("EURUSD", "forex"))
 
     def test_a_curve_that_did_not_cross_stays_quiet(self):
         _series("DGS10", [4.50, 4.40])
         _series("DGS2", [4.10, 4.00])
-        self.assertIsNone(self._rule().evaluate(_instrument("QQQ", asset_class="etf")))
+        self.assertIsNone(self._eval("QQQ", "etf"))
 
     def test_no_history_is_silence_not_a_crash(self):
-        self.assertIsNone(self._rule().evaluate(_instrument("IWM", asset_class="etf")))
+        self.assertIsNone(self._eval("IWM", "etf"))
+
+    def test_the_slope_is_read_on_the_dates_both_legs_share(self):
+        """DGS10 today and yesterday, DGS2 yesterday and the day before:
+        the old read mixed the days into a flip (+0.10 against -0.30); on
+        the common dates the curve stayed under zero."""
+        _dated_series("DGS10", {0: 4.20, 1: 4.00, 2: 4.00})
+        _dated_series("DGS2", {1: 4.10, 2: 4.30})
+        ten = [float(v) for v in self._rule()._last_values("DGS10", n=2)]
+        two = [float(v) for v in self._rule()._last_values("DGS2", n=2)]
+        self.assertTrue(ten[1] - two[1] < 0 <= ten[0] - two[0],
+                        "the unpaired read would have flipped")
+        self.assertIsNone(self._eval("SPY", "etf"))
+
+    def test_a_dead_feed_does_not_keep_the_last_flip_true(self):
+        _dated_series("DGS10", {10: 4.20, 11: 4.00})
+        _dated_series("DGS2", {10: 4.10, 11: 4.30})
+        self.assertIsNone(self._eval("SPY", "etf"))
+
+    def test_no_bars_no_levels_no_signal(self):
+        self._flip()
+        self.assertIsNone(self._eval("SPY", "etf", bars=False))
+
+    def test_the_levels_read_the_bars_the_proving_ground_reads(self):
+        """An unadjusted 2:1 split six bars back: the raw ATR carries the
+        100-point gap and would push the stop to the top of the class's
+        band; the bar sanity adjusts the earlier bars, so the stop is the
+        1.5 ATR of the market the judge reads (3 on a 100 close)."""
+        self._flip()
+        bars = _bars()
+        for col in ("open", "high", "low", "close"):
+            bars.iloc[:-6, bars.columns.get_loc(col)] *= 2.0
+        with patch("signals.smc.dataframe.load_ohlcv", return_value=bars):
+            out = self._rule().evaluate(_instrument("SPY", asset_class="etf"))
+        self.assertIsNotNone(out)
+        self.assertAlmostEqual(out["stop"], 103.0)
+        self.assertAlmostEqual(out["target"], 94.0)
+
+    def test_one_flip_one_short_per_symbol(self):
+        from signals.models import Signal
+        from signals.rule_scope import cooldown_hours
+        from signals.tasks import _create_signals_and_notify
+        self._flip()
+        self.assertEqual(cooldown_hours("yield_curve_inversion_flip"), 720.0)
+        first = self._eval("SPY", "etf")
+        with patch("signals.announce.announce_new_signal"):
+            self.assertEqual(_create_signals_and_notify([first]), 1)
+        sig = Signal.objects.get(rule_name="yield_curve_inversion_flip")
+        Signal.objects.filter(pk=sig.pk).update(
+            is_active=False, outcome="hit_target",
+            expired_at=timezone.now() - timedelta(hours=100))
+        with patch("signals.announce.announce_new_signal"):
+            self.assertEqual(_create_signals_and_notify([self._eval(
+                "SPY", "etf")]), 0)
+        self.assertEqual(Signal.objects.filter(
+            rule_name="yield_curve_inversion_flip").count(), 1)
+
+
+FLIP = "yield_curve_inversion_flip"
+
+
+def _graded(rule, n, *, r=2.0, paired_on="2026-10-20", cls="stock",
+            start=0):
+    """`n` closed, graded shorts of `rule` on n instruments, all from the
+    flip paired on `paired_on`."""
+    from signals.models import Signal
+    hit = "hit_target" if r > 0 else "stopped_out"
+    for i in range(start, start + n):
+        Signal.objects.create(
+            instrument=_instrument(f"YC{i:03d}", asset_class=cls),
+            signal_type="macro", direction="bearish", urgency="medium",
+            title="MACRO · 2s10s yield curve un-inverted", description="",
+            rule_name=rule, score=0.6,
+            sub_scores={"paired_on": paired_on} if paired_on else {},
+            price_at_signal=Decimal("100"), suggested_entry=Decimal("100"),
+            suggested_stop=Decimal("103"), suggested_target=Decimal("94"),
+            is_active=False, outcome=hit, realized_r=r,
+            expired_at=timezone.now() - timedelta(days=1))
+
+
+class OneFlipIsOneObservationTests(TestCase):
+    """The fix grades the flip's shorts (entry, stop, target), and one
+    un-inversion shorts every instrument it argues at once: its record
+    counts flips, not signals (promotion_pipeline.EVENT_KEYED_RULES), so one
+    flip neither proves the rule to full size nor bars it nor weighs it."""
+
+    def test_one_flip_of_twenty_five_shorts_is_one_observation(self):
+        from signals.promotion_pipeline import _stats_since
+        _graded(FLIP, 25)
+        s = _stats_since(FLIP)
+        self.assertEqual((s["n"], s["signals"]), (1, 25))
+        self.assertAlmostEqual(s["expectancy"], 2.0)
+        self.assertEqual(s["hit_rate"], 1.0)
+
+    def test_one_flip_does_not_prove_the_rule_to_full_size(self):
+        from backtester.proving import proof
+        _graded(FLIP, 25)
+        p = proof.proof_for(FLIP, "stock", "SELL")
+        self.assertEqual(p["tier"], proof.UNPROVEN)
+        self.assertEqual(p["multiplier"], proof.REDUCED)
+        self.assertIn("1 flip over 25 graded signals", p["words"])
+        self.assertIn("proof needs 20 flips at +0.10R", p["words"])
+        # any other rule's 25 graded signals still prove it, as before
+        _graded("not_an_event_rule", 25, start=100)
+        q = proof.proof_for("not_an_event_rule", "stock", "SELL")
+        self.assertEqual(q["tier"], proof.LIVE_PROVEN)
+        self.assertIn("25 graded signals all time", q["words"])
+
+    def test_twenty_flips_can_prove_it(self):
+        from backtester.proving import proof
+        for k in range(20):
+            _graded(FLIP, 2, r=1.0, paired_on=f"2006-{k % 12 + 1:02d}-01"
+                    if k < 12 else f"2019-{k - 11:02d}-01", start=2 * k)
+        p = proof.proof_for(FLIP, "stock", "SELL")
+        self.assertEqual(p["tier"], proof.LIVE_PROVEN)
+        self.assertIn("20 flips over 40 graded signals", p["words"])
+
+    def test_one_losing_flip_is_no_measured_loser(self):
+        from signals.promotion_pipeline import (is_due_for_demotion,
+                                                measured_loser)
+        from signals.models import RuleControl
+        RuleControl.objects.create(rule_name=FLIP, promotion_stage="live_full")
+        _graded(FLIP, 25, r=-1.0)
+        self.assertEqual(measured_loser(FLIP), "")
+        self.assertIsNone(is_due_for_demotion(FLIP))
+        _graded("not_an_event_rule", 25, r=-1.0, start=100)
+        self.assertIn("25 graded signals all time",
+                      measured_loser("not_an_event_rule"))
+
+    def test_one_flip_climbs_no_rung(self):
+        from signals.models import RuleControl
+        from signals.promotion_pipeline import is_eligible_for_promotion
+        RuleControl.objects.create(rule_name=FLIP, promotion_stage="research")
+        _graded(FLIP, 40)
+        self.assertIsNone(is_eligible_for_promotion(FLIP))
+
+    def test_one_flip_does_not_weigh_its_votes(self):
+        from bot_program.asset_engine.aggregation import rule_weight
+        from bot_program.bot_grading import VENUE_LIVE
+        from signals.performance import calculate_signal_stats
+        _graded(FLIP, 25)
+        stats = calculate_signal_stats(days=180, group_by="rule_name")
+        self.assertEqual(stats[FLIP]["n_closed"], 25)
+        self.assertEqual(rule_weight(FLIP, "stock", signal_stats=stats,
+                                     venue=VENUE_LIVE), 1.0)
+        # ten flips at +2R: the lane weighs it, as any rule's ten signals
+        for k in range(1, 10):
+            _graded(FLIP, 1, paired_on=f"2010-{k:02d}-01", start=100 + k)
+        stats = calculate_signal_stats(days=180, group_by="rule_name")
+        self.assertEqual(rule_weight(FLIP, "stock", signal_stats=stats,
+                                     venue=VENUE_LIVE), 1.5)
+
+    def test_one_flip_states_no_expected_r_on_the_capital_desk(self):
+        from bot_program.capital_desk import DESK_MIN_N, _signal_rs, _stats
+        cutoff = timezone.now() - timedelta(days=180)
+        _graded(FLIP, 25)
+        rs = _signal_rs(rule=FLIP, cutoff=cutoff)
+        self.assertEqual(rs, [2.0])
+        self.assertLess(_stats(rs)["n"] if _stats(rs) else 0, DESK_MIN_N)
+        _graded("not_an_event_rule", 25, start=100)
+        self.assertEqual(len(_signal_rs(rule="not_an_event_rule",
+                                        cutoff=cutoff)), 25)
+
+    def test_the_provenance_counts_flips_on_a_page_s_own_map(self):
+        from signals.models import PromotionEvent, RuleControl
+        from signals.promotion_pipeline import provenance_notes
+        RuleControl.objects.create(rule_name=FLIP, promotion_stage="live_full")
+        PromotionEvent.objects.create(
+            rule_name=FLIP, from_stage="paper", to_stage="live_full",
+            reason="manual_promote", n_at_transition=0)
+        _graded(FLIP, 25)
+        # the page's map counts signals (bot_program.evidence.rule_rows)
+        page = {FLIP: {"n": 25, "expectancy": 2.0, "hit_rate": 1.0}}
+        self.assertEqual(provenance_notes([FLIP], stats=page)[FLIP],
+                         "by hand, unproven")
+        self.assertEqual(provenance_notes([FLIP])[FLIP], "by hand, unproven")
 
 
 class RegimeDetectionTests(TestCase):

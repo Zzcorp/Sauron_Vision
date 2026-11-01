@@ -12,6 +12,10 @@ personality declares — 21 days for scalp, 90 for swing, 365 for position.
 One 90-day window graded all three as if they were the same evidence,
 which is why it is broken out here rather than folded into the config
 table.
+
+A fifth (2026-10-31): BY SIDE. Long against short per rule and class —
+graded signals, paper and live fills, the proving ground's verdict and the
+stage (bot_program.evidence.side_rows). Display only.
 """
 import logging
 
@@ -19,7 +23,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
 
 from bot_program.evidence import (  # noqa: F401 — re-exported for callers
-    config_rows, persona_rows, rule_rows, shadow_agent_for,
+    config_rows, persona_rows, rule_rows, shadow_agent_for, side_rows,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,9 +60,22 @@ def evidence_ledger(request):
         logger.warning("[evidence] persona grade unreadable: %s", e)
         personas_error = (f"The personality grade could not be read ({e}). "
                           f"The three tables below are unaffected.")
+    # THE SCORECARD BY SIDE (2026-10-31): long against short per rule and
+    # class. Fenced like the personalities: an unreadable scorecard says
+    # so and hides nothing else.
+    sides, sides_error = [], ""
+    try:
+        sides = side_rows()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[evidence] side scorecard unreadable: %s", e)
+        sides_error = (f"The scorecard by side could not be read ({e}). "
+                       f"The other tables are unaffected.")
+    from signals.rule_scope import RECORD_MIN_RESOLVED
     return render(request, "dashboard/evidence.html", {
         "page_id": "evidence", "rules": rules, "configs": configs,
         "totals": totals, "personas": personas,
         "personas_error": personas_error,
+        "sides": sides, "sides_error": sides_error,
+        "gap_min": RECORD_MIN_RESOLVED,
         "show_owner": staff,
     })
