@@ -644,11 +644,33 @@ def _venue_still_holds(bot, trade, client) -> bool:
     return held
 
 
+def _wire_mark(bot, trade, price, client):
+    """A CACHED MARK NEVER ACTS ALONE (2026-11-01, review;
+    engine/etoro_rates): `price`, or — when it is this tick's mark read
+    off the shared rates cache — the wire's fresh read of the row's rate
+    (AssetBot._confirm_mark), None when that read cannot price the row.
+    A bot that is no AssetBot (a test's stand-in) answers `price`."""
+    confirm = getattr(type(bot), "_confirm_mark", None)
+    if not callable(confirm):
+        return price
+    return confirm(bot, trade, price, client)
+
+
 def care(bot, trade, price, client, *, now=None) -> str:
     """Run the care on one row inside manage_positions. "" when it left the
     row to the rest of the tick; "closed" or "attempted" when it sent a
     close — the caller then moves on either way (a close in flight must
-    never meet the SL/TP check below it the same tick)."""
+    never meet the SL/TP check below it the same tick).
+
+    A CACHED MARK NEVER ACTS ALONE (2026-11-01, review; engine/etoro_rates):
+    a decision taken on this tick's mark read off the shared rates cache
+    that would close the row, bank a part, change the care's state (its
+    peak, its soft stop...) or have the mirror ask the venue again
+    (_mirror_due) is taken again, from scratch, on one fresh read of the
+    wire (_wire_mark) before anything is saved or sent — what the care
+    sends is the row's own read's, as before the cache, and it goes this
+    tick when that read still decides it; a read that cannot price the row
+    leaves the row as it was this tick."""
     from bot_program import aragorn
     _stash(trade, None)
     if not aragorn.is_on():
@@ -667,12 +689,12 @@ def care(bot, trade, price, client, *, now=None) -> str:
             manual = bool(_is_manual_lane(bot.cfg))
         except Exception:  # noqa: BLE001 — unknown reads as a bot's own
             manual = False
-        crowd = None
+        crowd_read = None
         if not manual and trade.asset_class != "options" \
                 and getattr(bot, "asset_class", "") != "options":
             from bot_program import smart_money
             if smart_money.is_on():
-                def crowd():
+                def crowd_read():
                     try:
                         levels = smart_money.care_levels(trade.symbol,
                                                          trade.side, price)
@@ -690,10 +712,9 @@ def care(bot, trade, price, client, *, now=None) -> str:
                         logger.info("[care] %s #%s: crowd levels unread (%s)",
                                     trade.symbol, trade.id, e)
                         return None
-        if crowd is not None:
-            # read at most once a tick, whoever asks (the care's plan, the
-            # Orc's care ghost on the same inputs): the same object back
-            crowd = _Once(crowd)
+        # read at most once a tick per mark, whoever asks (the care's plan,
+        # the Orc's care ghost on the same inputs): the same object back
+        crowd = _Once(crowd_read) if crowd_read is not None else None
         # The scale-out is asked of a PAPER bot row only (the docstring:
         # eToro closes whole; the manual lane is the operator's).
         scale = bool(trade.paper) and not manual and scale_out_on()
@@ -708,6 +729,28 @@ def care(bot, trade, price, client, *, now=None) -> str:
         decision = plan(trade, price, now=now, posture_level=level, kind=kind,
                         live=not trade.paper, manual=manual, crowd=crowd,
                         scale=scale, event=event)
+        # anything this decision would save or send — a change of the
+        # care's state, a close, a scale-out, or the mirror's ask of the
+        # venue (a retry of an unchanged lock included) — is decided on
+        # the wire's read when this mark was read off the cache
+        try:
+            asks = not trade.paper and _mirror_due(trade, decision, client)
+        except Exception:  # noqa: BLE001 — the mirror says why itself
+            asks = False
+        if decision["changed"] or decision["action"] == "close" \
+                or decision.get("scale_out") or asks:
+            fresh = _wire_mark(bot, trade, price, client)
+            if fresh is None:
+                return ""                 # nothing saved, nothing sent
+            if fresh is not price:
+                # decided on a cached mark: decided again on the wire's
+                price = fresh
+                crowd = (_Once(crowd_read) if crowd_read is not None
+                         else None)
+                decision = plan(trade, price, now=now, posture_level=level,
+                                kind=kind, live=not trade.paper,
+                                manual=manual, crowd=crowd, scale=scale,
+                                event=event)
         # THE CARE'S INPUTS, IN MEMORY ONLY (the Orcs, spec §3.3): the care
         # ghost replays plan() on its own state with exactly these. Never
         # saved, never sent; nothing in the care reads it back.
@@ -825,39 +868,63 @@ def _scale_out(bot, trade, price, decision) -> bool:
     return True
 
 
+def _mirror_due(trade, decision, client, *, now=None) -> bool:
+    """The mirror's own early answers (_mirror_to_venue), read alone: True
+    when it would ask the venue for the row's soft stop — a protected real
+    row, a venue that moves its stop, a soft stop the venue does not hold
+    (nor a tighter one), and no same ask within MIRROR_RETRY_MINUTES. The
+    care reads it before it takes a decision on a mark read off the shared
+    rates cache (2026-11-01, review: a retry of an unchanged lock is a send
+    too). Raises on a record it cannot read, as the mirror always did
+    there (its caller says so)."""
+    care = dict(decision.get("care") or {})
+    soft = _f(care.get("soft_stop"))
+    if trade.paper or soft is None or soft <= 0:
+        return False
+    if not (trade.metadata or {}).get("protected"):
+        return False
+    if not callable(getattr(client, "modify_protective", None)):
+        return False
+    d = 1.0 if str(trade.side).upper() == "BUY" else -1.0
+    venue = _f(care.get("venue_stop"))
+    if venue is not None and d * (venue - soft) >= -1e-12:
+        return False                    # the venue holds it, or tighter
+    now = now or timezone.now()
+    asked_for = _f(care.get("venue_asked_for"))
+    asked_at = care.get("venue_asked_at")
+    if asked_for is not None and abs(asked_for - soft) < 1e-12 and asked_at:
+        from django.utils.dateparse import parse_datetime
+        last = parse_datetime(str(asked_at))
+        if last is not None and (now - last) < timedelta(
+                minutes=MIRROR_RETRY_MINUTES):
+            return False                # the same ask, too soon
+    return True
+
+
 def _mirror_to_venue(bot, trade, price, client, decision) -> bool:
     """Copy a REAL row's soft stop onto the venue's stop (the docstring: THE
     MIRROR). True when the venue took it this tick. Never raises; a mirror
     that fails leaves the platform's soft stop exactly where it was."""
     try:
+        now = timezone.now()
+        if not _mirror_due(trade, decision, client, now=now):
+            return False
         care = dict(decision.get("care") or {})
         soft = _f(care.get("soft_stop"))
-        if trade.paper or soft is None or soft <= 0:
-            return False
         meta = trade.metadata or {}
-        if not meta.get("protected"):
-            return False
-        if not callable(getattr(client, "modify_protective", None)):
-            return False
         d = 1.0 if str(trade.side).upper() == "BUY" else -1.0
-        venue = _f(care.get("venue_stop"))
-        if venue is not None and d * (venue - soft) >= -1e-12:
-            return False                    # the venue holds it, or tighter
-        now = timezone.now()
-        asked_for = _f(care.get("venue_asked_for"))
-        asked_at = care.get("venue_asked_at")
-        if asked_for is not None and abs(asked_for - soft) < 1e-12 and asked_at:
-            from django.utils.dateparse import parse_datetime
-            last = parse_datetime(str(asked_at))
-            if last is not None and (now - last) < timedelta(
-                    minutes=MIRROR_RETRY_MINUTES):
-                return False                # the same ask, too soon
         from decimal import Decimal
 
         from core.price_format import price_decimals
         from bot_program.engine.trailing import is_improvement
         places = price_decimals(soft, trade.asset_class, trade.symbol)
         candidate = Decimal(str(round(soft, places)))
+        # A CACHED MARK NEVER ACTS ALONE (2026-11-01, review): the level is
+        # judged against, and sent at, the wire's read; one that cannot
+        # price the row asks nothing and records nothing
+        price = _wire_mark(bot, trade, price, client)
+        if price is None:
+            return False
         care["venue_asked_at"] = now.isoformat()
         care["venue_asked_for"] = soft
         if not is_improvement(trade, candidate, price):

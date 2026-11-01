@@ -195,8 +195,10 @@ class ThePauseTests(_PauseOn, SimpleTestCase):
     def test_the_constants(self):
         self.assertEqual((ec.RATE_PAUSE_FALLBACK_S, ec.RATE_PAUSE_MAX_S,
                           ec.RATE_PAUSE_STREAK_S), (30.0, 120.0, 450.0))
+        # "rates" since 2026-11-01: the batched rates read (tickers) is the
+        # same trading-lane read as one ticker, so its 429 pauses too
         self.assertEqual(ec.RATE_PAUSE_SITES,
-                         frozenset({"ticker", "search"}))
+                         frozenset({"ticker", "search", "rates"}))
         self.assertEqual((ec.SEARCH_NO_CONFIRM_S, ec.SEARCH_NO_TTL_S),
                          (60.0, 21600.0))
 

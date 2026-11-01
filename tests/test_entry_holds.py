@@ -356,8 +356,13 @@ class TheEngineReadsItTests(SimpleTestCase):
                         src.index("venue_health.pause_s(client)"))
         self.assertLess(src.index("venue_health.pause_s(client)"),
                         src.index("venue_health.kept_no(client, symbol)"))
+        # the proposal's rate is read through the batched snapshot since
+        # 2026-11-01 (_proposal_tick), and a live client's clock gate sits
+        # between the holds and that read (a shut market asks nothing)
         self.assertLess(src.index("venue_health.kept_no(client, symbol)"),
-                        src.index("tk = client.ticker(symbol)"))
+                        src.index("self._entry_timing_gate(symbol)"))
+        self.assertLess(src.index("self._entry_timing_gate(symbol)"),
+                        src.index("tk = self._proposal_tick(client, symbol)"))
         src = inspect.getsource(AssetBot.execute_entry)
         sick = src.index("venue_health.refusal(client, symbol)")
         pause = src.index("venue_health.pause_s(client)")
