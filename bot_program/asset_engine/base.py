@@ -152,6 +152,107 @@ def is_entry_working(trade) -> bool:
     return bool((getattr(trade, "metadata", None) or {}).get("entry_working"))
 
 
+#: What eToro freezes beside a held order's margin: its fees (2026-11-01).
+#: frozenAmount is requestedAmount plus them (MEASURED: 1.00 flat on a
+#: stock, 1.98 on a stock short, 0.13 on GLDM at 2x, 0.17 = 1 % on BTC,
+#: 0.00 on a commodity), so each WORKING row explains its margin and the
+#: larger of these two more of eToro's frozen cash. With no WORKING row
+#: nothing is explained: eToro read 0.0 frozen once its held order was
+#: withdrawn (MEASURED, doc §4 D2b-i).
+FROZEN_FEE_FLAT = 2.0
+FROZEN_FEE_FRACTION = 0.01
+
+
+def _utc_minute(at) -> str:
+    """'2026-11-01 13:42 UTC', for the in-doubt words (2026-11-01)."""
+    from datetime import timezone as dt_timezone
+    return at.astimezone(dt_timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def working_at(trade, at) -> bool:
+    """True when this row was an order the broker held, not yet a
+    position, at the instant `at` (2026-11-01): booked by then, and WORKING
+    now or filled or withdrawn after it (the fill poll stamps
+    entry_filled_at, the withdrawal entry_withdrawn_at). Read against
+    eToro's frozen cash, which is dated by the read that carried it."""
+    from datetime import datetime as _dt
+    if at is None:
+        return False
+    opened = getattr(trade, "opened_at", None)
+    if opened is not None and opened > at:
+        return False
+    meta = getattr(trade, "metadata", None) or {}
+    if meta.get("entry_working"):
+        return True
+    for key in ("entry_filled_at", "entry_withdrawn_at"):
+        since = meta.get(key)
+        if not since:
+            continue
+        try:
+            if _dt.fromisoformat(str(since)) > at:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def frozen_explained(user, world: str, at) -> dict:
+    """What Sauron's own WORKING eToro rows of `world` explain of eToro's
+    frozen cash read at `at` (2026-11-01): {"margin", "n", "tolerance"}.
+
+    eToro HOLDS an order outside market hours in no /portfolio row, with
+    its frozenAmount in both its used margin and its frozen cash (MEASURED,
+    doc §4 D2b-i). The rows are this user's real-money rows carried by
+    eToro in that world that were orders eToro held at the read
+    (working_at); each explains the margin of the units still held,
+    requested less any partial fill, at the row's price over its own
+    leverage (risk_gate.capital_at_work, carrier etoro: the venue's
+    notional / L), plus the larger of FROZEN_FEE_FLAT and
+    FROZEN_FEE_FRACTION of it for the fees eToro freezes with it.
+
+    Read by the in-doubt note's settle (AssetBot._settle_in_doubt: a flat
+    read counts only while the frozen cash is explained) and by the used
+    and free pages' split ("held at eToro, no Sauron row"). Moves no gate:
+    the pledge gate reads eToro's used margin, which carries every held
+    order already. Raises what the reads raise."""
+    from django.db.models import Q
+
+    from bot_program.models import AssetBotTrade
+    from dashboard.position_summary import world_of
+    from portfolio.risk_gate import capital_at_work
+    from portfolio.services import value_per_unit
+    out = {"margin": 0.0, "n": 0, "tolerance": 0.0}
+    if at is None:
+        return out
+    rows = (AssetBotTrade.objects
+            .filter(config__user=user, paper=False, opened_at__lte=at)
+            .filter(Q(status__in=("OPEN", "CLOSE_PENDING"))
+                    | Q(closed_at__gt=at)))
+    for t in rows:
+        meta = t.metadata or {}
+        if str(meta.get("broker") or "").strip().lower() != "etoro":
+            continue
+        if world_of(t) != world or not working_at(t, at):
+            continue
+        try:
+            requested = float(meta.get("qty_requested") or t.qty or 0)
+            filled = float(meta.get("entry_working_partial") or 0)
+            notional = abs(float(t.entry_price or 0)
+                           * max(0.0, requested - filled)
+                           * float(value_per_unit(t) or 1.0))
+        except (TypeError, ValueError):
+            continue
+        margin = capital_at_work(t.asset_class, notional,
+                                 leverage=meta.get("leverage"),
+                                 carrier="etoro")
+        out["margin"] += margin
+        out["n"] += 1
+        out["tolerance"] += max(FROZEN_FEE_FLAT, FROZEN_FEE_FRACTION * margin)
+    out["margin"] = round(out["margin"], 2)
+    out["tolerance"] = round(out["tolerance"], 2)
+    return out
+
+
 def cancel_working_entry(trade, client, *, reason: str,
                          cancel_parent: bool = True) -> bool:
     """Withdraw an unfilled entry and mark the row CANCELED. Nothing traded.
@@ -1774,20 +1875,223 @@ class AssetBot(ABC):
         """Note on the config that `symbol` has an order nobody can account
         for. Read by propose_entry, which refuses the symbol while it is
         fresh — because the idempotency key buckets by the minute, so the
-        next tick would send a SECOND order under a new reference."""
+        next tick would send a SECOND order under a new reference — and,
+        since 2026-11-01, by the TAKE TRADE ticket of the lane
+        (manual_trade._in_doubt_refusal) and by every other lane of the
+        user, which reads it and leaves its settle here
+        (_in_doubt_elsewhere)."""
         try:
-            extras = dict(self.cfg.extras or {})
-            book = dict(extras.get("entry_in_doubt") or {})
-            book[str(symbol).upper()] = {
+            self._write_in_doubt(symbol, {
                 "reference": reference,
                 "at": timezone.now().isoformat(),
-            }
-            extras["entry_in_doubt"] = book
-            self.cfg.extras = extras
-            self.cfg.save(update_fields=["extras"])
+            })
         except Exception as e:  # noqa: BLE001 — a lost note must not raise
             logger.warning("[%s_bot] could not record the in-doubt order for "
                            "%s: %s", self.asset_class, symbol, e)
+
+    def _write_in_doubt(self, symbol: str, note, *,
+                        if_reference=None) -> bool:
+        """Write the in-doubt note for `symbol` (None clears it), merged
+        into the config's extras as they stand under the row's lock
+        (2026-11-01); self.cfg.extras follows. True when the book now says
+        what was asked. `if_reference` names the note the caller judged:
+        a note stored since under another reference (a newer order in
+        doubt) is left as it is (False), and one cleared since is not
+        written back (False; a clear finds it done, True).
+
+        THE TICKET'S LANE IS ONE CONFIG FOR A WHOLE CLASS. Two tickets on
+        two symbols whose orders both failed to come back each wrote the
+        whole note book from an extras read taken before their POST, and
+        the second erased the first's note — the one thing that stops a
+        second order on that symbol. The safety module's merge
+        (_save_extras) for one key of the book. Without the lock (an
+        unsaved config, a row that cannot be read) the note is written
+        from the config in hand, as before. Raises what the save raises."""
+        want = str(symbol).upper()
+
+        def _merged(extras):
+            """(the extras to save, or None for no write; the answer)."""
+            extras = dict(extras or {})
+            book = dict(extras.get("entry_in_doubt") or {})
+            if if_reference is not None:
+                held = book.get(want)
+                if not isinstance(held, dict):
+                    return None, note is None
+                if (str(held.get("reference") or "")
+                        != str(if_reference or "")):
+                    return None, False
+            if note is None:
+                book.pop(want, None)
+            else:
+                book[want] = note
+            extras["entry_in_doubt"] = book
+            return extras, True
+
+        pk = getattr(self.cfg, "pk", None)
+        if pk is not None:
+            try:
+                from django.db import transaction
+                with transaction.atomic():
+                    row = (type(self.cfg)._default_manager
+                           .select_for_update().filter(pk=pk).first())
+                    if row is not None:
+                        merged, answer = _merged(row.extras)
+                        if merged is None:
+                            self.cfg.extras = row.extras
+                            return answer
+                        row.extras = merged
+                        row.save(update_fields=["extras"])
+                        self.cfg.extras = merged
+                        return answer
+            except Exception as e:  # noqa: BLE001 — written below, unlocked
+                logger.warning("[%s_bot] %s: the in-doubt note is written "
+                               "without the row's lock: %s", self.asset_class,
+                               symbol, e)
+        merged, answer = _merged(self.cfg.extras)
+        if merged is not None:
+            self.cfg.extras = merged
+            self.cfg.save(update_fields=["extras"])
+        return answer
+
+    @staticmethod
+    def in_doubt_words(doubt, *, why=None, sender=None) -> str:
+        """What a refusal on an in-doubt note says: the reference and the
+        time (propose_entry's words since 2026-10-05; the TAKE TRADE
+        ticket's since 2026-11-01), then why the note stands.
+
+        `why` is the settle's own answer for this call (_in_doubt_why):
+        the frozen cash eToro holds, a position the broker lists, a read
+        still awaited (2026-11-01). None falls back to the note's stored
+        "held" words, which the settle keeps only while its latest read
+        shows that cash; "" says nothing more. `sender` names another lane
+        whose note this is ("the TAKE TRADE ticket", "the bot 'gold
+        bot'"): "an order <sender> sent under reference ...". Never
+        raises."""
+        doubt = doubt or {}
+        who = f"an order {sender} sent" if sender else "an order"
+        words = (f"{who} under reference "
+                 f"{doubt.get('reference') or '(none)'} may already be live "
+                 f"(since {doubt.get('at')})")
+        if why is None:
+            why = (doubt.get("held") or {}).get("words")
+        return f"{words}; {why}" if why else words
+
+    @classmethod
+    def in_doubt_until(cls, doubt) -> str:
+        """When an in-doubt note lifts by itself at the latest: its time
+        plus IN_DOUBT_QUIET_HOURS, as '2026-11-02 03:40 UTC' (2026-11-01);
+        "" when the note carries no readable time."""
+        from datetime import datetime as _dt
+        try:
+            at = _dt.fromisoformat(str((doubt or {}).get("at")))
+            return _utc_minute(at + timedelta(hours=cls.IN_DOUBT_QUIET_HOURS))
+        except (TypeError, ValueError, AttributeError):
+            return ""
+
+    def _in_doubt_why(self, symbol: str):
+        """Why the last settle of `symbol` on this bot kept its note, in
+        words, or None when no settle ran (2026-11-01)."""
+        return (getattr(self, "_in_doubt_whys", None) or {}).get(
+            str(symbol).upper())
+
+    def _in_doubt_stands(self, symbol: str, why: str) -> bool:
+        """Remember why the note on `symbol` stands, for the refusal that
+        follows the settle (in_doubt_words' `why`); False, the settle's
+        answer."""
+        book = getattr(self, "_in_doubt_whys", None)
+        if book is None:
+            book = self._in_doubt_whys = {}
+        book[str(symbol).upper()] = why
+        return False
+
+    def _in_doubt_elsewhere(self, symbol: str):
+        """The freshest in-doubt note on `symbol` that ANOTHER config of
+        this user holds, or None (2026-11-01): {"note", "config_id",
+        "sender"}.
+
+        ONE NOTE HOLDS BOTH LANES. A note lives on the config that sent the
+        order, and each lane read its own only: after a TAKE TRADE in doubt
+        a bot on the symbol sent the same bet once venue health's quiet
+        ended, and after a bot's order in doubt the ticket sent at once —
+        the second order the note exists to prevent. propose_entry and
+        execute_entry (the bot lane) and manual_trade._in_doubt_refusal
+        (the ticket) now refuse the symbol on this too. It is read here,
+        never settled: the owner's own settle clears it once the broker
+        reads flat for it, and it expires after IN_DOUBT_QUIET_HOURS as its
+        owner's does. Fresh rows, whatever mode the owner is in now: the
+        order went to a broker when the note was written. Never raises (a
+        config that cannot be read holds nothing, as _in_doubt_note)."""
+        from datetime import datetime as _dt
+        want = str(symbol).upper()
+        try:
+            from bot_program.models import AssetBotConfig
+            # Asked of the database by the key: extras carries every skip
+            # of a config, and this runs on every live proposal.
+            rows = list(AssetBotConfig.objects
+                        .filter(user_id=self.user.id,
+                                extras__entry_in_doubt__has_key=want)
+                        .exclude(pk=getattr(self.cfg, "pk", None))
+                        .values_list("pk", "name", "extras"))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[%s_bot] %s: the other lanes' in-doubt notes "
+                           "could not be read: %s", self.asset_class, want, e)
+            return None
+        try:
+            from bot_program.manual_trade import MANUAL_CONFIG_NAME
+        except Exception:  # noqa: BLE001 — the lane's own name, as stored
+            MANUAL_CONFIG_NAME = "manual"
+        best = None
+        for pk, name, extras in rows:
+            book = ((extras or {}).get("entry_in_doubt")
+                    if isinstance(extras, dict) else None)
+            note = book.get(want) if isinstance(book, dict) else None
+            if not isinstance(note, dict):
+                continue
+            try:
+                at = _dt.fromisoformat(str(note.get("at")))
+                age_h = (timezone.now() - at).total_seconds() / 3600.0
+            except (TypeError, ValueError):
+                continue
+            if age_h >= self.IN_DOUBT_QUIET_HOURS:
+                continue
+            if best is None or at > best[0]:
+                sender = ("the TAKE TRADE ticket" if name == MANUAL_CONFIG_NAME
+                          else f"the bot '{name}'")
+                best = (at, {"note": note, "config_id": pk,
+                             "sender": sender})
+        return best[1] if best else None
+
+    def _order_in_doubt(self, symbol: str, reference: str, client) -> None:
+        """An order whose answer did not come back, on either lane
+        (2026-11-01): the bot tick's execute_entry and the TAKE TRADE
+        ticket (manual_trade._execute) both call this when the raise says
+        `in_doubt`. The note on the config (_remember_in_doubt: the symbol
+        is refused while it stands), the staff alert with the reference to
+        search the broker for, and the account's cells read again a few
+        seconds from now (_reread_account_soon), so the next order on any
+        symbol is judged on the margin eToro holds for this one if it took
+        it. Nothing is resent and no row is booked; never raises."""
+        self._remember_in_doubt(symbol, reference)
+        logger.error("[%s_bot] %s: the order request did not come "
+                     "back — it MAY be live at the broker under "
+                     "reference %s. NOT retried.",
+                     self.asset_class, symbol, reference or "(none)")
+        try:
+            from bot_program.notifications import notify_staff
+            notify_staff(
+                title=f"⚠ {symbol}: an order may be live with no row",
+                body=(f"{self.asset_class.upper()} placement for "
+                      f"{symbol} did not come back. Search the "
+                      f"broker for reference {reference or '(none)'}: if "
+                      f"that order exists, this platform has no "
+                      f"row for it and nothing is managing it. "
+                      f"{symbol} is not retried for "
+                      f"{self.IN_DOUBT_QUIET_HOURS}h."),
+                url="/positions/")
+        except Exception as e2:  # noqa: BLE001
+            logger.warning("[%s_bot] in-doubt alert failed: %s",
+                           self.asset_class, e2)
+        self._reread_account_soon(client, why="order in doubt")
 
     def _remember_leverage_refusal(self, symbol: str, leverage: int,
                                    why: str) -> None:
@@ -1895,7 +2199,51 @@ class AssetBot(ABC):
         symbol (or a position it cannot name), that cannot be asked, or
         that declares no lag number keeps the note — and a position the
         venue holds is NEVER adopted here: reconcile and the operator own
-        that (the in-doubt alert says where to look). Never raises."""
+        that (the in-doubt alert says where to look). Never raises.
+
+        AND ON eTORO, A FLAT READ COUNTS ONLY WHILE ITS FROZEN CASH IS
+        EXPLAINED (2026-11-01). An order eToro HOLDS (WaitingForMarket) is
+        in no /portfolio row (MEASURED, doc §4 D2b-i), so two flat reads
+        cleared the note while eToro held the order, the symbol traded
+        again, and at the open the order filled as a position with no row.
+        A flat read now counts only when eToro's frozen cash (the sync's
+        last_frozen_cash) was read after the note, in the account's world,
+        and is no more than Sauron's own WORKING eToro rows explain
+        (frozen_explained). Read before the note or in the other world, it
+        cannot speak for this order: the note waits for the next read.
+        Larger, the note stands and says so (its "held"), and the flat
+        reads counted so far start again. A cell never stored, or one the
+        last read did not carry (None), and any other venue keep the rule
+        above.
+
+        THE FROZEN READ BEHIND A FLAT READ IS PAST THE LAG TOO (review,
+        2026-11-01). It counted once read after the note, and the likeliest
+        such read is the one the in-doubt call itself queues
+        (_order_in_doubt; etoro_cells.SETTLE_S, 3 s after it). eToro, slow
+        or failing enough to lose the answer, may register and hold the
+        order after that read: one read backed both flat reads, the note
+        cleared while eToro held the order, and the next ticket sent a
+        second one. A read that shows the cash explained now backs a flat
+        read only past the venue's lag since the note and after the
+        previous flat read, the position read's own rule (_in_doubt_frozen
+        `floor`): the note settles at the reads' pace, a sync's beat at
+        worst. A read that shows cash no row explains keeps the note, early
+        or not.
+
+        SAURON'S OWN POSITION IS NOT THE ORDER. eToro opens each order as
+        its own position, so one whose id an open or closing Sauron row of
+        the user records cannot be the order whose answer did not come back
+        (_own_position_ids): it is passed over, and a ticket that adds to a
+        symbol its lane holds is no longer refused for the note's 12 h. On
+        eToro only (a venue that nets can carry this order's fill inside a
+        row's own position), and never for a position no row owns, named
+        or not.
+
+        THE WORDS FOLLOW THE LATEST READ. Why the note stands is kept for
+        the refusal that follows (_in_doubt_stands; in_doubt_words), and
+        the note's "held" words are dropped by the first read that does not
+        show that cash: they said "eToro holds" after the order filled."""
+        want = str(symbol).upper()
         try:
             from datetime import datetime as _dt
             from bot_program.engine.broker_router import client_for_symbol
@@ -1904,50 +2252,209 @@ class AssetBot(ABC):
             lag = getattr(client, "PORTFOLIO_LAG_S", 0)
             if (isinstance(lag, bool) or not isinstance(lag, (int, float))
                     or lag <= 0):
-                return False
+                return self._in_doubt_stands(
+                    want, "the broker declares no list lag to read it by: "
+                          "only its expiry lifts it")
+            lag_td = timedelta(seconds=float(lag))
             now = timezone.now()
             at = _dt.fromisoformat(str(note.get("at")))
-            if (now - at).total_seconds() < float(lag):
-                return False
+            flat = int(note.get("flat_reads") or 0)
+            if now - at < lag_td:
+                return self._in_doubt_stands(
+                    want, f"the broker's position list lags {lag:g}s: it is "
+                          f"read from {_utc_minute(at + lag_td)}")
             last = note.get("flat_read_at")
-            if last and (now - _dt.fromisoformat(str(last))).total_seconds() \
-                    < float(lag):
-                return False
+            last_at = _dt.fromisoformat(str(last)) if last else None
+            if last_at is not None and now - last_at < lag_td:
+                return self._in_doubt_stands(
+                    want, f"the broker read flat {flat} of "
+                          f"{self.IN_DOUBT_FLAT_READS} times; the next read "
+                          f"from {_utc_minute(last_at + lag_td)}")
+            floor, since = at + lag_td, "the list's lag after the order"
+            if last_at is not None and last_at > floor:
+                floor, since = last_at, "the last flat read"
+            verdict, held = self._in_doubt_frozen(client, at, floor=floor,
+                                                  since=since)
+            if verdict != "held" and note.get("held"):
+                # This read does not show the cash the note says eToro
+                # holds: its words go, merged as the flat read is.
+                note = {k: v for k, v in note.items() if k != "held"}
+                self._write_in_doubt(want, note,
+                                     if_reference=note.get("reference"))
+            if verdict == "unread":
+                logger.info("[%s_bot] %s: the in-doubt note waits — %s",
+                            self.asset_class, symbol, held)
+                return self._in_doubt_stands(want, held)
+            if verdict == "held":
+                logger.warning("[%s_bot] %s: the in-doubt note stands — %s",
+                               self.asset_class, symbol, held["words"])
+                prev = note.get("held") or {}
+                if (note.get("flat_reads")
+                        or prev.get("read_at") != held["read_at"]
+                        or prev.get("frozen") != held["frozen"]):
+                    kept = {k: v for k, v in note.items()
+                            if k not in ("flat_reads", "flat_read_at")}
+                    kept["held"] = held
+                    self._write_in_doubt(
+                        symbol, kept, if_reference=note.get("reference"))
+                return self._in_doubt_stands(want, held["words"])
             positions = self._broker_snapshot(client, "positions")
             if positions is None:
-                return False
-            want = str(symbol).upper()
+                return self._in_doubt_stands(
+                    want, "the broker's position list could not be read")
+            owned = self._own_position_ids(client)
             for p in positions:
                 if not isinstance(p, dict):
                     continue
-                if (p.get("symbol_unresolved")
-                        or str(p.get("symbol") or "").upper() == want):
+                pid = str(p.get("position_id") or "").strip()
+                if pid and pid in owned:
+                    continue            # a Sauron row's own: not the order
+                unnamed = bool(p.get("symbol_unresolved"))
+                if unnamed or str(p.get("symbol") or "").upper() == want:
                     logger.warning(
                         "[%s_bot] %s: the venue holds a position the "
                         "in-doubt order may have opened (%s) — the note "
                         "stands; nothing is adopted here", self.asset_class,
                         symbol, p.get("symbol") or "unnamed")
-                    return False
-            reads = int(note.get("flat_reads") or 0) + 1
-            extras = dict(self.cfg.extras or {})
-            book = dict(extras.get("entry_in_doubt") or {})
-            if reads >= self.IN_DOUBT_FLAT_READS:
-                book.pop(want, None)
+                    where = f"position {pid}" if pid else "no id"
+                    return self._in_doubt_stands(want, (
+                        f"the broker lists a position it cannot name "
+                        f"({where}), which may be this order" if unnamed
+                        else f"the broker lists a position on {want} that no "
+                             f"Sauron row owns ({where}), which may be this "
+                             f"order"))
+            reads = flat + 1
+            cleared = reads >= self.IN_DOUBT_FLAT_READS
+            # Merged under the row's lock (_write_in_doubt), and only into
+            # the note judged here: a newer order in doubt on the symbol
+            # keeps its own note.
+            written = self._write_in_doubt(
+                want, None if cleared else dict(
+                    {k: v for k, v in note.items() if k != "held"},
+                    flat_reads=reads, flat_read_at=now.isoformat()),
+                if_reference=note.get("reference"))
+            if cleared and written:
                 logger.info("[%s_bot] %s: the in-doubt order left no "
                             "position — the venue read flat %d times, each "
                             "past its %ss lag; the note is cleared",
                             self.asset_class, symbol, reads, lag)
+                (getattr(self, "_in_doubt_whys", None) or {}).pop(want, None)
+            elif not written:
+                self._in_doubt_stands(want, f"a newer order on {want} did "
+                                            f"not come back either")
             else:
-                book[want] = dict(note, flat_reads=reads,
-                                  flat_read_at=now.isoformat())
-            extras["entry_in_doubt"] = book
-            self.cfg.extras = extras
-            self.cfg.save(update_fields=["extras"])
-            return reads >= self.IN_DOUBT_FLAT_READS
+                self._in_doubt_stands(
+                    want, f"the broker read flat {reads} of "
+                          f"{self.IN_DOUBT_FLAT_READS} times; the next read "
+                          f"from {_utc_minute(now + lag_td)}")
+            return cleared and written
         except Exception as e:  # noqa: BLE001 — the note stands
             logger.warning("[%s_bot] %s: could not settle the in-doubt note: "
                            "%s", self.asset_class, symbol, e)
-            return False
+            return self._in_doubt_stands(
+                want, f"it could not be settled ({type(e).__name__})")
+
+    def _own_position_ids(self, client) -> set:
+        """The eToro position ids Sauron's own open and closing real rows
+        of this user record, in the client's world (2026-11-01; the row's
+        handle, venue_close.position_id_for), for the in-doubt settle:
+        eToro opens each order as its own position, so none of these is
+        the order whose answer did not come back. Empty on any other venue
+        (one that nets can carry that order's fill inside a row's own
+        position) and when the rows cannot be read: then every position on
+        the symbol keeps the note, as before. Never raises."""
+        from bot_program.engine.capabilities import adapter_key
+        if adapter_key(client) != "etoro":
+            return set()
+        try:
+            from bot_program.engine.venue_close import position_id_for
+            from bot_program.models import AssetBotTrade
+            from dashboard.position_summary import world_of
+            world = "demo" if getattr(client, "demo", True) else "live"
+            out = set()
+            for t in AssetBotTrade.objects.filter(
+                    config__user_id=self.user.id, paper=False,
+                    status__in=("OPEN", "CLOSE_PENDING")):
+                meta = t.metadata if isinstance(t.metadata, dict) else {}
+                if str(meta.get("broker") or "").strip().lower() != "etoro":
+                    continue
+                if world_of(t) != world:
+                    continue
+                pid = position_id_for(t)
+                if pid:
+                    out.add(pid)
+            return out
+        except Exception as e:  # noqa: BLE001 — every position counts
+            logger.warning("[%s_bot] Sauron's own eToro position ids could "
+                           "not be read for the in-doubt settle: %s",
+                           self.asset_class, e)
+            return set()
+
+    def _in_doubt_frozen(self, client, noted, *, floor=None, since=""):
+        """eToro's frozen cash against Sauron's own WORKING rows, for the
+        in-doubt settle (2026-11-01). (verdict, detail), the verdict one of
+
+          "rule"       not the eToro adapter, or the account stores no
+                       frozen cash (never stored, or the last read did not
+                       carry it): the position list alone decides, as
+                       before;
+          "unread"     the cell was read at or before `noted` (the note's
+                       time), or in the other world: it cannot speak for
+                       this order yet; or it shows the cash explained but
+                       was read at or before `floor` (`since` names it: the
+                       venue's lag after the note, or the last flat read),
+                       so it cannot back a flat read (detail: the words);
+          "held"       it holds more than those rows explain (detail:
+                       {"frozen", "explained", "currency", "read_at",
+                       "words"}), read after the note, at or before the
+                       floor too;
+          "explained"  it holds no more than they do, read after `floor`.
+
+        Stored cells only (the sync's and the re-read's); no broker call.
+        Raises what the reads raise (the settle keeps the note)."""
+        from datetime import timezone as dt_timezone
+
+        from bot_program.engine.capabilities import adapter_key
+        from bot_program.models import EtoroAccount
+        if adapter_key(client) != "etoro":
+            return "rule", None
+        acct = EtoroAccount.objects.filter(user_id=self.user.id).first()
+        frozen = getattr(acct, "last_frozen_cash", None)
+        if acct is None or frozen is None:
+            return "rule", None
+        read_at = acct.last_margin_at
+        if read_at is None or read_at <= noted:
+            return "unread", ("eToro's frozen cash has not been read since "
+                              "the order")
+        world = "demo" if acct.demo else "live"
+        stamped = str(acct.last_margin_world or "")
+        if stamped != world:
+            return "unread", (f"eToro's frozen cash was read in the "
+                              f"{stamped or '?'} world; this account trades "
+                              f"{world}")
+        fx = frozen_explained(self.user, world, read_at)
+        frozen = round(float(frozen), 2)
+        utc = read_at.astimezone(dt_timezone.utc)
+        if frozen <= fx["margin"] + fx["tolerance"] + 0.005:
+            if floor is not None and read_at <= floor:
+                return "unread", (
+                    f"eToro's frozen cash has not been read since "
+                    f"{since or 'the order'} "
+                    f"({floor.astimezone(dt_timezone.utc):%H:%M:%S} UTC): "
+                    f"the note waits for a later read")
+            return "explained", None
+        ccy = str(acct.last_equity_currency or "").upper()
+        unexplained = frozen - fx["margin"]
+        # The read's time leads (2026-11-01): the skip keeps 200 characters
+        # and cut it off at the end.
+        return "held", {
+            "frozen": frozen, "explained": fx["margin"], "currency": ccy,
+            "read_at": read_at.isoformat(),
+            "words": (f"read {utc:%H:%M} UTC: eToro holds "
+                      f"{unexplained:,.2f}{' ' + ccy if ccy else ''} of "
+                      f"frozen cash no Sauron order explains "
+                      f"({frozen:,.2f} frozen, {fx['margin']:,.2f} "
+                      f"explained by Sauron's WORKING rows)")}
 
     def _poll_working_entry(self, trade, client) -> None:
         """Ask the broker where a WORKING entry stands, and act on it.
@@ -4429,11 +4936,25 @@ class AssetBot(ABC):
         if doubt and self._settle_in_doubt(symbol, doubt):
             doubt = None
         if doubt:
-            return self._skip(
-                symbol, skips.ORDER_IN_DOUBT,
-                f"an order under reference "
-                f"{doubt.get('reference') or '(none)'} may already be live "
-                f"(since {doubt.get('at')})")
+            # The words the TAKE TRADE ticket refuses with too (2026-11-01,
+            # in_doubt_words), and why the settle kept the note.
+            return self._skip(symbol, skips.ORDER_IN_DOUBT,
+                              self.in_doubt_words(
+                                  self._in_doubt_note(symbol) or doubt,
+                                  why=self._in_doubt_why(symbol)))
+        # ...AND WHILE ANOTHER LANE'S ORDER ON IT MAY BE LIVE (2026-11-01):
+        # a TAKE TRADE ticket's, or another bot's, whose answer did not
+        # come back. Read, never settled here (_in_doubt_elsewhere); a
+        # paper config sends nothing to a broker and is not held.
+        if self.cfg.mode == "live":
+            other = self._in_doubt_elsewhere(symbol)
+            if other:
+                return self._skip(
+                    symbol, skips.ORDER_IN_DOUBT,
+                    self.in_doubt_words(other["note"], why="",
+                                        sender=other["sender"])
+                    + f"; until {self.in_doubt_until(other['note'])} at the "
+                      f"latest")
 
         # Cooldown: skip if a CLOSED trade for this symbol was created within cool_down_minutes.
         cool = self.cfg.cool_down_minutes or 0
@@ -5983,6 +6504,21 @@ class AssetBot(ABC):
             # order_error; closes, stop moves and the mirror are never
             # held, and the manual lane only warns. Keyed on the adapter,
             # so the desk seam's MagicMock and a PaperTrader pass.
+            # NO ORDER WHILE ANOTHER LANE'S ON THE SYMBOL MAY BE LIVE
+            # (2026-11-01), asked again here: a ticket's order that did not
+            # come back after this candidate was proposed, or a candidate
+            # built by hand, sends nothing either (_in_doubt_elsewhere;
+            # propose_entry refuses this config's own note).
+            _other = self._in_doubt_elsewhere(symbol)
+            if _other:
+                logger.warning("[%s_bot] %s HELD: %s's order may be live",
+                               self.asset_class, symbol, _other["sender"])
+                return self._skip(
+                    symbol, skips.ORDER_IN_DOUBT,
+                    self.in_doubt_words(_other["note"], why="",
+                                        sender=_other["sender"])
+                    + f"; until {self.in_doubt_until(_other['note'])} at the "
+                      f"latest")
             from bot_program import venue_health
             _sick, _sick_why = venue_health.refusal(client, symbol)
             if _sick:
@@ -6759,32 +7295,16 @@ class AssetBot(ABC):
                         entry_meta["fill_source"] = "pending"
             except Exception as e:
                 # IN DOUBT IS NOT REFUSED. The adapter marks a placement
-                # whose request never came back (`in_doubt`) and carries the
-                # reference the operator searches on; the engine reads the
-                # marker duck-typed, exactly as it reads every other adapter
-                # promise, rather than importing one venue's exception.
+                # whose request never came back (`in_doubt`; on eToro a 5xx
+                # answer too, since 2026-11-01) and carries the reference
+                # the operator searches on; the engine reads the marker
+                # duck-typed, exactly as it reads every other adapter
+                # promise, rather than importing one venue's exception. The
+                # note, the alert and the account's re-read are one call,
+                # the TAKE TRADE ticket's too (_order_in_doubt).
                 if getattr(e, "in_doubt", False):
                     ref = str(getattr(e, "reference", "") or "")
-                    self._remember_in_doubt(symbol, ref)
-                    logger.error("[%s_bot] %s: the order request did not come "
-                                 "back — it MAY be live at the broker under "
-                                 "reference %s. NOT retried.",
-                                 self.asset_class, symbol, ref or "(none)")
-                    try:
-                        from bot_program.notifications import notify_staff
-                        notify_staff(
-                            title=f"⚠ {symbol}: an order may be live with no row",
-                            body=(f"{self.asset_class.upper()} placement for "
-                                  f"{symbol} did not come back. Search the "
-                                  f"broker for reference {ref or '(none)'}: if "
-                                  f"that order exists, this platform has no "
-                                  f"row for it and nothing is managing it. "
-                                  f"{symbol} is not retried for "
-                                  f"{self.IN_DOUBT_QUIET_HOURS}h."),
-                            url="/positions/")
-                    except Exception as e2:  # noqa: BLE001
-                        logger.warning("[%s_bot] in-doubt alert failed: %s",
-                                       self.asset_class, e2)
+                    self._order_in_doubt(symbol, ref, client)
                     return self._skip(symbol, skips.ORDER_IN_DOUBT,
                                       f"reference {ref or '(none)'} may be "
                                       f"live at the broker")

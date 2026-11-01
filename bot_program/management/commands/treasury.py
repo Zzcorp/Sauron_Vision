@@ -222,10 +222,15 @@ class Command(BaseCommand):
                     est = " (estimated)" if r["estimated"] else ""
                     pid = (f"position {r['position_id']}" if r["position_id"]
                            else DASH)
+                    # a fresh in-doubt note on the symbol (2026-11-01):
+                    # words only, as on the page
+                    doubt = (f"  {r['in_doubt_t']}" if r.get("in_doubt_t")
+                             else "")
                     w(f"   {r['symbol']:<12} {r['side'] or DASH:<5} "
                       f"{(r['qty'] or 0):>14.4f} @ {(r['avg_cost'] or 0):>12.4f}"
                       f"  lev {_lev(r['leverage'])}  margin "
-                      f"{r['margin_t']}{est}  net {r['net_profit_t']}  {pid}")
+                      f"{r['margin_t']}{est}  net {r['net_profit_t']}  {pid}"
+                      f"{doubt}")
                 w(f"   {out['n']} position(s), {out['margin_t']} of margin, "
                   f"holdings read {out['age_t']} ago; matched by eToro's "
                   f"position id, else by symbol, side and units")

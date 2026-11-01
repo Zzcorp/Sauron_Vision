@@ -91,7 +91,7 @@ this render path. An em dash means NEVER MEASURED and is never a zero —
         <tbody>
         {% for r in o.rows %}
             <tr style="border-top:1px solid var(--border);">
-                <td data-label="Symbol" style="padding:8px 10px;">{{ r.symbol }}</td>
+                <td data-label="Symbol" style="padding:8px 10px;">{{ r.symbol }}{% if r.in_doubt_t %} <span style="color:var(--accent-gold);" title="A fresh in-doubt note on this symbol: an order Sauron sent whose answer did not come back (2026-11-01). Words only: Sauron does not adopt it, and no figure moves.">{{ r.in_doubt_t }}</span>{% endif %}</td>
                 <td data-label="Side">{{ r.side|default:"—" }}</td>
                 <td data-label="Units" style="text-align:right;">{% if r.qty is not None %}{{ r.qty|floatformat:4 }}{% else %}—{% endif %}</td>
                 <td data-label="Open rate" style="text-align:right;">{% if r.avg_cost is not None %}{{ r.avg_cost|floatformat:4 }}{% else %}—{% endif %}</td>

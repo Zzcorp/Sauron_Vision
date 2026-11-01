@@ -5,9 +5,11 @@ Three things, one memory:
 
   1. An eToro order POST whose request never came back is IN DOUBT
      (EtoroOrderInDoubt, in_doubt True): the engine notes the symbol and
-     never resends it blind. A connection never made is "not sent" (a
-     plain RuntimeError the engine may retry). The in-doubt note clears
-     EARLY once the venue reads flat for the symbol twice past its lag.
+     never resends it blind. Since 2026-11-01 a 5xx answer to it is in
+     doubt too; a 429 and a 4xx stay refusals. A connection never made is
+     "not sent" (a plain RuntimeError the engine may retry). The in-doubt
+     note clears EARLY once the venue reads flat for the symbol twice past
+     its lag.
   2. A READ (rates, search, account, portfolio, eligibility) that answered
      a 5xx or never came back is asked ONCE more; a 429 is not retried; a
      write never is.
@@ -398,16 +400,28 @@ class TheOrderThatDidNotComeBackTests(SimpleTestCase):
                                         "is the venue's failure")
                 self.assertIn("not sent", s["failures"][-1]["detail"])
 
-    def test_a_5xx_or_429_on_the_post_keeps_its_words_and_sickens_the_venue(self):
-        for status in (503, 429):
+    def test_a_5xx_on_the_post_is_in_doubt_a_429_keeps_its_words_both_sicken_the_venue(self):
+        """A 5xx is IN DOUBT since 2026-11-01: eToro may have taken the
+        order behind its gateway's error, and a refusal let the next tick
+        send it again (tests.test_order_in_doubt_lanes). A 429 is still the
+        venue refusing to read the order at all."""
+        for status, in_doubt in ((503, True), (429, False)):
             with self.subTest(status=status):
                 vh.reset()
                 t, fake = _client([SEARCH_AAPL,
                                    ("POST", ORDERS, status, {"m": "x"})])
                 with self.assertRaises(RuntimeError) as cm:
                     self._order(t)
-                self.assertFalse(getattr(cm.exception, "in_doubt", False))
-                self.assertIn(f"eToro refused ({status})", str(cm.exception))
+                self.assertEqual(getattr(cm.exception, "in_doubt", False),
+                                 in_doubt)
+                if in_doubt:
+                    self.assertIsInstance(cm.exception, EtoroOrderInDoubt)
+                    self.assertIn(f"(HTTP {status}", str(cm.exception))
+                    self.assertIn("Do not resend it", str(cm.exception))
+                else:
+                    self.assertIn(f"eToro refused ({status})",
+                                  str(cm.exception))
+                self.assertEqual(len(_calls(fake, "POST", ORDERS)), 1)
                 s = vh.sick("etoro", "demo")
                 self.assertIsNotNone(s)
                 self.assertEqual(s["failures"][-1]["code"], status)

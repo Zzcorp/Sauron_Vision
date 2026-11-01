@@ -39,6 +39,23 @@ WHAT IT PROMISES
     closed it in the eToro app, as the close-abandoned alert asks).
   * Display only. Nothing on an order path reads this module: no gate,
     limit or size moves with it (tests.test_used_is_etoros pins that).
+
+WHAT eTORO HOLDS WITH NO SAURON ROW (2026-11-01). An order eToro holds
+(WaitingForMarket) sits in its used margin and its frozen cash and in no
+/portfolio row (MEASURED, doc §4 D2b-i). When no Sauron row owns it (an
+order placed in the eToro app, or one of Sauron's whose answer did not
+come back) it is in "outside Sauron" with nothing to say so. The split now
+carves "held at eToro, no Sauron row" out of it, with its age: eToro's
+frozen cash less what Sauron's own WORKING rows explain
+(asset_engine.base.frozen_explained). Those rows are under "opened by
+Sauron" already and are never counted twice. An outside position, or the
+held part, on a symbol with a fresh in-doubt note on any of the user's
+configs says "may be Sauron's order of <time> that did not come back"
+(in_doubt_times); Sauron never adopts it, and no number moves between the
+split's parts. Only what could carry the order is named (review,
+2026-11-01): a read stamped no earlier than LIST_LAG_S before the note,
+and never a position whose own open time eToro dates before then
+(doubt_at).
 """
 from __future__ import annotations
 
@@ -78,6 +95,17 @@ SPLIT = ("At that read: opened by Sauron {sauron}{unconverted} · "
 SPLIT_UNREAD = ("Opened by Sauron {sauron}{unconverted} · {stopped}outside "
                 "Sauron {dash} (eToro's used is not read)")
 OUTSIDE = "outside Sauron {outside}"
+#: The part of it eToro holds as frozen cash that no Sauron row explains,
+#: with the read's age, then the rest (2026-11-01). Below zero the rest is
+#: said the other way round, as OVER is.
+HELD = "held at eToro, no Sauron row {held}, read {age} ago{doubt}"
+OUTSIDE_HELD = "outside Sauron {outside} ({held}; positions {rest})"
+OUTSIDE_HELD_OVER = ("outside Sauron {outside} ({held}; Sauron's rows count "
+                     "{over} more than eToro's positions)")
+#: A fresh in-doubt note on the symbol, on any of the user's configs: the
+#: order may be Sauron's own (2026-11-01). Words only.
+DOUBT = "may be Sauron's order of {time} that did not come back"
+DOUBT_HELD = "; {symbol}: " + DOUBT
 #: Sauron's rows count more than eToro holds (2026-10-31): a stop or a
 #: close eToro filled that Sauron has not booked yet, a close Sauron
 #: stopped that the operator closed by hand since the holdings were read,
@@ -101,6 +129,10 @@ TITLE = ("eToro's own figures, from the sync's cells (the account is read "
          "trying that eToro still lists: positions opened in the eToro app, "
          "a second position on a symbol Sauron holds, pending orders, a fill "
          "whose answer was lost. /treasury/ lists them position by position. "
+         "Held at eToro, no Sauron row is the part of it eToro holds as "
+         "frozen cash for orders beyond what Sauron's own WORKING rows "
+         "explain: an order placed in the eToro app, or one of Sauron's whose "
+         "answer did not come back. "
          "The order gate judges every eToro order on these same cells.")
 
 
@@ -275,6 +307,94 @@ def _world_of_trade(trade) -> str:
     return world_of(trade)
 
 
+def in_doubt_times(user, *, now=None) -> dict:
+    """{SYMBOL: [the times of the fresh in-doubt notes on it, oldest
+    first]}, over every config of this user (2026-11-01): an order Sauron
+    sent whose answer did not come back, noted on either lane
+    (AssetBot._order_in_doubt) and fresh for IN_DOUBT_QUIET_HOURS, as the
+    note itself is. Each reader keeps the ones its own read can carry
+    (doubt_at). Words only: nothing here counts it. Never raises: a page
+    renders without it."""
+    from datetime import datetime as _dt
+    now = now or timezone.now()
+    out = {}
+    try:
+        from bot_program.asset_engine.base import AssetBot
+        from bot_program.models import AssetBotConfig
+        quiet_s = float(AssetBot.IN_DOUBT_QUIET_HOURS) * 3600.0
+        books = [(e or {}).get("entry_in_doubt") if isinstance(e, dict)
+                 else None for e in AssetBotConfig.objects.filter(
+                     user_id=getattr(user, "pk", None))
+                 .values_list("extras", flat=True)]
+    except Exception:  # noqa: BLE001 — the label is left out
+        logger.warning("etoro_used: the in-doubt notes could not be read",
+                       exc_info=True)
+        return out
+    for book in books:
+        if not isinstance(book, dict):
+            continue
+        for symbol, note in book.items():
+            try:
+                at = _dt.fromisoformat(str((note or {}).get("at")))
+                if (now - at).total_seconds() >= quiet_s:
+                    continue
+            except (TypeError, ValueError, AttributeError):
+                continue
+            out.setdefault(str(symbol).upper(), []).append(at)
+    return {k: sorted(v) for k, v in out.items()}
+
+
+def doubt_at(times, read_at):
+    """The latest of `times` (in_doubt_times' list for one symbol) whose
+    order a read of eToro taken at `read_at` could carry, or None
+    (2026-11-01).
+
+    The label was chosen by symbol and freshness alone, so a holdings list
+    or a frozen-cash read taken before Sauron's order left — or a position
+    eToro opened before then — was named "may be Sauron's order", and an
+    operator acting on the page could close the wrong real position. An
+    order leaves at most its POST's timeout before its note, and the sync
+    stamps a read before it reads: a read stamped no earlier than
+    LIST_LAG_S before the note may carry it, and a position eToro dates no
+    earlier than that may be it (pass its open time). `read_at` None
+    carries nothing."""
+    from datetime import timedelta
+    if read_at is None:
+        return None
+    try:
+        edge = read_at + timedelta(seconds=LIST_LAG_S)
+        fits = [t for t in (times or []) if t <= edge]
+    except TypeError:
+        return None
+    return max(fits) if fits else None
+
+
+def _opened_at(row):
+    """eToro's own open time of a holdings row (broker_portfolio's
+    "opened_at", 2026-11-01), or None: a row stored before it, or one
+    that did not carry it."""
+    from datetime import datetime as _dt
+    raw = (row or {}).get("opened_at") if isinstance(row, dict) else None
+    if not isinstance(raw, str):
+        return None
+    try:
+        at = _dt.fromisoformat(raw)
+    except ValueError:
+        return None
+    return at if at.tzinfo is not None else None
+
+
+def _utc_minute(at) -> str:
+    """'2026-11-01 13:42 UTC'."""
+    from datetime import timezone as dt_timezone
+    return at.astimezone(dt_timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def doubt_words(at) -> str:
+    """DOUBT for a note written at `at`."""
+    return DOUBT.format(time=_utc_minute(at))
+
+
 def _rows(user, at):
     """This user's non-paper rows that can be part of the split: open or
     closing now, a close given up on (status ERROR with no close time:
@@ -336,7 +456,13 @@ def account_used(user, *, now=None, positions=False) -> "dict | None":
     may: its holdings were never read), "stopped_gone_n" (one it no longer
     lists, not counted), "outside" (None unread; below zero when Sauron's
     rows count more than eToro holds), "since_n", "unstamped_n",
-    "unconverted" [{"symbol", "currency"}], "t" (the head line), "cell_t"
+    "unconverted" [{"symbol", "currency"}], "held" (2026-11-01: the part
+    of "outside" eToro holds as frozen cash that Sauron's WORKING rows do
+    not explain; None when the frozen cash is not read), "positions_part"
+    (the rest of "outside"; None with "held"), "held_t",
+    "positions_part_t", "held_doubt_t" (the in-doubt notes the held part
+    may be, in words, or "": only one whose order these cells could
+    carry, doubt_at), "t" (the head line), "cell_t"
     (a strip cell's line under the used figure), "split_t", "title"} and,
     with `positions`, "positions": the holdings no Sauron row accounts for
     (outside_positions)."""
@@ -375,6 +501,34 @@ def account_used(user, *, now=None, positions=False) -> "dict | None":
     outside = (round(used - split["sauron"] - split["stopped"], 2)
                if used is not None else None)
 
+    # WHAT eTORO HOLDS WITH NO SAURON ROW (2026-11-01): its frozen cash
+    # less what Sauron's own WORKING rows explain at that read — those rows
+    # are under "opened by Sauron" already and are not counted twice. A
+    # remainder inside their fees is no order (frozen_explained). None
+    # when the frozen cash is not read: unread is not zero.
+    held = positions_part = None
+    if read and frozen is not None:
+        try:
+            from bot_program.asset_engine.base import frozen_explained
+            fx = frozen_explained(user, world, at)
+            raw = frozen - fx["margin"]
+            held = round(raw, 2) if raw > fx["tolerance"] + 0.005 else 0.0
+        except Exception:  # noqa: BLE001 — the split renders without it
+            logger.warning("etoro_used: the WORKING rows could not be read",
+                           exc_info=True)
+            held = None
+    if held is not None and outside is not None:
+        positions_part = round(outside - held, 2)
+    doubts = in_doubt_times(user, now=now) if (held or positions) else {}
+    # Only a note whose order these cells could carry (2026-11-01,
+    # doubt_at): cash read before an order left is not that order.
+    held_doubt = ""
+    if held:
+        for s, times in sorted(doubts.items()):
+            t = doubt_at(times, at)
+            if t is not None:
+                held_doubt += DOUBT_HELD.format(symbol=s, time=_utc_minute(t))
+
     # THE TOTAL'S OWN AGE, WHEREVER THE CELLS' AGE IS SAID (2026-10-31).
     # The re-read after an order and a close moves the cells and never the
     # total, so a stalled sync left an equity hours old under "read 20 s
@@ -412,6 +566,21 @@ def account_used(user, *, now=None, positions=False) -> "dict | None":
         # Below zero, said the other way round (2026-10-31).
         piece = (OVER.format(over=money(-outside)) if outside < 0
                  else OUTSIDE.format(outside=money(outside)))
+        if held:
+            # The part eToro holds with no Sauron row, carved out with its
+            # age (2026-11-01); nothing is said when there is none.
+            held_piece = HELD.format(held=money(held), age=_age_words(age_s),
+                                     doubt=held_doubt)
+            if outside < 0:
+                piece = f"{piece}; {held_piece}"
+            elif positions_part >= 0:
+                piece = OUTSIDE_HELD.format(outside=money(outside),
+                                            held=held_piece,
+                                            rest=money(positions_part))
+            else:
+                piece = OUTSIDE_HELD_OVER.format(
+                    outside=money(outside), held=held_piece,
+                    over=money(-positions_part))
         split_t = SPLIT.format(sauron=money(split["sauron"]),
                                unconverted=unconverted, stopped=stopped,
                                outside=piece, pnl=money(pnl, signed=True))
@@ -449,11 +618,16 @@ def account_used(user, *, now=None, positions=False) -> "dict | None":
         "outside": outside, "since_n": split["since_n"],
         "unstamped_n": split["unstamped_n"],
         "unconverted": split["unconverted"],
+        "held": held, "held_t": money(held),
+        "positions_part": positions_part,
+        "positions_part_t": money(positions_part),
+        "held_doubt_t": held_doubt.lstrip("; "),
         "t": head, "cell_t": cell, "split_t": split_t, "title": TITLE,
     }
     if positions:
         out["positions"] = outside_positions(user, acct, now=now,
-                                             claims=split["claims"])
+                                             claims=split["claims"],
+                                             doubts=doubts)
     return out
 
 
@@ -665,20 +839,29 @@ def mark_holdings(user, rows, s_at) -> None:
         r["claimed"] = bool(r["claim"])
 
 
-def outside_positions(user, acct=None, *, now=None, claims=None) -> dict:
+def outside_positions(user, acct=None, *, now=None, claims=None,
+                      doubts=None) -> dict:
     """What eToro's holdings snapshot carries that no Sauron row accounts
     for, position by position (2026-10-31).
 
     {"known" (a snapshot exists), "at", "age_s", "age_t", "rows": [{"symbol",
     "side", "qty", "avg_cost", "leverage", "amount", "margin", "estimated",
-    "net_profit", "position_id"}], "n", "margin" (the rows' sum, None when
-    one cannot be priced), "estimated_n"}.
+    "net_profit", "position_id", "in_doubt_t"}], "n", "margin" (the rows'
+    sum, None when one cannot be priced), "estimated_n"}.
 
     The claimants are Sauron's eToro rows of the account's world that the
     snapshot can list (_claimants): open when it was read, a close given
     up on, a row closed less than LIST_LAG_S before the read, and a row
     booked after the read by the position id it records only. `claims` is
-    claim_holdings' answer when the caller has it already."""
+    claim_holdings' answer when the caller has it already.
+
+    "in_doubt_t" (2026-11-01): a position on a symbol with a fresh in-doubt
+    note on any of the user's configs may be Sauron's own order whose
+    answer did not come back — said in words (DOUBT), never claimed,
+    adopted or counted apart — when it could be that order (doubt_at): a
+    position eToro dates (its own open time) no earlier than LIST_LAG_S
+    before the note, or with no such time, a list stamped so. `doubts` is
+    in_doubt_times' answer when the caller has it already."""
     now = now or timezone.now()
     acct = acct if acct is not None else _account(user)
     out = {"known": False, "at": None, "age_s": None, "age_t": "",
@@ -691,6 +874,8 @@ def outside_positions(user, acct=None, *, now=None, claims=None) -> dict:
     if claims is None:
         return out
     rows, total, priced, estimated = [], 0.0, True, 0
+    if doubts is None and claims["left"]:
+        doubts = in_doubt_times(user, now=now)
     for r in claims["left"]:
         margin, est = outside_margin(r)
         if margin is None:
@@ -698,6 +883,9 @@ def outside_positions(user, acct=None, *, now=None, claims=None) -> dict:
         else:
             total += margin
         estimated += 1 if est else 0
+        opened = _opened_at(r)
+        noted = doubt_at((doubts or {}).get(_sym(r)),
+                         opened if opened is not None else s_at)
         rows.append({"symbol": _sym(r), "side": side_key(r.get("side")),
                      "qty": _qty(r), "avg_cost": _f(r.get("avg_cost")),
                      "leverage": r.get("leverage"),
@@ -705,7 +893,8 @@ def outside_positions(user, acct=None, *, now=None, claims=None) -> dict:
                      "estimated": est, "net_profit": _f(r.get("net_profit")),
                      "position_id": _pid(r) or None,
                      "margin_t": money(margin),
-                     "net_profit_t": money(r.get("net_profit"), signed=True)})
+                     "net_profit_t": money(r.get("net_profit"), signed=True),
+                     "in_doubt_t": doubt_words(noted) if noted else ""})
     age = _age(s_at, now)
     out.update({"known": True, "at": s_at, "age_s": age,
                 "age_t": _age_words(age), "rows": rows, "n": len(rows),

@@ -739,13 +739,16 @@ TRANSPORT = (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
 
 class EtoroOrderInDoubt(RuntimeError):
     """A placement whose outcome is unknown: the POST left and nothing came
-    back (a read timeout, a connection reset after the send).
+    back (a read timeout, a connection reset after the send), or eToro's
+    side answered a 5xx (2026-11-01: the order may have been taken behind
+    the gateway's error).
 
     Distinct from a refusal on purpose — a caller that retried this would
-    double the position. The same contract as SaxoOrderInDoubt: the engine
-    reads `in_doubt` duck-typed off the raise (asset_engine/base.py
-    execute_entry), notes the symbol on the config for IN_DOUBT_QUIET_HOURS
-    and tells the staff; it never imports this class. Carries the
+    double the position. The same contract as SaxoOrderInDoubt: both lanes
+    read `in_doubt` duck-typed off the raise (asset_engine/base.py
+    execute_entry, manual_trade._execute; AssetBot._order_in_doubt), note
+    the symbol on the config for IN_DOUBT_QUIET_HOURS and tell the staff;
+    neither imports this class. Carries the
     x-request-id the order was sent with (eToro echoes it as referenceId on
     an acceptance; the lookup does NOT find it — MEASURED 2026-09-23 — so
     the operator checks the broker's open orders and positions for the
@@ -926,6 +929,21 @@ def _iso_to_ms(ts: str) -> int:
             tzinfo=timezone.utc).timestamp() * 1000)
     except ValueError:
         return 0
+
+
+def _iso_utc(ts) -> "str | None":
+    """An eToro time ('2026-09-23T14:06:31.463Z') as an ISO time in UTC
+    (2026-11-01); None for anything that is not a time carrying its zone:
+    a time with no zone is not guessed into UTC."""
+    if not isinstance(ts, str) or not ts.strip():
+        return None
+    try:
+        at = datetime.fromisoformat(ts.strip())
+    except ValueError:
+        return None
+    if at.tzinfo is None:
+        return None
+    return at.astimezone(timezone.utc).isoformat()
 
 
 def _level(value, name: str, symbol: str, side: str):
@@ -2134,6 +2152,12 @@ class EtoroTrader:
                                 else float(raw))
                 except (TypeError, ValueError):
                     row[key] = None
+            # ITS OWN OPEN TIME (2026-11-01): openDateTime, MEASURED on the
+            # /portfolio row ("2026-09-23T14:06:31.463Z"), kept as an ISO
+            # time in UTC. Read by the in-doubt label (etoro_used): a
+            # position eToro opened before Sauron's order left cannot be
+            # that order. None when the row carries no time with a zone.
+            row["opened_at"] = _iso_utc(p.get("openDateTime"))
             out.append(row)
         return out
 
@@ -2750,7 +2774,8 @@ class EtoroTrader:
         # may try again; anything after the send is EtoroOrderInDoubt,
         # which the engine notes on the symbol and never resends blind.
         # Both are noted on the venue's health as an ORDER failure, which
-        # on its own holds new real entries for the quiet.
+        # on its own holds new real entries for the quiet. A 5xx answer is
+        # in doubt too (2026-11-01, below).
         try:
             r = self._sess().post(self._v2_exec_orders(), json=body,
                                   headers=self._headers(rid),
@@ -2799,6 +2824,21 @@ class EtoroTrader:
                 self._note_health("order", code=code,
                                   detail=str(r.text)[:80])
             log.error("eToro order failed: %s", r.text)
+            if code >= 500:
+                # A 5xx IS IN DOUBT, NOT A REFUSAL (2026-11-01). The POST
+                # reached eToro's side and the error came from behind it:
+                # the order may have been taken (never measured either way).
+                # Read as "eToro refused", it left no note, no row and no
+                # alert on either lane, and the next tick sent it again. The
+                # engine now notes the symbol and never resends it blind;
+                # the health note above stays. A 429 and every 4xx are
+                # eToro declining to read the order: refusals, as before.
+                log.error("eToro order IN DOUBT for %s %s — the POST answered "
+                          "%s; reference %s. NOT retried.", symbol, side,
+                          code, rid)
+                raise EtoroOrderInDoubt(
+                    rid, symbol, f"HTTP {code}: {str(r.text)[:80]}",
+                    client_order_id=kwargs.get("client_order_id")) from e
             raise RuntimeError(f"eToro refused ({r.status_code}): "
                                f"{str(r.text)[:160]}") from e
         # AN ACCEPTANCE NOBODY CAN READ IS IN DOUBT (2026-10-31). A 2xx is

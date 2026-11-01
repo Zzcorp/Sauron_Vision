@@ -1400,6 +1400,58 @@ def _unseen_holder_error(dup, seen, side, symbol) -> str:
             f"taking a second one")
 
 
+def _in_doubt_refusal(bot, symbol) -> str:
+    """The LIVE ticket's refusal while this lane's own order on `symbol`
+    may be live at the broker, or "" (2026-11-01).
+
+    A ticket whose order did not come back (a read timeout after the send,
+    a 5xx) leaves the bot lane's own note on the lane's config
+    (AssetBot._order_in_doubt, in _execute). Before, it left nothing: the
+    ticket said "MAY have reached the broker", and the next ticket on the
+    symbol sent a second order and booked a second row. The ticket now
+    refuses the symbol while the note stands, in propose_entry's words
+    (AssetBot.in_doubt_words): the note settles early once the venue reads
+    flat for it with nothing unexplained frozen (_settle_in_doubt), and
+    expires by itself after IN_DOUBT_QUIET_HOURS. Asked by the preview
+    (which _execute runs again under the config's lock) and once more
+    beside the duplicate re-check before the order leaves, under the
+    order's claim. A paper ticket sends nothing to a broker and is not
+    held.
+
+    The refusal says why the note stands — what the settle read: frozen
+    cash no Sauron order explains, a position no Sauron row owns, a read
+    still awaited — and when it lifts at the latest, the note's time plus
+    IN_DOUBT_QUIET_HOURS (review, 2026-11-01). AND ANOTHER LANE'S NOTE
+    HOLDS THE TICKET TOO: a bot's order on the symbol whose answer did not
+    come back (AssetBot._in_doubt_elsewhere). It is read, never settled
+    here; the bot's own tick settles it."""
+    if getattr(bot.cfg, "mode", "paper") != "live":
+        return ""
+    sym = str(symbol).upper()
+    doubt = bot._in_doubt_note(symbol)
+    if doubt and bot._settle_in_doubt(symbol, doubt):
+        doubt = None
+    if doubt:
+        doubt = bot._in_doubt_note(symbol) or doubt
+        words = bot.in_doubt_words(doubt, why=bot._in_doubt_why(symbol))
+        return (f"{sym}: {words}. This lane's order did not come back: "
+                f"check the broker's open orders and positions for {sym}. "
+                f"The ticket sends no second order while it may be live "
+                f"(until {bot.in_doubt_until(doubt)} at the latest) — "
+                f"nothing was sent")
+    other = bot._in_doubt_elsewhere(symbol)
+    if not other:
+        return ""
+    words = bot.in_doubt_words(other["note"], why="",
+                               sender=other["sender"])
+    return (f"{sym}: {words}. Its answer did not come back: check the "
+            f"broker's open orders and positions for {sym}. The ticket sends "
+            f"no second order while it may be live (until "
+            f"{bot.in_doubt_until(other['note'])} at the latest, or until "
+            f"that lane's own check reads the broker flat for it) — nothing "
+            f"was sent")
+
+
 def _age_words(seconds) -> str:
     """'12 s', '4 min', '1.5 h': how old a reading is, for a sentence."""
     if seconds is None:
@@ -1616,6 +1668,14 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
     }
 
     bot = make_bot(cfg)
+
+    # THIS LANE'S ORDER ON THE SYMBOL MAY BE LIVE (2026-11-01): its answer
+    # did not come back and the note stands (_in_doubt_refusal). The live
+    # popup says so before anything is priced; _execute runs this preview
+    # again under its lock and asks once more before the order leaves.
+    _doubt = _in_doubt_refusal(bot, inst.symbol)
+    if _doubt:
+        return {"error": _doubt}
 
     # NO PAPER FILL WHILE THE MARKET IS SHUT (2026-09-26). A paper ticket
     # fills at the mark read just below, and on a Saturday that mark was
@@ -3103,6 +3163,14 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                 return {"error": (f"LIVE route unavailable — {cls} orders "
                                   f"have no live broker to go to. Nothing "
                                   f"was sent")}
+            # ...and whether this lane's own order on the symbol may be
+            # live (2026-11-01): another ticket's answer that did not come
+            # back since the preview under the lock asked, read off the
+            # config as it stands now (_in_doubt_refusal).
+            _doubt = _in_doubt_refusal(
+                make_bot(AssetBotConfig.objects.get(pk=cfg.pk)), inst.symbol)
+            if _doubt:
+                return {"error": _doubt}
             # ...and whether another config opened this bet since the
             # ticket was shown (2026-10-31, review)
             _unseen = _unseen_holder_error(
@@ -3218,11 +3286,35 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             except Exception as e:  # noqa: BLE001
                 logger.error("[take-trade] LIVE order errored for %s %s: %s",
                              side, inst.symbol, e)
+                # IN DOUBT IS NEVER FORGOTTEN, ON EITHER LANE (2026-11-01).
+                # A raise that says `in_doubt` (a read timeout after the
+                # send, a 5xx) left no row, no note and no alert here,
+                # where the bot lane wrote both: the operator's next
+                # ticket on the symbol sent a second order. The bot lane's
+                # own call now — the note on this lane's config (the
+                # ticket refuses the symbol while it stands:
+                # _in_doubt_refusal), the staff alert, and eToro's cells
+                # read again within seconds, so the next order is judged
+                # on what eToro holds for this one. Nothing is booked:
+                # there is no answer to book from.
+                held = ""
+                if getattr(e, "in_doubt", False):
+                    bot._order_in_doubt(
+                        inst.symbol, str(getattr(e, "reference", "") or ""),
+                        client)
+                    # The hold is on both lanes (2026-11-01: the bots
+                    # read this lane's note too, _in_doubt_elsewhere).
+                    until = bot.in_doubt_until(
+                        bot._in_doubt_note(inst.symbol))
+                    held = (f". Neither the ticket nor a bot sends a second "
+                            f"{inst.symbol} order while it may be live ("
+                            + (f"until {until} at the latest" if until else
+                               f"at most {bot.IN_DOUBT_QUIET_HOURS}h") + ")")
                 return {"error": (f"The live order errored before an answer "
                                   f"arrived ({e}). The order MAY have "
                                   f"reached the broker — check the "
                                   f"positions page and the broker before "
-                                  f"retrying")}
+                                  f"retrying{held}")}
 
             status = (res.get("status") or "").upper()
             try:

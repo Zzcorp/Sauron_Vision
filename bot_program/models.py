@@ -444,8 +444,11 @@ class EtoroAccount(models.Model):
     # from, written with them under last_margin_at and its world by the
     # sync and the re-read. DISPLAY ONLY: eToro's own figures headline
     # wherever a page says used or free (bot_program.etoro_used); no gate,
-    # limit or size reads them. None = this read did not carry it (three
-    # states; 0 is a measurement).
+    # limit or size reads them. One reader holds and never sizes
+    # (2026-11-01): an in-doubt order's note does not clear while
+    # last_frozen_cash holds more than Sauron's own WORKING rows explain
+    # (AssetBot._settle_in_doubt), so the symbol stays quiet longer. None =
+    # this read did not carry it (three states; 0 is a measurement).
     last_pnl = models.DecimalField(max_digits=18, decimal_places=2,
                                    null=True, blank=True)
     last_frozen_cash = models.DecimalField(max_digits=18, decimal_places=2,
