@@ -604,7 +604,13 @@ class PaperFallbackProvenanceTests(TestCase):
         self.assertEqual(trade.status, "CLOSE_PENDING")
         self.assertIsNone(trade.exit_price)
         self.assertNotIn("exit_fill_source", trade.metadata)
-        self.assertIn("PaperTrader", trade.metadata["close_retry_last_error"])
+        # NOTED BLOCKED, NO ATTEMPT SPENT (2026-11-01): nothing was sent and
+        # nothing was refused. Spending the attempt drove the row to ERROR in
+        # about an hour while the venue still held the position, and ERROR
+        # leaves every money reader.
+        self.assertIn("PaperTrader", trade.metadata["close_blocked_why"])
+        self.assertFalse(trade.metadata.get("close_retry_attempts"))
+        self.assertNotIn("close_retry_last_error", trade.metadata)
 
     def test_the_kill_switch_reports_the_symbol_instead_of_faking_a_close(self):
         """`errors` is where the operator reads 'these may still be OPEN at

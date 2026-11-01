@@ -776,6 +776,7 @@
     if (orisk.past_t) line(body, 'hd-tone-past').textContent = dots(orisk.past_t);
     if (s.demo_note_t) line(body, 'hd-muted').textContent = dots(s.demo_note_t);
     if (s.extra_t) line(body, 'hd-muted').textContent = dots(s.extra_t);
+    if (s.abandoned_t) line(body, 'hd-muted').textContent = dots(s.abandoned_t);
     var daily = s.daily || {};
     var l2 = line(body, daily.mode === 'shut' ? 'hd-tone-bad' : daily.mode === 'elite' ? 'hd-tone-near' : '');
     bold(l2, W('daily_stop'));

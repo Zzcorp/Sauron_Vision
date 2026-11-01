@@ -130,12 +130,23 @@ class ABusySessionIsNotAFailedAttemptTests(TestCase):
         self.assertEqual(trade.status, "CLOSE_PENDING")
         self.assertNotEqual(trade.status, "ERROR")
 
-    def test_a_real_broker_failure_still_counts(self):
-        """The guard must not disarm the abandon path it narrows."""
+    def test_a_real_broker_failure_is_held_back_apart_from_a_busy_session(self):
+        """The guard must not blur the two states it tells apart.
+
+        Since 2026-11-01 a live row handed the simulator spends no attempt
+        either way: nothing was sent and nothing was refused, and twelve
+        such passes abandoned a position the venue still held
+        (pending_closes.retry_trade_close). A venue that cannot be asked is
+        still not a lost race: it is noted as a close held back, in its own
+        words and with its own alert, never as a busy session. A close the
+        broker REFUSES still spends its attempt and still ends at the
+        budget (tests.test_closes_never_abandoned)."""
         trade = self._pending(attempts=0)
         self._retry(trade, busy=False)
         trade.refresh_from_db()
-        self.assertEqual(int(trade.metadata.get("close_retry_attempts") or 0), 1)
+        self.assertEqual(int(trade.metadata.get("close_retry_attempts") or 0), 0)
+        self.assertIn("PaperTrader", trade.metadata.get("close_blocked_why", ""))
+        self.assertNotIn("close_session_busy_since", trade.metadata)
 
     def test_a_long_stall_reaches_the_operator(self):
         """Not counting it must not mean saying nothing: a drain that can

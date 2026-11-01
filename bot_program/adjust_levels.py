@@ -445,12 +445,35 @@ def _move_broker_leg(user, trade, price, *, leg: str):
     other's leg type, so a stop request can never land on a target however
     the handles are ordered. That refusal is the whole safety property;
     routing them through one function here does not weaken it.
+
+    THE ROW'S OWN CARRIER (2026-11-01, review: broker_router
+    .client_for_row), as the manage tick moves the same stop. Today's
+    routing answers from the lane's mode and class box, which only say
+    where NEW orders go: on a lane stood down to paper, or with its eToro
+    class box unticked, a real eToro row was handed the simulator, and the
+    dialog said "this broker cannot modify a resting order yet — close and
+    re-open" while the tick moved that very stop at eToro. It moves a
+    resting leg of a position that exists and never opens one, behind the
+    PIN the view asks for any real row. A real row the router still hands
+    the simulator (no credentials, no broker library, the account now
+    trading the other world, or a lane on paper for a venue other than
+    eToro, which client_for_row does not reroute) is told so, and nothing
+    is sent.
     """
     try:
-        from bot_program.engine.broker_router import client_for_symbol
-        client = client_for_symbol(user, trade.symbol, trade.config)
+        from bot_program.engine.broker_router import client_for_row
+        client = client_for_row(trade, user=user)
     except Exception as e:  # noqa: BLE001
         return False, f"broker unreachable: {e}"
+
+    if not getattr(trade, "paper", True):
+        from bot_program.asset_engine.base import AssetBot
+        if AssetBot._is_paper_client(client):
+            return False, ("this live position's own venue cannot be asked "
+                           "from here, so nothing was sent: no credentials, "
+                           "no broker library, the account now trading the "
+                           "other world, or a lane on paper for a venue "
+                           "other than eToro")
 
     method = "modify_protective" if leg == "stop" else "modify_target"
     mover = getattr(client, method, None)

@@ -9,6 +9,10 @@ PaperTrader whenever:
 This is the single integration point for multi-asset execution. Adding a new
 broker means: build the adapter, add a credential model, register the routing
 case here.
+
+A row that already exists is closed and protected through `client_for_row`
+(2026-11-01): its own carrier, whatever the lane's mode and class box say
+about new orders.
 """
 from __future__ import annotations
 
@@ -336,6 +340,105 @@ def client_for_symbol(user, symbol: str, cfg=None, purpose: str = "trade"):
 
     # ── default: paper ─────────────────────────────────────────────────────
     return _paper_client(cfg)
+
+
+def client_for_row(trade, purpose: str = "trade", *, user=None, cfg=None):
+    """The client that closes and protects `trade`: its own carrier, in its
+    own world (2026-11-01).
+
+    client_for_symbol answers from TODAY's routing, the lane's mode and the
+    account's class boxes, and both only say where NEW orders go. A lane
+    stood down to paper (arm_manual_lane, the lane switch) or an unticked
+    eToro class box (commodity has no other venue) handed a REAL eToro row
+    the simulator: the pending-close drain spent an attempt on every pass
+    and gave the row up after about an hour with eToro still holding the
+    position, the kill switch and the CLOSE button refused it, the
+    reconcile could not read its venue and the manage tick left it
+    unmanaged. Standing a lane down means no new real entries, never
+    abandoning a real position.
+
+    So a LIVE row stamped broker "etoro" (AssetBot.venue_stamps) gets the
+    user's EtoroTrader in the world its broker_env names, whatever the
+    lane's mode and class box: the world the account trades, which must be
+    that one (a row that names none takes the account's). It gets a
+    PaperTrader, which every caller refuses to close a real row on, only
+    when that client could not be its own carrier: the keys are gone, or
+    the account now trades the other world than the row's broker_env (the
+    same key pair answers both worlds and the account's Demo box picks
+    one; a close sent to the other world would open a position there,
+    which venue_close refuses as well). Every other row, paper, another
+    carrier or none recorded, gets client_for_symbol's answer, as before.
+
+    Today's routing is asked first and stands whenever it already answers
+    the row's carrier in the row's world. A client the adapter map does not
+    know (capabilities.adapter_key answers "") is not second-guessed: the
+    third state venue_close's carrier check reads the same way.
+
+    CLOSES AND PROTECTIVE MOVES ONLY. The callers are the pending-close
+    drain, the kill switch's closes, the CLOSE button and every manual
+    close path, the reconcile's reads of a row's venue, the manage tick,
+    whose actions close, cancel or move a stop, and the operator's stop
+    and target dialog (adjust_levels._move_broker_leg, behind the PIN the
+    view asks for a real row; review, 2026-11-01). No entry path calls it;
+    tests.test_closes_never_abandoned pins the callers.
+
+    `user` and `cfg` are the row's own when the caller has them already
+    (the row's config and its owner otherwise)."""
+    cfg = cfg if cfg is not None else getattr(trade, "config", None)
+    user = user if user is not None else getattr(cfg, "user", None)
+    routed = client_for_symbol(user, trade.symbol, cfg, purpose)
+    meta = (trade.metadata
+            if isinstance(getattr(trade, "metadata", None), dict) else {})
+    carried = str(meta.get("broker") or "").strip().lower()
+    if getattr(trade, "paper", True) or carried != "etoro":
+        return routed
+    from .capabilities import adapter_key
+    answered = adapter_key(routed)
+    if not answered:
+        return routed
+    from bot_program.asset_engine.base import AssetBot
+    filled_in = str(meta.get("broker_env") or "").strip().lower()
+    if answered == "etoro":
+        world = AssetBot.VENUE_WORLDS.get(
+            str(getattr(routed, "env", "") or "").lower(), "")
+        if not filled_in or not world or world == filled_in:
+            return routed
+    return _etoro_client_for_row(user, cfg, trade.symbol, filled_in)
+
+
+def _etoro_client_for_row(user, cfg, symbol: str, filled_in: str):
+    """EtoroTrader for a real eToro row, built from the account as it
+    stands now, or PaperTrader when it cannot be the row's own carrier
+    (client_for_row, 2026-11-01). Read by query, not through a cached
+    relation: a box ticked a second ago is the account's state."""
+    try:
+        from bot_program.models import EtoroAccount
+        acct = EtoroAccount.objects.filter(
+            user_id=getattr(user, "pk", None)).first()
+        if acct is None:
+            log.warning("[router] %s: a real eToro row and no eToro account "
+                        "— paper (nothing can be sent for it)", symbol)
+            return _paper_client(cfg)
+        k, u = acct.get_credentials()
+        if not (k and u):
+            log.warning("[router] %s: a real eToro row and no eToro keys — "
+                        "paper (nothing can be sent for it)", symbol)
+            return _paper_client(cfg)
+        world = "paper" if acct.demo else "live"
+        if filled_in and filled_in != world:
+            log.warning("[router] %s: the row was filled in the %s world and "
+                        "the account now trades the %s world — paper "
+                        "(nothing is sent to either)", symbol, filled_in,
+                        world)
+            return _paper_client(cfg)
+        from .etoro_client import EtoroTrader
+        log.info("[router] %s: a real eToro row goes to its own carrier, "
+                 "whatever its lane's mode and class box", symbol)
+        return EtoroTrader(k, u, env="demo" if acct.demo else "live")
+    except Exception as e:  # noqa: BLE001 — unreadable is not a carrier
+        log.warning("[router] %s: the row's eToro account is unavailable "
+                    "(%s) — paper", symbol, e)
+        return _paper_client(cfg)
 
 
 def broker_name_for_symbol(user, symbol: str, cfg=None) -> str:

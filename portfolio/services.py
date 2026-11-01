@@ -340,6 +340,171 @@ def pnl_on_capital_pct(pnl, asset_class, notional, *, leverage=None,
     return round(float(pnl) / cap * 100, 2)
 
 
+#: The account model whose sync stores a carrier's holdings snapshot
+#: (broker_positions, broker_positions_at), by the carrier a live row
+#: records (AssetBot.venue_stamps).
+_HOLDINGS_ROWS = {"etoro": "EtoroAccount", "saxo": "SaxoAccount",
+                  "ibkr": "IBKRAccount"}
+
+
+def _side_key(side) -> str:
+    s = str(side or "").strip().upper()
+    return ("BUY" if s in ("BUY", "LONG") else
+            "SELL" if s in ("SELL", "SHORT") else "")
+
+
+def abandoned_still_held(user, *, now=None) -> list:
+    """The real rows Sauron stopped closing that their venue may still hold
+    (2026-11-01). Each one carries `held_listed`: True when the carrier's
+    stored holdings list it, False when they cannot say.
+
+    pending_closes._give_up turns a row whose close was refused twelve times
+    into ERROR with no close time, and every money reader filtered OPEN and
+    CLOSE_PENDING: the row left used, the exposure gate, the open-risk gate
+    and the TAKE TRADE lane's pool, while the platform itself calls it
+    "still open at the broker" (the close-abandoned alert, close-all's
+    refusal to say flat). A row paper=False, status ERROR and closed_at
+    null is kept here when:
+
+      * the carrier's stored holdings list it: by the position id the row
+        records (broker_position_id / protective_trade_id,
+        venue_close.position_id_for), or, for a row that records none or a
+        snapshot that carries no ids, by a position on its symbol and side
+        whose id no other Sauron row records (or one the venue could not
+        name); or
+      * that snapshot cannot say: never read, older than
+        capital_truth.TRACKING_FRESH_SECONDS, read before the row's own
+        position could be listed (its open plus the venue's measured list
+        lag), of the account's demo world while the row was filled in the
+        live one, or a carrier whose sync stores none (a row that records
+        no carrier is one).
+
+    A fresh snapshot that does not list it means the venue closed it (the
+    operator in the venue's app, as the alert asks): not counted. Nor is a
+    row the simulator carried (broker "paper"): no venue holds it. Nor is
+    a row filled in a rehearsal world (broker_env "paper": eToro's demo,
+    Saxo's SIM) while its account now trades live (2026-11-01, review): it
+    is no real money, and a live account stores no list of that world that
+    could ever drop it, so it held room in the LIVE gates for ever.
+
+    READ BY capital_summary (used, used_live), risk_gate
+    .open_capital_at_work (live_total), risk_gate.open_risk_state and the
+    TAKE TRADE preview's committed sum; the split's "Sauron stopped
+    closing" (bot_program.etoro_used) reads this same predicate. Never by
+    AssetBot._pledged_since (eToro's own cells count the position), the
+    drain, the reconcile or the manage tick: nothing is ever sent for such
+    a row. Cached columns only, no broker call; never raises."""
+    from datetime import datetime as _dt
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from bot_program.models import AssetBotTrade
+    try:
+        rows = list(AssetBotTrade.objects.filter(
+            config__user=user, paper=False, status="ERROR",
+            closed_at__isnull=True).select_related("config"))
+    except Exception:  # noqa: BLE001 — a page renders without it
+        logger.warning("abandoned_still_held: rows unreadable", exc_info=True)
+        return []
+    if not rows:
+        return []
+    from bot_program.capital_truth import TRACKING_FRESH_SECONDS, broker_env
+    from bot_program.engine.etoro_client import PORTFOLIO_LAG_S
+    from bot_program.engine.venue_close import position_id_for
+    now = now or timezone.now()
+    list_lag = timedelta(seconds=PORTFOLIO_LAG_S)
+
+    snaps = {}
+
+    def _snap(carrier):
+        """(holdings, read_at, world) of the carrier's account row, or
+        None when it keeps none."""
+        if carrier not in snaps:
+            snaps[carrier] = None
+            model = _HOLDINGS_ROWS.get(carrier)
+            if model is not None:
+                try:
+                    from bot_program import models as _m
+                    acct = (getattr(_m, model).objects
+                            .filter(user_id=getattr(user, "pk", None)).first())
+                    if acct is not None:
+                        snaps[carrier] = (
+                            [h for h in (acct.broker_positions or [])
+                             if isinstance(h, dict)],
+                            acct.broker_positions_at, broker_env(acct))
+                except Exception:  # noqa: BLE001 — unreadable cannot say
+                    logger.warning("abandoned_still_held: %s holdings "
+                                   "unreadable", carrier, exc_info=True)
+        return snaps[carrier]
+
+    claimed = None
+
+    def _claimed_ids():
+        """The position ids every other live row of this user records."""
+        nonlocal claimed
+        if claimed is None:
+            claimed = set()
+            for t in AssetBotTrade.objects.filter(
+                    config__user=user, paper=False,
+                    status__in=("OPEN", "CLOSE_PENDING", "ERROR"),
+                    closed_at__isnull=True).only("metadata"):
+                pid = position_id_for(t)
+                if pid:
+                    claimed.add(pid)
+        return claimed
+
+    out = []
+    for t in rows:
+        meta = t.metadata if isinstance(t.metadata, dict) else {}
+        carrier = str(meta.get("broker") or "").strip().lower()
+        if carrier == "paper":
+            continue
+        snap = _snap(carrier)
+        filled_in = str(meta.get("broker_env") or "").strip().lower()
+        if snap is not None and filled_in == "paper" and snap[2] == "live":
+            continue                     # a rehearsal row: no real money
+        listed = None                    # True / False / None (cannot say)
+        if snap is not None and snap[1] is not None:
+            held, at, world = snap
+            try:
+                age = (now - at).total_seconds()
+                before = (isinstance(t.opened_at, _dt)
+                          and at < t.opened_at + list_lag)
+            except TypeError:
+                age, before = None, True
+            fresh = age is not None and age <= TRACKING_FRESH_SECONDS
+            other_world = bool(filled_in and world and filled_in != world)
+            if fresh and not before and not other_world:
+                pid = position_id_for(t)
+                ids = {str(h.get("position_id")).strip() for h in held
+                       if str(h.get("position_id") or "").strip()}
+                if pid and ids:
+                    listed = pid in ids
+                else:
+                    mine = _side_key(t.side)
+                    others = _claimed_ids() - ({pid} if pid else set())
+                    listed = False
+                    for h in held:
+                        hid = str(h.get("position_id") or "").strip()
+                        if hid and hid in others:
+                            continue
+                        sym = str(h.get("symbol") or "").upper()
+                        if not sym or sym.startswith("ETORO:"):
+                            listed = True        # unnamed: it may be this
+                            break
+                        side = _side_key(h.get("side"))
+                        if sym == str(t.symbol or "").upper() and (
+                                not side or not mine or side == mine):
+                            listed = True
+                            break
+        if listed is False:
+            continue
+        t.held_listed = bool(listed)
+        out.append(t)
+    return out
+
+
 def capital_summary(user, *, shared=None):
     """Pools, used, free, cash — the money question, answered once.
 
@@ -421,9 +586,12 @@ def capital_summary(user, *, shared=None):
     # The world is read by `venue_of` — the rule the positions page reads
     # a row by — never by `config.mode`, which called all of those live.
     engaged = defaultdict(float)
-    for trade in AssetBotTrade.objects.filter(
+    # AND A CLOSE SAURON GAVE UP ON THAT THE VENUE STILL HOLDS (2026-11-01,
+    # abandoned_still_held): its money is still at the broker. It left used
+    # and used_live at ERROR, and free read that much richer.
+    for trade in list(AssetBotTrade.objects.filter(
             config__user=user, status__in=("OPEN", "CLOSE_PENDING")
-            ).select_related("config"):
+            ).select_related("config")) + abandoned_still_held(user):
         notional = abs(float(trade.entry_price or 0)
                        * float(trade.qty or 0) * value_per_unit(trade))
         # the ROW's stamp (2026-09-26): an eToro forex row sent at 1 is

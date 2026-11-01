@@ -1942,16 +1942,47 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
                 if part)
 
     open_trades = _open_manual_trades(cfg)
+    # A PAPER TICKET NEVER CLOSES A REAL POSITION (2026-11-01, review). A
+    # lane stood down to paper still holds the real rows its live tickets
+    # opened, and they were offered here as funding closes, pre-ticked. A
+    # ticket naming one sent its close through today's routing: the
+    # simulator was refused, the row went CLOSE_PENDING, and the drain,
+    # which asks the row's own carrier, closed it at the venue at the next
+    # beat, with no PIN, after the ticket said the close failed. A real
+    # row is closed from the positions page, with the PIN
+    # (manual_close.execute_close). They still count against the pool
+    # below: their money is still at work. A live ticket offers no funding
+    # close at all (_execute refuses close_ids), so it is left as it was.
+    real_kept = []
+    if not live:
+        real_kept = [t for t in open_trades if not t.paper]
+        open_trades = [t for t in open_trades if t.paper]
+    real_words = ""
+    if real_kept:
+        one = len(real_kept) == 1
+        names = ", ".join(sorted({str(t.symbol) for t in real_kept}))
+        real_words = (f". {len(real_kept)} REAL position{'' if one else 's'}"
+                      f" on this lane ({names}) still "
+                      f"{'counts' if one else 'count'} against the pool and "
+                      f"{'is' if one else 'are'} never closed by a paper "
+                      f"ticket: close {'it' if one else 'them'} from the "
+                      f"positions page, with the PIN")
     # Committed counts CLOSE_PENDING too — a close that has not filled is
     # still capital at the broker, exactly as every gate and the capital
     # card measure it; this sum used to read OPEN only, so the pool looked
     # richer than it was for as long as a close was stuck retrying. The
     # CLOSABLE list below stays OPEN-only: a pending close cannot be
     # closed again to free capital.
+    # And this lane's own closes Sauron gave up on that the broker still
+    # holds (2026-11-01, services.abandoned_still_held): ERROR left the sum
+    # while the position, and the money in it, stayed at the broker.
     from bot_program.models import AssetBotTrade as _ABT
+    from portfolio.services import abandoned_still_held
     committed = round(sum(
-        _trade_capital_use(t) for t in _ABT.objects.filter(
-            config=cfg, status__in=("OPEN", "CLOSE_PENDING"))), 2)
+        _trade_capital_use(t) for t in list(_ABT.objects.filter(
+            config=cfg, status__in=("OPEN", "CLOSE_PENDING")))
+        + [t for t in abandoned_still_held(user)
+           if t.config_id == cfg.pk]), 2)
     available = round(capital - committed, 2)
     deficit = round(capital_use - available, 2)
 
@@ -1960,15 +1991,17 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         if not open_trades:
             return {"error": f"This trade ties up ${capital_use:,.2f} of "
                              f"capital but only ${available:,.2f} is free — "
-                             f"and there are no open manual {cls} positions "
-                             f"to close"}
+                             f"and there are no open "
+                             f"{'paper ' if real_kept else ''}manual {cls} "
+                             f"positions to close{real_words}"}
         proposal = _funding_proposal(open_trades, deficit)
         if proposal is None:
             freeable = round(sum(_trade_capital_use(t)
                                  for t in open_trades), 2)
-            return {"error": f"Closing every open manual {cls} position "
-                             f"would free ${freeable:,.2f} against the "
-                             f"${deficit:,.2f} short"}
+            return {"error": f"Closing every open "
+                             f"{'paper ' if real_kept else ''}manual {cls} "
+                             f"position would free ${freeable:,.2f} against "
+                             f"the ${deficit:,.2f} short{real_words}"}
 
     # ── What an override is allowed to be ───────────────────────────────
     # Per-unit costs so the confirm step can show the consequence of a size
@@ -2033,7 +2066,8 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
     # send all of it back, so "close first" was a fact the operator was
     # shown rather than a decision they made. Keeping a position, or
     # closing a different one that frees as much, are both legitimate
-    # answers, and neither was expressible.
+    # answers, and neither was expressible. On a paper ticket, its paper
+    # rows only (2026-11-01, review: a real row is never closed by one).
     proposed_ids = {c["trade_id"] for c in proposal}
     closable = [{"trade_id": t.id, "symbol": t.symbol, "side": t.side,
                  "qty": float(t.qty), "entry": float(t.entry_price),
@@ -2737,12 +2771,34 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         if frozen:
             return {"error": f"LIVE entries are frozen — {frozen}"}
 
+    # A PAPER TICKET NEVER CLOSES A REAL POSITION (2026-11-01, review),
+    # refused before anything is liquidated. A real row named as a funding
+    # close went through today's routing: the simulator was refused, the
+    # row went CLOSE_PENDING, and the drain (which asks the row's own
+    # carrier) closed it at the venue at the next beat, with no PIN. The
+    # preview never offers one (_preview); a request naming one by hand is
+    # refused here, and the funding loop below takes paper rows only. A
+    # live ticket refuses every funding close above.
+    _cheap_paper = getattr(cfg, "mode", "paper") != "live"
+    if close_ids and _cheap_paper:
+        _real = sorted({str(s) for s in AssetBotTrade.objects.filter(
+            id__in=list(close_ids), config=cfg, status="OPEN",
+            paper=False).values_list("symbol", flat=True)})
+        if _real:
+            one = len(_real) == 1
+            what = "is a REAL position" if one else "are REAL positions"
+            it = "it" if one else "them"
+            return {"error": (f"{', '.join(_real)} {what}: a paper ticket "
+                              f"never closes {it} to fund a paper trade. "
+                              f"Close {it} from the positions page, with "
+                              f"the PIN — nothing was closed and nothing "
+                              f"was booked")}
+
     # A HOLDER THE TICKET DID NOT SHOW (2026-10-31, review), before
     # anything is liquidated; asked again under the lock and before the
     # live order. The same-asset warning is the operator's decision only
     # where it was shown.
     from portfolio.risk_gate import duplicate_state
-    _cheap_paper = getattr(cfg, "mode", "paper") != "live"
     _unseen = _unseen_holder_error(
         duplicate_state(user, symbol=inst.symbol, side=side,
                         config_id=cfg.id, paper=_cheap_paper),
@@ -2826,8 +2882,12 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         # AND the trade for one click. What can still refuse after them —
         # the book read again under the lock, a close that fails — says
         # which closes were realised (_refused).
+        # Paper rows only (2026-11-01, review): these closes run for a paper
+        # ticket alone, and a real row is never closed by one (refused
+        # above, before anything was liquidated).
         funding = list(AssetBotTrade.objects.filter(
-            id__in=list(close_ids), config=cfg, status="OPEN"))
+            id__in=list(close_ids), config=cfg, status="OPEN",
+            paper=True))
         freed = sum(_trade_capital_use(t) for t in funding)
         early = _judge_ticket(
             user, cfg, inst, side, cls, preview,

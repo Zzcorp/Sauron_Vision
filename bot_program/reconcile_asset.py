@@ -331,9 +331,16 @@ def reconcile_user(user) -> dict:
     """Reconcile one user's open AssetBotTrade rows against broker state.
 
     Returns counts: {checked, closed_as_orphan, broker_unavailable, errors}.
+
+    Each row is read at ITS OWN venue (2026-11-01, broker_router
+    .client_for_row): a real eToro row on a lane stood down to paper, or
+    whose class box was unticked, is judged on eToro's book. Today's
+    routing handed it the simulator, whose book holds no AssetBot row (its
+    read raises for one), so the row was never booked closed against it,
+    and never booked at all when eToro closed it.
     """
     from .models import AssetBotTrade
-    from .engine.broker_router import client_for_symbol
+    from .engine.broker_router import client_for_row
     from .engine.capabilities import adapter_key as _adapter_key
 
     qs = (AssetBotTrade.objects
@@ -377,7 +384,7 @@ def reconcile_user(user) -> dict:
             continue
         out["checked"] += 1
         try:
-            client = client_for_symbol(user, trade.symbol, trade.config)
+            client = client_for_row(trade, user=user)
             cache_key = _state_key(client, trade.asset_class)
             if cache_key not in cache:
                 read_at[cache_key] = timezone.now()
@@ -594,7 +601,10 @@ def _close_as_orphan(trade, *, venue_said: str = "",
     then carries the words of those unanswered asks onto the row."""
     # Best-effort exit price: use the broker's ticker, or fall back to
     # the trade's entry price (zero P&L) so we at least clear the row.
-    from .engine.broker_router import client_for_symbol
+    # AT THE ROW'S OWN VENUE (2026-11-01, broker_router.client_for_row): the
+    # reconcile found the miss there, and a real row's exit is never priced
+    # by the simulator's quote because its lane was stood down to paper.
+    from .engine.broker_router import client_for_row
     from .pending_closes import (EXIT_FILL_SOURCE_KEY,
                                  EXIT_SOURCE_BROKER, EXIT_SOURCE_MARK)
     from market_data.models import LiveQuote
@@ -613,8 +623,7 @@ def _close_as_orphan(trade, *, venue_said: str = "",
     # estimate, correctly flagged as one, and `realized_r` is computed
     # from whichever number lands here.
     try:
-        from .engine.broker_router import client_for_symbol as _cfs
-        _client = _cfs(trade.config.user, trade.symbol, trade.config)
+        _client = client_for_row(trade)
         _fill = getattr(_client, "closing_fill", None)
         got = _fill(trade) if callable(_fill) else None
         if got and got.get("price"):
@@ -642,7 +651,7 @@ def _close_as_orphan(trade, *, venue_said: str = "",
             pass
     else:
         try:
-            client = client_for_symbol(trade.config.user, trade.symbol, trade.config)
+            client = client_for_row(trade)
             tk = client.ticker(trade.symbol) or {}
             last = float(tk.get("lastPrice", 0) or 0)
             if last > 0:
@@ -899,8 +908,7 @@ def _close_as_orphan(trade, *, venue_said: str = "",
         # dead ticker call can leave unbound, and a leg left resting is
         # not a detail to skip on the way past.
         try:
-            leg_client = client_for_symbol(trade.config.user, trade.symbol,
-                                           trade.config)
+            leg_client = client_for_row(trade)
             cancel = getattr(leg_client, "cancel_order", None)
             if callable(cancel):
                 cancel(oid)
@@ -926,9 +934,18 @@ def _close_as_orphan(trade, *, venue_said: str = "",
 
 
 def _unclaimed_at(state: dict, by_position: bool, claimed: set,
-                  claimers: list) -> tuple:
-    """(unclaimed symbols, the names the alert says, the alert's key) for
-    one venue's read.
+                  claimers: list, given_up: set = frozenset()) -> tuple:
+    """(unclaimed symbols, the names the alert says, the alert's key, the
+    symbols of the positions closes Sauron gave up on still hold) for one
+    venue's read.
+
+    A CLOSE SAURON GAVE UP ON CLAIMS ITS OWN POSITION (2026-11-01,
+    review). Its row (ERROR, no close time) is in `claimers` after the
+    open rows, as etoro_used._claimants orders it, and its symbol is in
+    `given_up` for a venue compared by symbol; a position it takes is
+    returned apart (the fourth item), never as unclaimed: the exposure and
+    open-risk gates count it (portfolio.services.abandoned_still_held), so
+    "invisible to every gate" was false of it.
 
     BY POSITION AT eTORO (2026-10-31). The sweep compared the set of the
     broker's symbols with the set of the rows' symbols, so a second eToro
@@ -967,6 +984,10 @@ def _unclaimed_at(state: dict, by_position: bool, claimed: set,
             [r for r in rows if isinstance(r, dict)], mine)
         unclaimed = sorted(str(h["symbol"]).upper() for h in left
                            if h.get("symbol") and not h.get("unnamed"))
+        stopped = sorted(
+            str(h.get("symbol") or c["symbol"] or "").upper()
+            for h, c in pairs
+            if getattr(c.get("trade"), "status", "") == "ERROR")
         held_by_rows = Counter(str(h.get("symbol") or "").upper()
                                for h, _mine in pairs)
         names, key = [], []
@@ -975,10 +996,11 @@ def _unclaimed_at(state: dict, by_position: bool, claimed: set,
             k = held_by_rows.get(sym, 0)
             names.append(f"{sym} (+{n} beside Sauron's {k})" if k
                          else key[-1])
-        return unclaimed, names, key
+        return unclaimed, names, key, stopped
     held = {str(x).upper() for x in (state.get("symbols") or set())}
-    unclaimed = sorted(held - claimed)
-    return unclaimed, unclaimed, unclaimed
+    unclaimed = sorted(held - claimed - set(given_up))
+    stopped = sorted((held & set(given_up)) - claimed)
+    return unclaimed, unclaimed, unclaimed, stopped
 
 
 def reconcile_unknown_positions(user) -> dict:
@@ -1002,13 +1024,26 @@ def reconcile_unknown_positions(user) -> dict:
     not recognise is worse than one that says so. This is the same posture
     the circuit breakers take.
 
-    Returns {checked, unclaimed, broker_unavailable, errors, symbols}.
+    A CLOSE SAURON GAVE UP ON (2026-11-01, review: status ERROR with no
+    close time, pending_closes._give_up) claims its own position here, as
+    the split and the positions panel claim it. Since that date the
+    exposure and open-risk gates count such a row while its venue may hold
+    it (portfolio.services.abandoned_still_held), so the unclaimed words,
+    "invisible to every exposure and daily-loss gate", were false of it
+    and reached the phone every three hours. Its position is said apart,
+    on the same cadence and in true words (notify_given_up_held): a close
+    Sauron gave up on, still held, counted by those gates, not managed;
+    close it at the broker. Nothing here reads the predicate.
+
+    Returns {checked, unclaimed, broker_unavailable, errors, symbols,
+    given_up, given_up_symbols}.
     """
     from .models import AssetBotConfig, AssetBotTrade
     from .engine.broker_router import client_for_symbol
 
     out = {"checked": 0, "unclaimed": 0, "broker_unavailable": 0,
-           "errors": 0, "symbols": []}
+           "errors": 0, "symbols": [], "given_up": 0,
+           "given_up_symbols": []}
 
     # Every symbol this user's rows currently claim, in one query. Options
     # are claimed under their OCC symbol, which is what the broker reports.
@@ -1020,13 +1055,24 @@ def reconcile_unknown_positions(user) -> dict:
     for row in (AssetBotTrade.objects
                 .filter(config__user=user,
                         status__in=("OPEN", "CLOSE_PENDING"), paper=False)
-                .only("symbol", "metadata", "side", "qty")):
+                .only("symbol", "metadata", "side", "qty", "status")):
         # A WORKING row claims a symbol it holds NOTHING of: its order is
         # still queued. Counting it here would mask the very position that
         # order creates when it fills — the sweep exists to find units no
         # row accounts for, and an unfilled order accounts for none.
         if row.symbol and not is_entry_working(row):
             claimed.add(str(row.symbol).upper())
+            claimers.append(row)
+    # A CLOSE SAURON GAVE UP ON claims its own position (2026-11-01,
+    # review), after the open rows, as etoro_used._claimants orders them:
+    # its position is said apart, never as unclaimed (_unclaimed_at).
+    given_up = set()
+    for row in (AssetBotTrade.objects
+                .filter(config__user=user, status="ERROR", paper=False,
+                        closed_at__isnull=True)
+                .only("symbol", "metadata", "side", "qty", "status")):
+        if row.symbol:
+            given_up.add(str(row.symbol).upper())
             claimers.append(row)
     # A ROW CLOSED SECONDS AGO STILL CLAIMS ITS SYMBOL HERE (the lag; see
     # SWEEP_CLOSED_GRACE_S). Report-only, every venue.
@@ -1035,10 +1081,28 @@ def reconcile_unknown_positions(user) -> dict:
                 .filter(config__user=user, status="CLOSED", paper=False,
                         closed_at__gte=timezone.now()
                         - _td(seconds=SWEEP_CLOSED_GRACE_S))
-                .only("symbol", "metadata", "side", "qty")):
+                .only("symbol", "metadata", "side", "qty", "status")):
         if row.symbol:
             claimed.add(str(row.symbol).upper())
             claimers.append(row)
+
+    def _say_given_up(stopped, venue_words):
+        """The positions closes Sauron gave up on still hold, said in their
+        own words on the unclaimed cadence (2026-11-01, review)."""
+        if not stopped:
+            return
+        out["given_up"] += len(stopped)
+        out["given_up_symbols"].extend(stopped)
+        logger.warning("unknown-position sweep: %s still holds %d "
+                       "position(s) of closes Sauron gave up on: %s",
+                       venue_words, len(stopped), ", ".join(stopped[:8]))
+        try:
+            from bot_program.notifications import notify_given_up_held
+            notify_given_up_held(user, symbols=stopped, venue=venue_words)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("unknown-position sweep: given-up alert failed: "
+                           "%s", e)
+            out["errors"] += 1
 
     configs = (AssetBotConfig.objects
                .filter(user=user, enabled=True)
@@ -1101,8 +1165,9 @@ def reconcile_unknown_positions(user) -> dict:
                          "could not name — that part of the book is "
                          "unreadable, not clean", venue, state["unnamed"])
 
-        unclaimed, names, key = _unclaimed_at(
-            state, venue == "EtoroTrader", claimed, claimers)
+        unclaimed, names, key, stopped = _unclaimed_at(
+            state, venue == "EtoroTrader", claimed, claimers, given_up)
+        _say_given_up(stopped, venue)
         if not unclaimed:
             continue
 
@@ -1231,8 +1296,10 @@ def reconcile_unknown_positions(user) -> dict:
                                        "sweep of a book nobody could read",
                                        venue_name, acct.label)
                     else:
-                        unclaimed, names, key = _unclaimed_at(
-                            state, _kind == "etoro", claimed, claimers)
+                        unclaimed, names, key, stopped = _unclaimed_at(
+                            state, _kind == "etoro", claimed, claimers,
+                            given_up)
+                        _say_given_up(stopped, f"{venue_name} {acct.label}")
                         if unclaimed:
                             out["unclaimed"] += len(unclaimed)
                             out["symbols"].extend(unclaimed)

@@ -1311,6 +1311,15 @@ class EtoroTrader:
     #: window — a MagicMock's attribute is not a number.
     PORTFOLIO_LAG_S = PORTFOLIO_LAG_S
 
+    #: A CLOSE ORDER CANNOT BE WITHDRAWN HERE (2026-11-01). Its id is
+    #: findable on no read path (MEASURED 2026-09-23), so cancel_order reads
+    #: it once and answers False, nothing sent (D3b, below). Declared rather
+    #: than tested by class: pending_closes.retry_trade_close reads it, and a
+    #: pass beside a queued close then notes the close blocked instead of
+    #: spending an attempt on a cancel that cannot exist. Only `False` says
+    #: so; an adapter that declares nothing keeps the cancel-then-resend path.
+    CANCELS_CLOSE_ORDERS = False
+
     #: WHAT THE REAL ACCOUNT DOES WITH THE ENVIRONMENT SEGMENT, PER TAIL.
     #:
     #: Not a rule — a TABLE, because eToro is not consistent and a rule would

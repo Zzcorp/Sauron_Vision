@@ -1664,16 +1664,26 @@ def venue_position_state(trade, client):
 
 def retry_trade_close(trade) -> bool:
     """Retry one CLOSE_PENDING trade. True when it ended CLOSED."""
-    from bot_program.engine.broker_router import client_for_symbol
+    from bot_program.engine.broker_router import client_for_row
 
-    client = client_for_symbol(trade.config.user, trade.symbol, trade.config)
+    # THE ROW'S OWN CARRIER (2026-11-01, broker_router.client_for_row), not
+    # today's routing: a lane stood down to paper or an unticked eToro class
+    # box handed a real eToro row the simulator, every pass below spent an
+    # attempt, and the row was given up after about an hour with eToro
+    # still holding the position. Standing a lane down stops its new real
+    # entries; its real rows are still closed at their own venue.
+    client = client_for_row(trade)
 
-    # A LIVE row handed the simulator: the router falls back to PaperTrader
-    # when credentials are missing or a broker library is not installed. Its
-    # simulated FILLED response would book this live position at an invented
-    # price stamped `broker`, while the position it claims to have closed
-    # stays open at a broker we cannot reach. Count the attempt so the
-    # operator alert still fires, and send nothing. (A paper row is a
+    # A LIVE row handed the simulator all the same: its own venue cannot be
+    # asked from here (no credentials, no broker library, or the account
+    # now trades the other world). Its simulated FILLED response would book
+    # this live position at an invented price stamped `broker`, while the
+    # position it claims to have closed stays open at a broker we cannot
+    # reach. NOTED, NOT SPENT (2026-11-01): nothing was sent and nothing was
+    # refused, so the pass is the blocked pass of `_note_close_blocked`
+    # (its hourly line and its staff alert after 45 minutes), never an
+    # attempt: twelve of those gave ERROR, and ERROR leaves every money
+    # reader while the venue still holds the position. (A paper row is a
     # different thing entirely — PaperTrader IS its venue — and the sweep
     # never sends one here anyway.)
     if not trade.paper and is_paper_client(client):
@@ -1693,10 +1703,13 @@ def retry_trade_close(trade) -> bool:
                 trade.id, trade.symbol)
             _note_session_busy(trade)
             return False
-        msg = ("broker unavailable (PaperTrader fallback) — no close was "
-               "sent and the position is still open at the broker")
+        msg = ("broker unavailable (PaperTrader fallback): this row's own "
+               "venue cannot be asked from here (no credentials, no broker "
+               "library, or the account now trades the other world) — no "
+               "close was sent and nothing was refused; the position is "
+               "still open at the broker")
         logger.error("close retry #%s for %s: %s", trade.id, trade.symbol, msg)
-        _after_failed_attempt(trade, msg)
+        _note_close_blocked(trade, msg)
         return False
 
     # If the broker says the position is already gone, the original close
@@ -1807,6 +1820,30 @@ def retry_trade_close(trade) -> bool:
     # later pass reads `flat` once the netting has run.
     if exposure["state"] == POS_UNKNOWN and exposure["ambiguous"]:
         _note_close_blocked(trade, exposure["why"])
+        return False
+
+    # A CLOSE THE VENUE HOLDS AND CANNOT WITHDRAW (2026-11-01). eToro took a
+    # close and queued it (a shut market), and this pass's one order read
+    # did not answer: the venue-proved block above could not run. The cancel
+    # gate below cannot help either, because eToro cannot cancel a close
+    # order (EtoroTrader.CANCELS_CLOSE_ORDERS: its id is findable on no read
+    # path), so the pass used to be booked as a failed attempt although
+    # nothing was sent. Blocked passes never reset the counter: twelve failed
+    # reads in one shut window gave ERROR while eToro still held the
+    # position. Noted blocked in the venue-proved block's words, no attempt
+    # spent. Declared by the venue, never tested by class; the flat, lag and
+    # venue-proved paths above are untouched, and a book that read flat this
+    # pass never reaches here.
+    if ((trade.metadata or {}).get(CLOSE_ORDER_WORKING_KEY)
+            and getattr(client, "CANCELS_CLOSE_ORDERS", True) is False
+            and exposure["state"] != POS_FLAT):
+        _note_close_blocked(
+            trade, "a close order is queued there that this adapter can "
+                   "neither list nor cancel (its cancel_order refuses an id "
+                   "the lookup cannot read, nothing sent), the venue's own "
+                   "order read did not answer this pass and its position list "
+                   "does not show the position gone — waiting for the lookup "
+                   "to prove the close; nothing sent")
         return False
 
     # The previous attempt may have left an order alive at the broker (an

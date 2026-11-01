@@ -17,13 +17,17 @@ two would stop being comparable, which is the whole point of the ledger.
 
 Two states this module refuses rather than papers over:
 
-  * A LIVE trade whose broker is unreachable. ``client_for_symbol`` never
-    returns None — it falls back to PaperTrader — so calling the close
-    anyway gets a synthetic FILLED order back and stamps the row CLOSED
-    while the position is still live at the broker. That exact defect is
-    documented at asset_engine/base.py:100-110, where manage_positions
-    skips the trade for the same reason. Refusing is the only honest
-    answer: the operator must be told the position is still on.
+  * A LIVE trade whose broker is unreachable. The router never returns
+    None — it falls back to PaperTrader — so calling the close anyway gets
+    a synthetic FILLED order back and stamps the row CLOSED while the
+    position is still live at the broker. That exact defect is documented
+    at asset_engine/base.py manage_positions, which skips the trade for the
+    same reason. Refusing is the only honest answer: the operator must be
+    told the position is still on. Every path here asks for the row's OWN
+    carrier (broker_router.client_for_row, 2026-11-01): a real eToro row
+    on a lane stood down to paper, or whose class box was unticked, is
+    closed at eToro, never refused for the simulator today's routing
+    names.
 
   * A trade already in CLOSE_PENDING. The broker close failed and the
     retry beat task owns that row. Manual pressure there means "retry
@@ -294,7 +298,7 @@ def preview_close(user, trade) -> dict:
     Nothing is executed and nothing is claimed here — a preview that
     mutated the row would make hovering the button a trading action.
     """
-    from bot_program.engine.broker_router import client_for_symbol
+    from bot_program.engine.broker_router import client_for_row
 
     from bot_program.asset_engine.base import is_entry_working
     if is_entry_working(trade):
@@ -342,7 +346,7 @@ def preview_close(user, trade) -> dict:
                          f"{trade.asset_class} — this position cannot be "
                          f"closed from here; close it at the broker"}
 
-    client = client_for_symbol(user, trade.symbol, trade.config)
+    client = client_for_row(trade, user=user)
     if _live_broker_missing(trade, client):
         return {"error": f"{trade.symbol} is a LIVE position and its broker "
                          f"is unreachable (missing or invalid credentials). "
@@ -475,7 +479,7 @@ def execute_close(user, trade, *, pin_ok: bool = False) -> dict:
     checking it, this owns REQUIRING it, so a future caller (a bot console,
     an API) cannot forget the gate exists.
     """
-    from bot_program.engine.broker_router import client_for_symbol
+    from bot_program.engine.broker_router import client_for_row
 
     def _no_pin(t):
         return {"error": f"{t.symbol} is a LIVE position — the trading PIN "
@@ -507,7 +511,7 @@ def execute_close(user, trade, *, pin_ok: bool = False) -> dict:
         from bot_program.asset_engine.base import (cancel_working_entry,
                                                    is_entry_working)
         if is_entry_working(trade):
-            client = client_for_symbol(user, trade.symbol, trade.config)
+            client = client_for_row(trade, user=user)
             if _live_broker_missing(trade, client):
                 return {"error": f"{trade.symbol}'s entry order is still "
                                  f"working at the broker and the broker is "
@@ -531,7 +535,7 @@ def execute_close(user, trade, *, pin_ok: bool = False) -> dict:
                              f"{trade.asset_class} — close this position at "
                              f"the broker"}
 
-        client = client_for_symbol(user, trade.symbol, trade.config)
+        client = client_for_row(trade, user=user)
         if _live_broker_missing(trade, client):
             # The row stays OPEN. It has to: the position IS open, and a
             # CLOSED row here is the single most expensive lie the system

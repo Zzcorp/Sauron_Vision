@@ -233,6 +233,11 @@ RISK_PAST = ("PAST THE CEILING: no entry opens until a position closes or "
 DEMO_NOTE = "Demo rows are counted here, as the entry gate counts them."
 GATE_EXTRA = ("The gate counts {k} more row(s): open rows of the shared Main "
               "book, which are not seats here.")
+#: The open-risk gate's closes Sauron gave up on (2026-11-01, review:
+#: portfolio.services.abandoned_still_held), in the exposure refusal's
+#: words: never seats, never rows of the Main book.
+GATE_ABANDONED = ("The gate also counts {k} close(s) Sauron gave up on that "
+                  "the broker may still hold; close them at the broker.")
 DAILY_OPEN = "OPEN · {realized} realized in 24 h, floor {floor} ({pct}%)"
 DAILY_ELITE = ("ELITE ONLY · past the {pct}% stop: bots may open elite "
                "entries at half size, {used} of {max} used in 24 h; absolute "
@@ -1924,8 +1929,12 @@ def _head(raw, seats, book):
                            if orisk_out["tone"] != "unmeasured" else None)
         alloc, free, unmeasured, over, alloc_t = _alloc(mine, size)
         extra = 0
+        # The gate's closes Sauron gave up on are said apart (2026-11-01,
+        # review): never a seat, and never an open row of the Main book.
+        abandoned = 0
         if side == "live" and orisk_out["tone"] != "unmeasured":
-            extra = max(0, orisk_out["rows"] - len(real_seats))
+            abandoned = max(0, int(orisk.get("abandoned") or 0))
+            extra = max(0, orisk_out["rows"] - abandoned - len(real_seats))
         from portfolio.risk_gate import _book_words
         sides[side] = {
             "present": bool(mine) or orisk_out["rows"] > 0,
@@ -1957,6 +1966,9 @@ def _head(raw, seats, book):
                 s["world"] == "demo" for s in seats)) else "",
             "gate_extra_rows": extra,
             "extra_t": GATE_EXTRA.format(k=extra) if extra else "",
+            "gate_abandoned_rows": abandoned,
+            "abandoned_t": (GATE_ABANDONED.format(k=abandoned)
+                            if abandoned else ""),
         }
     cap = (raw or {}).get("capital") or {}
 

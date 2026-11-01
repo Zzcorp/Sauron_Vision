@@ -1221,9 +1221,14 @@ class AssetBot(ABC):
         definition, the reserved name AND no symbols
         (share_allocator._is_manual_lane, 2026-10-07): a scanning bot that
         merely carries the name sends bot orders, and those are withdrawn
-        like any other bot's."""
+        like any other bot's.
+
+        Withdrawn at the row's OWN carrier (2026-11-01, broker_router
+        .client_for_row), as manage_positions polls it: a braked config
+        stood down to paper had its real working order polled at eToro and
+        never withdrawn."""
         from bot_program.asset_engine import disarm
-        from bot_program.engine.broker_router import client_for_symbol
+        from bot_program.engine.broker_router import client_for_row
         from bot_program.models import AssetBotTrade
         from bot_program.share_allocator import _is_manual_lane
 
@@ -1238,7 +1243,7 @@ class AssetBot(ABC):
             try:
                 if not is_entry_working(t) or not t.broker_order_id:
                     continue
-                client = client_for_symbol(self.user, t.symbol, self.cfg)
+                client = client_for_row(t, user=self.user, cfg=self.cfg)
                 if self._is_paper_client(client):
                     continue
                 if cancel_working_entry(t, client, reason=reason,
@@ -1262,9 +1267,17 @@ class AssetBot(ABC):
 
         `paper_only` (2026-10-08, manage_paper_only) walks the PAPER rows
         alone: a real row is never read, routed, polled or closed.
+
+        Each row is managed through ITS OWN carrier (2026-11-01,
+        broker_router.client_for_row): a real eToro row of a lane stood
+        down to paper, or whose class box was unticked, keeps its time
+        stop, its stop moves and its care at eToro. Today's routing handed
+        it the simulator and the row was left unmanaged. Nothing here opens
+        a position: every action closes, cancels or moves a stop, and a
+        WORKING entry is only polled (booked on a fill, or withdrawn).
         """
         from bot_program.models import AssetBotTrade
-        from bot_program.engine.broker_router import client_for_symbol
+        from bot_program.engine.broker_router import client_for_row
 
         closed = 0
         # Broker snapshots (resting orders, positions) read once per tick
@@ -1276,7 +1289,7 @@ class AssetBot(ABC):
         for trade in rows:
             try:
                 protected = bool((trade.metadata or {}).get("protected"))
-                client = client_for_symbol(self.user, trade.symbol, self.cfg)
+                client = client_for_row(trade, user=self.user, cfg=self.cfg)
 
                 # Money-safety: the entry path refuses to trade when a LIVE
                 # config falls back to PaperTrader; managing must refuse too.

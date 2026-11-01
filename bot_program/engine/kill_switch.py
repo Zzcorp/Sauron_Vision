@@ -9,7 +9,8 @@ must be reconciled/closed manually.
 
 Covers both execution stacks:
   - legacy crypto  : ``BotConfig`` / ``BotTrade``        (routed via ``_client_for``)
-  - multi-asset    : ``AssetBotConfig`` / ``AssetBotTrade`` (routed via ``client_for_symbol``)
+  - multi-asset    : ``AssetBotConfig`` / ``AssetBotTrade`` (routed via
+                     ``client_for_row``: each row's own carrier, 2026-11-01)
 """
 import logging
 from decimal import Decimal
@@ -715,7 +716,7 @@ def _close_legacy_trade(trade, now):
 
 def _close_asset_trade(trade, now):
     """Close one multi-asset AssetBotTrade, routing through the broker_router."""
-    from bot_program.engine.broker_router import client_for_symbol
+    from bot_program.engine.broker_router import client_for_row
 
     is_options = trade.asset_class == "options"
 
@@ -723,8 +724,12 @@ def _close_asset_trade(trade, now):
     # the broker's own tick (PaperTrader for paper trades, which enforces
     # quote freshness itself). Construction failing aborts this trade's
     # close exactly as a failed submit does — the caller records the error.
+    # THE ROW'S OWN CARRIER (2026-11-01, broker_router.client_for_row): a
+    # real eToro row on a lane stood down to paper, or whose class box was
+    # unticked, is flattened at eToro; today's routing handed it the
+    # simulator and the switch refused it.
     try:
-        client = client_for_symbol(trade.config.user, trade.symbol, trade.config)
+        client = client_for_row(trade)
     except Exception as e:  # noqa: BLE001
         logger.warning("[KILL SWITCH] broker route failed for %s: %s",
                        trade.symbol, e)

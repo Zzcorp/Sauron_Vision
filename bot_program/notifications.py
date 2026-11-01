@@ -2020,6 +2020,74 @@ def notify_unclaimed_position(user, *, symbols: list, venue: str,
     )
 
 
+def notify_given_up_held(user, *, symbols: list, venue: str) -> bool:
+    """Positions the broker still holds for closes Sauron gave up on
+    (2026-11-01, review): rows pending_closes._give_up left ERROR with no
+    close time, whose position the unknown-position sweep still reads at
+    the venue.
+
+    The sweep called them positions "no row claims" and said they were
+    "invisible to every exposure and daily-loss gate": false since the
+    exposure and open-risk gates count such a row while its venue may hold
+    it (portfolio.services.abandoned_still_held). Said here in true words:
+    Sauron stopped retrying the close and manages nothing of it (no
+    bot-side stop; the kill switch walks open and closing rows only), the
+    two gates count it, and it is closed at the broker.
+
+    The unclaimed alert's kind (an operator kind: no bot preference mutes
+    it) and its cadence: the venue and every symbol, sorted, are the
+    standing condition, said again after UNCLAIMED_REMIND_S while it
+    stands. Returns False when the bell already says it."""
+    names = sorted(str(x) for x in symbols)
+    listed = ", ".join(names[:6])
+    more = f" (+{len(names) - 6} more)" if len(names) > 6 else ""
+    n = len(names)
+    one = n == 1
+    it = "it" if one else "them"
+    title = (f"▲ {n} close{'' if one else 's'} Sauron gave up on, still "
+             f"held at {venue}")
+    body = (f"{listed}{more}. Sauron stopped retrying "
+            f"{'this close' if one else 'these closes'} and no longer "
+            f"manages {it}: no bot-side stop, and the kill switch does not "
+            f"flatten {it}. The exposure and open-risk gates count {it} "
+            f"while the broker holds {it}. Close {it} at the broker.")
+    said = f"{venue}|{','.join(names)}"
+    try:
+        from datetime import timedelta as _td
+        from django.utils import timezone as _tz
+        from alerts.models import Notification
+        recent = Notification.objects.filter(
+            user=user, title=title[:200], data__given_up=said,
+            created_at__gte=_tz.now() - _td(seconds=UNCLAIMED_REMIND_S),
+        ).exists()
+        if recent:
+            return False
+    except Exception as e:  # noqa: BLE001 — a dedupe failure must not mute it
+        logger.warning("given-up-close dedupe failed: %s", e)
+    items = [f"Venue: {venue}",
+             f"Symbols: {listed}{more}",
+             (f"{'A close' if one else 'Closes'} Sauron gave up on: no "
+              f"longer retried or managed"),
+             (f"Counted by the exposure and open-risk gates while the "
+              f"broker holds {it}"),
+             f"Close {it} at the broker"]
+    return dispatch_notification(
+        user, "unclaimed_position",
+        title=title,
+        body=body,
+        url="/positions/",
+        row_data={"items": items, "given_up": said,
+                  "mark": NOTIFY_MARKS["unclaimed_position"]},
+        telegram=_plain_message(
+            title, items, NOTIFY_MARKS["unclaimed_position"],
+            summary=(f"{venue} still holds "
+                     f"{'a position' if one else 'positions'} whose close "
+                     f"Sauron gave up on; nothing on the platform manages "
+                     f"{it}."),
+            button=("Open positions", "/positions/")),
+    )
+
+
 #: The venue a decay was measured on, in the reader's words (2026-10-08).
 DECAY_VENUE_WORDS = {"live": "real money",
                      "demo": "the eToro demo account (not money)",

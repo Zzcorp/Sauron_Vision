@@ -36,7 +36,9 @@ WHAT IT PROMISES
     the account's own world count; a live row that names no broker is
     counted apart, never guessed. A close Sauron stopped trying counts
     only while eToro's holdings still list it (the operator may have
-    closed it in the eToro app, as the close-abandoned alert asks).
+    closed it in the eToro app, as the close-abandoned alert asks), or
+    cannot say it is gone: since 2026-11-01 the gates' own predicate,
+    portfolio.services.abandoned_still_held, decides it.
   * Display only. Nothing on an order path reads this module: no gate,
     limit or size moves with it (tests.test_used_is_etoros pins that).
 
@@ -453,8 +455,9 @@ def account_used(user, *, now=None, positions=False) -> "dict | None":
     "total_own_age_t" (the total's age when it is more than
     TOTAL_OWN_AGE_S older than the cells, else ""), "sauron", "sauron_n",
     "stopped", "stopped_n" (a close given up on that eToro still lists, or
-    may: its holdings were never read), "stopped_gone_n" (one it no longer
-    lists, not counted), "outside" (None unread; below zero when Sauron's
+    may: its holdings cannot say, portfolio.services.abandoned_still_held),
+    "stopped_gone_n" (one a fresh list no longer shows, not counted),
+    "outside" (None unread; below zero when Sauron's
     rows count more than eToro holds), "since_n", "unstamped_n",
     "unconverted" [{"symbol", "currency"}], "held" (2026-11-01: the part
     of "outside" eToro holds as frozen cash that Sauron's WORKING rows do
@@ -644,10 +647,21 @@ def _split(user, world, ccy, at, acct=None) -> dict:
     holdings said, which understated what is outside Sauron by exactly
     the margin the split exists to show, and the Treasury contradicted
     itself (its divergence said "the broker no longer lists it"). Now it
-    is matched against the holdings snapshot the way the outside list
-    matches it (claim_holdings): listed, it is subtracted; not listed, it
-    is counted apart and not subtracted; holdings never read, it is
-    subtracted and said "may still be open"."""
+    is matched against the holdings snapshot: listed, it is subtracted;
+    not listed, it is counted apart and not subtracted; holdings that
+    cannot say, it is subtracted and said "may still be open".
+
+    THE GATES' OWN PREDICATE (2026-11-01). Since that date the exposure
+    and open-risk gates, the capital summary and the TAKE TRADE pool count
+    such a row too, through portfolio.services.abandoned_still_held, and
+    this part reads that one predicate: listed by its position id (else by
+    symbol and side), or a snapshot that cannot say (never read, older than
+    capital_truth.TRACKING_FRESH_SECONDS, of the demo world for a live
+    row; a demo row while the account trades live is no money), so the
+    split, the pages and the gates agree on every row. A stale snapshot
+    said "no longer listed" here while the gates kept counting; it says
+    "may still be open" now. Opened by Sauron is this walk's open rows
+    only, never capital_summary's used, so no row is counted in both."""
     out = {"sauron": 0.0, "sauron_n": 0, "stopped": 0.0, "stopped_n": 0,
            "stopped_gone_n": 0, "stopped_unread": False, "since_n": 0,
            "unstamped_n": 0, "unconverted": [], "claims": None}
@@ -657,9 +671,9 @@ def _split(user, world, ccy, at, acct=None) -> dict:
         logger.warning("etoro_used: the rows could not be read",
                        exc_info=True)
         return out
-    # The holdings' claims, read once and only when a close given up on
-    # needs them (the outside list reuses them).
-    claims, asked = None, False
+    # The predicate's rows, read once and only when a close given up on
+    # needs them.
+    still_held = None
     counted = []
     for t in rows:
         meta = t.metadata or {}
@@ -683,19 +697,23 @@ def _split(user, world, ccy, at, acct=None) -> dict:
         except Exception:  # noqa: BLE001 — one row is not the split
             continue
         if given_up:
-            if not asked:
-                claims, asked = _holdings_claims(user, acct), True
-            if claims is not None and t.pk not in claims["claimed"]:
+            if still_held is None:
+                still_held = _still_held(user)      # {pk: row}, or False
+            if still_held is False:
+                kept, listed = t, False             # unreadable: cannot say
+            else:
+                kept = still_held.get(t.pk)
+                listed = bool(getattr(kept, "held_listed", False))
+            if kept is None:
                 out["stopped_gone_n"] += 1
                 continue
-            out["stopped_unread"] = out["stopped_unread"] or claims is None
+            out["stopped_unread"] = out["stopped_unread"] or not listed
             out["stopped"] += work
             out["stopped_n"] += 1
         else:
             out["sauron"] += work
             out["sauron_n"] += 1
         counted.append(t)
-    out["claims"] = claims
     out["sauron"] = round(out["sauron"], 2)
     out["stopped"] = round(out["stopped"], 2)
     # NON-USD NOTIONAL IS NOT CONVERTED (2026-10-31). services.value_per_unit
@@ -712,6 +730,21 @@ def _split(user, world, ccy, at, acct=None) -> dict:
             seen.add(sym)
             out["unconverted"].append({"symbol": sym, "currency": quote})
     return out
+
+
+def _still_held(user):
+    """{pk: row} of the closes given up on that the venue may still hold,
+    each carrying `held_listed` (2026-11-01): the gates' own predicate,
+    portfolio.services.abandoned_still_held, imported from there so no gate
+    module ever reads this one. False when it cannot be read: every such
+    row then "may still be open", never "no longer listed"."""
+    try:
+        from portfolio.services import abandoned_still_held
+        return {t.pk: t for t in abandoned_still_held(user)}
+    except Exception:  # noqa: BLE001 — the split renders without it
+        logger.warning("etoro_used: the given-up rows could not be judged",
+                       exc_info=True)
+        return False
 
 
 def _claim_order(trade, s_at) -> int:

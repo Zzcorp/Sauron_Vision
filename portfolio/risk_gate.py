@@ -483,7 +483,9 @@ def open_capital_at_work(user, portfolio) -> dict:
     Both halves, because exposure genuinely lives in two places here:
     `portfolio.Position` and `bot_program.AssetBotTrade` (the bots, TAKE
     TRADE, the LONG/SHORT buttons). CLOSE_PENDING is counted — the broker
-    position is still on.
+    position is still on. So is a close Sauron gave up on (ERROR) that the
+    broker still holds (2026-11-01, services.abandoned_still_held), in
+    the live total and apart as abandoned_total / abandoned_n.
 
     LIVE and PAPER capital are counted apart and NEVER added. `paper` is not a
     property of a config an operator can reason about from the outside: a LIVE
@@ -519,7 +521,15 @@ def open_capital_at_work(user, portfolio) -> dict:
     """
     from bot_program.models import AssetBotTrade
     from portfolio.models import Position
-    from portfolio.services import value_per_unit
+    from portfolio.services import abandoned_still_held, value_per_unit
+
+    def _at_work(trade):
+        notional = (float(trade.entry_price or 0) * float(trade.qty or 0)
+                    * value_per_unit(trade))
+        return capital_at_work(
+            trade.asset_class, notional,
+            leverage=(trade.metadata or {}).get("leverage"),
+            carrier=str((trade.metadata or {}).get("broker") or ""))
 
     live_total = 0.0
     live_n = 0
@@ -529,18 +539,27 @@ def open_capital_at_work(user, portfolio) -> dict:
             config__user=user,
             status__in=("OPEN", "CLOSE_PENDING")).only(
                 "asset_class", "entry_price", "qty", "metadata", "paper"):
-        notional = (float(trade.entry_price or 0) * float(trade.qty or 0)
-                    * value_per_unit(trade))
-        at_work = capital_at_work(
-            trade.asset_class, notional,
-            leverage=(trade.metadata or {}).get("leverage"),
-            carrier=str((trade.metadata or {}).get("broker") or ""))
+        at_work = _at_work(trade)
         if trade.paper:
             paper_total += at_work
             paper_n += 1
             continue
         live_total += at_work
         live_n += 1
+
+    # A CLOSE SAURON GAVE UP ON THAT THE VENUE STILL HOLDS (2026-11-01,
+    # services.abandoned_still_held): a real row, ERROR, still listed by its
+    # carrier's holdings or with nothing fresh to say otherwise. It left
+    # this sum at ERROR while the position stayed open at the broker, and
+    # the ceiling read that much more room. Counted live, at entry, as its
+    # open siblings are, and carried out apart so a refusal can name it.
+    abandoned_total = 0.0
+    abandoned_n = 0
+    for trade in abandoned_still_held(user):
+        abandoned_total += _at_work(trade)
+        abandoned_n += 1
+    live_total += abandoned_total
+    live_n += abandoned_n
 
     # The legacy half is counted, AND its age is carried out with it.
     #
@@ -589,7 +608,9 @@ def open_capital_at_work(user, portfolio) -> dict:
             "live_total": round(live_total, 2), "live_n": live_n,
             "paper_total": round(paper_total, 2), "paper_n": paper_n,
             "legacy_total": round(legacy_total, 2), "legacy_n": legacy_n,
-            "legacy_oldest": oldest}
+            "legacy_oldest": oldest,
+            "abandoned_total": round(abandoned_total, 2),
+            "abandoned_n": abandoned_n}
 
 
 def realized_since(user, portfolio, *, hours: int = DAILY_LOSS_WINDOW_HOURS,
@@ -852,7 +873,14 @@ def open_risk_state(user, *, portfolio=None, adding: float = 0.0,
     (2026-10-01). Never raises on data.
 
     {"ok", "reason", "limit_pct", "limit_money", "open_risk", "adding",
-     "book_value", "rows", "unstopped", "book_source", "venue"}
+     "book_value", "rows", "unstopped", "book_source", "venue",
+     "abandoned"}
+
+    "abandoned" (2026-11-01, review) is how many of "rows" are closes
+    Sauron gave up on that the broker may still hold, carried apart as
+    open_capital_at_work carries abandoned_n: they are never a seat or an
+    open row of any book, and a reader that says what the gate counts (the
+    Horde's head) names them apart.
 
     The operator, with 25 live bots on one shared account: "15% de risque
     ouvert max". Each position risks a small share at its stop, and the
@@ -860,7 +888,9 @@ def open_risk_state(user, *, portfolio=None, adding: float = 0.0,
     open ones would lose together if every stop were hit: qty x |entry -
     stop| x value_per_unit over every OPEN / CLOSE_PENDING bot and manual
     row of the venue, plus the legacy portfolio.Position rows on the live
-    venue. A row without a stop counts its whole notional. `adding` is a
+    venue, plus on the live venue the closes Sauron gave up on that the
+    broker still holds (2026-11-01, services.abandoned_still_held). A row
+    without a stop counts its whole notional. `adding` is a
     candidate's own risk at its stop, so "would THIS entry put the book
     past it?" is asked of the final size. "venue": "live" (the default)
     or "paper", judged apart like every other book limit.
@@ -873,7 +903,7 @@ def open_risk_state(user, *, portfolio=None, adding: float = 0.0,
     state = {"ok": True, "limit_pct": limit_pct, "limit_money": None,
              "open_risk": 0.0, "adding": round(float(adding or 0.0), 2),
              "book_value": book, "rows": 0, "unstopped": 0, "reason": "",
-             "book_source": book_source, "venue": venue}
+             "book_source": book_source, "venue": venue, "abandoned": 0}
     if limit_pct is None:
         state["reason"] = "no open-risk limit set on the book"
         return state
@@ -883,7 +913,7 @@ def open_risk_state(user, *, portfolio=None, adding: float = 0.0,
                            f"nothing to measure it against")
         return state
     total = 0.0
-    from portfolio.services import value_per_unit
+    from portfolio.services import abandoned_still_held, value_per_unit
     bot_symbols = set()
     for t in AssetBotTrade.objects.filter(
             config__user=user, status__in=("OPEN", "CLOSE_PENDING"),
@@ -896,6 +926,19 @@ def open_risk_state(user, *, portfolio=None, adding: float = 0.0,
         state["rows"] += 1
         state["unstopped"] += 0 if stopped else 1
         bot_symbols.add(str(t.symbol).upper())
+    if venue == "live":
+        # A close Sauron gave up on that the broker still holds (2026-11-01,
+        # services.abandoned_still_held): it still loses at its stop, or its
+        # whole notional with none, if the market goes there. Added on top:
+        # it never hides a legacy row on its symbol below, so counting it
+        # can only tighten this sum.
+        for t in abandoned_still_held(user):
+            risk, stopped = _row_risk(t.qty, t.entry_price, t.stop_loss,
+                                      t.side, value_per_unit(t))
+            total += risk
+            state["rows"] += 1
+            state["abandoned"] += 1
+            state["unstopped"] += 0 if stopped else 1
     if venue == "live":
         from portfolio.models import Position
         # OPEN legacy rows only, and never one that mirrors a position a
@@ -1074,6 +1117,17 @@ def exposure_state(user, *, portfolio=None, adding: float = 0.0,
                 f" — {open_book['legacy_n']} of those are portfolio-book rows "
                 f"holding {share:,.2f}{age}. Nothing closes that book "
                 f"automatically, so check they are still real positions")
+        # The same for a close Sauron gave up on that the broker may still
+        # hold (2026-11-01): it is counted, and the refusal says so, or the
+        # operator reads a ceiling held by positions no open list shows.
+        # "May": its holdings list it, or cannot say it is gone.
+        if (open_book.get("abandoned_n") and venue != "paper"
+                and open_book["total"] == open_book.get("live_total")):
+            state["reason"] += (
+                f" — {open_book['abandoned_n']} of those are closes Sauron "
+                f"gave up on that the broker may still hold "
+                f"({open_book['abandoned_total']:,.2f}); close them at the "
+                f"broker")
         return state
 
     state["reason"] = (f"{open_book['total']:,.2f} of {cap:,.2f} committed "
