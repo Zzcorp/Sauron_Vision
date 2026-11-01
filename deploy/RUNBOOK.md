@@ -556,6 +556,24 @@ It deletes only the public feed's off-grid 4h rows that overlap an
 on-grid row of the same instrument; off-grid history with nothing beside
 it stays, and a venue's own bars are never touched.
 
+**Once more, after the update of 2026-11-01** (the clean-up also clears an
+old grid beside another old grid): the CET-zone indices (DAX40, CAC40,
+IBEX35, STOXX50) had two old grids, both off the UTC grid (03, 07, 11...
+and 02, 06, 10... UTC), and where both were stored before the new grid's
+window the command above listed neither. Run the same two commands again
+(whether or not the first clean-up already ran). Over each stretch where
+two old grids overlap, it keeps one grid (the grid of the bars just before
+and after the stretch, else the later anchor: 03, 07, 11... UTC in the CET
+zone), one session at a time: a session where a grid starts or stops
+keeps the other grid's bars whole, so the series changes grid between two
+sessions and no hour loses its bar. It deletes a bar only when every hour
+of it is in a bar that stays, or in a period the kept grid shows empty at
+a session's edge; the dry run names the kept grid and why, line by line.
+A session neither grid holds whole (both stop inside it) is listed as
+left, never deleted, and then the command does not say "No off-grid 4h
+duplicates of the public feed.". A venue's bars, and off-grid history
+with nothing overlapping it, stay.
+
 ## 10. Restoring
 
 Dumps live inside the `backups` volume, not on the host, so copy one out
