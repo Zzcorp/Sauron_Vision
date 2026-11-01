@@ -500,11 +500,20 @@ def resolve_exit_fill(trade, result, *, mark, mark_info=None,
     # that name is the module-level function, and a parameter
     # shadowing it here is a trap for the next edit.
     _quality = dict(mark_info or {})
+    # THE AGE OF A CACHED MARK (2026-11-01) rides apart from the delay: it
+    # is written beside a booking the cached mark priced, and an age an
+    # earlier attempt left is cleared by any other booking.
+    _cached_age_s = _quality.pop(MARK_CACHED_AGE_KEY, None)
     if source == EXIT_SOURCE_MARK and _quality:
         meta.update(_quality)
     else:
         meta[MARK_DELAY_MINUTES_KEY] = None
         meta[MARK_DELAYED_KEY] = None
+    if source == EXIT_SOURCE_MARK and _cached_age_s is not None:
+        meta[MARK_CACHED_AGE_KEY] = _cached_age_s
+    elif (getattr(trade, "metadata", None) or {}).get(
+            MARK_CACHED_AGE_KEY) is not None:
+        meta[MARK_CACHED_AGE_KEY] = None
     if order_in_doubt(result):
         # THE VENUE WOULD NOT SAY WHETHER THIS CLOSE EXISTS. Written here,
         # where the answer arrives, because the pass that learns of the doubt
@@ -536,6 +545,16 @@ def resolve_exit_fill(trade, result, *, mark, mark_info=None,
 #: which is not the same as real-time and must not be written as 0.
 MARK_DELAY_MINUTES_KEY = "mark_delayed_minutes"
 MARK_DELAYED_KEY = "mark_delayed"
+#: THE AGE OF A CACHED MARK (2026-11-01, engine/etoro_rates): the seconds
+#: between eToro's rates answer and the booking, when the mark a close
+#: booked was read off the shared rates cache (at most MARK_MAX_AGE_S, or
+#: on a market the shut-market cadence holds its half hour,
+#: etoro_rates.shut_max_age): the manage tick's time stop, whose mark the
+#: batched snapshot priced (AssetBot._cached_mark_info; a care close is
+#: decided and booked on the wire's read). Written only beside a booking
+#: that mark priced, cleared when a later attempt books another; never the
+#: stale-print age (exit_mark_age_s, venue_mark), which keeps its rules.
+MARK_CACHED_AGE_KEY = "exit_mark_cached_age_s"
 
 
 def mark_quality(tick) -> dict:
@@ -568,6 +587,12 @@ def mark_with_quality(trade, client):
     Exists because three paths here book the mark AS the exit price, and a
     number whose staleness nobody recorded cannot be told afterwards from a
     live print. `_mark_price` keeps its own signature and delegates.
+
+    ALWAYS THE WIRE (2026-11-01): the drain's mark is a P0 read between
+    two closes, so it never reads the shared rates cache
+    (engine/etoro_rates), which the plan allowed it: a cache read there is
+    a round trip a stalled cache could hold the next close behind
+    (engine/etoro_budget's rule for P0).
     """
     if trade.asset_class == "options":
         # The premium reader owns its own sourcing and reports no delay.
