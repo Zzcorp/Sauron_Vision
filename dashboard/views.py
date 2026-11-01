@@ -4227,11 +4227,24 @@ def admin_dashboard(request):
     # way the broker credential forms are.
     from bot_program.capital_truth import (allocate_shares, followers_of,
                                            share_label, tracks_broker)
-    from bot_program.manual_trade import EXECUTABLE_CLASS, manual_config_for
+    from bot_program.manual_trade import (EXECUTABLE_CLASS, LANE_KNOBS,
+                                          LANE_KNOB_WORDS, lane_knob_defaults,
+                                          lane_knobs, manual_config_for)
     try:
         _plan = allocate_shares(followers_of(request.user))["plan"]
     except Exception:  # noqa: BLE001 — the card must render regardless
         _plan = {}
+
+    def _knob_rows(lane):
+        """The lane's own knobs (2026-10-31): stored value, or "" and the
+        default it falls back to, for the card's PIN-guarded form."""
+        stored, defaults = lane_knobs(lane), lane_knob_defaults(lane)
+        return [{"key": k, "words": LANE_KNOB_WORDS[k],
+                 "value": "" if stored[k] is None else f"{stored[k]:g}",
+                 "default": ("—" if defaults[k] is None
+                             else f"{defaults[k]:g}")}
+                for k in LANE_KNOBS]
+
     context["manual_lanes"] = [
         {"asset_class": cls, "mode": lane.mode,
          "capital": float(lane.capital),
@@ -4247,7 +4260,8 @@ def admin_dashboard(request):
          "tracks": bool((lane.extras or {}).get("capital_tracks_broker")),
          # The SHARE of the account this lane takes when it follows —
          # explicit, or the automatic split it currently gets.
-         "share": share_label(lane, _plan) if tracks_broker(lane) else ""}
+         "share": share_label(lane, _plan) if tracks_broker(lane) else "",
+         "knobs": _knob_rows(lane)}
         for cls in sorted(set(EXECUTABLE_CLASS.values()))
         for lane in [manual_config_for(request.user, cls)]
     ]
@@ -4907,7 +4921,8 @@ def take_trade_execute(request, signal_id):
                              stop=body["stop"],
                              target=body["target"],
                              leverage=body["leverage"],
-                             pin_ok=pin_ok)
+                             pin_ok=pin_ok,
+                             dup_seen=body["dup_seen"])
     res = _ticket_pin_words(res, pin_ok)
     # THE COUNCIL (2026-10-08): a sitting the owner asked about is linked
     # to the trade AFTER it was taken. It can only follow a trade, never
@@ -5016,6 +5031,16 @@ def _parse_trade_body(request):
         if council_session is not None and council_session <= 0:
             council_session = None
     parsed["council_session"] = council_session
+
+    # THE HOLDERS THE TICKET SHOWED (2026-10-31): its preview's
+    # duplicate.holder_ids, sent back so the send refuses a bot that opened
+    # the same bet since (manual_trade._execute). Absent is None — nothing
+    # shown; a list keeps its strings and drops anything else.
+    raw_seen = body.get("dup_seen")
+    if raw_seen is not None and not isinstance(raw_seen, list):
+        return None, "dup_seen must be a list"
+    parsed["dup_seen"] = (None if raw_seen is None else
+                          [s for s in raw_seen if isinstance(s, str)][:50])
 
     return {"close_ids": close_ids,
             "side": str(body.get("side", "")).upper(),
@@ -5335,7 +5360,8 @@ def asset_trade_execute(request, symbol):
                               stop=body["stop"],
                               target=body["target"],
                               leverage=body["leverage"],
-                              pin_ok=pin_ok)
+                              pin_ok=pin_ok,
+                              dup_seen=body["dup_seen"])
     res = _ticket_pin_words(res, pin_ok)
     # THE COUNCIL (2026-10-08): linked after the trade, as above.
     if isinstance(res, dict) and res.get("ok") and body.get("council_session"):
@@ -5391,6 +5417,49 @@ def take_trade_arm(request):
                                                   "LIVE",
                                        nothing="the lane stays as it was"),
                    pin_required=True, logged_out=bool(v.logged_out))
+    return JsonResponse(res)
+
+
+@login_required
+def take_trade_lane_knobs(request):
+    """POST {asset_class, pin, risk_per_trade_pct?, max_single_position_pct?,
+    max_notional_fraction?} — the manual lane's own knobs, the operator's
+    own lanes (2026-10-31). A number sets a knob, "" removes it (its
+    default stands), an absent key is left alone. Always the trading PIN
+    (an ACT door, core/trading_pin.py), asked after the numbers are
+    checked; every money question is manual_trade.set_lane_knobs's."""
+    from django.http import HttpResponseNotAllowed, JsonResponse
+
+    from bot_program.manual_trade import LANE_KNOBS, set_lane_knobs
+
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    import json as _json
+    try:
+        body = _json.loads(request.body.decode() or "{}")
+    except ValueError:
+        return JsonResponse({"error": "Body must be JSON"}, status=400)
+    if not isinstance(body, dict):
+        return JsonResponse({"error": "Body must be a JSON object"},
+                            status=400)
+    from core.trading_pin import ACT, refusal_of, sentence
+    from dashboard.views_close import _pin_ok as _trading_pin_ok
+    pin_ok = _trading_pin_ok(request, body, door=ACT,
+                             act="set the manual lane's knobs")
+    knobs = {k: v for k, v in body.items()
+             if k not in ("asset_class", "pin")}
+    res = set_lane_knobs(request.user,
+                         asset_class=str(body.get("asset_class", "") or ""),
+                         knobs=knobs, pin_ok=pin_ok,
+                         who=request.user.username)
+    v = refusal_of(pin_ok)
+    if v is not None and isinstance(res, dict) and res.get("error"):
+        res = dict(res, error=sentence(v, subject="Setting the manual lane's "
+                                                  "knobs",
+                                       nothing="nothing was saved"),
+                   pin_required=True, logged_out=bool(v.logged_out))
+    if isinstance(res, dict) and res.get("ok"):
+        res["keys"] = list(LANE_KNOBS)
     return JsonResponse(res)
 
 

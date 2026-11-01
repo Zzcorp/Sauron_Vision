@@ -23,6 +23,8 @@ from decimal import Decimal
 
 from django.utils import timezone
 
+from bot_program.etoro_cells import one_read_per_pass
+
 logger = logging.getLogger(__name__)
 
 #: How long a row that just CLOSED keeps claiming its symbol for the sweep
@@ -278,8 +280,9 @@ def _state_key(client, asset_class: str) -> tuple:
     in one portfolio and `_broker_open_symbols` never reads the class, so a
     key per (class, venue) asked GET /portfolio once per class: with forex,
     stock, commodity and crypto armed, four reads where one answers all,
-    every 15 minutes around the clock. Other venues keep the class in the
-    key (options and sec-typed books read differently per class)."""
+    every pass around the clock (every 5 minutes since 2026-10-31). Other
+    venues keep the class in the key (options and sec-typed books read
+    differently per class)."""
     venue = type(client).__name__
     if venue == "EtoroTrader":
         world = getattr(client, "_world", None)
@@ -287,6 +290,7 @@ def _state_key(client, asset_class: str) -> tuple:
     return (asset_class, venue)
 
 
+@one_read_per_pass()                # one account read when the walk ends
 def reconcile_user(user) -> dict:
     """Reconcile one user's open AssetBotTrade rows against broker state.
 
@@ -811,6 +815,11 @@ def _close_as_orphan(trade, *, venue_said: str = "",
             return False
         trade.save(update_fields=["exit_price", "pnl", "status", "closed_at",
                                     "reason", "metadata"])
+        # The account is read again once this booking commits (2026-10-31,
+        # bot_program.etoro_cells): the venue closed it, and the cash that
+        # freed is what the next order is judged on. Fenced inside.
+        from bot_program import etoro_cells
+        etoro_cells.refresh_for_trade(trade, why="venue close")
 
     # Grade it. The module docstring has always claimed this happened and it
     # never did: outcome was hardcoded to "manual_close" and realized_r was
@@ -1147,8 +1156,13 @@ def reconcile_unknown_positions(user) -> dict:
     return out
 
 
+@one_read_per_pass()
 def reconcile_all_users() -> dict:
-    """Walk every user with at least one open live AssetBotTrade."""
+    """Walk every user with at least one open live AssetBotTrade.
+
+    The venue closes this walk books ask the eToro account to be read
+    again once the walk has finished, one read per account however many
+    rows it closed (2026-10-31, bot_program.etoro_cells)."""
     from django.contrib.auth.models import User
     from .models import AssetBotTrade
 

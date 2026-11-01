@@ -282,7 +282,7 @@ DEFAULT_COMPONENTS = [
     # account, every follower's capital IS this reading times its share, and
     # the entry path freezes a follower whose reading has gone stale.
     {"key": "broker_account_sync", "name": "Broker Account Sync (Saxo · eToro · IBKR)",
-     "description": "Caches equity and holdings for every keyed Saxo, eToro and IBKR account every 15 min — the source of every 'as the broker sees it' cell. ONE switch for all THREE walks: unticking it stops Saxo and eToro too. Every following pool's capital is this reading times its share.",
+     "description": "Caches equity and holdings for every keyed Saxo, eToro and IBKR account (eToro every 5 min, the others every 15) — the source of every 'as the broker sees it' cell. ONE switch for all THREE walks: unticking it stops Saxo and eToro too. Every following pool's capital is this reading times its share.",
      "category": "pipeline"},
 
     # ── Share allocator ───────────────────────────────────────

@@ -186,14 +186,20 @@ class TheManualLaneTests(TestCase):
                     asset_class="crypto"))
         out = preview_asset_trade(self.user, self.inst, "BUY")
         self.assertNotIn("error", out)
+        # and not even a warning: the real book is not this ticket's book
+        self.assertTrue(out["duplicate"]["ok"], out["duplicate"])
 
-    def test_a_paper_holder_still_refuses_a_paper_ticket(self):
+    def test_a_paper_holder_still_warns_a_paper_ticket(self):
+        """Was ..._still_refuses_...: since 2026-10-31 the ticket warns
+        (tests/test_same_asset_ticket.py). The venue rule pinned here is
+        unchanged: the paper holder is judged on the paper book."""
         from bot_program.manual_trade import preview_asset_trade
         holder = _config(self.user, asset_class="crypto", name="momentum")
         _open(holder, "BTCUSD", rule="golden_cross", asset_class="crypto")
         out = preview_asset_trade(self.user, self.inst, "BUY")
+        self.assertNotIn("error", out, out)
         self.assertIn("already on the paper book via golden_cross",
-                      out.get("error", ""))
+                      out["duplicate"]["reason"])
 
 
 class TheBotPathTests(TestCase):

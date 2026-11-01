@@ -1497,8 +1497,10 @@ class TheWatchFollowsTheSchedule(SimpleTestCase):
             "reconcile-asset-bot-trades"]["schedule"])[0]
         text = self._watch()
         # The reconcile's cadence moved: rewrite "The watch" with it.
-        self.assertEqual(words, "every 15 min")
-        self.assertIn("Every 15 minutes, around the clock", text)
+        # 2026-10-31: every 5 minutes (the operator: "wait 15min to make
+        # another trade"), config/celery.py.
+        self.assertEqual(words, "every 5 min")
+        self.assertIn("Every 5 minutes, around the clock", text)
         self.assertNotIn("13:00", text)
         self.assertNotIn("market hours", text)
 

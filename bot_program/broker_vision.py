@@ -49,8 +49,31 @@ BROKER_ROWS = (
 ROUTABLE_CLASSES = ("stock", "etf", "forex", "commodity", "crypto")
 
 #: Past this, a reading is old enough that the page says so. Not a limit —
-#: the sync runs every 900 s, so anything past two cycles has missed one.
+#: the IBKR and Saxo walks run every 900 s, so anything past two cycles has
+#: missed one (the eToro walk, every 300 s since 2026-10-31, six).
 STALE_AFTER_S = 1900
+
+#: Each broker's account walk, by its beat entry (config/celery.py).
+SYNC_BEATS = {"ibkr": "sync-broker-account",
+              "saxo": "sync-saxo-accounts",
+              "etoro": "sync-etoro-accounts"}
+
+
+def sync_minutes(kind: str) -> int:
+    """How often `kind`'s account walk runs, in whole minutes, read off the
+    beat itself (2026-10-31: the eToro walk moved to 300 s, the others
+    kept 900 s, and "every 15" written once for all three became false for
+    one). 15 when the beat cannot be read."""
+    try:
+        from config.celery import app
+        from core.day_of_sauron import schedule_words
+        entry = app.conf.beat_schedule.get(SYNC_BEATS.get(str(kind), ""))
+        seconds = schedule_words(entry["schedule"])[1] if entry else None
+        if seconds and seconds > 0:
+            return max(1, int(round(seconds / 60.0)))
+    except Exception:  # noqa: BLE001 — a sentence, never a failure
+        pass
+    return 15
 
 
 def _age(when) -> "int | None":
@@ -397,14 +420,15 @@ def vision(user) -> dict:
                 blockers.append(
                     f"{r['name']}: {_live} live position(s) are attributed to "
                     f"it and its last reading is {_age_min} minutes old — "
-                    f"the sync runs every 15, so the platform has been "
+                    f"the sync runs every {sync_minutes(r['kind'])}, so the "
+                    f"platform has been "
                     f"blind to that money for {_age_min // 60} hours. "
                     f"Whatever section 6 says it agrees with is a snapshot, "
                     f"not the broker. {r['session']}.")
             else:
                 notes.append(f"{r['name']}: the equity reading is "
                              f"{_age_min} minutes old; the sync runs "
-                             f"every 15.")
+                             f"every {sync_minutes(r['kind'])}.")
     for d in div:
         if not d["known"] and d["platform_n"]:
             blockers.append(

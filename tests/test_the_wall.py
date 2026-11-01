@@ -749,9 +749,11 @@ class WallClaimsFollowTheCodeTests(TestCase):
         beat = app.conf.beat_schedule
         self.assertEqual(schedule_words(beat["sauron-mind-synthesize"]["schedule"])[0], "1 h")
         self.assertIn("Every hour a structured world snapshot", self.body)
+        # 2026-10-31: the reconcile moved to every 5 minutes (the operator:
+        # "wait 15min to make another trade"); the pillar moved with it.
         self.assertEqual(schedule_words(beat["reconcile-asset-bot-trades"]["schedule"])[0],
-                         "every 15 min")
-        self.assertIn("every 15 min, around the clock", self.body)
+                         "every 5 min")
+        self.assertIn("every 5 min, around the clock", self.body)
 
     def test_no_retired_source_or_server_is_advertised(self):
         for stale in ("Reddit / StockTwits", "IBKR / Twelve Data",

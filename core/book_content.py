@@ -323,11 +323,11 @@ CHAPTERS = [
                       "the platform. A trade opened by hand keeps the profit "
                       "locks and is never cut by a rule.")},
             {"title": "The watch",
-             "text": ("Every 15 minutes, around the clock, Sauron compares "
+             "text": ("Every 5 minutes, around the clock, Sauron compares "
                       "what it holds with what the broker holds: forex, "
                       "commodities and crypto trade through the night, and "
                       "a stop the broker fires in the night is seen within "
-                      "the quarter hour. That is one of two ways it learns that "
+                      "five minutes. That is one of two ways it learns that "
                       "a stop or a target was hit; the five-minute turn also "
                       "compares the price with both.")},
             {"title": "The close",
