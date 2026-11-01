@@ -30,6 +30,17 @@ reply (`series`), the quote's preview and the hero (`quote_facts`):
   * TODAY'S FORMING DAILY CANDLE from the same feed's intraday bars, and a
     bar that cannot have traded marked, never hidden
     (market_data.bar_shape).
+  * FOLDED FRAMES (2026-11-01, the operator: "augmenter la division des
+    chart ajout de 10min etc..."). A candle no feed stores or serves is
+    folded from a finer one of the SAME series: 2h from the 1h rows
+    choose() picks, on the fixed UTC grid; the weekly candle from the
+    daily series' days, by ISO week (Monday 00:00 UTC), each day in the
+    week of its session; 10 min from the keyless feed's 5 min bars
+    (neither Yahoo nor Binance has 10 min). A bucket is its first open,
+    highest high, lowest low, last close and summed volume; one holding a
+    suspect bar inherits its marking; the partial last one is the forming
+    bar. This week's candle takes the live tick only while it holds
+    today's forming day, as the daily view's last candle does.
 
 Display only: the engine reads bars through its own loaders, never this.
 """
@@ -68,6 +79,36 @@ INTRADAY_LIMIT = 240
 MINUTE_CACHE_S = 60
 #: The gap between the quote and the venue's last price the hero names.
 GAP_WORDS_PCT = 0.05
+
+# ── The chart's frames (2026-11-01) ─────────────────────────────────────
+#: The chart's timeframe on the wire -> its interval. "1min" etc., never a
+#: bare "1m": on this API "1m" has always meant one month of daily candles.
+WIRE_INTERVALS = {"1min": "1m", "5min": "5m", "10min": "10m",
+                  "15min": "15m", "30min": "30m", "1h": "1h", "2h": "2h",
+                  "4h": "4h"}
+#: The weekly candle on the wire: Yahoo's spelling, apart from "1w", the
+#: range of daily candles the toolbar has always had.
+WEEKLY = "1wk"
+#: An intraday frame's seconds.
+FRAME_SECONDS = {"1m": 60, "5m": 300, "10m": 600, "15m": 900, "30m": 1800,
+                 "1h": 3600, "2h": 7200, "4h": 14400}
+#: Frames drawn from STORED rows, and the stored frame each reads: nothing
+#: writes 2h, so it is folded from the same feed's 1h rows.
+STORED_FROM = {"1h": "1h", "2h": "1h", "4h": "4h"}
+#: Live frames a keyless feed has no interval for, and the finer one they
+#: are folded from (_native).
+LIVE_FOLD = {"10m": "5m"}
+#: Binance's kline intervals (GET /api/v3/klines). Yahoo's are
+#: market_data.public_feed.YF_NATIVE, and its client resamples the
+#: RESAMPLE_FROM frames from 1h itself.
+BINANCE_INTERVALS = frozenset({"1s", "1m", "3m", "5m", "15m", "30m", "1h",
+                               "2h", "4h", "6h", "8h", "12h", "1d", "3d",
+                               "1w", "1M"})
+#: How far back the weekly view reads days: five years of weeks, so SMA50
+#: and SMA200 have weeks to say something on.
+WEEKLY_DAYS = 1820
+#: A frame in the legend's words.
+FRAME_WORDS = {"5m": "5 min", "10m": "10 min"}
 
 
 def family(tag) -> str:
@@ -350,12 +391,20 @@ def _bar(p, time_value):
             "volume": float(p.volume) if p.volume else 0}
 
 
-def _finish(bars, src):
+def _finish(bars, src, fold_with=None):
     """Drop the bars that cannot be drawn, mark the suspect ones, and say
-    both in the legend's notes."""
+    both in the legend's notes.
+
+    With `fold_with` (2026-11-01) the bars are marked FIRST, then folded:
+    a bucket holding a suspect bar inherits the marking (`fold`), so a bad
+    hour whose 2h bucket's prices happen to look possible is still drawn
+    hollow and named. The note counts the bars drawn."""
     from market_data.bar_shape import finite, mark_suspects
     bars, dropped = finite(bars)
-    marked = mark_suspects(bars, src["label"])
+    mark_suspects(bars, src["label"])
+    if fold_with is not None:
+        bars = fold_with(bars)
+    marked = sum(1 for b in bars if b.get("suspect"))
     if marked:
         # "on candle charts": a line or area chart draws the close alone
         # (2026-10-31).
@@ -367,27 +416,143 @@ def _finish(bars, src):
     return bars
 
 
+# ── Folded frames (2026-11-01) ────────────────────────────────────────
+
+def _stamp(t) -> str:
+    """A bar's time in the legend's words: a date as it is, epoch seconds
+    as 'YYYY-MM-DD HH:MM UTC'."""
+    if isinstance(t, (int, float)):
+        return f"{datetime.fromtimestamp(t, tz=dt_tz.utc):%Y-%m-%d %H:%M} UTC"
+    return str(t)
+
+
+def fold(bars, key, part) -> list:
+    """Chart bars (oldest first) folded into buckets: `key(time)` names
+    each bar's bucket, and the bucket is drawn at that time. Its open is
+    the first bar's, its high the highest, its low the lowest, its close
+    the last bar's and its volume the sum (2026-11-01).
+
+    One feed in, one feed out: the caller hands the bars of ONE series. A
+    bucket holding a bar already marked suspect (mark_suspects) inherits
+    its words and says which `part` it was ("1h bar"): folded with a sound
+    neighbour, a bar whose high sits under its open makes a bucket whose
+    prices look possible. A partial bucket is drawn as it stands: the last
+    one is the forming bar, and a cut first one is the caller's to drop."""
+    groups = []
+    for b in bars:
+        k = key(b["time"])
+        if not groups or groups[-1][0] != k:
+            groups.append((k, []))
+        groups[-1][1].append(b)
+    out = []
+    for k, members in groups:
+        bar = {"time": k, "open": members[0]["open"],
+               "high": max(m["high"] for m in members),
+               "low": min(m["low"] for m in members),
+               "close": members[-1]["close"],
+               "volume": sum(float(m.get("volume") or 0) for m in members)}
+        odd = [m for m in members if m.get("suspect")]
+        if odd:
+            more = f" and {len(odd) - 1} more" if len(odd) > 1 else ""
+            bar["suspect"] = (f"{odd[0]['suspect']} (the {part} of "
+                              f"{_stamp(odd[0]['time'])}{more})")
+        out.append(bar)
+    return out
+
+
+def _on_grid(span, part, limit=None):
+    """A fold onto the fixed UTC grid of `span` seconds (00:00, 02:00 ...
+    for 2h, from the epoch whatever the season), keeping the newest `limit`
+    buckets. Read `limit` buckets' worth of rows, a first bucket the read
+    cut short always makes one bucket too many, so the newest `limit` never
+    hold it."""
+    def run(bars):
+        out = fold(bars, lambda t: int(t) - int(t) % span, part)
+        return out[-limit:] if limit else out
+    return run
+
+
+def _native(fam, interval) -> bool:
+    """Whether keyless feed `fam` serves `interval` itself (2026-11-01).
+    Yahoo serves market_data.public_feed.YF_NATIVE and resamples
+    RESAMPLE_FROM from 1h itself; Binance serves its kline intervals.
+    Neither serves 10 minutes: asked, Yahoo answers nothing and Binance
+    refuses the request."""
+    if fam == "binance":
+        return interval in BINANCE_INTERVALS
+    from market_data.public_feed import RESAMPLE_FROM, YF_NATIVE
+    return interval in YF_NATIVE or interval in RESAMPLE_FROM
+
+
+def _monday(when):
+    """00:00 UTC of the Monday of `when`'s ISO week."""
+    day = when.astimezone(dt_tz.utc).replace(hour=0, minute=0, second=0,
+                                            microsecond=0)
+    return day - timedelta(days=day.weekday())
+
+
+def week_of(day_label) -> str:
+    """The ISO week of a 'YYYY-MM-DD' day, as its Monday's 'YYYY-MM-DD'."""
+    d = datetime.strptime(str(day_label)[:10], "%Y-%m-%d")
+    return (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
+
+
+def utc_day(stamp) -> str:
+    """A daily row's label on the daily view: the UTC date of its stamp
+    (C1's label, unchanged)."""
+    return stamp.strftime("%Y-%m-%d")
+
+
+def session_day(stamp) -> str:
+    """The trading day a daily row is the bar of, 'YYYY-MM-DD'
+    (2026-11-01): its stamp rounded to the nearest UTC midnight.
+
+    Yahoo stamps a daily bar at midnight in the exchange's own zone, and
+    the EOD writer stores that instant as it is (yfinance_adapter
+    .save_history_to_db): DAX40's Monday sits at Sunday 22:00 or 23:00
+    UTC, the Nikkei's at Sunday 15:00, the ASX's at Sunday 13:00 or 14:00,
+    EURUSD=X's in British Summer Time at Sunday 23:00. By the UTC date of
+    the stamp, Monday's session was folded into the week before. Rounded,
+    a midnight from UTC-11 to UTC+12 lands on its own date: every index
+    in public_feed.YF_SYMBOL_MAP (the ASX's UTC+11 summer is the furthest
+    east) and every forex day; a market at UTC+13 (New Zealand's summer)
+    would not, and none is charted. A feed that stamps 00:00 UTC (Binance,
+    Alpha Vantage) or New York's midnight (04:00 or 05:00 UTC) keeps its
+    date."""
+    return (stamp.astimezone(dt_tz.utc) + timedelta(hours=12)) \
+        .strftime("%Y-%m-%d")
+
+
 def intraday_series(instrument, interval, *, route="",
                     limit=INTRADAY_LIMIT, now=None):
     """(bars, source) for an intraday frame. 1h and 4h are the stored
     rows of one feed; finer frames are fetched live from the keyless feed
     (never stored: a minute table for a chart click is not worth its
-    rows) and kept a minute. `time` is epoch seconds."""
+    rows) and kept a minute. `time` is epoch seconds.
+
+    2h and 10 min (2026-11-01). Nothing stores 2h: it is folded from the
+    1h rows of the feed choose() picks for 1h, with the same hole cut,
+    notes and suspect marks, on the fixed UTC grid; the newest `limit`
+    buckets are read as twice as many hours. Neither keyless feed serves
+    10 min: it is folded from the feed's 5 min bars, kept a minute under
+    its own key. 30 min is both feeds' own interval."""
     from market_data.models import PriceData
 
     now = now or datetime.now(dt_tz.utc)
     notes = []
-    if interval in ("1h", "4h"):
-        fams = _families(instrument, interval)
-        fam = choose(instrument, interval, fams, route, now, notes)
+    base = STORED_FROM.get(interval)
+    if base:
+        ratio = FRAME_SECONDS[interval] // FRAME_SECONDS[base]
+        fams = _families(instrument, base)
+        fam = choose(instrument, base, fams, route, now, notes)
         if fam:
             qs = PriceData.objects.filter(instrument=instrument,
-                                          timeframe=interval,
+                                          timeframe=base,
                                           source__in=fams[fam]["tags"])
             cut = _venue_hole(fams, fam, route)
             if cut is not None:
                 qs = qs.filter(timestamp__gt=cut)
-            rows = list(qs.order_by("-timestamp")[:limit])
+            rows = list(qs.order_by("-timestamp")[:limit * ratio])
             rows.reverse()
             bars = [_bar(p, int(p.timestamp.timestamp())) for p in rows]
             if rows and cut is not None and fams[fam]["oldest"] <= cut:
@@ -403,35 +568,57 @@ def intraday_series(instrument, interval, *, route="",
                         label(f, instrument) for f in older)
                         + " are not drawn")
             if rows:
-                newer = _newer_note(instrument, interval, fams, fam,
+                newer = _newer_note(instrument, base, fams, fam,
                                     rows[-1].timestamp)
                 if newer:
                     notes.append(newer)
+            fold_with = None
+            if ratio > 1:
+                fold_with = _on_grid(FRAME_SECONDS[interval], f"{base} bar",
+                                     limit)
+                if rows:
+                    notes.insert(0, f"{interval} candles folded from "
+                                    f"{label(fam, instrument)}'s {base} "
+                                    f"candles, on the UTC grid")
             src = _source(instrument, fam, route, notes)
-            return _finish(bars, src), src
+            return _finish(bars, src, fold_with), src
         # No stored rows (an instrument outside the fleet and the
         # watchlist): the live fetch below.
 
     fam = public_family(instrument.asset_class)
     src = _source(instrument, fam, route, notes)
-    raw = _live_frame(instrument, interval, limit)
+    fetch, ratio = interval, 1
+    if interval in LIVE_FOLD and not _native(fam, interval):
+        fetch = LIVE_FOLD[interval]
+        ratio = FRAME_SECONDS[interval] // FRAME_SECONDS[fetch]
+    raw = _live_frame(instrument, fetch, limit * ratio, key=interval)
     if raw is None:
         return [], src
     bars, dropped = raw
     if dropped:
         notes.append(f"{dropped} unreadable bar{'s' if dropped > 1 else ''}"
                      f" left out")
-    return _finish([dict(b) for b in bars], src), src
+    fold_with = None
+    if ratio > 1:
+        part = FRAME_WORDS.get(fetch, fetch)
+        fold_with = _on_grid(FRAME_SECONDS[interval], f"{part} bar", limit)
+        if bars:
+            notes.insert(0, f"{FRAME_WORDS.get(interval, interval)} candles "
+                            f"folded from {label(fam, instrument)}'s {part} "
+                            f"bars, on the UTC grid")
+    return _finish([dict(b) for b in bars], src, fold_with), src
 
 
-def _live_frame(instrument, interval, limit):
+def _live_frame(instrument, interval, limit, key=None):
     """(bars, dropped) of the keyless feed, kept a minute; None when the
-    class has no keyless feed."""
+    class has no keyless feed. `key` (2026-11-01): the chart frame the
+    bars are kept for, when it is not `interval` (10 min keeps the 5 min
+    bars it folds apart from the 5 min view's)."""
     from django.core.cache import cache
 
     from market_data.bar_shape import finite
 
-    key = f"chart:v2:{instrument.symbol}:{interval}"
+    key = f"chart:v2:{instrument.symbol}:{key or interval}"
     try:
         hit = cache.get(key)
     except Exception:  # noqa: BLE001
@@ -483,10 +670,110 @@ def daily_series(instrument, *, since=None, limit=None, route="", now=None):
     candle is built from the same feed's intraday rows of today, labelled
     forming: the default daily view ended on yesterday all day while the
     hero moved (Yahoo's EOD pass runs at 22:30 UTC)."""
-    from market_data.models import PriceData
-
     now = now or datetime.now(dt_tz.utc)
     notes = []
+    bars, fam = _daily_bars(instrument, since=since, route=route, now=now,
+                            notes=notes, words=_DAY_WORDS)
+    src = _source(instrument, fam or public_family(instrument.asset_class),
+                  route, notes)
+    if limit:
+        bars = bars[-int(limit):]
+    return _finish(bars, src), src
+
+
+#: What the legend says of today when the day is built from intraday rows,
+#: or cannot be (2026-11-01: the weekly view says it of this week).
+_DAY_WORDS = {
+    "forming": "today's candle is forming from {}'s intraday bars",
+    "elsewhere": ("today's candle is not drawn: today's intraday bars are "
+                  "{}'s, not {}'s"),
+}
+_WEEK_WORDS = {
+    "forming": "this week's candle is forming, today from {}'s intraday bars",
+    "elsewhere": ("this week's candle leaves today out: today's intraday "
+                  "bars are {}'s, not {}'s"),
+}
+#: Why this week's candle takes no live tick (2026-11-01): the bar's
+#: `no_tick`, which the widget's caption prints after "live quote not
+#: drawn: ".
+WEEK_NO_TICK = {
+    "out": "this week's candle leaves today out",
+    "closed": "today's daily candle has closed",
+}
+
+
+def weekly_series(instrument, *, since=None, route="", now=None):
+    """(bars, source) of weekly candles (2026-11-01), `time` the ISO week's
+    Monday as 'YYYY-MM-DD'.
+
+    Folded from the daily series' days (_daily_bars: ONE feed's 1d rows,
+    else its days folded from intraday rows, and today's forming day from
+    the same feed's intraday rows alone), by ISO week from Monday 00:00
+    UTC, each daily row in the week of its session (session_day). `since`
+    is taken back to its Monday, so the first week is whole, and the rows
+    are read from 12 hours before it: a Monday session stamped at Sunday
+    22:00 UTC is that week's first day. The week that holds `now` is this
+    week's FORMING candle, drawn as it stands; a week holding a suspect day
+    is marked. No row is written and no feed is asked.
+
+    THE TICK ONLY WHERE TODAY IS (2026-11-01). The widget welds the live
+    quote onto a forming daily-family bar. This week's candle holds today
+    only when its last day is today's forming candle, built from the same
+    feed's intraday rows: exactly when the daily view's last candle takes
+    the tick. When today's hours are another feed's (an eToro-routed
+    instrument on Yahoo's days, its normal state), or nothing of today is
+    stored yet, or today's day is the feed's stored daily bar, the candle
+    stays `forming` (the week runs) and says in `no_tick` why it takes no
+    tick (WEEK_NO_TICK): welded anyway, its close and high took the live
+    price every 15 s and the 60 s refresh took them away again."""
+    now = now or datetime.now(dt_tz.utc)
+    notes = []
+    first = None
+    if since is not None:
+        first = _monday(since)
+        since = first - timedelta(hours=12)
+    days, fam = _daily_bars(instrument, since=since, route=route, now=now,
+                            notes=notes, words=_WEEK_WORDS,
+                            day_of=session_day)
+    if first is not None:
+        # The half day read before the first Monday: a session of that
+        # Monday stays, an hour or a stamp of the Sunday before goes.
+        cut = first.strftime("%Y-%m-%d")
+        days = [d for d in days if d["time"] >= cut]
+    fam = fam or public_family(instrument.asset_class)
+    this_week = _monday(now).strftime("%Y-%m-%d")
+    today = now.astimezone(dt_tz.utc).strftime("%Y-%m-%d")
+
+    def weeks(bars):
+        out = fold(bars, week_of, "daily bar")
+        if out and out[-1]["time"] == this_week:
+            out[-1]["forming"] = True
+            last = bars[-1]
+            if not last.get("forming"):
+                out[-1]["no_tick"] = WEEK_NO_TICK[
+                    "out" if last["time"] < today else "closed"]
+        return out
+
+    if days:
+        notes.insert(0, f"weekly candles folded from {label(fam, instrument)}"
+                        f"'s days, ISO weeks from Monday 00:00 UTC")
+    src = _source(instrument, fam, route, notes)
+    bars = _finish(days, src, weeks)
+    if bars and bars[-1].get("forming") and not any(
+            n.startswith("this week's candle") for n in notes):
+        notes.append("this week's candle is forming")
+    return bars, src
+
+
+def _daily_bars(instrument, *, since, route, now, notes, words,
+                day_of=utc_day):
+    """(bars, feed) of ONE feed's daily candles, and the legend's notes on
+    `notes` in `words` (the daily_series body, 2026-11-01: the weekly view
+    folds the same days). `day_of` labels a daily row from its stamp: the
+    daily view keeps the UTC date (utc_day); the weekly view takes the
+    session's (session_day), and so does the check of whether today's
+    candle is in. Days folded from intraday rows are their UTC dates."""
+    from market_data.models import PriceData
 
     def _rows(tf, tags):
         qs = PriceData.objects.filter(instrument=instrument, timeframe=tf,
@@ -501,7 +788,7 @@ def daily_series(instrument, *, since=None, limit=None, route="", now=None):
     newest = None
     if fam:
         rows = list(_rows("1d", fams[fam]["tags"]))
-        bars = [_bar(p, p.timestamp.strftime("%Y-%m-%d")) for p in rows]
+        bars = [_bar(p, day_of(p.timestamp)) for p in rows]
         newest = rows[-1].timestamp if rows else None
     if not bars:
         for tf in ("4h", "1h"):
@@ -525,27 +812,21 @@ def daily_series(instrument, *, since=None, limit=None, route="", now=None):
                 # a fresh deployment has none for anything).
                 if bars[-1]["time"] == now.strftime("%Y-%m-%d"):
                     bars[-1]["forming"] = True
-                    notes.append(f"today's candle is forming from "
-                                 f"{label(f, instrument)}'s intraday bars")
+                    notes.append(words["forming"].format(
+                        label(f, instrument)))
                 break
     elif newest is not None:
         forming = _forming(instrument, fam, newest, bars[-1]["time"], now)
         if forming is not None:
             bars.append(forming)
-            notes.append(f"today's candle is forming from "
-                         f"{label(fam, instrument)}'s intraday bars")
+            notes.append(words["forming"].format(label(fam, instrument)))
         else:
             elsewhere = _today_elsewhere(instrument, fam, route,
                                          bars[-1]["time"], now)
             if elsewhere:
-                notes.append(f"today's candle is not drawn: today's intraday "
-                             f"bars are {label(elsewhere, instrument)}'s, not "
-                             f"{label(fam, instrument)}'s")
-    src = _source(instrument, fam or public_family(instrument.asset_class),
-                  route, notes)
-    if limit:
-        bars = bars[-int(limit):]
-    return _finish(bars, src), src
+                notes.append(words["elsewhere"].format(
+                    label(elsewhere, instrument), label(fam, instrument)))
+    return bars, fam
 
 
 def _fold(days, key, p):
