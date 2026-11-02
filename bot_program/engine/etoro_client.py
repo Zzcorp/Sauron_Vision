@@ -2086,7 +2086,10 @@ class EtoroTrader:
         not know (_parse_rates_batch) — is logged once with its keys only
         and marks the batch unproven for a day (etoro_rates.mark_unproven):
         this chunk and every later one answer BatchUnproven. Every trusted
-        row writes the shared cache. Never raises."""
+        row writes the shared cache. And until the operator's measurement
+        has read a trusted answer (etoro_rates.batch_waits, 2026-11-02)
+        nothing is sent in batch: every symbol answers BatchUnproven and
+        takes the single read. Never raises."""
         out, by_id, order, seen = {}, {}, [], set()
         for s in symbols or []:
             key = str(s or "").upper()
@@ -2112,6 +2115,15 @@ class EtoroTrader:
         n = etoro_rates.BATCH_MAX_IDS
         for start in range(0, len(order), n):
             chunk = order[start:start + n]
+            if etoro_rates.batch_waits():
+                # THE BATCH WAITS FOR ITS MEASUREMENT (2026-11-02): nothing
+                # is sent in batch before the operator's measurement read a
+                # trusted answer (etoro_rates.prove)
+                _all(chunk, etoro_rates.BatchUnproven(
+                    "eToro's batched rates wait for the operator's "
+                    "measurement (manage.py etoro_rates_shape, the demo key "
+                    "by default) — read alone"))
+                continue
             held = etoro_rates.unproven()
             if held:
                 _all(chunk, etoro_rates.BatchUnproven(

@@ -21,10 +21,18 @@ adapter does not trust (a row with no instrumentId, more rows than asked,
 an id that was not asked, no row at all for two ids or more, a shape the
 parser does not know, a 4xx) is logged once with its keys, never a price,
 and the batch is UNPROVEN for UNPROVEN_TTL_S in the shared cache: every
-symbol takes the single read meanwhile (BatchUnproven). The shape is
-unmeasured, and the batch is sent from the first pass: an answer it does
-not trust turns it off by itself. `manage.py etoro_rates_shape` is the
-operator's measurement.
+symbol takes the single read meanwhile (BatchUnproven).
+
+THE BATCH WAITS FOR ITS MEASUREMENT (2026-11-02, review; MEASURED_FIRST):
+the plan landed it "only after its demo measurement" (one call with two
+ids, the row keys and their order recorded), and it was sent from the
+first pass. Nothing is sent in batch now until the operator's
+measurement, `manage.py etoro_rates_shape` (the demo key by default), has
+read an answer the parser trusts and written its proof (prove, kept with
+no expiry in the shared cache): every symbol takes the single read
+meanwhile, as before the batch, the shared cache still serving the marks.
+An answer the batch itself does not trust still turns it off for
+UNPROVEN_TTL_S, proof or none.
 
 A FAILED BATCH IS ONE REQUEST, AND ITS N FAILURES. A 429, a 5xx or a
 transport failure of one batched GET is one request, noted on the
@@ -108,8 +116,8 @@ own hours for a CFD may not keep). A missing, unknown or failing clock
 means full cadence. Bounded: no mark is older than the half hour, and a
 cached mark never acts alone (above).
 
-CACHE and SHUT_CADENCE are read at call time: tests/__init__.py turns both
-off (the suite's fake wires count reads, and its rows run at whatever hour
+CACHE, SHUT_CADENCE and MEASURED_FIRST are read at call time:
+tests/__init__.py turns them off (the suite's fake wires count reads, and its rows run at whatever hour
 the wall clock says); tests/test_etoro_rates_batch.py turns them on. Django
 is imported inside the helpers, so the adapter that imports this stays
 importable without it. Never a key: the failure and missing memos are
@@ -129,6 +137,8 @@ log = logging.getLogger(__name__)
 #: The switches, read at call time (see the module docstring).
 CACHE = True
 SHUT_CADENCE = True
+#: The batch waits for the operator's measurement (proven, below).
+MEASURED_FIRST = True
 
 #: THE SHUT-MARKET CADENCE: one read per SHUT_EVERY_S, full cadence from
 #: SHUT_REOPEN_EARLY_S before the scheduled reopen, on these classes only,
@@ -159,6 +169,8 @@ MISSING_MEMO_S = 30
 
 PREFIX = "etoro_rates"
 UNPROVEN_KEY = f"{PREFIX}:batch_unproven"
+#: The operator's measurement read an answer the parser trusts (prove).
+PROVEN_KEY = f"{PREFIX}:batch_proven"
 
 
 def _now() -> float:
@@ -595,6 +607,48 @@ def mark_unproven(why: str, shape: str) -> bool:
     return first
 
 
+def proven() -> "dict | None":
+    """{"at", "world", "shape"} once the operator's measurement (manage.py
+    etoro_rates_shape) has read a batched answer the parser trusts, else
+    None — and None when the cache cannot be read: the batch waits
+    (2026-11-02). Never raises."""
+    try:
+        held = _cache().get(PROVEN_KEY)
+    except Exception:  # noqa: BLE001 — unreadable: not proven
+        return None
+    return held if isinstance(held, dict) else None
+
+
+def batch_waits() -> bool:
+    """True while the batch waits for its measurement (MEASURED_FIRST and
+    no proof)."""
+    return bool(MEASURED_FIRST) and proven() is None
+
+
+def prove(world: str, shape: str) -> bool:
+    """The measurement's trusted answer: the batch may be sent from now on
+    (an answer it does not trust still marks it unproven for a day). Kept
+    with no expiry; the shape is the parser's words for the answer's keys,
+    never a price or an id. True when written. Never raises."""
+    try:
+        _cache().set(PROVEN_KEY, {"at": _now(), "world": str(world or ""),
+                                  "shape": str(shape or "")[:600]}, None)
+        return True
+    except Exception as e:  # noqa: BLE001
+        log.warning("eToro batched rates: the measurement's proof could not "
+                    "be written (%s) — the batch keeps waiting",
+                    type(e).__name__)
+        return False
+
+
+def forget_proof() -> None:
+    """Delete the proof (tests). Never raises."""
+    try:
+        _cache().delete(PROVEN_KEY)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # ── this pass's failures: a failed batch is asked again by no reader ────
 
 #: (key hash, world, SYMBOL) -> (_mono() at, the answer)
@@ -674,9 +728,10 @@ def closed_for(kh, world, symbol):
 
 
 def reset() -> None:
-    """Forget this process's memory, its queued writes and the unproven
-    mark (tests; the cache's entries go with cache.clear()). Waits for a
-    drain in progress, so no write of a test lands in the next."""
+    """Forget this process's memory, its queued writes, the unproven mark
+    and the measurement's proof (tests; the cache's entries go with
+    cache.clear()). Waits for a drain in progress, so no write of a test
+    lands in the next."""
     with _WRITES_LOCK:
         _WRITES.clear()
     with _FAILED_LOCK:
@@ -687,6 +742,7 @@ def reset() -> None:
         _cache().delete(UNPROVEN_KEY)
     except Exception:  # noqa: BLE001
         pass
+    forget_proof()
 
 
 # ── the readers' one door ───────────────────────────────────────────────

@@ -2073,6 +2073,17 @@ class TheSwitchTests(SimpleTestCase):
         self.assertIn("_etoro_rates.CACHE = False", src)
         self.assertIn("_etoro_rates.SHUT_CADENCE = False", src)
 
+    def test_the_batch_waits_for_its_measurement_but_not_in_the_suite(self):
+        # 2026-11-02 (completes E2): on in production, off for the suite,
+        # whose batch tests read the batch as E2 sent it; TheBatchWaitsFor
+        # ItsMeasurementTests turns it on
+        import inspect
+        self.assertIs(er.MEASURED_FIRST, False)
+        self.assertIn("\nMEASURED_FIRST = True\n", inspect.getsource(er))
+        src = (Path(settings.BASE_DIR) / "tests" / "__init__.py").read_text(
+            encoding="utf-8")
+        self.assertIn("_etoro_rates.MEASURED_FIRST = False", src)
+
     def test_the_constants(self):
         # an answer lives the cadence's half hour; each reader bounds the
         # age it takes (2026-11-01, review: the half hour's answer is what
@@ -2116,6 +2127,58 @@ class TheSwitchOffTests(TestCase):
 
 # ── the operator's measurement ───────────────────────────────────────────
 
+class TheBatchWaitsForItsMeasurementTests(_RatesOn, TestCase):
+    """2026-11-02 (completes E2, review): the plan landed the batch "only
+    after its demo measurement" (one call with two ids, the row keys and
+    their order recorded); E2 sent it from the first pass, an untrusted
+    answer turning it off by itself. Nothing is sent in batch now until the
+    operator's measurement (manage.py etoro_rates_shape, the demo key by
+    default) has read an answer the parser trusts: every symbol takes the
+    single read meanwhile, as before the batch, and an answer the batch
+    itself does not trust still turns it off for a day."""
+
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.object(er, "MEASURED_FIRST", True)
+        p.start()
+        self.addCleanup(p.stop)
+        er.forget_proof()
+        self.addCleanup(er.forget_proof)
+
+    def test_unmeasured_nothing_is_sent_in_batch(self):
+        w = _Wire(prices={11: 101.0, 22: 102.0})
+        got = _trader(w).tickers(["AAA", "BBB"])
+        self.assertEqual(w.rates(), [], "nothing sent")
+        for s in ("AAA", "BBB"):
+            self.assertIsInstance(got[s], er.BatchUnproven)
+            self.assertIn("wait for the operator's measurement", str(got[s]))
+
+    def test_unmeasured_every_row_is_read_alone(self):
+        cfg = _cfg(_user("rb_unmeasured"), "U")
+        for s in ("AAA", "BBB"):
+            _held(cfg, s)
+        w = _Wire(prices={11: 101.0, 22: 102.0})
+        _tick(cfg, _trader(w))
+        self.assertEqual(sorted(w.rates()), ["11", "22"])
+
+    def test_a_proof_lets_the_batch_go(self):
+        er.prove("demo", "rates: a list of 2")
+        self.assertEqual(er.proven()["world"], "demo")
+        w = _Wire(prices={11: 101.0, 22: 102.0})
+        got = _trader(w).tickers(["AAA", "BBB"])
+        self.assertEqual(w.rates(), ["11,22"])
+        self.assertEqual(got["BBB"]["lastPrice"], "102.0")
+
+    def test_an_untrusted_answer_still_turns_a_proven_batch_off(self):
+        er.prove("demo", "rates: a list of 2")
+        w = _Wire(body=lambda ids: {"rates": [{"bid": 1.0}, {"bid": 2.0}]})
+        t = _trader(w)
+        t.tickers(["AAA", "BBB"])
+        self.assertIsNotNone(er.unproven())
+        t.tickers(["AAA", "BBB"])
+        self.assertEqual(w.rates(), ["11,22"], "off for the day after it")
+
+
 class TheShapeCommandTests(_RatesOn, TestCase):
 
     API, KEY = "API-SECRET-0042", "USER-SECRET-0043"
@@ -2154,6 +2217,13 @@ class TheShapeCommandTests(_RatesOn, TestCase):
         self.assertIn("trusted", text)
         for secret in ("123.456", "9.876", self.API, self.KEY):
             self.assertNotIn(secret, text)
+        # 2026-11-02: the trusted answer is the proof the batch waits for
+        held = er.proven()
+        self.assertEqual((held or {}).get("world"), "demo")
+        self.assertIn("proof    written: the batch may be sent from now on",
+                      text)
+        for secret in (self.API, self.KEY):
+            self.assertNotIn(secret, str(held))
 
     def test_an_untrusted_shape_is_said_and_marks_nothing(self):
         w = _Wire(body=lambda ids: {"rates": [{"bid": 1.0}, {"bid": 2.0}]})
@@ -2163,6 +2233,7 @@ class TheShapeCommandTests(_RatesOn, TestCase):
         self.assertIn("NOT trusted: a row with no instrumentId of its own",
                       text)
         self.assertIsNone(er.unproven(), "a measurement marks nothing")
+        self.assertIsNone(er.proven(), "and proves nothing")
 
     def test_no_row_at_all_is_said_as_no_row(self):
         w = _Wire(body=lambda ids: {"rates": []})
@@ -2192,6 +2263,7 @@ class TheShapeCommandTests(_RatesOn, TestCase):
                 self.assertIn("the batch stays on", text)
                 self.assertNotIn("unproven for 24 h", text)
                 self.assertIsNone(er.unproven())
+                self.assertIsNone(er.proven(), "a failure proves nothing")
                 self.assertEqual(vh._load(vh._key("etoro", "demo")), {},
                                  "a background read notes nothing")
                 t = ec.EtoroTrader(self.API, self.KEY, env="demo")

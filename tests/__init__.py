@@ -56,6 +56,12 @@ _etoro_budget.BUDGET = False
 # back on.
 _etoro_rates.CACHE = False
 _etoro_rates.SHUT_CADENCE = False
+# THE BATCH WAITS FOR ITS MEASUREMENT (2026-11-02, etoro_rates.
+# MEASURED_FIRST): in production nothing is sent in batch before the
+# operator's measurement wrote its proof. The suite's batch tests read the
+# batch as E2 sent it; tests/test_etoro_rates_batch.py's
+# TheBatchWaitsForItsMeasurementTests turns the wait back on.
+_etoro_rates.MEASURED_FIRST = False
 # THE READ POOL (2026-11-01, etoro_client.READ_POOL): a GET at P2 to P5
 # rides one pooled requests.Session per process and user key, kept at
 # module level. The suite's fake wires are handed to each client (a
