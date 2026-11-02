@@ -1,6 +1,6 @@
 # Sauron Vision — handoff for the next Claude session
 
-Read this first, whichever Claude account runs the session. It holds the state of every open line of work, the operator's standing decisions, and the house rules. It is kept on branch `claude/handoff` (never merged), and is updated at each milestone. Last update: 2026-11-01 ~21:15 UTC, by the session working since 2026-10-31.
+Read this first, whichever Claude account runs the session. It holds the state of every open line of work, the operator's standing decisions, and the house rules. It is kept on branch `claude/handoff` (never merged), and is updated at each milestone. Last update: 2026-11-02 ~05:00 UTC, by the session working since 2026-10-31.
 
 Nothing private lives here. The repository is public. The operator's account figures, positions, personal or family matters, and any partner or investor document never enter git. Those live in the operator's own claude.ai documents and in files he keeps.
 
@@ -50,10 +50,10 @@ Nothing private lives here. The repository is public. The operator's account fig
 
 | Branch | Base | Commits | State | Next |
 |---|---|---|---|---|
-| `claude/usedfix` | 6562ddb (in main) | U1 8e1d248 | U2 building | U2: a queued close spends no attempt while nothing is sent; `client_for_row` for the drain, the kill switch, the CLOSE button, the reconcile and the manage tick; ERROR rows eToro still lists stay counted. Then U2b and U3 (spec `plans/usedfix_spec.md`). Rebase onto main (conflicts with #82 expected), full suite, PR. |
-| `claude/barsguard` | 9d74a19 | B1 5a33424 | B2 building | B1: `backfill_bars` never writes the public feed over or beside a venue's bars. B2: `prune_offgrid_4h` clears overlapping off-grid public pairs (CET-zone indices). Suite, rebase, PR. Then the sheet that finally gives the po3 1h backfill (`backfill_bars --proving --intervals 1h --bars 9000`, `--dry-run` first). |
-| `claude/etbudget` | ba71a9f (old C2) | E1 e8bc2f2, E2 4ffde5e | E2 fix, then E3, then the full suite | The eToro request budget: one budget per key with priorities, a shared 429 pause, a batched rates read, pooled connections. When done: `git rebase --onto origin/main ba71a9f`, recount, suite, PR. |
-| Orcs O2 "shadow minds" | — | — | Spec being rebuilt: maps done in `plans/orcs2/`, design next | O2a wakes and the mind, O2b routing, O2c honor, temperaments, Captains, the Emperor and the drums, O2d seats, ranks, the council of war, Q&A and the post-mortem. Then the French plan for the operator with the daily cost and a proposed `ORC_DAILY_BUDGET_USD`, and the builds. |
+| `claude/barsguard` | ec54dd5 (main) | B1 08bcd4d, B2 3c8facc | PR #84 open, CI running | B1: `backfill_bars` never writes the public feed over or beside a venue's bars, and the footer says so. B2: `prune_offgrid_4h` also clears an off-grid public grid beside another off-grid grid (CET-zone indices). Merge when green. Then the sheet: the prune dry run, then `--yes`; then the po3 1h backfill (`backfill_bars --proving --intervals 1h --bars 9000 --dry-run`, then the real run; `--proving` takes its symbols from the 4h universe). |
+| `claude/usedfix` | ec54dd5 (main) | U1 2032398, U2 4fd9fe8, U2b f985154 | U3 building, then the full suite | U1: an order whose answer did not come back is never forgotten, on either lane. U2: a real position is never abandoned while eToro still holds it (a queued close spends no attempt while nothing is sent; a paper ticket never closes a real row). U2b: the demo short proofs stop waiting on a real row whose close eToro holds queued. U3: the used-capital gap shown per position, the gates value an eToro row at max(Sauron's figure, eToro's amount). Spec `plans/usedfix_spec.md`. Then PR, merge, sheet. |
+| `claude/etbudget` | ba71a9f (old C2) | E1-E3 and their "Completes" commits, tip 3397593 | Rebase onto main running | The eToro request budget: one budget per key with priorities, a shared 429 pause, a batched rates read, pooled connections. `git rebase --onto origin/main ba71a9f`, recount, review, full suite, PR. The sheet must give `python manage.py etoro_rates_shape --user <operator>` after the deploy: the batched rates wait for that demo measurement. |
+| Orcs O2 "shadow minds" | — | — | Spec done (`plans/orcs2/o2_spec.md`); French plan sent 2026-11-02 (`plans/orcs2/plan_fr.md`) | Waiting on the operator's answers to the plan's 10 questions (the defaults are in the spec's last section). Then build O2a to O2d, one PR each: O2a wakes and the mind on r0 (Sonnet 5.5, low effort), O2b routing in shadow, O2c honor, temperaments, Captains, the Emperor and the drums, O2d ranks, the council of war, the post-mortem, `/orc N question`. Everything arrives OFF with the Orcs budget at 0; no live model call (the about-$1 smoke included) without his word. |
 
 **Designed, not started**
 - Orders at a price, P1 to P5 (`plans/orders_spec.md`). The operator said yes to all. P1 is cancelling a pending close; P1b needs demo measurements M7 and M8 of eToro's close-order read and DELETE.
@@ -77,6 +77,7 @@ Nothing private lives here. The repository is public. The operator's account fig
 - Bearish rules born at research (PR #80).
 - The decisions taken for him on the used capital: a stood-down lane still closes its real rows; Sauron never adopts a position tied to its own in-doubt order; the gates value an eToro row at max(Sauron's figure, eToro's amount). The reason for the last one: eToro blocks more than notional over leverage on two USD-based exotic pairs at the same leverage.
 - He will cancel at eToro a close that eToro queued at the weekend shut, so the row stays CLOSE_PENDING and blocked: the drain sends nothing. Two follow-ups: the demo short-proof runner must not wait on such a row (U2b), and a lookup failure must not spend that row's attempts (U2).
+- He may run the work on two or three Claude subscriptions: this file is what lets any of them resume. Keep it current before each limit.
 
 ## 5. Merged today
 
