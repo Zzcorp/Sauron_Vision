@@ -4,10 +4,12 @@ The batched rates read (EtoroTrader.tickers, bot_program/engine/
 etoro_rates) sends ONE GET /api/v1/market-data/instruments/rates with
 instrumentIds as a comma list, and matches every row to its symbol by the
 row's OWN instrumentId, never by its position. That answer has never met a
-key. The batch does not wait for it: it is sent from the first pass, and
-the first answer the adapter does not trust (a row with no id of its own,
-no row at all...) turns it off for a day, every symbol read alone
-meanwhile, as before the batch. This is the operator's measurement. It
+key, and the batch WAITS FOR THIS MEASUREMENT (2026-11-02, the plan's
+order): nothing is sent in batch until it has read an answer the parser
+trusts, every symbol read alone meanwhile, as before the batch; the first
+answer the adapter does not trust afterwards (a row with no id of its
+own, no row at all...) still turns it off for a day. This is the
+operator's measurement. It
 sends ONE such GET (a 5xx or a transport failure is asked once more, as
 every read is), with two instrument ids, on the world chosen (demo by
 default), through the request budget at P5, and prints:
@@ -21,10 +23,13 @@ default), through the request budget at P5, and prints:
     for a 429 or a 5xx, what the adapter's batch does with one (one
     failure noted on that world's health, its symbols not asked again for
     30 s, the batch left on: a failure is no distrust);
-  * whether the batch is unproven today, since when and why.
+  * whether the batch is unproven today, since when and why, and whether
+    it is proven (this measurement or an earlier one).
 
-Read-only: that GET and nothing else. Nothing is cached, nothing is marked
-unproven, no order exists, and — a BACKGROUND read, as the candles are
+That GET and one record: when the parser trusts the answer, the proof the
+batch waits for (etoro_rates.prove: the instant, the world and the shape's
+words, never a price, an id or a key). Nothing else is cached, nothing is
+marked unproven, no order exists, and — a BACKGROUND read, as the candles are
 (2026-11-01, review) — a 429, a 5xx or a transport failure is noted on no
 world's health and starts no 429 pause: the measurement never holds an
 entry. The keys are never printed. Not runnable from the ops page: it
@@ -200,6 +205,14 @@ class Command(BaseCommand):
                                         f"HTTP {code}")
                 ec._parse_rates_batch(body, ids)
                 w("  parser   trusted — each row matched by its own id")
+                # THE PROOF THE BATCH WAITS FOR (2026-11-02)
+                if etoro_rates.prove(world, ec._rates_shape(body)):
+                    w("  proof    written: the batch may be sent from now on "
+                      "(an answer it does not trust still turns it off for "
+                      "a day)")
+                else:
+                    w("  proof    NOT written (the cache refused it): the "
+                      "batch keeps waiting")
         except ec._Untrusted as e:
             w(f"  parser   NOT trusted: {e.why} — the adapter would mark the "
               f"batch unproven for {etoro_rates.UNPROVEN_TTL_S // 3600} h "
@@ -211,3 +224,10 @@ class Command(BaseCommand):
               f"every symbol is read alone meanwhile")
         else:
             w("  today    the batch is not marked unproven")
+        proof = etoro_rates.proven()
+        if proof:
+            w(f"  proven   since {_at(proof.get('at'))} on the "
+              f"{proof.get('world') or '?'} world")
+        elif etoro_rates.MEASURED_FIRST:
+            w("  proven   not yet: the batch waits for a trusted answer, "
+              "every symbol read alone")
