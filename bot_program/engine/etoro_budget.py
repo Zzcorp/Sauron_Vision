@@ -37,7 +37,10 @@ spend only queues the COUNT for this process's flusher thread (the spend
 queue, below), so not one cache round trip stands between a close and
 the wire, between a close and its proofs, or between two closes of the
 kill switch. A family they take past its rate logs its overrun once per
-window. P2 to P5 are taken BEFORE (`take`): a take is
+window. The shared pause a P0 read's 429 grants goes through the same
+queue (`later`, 2026-11-02, review): it was a read and a write of the
+cache on that read's thread, before the next close. P2 to P5 are taken
+BEFORE (`take`): a take is
 granted only while the family keeps its floor (FLOOR_P2 .. FLOOR_P5 of its
 rate) for the priorities above, and P3 to P5 also skip while the shared
 429 pause holds for that key and world. A refused take sends nothing and
@@ -387,6 +390,11 @@ DRAIN_WAIT_S = 0.5
 #: {priority: count}, beside UNBUDGETED.
 SPENT_MAX = 10_000
 DROPPED: dict = {}
+#: OTHER CACHE WORK A P0 REQUEST LEAVES BEHIND (2026-11-02, review): the
+#: shared 429 pause a P0 read's 429 grants (etoro_client._on_429), queued
+#: as (fn, args) for the same flusher and drained with the counts, so no
+#: grant stands between that answer and the next close (`later`).
+_LATER: collections.deque = collections.deque()
 
 
 def _flush_loop() -> None:
@@ -423,9 +431,9 @@ def _drain(wait=None) -> None:
     """Count every request this process queued (`spend`). `wait`: the most
     to wait, in seconds, for a drain another thread is in; None waits as
     long as it takes. Never raises."""
-    # bound here: a fork rebinds both in the child, and a lock is released
+    # bound here: a fork rebinds them in the child, and a lock is released
     # by whoever took that very lock
-    lock, queue = _DRAIN, _SPENT
+    lock, queue, later_q = _DRAIN, _SPENT, _LATER
     if not lock.acquire(timeout=-1 if wait is None else max(0.0, wait)):
         return
     try:
@@ -433,8 +441,17 @@ def _drain(wait=None) -> None:
             try:
                 item = queue.popleft()
             except IndexError:
-                return
+                break
             _count(*item)
+        while True:
+            try:
+                fn, args = later_q.popleft()
+            except IndexError:
+                return
+            try:
+                fn(*args)
+            except Exception:  # noqa: BLE001 — off every path, never raises
+                pass
     finally:
         lock.release()
 
@@ -451,8 +468,9 @@ def _after_fork_in_child() -> None:
     its parent's queue is the parent's, and so are its locks (one held at
     the fork would never be released here) and its flusher thread (which
     does not exist here)."""
-    global _SPENT, _DRAIN, _WAKE, _FLUSHER_START
+    global _SPENT, _DRAIN, _WAKE, _FLUSHER_START, _LATER
     _SPENT = collections.deque()
+    _LATER = collections.deque()
     _DRAIN = threading.Lock()
     _WAKE = threading.Event()
     _FLUSHER_START = threading.Lock()
@@ -598,6 +616,23 @@ def spend(kh: str, family: str, priority: int, *, where: str = "",
         pass
 
 
+def later(fn, *args) -> None:
+    """Run `fn(*args)` OFF the calling request's path (2026-11-02, review):
+    queued for this process's flusher thread, as a spend's count is, and
+    run by every drain (the flusher, a take, flush()), so no cache round
+    trip stands between a P0 answer and the next close. For the shared
+    429 pause a P0 read's 429 grants (etoro_client._on_429), whatever
+    BUDGET says: the pause has its own switch. Never raises, never
+    waits."""
+    try:
+        if len(_LATER) >= SPENT_MAX:
+            return
+        _LATER.append((fn, args))
+        _wake_flusher()
+    except Exception:  # noqa: BLE001 — a lost grant is a later 429
+        pass
+
+
 def _count(kh, family, p, where, why, at) -> None:
     """Count one queued request in the window it was SENT in: the family's
     count, its priority's, the overrun logged once a window, the key
@@ -701,6 +736,7 @@ def reset() -> None:
     in progress, so no count of a test lands in the next."""
     with _DRAIN:
         _SPENT.clear()
+        _LATER.clear()
     _NOTED.clear()
     _DOWN_SAID.clear()
     UNBUDGETED.clear()

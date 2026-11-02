@@ -740,6 +740,86 @@ class TheSharedPauseTests(_BudgetOn, SimpleTestCase):
         a2 = self._meet_429("90")
         self.assertEqual(a2.rate_pause_s(), 35.0, "the first pause stands")
 
+    def test_a_p0_read_that_meets_a_429_grants_the_pause_off_its_path(self):
+        """2026-11-02 (completes E1, review): a P0 read that met eToro's
+        429 — the kill switch's or the drain's mark, the /search a close's
+        cold id costs — granted the shared pause on its own thread: a read
+        and a write of the budget's cache between that answer and the next
+        close, held by a cache that stalls. The grant is queued for this
+        process's flusher now, dated at the 429, and every take drains it
+        first."""
+        a, fake = _hclient([SEARCH_AAPL[:4],
+                            RATES_429 + ({"Retry-After": "40"},)])
+        a.instrument_id("AAPL")                  # the id warm: no /search
+        eb.flush()
+        at = self.bclock.t
+        gate, events = threading.Event(), []
+        stalled = _Recorder(events, gate=gate, stall_s=1.0)
+        with mock.patch.object(eb, "_cache", return_value=stalled):
+            started = time.monotonic()
+            with eb.at(eb.P0, "kill switch"), \
+                    self.assertRaises(requests.HTTPError):
+                a.ticker("AAPL")
+            took = time.monotonic() - started
+            on_the_path = [e for e in events if e.startswith("cache")]
+            gate.set()                           # the cache answers again
+            eb.flush()
+        self.assertEqual(on_the_path, [], events)
+        self.assertLess(took, 0.75, f"the P0 read waited {took:.2f}s on the "
+                                    f"budget's cache")
+        self.assertEqual(len(_wire_calls(fake, "/rates")), 1)
+        self.assertEqual(cache.get(eb._pause_key(KH, "live")),
+                         {"end": at + 40, "at": at},
+                         "granted all the same, dated at the 429")
+        # the next take of this process is judged on it
+        b, _ = _hclient([SEARCH_AAPL[:4], RATES_OK[:4]])
+        with eb.at(eb.P3), self.assertRaises(eb.Refused) as cm:
+            b.ticker("AAPL")
+        self.assertEqual(cm.exception.reason, eb.PAUSE)
+
+    def _no_flusher(self):
+        """The budget's drains on THIS thread only: a flusher thread that
+        runs (an earlier spend started it) drains nothing meanwhile."""
+        me, real = threading.get_ident(), eb._drain
+
+        def drain(wait=None):
+            if threading.get_ident() == me:
+                return real(wait)
+        return mock.patch.object(eb, "_drain", drain)
+
+    def test_a_take_drains_a_queued_grant_before_it_is_judged(self):
+        a, _ = _hclient([SEARCH_AAPL[:4],
+                         RATES_429 + ({"Retry-After": "40"},)])
+        a.instrument_id("AAPL")
+        eb.flush()
+        with self._no_flusher():
+            with eb.at(eb.P0, "pending-close drain"), \
+                    self.assertRaises(requests.HTTPError):
+                a.ticker("AAPL")
+            self.assertIsNone(cache.get(eb._pause_key(KH, "live")),
+                              "queued, not yet written")
+            with self.assertRaises(eb.Refused) as cm:
+                eb.take(KH, eb.MARKET, eb.P4, world="live", where="ticker")
+        self.assertEqual(cm.exception.reason, eb.PAUSE)
+
+    def test_below_p0_the_429_still_grants_the_pause_on_its_path(self):
+        # a mark (P3) or a read no caller classified (P1): the pause holds
+        # the moment the read returns, as since 2026-11-01
+        for scope in (None, eb.P3):
+            eb.forget_pauses()
+            a, _ = _hclient([SEARCH_AAPL[:4],
+                             RATES_429 + ({"Retry-After": "40"},)])
+            with self.subTest(scope=scope), self._no_flusher():
+                if scope is None:
+                    with self.assertRaises(requests.HTTPError):
+                        a.ticker("AAPL")
+                else:
+                    with eb.at(scope), self.assertRaises(requests.HTTPError):
+                        a.ticker("AAPL")
+                self.assertEqual(
+                    cache.get(eb._pause_key(KH, "live")),
+                    {"end": self.bclock.t + 40, "at": self.bclock.t})
+
     def test_p0_never_reads_it(self):
         self._meet_429()
         for scope in (None, eb.P5):

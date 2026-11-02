@@ -596,7 +596,8 @@ def _rate_headers(r) -> dict:
 #: smoke and the ramp), which skip while it holds. P0 (closes, stop moves,
 #: proofs, cancels, the drain, the kill switch) never reads it; nor do P1
 #: (the orders, and the mark of a live row eToro holds no stop for) and
-#: P2. RATE_PAUSE is read at call
+#: P2. A P0 read's own 429 grants it off that read's path, through the
+#: budget's flusher (_on_429, 2026-11-02). RATE_PAUSE is read at call
 #: time (tests/__init__.py turns it off).
 RATE_PAUSE = True
 #: A GUESS, said as one: eToro's 429 body and headers are unmeasured
@@ -645,15 +646,17 @@ def _retry_after_s(r) -> tuple:
         return None, None
 
 
-def _grant_rate_pause(budget_key: str, world: str, wait) -> str:
+def _grant_rate_pause(budget_key: str, world: str, wait, at=None) -> str:
     """Grant (budget_key, world) its shared pause unless one runs or the
     last one ended less than RATE_PAUSE_STREAK_S ago; the words say which.
     `budget_key` is the user key's hash (etoro_budget.key_hash), never the
     key. Two processes meeting one 429 grant one pause: the first write
     wins (etoro_budget.pause_write, fresh) and the other reads it as
-    running. Never raises."""
+    running. `at`, the 429's own instant (default now): a grant the
+    budget's flusher makes for a P0 read is dated at its 429 (2026-11-02).
+    Never raises."""
     try:
-        now = etoro_budget._now()
+        now = etoro_budget._now() if at is None else float(at)
         held = etoro_budget.pause_read(budget_key, world)
         end = None
         if held is not None:
@@ -1410,17 +1413,37 @@ class EtoroTrader:
             log.debug("eToro budget: %s not counted (%s)", where,
                       type(e).__name__)
 
-    def _on_429(self, where: str, r) -> str:
+    def _on_429(self, where: str, r, priority=None) -> str:
         """A 429 at `where`: grant the pause when `where` is a pause site
         AND this is not a background read, log the quota headers (the
         measurement RATE_PAUSE_FALLBACK_S waits for), and return the words
         for the health note. The pause is the shared one of this key and
-        world (2026-11-01). Never raises."""
+        world (2026-11-01). Never raises.
+
+        OFF THE PATH AT P0 (2026-11-02, review): a read at `priority` P0 —
+        the kill switch's or the drain's mark, the /search a close's cold
+        id costs — leaves the grant to the budget's flusher
+        (etoro_budget.later), dated at this 429: the grant reads and writes
+        the cache, and on this thread it stood between that answer and the
+        next close, held as long as a stalled cache holds it. Every take
+        drains the queue first, so the marks, the proposals and the
+        candles of this process are judged on the pause; the entry side
+        reads it once the flusher, woken at once, has written it. Below P0
+        the grant stays on the read's path, as before: the next ask of
+        that very lane meets it."""
         try:
             wait, raw = _retry_after_s(r)
-            said = (_grant_rate_pause(self._bkey(), self._world(), wait)
-                    if RATE_PAUSE and where in RATE_PAUSE_SITES
-                    and not getattr(self, "_background", False) else "")
+            pause = (RATE_PAUSE and where in RATE_PAUSE_SITES
+                     and not getattr(self, "_background", False))
+            if pause and priority is not None \
+                    and int(priority) <= etoro_budget.P0:
+                etoro_budget.later(_grant_rate_pause, self._bkey(),
+                                   self._world(), wait, etoro_budget._now())
+                said = "the pause is granted off this P0 read's path"
+            elif pause:
+                said = _grant_rate_pause(self._bkey(), self._world(), wait)
+            else:
+                said = ""
             log.info("eToro %s answered 429 (%s; %s) quota headers %s",
                      where, f"Retry-After {raw}" if raw else "no Retry-After",
                      said or "no pause", _rate_headers(r))
@@ -1530,7 +1553,7 @@ class EtoroTrader:
                 self.last_rate_headers = _rate_headers(r)
                 code = int(getattr(r, "status_code", 0) or 0)
                 if code == 429:
-                    said = self._on_429(where, r)
+                    said = self._on_429(where, r, p)
                     self._note_health(where, code=code, detail=said)
                     return r
                 if code < 500:
