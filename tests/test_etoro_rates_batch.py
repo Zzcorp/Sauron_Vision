@@ -975,7 +975,15 @@ class TheClockFirstTests(TestCase):
         self.assertEqual(w.rates(), ["11"])
 
 
-class TheProposalSnapshotTests(_RatesOn, TestCase):
+class TheProposalReadsTheWireTests(_RatesOn, TestCase):
+    """2026-11-02 (completes E2, review): an order is never priced from a
+    cache or a batch snapshot, and a proposal's quote IS the order's
+    price — its stop, its target and its size are built on it, and the
+    last look can only refuse. So each proposal reads its own rate on the
+    wire, as before the batch; the snapshot serves the marks alone. (These
+    tests were TheProposalSnapshotTests: one batched read for the config's
+    proposals past the clock, and a proposal priced off the cache with its
+    age on the row.)"""
 
     def setUp(self):
         super().setUp()
@@ -996,17 +1004,17 @@ class TheProposalSnapshotTests(_RatesOn, TestCase):
                                   summaries=[])
         return candidates
 
-    def test_the_proposals_past_the_clock_share_one_batched_read(self):
+    def test_each_proposal_reads_its_own_rate_on_the_wire(self):
         cfg = _cfg(self.user, "P", symbols=["AAA", "BBB", "CCC"])
         w = _Wire(prices={11: 101.0, 22: 102.0, 33: 103.0})
         cands = self._propose(cfg, _trader(w))
-        self.assertEqual(w.rates(), ["11,22,33"])
+        self.assertEqual(w.rates(), ["11", "22", "33"])
         self.assertEqual(sorted(c.symbol for c in cands),
                          ["AAA", "BBB", "CCC"])
         by = {c.symbol: c for c in cands}
         self.assertEqual(by["BBB"].market_price, 102.0)
 
-    def test_a_symbol_the_clock_refuses_is_not_in_the_batch(self):
+    def test_a_symbol_the_clock_refuses_asks_no_rate(self):
         cfg = _cfg(self.user, "P", symbols=["AAA", "BBB", "CCC"])
         w = _Wire(prices={11: 101.0, 22: 102.0, 33: 103.0})
         shut = {"ok": False, "code": "SHUT", "why": "shut", "until": None,
@@ -1018,18 +1026,24 @@ class TheProposalSnapshotTests(_RatesOn, TestCase):
                            side_effect=lambda s, *a, **k: (
                                shut if s == "BBB" else open_)):
             self._propose(cfg, _trader(w))
-        self.assertEqual(w.rates(), ["11,33"])
+        self.assertEqual(w.rates(), ["11", "33"])
 
-    def test_a_proposal_records_the_age_of_its_snapshot(self):
+    def test_a_cached_answer_never_prices_a_proposal(self):
         cfg = _cfg(self.user, "P", symbols=["AAA", "BBB"])
         w = _Wire(prices={11: 101.0, 22: 102.0})
         t = _trader(w)
-        t.tickers(["AAA", "BBB"])
+        t.tickers(["AAA", "BBB"])           # a fresh answer in the cache
+        w.prices.update({11: 101.5, 22: 102.5})
         self.clock.t += 12
         cands = self._propose(cfg, t)
-        self.assertEqual(w.rates(), ["11,22"], "both read off the snapshot")
+        self.assertEqual(w.rates(), ["11,22", "11", "22"],
+                         "each proposal read the wire")
+        by = {c.symbol: c for c in cands}
+        self.assertEqual((by["AAA"].market_price, by["BBB"].market_price),
+                         (101.5, 102.5), "priced on the wire's answer")
         for c in cands:
-            self.assertEqual(c.level_meta["proposal_quote_age_s"], 12.0)
+            self.assertNotIn("proposal_quote_age_s", c.level_meta)
+            self.assertNotIn("proposal_quote_batched", c.level_meta)
 
 
 # ── the shut-market cadence ──────────────────────────────────────────────
@@ -1351,20 +1365,20 @@ class TheCacheAgeTests(_RatesOn, TestCase):
             _tick(self.cfg, self.t)
         self.assertEqual(self.wire.rates(), ["11", "11"])
 
-    def test_the_preview_takes_one_up_to_ten_seconds_old(self):
+    def test_the_preview_takes_no_cached_answer(self):
+        # 2026-11-02 (completes E2): the TAKE TRADE dialog reads the wire,
+        # as it did before the cache (this was ..._takes_one_up_to_ten_
+        # seconds_old: PREVIEW_MAX_AGE_S, gone); the money rules change
+        # nothing a page shows beyond the budget's own command
         from bot_program import manual_trade as mt
+        self.assertFalse(hasattr(er, "PREVIEW_MAX_AGE_S"))
         self.clock.t = self.t0 + 9
         with mock.patch(ROUTER, return_value=self.t):
             price, _c, _d, _r, tick = mt._mark_for_detail(
-                self.user, self.cfg, "AAA",
-                max_age_s=er.PREVIEW_MAX_AGE_S)
-        self.assertEqual((price, tick["age_s"]), (101.0, 9.0))
-        self.assertEqual(self.wire.rates(), ["11"])
-        self.clock.t = self.t0 + 11
-        with mock.patch(ROUTER, return_value=self.t):
-            mt._mark_for_detail(self.user, self.cfg, "AAA",
-                                max_age_s=er.PREVIEW_MAX_AGE_S)
-        self.assertEqual(self.wire.rates(), ["11", "11"])
+                self.user, self.cfg, "AAA")
+        self.assertEqual(price, 101.0)
+        self.assertNotIn("cached", tick)
+        self.assertEqual(self.wire.rates(), ["11", "11"], "read on the wire")
 
     def test_the_last_look_never_reads_it(self):
         from bot_program.asset_engine.base import make_bot
@@ -1756,15 +1770,31 @@ class TheSnapshotPricedOrderTests(TestCase):
         return skips.last_by_symbol(self.cfg)[symbol]
 
     def _cached(self, look):
-        t, fake = self._wire(look)
-        # an answer another reader received 25 s ago
+        """A candidate that carries a cached quote's age, as a proposal
+        priced off the shared cache did until 2026-11-02 (one an older
+        process proposed, across a deploy): its last look still fails
+        closed. A proposal itself reads the wire since, whatever the cache
+        holds (test_a_proposal_is_priced_on_the_wire_whatever_the_cache_
+        holds). The look answers `look`."""
+        t, fake = self._wire(self.RATES_FRESH)
+        bot, cand = self._run(t)
+        self.assertEqual(len(self._rates(fake)), 1, "the proposal's own read")
+        cand.level_meta = dict(cand.level_meta, proposal_quote_age_s=25.0)
+        fake.routes.insert(0, look)
+        return bot, t, fake, cand
+
+    def test_a_proposal_is_priced_on_the_wire_whatever_the_cache_holds(self):
+        """2026-11-02 (completes E2, review): an answer another reader
+        received 25 s ago at 99.80 is in the cache; the proposal reads the
+        wire (100.0) and is built on it, with no snapshot's age."""
+        t, fake = self._wire(self.RATES_FRESH)
         er.put(t._world(), 1001, {"lastPrice": "99.80", "bid": "99.79",
                                   "ask": "99.81"}, at=er._now() - 25)
-        bot, cand = self._run(t)
-        self.assertEqual(self._rates(fake), [], "priced off the cache")
-        self.assertAlmostEqual(float(cand.level_meta["proposal_quote_age_s"]),
-                               25.0, delta=1.0)
-        return bot, t, fake, cand
+        _bot, cand = self._run(t)
+        self.assertEqual(len(self._rates(fake)), 1, "read on the wire")
+        self.assertEqual(cand.market_price, 100.0)
+        self.assertNotIn("proposal_quote_age_s", cand.level_meta)
+        self.assertNotIn("proposal_quote_batched", cand.level_meta)
 
     def test_a_cached_proposal_whose_look_cannot_read_sends_nothing(self):
         from bot_program.asset_engine import skips
@@ -1772,7 +1802,8 @@ class TheSnapshotPricedOrderTests(TestCase):
         bot, t, fake, cand = self._cached(self.RATES_500)
         self.assertIsNone(self._execute(bot, t, cand))
         self.assertEqual(_order_posts(fake), [], "no order on a cached price")
-        self.assertEqual(len(self._rates(fake)), 2, "the look and its retry")
+        self.assertEqual(len(self._rates(fake)), 1 + 2,
+                         "the proposal's read, then the look and its retry")
         note = self._note()
         self.assertEqual(note["code"], skips.NO_PRICE)
         self.assertTrue(note["detail"].startswith(
@@ -1793,32 +1824,16 @@ class TheSnapshotPricedOrderTests(TestCase):
         self.assertEqual(len(_order_posts(fake)), 1)
 
     def test_a_batched_proposal_whose_look_cannot_read_sends_nothing(self):
+        # a candidate carrying a batch's mark, as a proposal priced by a
+        # batch did until 2026-11-02 (an older process's): the same rule.
+        # A proposal reads its own rate on the wire since
+        # (TheProposalReadsTheWireTests: one read each, never a batch).
         from tests.test_etoro_leverage import _order_posts
-        self.cfg.symbols = ["MSFT", "AAPL"]
-        self.cfg.save(update_fields=["symbols"])
-        self.signal_for("MSFT")
-        batch = ("GET", "/rates", 200, {"rates": [
-            {"instrumentId": 2002, "bid": 49.995, "ask": 50.005,
-             "lastExecution": 50.0},
-            {"instrumentId": 1001, "bid": 99.79, "ask": 99.81,
-             "lastExecution": 99.8}]})
-        t, fake = self._wire(batch)
-        t._ids["MSFT"] = 2002
-        t._symbols.update({1001: "AAPL", 2002: "MSFT"})
-        with mock.patch("bot_program.engine.broker_router"
-                        ".broker_name_for_symbol", return_value="etoro"):
-            bot, first = self._run(t, symbol="MSFT")
-            _bot, cand = self._run(t, symbol="AAPL", bot=bot)
-        self.assertEqual(len(self._rates(fake)), 1, "one batch priced both")
-        self.assertTrue(first.level_meta.get("proposal_quote_batched"))
+        t, fake = self._wire(self.RATES_FRESH)
+        bot, cand = self._run(t)
+        self.assertNotIn("proposal_quote_batched", cand.level_meta)
         fake.routes.insert(0, self.RATES_500)
-        # AAPL priced off the batch MSFT's proposal sent (through the cache)
-        self.assertIsNone(self._execute(bot, t, cand))
-        self.assertEqual(_order_posts(fake), [])
-        # and a candidate priced by the batch's own answer: the same rule
-        cand.level_meta = {k: v for k, v in cand.level_meta.items()
-                           if k != "proposal_quote_age_s"}
-        cand.level_meta["proposal_quote_batched"] = True
+        cand.level_meta = dict(cand.level_meta, proposal_quote_batched=True)
         self.assertIsNone(self._execute(bot, t, cand))
         self.assertEqual(_order_posts(fake), [])
 
@@ -1837,8 +1852,10 @@ class TheSnapshotPricedOrderTests(TestCase):
 
 
 class TheTicketShowsTheAgeTests(_RatesOn, TestCase):
-    """The TAKE TRADE preview, on the real adapter: a price it read off the
-    shared cache carries its age; the send's own previews go to the wire."""
+    """The TAKE TRADE preview, on the real adapter: it reads the wire, as
+    the send's own previews do (2026-11-02, completes E2: it took a price
+    off the shared cache up to 10 s old, and said its age where no page
+    showed it; a page shows what it showed before the budget)."""
 
     def setUp(self):
         super().setUp()
@@ -1858,14 +1875,15 @@ class TheTicketShowsTheAgeTests(_RatesOn, TestCase):
         with mock.patch(ROUTER, return_value=t):
             return preview_asset_trade(self.user, self.inst, "BUY")
 
-    def test_the_preview_says_how_old_its_cached_price_is(self):
+    def test_the_preview_reads_the_wire_beside_a_fresh_cached_price(self):
+        # was ..._says_how_old_its_cached_price_is (4.0 s, one read)
         w = _Wire(prices={100000: 60000.0})
         t = _trader(w, env="demo", ids={"BTCUSD": 100000})
         t.ticker("BTCUSD")
         self.clock.t += 4
         out = self._preview(t)
-        self.assertEqual(out.get("mark_cached_age_s"), 4.0, out.get("error"))
-        self.assertEqual(w.rates(), ["100000"])
+        self.assertIsNone(out.get("mark_cached_age_s"), out.get("error"))
+        self.assertEqual(w.rates(), ["100000", "100000"])
 
     def test_a_fresh_preview_price_has_no_cached_age(self):
         w = _Wire(prices={100000: 60000.0})
@@ -1888,7 +1906,9 @@ class TheTicketShowsTheAgeTests(_RatesOn, TestCase):
                 mock.patch(ROUTER, return_value=t):
             mt._preview(self.user, self.inst, "BUY", ask_reread=False)
             mt.preview_asset_trade(self.user, self.inst, "BUY")
-        self.assertEqual(seen, [0, er.PREVIEW_MAX_AGE_S])
+        # the dialog's own preview reads the wire too since 2026-11-02 (it
+        # asked PREVIEW_MAX_AGE_S, 10 s)
+        self.assertEqual(seen, [0, 0])
 
 
 # ── every money path still refuses a 0 ───────────────────────────────────
@@ -1914,7 +1934,9 @@ class TheZeroTests(_RatesOn, TestCase):
         self.assertNotIn("venue_mark", zero.metadata)
         self.assertEqual(priced.metadata["venue_mark"]["price"], 102.0)
 
-    def test_a_zero_in_the_proposals_snapshot_is_never_an_entry(self):
+    def test_a_zero_in_the_proposals_read_is_never_an_entry(self):
+        # each proposal reads its own rate on the wire since 2026-11-02
+        # (this read one batch, "11,22", and was ..._proposals_snapshot_...)
         from bot_program.asset_engine import runner, skips
         w = _Wire(prices={11: 0, 22: 102.0})
         candidates = []
@@ -1927,7 +1949,7 @@ class TheZeroTests(_RatesOn, TestCase):
                                   candidates=candidates,
                                   not_desked={"paper": [], "live": []},
                                   summaries=[])
-        self.assertEqual(w.rates(), ["11,22"])
+        self.assertEqual(w.rates(), ["11", "22"])
         self.assertEqual([c.symbol for c in candidates], ["BBB"])
         note = _note(self.cfg, "AAA")
         self.assertEqual((note["code"], note["detail"]),
@@ -1963,9 +1985,11 @@ class TheZeroTests(_RatesOn, TestCase):
     def test_a_cached_zero_is_no_ticket_price(self):
         from bot_program import manual_trade as mt
         t, _w = self._cached_zero()
+        # the preview's own 10 s, written out: PREVIEW_MAX_AGE_S went with
+        # the dialog's cache read (2026-11-02); the reader stays
         with mock.patch(ROUTER, return_value=t):
             price, _c, _d, reason, _t = mt._mark_for_detail(
-                self.user, self.cfg, "AAA", max_age_s=er.PREVIEW_MAX_AGE_S)
+                self.user, self.cfg, "AAA", max_age_s=10)
         self.assertIsNone(price)
         self.assertEqual(reason, "answered no rate")
 
@@ -1992,9 +2016,12 @@ class TheSwitchTests(SimpleTestCase):
         # an answer lives the cadence's half hour; each reader bounds the
         # age it takes (2026-11-01, review: the half hour's answer is what
         # a shut market's marks read)
-        self.assertEqual((er.CACHE_TTL_S, er.MARK_MAX_AGE_S,
-                          er.PROPOSAL_MAX_AGE_S, er.PREVIEW_MAX_AGE_S),
-                         (1800, 30, 30, 10))
+        self.assertEqual((er.CACHE_TTL_S, er.MARK_MAX_AGE_S), (1800, 30))
+        # 2026-11-02 (completes E2): no proposal and no TAKE TRADE preview
+        # reads the cache any more (an order is never priced from it, and
+        # a page shows what it showed); their ages, 30 and 10, are gone
+        for gone in ("PROPOSAL_MAX_AGE_S", "PREVIEW_MAX_AGE_S"):
+            self.assertFalse(hasattr(er, gone), gone)
         self.assertEqual(er.CACHE_TTL_S, er.SHUT_EVERY_S)
         self.assertEqual(er.BATCH_MAX_IDS, 20)
         self.assertEqual(er.UNPROVEN_TTL_S, 24 * 3600)

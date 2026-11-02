@@ -399,11 +399,11 @@ def _mark_for_detail(user, cfg, symbol, *, max_age_s=0):
     wrong thing. `reason` carries the exception's text (a raise), or
     "answered no rate" (a 0 the venue returned), or "" with a price.
 
-    `max_age_s` (2026-11-01, engine/etoro_rates): the dialog's own preview
-    passes PREVIEW_MAX_AGE_S and may then be shown eToro's answer from the
-    shared rates cache (the tick says "cached" and its "age_s"); every
-    other caller — the send's own previews under the lock, the funding
-    closes' marks — passes nothing and reads the wire."""
+    `max_age_s` (2026-11-01, engine/etoro_rates): an answer from the
+    shared rates cache up to that old may be shown (the tick says "cached"
+    and its "age_s"). No caller passes one since 2026-11-02: the dialog's
+    own preview reads the wire again, as the send's own previews and the
+    funding closes' marks always did."""
     from bot_program.engine.broker_router import client_for_symbol
 
     client = client_for_symbol(user, symbol, cfg)
@@ -1491,11 +1491,12 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
     no eToro re-read, so the read that covers the order is the one its
     booking asks, SETTLE_S after the fill (bot_program.etoro_cells).
 
-    `quote_max_age_s` (2026-11-01, engine/etoro_rates): the dialog's
-    preview (preview_take_trade, preview_asset_trade) may show eToro's
-    answer from the shared rates cache up to PREVIEW_MAX_AGE_S old, and
-    then says how old it is (mark_cached_age_s). _execute's own previews
-    pass nothing: the send reads the wire.
+    `quote_max_age_s` (2026-11-01, engine/etoro_rates): an answer from
+    the shared rates cache up to that old may be shown, with its age
+    (mark_cached_age_s). Nobody passes one since 2026-11-02: the dialog's
+    preview (preview_take_trade, preview_asset_trade) reads the wire, as
+    _execute's own previews do; it showed a cached price up to 10 s old
+    and said its age where no page showed it.
 
     The funding proposal ("close these to free enough") considers ONLY
     open manual trades in this class — closing a bot's position from a
@@ -2045,8 +2046,8 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         # THE AGE OF A CACHED PRICE (2026-11-01, engine/etoro_rates): the
         # seconds since eToro answered the price shown, when the dialog's
         # preview took it from the shared rates cache (at most
-        # PREVIEW_MAX_AGE_S); None when it was read for this preview. The
-        # send reads its own.
+        # quote_max_age_s; none since 2026-11-02); None when it was read
+        # for this preview. The send reads its own.
         "mark_cached_age_s": (_tick.get("age_s")
                               if isinstance(_tick, dict)
                               and _tick.get("cached") else None),
@@ -2202,9 +2203,10 @@ def preview_take_trade(user, signal, leverage=None) -> dict:
                          f"direction — only bullish and bearish signals "
                          f"are executable"}
     side = "BUY" if signal.direction == "bullish" else "SELL"
-    from bot_program.engine.etoro_rates import PREVIEW_MAX_AGE_S
+    # THE WIRE (2026-11-02): the dialog's price is read for it, as before
+    # the shared rates cache
     return _preview(user, signal.instrument, side, signal=signal,
-                    leverage=leverage, quote_max_age_s=PREVIEW_MAX_AGE_S)
+                    leverage=leverage)
 
 
 def preview_asset_trade(user, inst, side, leverage=None) -> dict:
@@ -2212,9 +2214,8 @@ def preview_asset_trade(user, inst, side, leverage=None) -> dict:
     levels come from the engine's ATR machinery."""
     if side not in ("BUY", "SELL"):
         return {"error": f"Unknown side {side!r}"}
-    from bot_program.engine.etoro_rates import PREVIEW_MAX_AGE_S
-    return _preview(user, inst, side, leverage=leverage,
-                    quote_max_age_s=PREVIEW_MAX_AGE_S)
+    # THE WIRE (2026-11-02), as preview_take_trade
+    return _preview(user, inst, side, leverage=leverage)
 
 
 def _execute(user, inst, side, close_ids=None, signal=None,

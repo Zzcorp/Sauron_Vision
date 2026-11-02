@@ -43,12 +43,19 @@ write queue, below). Each reader bounds the age it takes:
 
   the marks and the care (AssetBot.manage_positions)   MARK_MAX_AGE_S
   the same marks on a market the cadence holds shut     shut_max_age
-  the proposals past the clock gate (one snapshot)      PROPOSAL_MAX_AGE_S
-  the TAKE TRADE dialog's preview (manual_trade)        PREVIEW_MAX_AGE_S
-  the last look before an order, the order itself,
-  the send's own previews, the kill switch, the CLOSE
+  the proposals, the TAKE TRADE dialog's preview, the
+  last look before an order, the order itself, the
+  send's own previews, the kill switch, the CLOSE
   button, the pending-close mark (pending_closes) and
   the reconcile's orphan mark (reconcile_asset)         never: the wire
+
+THE PROPOSALS AND THE DIALOG READ THE WIRE AGAIN (2026-11-02, review):
+from 2026-11-01 the proposals past the clock were read off one batched
+snapshot (30 s) and the TAKE TRADE dialog's preview off the cache (10 s).
+A proposal's quote is its order's price (the stop, the target and the
+size are built on it, and the last look can only refuse), and an order is
+never priced from a cache or a batch snapshot; and a page shows what it
+showed before the budget. The snapshot serves the marks alone.
 
 A CACHED MARK NEVER ACTS ALONE (2026-11-01, review; AssetBot._confirm_mark):
 a stop move (the mirror's retry of an unchanged lock included), a care
@@ -58,7 +65,8 @@ priority first, judged by the mark sanity as the row's own read was
 (against its state from before the cached print), so what such a send
 carries is decided on the row's own read, as before the cache. A
 proposal priced off the cache or a batch is never ordered on that price
-alone: its last look fails closed (AssetBot.execute_entry).
+alone: its last look fails closed (AssetBot.execute_entry); and since
+2026-11-02 no proposal is priced so (above).
 
 The plan let the pending-close mark and the orphan mark read it at 30 s;
 they do not: both are P0, and a cache read on the drain's path between
@@ -67,9 +75,10 @@ behind (engine/etoro_budget's rule: none on a P0 or P1 path).
 
 A cached answer says so ("cached", its "age_s" and "read_at"), and
 wherever one is booked or shown its age is recorded: the venue stamp is
-dated at the read, a close the manage tick books at it carries
-exit_mark_cached_age_s, a proposal priced off it carries
-proposal_quote_age_s, the dialog's preview says mark_cached_age_s.
+dated at the read, and a close the manage tick books at it carries
+exit_mark_cached_age_s (a proposal priced off it carried
+proposal_quote_age_s, and the dialog's preview mark_cached_age_s, until
+neither read it, 2026-11-02).
 
 THE SHUT-MARKET CADENCE (shut_max_age). The live mark of a row whose stop
 rests at eToro, on a market the exchange clock says is shut (the clock the
@@ -128,10 +137,10 @@ SHUT_CADENCE_CLASSES = frozenset({"forex", "commodity"})
 #: How long a rates answer lives in the shared cache: the cadence's half
 #: hour, the oldest any reader takes. Each reader bounds its own age.
 CACHE_TTL_S = SHUT_EVERY_S
-#: The oldest answer each reader takes (the table above).
+#: The oldest answer each reader takes (the table above). The proposals'
+#: 30 s and the TAKE TRADE preview's 10 s went with their cache reads
+#: (2026-11-02): both read the wire.
 MARK_MAX_AGE_S = 30
-PROPOSAL_MAX_AGE_S = 30
-PREVIEW_MAX_AGE_S = 10
 #: A symbol answered more recently than this is not asked again by a batch.
 PREFETCH_FRESH_S = 15
 #: The most ids one batched GET carries. A GUESS, said as one: eToro's own
@@ -757,8 +766,7 @@ def quote(client, symbol, *, max_age_s, refill=None) -> dict:
     raised (nothing asked again, no second health note), and so is a
     refusal, for a reader at its priority or below (closed_for); else ONE
     batched GET carries this symbol and up to BATCH_MAX_IDS - 1 of the
-    others (its answer says "batched": a proposal priced off it fails its
-    last look closed). A row missing from it — or from any trusted batch
+    others (its answer says "batched"). A row missing from it — or from any trusted batch
     of the pass (the missing memo) —, an unproven batch, a cold id and
     every reader without a pass take the single read. Raises what the
     single read raises."""

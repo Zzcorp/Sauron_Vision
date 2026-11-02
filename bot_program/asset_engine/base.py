@@ -4828,10 +4828,10 @@ class AssetBot(ABC):
         # keeps its floor for the marks, the last looks and the closes, or
         # while the shared 429 pause holds. A skip with the budget's words
         # (NO_PRICE, "— not asked"), never a venue failure; the order's own
-        # reads below (the eligibility, the last look, the POST) are P1.
-        # Through eToro it is read off ONE batched snapshot of this config's
-        # symbols past the clock (2026-11-01, _proposal_tick); the last look
-        # before the order is always the wire.
+        # reads below (the eToro facts, the last look, the POST) are P1.
+        # Read on the wire, as the order's price (2026-11-02, _proposal_tick:
+        # never off the shared cache or a batch); the last look before the
+        # order is the wire too.
         from bot_program.engine import etoro_budget
         try:
             with etoro_budget.at(etoro_budget.P4, "proposal"):
@@ -4943,15 +4943,6 @@ class AssetBot(ABC):
         )
         sl, tp, level_meta = stop_and_target(
             self.cfg, symbol, price, decision.direction)
-        # THE SNAPSHOT'S AGE (2026-11-01, engine/etoro_rates): a proposal
-        # priced off the shared rates cache says how old that answer was,
-        # one priced off a batch says so (review); the row carries it
-        # (execute_entry's entry metadata), and its last look fails closed.
-        if isinstance(tk, dict) and tk.get("cached"):
-            level_meta = dict(level_meta or {},
-                              proposal_quote_age_s=tk.get("age_s"))
-        elif isinstance(tk, dict) and tk.get("batched"):
-            level_meta = dict(level_meta or {}, proposal_quote_batched=True)
 
         # ── THE SMART MONEY (2026-10-02, bot_program/smart_money.py) ─────
         # The stop leaves the crowd's hunt zone BEFORE the cost filter and
@@ -5385,53 +5376,16 @@ class AssetBot(ABC):
         return ""
 
     def _proposal_tick(self, client, symbol):
-        """The proposal's rates answer (2026-11-01, engine/etoro_rates).
-        Through eToro it is read off ONE batched snapshot of this config's
-        symbols past the clock gate: the shared cache up to
-        PROPOSAL_MAX_AGE_S old, else one batched read carrying this symbol
-        and the config's later symbols that route to eToro and pass the
-        clock (_proposal_refill); a symbol the batch leaves out is read
-        alone, and a failed or refused batch answers every symbol of it.
-        Any other client, or etoro_rates.CACHE off: ticker(), as before.
-        Never an order's price: the last look reads the wire."""
-        from bot_program.engine import etoro_rates
-        if not etoro_rates.CACHE:
-            return client.ticker(symbol)
-        return etoro_rates.quote(
-            client, symbol, max_age_s=etoro_rates.PROPOSAL_MAX_AGE_S,
-            refill=lambda: self._proposal_refill(symbol))
-
-    def _proposal_refill(self, symbol) -> list:
-        """The config's symbols after `symbol`, in its own order, that the
-        proposal's batch may carry beside it (2026-11-01): routed to eToro
-        (broker_router.broker_name_for_symbol, no client built) and past
-        the clock gate (_entry_timing_gate, which the symbol's own proposal
-        asks again). Read once a tick per symbol. Never raises."""
-        syms = [str(s) for s in (self.cfg.symbols or [])]
-        try:
-            after = syms[syms.index(symbol) + 1:]
-        except ValueError:
-            after = syms
-        cache = getattr(self, "_tick_broker_cache", None)
-        out = []
-        for s in after:
-            key = ("proposal_batchable", s)
-            try:
-                if isinstance(cache, dict) and key in cache:
-                    ok = cache[key]
-                else:
-                    from bot_program.engine.broker_router import (
-                        broker_name_for_symbol)
-                    ok = (broker_name_for_symbol(self.user, s, self.cfg)
-                          == "etoro"
-                          and bool(self._entry_timing_gate(s).get("ok", True)))
-                    if isinstance(cache, dict):
-                        cache[key] = ok
-            except Exception:  # noqa: BLE001 — unread: read on its own turn
-                ok = False
-            if ok:
-                out.append(s)
-        return out
+        """The proposal's rates answer: ALWAYS THE WIRE (2026-11-02,
+        completes E2). The proposal's quote is the order's price — its
+        stop, its target and its size are built on it, and the last look
+        before the order can only refuse — and an order is never priced
+        from a cache or a batch snapshot. From 2026-11-01 it was read off
+        one batched snapshot of the config's symbols past the clock (the
+        shared cache up to 30 s old, or a batch); that snapshot now
+        serves the marks alone (etoro_rates.quote), and the proposal asks
+        ticker(), as it did before the batch, at P4 in the budget."""
+        return client.ticker(symbol)
 
     def _entry_timing_gate(self, symbol: str, *, now=None) -> dict:
         """THE ENTRY TIMING (2026-10-06, bot_program/entry_timing.verdict)
@@ -6637,7 +6591,9 @@ class AssetBot(ABC):
             # (2026-11-01, review; engine/etoro_rates): an order is never
             # priced off a cache or a batch snapshot alone — its look fails
             # closed, so a look that cannot read the quote, or reads one
-            # with no price, sends nothing (_last_look's fail_closed).
+            # with no price, sends nothing (_last_look's fail_closed). A
+            # proposal reads the wire since 2026-11-02 (_proposal_tick), so
+            # only a candidate an older process priced so carries the mark.
             _snapshot_priced = isinstance(level_meta, dict) and bool(
                 level_meta.get("proposal_quote_age_s") is not None
                 or level_meta.get("proposal_quote_batched"))
