@@ -957,24 +957,69 @@ def _buy():
 class TheClockFirstTests(TestCase):
     """Unconditional: the cache's switch does not move the gate."""
 
-    def test_a_shut_market_costs_no_rates_read_for_an_entry(self):
-        from bot_program.asset_engine import skips
+    def _propose_at(self, cfg, t, when):
         from bot_program.asset_engine.stock_bot import StockBot
-        cfg = _cfg(_user("rb_clock"), "K", symbols=["AAA"])
-        w = _Wire(prices={11: 101.0})
-        t = _trader(w)
         with mock.patch.object(et, "GATE", True), \
-                mock.patch("django.utils.timezone.now", return_value=SAT), \
+                mock.patch("django.utils.timezone.now", return_value=when), \
                 mock.patch(ROUTER, return_value=t), \
                 mock.patch("bot_program.asset_engine.stock_bot.StockBot"
                            ".decide", return_value=_buy()):
-            self.assertIsNone(StockBot(cfg).propose_entry("AAA"))
-        self.assertEqual(w.calls, [], "eToro was not asked")
+            return StockBot(cfg).propose_entry("AAA")
+
+    def test_a_shut_market_costs_one_rates_read_a_shut_for_an_entry(self):
+        # 2026-11-02 (completes E2, review): was ..._costs_no_rates_read_
+        # for_an_entry. The clock first skipped the entry quote's memory
+        # too (below): ONE read of each shut feeds it, and every later
+        # refusal of that shut asks nothing, where every tick of it asked
+        # before the clock went first
+        from bot_program.asset_engine import skips
+        cfg = _cfg(_user("rb_clock"), "K", symbols=["AAA"])
+        w = _Wire(prices={11: 101.0})
+        t = _trader(w)
+        for later in (0, 5 * 60, 20 * 3600):
+            self.assertIsNone(self._propose_at(
+                cfg, t, SAT + timedelta(seconds=later)))
+        self.assertEqual(w.rates(), ["11"], "one read for the whole shut")
         note = _note(cfg, "AAA")
         self.assertEqual(note["code"], skips.MARKET_SHUT)
         self.assertTrue(note["detail"].startswith(
             "the stock market is shut until Monday 13:30 UTC — new entries "
             "resume 13:45 UTC"), note)
+        cfg.refresh_from_db()
+        self.assertEqual(cfg.extras["entry_marks"]["AAA"]["mid"], 101.0)
+
+    def test_a_feed_frozen_through_the_shut_is_held_at_the_reopen(self):
+        """2026-11-02 (completes E2, review): the clock-first move skipped
+        _entry_quote_gate on a shut market, and with it the memory the
+        freeze rule reads (extras["entry_marks"]): a feed still showing
+        the shut's price after the reopen was a first sighting there, where
+        every refused tick of the shut had recorded that price, and the
+        freeze rule (FROZEN_MINUTES in an open market) let entries go on it
+        until 45 minutes after the reopen. The shut's one read is the
+        memory now, so the frozen feed is held at once, as before."""
+        from bot_program.asset_engine import skips
+        cfg = _cfg(_user("rb_clock_frozen"), "K", symbols=["AAA"])
+        w = _Wire(prices={11: 101.0})
+        t = _trader(w)
+        self.assertIsNone(self._propose_at(cfg, t, SAT))
+        monday = datetime(2026, 9, 28, 15, 0, tzinfo=UTC)
+        self.assertIsNone(self._propose_at(cfg, t, monday))
+        note = _note(cfg, "AAA")
+        self.assertEqual(note["code"], skips.SUSPECT_MARK, note)
+        self.assertIn("frozen quote: 101 unchanged for", note["detail"])
+
+    def test_a_feed_that_moved_at_the_reopen_is_not_held(self):
+        # the control: the shut's price was read, the reopen's moved
+        from bot_program.asset_engine import skips
+        cfg = _cfg(_user("rb_clock_moved"), "K", symbols=["AAA"])
+        w = _Wire(prices={11: 101.0})
+        t = _trader(w)
+        self.assertIsNone(self._propose_at(cfg, t, SAT))
+        w.prices[11] = 101.4
+        monday = datetime(2026, 9, 28, 15, 0, tzinfo=UTC)
+        self._propose_at(cfg, t, monday)
+        self.assertNotEqual(_note(cfg, "AAA").get("code"),
+                            skips.SUSPECT_MARK)
 
     def test_an_open_clock_reads_the_rate(self):
         from bot_program.asset_engine.stock_bot import StockBot
