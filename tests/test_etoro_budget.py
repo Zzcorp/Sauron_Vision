@@ -1721,16 +1721,67 @@ class TheOtherAccountReadersTests(_BudgetOn, TestCase):
             self.assertIsNone(capital_truth.broker_equity(user, cfg))
         self.assertEqual(fake.calls, [])
 
-    def test_the_key_probe_answers_unknown_in_the_budgets_words(self):
+    def test_the_key_probe_answers_not_asked_in_the_budgets_words(self):
+        # 2026-11-02 (completes E1): "not_asked", where it answered
+        # "unknown" — the save filed that as a probe that failed (below)
         from dashboard import views_brokers
         _account_at_p2s_limit()
         with mock.patch("requests.get") as get:
             state, words = views_brokers.etoro_probe("api-k", "user-k",
                                                      demo=False)
         get.assert_not_called()
-        self.assertEqual(state, "unknown")
+        self.assertEqual(state, views_brokers.PROBE_NOT_ASKED)
         self.assertTrue(words.startswith("eToro budget: account 28/30"),
                         words)
+
+    def _save_keys(self, *, row=None):
+        from django.contrib.messages import get_messages
+        from django.urls import reverse
+        admin = User.objects.create_superuser("budget_admin", "a@x", "x")
+        self.client.force_login(admin)
+        with mock.patch("requests.get") as get:
+            r = self.client.post(reverse("hq_save_etoro"), {
+                "target_username": "budget_keys", "etoro_api_key": "api-k",
+                "etoro_user_key": "user-k", "demo": "on",
+                "primary_stocks": "on"})
+        get.assert_not_called()
+        return [str(m) for m in get_messages(r.wsgi_request)]
+
+    def test_a_probe_the_budget_did_not_send_keeps_the_rows_verdict(self):
+        """2026-11-02 (completes E1, review): the probe the budget did not
+        send answered "unknown", and the /brokers/ save stored that as a
+        failed verification — connected=False — and, the row being the
+        book, said every pool is measured against "an account that just
+        refused us". Nothing was asked. A re-save of the pair and the world
+        the row was verified on keeps its verdict."""
+        from bot_program.models import EtoroAccount
+        user = User.objects.create_user("budget_keys", password="x")
+        acct = EtoroAccount.objects.create(user=user, demo=True,
+                                           connected=True,
+                                           is_primary_for_stocks=True)
+        acct.set_credentials("api-k", "user-k")
+        acct.save()
+        _account_at_p2s_limit()
+        said = self._save_keys()
+        acct.refresh_from_db()
+        self.assertTrue(acct.connected, "nothing failed: the verdict stands")
+        self.assertEqual(len(said), 1, said)
+        self.assertIn("not verified: eToro budget: account 28/30", said[0])
+        self.assertIn("Nothing was asked of eToro, so nothing failed",
+                      said[0])
+        for wrong in ("refused us", "REFUSED", "could not be verified"):
+            self.assertNotIn(wrong, said[0])
+
+    def test_a_new_pair_it_did_not_probe_is_unverified_never_refused(self):
+        from bot_program.models import EtoroAccount
+        User.objects.create_user("budget_keys", password="x")
+        _account_at_p2s_limit()
+        said = self._save_keys()
+        acct = EtoroAccount.objects.get(user__username="budget_keys")
+        self.assertFalse(acct.connected, "a pair nobody verified yet")
+        self.assertIn("the next account sync verifies them", said[0])
+        self.assertIn("while its keys are unverified", said[0])
+        self.assertNotIn("refused us", said[0])
 
     def test_the_legacy_adapter_answers_as_a_failed_fetch(self):
         from market_data.adapters.etoro_adapter import EtoroClient
@@ -1741,6 +1792,32 @@ class TheOtherAccountReadersTests(_BudgetOn, TestCase):
             self.assertIsNone(c.get_portfolio())
             self.assertIsNone(c.get_account_balance())
         get.assert_not_called()
+        # 2026-11-02 (completes E1): and it says nothing was asked
+        self.assertTrue(c.not_asked.startswith("eToro budget: account"),
+                        c.not_asked)
+
+    def test_the_setup_sync_the_budget_did_not_send_is_no_failure(self):
+        """2026-11-02 (completes E1, review): /setup/'s sync answered a
+        refusal as "Failed to sync eToro positions. Check your API key.":
+        nothing was asked, and the key is not in question."""
+        from django.contrib.messages import get_messages
+        from django.urls import reverse
+        user = User.objects.create_user("budget_setup", password="x")
+        self.client.force_login(user)
+        _account_at_p2s_limit(eb.key_hash("legacy-k"))
+        with mock.patch("market_data.adapters.etoro_adapter.API_KEY",
+                        "legacy-k"), \
+                mock.patch("requests.Session.get") as get:
+            r = self.client.post(reverse("setup"), {"action": "sync_etoro"})
+        get.assert_not_called()
+        said = [(m.level_tag, str(m)) for m in get_messages(r.wsgi_request)]
+        self.assertEqual(len(said), 1, said)
+        level, words = said[0]
+        self.assertEqual(level, "warning")
+        self.assertTrue(words.startswith("eToro sync not asked: eToro "
+                                         "budget: account"), words)
+        self.assertIn("nothing was sent", words)
+        self.assertNotIn("Check your API key", words)
 
     def test_telegram_status_says_not_read_now(self):
         from bot_program import telegram_eye
