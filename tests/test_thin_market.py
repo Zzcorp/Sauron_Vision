@@ -77,16 +77,25 @@ class TheAnswerIsRecordedTests(SimpleTestCase):
         feed._sv_public_feed = True
         feed.klines.return_value = [[7_000, "1", "2", "1", "1.5", "3"]]
         cfg = mock.MagicMock(symbols=["OATS"], asset_class="commodity")
+        # The keyless branch writes after the venue's newest bar only
+        # (2026-11-01): that read is the table's, so it is stood in for
+        # here as _upsert_rows is, and it must be asked with the answer.
         with mock.patch("instruments.models.Instrument.objects") as objs, \
                 mock.patch.object(bot_bars, "_client_for",
                                   return_value=feed), \
                 mock.patch.object(bot_bars, "_upsert_rows",
                                   return_value=(1, 0)), \
+                mock.patch.object(bot_bars, "_after_the_venues_last_bar",
+                                  side_effect=lambda inst, iv, rows: rows
+                                  ) as guard, \
                 mock.patch.object(bot_bars, "_pace"):
-            objs.filter.return_value.first.return_value = mock.MagicMock()
+            inst = mock.MagicMock()
+            objs.filter.return_value.first.return_value = inst
             bot_bars.refresh_bars_for_config(cfg, intervals=("4h",))
         self.assertEqual(bot_bars.last_answer("OATS", "4h")["newest_ms"],
                          7_000)
+        guard.assert_called_once_with(inst, "4h",
+                                      [[7_000, "1", "2", "1", "1.5", "3"]])
 
 
 class TheVerdictTests(SimpleTestCase):
