@@ -3765,6 +3765,13 @@ def setup(request):
                 messages.success(request, f"Synced {result['synced']} positions from eToro.")
             elif result.get("status") == "not_configured":
                 messages.error(request, "eToro API key not configured.")
+            elif result.get("status") == "not_asked":
+                # the eToro request budget sent nothing (2026-11-02): no
+                # failure, and the key is not in question
+                messages.warning(request, f"eToro sync not asked: "
+                                          f"{result.get('why') or 'the eToro request budget'}"
+                                          f" — nothing was sent; sync again "
+                                          f"in a minute.")
             else:
                 messages.error(request, "Failed to sync eToro positions. Check your API key.")
 

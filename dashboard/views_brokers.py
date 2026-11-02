@@ -108,10 +108,15 @@ from .views_admin_hq import _admin_only, _pin_ok
 logger = logging.getLogger(__name__)
 
 ETORO_PROBE_TIMEOUT_S = 10
+#: The probe's fourth answer (2026-11-02): the eToro request budget did
+#: not send it. Nothing was asked, so nothing failed (save_etoro_credentials
+#: keeps the row's verdict on a pair it already verified).
+PROBE_NOT_ASKED = "not_asked"
 
 
 def etoro_probe(api_key: str, user_key: str, demo: bool = True) -> tuple:
-    """("ok" | "refused" | "unknown", detail) — three answers, on purpose.
+    """("ok" | "refused" | "unknown", detail) — three answers, on purpose
+    (and PROBE_NOT_ASKED when the budget did not send it, below).
 
     200 means the keys work. 401 or 403 means eToro saw them and said no.
     Anything else — a 404, a 5xx, a timeout — means this call could not
@@ -136,8 +141,10 @@ def etoro_probe(api_key: str, user_key: str, demo: bool = True) -> tuple:
 
     THROUGH THE eTORO REQUEST BUDGET (2026-11-01, engine/etoro_budget): an
     account read at P2, keyed by the user key's hash. One the budget does
-    not send answers "unknown" with the budget's words (save again in a
-    minute), never "refused": nothing was asked.
+    not send answers PROBE_NOT_ASKED with the budget's words, never
+    "refused": nothing was asked. It answered "unknown" until 2026-11-02,
+    which the save filed as a probe that failed (connected=False, and "an
+    account that just refused us" on a row that is the book).
     """
     from bot_program.engine import etoro_budget
     from bot_program.engine.etoro_client import EtoroTrader
@@ -150,7 +157,7 @@ def etoro_probe(api_key: str, user_key: str, demo: bool = True) -> tuple:
                           world="demo" if demo else "live", where="probe",
                           why="key probe")
     except etoro_budget.Refused as e:
-        return "unknown", str(e)
+        return PROBE_NOT_ASKED, str(e)
     try:
         import requests
         r = requests.get(
@@ -863,6 +870,13 @@ def save_etoro_credentials(request):
 
     acct, _created = EtoroAccount.objects.get_or_create(user=user)
     was_demo = None if _created else acct.demo
+    # WHAT THE ROW WAS VERIFIED ON (2026-11-02): a probe the eToro budget
+    # does not send keeps this verdict for the same pair in the same world
+    try:
+        verified_pair = (None if _created or not acct.connected
+                         else acct.get_credentials())
+    except Exception:  # noqa: BLE001 — unreadable: verified on nothing
+        verified_pair = None
     # THE UNTICK. A demo -> live flip is the one click between a virtual
     # order and a real one with the SAME pair (module docstring, measured
     # 2026-09-23). Refused before anything is written — the keys are not
@@ -957,8 +971,19 @@ def save_etoro_credentials(request):
     acct.is_primary_for_crypto = request.POST.get("primary_crypto") == "on"
 
     verdict, detail = etoro_probe(api_key, user_key, demo=demo)
-    acct.connected = verdict == "ok"
-    if acct.connected:
+    # A PROBE THE BUDGET DID NOT SEND IS NO FAILURE (2026-11-02, completes
+    # E1): nothing was asked. The row keeps the verdict it had for the
+    # pair and the world it was verified on; a new pair or another world
+    # is recorded unverified, as for a probe that could not decide, and
+    # the next account sync, which reads the account on these keys, sets
+    # it connected.
+    not_asked = verdict == PROBE_NOT_ASKED
+    if not_asked:
+        acct.connected = (verified_pair == (api_key, user_key)
+                          and was_demo == demo)
+    else:
+        acct.connected = verdict == "ok"
+    if acct.connected and not not_asked:
         acct.last_sync = timezone.now()
         fields.append("last_sync")
     acct.save(update_fields=fields)
@@ -972,7 +997,12 @@ def save_etoro_credentials(request):
     carried = [c for c in ("stock", "forex", "commodity", "crypto")
                if acct.is_primary_for(c)]
     book_note = ""
-    if carried and not acct.connected:
+    if carried and not acct.connected and not_asked:
+        book_note = (f" It is flagged primary for {', '.join(carried)}, so it "
+                     f"is now the book while its keys are unverified: the "
+                     f"eToro request budget did not send the probe, and the "
+                     f"next account sync verifies them.")
+    elif carried and not acct.connected:
         book_note = (f" It is flagged primary for {', '.join(carried)}, so it "
                      f"is now the book: every pool and every limit is "
                      f"measured against an account that just refused us. "
@@ -991,6 +1021,14 @@ def save_etoro_credentials(request):
                                 f"({env}) but REFUSED by eToro ({detail}). "
                                 f"Check both keys, and that the account is "
                                 f"verified.{book_note}{env_note}")
+    elif not_asked:
+        kept = (" The row keeps its verdict: connected, on this pair and "
+                "this world." if acct.connected else
+                " They are recorded; the next account sync verifies them.")
+        messages.warning(request, f"eToro keys saved for {target_username} "
+                                  f"({env}); not verified: {detail}. "
+                                  f"Nothing was asked of eToro, so nothing "
+                                  f"failed.{kept}{book_note}{env_note}")
     else:
         messages.warning(request, f"eToro keys saved for {target_username} "
                                   f"({env}) but could not be verified — the "

@@ -14,6 +14,9 @@ class EtoroClient:
 
     def __init__(self, api_key=None):
         self.api_key = api_key or API_KEY
+        # The budget's words for the last read it did not send, or ""
+        # (2026-11-02): the sync tells "not asked" from a failed fetch.
+        self.not_asked = ""
         self.session = requests.Session()
         if self.api_key:
             self.session.headers.update({
@@ -29,8 +32,9 @@ class EtoroClient:
         etoro_budget): each GET here is an account read at P2. This legacy
         sync carries no user key, so its budget is keyed by the hash of
         its own key (never the key). False when the budget did not send
-        it: the caller answers as for a failed fetch, and nothing was
-        asked."""
+        it: the getter answers None, as for a failed fetch, nothing was
+        asked, and `not_asked` keeps the budget's words (2026-11-02), so
+        sync_etoro_positions says so instead of a failure."""
         from bot_program.engine import etoro_budget
         try:
             etoro_budget.take(etoro_budget.key_hash(self.api_key),
@@ -39,6 +43,7 @@ class EtoroClient:
             return True
         except etoro_budget.Refused as e:
             logger.info("eToro %s not asked: %s", what, e)
+            self.not_asked = str(getattr(e, "why", "") or e)
             return False
 
     def get_portfolio(self):
@@ -95,6 +100,10 @@ def sync_etoro_positions():
 
     positions_data = client.get_positions()
     if not positions_data:
+        if client.not_asked:
+            # THE BUDGET DID NOT SEND IT (2026-11-02, completes E1): nothing
+            # was asked, so nothing failed and the key is not in question
+            return {"status": "not_asked", "why": client.not_asked}
         return {"status": "fetch_failed"}
 
     # The shared "Main" book, because this sync has no user to attribute to:
