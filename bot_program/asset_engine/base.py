@@ -1878,7 +1878,12 @@ class AssetBot(ABC):
             if last and (now - _dt.fromisoformat(str(last))).total_seconds() \
                     < float(lag):
                 return False
-            positions = self._broker_snapshot(client, "positions")
+            # P1 IN THE eTORO BUDGET (2026-11-02): an order's own state,
+            # like its fill lookups — never refused, never paused
+            from bot_program.engine import etoro_budget
+            positions = self._broker_snapshot(
+                client, "positions", priority=etoro_budget.P1,
+                why="an order in doubt: does eToro hold it")
             if positions is None:
                 return False
             want = str(symbol).upper()
@@ -2031,7 +2036,11 @@ class AssetBot(ABC):
             # to this row. An account total that another row or a
             # hand-bought lot also claims proves nothing, and booking it
             # would put units on this row that belong to someone else.
-            positions = self._broker_snapshot(client, "positions")
+            # P1 in the eToro budget (2026-11-02): the order's own state.
+            from bot_program.engine import etoro_budget
+            positions = self._broker_snapshot(
+                client, "positions", priority=etoro_budget.P1,
+                why="a working entry: does eToro hold it")
             if positions is None:
                 return
             held = self._broker_still_holds(trade, positions)
@@ -2399,13 +2408,21 @@ class AssetBot(ABC):
                            "registered: %s", self.asset_class, trade.symbol,
                            e)
 
-    def _broker_snapshot(self, client, what: str):
+    def _broker_snapshot(self, client, what: str, *, priority=None,
+                         why: str = ""):
         """`what` in {"resting", "positions"} from this tick's cache.
 
         None means the broker could not be asked. The cache lives for one
         manage_positions pass, so a fleet of protected rows costs one
         openTrades() and one positions() read, not one pair per row.
-        """
+
+        `priority` and `why` (2026-11-02, engine/etoro_budget): the read's
+        priority in the eToro budget and its name, named by the caller —
+        P0 for a book a close stands on, P1 for an entry's own state. A
+        scope never lowers an outer one, so inside the manage walk's P3
+        mark scope this read stays P0 or P1: never refused, never paused,
+        never pooled. Unnamed, it is the caller's scope (P1 outside any),
+        as before; the pass's cached answer serves every caller."""
         cache = getattr(self, "_tick_broker_cache", None)
         if cache is None:
             cache = self._tick_broker_cache = {}
@@ -2424,13 +2441,19 @@ class AssetBot(ABC):
         if key in cache:
             return cache[key]
         value = None
+        import contextlib
+
+        from bot_program.engine import etoro_budget
+        scope = (etoro_budget.at(priority, why) if priority is not None
+                 else contextlib.nullcontext())
         try:
-            if what == "resting":
-                fn = getattr(client, "resting_order_ids", None)
-                value = fn() if callable(fn) else None
-            elif what == "positions":
-                fn = getattr(client, "get_positions", None)
-                value = fn() if callable(fn) else None
+            with scope:
+                if what == "resting":
+                    fn = getattr(client, "resting_order_ids", None)
+                    value = fn() if callable(fn) else None
+                elif what == "positions":
+                    fn = getattr(client, "get_positions", None)
+                    value = fn() if callable(fn) else None
         except Exception as e:  # noqa: BLE001 — unreachable reads as unknown
             logger.warning("[%s_bot] broker %s snapshot failed: %s",
                            self.asset_class, what, e)
@@ -2549,12 +2572,19 @@ class AssetBot(ABC):
         if not ids:
             return False
 
-        resting = self._broker_snapshot(client, "resting")
+        # P0 IN THE eTORO BUDGET (2026-11-02): the vanished-stop net's book
+        # is the one its close would stand on
+        from bot_program.engine import etoro_budget
+        resting = self._broker_snapshot(
+            client, "resting", priority=etoro_budget.P0,
+            why="the vanished-stop net")
         if resting is None:
             return False
         if any(oid in resting for oid in ids):
             return False
-        positions = self._broker_snapshot(client, "positions")
+        positions = self._broker_snapshot(
+            client, "positions", priority=etoro_budget.P0,
+            why="the vanished-stop net")
         if positions is None:
             return False
         held = self._broker_still_holds(trade, positions)
@@ -3855,7 +3885,11 @@ class AssetBot(ABC):
         if doubt and not trade.paper:
             held = None
             try:
-                positions = self._broker_snapshot(client, "positions")
+                # P0 in the eToro budget (2026-11-02): part of a close
+                from bot_program.engine import etoro_budget
+                positions = self._broker_snapshot(
+                    client, "positions", priority=etoro_budget.P0,
+                    why="a close in doubt: does eToro hold it")
                 held = (None if positions is None
                         else self._broker_still_holds(trade, positions))
             except Exception as e:  # noqa: BLE001 — cannot say stays None
@@ -5095,7 +5129,14 @@ class AssetBot(ABC):
         # `purpose` matters to IBKR alone (broker_router:243) — and carried
         # on the candidate so execute_entry rounds by the same answer.
         # Three states; None is whole shares for stocks, as before.
-        fractional = self._venue_fractional_units(client, symbol)
+        # P1 IN THE eTORO BUDGET, NAMED (2026-11-02): the order's own facts
+        # (the eligibility row, read once a UTC day per instrument and the
+        # same row execute_entry reads at P1). Never refused: a refusal
+        # would not defer the entry, it would round it as unmeasured.
+        from bot_program.engine import etoro_budget
+        with etoro_budget.at(etoro_budget.P1,
+                             "proposal: the order's unit granularity"):
+            fractional = self._venue_fractional_units(client, symbol)
         if sm_read is not None and sm_read["moved"]:
             qty, sl, sizing, level_meta = self._smart_money_fee_check(
                 client, symbol, decision, stage, sm_read, qty=qty,
