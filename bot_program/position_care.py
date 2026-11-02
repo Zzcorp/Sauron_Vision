@@ -631,7 +631,12 @@ def _venue_still_holds(bot, trade, client) -> bool:
     pid = str((trade.metadata or {}).get("protective_trade_id") or "")
     if not pid:
         return False
-    positions = bot._broker_snapshot(client, "positions")
+    # P0 IN THE eTORO BUDGET (2026-11-02): the book a care close stands on
+    # is part of that close — never refused, never paused
+    from bot_program.engine import etoro_budget
+    positions = bot._broker_snapshot(
+        client, "positions", priority=etoro_budget.P0,
+        why="care close: does eToro still hold it")
     if positions is None:
         return False
     held = any(str(p.get("position_id") or "") == pid for p in positions)

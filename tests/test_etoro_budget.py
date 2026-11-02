@@ -1073,6 +1073,112 @@ class TheBareRowMarkTests(_BudgetOn, TestCase):
         self._assert_marked_and_stopped(self._tick())
 
 
+def _spent(test):
+    """Every spend (a request counted once sent) as (family, priority,
+    where, why), recorded while the test runs."""
+    seen, real = [], eb.spend
+
+    def spend(kh, family, priority, **kw):
+        seen.append((family, priority, kw.get("where"), kw.get("why")))
+        return real(kh, family, priority, **kw)
+    p = mock.patch.object(eb, "spend", spend)
+    p.start()
+    test.addCleanup(p.stop)
+    return seen
+
+
+class TheManageTickBookReadsTests(_BudgetOn, TestCase):
+    """2026-11-02 (completes E1, review): the manage tick's reads of eToro's
+    book through AssetBot._broker_snapshot, and the proposal's read of the
+    order's unit granularity, ran at the default P1 with no caller's name:
+    counted and never refused, but missing from E1's list. They are named
+    now: P0 for the book read a close stands on (the care close's "does
+    eToro still hold it", the in-doubt close's, the vanished-stop net's),
+    P1 for an entry's own state (an order in doubt, a working entry) and
+    for the order's facts read at the proposal. Neither is ever refused,
+    paused or pooled: what is sent, and when, is unchanged."""
+
+    BOOK = ("GET", "/portfolio", 200, {"positions": []})
+
+    def setUp(self):
+        super().setUp()
+        from tests.test_exit_truth import _cfg, _trade, _user
+        self.cfg = _cfg(_user("budget_books"), name="BK")
+        self.trade = _trade(self.cfg, metadata={
+            "broker": "etoro", "broker_env": "live", "protected": True,
+            "protective_trade_id": "P101", "initial_stop_loss": 95.0})
+
+    def _client(self):
+        t, _fake = _client([self.BOOK], env="live")
+        return t
+
+    def _book_reads(self, seen):
+        return [s for s in seen if s[0] == eb.ACCOUNT
+                and s[2] == "portfolio"]
+
+    def test_a_snapshot_takes_the_priority_its_caller_names(self):
+        from bot_program.asset_engine.base import make_bot
+        bot, seen = make_bot(self.cfg), _spent(self)
+        with eb.at(eb.P3, "mark"):              # never lowered to P3
+            bot._broker_snapshot(self._client(), "positions",
+                                 priority=eb.P0, why="a close's book")
+        self.assertEqual(self._book_reads(seen),
+                         [(eb.ACCOUNT, eb.P0, "portfolio", "a close's book")])
+        seen.clear()
+        bot._tick_broker_cache = {}
+        bot._broker_snapshot(self._client(), "positions")
+        self.assertEqual(self._book_reads(seen),
+                         [(eb.ACCOUNT, eb.P1, "portfolio", "")],
+                         "unnamed, it is the caller's scope, as before")
+
+    def test_the_care_closes_book_read_is_p0(self):
+        from bot_program.asset_engine.base import make_bot
+        from bot_program.position_care import _venue_still_holds
+        bot, seen = make_bot(self.cfg), _spent(self)
+        _venue_still_holds(bot, self.trade, self._client())
+        self.assertEqual([s[1] for s in self._book_reads(seen)], [eb.P0])
+        self.assertIn("care close", self._book_reads(seen)[0][3])
+
+    def test_an_order_in_doubts_book_read_is_p1_and_named(self):
+        from bot_program.asset_engine.base import make_bot
+        bot, seen = make_bot(self.cfg), _spent(self)
+        note = {"reference": "r-1",
+                "at": (timezone.now() - timedelta(minutes=5)).isoformat()}
+        with mock.patch(ROUTER, return_value=self._client()):
+            bot._settle_in_doubt("AAPL", note)
+        reads = self._book_reads(seen)
+        self.assertEqual([s[1] for s in reads], [eb.P1])
+        self.assertIn("in doubt", reads[0][3])
+
+    def test_the_other_call_sites_name_their_priority(self):
+        import inspect
+
+        from bot_program.asset_engine import base
+        src = inspect.getsource(base.AssetBot)
+        for site, p in (("_poll_working_entry", "P1"),
+                        ("_protection_vanished", "P0"),
+                        ("_close_trade", "P0")):
+            body = inspect.getsource(getattr(base.AssetBot, site))
+            calls = [body[i:i + 200] for i in range(len(body))
+                     if body.startswith("_broker_snapshot(", i)]
+            reads = [c for c in calls if '"positions"' in c.split(")")[0]]
+            self.assertTrue(reads, site)
+            for call in reads:
+                self.assertIn(f"priority=etoro_budget.{p}",
+                              call.split(")")[0], site)
+        self.assertIn("def _broker_snapshot(self, client, what: str, *,",
+                      src)
+
+    def test_the_proposals_unit_granularity_read_is_p1_and_named(self):
+        from bot_program.asset_engine import base
+        import inspect
+        src = inspect.getsource(base.AssetBot.propose_entry)
+        at = src.index("fractional = self._venue_fractional_units(client, "
+                       "symbol)")
+        before = src[max(0, at - 300):at]
+        self.assertIn("etoro_budget.at(etoro_budget.P1,", before)
+
+
 class TheMarksBeforeProposalsTests(_BudgetOn, TestCase):
     """The marks keep real room over the proposals (2026-11-01, review):
     FLOOR_P4 0.40, so a proposal leaves 24 of 60 market tokens and the
