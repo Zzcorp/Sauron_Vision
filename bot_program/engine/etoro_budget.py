@@ -49,12 +49,23 @@ it is never a venue failure: never noted on the venue's health (so never
 SICK), never a mute of a feed, never a failed row, never an alarm.
 
 ATOMIC ACROSS PROCESSES: cache.add then cache.incr on one key per (key
-hash, family, window) — Redis' INCR in production (config/settings.py
+hash, family, second) — Redis' INCR in production (config/settings.py
 CACHES), LocMemCache's lock in the suite. A take refused after its
 increment gives the token back (cache.decr); in that instant a take at a
 higher limit may read one token too many and be refused, the safe way
-round. Fixed windows, not a rolling minute: a burst may sit on both sides
-of a minute's edge; the rates are guesses anyway.
+round.
+
+A ROLLING MINUTE (2026-11-02, review), not a fixed one: a take is judged
+on every request of its family sent in the last WINDOW_S seconds, read in
+one GET of the minute's SLOT_S slots (get_many, Redis' MGET). Fixed
+windows let a family spend its rate on both sides of a minute's edge,
+twice its rate inside one rolling minute — the 429 the budget is there to
+spare. A request counts 60 to 61 s after it was sent, so no rolling minute
+holds more than a priority's limit, and the family's rate is still spent
+minute after minute. The plan's token bucket with an atomic Lua take is
+not used: Django's cache API (Redis in production, LocMem in the suite)
+runs no script, and these INCRs bound what the bucket bounds. The minute
+windows name the command's report and the overruns' once-a-window line.
 
 THE CACHE UNREACHABLE: P0 and P1 go through unbudgeted and that is logged
 once per window per process (by the flusher, which meets the failure);
@@ -138,8 +149,13 @@ FLOOR_P3 = 0.10
 FLOOR_P4 = 0.40
 FLOOR_P5 = 0.50
 
-#: One window per minute, aligned on the epoch minute.
+#: One window per minute, aligned on the epoch minute: the length of the
+#: rolling minute a take is judged on, and the minutes the command reports.
 WINDOW_S = 60
+#: THE ROLLING MINUTE'S SLOTS (2026-11-02): each request is counted in the
+#: second it was sent, and a take reads the slots of the last WINDOW_S
+#: seconds (a request counts 60 to 61 s, the safe way round).
+SLOT_S = 1
 #: How long a window's counters stay readable: this one and the one before
 #: for the command, with a minute to spare.
 KEEP_S = 3 * WINDOW_S
@@ -294,8 +310,53 @@ def _words(reason, family, priority, *, n=None, left=None, world="",
 # ── the keys ────────────────────────────────────────────────────────────
 
 def _n_key(kh, family, win) -> str:
-    """The family's count in a window: the one the takes are judged on."""
+    """The family's count in a minute window: what the command reports.
+    Takes are judged on the rolling minute (_s_key) since 2026-11-02."""
     return f"{PREFIX}:n:{kh}:{family}:{win}"
+
+
+def _s_key(kh, family, slot) -> str:
+    """The family's count in one SLOT_S slot: what the rolling minute a
+    take is judged on adds up (2026-11-02)."""
+    return f"{PREFIX}:s:{kh}:{family}:{slot}"
+
+
+def _slot(now) -> int:
+    return int(math.floor(float(now) / SLOT_S))
+
+
+def _slot_keys(kh, family, now) -> list:
+    """The slots of the rolling minute ending at `now`, oldest first: every
+    request of the family sent within the last WINDOW_S seconds is counted
+    in one of them (and one sent up to SLOT_S earlier may be, the safe way
+    round)."""
+    first, last = _slot(float(now) - WINDOW_S), _slot(now)
+    return [_s_key(kh, family, s) for s in range(first, last + 1)]
+
+
+def _rolled(c, keys) -> tuple:
+    """(the count of every slot of `keys` but the last, the last one's), in
+    one get_many. Raises what the cache raises."""
+    got = c.get_many(keys) or {}
+
+    def n(key):
+        try:
+            return int(got.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0
+    return sum(n(k) for k in keys[:-1]), n(keys[-1])
+
+
+def rolling(kh: str, family: str, now=None) -> int:
+    """The requests of `family` the rolling minute ending at `now` holds
+    for key hash `kh`: what a take is judged on. 0 when the cache cannot be
+    read. Never raises."""
+    try:
+        past, here = _rolled(_cache(), _slot_keys(
+            kh, family, _now() if now is None else now))
+        return past + here
+    except Exception:  # noqa: BLE001
+        return 0
 
 
 def _p_key(kh, family, win, p) -> str:
@@ -551,20 +612,23 @@ def take(kh: str, family: str, priority: int, *, world: str = "",
                 raise _refused(c, kh, family, p, win, PAUSE, where=where,
                                why=why, left=left, world=world)
         cap = limit(family, p)
-        key = _n_key(kh, family, win)
-        seen = c.get(key)
-        if seen is not None and int(seen) >= cap:
-            raise _refused(c, kh, family, p, win, FLOOR, n=int(seen),
+        # THE ROLLING MINUTE (2026-11-02): every request of the family sent
+        # in the last WINDOW_S seconds, this second's slot last
+        keys = _slot_keys(kh, family, now)
+        past, here = _rolled(c, keys)
+        if past + here >= cap:
+            raise _refused(c, kh, family, p, win, FLOOR, n=past + here,
                            where=where, why=why)
-        n = _incr(c, key)
+        n = past + _incr(c, keys[-1])
         if n > cap:
             try:
-                c.decr(key)
+                c.decr(keys[-1])
             except Exception:  # noqa: BLE001 — a token lost is a refusal more
                 pass
             raise _refused(c, kh, family, p, win, FLOOR, n=n - 1,
                            where=where, why=why)
         try:
+            _incr(c, _n_key(kh, family, win))
             _incr(c, _p_key(kh, family, win, p))
         except Exception:  # noqa: BLE001 — the stats are the command's only
             pass
@@ -634,19 +698,27 @@ def later(fn, *args) -> None:
 
 
 def _count(kh, family, p, where, why, at) -> None:
-    """Count one queued request in the window it was SENT in: the family's
-    count, its priority's, the overrun logged once a window, the key
-    registered. Off every request's path (the flusher, a take's drain,
-    flush()). Never raises."""
+    """Count one queued request in the second and the window it was SENT
+    in: the rolling minute's slot, the family's minute count, its
+    priority's, the overrun (the rolling minute past the family's rate,
+    2026-11-02) logged once a window, the key registered. Off every
+    request's path (the flusher, a take's drain, flush()). Never
+    raises."""
     try:
         c = _cache()
         win = window(at)
-        n = _incr(c, _n_key(kh, family, win))
+        keys = _slot_keys(kh, family, at)
+        _incr(c, keys[-1])
         try:
+            _incr(c, _n_key(kh, family, win))
             _incr(c, _p_key(kh, family, win, p))
         except Exception:  # noqa: BLE001
             pass
         r = rate(family)
+        n = 0
+        if p <= P1:
+            past, here = _rolled(c, keys)
+            n = past + here
         if n > r and p <= P1:
             try:
                 _incr(c, _o_key(kh, family, win))
@@ -750,10 +822,11 @@ def report(now=None) -> dict:
     """What the budget holds, per key hash and family, for this window and
     the one before: {"ok", "error", "now", "windows", "rates", "floors",
     "keys": {kh: {"seen", "pause": {world: {"end", "left"} | None},
-    "families": {family: {win: {"taken", "by", "refused", "last",
-    "overruns"}}}}}}. Token counts, instants and words only: no account
-    figure and no key. This process's queued counts are counted first.
-    Never raises."""
+    "rolling": {family: the last WINDOW_S seconds' count, what a take is
+    judged on (2026-11-02)}, "families": {family: {win: {"taken", "by",
+    "refused", "last", "overruns"}}}}}}. Token counts, instants and words
+    only: no account figure and no key. This process's queued counts are
+    counted first. Never raises."""
     flush()
     now = _now() if now is None else float(now)
     win = window(now)
@@ -771,8 +844,12 @@ def report(now=None) -> dict:
         out.update(ok=False, error=type(e).__name__)
         return out
     for kh in sorted(seen):
-        entry = {"seen": seen.get(kh), "pause": {}, "families": {}}
+        entry = {"seen": seen.get(kh), "pause": {}, "rolling": {},
+                 "families": {}}
         try:
+            for family in FAMILIES:
+                past, here = _rolled(c, _slot_keys(kh, family, now))
+                entry["rolling"][family] = past + here
             for world in ("live", "demo"):
                 held = c.get(_pause_key(kh, world))
                 if isinstance(held, dict) and held.get("end") is not None:

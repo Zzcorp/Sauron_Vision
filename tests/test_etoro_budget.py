@@ -215,13 +215,74 @@ class TheTakeTests(_BudgetOn, SimpleTestCase):
         with self.assertRaises(eb.Refused):
             eb.take(KH, eb.MARKET, eb.P3, world="demo", where="ticker")
 
-    def test_a_new_window_has_its_tokens_back(self):
+    def test_the_tokens_come_back_as_the_rolling_minute_passes(self):
+        # 2026-11-02 (completes E1): a token comes back 60 to 61 s after
+        # the request that took it, never at a minute's edge (this was
+        # test_a_new_window_has_its_tokens_back: back at +60 s, the next
+        # fixed window); the window still names the command's minutes
         _fill(KH, eb.MARKET, 30)
         with self.assertRaises(eb.Refused):
             eb.take(KH, eb.MARKET, eb.P5, world="live", where="candles")
         self.assertEqual(eb.window_left_s(), 60.0)
         self.bclock.t += 60
+        with self.assertRaises(eb.Refused):
+            eb.take(KH, eb.MARKET, eb.P5, world="live", where="candles")
+        self.bclock.t += 1
         eb.take(KH, eb.MARKET, eb.P5, world="live", where="candles")
+
+    def test_a_burst_across_a_minutes_edge_is_judged_on_the_rolling_minute(
+            self):
+        """2026-11-02 (completes E1, review): fixed windows let a family
+        spend its rate on both sides of a minute's edge, twice its rate
+        inside one rolling minute. A take is judged on every request of
+        its family sent in the last 60 s."""
+        self.bclock.t += 59                     # the window's last second
+        _fill(KH, eb.MARKET, 30)
+        before = eb.window()
+        self.bclock.t += 2                      # the next window
+        self.assertEqual(eb.window(), before + 1)
+        with self.assertRaises(eb.Refused) as cm:
+            eb.take(KH, eb.MARKET, eb.P5, world="live", where="candles")
+        self.assertEqual(cm.exception.reason, eb.FLOOR)
+        self.assertEqual(cm.exception.why,
+                         "eToro budget: market 30/60 this minute, 30 kept "
+                         "for higher priorities (P5 candles)")
+        self.bclock.t += 59                     # 61 s after the burst
+        eb.take(KH, eb.MARKET, eb.P5, world="live", where="candles")
+
+    def test_no_rolling_minute_holds_more_than_a_priority_may_take(self):
+        # a take every half second for three minutes, starting 15 s before
+        # a minute's edge: fixed windows granted 30 just before the edge
+        # and 30 just after it, 60 inside one rolling minute
+        self.bclock.t += 45
+        granted = []
+        for _ in range(360):
+            try:
+                eb.take(KH, eb.MARKET, eb.P5, world="live", where="candles")
+                granted.append(self.bclock.t)
+            except eb.Refused as e:
+                self.assertEqual(e.reason, eb.FLOOR)
+            self.bclock.t += 0.5
+        cap = eb.limit(eb.MARKET, eb.P5)
+        worst = max(sum(1 for g in granted if t - 60 < g <= t)
+                    for t in granted)
+        self.assertLessEqual(worst, cap)
+        self.assertGreaterEqual(len(granted), 2 * cap,
+                                "the rate is still spent, minute after "
+                                "minute")
+
+    def test_p0_and_p1_past_the_rolling_minute_are_an_overrun(self):
+        self.bclock.t += 50
+        _fill(KH, eb.MARKET, 60)                # inside the rate
+        self.bclock.t += 20                     # the next window
+        with self.assertLogs("bot_program.engine.etoro_budget",
+                             level="WARNING") as logs:
+            eb.spend(KH, eb.MARKET, eb.P0, where="close")
+            eb.flush()
+        over = [m for m in logs.output
+                if "over its 60 a minute (61 this minute)" in m]
+        self.assertEqual(len(over), 1, logs.output)
+        self.assertEqual(cache.get(eb._o_key(KH, eb.MARKET, eb.window())), 1)
 
     def test_the_take_is_atomic_under_threads(self):
         granted, refused = [], []
@@ -264,8 +325,9 @@ class TheTakeTests(_BudgetOn, SimpleTestCase):
         win = eb.window()
         self.assertEqual(cache.get(eb._n_key(KH, eb.MARKET, win)), 63)
         self.assertEqual(cache.get(eb._o_key(KH, eb.MARKET, win)), 3)
-        # the next window's overrun is logged again
-        self.bclock.t += 60
+        # the next window's overrun is logged again (2026-11-02: 61 s on,
+        # once the rolling minute no longer holds the 63 above)
+        self.bclock.t += 61
         _fill(KH, eb.MARKET, 60)
         with self.assertLogs("bot_program.engine.etoro_budget",
                              level="WARNING") as logs:
@@ -1721,6 +1783,18 @@ class TheCommandTests(_BudgetOn, SimpleTestCase):
         self.assertIn("overruns 1", text)
         self.assertIn("429 pause: live holds for 40 s", text)
         self.assertIn("demo none", text)
+
+    def test_it_prints_the_rolling_minute_a_take_is_judged_on(self):
+        # 2026-11-02 (completes E1): 30 at a minute's last second, read 2 s
+        # later in the next minute, whose own count is 0
+        self.bclock.t += 59
+        _fill(KH, eb.MARKET, 30)
+        self.bclock.t += 2
+        self.assertEqual(eb.report()["keys"][KH]["rolling"][eb.MARKET], 30)
+        out = StringIO()
+        call_command("etoro_budget", stdout=out)
+        self.assertIn("market     in the last 60 s: 30/60 (what a take is "
+                      "judged on)", out.getvalue())
 
     def test_it_says_when_nothing_was_counted(self):
         out = StringIO()

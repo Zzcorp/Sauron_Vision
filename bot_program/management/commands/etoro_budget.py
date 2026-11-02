@@ -2,9 +2,11 @@
 
 The budget (bot_program/engine/etoro_budget) counts every request to
 eToro's public API per user key, in four families (market, account,
-execution, lookups), one window a minute, and refuses the takes below P1
-that would leave a family less than its floor for the priorities above.
-This prints, for this minute and the one before, per key hash and family:
+execution, lookups), and refuses the takes below P1 that would leave a
+family less than its floor for the priorities above, judged on the rolling
+minute (every request of the last 60 s, 2026-11-02). This prints, per key
+hash and family, that rolling minute's count, and for this minute and the
+one before:
 the takes by priority, the refusals with their reasons and the last
 refusal's words, the overruns (P0 and P1 past the family's rate, sent
 anyway), and whether the shared 429 pause holds for each world and until
@@ -90,6 +92,14 @@ class Command(BaseCommand):
                 else:
                     pause.append(f"{world} none")
             out.write("  429 pause: " + " · ".join(pause))
+            # THE ROLLING MINUTE (2026-11-02): what a take is judged on;
+            # the minutes below are its history
+            for family in eb.FAMILIES:
+                n = (entry.get("rolling") or {}).get(family) or 0
+                if n:
+                    out.write(f"  {family:<10} in the last {eb.WINDOW_S} s: "
+                              f"{n}/{rep['rates'][family]} (what a take is "
+                              f"judged on)")
             for family in eb.FAMILIES:
                 rows = entry["families"].get(family) or {}
                 for win in rep["windows"]:
