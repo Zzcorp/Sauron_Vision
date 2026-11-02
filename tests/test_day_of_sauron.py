@@ -168,8 +168,8 @@ class TheCadencesAreTheSchedulesOwnWordsTests(SimpleTestCase):
         self.assertEqual(_when(scheme, "tick-asset-bots"), "5 min")
         self.assertEqual(_when(scheme, "refresh-bot-bars"), "10 min")
         # 2026-10-31: 300 s, the operator's "the 15min etoro refresh is
-        # way too long" (config/celery.py). A crontab since 2026-11-01:
-        # see test_crontab_entries.
+        # way too long" (config/celery.py).
+        self.assertEqual(_when(scheme, "sync-etoro-accounts"), "5 min")
         self.assertEqual(_when(scheme, "sauron-mind-synthesize"), "1 h")
         self.assertEqual(_when(scheme, "sauron-critic-pass"), "2 h")
         self.assertEqual(_when(scheme, "fetch-tradingview-ideas"), "6 h")
@@ -183,15 +183,9 @@ class TheCadencesAreTheSchedulesOwnWordsTests(SimpleTestCase):
         self.assertEqual(_when(scheme, "sauron-horizon-monthly"), "1st 04:45")
         self.assertEqual(_when(scheme, "propose-share-plans"), "every 4 h at :05")
         self.assertEqual(_when(scheme, "refresh-option-chains"), "hourly 13:15–20:15")
-        # 2026-10-31: */5, beside the eToro sync's 300 s; 2026-11-01: at
-        # minute 3 of every five, the same words
+        # 2026-10-31: */5, beside the eToro sync's 300 s
         self.assertEqual(_when(scheme, "reconcile-asset-bot-trades"),
                          "every 5 min")
-        # 2026-11-01: the eToro sync left its 300 s interval ("5 min"),
-        # which beat started with the bot tick's, for minute 1 of every
-        # five on the clock (config/celery.py): still every five minutes,
-        # in a crontab's words
-        self.assertEqual(_when(scheme, "sync-etoro-accounts"), "every 5 min")
 
     def test_a_changed_cadence_changes_the_words(self):
         entry = dict(app.conf.beat_schedule["tick-asset-bots"])
