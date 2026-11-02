@@ -117,6 +117,40 @@ def account_pk_for(user):
         return None
 
 
+#: THE SYNC THE eTORO BUDGET DEFERRED (2026-11-02): the instant (epoch
+#: seconds, taken before the read) of the newest pass that did not send
+#: an account's aggregate. AssetBot._cash_gate refuses the account's eToro
+#: entries while it is newer than the account's last_sync: the cells and
+#: the equity a deferred pass did not read would have been fresher.
+_DEFERRED_KEY = "etoro_cells:sync_deferred:{pk}"
+#: Kept an hour: past it the cells' own hour rule refuses anyway.
+DEFERRED_KEEP_S = 3600
+
+
+def note_sync_deferred(account_pk, at) -> None:
+    """The sync did not send `account_pk`'s aggregate (a budget refusal)
+    in its pass stamped `at` (an aware datetime). Never raises: a note
+    that cannot be written holds nothing (2026-11-02)."""
+    try:
+        _cache().set(_DEFERRED_KEY.format(pk=account_pk), at.timestamp(),
+                     DEFERRED_KEEP_S)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("eToro sync: the deferral of account %s could not be "
+                       "noted (%s)", account_pk, type(e).__name__)
+
+
+def sync_deferred_at(account_pk):
+    """The newest deferred pass of `account_pk` within DEFERRED_KEEP_S, as
+    an aware UTC datetime, or None. Never raises."""
+    try:
+        from datetime import datetime, timezone as dt_timezone
+        held = _num(_cache().get(_DEFERRED_KEY.format(pk=account_pk)))
+        return (None if held is None
+                else datetime.fromtimestamp(held, tz=dt_timezone.utc))
+    except Exception:  # noqa: BLE001 — unreadable: nothing deferred
+        return None
+
+
 def note_read_started(account_pk) -> None:
     """Called by the task as its read starts: the window runs COALESCE_S
     from now, or from a later read already queued behind this one, which

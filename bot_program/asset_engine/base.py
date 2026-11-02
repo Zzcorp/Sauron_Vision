@@ -8114,6 +8114,21 @@ class AssetBot(ABC):
         if age > TRACKING_FRESH_SECONDS:
             return refuse(f"cash reading {age / 3600:.1f}h old (limit "
                           f"{TRACKING_FRESH_SECONDS / 3600:.0f}h) — refused")
+        # A SYNC THE eTORO BUDGET DEFERRED (2026-11-02, completes E1): the
+        # pass did not read this account's aggregate, so its cells and its
+        # equity are a pass older than they would have been, and an entry
+        # a fresh read would have refused could go. Refused until the next
+        # sync reads the account (its last_sync passes the deferral); a
+        # re-read after an order moves the cells, never the equity, and
+        # lifts nothing. Never an account figure in the words.
+        from bot_program import etoro_cells
+        deferred = etoro_cells.sync_deferred_at(acct.pk)
+        synced = getattr(acct, "last_sync", None)
+        if deferred is not None and (synced is None or deferred > synced):
+            return refuse(f"the eToro request budget deferred this account's "
+                          f"sync at {deferred.strftime('%H:%M:%S')} UTC; its "
+                          f"cash and equity are from before it — refused "
+                          f"until the next sync reads the account")
         # THE CELLS' WORLD (2026-09-26): the same key pair answers both
         # worlds and EtoroAccount.demo alone picks the segment, so a row
         # unticked demo -> live keeps the DEMO reading (six figures, doc §5)

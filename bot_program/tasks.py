@@ -1004,6 +1004,7 @@ def sync_etoro_accounts():
         out["attempted"] += 1
         reading, rows, margin, cells = None, None, None, CELLS_UNOFFERED
         read_at = None
+        book_deferred = aggregate_sent = False
         try:
             client = EtoroTrader(k, u, env="demo" if acct.demo else "live")
             # THE STAMP IS TAKEN BEFORE THE READ (2026-10-31). The cells
@@ -1020,8 +1021,25 @@ def sync_etoro_accounts():
             # account minute keeps its floor for the drain and the orders.
             with etoro_budget.at(etoro_budget.P2, "account sync"):
                 reading, margin, cells = _read_etoro_aggregate(client)
-                _warm_etoro_names(client, user, acct.demo)
-                rows = client.broker_portfolio()
+                aggregate_sent = True
+                try:
+                    _warm_etoro_names(client, user, acct.demo)
+                    rows = client.broker_portfolio()
+                except Exception as e:  # noqa: BLE001
+                    if not (getattr(e, "budget_refused", False)
+                            and cells == CELLS_READ):
+                        raise
+                    # THE AGGREGATE ANSWERED, THE BOOK WAS NOT SENT
+                    # (2026-11-02, completes E1): the cash, the used margin
+                    # and the equity it answered are written as a pass's
+                    # (they were thrown away, and the cash gate judged the
+                    # next entries on cells a pass older); the holdings
+                    # keep their own stamp, and nothing is a miss.
+                    rows, book_deferred = None, True
+                    out["book_deferred"] = out.get("book_deferred", 0) + 1
+                    logger.info("broker sync: %s (etoro) holdings not read "
+                                "this pass — %s; the cells it answered are "
+                                "written", acct.label, e)
         except Exception as e:  # noqa: BLE001 — one account must not stop the rest
             if getattr(e, "budget_refused", False):
                 # THE BUDGET DID NOT SEND THE READ (2026-11-01): a
@@ -1032,6 +1050,14 @@ def sync_etoro_accounts():
                 out["deferred"] = out.get("deferred", 0) + 1
                 logger.info("broker sync: %s (etoro) not read this pass — "
                             "%s; it keeps its last reading", acct.label, e)
+                if not aggregate_sent and read_at is not None:
+                    # AND ITS eTORO ENTRIES WAIT FOR THE NEXT READ
+                    # (2026-11-02, completes E1): the cells and the equity
+                    # this pass did not read would have been fresher, and
+                    # an entry they would have refused must not go on the
+                    # older ones (AssetBot._cash_gate reads this note)
+                    from . import etoro_cells
+                    etoro_cells.note_sync_deferred(acct.pk, read_at)
                 continue
             logger.warning("broker sync: %s (etoro) unreadable: %s",
                            acct.label, e)
@@ -1041,7 +1067,7 @@ def sync_etoro_accounts():
                 # in hand are a measurement, but this pass is a miss
                 margin, cells = None, CELLS_UNOFFERED
 
-        if reading is None and rows is None:
+        if reading is None and rows is None and not book_deferred:
             out["unreachable"] += 1
             _note_broker_miss(acct, user)
             continue
