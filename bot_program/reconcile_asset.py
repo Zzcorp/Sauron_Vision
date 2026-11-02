@@ -51,9 +51,11 @@ def one_book_per_pass():
     unclaimed sweep, which read GET /portfolio twice a pass before, seconds
     apart, for one answer. Each reader still warms its own names and names
     the raw rows with its own client (get_positions(book=...)), so the
-    sweep sees every position its own warm can name; a read that failed or
-    that the budget did not send is the pass's answer, never asked twice;
-    and the sweep's grace runs from that read (reconcile_unknown_positions).
+    sweep sees every position its own warm can name; a read the budget did
+    not send is the pass's answer, never asked twice, and a read that
+    failed is asked again by the next reader (2026-11-02: one failure
+    toward SICK where there were two, and no second chance); and the
+    sweep's grace runs from the read it uses (reconcile_unknown_positions).
     The row walk is the first reader, so its read, its lag window and its
     stamps are what they were. Nested, the outer pass holds."""
     if _BOOKS.get() is not None:
@@ -82,12 +84,21 @@ def _positions(client, fn) -> list:
     """`fn()` — the client's named open positions — except inside
     one_book_per_pass, where eToro's book is read once per key and world
     and named by this client after its own warm. Raises what the read
-    raised (a failure, a budget refusal), to every reader of the pass."""
+    raised: a budget refusal to every reader of the pass, a failure to its
+    own reader (the next one asks again, 2026-11-02)."""
     books = _BOOKS.get()
     key = _book_key(client) if books is not None else None
     if key is None:
         return fn() or []
     held = books.get(key)
+    if held is not None and "error" in held \
+            and not getattr(held["error"], "budget_refused", False):
+        # A FAILED READ IS NOT SHARED (2026-11-02, completes E3): the next
+        # reader asks again, as each reader did before the pass shared its
+        # book — a second chance on a passing failure, and a second note
+        # toward SICK on a failing venue, where one was made for two. A
+        # refusal is shared: nothing was sent, nothing failed.
+        held = None
     if held is None:
         at = timezone.now()                 # before the GET
         try:

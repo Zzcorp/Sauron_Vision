@@ -26,11 +26,14 @@ unmeasured, and the batch is sent from the first pass: an answer it does
 not trust turns it off by itself. `manage.py etoro_rates_shape` is the
 operator's measurement.
 
-A FAILED BATCH IS ONE FAILURE. A 429, a 5xx or a transport failure of one
-batched GET is one request, noted ONCE on the venue's health
-(EtoroTrader._read), never N: its symbols answer BatchFailed, and the
-readers of this pass do not ask them again one by one (the failure memo,
-FAILED_MEMO_S, this process). A budget refusal (etoro_budget.Refused:
+A FAILED BATCH IS ONE REQUEST, AND ITS N FAILURES. A 429, a 5xx or a
+transport failure of one batched GET is one request, noted on the
+venue's health once per instrument it carried (EtoroTrader._read the
+first, tickers the rest; 2026-11-02, review: it was noted ONCE, so a
+failing venue was SICK three failed batches later than N rows read alone
+made it, and the new real entries SICK holds went meanwhile): its
+symbols answer BatchFailed, and the readers of this pass do not ask them
+again one by one (the failure memo, FAILED_MEMO_S, this process). A budget refusal (etoro_budget.Refused:
 nothing sent, never a failure) is kept the same way, for the readers at
 its priority or below only (closed_for): a proposal's refusal never keeps
 a mark, whose floor is lower, from asking.
@@ -207,14 +210,18 @@ class BatchUnproven(LookupError):
 
 class BatchFailed(RuntimeError):
     """The batched GET carrying this symbol failed at the venue (a 429, a
-    5xx after its retry, a transport failure): ONE request, noted once on
-    the venue's health. Its symbols are not asked again one by one."""
+    5xx after its retry, a transport failure): ONE request, noted on the
+    venue's health once per instrument it carried, as the reads alone it
+    replaced were (2026-11-02, review: once for all of them, so a failing
+    venue needed three failed batches to be SICK where three rows read
+    alone made it, and an entry SICK would hold could go). Its symbols
+    are not asked again one by one."""
 
     def __init__(self, detail: str, n: int):
         super().__init__(
             f"the batched rates read failed ({detail}) — one request for "
-            f"{int(n)} instrument{'s' if int(n) != 1 else ''}, noted once on "
-            f"the venue's health")
+            f"{int(n)} instrument{'s' if int(n) != 1 else ''}, noted once per "
+            f"instrument on the venue's health")
         self.detail = detail
 
 

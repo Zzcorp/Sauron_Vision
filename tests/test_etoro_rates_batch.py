@@ -535,7 +535,13 @@ class TheParserTests(_RatesOn, SimpleTestCase):
         self.assertEqual(seen, [("market", eb.P4, "rates")],
                          "one token for three ids")
 
-    def test_a_failed_batch_is_one_request_and_one_health_note(self):
+    def test_a_failed_batch_is_one_request_and_one_note_per_instrument(
+            self):
+        # 2026-11-02 (completes E2, review): one note per instrument the
+        # failed GET carried, as the reads alone it replaced were noted
+        # (it was ..._and_one_health_note: ONE note, so a failing venue
+        # took three failed batches to make SICK where three rows read
+        # alone made it, and a new real entry SICK would hold could go)
         w = _Wire(prices={11: 10.0, 22: 20.0}, status=503)
         t = _trader(w)
         with mock.patch("time.sleep"):
@@ -544,8 +550,10 @@ class TheParserTests(_RatesOn, SimpleTestCase):
         for s in ("AAA", "BBB"):
             self.assertIsInstance(got[s], er.BatchFailed)
             self.assertTrue(er.final(got[s]))
-        self.assertEqual(len(vh._load(vh._key("etoro", "live"))["failures"]),
-                         1)
+        failures = vh._load(vh._key("etoro", "live"))["failures"]
+        self.assertEqual(len(failures), 2)
+        self.assertEqual({f["code"] for f in failures}, {503})
+        self.assertIn("noted once per instrument", str(got["AAA"]))
 
     def test_a_429_batch_grants_the_shared_pause_once(self):
         p = mock.patch.object(ec, "RATE_PAUSE", True)
@@ -559,8 +567,10 @@ class TheParserTests(_RatesOn, SimpleTestCase):
         self.assertEqual(w.rates(), ["11,22"], "a 429 is never retried")
         self.assertIsInstance(got["AAA"], er.BatchFailed)
         self.assertGreater(t.rate_pause_s(), 0, "the batch is a pause site")
+        # one pause, and one note per instrument (2026-11-02: one note)
         self.assertEqual(len(vh._load(vh._key("etoro", "live"))["failures"]),
-                         1)
+                         2)
+        self.assertEqual(len(eb._PAUSE_KEYS), 1)
 
     def test_a_cold_id_is_never_batched(self):
         """A batch carries only ids named without the wire: a /search costs
@@ -730,15 +740,21 @@ class TheOneFailureTests(_RatesOn, TestCase):
         self.cfg = _cfg(_user("rb_sick"), "S")
         self.rows = [_held(self.cfg, s) for s in ("AAA", "BBB", "CCC")]
 
-    def test_a_failed_batch_is_one_failure_toward_sick_not_one_per_row(self):
+    def test_a_failed_batch_counts_each_row_toward_sick_as_its_read_did(
+            self):
+        # 2026-11-02 (completes E2, review): was ..._is_one_failure_toward_
+        # sick_not_one_per_row (one note, never SICK). The money rule:
+        # entries are never sent more often, and three rows that fail
+        # alone make eToro sick (the control below), so the one request
+        # that carried them notes the three failures it stands for
         w = _Wire(prices={11: 101.0, 22: 102.0, 33: 103.0}, status=503)
         with mock.patch("time.sleep"):
             _tick(self.cfg, _trader(w))
         self.assertEqual(w.sets(), ["11,22,33", "11,22,33"],
                          "one batch and its one retry, no read per row")
         state = vh._load(vh._key("etoro", "live"))
-        self.assertEqual(len(state["failures"]), 1)
-        self.assertIsNone(vh.sick("etoro", "live"))
+        self.assertEqual(len(state["failures"]), 3)
+        self.assertIsNotNone(vh.sick("etoro", "live"))
         for s in ("AAA", "BBB", "CCC"):
             self.assertTrue(_note(self.cfg, s)["detail"].startswith(
                 "open position only clock-managed: the mark could not be "

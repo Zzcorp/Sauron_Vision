@@ -2075,8 +2075,10 @@ class EtoroTrader:
         takes the single read), the id's own error, BatchUnproven while the
         batch is unproven (nothing sent: the single read), BatchFailed when
         its GET failed at the venue (a 429, a 5xx after its retry, a
-        transport failure: one request, so ONE note on the venue's health,
-        made by _read), or the budget's Refused (nothing sent, no failure).
+        transport failure: one request, noted once per instrument it
+        carried — _read the first, _note_batch_failure the rest, as the
+        reads alone were; 2026-11-02), or the budget's Refused (nothing
+        sent, no failure).
 
         An answer it does not trust — a row with no instrumentId of its
         own, more rows than ids asked, an id that was not asked, no row at
@@ -2123,11 +2125,13 @@ class EtoroTrader:
                 if getattr(e, "budget_refused", False):
                     _all(chunk, e)
                 else:
-                    _all(chunk, etoro_rates.BatchFailed(
-                        f"{type(e).__name__}: {str(e)[:80]}", len(chunk)))
+                    detail = f"{type(e).__name__}: {str(e)[:80]}"
+                    self._note_batch_failure(chunk, detail=detail)
+                    _all(chunk, etoro_rates.BatchFailed(detail, len(chunk)))
                 continue
             code = int(getattr(r, "status_code", 0) or 0)
             if code == 429 or code >= 500:
+                self._note_batch_failure(chunk, code=code)
                 _all(chunk, etoro_rates.BatchFailed(f"HTTP {code}",
                                                     len(chunk)))
                 continue
@@ -2158,6 +2162,21 @@ class EtoroTrader:
                         out[k] = dict(tick, symbol=k)
             etoro_rates.put_many(world, rows)
         return out
+
+    def _note_batch_failure(self, chunk, *, code=None, detail="") -> None:
+        """A batched GET of `chunk` failed at the venue: _read noted it once,
+        and every further instrument it carried is noted here, as its read
+        alone would have been (2026-11-02, review): a failed batch of N
+        ids is N failures toward SICK, never one, so a failing venue holds
+        the new real entries as soon as N rows read alone made it. Not on
+        a background read (_note_health's own rule). Never raises."""
+        n = max(0, len(chunk or ()) - 1)
+        for _ in range(n):
+            self._note_health(
+                "rates", code=code,
+                detail=(f"one of {len(chunk)} instruments the failed "
+                        f"batched read carried"
+                        + (f" ({detail[:60]})" if detail else "")))
 
     def rates_raw(self, instrument_ids) -> tuple:
         """ONE batched rates GET for `instrument_ids` as given, answered

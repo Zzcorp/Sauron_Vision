@@ -988,13 +988,37 @@ class OneBookPerPassTests(TestCase):
         told.assert_called_once()
         self.assertEqual(told.call_args.kwargs["symbols"], ["MSFT"])
 
-    def test_a_failed_book_is_the_passs_answer_and_never_asked_twice(self):
+    def test_a_failed_book_is_asked_again_by_the_next_reader(self):
+        # 2026-11-02 (completes E3, review): was ..._is_the_passs_answer_
+        # and_never_asked_twice (one read and its retry for both walks: one
+        # failure toward SICK where there were two). A FAILED read is not
+        # shared: the sweep asks again, as each reader did before the pass
+        # shared its book, and a second failure is noted
+        from bot_program import venue_health as vh
+        vh.reset()
+        self.addCleanup(vh.reset)
         self.routes.insert(0, ("GET", "/info/portfolio", [(503, {})]))
         totals, told = self._all_users()
-        self.assertEqual(len(self._books()), 1 + ec.READ_RETRIES,
-                         "one read and its one retry, for both walks")
+        self.assertEqual(len(self._books()), 2 * (1 + ec.READ_RETRIES),
+                         "each reader's read and its one retry")
+        self.assertEqual(len(vh._load(vh._key("etoro", "live"))["failures"]),
+                         2)
         self.row.refresh_from_db()
         self.assertEqual(self.row.status, "OPEN")
+        self.assertGreaterEqual(totals["broker_unavailable"], 2, totals)
+        told.assert_not_called()
+
+    def test_a_book_the_budget_did_not_send_is_the_passs_answer(self):
+        # the control: a refusal is no failure, nothing was sent, and the
+        # sweep is not asked again (its words are the walk's)
+        from tests.test_etoro_budget import _fill
+        eb.reset()
+        self.addCleanup(eb.reset)
+        with mock.patch.object(eb, "BUDGET", True):
+            _fill(eb.key_hash(USER_KEY), eb.ACCOUNT,
+                  eb.limit(eb.ACCOUNT, eb.P2))
+            totals, told = self._all_users()
+        self.assertEqual(self._books(), [], "nothing sent")
         self.assertGreaterEqual(totals["broker_unavailable"], 2, totals)
         told.assert_not_called()
 
