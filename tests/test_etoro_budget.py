@@ -724,6 +724,7 @@ class TheAccountHelpersTests(_BudgetOn, TestCase):
 
     def test_a_sync_whose_portfolio_read_is_refused_defers_with_no_miss(
             self):
+        from bot_program.models import EtoroAccount
         from bot_program.tasks import sync_etoro_accounts
         from tests.test_sync_walks_etoro import _etoro
         user = User.objects.create_user("budget_helpers", password="x")
@@ -741,8 +742,14 @@ class TheAccountHelpersTests(_BudgetOn, TestCase):
         self.assertEqual(len(_wire_calls(t._session, "/aggregate-portfolio")),
                          1)
         self.assertEqual(_wire_calls(t._session, "/portfolio"), [])
+        # 2026-11-02 (completes E1): the book alone is deferred; the cells
+        # the aggregate answered are kept (they were thrown away: that pass
+        # was (attempted 0, deferred 1) and wrote nothing)
         self.assertEqual((out["attempted"], out["unreachable"],
-                          out.get("deferred", 0)), (0, 0, 1), out)
+                          out.get("deferred", 0), out.get("book_deferred")),
+                         (1, 0, 0, 1), out)
+        self.assertEqual(float(EtoroAccount.objects.get(
+            pk=acct.pk).last_available_cash), 400.0)
         self.assertIsNone(cache.get(f"broker_sync:miss:etoro:{acct.pk}"))
         told.assert_not_called()
         self.assertFalse([ln for ln in logs.output
@@ -1555,6 +1562,100 @@ class TheAccountReadTests(_BudgetOn, TestCase):
             out["skipped"])
         self.assertIsNone(EtoroAccount.objects.get(
             pk=self.acct.pk).last_margin_at)
+
+
+class TheDeferredSyncHoldsEntriesTests(_BudgetOn, TestCase):
+    """2026-11-02 (completes E1, review): E1's money direction said it
+    itself — a sync the budget deferred kept the old cells and equity, and
+    the cash gate judged that pass's entries on them, so an entry a fresh
+    read would have refused could go; and a book read refused after an
+    aggregate that answered threw the answered cells away. Now an
+    answered aggregate is kept, and a deferred one holds every eToro entry
+    of the account until the next sync reads it."""
+
+    def setUp(self):
+        super().setUp()
+        from tests.test_reread_after_orders import (_account, _components,
+                                                    _live_cfg)
+        _components()
+        self.user = User.objects.create_user("budget_hold", password="x")
+        self.acct = _account(self.user, cash="2000.00", used="1000.00",
+                             equity="5000.00", age_s=120)
+        self.cfg = _live_cfg(self.user)
+        self.kh = eb.key_hash("u")
+
+    def _gate(self):
+        from bot_program.asset_engine.stock_bot import StockBot
+        return StockBot(self.cfg)._cash_gate(
+            ec.EtoroTrader("k", "u", env="demo"), "AAPL", qty=1.0,
+            price=100.0, leverage=1)
+
+    def _sync(self, t):
+        from bot_program.tasks import sync_etoro_accounts
+        with mock.patch("bot_program.engine.etoro_client.EtoroTrader",
+                        return_value=t), \
+                mock.patch("bot_program.notifications.notify_staff"):
+            return sync_etoro_accounts.__wrapped__.__wrapped__()
+
+    def _trader(self, cash=1500.0, used=1500.0, total=5000.0):
+        t = ec.EtoroTrader("k", "u", env="demo")
+        t._session = _FakeSession([
+            ("GET", "/aggregate-portfolio", 200, {
+                "accountCurrency": "USD", "accountTotals": {
+                    "accountTotalValue": total,
+                    "accountAvailableCash": cash,
+                    "accountTotalUsedMargin": used}}),
+            ("GET", "/portfolio", 200, {"positions": []})])
+        return t
+
+    def test_a_deferred_sync_holds_etoro_entries_until_the_next_read(self):
+        self.assertEqual(self._gate()["refusal"], "", "fresh cells pass")
+        _fill(self.kh, eb.ACCOUNT, eb.limit(eb.ACCOUNT, eb.P2))
+        out = self._sync(self._trader())
+        self.assertEqual(out.get("deferred"), 1, out)
+        refusal = self._gate()["refusal"]
+        self.assertIn("the eToro request budget deferred this account's "
+                      "sync at ", refusal)
+        self.assertIn("refused until the next sync reads the account",
+                      refusal)
+        # the next pass reads it, and the hold lifts
+        self.bclock.t += 61
+        out = self._sync(self._trader())
+        self.assertEqual((out["stored"], out.get("deferred", 0)), (1, 0), out)
+        self.assertEqual(self._gate()["refusal"], "")
+
+    def test_a_re_read_after_an_order_does_not_lift_the_hold(self):
+        # the cells move, the equity does not: only the sync lifts it
+        from bot_program.tasks import refresh_etoro_cells
+        _fill(self.kh, eb.ACCOUNT, eb.limit(eb.ACCOUNT, eb.P2))
+        self._sync(self._trader())
+        self.bclock.t += 61
+        with mock.patch("bot_program.engine.etoro_client.EtoroTrader",
+                        return_value=self._trader()):
+            self.assertTrue(refresh_etoro_cells(self.acct.pk,
+                                                why="after a close")["read"])
+        self.assertIn("deferred this account's sync", self._gate()["refusal"])
+
+    def test_an_answered_aggregate_is_kept_when_only_the_book_is_refused(
+            self):
+        # one token left under P2: the aggregate's; the book finds none
+        _fill(self.kh, eb.ACCOUNT, eb.limit(eb.ACCOUNT, eb.P2) - 1)
+        before = self.acct.last_margin_at
+        out = self._sync(self._trader(cash=1500.0, used=1500.0))
+        self.acct.refresh_from_db()
+        self.assertEqual((float(self.acct.last_available_cash),
+                          float(self.acct.last_used_margin)),
+                         (1500.0, 1500.0), "the answered cells are written")
+        self.assertGreater(self.acct.last_margin_at, before)
+        self.assertGreater(self.acct.last_equity_at, before)
+        self.assertGreater(self.acct.last_sync, before)
+        self.assertEqual(self.acct.broker_positions, [{"symbol": "OLD"}],
+                         "the holdings keep their own stamp")
+        self.assertLess(self.acct.broker_positions_at, self.acct.last_sync)
+        self.assertIsNone(cache.get(f"broker_sync:miss:etoro:{self.acct.pk}"))
+        self.assertEqual((out["stored"], out.get("deferred", 0),
+                          out.get("book_deferred", 0)), (1, 0, 1), out)
+        self.assertEqual(self._gate()["refusal"], "", "fresh cells: no hold")
 
 
 def _components_only():
