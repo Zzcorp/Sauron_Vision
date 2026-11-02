@@ -879,10 +879,16 @@ class ThePoolCheckReadsTheSyncsEquityTests(TestCase):
 
 # ── the beats ─────────────────────────────────────────────────────────────
 
-class TheBeatsAreOffsetTests(SimpleTestCase):
-    """The eToro sync and the reconcile no longer fire with the five-minute
-    marks: the sync at minute 1 of every five, the reconcile at minute 3,
-    pinned to the clock; the bot tick keeps its 300 s interval."""
+class TheBeatsAreC2sTests(SimpleTestCase):
+    """2026-11-02 (completes E3, review): THE BEATS ARE C2's AGAIN. E3 moved
+    the eToro sync from C2's 300 s interval to minute 1 of every five and
+    the reconcile from C2's */5 to minute 3, off the bot tick's beat; the
+    house rule is that C2's cadence change is neither redone nor undone,
+    and the plan's item 1 was C2's to land. Restored: the sync's 300 s
+    interval and the reconcile's */5 crontab, as C2 set them (this class
+    was TheBeatsAreOffsetTests); the tick keeps its 300 s interval. The
+    budget meters what the beats ask (one book a reconcile pass, two
+    account GETs a sync pass)."""
 
     def _beat(self, key):
         from config.celery import app
@@ -891,52 +897,46 @@ class TheBeatsAreOffsetTests(SimpleTestCase):
     def test_the_tick_is_the_300_s_interval_it_was(self):
         self.assertEqual(self._beat("tick-asset-bots"), 300.0)
 
-    def test_the_sync_fires_at_minute_one_of_every_five(self):
-        from celery.schedules import crontab
-        sync = self._beat("sync-etoro-accounts")
-        self.assertIsInstance(sync, crontab)
-        self.assertEqual(sorted(sync.minute), list(range(1, 60, 5)))
-        self.assertEqual(len(sync.hour), 24)
-        self.assertEqual(len(sync.day_of_week), 7)
+    def test_the_sync_is_c2s_300_s_interval(self):
+        self.assertEqual(self._beat("sync-etoro-accounts"), 300.0)
 
-    def test_the_reconcile_fires_at_minute_three_of_every_five(self):
+    def test_the_reconcile_is_c2s_every_five_minutes(self):
         from celery.schedules import crontab
         rec = self._beat("reconcile-asset-bot-trades")
-        self.assertIsInstance(rec, crontab)
-        self.assertEqual(sorted(rec.minute), list(range(3, 60, 5)))
+        self.assertEqual(rec, crontab(minute="*/5"))
+        self.assertEqual(sorted(rec.minute), list(range(0, 60, 5)))
         self.assertEqual(len(rec.hour), 24)
-
-    def test_neither_fires_on_a_five_minute_mark_nor_beside_the_other(self):
-        sync = set(self._beat("sync-etoro-accounts").minute)
-        rec = set(self._beat("reconcile-asset-bot-trades").minute)
-        self.assertFalse({m for m in sync | rec if m % 5 == 0})
-        self.assertEqual(sync & rec, set())
 
     def test_both_still_beat_every_five_minutes(self):
         from core.component_digest import _period_hours
         from core.day_of_sauron import schedule_words
+        self.assertEqual(schedule_words(self._beat("sync-etoro-accounts"))[:3],
+                         ("5 min", 300.0, "interval"))
+        self.assertEqual(
+            schedule_words(self._beat("reconcile-asset-bot-trades"))[:3],
+            ("every 5 min", 300.0, "cron"))
         for key in ("sync-etoro-accounts", "reconcile-asset-bot-trades"):
-            words, period, kind, _first = schedule_words(self._beat(key))
-            self.assertEqual((words, period, kind),
-                             ("every 5 min", 300.0, "cron"), key)
             self.assertAlmostEqual(_period_hours(self._beat(key)),
                                    300 / 3600, msg=key)
 
 
-class TheSchedulerKeepsTheOffsetsTests(TestCase):
-    """The beat runs django_celery_beat's DatabaseScheduler: the minutes
-    survive its conversion into a stored crontab."""
+class TheSchedulerKeepsC2sBeatsTests(TestCase):
+    """The beat runs django_celery_beat's DatabaseScheduler: C2's two
+    schedules survive its conversion (was TheSchedulerKeepsTheOffsetsTests,
+    two crontabs at minutes 1 and 3)."""
 
-    def test_the_database_scheduler_keeps_both_minutes(self):
+    def test_the_database_scheduler_keeps_both(self):
         from django_celery_beat.schedulers import ModelEntry
 
         from config.celery import app
-        for key, first in (("sync-etoro-accounts", 1),
-                           ("reconcile-asset-bot-trades", 3)):
-            model, field = ModelEntry.to_model_schedule(
-                app.conf.beat_schedule[key]["schedule"])
-            self.assertEqual(field, "crontab", key)
-            self.assertEqual(model.minute, f"{first}-59/5", key)
+        model, field = ModelEntry.to_model_schedule(
+            app.conf.beat_schedule["sync-etoro-accounts"]["schedule"])
+        self.assertEqual(field, "interval")
+        self.assertEqual((model.every, model.period), (300, "seconds"))
+        model, field = ModelEntry.to_model_schedule(
+            app.conf.beat_schedule["reconcile-asset-bot-trades"]["schedule"])
+        self.assertEqual(field, "crontab")
+        self.assertEqual(model.minute, "*/5")
 
 
 # ── one book per reconcile pass ───────────────────────────────────────────

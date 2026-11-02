@@ -615,24 +615,15 @@ app.conf.beat_schedule = {
     # pacing (portfolio is no pause site; a 429 there counts on the
     # venue's health, three in 180 s make it sick — a rate this beat alone
     # cannot reach).
-    # ONE GET A PASS, AND OFF THE TICK'S BEAT (2026-11-01, plan item 1):
-    # the row walk and the unclaimed sweep share one read of eToro's book
-    # per user and world (reconcile_asset.one_book_per_pass), so a pass is
-    # ONE GET of /portfolio; and the beat fires at minute 3 of every five
-    # (:03, :08 ... :58), two minutes after the eToro sync (minute 1),
-    # never on the :00 / :05 marks this entry used. THE OFFSETS, STATED:
-    # the bot tick (tick-asset-bots) is a plain 300 s interval, which the
-    # database scheduler runs 300 s after its own last run, so its second
-    # is wherever beat last started it, not a minute of the clock. The sync
-    # was a 300 s interval started with it, and so fired in the same loop
-    # of beat as the tick's marks, every beat. Both are on the clock now,
-    # 60 s and 180 s past each five-minute mark, and 120 s apart: they
-    # meet the tick's opening burst only when beat's last start put the
-    # tick at that second. Still every five minutes; the 60 s lag window
-    # holds at any minute.
+    # ONE GET A PASS since 2026-11-01: the row walk and the unclaimed sweep
+    # share one read of eToro's book per user and world
+    # (reconcile_asset.one_book_per_pass); a read that failed is asked
+    # again by the sweep (2026-11-02). THE BEAT IS C2's (2026-11-02): it
+    # sat at minute 3 of every five from 2026-11-01; C2's */5 is restored,
+    # as C2 set it, and the request budget meters what it asks.
     "reconcile-asset-bot-trades": {
         "task": "bot_program.tasks.reconcile_all_asset_bot_trades",
-        "schedule": crontab(minute="3-59/5"),
+        "schedule": crontab(minute="*/5"),
     },
 
     # Every 15 min around the clock, like the reconcile above: an ISA
@@ -646,10 +637,9 @@ app.conf.beat_schedule = {
     },
     # 2026-09-17 — the eToro twin: same component switch
     # (broker_account_sync), a separate task so the IBKR loop's session
-    # leasing and 2FA guards are never touched. Both were plain intervals
-    # (the eToro walk is on the clock since 2026-11-01), so they may
-    # coincide; each is one HTTP round trip per account and the fast
-    # queue has two workers, which is contention nobody will see.
+    # leasing and 2FA guards are never touched. Both are plain intervals,
+    # so they may coincide; each is one HTTP round trip per account and
+    # the fast queue has two workers, which is contention nobody will see.
     # EVERY 300 s (2026-10-31, the operator: "The 15min etoro refresh is
     # way too long"): the cash and the used margin the order gate reads
     # are at most five minutes old even when nothing the platform did
@@ -666,16 +656,14 @@ app.conf.beat_schedule = {
     # fifteen minutes, BROKER_MISS_ALERT_AFTER) raise the stall alert,
     # still once per six hours. The history rows grow three-fold, inside
     # the 400-day prune (EQUITY_HISTORY_DAYS).
-    # AT MINUTE 1 OF EVERY FIVE (2026-11-01, plan item 1): :01, :06 ...
-    # :56, on the clock, instead of a 300 s interval that beat started with
-    # the bot tick's and so fired beside its marks every beat (see the
-    # reconcile above, at minute 3). Still every five minutes, so the cells
-    # are at most five minutes old and three misses are still fifteen
-    # minutes; its stored equity is also the pool check's now
-    # (capital_truth.broker_equity, 15 minutes or less).
+    # THE BEAT IS C2's (2026-11-02): it sat at minute 1 of every five from
+    # 2026-11-01; C2's 300 s interval is restored, as C2 set it, and the
+    # request budget meters what it asks. Its stored equity is also the
+    # pool check's since 2026-11-01 (capital_truth.broker_equity, 15
+    # minutes or less).
     "sync-etoro-accounts": {
         "task": "bot_program.tasks.sync_etoro_accounts",
-        "schedule": crontab(minute="1-59/5"),
+        "schedule": 300.0,
     },
     # 2026-09-17 — Saxo's OAuth session keeper. UNGATED: the refresh token
     # lives forty minutes and rotates, so a session that died because a
