@@ -2213,10 +2213,15 @@ class TheShapeCommandTests(_RatesOn, TestCase):
         self.assertIn("(P5 candles)", text)
         self.assertNotIn(self.KEY, text)
 
-    def test_it_is_registered_read_only_and_terminal_only(self):
+    def test_it_is_a_terminal_command_off_the_ops_page(self):
+        # 2026-11-02 (completes E2, review): it was registered in the ops
+        # catalogue, which put it on /ops/ and in the Wall's command
+        # count: a change of what a page shows beyond the budget's own
+        # command. It is named exempt now, with its reason; the budget's
+        # own command stays listed
         from core import ops_commands
-        e = ops_commands.get("etoro_rates_shape")
-        self.assertTrue(e["read_only"])
-        self.assertEqual(e["category"], "read")
-        self.assertFalse(ops_commands.is_runnable(e))
+        self.assertIsNone(ops_commands.get("etoro_rates_shape"))
+        self.assertIn("etoro_rates_shape", ops_commands.EXEMPT)
+        self.assertIn("terminal", ops_commands.EXEMPT["etoro_rates_shape"])
         self.assertNotIn("etoro_rates_shape", ops_commands.runnable_names())
+        self.assertIsNotNone(ops_commands.get("etoro_budget"))
