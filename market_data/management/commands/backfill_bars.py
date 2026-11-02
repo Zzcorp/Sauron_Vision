@@ -53,11 +53,35 @@ key; the verdicts it feeds do size real money (backtester/proving/proof.py).
 Symbols are the platform's own spelling (BTCUSD), translated to the venue's
 (BTCUSDT) on the way out — the same mapping `market_data.quotes` uses, so a
 backfilled bar and a live quote agree about what instrument they describe.
+
+THE VENUE'S BARS ARE NEVER WRITTEN OVER, NOR BESIDE (2026-11-01). Every
+row went to bot_bars._upsert_rows, which replaces the OHLC and the source
+of a row already at that timestamp, and nothing here asked whose row it
+was, unlike the bar pass and the watchlist pass. `--proving` takes every
+enabled bot's symbols and every open row, so on an eToro-routed live
+symbol it relabelled eToro's own candles as the public feed's where the
+hours met (XAUUSD became Yahoo's GC=F future, BTCUSD Binance's BTCUSDT)
+and wrote Yahoo's :30 bars beside eToro's :00 bars for US stocks and
+indices, under the bars a real row's exit booking, ATR stops and fill
+checks read. Now, for every interval, a series a venue wrote (any source
+that is not a public feed's: bot_bars._venue_rows, the pass's own test)
+gets public rows only OUTSIDE the venue's span: bars that have ended by
+the time its first bar opens, and bars after its newest one by the pass's
+rule once that bar is stale by the pass's own bound; while the venue is
+live, its next bars are the bar pass's (bot_bars._outside_the_venues_span).
+The writer itself never lets a public row replace a venue's
+(bot_bars._upsert_rows), so a bar the bar pass writes while this command
+runs stays the venue's. The Yahoo EOD's daily bars ("yfinance") are the
+public feed's own series, not a venue's: a 1d run still fills a hole and
+rewrites a partial bar inside their span. The run says per symbol how
+many it kept out, and why. A series no venue ever wrote is unchanged.
+
+The dry run downloads everything a real run would and writes nothing.
 """
 from __future__ import annotations
 
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_tz
 
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
@@ -108,6 +132,20 @@ def venue_symbol(symbol: str) -> str:
     return s
 
 
+def _after_the_last(rows, venue) -> int:
+    """How many of `rows` open after the venue's newest bar (`venue`,
+    bot_bars._venue_span); 0 without a venue (2026-11-01)."""
+    if not venue:
+        return 0
+    n = 0
+    for row in rows or []:
+        try:
+            n += int(row[0]) > venue["last_ms"]
+        except (TypeError, ValueError, IndexError):
+            continue
+    return n
+
+
 def catalogue_symbol(symbol: str) -> str:
     """Binance spelling -> platform spelling, for the pairs Binance renamed.
 
@@ -146,7 +184,11 @@ class Command(BaseCommand):
                                  f"{DEFAULT_BARS} — comfortably above the 210 an "
                                  f"SMA200 needs; {PROVING_BARS} with --proving.")
         parser.add_argument("--dry-run", action="store_true",
-                            help="Fetch and report, write nothing.")
+                            help="Fetch and report, write nothing. It still "
+                                 "downloads everything a real run would "
+                                 "(the whole history asked, from Yahoo or "
+                                 "page by page from Binance); only the "
+                                 "writes are skipped.")
 
     @staticmethod
     def proving_symbols() -> list:
@@ -206,6 +248,7 @@ class Command(BaseCommand):
         client = BinanceClient("", "", testnet=False)
 
         grand_total = 0
+        grand_kept_out = 0
         for symbol in symbols:
             inst = Instrument.objects.filter(symbol=symbol).first()
             if inst is None:
@@ -216,44 +259,109 @@ class Command(BaseCommand):
 
             for interval in intervals:
                 if inst.asset_class == "crypto":
-                    written = self._backfill_one(
+                    written, kept_out = self._backfill_one(
                         client, inst, symbol, interval, target, dry,
                         _upsert_rows)
                 else:
-                    written = self._backfill_public(
+                    written, kept_out = self._backfill_public(
                         inst, symbol, interval, target, dry, _upsert_rows)
                 grand_total += written
+                grand_kept_out += kept_out
 
         verb = "would write" if dry else "wrote"
         self.stdout.write(self.style.SUCCESS(
             f"\nBackfill complete — {verb} {grand_total} bars across "
-            f"{len(symbols)} symbol(s) x {len(intervals)} interval(s)."))
+            f"{len(symbols)} symbol(s) x {len(intervals)} interval(s)."
+            + (f" {grand_kept_out} public bar(s) skipped for a venue's bars "
+               f"(said above, per symbol)." if grand_kept_out else "")))
         if proving:
-            from backtester.proving.data import MIN_BARS, MIN_SPAN_DAYS
-            self.stdout.write(
-                f"The proving ground needs {MIN_SPAN_DAYS['4h']} days and "
-                f"{MIN_BARS['4h']} bars at 4h per symbol. Next: "
-                f"`python manage.py prove data` says who is still short; "
-                f"`python manage.py component on proving_ground` arms the "
-                f"nightly judge (03:40 UTC); `python manage.py prove rules "
-                f"--save` judges the live rules now. A saved verdict binds "
-                f"real money from the next live entry: FAILED refuses the "
-                f"rule on that class and side, PROVEN allows full size. "
-                f"Preview first: `prove rules` without --save.")
+            self._proving_footer(intervals)
         if not dry:
             self.stdout.write(
                 "Next: python manage.py shell -c "
                 "\"from indicators.tasks import recalculate_all_indicators as r; print(r())\"")
 
+    def _proving_footer(self, intervals) -> None:
+        """What the proving ground needs at each interval THIS run filled,
+        and what follows (2026-11-01). The footer cited the 4h minimums
+        whatever was backfilled (a 1h run read 540 days and 800 bars; the
+        judge wants backtester.proving.data's 365 and 2000 at 1h), and it
+        ended on "Next: ... `prove rules --save` judges the live rules
+        now": a step that sizes real money, offered as routine."""
+        from backtester.proving.data import MIN_BARS, MIN_SPAN_DAYS
+        for iv in intervals:
+            if iv in MIN_SPAN_DAYS and iv in MIN_BARS:
+                flag = "" if iv == "4h" else f" --timeframe {iv}"
+                self.stdout.write(
+                    f"The proving ground needs {MIN_SPAN_DAYS[iv]} days and "
+                    f"{MIN_BARS[iv]} bars at {iv} per symbol. `python "
+                    f"manage.py prove data{flag}` (read only) says who is "
+                    f"still short.")
+            else:
+                self.stdout.write(
+                    f"The proving ground judges no {iv} bars (only "
+                    f"{', '.join(sorted(MIN_BARS))}).")
+        self.stdout.write(
+            "The nightly judge (03:40 UTC) runs on its own while the "
+            "proving_ground component is on, and its saved verdicts size "
+            "real money. `python manage.py prove rules --save` changes "
+            "real-money sizing. A saved verdict binds real money from the "
+            "next live entry: FAILED refuses the rule on that class and "
+            "side, PROVEN allows full size. It is the operator's decision, "
+            "never a routine next step; `prove rules` without --save "
+            "previews and writes nothing.")
+
+    def _say_the_venue(self, inst, symbol, interval, venue, *, at, held,
+                       beside, after, tail, dry) -> None:
+        """What a (symbol, interval) a venue wrote got of the public feed,
+        and why (2026-11-01). One line when public rows were kept out of
+        its span: `at` its own timestamps (`held` of them because the
+        venue wrote that bar while this run went, bot_bars._upsert_rows),
+        `beside` its bars, `after` its newest bar while the venue is live.
+        One more when that newest bar is stale and `tail` rows after it
+        went to the writer, the pass's rule."""
+        from market_data.bot_bars import (STALE_VENUE_AFTER_S,
+                                          STALE_VENUE_BARS_CRYPTO)
+        if not venue:
+            return
+        sources = ", ".join(venue["sources"])
+        last = datetime.fromtimestamp(venue["last_ms"] / 1000, tz=dt_tz.utc)
+        if at or beside or after:
+            first = datetime.fromtimestamp(venue["first_ms"] / 1000,
+                                           tz=dt_tz.utc)
+            bound = (f"{STALE_VENUE_BARS_CRYPTO} bars"
+                     if inst.asset_class == "crypto"
+                     else f"{STALE_VENUE_AFTER_S // 3600} h")
+            during = (f", {held} of them written by the venue during this "
+                      f"run" if held else "")
+            self.stdout.write(
+                f"    {symbol} {interval}: {at + beside + after} public "
+                f"bar(s) skipped for the venue: {sources} wrote this series "
+                f"from {first:%Y-%m-%d %H:%M} to {last:%Y-%m-%d %H:%M} UTC "
+                f"({at} at its own timestamps{during}, {beside} beside its "
+                f"bars, {after} after its newest bar); public bars go only "
+                f"before its first bar, and after its last once that bar is "
+                f"stale ({bound}, the bar pass's bound): while the venue is "
+                f"live, its next bars are the bar pass's")
+        if tail and venue.get("stale_s") is not None:
+            self.stdout.write(
+                f"    {symbol} {interval}: the venue's newest bar ({sources}, "
+                f"{last:%Y-%m-%d %H:%M} UTC) is stale, "
+                f"{int(venue['stale_s'] // 3600)} h old: the public feed's "
+                f"bars after it {'would be' if dry else 'are'} written, the "
+                f"bar pass's own rule")
+
     def _backfill_public(self, inst, symbol, interval, target, dry,
-                         upsert) -> int:
+                         upsert) -> tuple:
         """Every non-crypto class, through the keyless feed, in ONE call.
 
         Yahoo answers with the whole window (ten years of daily bars, two
         of hourly) and the feed trims to `limit`, so there is nothing to
         paginate. A class with no keyless source is named and skipped,
-        never invented.
+        never invented. Returns (bars written, or in a dry run the bars it
+        would write; bars kept out for a venue's, 2026-11-01).
         """
+        from market_data.bot_bars import _outside_the_venues_span, _venue_span
         from market_data.public_feed import public_feed_for
 
         feed = public_feed_for(inst.asset_class)
@@ -261,31 +369,55 @@ class Command(BaseCommand):
             self.stderr.write(self.style.WARNING(
                 f"  {symbol} {interval}: no keyless source for asset class "
                 f"{inst.asset_class!r} — nothing written"))
-            return 0
+            return 0, 0
         try:
-            rows = feed.klines(symbol, interval=interval, limit=target)
+            rows = feed.klines(symbol, interval=interval, limit=target) or []
         except Exception as e:  # noqa: BLE001 — one symbol must not end the run
             self.stderr.write(self.style.ERROR(
                 f"  {symbol} {interval}: public feed failed: {e}"))
-            return 0
+            return 0, 0
+        venue = _venue_span(inst, interval)
+        kept, at, beside, after = _outside_the_venues_span(
+            rows, venue, INTERVAL_MINUTES[interval] * 60_000)
         written = 0
-        if rows and not dry:
-            written, _skipped = upsert(inst, interval, rows, "yfinance_public")
+        held = []          # a venue's bars that landed after the span read
+        if kept and not dry:
+            written, _skipped = upsert(inst, interval, kept, "yfinance_public",
+                                       held=held)
+        if held and venue is None:
+            venue = _venue_span(inst, interval)
         self.stdout.write(
             f"  {symbol:10} {interval:4} {len(rows):5} bars fetched "
             f"(public feed){'' if dry else f', {written} written'}")
-        return written if not dry else len(rows)
+        self._say_the_venue(inst, symbol, interval, venue, at=at + len(held),
+                            held=len(held), beside=beside, after=after,
+                            tail=_after_the_last(kept, venue), dry=dry)
+        return ((written if not dry else len(kept)),
+                at + len(held) + beside + after)
 
     def _backfill_one(self, client, inst, symbol, interval, target, dry,
-                      upsert) -> int:
+                      upsert) -> tuple:
+        """Crypto, Binance's public klines, paged forward. Returns (bars
+        written, or in a dry run the bars it would write; bars kept out
+        for a venue's, 2026-11-01)."""
+        from market_data.bot_bars import _outside_the_venues_span, _venue_span
+
         vsym = venue_symbol(symbol)
         minutes = INTERVAL_MINUTES[interval]
         span = timedelta(minutes=minutes * target)
         cursor = int((timezone.now() - span).timestamp() * 1000)
         now_ms = int(timezone.now().timestamp() * 1000)
+        # The venue's span, read once: this run writes public rows only,
+        # and those never move it. A bar the venue writes while the pages
+        # run is kept by the writer itself (bot_bars._upsert_rows never
+        # lets a public row replace a venue's), and counted in `held`.
+        venue = _venue_span(inst, interval)
 
         collected = 0
+        kept_total = 0
         written_total = 0
+        at_total = beside_total = after_total = tail_total = 0
+        held = []
         pages = 0
         while cursor < now_ms and collected < target:
             try:
@@ -300,9 +432,16 @@ class Command(BaseCommand):
 
             pages += 1
             collected += len(rows)
-            if not dry:
-                written, _skipped = upsert(inst, interval, rows,
-                                           "binance_public")
+            kept, at, beside, after = _outside_the_venues_span(
+                rows, venue, minutes * 60 * 1000)
+            kept_total += len(kept)
+            at_total += at
+            beside_total += beside
+            after_total += after
+            tail_total += _after_the_last(kept, venue)
+            if kept and not dry:
+                written, _skipped = upsert(inst, interval, kept,
+                                           "binance_public", held=held)
                 written_total += written
 
             # Advance past the last bar's OPEN time. Binance is inclusive on
@@ -313,7 +452,14 @@ class Command(BaseCommand):
             cursor = last_open + minutes * 60 * 1000
             time.sleep(SLEEP_BETWEEN_PAGES)
 
+        if held and venue is None:
+            venue = _venue_span(inst, interval)
         self.stdout.write(
             f"  {symbol:10} {interval:4} {collected:5} bars fetched "
             f"({pages} page(s)){'' if dry else f', {written_total} written'}")
-        return written_total if not dry else collected
+        self._say_the_venue(inst, symbol, interval, venue,
+                            at=at_total + len(held), held=len(held),
+                            beside=beside_total, after=after_total,
+                            tail=tail_total, dry=dry)
+        return ((written_total if not dry else kept_total),
+                at_total + len(held) + beside_total + after_total)

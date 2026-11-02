@@ -461,7 +461,57 @@ def _volume(raw) -> int:
     return min(int(value), _BIGINT_MAX)
 
 
-def _upsert_rows(inst, interval, rows, source) -> tuple[int, int]:
+#: The daily writers that store the public feeds' own series under a name
+#: of their own (2026-11-01): the Yahoo EOD ("yfinance",
+#: adapters/yfinance_adapter: Yahoo's daily bars, the very series the
+#: keyless feed writes as "yfinance_public", at the same timestamps) and
+#: Alpha Vantage ("alpha_vantage", adapters/alpha_vantage). Neither is a
+#: venue, and no venue writes a 1d bar.
+PUBLIC_DAILY_SOURCES = ("yfinance", "alpha_vantage")
+
+
+def _is_public_source(source) -> bool:
+    """True for a public feed's tag: a keyless feed's "..._public"
+    (_source_tag) or one of PUBLIC_DAILY_SOURCES. Every other tag is a
+    venue's (2026-11-01)."""
+    tag = str(source or "")
+    return tag.endswith("_public") or tag in PUBLIC_DAILY_SOURCES
+
+
+def _public_sources():
+    """_is_public_source as a filter on PriceData rows (2026-11-01)."""
+    from django.db.models import Q
+    return Q(source__endswith="_public") | Q(source__in=PUBLIC_DAILY_SOURCES)
+
+
+def _write_public_bar(inst, interval, at, values) -> bool:
+    """Write one public feed's bar at `at` unless a venue's row holds that
+    timestamp (2026-11-01). True when written: a public row there is
+    updated, an empty slot gets a new row, a venue's row is left as it is.
+    The unique (instrument, timeframe, timestamp) key settles a race: a
+    venue's bar that lands between the update and the insert makes the
+    insert fail, and only a public row is updated on the retry."""
+    from django.db import IntegrityError, transaction
+
+    from market_data.models import PriceData
+
+    mine = (PriceData.objects
+            .filter(instrument=inst, timeframe=interval, timestamp=at)
+            .filter(_public_sources()))
+    with transaction.atomic():
+        if mine.update(**values):
+            return True
+        try:
+            with transaction.atomic():
+                PriceData.objects.create(instrument=inst, timeframe=interval,
+                                         timestamp=at, **values)
+            return True
+        except IntegrityError:
+            return bool(mine.update(**values))
+
+
+def _upsert_rows(inst, interval, rows, source, *,
+                 held=None) -> tuple[int, int]:
     """Persist Binance-style kline rows. Returns (written, skipped).
 
     A row the database refuses is skipped and said, never raised: one
@@ -472,13 +522,29 @@ def _upsert_rows(inst, interval, rows, source) -> tuple[int, int]:
     one outside 0 < low <= min(open, close) <= max(open, close) <= high.
     Only `ts <= 0` and `close <= 0` were refused, so a bar with a low of 0
     or a high under its open was stored, drawn as a wick to zero and read
-    by every ATR stop on the symbol. A real bar always passes."""
+    by every ATR stop on the symbol. A real bar always passes.
+
+    THE PUBLIC FEED NEVER REPLACES A VENUE'S BAR, WHENEVER THAT BAR LANDED
+    (2026-11-01). The callers keep the public feed's rows out of a venue's
+    bars (_after_the_venues_last_bar, _outside_the_venues_span), but they
+    read the table first and write after, and the bar pass writes in
+    another process: an eToro bar it wrote in between was replaced, OHLC
+    and source, by the public feed's bar at that timestamp (backfill_bars
+    wrote its newest rows tens of seconds after its check), and the bots
+    read it until a later pass gave it back. A row written under a public
+    feed's tag (_is_public_source) now updates only a public row, or fills
+    an empty slot (_write_public_bar); a venue's row at its timestamp is
+    left as it is, counted neither written nor skipped, and its open
+    (epoch ms) appended to `held` when the caller passes a list. A venue's
+    own rows are written as before, over a public row too."""
     from django.db import DatabaseError
 
     from market_data.bar_shape import parse
     from market_data.models import PriceData
 
+    public = _is_public_source(source)
     written = skipped = 0
+    kept_out = []
     refused = None
     for row in rows or []:
         try:
@@ -487,18 +553,24 @@ def _upsert_rows(inst, interval, rows, source) -> tuple[int, int]:
                 skipped += 1
                 continue
             ts_ms, open_, high, low, close = bar
+            at = datetime.fromtimestamp(ts_ms / 1000, tz=dt_tz.utc)
+            values = {
+                "open": open_,
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": _volume(row[5]),
+                "source": source,
+            }
+            if public:
+                if _write_public_bar(inst, interval, at, values):
+                    written += 1
+                else:
+                    kept_out.append(ts_ms)
+                continue
             PriceData.objects.update_or_create(
-                instrument=inst, timeframe=interval,
-                timestamp=datetime.fromtimestamp(ts_ms / 1000, tz=dt_tz.utc),
-                defaults={
-                    "open": open_,
-                    "high": high,
-                    "low": low,
-                    "close": close,
-                    "volume": _volume(row[5]),
-                    "source": source,
-                },
-            )
+                instrument=inst, timeframe=interval, timestamp=at,
+                defaults=values)
             written += 1
         except (ValueError, TypeError, InvalidOperation, IndexError):
             skipped += 1
@@ -509,6 +581,12 @@ def _upsert_rows(inst, interval, rows, source) -> tuple[int, int]:
         logger.warning("[bars] %s %s: the database refused %d %s bar(s): %s",
                        getattr(inst, "symbol", inst), interval, skipped,
                        source, refused)
+    if kept_out:
+        logger.info("[bars] %s %s: %d %s bar(s) not written: a venue's bar "
+                    "holds that timestamp", getattr(inst, "symbol", inst),
+                    interval, len(kept_out), source)
+        if held is not None:
+            held.extend(kept_out)
     return written, skipped
 
 
@@ -718,8 +796,15 @@ def refresh_bars_for_config(cfg, *, intervals=DEFAULT_INTERVALS,
                         state.spent(max(1, _wire_reads(client) - before))
                 _note_answer(symbol, interval, rows)
             if getattr(client, "_sv_public_feed", False):
-                # The keyless feed IS the fallback: what it gave is written
-                # as it is, and nothing backs it up.
+                # The keyless feed IS the fallback: what it gave is written,
+                # and nothing backs it up. AFTER THE VENUE'S NEWEST BAR
+                # ONLY (2026-11-01), the fallback's rule: a config resolves
+                # to the keyless feed whenever its class has no venue this
+                # pass (credentials unread, the class's venue switched
+                # off), and its whole window used to land over the bars a
+                # venue wrote for the symbol, and beside them. A frame no
+                # venue ever wrote is unchanged.
+                rows = _after_the_venues_last_bar(inst, interval, rows)
                 written, skipped = _upsert_rows(inst, interval, rows, source)
                 out["bars"] += written
                 out["skipped"] += skipped
@@ -855,14 +940,26 @@ def _fallback_rows(cfg, symbol, interval, limit) -> "tuple[list, str]":
     return rows, _source_tag(feed)
 
 
+def _venue_rows(inst, interval):
+    """Every stored row of (inst, interval) a venue wrote: any source that
+    is not a public feed's (_is_public_source: "..._public", the Yahoo
+    EOD's "yfinance", Alpha Vantage's "alpha_vantage"). ONE TEST
+    (2026-11-01) for every writer of the public feed's bars: the pass's
+    fallback and its keyless configs, the watchlist pass, backfill_bars,
+    and the writer itself (_upsert_rows). The EOD's daily bars counted as
+    a venue's froze a 1d backfill out of their span: a hole the EOD left
+    stayed a hole, a bar it took mid-session stayed partial."""
+    from market_data.models import PriceData
+
+    return (PriceData.objects
+            .filter(instrument=inst, timeframe=interval)
+            .exclude(_public_sources()))
+
+
 def _after_the_venues_last_bar(inst, interval, rows) -> list:
     """The stand-in's rows newer than the venue's newest bar — all of them
     when no venue has ever written this frame."""
-    from market_data.models import PriceData
-
-    last = (PriceData.objects
-            .filter(instrument=inst, timeframe=interval)
-            .exclude(source__endswith="_public")
+    last = (_venue_rows(inst, interval)
             .order_by("-timestamp")
             .values_list("timestamp", flat=True).first())
     if last is None:
@@ -876,6 +973,76 @@ def _after_the_venues_last_bar(inst, interval, rows) -> list:
         except (TypeError, ValueError, IndexError):
             kept.append(row)        # _upsert_rows counts it as skipped
     return kept
+
+
+def _venue_span(inst, interval, now=None) -> "dict | None":
+    """What the venues hold of (inst, interval) (2026-11-01), by the rows
+    _venue_rows reads: {"first_ms", "last_ms" (the opens of its oldest and
+    newest bars, epoch ms), "stamps" (every bar's open), "sources",
+    "stale_s" (the age in seconds of its newest bar when the bar pass
+    would call it stale, _stale_age, else None)}, or None when no venue
+    ever wrote this frame."""
+    held = list(_venue_rows(inst, interval)
+                .values_list("timestamp", "source"))
+    if not held:
+        return None
+    stamps = {round(ts.timestamp() * 1000) for ts, _src in held}
+    last = max(stamps)
+    return {"first_ms": min(stamps), "last_ms": last,
+            "stamps": stamps, "sources": sorted({src for _ts, src in held}),
+            "stale_s": _stale_age(inst, interval, last, now=now)}
+
+
+def _outside_the_venues_span(rows, span, bar_ms) -> tuple:
+    """(kept, at, beside, after): which of the public feed's `rows` a
+    backfill may write into a series a venue wrote (`span`, _venue_span),
+    and how many it may not.
+
+    THE BACKFILL NEVER WRITES THE PUBLIC FEED OVER OR BESIDE A VENUE'S
+    BARS (2026-11-01). A row is kept when it has ENDED by the time the
+    venue's first bar opens (`bar_ms` is a bar's length: older history the
+    venue never had, never a :30 bar running into its first :00 bar). Kept
+    out: `at` a timestamp the venue holds (it would replace that bar, OHLC
+    and source), `beside` its bars otherwise (between its oldest and
+    newest, whatever the minute).
+
+    AFTER ITS NEWEST BAR ONLY ONCE THAT BAR IS STALE (2026-11-01). The
+    pass writes the public feed after a venue's newest bar only when the
+    venue gave nothing usable or a stale window, and a backfill cannot
+    know whether the venue answers: it wrote that tail while eToro was
+    live and simply not asked for the new hour yet (gold's forming hour
+    became GC=F's, NVDA's :30 bar ran beside eToro's last :00 bar), read
+    by the exit booking, the ATR stops and the 1h rules until the next
+    pass. A row that opens after the venue's newest bar is now kept only
+    when that bar is stale by the pass's own bound (`span["stale_s"]`),
+    by the pass's rule (_after_the_venues_last_bar); while the venue is
+    live it is counted `after` and left to the pass. No span keeps every
+    row. A row whose open cannot be read is kept: the writer refuses it
+    on its own."""
+    rows = list(rows or [])
+    if not span:
+        return rows, 0, 0, 0
+    first, last, stamps = span["first_ms"], span["last_ms"], span["stamps"]
+    stale = span.get("stale_s") is not None
+    kept, at, beside, after = [], 0, 0, 0
+    for row in rows:
+        try:
+            ts = int(row[0])
+        except (TypeError, ValueError, IndexError):
+            kept.append(row)
+            continue
+        if ts > last:
+            if stale:
+                kept.append(row)
+            else:
+                after += 1
+        elif ts < first and ts + int(bar_ms) <= first:
+            kept.append(row)
+        elif ts in stamps:
+            at += 1
+        else:
+            beside += 1
+    return kept, at, beside, after
 
 
 def _evict_stand_in_rows(inst, interval, rows) -> int:
@@ -936,8 +1103,17 @@ def _venue_window_is_stale(inst, interval, rows, now=None) -> "float | None":
             continue
     if not stamps:
         return None
+    return _stale_age(inst, interval, max(stamps), now=now)
+
+
+def _stale_age(inst, interval, newest_ms, now=None) -> "float | None":
+    """Age in seconds of a venue bar that opened at `newest_ms` (epoch ms)
+    when that is stale for this instrument's class, else None: the pass's
+    one bound, for its answers (_venue_window_is_stale) and, since
+    2026-11-01, for the newest bar a venue stored (_venue_span, read by
+    backfill_bars)."""
     now = now or datetime.now(dt_tz.utc)
-    age = now.timestamp() - max(stamps) / 1000
+    age = now.timestamp() - int(newest_ms) / 1000
     if (getattr(inst, "asset_class", "") or "") == "crypto":
         limit = STALE_VENUE_BARS_CRYPTO * INTERVAL_SECONDS.get(interval, 3600)
     else:
