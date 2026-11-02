@@ -4819,6 +4819,10 @@ class AssetBot(ABC):
         if _clock_first:
             _timing = self._entry_timing_gate(symbol)
             if not _timing["ok"]:
+                if _timing.get("code") == entry_timing.SHUT:
+                    # the freeze rule's memory of the shut's own price:
+                    # one read a shut (2026-11-02, _shut_quote_memory)
+                    self._shut_quote_memory(client, symbol, _timing)
                 logger.warning("[%s_bot] %s: entry refused on the clock — %s",
                                self.asset_class, symbol, _timing["why"])
                 return self._skip(symbol, entry_timing.skip_code(_timing),
@@ -5466,6 +5470,54 @@ class AssetBot(ABC):
             return str(label or stage_name)
         except Exception:  # noqa: BLE001 — a label never costs an entry
             return stage_name
+
+    def _shut_quote_memory(self, client, symbol: str, timing: dict) -> None:
+        """THE FREEZE RULE'S MEMORY THROUGH A SHUT (2026-11-02, completes
+        E2, review). The entry quote's memory (extras["entry_marks"],
+        _entry_quote_gate) is what the freeze rule reads: a mid unchanged
+        for FROZEN_MINUTES in an open market is SUSPECT_MARK. Every refused
+        tick of a shut market used to read the quote and record the shut's
+        own price; since the clock goes first (E2), a live client asks no
+        rate while the market is shut, so a feed still showing that price
+        after the reopen was a first sighting, and entries went on it until
+        45 minutes into the open market. So the FIRST refusal of each shut
+        (named by its scheduled reopen, the verdict's `until`) reads the
+        quote ONCE, at P4 in the eToro budget, and records it through
+        _entry_quote_gate, whose verdict is not read here (the clock refuses
+        the entry whatever it says). Every later refusal of that shut asks
+        nothing. An unknown reopen reads nothing; a read the budget refused
+        or that failed is asked at the next refusal. Never raises."""
+        try:
+            from bot_program import mark_sanity
+            from bot_program.asset_engine.safety import _extras, _save_extras
+            from bot_program.engine import etoro_budget
+            until = timing.get("until")
+            if until is None:
+                return
+            tag, key = until.isoformat(), str(symbol).upper()
+            held = (_extras(self.cfg).get("entry_marks") or {}).get(key)
+            if isinstance(held, dict) and held.get("shut_until") == tag:
+                return
+            try:
+                with etoro_budget.at(etoro_budget.P4,
+                                     "proposal: the shut market's quote"):
+                    tk = client.ticker(symbol)
+            except Exception as e:  # noqa: BLE001 — asked at the next refusal
+                logger.info("[%s_bot] %s: the shut market's quote not read "
+                            "(%s) — asked at the next refusal",
+                            self.asset_class, symbol, e)
+                return
+            self._entry_quote_gate(symbol, tk, client)
+            marks = dict(_extras(self.cfg).get("entry_marks") or {})
+            mark = marks.get(key)
+            if key not in marks and len(marks) >= mark_sanity.ENTRY_MARKS_MAX:
+                marks.pop(next(iter(marks)), None)
+            marks[key] = dict(mark if isinstance(mark, dict) else {},
+                              shut_until=tag)
+            _save_extras(self.cfg, entry_marks=marks)
+        except Exception as e:  # noqa: BLE001 — the memory never costs a tick
+            logger.warning("[%s_bot] %s: the shut market's quote memory not "
+                           "kept (%s)", self.asset_class, symbol, e)
 
     def _entry_quote_gate(self, symbol: str, tk, client, *, stop=None) -> dict:
         """THE ENTRY QUOTE (2026-10-05, mark_sanity.entry_quote): whether
