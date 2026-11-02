@@ -38,7 +38,15 @@ sitting itself, on a schedule, for every class whose short is not pinned:
   THE BUDGET    one key's quota serves both worlds, so the live lane goes
                 first (refusing): nothing is asked while eToro (either
                 world) is sick, after a 429 within YIELD_AFTER_429_S, in a
-                429 pause, or while a real position's close is pending.
+                429 pause, or while a real position's close is pending that
+                the retry task may still send. A close eToro already holds
+                is not waited on (2026-11-02,
+                pending_closes.close_held_at_venue: the retry task only
+                reads it, and sends nothing more for it), nor one the retry
+                task holds back behind it on the same symbol
+                (pending_closes.blocked_behind_held_close: it sends nothing
+                for it while that close stands); the dry run and
+                /short-proofs/ name them (not_waited_on).
                 Within the runner, a position it holds is closed before
                 anything else is opened, and that run opens nothing
                 (closes first). One class at a time: while any demo
@@ -347,7 +355,17 @@ def refusing() -> str:
     lane goes first. One key's quota serves both worlds, so either
     world's sickness, a 429 within YIELD_AFTER_429_S, a 429 pause, or a
     real position's close still pending holds every step. Read on the wall
-    clock: these are the wire's state, not the run's."""
+    clock: these are the wire's state, not the run's.
+
+    A close still pending holds it while the retry task may still SEND it
+    (2026-11-02). A close eToro already holds is only read from then on
+    (pending_closes.close_held_at_venue), and the runner waited on such a
+    row for good; so it did on a row the retry task holds back behind it,
+    sending nothing while it stands (pending_closes
+    .blocked_behind_held_close). They are named instead (not_waited_on),
+    read on every call: the moment the held row is booked, the row held
+    back behind it is waited on again. An unreadable one holds every
+    step."""
     from bot_program import venue_health as vh
     from bot_program.engine import etoro_client as ec
     for world in ("live", "demo"):
@@ -364,13 +382,70 @@ def refusing() -> str:
         except Exception:  # noqa: BLE001 — an unread pause holds nothing
             pass
     try:
-        from bot_program.asset_models import AssetBotTrade
-        if AssetBotTrade.objects.filter(status="CLOSE_PENDING",
-                                        paper=False).exists():
+        waited, _held, _behind = _real_closes_pending()
+        if waited:
             return "a real position's close is pending: closes go first"
     except Exception as e:  # noqa: BLE001
         return f"the pending closes are unread ({type(e).__name__})"
     return ""
+
+
+def _real_closes_pending():
+    """(waited on, held at eToro, held back behind one): the real
+    CLOSE_PENDING rows, oldest first, split by
+    pending_closes.close_held_at_venue and, for the rest,
+    pending_closes.blocked_behind_held_close (2026-11-02). Raises when they
+    cannot be read; refusing() then holds every step."""
+    from bot_program.asset_models import AssetBotTrade
+    from bot_program.pending_closes import (blocked_behind_held_close,
+                                            close_held_at_venue)
+    waited, held, behind = [], [], []
+    for row in (AssetBotTrade.objects
+                .filter(status="CLOSE_PENDING", paper=False)
+                .select_related("config")
+                .order_by("pk")):
+        if close_held_at_venue(row):
+            held.append(row)
+        elif blocked_behind_held_close(row):
+            behind.append(row)
+        else:
+            waited.append(row)
+    return waited, held, behind
+
+
+def not_waited_on() -> str:
+    """"" or, in words, the real closes pending that the runner does not
+    wait on and why (2026-11-02), by symbol and side: each one whose close
+    eToro already holds (pending_closes.close_held_at_venue), then each one
+    the retry task holds back behind such a close on the same symbol
+    (pending_closes.blocked_behind_held_close), in a sentence of its own.
+    Said by the dry run and /short-proofs/. Unreadable, it names nothing:
+    refusing() then holds every step and says so."""
+    try:
+        _waited, held, behind = _real_closes_pending()
+    except Exception:  # noqa: BLE001 — refusing() says they are unread
+        return ""
+    words = []
+    if held:
+        them = "it" if len(held) == 1 else "them"
+        names = ", ".join(f"{row.symbol} ({row.side})" for row in held)
+        words.append(f"a close eToro already holds is not waited on: "
+                     f"{names}; the retry task only reads {them} and sends "
+                     f"nothing more for {them}")
+    if behind:
+        names = ", ".join(f"{row.symbol} ({row.side})" for row in behind)
+        if len(behind) == 1:
+            said = (f"A close the retry task holds back behind one eToro "
+                    f"holds on the same symbol is not waited on either: "
+                    f"{names}; nothing is sent for it until that one is "
+                    f"gone")
+        else:
+            said = (f"Closes the retry task holds back behind one eToro "
+                    f"holds on the same symbol are not waited on either: "
+                    f"{names}; nothing is sent for them until that one is "
+                    f"gone")
+        words.append(said)
+    return ". ".join(words)
 
 
 def hold_until_for(symbol, icls, now):
@@ -579,7 +654,8 @@ def run_once(*, now=None, dry_run=False, asset_class=None, leverage=None,
                              leverage=leverage, overnight=overnight,
                              forced=forced),
                    stopped=stop_words(stop) if stop is not None else "",
-                   refusing=refusing(), switch=switch_on(),
+                   refusing=refusing(), not_waited_on=not_waited_on(),
+                   switch=switch_on(),
                    keyed=keyed_account(user) is not None)
         return out
     if not switch_on():
@@ -614,8 +690,10 @@ def _run(now, out, *, explicit, forced, asset_class, leverage, overnight,
         return _in_doubt(stale, "stopped between its order and eToro's "
                                 "answer: whether eToro holds a position is "
                                 "unknown", now)
-    # THE LIVE LANE FIRST: a sick venue, a 429, a real close pending hold
-    # every step, the runner's own demo close too (demo money waits)
+    # THE LIVE LANE FIRST: a sick venue, a 429, a real close the retry
+    # task may still send hold every step, the runner's own demo close too
+    # (demo money waits); a close eToro already holds does not, nor one the
+    # retry task holds back behind it (2026-11-02)
     why = refusing()
     if why:
         out["reason"] = why

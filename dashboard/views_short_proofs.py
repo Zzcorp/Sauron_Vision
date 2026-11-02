@@ -33,6 +33,7 @@ def short_proofs_page(request):
         "switch_row": comp is not None,
         "stopped_words": sp.stop_words(stop) if stop is not None else "",
         "refusing": sp.refusing(),
+        "not_waited_on": sp.not_waited_on(),
         "keyed": sp.keyed_account() is not None,
         "gate": sp.gate_words(),
         "steps": [dict(s, words=sp.step_words(s)) for s in sp.plan()],

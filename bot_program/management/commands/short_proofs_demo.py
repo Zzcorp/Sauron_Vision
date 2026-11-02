@@ -21,10 +21,14 @@ market, held, blocked, in its back-off) and sends nothing, whatever the
 switch says. A step named by hand (--class, --leverage, --overnight) is
 not spaced out from the last one; a multiplier or the overnight hold named
 by hand runs whatever its record says, never while a demo position is held
-(whatever its class: one class at a time) or its market is shut.
-Refused while the component short_proofs_demo is OFF and while a step is
-in doubt (cleared on /short-proofs/ with the trading PIN). --user names
-whose eToro keys (default: the first row that has both).
+(whatever its class: one class at a time) or its market is shut. The dry
+run names, too, each real close pending that the runner does not wait on,
+and why (2026-11-02: a close eToro already holds, which the retry task
+only reads, and one the retry task holds back behind it, for which it
+sends nothing while that close stands). Refused while the component
+short_proofs_demo is OFF and while a step is in doubt (cleared on
+/short-proofs/ with the trading PIN). --user names whose eToro keys
+(default: the first row that has both).
 
 Deliberately NOT runnable from the ops page: it presents the operator's
 eToro keys to an external service and places orders on the demo account.
@@ -74,6 +78,9 @@ class Command(BaseCommand):
                 w(f"STOPPED: {out['stopped']}.")
             if out["refusing"]:
                 w(f"Waiting on the live lane: {out['refusing']}.")
+            if out["not_waited_on"]:
+                words = out["not_waited_on"]
+                w(f"{words[0].upper()}{words[1:]}.")
             for step in out["plan"]:
                 w("  " + sp.step_words(step))
             if not out["plan"]:

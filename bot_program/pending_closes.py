@@ -1817,7 +1817,12 @@ def retry_trade_close(trade) -> bool:
     # sides of the symbol are open, or a lot names no size, or a sibling row
     # claims the same units. Sending here is precisely what turned a flatten
     # into a THIRD full-size order. Nothing is sent and nothing is booked; a
-    # later pass reads `flat` once the netting has run.
+    # later pass reads `flat` once the netting has run. With broker_exposure's
+    # sibling and other-side reads, this block is why a row
+    # blocked_behind_held_close (below) names sends nothing while a close
+    # eToro holds stands beside it, and why the demo short proofs do not wait
+    # on it (2026-11-02): a change here, to those reads or to _siblings_claim,
+    # is a change to that predicate.
     if exposure["state"] == POS_UNKNOWN and exposure["ambiguous"]:
         _note_close_blocked(trade, exposure["why"])
         return False
@@ -1833,7 +1838,10 @@ def retry_trade_close(trade) -> bool:
     # position. Noted blocked in the venue-proved block's words, no attempt
     # spent. Declared by the venue, never tested by class; the flat, lag and
     # venue-proved paths above are untouched, and a book that read flat this
-    # pass never reaches here.
+    # pass never reaches here. With the venue-proved block, this is why a
+    # row close_held_at_venue (below) names is never sent for again, and
+    # why the demo short proofs do not wait on it (2026-11-02): a change to
+    # either block is a change to that predicate.
     if ((trade.metadata or {}).get(CLOSE_ORDER_WORKING_KEY)
             and getattr(client, "CANCELS_CLOSE_ORDERS", True) is False
             and exposure["state"] != POS_FLAT):
@@ -2008,3 +2016,145 @@ def retry_all_pending_closes() -> dict:
         finally:
             _release(pk)
     return out
+
+
+# ── what the demo short proofs wait on (2026-11-02) ─────────────────────
+
+def close_held_at_venue(trade) -> bool:
+    """True for a REAL CLOSE_PENDING row whose close eToro already holds:
+    the retry task only READS it from now on and never sends for it again
+    (2026-11-02). Read by bot_program.short_proofs, whose demo steps wait
+    on every real close pending so that the key's quota is left to the
+    closes this module still has to SEND; this one sends nothing.
+
+    Exactly the marks retry_trade_close stops on before its cancel and its
+    resend: close_order_working (a close the venue took and queued, a shut
+    market; it stays set when the queued close is then cancelled in the
+    eToro app) on a row stamped broker "etoro" (AssetBot.venue_stamps),
+    while eToro declares that it cannot withdraw a close order
+    (EtoroTrader.CANCELS_CLOSE_ORDERS). broker_router.client_for_row hands
+    such a row EtoroTrader, in its own world, or PaperTrader when that
+    cannot be its carrier (the keys gone, the account trading the other
+    world), and every pass then ends without a write:
+
+      * PaperTrader: the blocked pass (_note_close_blocked);
+      * the open order's own read says "closed": booked flat, nothing sent;
+      * it says "open": the venue-proved block, beside the queued close;
+      * it does not answer: a book read flat books the row or waits, a
+        read inside the venue's lag waits, a close in doubt or an
+        ambiguous book blocks, and any other book is the queued-close
+        block.
+
+    A pass costs one order lookup while eToro answers it, and the position
+    list when it does not. Any other CLOSE_PENDING real row may still be
+    sent: no close_order_working, a carrier that can withdraw a close
+    (cancel, then resend) or none recorded (today's routing answers for
+    it). Those are waited on, as before, but for one the retry task holds
+    back behind a row this names (blocked_behind_held_close, below,
+    2026-11-02, review). Declared by the venue, never tested by class: the
+    day eToro can withdraw a close, its rows go back to the cancel and the
+    resend, and to being waited on."""
+    if getattr(trade, "paper", True) or \
+            getattr(trade, "status", "") != "CLOSE_PENDING":
+        return False
+    meta = getattr(trade, "metadata", None)
+    meta = meta if isinstance(meta, dict) else {}
+    if not meta.get(CLOSE_ORDER_WORKING_KEY):
+        return False
+    if str(meta.get("broker") or "").strip().lower() != "etoro":
+        return False
+    from bot_program.engine.etoro_client import EtoroTrader
+    return getattr(EtoroTrader, "CANCELS_CLOSE_ORDERS", True) is False
+
+
+def blocked_behind_held_close(trade) -> bool:
+    """True for a REAL CLOSE_PENDING row the retry task holds back, sending
+    nothing, behind a close eToro already holds on the same symbol
+    (close_held_at_venue) (2026-11-02, review). Read by
+    bot_program.short_proofs beside close_held_at_venue: its demo steps do
+    not wait on this row either while that close stands, and wait on it
+    again the moment the held row leaves CLOSE_PENDING, before the pass
+    that sends this one. A close eToro holds can stand for good (the
+    operator cancels it in the eToro app), and so does the block behind it.
+
+    The retry task's own blocks, in broker_exposure, both ambiguous (the
+    blocked pass, no attempt spent):
+
+      * ON ITS SIDE, the sibling block: another live row of this user
+        claims the symbol on that side (_siblings_claim: the same user,
+        symbol, side and asset class, real, not entry_working), so the book
+        cannot say what is this row's. The held row stands CLOSE_PENDING
+        until the retry task books it, so this row is never sent for while
+        it stands, in either world: eToro lists every position with a size
+        and a side (EtoroTrader.get_positions), so no unmeasured lot sends
+        it, and a book read flat books it without sending.
+      * ON THE OTHER SIDE, the other-side block: eToro lists the held
+        position against this one. Only when both rows name the same world
+        (broker_env): a row of the other world, or one that names none, is
+        read on a book that may not list it.
+
+    This row is stamped broker "etoro" (AssetBot.venue_stamps), so
+    broker_router.client_for_row reads eToro's book for it, or hands it the
+    simulator, whose pass is blocked too. An options row is read by
+    presence, never netted, and nothing beside it holds it back
+    (_options_exposure).
+
+    AND ITS LAST PASS SENT NOTHING (_last_pass_sent_nothing): a row the
+    retry task has not yet read beside the held close is waited on until
+    it has, and one it has sent for since is waited on from that resend.
+    On the other side, the pass that sees the held position gone sends
+    this row's close, even before the held row is booked; that resend ends
+    the let-go. Declared by the venue, as close_held_at_venue is: the day
+    eToro can withdraw a close, nothing is held back behind one."""
+    if getattr(trade, "paper", True) or \
+            getattr(trade, "status", "") != "CLOSE_PENDING":
+        return False
+    meta = getattr(trade, "metadata", None)
+    meta = meta if isinstance(meta, dict) else {}
+    if str(meta.get("broker") or "").strip().lower() != "etoro":
+        return False
+    if getattr(trade, "asset_class", "") == "options":
+        return False
+    if close_held_at_venue(trade) or not _last_pass_sent_nothing(meta):
+        return False
+    from bot_program.models import AssetBotTrade
+    world = str(meta.get("broker_env") or "").strip().lower()
+    beside = (AssetBotTrade.objects
+              .filter(config__user_id=trade.config.user_id,
+                      symbol=trade.symbol, asset_class=trade.asset_class,
+                      paper=False, status="CLOSE_PENDING")
+              .exclude(pk=trade.pk))
+    for other in beside:
+        theirs = other.metadata if isinstance(other.metadata, dict) else {}
+        if theirs.get("entry_working") or not close_held_at_venue(other):
+            continue
+        if other.side == trade.side:
+            return True                                 # the sibling block
+        if ({other.side, trade.side} == {"BUY", "SELL"} and world
+                and str(theirs.get("broker_env") or "").strip().lower()
+                == world):
+            return True                              # the other-side block
+    return False
+
+
+def _last_pass_sent_nothing(meta) -> bool:
+    """Did the retry task's last pass over this row send nothing
+    (2026-11-02)? close_blocked_at, stamped by every blocked pass
+    (_note_close_blocked), no older than close_retry_last_at, stamped by
+    every attempt (_record_attempt: a resend refused, failed or partly
+    filled, a cancel not confirmed). A pass that only waits (the venue's
+    lag, an unanswered ask) stamps neither and sends nothing. No blocked
+    stamp, or one unreadable or without a zone: False."""
+    from datetime import datetime as _dt
+    try:
+        blocked = meta.get("close_blocked_at")
+        tried = meta.get("close_retry_last_at")
+        blocked = _dt.fromisoformat(str(blocked)) if blocked else None
+        tried = _dt.fromisoformat(str(tried)) if tried else None
+    except (TypeError, ValueError):
+        return False
+    if blocked is None or timezone.is_naive(blocked):
+        return False
+    if tried is None:
+        return True
+    return timezone.is_aware(tried) and tried <= blocked
