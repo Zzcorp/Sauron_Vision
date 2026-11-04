@@ -629,11 +629,14 @@ ETORO_PROVEN_LEVERAGE = {"forex": 5}
 #: at L. It bound the attack mode's chooser until 2026-10-05, when the
 #: operator lifted that bound ("pas de limite à l'attaque",
 #: tests/test_attack_mode.py: a short's pick follows the LIVE list). Since
-#: 2026-10-31 its one reader is the TAKE TRADE ticket: a SELL defaults to
-#: the highest open multiplier at or under this (1 when absent), and the
-#: selector still offers every multiplier eToro allows, saying that only
-#: this much is measured for shorts (manual_trade._ticket_leverage). Read
-#: at CALL time.
+#: 2026-10-31 its one reader is the TAKE TRADE ticket, where a SELL
+#: defaulted to the highest open multiplier at or under this (1 when
+#: absent) until 2026-11-04. Since then (the operator: "restaurer achat et
+#: vente manuel en leverage max") a SELL defaults to the highest open
+#: multiplier, exactly like a BUY, and this is read for the ticket's note
+#: alone: when the highest goes above it, the note says that only this
+#: much is measured for shorts, and the default does not move
+#: (manual_trade._ticket_leverage). Read at CALL time.
 ETORO_PROVEN_SHORT_LEVERAGE = {}
 
 #: THE ATTACK MODE (2026-09-26; the operator: "je veux surtout que ce mode

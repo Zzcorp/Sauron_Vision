@@ -225,12 +225,21 @@ def _ticket_leverage(bot, cfg, client, symbol: str, side: str, price: float,
     carrying extras['leverage'] keeps the lane's own refusal at the order.
 
     A SHORT (2026-10-31): no eToro short above 1x has been measured (the
-    stock and forex SELLs of 2026-10-01 went at 1x), so a SELL with no
-    pick defaults to the highest choice at or under what its class's
-    short has been measured at (base.ETORO_PROVEN_SHORT_LEVERAGE, 1 when
-    absent; `short_measured`), never the highest. The choices are still
-    every multiplier eToro allows, and when they go above it
-    `short_note` says that only that much is measured for shorts.
+    stock and forex SELLs of 2026-10-01 went at 1x). `short_measured` is
+    what its class's short has been measured at
+    (base.ETORO_PROVEN_SHORT_LEVERAGE, 1 when absent).
+
+    A SHORT DEFAULTS TO THE HIGHEST, LIKE A BUY (2026-11-04). The operator:
+    "restaurer achat et vente manuel en leverage max" (restore manual buy
+    and sell at max leverage). From 2026-10-31 a SELL with no pick
+    defaulted to the highest choice at or under `short_measured`; it now
+    defaults to the highest choice, exactly as a BUY does. The choices do
+    not change (the same gates judge both sides), and a pick that is not
+    a choice is still an error. When the highest goes above
+    `short_measured`, `short_note` says so in words, as a note only: it
+    never moves the default. The FIRST SHORT warning
+    (short_readback.ticket_advisory) is asked at the ticket's own
+    multiplier and stays a warning. The bots' chooser is not this code.
     """
     from types import SimpleNamespace
 
@@ -278,6 +287,8 @@ def _ticket_leverage(bot, cfg, client, symbol: str, side: str, price: float,
         out["why"] = (passed_over[-1] if passed_over else
                       f"eToro's LIVE list for {symbol} carries nothing above "
                       f"1 today, or it could not be read")
+    # The highest, for a BUY and a SELL alike (2026-11-04, the operator:
+    # "restaurer achat et vente manuel en leverage max").
     default = out["max"]
     if str(side or "").upper() == "SELL":
         from bot_program.asset_engine import base as _base
@@ -287,13 +298,14 @@ def _ticket_leverage(bot, cfg, client, symbol: str, side: str, price: float,
         except (TypeError, ValueError):
             measured = 1
         out["short_measured"] = measured
-        default = max(c for c in out["choices"] if c <= max(measured, 1))
         if out["max"] > measured:
+            # Information, never the default (2026-11-04).
             from bot_program.short_readback import class_words
             out["short_note"] = (
                 f"Only {measured}x is measured for shorts on "
-                f"{class_words(icls)} at eToro: a short above it has not "
-                f"been measured, so the ticket defaults to {default}x.")
+                f"{class_words(icls)} at eToro; the ticket proposes the "
+                f"highest, {default}x, as the operator asked. Pick a lower "
+                f"one if you want.")
     if asked in (None, ""):
         out["chosen"] = default
         return out
@@ -1549,7 +1561,9 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
     """Everything the confirm popup needs, or {"error": ...}.
 
     `leverage` is the live ticket's multiplier as the operator picked it
-    (_ticket_leverage); None is the highest the instrument allows.
+    (_ticket_leverage); None is the highest the instrument allows, for a
+    BUY and a SELL alike (2026-11-04, the operator: "restaurer achat et
+    vente manuel en leverage max").
 
     `ask_reread` False is _execute's own previews (2026-10-31): they ask
     no eToro re-read, so the read that covers the order is the one its
@@ -2075,8 +2089,10 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
                 f"this ticket: {', '.join(f'{c}x' for c in ticket_lev['choices'])}."
                 + (f" Nothing above 1x: {ticket_lev['why']}"
                    if ticket_lev["max"] == 1 and ticket_lev["why"] else "")
-                # A SHORT (2026-10-31): the default is what a short has
-                # been measured at, and the note says so.
+                # A SHORT (2026-10-31; 2026-11-04, the operator: "restaurer
+                # achat et vente manuel en leverage max"): the default is
+                # the highest, a BUY's, and the note says how much is
+                # measured for shorts when the highest goes above it.
                 + (f" {ticket_lev['short_note']}"
                    if ticket_lev.get("short_note") else "")),
         })

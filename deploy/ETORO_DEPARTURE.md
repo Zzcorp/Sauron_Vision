@@ -859,12 +859,15 @@ commodity symbol reads `route=etoro` before its config is enabled.
   other class, and since 2026-10-31 a hand-taken SELL goes on every class,
   warned before the PIN and read back at the fill,
   bot_program/short_readback.py) and any leverage above 1x but forex's 5x
-  (a short above 1x has never been measured; the ticket defaults a SELL to
-  1x). Since 2026-10-31 the platform proves these shorts itself, on eToro's
-  DEMO account only (bot_program/short_proofs.py, the short_proofs_demo
-  switch, ON by default; `manage.py short_proofs_demo --dry-run` prints
-  its plan): a SELL of the venue minimum per class at 1x, then 2x and 5x
-  where the demo row lists them, filled, closed and recorded; a clean one
+  (a short above 1x has never been measured; since 2026-11-04, the
+  operator's "restaurer achat et vente manuel en leverage max", the ticket
+  proposes a SELL at the highest multiplier open, like a BUY, and its note
+  says how much is measured for shorts, 1x today). Since 2026-10-31 the
+  platform proves these shorts itself, on eToro's DEMO account only
+  (bot_program/short_proofs.py, the short_proofs_demo switch, ON by
+  default; `manage.py short_proofs_demo --dry-run` prints its plan): a
+  SELL of the venue minimum per class at 1x, then 2x and 5x where the
+  demo row lists them, filled, closed and recorded; a clean one
   opens that class to the bots at that multiplier only, and /short-proofs/
   revokes it with the trading PIN. Pinning one in ETORO_SHORT_PROVEN (§10)
   stays the stronger proof. What the proofs do not lift: an index in
