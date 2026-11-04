@@ -40,6 +40,17 @@ def _age(seconds) -> str:
     return f"{seconds / 3600:.1f}h"
 
 
+def _mark(h) -> str:
+    """The holding's mark, or the em dash when it carries none (2026-11-02):
+    eToro's holdings list no mark (broker_portfolio stores 0 there), and
+    "mark 0.0000" read as a price of nothing."""
+    try:
+        mark = float(h.get("market_price"))
+    except (TypeError, ValueError):
+        return f"{DASH:>12}"
+    return f"{mark:>12.4f}" if mark > 0 else f"{DASH:>12}"
+
+
 def _own_figures(h) -> str:
     """'  amount 350.00  net +12.50  position 12' for an eToro holdings row
     that carries them (2026-10-31); '' for a row that carries none."""
@@ -198,18 +209,20 @@ class Command(BaseCommand):
             if not r["held"]["rows"]:
                 w("      flat — measured, and zero")
             for h in r["held"]["rows"]:
-                mark = h.get("market_price") or 0
                 w(f"      {str(h.get('symbol')):<12} "
                   f"{str(h.get('side', '')):<5} "
                   f"{float(h.get('qty') or 0):>14.4f} @ "
                   f"{float(h.get('avg_cost') or 0):>12.4f}  "
-                  f"mark {float(mark):>12.4f}  "
+                  f"mark {_mark(h)}  "
                   f"{h.get('currency') or ''}  lev {_lev(h.get('leverage'))}"
                   + _own_figures(h))
 
         # What eToro holds outside Sauron's rows, position by position
-        # (2026-10-31): the page's "Outside Sauron at eToro" card.
-        out = (v.get("etoro") or {}).get("positions")
+        # (2026-10-31): the page's "Outside Sauron at eToro" card; then what
+        # eToro blocks on Sauron's own rows beyond Sauron's figure, the
+        # page's card below it (2026-11-02).
+        e = v.get("etoro") or {}
+        out = e.get("positions")
         if out is not None:
             w("\n5b. OUTSIDE SAURON AT eTORO, POSITION BY POSITION")
             if not out["known"]:
@@ -234,12 +247,25 @@ class Command(BaseCommand):
                 w(f"   {out['n']} position(s), {out['margin_t']} of margin, "
                   f"holdings read {out['age_t']} ago; matched by eToro's "
                   f"position id, else by symbol, side and units")
-                # The page's footer, said here too (2026-10-31).
-                w("   section 1's outside figure is eToro's used minus "
-                  "Sauron's rows and the closes Sauron stopped trying that "
-                  "eToro still lists: pending orders, a row eToro no longer "
-                  "holds and the time between the two reads set the two "
-                  "apart")
+                # The page's footer, said here too (2026-10-31; by
+                # position since 2026-11-02).
+                w("   section 1's outside figure is these positions plus "
+                  "what eToro holds as frozen cash beyond Sauron's WORKING "
+                  "rows; what neither explains is said there as "
+                  "unexplained, with the ages of the reads")
+            if e.get("excess_rows"):
+                w(f"   eToro holds more than Sauron counts on Sauron's own "
+                  f"rows: {e['excess_t']} in all, position by position "
+                  f"(eToro's amount against Sauron's figure for the row)")
+                for r in e["excess_rows"]:
+                    w(f"   {r['symbol']:<12} {r['side'] or DASH:<5} "
+                      f"{(r['qty'] or 0):>14.4f}  lev "
+                      f"{_lev(r['leverage'])}/{_lev(r['venue_leverage'])}  "
+                      f"Sauron {r['sauron_t']:>12}  eToro "
+                      f"{r['amount_t']:>12}  {r['diff_t']:>12}")
+                w("   the exposure gate and Sauron's used count eToro's "
+                  "amount where it is the larger, while eToro's holdings "
+                  "are at most an hour old")
 
         w("\n6. DIVERGENCE — THE BROKER AGAINST THE PLATFORM")
         for d in v["divergence"]:

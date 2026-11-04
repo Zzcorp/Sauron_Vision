@@ -505,6 +505,103 @@ def abandoned_still_held(user, *, now=None) -> list:
     return out
 
 
+def _amount(value):
+    """eToro's `amount` as a positive finite float, or None."""
+    if isinstance(value, bool):
+        return None
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if 0 < out < float("inf") else None
+
+
+def etoro_amount_floor(user, *, now=None):
+    """What the gates count for one real eToro row (2026-11-02): the larger
+    of Sauron's own figure for it (risk_gate.capital_at_work, entry value
+    over its leverage) and eToro's own amount for its position.
+
+    THE OPERATOR MEASURED THE GAP (2026-11-01, one GET /portfolio). Every
+    eToro position matched Sauron's figure to the cent but two USD-based
+    exotic pairs, where eToro blocked more than notional / L at the very
+    multiplier Sauron sent. The exposure gate and the used figures counted
+    Sauron's formula, so they read that much more room than eToro gave.
+    His decision: value an eToro row at the larger of the two.
+
+    Returns floor(trade, at_work) -> float. It answers eToro's amount when
+    that is larger and all of these hold, else `at_work` itself:
+
+      * the row is real (paper False) and stamped broker "etoro";
+      * the account's stored holdings (broker_positions, written by the
+        sync: eToro's position id and its invested `amount` on every row)
+        list the position id the row records (venue_close.position_id_for)
+        with an amount;
+      * those holdings are fresh: read no more than
+        capital_truth.TRACKING_FRESH_SECONDS ago;
+      * they are of the row's world: the account's world now
+        (capital_truth.broker_env; a change of world drops the stored
+        holdings) is the one the row was filled in (broker_env "paper" is
+        eToro's demo, any other stamp the real world, as the pages read a
+        row).
+
+    It never lowers a figure. Cached columns only, no broker call; the
+    holdings are read once per call, and an unreadable row costs the
+    floor, never the gate.
+
+    READ BY risk_gate.open_capital_at_work (the exposure gate) and
+    capital_summary (used, used_live). Not by the pledge gate
+    (AssetBot._cash_gate reads eToro's own cells, which hold these
+    amounts already), the open-risk gate (its figure is the risk at the
+    stop), the TAKE TRADE pool, or the eToro split, which lists the
+    difference position by position itself, for display: this reads the
+    stored holdings on its own, so no gate module reads the split."""
+    from django.utils import timezone
+
+    world, amounts = "", {}
+    try:
+        from bot_program.capital_truth import (TRACKING_FRESH_SECONDS,
+                                               broker_env)
+        from bot_program.models import EtoroAccount
+        acct = (EtoroAccount.objects
+                .filter(user_id=getattr(user, "pk", None))
+                .only("demo", "broker_positions", "broker_positions_at")
+                .first())
+        at = getattr(acct, "broker_positions_at", None)
+        if acct is not None and at is not None:
+            age = ((now or timezone.now()) - at).total_seconds()
+            if age <= TRACKING_FRESH_SECONDS:
+                world = broker_env(acct)
+                for h in acct.broker_positions or []:
+                    if not isinstance(h, dict):
+                        continue
+                    pid = str(h.get("position_id") or "").strip()
+                    amount = _amount(h.get("amount"))
+                    if pid and amount is not None:
+                        amounts[pid] = max(amount, amounts.get(pid, 0.0))
+    except Exception:  # noqa: BLE001 — the gate counts Sauron's figure
+        logger.warning("etoro_amount_floor: the stored holdings are "
+                       "unreadable; Sauron's own figures stand",
+                       exc_info=True)
+        amounts = {}
+
+    def floor(trade, at_work) -> float:
+        at_work = float(at_work)
+        if not amounts or getattr(trade, "paper", True) is not False:
+            return at_work
+        meta = trade.metadata if isinstance(trade.metadata, dict) else {}
+        if str(meta.get("broker") or "").strip().lower() != "etoro":
+            return at_work
+        filled_in = ("paper" if str(meta.get("broker_env") or "")
+                     .strip().lower() == "paper" else "live")
+        if filled_in != world:
+            return at_work
+        from bot_program.engine.venue_close import position_id_for
+        amount = amounts.get(position_id_for(trade))
+        return at_work if amount is None else max(at_work, amount)
+
+    return floor
+
+
 def capital_summary(user, *, shared=None):
     """Pools, used, free, cash — the money question, answered once.
 
@@ -543,6 +640,11 @@ def capital_summary(user, *, shared=None):
         age, and the split against Sauron's own eToro rows
         (bot_program.etoro_used.account_used): the pages headline it, the
         pool arithmetic below it.
+
+    WHAT eTORO BLOCKS (2026-11-02). An eToro row counts in used and
+    used_live at the larger of its own figure and eToro's amount for its
+    position, read from fresh holdings of its world (etoro_amount_floor),
+    as the exposure gate counts it: free goes down by that much.
     """
     from collections import defaultdict
 
@@ -586,6 +688,10 @@ def capital_summary(user, *, shared=None):
     # The world is read by `venue_of` — the rule the positions page reads
     # a row by — never by `config.mode`, which called all of those live.
     engaged = defaultdict(float)
+    # WHAT eTORO BLOCKS, WHEN IT IS MORE (2026-11-02, etoro_amount_floor):
+    # an eToro row counts the larger of its own figure and eToro's amount
+    # for its position, as the exposure gate counts it.
+    floor = etoro_amount_floor(user)
     # AND A CLOSE SAURON GAVE UP ON THAT THE VENUE STILL HOLDS (2026-11-01,
     # abandoned_still_held): its money is still at the broker. It left used
     # and used_live at ERROR, and free read that much richer.
@@ -597,10 +703,10 @@ def capital_summary(user, *, shared=None):
         # the ROW's stamp (2026-09-26): an eToro forex row sent at 1 is
         # USED in full — the gate counts it so; a "free" printed at 1/30
         # would be a free the next entry cannot draw
-        at_work = capital_at_work(
+        at_work = floor(trade, capital_at_work(
             trade.asset_class, notional,
             leverage=(trade.metadata or {}).get("leverage"),
-            carrier=str((trade.metadata or {}).get("broker") or ""))
+            carrier=str((trade.metadata or {}).get("broker") or "")))
         used[(trade.asset_class, trade.config.mode)] += at_work
         engaged["live" if venue_of(trade)[1] else "paper"] += at_work
 

@@ -58,6 +58,25 @@ split's parts. Only what could carry the order is named (review,
 2026-11-01): a read stamped no earlier than LIST_LAG_S before the note,
 and never a position whose own open time eToro dates before then
 (doubt_at).
+
+OUTSIDE, POSITION BY POSITION (2026-11-02). The operator measured the gap
+himself (one GET /portfolio, nothing sent): every eToro position matched
+Sauron's figure to the cent but two USD-based exotic pairs, where eToro
+blocked more than notional / L at the very multiplier Sauron sent. Outside
+was a remainder, eToro's used less Sauron's rows, so it called that margin
+on Sauron's own rows "outside Sauron". Outside is now the positions eToro
+lists that no Sauron row claims (their margins, as outside_positions lists
+them) plus the held part above: never a remainder. eToro's own amount for
+each of Sauron's own positions, less Sauron's figure for its row, is a line
+of its own, "eToro holds more than Sauron counts on Sauron's own rows",
+listed position by position on /treasury/ and in the treasury command's
+section 5b (excess_rows). What neither explains stays visible as
+"unexplained", with the ages of the two reads it compares: a row booked or
+closed between eToro's cells and its holdings, a fee frozen with Sauron's
+own held order, an amount eToro did not state, a held order while the
+frozen cash is not read. Never hidden, and never called outside. The gates
+count the larger of the two figures on each eToro row through
+portfolio.services.etoro_amount_floor, which reads the holdings itself.
 """
 from __future__ import annotations
 
@@ -93,28 +112,41 @@ TOTAL_AGE = " (read {age} ago)"
 #: strips, the Ops Center).
 CELL = "{available} available · {total} total{total_age} · read {age} ago"
 SPLIT = ("At that read: opened by Sauron {sauron}{unconverted} · "
-         "{stopped}{outside} · P&L {pnl}")
+         "{stopped}{excess}{outside}{unexplained} · P&L {pnl}")
 SPLIT_UNREAD = ("Opened by Sauron {sauron}{unconverted} · {stopped}outside "
                 "Sauron {dash} (eToro's used is not read)")
+#: The positions eToro lists that no Sauron row claims, plus the held part
+#: (2026-11-02): never a remainder of eToro's used.
 OUTSIDE = "outside Sauron {outside}"
+#: Outside is by position, so it is unread while the positions are; the
+#: held part is still said when there is one (2026-11-02).
+OUTSIDE_UNREAD = "outside Sauron {dash} (eToro's positions {why})"
 #: The part of it eToro holds as frozen cash that no Sauron row explains,
-#: with the read's age, then the rest (2026-11-01). Below zero the rest is
-#: said the other way round, as OVER is.
+#: with the read's age, then the positions (2026-11-01).
 HELD = "held at eToro, no Sauron row {held}, read {age} ago{doubt}"
 OUTSIDE_HELD = "outside Sauron {outside} ({held}; positions {rest})"
-OUTSIDE_HELD_OVER = ("outside Sauron {outside} ({held}; Sauron's rows count "
-                     "{over} more than eToro's positions)")
+#: eToro's own amount on Sauron's own positions less Sauron's figure for
+#: them (2026-11-02), a line of its own; said the other way round below
+#: zero.
+EXCESS = "eToro holds more than Sauron counts on Sauron's own rows {excess} · "
+EXCESS_UNDER = ("Sauron counts more than eToro holds on Sauron's own rows "
+                "{under} · ")
+#: What none of the parts explains, with the ages of the two reads it
+#: compares (2026-11-02). Below zero, Sauron's rows count more than eToro's
+#: used: a stop or a close eToro filled that Sauron has not booked yet, a
+#: stock quoted in a currency worth less than the account's (2026-10-31:
+#: "outside Sauron -650.00" said nothing of what it meant).
+UNEXPLAINED = " · unexplained {amount} ({ages})"
+UNEXPLAINED_OVER = (" · unexplained: Sauron's rows count {over} more than "
+                    "eToro's used ({ages}; a row eToro no longer holds, or an "
+                    "unconverted currency)")
+AGES = "eToro's used read {age} ago"
+AGES_POSITIONS = ", its positions {age} ago"
+AGES_UNREAD = ", its positions {why}"
 #: A fresh in-doubt note on the symbol, on any of the user's configs: the
 #: order may be Sauron's own (2026-11-01). Words only.
 DOUBT = "may be Sauron's order of {time} that did not come back"
 DOUBT_HELD = "; {symbol}: " + DOUBT
-#: Sauron's rows count more than eToro holds (2026-10-31): a stop or a
-#: close eToro filled that Sauron has not booked yet, a close Sauron
-#: stopped that the operator closed by hand since the holdings were read,
-#: a stock quoted in a currency worth less than the account's. "outside
-#: Sauron -650.00" said nothing of what it meant.
-OVER = ("Sauron's rows count {over} more than eToro's used (a row eToro no "
-        "longer holds, or an unconverted currency)")
 STOPPED = "Sauron stopped closing, still open at eToro {stopped} · "
 STOPPED_UNREAD = ("Sauron stopped closing, may still be open at eToro "
                   "{stopped} · ")
@@ -126,15 +158,18 @@ UNCONVERTED = " ({n} unconverted: {names})"
 TITLE = ("eToro's own figures, from the sync's cells (the account is read "
          "again a few seconds after every order and close). Opened by "
          "Sauron is what its own eToro rows of this world tie up, entry "
-         "value over their leverage, at that read. Outside Sauron is "
-         "eToro's used minus those rows and minus the closes Sauron stopped "
-         "trying that eToro still lists: positions opened in the eToro app, "
-         "a second position on a symbol Sauron holds, pending orders, a fill "
-         "whose answer was lost. /treasury/ lists them position by position. "
-         "Held at eToro, no Sauron row is the part of it eToro holds as "
-         "frozen cash for orders beyond what Sauron's own WORKING rows "
-         "explain: an order placed in the eToro app, or one of Sauron's whose "
-         "answer did not come back. "
+         "value over their leverage, at that read. eToro holds more than "
+         "Sauron counts on Sauron's own rows is eToro's own amount for each "
+         "of those positions less Sauron's figure for it: /treasury/ lists "
+         "them, and the exposure gate counts the larger of the two. Outside "
+         "Sauron is the positions eToro lists that no Sauron row claims "
+         "(opened in the eToro app, a second position on a symbol Sauron "
+         "holds, a fill whose answer was lost), plus what eToro holds as "
+         "frozen cash beyond Sauron's own WORKING rows: /treasury/ lists "
+         "them position by position. Held at eToro, no Sauron row is that "
+         "frozen part: an order placed in the eToro app, or one of Sauron's "
+         "whose answer did not come back. What none of these explains in "
+         "eToro's used is said as unexplained, with the ages of the reads. "
          "The order gate judges every eToro order on these same cells.")
 
 
@@ -457,18 +492,23 @@ def account_used(user, *, now=None, positions=False) -> "dict | None":
     "stopped", "stopped_n" (a close given up on that eToro still lists, or
     may: its holdings cannot say, portfolio.services.abandoned_still_held),
     "stopped_gone_n" (one a fresh list no longer shows, not counted),
-    "outside" (None unread; below zero when Sauron's
-    rows count more than eToro holds), "since_n", "unstamped_n",
+    "outside" (2026-11-02: "positions_part" plus "held"; None while the
+    cells or eToro's positions are not read), "since_n", "unstamped_n",
     "unconverted" [{"symbol", "currency"}], "held" (2026-11-01: the part
     of "outside" eToro holds as frozen cash that Sauron's WORKING rows do
     not explain; None when the frozen cash is not read), "positions_part"
-    (the rest of "outside"; None with "held"), "held_t",
+    (2026-11-02: the margin of the positions eToro lists that no Sauron
+    row claims; None while they are not read), "held_t",
     "positions_part_t", "held_doubt_t" (the in-doubt notes the held part
     may be, in words, or "": only one whose order these cells could
-    carry, doubt_at), "t" (the head line), "cell_t"
-    (a strip cell's line under the used figure), "split_t", "title"} and,
-    with `positions`, "positions": the holdings no Sauron row accounts for
-    (outside_positions)."""
+    carry, doubt_at), "excess", "excess_t", "excess_rows" (2026-11-02:
+    eToro's own amount less Sauron's figure on Sauron's own positions,
+    _own_rows_excess; None and [] while they are not read),
+    "unexplained", "unexplained_t" (eToro's used less every part above;
+    None while the cells are not read), "positions_at", "t" (the head
+    line), "cell_t" (a strip cell's line under the used figure),
+    "split_t", "title"} and, with `positions`, "positions": the holdings
+    no Sauron row accounts for (outside_positions)."""
     now = now or timezone.now()
     acct = _account(user)
     if acct is None:
@@ -501,15 +541,13 @@ def account_used(user, *, now=None, positions=False) -> "dict | None":
     age_s, total_age_s = _age(at if read else None, now), _age(total_at, now)
 
     split = _split(user, world, ccy or "USD", at if read else None, acct)
-    outside = (round(used - split["sauron"] - split["stopped"], 2)
-               if used is not None else None)
 
     # WHAT eTORO HOLDS WITH NO SAURON ROW (2026-11-01): its frozen cash
     # less what Sauron's own WORKING rows explain at that read — those rows
     # are under "opened by Sauron" already and are not counted twice. A
     # remainder inside their fees is no order (frozen_explained). None
     # when the frozen cash is not read: unread is not zero.
-    held = positions_part = None
+    held = None
     if read and frozen is not None:
         try:
             from bot_program.asset_engine.base import frozen_explained
@@ -520,8 +558,30 @@ def account_used(user, *, now=None, positions=False) -> "dict | None":
             logger.warning("etoro_used: the WORKING rows could not be read",
                            exc_info=True)
             held = None
-    if held is not None and outside is not None:
-        positions_part = round(outside - held, 2)
+
+    # OUTSIDE, POSITION BY POSITION (2026-11-02). The positions eToro lists
+    # that no Sauron row claims, plus the held part: never eToro's used
+    # less Sauron's rows, which called the margin eToro blocks on Sauron's
+    # own rows beyond Sauron's figure "outside Sauron". That margin is its
+    # own line (the excess), and what neither explains is unexplained.
+    s_at = getattr(acct, "broker_positions_at", None)
+    claims = _holdings_claims(user, acct) if (read or positions) else None
+    positions_part = excess = None
+    excess_rows = []
+    if read and claims is not None:
+        positions_part = _left_margin(claims["left"])
+        excess, excess_rows = _own_rows_excess(claims["pairs"],
+                                               split["work"])
+    outside = (round(positions_part + (held or 0.0), 2)
+               if used is not None and positions_part is not None else None)
+    unexplained = None
+    if used is not None:
+        unexplained = round(used - split["sauron"] - split["stopped"]
+                            - (excess or 0.0) - (positions_part or 0.0)
+                            - (held or 0.0), 2)
+    # Why the positions are not read, in the split's words.
+    why = ("never read" if s_at is None else "not readable"
+           if claims is None or positions_part is None else "")
     doubts = in_doubt_times(user, now=now) if (held or positions) else {}
     # Only a note whose order these cells could carry (2026-11-01,
     # doubt_at): cash read before an order left is not that order.
@@ -565,28 +625,48 @@ def account_used(user, *, now=None, positions=False) -> "dict | None":
     stopped = ((STOPPED_UNREAD if split["stopped_unread"] else STOPPED)
                .format(stopped=money(split["stopped"]))
                if split["stopped_n"] else "")
-    if outside is not None:
-        # Below zero, said the other way round (2026-10-31).
-        piece = (OVER.format(over=money(-outside)) if outside < 0
-                 else OUTSIDE.format(outside=money(outside)))
-        if held:
-            # The part eToro holds with no Sauron row, carved out with its
-            # age (2026-11-01); nothing is said when there is none.
-            held_piece = HELD.format(held=money(held), age=_age_words(age_s),
-                                     doubt=held_doubt)
-            if outside < 0:
-                piece = f"{piece}; {held_piece}"
-            elif positions_part >= 0:
-                piece = OUTSIDE_HELD.format(outside=money(outside),
-                                            held=held_piece,
-                                            rest=money(positions_part))
+    if used is not None:
+        # eToro's own amount on Sauron's own rows, its own line (2026-11-02);
+        # nothing is said when the two agree to the cent.
+        excess_piece = ""
+        if excess is not None and abs(excess) >= 0.005:
+            excess_piece = (EXCESS.format(excess=money(excess)) if excess > 0
+                            else EXCESS_UNDER.format(under=money(-excess)))
+        # The part eToro holds with no Sauron row, carved out with its age
+        # (2026-11-01); nothing is said when there is none.
+        held_piece = (HELD.format(held=money(held), age=_age_words(age_s),
+                                  doubt=held_doubt) if held else "")
+        if held_piece:
+            piece = OUTSIDE_HELD.format(
+                outside=money(outside) if outside is not None else DASH,
+                held=held_piece,
+                rest=money(positions_part) if positions_part is not None
+                else why)
+        elif outside is not None:
+            piece = OUTSIDE.format(outside=money(outside))
+        else:
+            piece = OUTSIDE_UNREAD.format(dash=DASH, why=why)
+        # What none of the parts explains, never hidden (2026-11-02), with
+        # the ages of the two reads it compares; below zero, said the other
+        # way round.
+        rest = ""
+        if unexplained is not None and abs(unexplained) >= 0.005:
+            ages = AGES.format(age=_age_words(age_s))
+            if why:
+                ages += AGES_UNREAD.format(why=why)
             else:
-                piece = OUTSIDE_HELD_OVER.format(
-                    outside=money(outside), held=held_piece,
-                    over=money(-positions_part))
+                s_age = _age(s_at, now)
+                if (s_age is not None and age_s is not None
+                        and abs(s_age - age_s) > TOTAL_OWN_AGE_S):
+                    ages += AGES_POSITIONS.format(age=_age_words(s_age))
+            rest = (UNEXPLAINED.format(amount=money(unexplained), ages=ages)
+                    if unexplained > 0 else
+                    UNEXPLAINED_OVER.format(over=money(-unexplained),
+                                            ages=ages))
         split_t = SPLIT.format(sauron=money(split["sauron"]),
                                unconverted=unconverted, stopped=stopped,
-                               outside=piece, pnl=money(pnl, signed=True))
+                               excess=excess_piece, outside=piece,
+                               unexplained=rest, pnl=money(pnl, signed=True))
     else:
         split_t = SPLIT_UNREAD.format(sauron=money(split["sauron"]),
                                       unconverted=unconverted,
@@ -625,13 +705,70 @@ def account_used(user, *, now=None, positions=False) -> "dict | None":
         "positions_part": positions_part,
         "positions_part_t": money(positions_part),
         "held_doubt_t": held_doubt.lstrip("; "),
+        "excess": excess, "excess_t": money(excess),
+        "excess_rows": excess_rows,
+        "unexplained": unexplained, "unexplained_t": money(unexplained),
+        "positions_at": s_at,
         "t": head, "cell_t": cell, "split_t": split_t, "title": TITLE,
     }
     if positions:
         out["positions"] = outside_positions(user, acct, now=now,
-                                             claims=split["claims"],
-                                             doubts=doubts)
+                                             claims=claims, doubts=doubts)
     return out
+
+
+def _left_margin(left) -> "float | None":
+    """The margin of the positions eToro lists that no Sauron row claims
+    (2026-11-02): outside_margin of each (eToro's own amount, else units
+    times the open rate over the row's leverage), summed; None when one of
+    them cannot be priced."""
+    total = 0.0
+    for r in left or []:
+        margin, _estimated = outside_margin(r)
+        if margin is None:
+            return None
+        total += margin
+    return round(total, 2)
+
+
+def _own_rows_excess(pairs, work) -> tuple:
+    """(the sum, the rows) of eToro's own amount less Sauron's figure on
+    Sauron's own positions (2026-11-02): over the holdings a Sauron row
+    claims (claim_holdings' pairs) whose row the split counted at the
+    cells' read (`work`, {pk: its capital at work}), and that carry
+    eToro's `amount`. A holding that states no amount says nothing of what
+    eToro blocks for it: never an estimate here, and what it leaves is
+    unexplained. The rows are the positions whose two figures differ by a
+    cent or more, the largest difference first: {"symbol", "side", "qty"
+    (eToro's units), "leverage" (the multiplier the row recorded),
+    "venue_leverage" (eToro's), "status", "sauron", "amount", "diff",
+    "sauron_t", "amount_t", "diff_t"}."""
+    total, rows = 0.0, []
+    for h, c in pairs or []:
+        trade = c.get("trade")
+        mine = (work or {}).get(getattr(trade, "pk", None))
+        amount = _f(h.get("amount"))
+        if mine is None or amount is None:
+            continue
+        diff = amount - mine
+        total += diff
+        if abs(diff) < 0.005:
+            continue
+        meta = trade.metadata if isinstance(trade.metadata, dict) else {}
+        qty = _qty(h)
+        rows.append({
+            "symbol": _sym(h) or str(trade.symbol or "").upper(),
+            "side": side_key(h.get("side")) or side_key(trade.side),
+            "qty": qty if qty is not None else _f(trade.qty),
+            "leverage": meta.get("leverage"),
+            "venue_leverage": h.get("leverage"),
+            "status": trade.status,
+            "sauron": round(mine, 2), "amount": round(amount, 2),
+            "diff": round(diff, 2),
+            "sauron_t": money(mine), "amount_t": money(amount),
+            "diff_t": money(diff, signed=True)})
+    rows.sort(key=lambda r: -r["diff"])
+    return round(total, 2), rows
 
 
 def _split(user, world, ccy, at, acct=None) -> dict:
@@ -661,10 +798,14 @@ def _split(user, world, ccy, at, acct=None) -> dict:
     split, the pages and the gates agree on every row. A stale snapshot
     said "no longer listed" here while the gates kept counting; it says
     "may still be open" now. Opened by Sauron is this walk's open rows
-    only, never capital_summary's used, so no row is counted in both."""
+    only, never capital_summary's used, so no row is counted in both.
+
+    "work" (2026-11-02): {pk: capital at work} of every row counted here,
+    open or stopped, so eToro's own amount for its position is compared
+    with the very figure the split counted for it (_own_rows_excess)."""
     out = {"sauron": 0.0, "sauron_n": 0, "stopped": 0.0, "stopped_n": 0,
            "stopped_gone_n": 0, "stopped_unread": False, "since_n": 0,
-           "unstamped_n": 0, "unconverted": [], "claims": None}
+           "unstamped_n": 0, "unconverted": [], "work": {}}
     try:
         rows = _rows(user, at)
     except Exception:  # noqa: BLE001 — the head line still says eToro's
@@ -714,6 +855,7 @@ def _split(user, world, ccy, at, acct=None) -> dict:
             out["sauron"] += work
             out["sauron_n"] += 1
         counted.append(t)
+        out["work"][t.pk] = work
     out["sauron"] = round(out["sauron"], 2)
     out["stopped"] = round(out["stopped"], 2)
     # NON-USD NOTIONAL IS NOT CONVERTED (2026-10-31). services.value_per_unit

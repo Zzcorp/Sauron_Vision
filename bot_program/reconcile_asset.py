@@ -173,6 +173,44 @@ def venue_lag_window(trade, client, *, doubt: bool = False) -> str:
     return ""
 
 
+def _number(value):
+    """A finite float, or None: never an object a mock answered with."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    out = float(value)
+    return out if out == out and out not in (float("inf"), float("-inf")) \
+        else None
+
+
+def _multiplier(value):
+    """A venue multiplier as a whole number of at least 1, or None."""
+    v = _number(value)
+    return int(v) if v is not None and v >= 1 and v == int(v) else None
+
+
+def _plain(value) -> str:
+    """'0.5', '6000', '1.08123': a figure as the venue's app prints it, up
+    to eight decimals, never in exponent form; the em dash for none."""
+    v = _number(value)
+    if v is None:
+        return "—"
+    return f"{v:.8f}".rstrip("0").rstrip(".") or "0"
+
+
+def unnamed_words(position) -> str:
+    """How the unknown-position sweep names a position its client could
+    not name (2026-11-02): "unnamed position BUY 0.5 units opened at 6000
+    (1x)". Its side, units, open rate and multiplier are what the venue's
+    app shows of it, so the operator can find it there. Never its id: the
+    alert reaches a phone, and an id is no name a human looks up."""
+    side = str(position.get("side") or "").strip().upper()
+    side = side if side in ("BUY", "SELL") else "side not stated"
+    lev = _multiplier(position.get("leverage"))
+    return (f"unnamed position {side} {_plain(position.get('qty'))} units "
+            f"opened at {_plain(position.get('avg_cost'))} "
+            f"({f'{lev}x' if lev else 'multiplier not stated'})")
+
+
 def _broker_open_symbols(client, *, asset_class: str, warm=()) -> dict:
     """Best-effort broker open-position state.
 
@@ -191,6 +229,11 @@ def _broker_open_symbols(client, *, asset_class: str, warm=()) -> dict:
                          and counted, because every caller reads a miss in
                          `symbols` as "the broker is flat" and closes the
                          row on it.
+      positions        — every position itself, named or not: its symbol
+                         ("" unnamed), side, units, the venue's position id,
+                         and for an unnamed one its open rate and multiplier
+                         when the client gave them (2026-11-02), so the
+                         unknown-position sweep can report it.
 
     `warm` is the symbols this reader is about to ask about. eToro names a
     position only from the reverse map the client itself filled and the
@@ -255,11 +298,14 @@ def _broker_open_symbols(client, *, asset_class: str, warm=()) -> dict:
             unresolved = p.get("symbol_unresolved") is True
             pid = p.get("position_id")
             side, qty = p.get("side"), p.get("qty")
+            rate, lev = p.get("avg_cost"), p.get("leverage")
         else:
             sym, sec = getattr(p, "symbol", None), getattr(p, "sec_type", None)
             unresolved = getattr(p, "symbol_unresolved", None) is True
             pid = getattr(p, "position_id", None)
             side, qty = getattr(p, "side", None), getattr(p, "qty", None)
+            rate, lev = (getattr(p, "avg_cost", None),
+                         getattr(p, "leverage", None))
         handle = ""
         if isinstance(pid, (str, int)) and not isinstance(pid, bool) \
                 and str(pid).strip():
@@ -270,9 +316,13 @@ def _broker_open_symbols(client, *, asset_class: str, warm=()) -> dict:
         # every position in every test as unnameable.
         if not sym or unresolved:
             unnamed += 1
+            # THE POSITION ITSELF, NOT ONLY ITS COUNT (2026-11-02): what the
+            # venue's app shows of it, so the sweep can report it. A number
+            # only, never an object a mock answered with.
             rows.append({"symbol": "", "side": side if isinstance(side, str)
                          else "", "qty": qty, "position_id": handle,
-                         "unnamed": True})
+                         "unnamed": True, "avg_cost": _number(rate),
+                         "leverage": _multiplier(lev)})
             continue
         sym = str(sym).upper()
         symbols.add(sym)
@@ -939,6 +989,17 @@ def _unclaimed_at(state: dict, by_position: bool, claimed: set,
     symbols of the positions closes Sauron gave up on still hold) for one
     venue's read.
 
+    AN UNNAMED POSITION NO ROW CLAIMS IS REPORTED (2026-11-02). At eToro a
+    position the client could not name (ETORO:<id>) was counted apart and
+    never reported, so a position placed in the eToro app on an instrument
+    no armed bot warms, or a TAKE TRADE order whose answer was lost, rang
+    nothing: the account-entry path, the only one a TAKE TRADE lane alone
+    gets, names no instrument at all. It is paired by its id only, as
+    before (a live row whose position id is its own claims it), and each
+    one no row claims is reported in its own words (unnamed_words: side,
+    units, open rate and multiplier), on the same three-hour cadence. The
+    first item then carries those words in place of a symbol.
+
     A CLOSE SAURON GAVE UP ON CLAIMS ITS OWN POSITION (2026-11-01,
     review). Its row (ERROR, no close time) is in `claimers` after the
     open rows, as etoro_used._claimants orders it, and its symbol is in
@@ -956,8 +1017,8 @@ def _unclaimed_at(state: dict, by_position: bool, claimed: set,
     the row records, else one by one by symbol, side and the closest
     units), and each position left is reported. A row stamped for another
     venue claims nothing there; an unstamped one may. A position the
-    client could not name is paired by its id only, and is counted as
-    unnamed as before, never reported by a name it does not have.
+    client could not name is paired by its id only, and is never reported
+    by a name it does not have: by its own figures (above).
 
     Every other venue keeps the symbol sets: some net a symbol into one
     row (IBKR, Alpaca), where a count would read two rows on one net
@@ -984,6 +1045,10 @@ def _unclaimed_at(state: dict, by_position: bool, claimed: set,
             [r for r in rows if isinstance(r, dict)], mine)
         unclaimed = sorted(str(h["symbol"]).upper() for h in left
                            if h.get("symbol") and not h.get("unnamed"))
+        # Unnamed, and no row's id claims it (2026-11-02): said by its own
+        # figures, after the named ones.
+        nameless = sorted(unnamed_words(h) for h in left
+                          if h.get("unnamed") or not h.get("symbol"))
         stopped = sorted(
             str(h.get("symbol") or c["symbol"] or "").upper()
             for h, c in pairs
@@ -996,7 +1061,10 @@ def _unclaimed_at(state: dict, by_position: bool, claimed: set,
             k = held_by_rows.get(sym, 0)
             names.append(f"{sym} (+{n} beside Sauron's {k})" if k
                          else key[-1])
-        return unclaimed, names, key, stopped
+        for words, n in sorted(Counter(nameless).items()):
+            key.append(f"{words} ×{n}" if n > 1 else words)
+            names.append(key[-1])
+        return unclaimed + nameless, names, key, stopped
     held = {str(x).upper() for x in (state.get("symbols") or set())}
     unclaimed = sorted(held - claimed - set(given_up))
     stopped = sorted((held & set(given_up)) - claimed)
@@ -1035,8 +1103,18 @@ def reconcile_unknown_positions(user) -> dict:
     Sauron gave up on, still held, counted by those gates, not managed;
     close it at the broker. Nothing here reads the predicate.
 
+    AN eTORO POSITION NO CLIENT HERE CAN NAME IS REPORTED TOO (2026-11-02).
+    The config loop counted it unreadable and the account-entry path, the
+    only one a TAKE TRADE lane alone gets, dropped it, so a position
+    placed in the eToro app on an instrument no armed bot warms, or a
+    ticket whose answer was lost, rang nothing. In both paths it is now
+    reported when no live row's position id claims it, by its side, units,
+    open rate and multiplier (unnamed_words). Report only; the same
+    three-hour dedupe. Other venues keep the old caution.
+
     Returns {checked, unclaimed, broker_unavailable, errors, symbols,
-    given_up, given_up_symbols}.
+    given_up, given_up_symbols}; an unnamed position's words stand in
+    `symbols` where a symbol would.
     """
     from .models import AssetBotConfig, AssetBotTrade
     from .engine.broker_router import client_for_symbol
@@ -1153,20 +1231,25 @@ def reconcile_unknown_positions(user) -> dict:
                            "could read", venue)
             continue
 
-        if state.get("unnamed"):
+        by_position = (venue == "EtoroTrader"
+                       and isinstance(state.get("positions"), list))
+        if state.get("unnamed") and not by_position:
             # UNNAMED IS NOT UNCLAIMED. A position this client could not name
             # cannot be compared to any row, and reporting it as
             # "ETORO:1001 is unclaimed" hands a human a name they cannot look
             # up — which is how the one true alarm stops being believed. The
             # named part of the book is still compared below: part measured,
-            # part not, which is the honest shape.
+            # part not, which is the honest shape. At eToro (2026-11-02) an
+            # unnamed position is compared by its id and reported by its own
+            # figures when no row's id claims it (_unclaimed_at): that part
+            # of the book is read, not unreadable.
             out["broker_unavailable"] += 1
             logger.error("unknown-position sweep: %s holds %d position(s) it "
                          "could not name — that part of the book is "
                          "unreadable, not clean", venue, state["unnamed"])
 
         unclaimed, names, key, stopped = _unclaimed_at(
-            state, venue == "EtoroTrader", claimed, claimers, given_up)
+            state, by_position, claimed, claimers, given_up)
         _say_given_up(stopped, venue)
         if not unclaimed:
             continue

@@ -57,9 +57,12 @@ this render path. An em dash means NEVER MEASURED and is never a zero —
     used, available, P&L and total as the sync's cells hold them, with
     their age; then how much of eToro's used Sauron's own eToro rows of
     this world account for at that read, a close Sauron stopped trying
-    that eToro still lists, and what is outside Sauron (eToro's used minus
-    both; said the other way round below zero), listed position by
-    position in the card below. The order gate judges every eToro order on
+    that eToro still lists, what eToro blocks on those rows beyond
+    Sauron's figure, and what is outside Sauron: the positions no Sauron
+    row claims plus what eToro holds as frozen cash beyond Sauron's
+    WORKING rows (2026-11-02, by position, never a remainder), each listed
+    position by position in the cards below. What none of them explains
+    is said as unexplained. The order gate judges every eToro order on
     these cells.
     {% endcomment %}
     {% if v.etoro %}{% with e=v.etoro %}
@@ -67,7 +70,7 @@ this render path. An em dash means NEVER MEASURED and is never a zero —
             <div><strong>{{ e.t }}</strong></div>
             <div>{{ e.split_t }}.</div>
             {% if e.read and e.frozen %}<div style="color:var(--text-muted);">eToro holds {{ e.frozen_t }} as frozen cash for pending orders (inside its used figure).</div>{% endif %}
-            <div style="color:var(--text-muted);">Outside Sauron is eToro's used minus what Sauron's own eToro rows tie up (entry value over their leverage) and minus the closes Sauron stopped trying that eToro still lists.</div>
+            <div style="color:var(--text-muted);">Opened by Sauron is what Sauron's own eToro rows tie up (entry value over their leverage). Outside Sauron is the positions eToro lists that no Sauron row claims, plus what eToro holds as frozen cash beyond Sauron's WORKING rows. What eToro blocks on Sauron's own rows beyond Sauron's figure is said apart, and what none of these explains is said as unexplained.</div>
         </div>
     {% endwith %}{% endif %}
     </div>
@@ -105,9 +108,47 @@ this render path. An em dash means NEVER MEASURED and is never a zero —
     </table>
     </div>
     <div style="padding:8px 16px 12px;font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
-        {{ o.n }} position(s), {{ o.margin_t }} of margin, holdings read {{ o.age_t }} ago{% if o.estimated_n %} ({{ o.estimated_n }} estimated){% endif %}. The outside figure above is eToro's used minus Sauron's rows and the closes Sauron stopped trying that eToro still lists: the two can differ by pending orders, which this list does not carry, by a row Sauron counts that eToro no longer holds (a stop or a close eToro filled before Sauron booked it), and by the time between the two reads. Each position was matched to Sauron's rows by eToro's position id, else by symbol, side and units.
+        {{ o.n }} position(s), {{ o.margin_t }} of margin, holdings read {{ o.age_t }} ago{% if o.estimated_n %} ({{ o.estimated_n }} estimated){% endif %}. The outside figure above is these positions plus what eToro holds as frozen cash beyond Sauron's WORKING rows. What neither explains is said there as unexplained, with the ages of the reads: a row Sauron counts that eToro no longer holds (a stop or a close eToro filled before Sauron booked it), a row booked between eToro's two reads, a pending order while the frozen cash is not read. Each position was matched to Sauron's rows by eToro's position id, else by symbol, side and units.
     </div>
     {% endif %}
+</div>
+{% endwith %}{% endif %}
+
+{% comment %}
+WHAT eTORO BLOCKS ON SAURON'S OWN ROWS (2026-11-02, etoro_used
+._own_rows_excess): eToro's own amount for each of Sauron's positions
+against Sauron's figure for its row, where the two differ by a cent or
+more. The operator's measurement found the whole gap here, on two
+USD-based exotic pairs, none of it outside Sauron.
+{% endcomment %}
+{% if v.etoro and v.etoro.excess_rows %}{% with e=v.etoro %}
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    <div class="card-header"><span class="card-title">eToro holds more than Sauron counts on Sauron's own rows — position by position</span></div>
+    <div class="table-wrapper">
+    <table class="sv-stack" style="width:100%;border-collapse:collapse;font-family:var(--font-mono);font-size:12px;">
+        <thead><tr style="text-align:left;color:var(--text-muted);font-size:11px;">
+            <th style="padding:8px 10px;">Symbol</th><th>Side</th><th style="text-align:right;">Units</th>
+            <th style="text-align:right;">Lev (Sauron / eToro)</th><th style="text-align:right;">Sauron counts</th>
+            <th style="text-align:right;">eToro's amount</th><th style="text-align:right;">eToro minus Sauron</th>
+        </tr></thead>
+        <tbody>
+        {% for r in e.excess_rows %}
+            <tr style="border-top:1px solid var(--border);">
+                <td data-label="Symbol" style="padding:8px 10px;">{{ r.symbol }}</td>
+                <td data-label="Side">{{ r.side|default:"—" }}</td>
+                <td data-label="Units" style="text-align:right;">{% if r.qty is not None %}{{ r.qty|floatformat:4 }}{% else %}—{% endif %}</td>
+                <td data-label="Lev" style="text-align:right;">{% if r.leverage %}{{ r.leverage }}x{% else %}—{% endif %} / {% if r.venue_leverage %}{{ r.venue_leverage }}x{% else %}—{% endif %}</td>
+                <td data-label="Sauron counts" style="text-align:right;">{{ r.sauron_t }}</td>
+                <td data-label="eToro amount" style="text-align:right;">{{ r.amount_t }}</td>
+                <td data-label="eToro minus Sauron" style="text-align:right;">{{ r.diff_t }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div style="padding:8px 16px 12px;font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
+        {{ e.excess_t }} in all, at eToro's holdings as read{% if e.positions and e.positions.age_t %} {{ e.positions.age_t }} ago{% endif %}. eToro's amount is what it lists as the position's invested amount; Sauron's figure is the row's entry value over its leverage. The exposure gate and Sauron's used count eToro's amount where it is the larger, while eToro's holdings are at most an hour old; the pledge gate already reads eToro's own cells.
+    </div>
 </div>
 {% endwith %}{% endif %}
 

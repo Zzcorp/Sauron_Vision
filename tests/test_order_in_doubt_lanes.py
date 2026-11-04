@@ -1599,7 +1599,9 @@ class TheSplitNamesTheHeldPartTests(TestCase):
         return _used(self.user, **kw)
 
     def test_frozen_2000_and_no_working_row_is_a_held_part_of_2000(self):
-        self._etoro(used="2000.00", frozen="2000.00")
+        # eToro lists no position (2026-11-02: outside is by position, so
+        # the holdings are read: flat)
+        self._etoro(used="2000.00", frozen="2000.00", held=[])
         u = self._used()
         self.assertEqual((u["sauron"], u["outside"]), (0.0, 2000.0))
         self.assertEqual((u["held"], u["positions_part"]), (2000.0, 0.0))
@@ -1613,20 +1615,25 @@ class TheSplitNamesTheHeldPartTests(TestCase):
     def test_a_working_row_is_never_counted_twice(self):
         """Sauron's WORKING gold is under "opened by Sauron" already; its
         2,000 and the 1.00 fee eToro freezes with it are not "held with no
-        Sauron row"."""
+        Sauron row", nor outside Sauron (2026-11-02: outside is by
+        position): the fee is said as unexplained."""
         from tests.test_used_is_etoros import _row
         _row(self.cfg, "XAUUSD", 0.5, 4000, working=True)
-        self._etoro(used="2001.00", frozen="2001.00")
+        self._etoro(used="2001.00", frozen="2001.00", held=[])
         u = self._used()
-        self.assertEqual((u["sauron"], u["outside"]), (2000.0, 1.0))
-        self.assertEqual((u["held"], u["positions_part"]), (0.0, 1.0))
+        self.assertEqual((u["sauron"], u["outside"]), (2000.0, 0.0))
+        self.assertEqual((u["held"], u["positions_part"]), (0.0, 0.0))
+        self.assertEqual(u["unexplained"], 1.0)
         self.assertNotIn("held at eToro", u["split_t"])
-        self.assertIn("· outside Sauron 1.00 · ", u["split_t"])
+        self.assertIn("· outside Sauron 0.00 · unexplained 1.00 (eToro's "
+                      "used read 4 min ago) · ", u["split_t"])
 
     def test_a_working_row_and_an_order_with_no_row(self):
-        from tests.test_used_is_etoros import _row
+        """And a position opened in the eToro app (1,200) beside them."""
+        from tests.test_used_is_etoros import _held, _row
         _row(self.cfg, "XAUUSD", 0.5, 4000, working=True)
-        self._etoro(used="5000.00", frozen="3800.00")
+        self._etoro(used="5000.00", frozen="3800.00", held=[
+            _held("WTIUSD", 20, 60, pid=8, amount=1200.0)])
         u = self._used()
         self.assertEqual((u["sauron"], u["outside"]), (2000.0, 3000.0))
         self.assertEqual((u["held"], u["positions_part"]), (1800.0, 1200.0))
@@ -1635,32 +1642,42 @@ class TheSplitNamesTheHeldPartTests(TestCase):
                       u["split_t"])
 
     def test_a_rest_below_zero_is_said_the_other_way_round(self):
-        """Sauron counts a position eToro no longer holds: the rest of the
-        outside part reads below zero and is said as the split says its
-        own excess (2026-10-31)."""
+        """Sauron counts a position eToro no longer holds (2026-10-31).
+        Since 2026-11-02 outside is the held part and the positions eToro
+        lists, never less: what eToro's used does not cover reads below
+        zero and is said the other way round, as unexplained."""
         from bot_program.models import EtoroAccount
         from tests.test_used_is_etoros import _row
         _row(self.cfg, "WTIUSD", 10, 100)                     # 1,000 counted
-        self._etoro(used="2500.00", frozen="2500.00")
+        self._etoro(used="2500.00", frozen="2500.00", held=[])
         u = self._used()
         self.assertEqual((u["outside"], u["held"], u["positions_part"]),
-                         (1500.0, 2500.0, -1000.0))
-        self.assertIn("· outside Sauron 1,500.00 (held at eToro, no Sauron "
-                      "row 2,500.00, read 4 min ago; Sauron's rows count "
-                      "1,000.00 more than eToro's positions) · ",
+                         (2500.0, 2500.0, 0.0))
+        self.assertEqual(u["unexplained"], -1000.0)
+        self.assertIn("· outside Sauron 2,500.00 (held at eToro, no Sauron "
+                      "row 2,500.00, read 4 min ago; positions 0.00) · "
+                      "unexplained: Sauron's rows count 1,000.00 more than "
+                      "eToro's used (eToro's used read 4 min ago; a row "
+                      "eToro no longer holds, or an unconverted currency) · ",
                       u["split_t"])
         EtoroAccount.objects.filter(user=self.user).update(
             last_used_margin=Decimal("800.00"),
             last_frozen_cash=Decimal("800.00"))
         u = self._used()
-        self.assertEqual((u["outside"], u["held"]), (-200.0, 800.0))
-        self.assertIn("· Sauron's rows count 200.00 more than eToro's used "
-                      "(a row eToro no longer holds, or an unconverted "
-                      "currency); held at eToro, no Sauron row 800.00, read "
-                      "4 min ago · ", u["split_t"])
+        self.assertEqual((u["outside"], u["held"], u["unexplained"]),
+                         (800.0, 800.0, -1000.0))
+        self.assertIn("· outside Sauron 800.00 (held at eToro, no Sauron row "
+                      "800.00, read 4 min ago; positions 0.00) · unexplained: "
+                      "Sauron's rows count 1,000.00 more than eToro's used "
+                      "(eToro's used read 4 min ago; a row eToro no longer "
+                      "holds, or an unconverted currency) · ", u["split_t"])
 
     def test_nothing_frozen_leaves_the_split_as_it_was(self):
-        self._etoro(used="2000.00", frozen="0.00")
+        """A gold opened in the eToro app, nothing frozen (2026-11-02: the
+        outside part is that position)."""
+        from tests.test_used_is_etoros import _held
+        self._etoro(used="2000.00", frozen="0.00", held=[
+            _held("XAUUSD", 0.5, 4000, pid=7, amount=2000.0)])
         u = self._used()
         self.assertEqual((u["held"], u["positions_part"]), (0.0, 2000.0))
         self.assertEqual(u["split_t"], (
@@ -1668,17 +1685,21 @@ class TheSplitNamesTheHeldPartTests(TestCase):
             "· P&L +0.00"))
 
     def test_a_frozen_cell_never_stored_carves_nothing(self):
-        """Unread is not zero: neither part is claimed."""
-        self._etoro(used="2000.00", frozen=None)
+        """Unread is not zero: the held part is not claimed, and outside is
+        the position eToro lists alone (2026-11-02)."""
+        from tests.test_used_is_etoros import _held
+        self._etoro(used="2000.00", frozen=None, held=[
+            _held("XAUUSD", 0.5, 4000, pid=7, amount=2000.0)])
         u = self._used()
         self.assertEqual(u["outside"], 2000.0)
         self.assertIsNone(u["held"])
-        self.assertIsNone(u["positions_part"])
-        self.assertEqual((u["held_t"], u["positions_part_t"]), ("—", "—"))
+        self.assertEqual(u["positions_part"], 2000.0)
+        self.assertEqual((u["held_t"], u["positions_part_t"]),
+                         ("—", "2,000.00"))
         self.assertNotIn("held at eToro", u["split_t"])
 
     def test_the_in_doubt_label_names_the_held_part_and_moves_no_number(self):
-        self._etoro(used="2000.00", frozen="2000.00")
+        self._etoro(used="2000.00", frozen="2000.00", held=[])
         before = self._used()
         when = _fresh_note(self.cfg, "XAUUSD")
         u = self._used()

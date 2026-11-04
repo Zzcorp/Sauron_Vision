@@ -2065,6 +2065,27 @@ class EtoroTrader:
                 # the readers that compare this name book a row CLOSED on a
                 # miss.
                 row["symbol_unresolved"] = True
+                # WHAT THE eTORO APP SHOWS OF IT (2026-11-02). With no name,
+                # the unknown-position sweep reports such a position by its
+                # side, units, open rate (openRate, measured) and multiplier
+                # (leverage, the row's own, kept as broker_portfolio keeps
+                # it: a whole number of at least 1, else absent), so the
+                # operator can find it in the app. Named rows keep their
+                # shape: a name is enough to find them.
+                rate = p.get("openRate")
+                try:
+                    if rate is not None and not isinstance(rate, bool):
+                        row["avg_cost"] = float(rate)
+                except (TypeError, ValueError):
+                    pass
+                lev = p.get("leverage")
+                try:
+                    if (lev is not None and not isinstance(lev, bool)
+                            and float(lev) >= 1
+                            and float(lev) == int(float(lev))):
+                        row["leverage"] = int(float(lev))
+                except (TypeError, ValueError):
+                    pass
             out.append(row)
         return out
 

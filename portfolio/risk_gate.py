@@ -518,18 +518,39 @@ def open_capital_at_work(user, portfolio) -> dict:
     value_per_unit: that column was never recorded on this book, and the rows
     that reach it are the stock/ETF ones the setup form and the eToro sync
     create, where the multiplier is 1 anyway.
+
+    WHAT eTORO BLOCKS, WHEN IT IS MORE (2026-11-02). The operator measured
+    the gap between Sauron's used and eToro's: two USD-based exotic pairs
+    where eToro blocked more than notional / L at the multiplier Sauron
+    sent, every other position to the cent. An eToro row now counts the
+    larger of its figure here and eToro's own amount for its position,
+    from the stored holdings when they are fresh and of the row's world
+    (services.etoro_amount_floor; still at entry: eToro's amount is what it
+    invested at the open). Never lower. What it adds is carried out apart
+    as etoro_over / etoro_over_n, so a refusal can name it. Money eToro
+    holds outside Sauron's rows is not added here (the operator's
+    decision): the pledge gate counts it, on eToro's own cells.
     """
     from bot_program.models import AssetBotTrade
     from portfolio.models import Position
-    from portfolio.services import abandoned_still_held, value_per_unit
+    from portfolio.services import (abandoned_still_held, etoro_amount_floor,
+                                    value_per_unit)
+
+    floor = etoro_amount_floor(user)
+    over = {"total": 0.0, "n": 0}
 
     def _at_work(trade):
         notional = (float(trade.entry_price or 0) * float(trade.qty or 0)
                     * value_per_unit(trade))
-        return capital_at_work(
+        mine = capital_at_work(
             trade.asset_class, notional,
             leverage=(trade.metadata or {}).get("leverage"),
             carrier=str((trade.metadata or {}).get("broker") or ""))
+        counted = floor(trade, mine)
+        if not trade.paper and counted > mine + 1e-9:
+            over["total"] += counted - mine
+            over["n"] += 1
+        return counted
 
     live_total = 0.0
     live_n = 0
@@ -610,7 +631,9 @@ def open_capital_at_work(user, portfolio) -> dict:
             "legacy_total": round(legacy_total, 2), "legacy_n": legacy_n,
             "legacy_oldest": oldest,
             "abandoned_total": round(abandoned_total, 2),
-            "abandoned_n": abandoned_n}
+            "abandoned_n": abandoned_n,
+            "etoro_over": round(over["total"], 2),
+            "etoro_over_n": over["n"]}
 
 
 def realized_since(user, portfolio, *, hours: int = DAILY_LOSS_WINDOW_HOURS,
@@ -1128,6 +1151,16 @@ def exposure_state(user, *, portfolio=None, adding: float = 0.0,
                 f"gave up on that the broker may still hold "
                 f"({open_book['abandoned_total']:,.2f}); close them at the "
                 f"broker")
+        # And what eToro blocks beyond Sauron's formula (2026-11-02): the
+        # committed figure is larger than the rows' own sum by that much,
+        # and a refusal that did not say so would read as a miscount.
+        if (open_book.get("etoro_over_n") and venue != "paper"
+                and open_book["total"] == open_book.get("live_total")):
+            state["reason"] += (
+                f" — on {open_book['etoro_over_n']} of those positions eToro "
+                f"blocks {open_book['etoro_over']:,.2f} more than Sauron's "
+                f"formula counts (eToro's own amount for each, from its "
+                f"holdings of the last hour)")
         return state
 
     state["reason"] = (f"{open_book['total']:,.2f} of {cap:,.2f} committed "

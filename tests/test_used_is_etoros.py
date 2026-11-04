@@ -26,8 +26,11 @@ WHAT THESE TESTS CONFRONT
   * The split, at that read: opened by Sauron (eToro-stamped rows of the
     account's world, open when eToro was read, entry over their leverage),
     Sauron stopped closing (a close given up on that eToro still lists),
-    and outside Sauron, eToro's used minus both. A non-USD stock is marked
-    unconverted; rows opened since the read are said apart.
+    and outside Sauron: since 2026-11-02 the positions eToro lists that no
+    Sauron row claims (plus the held part), never eToro's used minus both;
+    what none explains is unexplained (tests.test_used_by_position). A
+    non-USD stock is marked unconverted; rows opened since the read are
+    said apart.
   * The outside part, position by position: the holdings matched to
     Sauron's rows by eToro's position id, else one by one by symbol, side
     and the closest units; a leg Sauron closed within eToro's list lag
@@ -51,8 +54,9 @@ AND WHAT THE REVIEW FOUND (2026-10-31)
     do not ring it again (the real notifier, Telegram's POST stubbed).
   * A fill booked while the sync was reading claims its own position id;
     a close Sauron stopped trying is "still open at eToro" only while the
-    holdings list it; a negative outside part is said the other way
-    round; the split's sentences agree in number.
+    holdings list it; a negative remainder is said the other way round
+    (as unexplained since 2026-11-02); the split's sentences agree in
+    number.
   * The total carries its own age on every surface that prints it beside
     the cells' age; the Ops Center's cell wraps instead of cutting it.
   * The positions page's "At the broker" panel claims as the outside list
@@ -384,12 +388,24 @@ class TheSplitTests(TestCase):
     """6,000 used at eToro. Sauron's eToro rows of the real world: AAPL
     10 x 200 at 1x (2,000), MSFT 5 x 300 at 2x (750), a closing TSLA
     2 x 250 (500) — 3,250 opened by Sauron; a close given up on, NVDA
-    4 x 100 (400), which eToro's holdings still list. Outside Sauron:
-    6,000 - 3,250 - 400 = 2,350."""
+    4 x 100 (400), which eToro's holdings still list. eToro lists each of
+    them at Sauron's own figure, and an AMZN opened in the eToro app
+    (2,350): outside Sauron is that position, 2,350 (2026-11-02: by
+    position, never 6,000 - 3,250 - 400)."""
+
+    #: eToro's holdings, as the sync stores them.
+    HELD = [_held("AAPL", 10, 200, pid=1, amount=2000.0),
+            _held("MSFT", 5, 300, pid=2, amount=750.0, lev=2),
+            _held("TSLA", 2, 250, pid=3, amount=500.0),
+            _held("NVDA", 4, 100, pid=41),
+            _held("AMZN", 10, 235, pid=9, amount=2350.0)]
+
+    def _listed(self, *symbols):
+        return [h for h in self.HELD if h["symbol"] in symbols]
 
     def setUp(self):
         self.user = _user("ue_split")
-        self.acct = _etoro(self.user, held=[_held("NVDA", 4, 100, pid=41)])
+        self.acct = _etoro(self.user, held=self.HELD)
         self.cfg = _cfg(self.user)
         _row(self.cfg, "AAPL", 10, 200)
         _row(self.cfg, "MSFT", 5, 300, lev=2)
@@ -440,15 +456,18 @@ class TheSplitTests(TestCase):
     def test_a_stopped_close_etoro_no_longer_lists_is_not_subtracted(self):
         """The operator closed it in the eToro app, which the close-abandoned
         alert asks him to do: it is in none of eToro's figures, so it is
-        neither "still open at eToro" nor taken off eToro's used."""
+        neither "still open at eToro" nor taken off eToro's used. Since
+        2026-11-02 outside is by position, so the 400 eToro's used still
+        carries here (an older cell) is unexplained, never outside."""
         EtoroAccount.objects.filter(pk=self.acct.pk).update(
-            broker_positions=[])
+            broker_positions=self._listed("AAPL", "MSFT", "TSLA", "AMZN"))
         u = _used(self.user)
         self.assertEqual((u["stopped"], u["stopped_n"]), (0.0, 0))
         self.assertEqual(u["stopped_gone_n"], 1)
-        self.assertEqual(u["outside"], 2750.0)
+        self.assertEqual((u["outside"], u["unexplained"]), (2350.0, 400.0))
         self.assertNotIn("still open at eToro", u["split_t"])
-        self.assertIn("outside Sauron 2,750.00", u["split_t"])
+        self.assertIn("outside Sauron 2,350.00 · unexplained 400.00 (eToro's "
+                      "used read 4 min ago)", u["split_t"])
         self.assertIn("; 1 position Sauron stopped closing is no longer "
                       "listed at eToro and is not counted", u["split_t"])
 
@@ -461,31 +480,40 @@ class TheSplitTests(TestCase):
                       _used(self.user)["split_t"])
 
     def test_holdings_never_read_say_may_still_be_open(self):
+        """And outside, by position since 2026-11-02, is unread with them:
+        what eToro's used carries beyond Sauron's rows is unexplained."""
         EtoroAccount.objects.filter(pk=self.acct.pk).update(
             broker_positions_at=None)
         u = _used(self.user)
         self.assertEqual((u["stopped"], u["stopped_n"]), (400.0, 1))
-        self.assertEqual(u["outside"], 2350.0)
+        self.assertIsNone(u["outside"])
+        self.assertEqual(u["unexplained"], 2350.0)
         self.assertIn("Sauron stopped closing, may still be open at eToro "
-                      "400.00 · outside Sauron 2,350.00", u["split_t"])
+                      "400.00 · outside Sauron — (eToro's positions never "
+                      "read) · unexplained 2,350.00 (eToro's used read 4 min "
+                      "ago, its positions never read)", u["split_t"])
 
-    def test_a_negative_outside_is_said_the_other_way_round(self):
+    def test_a_remainder_below_zero_is_said_the_other_way_round(self):
         """Sauron's rows count more than eToro holds: a stop eToro filled
         that Sauron has not booked yet, or a currency counted unconverted.
-        "outside Sauron -650.00" said nothing of what it meant."""
+        "outside Sauron -650.00" said nothing of what it meant; since
+        2026-11-02 outside is the positions, and the remainder below zero
+        is said the other way round as unexplained."""
         EtoroAccount.objects.filter(pk=self.acct.pk).update(
-            last_used_margin=Decimal("3000.00"))
+            last_used_margin=Decimal("5350.00"))
         u = _used(self.user)
-        self.assertEqual(u["outside"], -650.0)
+        self.assertEqual((u["outside"], u["unexplained"]), (2350.0, -650.0))
         self.assertNotIn("outside Sauron -", u["split_t"])
-        self.assertIn("· Sauron's rows count 650.00 more than eToro's used "
-                      "(a row eToro no longer holds, or an unconverted "
-                      "currency) · P&L +500.00", u["split_t"])
+        self.assertIn("· outside Sauron 2,350.00 · unexplained: Sauron's rows "
+                      "count 650.00 more than eToro's used (eToro's used read "
+                      "4 min ago; a row eToro no longer holds, or an "
+                      "unconverted currency) · P&L +500.00", u["split_t"])
 
     def test_nothing_outside_is_zero_outside(self):
         EtoroAccount.objects.filter(pk=self.acct.pk).update(
+            broker_positions=self._listed("AAPL", "MSFT", "TSLA", "NVDA"),
             last_used_margin=Decimal("3650.00"))
-        self.assertIn("· outside Sauron 0.00 · ",
+        self.assertIn("· outside Sauron 0.00 · P&L ",
                       _used(self.user)["split_t"])
 
     def test_a_row_open_at_the_read_and_closed_since_was_in_it(self):
@@ -724,16 +752,18 @@ class TheTreasuryComparesEtoroByPositionTests(TestCase):
                       f"no longer lists it", body)
         self.assertNotIn("PLATFORM ONLY", body)
 
-    def test_the_outside_card_says_which_stopped_closes_it_counts(self):
-        """Its footer names the causes that set the list apart from the
-        figure above it."""
+    def test_the_outside_card_says_what_its_figure_is(self):
+        """Its footer says what the figure above it is (2026-11-02: these
+        positions and the held part, never a remainder) and names the
+        causes of what neither explains."""
         _etoro(self.user, held=[_held("NVDA", 2, 175, pid=12)])
         self.client.force_login(self.user)
         page = self.client.get(reverse("treasury_page")).content.decode()
         card = page[page.index("Outside Sauron at eToro"):]
         card = card[:card.index("Every broker")]
-        self.assertIn("minus Sauron's rows and the closes Sauron stopped "
-                      "trying that eToro still lists", card)
+        self.assertIn("The outside figure above is these positions plus what "
+                      "eToro holds as frozen cash beyond Sauron's WORKING "
+                      "rows", card)
         self.assertIn("a row Sauron counts that eToro no longer holds", card)
 
     def test_the_page_and_the_command_list_the_outside_part(self):
@@ -1091,10 +1121,13 @@ class NoGateReadsTheCapitalSummaryTests(SimpleTestCase):
 # ── 5. the surfaces ──────────────────────────────────────────────────────
 
 def _seeded(name):
-    """The split's account and rows, for the surfaces."""
+    """The split's account and rows, for the surfaces: 6,000 used, 750 of
+    it Sauron's NVDA, and a second NVDA opened in the eToro app whose
+    5,250 is outside Sauron (by position since 2026-11-02)."""
     user = _user(name)
     _etoro(user, held=[_held("NVDA", 5, 150, pid=11),
-                       _held("NVDA", 2, 175, pid=12, amount=350.0, net=12.5)],
+                       _held("NVDA", 2, 175, pid=12, amount=5250.0,
+                             net=12.5)],
            held_age_s=120)
     cfg = _cfg(user)
     _row(cfg, "NVDA", 5, 150, pid=11)
