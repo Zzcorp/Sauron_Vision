@@ -8,29 +8,41 @@ amount of money, read against the row's own amounts by value. A debate
 line is never cut (its view holds plain_words.LINE_MAX, the length the
 debate stores).
 
-  PS1  you: L0 shadow, the commission, the allowed actions and why not,
-       the army type (never a rank)
+  PS1  you: L0 shadow, the commission, the allowed actions and why not
+       (the officer's, O2a: mandate.allowed_actions), the events a lock
+       waiver may name, by code id, the army type (never a rank)
   PS2  the thesis and its provenance (money-free, thesis.provenance), the
        debate's sides, and the operator's own thesis (O1d) as a view: his
        words, never a fact
-  PS3  "no plan yet: the Orc writes one from O2"
-  PS4  the mandate: worst case, gross, loss, adds and re-entry left, the
-       book's headroom in R
-  PS5  the journal digest: the last 12 facts since birth with their ids
+  PS3  "no plan yet: the Orc writes one from O2"; from O2a, once a model
+       answered: the plan drawn by code, its version, and the LAST
+       decision's expectation with its result (hit, missed or pending)
+  PS4  the mandate: worst case, gross, the realized loss in R, the adds
+       left by the army type (less the officer's would-adds), re-entry
+       left, the book's headroom in R; from O2a the counters V2 and I12
+       read (plan changes left, steps left today, bars since the last
+       add and trim)
+  PS5  the journal digest: the last 12 facts since birth with their ids,
+       the takeover pinned while the care holds the position; from O2a its
+       notes: the last decisions and the refusals since the last model
+       answer, each a T1 view written through the validator's filter
   PS6  the care: its stops, peak and worst, the scale-out, the venue's
        stop and any refusal, the last 10 stop moves, Aragorn's actions
   PS7  the reviewer's verdicts of 24 h, the reasoning as a view
   PS8  the war drums heard since the last wake
   PS9-PS11  dashes until O2
-  PS12 (tail) the menu, the candidates (unordered, after the F5 shrink),
-       the recovery odds while under water (continuation odds: O2)
+  PS12 (tail) the menu, each row with its `watch` (O2a: may a plan clause
+       watch it, at least PLAN_WATCH_MIN_ATR1H x ATR(1h) from the mark) and
+       BE with its cost, the candidates (unordered, after the F5 shrink),
+       the recovery odds while under water (continuation odds: later)
   PS13 (tail) the integrity verdict
 """
 import logging
 from datetime import timedelta
 
 from bot_program.orcs import fence
-from bot_program.orcs.constants import FENCE_CAPS, MAX_ADDS, MAX_REENTRIES
+from bot_program.orcs.constants import (FENCE_CAPS, MAX_REENTRIES,
+                                        PS5_DECISIONS)
 from bot_program.orcs.plain import row_marks, voice
 
 logger = logging.getLogger(__name__)
@@ -69,11 +81,78 @@ def _ps1(orc, ctx) -> dict:
     from bot_program.orcs.army import name_of
     overlay = (orc.army_why or {}).get("overlay") if isinstance(
         orc.army_why, dict) else None
+    events = ctx.get("events") if isinstance(ctx.get("events"), dict) else {}
     return {"level": "L0 shadow", "commission": str(orc.commission or ""),
             "allowed_actions": list(ctx.get("allowed") or ["hold"]),
             "why_not": list(ctx.get("why_not") or []),
+            "events": [event_words(code, ev) for code, ev in
+                       sorted(events.items())] or NO_EVENT,
             "army": name_of(orc.army_type) + (" + Corsairs" if overlay
                                               else "")}
+
+
+#: PS1 when no print or shut is near (O2a).
+NO_EVENT = "— (no print or shut near)"
+
+
+def event_words(code, ev) -> str:
+    """An event by its code id, in fixed words (O2a, A.47): "C3: a USD
+    print in 2 h 10 min". Never a calendar title."""
+    ev = ev if isinstance(ev, dict) else {}
+    mins = max(0, int(round(_f(ev.get("minutes")) or 0)))
+    h, m = divmod(mins, 60)
+    when = f"{h} h {m} min" if h else f"{m} min"
+    if ev.get("kind") == "print":
+        ccy = fence.sanitize(ev.get("ccy"), 6) or "a"
+        return f"{code}: a {ccy} print in {when}"
+    return f"{code}: a market shut in {when}"
+
+
+def _decisions(orc, ctx, n=1) -> list:
+    """The Orc's last `n` decision entries, newest first, read up to the
+    re-render's journal_as_of when there is one (A.24)."""
+    from bot_program.orcs.models import OrcJournal
+    qs = OrcJournal.objects.filter(orc_id=orc.pk, kind="decision")
+    upto = (ctx or {}).get("journal_as_of")
+    if upto is not None:
+        qs = qs.filter(at__lte=upto)
+    return list(qs.order_by("-at", "-id")[:n])
+
+
+def _ps3(orc, ctx):
+    """PS3 [P25]: the plan drawn by code, its version, and the expectation
+    of the LAST decision with its result. O1's words while no model has
+    answered and no plan exists."""
+    from bot_program.orcs.notes import plan_line
+    last = _decisions(orc, ctx)
+    plan = orc.plan if isinstance(orc.plan, dict) else {}
+    if not plan and not last:
+        return PS3_WORDS
+    return {"plan": plan_line(orc), "version": int(orc.plan_version or 0),
+            "last_expectation": _last_expectation(orc, last[0] if last
+                                                  else None, ctx)}
+
+
+def _last_expectation(orc, decision, ctx):
+    from bot_program.orcs.evidence import expectation_words
+    from bot_program.orcs.models import OrcJournal
+    body = decision.body if decision is not None and isinstance(
+        decision.body, dict) else {}
+    exp = body.get("expectation")
+    if not isinstance(exp, dict) or exp.get("kind") in (None, "", "none"):
+        return "— (none set)"
+    qs = OrcJournal.objects.filter(orc_id=orc.pk, kind="fact",
+                                   body__fk="expectation",
+                                   body__decision=decision.pk)
+    upto = (ctx or {}).get("journal_as_of")
+    if upto is not None:
+        qs = qs.filter(at__lte=upto)
+    graded = qs.order_by("-at", "-id").first()
+    result = ((graded.body or {}).get("result") if graded is not None
+              else "pending")
+    return {"set_at": f"{decision.at:%m-%d %H:%M}",
+            "words": expectation_words(exp, orc),
+            "result": str(result or "pending")}
 
 
 def _ps2(orc, row) -> dict:
@@ -162,26 +241,127 @@ def _ps4(orc, row, ctx) -> dict:
             headroom = _r(limit * (1.0 - share) / r_money)
         else:
             headroom = "— (no open-risk limit measured)"
+    from bot_program.orcs import mandate
+    from bot_program.orcs.sessions import trading_day
+    now = ctx.get("now")
+    if now is None:
+        from django.utils import timezone
+        now = timezone.now()
+    counters = mandate.ps4(orc, {"decision_bars": ctx.get("decision_bars")},
+                           day=trading_day(now), now=now)
+    loss = _realized_loss(orc)
     return {"wc": (_r(at_stop) if at_stop is not None
                    else "— (no stop read)"),
             "gross": (_r(max(0.0, -at_stop)) if at_stop is not None
                       else "—"),
-            "loss": _r(0.0),
-            "adds_left": max(0, MAX_ADDS - int(orc.adds_used or 0)),
+            "loss": _r(-loss if loss else 0.0),
+            "adds_left": counters["adds_left"],
             "reentry_left": max(0, MAX_REENTRIES -
                                 int(orc.reentries_used or 0)),
+            "plan_changes_left": counters["plan_changes_left"],
+            "steps_left_today": counters["steps_left_today"],
+            "bars_since_add": counters["bars_since_add"],
+            "bars_since_trim": counters["bars_since_trim"],
             "book_headroom": headroom}
 
 
-def _ps5(orc) -> dict:
+def _realized_loss(orc) -> float:
+    """The idea's realized loss in R (A.47, P31.4), as a positive number:
+    the O arm's banked negative R, and the real legs that closed in loss.
+    0.0 when nothing was lost."""
+    from bot_program.orcs import mandate
+    try:
+        loss = float(mandate.arm_world(orc).get("losses_r") or 0.0)
+    except Exception:  # noqa: BLE001 — an unread arm banked nothing
+        loss = 0.0
+    closed = (orc.seen or {}).get("closed_legs") if isinstance(
+        orc.seen, dict) else None
+    if closed:
+        from bot_program.orcs.models import OrcJournal
+        for e in OrcJournal.objects.filter(orc_id=orc.pk, kind="fact",
+                                           body__leg__in=list(closed)):
+            r = _f((e.body or {}).get("r"))
+            if r is not None and r < 0:
+                loss += -r
+    return loss
+
+
+def _ps5(orc, ctx=None) -> dict:
+    """The last PS5_FACTS facts, read up to the re-render's journal_as_of
+    when there is one (A.24), and the takeover pinned while the Orc is
+    care_owned, even once it scrolled out of the twelve (A.47)."""
+    from bot_program.orcs.constants import STATE_CARE_OWNED
     from bot_program.orcs.models import OrcJournal
-    rows = list(OrcJournal.objects.filter(orc_id=orc.pk)
-                .exclude(fact_id="").order_by("-at", "-id")[:PS5_FACTS])
+    qs = OrcJournal.objects.filter(orc_id=orc.pk).exclude(fact_id="")
+    upto = (ctx or {}).get("journal_as_of")
+    if upto is not None:
+        qs = qs.filter(at__lte=upto)
+    rows = list(qs.order_by("-at", "-id")[:PS5_FACTS])
     rows.reverse()
-    return {"facts": [{"id": e.fact_id, "kind": fence.fact_kind(e),
-                       "at": f"{e.at:%m-%d %H:%M}",
-                       "t": _headline(e.headline)} for e in rows]
-            or "—", "notes": []}
+    facts = [{"id": e.fact_id, "kind": fence.fact_kind(e),
+              "at": f"{e.at:%m-%d %H:%M}", "t": _headline(e.headline)}
+             for e in rows]
+    if orc.state == STATE_CARE_OWNED:
+        took = qs.filter(kind="takeover").order_by("-at", "-id").first()
+        if took is not None and took.fact_id not in {f["id"] for f in facts}:
+            facts.insert(0, {"id": took.fact_id, "kind": fence.fact_kind(took),
+                             "at": f"{took.at:%m-%d %H:%M}",
+                             "t": _headline(took.headline), "pinned": True})
+    return {"facts": facts or "—", "notes": []}
+
+
+def ps5_notes(orc, ctx=None) -> list:
+    """PS5's notes (A.47, P26): the last PS5_DECISIONS decisions, each
+    {at, action, cited, expectation, outcome}, and every refusal since the
+    previous model-answered wake (a wake answered by code writes no
+    decision, so it never swallows one). Each a T1 view capped at
+    FENCE_CAPS["orc"]; the decision's words passed the validator's filter
+    when they were written. [] for none."""
+    from bot_program.orcs.evidence import expectation_words
+    from bot_program.orcs.models import OrcIntent, OrcJournal
+    decisions = _decisions(orc, ctx, PS5_DECISIONS)
+    if not decisions:
+        return []
+    intents = {}
+    for it in OrcIntent.objects.filter(decision_id__in=[d.pk for d in
+                                                        decisions]):
+        intents[it.decision_id] = it.status
+    out = []
+    for d in reversed(decisions):
+        b = d.body if isinstance(d.body, dict) else {}
+        ans = b.get("answer") if isinstance(b.get("answer"), dict) else {}
+        action = str(ans.get("action") or "—")
+        lid = str(ans.get("level_id") or "none")
+        cited = ", ".join(str(x) for x in ans.get("facts_cited") or []) \
+            or "none"
+        if b.get("status") == "refused":
+            outcome = f"refused ({b.get('rule') or 'V1'})"
+        elif b.get("late"):
+            outcome = f"late ({b.get('code') or 'row_closed'})"
+        elif d.pk in intents:
+            outcome = intents[d.pk]
+        else:
+            outcome = "hold" if action in ("hold", "—") else "kept"
+        text = (f"{d.at:%m-%d %H:%M} {action}"
+                f"{'' if lid == 'none' else ' ' + lid}; cited {cited}; "
+                f"expects {expectation_words(b.get('expectation'), orc)}; "
+                f"outcome {outcome}")
+        note = str(ans.get("note") or "")
+        if note:
+            text += f". Note: {note}"
+        out.append(fence.view("orc", text, FENCE_CAPS["orc"]))
+    since = decisions[0].at
+    qs = OrcJournal.objects.filter(orc_id=orc.pk, kind="refusal",
+                                   at__gte=since)
+    upto = (ctx or {}).get("journal_as_of")
+    if upto is not None:
+        qs = qs.filter(at__lte=upto)
+    for r in qs.order_by("at", "id"):
+        body = r.body if isinstance(r.body, dict) else {}
+        out.append(fence.view(
+            "orc", f"{r.at:%m-%d %H:%M} refused ({body.get('rule') or '—'}): "
+            f"{body.get('words') or ''}", FENCE_CAPS["orc"]))
+    return out
 
 
 def _headline(text) -> str:
@@ -290,8 +470,9 @@ def _ps8(orc, ctx=None) -> object:
 def ps(orc, row, ctx) -> dict:
     """PS's sections (PS1-PS11)."""
     now = ctx.get("now")
-    out = {"ps1": _ps1(orc, ctx), "ps2": _ps2(orc, row), "ps3": PS3_WORDS,
-           "ps4": _ps4(orc, row, ctx), "ps5": _ps5(orc),
+    out = {"ps1": _ps1(orc, ctx), "ps2": _ps2(orc, row),
+           "ps3": _ps3(orc, ctx),
+           "ps4": _ps4(orc, row, ctx), "ps5": _ps5(orc, ctx),
            "ps6": _ps6(orc, row, ctx),
            "ps7": {"reviews": _ps7(row, now),
                    "thesis_check": _thesis_check(row)},
@@ -334,17 +515,34 @@ def _recovery(ctx, row) -> object:
             "avg": _r(o.get("avg_r")), "thin": bool(o.get("thin"))}
 
 
+#: PS12's `watch` (O2a, A.47): may a plan clause watch this level?
+WATCH_YES = "yes"
+WATCH_NEAR = "no: too near the mark"
+
+
 def ps12(ctx, row=None) -> dict:
-    """The tail's menu, candidates (sorted by id, never ranked) and odds."""
+    """The tail's menu, candidates (sorted by id, never ranked) and odds.
+    Each menu row says whether a plan clause may watch it (V12, A.48: at
+    least PLAN_WATCH_MIN_ATR1H x ATR(1h) from the closing-side mark), and
+    BE carries its round trip in R (A.8): the entry plus its cost."""
+    from bot_program.orcs.constants import PLAN_WATCH_MIN_ATR1H
+    m, atr1h = _f(ctx.get("m")), _f(ctx.get("atr1h"))
+    entry, rpu = _f(ctx.get("entry")), _f(ctx.get("rpu"))
     menu_rows = []
     for r in (ctx.get("rows") or [])[:30]:
-        menu_rows.append({"id": r.get("id"), "kind": r.get("kind"),
-                          "tf": r.get("tf") or "",
-                          "r_away": (f"{r['r_away']:+.2f}"
-                                     if r.get("r_away") is not None else "—"),
-                          "atr_away": (f"{r['atr_away']:+.2f}"
-                                       if r.get("atr_away") is not None
-                                       else "—")})
+        price = _f(r.get("price"))
+        near = not (price is not None and m is not None and atr1h
+                    and abs(price - m) >= PLAN_WATCH_MIN_ATR1H * atr1h)
+        item = {"id": r.get("id"), "kind": r.get("kind"),
+                "tf": r.get("tf") or "",
+                "r_away": (f"{r['r_away']:+.2f}"
+                           if r.get("r_away") is not None else "—"),
+                "atr_away": (f"{r['atr_away']:+.2f}"
+                             if r.get("atr_away") is not None else "—"),
+                "watch": WATCH_NEAR if near else WATCH_YES}
+        if r.get("id") == "BE" and price is not None and entry and rpu:
+            item["cost"] = f"{abs(price - entry) / rpu:+.2f}R"
+        menu_rows.append(item)
     cands = []
     for c in ctx.get("candidates") or []:
         cands.append({"id": getattr(c, "id", ""),
@@ -352,6 +550,7 @@ def ps12(ctx, row=None) -> dict:
                       "levels": list(getattr(c, "level_ids", ()) or ())})
     return {"menu": menu_rows or "— (no menu: no fresh venue frame)",
             "candidates": sorted(cands, key=lambda c: c["id"]) or "—",
-            # O2: continuation_odds (backtester/proving/memory.py, §5.2)
+            # Later: continuation_odds (backtester/proving/memory.py,
+            # §5.2): no reader exists yet; it stays a dash through O2
             "odds": {"continuation": "— (continuation odds arrive with O2)",
                      "recovery": _recovery(ctx, row)}}

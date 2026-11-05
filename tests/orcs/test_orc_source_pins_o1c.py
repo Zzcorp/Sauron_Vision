@@ -74,13 +74,23 @@ class ThePinsTests(SimpleTestCase):
         self.assertIn("# O2:", src, "the dispatch seam is marked")
 
     def test_the_o2_seams_are_marked(self):
-        for name, needle in (("integrity", "# O2:"), ("dossier_market", "# O2:"),
+        for name, needle in (("dossier_market", "# O2:"),
                              ("dossier_position", "# O2:"),
-                             ("drum_bus", "# O2:"), ("fence", "# O2:")):
+                             ("drum_bus", "# O2:")):
             src = inspect.getsource(importlib.import_module(
                 f"bot_program.orcs.{name}"))
             with self.subTest(module=name):
                 self.assertIn(needle, src)
+        # integrity's and fence's seams were filled by O2a's mind
+        # (2026-11-05): the officer replaced allowed_actions_l0 in the
+        # dossier, and the validator enforces V10. Each says who filled it.
+        for name, filler in (("integrity", "bot_program/orcs/mandate.py"),
+                             ("fence", "bot_program/orcs/validator.py")):
+            src = inspect.getsource(importlib.import_module(
+                f"bot_program.orcs.{name}"))
+            with self.subTest(module=name):
+                self.assertNotIn("# O2:", src)
+                self.assertIn(filler, src)
 
     def test_the_bar_refresh_imports_no_order_path(self):
         from market_data import bot_bars, candle_headroom

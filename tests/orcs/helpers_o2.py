@@ -32,6 +32,7 @@ import copy
 import itertools
 import json
 import os
+import re
 import socket
 import sys
 import traceback
@@ -523,13 +524,28 @@ def kb10_marks():
     return money_marks([float(x) for x in KB10_FIGURES])
 
 
+#: A dossier bar row's own clock label, "MMDD HHMM", "MMDD" or "HHMM" at the
+#: head of a row of signed deltas (bot_program/orcs/dossier_instrument.py
+#: _rows and the tape): strftime's, never an amount. A label such as
+#: "1000" (10:00) or "1001" (1 October) sits within money_marks' 3% of the
+#: fixture's 987.65, so the walk reads every row with its label blanked
+#: (2026-11-05, O2a's first dossier sent: tests/orcs/test_orc_o2a_call.py).
+BAR_LABEL = re.compile(r'(?<=")\d{4}(?: \d{4})?(?= [-+]\d)')
+
+
+def _unlabelled(text) -> str:
+    return BAR_LABEL.sub(lambda m: "#" * len(m.group(0)), str(text or ""))
+
+
 def kb10_hits(requests) -> list:
     """(request number, text excerpt) for every text block that carries a
-    K-B10 figure, matched by value (plain_words.money_marks)."""
+    K-B10 figure, matched by value (plain_words.money_marks), a bar row's
+    clock label aside (BAR_LABEL)."""
     marks = kb10_marks()
     out = []
     for n, req in enumerate(requests, 1):
         for text in req.texts():
+            text = _unlabelled(text)
             m = marks.search(text)
             if m:
                 lo = max(0, m.start() - 20)

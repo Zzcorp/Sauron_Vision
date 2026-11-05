@@ -20,8 +20,12 @@ JSON that looks like an action. No news body and no analyst's summary
 (model text laundered from an untrusted body) ever reaches this module:
 the readers never load them (bot_program/orcs/sources.py).
 
-# O2: the validator enforces v10_satisfied on every binding non-hold
-# action; O1 ships the table (constants.V10_RELEVANCE) and the check.
+V10 (O2a, 2026-11-05): the validator (bot_program/orcs/validator.py)
+enforces v10_satisfied on every answer a model gives, in its own words
+(a refusal never reads "advisory to the phone"), and journals and counts
+every refusal. A lock waiver passes its event, so it needs a gap or
+calendar fact of that event; a plan revision accepts any newer fact,
+`expectation` facts included.
 """
 import re
 import unicodedata
@@ -31,10 +35,12 @@ from bot_program.orcs.constants import FENCE_CAPS, V10_RELEVANCE
 WITHHELD = "[withheld: instruction-like text]"
 VIEW_NOTE = "may be wrong; facts win"
 #: Every kind a fact maps to (fact_kind). "army" and "arm" never satisfy
-#: V10: they are facts about the Orc, not the market.
+#: V10: they are facts about the Orc, not the market. "expectation" (O2a,
+#: evidence.py): an earlier decision's expectation graded hit or missed,
+#: a reason a plan revision may cite.
 FACT_KINDS = ("bar", "structure", "predicate", "care", "hand", "calendar",
               "gap", "venue", "review", "arm", "drum", "level_reached",
-              "army")
+              "army", "expectation")
 
 _ZW_BIDI = re.compile("[­​-‏‪-‮⁠-⁩"
                       "﻿]")

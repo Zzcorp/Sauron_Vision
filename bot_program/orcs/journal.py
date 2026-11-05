@@ -99,10 +99,16 @@ def orc_lock(orc_pk, **filters):
             budget["spent_ms"] += spent
 
 
+#: The booking columns of an entry that carries a model call's usage (O2a,
+#: A.24): set when the entry is written, never after.
+BOOKING = ("model", "tokens_in", "tokens_out", "cache_read", "cache_write",
+           "cost_usd")
+
+
 def append(orc, kind, headline, *, author="code", body=None, fact=False,
            snapshot=None, facts_hash="", wake=None, at=None,
            block_hashes=None, remember=None, fields=None, id_prefix="F",
-           card=True, card_extra=None):
+           card=True, card_extra=None, booking=None):
     """Write one entry and return it. `remember` merges keys into the Orc's
     `seen` memory and `fields` sets Orc columns, both under the same lock,
     so the memory that decided the entry and the entry land together.
@@ -110,7 +116,9 @@ def append(orc, kind, headline, *, author="code", body=None, fact=False,
     the fact's series (F, or DR for a drum heard); `card` False keeps the
     entry off the card's journal lines (a detected wake, O1c), and
     `card_extra` merges keys into the card. `headline` may be a callable
-    of the fact id it is given. The defaults are O1a's.
+    of the fact id it is given. The defaults are O1a's. `booking` (O2a)
+    sets the entry's BOOKING columns: a decision's or an error's usage,
+    written with the entry, since nothing updates an entry once written.
 
     A `remember` value may be a callable of the LOCKED memory's current
     value for its key (O1c): a list or a pending wake another writer may
@@ -139,7 +147,8 @@ def append(orc, kind, headline, *, author="code", body=None, fact=False,
             orc_id=orc.pk, kind=str(kind), author=str(author),
             fact_id=fact_id, headline=text, body=dict(body or {}),
             snapshot=snapshot, facts_hash=str(facts_hash or ""), wake=wake,
-            at=at or timezone.now(), block_hashes=list(block_hashes or []))
+            at=at or timezone.now(), block_hashes=list(block_hashes or []),
+            **{k: v for k, v in (booking or {}).items() if k in BOOKING})
         locked.seen = seen
         notes.refresh(locked, entry=entry, journal_entry=card,
                       extra=card_extra)

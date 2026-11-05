@@ -23,6 +23,11 @@ the hooks called outside any transaction of theirs, and no lock holder
 that renders, validates, prices or calls the gateway) and the budget's
 arithmetic.
 
+THE LINE LOCK (O2a's settle, 2026-11-05): OrcSetting "minds_lock", made by
+get_or_create with one retry, taken before the Orc's row and the wake (the
+settle's order), waited for 2 s at most (TheLineLockTests on PostgreSQL;
+its race and its order on any engine).
+
 Run with:  python manage.py test tests.orcs.test_orc_o2a_locks
 (PostgreSQL: DB_ENGINE=postgresql and the DB_* variables of a scratch
 cluster.)
@@ -210,6 +215,142 @@ class TheLocksAreTakenOneWayTests(MindTestCase):
                     journal.append(locked, "decision", verdict)
             """)).body[0]
         self.assertEqual(holder_problems(ok), [])
+
+
+class TheLineLockOnAnyEngineTests(MindTestCase):
+    """O2a's line lock: its row survives two first callers, and the settle
+    takes its locks in the claim's order (A.18): the line, the Orc, the
+    wake."""
+
+    def test_the_lock_rows_get_or_create_survives_a_race(self):
+        from django.db import IntegrityError
+
+        from bot_program.orcs import scheduler
+        from bot_program.orcs.models import OrcSetting
+        real = OrcSetting.objects.get_or_create
+        calls = []
+
+        def racing(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                OrcSetting.objects.create(key="minds_lock", value={})
+                raise IntegrityError("a twin made it in the same instant")
+            return real(*args, **kwargs)
+        with patch.object(OrcSetting.objects, "get_or_create", racing), \
+                transaction.atomic():
+            row_ = scheduler.line_lock()
+        self.assertEqual(row_.key, "minds_lock")
+        self.assertEqual(len(calls), 2, "one retry")
+        self.assertEqual(OrcSetting.objects.filter(key="minds_lock").count(),
+                         1)
+
+    def test_the_settle_takes_the_line_then_the_orc_then_the_wake(self):
+        from bot_program.orcs import scheduler
+        fn = _source_fn("scheduler", "settle")
+        order = []
+        for sub in ast.walk(fn):
+            if isinstance(sub, ast.Call):
+                chain = t1.chain_of(sub.func)
+                if chain[-1] in ("line_lock", "orc_lock") or (
+                        "select_for_update" in chain and "OrcWake" in chain):
+                    order.append((sub.lineno, chain[-1] if chain[-1] in (
+                        "line_lock", "orc_lock") else "wake"))
+        self.assertEqual([name for _l, name in sorted(set(order))],
+                         ["line_lock", "orc_lock", "wake"])
+        self.assertEqual(holder_problems(fn), [])
+        self.assertIn("mind_gateway.ledger_row(", inspect.getsource(
+            __import__("bot_program.orcs.mind", fromlist=["think"]).think),
+            "the ledger lookup runs before the settle, outside its locks")
+        names = {n for n, _sub in t1.identifiers(ast.parse(
+            inspect.getsource(scheduler)))}
+        self.assertFalse(names & HOLDER_FORBIDDEN,
+                         "the scheduler holds locks: it names none of these")
+
+
+class _LineHolder:
+    """Thread A: holds the line lock (scheduler.line_lock) until released,
+    HOLD_S at most."""
+
+    def __init__(self):
+        self.ready, self.release = threading.Event(), threading.Event()
+        self.error = None
+        self.thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self):
+        from django.db import connection as conn
+
+        from bot_program.orcs import scheduler
+        try:
+            with transaction.atomic():
+                scheduler.line_lock()
+                self.ready.set()
+                self.release.wait(HOLD_S)
+        except Exception as e:  # noqa: BLE001 — told to the test thread
+            self.error = e
+            self.ready.set()
+        finally:
+            conn.close()
+
+    def __enter__(self):
+        self.thread.start()
+        if not self.ready.wait(10) or self.error:
+            raise RuntimeError(f"thread A never held the line lock: "
+                               f"{self.error}")
+        return self
+
+    def __exit__(self, *exc):
+        self.release.set()
+        self.thread.join(HOLD_S + 5)
+        return False
+
+
+@skipUnless(PG, NOT_PG)
+class TheLineLockTests(MindTransactionTestCase):
+    """O2a's line lock on PostgreSQL (N8 item 2): waited for 2 s at most,
+    its timeouts ending with its transaction, its row made once by two
+    first callers."""
+
+    def test_the_line_lock_waits_two_seconds_at_most(self):
+        from django.db import OperationalError
+
+        from bot_program.orcs import scheduler
+        session = _timeouts()
+        with transaction.atomic():
+            scheduler.line_lock()
+            self.assertEqual(_timeouts(), ("2s", "5s"))
+        self.assertEqual(_timeouts(), session)
+        with _LineHolder():
+            t0 = time.monotonic()
+            with self.assertRaises(OperationalError), transaction.atomic():
+                scheduler.line_lock()
+            took = time.monotonic() - t0
+        self.assertGreaterEqual(took, 1.5)
+        self.assertLess(took, 3.5)
+
+    def test_two_first_callers_make_one_row(self):
+        from django.db import connection as conn
+
+        from bot_program.orcs import scheduler
+        from bot_program.orcs.models import OrcSetting
+        errors, go = [], threading.Barrier(2)
+
+        def first():
+            try:
+                go.wait(5)
+                with transaction.atomic():
+                    scheduler.line_lock()
+            except Exception as e:  # noqa: BLE001 — told to the test
+                errors.append(e)
+            finally:
+                conn.close()
+        threads = [threading.Thread(target=first) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(20)
+        self.assertEqual(errors, [])
+        self.assertEqual(OrcSetting.objects.filter(key="minds_lock").count(),
+                         1)
 
 
 class TheBudgetArithmeticTests(MindTestCase):

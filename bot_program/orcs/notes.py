@@ -504,10 +504,40 @@ def _drums(card) -> list:
             for d in card.get("drums") or [] if isinstance(d, dict)]
 
 
+#: A plan's clauses in words (O2a, A.39): "tighten to S4h-L1 (2,612.00) on
+#: a touch". Each clause is a watch: it wakes the Orc near its level and
+#: never acts by itself.
+PLAN_CLAUSE_WORDS = {"tighten": "tighten to", "trim": "trim at",
+                     "exit": "exit at", "add": "add at"}
+PLAN_TRIGGER_WORDS = {"touch": "on a touch",
+                      "close_beyond": "on a close beyond"}
+PLAN_EXPECTS = {"closes_above": "expects a close above",
+                "closes_below": "expects a close below"}
+
+
 def plan_line(orc) -> str:
-    """The plan in one line. O1: no Orc writes a plan.
-    O2: the model's plan, rendered by code (prices through format_price)."""
-    return PLAN_NONE
+    """The plan in one line, drawn by code from its stored references,
+    every price through format_price (O2a, A.39); PLAN_NONE when no model
+    has written one."""
+    plan = orc.plan if isinstance(getattr(orc, "plan", None), dict) else {}
+    clauses = [c for c in plan.get("clauses") or [] if isinstance(c, dict)]
+    if not clauses:
+        return PLAN_NONE
+    parts = []
+    for c in clauses:
+        verb = PLAN_CLAUSE_WORDS.get(str(c.get("clause") or ""), "watch")
+        trig = PLAN_TRIGGER_WORDS.get(str(c.get("trigger") or ""), "")
+        parts.append(" ".join(x for x in (
+            verb, f"{c.get('level_id') or DASH} ({_px(orc, c.get('price'))})",
+            trig) if x))
+    exp = plan.get("expectation") if isinstance(plan.get("expectation"),
+                                                dict) else {}
+    level = exp.get("level") if isinstance(exp.get("level"), dict) else {}
+    if exp.get("kind") in PLAN_EXPECTS and level:
+        parts.append(f"{PLAN_EXPECTS[exp['kind']]} "
+                     f"{level.get('level_id') or DASH} "
+                     f"({_px(orc, level.get('price'))})")
+    return "; ".join(parts)
 
 
 def slot(orc, *, trade=None, root=None, tracks=(), now=None) -> dict:
@@ -785,6 +815,12 @@ RESERVED_PATTERNS = (
     re.compile(r"^Open Orc #\d+ ›$"),
     re.compile(r"^The position [+−-]?\d+\.\d\dR and the care ghost "
                r"[+−-]?\d+\.\d\dR so far; the Orc has taken no step\.$"),
+    # the grade's line once the O arm went to would mode (O2a, A.58)
+    re.compile(r"^Graded in shadow: the Orc's shadow arm "
+               r"(?:[+−-]?\d+\.\d\dR|—), the care ghost "
+               r"(?:[+−-]?\d+\.\d\dR|—), the playbook "
+               r"(?:[+−-]?\d+\.\d\dR|—); Δ against the care "
+               r"(?:[+−-]?\d+\.\d\dR|—)\.$"),
     re.compile(r"^(Line Orcs|Mercenaries|Olog-hai|Uruk-hai|Corsairs of "
                r"Umbar)( · Corsair overlay)?$"),
 )

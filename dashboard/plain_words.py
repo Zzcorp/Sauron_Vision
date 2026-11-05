@@ -38,6 +38,27 @@ WITHHELD_ERROR = "Withheld: this line quotes an error."
 # ── the scrub: a voice's words ───────────────────────────────────────────
 
 _CODES = r"US\$|USD|EUR|GBP|CHF|JPY|CAD|AUD|USDT|USDC"
+#: Every ISO 4217 currency code (2026-11-05, the Orcs' O2 spec A.34): beside
+#: a figure it names money, whichever currency it is ("NZD 500", "500 SEK",
+#: "AED 2,000"). Read in capitals only, so a word that spells one in lower
+#: case ("all", "top", "try") stays a word; the precious metals' codes
+#: (XAU, XAG, XPT, XPD) name a commodity's price, never money, and are left
+#: out.
+ISO_CODES = (
+    "AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD "
+    "BND BOB BRL BSD BTN BWP BYN BZD CAD CDF CHF CLP CNY COP CRC CUP CVE "
+    "CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF "
+    "GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS "
+    "KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD "
+    "MMK MNT MOP MRU MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR NZD OMR "
+    "PAB PEN PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK "
+    "SGD SHP SLE SOS SRD SSP STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD "
+    "TWD TZS UAH UGX USD UYU UZS VES VND VUV WST XAF XCD XOF XPF YER ZAR "
+    "ZMW ZWL").split()
+_ISO = "|".join(ISO_CODES)
+ISO_CURRENCY = re.compile(
+    r"(?<![A-Za-z])(?:" + _ISO + r")\s?[-+−]?\d"
+    r"|\d(?:[.,]\d+)?\s?[kmbKMB]?\s?(?:" + _ISO + r")(?![A-Za-z])")
 #: The currency half of the alarm tripwire (tests/test_alarm_bot.py MONEY):
 #: a currency sign or code beside a figure, a sign or a magnitude between
 #: them allowed ("USD -850.00", "$-412.50", "1.2k USD", "1250 USDC").
@@ -71,7 +92,8 @@ _FILLER = (r"(?:\s*(?:[:=~≈]|\b(?:of|at|is|was|about|around|roughly"
 #: brief's own amount ("size N units, risk at the stop 1,234.56",
 #: trade_debate.candidate_brief).
 MONEY_WORD = re.compile(
-    r"\b(?:P&L|PnL|equity|margin|balance|cash|capital"
+    r"\b(?:P&L|PnL|P/L|equity|margin|balance|cash|capital"
+    r"|unreali[sz]ed|floating|the account is"
     r"|(?<!stop[ -])(?<!take[ -])(?:profit|loss)(?:es)?|drawdown"
     r"|(?<!reward[:/ -])(?<!reward-to-)(?<!reward to )risk(?:ing|ed|s)?"
     r"(?: at the stop)?"
@@ -85,7 +107,11 @@ _MONEYISH = (r"[-+−]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|[1-9]\d{2,})"
 #: lose 1250.00 on the stop", "gives back 412.50 of open profit").
 MONEY_VERB = re.compile(
     r"\b(?:cost(?:s|ing)?|lose|loses|losing|lost|gain(?:s|ed|ing)?|worth"
-    r"|give(?:s|n)? back|gave back|giving back)\b" + _FILLER + _MONEYISH,
+    r"|give(?:s|n)? back|gave back|giving back"
+    # 2026-11-05 (the Orcs' O2 spec A.34): "up 1,200 today", "down 300
+    # since entry", "made 450 on the trim". A figure in R, ATR, pips or
+    # percent is never money: "up 1.2R", "down 12 pips", "up 0.6%" pass.
+    r"|up|down|made)\b" + _FILLER + _MONEYISH,
     re.IGNORECASE)
 #: The brief's amount shape (`:,.2f`: thousands grouped, two decimals),
 #: whatever word stands beside it ("one stop costs 1,234.56"). It also
@@ -95,8 +121,19 @@ MONEY_FIGURE = re.compile(r"(?<![\d.])\d{1,3}(?:,\d{3})+\.\d{2}(?![\d%R])")
 #: risk", "1,250 on the line").
 MONEY_AFTER = re.compile(
     r"\d\s?(?:dollars?|euros?|bucks)\b"
-    r"|\d[\d,.]*\s+(?:at risk|on the line|in loss(?:es)?)\b",
+    r"|\d[\d,.]*\s+(?:at risk|on the line|in loss(?:es)?)\b"
+    # 2026-11-05 (A.34): "2 grand", "1.2k on the table", "a 1.5k swing"
+    r"|\d\s?grand\b|\d(?:[.,]\d+)?\s?[kK]\b",
     re.IGNORECASE)
+#: An amount spelled out (2026-11-05, A.34): "fifty thousand", "half a
+#: million", "two hundred thousand".
+_SPELLED = (r"a|an|one|two|three|four|five|six|seven|eight|nine|ten"
+            r"|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen"
+            r"|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy"
+            r"|eighty|ninety|hundred|half(?:\s+an?)?|a\s+half|several|few")
+MONEY_SPELLED = re.compile(
+    r"\b(?:" + _SPELLED + r")(?:[\s-]+(?:" + _SPELLED + r"))*"
+    r"[\s-]+(?:thousand|million|billion)\b", re.IGNORECASE)
 #: An exception's class name, keyed on the suffixes Python and its
 #: libraries give them (KeyError, OSError, HTTPError, JSONDecodeError,
 #: BudgetRefused, ReadTimeout, StopIteration), dotted or not
@@ -120,12 +157,14 @@ def may_name_exception(text) -> bool:
 
 def may_name_money(text, marks=None) -> bool:
     """True when the text may name an amount of money: a currency beside a
-    figure, a money word or verb before one, the brief's own amount shape,
-    an amount said in words, or one of `marks` (money_marks)."""
+    figure (any ISO code in capitals, since 2026-11-05), a money word or
+    verb before one, the brief's own amount shape, an amount said in words
+    or spelled out, or one of `marks` (money_marks)."""
     t = str(text or "")
-    return bool(CURRENCY.search(t) or MONEY_WORD.search(t)
-                or MONEY_VERB.search(t) or MONEY_FIGURE.search(t)
-                or MONEY_AFTER.search(t)
+    return bool(CURRENCY.search(t) or ISO_CURRENCY.search(t)
+                or MONEY_WORD.search(t) or MONEY_VERB.search(t)
+                or MONEY_FIGURE.search(t) or MONEY_AFTER.search(t)
+                or MONEY_SPELLED.search(t)
                 or (marks is not None and marks.search(t)))
 
 

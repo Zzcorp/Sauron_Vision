@@ -691,14 +691,51 @@ def record(orc, trade, reasons, *, now, bot=None, price=None, cache=None,
     return wake
 
 
+#: The tick's own inputs a render keeps while the minds are on (O2a), so a
+#: wake sent back by the settle renders again as of its own moment, with
+#: the care and the predicates the tick saw, and its journal_as_of (A.24).
+RERENDER_KEEP = ("care", "predicates", "prev_recorded", "journal_as_of")
+
+
+def _minds_on() -> bool:
+    """The four gates of A.2, read once per render (O2a)."""
+    try:
+        from bot_program.orcs.switches import minds_on
+        return minds_on()
+    except Exception as e:  # noqa: BLE001 — unread is off
+        logger.info("[orcs] the minds' gates could not be read: %s", e)
+        return False
+
+
+def _evidence(orc, trade, ctx, reasons, now):
+    """O2a (A.8, A.46), while the minds are on: the validation context as
+    of the dossier, and the evidence facts written BEFORE the dossier is
+    rendered, so PS5 lists them. Each fact is its own short transaction:
+    no Orc lock is held across the render (N8). Returns the context."""
+    from bot_program.orcs import dossier, evidence
+    vctx = dossier.vctx(orc, trade, ctx, reasons=reasons, now=now)
+    evidence.write(orc, trade, ctx, vctx, reasons=reasons, now=now)
+    vctx["max_fact"] = int((orc.seen or {}).get("fact_seq") or 0)
+    return vctx
+
+
 def render_wake(wake):
     """Score, weather and dossier of one recorded wake, AS OF its moment
     (components["as_of"]), with the care's state and the price the tick
     saw. Writes the OrcWake's score, band, day class, components, block
     hashes and status, the journal's `wake` entry (off the card's lines),
     the card's intellect and integrity, and a quiet wake's reading.
-    Raises on a failure (render_queued fences it). Returns the wake."""
-    from bot_program.orcs import complexity, dossier, journal, weather
+    Raises on a failure (render_queued fences it). Returns the wake.
+
+    While the minds are on (O2a, A.8): the validation context and the
+    evidence facts first, in their own short transactions, then the
+    render's own transaction as in O1, which also stores S and keeps the
+    shared count, S's hash and version, the context and the facts hash in
+    the components. A wake the settle sent back reads the Orc's journal
+    up to its journal_as_of, still as of its own moment (A.24)."""
+    from django.db import transaction
+
+    from bot_program.orcs import dossier
     orc = wake.orc
     trade = orc.root_trade
     tick = dict(wake.components or {})
@@ -720,6 +757,24 @@ def render_wake(wake):
     if isinstance(tick.get("predicates"), dict):
         ctx["tick_predicates"] = tick["predicates"]
     ctx["prev_recorded"] = tick.get("prev_recorded")
+    minds = _minds_on()
+    vctx = None
+    if minds:
+        ctx["minds"] = True
+        upto = _parse(tick.get("journal_as_of"))
+        if upto is not None:
+            ctx["journal_as_of"] = upto
+        vctx = _evidence(orc, trade, ctx, reasons, now)
+    with transaction.atomic():
+        return _render(wake, orc, trade, tick, ctx, reasons, now=now,
+                       real=real, vctx=vctx)
+
+
+def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx):
+    """O1's per-wake render, in its own transaction: it takes the Orc's
+    lock only at its final journal.append."""
+    from bot_program.orcs import complexity, dossier, journal, weather
+    price = tick.get("price")
     day = weather.current(orc.user, orc.asset_class, now, real=real)
     hour = (day.components or {}).get("hour") or {}
     hour_at = _parse(hour.get("at")) if isinstance(hour, dict) else None
@@ -753,6 +808,12 @@ def render_wake(wake):
                        "trimmed": rendered.get("trimmed"),
                        "render": RENDER_DONE, "as_of": tick.get("as_of"),
                        "price": price}
+    if vctx is not None:
+        # O2a (A.8): what the mind reads, as of this dossier
+        wake.components.update({
+            "shared": rendered.get("shared"), "s": rendered.get("s"),
+            "vctx": vctx, "facts_hash": fh,
+            **{k: tick[k] for k in RERENDER_KEEP if k in tick}})
     wake.block_hashes = rendered["hashes"]
     wake.finished_at = now
     wake.save(update_fields=["score", "band", "day_class", "status",
@@ -795,8 +856,6 @@ def render_queued(*, limit=RENDER_BATCH) -> tuple:
     dossier, oldest first, each in its own savepoint. One that fails is
     marked `failed` with its error's kind (never retried, never stopping
     the next). Never raises."""
-    from django.db import transaction
-
     from bot_program.orcs.models import OrcWake
     try:
         ids = list(OrcWake.objects
@@ -808,13 +867,15 @@ def render_queued(*, limit=RENDER_BATCH) -> tuple:
     done = failed = 0
     for wid in ids:
         try:
-            with transaction.atomic():
-                w = (OrcWake.objects
-                     .select_related("orc", "orc__root_trade", "orc__user")
-                     .get(pk=wid))
-                if (w.components or {}).get("render") != RENDER_QUEUED:
-                    continue
-                render_wake(w)
+            # render_wake holds its own transaction (O2a): the minds'
+            # evidence facts commit before it, so no Orc lock is held
+            # across a dossier render (N8)
+            w = (OrcWake.objects
+                 .select_related("orc", "orc__root_trade", "orc__user")
+                 .get(pk=wid))
+            if (w.components or {}).get("render") != RENDER_QUEUED:
+                continue
+            render_wake(w)
             done += 1
         except Exception as e:  # noqa: BLE001 — one wake never stops one
             failed += 1

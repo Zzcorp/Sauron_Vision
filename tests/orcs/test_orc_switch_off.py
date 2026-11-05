@@ -439,6 +439,11 @@ class TheSourcePinTests(SimpleTestCase):
                                 "commands", "orcs.py"))
         return out
 
+    #: The one module that may name the provider (the O2 spec A.22, O2a
+    #: 2026-11-05): the gateway. It still names no order path.
+    GATEWAY = "mind_gateway.py"
+    MODEL = {"ai_agents", "anthropic"}
+
     def test_the_orcs_package_imports_no_order_path_and_no_model(self):
         for path in self._files():
             tree = ast.parse(open(path, encoding="utf-8").read())
@@ -452,8 +457,13 @@ class TheSourcePinTests(SimpleTestCase):
                     names.update(node.name.split("."))
                 elif isinstance(node, ast.ImportFrom) and node.module:
                     names.update(node.module.split("."))
+            banned = (self.FORBIDDEN - self.MODEL
+                      if os.path.basename(path) == self.GATEWAY
+                      else self.FORBIDDEN)
             with self.subTest(os.path.basename(path)):
-                self.assertFalse(names & self.FORBIDDEN, names & self.FORBIDDEN)
+                self.assertFalse(names & banned, names & banned)
+        self.assertIn(self.GATEWAY, [os.path.basename(p)
+                                     for p in self._files()])
 
     def test_nothing_outside_the_orcs_reads_the_stamp(self):
         """The stamp is the one write outside the Orc tables; nothing else

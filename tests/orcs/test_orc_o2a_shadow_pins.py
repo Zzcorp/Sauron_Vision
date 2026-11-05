@@ -57,13 +57,23 @@ COMMAND = BASE / "bot_program" / "management" / "commands" / "orcs.py"
 # ── O2 code ───────────────────────────────────────────────────────────────
 
 #: The modules O2 adds, whole (§1.1.3, §1.2.3, §1.3.3, §1.4.3). Each
-#: commit adds its own: mind_gateway, scheduler, mind, validator, mandate,
-#: doctrine, intents, evidence...
-O2_MODULES = ()
+#: commit adds its own. O2a's mind (2026-11-05): the gateway, the
+#: doctrine, the validator, the officer, the evidence, the mind and the
+#: scheduler's settle.
+O2_MODULES = ("mind_gateway", "doctrine", "validator", "mandate", "evidence",
+              "mind", "scheduler")
 #: Each definition O2 adds to an O1 module, by module and qualified name.
 O2_CODE = {
     "journal": ("lock_budget", "orc_lock"),
     "models": ("OrcIntent", "OrcIntent.Meta", "OrcIntent.__str__"),
+    # O2a's mind (2026-11-05)
+    "switches": ("_component_on", "gate_code", "minds_on"),
+    "dossier": ("cost_fraction", "decision_bars", "events_of", "vctx"),
+    "dossier_position": ("event_words", "_decisions", "_ps3",
+                         "_last_expectation", "_realized_loss",
+                         "ps5_notes"),
+    "grading": ("_usd_per", "mind_counts", "mind_tags"),
+    "wake": ("_minds_on", "_evidence", "_render"),
 }
 
 #: Every definition (function, class, method) of the package and of the

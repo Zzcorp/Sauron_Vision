@@ -222,8 +222,10 @@ MK_HEADLINES_PER_SESSION = 6
 MK_HEADLINE_STEPS = (6, 4, 3)
 IN_HEADLINES = 8
 MK_SESSION_MAX_TOKENS = 900
+#: "orc" (O2a, A.47): an Orc's own earlier decision or refusal, re-read in
+#: PS5 as a view.
 FENCE_CAPS = {"headline": 120, "calendar_title": 80, "mind": 300,
-              "reviewer": 280, "lesson": 200, "note": 140}
+              "reviewer": 280, "lesson": 200, "note": 140, "orc": 300}
 #: V10 (§5.2a item 5, revised 2026-10-15): the T0 fact kinds that may
 #: justify each action kind. `symbol`: the fact must be on this symbol;
 #: `event`: a gap or calendar fact of the named event; `newer`: any fact
@@ -414,3 +416,186 @@ INTENT_MODES = (MODE_SHADOW, MODE_REFUSED)
 ORC_LOCK_TIMEOUT_MS = 2000
 ORC_LOCK_MONEY_MS = 200
 ORC_STATEMENT_TIMEOUT_MS = 5000
+
+# ── O2a: one wake read in shadow (2026-11-05, the O2 spec A.2-A.41, A.46,
+# A.47, A.58). Nothing here sends anything: mind_gateway.py is the one
+# module that names the provider, and every gate below reads OFF until the
+# operator turns the minds on with his PIN and sets the Orcs line.
+
+#: A.1, A.2: the minds switch, and the platform master it sits under.
+MINDS_SWITCH = "orcs_minds"
+PLATFORM_MASTER = "platform_master"
+
+#: OrcWake.status, the full set (A.3; each fits max_length=12). O1 writes
+#: skipped and quiet; the settle writes running's ends; only scheduler.py
+#: writes pending, and recorded on a wake it sends back to the render.
+WAKE_STATUS_RECORDED = "recorded"
+WAKE_STATUS_PENDING = "pending"
+WAKE_STATUS_RUNNING = "running"
+WAKE_STATUS_DONE = "done"
+WAKE_STATUS_REFUSED = "refused"
+WAKE_STATUS_FAILED = "failed"
+WAKE_STATUS_LATE = "late"
+WAKE_STATUS_STALE = "stale"
+WAKE_STATUS_MERGED = "merged"
+WAKE_STATUSES = (WAKE_STATUS_RECORDED, WAKE_STATUS_QUIET,
+                 WAKE_STATUS_SKIPPED, WAKE_STATUS_PENDING,
+                 WAKE_STATUS_RUNNING, WAKE_STATUS_DONE, WAKE_STATUS_REFUSED,
+                 WAKE_STATUS_FAILED, WAKE_STATUS_LATE, WAKE_STATUS_STALE,
+                 WAKE_STATUS_MERGED)
+#: The statuses of a wake a model answered (A.33, A.58's n_llm).
+MODEL_ANSWERED = (WAKE_STATUS_DONE, WAKE_STATUS_REFUSED, WAKE_STATUS_LATE)
+
+#: A wake's codes (A.4, skipped_reason), and their fixed words. The four
+#: gates first (A.2), in the order admission reads them (A.11).
+CODE_PLATFORM_OFF = "platform_off"
+CODE_MINDS_OFF = "minds_off"
+CODE_LINE_OFF = "line_off"
+CODE_ORCS_OFF = "orcs_off"
+CODE_TOTAL = "total"
+CODE_LINE = "line"
+CODE_DEEP_SHARE = "deep_share"
+CODE_AUTHORITY = "authority"
+CODE_ROW_CLOSED = "row_closed"
+CODE_DEAD = "dead"
+CODE_UNSENT = "unsent"
+CODE_UNBILLED = "unbilled"
+CODE_BILLED_FAILURE = "billed_failure"
+WAKE_CODES = (
+    CODE_PLATFORM_OFF, CODE_MINDS_OFF, CODE_ORCS_OFF, CODE_LINE_OFF,
+    CODE_TOTAL, CODE_LINE, CODE_DEEP_SHARE, "triage", "inflight", "day_cap",
+    "routine_cap", "dollar_cap", "spacing", CODE_DEAD, CODE_ROW_CLOSED,
+    "over_budget", "breaker", "render_failed", "paused", "backlog",
+    CODE_AUTHORITY, "pre_o2", "wall_time", "worker_silent", CODE_UNSENT,
+    CODE_UNBILLED, CODE_BILLED_FAILURE)
+WAKE_CODE_WORDS = {
+    CODE_PLATFORM_OFF: "the platform's master switch is off",
+    CODE_MINDS_OFF: "the minds switch is off",
+    CODE_ORCS_OFF: "the orcs switch is off",
+    CODE_LINE_OFF: "the Orcs budget line is off (ORC_DAILY_BUDGET_USD=0)",
+    CODE_TOTAL: "the whole AI budget of the day is spent",
+    CODE_LINE: "the Orcs budget line has no room for this call",
+    CODE_DEEP_SHARE: "the deep-tier share of the Orcs line is used",
+    "triage": "its class's share of the Orcs line is used",
+    "inflight": "the money held for calls in flight is at the floor",
+    "day_cap": "this Orc's model wakes for the day are used",
+    "routine_cap": "this Orc's routine share of the day is used",
+    "dollar_cap": "this Orc's budget for the day is used",
+    "spacing": "a model read this Orc less than 15 minutes ago",
+    CODE_DEAD: "the Orc has ended",
+    CODE_ROW_CLOSED: "the position is closed",
+    "over_budget": "its dossier is over the size cap",
+    "breaker": "the calls are paused after repeated failures",
+    "render_failed": "its dossier could not be written",
+    "paused": "the minds were paused",
+    "backlog": "it waited behind a busy worker",
+    CODE_AUTHORITY: "a seat reads above L0, so no model is asked",
+    "pre_o2": "no model before O2",
+    "wall_time": "the call ran past its wall time",
+    "worker_silent": "the worker was silent",
+    CODE_UNSENT: "the request was refused before it was sent",
+    CODE_UNBILLED: "the call failed with no bill",
+    CODE_BILLED_FAILURE: "the call failed and was billed",
+}
+
+#: A.21: each rung's explicit bound and its httpx stall timeout. No model
+#: id here: mind_gateway reads the model of a rung from the catalog.
+RUNG_LIMITS = {"h0": {"max_tokens": 8000, "timeout_s": 120},
+               "r0": {"max_tokens": 8000, "timeout_s": 120},
+               "r1": {"max_tokens": 16000, "timeout_s": 180},
+               "r2": {"max_tokens": 16000, "timeout_s": 180},
+               "r3": {"max_tokens": 24000, "timeout_s": 300},
+               "r4": {"max_tokens": 32000, "timeout_s": 600},
+               "r5": {"max_tokens": 32000, "timeout_s": 600}}
+#: A.21: three pre-stream tries plus a live stream at 20 tokens a second.
+#: It closes a wake's status only and never frees money (A.55).
+WALL_S = {r: 3 * v["timeout_s"] + -(-v["max_tokens"] // 20) + 60
+          for r, v in RUNG_LIMITS.items()}
+#: A.21: the bound counts every prompt token at the 1h cache write, on this
+#: much more than the estimate of the exact text sent.
+BOUND_HEADROOM = 1.35
+#: A.12, §2.2's high column: what the per-Orc dollar cap counts for a call
+#: in flight or held without a bill, until OrcSetting "per_orc_high"
+#: holds each rung's measured p90.
+HIGH = {"h0": 0.0025, "r0": 0.0594, "r1": 0.1294, "r2": 0.1789,
+        "r3": 0.2989, "r4": 0.5389, "r5": 1.8644}
+#: The rung every O2a wake is answered on (A.21; §4 Q2).
+O2A_RUNG = "r0"
+
+#: A.28-A.30: the doctrine's and the schema's versions, S's size cap.
+S_VERSION = "s1"
+SCHEMA_VERSION = "d1"
+S_MAX_CHARS = 12000
+
+#: A.30: the answer's vocabulary (its enums).
+ACTIONS = ("hold", "revise_plan", "tighten", "exit", "trim", "lock_waive",
+           "add")
+RISK_SHARE_WORDS = {"none": None, "half": 0.5, "full": 1.0}
+CLAUSE_KINDS = ("tighten", "trim", "exit", "add")
+CLAUSE_TRIGGERS = ("touch", "close_beyond")
+EXPECTATION_KINDS = ("none", "closes_above", "closes_below")
+#: A trim always banks this share of the open size (A.30).
+TRIM_SHARE = 0.5
+
+#: A.31-A.32: the validator's rules, in the order they run, and their
+#: classes: a whole-answer refusal, or a part refused (V9 drops the asked
+#: wake, V11 withholds the note).
+V_RULES = ("V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9", "V10",
+           "V11", "V12", "V13", "V14")
+V_WHOLE = ("V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V10", "V12",
+           "V13", "V14")
+V_PART = ("V9", "V11")
+#: V2: plan changes a non-urgent wake may make in 24 hours.
+PLAN_CHANGES_24H_MAX = 2
+PLAN_WINDOW_H = 24
+#: V9: an asked wake is 0 or within these minutes.
+NEXT_WAKE_MIN_MIN = MIN_WAKE_SPACING_MIN
+NEXT_WAKE_MAX_MIN = 2 * W11_METRONOME_H * 60
+#: V11: a note with more of its letters outside Latin-1 is refused.
+NOTE_NON_LATIN1_MAX = 0.20
+#: V12: at most this many clauses; a watched level sits at least this many
+#: ATR(1h) from the closing-side mark (A.48).
+PLAN_CLAUSES_MAX = 4
+PLAN_WATCH_MIN_ATR1H = 0.5
+#: The menu rows the validation context keeps (A.8).
+VCTX_MENU_MAX = 30
+#: The menu kinds a level_reached fact may name (ids P, S, SW, RC, RN),
+#: never the idea's own BE, CARE or EFF rows (A.46).
+REACHED_KINDS = ("pool", "swing", "sweep", "recent", "round")
+#: The decision frame's final bars the validation context lists (I12).
+VCTX_DECISION_BARS = 12
+
+#: A.37: the officer's rules, and their numbers.
+I_RULES = ("I2", "I3", "I3c", "I3h", "I4", "I5", "I6", "I12")
+ADD_MIN_SHARE = 0.25
+STEPS_PER_DAY_MAX = 4
+ADD_SPACING_BARS = 2
+TRIM_SPACING_BARS = 1
+OFFICER_ALLOW, OFFICER_CUT, OFFICER_REFUSE = "allow", "cut", "refuse"
+
+#: A.41: a queued intent lives this long after its validation.
+INTENT_TTL_S = 600
+INTENT_STATUS_QUEUED = "queued"
+INTENT_STATUS_RECORDED = "recorded"
+INTENT_STATUS_REFUSED = "refused"
+#: PS5 (A.47): the last decisions it lists, each a T1 view capped at
+#: FENCE_CAPS["orc"].
+PS5_DECISIONS = 6
+
+#: A.24, A.25, A.55: the line lock's row, the money in flight and held,
+#: the per-rung HIGH override and the smoke's verdicts (OrcSetting keys).
+MINDS_LOCK_KEY = "minds_lock"
+MINDS_INFLIGHT_KEY = "minds_inflight"
+PER_ORC_HIGH_KEY = "per_orc_high"
+SMOKE_VERDICT_KEY = "smoke_verdict"
+#: The kinds of a hold (A.25): a call with no bill, a ledger row the
+#: provider failed to write, a wake past its wall time.
+HOLD_UNBILLED, HOLD_LEDGER_GAP, HOLD_ORPHAN = "unbilled", "ledger_gap", "orphan"
+HOLD_KINDS = (HOLD_UNBILLED, HOLD_LEDGER_GAP, HOLD_ORPHAN)
+#: N8: the line lock waits this long at most.
+LINE_LOCK_TIMEOUT_MS = ORC_LOCK_TIMEOUT_MS
+#: What a call came back with (mind_gateway.call, A.25): an answer; a
+#: billed failure; a failure with no bill; refused before the send; no
+#: send at all (a gate, the authority, the line).
+REPLY_ANSWER, REPLY_BILLED, REPLY_UNBILLED, REPLY_UNSENT, REPLY_CLOSED = (
+    "answer", "billed", "unbilled", "unsent", "closed")

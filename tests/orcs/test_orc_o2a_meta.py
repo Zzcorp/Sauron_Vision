@@ -583,9 +583,16 @@ class TheAccountFiguresWalkTests(MindTestCase):
             with self.subTest(text):
                 self.assertEqual(len(kb10_hits([self._req(text)])), 1)
         for text in ("price 102.25, ATR(1h) 1.4", "1.5R from the entry",
-                     "S4h-L1 (2,612.00)", "a 12% move"):
+                     "S4h-L1 (2,612.00)", "a 12% move",
+                     # a bar row's clock label is strftime's, never money
+                     '["1001 -7 +29 -9 +25","1022 1000 +1 +2 -3 +4"]'):
             with self.subTest(text):
                 self.assertEqual(kb10_hits([self._req(text)]), [])
+        for text in ('["1022 1000 +1 +2 -3 +4", "r 987.65"]',
+                     '{"rows": ["0930 +1 -1 +2 +0"], "size": 4321}'):
+            with self.subTest(text):
+                self.assertEqual(len(kb10_hits([self._req(text)])), 1,
+                                 "a figure beside a row is still found")
 
     def test_the_mixins_walk_reads_both_lists(self):
         self.count_requests.append(self._req("4321 units"))

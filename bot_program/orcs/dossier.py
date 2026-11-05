@@ -2,7 +2,8 @@
 wake's dossier is rendered OFF the tick, by the slow queue
 (wake.render_queued), as of the moment the tick recorded the wake.
 
-    S        the doctrine (O2; reserved in the size cap: S_TOKENS_RESERVE)
+    S        the doctrine (doctrine.py; reserved in the size cap:
+             S_TOKENS_RESERVE), stored as a block while the minds are on
     MK       the market day: MK0 at the roll, one block per CLOSED session,
              MK-E (bot_program/orcs/dossier_market.py). Built by the beats,
              never by a wake's render: a block it finds missing is listed in
@@ -264,8 +265,12 @@ def context_for(orc, row, *, price, now, cache=None, reasons=None,
         mn = menu.symbol_levels(row.symbol, row.asset_class, now=now, mark=m,
                                 cache=cache)
         cache[key] = mn
+    # BE is the entry plus its round trip, at the row's own cost fraction
+    # (O2a, A.8): its kind says so (menu.py), and the officer's break-even
+    # reads it (I3c)
+    cf = cost_fraction(row)
     rows = menu.for_idea(mn, side=row.side, entry=entry, risk_per_unit=rpu,
-                         mark=m, care_state=care)
+                         mark=m, care_state=care, cf=cf)
     sign = 1 if str(row.side).upper() == "BUY" else -1
     # the effective stop: the tightest of the row's own stop (the engine's
     # or the venue's), the care's soft stop and the stop the venue holds;
@@ -330,19 +335,159 @@ def context_for(orc, row, *, price, now, cache=None, reasons=None,
         row_ok=row_ok, contradictions=contra, stale=stale, missing=missing)
     f5 = verdict["critical"] or False
     mark_fresh = not any("mark" in c for c in verdict["critical"])
-    allowed, why_not = integrity.allowed_actions_l0(f5=f5,
-                                                    mark_fresh=mark_fresh)
+    # the officer's list (O2a, A.36): the L0 vocabulary, an add judged as if
+    # it bound, the army type's flags, F5's shrink
+    from bot_program.orcs import mandate
+    allowed, why_not = mandate.allowed_actions(orc, {"f5": f5,
+                                                     "mark_fresh": mark_fresh})
     return {"now": now, "price": p, "m": m, "mark_source": source,
             "mark_age_s": age, "real": real, "world": world, "rpu": rpu,
-            "entry": entry,
+            "entry": entry, "cf": cf, "mark_fresh": mark_fresh,
             "care": care, "effective": eff, "tf": tf, "frame": frame,
             "atr1h": atr1h, "menu": mn, "rows": rows,
             "candidates": integrity.shrink(cands, f5, mark_fresh=mark_fresh),
             "all_candidates": cands, "integrity": verdict, "f5": f5,
             "allowed": allowed, "why_not": why_not, "posture": posture,
             "blind": (blind, since), "calendar": cal, "next_event": nxt,
+            "events": events_of(row, cal, now, orc=orc),
+            "decision_bars": decision_bars(frame, now),
             "thesis_check": th, "predicates": preds, "cache": cache,
             "reasons": list(reasons or []), "bot": bot, "mind": mind}
+
+
+def cost_fraction(row) -> float:
+    """The row's round trip as a fraction of the price (O2a, A.8): the
+    cost the row was charged, else the config's cost model, as the arms
+    read it (ghost._cf); 0 when neither can be read."""
+    try:
+        from bot_program.orcs.ghost import _cf
+        return float(_cf(row, getattr(row, "config", None)) or 0.0)
+    except Exception:  # noqa: BLE001 — no cost model is no cost
+        return 0.0
+
+
+def decision_bars(frame, now) -> list:
+    """The ends of the decision frame's last final bars, oldest first
+    (O2a: I12 counts the bars since an accepted add or trim)."""
+    from bot_program.orcs import bars
+    from bot_program.orcs.constants import VCTX_DECISION_BARS
+    try:
+        df = bars.final_df(frame, now) if frame is not None else None
+        if df is None or not len(df):
+            return []
+        span = bars.span_of(frame.tf)
+        return [(bars._utc(t) + span).isoformat()
+                for t in df.index[-VCTX_DECISION_BARS:]]
+    except Exception:  # noqa: BLE001 — unread is none
+        return []
+
+
+def events_of(row, cal, now, *, orc=None) -> dict:
+    """The events a lock waiver may name and PS1 lists (O2a, A.8), by
+    code id, never by title: each high-impact print on the row's
+    currencies within PRINT_WITHIN_H ("C" and the calendar row's id), and
+    each shut within the army type's add_pre_shut_h ("SH" and its
+    moment). {code: {at, ccy, kind, minutes}}."""
+    from bot_program.orcs.constants import PRINT_WITHIN_H
+    out = {}
+    if isinstance(cal, dict) and not cal.get("dash"):
+        ccys = _currencies(row)
+        for ev in cal.get("value") or []:
+            mins = (ev["at"] - now).total_seconds() / 60.0
+            if ev.get("ccy") in ccys and 0 <= mins <= PRINT_WITHIN_H * 60:
+                out[f"C{ev['id']}"] = {"at": ev["at"].isoformat(),
+                                       "ccy": str(ev.get("ccy") or ""),
+                                       "kind": "print",
+                                       "minutes": round(mins)}
+    try:
+        from bot_program.orcs.mandate import army_of
+        from bot_program.orcs.sessions import shuts_within
+        hours = army_of(orc)["add_pre_shut_h"] if orc is not None else 0
+        for shut in shuts_within(row.asset_class, row.symbol, now,
+                                 hours=hours):
+            at = shut["at"]
+            out[f"SH{at:%y%m%d%H%M}"] = {
+                "at": at.isoformat(), "ccy": "", "kind": "shut",
+                "minutes": round(max(0.0, (at - now).total_seconds() / 60.0))}
+    except Exception as e:  # noqa: BLE001 — an unread clock lists no shut
+        logger.info("[orcs] %s: shuts unread: %s", row.symbol, e)
+    return out
+
+
+def vctx(orc, row, ctx, *, reasons, now) -> dict:
+    """THE VALIDATION CONTEXT (O2a, A.8), as of the dossier: what the
+    validator and the officer read, besides the journal and the Orc row's
+    own counters (map_wakes trap 31). Written to OrcWake.components
+    ["vctx"] while the minds are on. Prices are code's: the menu rows'
+    own, never a model's."""
+    from bot_program.orcs import gaps, playbook
+    from bot_program.orcs.constants import (PLAN_WATCH_MIN_ATR1H,
+                                            VCTX_MENU_MAX)
+    from bot_program.orcs.mandate import army_of
+    m, atr1h = _f(ctx.get("m")), _f(ctx.get("atr1h"))
+    menu_rows = []
+    for r in (ctx.get("rows") or [])[:VCTX_MENU_MAX]:
+        price = _f(r.get("price"))
+        menu_rows.append({
+            "id": r.get("id"), "kind": r.get("kind"), "tf": r.get("tf") or "",
+            "side": r.get("side") or "", "price": price,
+            "stop": _f(r.get("stop")),
+            "watchable": bool(price is not None and m is not None and atr1h
+                              and abs(price - m) >= PLAN_WATCH_MIN_ATR1H
+                              * atr1h)})
+    t = army_of(orc)
+    events = dict(ctx.get("events") or {})
+    titles = {f"C{ev['id']}": (ev.get("title"), ev.get("ccy"))
+              for ev in ((ctx.get("calendar") or {}).get("value") or [])}
+    gap_of = {}
+    for code, ev in events.items():
+        try:
+            if ev.get("kind") == "print":
+                title, ccy = titles.get(code, ("", ev.get("ccy")))
+                g = gaps.print_gap(row.symbol, row.asset_class, title, ccy,
+                                   now=now)
+            else:
+                g = gaps.next_shut_gap(row.symbol, row.asset_class, now=now)
+            gap_of[code] = {"kind": g.kind, "n": int(g.n),
+                            "p90_r": gaps.in_r(g, ctx.get("rpu")),
+                            "measured": gaps.measured(g,
+                                                      t["gap_min_samples"])}
+        except Exception as e:  # noqa: BLE001 — unread is unmeasured
+            logger.info("[orcs] %s: the gap of %s unread: %s", row.symbol,
+                        code, e)
+            gap_of[code] = {"kind": "", "n": 0, "p90_r": None,
+                            "measured": False}
+    plan = orc.plan if isinstance(orc.plan, dict) else {}
+    seen = orc.seen if isinstance(orc.seen, dict) else {}
+    atr = dict(getattr(ctx.get("menu"), "atr", None) or {})
+    f5 = ctx.get("f5") or []
+    return {
+        "allowed": list(ctx.get("allowed") or ["hold"]),
+        "why_not": list(ctx.get("why_not") or []),
+        "f5": list(f5) if isinstance(f5, (list, tuple)) else [],
+        "candidates": [{"id": getattr(c, "id", ""),
+                        "action": getattr(c, "action", ""),
+                        "level_ids": list(getattr(c, "level_ids", ()) or ())}
+                       for c in ctx.get("candidates") or []],
+        "menu": menu_rows, "events": events, "gaps": gap_of,
+        "effective": _f(ctx.get("effective")),
+        "atr": {tf: _f(atr.get(tf)) for tf in ("1h", "4h") if tf in atr},
+        "p": _f(ctx.get("price")), "m": m,
+        "mark_fresh": bool(ctx.get("mark_fresh")),
+        "thesis_intact": playbook.x_thesis(ctx.get("thesis_check"),
+                                           ctx.get("predicates"), now) is None,
+        "plan_version": int(orc.plan_version or 0),
+        "plan_at": plan.get("at"),
+        "max_fact": int(seen.get("fact_seq") or 0),
+        "world": str(ctx.get("world") or ""),
+        "urgent": any(isinstance(r, dict) and r.get("urgent")
+                      and r.get("source") != "plan" for r in reasons or ()),
+        "army_type": str(orc.army_type or ""),
+        "decision_tf": str(ctx.get("tf") or ""),
+        "decision_bars": list(ctx.get("decision_bars") or []),
+        "symbol": row.symbol, "side": str(row.side or "").upper(),
+        "entry": _f(ctx.get("entry")), "rpu": _f(ctx.get("rpu")),
+        "cf": _f(ctx.get("cf")) or 0.0, "as_of": now.isoformat()}
 
 
 def _contradiction_atr() -> float:
@@ -387,7 +532,8 @@ def render(orc, row, ctx, *, as_of, model=DOSSIER_REFERENCE_MODEL) -> dict:
             "PO3 read on a 4h fallback")
         if verdict.get("flag") in ("ok", "stale"):
             verdict["flag"] = "contradiction"
-    parts = {"ps": [dumps(ps_sections)], "ps5_notes": [],
+    parts = {"ps": [dumps(ps_sections)],
+             "ps5_notes": dossier_position.ps5_notes(orc, ctx),
              "mk_now": [mk_now_text],
              "in12_5m": today.pop("in12_5m", []),
              "in12_15m_old": today.pop("in12_15m_old", []),
@@ -436,8 +582,15 @@ def render(orc, row, ctx, *, as_of, model=DOSSIER_REFERENCE_MODEL) -> dict:
                           dossier_instrument.tape_rows(today), model)
     withheld = sum(fence.withheld_in(t) and t.count(fence.WITHHELD)
                    for t in (ps_text, tail_text))
-    return {"hashes": hashes, "shared": len(shared), "ps": ps_hash,
-            "tail": tail_hash, "tokens": int(tokens), "trimmed": trimmed,
-            "over_budget": tokens > DOSSIER_MAX_TOKENS,
-            "withheld": int(withheld), "integrity": ctx.get("integrity"),
-            "model": model, "missing": missing}
+    out = {"hashes": hashes, "shared": len(shared), "ps": ps_hash,
+           "tail": tail_hash, "tokens": int(tokens), "trimmed": trimmed,
+           "over_budget": tokens > DOSSIER_MAX_TOKENS,
+           "withheld": int(withheld), "integrity": ctx.get("integrity"),
+           "model": model, "missing": missing}
+    if ctx.get("minds"):
+        # S, the doctrine, stored as a block of its own while the minds are
+        # on (O2a, A.28): the system turn of the wake's call, by its hash
+        from bot_program.orcs import doctrine
+        from bot_program.orcs.constants import S_VERSION
+        out["s"] = {"hash": doctrine.block(model), "version": S_VERSION}
+    return out

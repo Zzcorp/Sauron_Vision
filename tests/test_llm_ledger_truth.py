@@ -60,6 +60,10 @@ BYPASS_SITES = {
     # The provider smoke (PR O0a): the operator's own measurement, run by
     # hand on the server, booked like every other call.
     "ai_agents/management/commands/claude_smoke.py": '"claude_smoke"',
+    # The Orcs' gateway (the O2 spec A.22, 2026-11-05): the one Orc module
+    # that names the provider; every Orc call is billed to agent "orc"
+    # (mind_gateway.ORC_AGENT) on the Orcs line.
+    "bot_program/orcs/mind_gateway.py": "ORC_AGENT",
 }
 
 # The only files allowed to opt out of the provider's ledger write —
