@@ -293,10 +293,12 @@ RENDER_LOCK_TTL_S = 110
 @guarded_task("orcs")
 def orc_render_wakes():
     """Every 2 minutes: the wakes the tick recorded, rendered as of their
-    moment (bot_program/orcs/wake.render_queued): the complexity score,
-    the band, the day's weather and the dossier's blocks. The tick writes
-    the wake and its reasons only, so a recorded wake costs the real-money
-    loop a handful of queries, never the dossier."""
+    moment (bot_program/orcs/wake.render_queued): the Orc's older pending
+    wake merged in (scheduler.absorb), then the complexity score, the band,
+    the day's weather and the dossier's blocks, then the admission to the
+    minds' queue (scheduler.admit), each step its own short transaction.
+    The tick writes the wake and its reasons only, so a recorded wake costs
+    the real-money loop a handful of queries, never the dossier."""
     if not cache.add(RENDER_LOCK, 1, RENDER_LOCK_TTL_S):
         return {"idle": "another render pass is running"}
     try:
@@ -304,8 +306,8 @@ def orc_render_wakes():
         out = wake.render_queued()
         done, failed = out
         # O2a (A.7, A.17): a pass that admitted any wake to the minds'
-        # queue sends one orc_think ticket; the render admits nothing yet,
-        # so the count is 0 until it does
+        # queue sends one orc_think ticket; with a gate closed (as they
+        # ship) every wake is answered by code and the count is 0
         admitted = int(getattr(out, "admitted", 0) or 0)
         if admitted:
             _think_ticket()
@@ -347,8 +349,9 @@ def orc_think():
     With the minds switch off, every pending wake is answered by code
     (`minds_off`) and the pass is idle. The result names `thought` and
     `by_code`, never a `skipped`, `parsed` or `attempted` key: the task
-    gate reads those as a health verdict. While the render admits nothing
-    (O2a's queue), no wake is pending and every pass is idle."""
+    gate reads those as a health verdict. While a gate is closed (as they
+    ship), the render pass answers every wake by code, no wake is pending
+    and every pass is idle."""
     from bot_program.orcs import scheduler, switches
     from bot_program.orcs.constants import CODE_MINDS_OFF
     if not switches.minds_switch_on():

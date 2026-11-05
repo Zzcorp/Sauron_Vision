@@ -534,6 +534,10 @@ class BulkEnableExemptTests(_Fixture):
             "capital_desk_mode_live", "fractional_units_live",
             "etoro_leverage_live", "shared_capital_live", "trade_debate",
             "aragorn", "crisis_mode", "smart_money")
+    #: The Orcs' mind switches (2026-11-05, the Orcs' O2 spec N2 and A.1):
+    #: a seeded System row each, OFF, that lets a model spend AI money and
+    #: moves no account money. "All on" holds them back like the live ones.
+    MINDS = ("orcs_minds",)
 
     def setUp(self):
         super().setUp()
@@ -549,13 +553,18 @@ class BulkEnableExemptTests(_Fixture):
         from core.platform_control import (BULK_ENABLE_EXEMPT,
                                            DEFAULT_COMPONENTS,
                                            LIVE_MONEY_SWITCHES,
-                                           LORE_READER_SWITCHES)
+                                           LORE_READER_SWITCHES,
+                                           ORC_MIND_SWITCHES)
         self.assertEqual(set(LIVE_MONEY_SWITCHES), set(self.LIVE))
+        self.assertEqual(set(ORC_MIND_SWITCHES), set(self.MINDS))
         # Beside the brake and the live switches, the two Lore readers
-        # (Agents group): each is armed by its own decision (lore/policy.py).
+        # (Agents group): each is armed by its own decision (lore/policy.py);
+        # and the Orcs' mind switches (System group), each turned on with
+        # the trading PIN (core/switch_pin.py).
         self.assertEqual(BULK_ENABLE_EXEMPT,
                          frozenset({"morgul_brake", *LIVE_MONEY_SWITCHES,
-                                    *LORE_READER_SWITCHES}))
+                                    *LORE_READER_SWITCHES,
+                                    *ORC_MIND_SWITCHES}))
         system = {c["key"]: c for c in DEFAULT_COMPONENTS
                   if c["category"] == "system"}
         agent = {c["key"] for c in DEFAULT_COMPONENTS
@@ -569,13 +578,19 @@ class BulkEnableExemptTests(_Fixture):
         for key in system:
             if key.endswith("_live") or "derisk" in key:
                 self.assertIn(key, BULK_ENABLE_EXEMPT, key)
+        # Each mind switch is a seeded System row, and it is seeded OFF.
+        from core.platform_control import PlatformComponent
+        for key in self.MINDS:
+            row = PlatformComponent.objects.get(key=key)
+            self.assertEqual((row.category, row.is_enabled),
+                             ("system", False), key)
 
     def test_all_on_for_system_leaves_every_live_switch_off(self):
         resp = self.client.post("/admin-dashboard/bulk-toggle/",
                                 {"category": "system", "action": "enable",
                                  "next": "ops"})
         self.assertRedirects(resp, "/ops/", fetch_redirect_response=False)
-        held = self.LIVE + ("morgul_brake",)
+        held = self.LIVE + self.MINDS + ("morgul_brake",)
         self.assertEqual(self._state(*held), {k: False for k in held})
         # ...and everything else in the group did turn on.
         self.assertEqual(
@@ -629,7 +644,7 @@ class BulkEnableExemptTests(_Fixture):
         self.assertEqual(resp.status_code, 200)
         groups = {g["key"]: g for g in resp.context["switches"]["groups"]}
         self.assertEqual(set(groups["system"]["held"]),
-                         set(self.LIVE) | {"morgul_brake"})
+                         set(self.LIVE) | set(self.MINDS) | {"morgul_brake"})
         self.assertEqual(set(groups["agent"]["held"]),
                          {"lore_staff", "lore_background"})
         self.assertEqual(groups["scraper"]["held"], [])
@@ -638,7 +653,7 @@ class BulkEnableExemptTests(_Fixture):
                  if "all on leaves" in ln]
         self.assertEqual(len(lines), 2, lines)
         system_line = next(ln for ln in lines if "morgul_brake" in ln)
-        for key in self.LIVE + ("morgul_brake",):
+        for key in self.LIVE + self.MINDS + ("morgul_brake",):
             self.assertIn(key, system_line)
         agent_line = next(ln for ln in lines if ln is not system_line)
         self.assertIn("lore_staff", agent_line)

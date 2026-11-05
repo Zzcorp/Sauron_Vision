@@ -104,15 +104,20 @@ class MindFixture(MindTestCase):
     # ── the wake's life, by hand where the queue will do it ──────────────
 
     def rendered(self, reasons=None, *, at=NOW, orc=None):
-        """record() then the render pass, as of `at`."""
+        """record() then the render alone (the render pass's step 2, A.7),
+        as of `at`: the tests that drive the merge and the admission call
+        scheduler.absorb and scheduler.admit themselves (2026-11-05: the
+        render pass admits since O2a's last commit)."""
         from bot_program.orcs import wake
         from bot_program.orcs.models import OrcWake
         orc = orc or self.orc
         orc.refresh_from_db()
         w = wake.record(orc, orc.root_trade, list(reasons or [W1]), now=at,
                         price="100.5")
+        w = (OrcWake.objects.select_related("orc", "orc__root_trade",
+                                            "orc__user").get(pk=w.pk))
         with patch("django.utils.timezone.now", return_value=at):
-            wake.render_queued()
+            wake.render_wake(w)
         return OrcWake.objects.get(pk=w.pk)
 
     def claim(self, w):

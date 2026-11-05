@@ -57,7 +57,8 @@ class TheScheduleTests(SimpleTestCase):
         from django.conf import settings
         text = open(os.path.join(settings.BASE_DIR, "deploy", "RUNBOOK.md"),
                     encoding="utf-8").read()
-        head = "## The Orcs (O1: journals, no model)"
+        # O2a (changed on purpose, 2026-11-05, U-R9): the minds in shadow
+        head = "## The Orcs (journals by code; minds in shadow from O2a)"
         self.assertIn(head, text)
         self.assertLess(text.index(head), text.index("## Operating notes"))
         section = text[text.index(head):text.index("## Operating notes")]

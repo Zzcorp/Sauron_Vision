@@ -552,8 +552,7 @@ def render(orc, row, ctx, *, as_of, model=DOSSIER_REFERENCE_MODEL) -> dict:
         for slot in tape["15m"].values():
             if isinstance(slot, dict):
                 slot["rows"] = (slot.get("rows") or [])[-8:]
-    ps_sections["ps5"]["notes"] = parts["ps5_notes"] or "— (no note: the " \
-        "Orc writes none before O2)"
+    ps_sections["ps5"]["notes"] = parts["ps5_notes"] or "— (no note yet)"
     who = f"Orc #{orc.root_trade_id}"
     ps_text = text_for(f"PS {who} | {as_of:%Y-%m-%d %H:%M} UTC | code only",
                        ps_sections)

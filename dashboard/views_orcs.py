@@ -18,6 +18,15 @@ An Orc's number is its idea's root trade id, as its label says ("Orc
 404 that names nobody. /orcs/seats/ and the AI spend lines pool every
 user's ideas or the platform's spend, so they are staff only. The pages
 cost a constant number of queries whatever the number of Orcs.
+
+THE MINDS (O2a, 2026-11-05, the O2 spec A.62, §1.1.8). A model may read
+an Orc's wakes in shadow, behind the minds switch and the Orcs line; the
+pages show what it left, read by code: each wake's status in words and
+the rung that was sent it, the plan drawn by code, every proposal "in
+shadow" with the officer's would-verdict and its status, the refusals,
+and for staff the Orcs line beside the minds switch and the day's Orc
+calls from the ledger. The four gates are read once per page. Nothing
+here calls a model.
 """
 from __future__ import annotations
 
@@ -35,10 +44,17 @@ from django.views.decorators.http import require_POST
 
 logger = logging.getLogger(__name__)
 
-NO_INTENTS = "No intents: an Orc proposes nothing until it reasons."
-SEATS_NOTE = ("In this release no Orc takes a step, so Δ measures the care "
-              "ghost against the care, not an Orc's skill. No seat holds any "
-              "power.")
+NO_INTENTS = "No intents: this Orc has proposed none."
+SEATS_NOTE = ("Δ measures the Orc's shadow arm (its proposals applied in "
+              "shadow, when it has any) against the care ghost; no seat holds "
+              "any power.")
+#: The officer's would-verdict on a proposal, in words (A.37).
+OFFICER_T = {"allow": "the officer would allow it",
+             "cut": "the officer would cut it",
+             "refuse": "the officer would refuse it"}
+#: The page's newest proposals and refusals.
+PAGE_INTENTS_MAX = 10
+PAGE_REFUSALS_MAX = 5
 THESIS_FORM = ("State your thesis in your own words. It is kept beside the "
                "entry's, never replaces it, and changes nothing the care "
                "does.")
@@ -101,6 +117,78 @@ def _grade(orc):
     return getattr(orc, "grade", None)
 
 
+def _minds():
+    """The minds' four gates, read once per page (O2a): None unread, so
+    the slot says the words true either way."""
+    try:
+        from bot_program.orcs.switches import minds_on
+        return bool(minds_on())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _officer_t(officer) -> str:
+    """The officer's would-verdict (A.37) in words, its rule and its own
+    words beside a cut or a refusal; "" when none was judged."""
+    officer = officer if isinstance(officer, dict) else {}
+    verdict = str(officer.get("verdict") or "")
+    words = OFFICER_T.get(verdict, "")
+    if not words:
+        return ""
+    rule = str(officer.get("rule") or "")
+    why = " ".join(str(officer.get("words") or "").split())
+    if verdict != "allow" and (rule or why):
+        return f"{words} ({': '.join(x for x in (rule, why) if x)})"
+    return words
+
+
+def _wake_rows(wakes) -> list:
+    """Each wake with its status in words (A.4) and the rung that was
+    sent it ("" when no model was: a code answer, quiet, merged)."""
+    from bot_program.orcs.notes import wake_status_t
+    out = []
+    for w in wakes:
+        comps = w.components if isinstance(w.components, dict) else {}
+        out.append({"w": w, "status_t": wake_status_t(w.status,
+                                                      w.skipped_reason),
+                    "rung": (str(comps.get("rung") or "")
+                             if w.started_at is not None else "")})
+    return out
+
+
+def _intent_rows(orc) -> list:
+    """The newest proposals (A.41), each in shadow with its mode, its
+    status and the officer's would-verdict. One query."""
+    from bot_program.orcs.intents import STATUS_T, intent_words
+    from bot_program.orcs.models import OrcIntent
+    rows = []
+    for it in (OrcIntent.objects.filter(orc=orc)
+               .order_by("-created_at", "-id")[:PAGE_INTENTS_MAX]):
+        rows.append({"at": it.created_at, "mode": it.mode,
+                     "kind_t": "proposed in shadow: " + intent_words(
+                         orc, {"kind": it.kind, "level": it.level,
+                               "event_id": it.event_id}),
+                     "status_t": STATUS_T.get(it.status, it.status),
+                     "officer_t": _officer_t(it.officer)})
+    return rows
+
+
+def _orc_line() -> dict:
+    """The staff line (A.62, U-R34): the Orcs line, the minds switch and
+    the day's Orc calls from the ledger. Read here: the Orc package names
+    nothing of ai_agents but its gateway."""
+    from django.utils import timezone as tz
+
+    from ai_agents.models import AgentTask
+    from ai_agents.spend import orc_line_q
+
+    from bot_program.orcs.switches import minds_switch_on
+    start = tz.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    return {"minds_switch": bool(minds_switch_on()),
+            "orc_calls": AgentTask.objects.filter(
+                created_at__gte=start).filter(orc_line_q()).count()}
+
+
 @_while_on
 @login_required
 def orcs_list(request):
@@ -120,10 +208,11 @@ def orcs_list(request):
                 .filter(~Q(state=STATE_DEAD)
                         | Q(state=STATE_DEAD, died_at__gte=since)))
     tracks = _tracks([o.pk for o in orcs], (ARM_CARE, ARM_ORC))
+    minds = _minds()
     rows = []
     for orc in orcs:
         sl = notes.slot(orc, trade=orc.root_trade,
-                        tracks=tracks.get(orc.pk, ()), now=now)
+                        tracks=tracks.get(orc.pk, ()), now=now, minds=minds)
         rows.append({"orc": orc, "slot": sl, "line": notes.line(sl),
                      "dead": orc.state == STATE_DEAD,
                      "grade_t": _grade_t(_grade(orc))})
@@ -139,12 +228,14 @@ def orcs_list(request):
             "n": int((seat.stats or {}).get("n") or 0)
             if isinstance(seat.stats, dict) else 0}
     spend = None
+    orc_line = {}
     if request.user.is_staff:
         # the AI budget lines (the platform's, every user's): staff only,
         # read here because the Orc package imports nothing of ai_agents
         try:
             from ai_agents.spend import lines_summary
             spend = lines_summary()
+            orc_line = _orc_line()
         except Exception:  # noqa: BLE001 — an unread ledger is no line
             logger.warning("[orcs] the spend lines could not be read",
                            exc_info=True)
@@ -152,7 +243,7 @@ def orcs_list(request):
         "page_id": "orcs", "alive": alive, "dead": dead, "dead_days": PAGE_DEAD_DAYS,
         "seats": sorted(seats.values(), key=lambda s: (
             s["seat"].venue, s["seat"].asset_class, s["seat"].rule_key)),
-        "spend": spend, "is_staff": request.user.is_staff,
+        "spend": spend, "is_staff": request.user.is_staff, **orc_line,
     })
 
 
@@ -204,9 +295,10 @@ def _arm_rows(tracks, orc):
 @login_required
 def orc_detail(request, trade_id):
     """One Orc: its thesis (the entry's, or reconstructed, and the
-    operator's beside it) with its predicates, the plan, the journal (facts
-    and notes drawn apart), the intents, the arms, the wakes and the
-    grade."""
+    operator's beside it) with its predicates, the plan, the intents in
+    shadow with the officer's would-verdicts and the refusals, the journal
+    (facts and notes drawn apart), the arms, the wakes with their status
+    and rung, and the grade."""
     from bot_program.orcs import notes
     from bot_program.orcs.constants import (ARM_CARE, ARM_ORC,
                                             PAGE_JOURNAL_MAX, PAGE_WAKES_MAX,
@@ -219,7 +311,8 @@ def orc_detail(request, trade_id):
     now = timezone.now()
     tracks = _tracks([orc.pk]).get(orc.pk, [])
     pair = [t for t in tracks if t.arm in (ARM_CARE, ARM_ORC)]
-    sl = notes.slot(orc, trade=orc.root_trade, tracks=pair, now=now)
+    sl = notes.slot(orc, trade=orc.root_trade, tracks=pair, now=now,
+                    minds=_minds())
     entries = [{"at": e.at, "kind": e.kind, "author": e.author,
                 "fact_id": e.fact_id, "t": e.headline,
                 "style": AUTHOR_STYLE.get(e.author, "fact")}
@@ -227,6 +320,9 @@ def orc_detail(request, trade_id):
                          .order_by("-at", "-id")[:PAGE_JOURNAL_MAX])]
     wakes = list(OrcWake.objects.filter(orc=orc)
                  .order_by("-created_at", "-id")[:PAGE_WAKES_MAX])
+    refusals = [{"at": e.at, "t": e.headline}
+                for e in (OrcJournal.objects.filter(orc=orc, kind="refusal")
+                          .order_by("-at", "-id")[:PAGE_REFUSALS_MAX])]
     th = orc.thesis if isinstance(orc.thesis, dict) else {}
     rec = th.get("reconstructed_from") if isinstance(
         th.get("reconstructed_from"), dict) else None
@@ -243,7 +339,8 @@ def orc_detail(request, trade_id):
         "can_write": orc.state != STATE_DEAD,
         "thesis_form": THESIS_FORM, "thesis_max": THESIS_OPERATOR_MAX,
         "journal": entries, "intents_none": NO_INTENTS,
-        "arms": _arm_rows(tracks, orc), "wakes": wakes,
+        "intents": _intent_rows(orc), "refusals": refusals,
+        "arms": _arm_rows(tracks, orc), "wakes": _wake_rows(wakes),
         "grade": _grade(orc), "grade_t": _grade_t(_grade(orc)),
     })
 

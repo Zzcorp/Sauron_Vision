@@ -20,17 +20,26 @@ row, calls a model or reads a broker; the card is changed in memory only,
 by `refresh`, inside journal.append's own transaction.
 
 THE SLOT (O1, §9.5). Every key that describes an Orc's act or outcome
-carries `mode` ("shadow" for every Orc in O1, §9.5's rule of 2026-10-15),
-and no Orc verb is printed: in O1 no Orc has acted. The slot carries no
-money: no cost, token, model, R-money or spend key at any depth (horde
-§13.2 item 7), and the operator's own words in it (his thesis, his thesis
-entries) pass PR68's plain words once, here (`_plain_voice`): every
+carries `mode` ("shadow" for every Orc, §9.5's rule of 2026-10-15; an
+intent the validator or the officer would refuse is "refused"), and no Orc
+verb is printed: no Orc acts on a position (a proposal is "proposed in
+shadow"). The slot carries no money: no cost, token, model, R-money or
+spend key at any depth (horde §13.2 item 7), and the operator's own
+words in it (his thesis, his thesis entries) pass PR68's plain words
+once, here (`_plain_voice`): every
 surface shows them as written or withheld whole. The rank's key is `lineage`, never `seat` (horde C18).
 Every sentence that names an Orc is listed in RESERVED_SENTENCES or
 matches RESERVED_PATTERNS, so the Horde's reserved-word walk can read it.
 
-THE SEAMS. effective_level is O3/O4a's §3.1 min(); the plan line, the
-intents, temperament, honor and the lineage's record are O2's.
+THE MINDS (O2a, 2026-11-05, the O2 spec A.62). The plan line is drawn by
+code from the plan a model wrote (plan_line); the intents are the card's
+three newest, written by the settle and the tick (no query); the rung is
+the card's, in tier words once a model was sent the wake; the next wake's
+words take `minds` from the page, read once; every sentence is true with
+the minds and the Orcs line on or off.
+
+THE SEAMS. effective_level is O3/O4a's §3.1 min(); temperament, honor and
+the lineage's record are O2's later commits'.
 """
 import logging
 import math
@@ -40,8 +49,12 @@ from datetime import timezone as dt_tz
 
 from bot_program.orcs import ranks
 from bot_program.orcs.constants import (ARM_CARE, ARM_ORC, GROSS_MAX_R,
-                                        MODE_SHADOW, RANK_GATE_N, SLOT_V,
-                                        THESIS_OPERATOR_MAX)
+                                        MODE_REFUSED, MODE_SHADOW,
+                                        RANK_GATE_N, RUNG_NONE, SLOT_V,
+                                        STATUS_LATE_T, STATUS_WORDS,
+                                        THESIS_OPERATOR_MAX,
+                                        WAKE_CODE_WORDS,
+                                        WAKE_SKIPPED_REASON)
 
 logger = logging.getLogger(__name__)
 
@@ -138,8 +151,9 @@ def refresh(orc, *, entry=None, journal_entry=True, extra=None) -> dict:
 
 DASH = "—"
 STATE_WORDS = {
-    "born": "Watching: a journal written by code, no model.",
-    "active": "Active.",
+    "born": "Watching: a journal written by code; no model has read it yet.",
+    "active": ("Active: its wakes are read in shadow when the minds are on; "
+               "nothing it decides is applied."),
     "care_owned": "Stood aside: the care holds this position.",
     "reentry_window": "Waiting: the re-entry window is open.",
     "dead": "Ended.",
@@ -170,18 +184,39 @@ INVALID_UNCHECKED_TIME = " (unchecked: the care measures no best excursion)"
 NO_INVALIDATION = "no invalidation is written"
 PLAN_NONE = "No plan yet: Orcs write plans once they reason."
 PLAN_SHORT = "no plan yet"
+#: The line's and the close note's word for a plan a model wrote (O2a,
+#: A.62): drawn by code, in shadow.
+PLAN_SHADOW_SHORT = "a plan in shadow"
+PLAN_SHADOW_T = "Plan in shadow: {plan}"
 RISK = "risk {r:.1f}R of {cap:g}R"
 RISK_NO_R = "no R: the position opened with no stop"
 RISK_NO_STOP = "no stop at the venue: the risk is not capped"
-COMPARE = ("The position {orc} and the care ghost {care} so far; the Orc "
-           "has taken no step.")
+#: The O arm against the care ghost (O2a, A.62): the arm in mode `real`
+#: (or `shadow`, after a hand act) is the position itself; in would mode
+#: it is the Orc's proposals applied in shadow. Neither is applied to the
+#: position, minds on or off.
+COMPARE = ("The position {orc} and the care ghost {care} so far; none of the "
+           "Orc's proposals has been applied.")
+COMPARE_WOULD = ("In shadow, the Orc's proposals {orc} and the care ghost "
+                 "{care} so far; none was applied to the position.")
 COMPARE_NONE = "Not measured yet: the arms have not stepped."
-NEXT_WAKE_T = "Next wake {when} UTC: detected and recorded only, no model."
-NEXT_WAKE_LATE = ("Next wake overdue since {when} UTC: detected and recorded "
-                  "only, no model.")
+#: The next wake (A.62). Its words take `minds` (switches.minds_on) from
+#: the slot's caller, read once per page, never once per slot: O1's "no
+#: model" words only while the minds are known to be off; read or unread
+#: otherwise, the words true either way.
+NEXT_WAKE_T = "Next wake {when} UTC."
+NEXT_WAKE_LATE = "Next wake overdue since {when} UTC."
+NEXT_WAKE_OFF_T = ("Next wake {when} UTC: detected and recorded only, no "
+                   "model.")
+NEXT_WAKE_OFF_LATE = ("Next wake overdue since {when} UTC: detected and "
+                      "recorded only, no model.")
 NEXT_WAKE_NONE = "No wake scheduled: no model is called."
 LATEST_NOTE_MAX = 40
-RUNG_NONE = "No model (code only)"
+#: A model's rung as the card says it (constants.RUNG_T, mind.rung_words):
+#: anything else on the card reads as no model (RUNG_NONE, constants).
+RUNG_WORDS_RE = re.compile(r"^[a-z]\d · [a-z]+ tier, [a-z]+ effort$")
+#: The slot's intents, the card's newest (A.41, A.62).
+SLOT_INTENTS = 3
 SCORE_T = "score {n} · {band}"
 INTEGRITY_OK = "The dossier is whole: nothing stale or contradictory."
 INTEGRITY_NONE = "Not read yet: no wake has been detected."
@@ -233,17 +268,44 @@ def day_hhmm(at, now=None) -> str:
     return moment.strftime("%a %d %b %H:%M")
 
 
-def next_wake_t(due, now=None) -> str:
+def next_wake_t(due, now=None, minds=None) -> str:
     """The next metronome in words: its day when it is not today, and
-    "overdue since" when it has passed (a shut market runs no tick)."""
+    "overdue since" when it has passed (a shut market runs no tick).
+    `minds` (O2a, A.62) is the four gates as the caller read them once:
+    False says O1's "detected and recorded only, no model", true while
+    they are off; True or None (unread) the words true either way."""
     moment = _when(due) if due else None
     if moment is None:
         return NEXT_WAKE_NONE
     from django.utils import timezone
     now = _when(now or timezone.now())
-    words = NEXT_WAKE_LATE if now is not None and moment < now \
-        else NEXT_WAKE_T
+    late = now is not None and moment < now
+    if minds is False:
+        words = NEXT_WAKE_OFF_LATE if late else NEXT_WAKE_OFF_T
+    else:
+        words = NEXT_WAKE_LATE if late else NEXT_WAKE_T
     return words.format(when=day_hhmm(moment, now))
+
+
+def wake_status_t(status, code="") -> str:
+    """A wake's status in its words (the O2 spec A.4; O2a, 2026-11-05): a
+    code answer says its code's words, and a failed, late, stale or
+    refused wake its cause beside them. O1's stored reason reads as the
+    code `pre_o2`. Pure."""
+    status = str(status or "")
+    code = str(code or "")
+    if code == WAKE_SKIPPED_REASON:
+        code = "pre_o2"
+    why = WAKE_CODE_WORDS.get(code, code)
+    if status == "skipped":
+        return STATUS_WORDS["skipped"].format(code=why or "no reason "
+                                                         "recorded")
+    words = STATUS_WORDS.get(status, status)
+    if status == "late" and code and code != "row_closed":
+        return STATUS_LATE_T.format(code=why)
+    if status in ("failed", "stale", "refused") and why:
+        return f"{words} ({why})"
+    return words
 
 
 def r_words(r) -> str:
@@ -352,16 +414,24 @@ def risk_line(trade, *, root=None):
 
 
 def compare(tracks) -> dict:
-    """The O arm (the position itself: no Orc steps in O1) against the care
-    ghost so far, from the arms (ghost.compare_line)."""
+    """The O arm against the care ghost so far, from the arms
+    (ghost.compare_line). The O arm is the position itself until a
+    proposal steps it in would mode (O2a, A.43): the words say which, and
+    that nothing an Orc proposed was applied to the position. No query:
+    the arms are in hand."""
     from bot_program.orcs.ghost import compare_line
+    tracks = list(tracks or ())
     try:
-        got = compare_line(list(tracks or ()))
+        got = compare_line(tracks)
     except Exception as e:  # noqa: BLE001 — an unread arm is unmeasured
         logger.info("[orcs] the arms could not be compared: %s", e)
         got = {}
     o, c = _f(got.get("orc_r")), _f(got.get("care_r"))
-    t = (COMPARE.format(orc=r_words(o), care=r_words(c))
+    would = any(getattr(t, "arm", None) == ARM_ORC
+                and isinstance(getattr(t, "state", None), dict)
+                and t.state.get("mode") == "would" for t in tracks)
+    words = COMPARE_WOULD if would else COMPARE
+    t = (words.format(orc=r_words(o), care=r_words(c))
          if o is not None and c is not None else COMPARE_NONE)
     return {"mode": MODE_SHADOW, "orc_r": o, "care_r": c, "t": t}
 
@@ -429,17 +499,57 @@ def _thesis(orc, card, trade) -> dict:
 
 
 def _intellect(card):
+    """The last wake's intellect. Its rung is the card's (O2a, A.62): a
+    model's rung in tier words once a model was sent the wake (mind.py
+    writes it at the settle), RUNG_NONE for a code answer, and O1's or any
+    other words read as RUNG_NONE: the slot carries no model id."""
     it = card.get("intellect")
     if not isinstance(it, dict):
         return None
     score = _f(it.get("score_v"))
     band = str(it.get("band") or "")
+    rung = str(it.get("rung_t") or "")
     return {"score_v": None if score is None else int(round(score)),
             "score_t": (SCORE_T.format(n=int(round(score)), band=band)
                         if score is not None else DASH),
             "band": band, "day_class": str(it.get("day_class") or ""),
-            "rung_t": RUNG_NONE, "escalated": False, "late": False,
+            "rung_t": rung if RUNG_WORDS_RE.match(rung) else RUNG_NONE,
+            "escalated": False, "late": it.get("late") is True,
             "at": it.get("at")}
+
+
+def _intents(card) -> list:
+    """The card's newest intents (A.41, A.62), as the settle and the tick
+    write them: {kind_t, mode, status_t}, a mode of shadow or refused.
+    No query."""
+    out = []
+    for i in card.get("intents") or []:
+        if not isinstance(i, dict):
+            continue
+        mode = str(i.get("mode") or "")
+        out.append({"kind_t": str(i.get("kind_t") or ""),
+                    "mode": mode if mode in (MODE_SHADOW, MODE_REFUSED)
+                    else MODE_SHADOW,
+                    "status_t": str(i.get("status_t") or "")})
+    return out[-SLOT_INTENTS:]
+
+
+def intellect_after(card, wake_pk, *, status_t, rung_t=None,
+                    late=None):
+    """The card's intellect with how wake `wake_pk` was answered (O2a,
+    A.62): its status words, and its rung once a model was sent it. None
+    when the card's intellect is another wake's (a newer render wrote
+    it): it is left as it is. Pure."""
+    card = card if isinstance(card, dict) else {}
+    it = card.get("intellect")
+    if not isinstance(it, dict) or it.get("wake") != wake_pk:
+        return None
+    out = {**it, "status_t": str(status_t or "")}
+    if rung_t is not None:
+        out["rung_t"] = str(rung_t)
+    if late is not None:
+        out["late"] = bool(late)
+    return out
 
 
 def _integrity(card):
@@ -540,11 +650,13 @@ def plan_line(orc) -> str:
     return "; ".join(parts)
 
 
-def slot(orc, *, trade=None, root=None, tracks=(), now=None) -> dict:
+def slot(orc, *, trade=None, root=None, tracks=(), now=None,
+         minds=None) -> dict:
     """The Horde's seat.orc for one idea (§9.5, the O1 keys). `trade` is
     the row the seat shows (its risk), `root` the idea's root row when it
-    differs; `tracks` its care ghost and O arm. No query: `orc.seat` is
-    expected selected."""
+    differs; `tracks` its care ghost and O arm; `minds` the four gates as
+    the page read them once (next_wake_t; O2a). No query: `orc.seat` is
+    expected selected, and the intents are the card's."""
     card = orc.card if isinstance(orc.card, dict) else {}
     level = effective_level(orc)
     due = getattr(orc, "next_wake_due", None)
@@ -570,9 +682,9 @@ def slot(orc, *, trade=None, root=None, tracks=(), now=None) -> dict:
                       else None),
         "care_compare": compare(tracks),
         "next_wake_at": _iso(due) if due else None,
-        "next_wake_t": next_wake_t(due, now),
+        "next_wake_t": next_wake_t(due, now, minds),
         "journal": _journal(card),
-        "intents": [],
+        "intents": _intents(card),
         "intellect": _intellect(card),
         "lineage": _lineage(orc, level),
         "integrity": _integrity(card),
@@ -641,8 +753,19 @@ def line(sl) -> str:
     if rank and commission:
         rank = f"{rank}, {commission}"
     parts = [sl.get("label") or "", rank, _first_invalidation(sl),
-             PLAN_SHORT, _note_short(sl), sl.get("risk_line") or ""]
+             _plan_short(sl), _note_short(sl), sl.get("risk_line") or ""]
     return " · ".join(p for p in parts if p)
+
+
+def _has_plan(sl) -> bool:
+    plan = str(sl.get("plan_line") or "")
+    return bool(plan) and plan != PLAN_NONE
+
+
+def _plan_short(sl) -> str:
+    """"no plan yet", or "a plan in shadow" once a model wrote one (O2a,
+    A.62): the line never says no plan beside a plan."""
+    return PLAN_SHADOW_SHORT if _has_plan(sl) else PLAN_SHORT
 
 
 def _j_line(j) -> str:
@@ -684,9 +807,11 @@ def close_note(sl) -> dict:
     short = STATE_SHORT.get(sl.get("state"), str(sl.get("state") or ""))
     th = sl.get("thesis") or {}
     inval = th.get("invalidation_t") or []
-    parts = [f"{level_t}, {short}: {PLAN_SHORT}.",
-             f"Thesis: {th.get('source_t') or DASH}"
-             + (f"; it {inval[0]}." if inval else ".")]
+    parts = [f"{level_t}, {short}: {_plan_short(sl)}."]
+    if _has_plan(sl):
+        parts.append(PLAN_SHADOW_T.format(plan=_sentence(sl["plan_line"])))
+    parts.append(f"Thesis: {th.get('source_t') or DASH}"
+                 + (f"; it {inval[0]}." if inval else "."))
     note = " ".join(str(sl.get("latest_note") or "").split())
     if note:
         parts.append(f"Latest note {hhmm(sl.get('latest_note_at'))} UTC: "
@@ -709,14 +834,16 @@ def _as_dict(trades) -> dict:
             if getattr(t, "pk", None) is not None}
 
 
-def for_rows(trade_ids, *, user=None, trades=None, now=None) -> dict:
+def for_rows(trade_ids, *, user=None, trades=None, now=None,
+             minds=None) -> dict:
     """{"bot:<trade id>": slot} for every row of `trade_ids` that is a leg
     of an idea (any leg resolves to its idea, §1.1), scoped to `user` when
     given. Two queries whatever the number of rows: the legs with their
     Orc, its seat and the row; the care ghost and the O arm of those
     ideas. `trades` ({id: row} or rows) are used in place of the rows read
-    (the caller's, already marked). O2: a third, the lineages' scars and
-    breaches. O5: an idea's risk sums its open legs."""
+    (the caller's, already marked); `minds` the caller's one read of the
+    four gates (slot). O2: a third, the lineages' scars and breaches. O5:
+    an idea's risk sums its open legs."""
     ids = set()
     for i in trade_ids or ():
         try:
@@ -750,7 +877,7 @@ def for_rows(trade_ids, *, user=None, trades=None, now=None) -> dict:
         for leg in by_orc[oid]:
             out[f"bot:{leg.trade_id}"] = slot(
                 orc, trade=rows[leg.trade_id], root=root,
-                tracks=tracks.get(oid, ()), now=now)
+                tracks=tracks.get(oid, ()), now=now, minds=minds)
     return out
 
 
@@ -808,13 +935,38 @@ def _army_names() -> tuple:
     return tuple(t.name for t in ARMY_TYPES.values())
 
 
+#: O2a's own sentences that name an Orc, on the Orcs' other surfaces
+#: (Telegram: surfaces.py; the pages: dashboard/views_orcs.py; the council
+#: band: dashboard/council_band.py), registered here with the slot's
+#: (2026-11-05, the O2 spec N6, A.62). Their modules hold the same words;
+#: tests/orcs/test_orc_o2a_words.py reads both.
+SURFACE_SENTENCES = frozenset({
+    "Orcs do not answer questions yet.",
+    "Nothing to switch off: no Orc acts on a position; the care holds every "
+    "position.",
+    "/orc NUMBER — one Orc: its thesis, journal, plan in shadow and the care "
+    "beside it",
+    "No intents: this Orc has proposed none.",
+    "Δ measures the Orc's shadow arm (its proposals applied in shadow, when "
+    "it has any) against the care ghost; no seat holds any power.",
+    "The Orcs are not in the field yet.",
+    "One Orc watches in shadow; it acts on no position.",
+})
 RESERVED_SENTENCES = frozenset({PLAN_NONE, RECONSTRUCTED_T, COMPARE_NONE,
-                                NEXT_WAKE_NONE, INTEGRITY_NONE})
+                                NEXT_WAKE_NONE, INTEGRITY_NONE}
+                               ) | SURFACE_SENTENCES
 RESERVED_PATTERNS = (
     re.compile(r"^Orc #\d+$"),
     re.compile(r"^Open Orc #\d+ ›$"),
-    re.compile(r"^The position [+−-]?\d+\.\d\dR and the care ghost "
-               r"[+−-]?\d+\.\d\dR so far; the Orc has taken no step\.$"),
+    # the comparison, the O arm the position itself or in would mode (O2a)
+    re.compile(r"^The position (?:[+−-]?\d+\.\d\dR|—) and the care ghost "
+               r"(?:[+−-]?\d+\.\d\dR|—) so far; none of the Orc's "
+               r"proposals has been applied\.$"),
+    re.compile(r"^In shadow, the Orc's proposals (?:[+−-]?\d+\.\d\dR|—) "
+               r"and the care ghost (?:[+−-]?\d+\.\d\dR|—) so far; none "
+               r"was applied to the position\.$"),
+    # the council band's count of the living Orcs (O2a)
+    re.compile(r"^\d+ Orcs watch in shadow; none acts on a position\.$"),
     # the grade's line once the O arm went to would mode (O2a, A.58)
     re.compile(r"^Graded in shadow: the Orc's shadow arm "
                r"(?:[+−-]?\d+\.\d\dR|—), the care ghost "

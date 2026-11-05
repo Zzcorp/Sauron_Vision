@@ -142,12 +142,13 @@ PIN_SWITCHES = LIVE_MONEY_SWITCHES + ORC_MIND_SWITCHES
 #: lore_background only after decision D1 (the briefing reaches readers
 #: who are not staff). Every PIN switch (PIN_SWITCHES, above) is also
 #: excluded by name where "all on" writes (core/switch_pin.set_category),
-#: so an Orc mind switch is held back before its key joins this set, which
-#: it does with its seeded row (tests/test_ops_cockpit.py wants every key
-#: here seeded; 2026-11-05).
+#: so an edit of this set cannot open "all on" to one. The Orcs' mind
+#: switches (ORC_MIND_SWITCHES) are in this set with their seeded rows
+#: (2026-11-05, the Orcs' O2 spec A.1, §4 Q1): one tap never starts AI
+#: spend (tests/test_ops_cockpit.py wants every key here seeded).
 LORE_READER_SWITCHES = ("lore_staff", "lore_background")
 BULK_ENABLE_EXEMPT = frozenset({"morgul_brake", *LORE_READER_SWITCHES,
-                                *LIVE_MONEY_SWITCHES})
+                                *LIVE_MONEY_SWITCHES, *ORC_MIND_SWITCHES})
 
 
 # ── Default components to register ───────────────────────
@@ -345,6 +346,19 @@ DEFAULT_COMPONENTS = [
     # exempt from "all on": nothing it does moves money.
     {"key": "orcs", "name": "Orcs (journals, no model)",
      "description": "Off (default). On: each open position gets an Orc, a journal written by code: its birth, thesis and army type, the care's and the venue's stop moves, reviews, thesis checks and the close. No model, no order, no stop moved. manage.py orcs.",
+     "category": "system"},
+    # THE ORCS' MINDS (2026-11-05, the Orcs' O2 spec A.1, N2): a model
+    # reads each Orc's wake in shadow, on the Orcs' own budget line, and
+    # writes plans and proposals that are graded, never applied. OFF on
+    # arrival (no is_enabled key), exempt from "all on" (BULK_ENABLE_EXEMPT)
+    # and turned on only with the trading PIN at /ops/ (ORC_MIND_SWITCHES,
+    # core/switch_pin.py); OFF takes no PIN. `orcs` above keeps its own
+    # words: "journals, no model" stays true of it alone (K-C1). A model is
+    # asked only while this, `orcs`, the platform master and the Orcs line
+    # (ORC_DAILY_BUDGET_USD above 0) are all on. Description measured below
+    # 300.
+    {"key": "orcs_minds", "name": "Orc Minds (models in shadow)",
+     "description": "Off (default). With orcs on and the Orcs' budget line set (ORC_DAILY_BUDGET_USD above 0), a model reads each Orc's wake in shadow and writes plans and proposals that are graded. Nothing it decides sends an order or moves a stop. Turning it on takes the PIN.",
      "category": "system"},
     # THE WAR DRUMS (2026-10-22, O1c, spec §4.7, §10.7, §11): with `orcs`
     # ON the drums are published, routed and journaled whatever this says.

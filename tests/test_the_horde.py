@@ -1005,6 +1005,38 @@ class TheOrcTests(_Base):
         self.assertNotRegex(HORDE_PY.read_text(encoding="utf-8"),
                             r'"seat"\s*:\s*\{[^}]*"level"')
 
+    def test_every_o2a_sentence_naming_an_orc_is_registered(self):
+        """The Orcs' O2 spec N6 (2026-11-05, O2a): each sentence the minds
+        add that names an Orc, on the slot, Telegram, the Orc pages and
+        the council band, reaches this walk's registry, as a fixed
+        sentence or through the slot's patterns, and none says an Orc
+        acted. A proposal is "proposed in shadow"."""
+        from bot_program.orcs import notes, surfaces
+        from dashboard import council_band, horde, views_orcs
+        fixed = (surfaces.QUESTION_LATER, surfaces.ORCS_OFF_NONE,
+                 surfaces.HELP_LINES[0], views_orcs.NO_INTENTS,
+                 views_orcs.SEATS_NOTE, council_band.ORCS,
+                 council_band.ORCS_ONE)
+        formed = (notes.COMPARE.format(orc="+0.40R", care="−0.10R"),
+                  notes.COMPARE_WOULD.format(orc="—", care="+1.25R"),
+                  council_band.ORCS_N.format(n=12))
+        verb = re.compile(r"Orc\w*\s+(decided|closed|trimmed|tightened|"
+                          r"added|moved|exited)")
+        named = 0
+        for text in fixed + formed:
+            self.assertIsNone(verb.search(text), text)
+            for sentence in _sentences(text):
+                if not ORC_WORD.search(sentence):
+                    continue
+                named += 1
+                if text in fixed:
+                    self.assertIn(sentence, horde.RESERVED_ORC_SENTENCES,
+                                  sentence)
+                self.assertTrue(notes.is_reserved(sentence), sentence)
+        self.assertEqual(named, len(fixed) + len(formed))
+        self.assertTrue(notes.SURFACE_SENTENCES
+                        <= horde.RESERVED_ORC_SENTENCES)
+
     # ── O1d (Orcs spec §9.5): the seams filled, only while orcs is ON ──
 
     def _orcs_on(self):

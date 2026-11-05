@@ -1,6 +1,8 @@
 """ONE CLAIMED WAKE, READ IN SHADOW (the O2 spec A.23-A.26, A.39-A.41;
-O2a, 2026-11-05). Nothing reaches it in production yet: no wake is ever
-claimed until the queue is built and the operator turns the minds on.
+O2a, 2026-11-05). A wake reaches it only through the queue: the render
+pass admits it (wake.render_queued), the worker claims it (scheduler.claim)
+with the four gates on, which the operator alone opens (the minds switch
+with his PIN, the Orcs line above 0). Both arrive closed.
 
   build_request  A.23: the request from the wake's STORED blocks (S by its
                  hash; the shared turn MK0, the closed sessions, MK-E and
@@ -25,7 +27,10 @@ claimed until the queue is built and the operator turns the minds on.
                  its proposals (OrcIntent, one per proposal that is not a
                  hold), the filtered note, last_good_wake_at and
                  last_facts_hash; a refused one its decision and its
-                 refusal; a late one its decision only (A.26)
+                 refusal; a late one its decision only (A.26); and on
+                 every outcome the card's intellect says how the wake was
+                 answered: its status words, and its rung in tier words
+                 once a model was sent it (write_intellect, A.62)
 
 Every proposal is in shadow: an OrcIntent is judged, queued for the Orc's
 own arm or recorded, and never sent anywhere. Its level is the stored
@@ -38,7 +43,7 @@ from decimal import Decimal
 from bot_program.orcs.constants import (CODE_UNSENT, INTENT_KINDS,
                                         REPLY_ANSWER, REPLY_BILLED,
                                         REPLY_CLOSED, REPLY_UNBILLED,
-                                        REPLY_UNSENT,
+                                        REPLY_UNSENT, RUNG_NONE, RUNG_T,
                                         INTENT_STATUS_QUEUED,
                                         INTENT_STATUS_RECORDED,
                                         INTENT_STATUS_REFUSED, INTENT_TTL_S,
@@ -67,6 +72,24 @@ def source_ref(wake, rung, caller=CALLER) -> str:
     """`Orc:<pk>:Wake:<w>:<rung>` (§1.0.9): the Orcs line's own prefix."""
     word = "Wake" if caller == CALLER else str(caller).capitalize()
     return f"Orc:{wake.orc_id}:{word}:{wake.pk}:{rung}"
+
+
+#: The replies of a call that was sent (A.25): a model read the wake, or
+#: its bill may follow.
+SENT = (REPLY_ANSWER, REPLY_BILLED, REPLY_UNBILLED)
+
+
+def rung_words(rung_name) -> str:
+    """A rung in tier words for the card (A.62): "r0 · balanced tier, low
+    effort". No model id, no cost. Read through the gateway's catalog
+    read, never under a lock (think, before the settle)."""
+    from bot_program.orcs import mind_gateway
+    try:
+        step = mind_gateway.rung(rung_name)
+    except (ValueError, KeyError):
+        return RUNG_NONE
+    return RUNG_T.format(rung=step["rung"], tier=step["tier"],
+                         effort=step["effort"])
 
 
 # ── the request (A.23) ───────────────────────────────────────────────────
@@ -259,6 +282,9 @@ def think(wake, *, now=None) -> dict:
     now = now or timezone.now()
     outcome = judge(wake, reply, now=now)
     outcome["source_ref"] = ref
+    # A.62: the card's rung, once a model was sent the wake (no lock held)
+    outcome["rung_t"] = (rung_words(rung_name) if reply.get("kind") in SENT
+                         else RUNG_NONE)
     # A.24 step 3: the provider's own ledger row of this call, looked up
     # once, before the settle takes its locks
     outcome["ledger"] = (mind_gateway.ledger_row(ref, since=wake.started_at)
@@ -679,6 +705,22 @@ def write_late(locked, w, outcome, *, now, code, fields, keys) -> None:
                    author="orc", body=_body(w, outcome, late=True, code=code),
                    wake=w, at=now, booking=_booking(outcome), fields=fields,
                    remember=keys)
+
+
+def write_intellect(locked, w, outcome) -> None:
+    """A.62, at the settle, inside its transaction (database writes only):
+    the card's intellect says how wake `w` was answered (its status words)
+    and, once a model was sent it, the rung in tier words (rung_t, which
+    think() read before the locks). Written only while the card's
+    intellect is this wake's: a newer render's is left as it is."""
+    from bot_program.orcs import journal, notes
+    from bot_program.orcs.constants import WAKE_STATUS_LATE as LATE
+    it = notes.intellect_after(
+        locked.card, w.pk,
+        status_t=notes.wake_status_t(w.status, w.skipped_reason),
+        rung_t=outcome.get("rung_t") or RUNG_NONE, late=w.status == LATE)
+    if it is not None:
+        journal.remember(locked, card_extra={"intellect": it})
 
 
 def write_late_settle(locked, w, outcome, *, now, fields, keys) -> None:

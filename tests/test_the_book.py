@@ -1699,15 +1699,20 @@ class TheBookFollowsTheCode(SimpleTestCase):
             "morgul_guards", "morgul_brake", "aragorn_scale_out",
             "pipeline_promotion", "proving_ground", "telegram_alarm",
             "council_bots", "council_ticket", "orcs", "big_money_board",
-            "lore_staff", "lore_background"}
+            "lore_staff", "lore_background",
+            # K-B8 (2026-11-05, the Orcs' O2 spec N2): "a second switch",
+            # the Orcs' minds, ships off and is no live-money switch
+            "orcs_minds"}
         for key in named:
             self.assertIn(key, rows, "%s is no longer a component: rewrite the safeguards" % key)
             row = rows[key]
             self.assertFalse(row.get("is_enabled") or row.get("enabled"),
                              "%s ships on: rewrite every 'off on arrival'" % key)
-        for key in ("council_bots", "council_ticket", "orcs"):
+        for key in ("council_bots", "council_ticket", "orcs", "orcs_minds"):
             self.assertNotIn(key, LIVE_MONEY_SWITCHES,
                              "%s moves money now: rewrite 'The council', 'The Orcs' and the lexicon's 'Shadow'" % key)
+        self.assertIn("orcs_minds", BULK_ENABLE_EXEMPT,
+                      "the Orcs' minds arrive by 'all on': rewrite 'The Orcs'")
 
     def test_a_brake_is_the_four_the_words_name(self):
         from bot_program.asset_engine import disarm
@@ -2217,6 +2222,36 @@ class TheBookFollowsTheCode(SimpleTestCase):
         everything = json.dumps([book.CHAPTERS, book.ERAS, book.MILESTONES, book.LEXICON]).lower()
         for stale in ("each open trade gets an orc", "one open trade from its birth", "journal per open trade"):
             self.assertNotIn(stale, everything, stale)
+
+    def test_an_orc_is_read_by_a_model_only_in_shadow_behind_its_switch(self):
+        """U-B2 (2026-11-05, the Orcs' O2 spec A.62): with the minds switch
+        and the Orcs line, a model reads an Orc's dossier in shadow, so "No
+        model is called" and "It calls no model" are said conditionally;
+        K-B1 stays: nothing an Orc writes sends an order or moves a stop."""
+        from bot_program.orcs.constants import MINDS_SWITCH
+        from core.platform_control import DEFAULT_COMPONENTS
+        rewrite = "rewrite 'The Orcs' and the lexicon's 'Orc'"
+        minds = [c for c in DEFAULT_COMPONENTS if c["key"] == MINDS_SWITCH]
+        self.assertEqual(len(minds), 1, rewrite + " (the second switch)")
+        self.assertNotIn("is_enabled", minds[0], rewrite)
+        chapter = self._text("safeguards", "The Orcs")
+        self.assertIn("With a second switch on and its budget line set, a "
+                      "model reads that dossier at each wake, in shadow: it "
+                      "writes a plan and proposals that are graded, and "
+                      "nothing an Orc writes sends an order or moves a "
+                      "stop.", chapter)
+        self.assertIn("nothing an Orc writes sends an order or moves a stop",
+                      chapter, "K-B1")
+        self.assertNotIn("No model is called", chapter)
+        lexicon = self._lexicon("Orc")
+        self.assertIn("With a second switch on and its budget line set, a "
+                      "model reads its dossier at each wake, in shadow: it "
+                      "writes a plan and proposals that are graded, and "
+                      "sends no order.", lexicon)
+        self.assertNotIn("It calls no model", lexicon)
+        # the dated line stays as dated (K-B9)
+        self.assertIn("no model is called, and nothing an Orc writes sends "
+                      "an order or moves a stop", self._milestone("fd41a45"))
 
     def test_an_orcs_owner_may_write_a_thesis(self):
         """Review (2026-10-31): every FACT of an Orc's journal is written by

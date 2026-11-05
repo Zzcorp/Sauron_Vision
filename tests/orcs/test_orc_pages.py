@@ -157,8 +157,8 @@ class TheDetailTests(_Pages):
             self.assertIn(anchor, html)
         self.assertIn("No plan yet: Orcs write plans once they reason.",
                       html)
-        self.assertIn("No intents: an Orc proposes nothing until it "
-                      "reasons.", html)
+        # O2a (changed on purpose, 2026-11-05, A.62): no proposal yet
+        self.assertIn("No intents: this Orc has proposed none.", html)
         self.assertIn("care ghost", html)
         self.assertIn("score 58 · complex", html)
         self.assertIn("No model (code only)", html)
@@ -324,7 +324,11 @@ class TheStaffTests(_Pages):
                                 army_type="line")
         demo = OrcSeat.objects.create(venue="demo", asset_class="crypto")
         html = self.page("orcs_seats").content.decode()
-        self.assertIn("In this release no Orc takes a step", html)
+        # O2a (changed on purpose, A.62): Δ measures the shadow arm
+        self.assertIn("Δ measures the Orc&#x27;s shadow arm (its proposals "
+                      "applied in shadow, when it has any) against the care "
+                      "ghost; no seat holds any power.", html)
+        self.assertNotIn("In this release", html)
         self.assertNotIn("+9.00R", html)
         seats = _table(html, "orc-seats")
         mine = [r for r in seats if r[0] == self.orc.seat.venue

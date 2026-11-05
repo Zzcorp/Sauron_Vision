@@ -1,9 +1,12 @@
 """THE SCHEDULER (the O2 spec A.7, A.11-A.27, A.51-A.56; O2a, 2026-11-05):
-the Orcs' queue and its money, around one wake's read (mind.py). Unwired
-in production: the render pass does not admit yet (wake.render_queued
-reports an admitted count of 0 until it does), so no wake becomes
-`pending`; the worker's beat (tasks.orc_think) and the watchdog
-(tasks.orc_minds_watch) run idle, and the Orcs line stays at 0.
+the Orcs' queue and its money, around one wake's read (mind.py). The render
+pass (wake.render_queued, on `slow`) calls absorb before each wake's render
+and admit after it; a pass that admitted a wake sends one orc_think
+ticket. Only this module writes `pending`, and `recorded` again on a wake
+it sends back to the render (A.3). With the minds switch OFF (as it ships)
+or the Orcs line at 0, admission answers every wake by code and nothing
+is claimed: the worker (tasks.orc_think) and the watchdog
+(tasks.orc_minds_watch) run idle.
 
   absorb   A.7 step 1 (P15), before a wake's render, under its Orc's lock:
            the Orc's pending wake is merged into it (the union of the
@@ -934,17 +937,22 @@ def _code_body(code, *, bound, purse) -> dict:
 def _by_code(locked, w, code, *, now, body=None) -> None:
     """A code answer (A.4, A.5): the wake `skipped` with its code, never a
     refusal and never silence; while the minds switch itself is on, a
-    `budget` entry in fixed words, off the card. The caller holds the
-    Orc's lock."""
-    from bot_program.orcs import journal, switches
+    `budget` entry in fixed words, off the card, the card's intellect
+    saying how this wake was answered when it is this wake's (A.62). The
+    caller holds the Orc's lock."""
+    from bot_program.orcs import journal, notes, switches
     w.status, w.skipped_reason = WAKE_STATUS_SKIPPED, code
     w.est_usd = Decimal(0)
     w.save(update_fields=["status", "skipped_reason", "est_usd"])
     if switches.minds_switch_on():
+        it = notes.intellect_after(locked.card, w.pk,
+                                   status_t=notes.wake_status_t(
+                                       WAKE_STATUS_SKIPPED, code))
         journal.append(locked, "budget", f"Answered by code: "
                        f"{WAKE_CODE_WORDS.get(code, code)}.",
                        body={"wake": w.pk, "code": code, **(body or {})},
-                       wake=w, card=False, at=now)
+                       wake=w, card=False, at=now,
+                       card_extra={"intellect": it} if it else None)
 
 
 def _to_pending(w, f, *, rung, bound, now) -> None:
@@ -978,7 +986,7 @@ def admit(wake, rendered=None, *, now=None) -> dict:
     older pending wake was merged into this one before its render
     (absorb), so the database's one-pending rule holds. Returns {status,
     code, priority}."""
-    from bot_program.orcs import journal, mind
+    from bot_program.orcs import journal, mind, switches
     from bot_program.orcs.models import OrcWake
     now = now or timezone.now()
     w = (OrcWake.objects.select_related("orc", "orc__seat",
@@ -996,11 +1004,17 @@ def admit(wake, rendered=None, *, now=None) -> dict:
     orc = w.orc
     f = _facts(w, orc)
     rung = O2A_RUNG
-    price = mind.price(w, rung)
-    purse = mind.purse()
-    code = _check(w, orc, f, now=now, rung=rung, bound=price["bound"],
-                  purse=purse, inflight_high=_running_high(orc.pk,
-                                                           exclude=w.pk))
+    gate = switches.gate_code()
+    if gate:
+        # a gate OFF answers first (A.11 step 2): the line's money is not
+        # read for a wake no model will see (as the minds ship, every one)
+        price, purse, code = {"bound": 0.0}, {}, gate
+    else:
+        price = mind.price(w, rung)
+        purse = mind.purse()
+        code = _check(w, orc, f, now=now, rung=rung, bound=price["bound"],
+                      purse=purse, inflight_high=_running_high(
+                          orc.pk, exclude=w.pk))
     with transaction.atomic():
         locked = journal.orc_lock(orc.pk)
         fresh = OrcWake.objects.select_for_update().get(pk=w.pk)
@@ -1272,6 +1286,7 @@ def settle(wake, outcome, *, now=None) -> dict:
                                                          or 0.0))
             mind.write_late_settle(locked, w, outcome, now=now,
                                    fields=fields, keys=keys)
+            mind.write_intellect(locked, w, outcome)
             out.update(status=w.status, late=True)
             return out
         held_high = 0.0
@@ -1296,6 +1311,7 @@ def settle(wake, outcome, *, now=None) -> dict:
                                keys=keys)
         w.save(update_fields=["status", "skipped_reason", "est_usd",
                               "finished_at"])
+        mind.write_intellect(locked, w, outcome)
         if not late:
             states(locked, w, outcome, now=now)
         if w.status == WAKE_STATUS_FAILED:

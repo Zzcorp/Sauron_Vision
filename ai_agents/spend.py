@@ -20,11 +20,11 @@ they can neither starve the brain nor be starved by it:
   * AI_DAILY_BUDGET_USD stays the TOTAL: no call on either line once the
     whole ledger's spend today reaches it. At 0 there is no total and the
     core line has no ceiling; the Orcs' cap still binds.
-  * The ORCS line is a cap, ORC_DAILY_BUDGET_USD (0 = the line is off,
-    which it is until O2 turns it on). It counts the rows of agents `orc`,
-    `captain`, `orc_*` and `captain_*`, and any row whose source_ref starts
-    with `Orc:` or `Captain:` (how the debate of an Orc's add is billed to
-    the Orcs, through BaseAgent.run(source_ref=)).
+  * The ORCS line is a cap, ORC_DAILY_BUDGET_USD (0 = the line is off, as
+    it ships: the operator turns it on). It counts the rows of agents
+    `orc`, `captain`, `orc_*` and `captain_*`, and any row whose source_ref
+    starts with `Orc:` or `Captain:` (how the debate of an Orc's add is
+    billed to the Orcs, through BaseAgent.run(source_ref=)).
   * The CORE line is everything else. Its allowance is the total minus
     what the Orcs have ACTUALLY spent today minus a floor kept for their
     live urgent and confirm wakes (ORC_LIVE_FLOOR_USD), never minus their
@@ -77,7 +77,8 @@ def _env_usd(name: str, default: float) -> float:
 
 
 # The Orcs' cap. 0 = their line is off: no Orc call is allowed, the core
-# line is the whole ledger, and no floor is held back. O2 turns it on.
+# line is the whole ledger, and no floor is held back. It ships at 0, and
+# the operator turns it on.
 DEFAULT_ORC_DAILY_BUDGET_USD = _env_usd("ORC_DAILY_BUDGET_USD", 0.0)
 # Held back from the core line, while the Orcs' line is on, for the Orcs'
 # live urgent and confirm wakes (spec §7.1, §10.6).

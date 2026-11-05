@@ -125,7 +125,8 @@ app.conf.task_routes = {
     # or the slow passes. Its watchdog runs on `slow`, never on `orcs`
     # (two long calls may hold both slots) and never in the census on
     # `fast` (N8). Both idle while the minds switch is off or the Orcs
-    # line is at 0, and no wake is admitted until the render admits.
+    # line is at 0: the render pass then answers every wake by code and
+    # admits none (wake.render_queued).
     "bot_program.orcs.tasks.orc_think": {"queue": "orcs"},
     "bot_program.orcs.tasks.orc_minds_watch": {"queue": "slow"},
 }

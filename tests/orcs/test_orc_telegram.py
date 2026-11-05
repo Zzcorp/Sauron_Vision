@@ -76,8 +76,9 @@ class TheOrcCommandTests(_OrcEye):
         self.assertIn("REAL MONEY · bot idea", t)
         self.assertIn("Rank: L0 · Snaga (watches and writes: shadow only) "
                       "· n 0", t)
-        self.assertIn("State: Watching: a journal written by code, no "
-                      "model.", t)
+        # O2a (changed on purpose, 2026-11-05, A.62)
+        self.assertIn("State: Watching: a journal written by code; no model "
+                      "has read it yet.", t)
         self.assertIn("R at the last tick +0.42R · best +0.90R", t)
         self.assertIn("Stops: eToro holds 2380.00 · the care&#x27;s soft "
                       "stop 2385.50 (breakeven)", t)
@@ -128,9 +129,9 @@ class TheOrcCommandTests(_OrcEye):
         with patch("brain.research_agent.begin_ask",
                    side_effect=AssertionError("a model")):
             verdict, texts = self.said(f"/orc {self.row.pk} why hold?")
-        self.assertIn("Orcs do not answer questions yet: none calls a "
-                      "model. Ask Sauron instead: /q &lt;question&gt;.",
-                      texts[0])
+        # O2a (changed on purpose, A.62): true with the minds on too
+        self.assertIn("Orcs do not answer questions yet. Ask Sauron "
+                      "instead: /q &lt;question&gt;.", texts[0])
         self.assertEqual(ResearchMessage.objects.count(), 0)
         self.assertEqual(OrcJournal.objects.count(), before)
 
@@ -174,9 +175,9 @@ class TheOrcsCommandTests(_OrcEye):
     def test_orcs_off_writes_nothing_and_turns_nothing_off(self):
         from core.platform_control import PlatformComponent
         verdict, texts = self.said("/orcs off")
+        # O2a (changed on purpose, A.62): no Orc acts, minds on or off
         self.assertIn("Nothing to switch off: no Orc acts on a position; "
-                      "each keeps a journal only, and the care holds every "
-                      "position.", texts[0])
+                      "the care holds every position.", texts[0])
         self.assertTrue(PlatformComponent.objects.get(key="orcs").is_enabled)
 
     def test_no_orc_on_watch(self):
@@ -213,8 +214,9 @@ class TheRulesTests(_OrcEye):
 
     def test_help_on_lists_the_two_commands(self):
         verdict, texts = self.said("/help")
-        self.assertIn("/orc NUMBER — one Orc: its thesis, journal and the "
-                      "care beside it (no model)", texts[0])
+        # O2a (changed on purpose, A.62)
+        self.assertIn("/orc NUMBER — one Orc: its thesis, journal, plan in "
+                      "shadow and the care beside it", texts[0])
         self.assertIn("/orcs [CLASS] — every Orc on watch, one line each",
                       texts[0])
 

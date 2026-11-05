@@ -1,7 +1,8 @@
 """T10, THE QUEUE, ITS WORKER AND ITS WATCHDOG (the O2 spec A.16-A.19,
 A.51-A.56; §1.1.7 T10 and its extras; P4, P8-P14, P16, P17; 2026-11-05).
-Wakes are admitted and claimed by hand (the render does not admit yet),
-read by mind.think on the fake model (N7), watched by scheduler.watch at
+Wakes are admitted and claimed by hand (the render pass admits them since
+o2a-light; tests/orcs/test_orc_o2a_e2e.py drives that pass whole), read
+by mind.think on the fake model (N7), watched by scheduler.watch at
 chosen moments.
 
 - the stall alarm fires 20 minutes after the FIRST send, whatever
@@ -516,7 +517,7 @@ class TheTaskTests(_Queue):
     def test_a_render_pass_that_admitted_sends_one_ticket(self):
         """A.17: one orc_think ticket after a render pass that admitted any
         wake, none otherwise; render_queued reports its admitted count
-        (0 until the render admits)."""
+        (0 while no recorded wake waits)."""
         from bot_program.orcs import tasks, wake
         from bot_program.orcs.wake import RenderPass
         out = RenderPass(3, 1, admitted=2)

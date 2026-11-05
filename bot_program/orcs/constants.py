@@ -350,13 +350,41 @@ DRUM_PREFIX = "DR"
 RING_SAMPLES = 8
 RING_TTL_S = 3600
 
-#: OrcWake.status values O1 writes (no `pending`: dispatch is O2's).
+#: OrcWake.status values O1 wrote: a rendered wake answered by code, or a
+#: quiet one. O2a's full set is below (WAKE_STATUSES).
 WAKE_STATUS_SKIPPED = "skipped"
 WAKE_STATUS_QUIET = "quiet"
+#: The reason O1's render stored on every wake it did not find quiet. It
+#: stays readable: a wake that carries it reads as the code `pre_o2` (the
+#: O2 spec A.4; O2a, 2026-11-05). Nothing writes it any more.
 WAKE_SKIPPED_REASON = "no model before O2"
-#: The words a wake's status is shown in.
-STATUS_WORDS = {"skipped": "recorded only: no model before O2",
-                "quiet": "nothing new: a code reading"}
+#: The words a wake's status is shown in, one sentence each (the O2 spec
+#: A.4; O2a, 2026-11-05). `skipped` names its code's words
+#: (notes.wake_status_t fills {code} from WAKE_CODE_WORDS).
+STATUS_WORDS = {
+    "recorded": "recorded: its dossier is being written",
+    "quiet": "nothing new: a code reading",
+    "skipped": "answered by code: {code}",
+    "pending": "waiting for its model call",
+    "running": "a model is reading it",
+    "done": "answered in shadow",
+    "refused": "the answer was refused by the validator",
+    "failed": "the model call failed",
+    "late": "answered after the position closed: kept, applied to nothing",
+    "stale": "not answered in time: the care holds",
+    "merged": "merged into a newer wake",
+}
+#: A late answer whose cause is not the close (the Orc ended, a gate went
+#: OFF): its cause's words in place of "after the position closed".
+STATUS_LATE_T = "answered too late ({code}): kept, applied to nothing"
+#: The render's own words for a wake it hands on to admission with every
+#: gate ON (wake._render, the O2 spec A.7): admission decides next, in its
+#: own transaction, whether a model reads it or code answers it.
+WAKE_RENDERED_WORDS = "its dossier is written; a model may read it next"
+#: The card's rung (the O2 spec A.62): no model for a code answer, or a
+#: model's rung in tier words, never its id or its cost.
+RUNG_NONE = "No model (code only)"
+RUNG_T = "{rung} · {tier} tier, {effort} effort"
 #: The routing table's version the weather is computed for (display only).
 ROUTING_VERSION = "table-v1"
 
@@ -426,9 +454,11 @@ ORC_STATEMENT_TIMEOUT_MS = 5000
 MINDS_SWITCH = "orcs_minds"
 PLATFORM_MASTER = "platform_master"
 
-#: OrcWake.status, the full set (A.3; each fits max_length=12). O1 writes
-#: skipped and quiet; the settle writes running's ends; only scheduler.py
-#: writes pending, and recorded on a wake it sends back to the render.
+#: OrcWake.status, the full set (A.3; each fits max_length=12). The tick
+#: (wake.record) writes `recorded`, with no reason; the render writes
+#: `quiet`, or `skipped` with a code (a gate it reads OFF; render_failed);
+#: only scheduler.py writes `pending`, and `recorded` again on a wake it
+#: sends back to the render; the settle writes running's ends.
 WAKE_STATUS_RECORDED = "recorded"
 WAKE_STATUS_PENDING = "pending"
 WAKE_STATUS_RUNNING = "running"
@@ -459,6 +489,11 @@ CODE_AUTHORITY = "authority"
 CODE_ROW_CLOSED = "row_closed"
 CODE_DEAD = "dead"
 CODE_UNSENT = "unsent"
+#: A.7: a wake the render pass could not finish (its merge, its render or
+#: its admission raised): answered by code, never pending, never silence.
+CODE_RENDER_FAILED = "render_failed"
+#: A.4: the code O1's stored reason reads as (WAKE_SKIPPED_REASON).
+CODE_PRE_O2 = "pre_o2"
 CODE_UNBILLED = "unbilled"
 CODE_BILLED_FAILURE = "billed_failure"
 WAKE_CODES = (
@@ -486,7 +521,7 @@ WAKE_CODE_WORDS = {
     CODE_ROW_CLOSED: "the position is closed",
     "over_budget": "its dossier is over the size cap",
     "breaker": "the calls are paused after repeated failures",
-    "render_failed": "its dossier could not be written",
+    "render_failed": "its render failed: the worker log says why",
     "paused": "the minds were paused",
     "backlog": "it waited behind a busy worker",
     CODE_AUTHORITY: "a seat reads above L0, so no model is asked",

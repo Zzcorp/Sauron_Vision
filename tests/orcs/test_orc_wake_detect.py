@@ -1,11 +1,14 @@
 """WAKE DETECTION IN O1 (bot_program/orcs/wake.py, spec §1.3, §7.5, §5.2a):
 the tick detects every W-code once per key, records urgent reasons at
 once and spaces the others by 15 minutes, merges what the census left
-pending, and RECORDS each detected wake; the slow queue then renders it
-(wake.render_queued) with its complexity score, band, the day's weather
-and its dossier's block hashes. No model is asked: the wake is `skipped`
-("no model before O2"), or `quiet` with a code reading when the facts did
-not move. Nothing here sends, moves or calls anything.
+pending, and RECORDS each detected wake (`recorded`, O2a); the slow queue
+then renders it (wake.render_queued) with its complexity score, band, the
+day's weather and its dossier's block hashes. With the minds off, as they
+ship, no model is asked: the wake is answered by code (`skipped`,
+`minds_off`; O1 wrote "no model before O2"), or `quiet` with a code
+reading when the facts did not move; with the four gates on, the render
+pass admits it `pending` (O2a, 2026-11-05). Nothing here sends, moves or
+calls anything.
 
 Run with:  python manage.py test tests.orcs.test_orc_wake_detect
 """
@@ -77,8 +80,9 @@ class TheRecordTests(_Detect):
         self.assertEqual(len(wakes), 1)
         w = wakes[0]
         self.assertEqual(self.codes(w), ["W1"])
+        # O2a (changed on purpose, 2026-11-05): the minds off, as they ship
         self.assertEqual((w.status, w.skipped_reason, w.kind),
-                         ("skipped", "no model before O2", "birth"))
+                         ("skipped", "minds_off", "birth"))
         self.assertIsNotNone(w.score)
         self.assertIn(w.band, ("routine", "material", "complex", "extreme"))
         self.assertIn(w.day_class, ("calm", "eventful", "stormy"))
@@ -94,14 +98,14 @@ class TheRecordTests(_Detect):
         self.assertTrue(entry.headline.startswith("Wake detected: birth. "
                                                   "Complexity "))
         self.assertTrue(entry.headline.endswith(
-            "Recorded only: no model is asked yet."))
+            "Answered by code: the minds switch is off."), entry.headline)
         card = self.orc.card
         self.assertNotIn("wake", [j["kind"] for j in card["journal"]],
                          "the wake entry is kept off the card's journal")
         self.assertTrue(set(map(str, card_before)) <= set(map(
             str, card["journal"])) or len(card["journal"]) == 3)
         self.assertEqual(card["intellect"]["rung_t"],
-                         "no model (O1: code only)")
+                         "No model (code only)")
         self.assertTrue(card["intellect"]["score_t"].startswith("score "))
         self.assertIn(card["integrity"]["flag"], ("ok", "stale", "critical",
                                                   "contradiction"))
@@ -115,11 +119,34 @@ class TheRecordTests(_Detect):
         self.assertEqual(len(self.wakes()), 1)
 
     def test_no_wake_is_ever_pending(self):
+        """...while the minds are off, as they ship (O2a)."""
         from bot_program.orcs.models import OrcWake
         self.tick(T0)
         self._care(mfe_r=-0.6, r_now=-0.6, mae_r=-0.6)
         self.tick(T0 + timedelta(minutes=1))
         self.assertFalse(OrcWake.objects.filter(status="pending").exists())
+
+    def test_with_the_four_gates_on_the_render_pass_admits_it(self):
+        """O2a (A.3, A.7): the tick records `recorded`; with the platform
+        master, `orcs`, `orcs_minds` and the Orcs line on, the render
+        pass merges, renders and admits the wake `pending`, one per Orc;
+        nothing is sent from here (the claim is the minds' worker's)."""
+        from ai_agents.models import AgentTask
+        from bot_program.orcs.models import OrcWake
+        from tests.orcs.helpers_o2 import minds_on
+        minds_on(self)
+        self.tick(T0, render=False)
+        [w] = self.wakes()
+        self.assertEqual((w.status, w.skipped_reason), ("recorded", ""))
+        with patch("django.utils.timezone.now", return_value=T0):
+            from bot_program.orcs import wake
+            out = wake.render_queued()
+        self.assertEqual((tuple(out), out.admitted), ((1, 0), 1))
+        w.refresh_from_db()
+        self.assertEqual((w.status, w.dedupe_key),
+                         ("pending", f"orc{self.orc.pk}:pending"))
+        self.assertEqual(OrcWake.objects.filter(status="pending").count(), 1)
+        self.assertEqual(AgentTask.objects.count(), 0)
 
 
 class TheReasonTests(_Detect):

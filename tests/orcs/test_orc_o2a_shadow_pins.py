@@ -26,7 +26,8 @@ pinned by their source's hash (item h).
 - (g) no reverse-accessor read outside the surfaces;
 - (h) the frozen O1 functions, as O2a leaves them (after N8's lock);
 - A.45b: in O2 code, no write into the tick's own objects;
-- A.3: `pending` is written by scheduler.py only;
+- A.3: `pending` is written by scheduler.py only, and so is `merged`
+  (A.7: the merge is scheduler.absorb's, which the render pass calls);
 - §1.0 item 5: every journal kind and author written is in
   JOURNAL_KINDS and AUTHORS (and O2 code names them as constants).
 
@@ -62,7 +63,8 @@ COMMAND = BASE / "bot_program" / "management" / "commands" / "orcs.py"
 #: scheduler's settle; O2a's queue grows the scheduler (admission, the
 #: merge, the claim, the watchdogs, the breaker, the Orc's states); O2a's
 #: arm (2026-11-05) adds the queued intents at the tick (intents.py) and
-#: the scheduler's tickets.
+#: the scheduler's tickets. O2a's light (2026-11-05) adds no module: it
+#: wires the render pass to the scheduler and rewrites the words.
 O2_MODULES = ("mind_gateway", "doctrine", "validator", "mandate", "evidence",
               "mind", "scheduler", "intents")
 #: Each definition O2 adds to an O1 module, by module and qualified name.
@@ -83,7 +85,17 @@ O2_CODE = {
              # watches, the army's metronome, F6's reference, the render
              # pass's admitted count
              "_print_band", "_watch_refs", "watch_key", "metronome_h",
-             "_minds_switch_on", "RenderPass", "RenderPass.__new__"),
+             "_minds_switch_on", "RenderPass", "RenderPass.__new__",
+             # O2a's light (2026-11-05): the gates read once per render, a
+             # render pass that could not finish a wake (A.7)
+             "_gate_code", "_render_failed"),
+    # O2a's light (2026-11-05): the words (A.4, A.62): a wake's status in
+    # words, the card's intents and intellect, the plan on the line
+    "notes": ("wake_status_t", "_intents", "intellect_after", "_has_plan",
+              "_plan_short"),
+    # O2a's light (2026-11-05): /orc reads the minds once, and the Orc's
+    # model calls today
+    "surfaces": ("_minds", "_model_calls"),
     # O2a's queue (2026-11-05): the minds' worker, its ticket, its watchdog
     "tasks": ("_think_ticket", "orc_think", "orc_minds_watch"),
     # O2a's arm (2026-11-05): the O arm's would mode, the intents taken at
@@ -373,7 +385,11 @@ FROZEN_IMPORTERS = {
     "dashboard/views_orcs.py", "market_data/bot_bars.py",
     "market_data/candle_headroom.py",
 }
-NAMED_BY_THE_SPEC = set()
+NAMED_BY_THE_SPEC = {
+    # O2a's light (2026-11-05, the O2 spec A.62): the band's sentence under
+    # THE TRADERS counts the living Orcs (switches, constants, models)
+    "dashboard/council_band.py",
+}
 
 #: The surfaces that show what a model wrote (N1.6, test items f and g).
 SURFACES = {
@@ -985,21 +1001,33 @@ def _is_pending(node, values) -> bool:
         node, (ast.Name, ast.Attribute)) else False
 
 
-def pending_writes(tree, mod) -> list:
+def pending_writes(tree, mod, *, word="pending") -> list:
     """A.3: a `pending` status written, or an OrcWake created without a
     status of its own (the model's default is pending); outside
-    scheduler.py."""
+    scheduler.py. With `word` "merged" (A.7): the merge's status written
+    outside scheduler.py (its absorb)."""
     if mod == PENDING_WRITER:
         return []
-    values = pending_values()
+    from bot_program.orcs import constants as C
+    values = (pending_values() if word == "pending" else
+              {word} | {n for n, v in vars(C).items()
+                        if isinstance(v, str) and v == word})
     out = []
     for sub in ast.walk(tree):
         if isinstance(sub, (ast.Assign, ast.AnnAssign)) and \
-                sub.value is not None and _is_pending(sub.value, values):
+                sub.value is not None:
             targets = sub.targets if isinstance(sub, ast.Assign) \
                 else [sub.target]
-            out += [f"{mod}:{sub.lineno} {ast.unparse(t)}" for t in targets
-                    if isinstance(t, ast.Attribute) and t.attr == "status"]
+            for t in targets:
+                # `w.status, w.skipped_reason = X, ""` pairs each target
+                pairs = (zip(t.elts, sub.value.elts)
+                         if isinstance(t, ast.Tuple)
+                         and isinstance(sub.value, ast.Tuple)
+                         else [(t, sub.value)])
+                out += [f"{mod}:{sub.lineno} {ast.unparse(tt)}"
+                        for tt, vv in pairs
+                        if isinstance(tt, ast.Attribute)
+                        and tt.attr == "status" and _is_pending(vv, values)]
         if not isinstance(sub, ast.Call):
             continue
         chain = chain_of(sub.func)
@@ -1018,8 +1046,9 @@ def pending_writes(tree, mod) -> list:
                 if isinstance(k, ast.Constant) and k.value == "status" and \
                         _is_pending(v, values):
                     out.append(f"{mod}:{sub.lineno} defaults status=pending")
-        if (chain == ["OrcWake"] or chain[-3:] == ["OrcWake", "objects",
-                                                    "create"]) \
+        if word == "pending" and (
+                chain == ["OrcWake"] or chain[-3:] == ["OrcWake", "objects",
+                                                       "create"]) \
                 and "status" not in kw:
             out.append(f"{mod}:{sub.lineno} an OrcWake with the model's "
                        f"default status (pending)")
@@ -1380,6 +1409,20 @@ class PendingAndJournalTests(MindTestCase):
             with self.subTest(module=mod):
                 self.assertEqual(pending_writes(tree_of(path), mod), [])
 
+    def test_merged_is_written_by_scheduler_py_only(self):
+        """A.7: the render pass merges through scheduler.absorb, which
+        wake.py imports inside render_queued only."""
+        for mod, path in package_files():
+            with self.subTest(module=mod):
+                self.assertEqual(pending_writes(tree_of(path), mod,
+                                                word="merged"), [])
+        writes = pending_writes(tree_of(PKG / "scheduler.py"), "absorb",
+                                word="merged")
+        self.assertTrue(writes, "the merge writes `merged` in scheduler.py")
+        self.assertTrue(pending_writes(tree_of(PKG / "scheduler.py"),
+                                       "admit"),
+                        "admission writes `pending` in scheduler.py")
+
     def test_every_journal_kind_and_author_is_allowed(self):
         o2 = {mod for mod, _q, _n in o2_units()}
         for mod, path in package_files():
@@ -1521,11 +1564,21 @@ class TheRulesCanFailTests(MindTestCase):
                 w.status = "pending"
                 OrcWake.objects.filter(pk=1).update(status="pending")
                 OrcWake.objects.create(orc=orc, dedupe_key="k")
+                w.status, w.skipped_reason = WAKE_STATUS_PENDING, ""
             """))
-        self.assertEqual(len(pending_writes(bad, "wake")), 3)
+        self.assertEqual(len(pending_writes(bad, "wake")), 4)
         self.assertEqual(pending_writes(bad, PENDING_WRITER), [])
         ok = ast.parse("OrcWake.objects.filter(status='pending').count()\n")
         self.assertEqual(pending_writes(ok, "wake"), [])
+        merged = ast.parse(inspect.cleandoc("""
+            def f(w):
+                w.status = WAKE_STATUS_MERGED
+                OrcWake.objects.filter(pk=1).update(status="merged")
+            """))
+        self.assertEqual(len(pending_writes(merged, "wake", word="merged")),
+                         2)
+        self.assertEqual(pending_writes(merged, PENDING_WRITER,
+                                        word="merged"), [])
 
     def test_a_journal_kind_outside_the_tuples_is_found(self):
         bad = ast.parse(inspect.cleandoc("""

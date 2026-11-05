@@ -1,5 +1,7 @@
-"""WAKE DETECTION IN O1 (spec §1.3, §7.5, §5.2a): the tick DETECTS and
-RECORDS; nothing is dispatched, no model is asked.
+"""WAKE DETECTION (spec §1.3, §7.5, §5.2a): the tick DETECTS and RECORDS;
+the slow queue renders, merges and admits; a model reads a wake only on
+the minds' own worker (bot_program/orcs/scheduler.py), in shadow, never in
+the tick.
 
 In the tick, after the care, the facts, the predicates, the arms and the
 drums (bot_program/orcs/observe.py), `detect` reads what changed between
@@ -36,16 +38,28 @@ the wake memory is merged under the Orc's lock (journal.merge_seen,
 add_keys, add_reasons, consume_reasons), never written from a copy in
 hand.
 
-RECORDING IS SPLIT (2026-10-23). The tick writes the OrcWake with its
+RECORDING IS SPLIT (2026-10-23). The tick writes the OrcWake, status
+`recorded` with no reason (the O2 spec A.3; O1 wrote `skipped`), with its
 reasons and the tick's cheap facts (its moment, its price, the care's
 state, the predicates) and the memory that decided it: a handful of
 queries, never the dossier. The slow queue (tasks.orc_render_wakes,
-`render_queued`) then renders each recorded wake AS OF its moment: its
-complexity score, band and the day's class (complexity.py, weather.py),
-its dossier stored block by block (dossier.py), then the OrcWake's score
-and hashes, its status (`skipped`, "no model before O2"; or `quiet` under
-F6 with a code `reading` and Orc.latest_note), a journal `wake` entry kept
-off the card's lines, and the card's `intellect` and `integrity`.
+`render_queued`) then takes each recorded wake through three short
+transactions (A.7; O2a, 2026-11-05), none holding an Orc lock across the
+dossier:
+
+  1. scheduler.absorb: the Orc's pending wake merged into this one, so
+     its dossier lists every reason (P15);
+  2. render_wake, AS OF its moment: its complexity score, band and the
+     day's class (complexity.py, weather.py), its dossier stored block by
+     block (dossier.py), then the OrcWake's score and hashes and its
+     status: `quiet` under F6 (a code `reading` and Orc.latest_note);
+     `skipped` with the code of a gate it reads OFF (minds_off,
+     line_off...); else it stays `recorded` for admission. A journal
+     `wake` entry, kept off the card's lines, ends in those status words;
+     the card's `intellect` (no model's rung: RUNG_NONE) and `integrity`;
+  3. scheduler.admit (A.11): `pending`, or `skipped` with its code.
+
+A pass that admitted a wake sends one orc_think ticket (tasks.py).
 Detection, spacing and the proxy for the last answered facts hash live in
 Orc.seen; the tick never writes the minds' columns (last_wake_at,
 last_facts_hash).
@@ -61,11 +75,12 @@ army type's period, and fires the wake a validated answer asked for.
 
 `detect` never raises; a recorded wake is written in a savepoint, so a
 failure leaves the tick and the Orc as they were, and a quiet tick costs
-no query at all. A render that fails marks its wake `failed` and never
-stops the next.
+no query at all. A render pass that fails on a wake (its merge, its
+render or its admission) marks it `failed` in its components and answers
+it by code (`skipped`, render_failed): never pending, never retried,
+never counted as the worker's silence (P11), and never stopping the next.
 
-# O2: a recorded wake is dispatched (status `pending`, the router, the
-# reserve, the budget) instead of `skipped`; drum deliveries add W12.
+# O2b, O2c: the router; drum deliveries add W12
 """
 import hashlib
 import json
@@ -75,10 +90,11 @@ import re
 from datetime import timedelta
 
 from bot_program.orcs.constants import (BAND_HOLD_AFTER_URGENT_MIN,
+                                        CODE_MINDS_OFF, CODE_RENDER_FAILED,
                                         FACTS_HASH_VERSION,
                                         MIN_WAKE_SPACING_MIN,
-                                        PRINT_BANDS_MIN, STATE_DEAD,
-                                        STATUS_WORDS, VENUE_LIVE,
+                                        PRINT_BANDS_MIN, RUNG_NONE,
+                                        STATE_DEAD, VENUE_LIVE,
                                         VENUE_PAPER, W3_NEAR_ATR1H,
                                         W3_ONCE_H, W4_GIVEBACK_SHARE,
                                         W4_THRESHOLDS, W5_EARNINGS_H,
@@ -88,13 +104,15 @@ from bot_program.orcs.constants import (BAND_HOLD_AFTER_URGENT_MIN,
                                         W11_CLOSE_BEFORE_MIN,
                                         W11_METRONOME_H, W11_OPEN_AFTER_MIN,
                                         W11_WEEKEND_BEFORE_H,
-                                        WAKE_KEYS_KEPT, WAKE_SKIPPED_REASON,
+                                        WAKE_KEYS_KEPT,
+                                        WAKE_RENDERED_WORDS,
+                                        WAKE_STATUS_PENDING,
                                         WAKE_STATUS_QUIET,
+                                        WAKE_STATUS_RECORDED,
                                         WAKE_STATUS_SKIPPED)
 
 logger = logging.getLogger(__name__)
 
-RUNG_O1 = "no model (O1: code only)"
 OPEN_STATUSES = ("OPEN", "CLOSE_PENDING")
 #: The reasons read from a STATE (not a transition): remembered for life in
 #: seen["wake_once"], so they fire once however long the position lives.
@@ -765,7 +783,8 @@ def record(orc, trade, reasons, *, now, bot=None, price=None, cache=None,
         dedupe_key=f"orc{orc.pk}:{now:%Y%m%d%H%M%S}:{reasons[0]['key']}"
         [:120],
         priority=1.0 if urgent else 0.0, kind=_kind_of(reasons),
-        status=WAKE_STATUS_SKIPPED, skipped_reason=WAKE_SKIPPED_REASON,
+        # A.3 (O2a): `recorded`, no reason; the render pass decides
+        status=WAKE_STATUS_RECORDED, skipped_reason="",
         components={"render": RENDER_QUEUED, "as_of": now.isoformat(),
                     "price": (str(price) if _f(price) is not None
                               else None),
@@ -814,16 +833,27 @@ def record(orc, trade, reasons, *, now, bot=None, price=None, cache=None,
 #: wake sent back by the settle renders again as of its own moment, with
 #: the care and the predicates the tick saw, and its journal_as_of (A.24).
 RERENDER_KEEP = ("care", "predicates", "prev_recorded", "journal_as_of")
+#: What the merge and an earlier admission wrote, kept by every render
+#: (A.7, A.11 step 9, P9): the first send a merged wake handed on, and the
+#: tick's own key of a wake the settle sent back.
+ADMISSION_KEEP = ("queued_at_inherited", "record_key")
 
 
 def _minds_on() -> bool:
     """The four gates of A.2, read once per render (O2a)."""
+    return _gate_code() == ""
+
+
+def _gate_code() -> str:
+    """The first of A.2's four gates that is OFF, as its code, read once
+    per render; "" when all four are ON. Unreadable reads OFF
+    (`minds_off`)."""
     try:
-        from bot_program.orcs.switches import minds_on
-        return minds_on()
+        from bot_program.orcs.switches import gate_code
+        return gate_code()
     except Exception as e:  # noqa: BLE001 — unread is off
         logger.info("[orcs] the minds' gates could not be read: %s", e)
-        return False
+        return CODE_MINDS_OFF
 
 
 def _minds_switch_on() -> bool:
@@ -887,9 +917,9 @@ def render_wake(wake):
     if isinstance(tick.get("predicates"), dict):
         ctx["tick_predicates"] = tick["predicates"]
     ctx["prev_recorded"] = tick.get("prev_recorded")
-    minds = _minds_on()
+    gate = _gate_code()
     vctx = None
-    if minds:
+    if not gate:
         ctx["minds"] = True
         upto = _parse(tick.get("journal_as_of"))
         if upto is not None:
@@ -897,12 +927,15 @@ def render_wake(wake):
         vctx = _evidence(orc, trade, ctx, reasons, now)
     with transaction.atomic():
         return _render(wake, orc, trade, tick, ctx, reasons, now=now,
-                       real=real, vctx=vctx)
+                       real=real, vctx=vctx, gate=gate)
 
 
-def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx):
+def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx,
+            gate=""):
     """O1's per-wake render, in its own transaction: it takes the Orc's
-    lock only at its final journal.append."""
+    lock only at its final journal.append. Its status (A.3; O2a): `quiet`
+    under F6; `skipped` with `gate`, the code of a gate read OFF; else
+    `recorded`, for admission (A.7 step 3)."""
     from bot_program.orcs import complexity, dossier, journal, weather
     price = tick.get("price")
     day = weather.current(orc.user, orc.asset_class, now, real=real)
@@ -933,17 +966,20 @@ def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx):
     reference = (orc.last_facts_hash if _minds_switch_on()
                  else seen.get("answered_hash"))
     quiet = complexity.f6(reasons, fh, reference)
-    status = WAKE_STATUS_QUIET if quiet else WAKE_STATUS_SKIPPED
+    code = "" if quiet else str(gate or "")
+    status = (WAKE_STATUS_QUIET if quiet else
+              WAKE_STATUS_SKIPPED if code else WAKE_STATUS_RECORDED)
     words = reasons_words(reasons)
     wake.score, wake.band, wake.day_class = sc, band, day.day_class
     wake.status = status
-    wake.skipped_reason = "" if quiet else WAKE_SKIPPED_REASON
+    wake.skipped_reason = code
     wake.components = {**comps, "stakes": st, "floor": floor,
                        "f5": f5_items, "f6": quiet,
                        "tokens": rendered.get("tokens"),
                        "trimmed": rendered.get("trimmed"),
                        "render": RENDER_DONE, "as_of": tick.get("as_of"),
-                       "price": price}
+                       "price": price,
+                       **{k: tick[k] for k in ADMISSION_KEEP if k in tick}}
     if vctx is not None:
         # O2a (A.8): what the mind reads, as of this dossier
         wake.components.update({
@@ -961,18 +997,24 @@ def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx):
     if not quiet:
         remember["answered_hash"] = fh
     from bot_program.orcs.integrity import words as integrity_words
+    from bot_program.orcs.notes import wake_status_t
+    # A.62 (O2a): the render's own status words; a wake it hands on to
+    # admission says so, and no model's rung is written until a model was
+    # sent the wake (mind.write_intellect, at the settle)
+    status_t = (WAKE_RENDERED_WORDS if status == WAKE_STATUS_RECORDED
+                else wake_status_t(status, code))
     card_extra = {
         "intellect": {"score_v": round(sc), "score_t":
                       f"score {sc:.0f} · {band}", "band": band,
-                      "day_class": day.day_class, "rung_t": RUNG_O1,
-                      "status_t": STATUS_WORDS.get(status, status),
+                      "day_class": day.day_class, "rung_t": RUNG_NONE,
+                      "status_t": status_t, "wake": wake.pk,
                       "escalated": False, "late": False,
                       "at": now.isoformat()},
         "integrity": {"flag": (ctx.get("integrity") or {}).get("flag", "ok"),
                       "t": integrity_words(ctx.get("integrity"))}}
     headline = (f"Wake detected: {words}. Complexity {sc:.0f} ({band}); "
-                f"the day is {day.day_class}. Recorded only: no model is "
-                f"asked yet.")
+                f"the day is {day.day_class}. {status_t[:1].upper()}"
+                f"{status_t[1:]}.")
     journal.append(orc, "wake", headline, body={
         "wake": wake.pk, "reasons": [r.get("t") for r in reasons],
         "score": sc, "band": band, "day_class": day.day_class,
@@ -992,8 +1034,7 @@ def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx):
 class RenderPass(tuple):
     """What one render pass did: (rendered, failed), as O1's callers read
     it, and `admitted`, the wakes it admitted to the minds' queue (the O2
-    spec A.7, A.17; O2a 2026-11-05). The render does not admit yet, so
-    `admitted` is 0 until it does; tasks.orc_render_wakes sends one
+    spec A.7, A.17; O2a 2026-11-05): tasks.orc_render_wakes sends one
     orc_think ticket after a pass that admitted any wake."""
 
     def __new__(cls, rendered=0, failed=0, admitted=0):
@@ -1003,11 +1044,23 @@ class RenderPass(tuple):
 
 
 def render_queued(*, limit=RENDER_BATCH) -> tuple:
-    """(rendered, failed): the recorded wakes still waiting for their
-    dossier, oldest first, each in its own savepoint. One that fails is
-    marked `failed` with its error's kind (never retried, never stopping
-    the next). Never raises. A RenderPass: its `admitted` count is 0 until
-    the render admits (O2a's last commit)."""
+    """The recorded wakes still waiting for their dossier, oldest first,
+    each through three short transactions (the O2 spec A.7; O2a,
+    2026-11-05), none holding an Orc lock across the dossier render (N8):
+
+      1. scheduler.absorb: the Orc's pending wake merged into this one,
+         under the Orc's lock, committed before the render (P15);
+      2. render_wake, in O1's own per-wake transaction;
+      3. scheduler.admit: `pending`, or `skipped` with its code, the Orc's
+         lock taken for the status write only (A.11).
+
+    A wake whose merge, render or admission raises is marked `failed` in
+    its components and answered by code (`skipped`, render_failed): never
+    pending, never retried, never the worker's silence (P11), and never
+    stopping the next. The scheduler is imported here only, so the tick's
+    import path never loads it. Never raises. A RenderPass: (rendered,
+    failed) and the count admitted."""
+    from bot_program.orcs import scheduler
     from bot_program.orcs.models import OrcWake
     try:
         ids = list(OrcWake.objects
@@ -1016,32 +1069,65 @@ def render_queued(*, limit=RENDER_BATCH) -> tuple:
     except Exception as e:  # noqa: BLE001
         logger.warning("[orcs] the queued wakes could not be listed: %s", e)
         return RenderPass(0, 0)
-    done = failed = 0
+    done = failed = admitted = 0
     for wid in ids:
         try:
-            # render_wake holds its own transaction (O2a): the minds'
-            # evidence facts commit before it, so no Orc lock is held
-            # across a dossier render (N8)
             w = (OrcWake.objects
                  .select_related("orc", "orc__root_trade", "orc__user")
                  .get(pk=wid))
             if (w.components or {}).get("render") != RENDER_QUEUED:
                 continue
+            scheduler.absorb(w)
             render_wake(w)
             done += 1
         except Exception as e:  # noqa: BLE001 — one wake never stops one
             failed += 1
             logger.warning("[orcs] wake %s not rendered: %s", wid, e)
-            try:
-                w = OrcWake.objects.filter(pk=wid).first()
-                if w is not None:
-                    w.components = {**(w.components or {}),
-                                    "render": RENDER_FAILED,
-                                    "render_error": type(e).__name__}
-                    w.save(update_fields=["components"])
-            except Exception:  # noqa: BLE001
-                pass
-    return RenderPass(done, failed)
+            _render_failed(wid, e, stage="render")
+            continue
+        try:
+            out = scheduler.admit(w)
+        except Exception as e:  # noqa: BLE001 — answered by code, logged
+            logger.warning("[orcs] wake %s not admitted: %s", wid, e)
+            _render_failed(wid, e, stage="admit")
+            continue
+        if out.get("status") == WAKE_STATUS_PENDING:
+            admitted += 1
+    return RenderPass(done, failed, admitted)
+
+
+def _render_failed(wid, error, *, stage) -> None:
+    """A wake the render pass could not finish (A.7, P11): its components
+    say so (O1's render "failed" and the error's kind, or the admission's
+    error beside a done render), and a wake still waiting for admission is
+    answered by code, `skipped` with render_failed. Never pending, never
+    retried. Fenced: a write that fails is logged."""
+    from bot_program.orcs.models import OrcWake
+    try:
+        w = OrcWake.objects.filter(pk=wid).first()
+        if w is None:
+            return
+        comps = dict(w.components or {})
+        if stage == "render":
+            comps.update(render=RENDER_FAILED,
+                         render_error=type(error).__name__)
+        else:
+            comps["admit_error"] = type(error).__name__
+        w.components = comps
+        fields = ["components"]
+        # a failed render rolled its own writes back; a failed admission
+        # leaves a wake the render already answered by code (a gate OFF)
+        # with that code
+        waiting = ((WAKE_STATUS_RECORDED, WAKE_STATUS_SKIPPED)
+                   if stage == "render" else (WAKE_STATUS_RECORDED,))
+        if w.status in waiting:
+            w.status, w.skipped_reason = (WAKE_STATUS_SKIPPED,
+                                          CODE_RENDER_FAILED)
+            fields += ["status", "skipped_reason"]
+        w.save(update_fields=fields)
+    except Exception:  # noqa: BLE001
+        logger.warning("[orcs] wake %s: its failure could not be written",
+                       wid, exc_info=True)
 
 
 # ── the census's reasons (merged by the next tick) ───────────────────────

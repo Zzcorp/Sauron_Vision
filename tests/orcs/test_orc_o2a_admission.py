@@ -1,8 +1,9 @@
 """T3, ADMISSION AND THE MERGE (the O2 spec A.7 step 1, A.11-A.16 and the
 claim's re-checks of A.18; §1.1.7 T3, with T4's merge; P1, P5, P6, P7,
-P9, P12, P15; 2026-11-05). The render does not admit yet: these tests
-drive scheduler.absorb and scheduler.admit as the render pass will call
-them, then scheduler.claim and mind.think on the fake model (N7).
+P9, P12, P15; 2026-11-05). The render pass calls scheduler.absorb and
+scheduler.admit (wake.render_queued, since o2a-light); these tests drive
+them by hand as it calls them, then scheduler.claim and mind.think on
+the fake model (N7).
 
 - every code of A.11 is a pair inside one test (ZERO_CALL_CODES): one
   request with every gate ON, then only the one condition flipped, the
@@ -75,14 +76,15 @@ class QueueFixture(MindFixture):
 
     def twin(self, w, *, reasons=None, orc=None, **comps):
         """A rendered wake on `w`'s stored dossier, with its own reasons and
-        tick key, its status as O1's render leaves it."""
+        tick key, its status as the render leaves it with the four gates
+        on: `recorded`, no code (A.3, o2a-light)."""
         from bot_program.orcs.models import OrcWake
         orc = orc or self.orc
         n = OrcWake.objects.count()
         return OrcWake.objects.create(
             orc_id=orc.pk, reasons=list(reasons or w.reasons),
             dedupe_key=f"orc{orc.pk}:twin{n}:{w.pk}", kind=w.kind,
-            status="skipped", skipped_reason="no model before O2",
+            status="recorded", skipped_reason="",
             components={**dict(w.components or {}), **comps},
             block_hashes=list(w.block_hashes or []), score=w.score,
             band=w.band, day_class=w.day_class)

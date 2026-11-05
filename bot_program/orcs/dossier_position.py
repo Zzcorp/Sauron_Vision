@@ -14,9 +14,9 @@ debate stores).
   PS2  the thesis and its provenance (money-free, thesis.provenance), the
        debate's sides, and the operator's own thesis (O1d) as a view: his
        words, never a fact
-  PS3  "no plan yet: the Orc writes one from O2"; from O2a, once a model
-       answered: the plan drawn by code, its version, and the LAST
-       decision's expectation with its result (hit, missed or pending)
+  PS3  "no plan yet" while no model has answered; once one has: the plan
+       drawn by code, its version, and the LAST decision's expectation
+       with its result (hit, missed or pending)
   PS4  the mandate: worst case, gross, the realized loss in R, the adds
        left by the army type (less the officer's would-adds), re-entry
        left, the book's headroom in R; from O2a the counters V2 and I12
@@ -30,7 +30,8 @@ debate stores).
        stop and any refusal, the last 10 stop moves, Aragorn's actions
   PS7  the reviewer's verdicts of 24 h, the reasoning as a view
   PS8  the war drums heard since the last wake
-  PS9-PS11  dashes until O2
+  PS9-PS11  dashes, each saying what is not there yet (the temperament,
+       the lessons, the Captain), true whatever the minds' switches say
   PS12 (tail) the menu, each row with its `watch` (O2a: may a plan clause
        watch it, at least PLAN_WATCH_MIN_ATR1H x ATR(1h) from the mark) and
        BE with its cost, the candidates (unordered, after the F5 shrink),
@@ -47,7 +48,7 @@ from bot_program.orcs.plain import row_marks, voice
 
 logger = logging.getLogger(__name__)
 
-PS3_WORDS = "no plan yet: the Orc writes one from O2"
+PS3_WORDS = "no plan yet"
 PS5_FACTS = 12
 PS6_MOVES = 10
 
@@ -480,8 +481,8 @@ def ps(orc, row, ctx) -> dict:
     # O2: PS9 the temperament's lead voices and lane texts (§4.6), PS10
     # the lessons and weapons of the lineage (§6.10-6.11), PS11 the
     # Captain's orders and the Emperor's theme orders (§4.2, §4.6).
-    out["ps9"] = "— (the temperament arrives with O2)"
-    out["ps10"] = "— (no lesson yet: the lineage's record starts in O2)"
+    out["ps9"] = "— (no temperament drawn)"
+    out["ps10"] = "— (no lesson yet)"
     out["ps11"] = "— (no Captain seated yet)"
     return out
 
@@ -552,5 +553,5 @@ def ps12(ctx, row=None) -> dict:
             "candidates": sorted(cands, key=lambda c: c["id"]) or "—",
             # Later: continuation_odds (backtester/proving/memory.py,
             # §5.2): no reader exists yet; it stays a dash through O2
-            "odds": {"continuation": "— (continuation odds arrive with O2)",
+            "odds": {"continuation": "— (not measured)",
                      "recovery": _recovery(ctx, row)}}

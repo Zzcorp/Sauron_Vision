@@ -25,11 +25,12 @@ The Orcs' mind switches (2026-11-05, the Orcs' O2 spec N2, §4 Q0 and Q1;
 test T19): each lets a model spend AI money and moves no account money,
 so it is in ORC_MIND_SWITCHES, never in LIVE_MONEY_SWITCHES, and turning
 it on takes the same PIN at every door. The door, audit, "all on" and
-OFF cases run over PIN_SWITCHES (both tuples), on Orc rows the fixture
-makes itself: no seeded row exists until the minds ship (spec A.1), and a
-row made by hand must already be guarded. The seed and non-live cases
-stay on the seeded rows. Every sentence says what its key does: "moves
-real money", or "lets a model spend AI money", never one for the other.
+OFF cases run over PIN_SWITCHES (both tuples), on the seeded rows: the
+Orc Minds row ships with the minds, OFF (spec A.1, 2026-11-05), and a row
+made again by hand is guarded too (section 14). The seed and non-live
+checks run over PIN_SWITCHES as well. Every sentence says what its key
+does: "moves real money", or "lets a model spend AI money", never one
+for the other.
 
 The PIN below is a test-only value set through the profile's own helper.
 
@@ -86,20 +87,9 @@ def _pin_keys():
     return PIN_SWITCHES
 
 
-#: The name the Orc Minds row carries (spec A.1); the fixture's own row
-#: carries it too, so the sentences read as the page will.
+#: The name the seeded Orc Minds row carries (spec A.1,
+#: core/platform_control.py), so the sentences read as the page does.
 ORC_ROW_NAME = "Orc Minds (models in shadow)"
-
-
-def _orc_rows():
-    """The Orc mind switches' rows, made by the test: a System row each,
-    OFF, so "all on" beside System would reach it. A seeded row, once one
-    ships, is used as it is."""
-    from core.platform_control import ORC_MIND_SWITCHES, PlatformComponent
-    for key in ORC_MIND_SWITCHES:
-        PlatformComponent.objects.get_or_create(key=key, defaults={
-            "name": ORC_ROW_NAME if key == "orcs_minds" else key,
-            "category": "system", "is_enabled": False})
 
 
 def _row(key):
@@ -159,17 +149,13 @@ def _set_count(session, n):
 
 class _Fixture(TestCase):
 
-    #: Make the Orc mind switches' rows (2026-11-05): no seeded row exists
-    #: until the minds ship, so the cases over PIN_SWITCHES make their own.
-    orc_rows = True
-
     def setUp(self):
         from django.core.cache import cache
         from core.platform_control import seed_components
         cache.clear()
+        # Every PIN key's row is seeded, the Orc Minds row too since the
+        # minds ship (2026-11-05): no case makes its own.
         seed_components()
-        if self.orc_rows:
-            _orc_rows()
         self.admin = User.objects.create_superuser(
             "switch_admin", "switch_admin@example.test", "x")
         self.prof = _set_pin(self.admin)
@@ -522,11 +508,9 @@ def _audit_clear():
 # ── 4. non-live keys: exactly as before ─────────────────────────────────
 class NonLiveKeysUnchangedTests(_Fixture):
 
-    #: The seeded rows alone, as before the Orc rows: "all on"'s count
-    #: here is the seeded group's (the Orc rows' own case is section 14).
-    orc_rows = False
-
     def test_every_door_flips_a_non_live_key_both_ways_without_a_pin(self):
+        # none of these takes the PIN: no live-money key, no Orc mind key
+        self.assertFalse(set(NON_LIVE) & set(_pin_keys()))
         for key in NON_LIVE:
             name = _row(key).name
             resp = self.ops(key)
@@ -574,6 +558,10 @@ class NonLiveKeysUnchangedTests(_Fixture):
             row = PlatformComponent.objects.filter(key=key).first()
             if row is not None:
                 self.assertFalse(row.is_enabled, key)
+        # every PIN key is exempt, and its seeded row stays OFF
+        for key in _pin_keys():
+            self.assertIn(key, BULK_ENABLE_EXEMPT, key)
+            self.assertFalse(_row(key).is_enabled, key)
         self.assertFalse(PlatformComponent.objects.filter(
             category="system", is_enabled=False).exclude(
                 key__in=BULK_ENABLE_EXEMPT).exists())
@@ -890,27 +878,39 @@ class NoDocAdvisesARefusedCommandTests(_Fixture):
 # ── 8. a seed never arms ───────────────────────────────────────────────
 class SeedNeverArmsTests(TestCase):
 
-    def test_every_live_switch_seeds_off(self):
+    def test_every_pin_switch_seeds_off(self):
+        """Every key whose ON takes the PIN, the live-money switches and
+        the Orcs' mind switches (since the minds ship, 2026-11-05), is
+        seeded, and seeded OFF."""
         from core.platform_control import (DEFAULT_COMPONENTS,
                                            PlatformComponent, seed_components)
         seed_components()
-        for key in _live():
+        for key in _pin_keys():
             row = PlatformComponent.objects.filter(key=key).first()
             self.assertIsNotNone(row, f"{key} is not seeded")
             self.assertFalse(row.is_enabled, key)
+        # The Orc Minds row is a System row under the name its sentences
+        # carry (spec A.1).
+        minds = PlatformComponent.objects.get(key="orcs_minds")
+        self.assertEqual((minds.name, minds.category),
+                         (ORC_ROW_NAME, "system"))
         # One row ships ON, on the operator's word (2026-10-31): the demo
         # short proofs, which only ever touch eToro's demo account. It is
-        # no live-money switch, so no seed arms real money.
+        # no live-money switch, so no seed arms real money; and no Orc mind
+        # switch, so no seed lets a model spend AI money.
         self.assertEqual([c["key"] for c in DEFAULT_COMPONENTS
                           if "is_enabled" in c], ["short_proofs_demo"])
         self.assertNotIn("short_proofs_demo", _live())
+        self.assertNotIn("short_proofs_demo", _pin_keys())
 
     def test_a_reseed_leaves_an_armed_switch_armed(self):
         from core.platform_control import seed_components
         seed_components()
-        _raw("aragorn", True)
+        for key in ("aragorn", "orcs_minds"):
+            _raw(key, True)
         seed_components()
-        self.assertTrue(_row("aragorn").is_enabled)
+        for key in ("aragorn", "orcs_minds"):
+            self.assertTrue(_row(key).is_enabled, key)
 
 
 # ── 9. the pages ask for the PIN only where it is needed ───────────────
@@ -1386,8 +1386,8 @@ class OrcMindSwitchesTakeThePinTests(_Fixture):
                       "toggle here", line)
 
     def test_a_hand_made_orc_row_is_pin_guarded(self):
-        """Before its seeded row ships: the shell refuses the key with no
-        row at all, the Django admin may make the row OFF, and from then
+        """The seeded row deleted: the shell refuses the key with no row
+        at all, the Django admin may make the row again OFF, and from then
         on only /ops/ with the PIN turns it on."""
         from core.platform_control import PlatformComponent
         PlatformComponent.objects.filter(key="orcs_minds").delete()

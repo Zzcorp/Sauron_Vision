@@ -53,8 +53,8 @@ The rule, kept here and only here:
   when. Never the PIN, its length or its hash.
 * "All on" never reaches a PIN key: set_category excludes PIN_SWITCHES
   by name beside BULK_ENABLE_EXEMPT, so an edit of the exempt set cannot
-  open that door, and a row made by hand (an Orc mind switch before its
-  seeded row ships) is held back all the same.
+  open that door, and a row made by hand (an Orc mind switch's seeded
+  row deleted and made again) is held back all the same.
 * Other keys, and the "all on" exemptions, are as they were.
 
 What stays out of reach of any PIN: the ORM, `manage.py shell`, dbshell
