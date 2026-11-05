@@ -109,6 +109,25 @@ LIVE_MONEY_SWITCHES = (
     "smart_money",                  # moves stops, sizes real-money entries
 )
 
+#: The Orcs' mind switches (2026-11-05, the Orcs' O2 spec N2, §4 Q0 and
+#: Q1). None moves account money, so none is in LIVE_MONEY_SWITCHES and
+#: the Wall's count of real-money switches does not move (core/
+#: wall_facts.py). But each lets a model spend AI money, or changes what a
+#: model reads, so turning one ON takes the trading PIN at /ops/ exactly
+#: as a live-money switch does, and the shell and the Django admin refuse
+#: it (core/switch_pin.py); turning one OFF never asks. Named here by
+#: hand, never derived, for the reason above: a switch that spends is held
+#: because somebody wrote it down. Each arrives OFF, with its row, in the
+#: commit that ships what it gates.
+ORC_MIND_SWITCHES = (
+    "orcs_minds",                   # a model reads each Orc's wake, in shadow
+)
+
+#: Every switch whose ON takes the trading PIN, at every door
+#: (core/switch_pin.py): both tuples above, kept apart. The doors read this
+#: one; the Wall counts LIVE_MONEY_SWITCHES alone.
+PIN_SWITCHES = LIVE_MONEY_SWITCHES + ORC_MIND_SWITCHES
+
 #: Switches a category's "all on" button never turns on (2026-09-26,
 #: dashboard.views.admin_bulk_toggle): each is a separate decision, made by
 #: its own toggle (a live-money switch with the trading PIN, which the
@@ -121,7 +140,11 @@ LIVE_MONEY_SWITCHES = (
 #: (lore/policy.py SWITCHES, in the Agents group) are decisions of their
 #: own too: lore_staff after the first entries are reviewed,
 #: lore_background only after decision D1 (the briefing reaches readers
-#: who are not staff).
+#: who are not staff). Every PIN switch (PIN_SWITCHES, above) is also
+#: excluded by name where "all on" writes (core/switch_pin.set_category),
+#: so an Orc mind switch is held back before its key joins this set, which
+#: it does with its seeded row (tests/test_ops_cockpit.py wants every key
+#: here seeded; 2026-11-05).
 LORE_READER_SWITCHES = ("lore_staff", "lore_background")
 BULK_ENABLE_EXEMPT = frozenset({"morgul_brake", *LORE_READER_SWITCHES,
                                 *LIVE_MONEY_SWITCHES})

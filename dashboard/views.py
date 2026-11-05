@@ -4098,10 +4098,11 @@ def admin_dashboard(request):
 
     context["master_enabled"] = master_enabled
     context["components_by_category"] = components_by_category
-    # The live-money switches: their forms carry a PIN field while OFF
-    # (core/switch_pin.py, 2026-10-23).
-    from core.platform_control import LIVE_MONEY_SWITCHES
-    context["live_money_keys"] = LIVE_MONEY_SWITCHES
+    # The PIN switches: their forms carry a PIN field while OFF
+    # (core/switch_pin.py, 2026-10-23): the live-money switches and, since
+    # 2026-11-05, the Orcs' mind switches (PIN_SWITCHES).
+    from core.platform_control import PIN_SWITCHES
+    context["pin_keys"] = PIN_SWITCHES
 
     # What STOP ALL does NOT do. Toggling platform_master stops the scheduler
     # from running tasks; it does not close a single position. So an operator

@@ -21,6 +21,16 @@ The rule these tests pin (core/switch_pin.py is the one helper):
 * non-live keys behave exactly as before, and "all on" keeps its
   exemptions.
 
+The Orcs' mind switches (2026-11-05, the Orcs' O2 spec N2, §4 Q0 and Q1;
+test T19): each lets a model spend AI money and moves no account money,
+so it is in ORC_MIND_SWITCHES, never in LIVE_MONEY_SWITCHES, and turning
+it on takes the same PIN at every door. The door, audit, "all on" and
+OFF cases run over PIN_SWITCHES (both tuples), on Orc rows the fixture
+makes itself: no seeded row exists until the minds ship (spec A.1), and a
+row made by hand must already be guarded. The seed and non-live cases
+stay on the seeded rows. Every sentence says what its key does: "moves
+real money", or "lets a model spend AI money", never one for the other.
+
 The PIN below is a test-only value set through the profile's own helper.
 
 Run with:  python manage.py test tests.test_switch_pin
@@ -62,6 +72,34 @@ ADMIN_LIST = "/admin/core/platformcomponent/"
 def _live():
     from core.platform_control import LIVE_MONEY_SWITCHES
     return LIVE_MONEY_SWITCHES
+
+
+def _minds():
+    from core.platform_control import ORC_MIND_SWITCHES
+    return ORC_MIND_SWITCHES
+
+
+def _pin_keys():
+    """Every key whose ON takes the PIN: the live-money switches and the
+    Orcs' mind switches (core.platform_control.PIN_SWITCHES)."""
+    from core.platform_control import PIN_SWITCHES
+    return PIN_SWITCHES
+
+
+#: The name the Orc Minds row carries (spec A.1); the fixture's own row
+#: carries it too, so the sentences read as the page will.
+ORC_ROW_NAME = "Orc Minds (models in shadow)"
+
+
+def _orc_rows():
+    """The Orc mind switches' rows, made by the test: a System row each,
+    OFF, so "all on" beside System would reach it. A seeded row, once one
+    ships, is used as it is."""
+    from core.platform_control import ORC_MIND_SWITCHES, PlatformComponent
+    for key in ORC_MIND_SWITCHES:
+        PlatformComponent.objects.get_or_create(key=key, defaults={
+            "name": ORC_ROW_NAME if key == "orcs_minds" else key,
+            "category": "system", "is_enabled": False})
 
 
 def _row(key):
@@ -121,11 +159,17 @@ def _set_count(session, n):
 
 class _Fixture(TestCase):
 
+    #: Make the Orc mind switches' rows (2026-11-05): no seeded row exists
+    #: until the minds ship, so the cases over PIN_SWITCHES make their own.
+    orc_rows = True
+
     def setUp(self):
         from django.core.cache import cache
         from core.platform_control import seed_components
         cache.clear()
         seed_components()
+        if self.orc_rows:
+            _orc_rows()
         self.admin = User.objects.create_superuser(
             "switch_admin", "switch_admin@example.test", "x")
         self.prof = _set_pin(self.admin)
@@ -189,7 +233,7 @@ class EveryDoorRefusesOnWithoutThePinTests(_Fixture):
         self.assertFalse(_audit("switch_armed", key), door)
 
     def test_the_ops_toggle_without_a_pin_changes_nothing_and_says_why(self):
-        for key in _live():
+        for key in _pin_keys():
             old = timezone.now() - timedelta(days=3)
             from core.platform_control import PlatformComponent
             PlatformComponent.objects.filter(key=key).update(updated_at=old)
@@ -203,7 +247,7 @@ class EveryDoorRefusesOnWithoutThePinTests(_Fixture):
             self.assertEqual(_row(key).updated_at, old, key)
 
     def test_a_blank_pin_is_a_missing_pin(self):
-        for key in _live():
+        for key in _pin_keys():
             resp = self.ops(key, want="on", pin="")
             self.assertIn("trading PIN", _flashes(resp), key)
             self._refused(key, "ops", door="ops, blank pin")
@@ -211,13 +255,13 @@ class EveryDoorRefusesOnWithoutThePinTests(_Fixture):
     def test_a_form_without_want_still_cannot_arm(self):
         """An old page, or a hand-made POST with no `want`: the toggle
         reads the row (OFF), so the ask is ON, and ON takes the PIN."""
-        for key in _live():
+        for key in _pin_keys():
             resp = self.ops(key)
             self.assertIn("trading PIN", _flashes(resp), key)
             self._refused(key, "ops", door="ops, no want")
 
     def test_the_admin_dashboard_forms_refuse_too(self):
-        for key in _live():
+        for key in _pin_keys():
             resp = self.dashboard(key)
             self.assertRedirects(resp, "/admin-dashboard/",
                                  fetch_redirect_response=False)
@@ -225,7 +269,7 @@ class EveryDoorRefusesOnWithoutThePinTests(_Fixture):
             self._refused(key, "admin_dashboard", door="admin dashboard")
 
     def test_the_system_map_refuses_with_a_sentence_naming_ops(self):
-        for key in _live():
+        for key in _pin_keys():
             resp = self.map(key)
             self.assertEqual(resp.status_code, 403, key)
             body = resp.json()
@@ -239,12 +283,12 @@ class EveryDoorRefusesOnWithoutThePinTests(_Fixture):
         resp = self.client.post(BULK, {"category": "system",
                                        "action": "enable", "next": "ops"})
         self.assertRedirects(resp, "/ops/", fetch_redirect_response=False)
-        for key in _live():
+        for key in _pin_keys():
             self.assertFalse(_row(key).is_enabled, key)
             self.assertFalse(_audit("switch_armed", key), key)
 
     def test_the_django_admin_changelist_checkbox_refuses(self):
-        for key in _live():
+        for key in _pin_keys():
             resp = self.admin_changelist(key, on=True)
             # Not a form error (that would drop every other row's save):
             # the row stays as stored and a message says why.
@@ -255,7 +299,7 @@ class EveryDoorRefusesOnWithoutThePinTests(_Fixture):
             self._refused(key, "django_admin", door="admin changelist")
 
     def test_the_django_admin_change_form_refuses(self):
-        for key in _live():
+        for key in _pin_keys():
             resp = self.admin_change(key, on=True)
             self.assertEqual(resp.status_code, 200, key)
             self.assertContains(resp, "/ops/")
@@ -263,7 +307,7 @@ class EveryDoorRefusesOnWithoutThePinTests(_Fixture):
 
     def test_the_django_admin_add_form_cannot_create_a_live_row_on(self):
         from core.platform_control import PlatformComponent
-        for key in _live():
+        for key in _pin_keys():
             PlatformComponent.objects.filter(key=key).delete()
             resp = self.admin_add(key, on=True)
             self.assertEqual(resp.status_code, 200, key)
@@ -276,7 +320,7 @@ class EveryDoorRefusesOnWithoutThePinTests(_Fixture):
     def test_renaming_an_enabled_row_into_a_live_key_is_refused(self):
         from core.platform_control import PlatformComponent
         _raw("scraper_news", True)
-        for key in _live():
+        for key in _pin_keys():
             PlatformComponent.objects.filter(key=key).delete()
             resp = self.admin_change("scraper_news", on=True, new_key=key)
             self.assertEqual(resp.status_code, 200, key)
@@ -287,7 +331,7 @@ class EveryDoorRefusesOnWithoutThePinTests(_Fixture):
                              "django_admin")
 
     def test_manage_py_component_on_refuses_and_points_to_ops(self):
-        for key in _live():
+        for key in _pin_keys():
             with self.assertRaises(CommandError) as ctx:
                 call_command("component", "on", key, stdout=StringIO())
             said = str(ctx.exception)
@@ -298,7 +342,7 @@ class EveryDoorRefusesOnWithoutThePinTests(_Fixture):
 
     def test_a_programmatic_call_without_a_request_is_refused(self):
         from core.switch_pin import set_switch
-        for key in _live():
+        for key in _pin_keys():
             res = set_switch(key, True, via="shell")
             self.assertFalse(res.ok, key)
             self.assertEqual(res.refusal, "no_pin_here", key)
@@ -310,7 +354,7 @@ class TheRightPinArmsTests(_Fixture):
 
     def test_ops_with_the_pin_turns_each_live_switch_on_and_records_it(self):
         from core.platform_control import PlatformComponent
-        for key in _live():
+        for key in _pin_keys():
             old = timezone.now() - timedelta(days=3)
             PlatformComponent.objects.filter(key=key).update(updated_at=old)
             resp = self.ops(key, want="on", pin=TEST_PIN)
@@ -329,7 +373,7 @@ class TheRightPinArmsTests(_Fixture):
             self.assertIsNotNone(armed.created_at)
 
     def test_the_admin_dashboard_forms_arm_with_the_pin(self):
-        for key in _live():
+        for key in _pin_keys():
             resp = self.dashboard(key, want="on", pin=TEST_PIN)
             self.assertRedirects(resp, "/admin-dashboard/",
                                  fetch_redirect_response=False)
@@ -374,7 +418,7 @@ class TheRightPinArmsTests(_Fixture):
         said = []
         try:
             logging.getLogger("core.switch_pin").debug("capture-canary")
-            for key in ("aragorn", "smart_money"):
+            for key in ("aragorn", "smart_money", "orcs_minds"):
                 said.append(_flashes(self.ops(key, want="on", pin=WRONG_PIN)))
                 said.append(_flashes(self.ops(key, want="on", pin=TEST_PIN)))
                 said.append(_flashes(self.ops(key, want="off")))
@@ -432,7 +476,7 @@ class OffIsFreeEverywhereTests(_Fixture):
             ("admin change form", "django_admin",
              lambda k: self.admin_change(k, on=False)),
         )
-        for key in _live():
+        for key in _pin_keys():
             for door, via, flip in doors:
                 _raw(key, True)
                 resp = flip(key)
@@ -440,7 +484,7 @@ class OffIsFreeEverywhereTests(_Fixture):
                 self._disarmed(key, via, f"{door} / {key}")
                 _audit_clear()
         # the shell, and no PIN prompt anywhere
-        for key in _live():
+        for key in _pin_keys():
             _raw(key, True)
             out = StringIO()
             call_command("component", "off", key, stdout=out)
@@ -464,7 +508,7 @@ class OffIsFreeEverywhereTests(_Fixture):
         self.assertRedirects(resp, "/ops/", fetch_redirect_response=False)
         self.assertFalse(PlatformComponent.objects.filter(
             category="system", is_enabled=True).exists())
-        for key in _live():
+        for key in _pin_keys():
             [row] = _audit("switch_disarmed", key)
             self.assertEqual(row.data["via"], "all_off")
             self.assertEqual(row.data["who"], "switch_admin")
@@ -477,6 +521,10 @@ def _audit_clear():
 
 # ── 4. non-live keys: exactly as before ─────────────────────────────────
 class NonLiveKeysUnchangedTests(_Fixture):
+
+    #: The seeded rows alone, as before the Orc rows: "all on"'s count
+    #: here is the seeded group's (the Orc rows' own case is section 14).
+    orc_rows = False
 
     def test_every_door_flips_a_non_live_key_both_ways_without_a_pin(self):
         for key in NON_LIVE:
@@ -775,20 +823,24 @@ def _documented_orm_arms(root=None):
 class NoDocAdvisesARefusedCommandTests(_Fixture):
 
     def test_no_document_tells_the_operator_to_arm_real_money_by_shell(self):
-        live = set(_live())
+        """...nor a model's AI spend (2026-11-05): `component on` refuses
+        every PIN key, so no page prints it for one, not even to say it is
+        refused (name the command without the key)."""
+        pin = set(_pin_keys())
         bad = [(k, where) for k, where in _documented_on_commands()
-               if k in live]
+               if k in pin]
         self.assertEqual(bad, [], "these would now be refused: say /ops/ "
                                   "with the trading PIN instead")
 
     def test_no_document_arms_real_money_through_the_orm(self):
         """deploy/ETORO_DEPARTURE.md's THE FLIP once printed a `manage.py
         shell -c` that set etoro_leverage_live with an ORM update: no PIN,
-        and no switch_armed row on the audit chain."""
-        live = set(_live())
+        and no switch_armed row on the audit chain. The same for a switch
+        that lets a model spend AI money (2026-11-05)."""
+        pin = set(_pin_keys())
         bad = sorted({(k, where) for k, where in _documented_orm_arms()
-                      if k in live})
-        self.assertEqual(bad, [], "these arm real money by the shell: say "
+                      if k in pin})
+        self.assertEqual(bad, [], "these arm a PIN switch by the shell: say "
                                   "/ops/ with the trading PIN instead")
 
     def test_the_scans_see_every_place_advice_lives(self):
@@ -879,7 +931,7 @@ def _toggle_forms(html):
 class TheOpsPageAsksOnlyWhereItMustTests(_Fixture):
 
     def _check(self, html, page):
-        live = set(_live())
+        live = set(_pin_keys())
         forms = _toggle_forms(html)
         self.assertTrue(forms, page)
         seen_live_off = seen_live_on = seen_plain = False
@@ -908,7 +960,7 @@ class TheOpsPageAsksOnlyWhereItMustTests(_Fixture):
         self._check(resp.content.decode(), "/ops/")
         rows = {r["comp"].key: r for g in resp.context["switches"]["groups"]
                 for r in g["rows"]}
-        for key in _live():
+        for key in _pin_keys():
             self.assertTrue(rows[key]["live"], key)
         self.assertFalse(rows["scraper_news"]["live"])
 
@@ -919,8 +971,11 @@ class TheOpsPageAsksOnlyWhereItMustTests(_Fixture):
         self.assertEqual(len(lines), 2, lines)
         system_line = next(ln for ln in lines if "morgul_brake" in ln)
         self.assertIn("trading PIN", system_line)
-        for key in _live():
+        for key in _pin_keys():
             self.assertIn(key, system_line)
+        # The group holds an Orc row: the line says what that one does.
+        self.assertIn("a live-money switch, or one that lets a model spend "
+                      "AI money, takes your trading PIN", system_line)
         agent_line = next(ln for ln in lines if ln is not system_line)
         self.assertNotIn("trading PIN", agent_line)
 
@@ -1169,3 +1224,191 @@ class ASpentCounterIsNeverCheckedTests(_Fixture):
         self.assertNotIn("_auth_user_id", self.client.session)
         self.assertEqual(_audit("switch_refused", "aragorn")[-1]
                          .data["reason"], "locked_out")
+
+
+# ── 14. the Orcs' mind switches take the same PIN (2026-11-05) ─────────
+def _shell_words(subject, verb_phrase, it="it", door="the shell"):
+    return (f"{subject} {verb_phrase}: turning {it} on takes your trading "
+            f"PIN, and {door} never asks for one. Turn {it} on from /ops/ "
+            f"(Switches, System) with your PIN. Nothing was changed.")
+
+
+class OrcMindSwitchesTakeThePinTests(_Fixture):
+    """The Orcs' O2 spec N2 and §4 Q0, Q1: a switch that lets a model
+    spend AI money is turned on with the trading PIN, like a live-money
+    switch, and is never one: it says what it does, and the Wall counts
+    real money alone. Sections 1, 2, 3, 7 and 9 run their door, audit,
+    "all on" and OFF cases over PIN_SWITCHES; these are the rest."""
+
+    def test_the_tuples_are_named_apart(self):
+        from core import wall_facts
+        from core.platform_control import (LIVE_MONEY_SWITCHES,
+                                           ORC_MIND_SWITCHES, PIN_SWITCHES)
+        self.assertIn("orcs_minds", ORC_MIND_SWITCHES)
+        self.assertEqual(PIN_SWITCHES,
+                         LIVE_MONEY_SWITCHES + ORC_MIND_SWITCHES)
+        self.assertEqual(len(set(PIN_SWITCHES)), len(PIN_SWITCHES))
+        for key in ORC_MIND_SWITCHES:
+            self.assertNotIn(key, LIVE_MONEY_SWITCHES, key)
+            self.assertTrue(key.startswith("orcs_"), key)
+        # O1's switches keep their meaning: `orcs` journals, the drums are
+        # journaled, the tape asks eToro's candles. None takes the PIN.
+        for key in ("orcs", "orcs_drums", "orcs_tape"):
+            self.assertNotIn(key, PIN_SWITCHES, key)
+        # The Wall counts the switches to real money, and only those.
+        self.assertEqual(wall_facts._count_money_switches(),
+                         len(LIVE_MONEY_SWITCHES))
+
+    def test_each_orc_key_takes_the_pin_on_and_none_off(self):
+        from core import switch_pin
+        for key in _minds():
+            self.assertTrue(switch_pin.needs_pin(key, was_on=False,
+                                                 want_on=True), key)
+            for was_on, want_on in ((True, False), (True, True),
+                                    (False, False)):
+                self.assertFalse(switch_pin.needs_pin(
+                    key, was_on=was_on, want_on=want_on), key)
+        for key in ("orcs", "orcs_drums", "orcs_tape"):
+            self.assertFalse(switch_pin.needs_pin(key, was_on=False,
+                                                  want_on=True), key)
+
+    def test_every_sentence_says_what_an_orc_switch_does(self):
+        from core.switch_pin import OPS_POINTER, refusal_sentence
+        # /ops/ without a PIN
+        self.assertEqual(
+            _last_flash(self.ops("orcs_minds", want="on")),
+            f"{ORC_ROW_NAME} lets a model spend AI money: turning it on "
+            f"takes your trading PIN. Nothing was changed.")
+        # the system map: its error and its pointer
+        body = self.map("orcs_minds").json()
+        self.assertIn("lets a model spend AI money", body["error"])
+        self.assertEqual(body["detail"], OPS_POINTER)
+        self.assertIn("let a model spend AI money", OPS_POINTER)
+        self.assertIn("/ops/", OPS_POINTER)
+        self.assertNotIn("Live-money switches", OPS_POINTER)
+        # the doors that never take a PIN: the shell, the Django admin
+        self.assertEqual(refusal_sentence(["orcs_minds"], via="shell"),
+                         _shell_words("orcs_minds",
+                                      "lets a model spend AI money"))
+        resp = self.admin_change("orcs_minds", on=True)
+        self.assertContains(resp, _shell_words(
+            "orcs_minds", "lets a model spend AI money",
+            door="this admin page"))
+        # a live-money key keeps its own words, and never the Orcs'
+        for key in _live():
+            said = refusal_sentence([key], via="shell")
+            self.assertEqual(said, _shell_words(key, "moves real money"))
+            self.assertNotIn("AI money", said)
+        self.assertEqual(
+            _last_flash(self.ops("aragorn", want="on")),
+            f"{_row('aragorn').name} moves real money: turning it on "
+            f"takes your trading PIN. Nothing was changed.")
+        self.assertEqual(refusal_sentence(["aragorn", "crisis_mode"],
+                                          via="shell"),
+                         _shell_words("aragorn, crisis_mode",
+                                      "move real money", it="them"))
+
+    def test_a_mixed_shell_list_names_each_for_what_it_does(self):
+        with self.assertRaises(CommandError) as ctx:
+            call_command("component", "on", "telegram_alarm", "aragorn",
+                         "orcs_minds", stdout=StringIO())
+        self.assertEqual(str(ctx.exception), _shell_words(
+            "aragorn moves real money and orcs_minds",
+            "lets a model spend AI money", it="them"))
+        for key in ("telegram_alarm", "aragorn", "orcs_minds"):
+            self.assertFalse(_row(key).is_enabled, key)
+        self.assertEqual([r.data["key"] for r in _audit("switch_refused")],
+                         ["aragorn", "orcs_minds"])
+
+    def test_an_orc_switch_meets_the_same_counted_check(self):
+        from core.switch_pin import LOGIN_MARK_KEY
+        from dashboard.lock_views import ATTEMPTS_KEY, MAX_ATTEMPTS
+        resp = self.ops("orcs_minds", want="on", pin=WRONG_PIN)
+        self.assertEqual(_last_flash(resp),
+                         f"Incorrect PIN: {ORC_ROW_NAME} stays OFF. "
+                         f"{MAX_ATTEMPTS - 1} attempts left before this "
+                         f"session ends.")
+        self.assertEqual(self.client.session[ATTEMPTS_KEY], 1)
+        self.assertEqual(_audit("switch_refused", "orcs_minds")[-1]
+                         .data["reason"], "pin_wrong")
+        # a session that did not log in under the current PIN
+        s = self.client.session
+        s.pop(LOGIN_MARK_KEY, None)
+        s.save()
+        resp = self.ops("orcs_minds", want="on", pin=TEST_PIN)
+        self.assertIn("Log in again", _last_flash(resp))
+        self.assertEqual(_audit("switch_refused", "orcs_minds")[-1]
+                         .data["reason"], "login_again")
+        # an account with no PIN
+        bare = User.objects.create_superuser("bare_minds", "bm@x.test", "x")
+        self.client.force_login(bare)
+        resp = self.ops("orcs_minds", want="on", pin=WRONG_PIN)
+        self.assertEqual(
+            _last_flash(resp),
+            f"{ORC_ROW_NAME} lets a model spend AI money and your account "
+            f"has no trading PIN yet: set one on your profile, then log out "
+            f"and log in again with it. Nothing was changed.")
+        self.assertEqual(_audit("switch_refused", "orcs_minds")[-1]
+                         .data["reason"], "pin_not_set")
+        self.assertFalse(_row("orcs_minds").is_enabled)
+        self.assertFalse(_audit("switch_armed"))
+
+    def test_all_on_never_reaches_a_pin_key_even_without_the_exempt_set(self):
+        """set_category excludes PIN_SWITCHES by name beside
+        BULK_ENABLE_EXEMPT: an edit of the exempt set opens "all on" to
+        neither real money nor a model's spend."""
+        from core import switch_pin
+        with patch.object(switch_pin, "BULK_ENABLE_EXEMPT", frozenset()):
+            self.client.post(BULK, {"category": "system",
+                                    "action": "enable", "next": "ops"})
+        # the patch took: the brake is held back by the exempt set alone
+        self.assertTrue(_row("morgul_brake").is_enabled)
+        for key in _pin_keys():
+            self.assertFalse(_row(key).is_enabled, key)
+        self.assertFalse(_audit("switch_armed"))
+
+    def test_the_held_line_names_ai_money_only_beside_an_orc_row(self):
+        from core.platform_control import PlatformComponent
+
+        def system_line():
+            html = self.client.get("/ops/").content.decode()
+            return next(ln for ln in html.splitlines()
+                        if "all on leaves" in ln and "morgul_brake" in ln)
+
+        line = system_line()
+        self.assertIn("orcs_minds", line)
+        self.assertIn("or one that lets a model spend AI money", line)
+        PlatformComponent.objects.filter(key__in=_minds()).delete()
+        line = system_line()
+        self.assertNotIn("orcs_minds", line)
+        self.assertNotIn("AI money", line)
+        self.assertIn("a live-money switch takes your trading PIN on its own "
+                      "toggle here", line)
+
+    def test_a_hand_made_orc_row_is_pin_guarded(self):
+        """Before its seeded row ships: the shell refuses the key with no
+        row at all, the Django admin may make the row OFF, and from then
+        on only /ops/ with the PIN turns it on."""
+        from core.platform_control import PlatformComponent
+        PlatformComponent.objects.filter(key="orcs_minds").delete()
+        with self.assertRaises(CommandError) as ctx:
+            call_command("component", "on", "orcs_minds", stdout=StringIO())
+        self.assertIn("lets a model spend AI money", str(ctx.exception))
+        self.assertFalse(PlatformComponent.objects.filter(
+            key="orcs_minds").exists())
+        [refused] = _audit("switch_refused", "orcs_minds")
+        self.assertEqual(refused.data["via"], "shell")
+        self.assertIsNone(refused.data["before"])
+
+        resp = self.admin_add("orcs_minds", on=False)
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(_row("orcs_minds").is_enabled)
+        self.admin_changelist("orcs_minds", on=True)
+        self.assertFalse(_row("orcs_minds").is_enabled)
+        self.assertEqual(_audit("switch_refused", "orcs_minds")[-1]
+                         .data["via"], "django_admin")
+        self.ops("orcs_minds", want="on", pin=TEST_PIN)
+        self.assertTrue(_row("orcs_minds").is_enabled)
+        [armed] = _audit("switch_armed", "orcs_minds")
+        self.assertEqual(armed.data["via"], "ops")
+        self.assertEqual(armed.data["who"], "switch_admin")

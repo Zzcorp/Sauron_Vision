@@ -97,26 +97,32 @@ def _cache_set(key, value, ttl):
 # ── (a) the switches ────────────────────────────────────────────────────
 def _switches(now) -> dict:
     from core.platform_control import (BULK_ENABLE_EXEMPT,
-                                       LIVE_MONEY_SWITCHES, PlatformComponent)
+                                       ORC_MIND_SWITCHES, PIN_SWITCHES,
+                                       PlatformComponent)
 
     # `held`: the keys in the group its "all on" button leaves OFF (the
-    # live-money switches, the Morgul brake, the two Lore readers); the page
-    # says so in one line. `live` / `held_live`: the live-money switches,
-    # whose toggle takes the trading PIN to turn on (core/switch_pin.py).
+    # PIN switches, the Morgul brake, the two Lore readers); the page says
+    # so in one line. `live` / `held_live`: the PIN switches, whose toggle
+    # takes the trading PIN to turn on (core/switch_pin.py): the live-money
+    # switches and, since 2026-11-05, the Orcs' mind switches, which
+    # `held_minds` names so the line says what they do. "All on" holds a
+    # PIN switch back by name even before its key is exempt.
     groups = OrderedDict(
         (k, {"key": k, "label": label, "rows": [], "held": [],
-             "held_live": []})
+             "held_live": [], "held_minds": []})
         for k, label in CATEGORY_ORDER)
     n_on = n_off = n_err = 0
     for c in PlatformComponent.objects.order_by("category", "name"):
         group = groups.get(c.category) or groups["other"]
-        live = c.key in LIVE_MONEY_SWITCHES
+        live = c.key in PIN_SWITCHES
         group["rows"].append({"comp": c, "age": _age_text(c.last_run_at, now),
                               "live": live})
-        if c.key in BULK_ENABLE_EXEMPT:
+        if c.key in BULK_ENABLE_EXEMPT or live:
             group["held"].append(c.key)
         if live:
             group["held_live"].append(c.key)
+        if c.key in ORC_MIND_SWITCHES:
+            group["held_minds"].append(c.key)
         if c.is_enabled:
             n_on += 1
         else:

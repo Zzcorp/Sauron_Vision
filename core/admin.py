@@ -1,15 +1,17 @@
 from django import forms
 from django.contrib import admin
-from .platform_control import LIVE_MONEY_SWITCHES, PlatformComponent
+from .platform_control import PIN_SWITCHES, PlatformComponent
 from .models import FeatureFlag, AuditLog, TradingRestriction
 
 
 class PlatformComponentAdminForm(forms.ModelForm):
-    """The admin never turns a live-money switch ON (2026-10-23,
+    """The admin never turns a PIN switch ON (2026-10-23,
     core/switch_pin.py): that takes the trading PIN, which this page
     never asks for. Refused here, on the changelist checkbox, the change
-    form and the add form alike, including by renaming a row into a
-    live-money key. Turning one OFF stays free.
+    form and the add form alike, including by renaming a row into a PIN
+    key. Turning one OFF stays free. A PIN switch is a live-money switch
+    or, since 2026-11-05, an Orc mind switch (PIN_SWITCHES), so a row made
+    here by hand for one is created OFF and stays guarded.
 
     `clean()` runs before the instance is updated from the POST, so the
     row's stored state is still the database's; it is re-read anyway.
@@ -38,7 +40,7 @@ class PlatformComponentAdminForm(forms.ModelForm):
             else inst.key
         want_on = cleaned.get("is_enabled", inst.is_enabled) \
             if "is_enabled" in self.fields else inst.is_enabled
-        if not (key and want_on and key in LIVE_MONEY_SWITCHES):
+        if not (key and want_on and key in PIN_SWITCHES):
             return cleaned
         stored = None
         if inst.pk:
@@ -95,7 +97,7 @@ class PlatformComponentAdmin(admin.ModelAdmin):
             return      # refused: nothing written, no false "disarmed" row
         super().save_model(request, obj, form, change)
         if change and "is_enabled" in form.changed_data \
-                and not obj.is_enabled and obj.key in LIVE_MONEY_SWITCHES:
+                and not obj.is_enabled and obj.key in PIN_SWITCHES:
             from core.switch_pin import VIA_DJANGO_ADMIN, record_disarm
             record_disarm(obj.key, via=VIA_DJANGO_ADMIN, user=request.user)
 

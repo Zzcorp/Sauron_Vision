@@ -1314,7 +1314,7 @@ button.
             <td style="font-family:var(--font-mono);font-size:12px;">{{ c.run_count }}</td>
             <td style="font-family:var(--font-mono);font-size:12px;color:{% if c.error_count > 0 %}var(--accent-red){% else %}var(--text-muted){% endif %};">{{ c.error_count }}</td>
             <td><form method="post" action="{% url 'admin_toggle_component' %}" style="display:inline;">{% csrf_token %}<input type="hidden" name="key" value="{{ c.key }}">
-                {% if c.key in live_money_keys %}<input type="hidden" name="want" value="{% if c.is_enabled %}off{% else %}on{% endif %}">{% if not c.is_enabled %}<input type="password" name="pin" placeholder="PIN" inputmode="numeric" autocomplete="off" required aria-label="Trading PIN to turn {{ c.key }} on" style="width:60px;padding:4px;font-size:11px;margin-right:4px;">{% endif %}{% endif %}
+                {% if c.key in pin_keys %}<input type="hidden" name="want" value="{% if c.is_enabled %}off{% else %}on{% endif %}">{% if not c.is_enabled %}<input type="password" name="pin" placeholder="PIN" inputmode="numeric" autocomplete="off" required aria-label="Trading PIN to turn {{ c.key }} on" style="width:60px;padding:4px;font-size:11px;margin-right:4px;">{% endif %}{% endif %}
                 {% if c.is_enabled %}<button type="submit" class="btn btn-sm btn-danger">STOP</button>
                 {% else %}<button type="submit" class="btn btn-sm btn-primary">START</button>{% endif %}
             </form></td>

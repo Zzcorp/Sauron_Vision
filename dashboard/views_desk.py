@@ -54,7 +54,9 @@ HEAT_MAX = 12
 CMD_ON = "./deploy/dc exec web python manage.py component on pipeline_capital_desk"
 # The live mode moves real money: turning it on takes the trading PIN on
 # /ops/, and the shell refuses it (2026-10-23, core/switch_pin.py), so
-# the page names where, not a command that would be refused.
+# the page names where, not a command that would be refused. The page
+# asks the doors' own tuple (PIN_SWITCHES, 2026-11-05), so a switch that
+# takes the PIN is never sent to the shell.
 LIVE_HOW = "turn it on from /ops/ with your trading PIN"
 CMD_LIVE = "turn capital_desk_mode_live on from /ops/ with your trading PIN"
 CMD_GRADE = "./deploy/dc exec web python manage.py desk grade"
@@ -537,7 +539,7 @@ def desk_dashboard(request):
         platform = {"staff_only": False, "error": "", "components": [],
                     "last_grade": None}
         try:
-            from core.platform_control import (LIVE_MONEY_SWITCHES,
+            from core.platform_control import (PIN_SWITCHES,
                                                PlatformComponent)
             rows = {c.key: c for c in PlatformComponent.objects.filter(
                 key__in=(capital_desk.PIPELINE_COMPONENT,
@@ -549,7 +551,7 @@ def desk_dashboard(request):
                     "key": key, "row": comp,
                     "on": bool(comp and comp.is_enabled),
                     "registered": comp is not None,
-                    "command": (LIVE_HOW if key in LIVE_MONEY_SWITCHES else
+                    "command": (LIVE_HOW if key in PIN_SWITCHES else
                                 f"./deploy/dc exec web python manage.py "
                                 f"component on {key}"),
                 })
