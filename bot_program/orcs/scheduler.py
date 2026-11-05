@@ -84,13 +84,17 @@ order, each waited for 2 s at most, doing only database reads and writes:
      now, queued_at kept
 
 A wake that is no longer running when its settle comes (a wall-timed
-call settling late) books its real cost on an error entry, drops its
-hold, and writes nothing else (A.55).
+call settling late) books its real cost on an error entry and writes
+nothing else (A.55); its orphan hold goes by what came back, as a
+ticket's does (A.24, A.25): a bill with its ledger row drops it, a bill
+with none holds the booked cost as `ledger_gap`, a call never sent drops
+it, and a call with no bill keeps it until 00:00 UTC (_late_hold).
 
 THE MONEY HELD (OrcSetting "minds_inflight"): {key: {kind, usd, high,
 orc, wake, rung, at, until}}. Every hold counts in the line's in-flight
 sum (mind_gateway.inflight_usd) until it expires at 00:00 UTC, never
-earlier; a late settle with usage drops its own.
+earlier; a late settle drops its own only once its bill is booked with
+its ledger row, or when its call was never sent (_late_hold).
 """
 import logging
 import math
@@ -136,8 +140,9 @@ from bot_program.orcs.constants import (BREAKER_FAILS, BREAKER_PAUSE_MIN,
                                         ORC_STATEMENT_TIMEOUT_MS,
                                         PER_ORC_DAILY_KEY,
                                         PER_ORC_DAILY_USD, PER_ORC_HIGH_KEY,
-                                        RANKS, REPLY_ANSWER, REPLY_UNBILLED,
-                                        REPLY_UNSENT, ROUTINE_SHARE,
+                                        RANKS, REPLY_ANSWER, REPLY_CLOSED,
+                                        REPLY_UNBILLED, REPLY_UNSENT,
+                                        ROUTINE_SHARE,
                                         ROUTINE_SHARE_KEY,
                                         STALE_MIN, STALL_MIN, STATE_ACTIVE,
                                         STATE_BORN, STATE_CARE_OWNED,
@@ -541,8 +546,9 @@ def hold(*, kind, usd, wake, rung, now, high_usd=0.0) -> str:
 
 
 def drop_hold(wake, now) -> dict:
-    """Drop the hold of `wake`'s call, if any (a late settle with usage
-    books the real cost instead); the entry dropped, or {}."""
+    """Drop the hold of `wake`'s call, if any (a late settle whose bill
+    was booked, or whose call was never sent: _late_hold); the entry
+    dropped, or {}."""
     store = _inflight_row()
     value = _pruned(store.value if isinstance(store.value, dict) else {},
                     now)
@@ -1238,6 +1244,38 @@ def _late_code(locked) -> str:
     return switches.gate_code()
 
 
+def _late_hold(w, outcome, *, usage, cost, ledger, rung, now) -> tuple:
+    """A.24, A.25 for a late settle (2026-11-05, completing O2a): the
+    orphan hold the watchdog made of a wall-timed wake's bound (A.55),
+    after its call came back. (the hold's kind kept, or "", the HIGH to
+    take off the Orc's unbilled dollars). The caller holds the line lock.
+
+      a bill, its ledger row found   the hold dropped, its HIGH with it
+      a bill, no ledger row          the booked cost held as `ledger_gap`
+                                     until 00:00 UTC; its HIGH dropped, the
+                                     cost being in the Orc's day dollars
+      nothing sent (closed, unsent)  the hold dropped: nothing can bill
+      no bill (a timeout, a cut      the hold and its HIGH kept until
+      stream, a network error)       00:00 UTC: the tokens streamed
+                                     before the cut may still be billed"""
+    kind = outcome.get("kind")
+    if usage is not None:
+        gone = drop_hold(w, now)
+        if ledger:
+            return "", float(gone.get("high") or 0.0)
+        hold(kind=HOLD_LEDGER_GAP, usd=cost, wake=w, rung=rung, now=now)
+        return HOLD_LEDGER_GAP, float(gone.get("high") or 0.0)
+    if kind in (REPLY_CLOSED, REPLY_UNSENT):
+        gone = drop_hold(w, now)
+        return "", float(gone.get("high") or 0.0)
+    store = _inflight_row()
+    value = _pruned(store.value if isinstance(store.value, dict) else {},
+                    now)
+    entry = value.get(f"w{w.pk}")
+    return (str(entry.get("kind") or HOLD_ORPHAN)
+            if isinstance(entry, dict) else ""), 0.0
+
+
 def _send_back(locked, now) -> int:
     """A.24 step 6: the Orc's pending wake goes back to the render,
     still as of its own moment, reading the Orc's journal up to now."""
@@ -1278,16 +1316,19 @@ def settle(wake, outcome, *, now=None) -> dict:
         locked = journal.orc_lock(wake.orc_id)
         w = OrcWake.objects.select_for_update().get(pk=wake.pk)
         if w.status != WAKE_STATUS_RUNNING:
-            # a late settle (A.55): the real cost booked once, its hold
-            # dropped, nothing else written
-            gone = drop_hold(w, now)
+            # a late settle (A.55): the real cost booked once, nothing else
+            # written; its orphan hold kept or released by what came back
+            # (A.24, A.25), as a ticket's late settle does
+            held, unbilled_drop = _late_hold(w, outcome, usage=usage,
+                                             cost=cost, ledger=ledger,
+                                             rung=rung, now=now)
             fields, keys = _counters(locked, now, cost=cost, routine=routine,
-                                     unbilled_drop=float(gone.get("high")
-                                                         or 0.0))
+                                     unbilled_drop=unbilled_drop)
             mind.write_late_settle(locked, w, outcome, now=now,
-                                   fields=fields, keys=keys)
+                                   fields=fields, keys=keys, held=held)
             mind.write_intellect(locked, w, outcome)
-            out.update(status=w.status, late=True)
+            out.update(status=w.status, late=True,
+                       held=f"w{w.pk}" if held else "")
             return out
         held_high = 0.0
         kind = outcome.get("kind")
@@ -1504,7 +1545,8 @@ def _wall_time(now) -> int:
     to a hold of kind `orphan` until 00:00 UTC (its HIGH on the Orc's
     unbilled dollars): the call may still be streaming, or be orphaned by
     a worker's restart, and may yet bill. Its late settle books the real
-    cost once and drops the hold."""
+    cost once and keeps or releases the hold by what came back
+    (_late_hold): never released without a bill or a call never sent."""
     from bot_program.orcs import journal
     from bot_program.orcs.models import OrcWake
     n = 0

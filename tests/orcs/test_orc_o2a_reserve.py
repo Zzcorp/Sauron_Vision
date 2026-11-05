@@ -15,7 +15,11 @@ released before its cost is known.
   next claim counts it until then
 - a call past its wall time is closed `failed` and its bound held as an
   orphan, never free in between: a claim that fits only without it is
-  refused; its late settle books the real cost once and drops the hold
+  refused; its late settle books the real cost once, and keeps or drops
+  the hold by what came back (2026-11-05, completing O2a): a bill with
+  its ledger row drops it; a bill with no ledger row holds the booked
+  cost as `ledger_gap`; no bill keeps the bound and its HIGH until 00:00
+  UTC; a call never sent drops it
 - booked <= the bound; can_spend gets the bound plus the others' money,
   never its own twice, never the default estimate
 - one call in flight per Orc: the second wake is claimed only after the
@@ -38,8 +42,9 @@ from django.test import override_settings
 from django.utils import timezone
 
 from tests.orcs.helpers import _config, _row, _switch, _user
-from tests.orcs.helpers_o2 import (MindTransactionTestCase, PreStream,
-                                   fake_answer, fake_usage, minds_on)
+from tests.orcs.helpers_o2 import (MidStream, MindTransactionTestCase,
+                                   PreStream, fake_answer, fake_usage,
+                                   minds_on)
 from tests.orcs.test_orc_o2a_admission import W4, QueueFixture
 from tests.orcs.test_orc_o2a_call import NOW, answer
 
@@ -78,6 +83,34 @@ class _Reserve(QueueFixture):
     def inflight(self, **kw):
         from bot_program.orcs import mind
         return mind.purse(**kw)["inflight"]
+
+    def wall_timed(self, script):
+        """A claimed call that the watchdog closes for its wall time while
+        it is still out (inside the fake client's call, no lock held),
+        then comes back with `script`: (wake, its bound, the settle, the
+        watchdog's result, the money held inside the call)."""
+        from bot_program.orcs import mind, scheduler
+        from bot_program.orcs.constants import WALL_S
+        base = self.rendered()
+        self.one_bound_line(base)
+        self.pending(base, timezone.now() - timedelta(minutes=1))
+        w = scheduler.claim()["wake"]
+        bound = float(w.est_usd)
+        past = w.started_at + timedelta(seconds=WALL_S["r0"] + 1)
+        inner = self.inside_the_call(
+            lambda: (scheduler.watch(now=past), self.inflight()))
+        self.use_fake(script)
+        out = mind.think(w)
+        watch, held_inside = inner["value"]
+        return w, bound, out, watch, held_inside
+
+    def late_entry(self, w):
+        """The late settle's error entry of `w` (the wall time's own is
+        written at the watchdog's moment, after it in time)."""
+        found = [e for e in self.entries(kind="error", wake=w)
+                 if (e.body or {}).get("late_settle")]
+        self.assertEqual(len(found), 1)
+        return found[0]
 
 
 class TheReservationTests(_Reserve):
@@ -204,6 +237,139 @@ class TheReservationTests(_Reserve):
                                places=6)
         self.assertAlmostEqual(self.inflight(), 0.0, places=6,
                                msg="the hold dropped")
+
+    def test_a_late_settle_with_no_bill_keeps_the_orphan_hold(self):
+        """A.25, N3, N4 (2026-11-05, completing O2a): a wall-timed call
+        that comes back with no bill (a timeout mid-stream) may still be
+        billed for its cut stream: its whole bound stays held until 00:00
+        UTC, and its HIGH stays on the Orc's unbilled dollars."""
+        from ai_agents import spend
+        from bot_program.orcs import scheduler
+        from bot_program.orcs.scheduler import next_midnight
+        w, bound, out, watch, held_inside = self.wall_timed(
+            MidStream(TimeoutError("read timed out")))
+        self.assertEqual(watch["minds_wall_time"], 1)
+        self.assertAlmostEqual(held_inside, bound, places=6)
+        self.assertTrue(out["late"])
+        self.assertEqual(out["held"], f"w{w.pk}")
+        self.assert_one_call()
+        self.assertAlmostEqual(self.inflight(), bound, places=6,
+                               msg="the orphan hold is kept")
+        self.assertEqual(self.holds()[f"w{w.pk}"]["kind"], "orphan")
+        self.assertEqual(spend.spent_today("orcs"), 0.0)
+        self.orc.refresh_from_db()
+        self.assertAlmostEqual(self.orc.seen["unbilled_usd"],
+                               scheduler.high("r0"), places=6)
+        self.assertEqual(float(self.orc.spend_today_usd), 0.0)
+        late = self.late_entry(w)
+        self.assertEqual(late.headline, "A call that ran past its wall "
+                         "time came back with no bill: its bound stays held "
+                         "until 00:00 UTC, nothing applied.")
+        self.assertEqual(late.body["held"], "orphan")
+        midnight = next_midnight(timezone.now())
+        with patch("django.utils.timezone.now",
+                   return_value=midnight + timedelta(minutes=1)):
+            self.assertAlmostEqual(self.inflight(), 0.0, places=6,
+                                   msg="it expires at 00:00 UTC")
+
+    def test_a_late_settle_with_no_ledger_row_holds_the_booked_cost(self):
+        """A.24 (2026-11-05, completing O2a): a wall-timed call that comes
+        back billed while the provider's fenced ledger write failed is
+        booked on the Orc, and its cost is held as `ledger_gap` until
+        00:00 UTC, so the line and the core's floor still count it; its
+        HIGH leaves the unbilled dollars (the cost is in the Orc's day
+        dollars now) and the watchdog raises the gap."""
+        from ai_agents import spend
+        from ai_agents.models import AgentTask
+        usage = fake_usage(input_tokens=9000, output_tokens=900)
+        with patch.object(AgentTask.objects, "create",
+                          side_effect=RuntimeError("the ledger is down")):
+            w, bound, out, watch, held_inside = self.wall_timed(
+                fake_answer(answer(), usage=usage))
+        self.assertEqual(watch["minds_wall_time"], 1)
+        self.assertTrue(out["late"])
+        self.assertEqual(out["held"], f"w{w.pk}")
+        self.assert_one_call()
+        self.assertEqual(spend.spent_today("orcs"), 0.0)
+        late = self.late_entry(w)
+        cost = float(late.cost_usd)
+        self.assertGreater(cost, 0)
+        self.assertAlmostEqual(self.inflight(), cost, places=6,
+                               msg="the line still counts the cost")
+        entry = self.holds()[f"w{w.pk}"]
+        self.assertEqual(entry["kind"], "ledger_gap")
+        self.assertAlmostEqual(entry["usd"], cost, places=6)
+        self.orc.refresh_from_db()
+        self.assertAlmostEqual(float(self.orc.spend_today_usd), cost,
+                               places=6)
+        self.assertAlmostEqual(self.orc.seen["unbilled_usd"], 0.0,
+                               places=6)
+        self.assertEqual(late.headline, "A call that ran past its wall "
+                         "time came back: its cost is booked and held until "
+                         "00:00 UTC (the provider wrote no ledger row), "
+                         "nothing applied.")
+        self.assertEqual(self.watch(timezone.now())["minds_ledger_gap"], 1)
+
+    def test_a_late_settle_with_no_bill_after_midnight_holds_no_more(self):
+        """A.25: the orphan hold ends at 00:00 UTC, never earlier; a call
+        with no bill that comes back after it holds nothing more, and its
+        words say the hold had ended."""
+        from bot_program.orcs import mind, scheduler
+        from bot_program.orcs.constants import WALL_S
+        from bot_program.orcs.scheduler import next_midnight
+        base = self.rendered()
+        self.one_bound_line(base)
+        self.pending(base, timezone.now() - timedelta(minutes=1))
+        w = scheduler.claim()["wake"]
+        past = w.started_at + timedelta(seconds=WALL_S["r0"] + 1)
+        after = next_midnight(past) + timedelta(minutes=1)
+        inner = self.inside_the_call(lambda: scheduler.watch(now=past))
+        self.use_fake(MidStream(TimeoutError("read timed out")))
+        out = mind.think(w, now=after)
+        self.assertEqual(inner["value"]["minds_wall_time"], 1)
+        self.assert_one_call()
+        self.assertEqual((out["late"], out["held"]), (True, ""))
+        self.assertNotIn(f"w{w.pk}", scheduler._pruned(self.holds(), after),
+                         "no hold of its own runs past 00:00 UTC")
+        self.assertEqual(self.late_entry(w).headline,
+                         "A call that ran past its wall time came back with "
+                         "no bill after its hold ended at 00:00 UTC, nothing "
+                         "applied.")
+
+    def test_a_wall_timed_call_never_sent_frees_its_hold(self):
+        """A.25 (2026-11-05, completing O2a): a wall-timed wake whose call
+        the gateway never sent (a gate closed before the send) can never
+        be billed: its late settle drops the orphan hold and the HIGH.
+        Its pair: a wall-timed call that was sent, billed and ledgered
+        drops its hold too, after one request."""
+        from bot_program.orcs import mind, scheduler
+        from bot_program.orcs.constants import WALL_S
+        w, bound, out, watch, held_inside = self.wall_timed(
+            fake_answer(answer()))
+        self.assertTrue(out["late"])
+        self.assert_one_call()
+        self.assertAlmostEqual(self.inflight(), 0.0, places=6)
+        base = self.rendered()
+        self.pending(base, timezone.now() - timedelta(minutes=1))
+        second = scheduler.claim()["wake"]
+        self.assertIsNotNone(second)
+        past = second.started_at + timedelta(seconds=WALL_S["r0"] + 1)
+        self.assertEqual(scheduler.watch(now=past)["minds_wall_time"], 1)
+        self.assertGreater(self.inflight(), 0.0, "held while it is out")
+        _switch("orcs_minds", False)
+        out = mind.think(second)
+        self.assertEqual((out["late"], out["held"]), (True, ""))
+        late = self.late_entry(second)
+        self.assert_no_call(code="minds_off", got=late.body["code"])
+        self.assertAlmostEqual(self.inflight(), 0.0, places=6,
+                               msg="nothing was sent: nothing is held")
+        self.assertNotIn(f"w{second.pk}", self.holds())
+        self.orc.refresh_from_db()
+        self.assertAlmostEqual(self.orc.seen["unbilled_usd"], 0.0,
+                               places=6)
+        self.assertEqual(late.headline, "A call that ran past its wall "
+                         "time was never sent: its bound is released, "
+                         "nothing applied.")
 
     def test_booked_never_passes_the_claims_bound(self):
         """N4 through the claim: the worst usage (every prompt token

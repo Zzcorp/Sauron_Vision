@@ -730,14 +730,45 @@ def write_intellect(locked, w, outcome) -> None:
         journal.remember(locked, card_extra={"intellect": it})
 
 
-def write_late_settle(locked, w, outcome, *, now, fields, keys) -> None:
+#: A late settle's words (A.24, A.25, A.55), by what came back: a bill
+#: with its ledger row, a bill with none (held as `ledger_gap`), no bill
+#: (the orphan hold kept, or already ended at 00:00 UTC), nothing sent
+#: (released). Code's fixed words.
+LATE_SETTLE_WORDS = {
+    "booked": "A call that ran past its wall time came back: its cost is "
+              "booked, nothing applied.",
+    "ledger_gap": "A call that ran past its wall time came back: its cost "
+                  "is booked and held until 00:00 UTC (the provider wrote "
+                  "no ledger row), nothing applied.",
+    "unbilled": "A call that ran past its wall time came back with no "
+                "bill: its bound stays held until 00:00 UTC, nothing "
+                "applied.",
+    "unbilled_ended": "A call that ran past its wall time came back with "
+                      "no bill after its hold ended at 00:00 UTC, nothing "
+                      "applied.",
+    "unsent": "A call that ran past its wall time was never sent: its "
+              "bound is released, nothing applied.",
+}
+
+
+def write_late_settle(locked, w, outcome, *, now, fields, keys,
+                      held="") -> None:
     """A.55: a settle on a wake that is no longer running (its wall time
-    closed it): the real cost booked on an error entry, nothing else."""
+    closed it): the real cost booked on an error entry, nothing else. Its
+    words say what became of the orphan hold (`held`, the settle's: the
+    kind kept, or "" released; 2026-11-05, completing O2a)."""
     from bot_program.orcs import journal
-    journal.append(locked, "error", "A call that ran past its wall time "
-                   "came back: its cost is booked, nothing applied.",
+    kind = str(outcome.get("kind") or "")
+    if isinstance(outcome.get("usage"), dict):
+        words = LATE_SETTLE_WORDS["ledger_gap" if held else "booked"]
+    elif kind in (REPLY_CLOSED, REPLY_UNSENT):
+        words = LATE_SETTLE_WORDS["unsent"]
+    else:
+        words = LATE_SETTLE_WORDS["unbilled" if held else "unbilled_ended"]
+    journal.append(locked, "error", words,
                    body={"wake": w.pk, "late_settle": True,
                          "rung": str(outcome.get("rung") or ""),
-                         "kind": str(outcome.get("kind") or "")},
+                         "kind": kind, "code": str(outcome.get("code") or ""),
+                         "held": str(held or "")},
                    wake=w, at=now, booking=_booking(outcome), fields=fields,
                    remember=keys)
