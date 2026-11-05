@@ -32,7 +32,9 @@ is claimed: the worker (tasks.orc_think) and the watchdog
            (A.20); the cold-burst rule (A.16). A pass writes `running`,
            started_at, est_usd (the bound), the rung's model, the Orc's
            last_wake_at and its two count counters; the call follows with
-           no lock held
+           no lock held. A wake past the stale clock (A.55) is never sent:
+           answered `paused` after a pause of the watchdog, as a returning
+           `orcs` or platform master leaves it, else left to the watchdog
   run      A.19: claim and think one wake at a time, the four gates read
            again at each claim, for THINK_RUN_S at most
   settle   A.24-A.26 (below), then the Orc's states (A.51-A.53) and the
@@ -1083,11 +1085,23 @@ def _take(locked, w, f, price, *, rung, now) -> None:
     journal.remember(locked, fields=fields, **keys)
 
 
-def _claim_one(wid, orc_id, *, now) -> tuple:
+def _past_stale(queued_at, now) -> bool:
+    """A.55: a pending wake whose first send is older than STALE_MIN."""
+    return queued_at is not None and queued_at < now - timedelta(
+        minutes=STALE_MIN)
+
+
+def _claim_one(wid, orc_id, *, now, paused=False) -> tuple:
     """One candidate, in its own short transaction: ("claimed", wake),
     ("code", code), or ("wait", why) for a candidate that stays pending
     (its Orc's row held by another, a call of its Orc in flight, a cold
-    model's first call running)."""
+    model's first call running, or its first send past the stale clock
+    while the watchdog runs). A wake past the stale clock is never sent on
+    its old dossier (A.55; 2026-11-05, completing O2a): with a gate OFF it
+    is answered by that gate's code, after a pause of the watchdog
+    (`paused`, as after `orcs` or the platform master came back ON) by
+    `paused`, as the watchdog's next pass would; else the watchdog closes
+    it (backlog behind a busy worker, worker_silent)."""
     from bot_program.orcs import journal, mind
     from bot_program.orcs.models import OrcWake
     rung = O2A_RUNG
@@ -1107,8 +1121,15 @@ def _claim_one(wid, orc_id, *, now) -> tuple:
             return "wait", "a call of this Orc is in flight"
         f = _facts(w, locked)
         purse = mind.purse()
-        code = _check(w, locked, f, now=now, rung=rung, bound=price["bound"],
-                      purse=purse, inflight_high=0.0)
+        if _past_stale(w.queued_at, now):
+            from bot_program.orcs import switches
+            code = switches.gate_code() or (CODE_PAUSED if paused else "")
+            if not code:
+                return "wait", "past the stale clock: the watchdog closes it"
+        else:
+            code = _check(w, locked, f, now=now, rung=rung,
+                          bound=price["bound"], purse=purse,
+                          inflight_high=0.0)
         if not code:
             _ok, code, _why = mind.ask_line(
                 rung_name=rung, bound_usd=price["bound"],
@@ -1128,7 +1149,12 @@ def claim(*, now=None, limit=CLAIM_SCAN) -> dict:
     """A.18: claim the best pending wake whose Orc has no call in flight,
     one short transaction per candidate examined (N8). A candidate a check
     refuses is answered by code and committed, and the claim tries the
-    next. Returns {wake (the claimed wake, or None), by_code, waiting}."""
+    next. A wake whose first send is past the stale clock is never sent
+    on its old dossier (A.55; 2026-11-05, completing O2a): after a pause
+    of the watchdog (`orcs` or the platform master came back ON) it is
+    answered `paused` here, else left pending for the watchdog's next
+    pass, without a lock. Returns {wake (the claimed wake, or None),
+    by_code, waiting}."""
     from bot_program.orcs.models import OrcWake
     now = now or timezone.now()
     out = {"wake": None, "by_code": 0, "waiting": 0}
@@ -1136,14 +1162,22 @@ def claim(*, now=None, limit=CLAIM_SCAN) -> dict:
                .values_list("orc_id", flat=True))
     candidates = list(OrcWake.objects.filter(status=WAKE_STATUS_PENDING)
                       .order_by("-priority", "queued_at", "id")
-                      .values_list("id", "orc_id")[:int(limit)])
-    for wid, orc_id in candidates:
+                      .values_list("id", "orc_id", "queued_at")[:int(limit)])
+    # A.55: the watchdog's pause, read once per claim (a wake past the
+    # stale clock is never sent; _claim_one)
+    paused = _paused(_watch_last(), now)
+    for wid, orc_id, queued_at in candidates:
         if orc_id in busy:
             # one call in flight per Orc: it stays pending; the running
             # wake's settle sends it back to the render (A.24)
             out["waiting"] += 1
             continue
-        verdict, what = _claim_one(wid, orc_id, now=now)
+        if not paused and _past_stale(queued_at, now):
+            # never sent on its old dossier: the watchdog's next pass
+            # answers it by code (no lock taken here for it)
+            out["waiting"] += 1
+            continue
+        verdict, what = _claim_one(wid, orc_id, now=now, paused=paused)
         if verdict == "claimed":
             out["wake"] = what
             return out
@@ -1602,12 +1636,26 @@ def _holds(now) -> dict:
                               if e.get("kind") == HOLD_LEDGER_GAP)}
 
 
+def _watch_last():
+    """The watchdog's previous pass (OrcSetting "minds_watch_last_at"),
+    read; None when it never ran."""
+    value = _setting(MINDS_WATCH_LAST_KEY)
+    return _parse(value.get("at") if isinstance(value, dict) else value)
+
+
+def _paused(last, now) -> bool:
+    """A.55: the watchdog did not run for more than WATCH_PAUSED_MIN
+    before `now` (or never ran): the Orcs were paused, `orcs` or the
+    platform master OFF, whose task gate skips the watchdog and the
+    worker alike."""
+    return last is None or now - last > timedelta(minutes=WATCH_PAUSED_MIN)
+
+
 def _watch_stamp(now):
     """The watchdog's previous pass (OrcSetting "minds_watch_last_at"),
     then this one stamped. None when it never ran."""
     from bot_program.orcs.models import OrcSetting
-    value = _setting(MINDS_WATCH_LAST_KEY)
-    last = _parse(value.get("at") if isinstance(value, dict) else value)
+    last = _watch_last()
     OrcSetting.objects.update_or_create(
         key=MINDS_WATCH_LAST_KEY, defaults={"value": {"at": now.isoformat()},
                                             "updated_by": "watchdog"})
@@ -1626,7 +1674,7 @@ def watch(*, now=None) -> dict:
     from bot_program.orcs.models import OrcWake
     now = now or timezone.now()
     last = _watch_stamp(now)
-    paused = last is None or now - last > timedelta(minutes=WATCH_PAUSED_MIN)
+    paused = _paused(last, now)
     out = {"minds_stalled": 0, "minds_stale": 0, "minds_backlog": 0,
            "minds_wall_time": 0, "minds_ticket_wall_time": 0,
            "minds_holds": 0, "minds_ledger_gap": 0, "minds_breaker": 0,

@@ -1431,9 +1431,16 @@ config stopped by hand keeps its paper rows managed, and those get one).
 **Switching it OFF** stops new births, new journal lines and the census at
 the next tick; the Orcs already born keep what they wrote. With the minds
 on (O2a), switching `orcs`, `orcs_minds` or the platform master OFF takes
-no PIN and stops new model calls at the next claim: a wake waiting for its
-call closes with a code, and a call already in flight finishes and is
-booked, or, with no bill, keeps its money held until 00:00 UTC.
+no PIN and stops new model calls at the next claim. With `orcs_minds` OFF,
+the next `orc-think` beat (within a minute) answers every waiting wake by
+code (`minds_off`). With `orcs` or the platform master OFF, the minds'
+worker and watchdog stop with every other Orc task, so a waiting wake
+waits: when the switch comes back, one that waited under 30 minutes is
+still read, and one that waited longer is never sent on its old dossier
+(answered by code, `paused`, at the next claim when the Orcs were off for
+over 10 minutes; else closed by the watchdog's next pass as usual). A call
+already in flight finishes and is booked, or, with no bill, keeps its
+money held until 00:00 UTC.
 
 **The kill switch ends every idea** in its scope, whatever the orcs switch
 says: each Orc is marked dead with no re-entry window before the sweep
@@ -1874,11 +1881,24 @@ and demo, routine wakes 75% of that. While the line is on, the core line
 is the total less what the Orcs actually spent, less the $3.00 floor.
 
 To stop them: turning `orcs_minds`, `orcs` or the platform master OFF
-takes no PIN and stops new calls at the next claim; a wake waiting for its
-call closes with a code (`minds_off`, `orcs_off`, `platform_off`), and a
-call already in flight finishes and is booked or, with no bill, keeps its
-money held until 00:00 UTC. Setting the line back to 0 (then
-`./deploy/dc up -d`) refuses every Orc call. Nothing is notified.
+takes no PIN and stops new calls at the next claim.
+- `orcs_minds` OFF: the next `orc-think` beat answers every waiting wake
+  by code (`minds_off`).
+- `orcs` or the platform master OFF: the task gate stops the minds'
+  worker and watchdog with every other Orc task, so a waiting wake waits,
+  with no code. When the switch comes back, a wake that waited under 30
+  minutes is still read; one that waited longer is never sent on its old
+  dossier (answered by code, `paused`, at the next claim when the Orcs
+  were off for over 10 minutes; else closed by the watchdog's next pass
+  as usual).
+- A call already in flight finishes and is booked or, with no bill, keeps
+  its money held until 00:00 UTC; an answer that comes back while a gate
+  is OFF is kept as late (`minds_off`, `orcs_off`, `platform_off`) and
+  applied to nothing.
+
+Setting the line back to 0 (then `./deploy/dc up -d`) refuses every Orc
+call: the next claim answers each waiting wake by code (`line_off`).
+Nothing is notified.
 
 ## Operating notes
 

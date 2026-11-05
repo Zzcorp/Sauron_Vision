@@ -12,6 +12,11 @@ chosen moments.
   worker it closes `backlog`, a code answer, and no Orc changes state
   (P11, P14); a gate OFF or a paused watchdog close it by code with no
   care; a pending wake 25 minutes old is still served (P14)
+- a wake past the stale clock is never sent on its old dossier
+  (2026-11-05, completing O2a): the claim leaves it to the watchdog while
+  the watchdog runs, and answers it `paused` after a pause, which is what
+  `orcs` or the platform master coming back ON leaves (both stop the
+  worker and the watchdog at the task gate: a waiting wake waits)
 - silence and the care count only failed and silent-stale wakes: a day of
   code answers leaves the Orc active; two failed calls or two refused
   answers in a row send it to the care; a valid answer without the
@@ -129,8 +134,12 @@ class TheWatchdogTests(_Queue):
                     served += 1
             if minute % 5 == 0 and minute:
                 reports.append(self.watch(at))
-        # claims at minutes 0, 2, ..., 34; the pass at 35 closes the rest
-        self.assertEqual(served, 18)
+        # the claims at minutes 0, 2, ..., 30 serve one each; at 32 and 34
+        # every wake left is past the stale clock and waits for the
+        # watchdog, never sent on its old dossier (2026-11-05, completing
+        # O2a: those two claims sent one each before); the pass at 35
+        # closes the rest
+        self.assertEqual(served, 16)
         statuses = list(OrcWake.objects.filter(orc__in=orcs).exclude(
             pk=base.pk).values_list("status", "skipped_reason"))
         backlog = [s for s in statuses if s == ("skipped", "backlog")]
@@ -162,7 +171,11 @@ class TheWatchdogTests(_Queue):
 
     def test_a_gate_off_closes_by_code_with_no_care(self):
         """A.55: platform_off and minds_off are code answers, never
-        silence."""
+        silence. (scheduler.watch read directly: the task gate skips
+        orc_minds_watch while the platform master is OFF, so its
+        platform_off is a pass that was already running;
+        test_a_returning_switch_never_sends_a_stale_dossier drives the
+        tasks.)"""
         base = self.rendered([W4])
         for gate, code in (("platform_master", "platform_off"),
                            ("orcs_minds", "minds_off")):
@@ -188,6 +201,33 @@ class TheWatchdogTests(_Queue):
         got = self.serve(now=at, script=fake_answer(answer()))
         self.assertEqual(got["wake"].pk, w.pk)
         self.assert_one_call()
+
+    def test_the_claim_never_sends_a_wake_past_the_stale_clock(self):
+        """A.55 (2026-11-05, completing O2a): a wake that waited past
+        STALE_MIN is never sent on its old dossier. While the watchdog
+        runs, the claim leaves it to the watchdog's next pass, which
+        answers it by code (`backlog` behind a busy worker), with no call;
+        its pair, a wake 25 minutes old, is read."""
+        from bot_program.orcs import scheduler
+        base = self.rendered()
+        young, old = self.orcs(2)
+        at = timezone.now()
+        self.watch(at - timedelta(minutes=1))
+        fresh = self.pending(base, at - timedelta(minutes=25), orc=young)
+        stale = self.pending(base, at - timedelta(minutes=31), orc=old)
+        got = self.serve(now=at, script=fake_answer(answer()))
+        self.assertEqual(got["wake"].pk, fresh.pk)
+        self.assert_one_call()
+        self.assertIsNone(self.serve(now=at)["wake"])
+        stale.refresh_from_db()
+        self.assertEqual((stale.status, stale.skipped_reason),
+                         ("pending", ""), "left to the watchdog")
+        self.assertEqual(scheduler.claim(now=at)["waiting"], 1)
+        out = self.watch(at + timedelta(minutes=1))
+        stale.refresh_from_db()
+        self.assert_no_call(code="backlog", got=stale.skipped_reason)
+        self.assertEqual((stale.status, out["minds_backlog"],
+                          out["minds_stale"]), ("skipped", 1, 0))
 
 
 # ── the care's causes (A.51-A.53) ────────────────────────────────────────
@@ -478,6 +518,55 @@ class TheTaskTests(_Queue):
         _switch("orcs", False)
         for task in (tasks.orc_think, tasks.orc_minds_watch):
             self.assertEqual(task()["status"], "skipped")
+
+    def test_a_returning_switch_never_sends_a_stale_dossier(self):
+        """U-R14, A.55 (2026-11-05, completing O2a): `orcs` or the platform
+        master OFF stops the minds' worker and watchdog at the task gate,
+        so a waiting wake waits, with no code. Back ON, the worker reads a
+        wake that waited under the stale clock; one past it, after a
+        pause of the watchdog, is answered by code (`paused`) and never
+        sent on its old dossier."""
+        from bot_program.orcs import tasks
+        from bot_program.orcs.models import OrcSetting
+        base = self.rendered([W4])
+        for gate, why in (("orcs", "orcs_disabled"),
+                          ("platform_master", "platform_disabled")):
+            with self.subTest(gate):
+                young, old = self.orcs(2)
+                now = timezone.now()
+                # the watchdog's last pass, before the switch went off
+                OrcSetting.objects.update_or_create(
+                    key="minds_watch_last_at", defaults={"value": {
+                        "at": (now - timedelta(minutes=50)).isoformat()}})
+                fresh = self.pending(base, now - timedelta(minutes=20),
+                                     orc=young)
+                _switch(gate, False)
+                for task in (tasks.orc_think, tasks.orc_minds_watch):
+                    self.assertEqual(task(), {"status": "skipped",
+                                              "reason": why})
+                fresh.refresh_from_db()
+                self.assertEqual((fresh.status, fresh.skipped_reason),
+                                 ("pending", ""), "it waits, uncoded")
+                _switch(gate, True)
+                self.use_fake(fake_answer(answer()))
+                self.assertEqual(tasks.orc_think(), {
+                    "status": "success", "thought": 1, "by_code": 0})
+                self.assert_one_call()
+                fresh.refresh_from_db()
+                self.assertEqual(fresh.status, "done")
+                # the same cycle, the wake past the stale clock
+                stale = self.pending(base, now - timedelta(minutes=45),
+                                     orc=old)
+                _switch(gate, False)
+                self.assertEqual(tasks.orc_think()["status"], "skipped")
+                _switch(gate, True)
+                self.assertEqual(tasks.orc_think(), {
+                    "status": "success", "thought": 0, "by_code": 1})
+                stale.refresh_from_db()
+                self.assert_no_call(code="paused", got=stale.skipped_reason)
+                self.assertEqual(stale.status, "skipped")
+                old.refresh_from_db()
+                self.assertNotEqual(old.state, "care_owned")
 
     def test_the_minds_switch_off_closes_the_queue(self):
         """A.17: with the minds switch off, orc_think answers every pending
