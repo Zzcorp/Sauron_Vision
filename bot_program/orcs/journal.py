@@ -57,11 +57,13 @@ def lock_budget(ms):
             outer["spent_ms"] += budget["spent_ms"]
 
 
-def orc_lock(orc_pk, **filters):
+def orc_lock(orc_pk, *, skip_locked=False, **filters):
     """The Orc's row, locked for the caller's transaction: every Orc-row
     lock of the package is taken here. `filters` narrow the row (the root
     trade, for complete_provenance); none matching raises Orc.DoesNotExist,
-    as .get() does.
+    as .get() does. `skip_locked` (the claim, the O2 spec A.18) never
+    waits: a row another transaction holds (the tick, a close) is skipped
+    and None is returned, so its wake stays pending for the next claim.
 
     On PostgreSQL it first sets, LOCAL to the transaction, lock_timeout to
     what the block's lock_budget has left (ORC_LOCK_TIMEOUT_MS outside
@@ -79,8 +81,11 @@ def orc_lock(orc_pk, **filters):
     if conn.vendor != "postgresql" or conn.get_autocommit():
         # no row lock to bound (SQLite), or no transaction to hold one:
         # select_for_update says so itself, as it always did
-        return Orc.objects.select_for_update(no_key=True).get(pk=orc_pk,
-                                                              **filters)
+        rows = Orc.objects.select_for_update(no_key=True,
+                                             skip_locked=skip_locked)
+        if skip_locked:
+            return rows.filter(pk=orc_pk, **filters).first()
+        return rows.get(pk=orc_pk, **filters)
     budget = _BUDGET.get()
     wait_ms = ORC_LOCK_TIMEOUT_MS if budget is None else int(
         budget["left_ms"])
@@ -90,6 +95,10 @@ def orc_lock(orc_pk, **filters):
                     [f"{max(wait_ms, 1)}ms", f"{ORC_STATEMENT_TIMEOUT_MS}ms"])
     started = time.monotonic()
     try:
+        if skip_locked:
+            return Orc.objects.select_for_update(
+                no_key=True, skip_locked=True).filter(pk=orc_pk,
+                                                      **filters).first()
         return Orc.objects.select_for_update(
             no_key=True, nowait=wait_ms < 1).get(pk=orc_pk, **filters)
     finally:

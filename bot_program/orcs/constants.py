@@ -599,3 +599,89 @@ LINE_LOCK_TIMEOUT_MS = ORC_LOCK_TIMEOUT_MS
 #: send at all (a gate, the authority, the line).
 REPLY_ANSWER, REPLY_BILLED, REPLY_UNBILLED, REPLY_UNSENT, REPLY_CLOSED = (
     "answer", "billed", "unbilled", "unsent", "closed")
+
+# ── O2a: the queue (2026-11-05, the O2 spec A.7-A.19, A.48-A.56) ──────────
+# Admission, the merge, the claim, the per-Orc day caps, the triage, the
+# watchdogs and the breaker (bot_program/orcs/scheduler.py). Nothing here
+# sends anything: while the minds switch is off or the Orcs line is at 0,
+# every wake is answered by code.
+
+#: The codes admission and the claim write (A.4), named once.
+CODE_QUIET = "quiet"
+CODE_TRIAGE = "triage"
+CODE_INFLIGHT = "inflight"
+CODE_DAY_CAP = "day_cap"
+CODE_ROUTINE_CAP = "routine_cap"
+CODE_DOLLAR_CAP = "dollar_cap"
+CODE_SPACING = "spacing"
+CODE_OVER_BUDGET = "over_budget"
+CODE_BREAKER = "breaker"
+CODE_PAUSED = "paused"
+CODE_BACKLOG = "backlog"
+CODE_WALL_TIME = "wall_time"
+CODE_WORKER_SILENT = "worker_silent"
+
+#: A.12: an Orc's model wakes a day are weather.caps_for's (OrcSetting
+#: "wakes_per_day" overrides them, {"real": {class: n}, "paper": n}); its
+#: dollars a day by money world, checked with each rung's HIGH (OrcSetting
+#: "per_orc_daily_usd"); the share of either cap its routine wakes may use
+#: (OrcSetting "routine_share"). Each binds at once, with no restart.
+PER_ORC_DAILY_USD = {"real": 2.00, "paper": 0.50}
+ROUTINE_SHARE = 0.75
+WAKES_PER_DAY_KEY = "wakes_per_day"
+PER_ORC_DAILY_KEY = "per_orc_daily_usd"
+ROUTINE_SHARE_KEY = "routine_share"
+#: A.13: the triage inside the Orcs line, with cap C and the reserve
+#: R = min(reserve_cap, reserve_share x C) kept for real-money urgent
+#: wakes: real non-urgent wakes stop at C - R, paper urgent at
+#: paper_urgent x C, paper non-urgent at paper x C, the post-mortems and
+#: the council of war at tickets x C (OrcSetting "triage" overrides it).
+TRIAGE = {"reserve_cap": 1.00, "reserve_share": 0.20, "paper_urgent": 0.60,
+          "paper": 0.45, "tickets": 0.30}
+TRIAGE_KEY = "triage"
+#: A.14: the triage classes and the claim's rank (OrcWake.priority).
+CLASS_REAL_URGENT, CLASS_REAL, CLASS_PAPER_URGENT, CLASS_PAPER = (
+    "real_urgent", "real", "paper_urgent", "paper")
+RANKS = {CLASS_REAL_URGENT: 3, CLASS_REAL: 2, CLASS_PAPER_URGENT: 1,
+         CLASS_PAPER: 0}
+#: A.16: a model is cold when no call on it started this long ago; its
+#: first call then runs alone (urgent wakes are never held).
+COLD_MODEL_MIN = 55
+#: A.17, A.19: one orc_think run claims and thinks one wake at a time for
+#: this long at most; its beat every 60 s, a run not started within 55 s
+#: dropped.
+THINK_RUN_S = 100
+THINK_BEAT_S = 60
+#: A.54, A.55: a pending wake alarms past STALL_MIN from its first send,
+#: closes past STALE_MIN; a watchdog silent for WATCH_PAUSED_MIN before a
+#: pass means the Orcs were paused.
+STALL_MIN = 20
+STALE_MIN = 30
+WATCH_PAUSED_MIN = 10
+WATCH_BEAT_S = 300
+#: A.56: the breaker opens after BREAKER_FAILS failed wakes of any Orc
+#: within BREAKER_WINDOW_MIN, and pauses the claims BREAKER_PAUSE_MIN.
+BREAKER_FAILS = 5
+BREAKER_WINDOW_MIN = 10
+BREAKER_PAUSE_MIN = 15
+#: The OrcSetting keys of the breaker and the watchdog's last pass.
+MINDS_BREAKER_KEY = "minds_breaker"
+MINDS_WATCH_LAST_KEY = "minds_watch_last_at"
+#: A.52: what sends an Orc to the care, and its words (care_owned_reason).
+CARE_AFTER_FAILED = 2
+CARE_AFTER_REFUSED = 2
+CARE_WORKER_SILENT = "worker_silent"
+CARE_CALLS_FAILING = "calls_failing"
+CARE_ANSWERS_REFUSED = "answers_refused"
+CARE_WORDS = {
+    CARE_WORKER_SILENT: "a wake waited 30 minutes for a silent worker",
+    CARE_CALLS_FAILING: "two model calls in a row failed",
+    CARE_ANSWERS_REFUSED: "two answers in a row were refused",
+}
+#: A.10: the facts hash's version, part of its hashed input; the print's
+#: distance in bands, in minutes: under 3 h, 3 to 24 h, over 24 h.
+FACTS_HASH_VERSION = 2
+PRINT_BANDS_MIN = (180, 1440)
+#: A.49: the asked wake's memory key and words.
+W11_ASK_KEY = "w11_ask"
+W11_ASK_WORDS = "the Orc asked to look again"

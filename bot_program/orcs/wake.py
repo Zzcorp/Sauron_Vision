@@ -9,7 +9,8 @@ care's state on the row and the frames the tick already read, and finds:
   W1   the first detect after the birth                          urgent
   W2   a final venue bar of the decision timeframe (a Mercenary's 1h)
   W3   the closing-side mark within 0.1 x ATR(1h) of an invalidation
-       level, again only W3_ONCE_H after that level's last W3   urgent
+       level, again only W3_ONCE_H after that level's last W3   urgent;
+       near a level of the plan's watches (O2a), never urgent
   W4   +1R, +2R, +3R first reached; -0.5R and -0.75R (urgent); the
        give-back to half the best after +1R
   W6   the care moved its stop; the venue refused the stop; the care
@@ -17,8 +18,10 @@ care's state on the row and the frames the tick already read, and finds:
   W8   a predicate met (urgent); the thesis check reads exit
   W9   a hand edit of the levels
   W10  a close in doubt, an entry in doubt, inert stop rules     urgent
-  W11  the metronome: every 4 h while the market is open; a stock or ETF
-       at its open + 60 min and its close - 90 min; 2 h before a weekend
+  W11  the metronome: while the market is open, the army type's period
+       (Line 4 h, Mercenaries 1 h, Olog-hai 24 h) after the last recorded
+       wake; a stock or ETF at its open + 60 min and its close - 90 min;
+       2 h before a weekend; the wake a validated answer asked for (O2a)
 
 and merges what the census left in `seen["wake_pending"]` (W5 the clock
 around a print, W7 the book, W10 a close pending). Each reason counts once
@@ -44,7 +47,17 @@ and hashes, its status (`skipped`, "no model before O2"; or `quiet` under
 F6 with a code `reading` and Orc.latest_note), a journal `wake` entry kept
 off the card's lines, and the card's `intellect` and `integrity`.
 Detection, spacing and the proxy for the last answered facts hash live in
-Orc.seen, never in O2's columns (last_wake_at, last_facts_hash).
+Orc.seen; the tick never writes the minds' columns (last_wake_at,
+last_facts_hash).
+
+THE QUEUE'S INPUTS (the O2 spec A.9, A.10, A.48-A.50; O2a 2026-11-05).
+The facts hash is version 2 (the plan's version and its watched levels by
+stored reference, the next print's distance in bands), whatever the minds
+switch says. While the minds switch is on, F6 compares it with the last
+VALIDATED answer's (Orc.last_facts_hash), never with the proxy, so a wake
+answered by code never makes the next metronome quiet. W3 watches the
+plan's levels without urgency; W11 counts from every recorded wake at the
+army type's period, and fires the wake a validated answer asked for.
 
 `detect` never raises; a recorded wake is written in a savepoint, so a
 failure leaves the tick and the Orc as they were, and a quiet tick costs
@@ -62,13 +75,16 @@ import re
 from datetime import timedelta
 
 from bot_program.orcs.constants import (BAND_HOLD_AFTER_URGENT_MIN,
-                                        MIN_WAKE_SPACING_MIN, STATE_DEAD,
+                                        FACTS_HASH_VERSION,
+                                        MIN_WAKE_SPACING_MIN,
+                                        PRINT_BANDS_MIN, STATE_DEAD,
                                         STATUS_WORDS, VENUE_LIVE,
                                         VENUE_PAPER, W3_NEAR_ATR1H,
                                         W3_ONCE_H, W4_GIVEBACK_SHARE,
                                         W4_THRESHOLDS, W5_EARNINGS_H,
                                         W5_LATE_MIN, W5_OFFSETS_MIN,
-                                        W7_OPEN_RISK_SHARE,
+                                        W7_OPEN_RISK_SHARE, W11_ASK_KEY,
+                                        W11_ASK_WORDS,
                                         W11_CLOSE_BEFORE_MIN,
                                         W11_METRONOME_H, W11_OPEN_AFTER_MIN,
                                         W11_WEEKEND_BEFORE_H,
@@ -120,20 +136,53 @@ def _parse(s):
         return None
 
 
+def _print_band(minutes):
+    """The next print's distance in bands (A.10): "under_3h", "3h_24h",
+    "over_24h", or None with no print ahead."""
+    m = _f(minutes)
+    if m is None:
+        return None
+    lo, hi = PRINT_BANDS_MIN
+    if m < lo:
+        return "under_3h"
+    return "3h_24h" if m <= hi else "over_24h"
+
+
+def _watch_refs(watches) -> list:
+    """The plan's watched levels by their STORED references (kind, tf,
+    price; A.39), never by id alone: a menu id names another price at the
+    next build (A.30)."""
+    out = []
+    for w in watches or ():
+        if not isinstance(w, dict):
+            continue
+        price = _f(w.get("price"))
+        out.append([str(w.get("kind") or ""), str(w.get("tf") or ""),
+                    None if price is None else round(price, 10)])
+    return sorted(out, key=lambda x: (x[0], x[1], x[2] is None, x[2] or 0))
+
+
 def facts_hash(snapshot) -> str:
-    """The facts a quiet wake compares (§1.3): the R in quarter-R buckets,
-    the menu's level set, the PO3 phase, the calendar distance (by the
-    hour), the thesis check's verdict, the predicates' states."""
+    """The facts a quiet wake compares (§1.3), version 2 (the O2 spec A.10,
+    O2a 2026-11-05): the R in quarter-R buckets, the menu's level set, the
+    PO3 phase, the next print's distance IN BANDS (under 3 h, 3 to 24 h,
+    over 24 h: O1 counted whole hours, so F6 was almost never quiet), the
+    thesis check's verdict, the predicates' states, the plan's version and
+    its watched levels by their stored references. FACTS_HASH_VERSION is
+    part of the hashed input. It applies whatever the minds switch says,
+    so F6's quiet share is measured before the minds go on (A.5)."""
     s = snapshot or {}
     r = _f(s.get("r_now"))
-    cal = _f(s.get("calendar_min"))
-    canon = {"r": None if r is None else int(math.floor(r / 0.25 + 1e-9)),
+    canon = {"v": FACTS_HASH_VERSION,
+             "r": None if r is None else int(math.floor(r / 0.25 + 1e-9)),
              "menu": sorted(str(x) for x in s.get("menu") or ()),
              "po3": str(s.get("po3") or ""),
-             "calendar_h": None if cal is None else int(cal // 60),
+             "calendar": _print_band(s.get("calendar_min")),
              "thesis": str(s.get("thesis") or ""),
              "predicates": {str(k): str(v) for k, v in sorted(
-                 (s.get("predicates") or {}).items())}}
+                 (s.get("predicates") or {}).items())},
+             "plan_v": int(s.get("plan_v") or 0),
+             "watches": _watch_refs(s.get("watches"))}
     return hashlib.sha256(json.dumps(canon, sort_keys=True).encode()) \
         .hexdigest()
 
@@ -197,16 +246,37 @@ def _closing_mark(bot, trade, price, now):
     return _f(price)
 
 
+def watch_key(watch) -> str:
+    """A plan watch's memory key in seen["w3_at"]: its STORED reference,
+    plan:<kind>:<tf>:<price> (A.48), never its menu id alone, which names
+    another price at the next build (A.30)."""
+    price = _f((watch or {}).get("price"))
+    return (f"plan:{(watch or {}).get('kind') or ''}:"
+            f"{(watch or {}).get('tf') or ''}:"
+            f"{'' if price is None else format(price, '.10g')}")
+
+
 def _w3(orc, trade, bot, price, now, cache, seen, add):
     """The closing-side mark near an invalidation level: urgent, and again
     for that level only W3_ONCE_H after its last recorded W3 (never a
-    fixed clock bucket: 11:59 and 12:00 are one W3)."""
+    fixed clock bucket: 11:59 and 12:00 are one W3).
+
+    The plan's watches (the O2 spec A.48, O2a 2026-11-05): beside the
+    thesis's close_beyond levels, each level a validated plan stored in
+    Orc.watches (prices copied by code from the wake's menu), under the
+    same W3_NEAR_ATR1H and once per level per W3_ONCE_H. A watch is the
+    model's own choice, so it never buys urgency: `urgent` False, `source`
+    "plan", the key W3:plan:<level_id>:<YYYYmmddHHMM>, its memory keyed by
+    its stored reference (watch_key). It is routine, ranks non-urgent and
+    waits for the spacing. Only the thesis's levels keep W3's urgency."""
     from bot_program.orcs import bars
     from bot_program.orcs.facts import px
     levels = [p for p in (orc.thesis or {}).get("invalidation") or []
               if isinstance(p, dict) and p.get("kind") == "close_beyond"
               and _f(p.get("level")) is not None]
-    if not levels:
+    watches = [w for w in (orc.watches or [])
+               if isinstance(w, dict) and _f(w.get("price")) is not None]
+    if not levels and not watches:
         return
     m = _closing_mark(bot, trade, price, now)
     if m is None:
@@ -227,6 +297,21 @@ def _w3(orc, trade, bot, price, now, cache, seen, add):
             add("W3", f"W3:{lid}:{now:%Y%m%d%H%M}",
                 f"the mark near {lid} ({px(trade, p['level'])})", True,
                 level=lid)
+    # a watch's W3 waits for the spacing in the pending wake: the same
+    # level is never added again, under another minute's key, meanwhile
+    pending = {r.get("level") for r in (seen.get("wake_pending") or {})
+               .get("reasons") or [] if isinstance(r, dict)}
+    for w in watches:
+        ref = watch_key(w)
+        last = _parse(last_at.get(ref))
+        if ref in pending or (last is not None
+                              and now - last < timedelta(hours=W3_ONCE_H)):
+            continue
+        if abs(m - _f(w["price"])) <= W3_NEAR_ATR1H * atr:
+            lid = str(w.get("level_id") or "the level")
+            add("W3", f"W3:plan:{lid}:{now:%Y%m%d%H%M}",
+                f"the mark near the plan's {lid} ({px(trade, w['price'])})",
+                False, level=ref, source="plan")
 
 
 def _w4(care, add):
@@ -293,7 +378,22 @@ def _w10(bot, trade, add):
             "an entry in doubt on this symbol", True)
 
 
+def metronome_h(orc) -> float:
+    """The metronome's period (the O2 spec A.50, §4 Q10; O2a 2026-11-05):
+    the Orc's army type's own (army.ARMY_TYPES, pure): Line 4 h,
+    Mercenaries 1 h, Olog-hai 24 h; Line's for a type it does not know."""
+    from bot_program.orcs.army import ARMY_TYPES, LINE
+    t = ARMY_TYPES.get(str(getattr(orc, "army_type", "") or "")) or LINE
+    return float(t.metronome_h or W11_METRONOME_H)
+
+
 def _w11(orc, trade, now, seen, add):
+    """The metronome, its army type's period after the last RECORDED wake
+    (A.50: every recorded wake restarts it), while the market is open; a
+    stock's or ETF's open and close; the weekend. And the asked wake
+    (A.49, P23): a validated answer's next_wake_min, kept in
+    seen["w11_ask"], fires at the first open-market tick at or after its
+    time, key W11:ask:<YYYYmmddHHMM>; `record` consumes it."""
     from bot_program.orcs.sessions import NEVER_SHUTS, next_shut
     cls = str(trade.asset_class or "")
     shut = None
@@ -305,8 +405,11 @@ def _w11(orc, trade, now, seen, add):
         if shut and shut.get("now_shut"):
             return
     last = _parse(seen.get("w11_at"))
-    if last is not None and now - last >= timedelta(hours=W11_METRONOME_H):
+    if last is not None and now - last >= timedelta(hours=metronome_h(orc)):
         add("W11", f"W11:{now:%Y%m%d%H}", "metronome", False)
+    ask = _parse(seen.get(W11_ASK_KEY))
+    if ask is not None and now >= ask:
+        add("W11", f"W11:ask:{ask:%Y%m%d%H%M}", W11_ASK_WORDS, False)
     if shut and shut.get("modelled") and shut.get("at") is not None:
         to_shut = (shut["at"] - now).total_seconds() / 60.0
         day = f"{now:%Y%m%d}"
@@ -609,7 +712,13 @@ def _snapshot(orc, trade, ctx) -> dict:
                            if isinstance(ctx.get("tick_predicates"), dict)
                            else {k: (v or {}).get("state") for k, v in (
                                (orc.seen or {}).get("predicates")
-                               or {}).items()})}
+                               or {}).items()}),
+            # the facts hash v2 (A.10): the plan's version and its watched
+            # levels by their stored references
+            "plan_v": int(orc.plan_version or 0),
+            "watches": [{"kind": w.get("kind"), "tf": w.get("tf"),
+                         "price": w.get("price")}
+                        for w in (orc.watches or []) if isinstance(w, dict)]}
 
 
 def _reading(trade, ctx, tf) -> str:
@@ -644,7 +753,6 @@ def record(orc, trade, reasons, *, now, bot=None, price=None, cache=None,
     Returns the OrcWake."""
     from bot_program.orcs import journal
     from bot_program.orcs.models import OrcWake
-    codes = {r.get("code") for r in reasons}
     urgent = any(r.get("urgent") for r in reasons)
     seen = orc.seen or {}
     meta = trade.metadata if isinstance(trade.metadata, dict) else {}
@@ -664,9 +772,13 @@ def record(orc, trade, reasons, *, now, bot=None, price=None, cache=None,
                     "care": dict(care), "predicates": preds,
                     # PS8's "since the last wake": the one BEFORE this
                     "prev_recorded": seen.get("last_recorded")})
-    w11_at = now.isoformat() if ("W11" in codes or not seen.get("w1")) \
-        else seen.get("w11_at") or now.isoformat()
-    due = (_parse(w11_at) or now) + timedelta(hours=W11_METRONOME_H)
+    # A.50 (O2a, 2026-11-05): the metronome counts from EVERY recorded
+    # wake, at the army type's period; the next wake is due at the earlier
+    # of it and a validated answer's ask (A.49), which a wake carrying its
+    # W11:ask key consumes
+    w11_at = now.isoformat()
+    due = now + timedelta(hours=metronome_h(orc))
+    ask = seen.get(W11_ASK_KEY)
     remember = {
         "w1": True,
         "wake_keys": journal.add_keys(WAKE_KEYS_KEPT, [
@@ -675,6 +787,13 @@ def record(orc, trade, reasons, *, now, bot=None, price=None, cache=None,
             r["key"] for r in reasons if _one_shot(r)]),
         "wake_pending": journal.consume_reasons([r["key"] for r in reasons]),
         "last_recorded": now.isoformat(), "w11_at": w11_at}
+    if any(str(r.get("key") or "").startswith("W11:ask:") for r in reasons):
+        # consumed: only the ask this wake fired, never one a settle wrote
+        # since this tick read the Orc
+        remember[W11_ASK_KEY] = lambda cur, seen_ask=ask: (
+            None if cur == seen_ask else cur)
+    elif _parse(ask) is not None and _parse(ask) < due:
+        due = _parse(ask)
     if urgent:
         remember["band_hold_until"] = (now + timedelta(
             minutes=BAND_HOLD_AFTER_URGENT_MIN)).isoformat()
@@ -704,6 +823,17 @@ def _minds_on() -> bool:
         return minds_on()
     except Exception as e:  # noqa: BLE001 — unread is off
         logger.info("[orcs] the minds' gates could not be read: %s", e)
+        return False
+
+
+def _minds_switch_on() -> bool:
+    """The minds switch alone (`orcs_minds`), read once per render: F6's
+    reference follows it (A.9). Unreadable is off."""
+    try:
+        from bot_program.orcs.switches import minds_switch_on
+        return minds_switch_on()
+    except Exception as e:  # noqa: BLE001 — unread is off
+        logger.info("[orcs] the minds switch could not be read: %s", e)
         return False
 
 
@@ -796,7 +926,13 @@ def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx):
     f5_on, f5_items = complexity.f5(ctx.get("integrity"))
     snapshot = _snapshot(orc, trade, ctx)
     fh = facts_hash(snapshot)
-    quiet = complexity.f6(reasons, fh, seen.get("answered_hash"))
+    # F6's reference (A.9, P27): while the minds switch is on, the hash of
+    # the last VALIDATED answer (Orc.last_facts_hash, which only a done
+    # answer writes), so a wake answered by code for budget or a cap never
+    # makes the next metronome quiet; O1's proxy while it is off
+    reference = (orc.last_facts_hash if _minds_switch_on()
+                 else seen.get("answered_hash"))
+    quiet = complexity.f6(reasons, fh, reference)
     status = WAKE_STATUS_QUIET if quiet else WAKE_STATUS_SKIPPED
     words = reasons_words(reasons)
     wake.score, wake.band, wake.day_class = sc, band, day.day_class
@@ -813,6 +949,8 @@ def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx):
         wake.components.update({
             "shared": rendered.get("shared"), "s": rendered.get("s"),
             "vctx": vctx, "facts_hash": fh,
+            # A.11 step 4, read again at the claim (A.18)
+            "over_budget": bool(rendered.get("over_budget")),
             **{k: tick[k] for k in RERENDER_KEEP if k in tick}})
     wake.block_hashes = rendered["hashes"]
     wake.finished_at = now
@@ -851,11 +989,25 @@ def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx):
     return wake
 
 
+class RenderPass(tuple):
+    """What one render pass did: (rendered, failed), as O1's callers read
+    it, and `admitted`, the wakes it admitted to the minds' queue (the O2
+    spec A.7, A.17; O2a 2026-11-05). The render does not admit yet, so
+    `admitted` is 0 until it does; tasks.orc_render_wakes sends one
+    orc_think ticket after a pass that admitted any wake."""
+
+    def __new__(cls, rendered=0, failed=0, admitted=0):
+        out = super().__new__(cls, (int(rendered), int(failed)))
+        out.admitted = int(admitted)
+        return out
+
+
 def render_queued(*, limit=RENDER_BATCH) -> tuple:
     """(rendered, failed): the recorded wakes still waiting for their
     dossier, oldest first, each in its own savepoint. One that fails is
     marked `failed` with its error's kind (never retried, never stopping
-    the next). Never raises."""
+    the next). Never raises. A RenderPass: its `admitted` count is 0 until
+    the render admits (O2a's last commit)."""
     from bot_program.orcs.models import OrcWake
     try:
         ids = list(OrcWake.objects
@@ -863,7 +1015,7 @@ def render_queued(*, limit=RENDER_BATCH) -> tuple:
                    .order_by("id").values_list("id", flat=True)[:int(limit)])
     except Exception as e:  # noqa: BLE001
         logger.warning("[orcs] the queued wakes could not be listed: %s", e)
-        return 0, 0
+        return RenderPass(0, 0)
     done = failed = 0
     for wid in ids:
         try:
@@ -889,7 +1041,7 @@ def render_queued(*, limit=RENDER_BATCH) -> tuple:
                     w.save(update_fields=["components"])
             except Exception:  # noqa: BLE001
                 pass
-    return done, failed
+    return RenderPass(done, failed)
 
 
 # ── the census's reasons (merged by the next tick) ───────────────────────

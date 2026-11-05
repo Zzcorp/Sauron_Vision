@@ -33,9 +33,10 @@ excursion is never read as a small one. A met predicate stays met. Its
 state lives in Orc.seen["predicates"], merged with the fact under the
 Orc's lock.
 
-O1 writes facts only. THE SEAM: a met predicate is an urgent W8 wake from O2
-(`# O2: wake.request(orc, "W8", urgent=True)` below); nothing here wakes,
-moves or sends anything.
+O1 writes facts only; nothing here wakes, moves or sends anything. A met
+predicate's urgent W8 wake is detected on the same tick, from the state's
+transition (bot_program/orcs/wake.py), so no request is needed here (the
+O2 spec §1.1.3, O2a 2026-11-05).
 """
 import logging
 from dataclasses import asdict, dataclass
@@ -348,7 +349,6 @@ def check(orc, row, *, now, frames=None, mfe_r=None, mark=None,
                      "at": now.isoformat(), "bar_end": bar_end}
         changed = True
         if res.state == PRED_MET:
-            # O2: wake.request(orc, "W8", urgent=True)
             journal.append(orc, "fact", met_line(pred, res, row),
                            body={"predicate": pred, "result": res.as_dict()},
                            fact=True, remember={"predicates": dict(seen)})

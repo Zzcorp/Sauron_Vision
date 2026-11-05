@@ -30,7 +30,11 @@ class TheScheduleTests(SimpleTestCase):
         self.assertEqual(routes["bot_program.orcs.tasks.orc_census"],
                          {"queue": "fast"})
         self.assertFalse([k for k in routes if k.startswith(
-            "bot_program.orcs") and "*" in k], "no orcs glob before O2")
+            "bot_program.orcs") and "*" in k],
+            "still no orcs glob: worker-orc serves `orcs` for the minds' "
+            "worker task alone (O2a)")
+        self.assertEqual(routes["bot_program.orcs.tasks.orc_think"],
+                         {"queue": "orcs"})
         self.assertIn("bot_program.orcs.tasks", app.conf.imports)
         from bot_program.orcs.tasks import orc_census
         self.assertEqual(orc_census.name, "bot_program.orcs.tasks.orc_census")

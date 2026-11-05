@@ -97,12 +97,13 @@ app.conf.task_routes = {
     "market_data.tasks.fetch_eod_crypto": {"queue": "slow"},
     # 2026-10-16 -- the Orcs' census (bot_program/orcs): database reads and
     # the Orc tables only, no broker, no model, beside the Morgul guards.
-    # No orcs.* glob: the `orcs` queue and its worker arrive with O2.
+    # No orcs.* glob: the `orcs` queue carries the minds' worker task
+    # alone, by exact name (O2a, below).
     "bot_program.orcs.tasks.orc_census": {"queue": "fast"},
     # 2026-10-16 -- the Orcs' arms and grades (O1b): bars and the Orc tables
     # only, no broker, no model. On `slow` (worker-slow serves slow,ai) by
-    # exact name until O2 ships the `orcs` queue and worker-orc: a glob to
-    # a queue no worker consumes would strand them.
+    # exact name, never a glob: the `orcs` queue is the minds' calls' own
+    # (worker-orc, O2a), and a pass there would wait behind them.
     "bot_program.orcs.tasks.track_ghosts": {"queue": "slow"},
     "bot_program.orcs.tasks.grade_closed": {"queue": "slow"},
     "bot_program.orcs.tasks.shadow_audit": {"queue": "slow"},
@@ -117,6 +118,16 @@ app.conf.task_routes = {
     # 2026-10-23 -- a recorded wake's score, weather and dossier, rendered
     # off the tick (the tick writes the wake and its reasons only).
     "bot_program.orcs.tasks.orc_render_wakes": {"queue": "slow"},
+    # 2026-11-05 -- the Orcs' minds (O2a, the O2 spec A.17): the worker
+    # that claims a wake and reads it with a model in shadow, on its own
+    # queue, consumed by worker-orc alone (deploy/docker-compose.yml), so
+    # a call of up to minutes never sits in front of the tick, the pollers
+    # or the slow passes. Its watchdog runs on `slow`, never on `orcs`
+    # (two long calls may hold both slots) and never in the census on
+    # `fast` (N8). Both idle while the minds switch is off or the Orcs
+    # line is at 0, and no wake is admitted until the render admits.
+    "bot_program.orcs.tasks.orc_think": {"queue": "orcs"},
+    "bot_program.orcs.tasks.orc_minds_watch": {"queue": "slow"},
 }
 
 # ============================================================
@@ -517,6 +528,21 @@ app.conf.beat_schedule = {
         "task": "bot_program.orcs.tasks.orc_render_wakes",
         "schedule": 120.0,
         "options": {"expires": 110, "expire_seconds": 110},
+    },
+    # THE ORCS' MINDS (2026-11-05, O2a, the O2 spec A.17, A.54): the
+    # worker every 60 s (a run not started within 55 s is dropped; a
+    # render pass that admits a wake also sends it a ticket), the
+    # watchdog every 5 min on `slow`. Behind the orcs switch; each idle
+    # while the minds switch is off or nothing waits.
+    "orc-think": {
+        "task": "bot_program.orcs.tasks.orc_think",
+        "schedule": 60.0,
+        "options": {"expires": 55, "expire_seconds": 55},
+    },
+    "orc-minds-watch": {
+        "task": "bot_program.orcs.tasks.orc_minds_watch",
+        "schedule": 300.0,
+        "options": {"expires": 280, "expire_seconds": 280},
     },
     "orc-tape-mercenary": {
         "task": "market_data.tasks.refresh_orc_tape_task",

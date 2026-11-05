@@ -144,6 +144,15 @@ def line_summary() -> dict:
     return spend.lines_summary()
 
 
+def live_floor() -> float:
+    """ORC_LIVE_FLOOR_USD: what the core line holds back while the Orcs
+    line is on (spend.py). The core subtracts only the Orcs' BOOKED spend
+    and this floor, so the Orcs' money in flight and held never passes it
+    (A.18's `inflight` rule; O2a's queue, 2026-11-05)."""
+    from ai_agents import spend
+    return float(spend.ORC_LIVE_FLOOR_USD)
+
+
 def _until_ok(entry, now) -> bool:
     from django.utils.dateparse import parse_datetime
     until = entry.get("until")

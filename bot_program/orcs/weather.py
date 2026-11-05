@@ -3,10 +3,16 @@ class), computed at the trading-day roll (17:00 New York) over the day
 ahead, re-run UPWARD only when the posture's level or the Mind's regime
 changed since it was computed, never lowered within the trading day.
 
-In O1 the weather routes nothing and caps nothing: it is journaled on
-every detected wake, shown on the card and the Horde's class band (O1d),
-and its caps are written for display only (`caps_for`; the dollar caps
-arrive with the router, O2).
+The weather routes nothing (the router is O2b's). It is journaled on
+every detected wake and shown on the card and the Horde's class band
+(O1d). From O2a (2026-11-05, the O2 spec A.12, §4 Q4) its model-wake cap
+BINDS: the scheduler counts each Orc's model wakes against
+`caps_for(day_class, real)`, computed per Orc with that Orc's own money
+world (real 12, 14 or 16 by the trading day's class; paper and demo 6),
+never read back from OrcDayBaseline.caps, which holds what its first
+reader's world produced. The Orc's dollars a day are the scheduler's
+(OrcSetting per_orc_daily_usd). The frontier quota and the probes stay
+display only until O2b.
 
     calm       day score < 30
     eventful   30 to < 55
@@ -26,20 +32,26 @@ from bot_program.orcs.constants import ROUTING_VERSION
 
 logger = logging.getLogger(__name__)
 
-#: §7.5.7, display only in O1: the model wakes a day by money and weather,
-#: and the frontier quota (§7.5.3).
+#: §7.5.7: the model wakes a day by money and weather (binding from O2a,
+#: A.12: paper and demo 6, §4 Q4), and the frontier quota (§7.5.3,
+#: display only until O2b).
 WAKES_PER_DAY = {"real": {"calm": 12, "eventful": 14, "stormy": 16},
-                 "paper": 12}
+                 "paper": 6}
 FRONTIER_PER_DAY = {"calm": 1, "eventful": 2, "stormy": 4}
 _RANK = {"calm": 0, "eventful": 1, "stormy": 2}
+#: What binds of caps_for's (the scheduler's count cap); the rest is shown.
+BINDING = ("wakes_per_day",)
 
 
 def caps_for(day_class, real) -> dict:
+    """The caps of one Orc's day by its own money world (`real`) and the
+    trading day's class: `wakes_per_day` binds (A.12), the frontier quota
+    and the probes are shown only (O2b's)."""
     wakes = (WAKES_PER_DAY["real"].get(day_class, 12) if real
              else WAKES_PER_DAY["paper"])
     return {"wakes_per_day": int(wakes),
             "frontier_quota": int(FRONTIER_PER_DAY.get(day_class, 1)),
-            "probes": day_class != "stormy", "display_only": True}
+            "probes": day_class != "stormy", "binding": list(BINDING)}
 
 
 def _class_currencies(user, asset_class) -> list:

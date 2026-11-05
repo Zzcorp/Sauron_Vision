@@ -151,7 +151,7 @@ asks for the password again.
 
 **Everything ships OFF, including the master switch.** This is deliberate — a
 freshly deployed trading platform should not start acting on its own — but it
-means that until you do this, beat fires every scheduled task, both workers
+means that until you do this, beat fires every scheduled task, the workers
 consume them, and every one returns `skipped`. The site looks completely
 healthy while doing nothing at all.
 
@@ -1520,7 +1520,9 @@ for a reason to think: the birth, a closed bar of the decision timeframe,
 the mark near an invalidation level, +1R, +2R, +3R, -0.5R and -0.75R first
 reached, half the best given back, the care moving or closing, the venue
 refusing a stop, a met predicate, a hand edit of the levels, a close or an
-entry in doubt, the metronome (every 4 hours while the market is open), a
+entry in doubt, the metronome (while the market is open, the Orc's army
+type's period after its last recorded wake: 4 hours for Line Orcs, every
+hour for Mercenaries, once a day for the Olog-hai), a
 high-impact print (3 hours and 1 hour before, 15 minutes after), a change
 of the daily-loss mode, open risk at 80% of its limit, a change of the
 posture, a close pending at the venue. The book is read in the Orc's own

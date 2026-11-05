@@ -339,3 +339,10 @@ class TheFactsHashTests(TestCase):
         self.assertNotEqual(h, facts_hash({**base, "predicates":
                                            {"a": "met"}}))
         self.assertEqual(len(h), 64)
+        # version 2 (O2a, 2026-11-05, the O2 spec A.10): the next print in
+        # bands (under 3 h, 3 to 24 h, over 24 h), no longer whole hours;
+        # the plan's version moves it (tests/orcs/test_orc_o2a_dossier.py)
+        self.assertEqual(h, facts_hash({**base, "calendar_min": 460}),
+                         "6 h 40 and 7 h 40 are one band")
+        self.assertNotEqual(h, facts_hash({**base, "calendar_min": 170}))
+        self.assertNotEqual(h, facts_hash({**base, "plan_v": 1}))

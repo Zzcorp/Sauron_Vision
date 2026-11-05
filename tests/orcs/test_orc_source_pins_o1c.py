@@ -91,6 +91,16 @@ class ThePinsTests(SimpleTestCase):
             with self.subTest(module=name):
                 self.assertNotIn("# O2:", src)
                 self.assertIn(filler, src)
+        # predicates' stale `wake.request` seam is deleted by O2a's queue
+        # (2026-11-05, the O2 spec §1.0 item 6, §1.1.3): W8 is detected on
+        # the same tick from the predicate's transition (wake.py), and O2
+        # adds no request()
+        src = inspect.getsource(importlib.import_module(
+            "bot_program.orcs.predicates"))
+        with self.subTest(module="predicates"):
+            self.assertNotIn("# O2:", src)
+            self.assertNotIn("wake.request", src)
+            self.assertIn("bot_program/orcs/wake.py", src)
 
     def test_the_bar_refresh_imports_no_order_path(self):
         from market_data import bot_bars, candle_headroom

@@ -77,3 +77,12 @@ def gate_code() -> str:
 def minds_on() -> bool:
     """True when all four gates of A.2 are ON."""
     return gate_code() == ""
+
+
+def minds_switch_on() -> bool:
+    """The minds switch alone (`orcs_minds`), OFF when unreadable: a code
+    answer is journaled while it is on (A.5), F6 reads the last validated
+    answer's hash while it is on (A.9), and orc_think closes the pending
+    wakes while it is off (A.17). (O2a's queue, 2026-11-05.)"""
+    from bot_program.orcs.constants import MINDS_SWITCH
+    return _component_on(MINDS_SWITCH)

@@ -1,7 +1,48 @@
-"""THE SCHEDULER (the O2 spec A.24-A.27; O2a, 2026-11-05). This commit
-builds its settle only: admission, the merge, the claim and the
-watchdogs come with the queue. Nothing reaches it in production yet: no
-wake is ever claimed, so none is ever settled.
+"""THE SCHEDULER (the O2 spec A.7, A.11-A.27, A.51-A.56; O2a, 2026-11-05):
+the Orcs' queue and its money, around one wake's read (mind.py). Unwired
+in production: the render pass does not admit yet (wake.render_queued
+reports an admitted count of 0 until it does), so no wake becomes
+`pending`; the worker's beat (tasks.orc_think) and the watchdog
+(tasks.orc_minds_watch) run idle, and the Orcs line stays at 0.
+
+  absorb   A.7 step 1 (P15), before a wake's render, under its Orc's lock:
+           the Orc's pending wake is merged into it (the union of the
+           reasons by key, each keeping its own urgency; the first send
+           inherited as components["queued_at_inherited"]); the older
+           wake becomes `merged`
+  admit    A.11, after the render, the Orc's lock taken for the status
+           write only. A quiet wake stays quiet; otherwise the first check
+           that fails answers it by code (`skipped` with its code, a
+           `budget` entry while the minds switch itself is on), in this
+           order: the four gates; the Orc dead, the row closed; the
+           dossier over its size cap; the breaker; the Orc's day caps
+           (A.12); the triage and the core's floor (A.13, A.18); the
+           spacing (A.15). Else `pending`: dedupe_key "orc<pk>:pending"
+           (the database then holds one pending wake per Orc), the tick's
+           key kept in components["record_key"], queued_at set once, the
+           priority its rank (A.14), the rung r0 and A.21's bound
+  claim    A.18, one short transaction per examined candidate, best first
+           (-priority, queued_at, id): the line lock, the candidate's Orc
+           row (skip_locked: a row the tick or a close holds stays
+           `pending`), the wake. One call in flight per Orc; A.11 steps
+           2-8 again with the money in flight and held, then the line
+           (A.20); the cold-burst rule (A.16). A pass writes `running`,
+           started_at, est_usd (the bound), the rung's model, the Orc's
+           last_wake_at and its two count counters; the call follows with
+           no lock held
+  run      A.19: claim and think one wake at a time, the four gates read
+           again at each claim, for THINK_RUN_S at most
+  settle   A.24-A.26 (below), then the Orc's states (A.51-A.53) and the
+           breaker (A.56)
+  watch    A.54-A.56 (orc_minds_watch, on `slow`): the stall alarm, the
+           stale and backlog closes, the wall time, the holds, the
+           breaker, the ledger gaps
+
+THE MONEY (N3): every check of the line reads its cap, what it booked
+today and the OTHER calls' money in flight and held, through mind.py
+(the gateway's reads: the ledger's sums and the settings, never a call),
+so this module names no gateway and holds its locks over database reads
+and writes only (N8). A call's own reservation is never counted twice.
 
 THE SETTLE. Validation, the officer and the lookup of the provider's
 ledger row have run already, with no lock held (N8, mind.py). Then one
@@ -40,6 +81,8 @@ sum (mind_gateway.inflight_usd) until it expires at 00:00 UTC, never
 earlier; a late settle with usage drops its own.
 """
 import logging
+import math
+import time
 from datetime import datetime, timedelta
 from datetime import timezone as dt_tz
 from decimal import Decimal
@@ -47,14 +90,49 @@ from decimal import Decimal
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from bot_program.orcs.constants import (HIGH, HOLD_LEDGER_GAP, HOLD_UNBILLED,
-                                        LINE_LOCK_TIMEOUT_MS,
+from bot_program.orcs.constants import (BREAKER_FAILS, BREAKER_PAUSE_MIN,
+                                        BREAKER_WINDOW_MIN,
+                                        CARE_AFTER_FAILED,
+                                        CARE_AFTER_REFUSED,
+                                        CARE_ANSWERS_REFUSED,
+                                        CARE_CALLS_FAILING, CARE_WORDS,
+                                        CARE_WORKER_SILENT, CLASS_PAPER,
+                                        CLASS_PAPER_URGENT, CLASS_REAL,
+                                        CLASS_REAL_URGENT, CODE_BACKLOG,
+                                        CODE_BREAKER, CODE_DAY_CAP,
+                                        CODE_DEAD, CODE_DOLLAR_CAP,
+                                        CODE_INFLIGHT, CODE_OVER_BUDGET,
+                                        CODE_PAUSED, CODE_QUIET,
+                                        CODE_ROUTINE_CAP, CODE_ROW_CLOSED,
+                                        CODE_SPACING, CODE_TRIAGE,
+                                        CODE_WALL_TIME, CODE_WORKER_SILENT,
+                                        COLD_MODEL_MIN, HIGH,
+                                        HOLD_LEDGER_GAP, HOLD_ORPHAN,
+                                        HOLD_UNBILLED, LINE_LOCK_TIMEOUT_MS,
+                                        MIN_WAKE_SPACING_MIN,
+                                        MINDS_BREAKER_KEY,
                                         MINDS_INFLIGHT_KEY, MINDS_LOCK_KEY,
+                                        MINDS_WATCH_LAST_KEY, O2A_RUNG,
+                                        OFFICER_REFUSE,
                                         ORC_STATEMENT_TIMEOUT_MS,
-                                        PER_ORC_HIGH_KEY, REPLY_ANSWER,
-                                        REPLY_UNBILLED, WAKE_STATUS_PENDING,
+                                        PER_ORC_DAILY_KEY,
+                                        PER_ORC_DAILY_USD, PER_ORC_HIGH_KEY,
+                                        RANKS, REPLY_ANSWER, REPLY_UNBILLED,
+                                        ROUTINE_SHARE, ROUTINE_SHARE_KEY,
+                                        STALE_MIN, STALL_MIN, STATE_ACTIVE,
+                                        STATE_BORN, STATE_CARE_OWNED,
+                                        STATE_DEAD, THINK_RUN_S, TRIAGE,
+                                        TRIAGE_KEY, VENUE_LIVE, WAKE_CODE_WORDS,
+                                        WAKE_STATUS_DONE, WAKE_STATUS_FAILED,
+                                        WAKE_STATUS_MERGED,
+                                        WAKE_STATUS_PENDING,
+                                        WAKE_STATUS_QUIET,
                                         WAKE_STATUS_RECORDED,
-                                        WAKE_STATUS_RUNNING)
+                                        WAKE_STATUS_REFUSED,
+                                        WAKE_STATUS_RUNNING,
+                                        WAKE_STATUS_SKIPPED,
+                                        WAKE_STATUS_STALE, WAKES_PER_DAY_KEY,
+                                        WALL_S, WATCH_PAUSED_MIN)
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +142,15 @@ COUNTERS = ("llm_wakes_today", "routine_wakes_today", "spend_today_usd",
 COUNTERS_DAY = "counters_day"
 #: A wake is routine when every reason is one of these, or a plan's watch.
 ROUTINE_CODES = ("W2", "W11")
+#: How many pending wakes one claim examines, best first.
+CLAIM_SCAN = 50
+#: A rendered wake admission may act on: the O1 render's statuses.
+ADMISSIBLE = (WAKE_STATUS_SKIPPED, WAKE_STATUS_RECORDED)
+#: The codes that answer a wake by code for budget (§2.6 item 8).
+BUDGET_CODES = (CODE_TRIAGE, CODE_INFLIGHT, CODE_DAY_CAP, CODE_ROUTINE_CAP,
+                CODE_DOLLAR_CAP, "line", "total", "deep_share")
+#: The return's words (A.53).
+RETURN_WORDS = "The Orc reads its position again: it cited the takeover."
 
 
 def _utc(now):
@@ -79,6 +166,16 @@ def next_midnight(now) -> datetime:
     """00:00 UTC after `now`: when every hold expires (A.25)."""
     day = _utc(now).date() + timedelta(days=1)
     return datetime(day.year, day.month, day.day, tzinfo=dt_tz.utc)
+
+
+def _parse(value):
+    from django.utils.dateparse import parse_datetime
+    if isinstance(value, datetime):
+        return value
+    try:
+        return parse_datetime(str(value)) if value else None
+    except (TypeError, ValueError):
+        return None
 
 
 def high(rung) -> float:
@@ -99,6 +196,242 @@ def is_routine(reasons) -> bool:
     rs = [r for r in reasons or () if isinstance(r, dict)]
     return bool(rs) and all(r.get("code") in ROUTINE_CODES
                             or r.get("source") == "plan" for r in rs)
+
+
+def is_urgent(reasons) -> bool:
+    """A.14: any reason urgent; a reason from the plan's own watch never
+    makes a wake urgent (A.48)."""
+    return any(isinstance(r, dict) and r.get("urgent")
+               and r.get("source") != "plan" for r in reasons or ())
+
+
+# ── the money world, the class and the rank (A.13, A.14) ─────────────────
+
+def is_real(orc, row=None) -> bool:
+    """A.14 (§4 Q6): real money only when BOTH the Orc's seat is live and
+    the row's own world (dashboard.position_summary.world_of) is live. A
+    demo row, a paper row and a row that states no world are budgeted as
+    paper: birth.world maps no world to live, so it is never read for the
+    budget. An unreadable one is paper."""
+    try:
+        from dashboard.position_summary import world_of
+        seat = orc.seat
+        row = row if row is not None else orc.root_trade
+        return (str(seat.venue or "") == VENUE_LIVE
+                and world_of(row) == VENUE_LIVE)
+    except Exception as e:  # noqa: BLE001 — unread is never real money
+        logger.info("[orcs] Orc %s: the money world unread: %s",
+                    getattr(orc, "pk", "?"), e)
+        return False
+
+
+def triage_class(real, urgent) -> str:
+    if real:
+        return CLASS_REAL_URGENT if urgent else CLASS_REAL
+    return CLASS_PAPER_URGENT if urgent else CLASS_PAPER
+
+
+def rank(real, urgent) -> int:
+    """A.14: 3 real urgent, 2 real non-urgent, 1 paper urgent, 0 paper
+    non-urgent; the claim takes -priority, queued_at, id."""
+    return int(RANKS[triage_class(real, urgent)])
+
+
+def _setting(key):
+    from bot_program.orcs.models import OrcSetting
+    return OrcSetting.get(key)
+
+
+def triage_shares() -> dict:
+    """A.13's shares and R's cap: constants.TRIAGE, each key overridden
+    by OrcSetting "triage" (binding at once)."""
+    out = dict(TRIAGE)
+    over = _setting(TRIAGE_KEY)
+    if isinstance(over, dict):
+        for key, value in over.items():
+            if key in out:
+                try:
+                    out[key] = max(0.0, float(value))
+                except (TypeError, ValueError):
+                    continue
+    return out
+
+
+def ceilings(cap, shares=None) -> dict:
+    """A.13: each class's ceiling in a line of cap C, with the reserve
+    R = min(reserve_cap, reserve_share x C) kept for real-money urgent
+    wakes: real urgent C, real non-urgent C - R, paper urgent and paper
+    non-urgent their shares of C, the tickets of the post-mortems and the
+    council of war theirs. R <= 0.2 x C keeps C - R >= 0.8 x C, so they
+    never invert; each is also held at or under the class above it, so an
+    override cannot invert them either."""
+    s = shares or triage_shares()
+    c = max(0.0, float(cap or 0.0))
+    reserve = min(float(s["reserve_cap"]), float(s["reserve_share"]) * c)
+    real = max(0.0, c - reserve)
+    paper_urgent = min(real, float(s["paper_urgent"]) * c)
+    paper = min(paper_urgent, float(s["paper"]) * c)
+    return {CLASS_REAL_URGENT: c, CLASS_REAL: real,
+            CLASS_PAPER_URGENT: paper_urgent, CLASS_PAPER: paper,
+            "tickets": min(paper, float(s["tickets"]) * c),
+            "reserve": c - real}
+
+
+# ── the Orc's day caps (A.12) ────────────────────────────────────────────
+
+def wakes_cap(day_class, real) -> int:
+    """The Orc's model wakes for the day, by its OWN money world and the
+    trading day's class (weather.caps_for: real 12, 14 or 16; paper and
+    demo 6), never read back from OrcDayBaseline.caps (that row holds what
+    its first reader's world produced). OrcSetting "wakes_per_day"
+    overrides them."""
+    from bot_program.orcs import weather
+    n = int(weather.caps_for(day_class, real)["wakes_per_day"])
+    over = _setting(WAKES_PER_DAY_KEY)
+    try:
+        if isinstance(over, dict):
+            if real and isinstance(over.get("real"), dict) and \
+                    day_class in over["real"]:
+                n = int(over["real"][day_class])
+            elif not real and "paper" in over:
+                n = int(over["paper"])
+    except (TypeError, ValueError):
+        pass
+    return max(0, n)
+
+
+def per_orc_daily_usd(real) -> float:
+    """The Orc's dollars a day (OrcSetting "per_orc_daily_usd" overrides
+    PER_ORC_DAILY_USD): real money $2.00, paper and demo $0.50."""
+    key = "real" if real else "paper"
+    over = _setting(PER_ORC_DAILY_KEY)
+    try:
+        if isinstance(over, dict) and key in over:
+            return max(0.0, float(over[key]))
+    except (TypeError, ValueError):
+        pass
+    return float(PER_ORC_DAILY_USD[key])
+
+
+def routine_share() -> float:
+    over = _setting(ROUTINE_SHARE_KEY)
+    try:
+        share = ROUTINE_SHARE if over is None else float(over)
+    except (TypeError, ValueError):
+        share = ROUTINE_SHARE
+    return min(1.0, max(0.0, share))
+
+
+def day_counters(orc, now) -> dict:
+    """The Orc's four day counters and its unbilled HIGH for the UTC day of
+    `now`: all zero when they belong to an earlier day (they reset lazily,
+    A.12, §4 Q7)."""
+    seen = orc.seen if isinstance(orc.seen, dict) else {}
+    if seen.get(COUNTERS_DAY) != utc_day(now):
+        return {"llm": 0, "routine": 0, "usd": 0.0, "routine_usd": 0.0,
+                "unbilled": 0.0}
+    return {"llm": int(orc.llm_wakes_today or 0),
+            "routine": int(orc.routine_wakes_today or 0),
+            "usd": float(orc.spend_today_usd or 0),
+            "routine_usd": float(orc.routine_spend_today_usd or 0),
+            "unbilled": float(seen.get("unbilled_usd") or 0.0)}
+
+
+def cap_code(orc, *, real, urgent, routine, rung, day_class, now,
+             inflight_high=0.0) -> str:
+    """A.12: the first of the Orc's day caps this wake would pass, as its
+    code; "" when none. The whole day first, then the routine sub-caps, as
+    well as the whole day, never instead of it:
+
+      day_cap      llm_wakes_today has reached the count cap; a real-money
+                   urgent wake alone may pass it
+      dollar_cap   spend_today + unbilled + HIGH of the Orc's call in
+                   flight + HIGH(this rung) would pass its dollars: no wake
+                   ever passes them (the line and the triage keep the
+                   whole bound)
+      routine_cap  a routine wake past routine_share of either cap
+
+    The count is written at the claim, the dollars at the settle."""
+    c = day_counters(orc, now)
+    wakes = wakes_cap(day_class, real)
+    usd = per_orc_daily_usd(real)
+    this = high(rung)
+    if c["llm"] >= wakes and not (real and urgent):
+        return CODE_DAY_CAP
+    if c["usd"] + c["unbilled"] + inflight_high + this > usd + 1e-9:
+        return CODE_DOLLAR_CAP
+    if routine:
+        share = routine_share()
+        if c["routine"] >= math.floor(share * wakes + 1e-9):
+            return CODE_ROUTINE_CAP
+        if c["routine_usd"] + c["unbilled"] + inflight_high + this > \
+                share * usd + 1e-9:
+            return CODE_ROUTINE_CAP
+    return ""
+
+
+def money_code(*, real, urgent, bound, purse) -> str:
+    """A.13 and A.18's floor rule, on the line as `purse` reads it (its
+    cap, what it booked today, the OTHER calls' money in flight and held,
+    the core's floor): `triage` when the booked spend, the money in flight
+    and held and this bound pass this class's ceiling; `inflight` when the
+    money in flight and held and this bound pass ORC_LIVE_FLOOR_USD, the
+    floor the core line holds back for the Orcs' unbooked money."""
+    ceiling = ceilings(purse["cap"])[triage_class(real, urgent)]
+    others = float(purse["inflight"])
+    if float(purse["spent"]) + others + float(bound) > ceiling + 1e-9:
+        return CODE_TRIAGE
+    if others + float(bound) > float(purse["floor"]) + 1e-9:
+        return CODE_INFLIGHT
+    return ""
+
+
+def spacing_code(orc, *, urgent, now) -> str:
+    """A.15: a non-urgent wake needs MIN_WAKE_SPACING_MIN since the Orc's
+    last CLAIMED model wake (last_wake_at, written at the claim)."""
+    if urgent or orc.last_wake_at is None:
+        return ""
+    if now - orc.last_wake_at < timedelta(minutes=MIN_WAKE_SPACING_MIN):
+        return CODE_SPACING
+    return ""
+
+
+# ── the breaker (A.56) ───────────────────────────────────────────────────
+
+def breaker_state(now) -> dict:
+    """OrcSetting "minds_breaker" while it is open at `now` ({until, why,
+    at}); {} when it is closed."""
+    value = _setting(MINDS_BREAKER_KEY)
+    if not isinstance(value, dict):
+        return {}
+    until = _parse(value.get("until"))
+    return dict(value) if until is not None and until > now else {}
+
+
+def _trip(now) -> bool:
+    """Open the breaker for BREAKER_PAUSE_MIN when BREAKER_FAILS wakes of
+    any Orc ended `failed` within BREAKER_WINDOW_MIN. The caller holds the
+    line lock. True when it opened now."""
+    from bot_program.orcs.models import OrcSetting, OrcWake
+    if breaker_state(now):
+        return False
+    n = OrcWake.objects.filter(
+        status=WAKE_STATUS_FAILED,
+        finished_at__gte=now - timedelta(minutes=BREAKER_WINDOW_MIN),
+        finished_at__lte=now).count()
+    if n < BREAKER_FAILS:
+        return False
+    OrcSetting.objects.update_or_create(key=MINDS_BREAKER_KEY, defaults={
+        "value": {"until": (now + timedelta(minutes=BREAKER_PAUSE_MIN))
+                  .isoformat(),
+                  "why": f"{n} model calls failed within "
+                         f"{BREAKER_WINDOW_MIN} minutes",
+                  "at": now.isoformat()},
+        "updated_by": "breaker"})
+    logger.warning("[orcs] the minds' breaker opened: %s calls failed within "
+                   "%s min; the claims pause %s min", n, BREAKER_WINDOW_MIN,
+                   BREAKER_PAUSE_MIN)
+    return True
 
 
 # ── the line lock (N8) ───────────────────────────────────────────────────
@@ -188,6 +521,376 @@ def drop_hold(wake, now) -> dict:
     return gone
 
 
+# ── the merge (A.7 step 1) ───────────────────────────────────────────────
+
+def _pending_key(orc_id) -> str:
+    return f"orc{orc_id}:pending"
+
+
+def absorb(wake, *, now=None) -> int:
+    """A.7 step 1 (P15): in its own transaction under the Orc's lock,
+    BEFORE `wake` is rendered, the Orc's pending wake is merged into it:
+    `wake` takes the union of both wakes' reasons, by key, each reason
+    keeping its own `urgent`, and the older first send as
+    components["queued_at_inherited"] (the earliest, when it inherits
+    twice); its kind is the union's. The older wake becomes `merged`, with
+    components["merged_into"] and finished_at. So the survivor's dossier
+    lists every reason, and its urgency, its rank and its F6 test are the
+    union's. Returns how many wakes it merged."""
+    from bot_program.orcs import journal
+    from bot_program.orcs.models import OrcWake
+    from bot_program.orcs.wake import _kind_of
+    now = now or timezone.now()
+    with transaction.atomic():
+        journal.orc_lock(wake.orc_id)
+        w = OrcWake.objects.select_for_update().get(pk=wake.pk)
+        older = list(OrcWake.objects.select_for_update()
+                     .filter(orc_id=w.orc_id, status=WAKE_STATUS_PENDING)
+                     .exclude(pk=w.pk).order_by("id"))
+        if not older:
+            return 0
+        reasons = [r for r in w.reasons or [] if isinstance(r, dict)]
+        keys = {r.get("key") for r in reasons}
+        comps = dict(w.components or {})
+        first = _parse(comps.get("queued_at_inherited"))
+        for o in older:
+            for r in o.reasons or []:
+                if isinstance(r, dict) and r.get("key") not in keys:
+                    reasons.append(r)
+                    keys.add(r.get("key"))
+            sent = o.queued_at or _parse((o.components or {}).get(
+                "queued_at_inherited"))
+            if sent is not None and (first is None or sent < first):
+                first = sent
+            o.status = WAKE_STATUS_MERGED
+            o.components = {**(o.components or {}), "merged_into": w.pk}
+            o.finished_at = now
+            o.save(update_fields=["status", "components", "finished_at"])
+        if first is not None:
+            comps["queued_at_inherited"] = first.isoformat()
+        w.reasons, w.components = reasons, comps
+        w.kind = _kind_of(reasons)
+        w.save(update_fields=["reasons", "components", "kind"])
+    wake.reasons, wake.components, wake.kind = w.reasons, w.components, w.kind
+    return len(older)
+
+
+# ── admission (A.11) ─────────────────────────────────────────────────────
+
+def _facts(w, orc) -> dict:
+    """The wake's world, urgency, routine-ness and rank (A.12, A.14), read
+    on the wake's reasons as they stand (a survivor's after a merge)."""
+    real = is_real(orc)
+    urgent = is_urgent(w.reasons)
+    return {"real": real, "urgent": urgent, "routine": is_routine(w.reasons),
+            "rank": rank(real, urgent)}
+
+
+def _running_high(orc_id, *, exclude=None) -> float:
+    """Σ HIGH of the Orc's calls in flight (A.12): one at most (A.18)."""
+    from bot_program.orcs.models import OrcWake
+    qs = OrcWake.objects.filter(orc_id=orc_id, status=WAKE_STATUS_RUNNING)
+    if exclude is not None:
+        qs = qs.exclude(pk=exclude)
+    return sum(high((c or {}).get("rung") or O2A_RUNG)
+               for c in qs.values_list("components", flat=True))
+
+
+def _check(w, orc, f, *, now, rung, bound, purse, inflight_high) -> str:
+    """A.11 steps 2-8, the first that fails as its code; "" when all pass:
+    the four gates (read anew); the Orc dead, the row not open; the
+    dossier over its size cap; the breaker; the day caps; the triage and
+    the core's floor; the spacing. Database reads only."""
+    from bot_program.orcs import switches
+    code = switches.gate_code()
+    if code:
+        return code
+    if orc.state == STATE_DEAD:
+        return CODE_DEAD
+    if _row_status(orc) not in _open_statuses():
+        return CODE_ROW_CLOSED
+    if (w.components or {}).get("over_budget"):
+        return CODE_OVER_BUDGET
+    if breaker_state(now):
+        return CODE_BREAKER
+    code = cap_code(orc, real=f["real"], urgent=f["urgent"],
+                    routine=f["routine"], rung=rung, day_class=w.day_class,
+                    now=now, inflight_high=inflight_high)
+    if code:
+        return code
+    code = money_code(real=f["real"], urgent=f["urgent"], bound=bound,
+                      purse=purse)
+    if code:
+        return code
+    return spacing_code(orc, urgent=f["urgent"], now=now)
+
+
+def _open_statuses():
+    from bot_program.orcs.wake import OPEN_STATUSES
+    return OPEN_STATUSES
+
+
+def _code_body(code, *, bound, purse) -> dict:
+    """What a code answer's journal body keeps: the line's numbers for a
+    money code (dollars in the body only, never in the headline, A.5)."""
+    if code in BUDGET_CODES:
+        return {"bound_usd": round(float(bound), 6),
+                "line": {k: round(float(purse.get(k) or 0), 6)
+                         for k in ("cap", "spent", "inflight", "floor")}}
+    return {}
+
+
+def _by_code(locked, w, code, *, now, body=None) -> None:
+    """A code answer (A.4, A.5): the wake `skipped` with its code, never a
+    refusal and never silence; while the minds switch itself is on, a
+    `budget` entry in fixed words, off the card. The caller holds the
+    Orc's lock."""
+    from bot_program.orcs import journal, switches
+    w.status, w.skipped_reason = WAKE_STATUS_SKIPPED, code
+    w.est_usd = Decimal(0)
+    w.save(update_fields=["status", "skipped_reason", "est_usd"])
+    if switches.minds_switch_on():
+        journal.append(locked, "budget", f"Answered by code: "
+                       f"{WAKE_CODE_WORDS.get(code, code)}.",
+                       body={"wake": w.pk, "code": code, **(body or {})},
+                       wake=w, card=False, at=now)
+
+
+def _to_pending(w, f, *, rung, bound, now) -> None:
+    """A.11 step 9: `pending`, one per Orc at the database (the key
+    "orc<pk>:pending", the constraint orcwake_one_pending_per_key), the
+    tick's own key kept, the first send set once (inherited from a merged
+    wake, or now) and never moved, the priority its rank, the rung and
+    its bound."""
+    comps = dict(w.components or {})
+    if w.dedupe_key != _pending_key(w.orc_id):
+        comps.setdefault("record_key", w.dedupe_key)
+    comps.update({"rung": rung, "bound": round(float(bound), 6),
+                  "real": bool(f["real"]), "urgent": bool(f["urgent"])})
+    w.components = comps
+    w.dedupe_key = _pending_key(w.orc_id)
+    if w.queued_at is None:
+        w.queued_at = _parse(comps.get("queued_at_inherited")) or now
+    w.priority = float(f["rank"])
+    w.status, w.skipped_reason = WAKE_STATUS_PENDING, ""
+    w.est_usd = Decimal(0)
+    w.save(update_fields=["components", "dedupe_key", "queued_at",
+                          "priority", "status", "skipped_reason", "est_usd"])
+
+
+def admit(wake, rendered=None, *, now=None) -> dict:
+    """A.11, after the render (`rendered`: the render's own result, whose
+    over_budget it reads; else the wake's components): a quiet wake stays
+    quiet; otherwise the first check that fails answers it by code, or it
+    becomes `pending`. The checks read first; then one short transaction
+    under the Orc's lock writes the status alone (A.7 step 3). The Orc's
+    older pending wake was merged into this one before its render
+    (absorb), so the database's one-pending rule holds. Returns {status,
+    code, priority}."""
+    from bot_program.orcs import journal, mind
+    from bot_program.orcs.models import OrcWake
+    now = now or timezone.now()
+    w = (OrcWake.objects.select_related("orc", "orc__seat",
+                                        "orc__root_trade").get(pk=wake.pk))
+    if w.status == WAKE_STATUS_QUIET:
+        return {"status": WAKE_STATUS_QUIET, "code": CODE_QUIET,
+                "priority": w.priority}
+    comps = w.components if isinstance(w.components, dict) else {}
+    if w.status not in ADMISSIBLE or comps.get("render") != "done":
+        return {"status": w.status, "code": w.skipped_reason,
+                "priority": w.priority}
+    if isinstance(rendered, dict) and "over_budget" in rendered:
+        w.components = {**comps, "over_budget": bool(
+            rendered["over_budget"])}
+    orc = w.orc
+    f = _facts(w, orc)
+    rung = O2A_RUNG
+    price = mind.price(w, rung)
+    purse = mind.purse()
+    code = _check(w, orc, f, now=now, rung=rung, bound=price["bound"],
+                  purse=purse, inflight_high=_running_high(orc.pk,
+                                                           exclude=w.pk))
+    with transaction.atomic():
+        locked = journal.orc_lock(orc.pk)
+        fresh = OrcWake.objects.select_for_update().get(pk=w.pk)
+        if fresh.status not in ADMISSIBLE:
+            return {"status": fresh.status, "code": fresh.skipped_reason,
+                    "priority": fresh.priority}
+        fresh.components = w.components
+        if code:
+            fresh.save(update_fields=["components"])
+            _by_code(locked, fresh, code, now=now,
+                     body=_code_body(code, bound=price["bound"], purse=purse))
+        else:
+            _to_pending(fresh, f, rung=rung, bound=price["bound"], now=now)
+    wake.status, wake.skipped_reason = fresh.status, fresh.skipped_reason
+    return {"status": fresh.status, "code": code, "priority": fresh.priority}
+
+
+# ── the claim (A.16, A.18) ───────────────────────────────────────────────
+
+def _cold_running(model) -> bool:
+    """A.16: the first call on a cold model is running."""
+    from bot_program.orcs.models import OrcWake
+    return any(isinstance(c, dict) and c.get("cold")
+               for c in OrcWake.objects.filter(
+                   status=WAKE_STATUS_RUNNING, model=model)
+               .values_list("components", flat=True))
+
+
+def _take(locked, w, f, price, *, rung, now) -> None:
+    """A.18 on a pass: `running`, started_at, est_usd = the bound, the
+    rung's model; whether its model was cold (A.16); the Orc's
+    last_wake_at and its count counters (reset first on a new UTC day).
+    The caller holds the line lock and the Orc's lock."""
+    from bot_program.orcs import journal
+    from bot_program.orcs.models import OrcWake
+    model = str(price["model"] or "")[:50]
+    cold = not OrcWake.objects.filter(
+        model=model, started_at__gte=now - timedelta(minutes=COLD_MODEL_MIN)
+    ).exclude(pk=w.pk).exists()
+    w.status = WAKE_STATUS_RUNNING
+    w.started_at = now
+    w.est_usd = Decimal(str(round(float(price["bound"]), 6)))
+    w.model = model
+    w.components = {**(w.components or {}), "rung": rung,
+                    "bound": round(float(price["bound"]), 6),
+                    "real": bool(f["real"]), "urgent": bool(f["urgent"]),
+                    "cold": cold}
+    w.save(update_fields=["status", "started_at", "est_usd", "model",
+                          "components"])
+    c = day_counters(locked, now)
+    fields = {"last_wake_at": now, "llm_wakes_today": c["llm"] + 1,
+              "routine_wakes_today": c["routine"] + (1 if f["routine"]
+                                                     else 0)}
+    keys = {COUNTERS_DAY: utc_day(now)}
+    seen = locked.seen if isinstance(locked.seen, dict) else {}
+    if seen.get(COUNTERS_DAY) != utc_day(now):
+        fields.update(spend_today_usd=Decimal(0),
+                      routine_spend_today_usd=Decimal(0))
+        keys["unbilled_usd"] = 0.0
+    journal.remember(locked, fields=fields, **keys)
+
+
+def _claim_one(wid, orc_id, *, now) -> tuple:
+    """One candidate, in its own short transaction: ("claimed", wake),
+    ("code", code), or ("wait", why) for a candidate that stays pending
+    (its Orc's row held by another, a call of its Orc in flight, a cold
+    model's first call running)."""
+    from bot_program.orcs import journal, mind
+    from bot_program.orcs.models import OrcWake
+    rung = O2A_RUNG
+    # the bound and the model: the catalog's arithmetic, read before the
+    # locks
+    price = mind.price(OrcWake.objects.get(pk=wid), rung)
+    with transaction.atomic():
+        line_lock()
+        locked = journal.orc_lock(orc_id, skip_locked=True)
+        if locked is None:
+            return "wait", "the Orc's row is held"
+        w = OrcWake.objects.select_for_update().get(pk=wid)
+        if w.status != WAKE_STATUS_PENDING:
+            return "gone", w.status
+        if OrcWake.objects.filter(orc_id=orc_id,
+                                  status=WAKE_STATUS_RUNNING).exists():
+            return "wait", "a call of this Orc is in flight"
+        f = _facts(w, locked)
+        purse = mind.purse()
+        code = _check(w, locked, f, now=now, rung=rung, bound=price["bound"],
+                      purse=purse, inflight_high=0.0)
+        if not code:
+            _ok, code, _why = mind.ask_line(
+                rung_name=rung, bound_usd=price["bound"],
+                real_urgent=f["real"] and f["urgent"])
+        if code:
+            _by_code(locked, w, code, now=now,
+                     body=_code_body(code, bound=price["bound"],
+                                     purse=purse))
+            return "code", code
+        if not f["urgent"] and _cold_running(price["model"]):
+            return "wait", "the first call on a cold model is running"
+        _take(locked, w, f, price, rung=rung, now=now)
+    return "claimed", w
+
+
+def claim(*, now=None, limit=CLAIM_SCAN) -> dict:
+    """A.18: claim the best pending wake whose Orc has no call in flight,
+    one short transaction per candidate examined (N8). A candidate a check
+    refuses is answered by code and committed, and the claim tries the
+    next. Returns {wake (the claimed wake, or None), by_code, waiting}."""
+    from bot_program.orcs.models import OrcWake
+    now = now or timezone.now()
+    out = {"wake": None, "by_code": 0, "waiting": 0}
+    busy = set(OrcWake.objects.filter(status=WAKE_STATUS_RUNNING)
+               .values_list("orc_id", flat=True))
+    candidates = list(OrcWake.objects.filter(status=WAKE_STATUS_PENDING)
+                      .order_by("-priority", "queued_at", "id")
+                      .values_list("id", "orc_id")[:int(limit)])
+    for wid, orc_id in candidates:
+        if orc_id in busy:
+            # one call in flight per Orc: it stays pending; the running
+            # wake's settle sends it back to the render (A.24)
+            out["waiting"] += 1
+            continue
+        verdict, what = _claim_one(wid, orc_id, now=now)
+        if verdict == "claimed":
+            out["wake"] = what
+            return out
+        if verdict == "code":
+            out["by_code"] += 1
+        elif verdict == "wait":
+            out["waiting"] += 1
+    return out
+
+
+def run(*, clock=None, now_fn=None, budget_s=THINK_RUN_S) -> dict:
+    """A.19, one orc_think run: claim one wake, read it (mind.think, no
+    lock held), and again, until nothing can be claimed or `budget_s` has
+    passed since it started. Each claim reads the four gates anew, the
+    platform master included (A.2). Returns {thought, by_code, waiting}."""
+    from bot_program.orcs import mind
+    clock = clock or time.monotonic
+    now_fn = now_fn or timezone.now
+    started = clock()
+    out = {"thought": 0, "by_code": 0, "waiting": 0}
+    while clock() - started < budget_s:
+        got = claim(now=now_fn())
+        out["by_code"] += got["by_code"]
+        out["waiting"] = got["waiting"]
+        w = got["wake"]
+        if w is None:
+            if got["by_code"]:
+                continue        # the candidates behind those answered
+            break
+        try:
+            mind.think(w)
+        except Exception as e:  # noqa: BLE001 — the watchdog closes it
+            logger.warning("[orcs] wake %s: the read failed: %s", w.pk, e)
+        out["thought"] += 1
+    return out
+
+
+def close_pending(code, *, now=None) -> int:
+    """A.17: every pending wake answered by code (the minds switch OFF:
+    `minds_off`), each in its own short transaction under the line lock
+    and its Orc's lock. Returns how many it closed."""
+    from bot_program.orcs import journal
+    from bot_program.orcs.models import OrcWake
+    now = now or timezone.now()
+    n = 0
+    for wid, orc_id in list(OrcWake.objects.filter(
+            status=WAKE_STATUS_PENDING).values_list("id", "orc_id")):
+        with transaction.atomic():
+            line_lock()
+            locked = journal.orc_lock(orc_id)
+            w = OrcWake.objects.select_for_update().get(pk=wid)
+            if w.status != WAKE_STATUS_PENDING:
+                continue
+            _by_code(locked, w, code, now=now)
+            n += 1
+    return n
+
+
 # ── the settle ───────────────────────────────────────────────────────────
 
 def _counters(locked, now, *, cost, routine, unbilled_high=0.0,
@@ -223,10 +926,7 @@ def _late_code(locked) -> str:
     """A.26: why an answer that came back can no longer be applied: the
     row closed, the Orc dead, or a gate OFF (its code); "" when none."""
     from bot_program.orcs import switches
-    from bot_program.orcs.constants import (CODE_DEAD, CODE_ROW_CLOSED,
-                                            STATE_DEAD)
-    from bot_program.orcs.wake import OPEN_STATUSES
-    if _row_status(locked) not in OPEN_STATUSES:
+    if _row_status(locked) not in _open_statuses():
         return CODE_ROW_CLOSED
     if locked.state == STATE_DEAD:
         return CODE_DEAD
@@ -251,8 +951,9 @@ def _send_back(locked, now) -> int:
 
 def settle(wake, outcome, *, now=None) -> dict:
     """Settle one claimed wake with what its call came back with
-    (`outcome`, mind.judge's), in one short transaction (A.24-A.26).
-    Returns {status, code, held, sent_back, late}."""
+    (`outcome`, mind.judge's), in one short transaction (A.24-A.26), then
+    the Orc's states (A.51-A.53) and, after a failed call, the breaker
+    (A.56). Returns {status, code, held, sent_back, late}."""
     from bot_program.orcs import journal, mind
     from bot_program.orcs.models import OrcWake
     now = now or timezone.now()
@@ -304,6 +1005,325 @@ def settle(wake, outcome, *, now=None) -> dict:
                                keys=keys)
         w.save(update_fields=["status", "skipped_reason", "est_usd",
                               "finished_at"])
+        if not late:
+            states(locked, w, outcome, now=now)
+        if w.status == WAKE_STATUS_FAILED:
+            _trip(now)
         out.update(status=w.status, code=w.skipped_reason, late=bool(late))
         out["sent_back"] = _send_back(locked, now)
     return out
+
+
+# ── the Orc's states (A.51-A.53) ─────────────────────────────────────────
+
+def takeover(locked, reason, *, wake=None, now) -> None:
+    """A.53: the care takes the idea. A `takeover` journal entry, a code
+    FACT (an F-id, body {fk: "care", reason, wake}, so fence.fact_kind
+    reads a T0 care fact), in fixed words; state `care_owned`, its words
+    and its moment; both counters reset. In shadow nothing changes in what
+    the care does: the care always holds the row in O2. The caller holds
+    the Orc's lock."""
+    from bot_program.orcs import journal
+    words = CARE_WORDS.get(reason, reason)
+    journal.append(locked, "takeover", f"The care holds this position: "
+                   f"{words}.", fact=True,
+                   body={"fk": "care", "reason": reason,
+                         "wake": getattr(wake, "pk", None)},
+                   wake=wake, at=now,
+                   fields={"state": STATE_CARE_OWNED,
+                           "care_owned_reason": words[:200],
+                           "care_owned_at": now},
+                   remember={"refused_in_row": 0, "failed_in_row": 0})
+    logger.info("[orcs] Orc %s: the care takes the idea (%s)", locked.pk,
+                reason)
+
+
+def _cites_takeover(locked, w, outcome) -> str:
+    """A.53's return: the F-id of the Orc's latest takeover when this
+    wake's dossier carried it (the fact existed when the wake was
+    rendered: its number is at most vctx.max_fact, and PS5 pins it while
+    the care holds the idea) and the answer cites it; "" otherwise."""
+    from bot_program.orcs.models import OrcJournal
+    took = (OrcJournal.objects.filter(orc_id=locked.pk, kind="takeover")
+            .exclude(fact_id="").order_by("-at", "-id").first())
+    if took is None:
+        return ""
+    cited = set((outcome.get("kept") or {}).get("facts_cited") or [])
+    number = took.fact_id[1:]
+    vctx = ((w.components or {}).get("vctx") or {})
+    try:
+        shown = int(number) <= int(vctx.get("max_fact") or 0)
+    except (TypeError, ValueError):
+        shown = False
+    return took.fact_id if shown and took.fact_id in cited else ""
+
+
+def states(locked, w, outcome, *, now) -> None:
+    """A.51-A.53 after a settle's writes, inside its transaction (database
+    writes only). What moves the two counters (A.52):
+
+      refused_in_row  rises on a refused answer: the wake ended `refused`
+                      (a V-rule), or `done` with an intent the officer
+                      would refuse
+      failed_in_row   rises on a `failed` wake
+      both reset      on any other `done` wake
+
+    A code answer, `quiet`, `merged` and `late` never move either, nor a
+    part refusal (V9, V11). Then: born -> active on the first done wake;
+    a done wake that carried the takeover in its dossier and cites it
+    returns the Orc from the care (a `return` entry); CARE_AFTER_REFUSED
+    refused answers or CARE_AFTER_FAILED failed calls in a row send the
+    Orc to the care (A.53's takeover)."""
+    from bot_program.orcs import journal
+    status = w.status
+    seen = locked.seen if isinstance(locked.seen, dict) else {}
+    refused = int(seen.get("refused_in_row") or 0)
+    failed = int(seen.get("failed_in_row") or 0)
+    intent = outcome.get("intent") if isinstance(outcome.get("intent"),
+                                                 dict) else {}
+    would_refuse = (intent.get("officer") or {}).get("verdict") == \
+        OFFICER_REFUSE
+    if status == WAKE_STATUS_FAILED:
+        failed += 1
+    elif status == WAKE_STATUS_REFUSED or (status == WAKE_STATUS_DONE
+                                           and would_refuse):
+        refused += 1
+    elif status == WAKE_STATUS_DONE:
+        refused = failed = 0
+    else:
+        return
+    if locked.state == STATE_DEAD:
+        return
+    counts = {"refused_in_row": refused, "failed_in_row": failed}
+    if status == WAKE_STATUS_DONE and locked.state == STATE_CARE_OWNED:
+        cited = _cites_takeover(locked, w, outcome)
+        if cited:
+            journal.append(locked, "return", RETURN_WORDS,
+                           body={"wake": w.pk, "takeover": cited},
+                           wake=w, at=now,
+                           fields={"state": STATE_ACTIVE,
+                                   "care_owned_reason": "",
+                                   "care_owned_at": None},
+                           remember=counts)
+            return
+    reason = (CARE_ANSWERS_REFUSED if refused >= CARE_AFTER_REFUSED
+              else CARE_CALLS_FAILING if failed >= CARE_AFTER_FAILED
+              else "")
+    if reason and locked.state != STATE_CARE_OWNED:
+        takeover(locked, reason, wake=w, now=now)
+        return
+    fields = {}
+    if status == WAKE_STATUS_DONE and locked.state == STATE_BORN:
+        fields["state"] = STATE_ACTIVE
+    journal.remember(locked, fields=fields, **counts)
+
+
+# ── the watchdog (A.54-A.56) ─────────────────────────────────────────────
+
+def _stalled(now) -> int:
+    """A.54: the pending wakes whose FIRST send is older than STALL_MIN.
+    Nothing re-stamps queued_at; a claim ends the stall clock."""
+    from bot_program.orcs.models import OrcWake
+    n = OrcWake.objects.filter(
+        status=WAKE_STATUS_PENDING,
+        queued_at__lt=now - timedelta(minutes=STALL_MIN)).count()
+    if n:
+        logger.warning("[orcs] %s wake(s) waited over %s minutes for a "
+                       "model call", n, STALL_MIN)
+    return n
+
+
+def _worker_silent(now) -> bool:
+    """A.55: no wake was claimed (started_at) and none settled in the
+    last STALE_MIN. A settle is a claimed wake that finished; a wake the
+    watchdog closed for its wall time is not one."""
+    from bot_program.orcs.models import OrcWake
+    cutoff = now - timedelta(minutes=STALE_MIN)
+    if OrcWake.objects.filter(started_at__gte=cutoff,
+                              started_at__lte=now).exists():
+        return False
+    return not (OrcWake.objects.filter(started_at__isnull=False,
+                                       finished_at__gte=cutoff,
+                                       finished_at__lte=now)
+                .exclude(skipped_reason=CODE_WALL_TIME).exists())
+
+
+def _stale(now, *, paused) -> dict:
+    """A.55: each pending wake older than STALE_MIN is closed: answered by
+    code while a gate is OFF (its code) or after a pause of the watchdog
+    (`paused`), with no care; `stale` with `worker_silent` when the worker
+    was silent, and its Orc goes to the care (A.52); else `skipped` with
+    `backlog`: it waited behind a busy worker, a code answer, never a
+    refusal and never silence."""
+    from bot_program.orcs import journal, switches
+    from bot_program.orcs.models import OrcWake
+    out = {"stale": 0, "backlog": 0, "by_code": 0}
+    old = list(OrcWake.objects.filter(
+        status=WAKE_STATUS_PENDING,
+        queued_at__lt=now - timedelta(minutes=STALE_MIN))
+        .order_by("queued_at", "id").values_list("id", "orc_id"))
+    if not old:
+        return out
+    gate = switches.gate_code()
+    silent = _worker_silent(now)
+    for wid, orc_id in old:
+        with transaction.atomic():
+            line_lock()
+            locked = journal.orc_lock(orc_id)
+            w = OrcWake.objects.select_for_update().get(pk=wid)
+            if w.status != WAKE_STATUS_PENDING:
+                continue
+            if gate or paused:
+                _by_code(locked, w, gate or CODE_PAUSED, now=now)
+                out["by_code"] += 1
+            elif silent:
+                w.status, w.skipped_reason = (WAKE_STATUS_STALE,
+                                              CODE_WORKER_SILENT)
+                w.finished_at = now
+                w.save(update_fields=["status", "skipped_reason",
+                                      "finished_at"])
+                out["stale"] += 1
+                if locked.state not in (STATE_CARE_OWNED, STATE_DEAD):
+                    takeover(locked, CARE_WORKER_SILENT, wake=w, now=now)
+            else:
+                _by_code(locked, w, CODE_BACKLOG, now=now)
+                out["backlog"] += 1
+    return out
+
+
+def _wall_time(now) -> int:
+    """A.55: a running wake past WALL_S(rung) since started_at is closed
+    `failed` (code `wall_time`), for the care's counters; its bound moves
+    to a hold of kind `orphan` until 00:00 UTC (its HIGH on the Orc's
+    unbilled dollars): the call may still be streaming, or be orphaned by
+    a worker's restart, and may yet bill. Its late settle books the real
+    cost once and drops the hold."""
+    from bot_program.orcs import journal
+    from bot_program.orcs.models import OrcWake
+    n = 0
+    for w0 in list(OrcWake.objects.filter(status=WAKE_STATUS_RUNNING,
+                                          started_at__isnull=False)):
+        rung = str((w0.components or {}).get("rung") or O2A_RUNG)
+        if now - w0.started_at <= timedelta(seconds=WALL_S.get(
+                rung, WALL_S[O2A_RUNG])):
+            continue
+        with transaction.atomic():
+            line_lock()
+            locked = journal.orc_lock(w0.orc_id)
+            w = OrcWake.objects.select_for_update().get(pk=w0.pk)
+            if w.status != WAKE_STATUS_RUNNING:
+                continue
+            held_high = high(rung)
+            hold(kind=HOLD_ORPHAN, usd=w.est_usd, wake=w, rung=rung, now=now,
+                 high_usd=held_high)
+            fields, keys = _counters(locked, now, cost=Decimal(0),
+                                     routine=False, unbilled_high=held_high)
+            w.status, w.skipped_reason = WAKE_STATUS_FAILED, CODE_WALL_TIME
+            w.est_usd = Decimal(0)
+            w.finished_at = now
+            w.save(update_fields=["status", "skipped_reason", "est_usd",
+                                  "finished_at"])
+            journal.append(locked, "error", "The model call ran past its wall "
+                           "time: its bound stays held until 00:00 UTC.",
+                           body={"wake": w.pk, "code": CODE_WALL_TIME,
+                                 "rung": rung, "held": True},
+                           wake=w, at=now, fields=fields, remember=keys)
+            states(locked, w, {"kind": "wall_time"}, now=now)
+            n += 1
+    if n:
+        with transaction.atomic():
+            line_lock()
+            _trip(now)
+    return n
+
+
+def _holds(now) -> dict:
+    """The holds: the expired ones pruned at 00:00 UTC, never earlier;
+    those still held counted, the ledger gaps apart (A.24, A.25)."""
+    with transaction.atomic():
+        line_lock()
+        store = _inflight_row()
+        value = store.value if isinstance(store.value, dict) else {}
+        kept = _pruned(value, now)
+        if kept != value:
+            store.value = kept
+            store.save(update_fields=["value"])
+    return {"held": len(kept),
+            "ledger_gap": sum(1 for e in kept.values()
+                              if e.get("kind") == HOLD_LEDGER_GAP)}
+
+
+def _watch_stamp(now):
+    """The watchdog's previous pass (OrcSetting "minds_watch_last_at"),
+    then this one stamped. None when it never ran."""
+    from bot_program.orcs.models import OrcSetting
+    value = _setting(MINDS_WATCH_LAST_KEY)
+    last = _parse(value.get("at") if isinstance(value, dict) else value)
+    OrcSetting.objects.update_or_create(
+        key=MINDS_WATCH_LAST_KEY, defaults={"value": {"at": now.isoformat()},
+                                            "updated_by": "watchdog"})
+    return last
+
+
+def watch(*, now=None) -> dict:
+    """One pass of the minds' watchdog (A.54-A.56; orc_minds_watch, on
+    `slow`, every 5 minutes: never on the fast queue, N8), its steps in
+    the census's tuple style, each fenced. The result names the counts
+    (stalled, stale, backlog, wall-timed, holds, breaker, ledger gaps,
+    and the wakes answered by code for budget today), never a `skipped`,
+    `parsed` or `attempted` key (core/task_gate.py reads those as a
+    health verdict); `idle` when nothing waits, runs or is held."""
+    from bot_program.orcs.models import OrcWake
+    now = now or timezone.now()
+    last = _watch_stamp(now)
+    paused = last is None or now - last > timedelta(minutes=WATCH_PAUSED_MIN)
+    out = {"minds_stalled": 0, "minds_stale": 0, "minds_backlog": 0,
+           "minds_wall_time": 0, "minds_holds": 0, "minds_ledger_gap": 0,
+           "minds_breaker": 0, "answered_by_code": 0}
+
+    def stale():
+        got = _stale(now, paused=paused)
+        out["minds_backlog"] = got["backlog"]
+        return got["stale"]
+
+    def holds():
+        got = _holds(now)
+        out["minds_ledger_gap"] = got["ledger_gap"]
+        return got["held"]
+
+    day_start = datetime.combine(_utc(now).date(), datetime.min.time(),
+                                 tzinfo=dt_tz.utc)
+    steps = (("minds_stalled", lambda: _stalled(now)),
+             ("minds_stale", stale),
+             ("minds_wall_time", lambda: _wall_time(now)),
+             ("minds_holds", holds),
+             ("minds_breaker", lambda: 1 if breaker_state(now) else 0),
+             ("answered_by_code", lambda: OrcWake.objects.filter(
+                 status=WAKE_STATUS_SKIPPED, skipped_reason__in=BUDGET_CODES,
+                 created_at__gte=day_start).count()))
+    for key, step in steps:
+        try:
+            out[key] = int(step() or 0)
+        except Exception as e:  # noqa: BLE001 — one step never stops the rest
+            logger.warning("[orcs] the minds' watchdog step %s failed: %s",
+                           key, e)
+    waiting = OrcWake.objects.filter(status__in=(WAKE_STATUS_PENDING,
+                                                 WAKE_STATUS_RUNNING)).exists()
+    alarms = []
+    for key, words in (
+            ("minds_stalled", "waited over 20 minutes for a model call"),
+            ("minds_stale", "closed stale: the worker was silent"),
+            ("minds_backlog", "answered by code after waiting behind a busy "
+                              "worker"),
+            ("minds_wall_time", "ran past their wall time"),
+            ("minds_ledger_gap", "held: the provider wrote no ledger row")):
+        if out[key]:
+            alarms.append(f"{out[key]} wake(s) {words}")
+    if out["minds_breaker"]:
+        alarms.append("the breaker pauses the claims")
+    if alarms:
+        return {"status": "warning", "reason": "; ".join(alarms), **out}
+    if not waiting and not out["minds_holds"] and not out["minds_wall_time"]:
+        return {"idle": "no wake waits for a model and no money is held",
+                **out}
+    return {"status": "success", **out}

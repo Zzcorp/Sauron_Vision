@@ -44,6 +44,7 @@ from bot_program.orcs.constants import (CODE_UNSENT, INTENT_KINDS,
                                         OFFICER_REFUSE,
                                         S_VERSION, SCHEMA_VERSION,
                                         SMOKE_VERDICT_KEY, STATE_CARE_OWNED,
+                                        W11_ASK_KEY,
                                         WAKE_CODE_WORDS, WAKE_STATUS_DONE,
                                         WAKE_STATUS_FAILED, WAKE_STATUS_LATE,
                                         WAKE_STATUS_REFUSED,
@@ -136,11 +137,56 @@ def build_request(wake, rung_name) -> dict:
         **efforts(rung_name)}
 
 
+# ── the line, as the scheduler weighs it (O2a's queue, 2026-11-05) ───────
+# The scheduler holds the line lock and the Orc's lock over its checks
+# and names no gateway (N8; tests/orcs/test_orc_o2a_locks.py): these are
+# the gateway's READS it needs there, the ledger's sums, the settings and
+# the catalog's arithmetic. None of them sends anything.
+
+def price(wake, rung_name) -> dict:
+    """{bound, model, tier} of one call for `wake` on rung `rung_name`:
+    A.21's bound on the render's estimate of the exact text sent
+    (components["tokens"]), the rung's model and tier read from the
+    catalog by the rung's name."""
+    from bot_program.orcs import mind_gateway
+    step = mind_gateway.rung(rung_name)
+    comps = wake.components if isinstance(wake.components, dict) else {}
+    return {"bound": float(mind_gateway.bound(rung_name, comps.get("tokens"))),
+            "model": step["model"], "tier": step["tier"]}
+
+
+def purse(*, exclude_wake=None) -> dict:
+    """The Orcs line as admission and the claim weigh it (A.13, A.18): its
+    cap, what it booked today, the OTHER calls' money in flight and held
+    (every running wake's est_usd but `exclude_wake`'s, and the holds and
+    tickets of OrcSetting "minds_inflight"), and the floor the core line
+    holds back for the Orcs (ORC_LIVE_FLOOR_USD)."""
+    from bot_program.orcs import mind_gateway
+    return {"cap": mind_gateway.line_cap(),
+            "spent": mind_gateway.line_spent(),
+            "inflight": mind_gateway.inflight_usd(exclude_wake=exclude_wake),
+            "floor": mind_gateway.live_floor()}
+
+
+def ask_line(*, rung_name, bound_usd, exclude_wake=None,
+             real_urgent=False) -> tuple:
+    """The line's answer for one call (A.20), (allowed, code, why): the
+    gateway asks spend.can_spend for this bound plus the other calls'
+    money, never its own twice, never total_only."""
+    from bot_program.orcs import mind_gateway
+    return mind_gateway.ask_line(rung_name=rung_name, bound_usd=bound_usd,
+                                 exclude_wake=exclude_wake,
+                                 real_urgent=real_urgent)
+
+
 # ── one wake ─────────────────────────────────────────────────────────────
 
 def _real_urgent(wake) -> bool:
-    vctx = (wake.components or {}).get("vctx") or {}
-    return vctx.get("world") == "live" and bool(vctx.get("urgent"))
+    """A real-money urgent wake, as the claim judged it (A.14): the seat
+    AND the row's own world live, never birth.world's guess for a row that
+    states no world. Only such a wake passes the deep share (D30)."""
+    comps = wake.components if isinstance(wake.components, dict) else {}
+    return bool(comps.get("real")) and bool(comps.get("urgent"))
 
 
 def think(wake, *, now=None) -> dict:
@@ -511,6 +557,16 @@ def _write_done(locked, w, outcome, verdict, *, now, fields, keys):
         done["latest_note"] = note[:140]
         done["latest_note_at"] = now
     remember = dict(keys)
+    # A.49 (P23): a next_wake_min that passed V9 asks for a wake at the
+    # answer's time plus n minutes; W11 fires it at the first open-market
+    # tick at or after then (wake._w11), and the next wake is due at the
+    # earlier of the metronome and the ask
+    asked = int(verdict.get("next_wake_min") or 0)
+    if asked:
+        ask = now + timedelta(minutes=asked)
+        remember[W11_ASK_KEY] = ask.isoformat()
+        due = locked.next_wake_due
+        done["next_wake_due"] = ask if due is None or ask < due else due
     accept = outcome.get("accept")
     if isinstance(accept, dict):
         remember["officer"] = (lambda cur, a=accept: mandate.accept(
