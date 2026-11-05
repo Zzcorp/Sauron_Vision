@@ -144,13 +144,15 @@ class _Words(MindTestCase):
 class TheSlotWordsTests(_Words):
 
     def test_the_born_and_active_states_are_true_on_and_off(self):
+        # changed on purpose (2026-11-05, completing O2a): the born words
+        # stay true after a refused first answer (TheBornWordsStayTrueTests)
         from bot_program.orcs.models import Orc
         for minds in (True, False, None):
             with self.subTest(minds=minds):
                 self.assertEqual(
                     self.slot(minds=minds)["state_t"],
-                    "Watching: a journal written by code; no model has read "
-                    "it yet.")
+                    "Watching: a journal written by code; no model answer "
+                    "has been accepted yet.")
         Orc.objects.filter(pk=self.orc.pk).update(state="active")
         for minds in (True, False, None):
             with self.subTest(minds=minds):
@@ -804,3 +806,41 @@ class TheLastFactIsCodesTests(MindFixture):
             self.assertEqual(notes.last_fact(lines)["t"], "the fact",
                              author)
             self.assertIsNone(notes.last_fact(lines[1:]), author)
+
+
+# ── the born state stays true after a model's answer (2026-11-05) ────────
+
+class TheBornWordsStayTrueTests(MindFixture):
+    """A.51, A.62 (completing O2a): an Orc stays born until its first done
+    answer, so the born words are true in every born case, a first answer
+    the validator refused included, with the minds on and off; the first
+    done answer makes it active."""
+
+    def test_a_refused_first_answer_leaves_true_born_words(self):
+        from html import unescape
+
+        from bot_program.orcs import notes, surfaces
+        from bot_program.orcs.models import Orc
+        born_t = ("Watching: a journal written by code; no model answer has "
+                  "been accepted yet.")
+        base = self.rendered()
+        out = self.think(self.copy_of(base), fake_answer(answer(
+            action="tighten", level_id="XX-1")))
+        self.assertEqual((out["status"], out["code"]), ("refused", "V5"))
+        orc = Orc.objects.select_related("seat", "root_trade").get(
+            pk=self.orc.pk)
+        self.assertEqual(orc.state, "born")
+        for minds in (True, False, None):
+            with self.subTest(minds=minds):
+                said = notes.slot(orc, trade=self.row, minds=minds)[
+                    "state_t"]
+                self.assertEqual(said, born_t)
+                self.assertNotIn("no model has read it", said)
+        self.assertIn(f"State: {born_t}",
+                      unescape(surfaces.orc_card(orc).text()))
+        self.think(self.copy_of(base), fake_answer(answer()))
+        orc.refresh_from_db()
+        self.assertEqual(orc.state, "active")
+        self.assertEqual(notes.slot(orc, trade=self.row)["state_t"],
+                         "Active: its wakes are read in shadow when the "
+                         "minds are on; nothing it decides is applied.")

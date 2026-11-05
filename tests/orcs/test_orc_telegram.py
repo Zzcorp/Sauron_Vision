@@ -76,9 +76,10 @@ class TheOrcCommandTests(_OrcEye):
         self.assertIn("REAL MONEY · bot idea", t)
         self.assertIn("Rank: L0 · Snaga (watches and writes: shadow only) "
                       "· n 0", t)
-        # O2a (changed on purpose, 2026-11-05, A.62)
+        # O2a (changed on purpose, 2026-11-05, A.62; and again completing
+        # O2a: true after a refused first answer too, A.51)
         self.assertIn("State: Watching: a journal written by code; no model "
-                      "has read it yet.", t)
+                      "answer has been accepted yet.", t)
         self.assertIn("R at the last tick +0.42R · best +0.90R", t)
         self.assertIn("Stops: eToro holds 2380.00 · the care&#x27;s soft "
                       "stop 2385.50 (breakeven)", t)

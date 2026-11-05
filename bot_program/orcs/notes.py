@@ -151,7 +151,11 @@ def refresh(orc, *, entry=None, journal_entry=True, extra=None) -> dict:
 
 DASH = "—"
 STATE_WORDS = {
-    "born": "Watching: a journal written by code; no model has read it yet.",
+    # A.51: born until the first done answer, so these words stay true
+    # after a model's answer the validator refused, a late one or a failed
+    # call (2026-11-05, completing O2a), with the minds on and off
+    "born": ("Watching: a journal written by code; no model answer has been "
+             "accepted yet."),
     "active": ("Active: its wakes are read in shadow when the minds are on; "
                "nothing it decides is applied."),
     "care_owned": "Stood aside: the care holds this position.",

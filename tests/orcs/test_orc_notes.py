@@ -172,13 +172,15 @@ class TheSlotTests(_Seen):
             "level", "level_t", "commission", "commission_t", "stood_down",
             "care_owned_reason"})
         # O2a (changed on purpose, 2026-11-05, A.62): the intents are the
-        # card's (none written yet), and the born state says no model has
-        # read the Orc yet, true with the minds on and off
+        # card's (none written yet), and the born state says no model
+        # answer has been accepted yet, true with the minds on and off and
+        # after a refused first answer (changed again on purpose,
+        # completing O2a, A.51)
         self.assertEqual(sl["intents"], [])
         self.assertEqual(sl["page"], f"/orcs/{self.row.pk}/")
         self.assertEqual(sl["state_t"],
-                         "Watching: a journal written by code; no model has "
-                         "read it yet.")
+                         "Watching: a journal written by code; no model "
+                         "answer has been accepted yet.")
         from bot_program.orcs.models import Orc
         intents = [{"kind_t": "proposed in shadow: tighten to S1h-L1 "
                               "(99.00)", "mode": "shadow",
