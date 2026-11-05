@@ -16,6 +16,9 @@ claimed until the queue is built and the operator turns the minds on.
   judge          the parse, the validator (V1-V14) and the officer
                  (I2-I12), as of the wake's own validation context: never
                  under a lock (N8)
+  ticket_*       A.57 (O2a's arm, 2026-11-05): a ticket's caller, the
+                 estimate of the exact text it sends and its bound, for the
+                 scheduler's tickets and `orcs smoke` (reads, never a call)
   write_*        the outcome's writes, called by the settle inside its one
                  transaction: database writes only. A done answer writes
                  its decision (with the booking), its plan (a revision),
@@ -49,6 +52,7 @@ from bot_program.orcs.constants import (CODE_UNSENT, INTENT_KINDS,
                                         WAKE_STATUS_FAILED, WAKE_STATUS_LATE,
                                         WAKE_STATUS_REFUSED,
                                         WAKE_STATUS_SKIPPED)
+from bot_program.orcs.intents import CARD_INTENTS, STATUS_T, intent_words
 
 logger = logging.getLogger(__name__)
 
@@ -56,19 +60,7 @@ logger = logging.getLogger(__name__)
 CALLER = "wake"
 #: A fact id as the answer may cite one (F41, DR3).
 FACT_ID = re.compile(r"(?:F|DR)\d{1,6}")
-#: The proposals' words (A.41): "tighten to S4h-L1 (2,612.00)".
-INTENT_WORDS = {"tighten": "tighten to {lv}", "trim": "trim at {lv}",
-                "exit": "exit at {lv}", "lock_waive": "waive the lock for {ev}",
-                "add": "add at {lv}"}
 ACTION_WORDS = {"hold": "hold", "revise_plan": "revise the plan"}
-#: An intent's status on the card (A.41, A.62).
-STATUS_T = {INTENT_STATUS_QUEUED: "queued for the shadow arm",
-            INTENT_STATUS_RECORDED: "recorded, never applied",
-            INTENT_STATUS_REFUSED: "would be refused",
-            "simulated": "applied to the shadow arm",
-            "expired": "expired"}
-#: The card keeps the newest intents (A.41).
-CARD_INTENTS = 3
 
 
 def source_ref(wake, rung, caller=CALLER) -> str:
@@ -177,6 +169,56 @@ def ask_line(*, rung_name, bound_usd, exclude_wake=None,
     return mind_gateway.ask_line(rung_name=rung_name, bound_usd=bound_usd,
                                  exclude_wake=exclude_wake,
                                  real_urgent=real_urgent)
+
+
+# ── the tickets, as the scheduler and the commands weigh them (A.57; O2a's
+# arm, 2026-11-05): the gateway's reads, never a call ────────────────────
+
+def ticket_caller(caller, rung_name) -> None:
+    """A.57: a ticket is for a caller of §1.0.9 that is not the wake
+    (mind_gateway.CALLER_RUNGS), on one of that caller's rungs: else
+    ValueError, before anything is held or sent (N4)."""
+    from bot_program.orcs import mind_gateway
+    if caller == CALLER:
+        raise ValueError("a wake is claimed, never ticketed")
+    mind_gateway.check_rung(caller, rung_name)
+
+
+def ticket_price(rung_name, tokens) -> dict:
+    """{bound, model, tier, wall_s} of one ticket on rung `rung_name`:
+    A.21's bound on `tokens`, the estimate of the exact text sent, with
+    the rung's own limits; a ticket sends no fallback (B.14)."""
+    from bot_program.orcs import mind_gateway
+    step = mind_gateway.rung(rung_name)
+    return {"bound": float(mind_gateway.bound(rung_name, tokens)),
+            "model": step["model"], "tier": step["tier"],
+            "wall_s": int(step["wall_s"])}
+
+
+def ticket_tokens(wake, rung_name) -> int:
+    """A.57: the estimate of the exact text a ticket sends from `wake`'s
+    stored dossier: dossier.estimate_tokens of S and of each stored block
+    (with its own bar rows), x the rung's family factor."""
+    from bot_program.orcs import dossier, mind_gateway
+    from bot_program.orcs.models import OrcDossierBlock
+    model = mind_gateway.rung(rung_name)["model"]
+    comps = wake.components if isinstance(wake.components, dict) else {}
+    hashes = [str(h) for h in wake.block_hashes or []]
+    s = comps.get("s") if isinstance(comps.get("s"), dict) else {}
+    s_hash = str(s.get("hash") or "")
+    if s_hash:
+        hashes.append(s_hash)
+    found = {b.hash: b for b in OrcDossierBlock.objects.filter(
+        hash__in=hashes).only("hash", "text", "body")}
+    total = 0
+    for h in hashes:
+        b = found.get(h)
+        if b is None:
+            continue
+        body = b.body if isinstance(b.body, dict) else {}
+        total += dossier.estimate_tokens(b.text, int(body.get("bar_rows")
+                                                     or 0), model)
+    return int(total)
 
 
 # ── one wake ─────────────────────────────────────────────────────────────
@@ -405,21 +447,6 @@ def _booking(outcome) -> dict:
                                or 0),
             "cost_usd": Decimal(str(round(float(usage.get("cost_usd")
                                                 or 0), 6)))}
-
-
-def _level_words(target, level) -> str:
-    from bot_program.orcs.facts import px
-    level = level if isinstance(level, dict) else {}
-    if not level.get("level_id"):
-        return "market"
-    return f"{level['level_id']} ({px(target, level.get('price'))})"
-
-
-def intent_words(target, intent) -> str:
-    """A proposal in fixed words, its price drawn by code (A.41)."""
-    tpl = INTENT_WORDS.get(str(intent.get("kind") or ""), "{lv}")
-    return tpl.format(lv=_level_words(target, intent.get("level")),
-                      ev=intent.get("event_id") or "—")
 
 
 def decision_words(target, verdict) -> str:

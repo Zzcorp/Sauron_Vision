@@ -60,9 +60,11 @@ COMMAND = BASE / "bot_program" / "management" / "commands" / "orcs.py"
 #: commit adds its own. O2a's mind (2026-11-05): the gateway, the
 #: doctrine, the validator, the officer, the evidence, the mind and the
 #: scheduler's settle; O2a's queue grows the scheduler (admission, the
-#: merge, the claim, the watchdogs, the breaker, the Orc's states).
+#: merge, the claim, the watchdogs, the breaker, the Orc's states); O2a's
+#: arm (2026-11-05) adds the queued intents at the tick (intents.py) and
+#: the scheduler's tickets.
 O2_MODULES = ("mind_gateway", "doctrine", "validator", "mandate", "evidence",
-              "mind", "scheduler")
+              "mind", "scheduler", "intents")
 #: Each definition O2 adds to an O1 module, by module and qualified name.
 O2_CODE = {
     "journal": ("lock_budget", "orc_lock"),
@@ -84,6 +86,20 @@ O2_CODE = {
              "_minds_switch_on", "RenderPass", "RenderPass.__new__"),
     # O2a's queue (2026-11-05): the minds' worker, its ticket, its watchdog
     "tasks": ("_think_ticket", "orc_think", "orc_minds_watch"),
+    # O2a's arm (2026-11-05): the O arm's would mode, the intents taken at
+    # the tick and expired at the close (A.42-A.45b)
+    "ghost": ("_faith", "_take_intents", "_to_would", "arm_effective",
+              "apply_intent", "_same_moment", "_would_ctx",
+              "would_hand_line", "_step_would", "_expire_arm_closed",
+              "_expire_after_close", "_tail_events"),
+    # O2a's arm (2026-11-05): A.59's status and replay, the smoke (A.60),
+    # its verdicts and the count of S (A.61)
+    "command:orcs": ("Command._mind_replay", "Command._validation_words",
+                     "Command._officer_words", "Command._minds_status",
+                     "Command._smoke", "Command._smoke_wake",
+                     "Command._smoke_answer", "Command._orc_of",
+                     "Command._gates_words", "Command._smoke_verdict",
+                     "Command._tokens"),
 }
 
 #: Every definition (function, class, method) of the package and of the

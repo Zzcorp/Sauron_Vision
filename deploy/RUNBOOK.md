@@ -1565,6 +1565,32 @@ again:
 ./deploy/dc exec web python manage.py orcs actuals --days 14 --record  # ... and record it
 ```
 
+From O2a, `orcs` (the status) also shows the minds: the `orcs_minds`
+switch, the Orcs budget line, the model calls today, the wakes waiting for
+a model, the money held for calls without a bill, the tickets in flight,
+the stall alarm, the breaker and the ledger gaps. `dossier` also prints S,
+the model's answer as kept with each V-rule's verdict, the officer's
+verdicts and the booking, for a wake a model read. A proposal of an answer
+never reaches the position: queued, it steps only the Orc's own shadow arm
+at the next tick, priced at that tick, or expires. Three subcommands
+prepare the minds without turning them on. `smoke --row` is dry without
+`--yes`; with it, and only while the four gates are ON (the platform
+master, `orcs`, `orcs_minds`, the Orcs line above 0), it reserves a ticket
+for the whole bound, sends ONE call on the Orcs line from the Orc's latest
+stored dossier (r0, or h0 with `--rung h0`), prints the answer and its
+validation, and writes nothing to the Orc. `smoke-verdict` records what
+`manage.py claude_smoke --yes` printed for one model family; it sends
+nothing. `tokens --s --yes` counts S at the provider's free token count
+(the API key only: no switch, no line) and records it:
+
+```bash
+./deploy/dc exec web python manage.py orcs smoke --row ROOT_ID              # dry: the one call it would make
+./deploy/dc exec web python manage.py orcs smoke --row ROOT_ID --yes        # one call (refused while a gate is OFF)
+./deploy/dc exec web python manage.py orcs smoke-verdict --family sonnet --pass
+./deploy/dc exec web python manage.py orcs smoke-verdict --family opus --fail effort cache
+./deploy/dc exec web python manage.py orcs tokens --s --yes                 # free, never booked; recorded
+```
+
 When the venue's mark is older than 120 s (or not the venue's), the
 decision frame's bars are stale, or the row cannot be read, the verdict is
 critical and the Orc's menu holds no exit, trim, waiver or add: hold, a

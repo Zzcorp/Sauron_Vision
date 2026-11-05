@@ -339,6 +339,13 @@ def call(*, caller, rung_name, request, source_ref, bound_usd,
                   stop_reason=(usage or {}).get("stop_reason"))
 
 
+def has_key() -> bool:
+    """The provider's API key is set in this process: what `orcs tokens
+    --yes` needs, and all it needs (A.61)."""
+    from ai_agents.providers.claude_provider import ClaudeProvider
+    return bool(ClaudeProvider().api_key)
+
+
 def measure_tokens(*, rung_name="r0", system_blocks=None,
                    shared_user_blocks=None, private_user_blocks=None,
                    system_prompt="", user_message="") -> int:

@@ -28,6 +28,12 @@ get_or_create with one retry, taken before the Orc's row and the wake (the
 settle's order), waited for 2 s at most (TheLineLockTests on PostgreSQL;
 its race and its order on any engine).
 
+O2a'S ARM (2026-11-05, PostgreSQL): (e) a queued proposal is taken inside
+the tick's lock budget, so with the Orc's lock held the tick still ends in
+under a second and the proposal waits for the next tick; (f) a ticket's
+reservation and settle wait for the line lock 2 s at most and hold nothing
+they did not finish.
+
 Run with:  python manage.py test tests.orcs.test_orc_o2a_locks
 (PostgreSQL: DB_ENGINE=postgresql and the DB_* variables of a scratch
 cluster.)
@@ -639,3 +645,114 @@ class TheMoneyPathsNeverWaitTests(MindTransactionTestCase):
             return None
         got = self._same_without_and_with(run)
         self.assertEqual(got[1]["metadata"]["desk_plan_id"], 7)
+
+
+@skipUnless(PG, NOT_PG)
+class TheArmAndTheTicketsWaitWithinTheirBudgetsTests(MindTransactionTestCase):
+    """O2a's arm (2026-11-05) on PostgreSQL. (e) A queued proposal is taken
+    inside the tick's lock budget (intents.take, from ghost._step_orc,
+    under observe.after_care): with thread A holding the Orc's row lock the
+    tick still finishes in under a second, the proposal stays queued and
+    the arm as it was; once the lock is free the next tick takes it. (f) A
+    ticket's reservation and its settle wait for the line lock 2 s at most
+    and leave nothing held when refused."""
+
+    def setUp(self):
+        _switch("aragorn")
+        _on()
+        from tests.test_risk_limits_bind import _quote
+        _quote("BTCUSD", "102.2")
+
+    def test_e_a_queued_proposal_never_makes_the_tick_wait(self):
+        from bot_program.asset_engine.base import make_bot
+        from bot_program.models import AssetBotTrade
+        from bot_program.orcs import journal
+        from bot_program.orcs.birth import ensure
+        from bot_program.orcs.models import Orc, OrcIntent, OrcTrack
+        user = _user("o2lock_arm")
+        cfg = _config(user, name="o2lock")
+        held = _row(cfg)
+        AssetBotTrade.objects.filter(pk=held.pk).update(
+            opened_at=FIXED - timedelta(hours=1))
+        held.refresh_from_db()
+        with patch("django.utils.timezone.now", return_value=FIXED):
+            orc = ensure(held, now=FIXED)
+        self.assertIsNotNone(orc)
+        it = OrcIntent.objects.create(
+            orc=orc, kind="exit", mode="shadow", status="queued",
+            why="queued for the shadow arm",
+            expires_at=FIXED + timedelta(minutes=10), rung="r0",
+            s_version="s1", schema_version="d1")
+        journal.remember(orc, intents_queued=(
+            lambda cur, pk=it.pk: [x for x in (cur or [])
+                                   if isinstance(x, int)] + [pk]))
+        client = MagicMock()
+        client.ticker.return_value = {"lastPrice": "102.2"}
+        client.get_positions.return_value = []
+
+        def tick(at):
+            with patch(ROUTER, return_value=client), \
+                    patch("django.utils.timezone.now", return_value=at):
+                return make_bot(cfg).manage_positions()
+        with _Holder(orc.pk):
+            t0 = time.monotonic()
+            tick(FIXED + timedelta(minutes=1))
+            took = time.monotonic() - t0
+        self.assertLess(took, UNDER_S, f"{took:.3f}s with the Orc's lock held")
+        self.assertEqual(_timeouts(), ("0", "0"),
+                         "no Orc timeout stays on B's connection")
+        it.refresh_from_db()
+        self.assertEqual(it.status, "queued")
+        self.assertEqual(Orc.objects.get(pk=orc.pk).seen.get(
+            "intents_queued"), [it.pk])
+        arm = OrcTrack.objects.get(orc=orc, arm="orc_shadow")
+        self.assertTrue(arm.open)
+        self.assertNotEqual(arm.state.get("mode"), "would")
+        tick(FIXED + timedelta(minutes=2))
+        it.refresh_from_db()
+        self.assertEqual(it.status, "simulated", "the next tick takes it")
+        arm.refresh_from_db()
+        self.assertFalse(arm.open)
+        self.assertEqual(arm.state["exit"]["kind"], "orc")
+        held.refresh_from_db()
+        self.assertEqual((held.status, held.stop_loss),
+                         ("OPEN", Decimal("98")), "the position is the care's")
+
+    def test_f_a_ticket_waits_for_the_line_lock_two_seconds_at_most(self):
+        from django.db import OperationalError
+
+        from bot_program.orcs import scheduler
+        from bot_program.orcs.models import OrcSetting
+        from tests.orcs.helpers_o2 import minds_on
+        minds_on(self)
+        request = {"rung": "r0", "tokens": 1000, "item": "t17:f"}
+        # the lock's row made and committed first, as the watchdog's first
+        # pass makes it (a first caller's row is its own until it commits)
+        with transaction.atomic():
+            scheduler.line_lock()
+        with _LineHolder():
+            t0 = time.monotonic()
+            with self.assertRaises(OperationalError):
+                scheduler.reserve_ticket("smoke", request)
+            took = time.monotonic() - t0
+        self.assertGreaterEqual(took, 1.5)
+        self.assertLess(took, 3.5)
+        self.assertEqual(OrcSetting.get("minds_inflight") or {}, {},
+                         "nothing held")
+        self.assertEqual(OrcSetting.get("minds_tickets") or {}, {},
+                         "nothing counted")
+        got = scheduler.reserve_ticket("smoke", request)
+        self.assertTrue(got["ok"])
+        with _LineHolder():
+            t0 = time.monotonic()
+            with self.assertRaises(OperationalError):
+                scheduler.settle_ticket(got["key"], {"kind": "closed",
+                                                     "sent": False})
+            took = time.monotonic() - t0
+        self.assertLess(took, 3.5)
+        self.assertEqual(
+            (OrcSetting.get("minds_inflight") or {})[got["key"]]["kind"],
+            "ticket", "still held: the watchdog makes it an orphan at its "
+                      "wall time")
+        self.assertTrue(scheduler.settle_ticket(
+            got["key"], {"kind": "closed", "sent": False})["released"])

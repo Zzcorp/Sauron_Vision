@@ -36,7 +36,16 @@ reports an admitted count of 0 until it does), so no wake becomes
            breaker (A.56)
   watch    A.54-A.56 (orc_minds_watch, on `slow`): the stall alarm, the
            stale and backlog closes, the wall time, the holds, the
-           breaker, the ledger gaps
+           breaker, the ledger gaps; and a ticket past its wall time made
+           an orphan hold (A.57)
+  tickets  A.57 (O2a's arm, 2026-11-05): every model call that is not a
+           wake (from O2a, `orcs smoke --row`) holds its bound through
+           reserve_ticket, under the line lock: its caller and rung a row
+           of §1.0.9, its request refused by code above TICKET_MAX_TOKENS,
+           the four gates, its item (one billed attempt), its day cap, its
+           class's ceiling and the core's floor, then the line, with the
+           money in flight and held. settle_ticket releases it as the
+           settle releases a wake's, the ledger check included
 
 THE MONEY (N3): every check of the line reads its cap, what it booked
 today and the OTHER calls' money in flight and held, through mind.py
@@ -101,28 +110,40 @@ from bot_program.orcs.constants import (BREAKER_FAILS, BREAKER_PAUSE_MIN,
                                         CLASS_REAL_URGENT, CODE_BACKLOG,
                                         CODE_BREAKER, CODE_DAY_CAP,
                                         CODE_DEAD, CODE_DOLLAR_CAP,
-                                        CODE_INFLIGHT, CODE_OVER_BUDGET,
+                                        CODE_EXPIRED, CODE_INFLIGHT,
+                                        CODE_ITEM_BUSY, CODE_ITEM_CLOSED,
+                                        CODE_OVER_BUDGET,
                                         CODE_PAUSED, CODE_QUIET,
                                         CODE_ROUTINE_CAP, CODE_ROW_CLOSED,
                                         CODE_SPACING, CODE_TRIAGE,
                                         CODE_WALL_TIME, CODE_WORKER_SILENT,
                                         COLD_MODEL_MIN, HIGH,
                                         HOLD_LEDGER_GAP, HOLD_ORPHAN,
-                                        HOLD_UNBILLED, LINE_LOCK_TIMEOUT_MS,
+                                        HOLD_TICKET, HOLD_UNBILLED,
+                                        ITEM_BILLED, ITEM_CLOSED, ITEM_EXPIRED,
+                                        ITEM_FAILED, ITEM_RESERVED,
+                                        ITEM_UNBILLED, ITEM_UNSENT,
+                                        ITEM_WAITING, LINE_LOCK_TIMEOUT_MS,
                                         MIN_WAKE_SPACING_MIN,
                                         MINDS_BREAKER_KEY,
                                         MINDS_INFLIGHT_KEY, MINDS_LOCK_KEY,
+                                        MINDS_TICKETS_KEY,
                                         MINDS_WATCH_LAST_KEY, O2A_RUNG,
                                         OFFICER_REFUSE,
                                         ORC_STATEMENT_TIMEOUT_MS,
                                         PER_ORC_DAILY_KEY,
                                         PER_ORC_DAILY_USD, PER_ORC_HIGH_KEY,
                                         RANKS, REPLY_ANSWER, REPLY_UNBILLED,
-                                        ROUTINE_SHARE, ROUTINE_SHARE_KEY,
+                                        REPLY_UNSENT, ROUTINE_SHARE,
+                                        ROUTINE_SHARE_KEY,
                                         STALE_MIN, STALL_MIN, STATE_ACTIVE,
                                         STATE_BORN, STATE_CARE_OWNED,
-                                        STATE_DEAD, THINK_RUN_S, TRIAGE,
-                                        TRIAGE_KEY, VENUE_LIVE, WAKE_CODE_WORDS,
+                                        STATE_DEAD, THINK_RUN_S,
+                                        TICKET_CLASS, TICKET_DAY_CAP,
+                                        TICKET_ITEMS_KEEP_DAYS,
+                                        TICKET_MAX_TOKENS, TICKET_RETRIES,
+                                        TRIAGE, TRIAGE_KEY, VENUE_LIVE,
+                                        WAKE_CODE_WORDS,
                                         WAKE_STATUS_DONE, WAKE_STATUS_FAILED,
                                         WAKE_STATUS_MERGED,
                                         WAKE_STATUS_PENDING,
@@ -377,7 +398,14 @@ def money_code(*, real, urgent, bound, purse) -> str:
     and held and this bound pass this class's ceiling; `inflight` when the
     money in flight and held and this bound pass ORC_LIVE_FLOOR_USD, the
     floor the core line holds back for the Orcs' unbooked money."""
-    ceiling = ceilings(purse["cap"])[triage_class(real, urgent)]
+    return class_money_code(triage_class(real, urgent), bound=bound,
+                           purse=purse)
+
+
+def class_money_code(klass, *, bound, purse) -> str:
+    """money_code under one class's ceiling (a key of `ceilings`: a wake's
+    triage class, or a ticket caller's, A.57)."""
+    ceiling = ceilings(purse["cap"])[klass]
     others = float(purse["inflight"])
     if float(purse["spent"]) + others + float(bound) > ceiling + 1e-9:
         return CODE_TRIAGE
@@ -519,6 +547,269 @@ def drop_hold(wake, now) -> dict:
     store.value = value
     store.save(update_fields=["value"])
     return gone
+
+
+# ── the tickets (A.57; O2a's arm, 2026-11-05) ────────────────────────────
+# Every model call that is not a wake reserves through a ticket: from O2a,
+# `orcs smoke --row`; later the probes, the twin, Captains, the Emperor,
+# the Skeptic, post-mortems, the council of war and questions. A ticket is
+# an entry of OrcSetting "minds_inflight" {kind: "ticket", usd: its bound,
+# at, wall_s, caller, rung, item, orc, ref}, counted in every in-flight sum
+# of the line like a running wake's bound (mind_gateway.inflight_usd), and
+# released only by its settle; past its wall time the watchdog makes it an
+# orphan hold until 00:00 UTC (_tickets_wall_time). Its book, OrcSetting
+# "minds_tickets" {day, counts {caller: n}, items {item: {...}}}, keeps
+# the day caps and ONE BILLED ATTEMPT PER ITEM: a call with usage closes
+# its item, billed or refused alike; one failure with no bill leaves one
+# more try; a refusal for budget (no call made) may wait, at most until
+# the next UTC day, when the item closes `expired`. So an item refused
+# every time is billed once, never once a beat.
+
+def _tickets_row():
+    """OrcSetting "minds_tickets", locked: the caller holds the line lock
+    already, so two reservations never write it at once."""
+    from bot_program.orcs.models import OrcSetting
+    row_, _ = OrcSetting.objects.get_or_create(key=MINDS_TICKETS_KEY,
+                                               defaults={"value": {}})
+    return OrcSetting.objects.select_for_update().get(pk=row_.pk)
+
+
+def ticket_book(value, now) -> dict:
+    """The tickets' book for the UTC day of `now` (pure): the counts of
+    an earlier day dropped, an item that waited for the budget past its
+    day closed `expired`, items older than TICKET_ITEMS_KEEP_DAYS gone."""
+    book = value if isinstance(value, dict) else {}
+    today = utc_day(now)
+    keep_from = (_utc(now).date()
+                 - timedelta(days=TICKET_ITEMS_KEEP_DAYS)).isoformat()
+    items = {}
+    for key, item in (book.get("items") or {}).items():
+        if not isinstance(item, dict) or str(item.get("day") or "") \
+                < keep_from:
+            continue
+        item = dict(item)
+        if item.get("state") == ITEM_WAITING and item.get("day") != today:
+            item["state"], item["code"] = ITEM_EXPIRED, CODE_EXPIRED
+        items[str(key)] = item
+    counts = dict(book.get("counts") or {}) if book.get("day") == today \
+        else {}
+    return {"day": today, "counts": counts, "items": items}
+
+
+def _item_code(item) -> str:
+    """Why an item may not send again, as a code; "" when it may."""
+    if not item:
+        return ""
+    state = item.get("state")
+    if state == ITEM_EXPIRED:
+        return CODE_EXPIRED
+    if state in ITEM_CLOSED:
+        return CODE_ITEM_CLOSED
+    if state == ITEM_RESERVED:
+        return CODE_ITEM_BUSY
+    return ""
+
+
+def reserve_ticket(caller, request, *, now=None) -> dict:
+    """A.57: one ticket for a call of `caller` that is not a wake. Its
+    request comes first: `request` {rung, tokens (the estimate of the
+    exact text it sends, x the family factor: mind.ticket_tokens), item,
+    orc, ref}. ValueError, before anything is held, for a caller that is
+    no ticket row of §1.0.9 (mind_gateway.CALLER_RUNGS, TICKET_MAX_TOKENS,
+    TICKET_CLASS) or a rung outside its list. Then, the first that fails
+    answering by code with nothing held: the request above
+    TICKET_MAX_TOKENS (`over_budget`, before any lock); under the line
+    lock, its item (one billed attempt), the four gates, the caller's day
+    cap, its class's ceiling and the core's floor (A.13, A.18), then the
+    line for the whole bound plus the money in flight and held (A.20).
+    A pass holds the bound (no fallback, B.14) and counts the day.
+    Returns {ok, code, key, bound, model, tier}."""
+    from bot_program.orcs import mind, switches
+    now = now or timezone.now()
+    req = dict(request or {})
+    rung = str(req.get("rung") or "")
+    mind.ticket_caller(caller, rung)
+    cap, klass = TICKET_MAX_TOKENS.get(caller), TICKET_CLASS.get(caller)
+    if cap is None or klass is None:
+        raise ValueError(f"the {caller} caller has no ticket row "
+                         f"(TICKET_MAX_TOKENS, TICKET_CLASS)")
+    tokens = max(0, int(req.get("tokens") or 0))
+    # the bound: the catalog's arithmetic, read before the lock
+    price = mind.ticket_price(rung, tokens)
+    out = {"ok": False, "code": "", "key": "", "bound": price["bound"],
+           "model": price["model"], "tier": price["tier"]}
+    if tokens > int(cap):
+        out["code"] = CODE_OVER_BUDGET
+        return out
+    item = str(req.get("item") or "")[:160]
+    with transaction.atomic():
+        line_lock()
+        books = _tickets_row()
+        book = ticket_book(books.value, now)
+        prior = book["items"].get(item) if item else None
+        code = _item_code(prior) or switches.gate_code()
+        day_cap = int(TICKET_DAY_CAP.get(caller) or 0)
+        if not code and day_cap and int(book["counts"].get(caller) or 0) \
+                >= day_cap:
+            code = CODE_DAY_CAP
+        if not code:
+            code = class_money_code(klass, bound=price["bound"],
+                                    purse=mind.purse())
+        if not code:
+            _ok, code, _why = mind.ask_line(rung_name=rung,
+                                            bound_usd=price["bound"])
+        if code:
+            if item and code not in (CODE_ITEM_CLOSED, CODE_ITEM_BUSY,
+                                     CODE_EXPIRED):
+                # no call made: the item may wait, at most to the next UTC
+                # day (ticket_book closes it then)
+                book["items"][item] = {**(prior or {}), "caller": caller,
+                                       "day": book["day"],
+                                       "state": ITEM_WAITING, "code": code,
+                                       "at": now.isoformat()}
+            books.value = book
+            books.save(update_fields=["value"])
+            out["code"] = code
+            return out
+        import uuid
+        key = f"t{uuid.uuid4().hex[:16]}"
+        store = _inflight_row()
+        value = _pruned(store.value if isinstance(store.value, dict) else {},
+                        now)
+        value[key] = {"kind": HOLD_TICKET,
+                      "usd": round(float(price["bound"]), 6),
+                      "caller": str(caller), "rung": rung, "item": item,
+                      "orc": req.get("orc"),
+                      "ref": str(req.get("ref") or "")[:120],
+                      "at": now.isoformat(), "wall_s": int(price["wall_s"])}
+        store.value = value
+        store.save(update_fields=["value"])
+        book["counts"][caller] = int(book["counts"].get(caller) or 0) + 1
+        if item:
+            book["items"][item] = {**(prior or {}), "caller": caller,
+                                   "day": book["day"],
+                                   "state": ITEM_RESERVED, "code": "",
+                                   "at": now.isoformat(), "ticket": key}
+        books.value = book
+        books.save(update_fields=["value"])
+    out.update(ok=True, key=key)
+    return out
+
+
+def _item_after(item, outcome) -> dict:
+    """An item after its call (pure): billed (closed) by a call with
+    usage, its one retry used by a failure with no bill (closed on the
+    second), closed by a request refused before the send, waiting after a
+    refusal with no call made."""
+    item = dict(item or {})
+    usage = outcome.get("usage") if isinstance(outcome.get("usage"),
+                                               dict) else None
+    kind = outcome.get("kind")
+    if outcome.get("sent"):
+        item["sends"] = int(item.get("sends") or 0) + 1
+    if usage is not None:
+        item["state"], item["code"] = ITEM_BILLED, ""
+    elif kind == REPLY_UNBILLED:
+        item["state"] = (ITEM_FAILED if int(item.get("sends") or 0)
+                         > TICKET_RETRIES else ITEM_UNBILLED)
+        item["code"] = str(outcome.get("code") or "")
+    elif kind == REPLY_UNSENT:
+        item["state"], item["code"] = ITEM_UNSENT, str(
+            outcome.get("code") or "")
+    else:
+        item["state"], item["code"] = ITEM_WAITING, str(
+            outcome.get("code") or "")
+    item.pop("ticket", None)
+    return item
+
+
+def settle_ticket(key, outcome, *, now=None) -> dict:
+    """A.57, a ticket's settle (A.24's release, the ledger check included),
+    in one short transaction under the line lock, database writes only.
+    `outcome` is the gateway's reply with "ledger": whether the provider's
+    own ledger row of the call exists, looked up before the lock through
+    the gateway (never inside it). A call with usage releases the ticket
+    once its ledger row is found, else holds the booked cost as
+    `ledger_gap` until 00:00 UTC; a call with no bill keeps its bound held
+    as `unbilled` until 00:00 UTC (it may have been billed); nothing sent
+    releases it. A ticket the watchdog already made an orphan (its wall
+    time) settles late: a bill drops the hold once its row is found, no
+    bill leaves it held until 00:00 UTC. Then its item (_item_after).
+    Returns {held, released, late, item}."""
+    now = now or timezone.now()
+    usage = outcome.get("usage") if isinstance(outcome.get("usage"),
+                                               dict) else None
+    kind = outcome.get("kind")
+    out = {"held": "", "released": False, "late": False, "item": ""}
+    with transaction.atomic():
+        line_lock()
+        store = _inflight_row()
+        value = _pruned(store.value if isinstance(store.value, dict) else {},
+                        now)
+        entry = value.get(key) if isinstance(value.get(key), dict) else None
+        if entry is not None and entry.get("kind") in (HOLD_TICKET,
+                                                       HOLD_ORPHAN):
+            out["late"] = entry.get("kind") == HOLD_ORPHAN
+            until = next_midnight(now).isoformat()
+            if usage is not None and outcome.get("ledger"):
+                value.pop(key)
+                out["released"] = True
+            elif usage is not None:
+                value[key] = {**entry, "kind": HOLD_LEDGER_GAP,
+                              "usd": round(float(usage.get("cost_usd")
+                                                 or 0), 6), "until": until}
+            elif kind == REPLY_UNBILLED or out["late"]:
+                value[key] = {**entry, "kind": (HOLD_ORPHAN if out["late"]
+                                                else HOLD_UNBILLED),
+                              "until": until}
+            else:
+                value.pop(key)
+                out["released"] = True
+            if key in value:
+                out["held"] = value[key]["kind"]
+            store.value = value
+            store.save(update_fields=["value"])
+        item = str((entry or {}).get("item") or "")
+        if item:
+            books = _tickets_row()
+            book = ticket_book(books.value, now)
+            book["items"][item] = {**_item_after(book["items"].get(item),
+                                                 outcome),
+                                   "day": book["day"], "at": now.isoformat()}
+            out["item"] = book["items"][item]["state"]
+            books.value = book
+            books.save(update_fields=["value"])
+    return out
+
+
+def _tickets_wall_time(now) -> int:
+    """A.57: a ticket past its wall time becomes an `orphan` hold until
+    00:00 UTC: its call may still stream, or be orphaned by a worker's
+    restart, and may yet bill; nothing is dropped earlier. Its late
+    settle books it (settle_ticket)."""
+    n = 0
+    with transaction.atomic():
+        line_lock()
+        store = _inflight_row()
+        value = _pruned(store.value if isinstance(store.value, dict) else {},
+                        now)
+        for key, entry in list(value.items()):
+            if entry.get("kind") != HOLD_TICKET:
+                continue
+            at = _parse(entry.get("at"))
+            if at is None or now - at <= timedelta(
+                    seconds=float(entry.get("wall_s") or 0)):
+                continue
+            value[key] = {**entry, "kind": HOLD_ORPHAN,
+                          "until": next_midnight(now).isoformat()}
+            n += 1
+        if n:
+            store.value = value
+            store.save(update_fields=["value"])
+    if n:
+        logger.warning("[orcs] %s ticket(s) ran past their wall time: their "
+                       "bounds stay held until 00:00 UTC", n)
+    return n
 
 
 # ── the merge (A.7 step 1) ───────────────────────────────────────────────
@@ -1269,8 +1560,9 @@ def watch(*, now=None) -> dict:
     """One pass of the minds' watchdog (A.54-A.56; orc_minds_watch, on
     `slow`, every 5 minutes: never on the fast queue, N8), its steps in
     the census's tuple style, each fenced. The result names the counts
-    (stalled, stale, backlog, wall-timed, holds, breaker, ledger gaps,
-    and the wakes answered by code for budget today), never a `skipped`,
+    (stalled, stale, backlog, wall-timed, the tickets wall-timed (A.57),
+    holds, breaker, ledger gaps, and the wakes answered by code for budget
+    today), never a `skipped`,
     `parsed` or `attempted` key (core/task_gate.py reads those as a
     health verdict); `idle` when nothing waits, runs or is held."""
     from bot_program.orcs.models import OrcWake
@@ -1278,8 +1570,9 @@ def watch(*, now=None) -> dict:
     last = _watch_stamp(now)
     paused = last is None or now - last > timedelta(minutes=WATCH_PAUSED_MIN)
     out = {"minds_stalled": 0, "minds_stale": 0, "minds_backlog": 0,
-           "minds_wall_time": 0, "minds_holds": 0, "minds_ledger_gap": 0,
-           "minds_breaker": 0, "answered_by_code": 0}
+           "minds_wall_time": 0, "minds_ticket_wall_time": 0,
+           "minds_holds": 0, "minds_ledger_gap": 0, "minds_breaker": 0,
+           "answered_by_code": 0}
 
     def stale():
         got = _stale(now, paused=paused)
@@ -1296,6 +1589,9 @@ def watch(*, now=None) -> dict:
     steps = (("minds_stalled", lambda: _stalled(now)),
              ("minds_stale", stale),
              ("minds_wall_time", lambda: _wall_time(now)),
+             # A.57 (O2a's arm, 2026-11-05): a ticket past its wall time
+             # becomes an orphan hold until 00:00 UTC, before the holds count
+             ("minds_ticket_wall_time", lambda: _tickets_wall_time(now)),
              ("minds_holds", holds),
              ("minds_breaker", lambda: 1 if breaker_state(now) else 0),
              ("answered_by_code", lambda: OrcWake.objects.filter(
@@ -1319,6 +1615,10 @@ def watch(*, now=None) -> dict:
             ("minds_ledger_gap", "held: the provider wrote no ledger row")):
         if out[key]:
             alarms.append(f"{out[key]} wake(s) {words}")
+    if out["minds_ticket_wall_time"]:
+        alarms.append(f"{out['minds_ticket_wall_time']} ticket(s) ran past "
+                      f"their wall time: their bounds stay held until 00:00 "
+                      f"UTC")
     if out["minds_breaker"]:
         alarms.append("the breaker pauses the claims")
     if alarms:

@@ -685,3 +685,78 @@ PRINT_BANDS_MIN = (180, 1440)
 #: A.49: the asked wake's memory key and words.
 W11_ASK_KEY = "w11_ask"
 W11_ASK_WORDS = "the Orc asked to look again"
+
+# ── O2a: the shadow arm and the tickets (2026-11-05, the O2 spec A.41-A.45b,
+# A.57, A.59-A.61). Nothing here sends anything or reaches a position: a
+# queued proposal steps the Orc's own arm (intents.py, ghost.py), and a
+# ticket holds the Orcs line's money for a call that is not a wake.
+
+#: A.42: the kinds a queued intent steps the O arm with (an add is judged
+#: and recorded, never applied, A.41), and its two ends at the tick.
+INTENT_APPLIED_KINDS = ("tighten", "trim", "exit", "lock_waive")
+INTENT_STATUS_SIMULATED = "simulated"
+INTENT_STATUS_EXPIRED = "expired"
+EXPIRY_TTL, EXPIRY_MOVED, EXPIRY_ROW_CLOSED, EXPIRY_ARM_CLOSED = (
+    INTENT_EXPIRY_CODES)
+#: The expiry codes in fixed words (A.42); `moved` says which way in the
+#: intent's own `why` (MOVED_WORDS).
+EXPIRY_WORDS = {
+    EXPIRY_TTL: (f"no tick could apply it within {INTENT_TTL_S // 60} "
+                 f"minutes of its validation"),
+    EXPIRY_MOVED: "the price moved before a tick could apply it",
+    EXPIRY_ROW_CLOSED: "the position closed first",
+    EXPIRY_ARM_CLOSED: "the shadow arm had already closed",
+}
+MOVED_WORDS = {
+    "room": ("the would-stop no longer has its room (0.5 ATR) from the "
+             "tick's price and mark"),
+    "tighter": "the would-stop is no longer tighter than the shadow arm's",
+    "unmeasured": "the would-stop's room cannot be measured",
+    "trim": "nothing is left to trim",
+}
+
+#: A.57: a ticket's request, estimated (dossier.estimate_tokens x the
+#: family factor) above its caller's cap, is refused by code (over_budget)
+#: before anything is reserved: a digest that grew with an idea's life
+#: would make the reservation no bound at all. The smoke sends a wake's
+#: stored dossier, capped as a wake's; the others are §1.0.9's, measured
+#: with `orcs tokens` like S once each caller ships.
+TICKET_MAX_TOKENS = {"smoke": DOSSIER_MAX_TOKENS, "captain": 10000,
+                     "emperor": 16000, "skeptic": 6000, "postmortem": 12000,
+                     "tribunal": 12000, "question": DOSSIER_MAX_TOKENS + 400}
+#: §1.0.9: the triage ceiling a ticket caller reserves under (A.13): the
+#: smoke C - R, the real-money non-urgent class. A later caller adds its
+#: row with its CALLER_RUNGS row.
+TICKET_CLASS = {"smoke": CLASS_REAL}
+#: §1.0.9: a caller's tickets a UTC day; 0 counts none (the smoke is one
+#: per command, which the command keeps).
+TICKET_DAY_CAP = {"smoke": 0}
+#: A.57: one billed attempt per item; a call that failed with no bill is
+#: tried again at most this many times.
+TICKET_RETRIES = 1
+#: A ticket in OrcSetting "minds_inflight", beside the holds (A.57); the
+#: tickets' day counts and items (OrcSetting "minds_tickets"), kept this
+#: many days.
+HOLD_TICKET = "ticket"
+MINDS_TICKETS_KEY = "minds_tickets"
+TICKET_ITEMS_KEEP_DAYS = 7
+#: A ticket item's states: a call reserved; closed by a billed call, by a
+#: second failure with no bill, by a request refused before the send, or
+#: by waiting past its UTC day; open after a failure with no bill (one try
+#: left) or a refusal for budget (it may wait until the next UTC day).
+ITEM_RESERVED, ITEM_BILLED, ITEM_FAILED, ITEM_UNSENT = (
+    "reserved", "billed", "failed", "unsent")
+ITEM_UNBILLED, ITEM_WAITING, ITEM_EXPIRED = "unbilled", "waiting", "expired"
+ITEM_CLOSED = (ITEM_BILLED, ITEM_FAILED, ITEM_UNSENT, ITEM_EXPIRED)
+CODE_ITEM_CLOSED = "item_closed"
+CODE_ITEM_BUSY = "item_busy"
+CODE_EXPIRED = "expired"
+TICKET_CODE_WORDS = {
+    CODE_ITEM_CLOSED: "this item had its one billed call already",
+    CODE_ITEM_BUSY: "a call for this item is in flight",
+    CODE_EXPIRED: "it waited for the budget past its UTC day",
+}
+#: A.61: S's count (OrcSetting "s_tokens") and the smoke's reasons for a
+#: FAIL (claude_smoke's own: call A, call B, no cache read, less than 2x).
+S_TOKENS_KEY = "s_tokens"
+SMOKE_FAIL_REASONS = ("call_a", "call_b", "cache", "effort")
