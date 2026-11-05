@@ -47,7 +47,8 @@ from django.utils import timezone
 
 from tests.orcs.helpers import (_config, _on, _row, _switch, _user,
                                 _wake_card, born, tracks_of)
-from tests.orcs.helpers_o2 import MindTestCase, minds_on
+from tests.orcs.helpers_o2 import MindTestCase, fake_answer, minds_on
+from tests.orcs.test_orc_o2a_call import MindFixture, answer
 
 UTC = dt_tz.utc
 ORC_WORD = re.compile(r"\b(Orc|Orcs|Captain|Captains)\b")
@@ -674,3 +675,65 @@ class TheRegistrationTests(MindTestCase):
                 k: v for k, v in settings.AI_CONFIG.items()
                 if k != "orc_daily_budget_usd"}):
             self.assertEqual(spend.orc_line_cap(), 0.0)
+
+
+# ── the last fact is code's (N5; 2026-11-05, completing O2a) ─────────────
+
+class TheLastFactIsCodesTests(MindFixture):
+    """N5, A.62: the last fact Telegram /orc and the close dialog's note
+    print is a line code wrote. A model's own lines on the card (its
+    decision, its plan, its proposals, author `orc`; a Captain's and the
+    Emperor's from O2c) are its words, never a fact: they are shown under
+    their own labels (the latest note, the plan, the intents)."""
+
+    def _said(self):
+        from bot_program.models import AssetBotTrade
+        from bot_program.orcs import notes, surfaces
+        from bot_program.orcs.models import Orc
+        orc = Orc.objects.select_related("seat", "root_trade").get(
+            pk=self.orc.pk)
+        row = AssetBotTrade.objects.get(pk=self.row.pk)
+        return (orc, surfaces.orc_card(orc).text(),
+                notes.close_note_for(row, user=self.user)["t"])
+
+    def test_a_models_decision_is_never_the_last_fact(self):
+        from bot_program.orcs import notes
+        base = self.rendered()
+        self.think(self.copy_of(base), fake_answer(answer()))
+        orc, telegram, note = self._said()
+        lines = orc.card["journal"]
+        self.assertEqual((lines[-1]["author"], lines[-1]["kind"]),
+                         ("orc", "decision"))
+        fact = [j for j in lines if j["author"] == "code"][-1]
+        said = f"Last fact {notes.hhmm(fact['at'])} UTC: {fact['t']}"
+        for name, text in (("telegram", telegram), ("close note", note)):
+            self.assertIn(said, text, name)
+            self.assertNotRegex(text, r"Last fact \S+ UTC: (?:Decision|Plan "
+                                      r"v\d+|Proposed) in shadow", name)
+        # two more answers: the card's three lines are the model's alone,
+        # and no line is called a fact; its note keeps its own label
+        for _ in range(2):
+            self.think(self.copy_of(base), fake_answer(answer()))
+        orc, telegram, note = self._said()
+        self.assertEqual({j["author"] for j in orc.card["journal"]},
+                         {"orc"})
+        for name, text in (("telegram", telegram), ("close note", note)):
+            self.assertNotIn("Last fact", text, name)
+            self.assertIn("Holding: the 4h structure intact.", text, name)
+
+    def test_the_last_fact_is_the_newest_line_code_wrote(self):
+        from bot_program.orcs import notes
+        from bot_program.orcs.constants import AUTHORS, FACT_AUTHORS
+        self.assertEqual(set(FACT_AUTHORS), {"code", "care", "reconcile",
+                                             "morgul"})
+        self.assertTrue(set(FACT_AUTHORS) <= set(AUTHORS))
+        for author in FACT_AUTHORS:
+            lines = [{"author": "code", "t": "older"},
+                     {"author": author, "t": "newest"}]
+            self.assertEqual(notes.last_fact(lines)["t"], "newest", author)
+        for author in ("orc", "captain", "emperor", "operator", ""):
+            lines = [{"author": "care", "t": "the fact"},
+                     {"author": author, "t": "not a fact"}]
+            self.assertEqual(notes.last_fact(lines)["t"], "the fact",
+                             author)
+            self.assertIsNone(notes.last_fact(lines[1:]), author)

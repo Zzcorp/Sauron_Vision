@@ -7,9 +7,10 @@ know these commands).
 
     /orc NUMBER       one Orc: its rank, state, R and stops (or, once its
                       row is closed, where it closed and the R booked),
-                      thesis, plan, latest note, last fact (never the
-                      operator's own words), next wake, the care beside
-                      it, its army
+                      thesis, plan, latest note, last fact (a line code
+                      wrote: never the operator's own words, never a
+                      model's, O2a), next wake, the care beside it, its
+                      army
     /orcs [CLASS]     every Orc on watch, one line each (20 at most)
 
 NUMBER is the Orc's number, its idea's root trade, or any of its legs.

@@ -785,10 +785,15 @@ def line_dict(sl) -> dict:
 
 
 def last_fact(journal_lines):
-    """The newest card line written by code, never the operator's own
-    words (his thesis is his text, not a fact: no F-id). None for none."""
+    """The newest card line written by code (FACT_AUTHORS), never the
+    operator's own words (his thesis is his text, not a fact: no F-id)
+    and never a model's (N5; O2a, 2026-11-05: a decision, a plan or a
+    proposal by `orc` is its words, shown under its own labels). None for
+    none: while the card's lines are all the model's, no line is called
+    a fact."""
+    from bot_program.orcs.constants import FACT_AUTHORS
     for j in reversed(list(journal_lines or ())):
-        if isinstance(j, dict) and j.get("author") != AUTHOR_OPERATOR \
+        if isinstance(j, dict) and j.get("author") in FACT_AUTHORS \
                 and str(j.get("t") or "").strip():
             return j
     return None

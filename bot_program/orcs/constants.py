@@ -29,6 +29,11 @@ JOURNAL_KINDS = (
 #: OrcJournal.author (§1.4).
 AUTHORS = ("code", "orc", "care", "captain", "operator", "morgul",
            "reconcile")
+#: The authors whose lines are facts: written by code (the O2 spec N5;
+#: 2026-11-05, completing O2a). A model's lines (`orc`; a Captain's and,
+#: from O2c, the Emperor's) are its words and the operator's are his: the
+#: surfaces never call one the last fact (notes.last_fact).
+FACT_AUTHORS = ("code", "care", "reconcile", "morgul")
 
 #: Orc.commission (§3.2): an operator's ticket starts at advise; a bot
 #: idea follows its class seat.
