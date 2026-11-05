@@ -362,12 +362,15 @@ def _attack_lines(w, cfg, kind, venue, now, blockers, warnings) -> None:
     carries, the class ceiling, the proven multiplier and the most the
     chooser may pick. That most is judged by the engine's own rule
     (judge_order_leverage with the pick); a refusal is a BLOCKER when
-    armed, worth reading when not. Nothing here asks a broker."""
+    armed, worth reading when not. Nothing here asks a broker. Since
+    2026-11-05 the most is under MAX BOT LEVERAGE too (bot_leverage_cap,
+    the engine's own reader), and the line says so when it keeps the
+    chooser under the class ceiling."""
     from bot_program.asset_engine.base import (
         ATTACK_HIGH_MIN_AVG_R, ATTACK_HIGH_MIN_N, ATTACK_HIGH_MIN_WIN_RATE,
         LEVERAGE_SWITCH_KEY, MAX_ORDER_LEVERAGE, ORDER_LEVERAGE_CEILING,
-        attack_thresholds, attack_tier_scales, judge_order_leverage,
-        proven_leverage)
+        attack_thresholds, attack_tier_scales, bot_cap_words,
+        bot_leverage_cap, judge_order_leverage, proven_leverage)
     from bot_program.asset_engine.sizing import risk_fraction
     from core.platform_control import is_component_enabled
     try:
@@ -395,17 +398,23 @@ def _attack_lines(w, cfg, kind, venue, now, blockers, warnings) -> None:
           f"still apply")
         return
     on = is_component_enabled(LEVERAGE_SWITCH_KEY)
+    # MAX BOT LEVERAGE (2026-11-05): None when blank, and for "manual"
+    cap = bot_leverage_cap(cfg)
     for icls in _instrument_classes(cfg):
         ceiling = min(int(MAX_ORDER_LEVERAGE),
                       int(ORDER_LEVERAGE_CEILING.get(icls, 1)))
         proven = proven_leverage(icls)
         # 2026-10-05 ("pas de limite à l'attaque"): the proven multiplier
         # is a record, not a bound — the chooser picks on the LIVE list,
-        # the ceiling and the stop band with its headroom
-        most = ceiling if on else 1
+        # the ceiling and the stop band with its headroom; since
+        # 2026-11-05 at most MAX BOT LEVERAGE too
+        capped = on and cap is not None and cap < ceiling
+        most = (min(ceiling, cap) if capped else ceiling) if on else 1
         w(f"          {icls}: ceiling {ceiling}x (the venue's class "
           f"maximum), measured at {proven}x — the chooser picks at most "
-          f"{most}x, on eToro's LIVE list and inside the stop band"
+          f"{most}x"
+          + (f" ({bot_cap_words(cap)})" if capped else "")
+          + ", on eToro's LIVE list and inside the stop band"
           + ("" if on else f" ({LEVERAGE_SWITCH_KEY} is OFF: every order "
                            f"goes at 1x)"))
         if most <= 1:
@@ -979,6 +988,28 @@ class Command(BaseCommand):
                             cfg, _icls, kind)
                         if _lev_why:
                             break
+                    # MAX BOT LEVERAGE (2026-11-05): the engine judges the
+                    # TYPED number (above, refusals unchanged), then sends
+                    # it at the cap when it sits above it
+                    # (AssetBot._bot_cap_leverage), or, when eToro does not
+                    # take the cap, at the highest step under it on the
+                    # instrument's LIVE list (AssetBot._bot_cap_step, the
+                    # review of 2026-11-05) — here eToro's steps as
+                    # measured (bot_cap_step), since nothing here asks
+                    # eToro. Every number below is the multiplier SENT
+                    _sent, _capped = _lev, ""
+                    if not _lev_why and _lev is not None and _lev > 1:
+                        from bot_program.asset_engine.base import (
+                            bot_cap_step, bot_cap_words, bot_leverage_cap)
+                        _bcap = bot_leverage_cap(cfg)
+                        if _bcap is not None and _bcap < _lev:
+                            _sent = bot_cap_step(_bcap)
+                            _capped = (
+                                f", sent at {_sent}x ({bot_cap_words(_bcap)})"
+                                if _sent == _bcap else
+                                f", sent at {_sent}x, eToro's highest step "
+                                f"at or under {_bcap}x "
+                                f"({bot_cap_words(_bcap)})")
                     if _lev_why:
                         w(f"        leverage {_raw_lev!r} (extras)  ← {_lev_why}")
                         (blockers if cfg.enabled else warnings).append(
@@ -986,15 +1017,19 @@ class Command(BaseCommand):
                     elif _lev == 1:
                         w("        leverage 1 (extras) — the adapter's "
                           "default, recorded on the row")
+                    elif _sent == 1:
+                        # capped at 1: the unlevered order, as a typed 1
+                        w(f"        leverage {_lev}x (extras){_capped} — the "
+                          f"adapter's default, recorded on the row")
                     else:
                         from portfolio.models import Portfolio
                         from portfolio.services import PER_USER_SUFFIX
                         _own = Portfolio.objects.filter(
                             name=f"{user.username}{PER_USER_SUFFIX}").first()
-                        w(f"        leverage {_lev}x (extras) — rides the "
-                          f"eToro order body; units, the notional ceiling "
+                        w(f"        leverage {_lev}x (extras){_capped} — rides "
+                          f"the eToro order body; units, the notional ceiling "
                           f"and the loss at the stop are unchanged; cash "
-                          f"pledged per position is notional/{_lev} "
+                          f"pledged per position is notional/{_sent} "
                           f"(measured on demo 2026-09-23: 42.39 on 84.79 "
                           f"at 2x); MAX TOTAL EXPOSURE is a "
                           f"percentage of your /setup/ book: "
@@ -1008,7 +1043,7 @@ class Command(BaseCommand):
                               "venue row — every levered entry is refused "
                               "until the sync stores them")
                             (blockers if cfg.enabled else warnings).append(
-                                f"config {cfg.id} ({cfg.name}) at {_lev}x: "
+                                f"config {cfg.id} ({cfg.name}) at {_sent}x: "
                                 f"the venue row's available cash / used "
                                 f"margin have never been stored — every "
                                 f"levered entry is refused (leverage_refused) "
@@ -1023,7 +1058,7 @@ class Command(BaseCommand):
                                is not None else
                                DEFAULT_MAX_HOLD_HOURS.get(cfg.asset_class))
                         warnings.append(
-                            f"config {cfg.id} ({cfg.name}) at {_lev}x: "
+                            f"config {cfg.id} ({cfg.name}) at {_sent}x: "
                             f"financing (overnight/weekend fees on a levered "
                             f"CFD) is charged by NOTHING here — the cost "
                             f"filter is spread only — and the position may "
@@ -1037,17 +1072,31 @@ class Command(BaseCommand):
                             proven_leverage)
                         for _icls in _instrument_classes(cfg):
                             _pv = proven_leverage(_icls)
-                            if _lev > _pv:
+                            if _sent > _pv:
                                 warnings.append(
                                     f"config {cfg.id} ({cfg.name}) at "
-                                    f"{_lev}x: {_icls} is proven at {_pv}x "
+                                    f"{_sent}x: {_icls} is proven at {_pv}x "
                                     f"only — no demo fill-and-close at "
-                                    f"{_lev}x is pinned; a typed multiplier "
+                                    f"{_sent}x is pinned; a typed multiplier "
                                     f"is not held to the proven multipliers "
                                     f"(nor is the attack mode, since "
                                     f"2026-10-05)")
+                # MAX BOT LEVERAGE (2026-11-05), beside every live config's
+                # leverage line: the operator's cap on the bots' multiplier
+                # at eToro, the engine's own reader (bot_leverage_cap); the
+                # TAKE TRADE lane's own config is never capped
+                from bot_program.asset_engine.base import bot_leverage_cap
+                from bot_program.manual_trade import MANUAL_CONFIG_NAME
+                if cfg.name == MANUAL_CONFIG_NAME:
+                    w("        MAX BOT LEVERAGE does not apply — the "
+                      "hand-taken TAKE TRADE ticket is never capped")
+                else:
+                    _bcap = bot_leverage_cap(cfg)
+                    w("        MAX BOT LEVERAGE —  (blank on /setup/: no cap "
+                      "on the bots' multiplier)" if _bcap is None else
+                      f"        MAX BOT LEVERAGE {_bcap}x (/setup/) — this "
+                      f"bot's multiplier at eToro is at most {_bcap}x")
                 if cfg.enabled and not list(cfg.symbols or []):
-                    from bot_program.manual_trade import MANUAL_CONFIG_NAME
                     if cfg.name != MANUAL_CONFIG_NAME:
                         blockers.append(f"config {cfg.id} ({cfg.name}) is LIVE "
                                         f"and enabled with no symbols")

@@ -194,6 +194,27 @@
                 </div>
             </div>
             <div style="margin-bottom: 16px;">
+                {# 2026-11-05, the operator: "restaurer achat et vente manuel #}
+                {# en leverage max et plus mesuré pour les bots". Not required: #}
+                {# blank stores NULL, no cap (dashboard.views, base.bot_leverage_cap). #}
+                <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX BOT LEVERAGE (x)</label>
+                <input type="number" step="1" min="1" max="30" name="max_bot_leverage" value="{{ limits.max_bot_leverage|default_if_none:'' }}" placeholder="no cap"
+                    style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">
+                {# 2026-11-05, the review: eToro takes only its steps, so a cap #}
+                {# between two sends the step under it (base.AssetBot._bot_cap_step). #}
+                <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);margin-top:6px;">
+                    The highest multiplier the bots may send to eToro: the
+                    attack mode picks at most this, and a bot set higher is
+                    sent at this instead,
+                    or at eToro&#x27;s highest step under it
+                    when eToro does not take this one
+                    (its steps are 2, 5, 10, 20 and 30).
+                    Never the hand-taken TAKE TRADE ticket,
+                    which keeps the highest eToro allows. A lower multiplier
+                    locks more cash per bot position. 1 to 30; blank = no cap.
+                </div>
+            </div>
+            <div style="margin-bottom: 16px;">
                 <label style="display:block;font-family:var(--font-mono);font-size:10px;letter-spacing:2px;color:var(--text-muted);margin-bottom:6px;">MAX OPEN RISK (%)</label>
                 <input type="number" step="any" min="1" max="100" required name="max_open_risk" value="{{ limits.max_open_risk_pct }}"
                     style="width:100%;padding:10px 14px;background:var(--bg-void);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;">

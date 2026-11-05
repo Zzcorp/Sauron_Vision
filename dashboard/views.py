@@ -3668,6 +3668,14 @@ RISK_LIMIT_BOUNDS = {
     # book (2026-10-04, risk_gate.notional_state). 1 is "no leverage at
     # all"; 50 is past anything a retail venue margins.
     "max_notional_multiple": (1.0, 50.0, "Max notional multiple"),
+    # MAX BOT LEVERAGE (2026-11-05; the operator: "restaurer achat et vente
+    # manuel en leverage max et plus mesuré pour les bots" — restore manual
+    # buy and sell at max leverage, and more measured for the bots): the
+    # highest multiplier a BOT's eToro order may carry, a whole number of x
+    # (asset_engine.base.bot_leverage_cap, BOT_LEVERAGE_BOUNDS: 1 to
+    # MAX_ORDER_LEVERAGE, pinned equal). Never the TAKE TRADE ticket. 1 is
+    # "the bots never lever"; BLANK is no cap (RISK_LIMIT_BLANK_IS_NONE).
+    "max_bot_leverage": (1, 30, "Max bot leverage"),
 }
 
 # POST field -> Portfolio field. The form names are short and the model names
@@ -3682,12 +3690,24 @@ RISK_LIMIT_FIELDS = {
     "max_pledged": "max_pledged_pct",
     "max_open_risk": "max_open_risk_pct",
     "max_notional": "max_notional_multiple",
+    "max_bot_leverage": "max_bot_leverage",
 }
 
 # Fields a post may leave OUT (absent, not blank) and keep the stored value:
 # a card rendered before the field existed must still save the others. A
 # field that IS posted is judged like every sibling — blank is refused.
-RISK_LIMIT_OPTIONAL = {"max_pledged", "max_open_risk", "max_notional"}
+RISK_LIMIT_OPTIONAL = {"max_pledged", "max_open_risk", "max_notional",
+                       "max_bot_leverage"}
+
+# Fields whose BLANK is a value (2026-11-05): a posted blank stores NULL,
+# "no limit" — MAX BOT LEVERAGE left empty is no cap on the bots'
+# multiplier. Absent is still RISK_LIMIT_OPTIONAL's rule (the stored value
+# is kept): only a card that shows the field can clear it.
+RISK_LIMIT_BLANK_IS_NONE = {"max_bot_leverage"}
+
+# Fields that are counts or multipliers: a value that is not whole is a
+# typo, refused, never rounded.
+RISK_LIMIT_WHOLE = {"max_theme_legs", "max_bot_leverage"}
 
 
 def _apply_risk_limits(portfolio, post) -> tuple[bool, list[str]]:
@@ -3702,14 +3722,24 @@ def _apply_risk_limits(portfolio, post) -> tuple[bool, list[str]]:
     field or a typo raised ValueError straight out of the view — a 500 on a
     settings page — and any number at all was accepted, including the zeros
     that now mean "stop trading".
+
+    MAX BOT LEVERAGE (2026-11-05) saves under the same rules — its bounds,
+    all or none — with two of its own: a posted BLANK stores NULL, no cap
+    (RISK_LIMIT_BLANK_IS_NONE), and a value that is not a whole multiplier
+    is refused (RISK_LIMIT_WHOLE). A card rendered before it existed posts
+    nothing for it and keeps the stored value (RISK_LIMIT_OPTIONAL).
     """
     rejected: list[str] = []
-    pending: dict[str, float] = {}
+    pending: dict[str, float | int | None] = {}
 
     for form_name, field in RISK_LIMIT_FIELDS.items():
         low, high, label = RISK_LIMIT_BOUNDS[field]
         raw = post.get(form_name)
         if raw is None and form_name in RISK_LIMIT_OPTIONAL:
+            continue
+        if (raw is not None and str(raw).strip() == ""
+                and field in RISK_LIMIT_BLANK_IS_NONE):
+            pending[field] = None
             continue
         if raw is None or str(raw).strip() == "":
             rejected.append(f"{label} was left blank")
@@ -3728,17 +3758,23 @@ def _apply_risk_limits(portfolio, post) -> tuple[bool, list[str]]:
                     f"{label} must be between {low:g} and {high:g} — it is "
                     f"a count of concurrent same-currency tickets, and 0 "
                     f"turns the theme gate off")
+            elif field == "max_bot_leverage":
+                rejected.append(
+                    f"{label} must be between {low:g} and {high:g} — a "
+                    f"whole multiplier, or blank for no cap")
             else:
                 rejected.append(
                     f"{label} must be between {low:g} and {high:g} — "
                     f"{value:g} would gate every trade on this platform")
             continue
-        if field == "max_theme_legs":
-            # A count of tickets. int() would quietly turn 2.5 into 2 and
-            # save a limit nobody typed; a count that is not whole is a
-            # typo, and typos are rejected, not rounded.
+        if field in RISK_LIMIT_WHOLE:
+            # A count of tickets, or a multiplier. int() would quietly turn
+            # 2.5 into 2 and save a limit nobody typed; a value that is not
+            # whole is a typo, and typos are rejected, not rounded.
             if value != int(value):
-                rejected.append(f"{label} is a count of tickets — "
+                what = ("a count of tickets" if field == "max_theme_legs"
+                        else "a whole multiplier")
+                rejected.append(f"{label} is {what} — "
                                 f"{value:g} is not a whole number")
                 continue
             value = int(value)

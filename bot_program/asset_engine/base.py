@@ -460,6 +460,102 @@ def free_cash_decides_alone(ceiling=None) -> bool:
     except (TypeError, ValueError):
         return False
 
+
+#: MAX BOT LEVERAGE (2026-11-05): the bounds a stored cap must sit in to be
+#: used, a whole number of x — the /setup/ card's own
+#: (dashboard.views.RISK_LIMIT_BOUNDS["max_bot_leverage"], pinned equal).
+BOT_LEVERAGE_BOUNDS = (1, MAX_ORDER_LEVERAGE)
+
+
+def bot_cap_words(cap) -> str:
+    """The words every reader of the cap says it in: "capped at Nx by MAX
+    BOT LEVERAGE"."""
+    return f"capped at {cap}x by MAX BOT LEVERAGE"
+
+
+#: eToro's MULTIPLIER STEPS (2026-11-05, the review of MAX BOT LEVERAGE):
+#: eToro takes only the multipliers on an instrument's LIVE leverageValues
+#: list, and every LIVE list read is a run of this one ladder — forex
+#: [2, 5, 10, 20, 30], SPX500 [2, 5, 10, 20], WHEAT [2, 5, 10], stocks
+#: [2, 5], BTC [2], each beside a 1x entry (measured 2026-09-23 and
+#: 2026-09-25; the rows in tests/test_etoro_client.py and
+#: tests/test_attack_mode.py). A RECORD for the words that cannot ask
+#: eToro (preflight_live §4, through bot_cap_step): the engine sends on the
+#: instrument's OWN LIVE list at the order (AssetBot._bot_cap_step), never
+#: on this.
+ETORO_LEVERAGE_STEPS = (1, 2, 5, 10, 20, 30)
+
+
+def bot_cap_step(cap) -> int:
+    """The highest of ETORO_LEVERAGE_STEPS at or under `cap` (a whole
+    number >= 1, as bot_leverage_cap answers it): the multiplier a bot
+    typed above the cap is sent at on every list measured — 3 and 4 read
+    2, 6 to 9 read 5. A cap between two steps sent as it is would meet the
+    instrument's own refusal (_instrument_leverage_check: "not in eToro's
+    LIVE leverageValues ... refused, not clamped") on every tick."""
+    return max(s for s in ETORO_LEVERAGE_STEPS if s <= max(1, int(cap)))
+
+
+def bot_leverage_cap(cfg=None):
+    """MAX BOT LEVERAGE (2026-11-05): the highest multiplier a BOT's eToro
+    order may carry, as a whole number of x, or None for no cap.
+
+    The operator, 2026-11-04: "restaurer achat et vente manuel en leverage
+    max et plus mesuré pour les bots" (restore manual buy and sell at max
+    leverage, and more measured for the bots). On 2026-10-05 he had said
+    "pas de limite à l'attaque"; the one switch etoro_leverage_live opens
+    leverage for the bots and the TAKE TRADE ticket alike, so the bots get
+    their own cap: the limits book's max_bot_leverage (the /setup/ Risk
+    Limits card), read here at CALL time, never copied.
+
+    Read at the bots' order only (AssetBot._choose_auto_leverage picks at
+    most it; AssetBot._order_leverage sends a typed multiplier above it at
+    it, or at the highest multiplier under it on the instrument's LIVE
+    list when eToro does not take it — AssetBot._bot_cap_step; the bot's
+    own pre-order hints count it). Never by
+    judge_order_leverage, which the TAKE TRADE ticket shares, never by
+    sizing, the stop band, the switch or the class ceilings. `cfg`, when
+    given, is the config the order is for: the TAKE TRADE lane's own
+    config (manual_trade.MANUAL_CONFIG_NAME, "manual") answers None, never
+    capped, without reading the book.
+
+    Blank (NULL, the default the migration adds) is None: no cap, today's
+    behaviour. FAILS TO NO CAP, AND ONLY BECAUSE THAT IS MAIN'S BEHAVIOUR:
+    before this setting existed (main, 2026-11-04) no bot multiplier had a
+    cap of the operator's, so a book that cannot be read, or a stored
+    value that is not a whole number inside BOT_LEVERAGE_BOUNDS (only a
+    write past the card can put one there), answers None — exactly what
+    every bot did until now, never anything looser — and the failure is
+    logged at WARNING."""
+    if cfg is not None:
+        from bot_program.manual_trade import MANUAL_CONFIG_NAME
+        if getattr(cfg, "name", None) == MANUAL_CONFIG_NAME:
+            return None
+    try:
+        from portfolio.risk_gate import limits_book
+        raw = getattr(limits_book(), "max_bot_leverage", None)
+    except Exception as e:  # noqa: BLE001 (no cap answers, as on main; said)
+        logger.warning("[bot-leverage] MAX BOT LEVERAGE unreadable (%s) — no "
+                       "cap, as before the setting existed", type(e).__name__)
+        return None
+    if raw is None:
+        return None
+    low, high = BOT_LEVERAGE_BOUNDS
+    # a NUMBER only: a bool, a string or a stand-in object is not one
+    whole = None
+    if isinstance(raw, (int, float, Decimal)) and not isinstance(raw, bool):
+        try:
+            if raw == int(raw):
+                whole = int(raw)
+        except (ValueError, OverflowError, InvalidOperation):  # NaN, inf
+            whole = None
+    if whole is None or not (low <= whole <= high):
+        logger.warning("[bot-leverage] MAX BOT LEVERAGE %r is not a whole "
+                       "number from %d to %d — no cap, as before the setting "
+                       "existed", raw, low, high)
+        return None
+    return whole
+
 #: The PlatformComponent that stays OFF until deploy/ETORO_DEPARTURE.md §4
 #: D2b (both sittings) is recorded in tests/test_etoro_client.py. A
 #: missing row reads OFF (core.platform_control.is_component_enabled).
@@ -657,7 +753,9 @@ ETORO_PROVEN_SHORT_LEVERAGE = {}
 #:         limite à l'attaque": no proven-multiplier bound any more) and
 #:         the stop band with its headroom — the least cash the stop
 #:         allows — then judged by every gate a typed number meets. The
-#:         chooser picks; it never bypasses a gate.
+#:         chooser picks; it never bypasses a gate. Since 2026-11-05 MAX
+#:         BOT LEVERAGE (bot_leverage_cap, the /setup/ card) joins the
+#:         ceiling when the operator sets it: the chooser picks at most it.
 AUTO_LEVERAGE = "auto"
 
 #: The tier multipliers of the config's risk fraction. Overridable per
@@ -1683,6 +1781,31 @@ class AssetBot(ABC):
         """The config's extras['leverage'] through _leverage_hint_of."""
         return self._leverage_hint_of(getattr(self.cfg, "extras", None))
 
+    def _bot_leverage_hint(self, client=None, symbol: str = "",
+                           side: str = "BUY"):
+        """The typed hint (_extras_leverage_hint) under MAX BOT LEVERAGE
+        (2026-11-05, bot_leverage_cap): the multiplier a typed config is
+        SENT at once the engine's rule allows it. None (no key, or "auto")
+        and 1 stay as they are, and so does every number at or under the
+        cap, and every number while the cap is blank. Above the cap: with
+        the `client` the order goes through, the multiplier
+        AssetBot._bot_cap_step sends — the cap, or the highest under it on
+        the instrument's LIVE list when eToro does not take the cap (the
+        eToro gate in execute_entry asks the proof at that one); without
+        it, the cap, the most it is sent at (MAX SINGLE POSITION's
+        _margin_leverage_hint before the order — execute_entry judges it
+        again at the multiplier sent). The TAKE TRADE lane reads
+        _leverage_hint_of, never this."""
+        hint = self._extras_leverage_hint()
+        if hint is None or hint <= 1:
+            return hint
+        cap = bot_leverage_cap(self.cfg)
+        if cap is None or hint <= cap:
+            return hint
+        if client is None:
+            return cap
+        return self._bot_cap_step(client, symbol, side, cap)[0]
+
     def _leverage_is_auto(self) -> bool:
         """The config asks for the attack mode (extras["leverage"] =
         "auto")."""
@@ -1692,24 +1815,31 @@ class AssetBot(ABC):
         """The most the attack mode could pick for an instrument of class
         `icls`: 1 while etoro_leverage_live is OFF, else the lower of the
         platform cap and the class ceiling (2026-10-05: the proven
-        multiplier no longer bounds the chooser). The chooser may pick
-        less (the LIVE list, the stop band and its headroom)."""
+        multiplier no longer bounds the chooser) and, since 2026-11-05,
+        MAX BOT LEVERAGE when the operator set it (bot_leverage_cap). The
+        chooser may pick less (the LIVE list, the stop band and its
+        headroom)."""
         from core.platform_control import is_component_enabled
         if not is_component_enabled(LEVERAGE_SWITCH_KEY):
             return 1
-        return max(1, min(int(MAX_ORDER_LEVERAGE),
-                          int(ORDER_LEVERAGE_CEILING.get(icls, 1))))
+        bound = min(int(MAX_ORDER_LEVERAGE),
+                    int(ORDER_LEVERAGE_CEILING.get(icls, 1)))
+        cap = bot_leverage_cap(self.cfg)
+        if cap is not None:
+            bound = min(bound, cap)
+        return max(1, bound)
 
     def _margin_leverage_hint(self, symbol: str):
         """The multiplier MAX SINGLE POSITION counts a ticket at before the
-        order: the typed hint (_extras_leverage_hint), or, in the attack
-        mode, the most the chooser could pick for this instrument
+        order: the typed hint under MAX BOT LEVERAGE (_bot_leverage_hint,
+        2026-11-05: the multiplier a typed config is sent at), or, in the
+        attack mode, the most the chooser could pick for this instrument
         (_auto_leverage_bound). execute_entry judges the gate again at
         the multiplier actually chosen, so every margin gate sees the
         multiplier sent."""
         if self._leverage_is_auto():
             return self._auto_leverage_bound(self._instrument_class(symbol))
-        return self._extras_leverage_hint()
+        return self._bot_leverage_hint()
 
     def _extras_float(self, key: str, default: float = 0.0) -> float:
         """Read a numeric knob out of cfg.extras without ever raising.
@@ -6002,10 +6132,16 @@ class AssetBot(ABC):
                     symbol, skips.NO_PRICE,
                     f"{symbol}: eToro rate pause after a 429, "
                     f"{_pause:.0f}s left — nothing sent")
+            # the hint is the multiplier a typed config is SENT at, under
+            # MAX BOT LEVERAGE (2026-11-05; the typed number while it is
+            # blank; on this client, the step under the cap when eToro does
+            # not take the cap): the gate asks the proof and the row at
+            # that one
             _gate, _gate_why = self._etoro_entry_refusal(
                 client, symbol, decision.direction, float(qty), float(price),
                 self._instrument_class(symbol),
-                leverage_hint=self._extras_leverage_hint(),
+                leverage_hint=self._bot_leverage_hint(
+                    client, symbol, decision.direction),
                 horizon_hours=getattr(cand, "horizon_hours", None))
             if _gate:
                 logger.warning("[%s_bot] %s REFUSED: %s", self.asset_class,
@@ -6127,6 +6263,21 @@ class AssetBot(ABC):
                                   _cut_note
                                   + (f"attack {_attack['tier']}: "
                                      if _attack else "") + lev_why)
+            _bcnote = (getattr(self, "_bot_cap_note", None) or {}).pop(
+                symbol, None)
+            if _bcnote:
+                # MAX BOT LEVERAGE LOWERED A TYPED MULTIPLIER (2026-11-05):
+                # the configured and the sent multiplier both on the row,
+                # and MAX SINGLE POSITION judged again at the multiplier
+                # sent, as for the posture below (the cap is read at call
+                # time, and may have moved since the proposal counted it)
+                entry_meta["max_bot_leverage"] = _bcnote
+                if not self._judge_final_size(
+                        symbol, qty=qty, price=price, sl=sl,
+                        decision=decision, sizing=sizing, venue=cand.venue,
+                        leverage=int(leverage or 1),
+                        note=f"{_bcnote['why']}: at {int(leverage or 1)}x: "):
+                    return None
             _plnote = (getattr(self, "_posture_lev_note", None) or {}).pop(
                 symbol, "")
             if _plnote:
@@ -6296,6 +6447,22 @@ class AssetBot(ABC):
                                           _cut_note
                                           + f"after the Executioner's cut: "
                                           f"{lev_why}")
+                    _bc2 = (getattr(self, "_bot_cap_note", None)
+                            or {}).pop(symbol, None)
+                    if _bc2:
+                        # MAX BOT LEVERAGE (2026-11-05), as at the first
+                        # call: on the row, and MAX SINGLE POSITION at the
+                        # multiplier sent
+                        entry_meta["max_bot_leverage"] = _bc2
+                        if not self._judge_final_size(
+                                symbol, qty=qty, price=price, sl=sl,
+                                decision=decision, sizing=sizing,
+                                venue=cand.venue,
+                                leverage=int(leverage or 1),
+                                note=(f"after the Executioner's cut: "
+                                      f"{_bc2['why']}: at "
+                                      f"{int(leverage or 1)}x: ")):
+                            return None
                     _pl2 = (getattr(self, "_posture_lev_note", None)
                             or {}).pop(symbol, "")
                     if _pl2:
@@ -7272,8 +7439,34 @@ class AssetBot(ABC):
         here) lets the chooser pass over an L whose margin would sit under
         eToro's minimum. The pick and its words are kept on
         self._auto_pick[symbol] for the row. A config without "auto"
-        never reaches the chooser."""
+        never reaches the chooser.
+
+        MAX BOT LEVERAGE (2026-11-05; the operator: "restaurer achat et
+        vente manuel en leverage max et plus mesuré pour les bots" —
+        restore manual buy and sell at max leverage, and more measured for
+        the bots): the chooser picks at most the cap, and a TYPED
+        multiplier the engine's rule allowed is sent at the cap when it
+        sits above it (_bot_cap_leverage) — the operator's own cap wins
+        over a per-config number, and nothing is refused for it. eToro
+        takes only the steps on the instrument's LIVE list (2 5 10 20 30 as
+        measured) and the card any whole number: a cap eToro does not take
+        sends the highest multiplier under it on that list (_bot_cap_step,
+        the review of 2026-11-05 — sent as it was, a cap between two steps
+        met the instrument's own refusal on every tick, the bot stopped).
+        The rule judges the typed number FIRST, as on main, so the switch,
+        the platform cap, the class ceiling and the own book refuse exactly
+        what they refused; every check after (the posture, the
+        instrument's own entry, the short's proof, the refusal note) meets
+        the multiplier sent, and a refusal there leads with the cap's
+        words. The configured and the sent multiplier are kept on
+        self._bot_cap_note[symbol] for the row. No key stays no key (1x); a
+        config named "manual" is never capped."""
         from bot_program.engine.capabilities import adapter_key
+        if not isinstance(getattr(self, "_bot_cap_note", None), dict):
+            self._bot_cap_note = {}
+        # a note is this call's or nothing: a refusal below leaves none
+        # for a later order of the symbol to record
+        self._bot_cap_note.pop(symbol, None)
         pick = None
         if self._leverage_is_auto():
             pick, pick_why = self._choose_auto_leverage(
@@ -7289,6 +7482,15 @@ class AssetBot(ABC):
                                         adapter_key(client), pick=pick)
         if why:
             return lev, why
+        # MAX BOT LEVERAGE (2026-11-05): lowers what the rule allowed — to
+        # the cap, or to the highest step under it eToro takes — never
+        # raises it, never refuses; judged before the posture and the
+        # instrument's own entry, so the multiplier sent is the one checked
+        lev, _bcnote = self._bot_cap_leverage(client, symbol, side, lev)
+        if _bcnote:
+            self._bot_cap_note[symbol] = _bcnote
+        # a refusal of the multiplier the cap set says the cap set it
+        _lead = f"{_bcnote['why']}: " if _bcnote else ""
         # THE POSTURE CAP (2026-10-02): judged before the instrument's own
         # entry below, so the lowered multiplier is the one checked.
         lev, _pnote = self._posture_leverage(symbol, side, lev)
@@ -7300,19 +7502,120 @@ class AssetBot(ABC):
         inst_why = self._instrument_leverage_check(client, symbol, side, eff,
                                                    price, stop)
         if inst_why:
-            return None, inst_why
+            return None, _lead + inst_why
         short_why = self._short_proof_leverage(client, symbol, side, eff)
         if short_why:
-            return None, short_why
+            return None, _lead + short_why
         if lev is None or lev <= 1:
             return lev, ""
         note = self._leverage_refusal_note(symbol)
         if note:
-            return None, (f"at {lev}x: eToro refused {symbol} "
+            return None, (f"{_lead}at {lev}x: eToro refused {symbol} "
                           f"{note['age_h']:.1f}h ago ({note.get('why')}); "
                           f"quiet for {self.LEVERAGE_QUIET_HOURS}h — nothing "
                           f"sent, not at {lev}, not at 1")
         return lev, ""
+
+    def _bot_cap_leverage(self, client, symbol: str, side: str,
+                          lev) -> tuple:
+        """MAX BOT LEVERAGE on a multiplier the engine's rule allowed
+        (2026-11-05): (lev, {}) when nothing lowers it, else (sent, note)
+        with note {"cap", "configured", "sent", "why"} — "why" in the
+        order's words, logged here and recorded on the row by
+        execute_entry: "capped at 2x by MAX BOT LEVERAGE (the config asks
+        10x)" when the cap is sent, and, when eToro does not take the cap
+        on this instrument (_bot_cap_step, the review of 2026-11-05), the
+        multiplier sent and why: "capped at 3x by MAX BOT LEVERAGE (the
+        config asks 10x): 2x, the highest under 3x on eToro's LIVE list".
+        Lowers, never raises and never refuses: a refusal would stop the
+        bot, the opposite of the operator's order. None (no key) and 1
+        pass; a blank cap passes; a config named "manual" passes
+        (bot_leverage_cap). In the attack mode the pick already sits under
+        the cap: this lowers it only if the cap moved between the two
+        reads, and says so."""
+        if lev is None or int(lev) <= 1:
+            return lev, {}
+        cap = bot_leverage_cap(self.cfg)
+        if cap is None or int(lev) <= cap:
+            return lev, {}
+        sent, step = self._bot_cap_step(client, symbol, side, cap)
+        asked = ("the attack mode picked" if self._leverage_is_auto()
+                 else "the config asks")
+        words = (f"{bot_cap_words(cap)} ({asked} {int(lev)}x)"
+                 + (f": {step}" if step else ""))
+        logger.info("[%s_bot] %s %s", self.asset_class, symbol, words)
+        return sent, {"cap": cap, "configured": int(lev), "sent": sent,
+                      "why": words}
+
+    def _bot_cap_step(self, client, symbol: str, side: str,
+                      cap: int) -> tuple:
+        """MAX BOT LEVERAGE ON eToro's OWN STEPS (2026-11-05, the review of
+        the same day): (L, words), the multiplier a bot order capped at
+        `cap` is sent at — `words` "" when it is the cap itself.
+
+        eToro takes only the multipliers on the instrument's LIVE list (2,
+        5, 10, 20, 30 as measured, ETORO_LEVERAGE_STEPS; [2, 5] on a
+        stock), while the /setup/ card takes any whole number from 1 to 30.
+        Sent as it is, a cap between two steps met the instrument's own
+        refusal (_instrument_leverage_check: "refused, not clamped") on
+        every tick of a bot typed above it — the bot stopped, the opposite
+        of the operator's order (2026-11-04: "restaurer achat et vente
+        manuel en leverage max et plus mesuré pour les bots" — the bots
+        measured, not stopped). So: the HIGHEST L at or under the cap on
+        the instrument's LIVE list for this side, at the settlement a
+        levered order lands on — the list _choose_auto_leverage reads,
+        and, as there, for a short the code does not pin (short_pinned),
+        only the multipliers the demo account measured
+        (demo_short_leverages, which _short_proof_leverage holds the order
+        to). The cap itself when it is on that list. 1, the unlevered
+        order, when the list is read and nothing above 1 sits under the
+        cap — judged then by the instrument's own 1x rule, as a typed 1
+        is. The cap unchanged when the list cannot be read (no
+        leverage_values tier, the row or the LIVE list unread, no levered
+        entry for the direction): the instrument's check then refuses it
+        as it refuses every levered order there — what the typed number
+        met before the cap. Never above the cap (the cap is under the
+        typed number), never a refusal of its own; one read of the row,
+        the chooser's, and nothing more while it is unread."""
+        from bot_program.engine.capabilities import has_capability
+        cap = int(cap)
+        if cap <= 1 or not has_capability(client, "leverage_values"):
+            return cap, ""
+        try:
+            _elig = getattr(client, "eligibility", None)
+            row = _elig(symbol) if callable(_elig) else None
+        except Exception as e:  # noqa: BLE001 — a raise IS could-not-read
+            logger.info("[%s_bot] %s: eligibility raised %s: %s",
+                        self.asset_class, symbol, type(e).__name__, e)
+            row = None
+        if not isinstance(row, dict):
+            return cap, ""
+        try:
+            settle = client.settlement_for(symbol, side, 2)
+            vals = (client.leverage_values(symbol, side, settle,
+                                           world="live")
+                    if settle else None)
+        except Exception as e:  # noqa: BLE001 — could-not-read
+            logger.info("[%s_bot] %s: LIVE leverageValues raised %s: %s",
+                        self.asset_class, symbol, type(e).__name__, e)
+            vals = None
+        if vals is None:
+            return cap, ""
+        listed = [v for v in vals if v > 1]
+        where = "eToro's LIVE list"
+        icls = self._instrument_class(symbol)
+        if str(side or "BUY").upper() != "BUY" and not short_pinned(icls):
+            measured = demo_short_leverages(icls)
+            if measured:
+                listed = [v for v in listed if v in measured]
+                where = "eToro's LIVE list and the short's demo proofs"
+        if cap in listed:
+            return cap, ""
+        under = [v for v in listed if v < cap]
+        if under:
+            return max(under), (f"{max(under)}x, the highest under {cap}x "
+                                f"on {where}")
+        return 1, f"1x, nothing above 1 under {cap}x on {where}"
 
     def _short_proof_leverage(self, client, symbol: str, side: str,
                               eff: int) -> str:
@@ -7371,7 +7674,17 @@ class AssetBot(ABC):
         never clamped and the stop never widened for the band. Units never
         see L (house rule 5): the size was decided before this runs. The
         pick then meets every gate a typed number meets
-        (_order_leverage)."""
+        (_order_leverage).
+
+        MAX BOT LEVERAGE (2026-11-05; the operator: "restaurer achat et
+        vente manuel en leverage max et plus mesuré pour les bots" —
+        restore manual buy and sell at max leverage, and more measured for
+        the bots): the cap the operator set on /setup/ (bot_leverage_cap,
+        read here at call time; None for a config named "manual") joins
+        the min of the ceilings — L <= the cap too — and when it keeps out
+        a listed multiplier the class ceiling allowed, the words say
+        "capped at Nx by MAX BOT LEVERAGE". A cap of 1 is the unlevered
+        order, on the 1x rule above. Blank: main's pick and main's words."""
         from bot_program.engine.capabilities import (adapter_key,
                                                      has_capability)
         from core.platform_control import is_component_enabled
@@ -7387,6 +7700,10 @@ class AssetBot(ABC):
         icls = self._instrument_class(symbol)
         ceiling = min(int(MAX_ORDER_LEVERAGE),
                       int(ORDER_LEVERAGE_CEILING.get(icls, 1)))
+        # MAX BOT LEVERAGE (2026-11-05): the most the chooser may pick;
+        # `ceiling` stays the class's, for the words
+        cap = bot_leverage_cap(self.cfg)
+        bound = ceiling if cap is None else min(ceiling, cap)
         direction = "long" if str(side or "BUY").upper() == "BUY" else "short"
         # 2026-10-05: no proven-multiplier bound (ETORO_PROVEN_LEVERAGE and
         # ETORO_PROVEN_SHORT_LEVERAGE are records); the LIVE list, the
@@ -7463,9 +7780,13 @@ class AssetBot(ABC):
                         f"at {', '.join(f'{m}x' for m in sorted(measured))}"
                         f" only")
                 listed = kept
+        # MAX BOT LEVERAGE said only where it keeps out a listed multiplier
+        # the class ceiling allowed (2026-11-05)
+        cap_words = (bot_cap_words(cap)
+                     if any(bound < v <= ceiling for v in listed) else "")
         passed_over = []
         for lev in sorted(listed, reverse=True):
-            if lev > ceiling:
+            if lev > bound:
                 continue
             if frac is None:
                 passed_over.append("no stop was handed in, so the band "
@@ -7498,7 +7819,9 @@ class AssetBot(ABC):
             return lev, (
                 f"auto: {lev}x — the highest on {symbol}'s LIVE "
                 f"{direction}/{settle_up} list {listed} inside the {icls} "
-                f"ceiling ({ceiling}x); the stop is {frac * lev:.1%} of the "
+                f"ceiling ({ceiling}x)"
+                + (f", {cap_words}" if cap_words else "")
+                + f"; the stop is {frac * lev:.1%} of the "
                 f"margin, inside {headroom:.0%} of the {band:g}% band"
                 + (" (assumed from the one measured band)" if assumed
                    else " (printed)")
@@ -7531,8 +7854,15 @@ class AssetBot(ABC):
         elif not [v for v in listed if v <= ceiling]:
             reason = (f"nothing on the LIVE list {listed} sits inside the "
                       f"{icls} ceiling ({ceiling}x)")
+        elif not [v for v in listed if v <= bound]:
+            # MAX BOT LEVERAGE (2026-11-05) keeps out every listed
+            # multiplier the ceiling allowed; at 1 that is the whole reason
+            reason = (bot_cap_words(cap) if bound <= 1 else
+                      f"{bot_cap_words(cap)}: nothing on the LIVE list "
+                      f"{listed} sits at or under {bound}x")
         else:
-            reason = "; ".join(passed_over) or "no multiplier passed"
+            reason = ((f"{cap_words}; " if cap_words else "")
+                      + ("; ".join(passed_over) or "no multiplier passed"))
         try:
             settle_one = client.settlement_for(symbol, side, 1)
         except Exception:  # noqa: BLE001
