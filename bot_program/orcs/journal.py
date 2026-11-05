@@ -2,16 +2,101 @@
 the model may later cite; the id runs per Orc, kept in `seen["fact_seq"]`
 and taken under the Orc's row lock, with the card refreshed in the same
 transaction. A drum heard (O1c, §4.7) is a fact with its own series
-(DR3, `seen["drum_seq"]`). Nothing here updates or deletes an entry."""
+(DR3, `seen["drum_seq"]`). Nothing here updates or deletes an entry.
+
+THE ORC'S LOCK (the O2 spec N8, 2026-11-05): every Orc-row lock of the
+package is taken by `orc_lock`, which waits a bounded time, and the
+real-money paths wait within a `lock_budget` of ORC_LOCK_MONEY_MS in all,
+so no Orc lock can delay the care, a close or the kill switch."""
+import contextlib
+import contextvars
+import time
+
 from django.db import transaction
 from django.utils import timezone
 
 from bot_program.orcs import notes
+from bot_program.orcs.constants import (ORC_LOCK_TIMEOUT_MS,
+                                        ORC_STATEMENT_TIMEOUT_MS)
 
 #: OrcJournal.headline's column.
 HEADLINE_MAX = 200
 #: Each fact id series and the memory key its counter lives under.
 SEQ_KEYS = {"F": "fact_seq", "DR": "drum_seq"}
+#: The lock budget of the block this thread runs in (lock_budget), or
+#: None: each Orc lock then waits at most ORC_LOCK_TIMEOUT_MS.
+_BUDGET = contextvars.ContextVar("orc_lock_budget", default=None)
+
+
+# ── the Orc's lock (N8, O2a 2026-11-05) ──────────────────────────────────
+
+@contextlib.contextmanager
+def lock_budget(ms):
+    """Inside the block, this thread's Orc locks wait `ms` milliseconds IN
+    ALL: each lock may wait what is left, and once the budget is spent a
+    lock that is not free at once fails at once (NOWAIT). A block inside
+    another never widens it, and what it spends is spent for the outer
+    block too. Yields the budget, {"left_ms", "spent_ms"}.
+
+    The real-money paths enter it with ORC_LOCK_MONEY_MS: the tick's Orc
+    steps (observe.after_care), a close's journal
+    (lifecycle._closed_quietly), the kill switch (lifecycle.kill_all) and
+    the entry's provenance (thesis.complete_provenance). A lock that runs
+    out raises inside their fences, which log it; the census's sweep and
+    the next tick catch up. The census's own sweep keeps the default."""
+    outer = _BUDGET.get()
+    left = float(ms) if outer is None else min(float(ms), outer["left_ms"])
+    budget = {"left_ms": max(0.0, left), "spent_ms": 0.0}
+    token = _BUDGET.set(budget)
+    try:
+        yield budget
+    finally:
+        _BUDGET.reset(token)
+        if outer is not None:
+            outer["left_ms"] = max(0.0, outer["left_ms"] - budget["spent_ms"])
+            outer["spent_ms"] += budget["spent_ms"]
+
+
+def orc_lock(orc_pk, **filters):
+    """The Orc's row, locked for the caller's transaction: every Orc-row
+    lock of the package is taken here. `filters` narrow the row (the root
+    trade, for complete_provenance); none matching raises Orc.DoesNotExist,
+    as .get() does.
+
+    On PostgreSQL it first sets, LOCAL to the transaction, lock_timeout to
+    what the block's lock_budget has left (ORC_LOCK_TIMEOUT_MS outside
+    any; a spent budget locks with NOWAIT) and statement_timeout to
+    ORC_STATEMENT_TIMEOUT_MS. Both end with the transaction: every caller
+    holds this lock in a transaction of the Orcs' own (the tick, a close's
+    on-commit callback, the kill switch and the entry call the Orcs
+    outside any transaction of theirs). The lock is FOR NO KEY UPDATE: it
+    serialises the Orc's writers as FOR UPDATE did, while a row that only
+    names the Orc (a wake, a journal entry, a track, a drum) is written
+    without waiting for it, as PostgreSQL's foreign-key check takes FOR
+    KEY SHARE. SQLite has no row lock: there the row is read as it is."""
+    from bot_program.orcs.models import Orc
+    conn = transaction.get_connection()
+    if conn.vendor != "postgresql" or conn.get_autocommit():
+        # no row lock to bound (SQLite), or no transaction to hold one:
+        # select_for_update says so itself, as it always did
+        return Orc.objects.select_for_update(no_key=True).get(pk=orc_pk,
+                                                              **filters)
+    budget = _BUDGET.get()
+    wait_ms = ORC_LOCK_TIMEOUT_MS if budget is None else int(
+        budget["left_ms"])
+    with conn.cursor() as cur:
+        cur.execute("SELECT set_config('lock_timeout', %s, true), "
+                    "set_config('statement_timeout', %s, true)",
+                    [f"{max(wait_ms, 1)}ms", f"{ORC_STATEMENT_TIMEOUT_MS}ms"])
+    started = time.monotonic()
+    try:
+        return Orc.objects.select_for_update(
+            no_key=True, nowait=wait_ms < 1).get(pk=orc_pk, **filters)
+    finally:
+        if budget is not None:
+            spent = (time.monotonic() - started) * 1000.0
+            budget["left_ms"] = max(0.0, budget["left_ms"] - spent)
+            budget["spent_ms"] += spent
 
 
 def append(orc, kind, headline, *, author="code", body=None, fact=False,
@@ -31,9 +116,9 @@ def append(orc, kind, headline, *, author="code", body=None, fact=False,
     value for its key (O1c): a list or a pending wake another writer may
     have grown since this caller read the Orc is then merged under the
     lock, never overwritten from a stale copy (merge_seen)."""
-    from bot_program.orcs.models import Orc, OrcJournal
+    from bot_program.orcs.models import OrcJournal
     with transaction.atomic():
-        locked = Orc.objects.select_for_update().get(pk=orc.pk)
+        locked = orc_lock(orc.pk)
         seen = dict(locked.seen or {})
         fact_id = ""
         if fact:
@@ -83,9 +168,8 @@ def remember(orc, *, fields=None, card_extra=None, **keys):
     callable value is applied to the locked memory's value (_merge).
     `fields` sets Orc columns and `card_extra` merges keys into the card,
     in the same save (O1c: a wake recorded in the tick)."""
-    from bot_program.orcs.models import Orc
     with transaction.atomic():
-        locked = Orc.objects.select_for_update().get(pk=orc.pk)
+        locked = orc_lock(orc.pk)
         seen = dict(locked.seen or {})
         _merge(seen, keys)
         locked.seen = seen
@@ -178,10 +262,8 @@ def merge_seen(orc, fn):
     place) and save it when it changed; return what `fn` returned. The
     in-memory `orc` is updated to the locked memory."""
     import copy
-
-    from bot_program.orcs.models import Orc
     with transaction.atomic():
-        locked = Orc.objects.select_for_update().get(pk=orc.pk)
+        locked = orc_lock(orc.pk)
         before = copy.deepcopy(locked.seen or {})
         seen = copy.deepcopy(before)
         out = fn(seen)

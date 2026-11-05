@@ -815,10 +815,11 @@ from .aragorn_models import (  # noqa: F401
     MarketStressReading, PairVerdict, AragornAction, AragornSetting,
 )
 # THE ORCS (2026-10-16, bot_program/orcs): one trader agent per open
-# position, journaled by code (O1: no model, no order).
+# position, journaled by code (O1: no model, no order). O2a (2026-11-05)
+# adds OrcIntent, a model's proposals in shadow.
 from .orcs.models import (  # noqa: F401
     OrcSeat, Orc, OrcLeg, OrcWake, OrcJournal, OrcTrack, OrcGrade,
-    OrcSetting, OrcDossierBlock, OrcDayBaseline, OrcDrum,
+    OrcSetting, OrcDossierBlock, OrcDayBaseline, OrcDrum, OrcIntent,
 )
 # THE SHORTS MEASURED BY HAND (2026-10-31, bot_program/short_readback.py):
 # a hand-taken eToro short read back clean at its fill.

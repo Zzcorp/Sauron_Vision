@@ -13,6 +13,12 @@ the CLOSE_PENDING drain and the kill switch, so the hook is tied to none:
 
 In O1 every idea ends dead: a re-entry window needs an L3 seat and the
 re-entry path, which arrive with O5. Only Orc tables are written.
+
+THE ORC'S LOCK (the O2 spec N8, 2026-11-05): a close's journal and the
+kill switch take an Orc's lock through journal.orc_lock within the money
+paths' lock budget. An Orc another process holds is waited for
+ORC_LOCK_MONEY_MS in all; then its journal fails, logged, and the census's
+sweep, which keeps the default, catches up. The close itself never waits.
 """
 import logging
 from functools import partial
@@ -23,7 +29,8 @@ from django.dispatch import receiver
 from django.utils import timezone
 
 from bot_program.orcs.constants import (LEG_DONE_STATUSES, MAX_REENTRIES,
-                                        STATE_DEAD, STATE_REENTRY)
+                                        ORC_LOCK_MONEY_MS, STATE_DEAD,
+                                        STATE_REENTRY)
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +65,9 @@ def _leg_saved(sender, instance, created=False, **kwargs):
 
 def _closed_quietly(trade_id):
     try:
-        on_leg_closed(trade_id)
+        from bot_program.orcs import journal
+        with journal.lock_budget(ORC_LOCK_MONEY_MS):
+            on_leg_closed(trade_id)
     except Exception as e:  # noqa: BLE001
         logger.warning("[orcs] close of #%s not journaled: %s", trade_id, e)
 
@@ -102,11 +111,12 @@ def _close_leg(leg, trade_id, now) -> tuple:
     """(orc, journaled): the close fact (once) and the idea's end."""
     from bot_program.models import AssetBotTrade
     from bot_program.orcs import facts, journal
-    from bot_program.orcs.models import Orc, OrcLeg
+    from bot_program.orcs.models import OrcLeg
     journaled = False
     with transaction.atomic():
-        # the Orc's row alone is locked (never its shared seat)
-        orc = Orc.objects.select_for_update().get(pk=leg.orc_id)
+        # the Orc's row alone is locked (never its shared seat), within
+        # the caller's lock budget (N8)
+        orc = journal.orc_lock(leg.orc_id)
         trade = AssetBotTrade.objects.get(pk=trade_id)
         if trade.status not in LEG_DONE_STATUSES:
             return orc, False
@@ -152,7 +162,9 @@ def _close_leg(leg, trade_id, now) -> tuple:
 def kill_all(user=None, *, reason="", now=None) -> int:
     """The kill switch ends every idea in scope: dead, killed, no re-entry
     window. It ignores the switch on purpose: an idea must never outlive a
-    flatten. One SELECT when there is nothing to end. Returns the count."""
+    flatten. One SELECT when there is nothing to end. Returns the count.
+    The Orcs' locks are waited for ORC_LOCK_MONEY_MS in all (N8): an Orc
+    held elsewhere is not ended here, logged, and the flatten goes on."""
     from bot_program.orcs import journal
     from bot_program.orcs.models import Orc
     now = now or timezone.now()
@@ -160,22 +172,23 @@ def kill_all(user=None, *, reason="", now=None) -> int:
     if user is not None:
         qs = qs.filter(user=user)
     n = 0
-    for orc in list(qs):
-        try:
-            with transaction.atomic():
-                locked = Orc.objects.select_for_update().get(pk=orc.pk)
-                if locked.state == STATE_DEAD:
-                    continue
-                journal.append(locked, "fact", "The kill switch ended this "
-                               "idea: no re-entry window.",
-                               body={"reason": str(reason or "")[:120]},
-                               fact=True,
-                               fields={"state": STATE_DEAD, "killed": True,
-                                       "died_at": now})
-            n += 1
-        except Exception as e:  # noqa: BLE001 — one idea never stops it
-            logger.warning("[orcs] Orc %s was not ended by the kill "
-                           "switch: %s", orc.pk, e)
+    with journal.lock_budget(ORC_LOCK_MONEY_MS):
+        for orc in list(qs):
+            try:
+                with transaction.atomic():
+                    locked = journal.orc_lock(orc.pk)
+                    if locked.state == STATE_DEAD:
+                        continue
+                    journal.append(locked, "fact", "The kill switch ended "
+                                   "this idea: no re-entry window.",
+                                   body={"reason": str(reason or "")[:120]},
+                                   fact=True,
+                                   fields={"state": STATE_DEAD,
+                                           "killed": True, "died_at": now})
+                n += 1
+            except Exception as e:  # noqa: BLE001 — one idea never stops it
+                logger.warning("[orcs] Orc %s was not ended by the kill "
+                               "switch: %s", orc.pk, e)
     return n
 
 

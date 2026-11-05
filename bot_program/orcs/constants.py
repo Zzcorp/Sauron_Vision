@@ -393,3 +393,24 @@ RANK_GATE_N = 20
 PAGE_DEAD_DAYS = 30
 PAGE_JOURNAL_MAX = 100
 PAGE_WAKES_MAX = 10
+
+# ── O2a: the minds' foundations (2026-11-05, the O2 spec §1.1, N8) ─────────
+
+#: OrcIntent (the O2 spec §1.1.2 item 1): one row per proposal that is not
+#: a hold. Its kinds; its statuses; the codes an expired one carries in
+#: `rule` (A.42); its modes, two of MODES: no O2 proposal is binding.
+INTENT_KINDS = ("tighten", "trim", "exit", "lock_waive", "add")
+INTENT_STATUSES = ("queued", "simulated", "expired", "recorded", "refused")
+INTENT_EXPIRY_CODES = ("ttl", "moved", "row_closed", "arm_closed")
+INTENT_MODES = (MODE_SHADOW, MODE_REFUSED)
+
+#: N8: how long an Orc's row lock may be waited for (journal.orc_lock),
+#: in milliseconds. Each lock outside a lock budget waits at most
+#: ORC_LOCK_TIMEOUT_MS. The real-money paths (the tick's Orc steps, a
+#: close's journal, the kill switch, the entry's provenance) enter
+#: journal.lock_budget(ORC_LOCK_MONEY_MS): their Orc locks wait that much
+#: in all. A lock holder's statements stop at ORC_STATEMENT_TIMEOUT_MS.
+#: PostgreSQL only: SQLite has no row lock.
+ORC_LOCK_TIMEOUT_MS = 2000
+ORC_LOCK_MONEY_MS = 200
+ORC_STATEMENT_TIMEOUT_MS = 5000
