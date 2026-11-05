@@ -215,7 +215,11 @@ class TheLaneSendsTheShortTests(_EtoroShortBase):
         out, sent, _fake = self._send()
         self.assertTrue(out.get("ok"), out)
         self.assertEqual((sent["symbol"], sent["side"]), ("BTCUSD", "SELL"))
-        self.assertNotIn("leverage", sent["kw"], "a short goes at 1x")
+        # At 1x because this wire's LIVE list offers nothing above 1, not
+        # because of the default: a SELL proposes the highest choice, like
+        # a BUY, since 2026-11-04 (tests/test_manual_ticket_leverage.py).
+        self.assertNotIn("leverage", sent["kw"],
+                         "nothing above 1x is open on this wire")
         row = AssetBotTrade.objects.get(pk=out["trade_id"])
         self.assertEqual(row.side, "SELL")
         self.assertFalse(row.paper)
