@@ -1,0 +1,4 @@
+# CI only (.github/workflows/tests.yml installs it beside requirements.txt);
+# no image installs it. tblib carries a failing test's traceback back from
+# a worker of the parallel run (manage.py test --parallel), 2026-11-05.
+tblib==3.2.2
