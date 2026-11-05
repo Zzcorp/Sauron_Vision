@@ -21,7 +21,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_tz
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -141,6 +141,17 @@ def _speak(s, voice, answer=None, *, status="spoke", wave=None, why="",
                 payload=c["payload"], symbol=c["symbol"], grade=c["grade"],
                 grade_notes=c["grade_notes"])
     return row
+
+
+# (2026-11-05) The one instant the two money-leak tests run at
+# (TheTruthTests.test_no_money_reaches_the_band and
+# TheFinalTruthTests.test_the_briefs_amount_echoed_by_a_voice_is_withheld).
+# Their leak checks read the band's whole text, and on the real clock that
+# text moved with it twice over: each sitting's `at` to the microsecond,
+# and each panel's "rev", eight hex digits of a hash over panel data that
+# carries the sitting's time and date. Either could spell what a check
+# looks for. Fixed here, the text is the same on every run, revs included.
+PINNED = datetime(2026, 11, 5, 12, 0, tzinfo=dt_tz.utc)
 
 
 def _report(regime="trending", conf=0.71, minutes=10, error=""):
@@ -759,8 +770,18 @@ class TheTruthTests(_Case):
     def test_no_money_reaches_the_band(self):
         from dashboard.council_band import CURRENCY
         user = _user("cb_money", staff=True)
-        self._money_fixtures(user)
-        out = _everything(user)
+        # (2026-11-05) The fixtures and the reads run at PINNED, one fixed
+        # instant. On the real clock the text below moved with it: a
+        # sitting written at hh:mm:10.73xxxx spelled "0.73" in its `at`
+        # (hh:mm:13.22xxxx "3.22"), one run in about 500; and a panel's
+        # "rev", a hash over data that carries the sitting's time, read as
+        # an amount in CAD to CURRENCY when it began "cad" and a digit
+        # ("cad91c13") or ended a digit and "cad" ("57db3cad"). Pinned to
+        # the current second, the revs still moved (114 seconds of
+        # 2026-11-05 failed). At PINNED the text is the same on every run.
+        with mock.patch("django.utils.timezone.now", return_value=PINNED):
+            self._money_fixtures(user)
+            out = _everything(user)
         text = _text(out)
         for leak in ("1,234.56", "777.77", "$2,000", "500 USD", "$15.00",
                      "3.2173", "0.7319", "3.22", "0.73", "84.8"):
@@ -3083,6 +3104,15 @@ class TheFinalTruthTests(_Case):
     # finding 1: the brief's own amount, echoed by the voices
     def test_the_briefs_amount_echoed_by_a_voice_is_withheld(self):
         from dashboard import council_band as B
+        # (2026-11-05) The test runs at PINNED, as
+        # TheTruthTests.test_no_money_reaches_the_band does. On the real
+        # clock a sitting written at hh:mm:ss.1235xx (or .x1235x, ...)
+        # spelled "1235" in its `at`, and a panel's "rev", a hash over data
+        # that carries the sitting's time, could hold "1235" as well
+        # ("1235cff8", "a0f1235c"): either failed the leak check below.
+        clock = mock.patch("django.utils.timezone.now", return_value=PINNED)
+        clock.start()
+        self.addCleanup(clock.stop)
         _report()
         s = _session(user=self.user, symbol="ECHOSYM", entry=1.10, stop=1.09,
                      qty=123456, value_per_unit=1.0,

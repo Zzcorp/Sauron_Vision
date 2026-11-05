@@ -21,6 +21,7 @@ import json
 import re
 from datetime import timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
@@ -67,14 +68,24 @@ def _strings(obj, out=None):
     return out
 
 
+def _whole_second():
+    """Now, to the whole second. A journal or drum line written while the
+    clock is pinned here carries its `at` with no microseconds
+    (2026-11-05; see TheSlotTests.test_no_money_or_spend_key_at_any_depth)."""
+    return timezone.now().replace(microsecond=0)
+
+
 class _Seen(TestCase):
 
     def setUp(self):
         _on()
-        self.user = _user("orc_seen")
-        self.cfg = _config(self.user)
-        self.row = _row(self.cfg, meta={"broker": "paper"})
-        self.orc = born(self, self.row)
+        # the row, its Orc and the birth's journal lines at one whole
+        # second (2026-11-05): the slot prints those lines' `at`
+        with patch("django.utils.timezone.now", return_value=_whole_second()):
+            self.user = _user("orc_seen")
+            self.cfg = _config(self.user)
+            self.row = _row(self.cfg, meta={"broker": "paper"})
+            self.orc = born(self, self.row)
         self.row.refresh_from_db()
 
     def rows(self, ids=None, **kw):
@@ -497,8 +508,15 @@ class TheSlotTests(_Seen):
 
     def test_no_money_or_spend_key_at_any_depth(self):
         from bot_program.orcs.models import Orc
-        _wake_card(self.orc)
-        _drum_heard(self.orc)
+        # (2026-11-05) The text below holds every journal and drum line's
+        # `at` to the microsecond. On the real clock, a line written at
+        # hh:mm:ss.250xxx (or .x250xx, ...) spelled "250" there and failed
+        # the r_money check: 15 runs in 1000, and once in a parallel run.
+        # The birth (setUp) and the lines below are written at whole
+        # seconds, so every digit left in the text is one the slot wrote.
+        with patch("django.utils.timezone.now", return_value=_whole_second()):
+            _wake_card(self.orc)
+            _drum_heard(self.orc)
         Orc.objects.filter(pk=self.orc.pk).update(
             spend_today_usd=Decimal("1.5"), r_money=Decimal("250"))
         sl = self.slot()

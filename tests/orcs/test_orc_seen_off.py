@@ -24,6 +24,7 @@ from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
+from core.exchange_status import get_exchange_status
 from tests.orcs.helpers import (_drum_heard, _paper_cap, _switch, _wake_card,
                                 born)
 from tests.test_the_horde import (LOCMEM, _all_on, _cfg, _legacy, _manual,
@@ -218,7 +219,16 @@ class TheBooksOffTests(_Row):
     def test_positions_page_off_is_byte_identical(self):
         born(self, self.row)
         _orcs(False)
-        with patch("django.utils.timezone.now", return_value=NOW):
+        # (2026-11-05) The page's market sessions (base.html, from
+        # core.context_processors) read the wall clock, not
+        # django.utils.timezone.now: two renders a second apart, either
+        # side of a minute boundary, differed (New York "08:38" / "08:39",
+        # and each "opens in" / "closes in") and failed the comparison,
+        # more often in a parallel run, where a render is slower. Both
+        # renders read the sessions at NOW, as the rest of the page does.
+        with patch("django.utils.timezone.now", return_value=NOW), \
+                patch("core.context_processors.get_exchange_status",
+                      lambda now_utc=None: get_exchange_status(NOW)):
             off = self.html()
             with patch.dict("sys.modules", NO_NOTES):
                 bare = self.html()
