@@ -489,9 +489,21 @@ DEFAULT_COMPONENTS = [
     # attack mode ("auto") sends 1x while this is OFF. The proven
     # multipliers bind "auto" only; a typed multiplier needs its class
     # proven, the class ceiling and the instrument's LIVE list.
-    # Description measured at 299 chars (< 300).
+    # 2026-11-05, the words corrected (they said "up to 20x" and "'auto' is
+    # held to its proven multiplier"): since 2026-10-05 ("pas de limite à
+    # l'attaque") the platform cap is 30x, forex's ceiling 30 (base.
+    # ORDER_LEVERAGE_CEILING), and no proven multiplier bounds the chooser
+    # — the LIVE list, the class ceiling and the stop band do. This switch
+    # also opens the hand-taken TAKE TRADE ticket's multiplier
+    # (manual_trade._ticket_leverage); the operator, 2026-11-04: "restaurer
+    # achat et vente manuel en leverage max et plus mesuré pour les bots",
+    # so MAX BOT LEVERAGE on /setup/ (base.bot_leverage_cap) caps the
+    # bots, never the ticket. The words keep "LIVE leverageValues" and "the
+    # proven set" (GAP 11, tests/test_etoro_leverage.py): the class proof
+    # still gates every eToro order. Description measured at 294 chars
+    # (< 300).
     {"key": "etoro_leverage_live", "name": "eToro Leverage (per config)",
-     "description": "Off (default): a typed extras['leverage'] above 1 is REFUSED at the tick and by preflight_live; 'auto' goes at 1x. On: up to 20x (forex, index; commodity 10x, stock 5x, crypto 2x) if in the instrument's LIVE leverageValues and its class is in the proven set; 'auto' is held to its proven multiplier.",
+     "description": "Off (default): a typed extras['leverage'] above 1 is REFUSED; 'auto' and the TAKE TRADE ticket go at 1x. On: up to the class ceiling (forex 30x, index 20x, commodity 10x, stock 5x, crypto 2x) if in the LIVE leverageValues, its class in the proven set. MAX BOT LEVERAGE (/setup/) caps bots only.",
      "category": "system"},
 
     # ── The demo short proofs (2026-10-31, bot_program/short_proofs.py) ──

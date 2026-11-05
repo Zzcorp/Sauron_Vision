@@ -73,6 +73,19 @@ class Portfolio(models.Model):
     # manual ticket; a research pool is measured against itself. 0 reads
     # as "not set" and switches the gate off. Bounds 1-50 on the card.
     max_notional_multiple = models.FloatField(default=4.0)
+    # MAX BOT LEVERAGE (2026-11-05): the highest multiplier a BOT's eToro order
+    # may carry, a whole number of x from 1 to MAX_ORDER_LEVERAGE (30), read
+    # by asset_engine.base.bot_leverage_cap at the order. The operator,
+    # 2026-11-04: "restaurer achat et vente manuel en leverage max et plus
+    # mesuré pour les bots" (restore manual buy and sell at max leverage,
+    # and more measured for the bots). The attack mode picks at most it and
+    # a config typed above it is sent at it (or, when eToro does not take
+    # it, at the highest step under it on the instrument's LIVE list —
+    # base.AssetBot._bot_cap_step); the hand-taken TAKE TRADE
+    # ticket and every config named "manual" are never capped. NULL (blank
+    # on the card) is no cap — what every bot did before it existed — and
+    # the migration adds it NULL, so nothing changes on deploy.
+    max_bot_leverage = models.IntegerField(null=True, blank=True)
 
     updated_at = models.DateTimeField(auto_now=True)
 
