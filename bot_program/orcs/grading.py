@@ -17,7 +17,9 @@ forward-only, once every arm has resolved.
                  n_actions (simulated proposals), n_refused (refusal
                  entries), the expectation hit rate, the flip-flop rate;
                  tags s:, schema:, rung: and invalid:<rate>, so grades
-                 under different minds are never pooled
+                 under different minds are never pooled, and arm:would
+                 when the O arm was the Orc's proposals in shadow (its
+                 would mode): every surface then names it so
   bar_source     "etoro" only when the menu at birth and every bar the arms
                  read were the venue's own; "platform" otherwise: never
                  pooled
@@ -50,6 +52,14 @@ from bot_program.orcs.constants import (ARM_CARE, ARM_ORC, ARM_PLAYBOOK,
 logger = logging.getLogger(__name__)
 
 FELL_WORDS = {FELL_WON: "Won.", FELL_HONOURABLE: "Honourable defeat."}
+#: The O arm in the grade's words (A.58): the position while the arm only
+#: recorded the row; the Orc's shadow arm once its proposals stepped it
+#: (its would mode, A.43). The grade keeps which as a tag (OrcGrade has no
+#: column for it), so the Orc page and Telegram say what its journal line
+#: says (2026-11-05, completing O2a).
+ARM_POSITION_T = "the position"
+ARM_WOULD_T = "the Orc's shadow arm"
+WOULD_TAG = "arm:would"
 
 
 def _f(x):
@@ -110,11 +120,18 @@ def grade_line(nums, verdict, *, would=False) -> str:
     shadow arm" once its proposals stepped it (its would mode)."""
     tail = (f"Fault: {verdict.causes[0]}." if verdict.fell == FELL_FAULT
             else FELL_WORDS.get(verdict.fell, "Not classed: no R."))
-    arm = "the Orc's shadow arm" if would else "the position"
+    arm = ARM_WOULD_T if would else ARM_POSITION_T
     return (f"Graded in shadow: {arm} "
             f"{_rr(nums['orc_r_gross'])}, the care ghost "
             f"{_rr(nums['ghost_r'])}, the playbook {_rr(nums['play_r'])}; "
             f"Δ against the care {_rr(nums['delta_care'])}. {tail}")
+
+
+def graded_would(g) -> bool:
+    """The grade `g` measured the Orc's shadow arm in would mode (its tag
+    WOULD_TAG): the surfaces then name the O arm ARM_WOULD_T."""
+    tags = getattr(g, "tags", None)
+    return isinstance(tags, (list, tuple)) and WOULD_TAG in tags
 
 
 def _usd_per(ccy):
@@ -239,11 +256,12 @@ def grade(orc, *, now=None):
     by = {t.arm: t for t in tracks}
     o = by.get(ARM_ORC)
     o_state = (o.state or {}) if o else {}
+    would = o_state.get("mode") == "would"
     row = AssetBotTrade.objects.filter(pk=orc.root_trade_id).first()
     # A.58: the mind's counters and its AI cost, in the Orc's currency;
     # with no rate the money figures stay unknown, never priced at 1
     mind = mind_counts(orc)
-    tags = mind_tags(mind)
+    tags = mind_tags(mind) + ([WOULD_TAG] if would else [])
     ai_cost = float(mind["ai_cost_usd"])
     if ai_cost:
         per = _usd_per(orc.ccy)
@@ -322,7 +340,7 @@ def grade(orc, *, now=None):
                 "first_divergence": first[:8], "graded_at": now})
             if created:
                 journal.append(orc, "grade", grade_line(
-                    nums, verdict, would=o_state.get("mode") == "would"),
+                    nums, verdict, would=would),
                                body={**{k: v for k, v in nums.items()
                                         if k != "net_edge_money"},
                                      "fell": verdict.fell,

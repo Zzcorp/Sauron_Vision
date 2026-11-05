@@ -223,11 +223,17 @@ def _closed_line(trade) -> str:
 
 
 def _grade_line(orc):
+    """The dead idea's grade in R. Its O arm is the position, or the
+    Orc's shadow arm once its proposals stepped it (the grade's arm:would
+    tag; O2a, 2026-11-05, A.58), as the grade's journal line says."""
+    from bot_program.orcs.grading import (ARM_POSITION_T, ARM_WOULD_T,
+                                          graded_would)
     from bot_program.orcs.notes import r_words
     g = getattr(orc, "grade", None)
     if g is None:
         return None
-    return (f"Graded: the position {r_words(g.orc_r_gross)}, the care ghost "
+    arm = ARM_WOULD_T if graded_would(g) else ARM_POSITION_T
+    return (f"Graded: {arm} {r_words(g.orc_r_gross)}, the care ghost "
             f"{r_words(g.ghost_r)}; Δ against the care "
             f"{r_words(g.delta_care)} (shadow: no Orc acted).")
 

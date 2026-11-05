@@ -79,7 +79,9 @@ O2_CODE = {
     "dossier_position": ("event_words", "_decisions", "_ps3",
                          "_last_expectation", "_realized_loss",
                          "ps5_notes"),
-    "grading": ("_usd_per", "mind_counts", "mind_tags"),
+    "grading": ("_usd_per", "mind_counts", "mind_tags",
+                # completing O2a (2026-11-05): the grade's arm:would tag
+                "graded_would"),
     "wake": ("_minds_on", "_evidence", "_render",
              # O2a's queue (2026-11-05): the facts hash v2, the plan's
              # watches, the army's metronome, F6's reference, the render

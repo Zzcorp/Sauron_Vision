@@ -978,6 +978,16 @@ RESERVED_PATTERNS = (
                r"(?:[+−-]?\d+\.\d\dR|—), the playbook "
                r"(?:[+−-]?\d+\.\d\dR|—); Δ against the care "
                r"(?:[+−-]?\d+\.\d\dR|—)\.$"),
+    # the same grade on the Orc's page and on Telegram /orc (2026-11-05,
+    # completing O2a: dashboard/views_orcs._grade_t, surfaces._grade_line)
+    re.compile(r"^Graded in shadow: the Orc's shadow arm "
+               r"(?:[+−-]?\d+\.\d\dR|—), the care ghost "
+               r"(?:[+−-]?\d+\.\d\dR|—), Δ "
+               r"(?:[+−-]?\d+\.\d\dR|—)(?: \([^()]*\))?\.$"),
+    re.compile(r"^Graded: (?:the position|the Orc's shadow arm) "
+               r"(?:[+−-]?\d+\.\d\dR|—), the care ghost "
+               r"(?:[+−-]?\d+\.\d\dR|—); Δ against the care "
+               r"(?:[+−-]?\d+\.\d\dR|—) \(shadow: no Orc acted\)\.$"),
     re.compile(r"^(Line Orcs|Mercenaries|Olog-hai|Uruk-hai|Corsairs of "
                r"Umbar)( · Corsair overlay)?$"),
 )

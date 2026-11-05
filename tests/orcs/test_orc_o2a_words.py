@@ -36,6 +36,7 @@ import re
 from datetime import datetime, timedelta
 from datetime import timezone as dt_tz
 from decimal import Decimal
+from html import unescape
 from pathlib import Path
 
 from django.conf import settings
@@ -554,6 +555,65 @@ class ThePagesWordsTests(_Words):
         self.assertIn("Graded in shadow: ", html)
         self.assertNotIn("no Orc action", html)
 
+    def _dead(self, *, would, symbol):
+        """A dead idea on its own row, every arm closed (the O arm at
+        +1.20R, the care ghost at -0.30R), its O arm in would mode or not,
+        graded (grading.grade)."""
+        from bot_program.models import AssetBotTrade
+        from bot_program.orcs.grading import grade
+        from bot_program.orcs.models import Orc, OrcTrack
+        row = _row(self.cfg, symbol=symbol, meta={"broker": "paper"})
+        orc = born(self, row)
+        exits = {"orc_shadow": 1.2, "care": -0.3, "playbook": 0.1,
+                 "chandelier3": 0.0, "staged": 0.0}
+        for t in OrcTrack.objects.filter(orc=orc):
+            st = dict(t.state or {})
+            if t.arm == "orc_shadow" and would:
+                st["mode"] = "would"
+            OrcTrack.objects.filter(pk=t.pk).update(
+                open=False, exit_r=exits[t.arm], exit_price=Decimal("101"),
+                exit_at=timezone.now(), exit_why="x", state=st)
+        AssetBotTrade.objects.filter(pk=row.pk).update(
+            status="CLOSED", pnl=Decimal("3"), exit_price=Decimal("101"),
+            closed_at=timezone.now())
+        Orc.objects.filter(pk=orc.pk).update(state="dead",
+                                             died_at=timezone.now())
+        orc.refresh_from_db()
+        return row, orc, grade(orc)
+
+    def test_the_grade_names_the_shadow_arm_once_it_stepped(self):
+        """A.58, §1.0 item 7 (2026-11-05, completing O2a): once the Orc's
+        proposals stepped its arm (would mode), the grade's O arm is the
+        Orc's shadow arm, not the position. The grade keeps which (its tag
+        arm:would), and its journal line, the Orc page and the list say
+        the same; the sentence that names the Orc is registered."""
+        from bot_program.orcs import notes
+        from bot_program.orcs.models import OrcJournal
+        for would, symbol, arm in ((False, "ETHUSD", "the position"),
+                                   (True, "SOLUSD", "the Orc's shadow arm")):
+            with self.subTest(would=would):
+                row, orc, g = self._dead(would=would, symbol=symbol)
+                self.assertEqual("arm:would" in g.tags, would)
+                said = (f"Graded in shadow: {arm} +1.20R, the care ghost "
+                        f"-0.30R, Δ +1.50R")
+                line = OrcJournal.objects.get(orc=orc, kind="grade").headline
+                self.assertTrue(line.startswith(
+                    f"Graded in shadow: {arm} +1.20R, the care ghost "
+                    f"-0.30R, the playbook +0.10R; Δ against the care "
+                    f"+1.50R."), line)
+                html = unescape(self.client.get(reverse(
+                    "orc_detail", args=[row.pk])).content.decode())
+                found = re.findall(r"<p>(Graded in shadow: [^<]*)</p>", html)
+                self.assertEqual(len(found), 1, found)
+                self.assertTrue(found[0].startswith(said), found[0])
+                listed = unescape(self.client.get(reverse(
+                    "orcs_list")).content.decode())
+                self.assertIn(said.split(": ", 1)[1], listed)
+                if would:
+                    self.assertTrue(notes.is_reserved(found[0]), found[0])
+                else:
+                    self.assertNotIn("shadow arm", found[0] + line)
+
     def test_the_list_title_and_the_staff_line_off_and_on(self):
         from ai_agents.models import AgentTask
         staff = get_user_model().objects.create_user(
@@ -644,6 +704,13 @@ class TheRegistrationTests(MindTestCase):
         from dashboard import council_band, views_orcs
         texts = [notes.COMPARE.format(orc="+0.40R", care="-0.10R"),
                  notes.COMPARE_WOULD.format(orc="+0.40R", care="-0.10R"),
+                 # the grade's O arm in would mode, on the Orc's page and
+                 # on Telegram /orc (2026-11-05, completing O2a)
+                 "Graded in shadow: the Orc's shadow arm +1.20R, the care "
+                 "ghost -0.30R, Δ +1.50R (a stop).",
+                 "Graded: the Orc's shadow arm +1.20R, the care ghost "
+                 "-0.30R; Δ against the care +1.50R (shadow: no Orc "
+                 "acted).",
                  surfaces.QUESTION_LATER, surfaces.ORCS_OFF_NONE,
                  surfaces.HELP_LINES[0], views_orcs.NO_INTENTS,
                  views_orcs.SEATS_NOTE, council_band.ORCS,

@@ -243,6 +243,32 @@ class TheRulesTests(_OrcEye):
         for gone in ("holds", "Stops:", "R at the last tick", "risk "):
             self.assertNotIn(gone, texts[0])
 
+    def test_a_graded_shadow_arm_is_named_as_such(self):
+        """O2a (2026-11-05, A.58): once the Orc's proposals stepped its arm
+        (would mode, the grade's tag arm:would), the grade's O arm is the
+        Orc's shadow arm, never "the position"; the sentence is
+        registered."""
+        from bot_program.models import AssetBotTrade
+        from bot_program.orcs import notes
+        from bot_program.orcs.models import Orc, OrcGrade
+        now = timezone.now()
+        AssetBotTrade.objects.filter(pk=self.row.pk).update(
+            status="CLOSED", closed_at=now, exit_price=Decimal("2390"),
+            realized_r=-0.5)
+        Orc.objects.filter(pk=self.orc.pk).update(state="dead",
+                                                  died_at=now)
+        OrcGrade.objects.create(orc=self.orc, orc_r_gross=1.2, ghost_r=-0.3,
+                                delta_care=1.5,
+                                tags=["s:s1", "rung:r0", "arm:would"])
+        from html import unescape
+        verdict, texts = self.said(f"/orc {self.row.pk}")
+        text = unescape(texts[0])
+        said = ("Graded: the Orc's shadow arm +1.20R, the care ghost -0.30R; "
+                "Δ against the care +1.50R (shadow: no Orc acted).")
+        self.assertIn(said, text)
+        self.assertNotIn("Graded: the position", text)
+        self.assertTrue(notes.is_reserved(said), said)
+
     def test_a_closed_row_with_no_r_says_so(self):
         from bot_program.models import AssetBotTrade
         AssetBotTrade.objects.filter(pk=self.row.pk).update(
