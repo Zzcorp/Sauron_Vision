@@ -50,6 +50,7 @@ side mark. applied_r is that price's R per unit of the arm's risk.
 """
 import copy
 import logging
+import re
 from decimal import Decimal
 
 from django.db import transaction
@@ -72,6 +73,13 @@ logger = logging.getLogger(__name__)
 INTENT_WORDS = {"tighten": "tighten to {lv}", "trim": "trim at {lv}",
                 "exit": "exit at {lv}", "lock_waive": "waive the lock for {ev}",
                 "add": "add at {lv}"}
+#: An event as code names it (dossier.events_of): a print "C<calendar
+#: id>", a shut "SH<yymmddHHMM>". A lock waiver's words name its event
+#: only in this form; anything else, "unknown" or a model's own text read
+#: from an older row alike, reads EVENT_UNLISTED (N5; 2026-11-05,
+#: completing O2a).
+EVENT_CODE = re.compile(r"(?:C\d{1,12}|SH\d{10})")
+EVENT_UNLISTED = "an unlisted event"
 #: An intent's status on the card (A.41, A.62).
 STATUS_T = {INTENT_STATUS_QUEUED: "queued for the shadow arm",
             INTENT_STATUS_RECORDED: "recorded, never applied",
@@ -111,10 +119,13 @@ def _level_words(target, level) -> str:
 
 
 def intent_words(target, intent) -> str:
-    """A proposal in fixed words, its price drawn by code (A.41)."""
+    """A proposal in fixed words, its price drawn by code (A.41); a lock
+    waiver's event by its code id only (EVENT_CODE), never a model's
+    text."""
     tpl = INTENT_WORDS.get(str(intent.get("kind") or ""), "{lv}")
+    ev = str(intent.get("event_id") or "")
     return tpl.format(lv=_level_words(target, intent.get("level")),
-                      ev=intent.get("event_id") or "—")
+                      ev=ev if EVENT_CODE.fullmatch(ev) else EVENT_UNLISTED)
 
 
 def _words_of(target, it) -> str:

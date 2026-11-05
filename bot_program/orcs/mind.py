@@ -34,7 +34,10 @@ with his PIN, the Orcs line above 0). Both arrive closed.
 
 Every proposal is in shadow: an OrcIntent is judged, queued for the Orc's
 own arm or recorded, and never sent anywhere. Its level is the stored
-reference copied from the wake's menu, never a model's price (A.30)."""
+reference copied from the wake's menu, never a model's price (A.30), and
+its candidate and event are the answer as kept (_kept), refused or not:
+an id that is not the wake's own reads "unknown", never the model's text
+(N5; 2026-11-05)."""
 import logging
 import re
 from datetime import timedelta
@@ -388,14 +391,18 @@ def judge(wake, reply, *, now) -> dict:
         return outcome
     day = trading_day(now).isoformat()
     bars = list(vctx.get("decision_bars") or [])
-    intent = {"kind": action, "candidate": answer.get("candidate") or "",
+    # the proposal's ids are the answer AS KEPT (N5; 2026-11-05, completing
+    # O2a): an answer refused whole is stored and shown too (A.41), so a
+    # candidate or an event that is not one of the wake's own reads
+    # "unknown", never the model's text
+    kept = outcome["kept"] or {}
+    intent = {"kind": action, "candidate": str(kept.get("candidate") or ""),
               "level": verdict.get("level") or {},
               "would_stop": verdict.get("would_stop"),
-              "event_id": (answer.get("event_id") if action == "lock_waive"
-                           else ""),
+              "event_id": (str(kept.get("event_id") or "")
+                           if action == "lock_waive" else ""),
               "share": verdict.get("share"),
-              "facts_cited": list((outcome["kept"] or {}).get("facts_cited")
-                                  or [])}
+              "facts_cited": list(kept.get("facts_cited") or [])}
     if verdict["status"] != WAKE_STATUS_DONE:
         intent.update(mode=MODE_REFUSED, status=INTENT_STATUS_REFUSED,
                       rule=verdict.get("rule") or "", officer={},
