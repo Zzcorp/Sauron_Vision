@@ -9,10 +9,29 @@ inside its functions.
                     limits (constants.RUNG_LIMITS, WALL_S). No model id is
                     written here or anywhere in the package.
   CALLER_RUNGS      the rungs each caller may use (§1.0.9). A rung outside
-                    the caller's list raises before anything is sent.
+                    the caller's list raises before anything is sent. From
+                    O2b (2026-11-06, B.15a) the wake's are r0-r4 and the
+                    smoke's h0, r0-r4; the probe's (B.15b) h0, r0, r1, r3
+                    and r4, with r2 only as B.5's map of r3 and r4
+                    (MAPPED_RUNGS); the twin's (B.15c, O2b's frontier) r4,
+                    with r2 only as B.5's map of it
+  the pair          B.9, B.10, B.15c (O2b's frontier, 2026-11-06): a wake
+                    reaches r5 only through Fable's gate: `call` refuses r5
+                    before the send unless the call carries the gate's pass
+                    (`frontier_pass`, the twin's ticket key) and the pair's
+                    reservation is found held (pair_held: the twin's ticket
+                    and its r5 wake running with its bound reserved), and
+                    the twin unless its own ticket is found held beside its
+                    r5 wake; the frontier's switch is read again at each of
+                    the two sends. frontier_calls counts the r5 calls the
+                    ledger holds today (the frontier quota's, B.8b)
   bound             A.21: every prompt token at the model's 1h cache write
                     on 1.35 x the estimate of the exact text sent, plus the
-                    rung's max_tokens of output. O2a sends no fallback.
+                    rung's max_tokens of output; plus the fallback's own,
+                    where one is sent (B.14)
+  fallback_list     B.14 (O2b, 2026-11-06): the list form the gateway
+                    builds for a real-money wake on r2-r5, the fallback's
+                    id read from the catalog; none for any other call
   ask_line          A.20: the Orcs line asked for this call's bound PLUS the
                     money of the OTHER calls in flight (the running wakes'
                     est_usd and the holds in OrcSetting "minds_inflight"),
@@ -20,11 +39,15 @@ inside its functions.
                     never `total_only`. Its refusal is a code: line_off,
                     total, line or deep_share.
   call              the four gates read again just before the send (A.2),
-                    the refusal while any seat reads above L0 (A.29), the
+                    and the caller's own switch (the probes', O2b), the
+                    refusal while any seat reads above L0 (A.29), the
                     line asked, then ONE send (max_attempts=1) on the Orcs
                     line, agent "orc", the caller's source_ref, no client
                     refusal re-run. What came back is a reply dict, never
                     an exception, but for a rung the caller may not use.
+  probes_spent      what the probes booked today on the Orcs line (the
+                    ledger's ':probe:' rows), which their own allowance
+                    weighs (B.11; O2b's probes, 2026-11-06)
   measure_tokens    the provider's free token count (`orcs tokens`, A.61):
                     never complete(), never ledgered.
   ledger_row        the settle's one lookup of the provider's own ledger
@@ -41,11 +64,14 @@ from bot_program.orcs.constants import (BOUND_HEADROOM, CODE_AUTHORITY,
                                         CODE_BILLED_FAILURE, CODE_DEEP_SHARE,
                                         CODE_LINE, CODE_LINE_OFF, CODE_TOTAL,
                                         CODE_UNBILLED, CODE_UNSENT,
-                                        MINDS_INFLIGHT_KEY, REPLY_ANSWER,
-                                        REPLY_BILLED, REPLY_CLOSED,
-                                        REPLY_UNBILLED, REPLY_UNSENT,
-                                        RUNG_LIMITS, WAKE_STATUS_RUNNING,
-                                        WALL_S)
+                                        FALLBACK_MAX_TOKENS, FALLBACK_RUNGS,
+                                        FRONTIER_RUNG, HOLD_TICKET,
+                                        MINDS_INFLIGHT_KEY, PROBE_REF_MARK,
+                                        REPLY_ANSWER, REPLY_BILLED,
+                                        REPLY_CLOSED, REPLY_UNBILLED,
+                                        REPLY_UNSENT, RUNG_LIMITS,
+                                        TWIN_CALLER, TWIN_RUNG,
+                                        WAKE_STATUS_RUNNING, WALL_S)
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +81,29 @@ ORC_AGENT = "orc"
 ORC_LINE = "orcs"
 SOURCE_PREFIX = "Orc:"
 #: §1.0.9: each caller and the rungs it may use. Later commits extend it;
-#: r5 is reachable only through O2b's Fable gate.
-CALLER_RUNGS = {"wake": ("r0",), "smoke": ("r0", "h0")}
-#: The keywords a caller's request may carry; the gateway sets the rest.
+#: r5 is reachable only through O2b's Fable gate (`call`'s pass, below).
+#: O2b's routed rung (2026-11-06, B.15a): a wake answers on the rung the
+#: router chose, r0-r4, and the smoke takes the wake's rungs beside h0.
+#: O2b's probes (2026-11-06, B.15b): a probe reads on h0, r0, r1, r3 or r4
+#: (paper never routes to r2, real money's material rung). O2b's frontier
+#: (2026-11-06, B.15c): r5's blind twin reads on r4.
+CALLER_RUNGS = {"wake": ("r0", "r1", "r2", "r3", "r4"),
+                "smoke": ("h0", "r0", "r1", "r2", "r3", "r4"),
+                "probe": ("h0", "r0", "r1", "r3", "r4"),
+                "twin": (TWIN_RUNG,)}
+#: §1.0.9's "mapped": a rung a caller reaches only as B.5's map of another
+#: (one effort per model until the smoke's PASS): a probe answers on r2
+#: only as the map of r3 or r4 (Opus at its one effort), and the twin on
+#: r2 only as the map of r4, named by the rung it was asked as (`would`).
+MAPPED_RUNGS = {"probe": {"r2": ("r3", "r4")},
+                "twin": {"r2": (TWIN_RUNG,)}}
+#: The caller of a wake's call (mind.CALLER): the one that reaches r5, and
+#: only through the pass of Fable's gate.
+WAKE_CALLER = "wake"
+#: The keywords a caller's request may carry; the gateway sets the rest,
+#: the fallbacks among them (B.14: the gateway builds the list form).
 REQUEST_KEYS = ("system_blocks", "shared_user_blocks", "private_user_blocks",
-                "turn_effort", "effort", "output_schema", "fallbacks")
+                "turn_effort", "effort", "output_schema")
 
 
 # ── the rungs ────────────────────────────────────────────────────────────
@@ -85,31 +129,102 @@ def rung(name) -> dict:
     raise ValueError(f"no rung {name!r} on the Orcs' ladder")
 
 
-def check_rung(caller, name) -> None:
+def check_rung(caller, name, *, would=None) -> None:
     """ValueError, before anything is sent, for a caller missing from
-    CALLER_RUNGS or a rung outside its list (N4)."""
+    CALLER_RUNGS or a rung outside its list (N4), but a rung MAPPED_RUNGS
+    admits as B.5's map of `would`, the rung it was asked as (O2b's
+    probes, 2026-11-06)."""
     allowed = CALLER_RUNGS.get(caller)
     if allowed is None:
         raise ValueError(f"no Orc caller {caller!r}: every model caller is "
                          f"a row of CALLER_RUNGS")
-    if name not in allowed:
-        raise ValueError(f"the {caller} caller may not use rung {name!r} "
-                         f"(its rungs: {', '.join(allowed)})")
+    if name in allowed:
+        return
+    if would is not None and would in MAPPED_RUNGS.get(caller, {}).get(
+            name, ()):
+        return
+    raise ValueError(f"the {caller} caller may not use rung {name!r} "
+                     f"(its rungs: {', '.join(allowed)})")
 
 
-def bound(name, est_tokens) -> float:
+def pair_held(key, *, pair=None) -> bool:
+    """B.9, B.10 (O2b's frontier, 2026-11-06): the pair's reservation found
+    held: `key` names a ticket of the twin in OrcSetting "minds_inflight"
+    that has not expired, beside a wake running on r5 with its own bound
+    reserved (est_usd above 0), that wake being `pair` when one is given.
+    The claim writes both in one transaction under the line lock. A read,
+    never a write."""
+    from bot_program.orcs.models import OrcWake
+    entry = holds().get(str(key or ""))
+    if not isinstance(entry, dict) or entry.get("kind") != HOLD_TICKET \
+            or entry.get("caller") != TWIN_CALLER:
+        return False
+    wake = entry.get("pair")
+    if wake is None or (pair is not None and wake != pair):
+        return False
+    return OrcWake.objects.filter(pk=wake, status=WAKE_STATUS_RUNNING,
+                                  est_usd__gt=0,
+                                  components__rung=FRONTIER_RUNG).exists()
+
+
+def check_call(caller, name, *, would=None, frontier_pass=None,
+               exclude_wake=None, exclude_key=None) -> None:
+    """ValueError, before anything is sent (N4): `check_rung`'s, and B.15c
+    (O2b's frontier, 2026-11-06): r5 for a wake only through Fable's gate,
+    with its pass (`frontier_pass`, the twin's ticket key) and the pair's
+    reservation held for this very wake (`exclude_wake`); the twin only
+    beside its r5 wake, its own ticket (`exclude_key`) held."""
+    if caller == WAKE_CALLER and name == FRONTIER_RUNG:
+        if not pair_held(frontier_pass, pair=exclude_wake):
+            raise ValueError("r5 is sent only through the Fable gate: the "
+                             "pair's reservation (its wake's bound and its "
+                             "twin's ticket) is not held")
+        return
+    check_rung(caller, name, would=would)
+    if caller == TWIN_CALLER and not pair_held(exclude_key):
+        raise ValueError("the twin is sent only beside its r5 wake: its "
+                         "ticket is not held")
+
+
+def bound(name, est_tokens, *, fallback=False) -> float:
     """A.21: what one call on rung `name` can cost at most, for a request
     estimated at `est_tokens`: every prompt token written to the 1h cache
     (the dearest input price) on ceil(est x 1.35), plus max_tokens of
-    output. No fallback is sent in O2a."""
-    from ai_agents.catalog import cost_usd
+    output. With `fallback` (B.14; O2b, 2026-11-06: a real-money wake on
+    r2-r5), plus the fallback model's own bound: the same prompt written
+    at its 1h price, and its own max_tokens of output."""
+    from ai_agents.catalog import ORC_FALLBACK_V1, cost_usd
     step = rung(name)
     est = max(0, int(est_tokens or 0))
     headroom = int(round(BOUND_HEADROOM * 100))
     written = -(-est * headroom // 100)
-    return float(cost_usd(step["model"], input_tokens=0,
-                          output_tokens=step["max_tokens"],
-                          cache_write_1h=written))
+    out = float(cost_usd(step["model"], input_tokens=0,
+                         output_tokens=step["max_tokens"],
+                         cache_write_1h=written))
+    if fallback:
+        out += float(cost_usd(ORC_FALLBACK_V1, input_tokens=0,
+                              output_tokens=FALLBACK_MAX_TOKENS,
+                              cache_write_1h=written))
+    return out
+
+
+def sends_fallback(caller, name, real_money) -> bool:
+    """B.14 (O2b, 2026-11-06): only a real-money wake on r2-r5 names a
+    fallback. Paper and demo wakes, and every ticket (the smoke, the
+    probes, r5's blind twin; later Captains and the rest), send none:
+    their bounds stay the primary's alone, and a refusal is a billed
+    failure, as on r0 (a refused probe or twin is stored invalid)."""
+    return caller == "wake" and bool(real_money) and name in FALLBACK_RUNGS
+
+
+def fallback_list(caller, name, real_money):
+    """The list form [{"model": ORC_FALLBACK_V1, "max_tokens": 8000}] the
+    gateway sends (B.14), the id read from the catalog by its name; None
+    when sends_fallback says none."""
+    if not sends_fallback(caller, name, real_money):
+        return None
+    from ai_agents.catalog import ORC_FALLBACK_V1
+    return [{"model": ORC_FALLBACK_V1, "max_tokens": FALLBACK_MAX_TOKENS}]
 
 
 def supports_turn_effort(name) -> bool:
@@ -142,6 +257,65 @@ def line_summary() -> dict:
     """Both lines and the total (spend.lines_summary), for the staff."""
     from ai_agents import spend
     return spend.lines_summary()
+
+
+def probes_spent() -> float:
+    """What the probes booked today on the Orcs line (B.11; O2b's probes,
+    2026-11-06): the ledger's rows since 00:00 UTC, on the line's own
+    membership, whose source_ref names a probe (Orc:<pk>:Wake:<w>:probe:
+    <rung>). Their own allowance weighs it, never the whole line's spend,
+    which would let an Opus probe run only in the first hours of the UTC
+    day."""
+    from django.db.models import Sum
+    from django.utils import timezone
+
+    from ai_agents.models import AgentTask
+    from ai_agents.spend import orc_line_q
+    start = timezone.now().replace(hour=0, minute=0, second=0,
+                                   microsecond=0)
+    total = (AgentTask.objects.filter(created_at__gte=start)
+             .filter(orc_line_q())
+             .filter(structured_output__source_ref__icontains=PROBE_REF_MARK)
+             .aggregate(s=Sum("cost_usd"))["s"])
+    return float(total or 0)
+
+
+def frontier_calls(orc_ids) -> int:
+    """B.8b (O2b's frontier, 2026-11-06): the r5 calls of these Orcs the
+    Orcs line booked today: the ledger's rows since 00:00 UTC, on the
+    line's own membership, whose source_ref is one of theirs on r5 (the
+    rung that answered: Orc:<pk>:...:r5), counted by the source_ref's rung.
+    A twin's (twin:r4) or a probe's is no r5 call. The frontier quota left
+    is OrcSetting frontier_per_day less these (mind.frontier_left)."""
+    from django.utils import timezone
+
+    from ai_agents.models import AgentTask
+    from ai_agents.spend import orc_line_q
+    ids = {int(i) for i in orc_ids or ()}
+    if not ids:
+        return 0
+    start = timezone.now().replace(hour=0, minute=0, second=0,
+                                   microsecond=0)
+    n = 0
+    for ref in (AgentTask.objects.filter(created_at__gte=start)
+                .filter(orc_line_q())
+                .filter(structured_output__source_ref__endswith=(
+                    f":{FRONTIER_RUNG}"))
+                .values_list("structured_output__source_ref", flat=True)):
+        parts = str(ref or "").split(":")
+        if len(parts) > 2 and parts[0] == "Orc" and parts[1].isdigit() \
+                and int(parts[1]) in ids:
+            n += 1
+    return n
+
+
+def deep_share() -> float:
+    """DEEP_TIER_SHARE (spend.py): the share of a line the deep and
+    frontier tiers stop at. can_spend weighs only the line's BOOKED spend
+    against it; the scheduler mirrors it on the money in flight and held
+    (B.13; O2b, 2026-11-06), reading the share here."""
+    from ai_agents import spend
+    return float(spend.DEEP_TIER_SHARE)
 
 
 def live_floor() -> float:
@@ -271,14 +445,22 @@ def _error_words(exc) -> str:
 
 
 def call(*, caller, rung_name, request, source_ref, bound_usd,
-         exclude_wake=None, exclude_key=None, real_urgent=False) -> dict:
+         exclude_wake=None, exclude_key=None, real_urgent=False,
+         real_money=False, would_rung=None, frontier_pass=None) -> dict:
     """ONE model call for `caller` on rung `rung_name`, or none. `request`
     holds the caller's blocks, schema and efforts (REQUEST_KEYS); this
     function sets the model, the rung's limits, the agent, the line, the
-    source_ref and max_attempts=1. Returns a reply dict:
+    source_ref, max_attempts=1 and the fallback: the list form for a
+    real-money wake (`real_money`) on r2-r5 only (B.14; O2b, 2026-11-06).
+    `would_rung`: the rung a probe or the twin was asked as, which admits
+    its mapped r2 (MAPPED_RUNGS; O2b's probes, 2026-11-06).
+    `frontier_pass`: an r5 wake's pass of Fable's gate, its twin's ticket
+    key, the pair's reservation found held (check_call; O2b's frontier,
+    2026-11-06). Returns a reply dict:
 
-      closed     nothing sent: a gate is OFF, a seat reads above L0, or
-                 the line refused (`code`)
+      closed     nothing sent: a gate is OFF, the caller's own switch is
+                 OFF (the probes'; the frontier's, for r5 and its twin),
+                 a seat reads above L0, or the line refused (`code`)
       unsent     nothing sent: the request was refused before the send
                  (a ValueError of build_request)
       answer     the model answered (`text`, `usage`)
@@ -287,17 +469,21 @@ def call(*, caller, rung_name, request, source_ref, bound_usd,
       unbilled   the call failed with no bill read (a timeout, a network
                  error, an error mid-stream): its bound stays held
 
-    ValueError for a rung the caller may not use, a source_ref that is not
-    an Orc's, or a request key the gateway owns: before anything is sent."""
-    check_rung(caller, rung_name)
+    ValueError for a rung the caller may not use (r5 without the pair's
+    reservation held, the twin without its own), a source_ref that is not
+    an Orc's, or a request key the gateway owns: before anything is
+    sent."""
+    check_call(caller, rung_name, would=would_rung,
+               frontier_pass=frontier_pass, exclude_wake=exclude_wake,
+               exclude_key=exclude_key)
     if not str(source_ref or "").startswith(SOURCE_PREFIX):
         raise ValueError(f"an Orc call's source_ref starts {SOURCE_PREFIX!r}")
     extra = set(request or {}) - set(REQUEST_KEYS)
     if extra:
         raise ValueError(f"the gateway sets {sorted(extra)} itself")
     step = rung(rung_name)
-    from bot_program.orcs.switches import gate_code
-    code = gate_code() or authority_code()
+    from bot_program.orcs.switches import caller_code, gate_code
+    code = gate_code() or caller_code(caller, rung_name) or authority_code()
     if code:
         return _reply(REPLY_CLOSED, sent=False, code=code, step=step)
     allowed, code, why = ask_line(rung_name=rung_name, bound_usd=bound_usd,
@@ -315,7 +501,9 @@ def call(*, caller, rung_name, request, source_ref, bound_usd,
             agent_name=ORC_AGENT, record=True, source_ref=str(source_ref),
             model=step["model"], line=ORC_LINE, client_refusal_rerun=False,
             max_attempts=1, max_tokens=step["max_tokens"],
-            timeout_s=step["timeout_s"], **dict(request or {}))
+            timeout_s=step["timeout_s"],
+            fallbacks=fallback_list(caller, rung_name, real_money),
+            **dict(request or {}))
     except ValueError as e:
         return _reply(REPLY_UNSENT, sent=False, code=CODE_UNSENT,
                       error=_error_words(e), step=step,

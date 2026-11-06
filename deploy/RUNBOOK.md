@@ -1328,12 +1328,26 @@ core line's spend and what is left of it) and adds a third:
 - line on: `AI $x of $y (= $T − Orcs spent − $3.00 floor) · Orcs $z of $C · total $t of $T`.
 
 The card "The Orcs (read-only)" shows the ladder the Orcs read (model and
-effort per rung). It is an unvalidated prior: once the minds switch and
-the Orcs line are on, every wake a model reads is answered on r0; a
-router comes with O2b. No tier setting on this page ever moves it, and no
-override can be saved for an Orc agent name. The card also counts the
-day's Orc calls from the ledger. The catalog table lists each model's
-cache-read price and the shortest prefix it will cache.
+effort per rung). It is an unvalidated prior. Its sentence reads the
+router's switch, `orcs_router`: while it is OFF, as it ships, once the
+minds switch and the Orcs line are on, every wake a model reads is
+answered on r0. Routing is recorded in shadow (O2b): each rendered wake
+also keeps the rung a router would choose from its band and money world,
+one effort per model until the smoke's PASS, and the Orc's page shows it
+as "would route: r2 (deep tier, medium effort)"; recording it sends no
+call and spends nothing. With the switch ON, that rung answers (see "The
+Orcs' router (O2b)" below). Each rung's row counts today's calls (the
+Orcs line's ledger rows, by the rung that answered), today's
+would-counts (the wakes the router would send it) and today's probes;
+below the ladder each band boundary shows its probe pairs and whether it
+reads validated (see "The Orcs' probes (O2b)" below). It also says that
+Fable (r5) stays at 0 through O2: its pair with its r4 blind twin is
+bounded above the $3.00 the Orcs may hold in flight, so its gate cannot
+open, with the frontier switch and its quota (see "Fable's gate (O2b)"
+below). No tier setting on this page ever moves the ladder or the route,
+and no override can be saved for an Orc agent name. The card also counts the day's Orc calls
+from the ledger. The catalog table lists each model's cache-read price
+and the shortest prefix it will cache.
 
 **The provider smoke.** Two facts behind the Orcs' design need the real
 API: how many tokens their dossier is on each model's tokenizer, and
@@ -1369,7 +1383,10 @@ What each model's block means:
   effort of a model.
 - `FAIL ... read no cache`: each (model, effort) pair would need its own
   cache, so the Orcs' router must change model and effort per epoch,
-  never per wake.
+  never per wake. The Orcs' router assumes a FAIL until a PASS is
+  recorded for the family (`orcs smoke-verdict`): until then each model
+  runs at one effort all day, Sonnet at r0's (low) and Opus at r2's
+  (medium), whatever the band.
 - `FAIL ... less than 2x`: the effort-only message did not govern the
   answer; every call would run at the model's pinned effort.
 - `FAIL ... stop_reason` or `... schema`: the answer was cut short, refused
@@ -1601,8 +1618,12 @@ prepare the minds without turning them on. `smoke --row` is dry without
 `--yes`; with it, and only while the four gates are ON (the platform
 master, `orcs`, `orcs_minds`, the Orcs line above 0), it reserves a ticket
 for the whole bound, sends ONE call on the Orcs line from the Orc's latest
-stored dossier (r0, or h0 with `--rung h0`), prints the answer and its
-validation, and writes nothing to the Orc. `smoke-verdict` records what
+stored dossier (r0, or h0 with `--rung h0`; from O2b a wake's rung r1 to
+r4 with `--rung`, only while the router's switch `orcs_router` is ON too,
+answered at one effort per model until the smoke's PASS, both rungs
+printed, never with a fallback; r5 only through Fable's gate, which in O2
+refuses it with the clause that fails, nothing reserved or sent), prints
+the answer and its validation, and writes nothing to the Orc. `smoke-verdict` records what
 `manage.py claude_smoke --yes` printed for one model family; it sends
 nothing. `tokens --s --yes` counts S at the provider's free token count
 (the API key only: no switch, no line) and records it:
@@ -1610,6 +1631,7 @@ nothing. `tokens --s --yes` counts S at the provider's free token count
 ```bash
 ./deploy/dc exec web python manage.py orcs smoke --row ROOT_ID              # dry: the one call it would make
 ./deploy/dc exec web python manage.py orcs smoke --row ROOT_ID --yes        # one call (refused while a gate is OFF)
+./deploy/dc exec web python manage.py orcs smoke --row ROOT_ID --rung r2    # dry: a routed rung (--yes: the router's switch ON too)
 ./deploy/dc exec web python manage.py orcs smoke-verdict --family sonnet --pass
 ./deploy/dc exec web python manage.py orcs smoke-verdict --family opus --fail effort cache
 ./deploy/dc exec web python manage.py orcs tokens --s --yes                 # free, never booked; recorded
@@ -1755,7 +1777,9 @@ also says the Orc's model calls today (a count, never money).
   what invalidates it, the risk at the venue's stop, the care beside the
   position, the complexity score of its last detected wake and what
   answered it ("No model (code only)" for a code answer, or the rung that
-  read it in shadow, "r0 · balanced tier, low effort"), the dossier's
+  read it in shadow, in tier words: "r0 · balanced tier, low effort", or
+  with the router's switch on a routed rung such as "r2 · deep tier,
+  medium effort"; never a model or a cost), the dossier's
   integrity, its journal, the drums it heard
   and a link to its page. Each class band shows the day's weather. The
   answer's `v` is 2 while `orcs` is ON, 1 while OFF.
@@ -1828,12 +1852,16 @@ A wake's life: the tick records it (`recorded`); the render pass
 dossier and admits it: `quiet` (nothing new), answered by code (`skipped`
 with its code, for example `minds_off` while the minds switch is off, or a
 day cap, the triage, the spacing), or `pending`; `worker-orc` claims it
-inside the Orcs line, sends one call on r0, validates the answer and
+inside the Orcs line, sends one call (on r0 while the router's switch is
+OFF, as it ships; see "The Orcs' router (O2b)"), validates the answer and
 settles it: `done` (answered in shadow), `refused` (by the validator),
 `failed`, `late` (it came back after the position closed: kept, applied to
 nothing), `stale` (not answered in 30 minutes while the worker was
 silent: the care holds the idea) or `merged`. The Orc's page shows each
-status in words, with the rung that read it.
+status in words, with the rung that read it and, while that is another
+rung, the one a router would choose, recorded in shadow ("would route: r2
+(deep tier, medium effort)"): while the router's switch is OFF, r0 answers
+every wake a model reads.
 
 To turn them on, in this order:
 
@@ -1876,7 +1904,8 @@ To turn them on, in this order:
 What they may spend: at most `ORC_DAILY_BUDGET_USD` per UTC day ($6.00
 proposed for the first week: about $4.27 to $5.14 a day for 10 positions
 on r0 under the triage). Each call is reserved at its bound before it is
-sent (about $0.20 at most on r0) and booked at its real cost; inside the
+sent (about $0.20 at most on r0; up to about $1.37 on a routed Opus rung,
+below) and booked at its real cost; inside the
 line each Orc spends at most $2.00 a day on real money and $0.50 on paper
 and demo, routine wakes 75% of that. While the line is on, the core line
 is the total less what the Orcs actually spent, less the $3.00 floor.
@@ -1900,6 +1929,181 @@ takes no PIN and stops new calls at the next claim.
 Setting the line back to 0 (then `./deploy/dc up -d`) refuses every Orc
 call: the next claim answers each waiting wake by code (`line_off`).
 Nothing is notified.
+
+### The Orcs' router (O2b)
+
+Every wake the render pass writes also records the rung a pure router
+chooses from its band and money world (table v1: routine r0; material r1
+on paper and demo, r2 on real money; complex r3; extreme r4, Fable's r5
+staying closed through O2). The Orc's page shows it as "would route: r2
+(deep tier, medium effort)". The switch `orcs_router` ("Orc Router (routed
+rungs in shadow)", System, OFF on arrival, left OFF by "all on", turned on
+only with your trading PIN at /ops/) decides whether that choice answers:
+
+- OFF, as it ships: every wake a model reads is answered on r0, and the
+  router's choice is only recorded.
+- ON, with the minds on: the wake's dossier is written once for the routed
+  model's family and the wake is answered on its routed rung, one effort
+  per model until the smoke's PASS for that family. Without a recorded
+  PASS, Sonnet answers at r0's effort (low) and Opus at r2's (medium): r1
+  answers as r0, r3 and r4 as r2, and the router's own choice stays on
+  the page. The card says the rung that answered in tier words, for
+  example "r2 · deep tier, medium effort", never a model or a cost. A
+  real-money wake on r2 to r4 also names Opus 5 as the server's fallback
+  for a refused answer, and its reservation counts that fallback too;
+  paper and demo wakes, and `orcs smoke`, name none.
+
+To turn it on, in this order:
+
+1. Record the smoke's PASS for each family, as `claude_smoke --yes`
+   printed it. Without it the router still answers, at one effort per
+   model:
+
+   ```bash
+   ./deploy/dc exec web python manage.py orcs smoke-verdict --family sonnet --pass
+   ./deploy/dc exec web python manage.py orcs smoke-verdict --family opus --pass
+   ```
+
+2. Set the line at $10 in `.env` (`ORC_DAILY_BUDGET_USD=10`) and raise
+   `AI_DAILY_BUDGET_USD` to 28 (the core's 15, the line and the $3 floor),
+   then `./deploy/dc up -d`.
+3. On /ops/ (Switches, System), turn on "Orc Router (routed rungs in
+   shadow)" with your trading PIN. The shell refuses this key and points
+   to /ops/, and the Django admin will not turn it on either.
+4. Optionally smoke one routed rung, dry first:
+   `orcs smoke --row ROOT_ID --rung r2`, then the same with `--yes`.
+
+What it may spend: still at most `ORC_DAILY_BUDGET_USD` per UTC day. For
+10 positions that is about $5.88 to $11.48 a day of demand at central
+output, against $4.47 to $5.36 on r0 alone; under a $10 line a stormy
+central day answers about 35 wakes by code. An Opus call is reserved at
+its bound before it is sent: about $0.55 to $0.87 on paper and demo, and
+on real money, with its fallback, about $1.05 on r2, $1.21 on r3 and
+$1.37 on r4. Inside the line, calls on the deep tier (r2 to r4) stop at
+70% of the line, counting the money in flight and held, except a
+real-money urgent wake; the triage, each Orc's day caps and the $3.00
+held for calls in flight still bind.
+
+An Opus call may run past 30 minutes inside its wall time (about 36
+minutes on r3, 58 on r4): a wake that waits behind it, its own Orc's next
+wake included, is answered by code as a backlog after 30 minutes, and no
+Orc goes to the care for that wait. Only a worker with no call in flight,
+none claimed and none settled for 30 minutes is silent, which hands the
+waiting wake's Orc to the care.
+
+To stop it: turning `orcs_router` OFF takes no PIN. A wake already
+waiting is answered on r0 at the next claim, re-priced on r0 (its stored
+dossier still fits), and every later wake is answered on r0, its route
+only recorded. A call already in flight finishes on its rung and is
+booked.
+
+### The Orcs' probes (O2b)
+
+A probe measures the rungs beside the one that answered: beside a paper
+or demo wake a model read (answered in shadow, or refused), a
+neighbouring rung reads the same stored dossier again, blind to that
+answer, and the two answers are kept side by side and graded. The switch
+`orcs_probes` ("Orc Probes (neighbouring rungs in shadow)", System, OFF
+on arrival, left OFF by "all on", turned on only with your trading PIN at
+/ops/) decides whether any is sent. A probe is never sent beside real
+money, and nothing it decides is applied: it writes no plan, no proposal,
+no note, no journal line and no card line, and it never counts in the
+Orc's own day caps. It is kept only in the probe pairs' table and the
+ledger, billed on the Orcs line.
+
+Which, beside paper and demo wakes only: h0 on calm and eventful days
+(none on a stormy day), and the rung across a band boundary when the
+wake's score sits within 5 of 30, 55 or 75 (for example r1 beside an r0
+wake at 27), one effort per model until the smoke's PASS, as for a wake.
+A boundary pair compares the two rungs on either side of its boundary, so
+a boundary probe goes only beside a wake answered on its own route's rung:
+while the router's switch is OFF, r0 answers every wake, and only a wake
+whose route answers on r0 too (a routine wake near 30, for example) gets
+one. A probe sends no fallback: a refused answer is kept as invalid.
+
+When: `worker-orc` sends them after its wakes, last of all: while a
+real-money wake waits for its call, none is sent. A probe goes within 15
+minutes of the answer it stands beside, else it is dropped; each one is
+billed once.
+
+What they may spend: their own allowance, `probes_usd_per_day`, by
+default 15% of the line ($1.50 at $10), read at once; an explicit value
+is in dollars. A user gets at most 6 boundary probes and 40 h0 probes a
+day (`probes_per_day`). Inside the line every probe also stays within
+C − R (the real-money non-urgent class), the 70% deep share for an Opus
+rung and the $3.00 held for calls in flight. That is about $0.48 a day
+for 6 boundary probes on r1, plus cents for h0, and never more than the
+allowance. Both settings bind at once, with no restart:
+
+```bash
+./deploy/dc exec web python manage.py shell -c "from bot_program.orcs.models import OrcSetting; OrcSetting.objects.update_or_create(key='probes_usd_per_day', defaults={'value': 1.0})"
+./deploy/dc exec web python manage.py shell -c "from bot_program.orcs.models import OrcSetting; OrcSetting.objects.update_or_create(key='probes_per_day', defaults={'value': {'boundary': 6, 'h0': 40}})"
+```
+
+Where to read them: /orcs/seats/ (staff) adds the ladder table, one row
+per kind, boundary and money world: the pairs, the completed blocks of
+20, each side's valid answers, how often both named the same action and
+level, each side's forward R over the next final decision-frame bar after
+the later answer, and each side's cost per pair. /ai-models/ counts each
+rung's probes today and shows each boundary's state: validated after two
+completed blocks. The state is shown only: no router reads it, and the
+ladder does not change.
+
+To turn them on, with the minds switch and the Orcs line on: on /ops/
+(Switches, System), turn on "Orc Probes (neighbouring rungs in shadow)"
+with your trading PIN. The shell's `component on` refuses this key and
+points to /ops/, and the Django admin will not turn it on either. To stop
+them: turning `orcs_probes` OFF takes no PIN; the next probe is not sent,
+and one already in flight finishes and is booked.
+
+### Fable's gate (O2b)
+
+Fable (r5) stays at 0 through O2. The router sends an extreme wake to r5
+only when every clause of Fable's gate holds, read in this order, the
+first that fails kept in the route on the wake's journal entry as
+"extreme: r4, ..." (no page shows it): real money; the band is extreme; a
+frontier quota is left today; the frontier switch is ON; the pair fits
+under the wake's class's ceiling and the deep tiers' share; the pair fits
+under the $3.00 the Orcs may hold in flight; the router's switch
+(`orcs_router`) is ON, since no dossier is written for Fable while it is
+OFF; and that dossier, written for Fable at 1.35 times the tokens, is
+within its size cap (one that is not is written again for r4, which
+answers it). Otherwise the wake is answered as any other: while the
+router's switch (`orcs_router`) is OFF, as it ships, r0 answers every
+wake a model reads, extreme ones and real money included; with it ON, r4
+answers (r2, at Opus's one effort, until the smoke's PASS for Opus).
+
+The pair is r5 with its r4 blind twin. The twin reads the same stored
+dossier on r4 (on r2, at Opus's one effort, until the smoke's PASS for
+Opus), blind to r5's answer, with no fallback, and is kept only as a
+`twin` pair in the probe pairs' table on /orcs/seats/; r5's answer is the
+Orc's, and r5 is sent only once its twin was. Both are reserved together
+at the wake's claim, priced at the dossier's size cap: r5's bound with its
+fallback, about $2.69, and the twin's, about $0.88 on r4 ($0.56 on r2):
+about $3.57 in all ($3.25 before Opus's PASS). That is above the $3.00 the
+Orcs may hold in flight, so the gate cannot open in O2, whatever the
+switch and the quota say: no r5 and no twin call is sent, and Fable adds
+$0.
+
+- The switch `orcs_frontier` ("Orc Frontier (Fable and its blind twin in
+  shadow)", System, OFF on arrival, left OFF by "all on") takes your
+  trading PIN at /ops/ to turn on; the shell's `component on` refuses it
+  and points to /ops/, and the Django admin will not turn it on either.
+  Turning it OFF takes no PIN: a wake already admitted on r5 is answered on
+  r4 at its claim, and a pair whose switch reads OFF at the send sends
+  nothing.
+- The quota is OrcSetting `frontier_per_day`, 0 by default: the r5 calls a
+  user may make a UTC day, across all classes, less those made today (and
+  those in flight). The day's weather row shows the setting's value; the
+  router never reads that row. It binds at once, with no restart (in O2
+  it opens nothing, the pair being above the floor):
+
+  ```bash
+  ./deploy/dc exec web python manage.py shell -c "from bot_program.orcs.models import OrcSetting; OrcSetting.objects.update_or_create(key='frontier_per_day', defaults={'value': 0})"
+  ```
+- `orcs smoke --row ROOT_ID --rung r5` goes through the same gate on the
+  Orc's latest stored wake and is refused with the clause that fails;
+  nothing is reserved or sent.
 
 ## Operating notes
 

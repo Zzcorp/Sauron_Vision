@@ -8,7 +8,25 @@ Orcs budget line above 0 (read through bot_program/orcs/mind_gateway.py,
 the one module that names the budget). `gate_code` names the first one
 that is OFF, `minds_on` says whether all four are ON. The tick never reads
 them, and nothing here imports the gateway until it is asked: the tick's
-import path never loads it."""
+import path never loads it.
+
+THE ROUTER'S SWITCH (O2b, 2026-11-06): `orcs_router`, read by `router_on`,
+decides which rung answers a wake the four gates let a model read: OFF r0,
+ON the rung the router chose.
+
+THE PROBES' SWITCH (O2b's probes, 2026-11-06): `orcs_probes`, read by
+`probes_on`, is a model caller's own switch (N2, A.2): a probe needs it
+beside the four gates. `caller_code` names a caller's own switch while it
+is OFF, read before each probe, at its reservation and at the gateway.
+
+THE FRONTIER'S SWITCH (O2b's frontier, 2026-11-06): `orcs_frontier`, read by
+`frontier_on`, is one clause of Fable's gate (B.9, read at the render), the
+twin's own switch and r5's beside the wake's (B.15c, read again at the
+claim and at each of the pair's sends): OFF, an extreme wake routes r4,
+which answers it while the router's switch is ON (r0 answers every wake
+while that one is OFF, as it ships; 2026-11-06, completing O2b). In O2 the
+gate cannot open whatever it says (the pair's bound is above the money the
+Orcs may hold in flight)."""
 import logging
 
 logger = logging.getLogger(__name__)
@@ -86,3 +104,54 @@ def minds_switch_on() -> bool:
     wakes while it is off (A.17). (O2a's queue, 2026-11-05.)"""
     from bot_program.orcs.constants import MINDS_SWITCH
     return _component_on(MINDS_SWITCH)
+
+
+def router_on() -> bool:
+    """The router's switch (`orcs_router`; O2b, 2026-11-06, the O2 spec
+    B.2b, N2), OFF when unreadable. Read once per render (the dossier's
+    family, B.4), at admission and at each claim (frictionless off: a wake
+    claimed once it is OFF is answered on r0), and by `orcs smoke` for a
+    rung above r0. It is no fifth gate: OFF, the minds still answer every
+    wake a model reads, on r0. The tick never reads it."""
+    from bot_program.orcs.constants import ROUTER_SWITCH
+    return _component_on(ROUTER_SWITCH)
+
+
+def probes_on() -> bool:
+    """The probes' switch (`orcs_probes`; O2b's probes, 2026-11-06, the O2
+    spec B.11, N2), OFF when unreadable. Read before each probe
+    (probes.run), at its reservation and again at the gateway, so a probe
+    is sent only while it is ON (frictionless off). The tick never reads
+    it."""
+    from bot_program.orcs.constants import PROBES_SWITCH
+    return _component_on(PROBES_SWITCH)
+
+
+def frontier_on() -> bool:
+    """The frontier's switch (`orcs_frontier`; O2b's frontier, 2026-11-06,
+    the O2 spec B.9, B.15c, N2), OFF when unreadable. Read by Fable's gate
+    at the render (one of its clauses), again at the r5 wake's claim (OFF,
+    r4 answers it from its stored dossier) and at each of the pair's sends
+    (caller_code), so a pair is sent only while it is ON (frictionless
+    off). The tick never reads it."""
+    from bot_program.orcs.constants import FRONTIER_SWITCH
+    return _component_on(FRONTIER_SWITCH)
+
+
+def caller_code(caller, rung=None) -> str:
+    """A model caller's OWN switch (N2, A.2: a caller needs its own switch
+    beside the four gates), as its code while it is OFF; "" while it is ON
+    and for a caller with none of its own: the wake (the minds switch is
+    its own) and the smoke (its `--yes`). O2b's probes (2026-11-06): the
+    probe's is `orcs_probes` (`probes_off`). O2b's frontier (2026-11-06,
+    B.15c): the twin's is `orcs_frontier` (`frontier_off`), and so is a
+    wake's on `rung` r5, beside the four gates. Unreadable is OFF."""
+    from bot_program.orcs.constants import (CODE_FRONTIER_OFF,
+                                            CODE_PROBES_OFF, FRONTIER_RUNG,
+                                            PROBE_CALLER, TWIN_CALLER)
+    if caller == PROBE_CALLER and not probes_on():
+        return CODE_PROBES_OFF
+    if (caller == TWIN_CALLER or (caller == "wake" and rung == FRONTIER_RUNG)
+            ) and not frontier_on():
+        return CODE_FRONTIER_OFF
+    return ""

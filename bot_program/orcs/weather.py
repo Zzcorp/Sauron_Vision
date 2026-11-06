@@ -3,7 +3,12 @@ class), computed at the trading-day roll (17:00 New York) over the day
 ahead, re-run UPWARD only when the posture's level or the Mind's regime
 changed since it was computed, never lowered within the trading day.
 
-The weather routes nothing (the router is O2b's). It is journaled on
+The weather routes nothing. Its day class is one input of the pure router
+(bot_program/orcs/router.py, O2b, 2026-11-06), which lists a paper or
+demo wake's probes on calm and eventful days only; its choice is recorded
+in shadow, and answers only behind the router's switch (orcs_router,
+OFF as it ships: r0 answers every wake a model reads). The weather is
+journaled on
 every detected wake and shown on the card and the Horde's class band
 (O1d). From O2a (2026-11-05, the O2 spec A.12, §4 Q4) its model-wake cap
 BINDS: the scheduler counts each Orc's model wakes against
@@ -11,8 +16,21 @@ BINDS: the scheduler counts each Orc's model wakes against
 world (real 12, 14 or 16 by the trading day's class; paper and demo 6),
 never read back from OrcDayBaseline.caps, which holds what its first
 reader's world produced. The Orc's dollars a day are the scheduler's
-(OrcSetting per_orc_daily_usd). The frontier quota and the probes stay
-display only until O2b.
+(OrcSetting per_orc_daily_usd). From O2b's probes (2026-11-06, B.8a) its
+`probes` BINDS too: bot_program/orcs/probes.py sends a probe only on a day
+it allows (none on a stormy day), behind the probes' switch (orcs_probes,
+OFF as it ships).
+
+THE FRONTIER QUOTA (O2b's frontier, 2026-11-06, the O2 spec B.8b, §4 Q12)
+is no cap of the day's class: it is OrcSetting `frontier_per_day`, 0 by
+default (`frontier_per_day`), the r5 calls a user may make a UTC day across
+all classes. Fable's gate reads it less the user's r5 calls today
+(mind.frontier_left), never this row; `current` writes the setting's value
+in OrcDayBaseline.frontier_quota, where O1 wrote 1, 2 or 4 by the day's
+class, so the row shows it, and nothing that routes reads the row (its
+earlier days' values are history). In O2 the gate cannot open whatever the
+quota says: Fable's pair is bounded above the money the Orcs may hold in
+flight.
 
     calm       day score < 30
     eventful   30 to < 55
@@ -28,30 +46,51 @@ import logging
 from datetime import timedelta
 
 from bot_program.orcs import complexity
-from bot_program.orcs.constants import ROUTING_VERSION
+from bot_program.orcs.constants import (FRONTIER_PER_DAY,
+                                        FRONTIER_PER_DAY_KEY,
+                                        ROUTING_VERSION)
 
 logger = logging.getLogger(__name__)
 
 #: §7.5.7: the model wakes a day by money and weather (binding from O2a,
-#: A.12: paper and demo 6, §4 Q4), and the frontier quota (§7.5.3,
-#: display only until O2b).
+#: A.12: paper and demo 6, §4 Q4). The frontier quota is the setting's,
+#: per user, not the class's (B.8b: frontier_per_day).
 WAKES_PER_DAY = {"real": {"calm": 12, "eventful": 14, "stormy": 16},
                  "paper": 6}
-FRONTIER_PER_DAY = {"calm": 1, "eventful": 2, "stormy": 4}
 _RANK = {"calm": 0, "eventful": 1, "stormy": 2}
-#: What binds of caps_for's (the scheduler's count cap); the rest is shown.
-BINDING = ("wakes_per_day",)
+#: What binds of caps_for's: the scheduler's count cap (O2a) and the probes
+#: (O2b, 2026-11-06, B.8a: probes.py reads them); the rest is shown.
+BINDING = ("wakes_per_day", "probes")
 
 
 def caps_for(day_class, real) -> dict:
     """The caps of one Orc's day by its own money world (`real`) and the
-    trading day's class: `wakes_per_day` binds (A.12), the frontier quota
-    and the probes are shown only (O2b's)."""
+    trading day's class: `wakes_per_day` binds (A.12); `probes` binds
+    (B.8a: a probe is sent only on a day it allows, none on a stormy day,
+    and never beside real money). Pure. The frontier quota is no cap of the
+    day's class (O2b's frontier, 2026-11-06, B.8b): it is the setting's
+    (`frontier_per_day`), which `current` writes on the day row."""
     wakes = (WAKES_PER_DAY["real"].get(day_class, 12) if real
              else WAKES_PER_DAY["paper"])
     return {"wakes_per_day": int(wakes),
-            "frontier_quota": int(FRONTIER_PER_DAY.get(day_class, 1)),
             "probes": day_class != "stormy", "binding": list(BINDING)}
+
+
+def frontier_per_day() -> int:
+    """B.8b (O2b's frontier, 2026-11-06, §4 Q12): OrcSetting
+    "frontier_per_day", the r5 calls a user may make a UTC day across all
+    classes, binding at once; FRONTIER_PER_DAY (0) when it is unset or
+    unreadable. Fable's gate reads it less the user's r5 calls today
+    (mind.frontier_left); `current` writes it on the day row, which
+    nothing that routes reads."""
+    from bot_program.orcs.models import OrcSetting
+    value = OrcSetting.get(FRONTIER_PER_DAY_KEY, FRONTIER_PER_DAY)
+    if isinstance(value, bool):
+        return int(FRONTIER_PER_DAY)
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return int(FRONTIER_PER_DAY)
 
 
 def _class_currencies(user, asset_class) -> list:
@@ -202,7 +241,8 @@ def current(user, asset_class, now=None, *, inputs=None, real=True):
                     day_class=cls, score=sc,
                     components={"market": market, "inputs": stamp},
                     caps=caps_for(cls, real),
-                    frontier_quota=caps_for(cls, real)["frontier_quota"],
+                    # B.8b: the setting's quota, shown; never the class's
+                    frontier_quota=frontier_per_day(),
                     routing_version=ROUTING_VERSION,
                     history=[{**entry, "why": "computed at the day's first "
                                               "read"}])
@@ -221,7 +261,7 @@ def current(user, asset_class, now=None, *, inputs=None, real=True):
         row.day_class = new_cls
         comps["market"] = market
         row.caps = caps_for(new_cls, real)
-        row.frontier_quota = row.caps["frontier_quota"]
+        row.frontier_quota = frontier_per_day()
         row.history = list(row.history or []) + [
             {**entry, "day_class": new_cls, "why": "re-run upward: the "
                                                    "posture or the regime "

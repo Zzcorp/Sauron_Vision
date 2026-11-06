@@ -1,6 +1,6 @@
 """The Orcs, from the shell (O1: journals of code facts; O2a, 2026-11-05: the
 minds' status, the smoke of one stored dossier, the smoke's verdicts and the
-count of S).
+count of S; O2b, 2026-11-06: the smoke on a wake's routed rungs).
 
     python manage.py orcs                          # the switches, the Orcs line, the minds' queue, every live Orc
     python manage.py orcs adopt --open             # plan: the open rows that would be adopted
@@ -15,6 +15,7 @@ count of S).
     python manage.py orcs smoke --row ROOT_ID         # dry: the one call the Orc's latest stored dossier would make
     python manage.py orcs smoke --row ROOT_ID --yes   # ... sent once, on the Orcs line (the four gates ON)
     python manage.py orcs smoke --row ROOT_ID --rung h0 --yes
+    python manage.py orcs smoke --row ROOT_ID --rung r2 --yes   # a routed rung: the router's switch ON too
     python manage.py orcs smoke-verdict --family sonnet --pass             # what claude_smoke --yes printed
     python manage.py orcs smoke-verdict --family opus --fail effort cache
     python manage.py orcs tokens --s                  # dry: what would be counted
@@ -51,13 +52,25 @@ line at 0 it shows them OFF and at 0: no wake is read by a model then.
 
 `smoke --row ROOT_ID` (O2a, the O2 spec A.60) reads the Orc's latest wake
 with a stored dossier and prints, without --yes, the one call it would
-make: the rung (r0, or h0 with --rung h0; no other), its family, the tokens
-of the exact text, the bound, the Orcs line's answer and the four gates.
+make: the rung, its family, the tokens of the exact text, the bound, the
+Orcs line's answer and the four gates. The rung is r0 by default, h0 with
+--rung h0, or from O2b (2026-11-06, B.15a) one of a wake's rungs r1-r4,
+answered as B.5 maps it (one effort per model until the smoke's PASS for
+its family: r1 as r0, r3 and r4 as r2), both rungs printed. `--rung r5`
+(O2b's frontier, 2026-11-06, B.15c, P35) goes only through Fable's gate,
+read on that wake: it prints the clause that fails and refuses --yes with
+it, nothing reserved or sent (in O2 the pair's bound is above the money
+the Orcs may hold in flight, so a clause always fails); and since r5
+answers only beside its blind twin, at a real-money extreme wake's own
+claim, the smoke sends no Fable call even when every clause holds.
 `--yes` is refused while any gate is OFF (the platform master, `orcs`,
-`orcs_minds`, the Orcs line above 0). Otherwise it reserves a ticket for
-the whole bound, sends ONE call on the Orcs line (agent `orc`, source_ref
-`Orc:<pk>:Smoke:<wake>:<rung>`), prints the answer and its validation, and
-writes nothing to the Orc: no journal entry, plan, intent or counter.
+`orcs_minds`, the Orcs line above 0), and for a rung above r0 while the
+router's switch (`orcs_router`) is OFF, as a wake's would be. Otherwise it
+reserves a ticket for the whole bound (no fallback: a ticket names none),
+sends ONE call on the Orcs line (agent `orc`, source_ref
+`Orc:<pk>:Smoke:<wake>:<rung>`, the rung that answered), prints the answer
+and its validation, and writes nothing to the Orc: no journal entry,
+plan, intent or counter.
 
 `smoke-verdict` (A.61) records what `claude_smoke --yes` printed for one
 model family: `--pass`, or `--fail` with one or more of call_a, call_b,
@@ -111,7 +124,10 @@ class Command(BaseCommand):
         parser.add_argument("--row", default="",
                             help="smoke: the Orc's root trade id")
         parser.add_argument("--rung", default=O2A_RUNG,
-                            help="smoke: r0 (the default) or h0")
+                            help="smoke: r0 (the default), h0, or a "
+                                 "wake's rung r1-r4 (the router's switch "
+                                 "ON); r5 only through Fable's gate, "
+                                 "which refuses it in O2")
         parser.add_argument("--family", default="",
                             help="smoke-verdict: the model family the "
                                  "verdict is for")
@@ -380,20 +396,34 @@ class Command(BaseCommand):
         """A.60 (O2a's arm, 2026-11-05): the one command of O2a that sends
         a call. Dry by default; --yes refused while a gate is OFF; a
         ticket for the whole bound, ONE send on the Orcs line, the answer
-        judged and printed; nothing written to the Orc."""
+        judged and printed; nothing written to the Orc. O2b (2026-11-06,
+        B.15a, P34): a wake's rungs r1-r4 under a wake's gates, the
+        router's switch among them, each answered as B.5 maps it."""
         from django.utils import timezone
 
         from bot_program.orcs import mind, mind_gateway, scheduler, switches
         from bot_program.orcs.constants import (CODE_UNBILLED, REPLY_UNBILLED,
+                                                ROUTED_RUNGS, ROUTER_SWITCH,
+                                                SMOKE_MAPPED_T,
                                                 TICKET_CODE_WORDS,
                                                 WAKE_CODE_WORDS)
         words = {**WAKE_CODE_WORDS, **TICKET_CODE_WORDS}
         orc = self._orc_of(opts["row"], "smoke --row")
-        rung_name = str(opts["rung"] or "")
+        asked = str(opts["rung"] or "")
+        from bot_program.orcs.constants import FRONTIER_RUNG
+        if asked == FRONTIER_RUNG:
+            # B.15c, P35 (O2b's frontier, 2026-11-06): r5 only through
+            # Fable's gate
+            return self._smoke_fable(orc, opts)
         try:
-            mind.ticket_caller(SMOKE, rung_name)
+            mind.ticket_caller(SMOKE, asked)
         except ValueError as e:
             raise CommandError(f"{e}: nothing was reserved or sent.")
+        # B.15a, B.5 (O2b, 2026-11-06): a wake's rung answers as the effort
+        # map says (one effort per model until the smoke's PASS), and a
+        # rung above r0 takes the router's switch, as a wake's does
+        rung_name = mind.answering_rung(asked)
+        routed = asked in ROUTED_RUNGS
         w = self._smoke_wake(orc)
         try:
             request = mind.build_request(w, rung_name)
@@ -410,7 +440,10 @@ class Command(BaseCommand):
         out(f"The smoke of Orc #{orc.root_trade_id} ({orc.symbol}): wake "
             f"#{w.pk} of {when} UTC, its stored dossier "
             f"({len(w.block_hashes or [])} blocks and S).")
-        out(f"The call: rung {rung_name}, the {step['family']} family "
+        which = (SMOKE_MAPPED_T.format(asked=asked, rung=rung_name,
+                                       family=step["family"]) + ":"
+                 if rung_name != asked else f"rung {rung_name},")
+        out(f"The call: {which} the {step['family']} family "
             f"({step['tier']} tier, effort {effort}), at most "
             f"{step['max_tokens']} tokens out, one send.")
         out(f"Its text: {tokens} tokens estimated; bound "
@@ -424,6 +457,12 @@ class Command(BaseCommand):
         out(f"The four gates: {self._gates_words()}"
             + (": a call may be sent." if not gate
                else f": --yes is refused, {words.get(gate, gate)} ({gate})."))
+        router = switches.router_on()
+        if routed:
+            out(f"The router's switch ({ROUTER_SWITCH}) is "
+                f"{'ON' if router else 'OFF'}"
+                + (": a rung above r0 may be sent." if router else
+                   f": --yes is refused for rung {asked}, a rung above r0."))
         if not opts["yes"]:
             out("DRY RUN: nothing reserved, nothing sent. --yes sends ONE "
                 "call on the Orcs line.")
@@ -432,6 +471,12 @@ class Command(BaseCommand):
             raise CommandError(f"--yes is refused while a gate is OFF: "
                                f"{words.get(gate, gate)} ({gate}). Nothing "
                                f"was reserved or sent.")
+        if routed and not router:
+            raise CommandError(f"--yes is refused for rung {asked} while the "
+                               f"router's switch is OFF ({ROUTER_SWITCH}): a "
+                               f"rung above r0 is sent, as a wake's is, only "
+                               f"with it ON (at /ops/, with the trading "
+                               f"PIN). Nothing was reserved or sent.")
         got = scheduler.reserve_ticket(SMOKE, {"rung": rung_name,
                                                "tokens": tokens,
                                                "orc": orc.pk, "ref": ref})
@@ -460,6 +505,51 @@ class Command(BaseCommand):
             settled = scheduler.settle_ticket(got["key"],
                                               {**reply, "ledger": found})
         self._smoke_answer(w, reply, ref, found, settled)
+
+    def _smoke_fable(self, orc, opts):
+        """B.15c, P35 (O2b's frontier, 2026-11-06): `--rung r5` goes only
+        through Fable's gate, its clauses read in their order on the Orc's
+        latest stored wake (router.fable_gate): real money, the band
+        extreme, a frontier quota left, the frontier's switch, the pair's
+        money (scheduler.fable_money: priced at the dossier's size cap, in
+        O2 above the money the Orcs may hold in flight), its stored
+        dossier written for Fable within its cap. Dry, it prints the
+        clause; --yes is refused with it, nothing reserved or sent. When
+        every clause holds, --yes is refused too: r5 answers only beside
+        its r4 blind twin, at a real-money extreme wake's own claim, and
+        the smoke sends one call, never a pair."""
+        from bot_program.orcs import mind, router, scheduler, switches
+        from bot_program.orcs.constants import FRONTIER_RUNG
+        w = self._smoke_wake(orc)
+        comps = w.components if isinstance(w.components, dict) else {}
+
+        def stored():
+            if str(comps.get("family") or "") != "fable":
+                return router.NOT_FABLE_STORED
+            return router.FABLE_OVER if comps.get("over_budget") else ""
+        clause = router.fable_gate(
+            real=scheduler.is_real(orc), band=str(w.band or ""),
+            quota=lambda: mind.frontier_left(orc.user_id),
+            switch=switches.frontier_on,
+            money=lambda: scheduler.fable_money(w.reasons), render=stored)
+        pair = mind.pair_price()
+        out = self.stdout.write
+        when = w.created_at.strftime("%Y-%m-%d %H:%M")
+        out(f"The smoke of Orc #{orc.root_trade_id} ({orc.symbol}): wake "
+            f"#{w.pk} of {when} UTC, rung {FRONTIER_RUNG} (Fable), which "
+            f"answers only beside its r4 blind twin: the pair is bounded at "
+            f"${pair['weigh']:.4f} at the dossier's size cap.")
+        out("Fable's gate: " + (f"closed, {clause}." if clause else
+                                "every clause holds."))
+        why = (f"{clause} (Fable's gate)" if clause else
+               "r5 answers only beside its r4 blind twin, at a real-money "
+               "extreme wake's own claim; the smoke sends no pair")
+        if not opts["yes"]:
+            out(f"DRY RUN: nothing reserved, nothing sent. --yes is refused "
+                f"for rung {FRONTIER_RUNG!r}: {why}.")
+            return
+        raise CommandError(f"--yes is refused for rung {FRONTIER_RUNG!r}: "
+                           f"{why}. Nothing was reserved or sent.")
 
     def _smoke_wake(self, orc):
         """The Orc's latest wake with a stored dossier: S by its hash and
