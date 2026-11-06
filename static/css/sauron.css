@@ -43,12 +43,30 @@
             --sidebar-width: 260px;
             --topbar-height: 56px;
         }
+        /* The browser's own parts follow the theme (2026-11-06). With no
+           colour scheme it paints them in its light default: scrollbars, a
+           select's open list, date pickers, any control no rule dresses.
+           The light-mode class sits on <body> (base.html), and the page's
+           scrollbars follow the root, hence :has(). */
+        :root { color-scheme: dark; }
+        :root:has(> body.light-mode) { color-scheme: light; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: var(--bg-void); color: var(--text-primary);
             font-family: var(--font-body); font-size: 15px; font-weight: 500;
             line-height: 1.6; min-height: 100vh; overflow-x: hidden;
         }
+        /* Links (2026-11-06). A link no class dresses took the browser's
+           blue, unreadable on the void (/orcs/ "Orc #13", footnotes). Now
+           the text colour, underlined at 40 %, the full underline under the
+           pointer. :where() keeps both rules at an element's weight, so any
+           class that dresses its links still wins, and an <a> with no href
+           (no link) is left alone. */
+        a:where(:any-link) {
+            color: var(--text-primary);
+            text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+        }
+        a:where(:any-link:hover) { text-decoration-color: currentColor; }
 
         /* ── Globe-Eye: static eye, rotating globe ─── */
         .globe-eye-bg {
@@ -7491,6 +7509,11 @@ body.light-mode .gollum-fab .gl-lid { fill: var(--bg-elev); }
     font-family: var(--font-mono);
     vertical-align: middle;
 }
+/* A <button> does not inherit the page's font: the browser gives it its
+   own, and the bid and the ask printed on these two in Arial beside a
+   spread in the mono face (2026-11-06). The platform-wide reset is the
+   UI plan's next stage; the ticket cannot wait for it. */
+.sv-ticket button { font: inherit; }
 .tk-side {
     display: flex;
     flex-direction: column;

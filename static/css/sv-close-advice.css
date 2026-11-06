@@ -64,6 +64,16 @@
      (sauron.css). At bottom: 0 the phone nav would cover the bar and the
      Eye would sit on its Clear button. */
 body:has(.sv-sel-bar) .main-content { overflow-x: clip; }
+/* The clip's other half (2026-11-06). .main-content is a flex item, and a
+   flex item's automatic minimum width is zero only while it is a scroll
+   container: overflow-x: hidden made it one, clip does not. Under the clip
+   the column grew to its widest content (the positions table) and ran under
+   the signal rail, whose room is the column's margin-right: on the
+   synthetic fixture 44 px with the rail shut, 280 px with it open at 1280
+   and 1440, 33 px at 1920, and 159 px on /portfolio/. Zero gives the column
+   back its track; the table scrolls in its own wrapper, as it did under
+   hidden. */
+body:has(.sv-sel-bar) .main-content { min-width: 0; }
 .sv-sel-bar {
     position: sticky;
     bottom: calc(var(--se-bottom-edge, 24px) + var(--se-fab-size, 56px) + 16px);

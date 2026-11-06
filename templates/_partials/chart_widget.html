@@ -379,6 +379,18 @@ Optional page data (json_script blocks the widget picks up when present):
     color: var(--text-secondary, #7aaa8a);
 }
 .sv-pos-legend[hidden] { display: none; }
+/* The chart library's credit (2026-11-06): the last line under the chart,
+   always there, in the captions' voice. Its link takes the base link face
+   (sauron.css). */
+.sv-chart-credit {
+    margin-top: 4px;
+    padding: 0 2px;
+    font-family: var(--font-mono, monospace);
+    font-size: 10px;
+    letter-spacing: .02em;
+    line-height: 1.5;
+    color: var(--text-secondary, #7aaa8a);
+}
 /* Whose candles these are (2026-10-31): the feed in words, what the
    series left out or marks, whose prices the position lines are, and why
    the live quote is not drawn when it is not. The first line under the
@@ -889,6 +901,17 @@ first one arrives and whenever the map cannot be read.{% endcomment %}
 <div class="sv-pos-legend" id="{{ chart_id }}-pos-legend" hidden>
     <span class="sv-pos-legend-title">Positioning:</span>
     <span class="sv-pos-legend-words" data-role="words"></span>
+</div>
+
+{% comment %}The chart library's credit (2026-11-06). lightweight-charts is
+TradingView's, under the Apache License 2.0, and its licence asks for TradingView
+to be named as the product's creator: the attribution notice of its NOTICE
+file and a link to https://www.tradingview.com/ on a page the users see. Last
+in the caption row and never hidden: wherever the chart is drawn, the credit
+is under it.{% endcomment %}
+<div class="sv-chart-credit">
+    <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">Charts by TradingView</a>
+    · TradingView Lightweight Charts™ · Copyright (c) 2023 TradingView, Inc.
 </div>
 
 <!-- Lightweight Charts library (loaded once globally) -->
