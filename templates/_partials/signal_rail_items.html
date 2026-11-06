@@ -66,7 +66,7 @@ first render passes rail_initial and renders those rows itself.
                         title="Pass — takes it off your rail on every device; the engine still sees it"
                         aria-label="Pass on {{ s.instrument.symbol }} signal"
                         onclick="event.preventDefault(); event.stopPropagation(); window.dismissSignal && window.dismissSignal({{ s.id }});">&times;</button>
-                <a href="{{ signals_url }}" class="sr-signal" style="text-decoration:none;">
+                <a href="{{ signals_url }}" class="sr-signal" aria-haspopup="dialog" aria-expanded="false" style="text-decoration:none;">
                     <div class="sr-dot" style="background:{% if s.direction == 'bullish' %}var(--accent){% else %}var(--accent-red){% endif %};"></div>
                     <div class="sr-detail">
                         <div class="sr-row1">
@@ -112,6 +112,7 @@ first render passes rail_initial and renders those rows itself.
                         <span class="sr-pop-sym">{{ s.instrument.symbol }}</span>
                         <span class="sr-pop-dir sr-pop-dir-{{ s.direction }}">{{ s.direction|upper }}</span>
                         {% if s.urgency %}<span class="sr-urg sr-urg-{{ s.urgency }}" style="margin-left:auto;">{{ s.urgency|upper }}</span>{% endif %}
+                        <button type="button" class="sv-pop-x" aria-label="Close this card" title="Close (Esc)">&times;</button>
                     </div>
                     {% if s.acted %}
                     {% comment %}The banner exists so the operator reads
@@ -194,7 +195,15 @@ first render passes rail_initial and renders those rows itself.
                     it too. Your own exact hand position on THIS signal is
                     one position per signal: the server refuses a second
                     (manual_trade's duplicate check), so the card says so
-                    rather than offering a ticket it would refuse.{% endcomment %}
+                    rather than offering a ticket it would refuse.
+
+                    THE FOOT (2026-11-06): both action rows ride a sticky foot
+                    (static/css/sv-rail.css), so TAKE TRADE and PASS stay in
+                    view while a long card's body scrolls between its head
+                    and them; ALL SIGNALS keeps the way to /signals/ that a
+                    click on the card used to be (a click now pins this
+                    card).{% endcomment %}
+                    <div class="sr-pop-foot">
                     <div class="sr-pop-actions sr-pop-actions-react">
                         {% if s.acted and s.acted.by == "manual" and s.acted.exact %}
                         <span class="sr-pop-one">One position per signal: #{{ s.acted.trade_id }} is open.</span>
@@ -214,11 +223,13 @@ first render passes rail_initial and renders those rows itself.
                     {# Explore row — secondary deep-dive actions. #}
                     <div class="sr-pop-actions">
                         <a href="{% url 'instrument_detail' s.instrument.symbol %}" class="sr-pop-btn">▸ INSTRUMENT</a>
+                        <a href="{{ signals_url }}" class="sr-pop-btn">▸ ALL SIGNALS</a>
                         <button type="button" class="sr-pop-btn"
                                 data-ask-sauron="{{ s.direction|upper }} {{ s.instrument.symbol }}{% if s.rule_name %} ({{ s.rule_name }}){% endif %}"
                                 data-ask-kind="signal">
                             ▸ ASK SAURON
                         </button>
+                    </div>
                     </div>
                 </div>
             </div>

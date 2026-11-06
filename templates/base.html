@@ -1682,44 +1682,65 @@
     });
     return { top: top + 12, bottom: bottom - 12 };
   }
+  /* Shared with the portal engine (UPGRADE-9), which places the
+     watchlist's cards between the same bands. */
+  window.svChromeBounds = chromeBounds;
+  /* ON CLICK, PINNED, AND FITTING THE SCREEN (2026-11-06). A click or a
+     tap on the card (a.sr-signal) pins its popup: it stays while the hand
+     leaves, the rail sweeps or the tab is switched, and closes on an
+     outside click or tap, Esc, its × or a second click (window.svPin, in
+     UPGRADE-9, keeps one pinned popup on the page). Hover still previews
+     on a desktop, unchanged, and opens nothing while a card is pinned. A
+     modified click keeps the browser's own meaning.
+
+     Placement: the card is capped at the space between the fixed chrome
+     bands and scrolls inside, its head and its foot (TAKE TRADE, PASS)
+     sticky (static/css/sv-rail.css); its top sits on the card's top, slid
+     up only as far as the bottom band requires and never above the top
+     band; the arrow points at the card; a narrow window caps its width to
+     the room left of the rail. A pinned card follows the rail's scroll. */
+  function placePopup(wrap, pop) {
+    var rect = wrap.getBoundingClientRect();
+    var cb = chromeBounds();
+    var space = Math.max(120, cb.bottom - cb.top);
+    pop.style.maxHeight = space + 'px';
+    pop.style.overflowY = 'auto';
+    var room = rect.left - 24;
+    pop.style.width = room < 300 ? Math.max(200, room) + 'px' : '';
+    var ph = Math.min(pop.offsetHeight || 220, space);
+    var top = rect.top;
+    if (top + ph > cb.bottom) top = cb.bottom - ph;
+    if (top < cb.top) top = cb.top;
+    /* Right anchor: 12px gutter from the rail's left edge — popup
+       sits in the page content area, NOT overlapping the rail. */
+    pop.style.right = (window.innerWidth - rect.left + 12) + 'px';
+    pop.style.left = 'auto';
+    pop.style.top = top + 'px';
+    var arrow = rect.top + rect.height / 2 - top;
+    arrow = Math.max(14, Math.min(arrow, ph - 14));
+    pop.style.setProperty('--sr-arrow-y', arrow + 'px');
+  }
   function showPopup(wrap) {
     var pop = wrap.querySelector('.sr-popup');
     if (!pop) return;
-    var rect = wrap.getBoundingClientRect();
     /* Make popup measurable so we can clamp to viewport vertically. */
     pop.style.visibility = 'hidden';
     pop.style.opacity = '0';
-    pop.style.maxHeight = '';
-    pop.style.overflowY = '';
     pop.classList.add('show');
-    var pw = pop.offsetWidth || 300;
-    var ph = pop.offsetHeight || 220;
-    /* Right anchor: 12px gutter from the rail's left edge — popup
-       sits in the page content area, NOT overlapping the rail. */
-    var rightOf = (window.innerWidth - rect.left) + 12;
-    var cb = chromeBounds();
-    /* Taller than the space between the bands: cap and scroll — the
-       action buttons at the bottom must stay reachable. */
-    var space = cb.bottom - cb.top;
-    if (ph > space) {
-      pop.style.maxHeight = space + 'px';
-      pop.style.overflowY = 'auto';
-      ph = space;
-    }
-    /* Vertical: centered on the row, clamped between the chrome bands. */
-    var top = rect.top + rect.height / 2 - ph / 2;
-    top = Math.max(cb.top, Math.min(top, cb.bottom - ph));
-    pop.style.right = rightOf + 'px';
-    pop.style.left = 'auto';
-    pop.style.top  = top + 'px';
+    placePopup(wrap, pop);
     /* Now reveal. */
     pop.style.visibility = '';
     pop.style.opacity = '';
   }
+  function pinned(pop) { return !!(pop && pop.classList.contains('sv-pinned')); }
   function hidePopup(wrap) {
     var pop = wrap.querySelector('.sr-popup');
     if (!pop) return;
     pop.classList.remove('show');
+    pop.classList.remove('sv-pinned');
+    var a = wrap.querySelector('a.sr-signal');
+    if (a) a.setAttribute('aria-expanded', 'false');
+    if (window.svPin) window.svPin.drop(pop);
     /* See SV.popup in static/js/sv-notif-card.js: the registry is how the
        other engines' scroll handlers know a scroll came from inside a card
        the operator is reading rather than from a stale anchor. */
@@ -1727,6 +1748,17 @@
     /* (2026-11-06) A rail refresh that waited for this card lands now,
        unless the hand is still on the rail (UPGRADE-3, svRailRelease). */
     if (window.svRailRelease) window.svRailRelease();
+  }
+  function pinCard(wrap) {
+    var pop = wrap.querySelector('.sr-popup');
+    if (!pop) return;
+    if (wrap._srCancel) wrap._srCancel();
+    if (window.svPin) window.svPin.take(pop, function () { hidePopup(wrap); }, wrap);
+    showPopup(wrap);
+    pop.classList.add('sv-pinned');
+    var a = wrap.querySelector('a.sr-signal');
+    if (a) a.setAttribute('aria-expanded', 'true');
+    if (window.SV && SV.popup) SV.popup.opened(pop);
   }
   function bind() {
     document.querySelectorAll('.sr-signal-wrap').forEach(function(wrap) {
@@ -1740,10 +1772,12 @@
          pointer is on the card: `maybeHide` checks where the pointer went
          first, and arriving on either end cancels it. A card the operator
          has REACHED closes when they leave it or press Escape, not on a
-         stopwatch racing their hand to the action buttons. */
+         stopwatch racing their hand to the action buttons. A PINNED card
+         does not close on the hand at all. */
       function scheduleHide() {
         if (hideTimer) clearTimeout(hideTimer);
-        hideTimer = setTimeout(function() { hidePopup(wrap); }, 260);
+        if (pinned(pop)) return;
+        hideTimer = setTimeout(function() { if (!pinned(pop)) hidePopup(wrap); }, 260);
       }
       function cancelHide() {
         if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
@@ -1757,10 +1791,17 @@
         }
         scheduleHide();
       }
+      wrap._srCancel = function () {
+        cancelHide();
+        if (enterTimer) { clearTimeout(enterTimer); enterTimer = null; }
+      };
       wrap.addEventListener('mouseenter', function() {
         cancelHide();
+        /* No hover preview while any popup is pinned (2026-11-06). */
+        if (window.svPin && window.svPin.current()) return;
         if (enterTimer) clearTimeout(enterTimer);
         enterTimer = setTimeout(function() {
+          if (window.svPin && window.svPin.current()) return;
           showPopup(wrap);
           if (pop && window.SV && SV.popup) SV.popup.opened(pop);
         }, window.SV_HOVER_BEAT_MS || 450);
@@ -1784,10 +1825,103 @@
       }
     });
   }
+  /* The rail's clicks, delegated to the body no refresh replaces: the
+     card pins or unpins its popup, the × closes it. */
+  var railBody = document.getElementById('railSignalsBody');
+  if (railBody) {
+    railBody.addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      var x = t.closest('.sv-pop-x');
+      if (x) {
+        var xw = x.closest('.sr-signal-wrap');
+        e.preventDefault();
+        e.stopPropagation();
+        if (xw) hidePopup(xw);
+        return;
+      }
+      var a = t.closest('a.sr-signal');
+      if (!a || !railBody.contains(a)) return;
+      if (e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      var wrap = a.closest('.sr-signal-wrap');
+      if (!wrap) return;
+      if (pinned(wrap.querySelector('.sr-popup'))) hidePopup(wrap);
+      else pinCard(wrap);
+    });
+    var placing = false;
+    function replace() {
+      if (placing) return;
+      placing = true;
+      var raf = window.requestAnimationFrame
+        ? function (f) { window.requestAnimationFrame(f); }
+        : function (f) { setTimeout(f, 16); };
+      raf(function () {
+        placing = false;
+        var pop = railBody.querySelector('.sr-popup.sv-pinned');
+        var wrap = pop && pop.closest('.sr-signal-wrap');
+        if (wrap) placePopup(wrap, pop);
+      });
+    }
+    railBody.addEventListener('scroll', replace);
+    window.addEventListener('resize', replace);
+  }
+  /* A row of the headband SIGNALS popup opens its card in the rail: the
+     rail opens and SIGNALS un-collapses if they were not, the card scrolls
+     into view and its popup pins. A card the rail does not show (left the
+     rail, or hidden by a filter) opens /signals/ instead. */
+  window.svRailFocus = function (id) {
+    var sid = String(id);
+    var rail = document.getElementById('signalsRail');
+    var sec = document.getElementById('railSignals');
+    var find = function () {
+      return document.querySelector('#railSignalsBody .sr-signal-wrap[data-signal-id="' + sid + '"]');
+    };
+    var wrap = find();
+    var gone = !wrap || wrap.style.display === 'none'
+      || (window.getComputedStyle && window.getComputedStyle(wrap).display === 'none');
+    if (!rail || !sec || gone) { window.location.assign('/signals/'); return; }
+    var wait = 0;
+    if (!rail.classList.contains('open')) {
+      rail.classList.add('open');
+      try { localStorage.setItem('sauron_signals_rail', 'open'); } catch (e) {}
+      wait = 320;
+    }
+    if (sec.classList.contains('collapsed')) {
+      sec.classList.remove('collapsed');
+      try { localStorage.setItem('sauron_rail_sig', '0'); } catch (e) {}
+      wait = 320;
+    }
+    if (window.svPin) window.svPin.closeCurrent();
+    setTimeout(function () {
+      var w = find();
+      if (!w) { window.location.assign('/signals/'); return; }
+      if (w.scrollIntoView) w.scrollIntoView({ block: 'nearest' });
+      pinCard(w);
+    }, wait);
+  };
+  var hbRows = document.getElementById('hbSignalRows');
+  if (hbRows) {
+    hbRows.addEventListener('click', function (e) {
+      var row = e.target && e.target.closest ? e.target.closest('.sv-sig-row[data-signal-id]') : null;
+      if (!row) return;
+      e.preventDefault();
+      e.stopPropagation();
+      window.svRailFocus(row.getAttribute('data-signal-id'));
+    });
+    hbRows.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      var row = e.target && e.target.closest ? e.target.closest('.sv-sig-row[data-signal-id]') : null;
+      if (row) window.svRailFocus(row.getAttribute('data-signal-id'));
+    });
+  }
   /* Escape closes whichever rail card is open — the universal way out of
-     anything floating, and previously the one this card did not offer. */
+     anything floating, and previously the one this card did not offer.
+     Not while an overlay dialog is open (the TAKE TRADE ticket over a
+     pinned card): Esc there is the dialog's. */
   document.addEventListener('keydown', function(e) {
     if (e.key !== 'Escape' && e.key !== 'Esc') return;
+    if (document.querySelector('.sv-dialog.is-open')) return;
     document.querySelectorAll('.sr-signal-wrap').forEach(function(wrap) {
       if (wrap._srHide) wrap._srHide();
     });
@@ -1885,7 +2019,7 @@
     var wrap = document.querySelector('.sr-signal-wrap[data-signal-id="' + sid + '"]');
     if (!wrap) return;
     var pop = wrap.querySelector('.sr-popup');
-    if (pop) pop.classList.remove('show');
+    if (wrap._srHide) wrap._srHide(); else if (pop) pop.classList.remove('show');
     /* Capture height first so the max-height transition has somewhere
        to animate FROM — and animate it INLINE: the inline start value
        set here would beat any max-height declared on the class, so the
@@ -4581,6 +4715,11 @@ window.svWheelMarquee = function (frame, track) {
     if (chip) chip.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
+      /* A card pinned on the rail (or the pinned headband list) unpins
+         first: the answer it waited for is the one to read now. */
+      const cur = window.svPin && window.svPin.current();
+      const rb = document.getElementById('railSignalsBody');
+      if (cur && ((rb && rb.contains(cur)) || cur.id === 'hbSignalsDD')) window.svPin.closeCurrent();
       window.svRailRelease(true);
     });
   })();
@@ -5020,6 +5159,67 @@ window.svWheelMarquee = function (frame, track) {
     if (!pop || !window.SV || !SV.popup) return;
     (open ? SV.popup.opened : SV.popup.closed)(pop);
   }
+  /* ONE PINNED POPUP ON THE PAGE (2026-11-06). A click or a tap pins the
+     rail's signal card (Phase 62.1), the watchlist's and the data
+     headband's cards and the bottom bar's dropdowns (below): pinning one
+     closes the one before, and while one is pinned no hover preview opens
+     anywhere. A pinned popup stays while the hand leaves, the page
+     scrolls, the live sweep runs or the tab is switched; it closes on an
+     outside click or tap (not inside an open overlay dialog — the TAKE
+     TRADE ticket opened over a pinned card does not close the card), Esc
+     (not while a dialog is open), its ×, a second click on what opened
+     it, or its anchor leaving the page. */
+  window.svPin = (function () {
+    var cur = null;
+    function close(c) { try { c.close(); } catch (e) { /* closed anyway */ } }
+    return {
+      take: function (pop, closeFn, anchor) {
+        if (cur && cur.pop !== pop) { var prev = cur; cur = null; close(prev); }
+        cur = { pop: pop, close: closeFn, anchor: anchor || null };
+      },
+      drop: function (pop) { if (cur && (!pop || cur.pop === pop)) cur = null; },
+      current: function () { return cur ? cur.pop : null; },
+      anchor: function () { return cur ? cur.anchor : null; },
+      closeCurrent: function () { if (cur) { var c = cur; cur = null; close(c); } }
+    };
+  })();
+  function isPinned(pop) { return !!(pop && pop.classList && pop.classList.contains('sv-pinned')); }
+  function dialogOpen() { return !!document.querySelector('.sv-dialog.is-open'); }
+  /* The × of a pinned portal popup or dropdown, appended once to its head
+     (the rail's card renders its own). */
+  function addPopX(pop, headSel, closeFn) {
+    if (pop._svX) return;
+    var head = pop.querySelector(headSel);
+    if (!head) return;
+    var x = document.createElement('button');
+    x.setAttribute('type', 'button');
+    x.className = 'sv-pop-x';
+    x.setAttribute('aria-label', 'Close');
+    x.setAttribute('title', 'Close (Esc)');
+    x.textContent = '\u00d7';
+    x.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeFn();
+    });
+    head.appendChild(x);
+    pop._svX = x;
+  }
+  document.addEventListener('pointerdown', function (e) {
+    var pop = window.svPin.current();
+    var t = e.target;
+    if (!pop || !t || t.nodeType !== 1) return;
+    if (pop.contains(t)) return;
+    var anchor = window.svPin.anchor();
+    if (anchor && anchor.contains(t)) return;
+    if (t.closest && t.closest('.sv-dialog, .sv-backdrop')) return;
+    window.svPin.closeCurrent();
+  }, true);
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape' && e.key !== 'Esc') return;
+    if (!window.svPin.current() || dialogOpen()) return;
+    window.svPin.closeCurrent();
+  });
   function showPortalPopup(item, popSelector, maxW, placement) {
     /* An item a live swap has taken is anchored nowhere: its rect is all
        zeros, and its card would open in the corner pointing at nothing. */
@@ -5040,23 +5240,33 @@ window.svWheelMarquee = function (frame, track) {
        their cursor onto the popup to click links/buttons inside.    */
     pop.style.pointerEvents = 'auto';
     var r = item.getBoundingClientRect();
-    var ph = pop.offsetHeight || 0;
+    /* Fit the screen (2026-11-06): never wider than the window allows (a
+       360px phone), and capped at the height left, scrolling inside. */
+    var w = Math.min(maxW, window.innerWidth - 32);
+    pop.style.maxWidth = w + 'px';
+    pop.style.minWidth = w < 320 ? w + 'px' : '';
     var top, left;
     if (placement === 'left') {
-      /* Beside the item, vertically centered — the signal-card pattern. */
+      /* Beside the item, centred on it and clamped between the chrome
+         bands — the signal-card pattern; the space between them is its
+         height. */
+      var cb = window.svChromeBounds ? window.svChromeBounds()
+        : { top: 12, bottom: window.innerHeight - 12 };
+      var space = Math.max(120, cb.bottom - cb.top);
+      pop.style.maxHeight = space + 'px';
+      var ph = Math.min(pop.offsetHeight || 0, space);
       top = r.top + r.height / 2 - ph / 2;
-      left = r.left - maxW - 12;
+      top = Math.max(cb.top, Math.min(top, cb.bottom - ph));
+      left = r.left - w - 12;
     } else {
+      /* Under its cell, always: the card is capped at the height left
+         below it rather than slid up over the band it describes. */
       top = r.bottom + 4;
       left = r.left;
-    }
-    /* Clamp to the viewport on both axes: headband popups near the right
-       edge slide left; rail popups near the bottom slide up. */
-    if (ph && top + ph > window.innerHeight - 12) {
-      top = window.innerHeight - ph - 12;
+      pop.style.maxHeight = Math.max(120, window.innerHeight - top - 12) + 'px';
     }
     if (top < 12) top = 12;
-    if (left + maxW > window.innerWidth - 16) left = window.innerWidth - maxW - 16;
+    if (left + w > window.innerWidth - 16) left = window.innerWidth - w - 16;
     if (left < 16) left = 16;
     pop.style.top = top + 'px';
     pop.style.left = left + 'px';
@@ -5091,6 +5301,8 @@ window.svWheelMarquee = function (frame, track) {
      the gap itself. */
   function maybeHidePortalPopup(item, pop, to) {
     if (!pop) return;
+    /* A pinned card does not close on the hand (2026-11-06). */
+    if (isPinned(pop)) return;
     if (to && to.nodeType === 1
         && ((item && item.contains(to)) || pop.contains(to))) {
       if (item && item._popHideTimer) {
@@ -5103,11 +5315,21 @@ window.svWheelMarquee = function (frame, track) {
   function scheduleHidePortalPopup(item, pop) {
     if (!pop) return;
     if (item._popHideTimer) clearTimeout(item._popHideTimer);
-    item._popHideTimer = setTimeout(function() { hidePortalPopup(pop); }, POP_LEAVE_MS);
+    item._popHideTimer = setTimeout(function() {
+      if (!isPinned(pop)) hidePortalPopup(pop);
+    }, POP_LEAVE_MS);
   }
   function hidePortalPopup(pop) {
     if (!pop) return;
     popRegister(pop, false);
+    if (isPinned(pop)) {
+      pop.classList.remove('sv-pinned');
+      if (pop._origParent) pop._origParent.setAttribute('aria-expanded', 'false');
+    }
+    window.svPin.drop(pop);
+    pop.style.maxHeight = '';
+    pop.style.maxWidth = '';
+    pop.style.minWidth = '';
     pop.style.display = '';
     pop.style.position = '';
     pop.style.zIndex = '';
@@ -5140,7 +5362,8 @@ window.svWheelMarquee = function (frame, track) {
      or open across it. */
   function resetPortals() {
     if (beatItem) disarmPortal(beatItem);
-    portalOpen.slice().forEach(function(p) { hidePortalPopup(p); });
+    /* A pinned card is not a hand that left unseen: it stays. */
+    portalOpen.slice().forEach(function(p) { if (!isPinned(p)) hidePortalPopup(p); });
     portalRewake = true;
   }
 
@@ -5151,6 +5374,7 @@ window.svWheelMarquee = function (frame, track) {
      nothing. */
   document.addEventListener('keydown', function(e) {
     if ((e.key === 'Escape' || e.key === 'Esc') && activePopup) {
+      if (isPinned(activePopup) && dialogOpen()) return;
       hidePortalPopup(activePopup);
     }
   });
@@ -5167,6 +5391,8 @@ window.svWheelMarquee = function (frame, track) {
        A swap that names no region keeps the old blanket behaviour. */
     var region = e && e.detail && e.detail.svRegion;
     var anchor = activePopup._origParent;
+    /* A pinned card whose cell is still on the page stays pinned. */
+    if (isPinned(activePopup) && anchor && anchor.isConnected) return;
     if (region && region.contains && anchor && anchor.isConnected
         && region !== anchor && !region.contains(anchor)) return;
     hidePortalPopup(activePopup);
@@ -5189,14 +5415,34 @@ window.svWheelMarquee = function (frame, track) {
   // One beat at a time: arming an item disarms the last one, whose leave
   // may never have come (a swap removed it from under the pointer).
   function armPortal(item, sel, width, side){
+    /* No hover preview while a popup is pinned (2026-11-06). */
+    if (window.svPin.current()) return;
     if (beatItem && beatItem !== item) disarmPortal(beatItem);
     if (item._svBeat) clearTimeout(item._svBeat);
     beatItem = item;
     item._svBeat = setTimeout(function(){
       item._svBeat = null;
       if (beatItem === item) beatItem = null;
+      if (window.svPin.current()) return;
       showPortalPopup(item, sel, width, side);
     }, window.SV_HOVER_BEAT_MS || 450);
+  }
+  /* A click or a tap pins the item's card at once (2026-11-06). */
+  function pinPortal(item, sel, width, side){
+    disarmPortal(item);
+    var was = item._portalPop;
+    if (was && isPinned(was) && was.style.display === 'block') {
+      hidePortalPopup(was);
+      return;
+    }
+    showPortalPopup(item, sel, width, side);
+    var pop = item._portalPop;
+    if (!pop || pop.style.display !== 'block') return;
+    window.svPin.take(pop, function(){ hidePortalPopup(pop); }, item);
+    pop.classList.add('sv-pinned');
+    addPopX(pop, '.dh-pop-head', function(){ hidePortalPopup(pop); });
+    item.setAttribute('aria-haspopup', 'dialog');
+    item.setAttribute('aria-expanded', 'true');
   }
   function disarmPortal(item){
     if (item._svBeat) { clearTimeout(item._svBeat); item._svBeat = null; }
@@ -5216,9 +5462,18 @@ window.svWheelMarquee = function (frame, track) {
     var item = node && node.nodeType === 1 && node.closest ? node.closest(sel) : null;
     return item && host.contains(item) ? item : null;
   }
-  function delegatePortal(host, sel, arm){
+  function delegatePortal(host, sel, arm, pin){
     if (!host || host._svPortalHost) return;
     host._svPortalHost = true;
+    /* The click pins (2026-11-06); a modified click keeps the browser's
+       own meaning (a new tab). */
+    if (pin) host.addEventListener('click', function(e){
+      var item = portalItemAt(host, sel, e.target);
+      if (!item) return;
+      if (e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      pin(item);
+    });
     host.addEventListener('mouseover', function(e){
       var item = portalItemAt(host, sel, e.target);
       var from = e.relatedTarget;
@@ -5249,12 +5504,16 @@ window.svWheelMarquee = function (frame, track) {
   // Data headband popups (portal to body) — hover-friendly
   delegatePortal(document.getElementById('dataHeadband'), '.dh-item', function(item){
     armPortal(item, '.dh-pop', 380);
+  }, function(item){
+    pinPortal(item, '.dh-pop', 380);
   });
 
   // Watchlist rail popups — same portal, same lifecycle, but placed to the
   // SIDE of the rail like the signal cards' popups, not under the item.
   delegatePortal(document.getElementById('railWatchBody'), '.wl-item', function(item){
     armPortal(item, '.wl-pop', 380, 'left');
+  }, function(item){
+    pinPortal(item, '.wl-pop', 380, 'left');
   });
 
   // News ticker popups (portal to body), delegated to #tickerBar — bound
@@ -5406,25 +5665,52 @@ window.svWheelMarquee = function (frame, track) {
   // As body children the dropdowns' hovercard tier wins for real. The
   // CSS :hover display rule no longer reaches them, so JS owns show/hide,
   // with a short grace so the pointer can travel into the dropdown.
+  //
+  // ON CLICK, PINNED (2026-11-06): a click or a tap on a cell pins its
+  // dropdown open — it stays while the hand leaves and closes on an
+  // outside click, Esc, its × or a second click on the cell (svPin); hover
+  // still opens it on the beat, and nothing opens on hover while a popup
+  // is pinned. It opens upward, capped at the height up to the top chrome
+  // and scrolling inside, its head sticky. The "▸ View …" footer, dead
+  // since the dropdown left its cell for <body>, navigates to the cell's
+  // page again.
   document.querySelectorAll('.info-panel-wrap .ip-cat').forEach(function(cat){
     var dd = cat.querySelector('.ip-dropdown');
     if(!dd) return;
     document.body.appendChild(dd);
+    var kids = dd.children;
+    var foot = kids.length ? kids[kids.length - 1] : null;
+    if (foot && foot.classList.contains('ip-dd-item')) foot.setAttribute('data-sv-dd-foot', '');
     var hideTimer = null;
+    function pinnedDd() { return dd.classList.contains('sv-pinned'); }
+    function hideNow(){
+      dd.style.display = 'none';
+      // display:none keeps the rows in the document, so a dwell card
+      // anchored to one never sees its anchor "detach" — close it with
+      // the panel it belongs to, or it floats over a page alone.
+      if (window.SV && window.SV.dwell && window.SV.dwell.hideWithin) {
+        window.SV.dwell.hideWithin(dd);
+      }
+    }
     function hideSoon(){
       if (hideTimer) clearTimeout(hideTimer);
+      if (pinnedDd()) return;
       hideTimer = setTimeout(function(){
-        dd.style.display = 'none';
-        // display:none keeps the rows in the document, so a dwell card
-        // anchored to one never sees its anchor "detach" — close it with
-        // the panel it belongs to, or it floats over a page alone.
-        if (window.SV && window.SV.dwell && window.SV.dwell.hideWithin) {
-          window.SV.dwell.hideWithin(dd);
-        }
+        if (pinnedDd()) return;
+        hideNow();
       }, 120);
     }
     function cancelHide(){
       if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    }
+    function unpin(){
+      cancelHide();
+      dd.classList.remove('sv-pinned');
+      cat.setAttribute('aria-expanded', 'false');
+      window.svPin.drop(dd);
+      popRegister(dd, false);
+      hideNow();
+      if (dd.id === 'hbSignalsDD' && window.svRailRelease) window.svRailRelease();
     }
     // Published for the news dwell-card: stepping from a row onto its
     // card exits this dropdown, and without a shared grace the panel
@@ -5441,6 +5727,9 @@ window.svWheelMarquee = function (frame, track) {
       var r = cat.getBoundingClientRect();
       dd.style.visibility = 'hidden'; dd.style.display = 'block';
       dd.style.pointerEvents = 'auto';
+      // The height left up to the top chrome, never under 160px.
+      var cb = window.svChromeBounds ? window.svChromeBounds() : { top: 12 };
+      dd.style.maxHeight = Math.max(160, r.top - (cb.top - 12) - 8) + 'px';
       // Clamp with the MEASURED width — the old assumed 340px let the
       // wider dropdowns overshoot the right edge by their difference.
       var ddW = dd.offsetWidth || 340;
@@ -5454,16 +5743,41 @@ window.svWheelMarquee = function (frame, track) {
     cat.addEventListener('mouseenter', function(){
       cancelHide();
       if (dd.style.display === 'block') return;
+      if (window.svPin.current()) return;
       if (openTimer) clearTimeout(openTimer);
-      openTimer = setTimeout(function(){ openTimer = null; open(); },
-                             window.SV_HOVER_BEAT_MS || 450);
+      openTimer = setTimeout(function(){
+        openTimer = null;
+        if (window.svPin.current()) return;
+        open();
+      }, window.SV_HOVER_BEAT_MS || 450);
     });
     cat.addEventListener('mouseleave', function(){
       if (openTimer) { clearTimeout(openTimer); openTimer = null; }
       hideSoon();
     });
+    cat.addEventListener('click', function(e){
+      if (e.button || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      e.preventDefault();
+      if (openTimer) { clearTimeout(openTimer); openTimer = null; }
+      if (pinnedDd() && dd.style.display === 'block') { unpin(); return; }
+      cancelHide();
+      window.svPin.take(dd, unpin, cat);
+      open();
+      dd.classList.add('sv-pinned');
+      addPopX(dd, '.ip-dd-head', unpin);
+      cat.setAttribute('aria-haspopup', 'dialog');
+      cat.setAttribute('aria-expanded', 'true');
+      popRegister(dd, true);
+    });
     dd.addEventListener('mouseenter', cancelHide);
     dd.addEventListener('mouseleave', hideSoon);
+    dd.addEventListener('click', function(e){
+      var f = e.target && e.target.closest ? e.target.closest('[data-sv-dd-foot]') : null;
+      if (!f || !dd.contains(f)) return;
+      e.preventDefault();
+      var href = cat.getAttribute('href');
+      if (href) window.location.assign(href);
+    });
   });
 
   // Info panel minimize / restore toggle
