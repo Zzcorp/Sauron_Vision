@@ -64,17 +64,29 @@ COMMAND = BASE / "bot_program" / "management" / "commands" / "orcs.py"
 #: merge, the claim, the watchdogs, the breaker, the Orc's states); O2a's
 #: arm (2026-11-05) adds the queued intents at the tick (intents.py) and
 #: the scheduler's tickets. O2a's light (2026-11-05) adds no module: it
-#: wires the render pass to the scheduler and rewrites the words.
+#: wires the render pass to the scheduler and rewrites the words. O2b's
+#: route in shadow (2026-11-06) adds the pure router (router.py); O2b's
+#: probes (2026-11-06) the probes and their forward grade (probes.py).
 O2_MODULES = ("mind_gateway", "doctrine", "validator", "mandate", "evidence",
-              "mind", "scheduler", "intents")
+              "mind", "scheduler", "intents", "router", "probes")
 #: Each definition O2 adds to an O1 module, by module and qualified name.
 O2_CODE = {
     "journal": ("lock_budget", "orc_lock"),
-    "models": ("OrcIntent", "OrcIntent.Meta", "OrcIntent.__str__"),
+    "models": ("OrcIntent", "OrcIntent.Meta", "OrcIntent.__str__",
+               # O2b's probes (2026-11-06): the probe pairs' table
+               "OrcTierGrade", "OrcTierGrade.Meta", "OrcTierGrade.__str__"),
     # O2a's mind (2026-11-05)
     "switches": ("_component_on", "gate_code", "minds_on",
                  # O2a's queue (2026-11-05)
-                 "minds_switch_on"),
+                 "minds_switch_on",
+                 # O2b's routed rung (2026-11-06): the router's switch
+                 "router_on",
+                 # O2b's probes (2026-11-06): the probes' switch, and a
+                 # caller's own switch (N2) read beside the four gates
+                 "probes_on", "caller_code",
+                 # O2b's frontier (2026-11-06): the frontier's switch, the
+                 # twin's own and r5's beside the wake's (B.15c)
+                 "frontier_on"),
     "dossier": ("cost_fraction", "decision_bars", "events_of", "vctx"),
     "dossier_position": ("event_words", "_decisions", "_ps3",
                          "_last_expectation", "_realized_loss",
@@ -90,7 +102,13 @@ O2_CODE = {
              "_minds_switch_on", "RenderPass", "RenderPass.__new__",
              # O2a's light (2026-11-05): the gates read once per render, a
              # render pass that could not finish a wake (A.7)
-             "_gate_code", "_render_failed"),
+             "_gate_code", "_render_failed",
+             # O2b's route in shadow (2026-11-06): the route's money world
+             # (the budget's) and the route recorded on every render
+             "_route_world", "_route",
+             # O2b's frontier (2026-11-06): Fable's gate, its clauses read
+             # before the render (B.9)
+             "_fable_gate"),
     # O2a's light (2026-11-05): the words (A.4, A.62): a wake's status in
     # words, the card's intents and intellect, the plan on the line
     "notes": ("wake_status_t", "_intents", "intellect_after", "_has_plan",
@@ -98,8 +116,13 @@ O2_CODE = {
     # O2a's light (2026-11-05): /orc reads the minds once, and the Orc's
     # model calls today
     "surfaces": ("_minds", "_model_calls"),
+    # O2b's frontier (2026-11-06): the frontier quota, OrcSetting
+    # frontier_per_day, which the day row shows (B.8b)
+    "weather": ("frontier_per_day",),
     # O2a's queue (2026-11-05): the minds' worker, its ticket, its watchdog
-    "tasks": ("_think_ticket", "orc_think", "orc_minds_watch"),
+    "tasks": ("_think_ticket", "orc_think", "orc_minds_watch",
+              # O2b's probes (2026-11-06): the worker's probe pass, last
+              "_probe_pass"),
     # O2a's arm (2026-11-05): the O arm's would mode, the intents taken at
     # the tick and expired at the close (A.42-A.45b)
     "ghost": ("_faith", "_take_intents", "_to_would", "arm_effective",
@@ -113,7 +136,10 @@ O2_CODE = {
                      "Command._smoke", "Command._smoke_wake",
                      "Command._smoke_answer", "Command._orc_of",
                      "Command._gates_words", "Command._smoke_verdict",
-                     "Command._tokens"),
+                     "Command._tokens",
+                     # O2b's frontier (2026-11-06): the smoke's r5, only
+                     # through Fable's gate (B.15c, P35)
+                     "Command._smoke_fable"),
 }
 
 #: Every definition (function, class, method) of the package and of the
@@ -391,6 +417,11 @@ NAMED_BY_THE_SPEC = {
     # O2a's light (2026-11-05, the O2 spec A.62): the band's sentence under
     # THE TRADERS counts the living Orcs (switches, constants, models)
     "dashboard/council_band.py",
+    # O2b's routed rung (2026-11-06, the O2 spec §1.2.3, B.16a): the
+    # /ai-models/ card reads the router's switch and counts, per rung,
+    # today's would-routes (switches, models); it reads no model's words,
+    # so it is no surface (test items f and g still bind it)
+    "dashboard/views_ai_models.py",
 }
 
 #: The surfaces that show what a model wrote (N1.6, test items f and g).
@@ -402,10 +433,14 @@ SURFACES = {
 }
 #: What only the surfaces import (test item f). bot_program/models.py
 #: re-exports every Orc table for the app's model registry, OrcIntent
-#: included, and is allowed that one name.
+#: included, and is allowed that one name. O2b's probes (2026-11-06,
+#: changed on purpose): OrcTierGrade, which keeps what each rung answered
+#: of a probe pair, joins it, and the registry's re-export of it is
+#: allowed beside OrcIntent's (N1.6).
 SURFACE_ONLY = {"OrcIntent", "scheduler", "mandate", "validator", "mind",
-                "mind_gateway"}
-REGISTRY = ("bot_program/models.py", "OrcIntent")
+                "mind_gateway", "OrcTierGrade"}
+REGISTRY = {("bot_program/models.py", "OrcIntent"),
+            ("bot_program/models.py", "OrcTierGrade")}
 #: The reverse accessors from the platform's rows to the Orcs (test g).
 REVERSE = {"orc", "orc_leg", "orcs"}
 
@@ -1352,7 +1387,7 @@ class TheImportersAreFrozenTests(MindTestCase):
             if not parts & SURFACE_ONLY or rel in SURFACES:
                 continue
             with self.subTest(f"{rel}: {mod}.{name}"):
-                self.assertEqual((rel, name), REGISTRY)
+                self.assertIn((rel, name), REGISTRY)
 
 
 class NoReverseAccessorTests(MindTestCase):

@@ -64,7 +64,10 @@
 </style>
 
 <script>
-(function() {
+/* Drawn once Chart.js is here (_chart_assets.html, 2026-11-06): htmx runs
+   this block as soon as it swaps the fragment in, before the library it
+   brings has loaded. */
+window.svChartJsReady(function () {
   const data = {{ chart_data|safe }};
   const setupDist = {{ setup_dist|safe }};
   const rHist = {{ r_hist|safe }};
@@ -118,5 +121,5 @@
                  scales: { y: { beginAtZero: true } } },
     });
   }
-})();
+});
 </script>

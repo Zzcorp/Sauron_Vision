@@ -6,9 +6,10 @@ its journal, its tracks and grade, the setting, and the three tables of
 the dossier and the drums (O1c). OrcWake ships as a table only; O1c writes
 it. The tables only O2 writes ship in O2's own migrations (§10.7): O2a's
 (2026-11-05, migration 0049) adds OrcIntent, the proposals in shadow, and
-OrcWake's first send (`queued_at`) with the claim's index; OrcActionGrade,
-Captain, CaptainOrder and the 2026-10-09 additions marked O2 come with the
-later O2 commits.
+OrcWake's first send (`queued_at`) with the claim's index; O2b's
+(2026-11-06, migration 0050) adds OrcTierGrade, the probe pairs; Captain,
+CaptainOrder and the 2026-10-09 additions marked O2 come with the later O2
+commits.
 
 No `choices=` on any status or kind column: the allowed values are tuples
 in bot_program/orcs/constants.py, so a later PR adds one without a
@@ -285,6 +286,62 @@ class OrcIntent(models.Model):
 
     def __str__(self):
         return f"{self.orc_id} {self.kind} {self.status} {self.level_id}"
+
+
+class OrcTierGrade(models.Model):
+    """One probe pair (the O2 spec §1.2.2, B.11, B.12; O2b, 2026-11-06): a
+    wake a model read on its answering rung and, blind to that answer, a
+    neighbouring rung on the same stored dossier (an h0 or a boundary
+    probe; Fable's blind twin from O2b's last commit), in shadow. Each side
+    {action, level_id, valid, rule, stop, at}: the answer as kept (an id
+    only when it names the wake's own menu, else "unknown"), whether the
+    validator passed it, a tighten's would-stop (a price) and the answer's
+    moment; never a note. The two costs are AI spend in USD, shown on staff
+    pages only. Blocks of SEAT_WINDOW pairs per (boundary, kind, world);
+    the forward grade over the next final decision-frame bar after the
+    later answer (bot_program/orcs/probes.py). Shown only: no router reads
+    it."""
+    wake = models.ForeignKey(OrcWake, null=True, blank=True,
+                             on_delete=models.SET_NULL,
+                             related_name="tier_grades")
+    orc = models.ForeignKey(Orc, on_delete=models.CASCADE,
+                            related_name="tier_grades")
+    kind = models.CharField(max_length=8)      # constants.TIER_GRADE_KINDS
+    #: the band boundary a boundary probe crosses (PROBE_BOUNDARIES); null
+    #: for h0 and the twin
+    boundary = models.SmallIntegerField(null=True, blank=True)
+    world = models.CharField(max_length=8)     # constants.VENUES
+    #: the ANSWERING rungs (B.2b), and the router's own choice beside them
+    routed_rung = models.CharField(max_length=4)
+    probe_rung = models.CharField(max_length=4)
+    would_rung = models.CharField(max_length=4, blank=True)
+    routed = models.JSONField(default=dict, blank=True)
+    probe = models.JSONField(default=dict, blank=True)
+    agree_action = models.BooleanField(default=False)
+    agree_level = models.BooleanField(default=False)
+    routed_cost_usd = models.DecimalField(max_digits=10, decimal_places=6,
+                                          default=0)
+    probe_cost_usd = models.DecimalField(max_digits=10, decimal_places=6,
+                                         default=0)
+    #: the forward grade (B.12): each side's R, and the graded bar's end
+    fwd_routed_r = models.FloatField(null=True, blank=True)
+    fwd_probe_r = models.FloatField(null=True, blank=True)
+    fwd_at = models.DateTimeField(null=True, blank=True)
+    block = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["wake", "kind"],
+                                    name="orctiergrade_one_per_wake_kind"),
+        ]
+        indexes = [models.Index(fields=["kind", "boundary", "world", "block"],
+                                name="orctiergrade_block"),
+                   models.Index(fields=["fwd_at"], name="orctiergrade_fwd")]
+
+    def __str__(self):
+        return (f"{self.orc_id} {self.kind} {self.boundary or ''} "
+                f"{self.routed_rung}/{self.probe_rung} block {self.block}")
 
 
 class OrcTrack(models.Model):

@@ -155,20 +155,40 @@ class TheWeatherTests(TestCase):
         self.assertEqual(later.day_class, "stormy")
         self.assertEqual(later.history[-1]["day_class"], "stormy")
 
-    def test_caps_for_binds_the_model_wakes(self):
+    def test_caps_for_binds_the_model_wakes_and_the_probes(self):
         """O2a (2026-11-05, the O2 spec A.12, §4 Q4): the wake cap binds,
         per Orc and its own money world: real 12, 14 or 16 by the day's
-        class, paper and demo 6 (O1 showed 12); the frontier quota and the
-        probes stay shown only until O2b."""
+        class, paper and demo 6 (O1 showed 12). O2b (2026-11-06, B.8a;
+        changed on purpose): the probes bind too, none on a stormy day
+        (bot_program/orcs/probes.py reads them). O2b's frontier
+        (2026-11-06, B.8b; changed on purpose): the frontier quota is no
+        cap of the day's class any more (it was 1, 2 or 4): it is
+        OrcSetting frontier_per_day's, 0 by default, which `current` writes
+        on the day row and nothing that routes reads."""
         from bot_program.orcs.weather import caps_for
         self.assertEqual(caps_for("calm", True)["wakes_per_day"], 12)
         self.assertEqual(caps_for("eventful", True)["wakes_per_day"], 14)
         self.assertEqual(caps_for("stormy", True)["wakes_per_day"], 16)
         self.assertEqual(caps_for("stormy", False)["wakes_per_day"], 6)
         self.assertEqual(caps_for("calm", False)["wakes_per_day"], 6)
-        self.assertEqual(caps_for("stormy", True)["frontier_quota"], 4)
+        for day in ("calm", "eventful", "stormy"):
+            self.assertNotIn("frontier_quota", caps_for(day, True))
+            self.assertNotIn("frontier_quota", caps_for(day, False))
+        from bot_program.orcs.weather import current
+        row = current(self.user, "forex", self.now, inputs=self._inputs(
+            posture_level="crisis"))
+        self.assertEqual((row.day_class, row.frontier_quota), ("stormy", 0))
+        from bot_program.orcs.models import OrcSetting
+        OrcSetting.objects.update_or_create(key="frontier_per_day",
+                                            defaults={"value": 1})
+        other = current(self.user, "index", self.now,
+                        inputs=self._inputs(posture_level="crisis"))
+        self.assertEqual((other.day_class, other.frontier_quota),
+                         ("stormy", 1), "the setting's, on every class")
         self.assertEqual(caps_for("calm", True)["binding"],
-                         ["wakes_per_day"])
+                         ["wakes_per_day", "probes"])
+        self.assertEqual([caps_for(d, False)["probes"] for d in (
+            "calm", "eventful", "stormy")], [True, True, False])
         self.assertNotIn("display_only", caps_for("calm", True))
         for v in caps_for("calm", True).values():
             self.assertNotIsInstance(v, float, "no dollar figure")

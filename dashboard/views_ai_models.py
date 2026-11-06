@@ -90,12 +90,14 @@ KNOWN_AGENT_KEYS = {name for _, rows in AGENT_GROUPS for name, _, _ in rows}
 # SHOWN on the page and never writable: the Orcs read their own pinned
 # ladder (catalog.ORC_LADDER_V1, through bot_program/orcs/mind_gateway.py:
 # with the minds switch and the Orcs line on, every wake a model reads is
-# answered on r0; no router before O2b), never resolve_agent, so an
-# override row here would persist and be read by nothing — exactly what
-# KNOWN_AGENT_KEYS exists to refuse. Their spend is the Orcs' budget line
-# (ai_agents/spend.py), off at 0 until the operator sets it; a model is
-# asked only once he has also turned the minds switch on with his PIN
-# (2026-11-05).
+# answered on r0 while the router's switch, orcs_router, is off, as it
+# ships, and on the rung the router chose once he turns it on with his
+# PIN, 2026-11-06; Fable's r5 only through its gate, which cannot open in
+# O2), never resolve_agent, so an override row here would
+# persist and be read by nothing — exactly what KNOWN_AGENT_KEYS exists to
+# refuse. Their spend is the Orcs' budget line (ai_agents/spend.py), off
+# at 0 until the operator sets it; a model is asked only once he has also
+# turned the minds switch on with his PIN (2026-11-05).
 ORC_AGENT_KEYS = (
     ("orc", "The Orc (one per open position)"),
     ("orc_confirm", "The Orc's confirm wake"),
@@ -119,6 +121,90 @@ def _orc_calls_today() -> int:
                                    microsecond=0)
     return AgentTask.objects.filter(created_at__gte=start).filter(
         orc_line_q()).count()
+
+
+def _orc_rungs_today() -> dict:
+    """{rung: {calls, would, probes}} for the card's ladder (the Orcs' O2
+    spec B.16a; O2b, 2026-11-06), the day since 00:00 UTC, as the line's:
+
+      calls   the Orcs line's ledger rows (spend.orc_line_q), by the rung
+              their source_ref ends with: the rung that ANSWERED (B.2b), a
+              wake's, a smoke's or a probe's
+      would   the wakes rendered, by the router's own choice
+              (components["route"]["would_rung"]), recorded whatever its
+              switch says; a quiet or a merged wake aside, since no model
+              would read it
+      probes  of those calls, the probes' (their source_ref names a probe:
+              Orc:<pk>:Wake:<w>:probe:<rung>; O2b's probes, 2026-11-06)
+
+    Two queries, the route read by its key alone, never a wake's whole
+    components. A count, never money: the dollars are the TODAY cell's."""
+    from collections import Counter
+
+    from django.utils import timezone
+
+    from ai_agents.catalog import ORC_LADDER_V1
+    from ai_agents.models import AgentTask
+    from ai_agents.spend import ORC_SOURCE_PREFIXES, orc_line_q
+    from bot_program.orcs.constants import (PROBE_REF_MARK,
+                                            WAKE_STATUS_MERGED,
+                                            WAKE_STATUS_QUIET)
+    from bot_program.orcs.models import OrcWake
+    start = timezone.now().replace(hour=0, minute=0, second=0,
+                                   microsecond=0)
+    calls, probes = Counter(), Counter()
+    for ref in (AgentTask.objects.filter(created_at__gte=start)
+                .filter(orc_line_q())
+                .values_list("structured_output__source_ref", flat=True)):
+        ref = str(ref or "")
+        if ref.startswith(ORC_SOURCE_PREFIXES):
+            rung = ref.rsplit(":", 1)[-1]
+            calls[rung] += 1
+            if PROBE_REF_MARK in ref:
+                probes[rung] += 1
+    would = Counter(str(r or "") for r in (
+        OrcWake.objects.filter(created_at__gte=start)
+        .exclude(status__in=(WAKE_STATUS_QUIET, WAKE_STATUS_MERGED))
+        .values_list("components__route__would_rung", flat=True)))
+    return {step["rung"]: {"calls": calls.get(step["rung"], 0),
+                           "would": would.get(step["rung"], 0),
+                           "probes": probes.get(step["rung"], 0)}
+            for step in ORC_LADDER_V1}
+
+
+def _orc_router_on() -> bool:
+    """The Orcs router's switch (orcs_router), OFF when unreadable: the
+    card's sentence says which rung answers (B.16a)."""
+    from bot_program.orcs.switches import router_on
+    return router_on()
+
+
+def _orc_probes_on() -> bool:
+    """The Orcs probes' switch (orcs_probes), OFF when unreadable: the
+    card's sentence says whether a rung is probed (B.16a; O2b's probes,
+    2026-11-06)."""
+    from bot_program.orcs.switches import probes_on
+    return probes_on()
+
+
+def _orc_frontier() -> dict:
+    """Fable's gate on the card (the Orcs' O2 spec B.9, §1.2.7; O2b's
+    frontier, 2026-11-06): the pair's bound at the dossier's size cap (r5
+    with its fallback and its r4 blind twin), the money the Orcs may hold
+    in flight, whether the pair fits under it (never in O2), the frontier's
+    switch and its quota (bot_program/orcs/probes.frontier_state). Shown
+    only: no router reads it. AI money, on a staff page."""
+    from bot_program.orcs import probes
+    return probes.frontier_state()
+
+
+def _orc_boundaries() -> list:
+    """Each band boundary's validation state by money world (B.16a; O2b's
+    probes, 2026-11-06): its probe pairs, its completed blocks of 20 and
+    whether two are complete (bot_program/orcs/probes.boundary_states).
+    Shown only: no router reads it. Counts, never money."""
+    from bot_program.orcs import probes
+    return probes.boundary_states()
 
 
 def agent_choice(name: str, tier: str) -> tuple:
@@ -235,6 +321,7 @@ def ai_models_dashboard(request):
                                    PRICES_READ_ON, PRICING_SOURCE)
     from ai_agents.spend import (daily_budget, lines_summary, remaining_today,
                                  spent_today)
+    rungs_today = _orc_rungs_today()
 
     return render(request, "dashboard/ai_models.html", {
         "page_id": "ai_models",
@@ -248,9 +335,23 @@ def ai_models_dashboard(request):
         # The day's Orc calls, from the ledger (O2a, U-A1): a count of the
         # rows on the Orcs line since 00:00 UTC, the line's own day
         "orc_calls_today": _orc_calls_today(),
+        # O2b (2026-11-06, B.16a): which rung answers (the router's
+        # switch), and per rung the day's calls and would-counts
+        "orc_router_on": _orc_router_on(),
         "orc_ladder": [
             {**rung, "label": MODELS.get(rung["model"], {}).get(
-                "label", rung["model"])} for rung in ORC_LADDER_V1],
+                "label", rung["model"]),
+             "calls_today": rungs_today[rung["rung"]]["calls"],
+             "would_today": rungs_today[rung["rung"]]["would"],
+             "probes_today": rungs_today[rung["rung"]]["probes"]}
+            for rung in ORC_LADDER_V1],
+        # O2b's probes (2026-11-06, B.16a): whether a rung is probed, and
+        # each boundary's validation state
+        "orc_probes_on": _orc_probes_on(),
+        "orc_boundaries": _orc_boundaries(),
+        # O2b's frontier (2026-11-06, B.9): Fable's gate, which cannot
+        # open in O2 (its pair is bounded above the in-flight floor)
+        "orc_frontier": _orc_frontier(),
         "orc_agent_keys": ORC_AGENT_KEYS,
         "prices_source": PRICING_SOURCE,
         "cache_source": CACHE_SOURCE,
