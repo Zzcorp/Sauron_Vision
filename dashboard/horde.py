@@ -2376,8 +2376,13 @@ def _mission(trade, hand, signal, pcls, now):
             lines.append({"label": "Signal backing", "ok": n > 0,
                           "t": f"{n} signal(s)" if n else "none"})
         if meta.get("size_source"):
+            # "smallest_size" (2026-11-06, manual_trade._smallest_size):
+            # the budget sized the ticket to zero and it went at the
+            # smallest size the venue takes.
             lines.append({"label": "Size", "ok": True,
                           "t": "yours" if meta["size_source"] == "operator"
+                          else "the smallest size the venue takes"
+                          if meta["size_source"] == "smallest_size"
                           else "the risk budget"})
         out["at_entry"] = lines
     debate = meta.get("debate") if isinstance(meta.get("debate"), dict) else None

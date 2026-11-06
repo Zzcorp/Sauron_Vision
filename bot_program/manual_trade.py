@@ -841,6 +841,62 @@ def _venue_min_qty(client, symbol: str, price: float, vpu: float,
     return _ceil_to_step(floor, step), ""
 
 
+def _size_words(qty: float) -> str:
+    """A size in words: "1 unit", "100 units" (2026-11-06)."""
+    return f"{float(qty):g} unit" + ("" if float(qty) == 1.0 else "s")
+
+
+def _smallest_size(cfg, *, qty: float, whom: str, live: bool, entry: float,
+                   stop: float, vpu: float, default_pct: float) -> dict:
+    """THE SMALLEST SIZE (2026-11-06): a manual ticket the risk budget
+    sizes to zero, judged at `qty`, the smallest size the venue takes.
+
+    The operator: "j'ai toujours en stock cette empechement: Sized to zero
+    — the risk budget does not cover one tradeable unit at this stop
+    distance. debride la machine quand il s'agit du manuel". The manual
+    lane follows the whole account, and on a small account 0.25% of it
+    bought less than one whole share of most stocks at a sane stop: the
+    preview refused the ticket before the dialog opened, and the operator
+    never got to choose.
+
+    {"qty", "risk", "risk_pct", "whom", "note"} when that size's risk at
+    `stop` is within the hard cap, sizing.MAX_RISK_FRACTION of the pool
+    (the operator's written 7%): the ticket proposes it, and `note` says
+    in plain words what it risks against the budget, before the PIN.
+    {"error"} when even that size is past the cap, naming the size, the
+    risk and the cap. `whom` names who takes that size (_preview: the
+    venue, for its own minimum or the paper venue; this platform, for one
+    step of its own granularity on a live venue whose minimum was not
+    read — _qty_step is not a venue minimum and is never called one).
+    `default_pct` is the lane's own risk per ticket, in percent.
+
+    Asked by the manual lane only, in _preview and again in _judge_ticket
+    at the fill and the stop actually sent. The bots never raise a size
+    (nobody is there to agree): they skip a size of zero, as before."""
+    from bot_program.asset_engine.sizing import MAX_RISK_FRACTION
+    capital = float(getattr(cfg, "capital", 0) or 0)
+    ccy = str(getattr(cfg, "base_currency", "") or "USD")
+    qty = float(qty)
+    risk = round(qty * abs(float(entry) - float(stop)) * float(vpu), 6)
+    cap = capital * MAX_RISK_FRACTION
+    # The 1e-9 slack is judge_qty's: float noise at the cap, not tolerance.
+    if risk > cap + 1e-9:
+        return {"error": (
+            f"Even {whom}, {_size_words(qty)}, risks {risk:,.2f} {ccy} at "
+            f"this stop — past the hard cap of {cap:,.2f} {ccy} "
+            f"({MAX_RISK_FRACTION * 100:g}% of the {capital:,.2f} {ccy} "
+            f"pool); the {float(default_pct):.2f}% risk budget sizes this "
+            f"ticket to zero. Widen the pool or tighten the stop. "
+            + ("Nothing was sent" if live else "Nothing was booked"))}
+    risk_pct = risk / capital * 100.0 if capital > 0 else 0.0
+    return {"qty": qty, "risk": risk, "risk_pct": round(risk_pct, 4),
+            "whom": whom,
+            "note": (f"Raised to {whom}: {_size_words(qty)}. At this stop it "
+                     f"risks {risk:,.2f} {ccy} ({risk_pct:.2f}% of the "
+                     f"pool), more than the {float(default_pct):.2f}% a "
+                     f"ticket risks by default.")}
+
+
 def judge_qty(cfg, *, asset_class, qty, entry, stop, value_per_unit,
               available, leverage=None, carrier: str = "", cap_class=None):
     """Why this size may not be sent, or None.
@@ -1740,20 +1796,68 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
                            direction=side, value_per_unit=vpu,
                            cap_class=cap_cls)
     qty = bot._round_qty(sizing["qty"], price)
-    if qty <= 0:
-        return {"error": "Sized to zero — the risk budget does not cover "
-                         "one tradeable unit at this stop distance"}
 
-    # THE VENUE'S OWN MINIMUM (2026-10-01, _venue_min_qty). On a live
-    # ticket the default size is raised to it when the risk cap allows —
-    # a human confirms this ticket with a PIN and sees why it is larger —
-    # and refused here when it does not: an order eToro will refuse is
-    # not a size to offer. The bots refuse rather than resize (nobody is
-    # there to agree); this lane says it and asks.
+    # THE VENUE'S OWN MINIMUM (2026-10-01, _venue_min_qty), read on a live
+    # ticket only. Read before the size is judged since 2026-11-06: the
+    # smallest size below starts from it.
     venue_min_qty, venue_min_note = None, ""
     if live:
         venue_min_qty, _vwhy = _venue_min_qty(
             _client, inst.symbol, float(price), vpu, _qty_step(bot, price))
+
+    # THE SMALLEST SIZE (2026-11-06, _smallest_size; the operator:
+    # "debride la machine quand il s'agit du manuel"). A risk-based size
+    # that ROUNDS to zero is no longer refused here, before the dialog: the
+    # ticket starts from the smallest size the venue takes — its own
+    # minimum on a live ticket when it is known, else one step of this
+    # platform's granularity (_qty_step) — and proposes it, with what it
+    # risks in words, when that risk is within the 7% hard cap; refused,
+    # in words, only past it. The operator decides on the dialog, with the
+    # PIN on a live ticket; every other gate below and in _execute stands.
+    # Only a ROUNDING: no risk-based size at all (a stop-floor skip, no
+    # rate — ForexBot's 0.0 value per unit — no budget) is refused as
+    # before. The bots refuse a size of zero (nobody is there to agree).
+    smallest_rec = None
+    if qty <= 0:
+        if not float(sizing["qty"] or 0) > 0:
+            return {"error": "Sized to zero — the risk budget does not cover "
+                             "one tradeable unit at this stop distance"}
+        from bot_program.asset_engine.sizing import risk_fraction
+        from bot_program.engine.broker_router import broker_name_for_symbol
+        route = broker_name_for_symbol(user, inst.symbol, cfg)
+        venue = _VENUE_LABELS.get(route) or route or "the venue"
+        if venue_min_qty is not None:
+            smallest, source = float(venue_min_qty), "venue_minimum"
+            whom = f"the smallest size {venue} takes"
+        else:
+            smallest, source = float(_qty_step(bot, price)), "step"
+            whom = (f"the smallest size this platform sends to {venue} "
+                    f"({venue}'s own minimum was not read)" if live
+                    else f"the smallest size {venue} takes")
+        smallest_rec = _smallest_size(
+            cfg, qty=smallest, whom=whom, live=live, entry=float(price),
+            stop=float(sizing["stop"]), vpu=vpu,
+            default_pct=risk_fraction(cfg) * 100.0)
+        if smallest_rec.get("error"):
+            return {"error": smallest_rec["error"]}
+        smallest_rec["source"] = source
+        qty = smallest
+        # The budget stays the budget (risk_dollars: what the stop buys
+        # at the lane's own fraction); the size, its notional and every
+        # number below are the smallest size's.
+        _cap0 = float(cfg.capital or 0)
+        sizing = {**sizing, "qty": qty,
+                  "notional_fraction": (
+                      round(qty * float(price) * vpu / _cap0, 6)
+                      if _cap0 else 0.0)}
+
+    # THE VENUE'S OWN MINIMUM, the raise (2026-10-01). On a live ticket
+    # the default size is raised to it when the risk cap allows — a human
+    # confirms this ticket with a PIN and sees why it is larger — and
+    # refused here when it does not: an order eToro will refuse is not a
+    # size to offer. The bots refuse rather than resize (nobody is there
+    # to agree); this lane says it and asks.
+    if live:
         if venue_min_qty is not None and qty < venue_min_qty - 1e-9:
             from bot_program.asset_engine.sizing import (
                 MAX_RISK_FRACTION as _MAX_RISK)
@@ -2157,6 +2261,12 @@ def _preview(user, inst, side, signal=None, *, gate_now=None,
         # when the default was raised to it, the sentence that says so.
         "venue_min_qty": venue_min_qty,
         "venue_min_note": venue_min_note,
+        # THE SMALLEST SIZE (2026-11-06, _smallest_size): None, or — when
+        # the risk budget sized this ticket to zero — the size it was
+        # raised to {qty, source ("venue_minimum" | "step"), risk,
+        # risk_pct, whom, note}. The dialog prints `note` before the PIN
+        # and keeps `qty` when the stop moves; _judge_ticket sends it.
+        "smallest_size": smallest_rec,
         "max_risk_dollars": round(capital * MAX_RISK_FRACTION, 2),
         "max_notional": max_notional,
         # The book's ceilings, so the popup can name the one that is binding
@@ -2321,7 +2431,10 @@ def _judge_ticket(user, cfg, inst, side, cls, preview, *, live,
     on this lane). {"error"} or the ticket as it will be sent: bot,
     ticket_l, ticket_stamp, fill, vpu, stop, target, level_overrides,
     overridden, qty, dist, risk_dollars, notional, notional_fraction,
-    capital_use, and dup (duplicate_state's answer, 2026-11-01).
+    capital_use, dup (duplicate_state's answer, 2026-11-01), and
+    size_source with smallest_size (2026-11-06: "smallest_size" and the
+    preview's _smallest_size dict when the ticket goes at the smallest
+    size the preview proposed; "operator" or "risk_budget" and None).
 
     `_execute` asks it TWICE: before any funding close, against the pool
     the selection will leave (`available` + what the selected closes
@@ -2418,12 +2531,53 @@ def _judge_ticket(user, cfg, inst, side, cls, preview, *, live,
     # automatic size re-derived at the fill must not slip under it.
     vmin = preview.get("venue_min_qty")
     floor_raised = False
+    # THE SMALLEST SIZE the preview proposed (2026-11-06, _smallest_size):
+    # its dict when the risk budget sized this ticket to zero, else None.
+    smallest = (preview.get("smallest_size")
+                if isinstance(preview.get("smallest_size"), dict) else None)
+    size_source = "operator" if overridden else "risk_budget"
     if not overridden:
-        qty = bot._round_qty(preview["risk_dollars"] / dist, fill) \
-            if dist > 0 else 0
+        at_smallest = False
+        if dist <= 0:
+            # No usable rate (ForexBot's 0.0 sentinel, below): no size at
+            # all, the smallest one included.
+            qty = 0
+        elif smallest is not None and stop_override is None:
+            # Untouched: the size the dialog showed IS the size sent. It
+            # is not re-derived from the budget at the fill (the paper
+            # fill is adverse, so the budget buys even less there); it is
+            # judged at the fill below, with every cap.
+            qty, at_smallest = float(preview["qty"]), True
+        else:
+            qty = bot._round_qty(preview["risk_dollars"] / dist, fill)
+            if qty <= 0 and smallest is not None:
+                # A stop the operator moved, where the budget still buys
+                # nothing: the smallest size again, as the dialog shows it.
+                qty, at_smallest = float(smallest["qty"]), True
         if qty <= 0:
             return {"error": "Sized to zero at the adjusted fill price"}
-        if vmin and qty < float(vmin) - 1e-9:
+        if at_smallest:
+            # The 7% hard cap in the smallest size's own words, at the
+            # fill and the stop actually sent; then every cap judge_qty
+            # holds (the notional cap, the pool).
+            from bot_program.asset_engine.sizing import risk_fraction
+            again = _smallest_size(
+                cfg, qty=qty, live=live, entry=fill, stop=stop, vpu=vpu,
+                whom=str(smallest.get("whom")
+                         or "the smallest size the venue takes"),
+                default_pct=risk_fraction(cfg) * 100.0)
+            if again.get("error"):
+                return {"error": again["error"]}
+            why = judge_qty(cfg, asset_class=cls, qty=qty, entry=fill,
+                            stop=stop, value_per_unit=vpu,
+                            available=available,
+                            cap_class=preview.get("cap_class"),
+                            **ticket_stamp)
+            if why:
+                return {"error": why}
+            floor_raised = True
+            size_source = "smallest_size"
+        elif vmin and qty < float(vmin) - 1e-9:
             qty = float(vmin)
             floor_raised = True
             why = judge_qty(cfg, asset_class=cls, qty=qty, entry=fill,
@@ -2433,11 +2587,12 @@ def _judge_ticket(user, cfg, inst, side, cls, preview, *, live,
                             **ticket_stamp)
             if why:
                 return {"error": why}
-        if stop_override is not None:
+        if stop_override is not None and not at_smallest:
             # A hand-placed stop re-denominates the risk budget, so the
             # size it derives is not the size the preview was judged
             # for — a stop half as wide buys twice the position. The
-            # caps have to bite on what is actually sent.
+            # caps have to bite on what is actually sent (the smallest
+            # size was judged at that stop above).
             why = judge_qty(cfg, asset_class=cls, qty=qty, entry=fill,
                             stop=stop, value_per_unit=vpu,
                             available=available,
@@ -2534,7 +2689,12 @@ def _judge_ticket(user, cfg, inst, side, cls, preview, *, live,
             "level_overrides": level_overrides, "overridden": overridden,
             "qty": qty, "dist": dist, "risk_dollars": risk_dollars,
             "notional": notional, "notional_fraction": notional_fraction,
-            "capital_use": capital_use, "dup": dup}
+            "capital_use": capital_use, "dup": dup,
+            # Which size this is (2026-11-06): the operator's, the risk
+            # budget's, or the smallest size the preview proposed.
+            "size_source": size_source,
+            "smallest_size": (smallest if size_source == "smallest_size"
+                           else None)}
 
 
 def _realised_closes(rows) -> list:
@@ -2890,6 +3050,7 @@ def _execute(user, inst, side, close_ids=None, signal=None,
         stop, target = judged["stop"], judged["target"]
         level_overrides = judged["level_overrides"]
         overridden, qty = judged["overridden"], judged["qty"]
+        size_source = judged["size_source"]
         risk_dollars = judged["risk_dollars"]
         notional_fraction = judged["notional_fraction"]
         capital_use = judged["capital_use"]
@@ -2928,8 +3089,10 @@ def _execute(user, inst, side, close_ids=None, signal=None,
             "market_price": preview["entry"],
             "funding_closes": closed,
             # Which size this was, so the ledger can tell an operator's
-            # judgement apart from the engine's arithmetic later.
-            "size_source": "operator" if overridden else "risk_budget",
+            # judgement apart from the engine's arithmetic later — and,
+            # since 2026-11-06, from the smallest size the venue takes
+            # ("smallest_size"), proposed when the budget sized it to zero.
+            "size_source": size_source,
             # Whether the brain was recommending against discretionary
             # entries when this one was taken. Grading later has to be able
             # to ask whether the advisory was worth following, and it cannot
@@ -2979,6 +3142,15 @@ def _execute(user, inst, side, close_ids=None, signal=None,
                     "signals", []),
             },
         }
+        _smallest = judged.get("smallest_size")
+        if isinstance(_smallest, dict):
+            # And the raise to the smallest size (2026-11-06), as the
+            # dialog said it before the PIN. Only when it happened: an
+            # ordinary ticket keeps its shape.
+            meta["smallest_size"] = {
+                "qty": float(qty),
+                "source": str(_smallest.get("source") or ""),
+                "note": str(_smallest.get("note") or "")[:600]}
         if not dup["ok"]:
             # And who else held this bet when it was taken (2026-10-31).
             # Only when someone did: an ordinary ticket keeps its shape.
@@ -3496,7 +3668,8 @@ def _execute(user, inst, side, close_ids=None, signal=None,
            "stop": float(trade.stop_loss),
            "target": float(trade.take_profit),
            "risk_dollars": risk_dollars,
-           "sized_by": "operator" if overridden else "risk_budget",
+           # "operator", "risk_budget", or "smallest_size" (2026-11-06)
+           "sized_by": size_source,
            # What the operator moved, so the confirmation can name it back
            # to them rather than claiming the platform's own defaults.
            "overrides": (["qty"] if overridden else []) + level_overrides,

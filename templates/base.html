@@ -1954,6 +1954,11 @@
       var avail = Number(p.available) || 0;
       var budget = Number(p.risk_dollars) || 0;
       var def = Number(p.qty);
+      /* THE SMALLEST SIZE (2026-11-06, manual_trade._smallest_size): the
+         size the server raised this ticket to when the risk budget sized
+         it to zero; 0 on any other ticket. */
+      var smallestQty = (p.smallest_size && Number(p.smallest_size.qty) > 0)
+        ? Number(p.smallest_size.qty) : 0;
       var L = p.levels || {};
       var lever = p.leverage || {};
       /* THE SEND'S OWN CASH CHECK (2026-10-31, manual_trade.
@@ -2058,6 +2063,18 @@
       }
       function stopMoved() { return levelable && moved(stopVal, defStop); }
       function targetMoved() { return levelable && moved(targetVal, defTarget); }
+      /* What the risk budget buys at the current stop, floored. */
+      function budgetQty() {
+        var r = rpu();
+        return r > 0 ? floorStep(budget / r) : 0;
+      }
+      /* A ticket raised to the smallest size keeps it at a moved stop the
+         budget still buys less at — what the send does
+         (manual_trade._judge_ticket, 2026-11-06); the risk then follows
+         the stop. */
+      function smallestHolds() {
+        return smallestQty > 0 && budgetQty() < smallestQty;
+      }
       /* The size the risk budget implies at the current stop. Untouched,
          it is the server's own number rather than a re-derivation of it:
          re-deriving would land a step away from what the server sends and
@@ -2066,8 +2083,9 @@
          is not a ceiling. */
       function autoQty() {
         if (!stopMoved()) return def;
-        var r = rpu();
-        return r > 0 ? floorStep(budget / r) : 0;
+        var q = budgetQty();
+        if (smallestQty > 0 && q < smallestQty) q = smallestQty;
+        return q;
       }
 
       /* ── The verdict, previewed ───────────────────────────────────────
@@ -2251,6 +2269,22 @@
                        (h.manual ? 'by hand' : ('rule ' + (h.rule || '—'))) +
                        ' · ' + h.venue + ' · #' + h.trade_id);
           }).join('<br>') + '</div>';
+      }
+
+      /* THE SIZE WAS RAISED ABOVE THE RISK BUDGET: the budget sized this
+         ticket to zero and the server proposes the smallest size the venue
+         takes (smallest_size, 2026-11-06), or it raised the size to the
+         broker's minimum (venue_min_note, 2026-10-01). The server's
+         sentence, with the money it risks, before the PIN: the operator's
+         call, repeated beside the PIN and the go button (sideNotes). */
+      var raisedNote = (p.smallest_size && p.smallest_size.note) || p.venue_min_note || '';
+      if (raisedNote) {
+        warnHtml += '<div class="sz-warn sz-warn--book" data-role="smallestsize">' +
+          '<b>SIZE RAISED ABOVE THE RISK BUDGET</b>' + esc(raisedNote) +
+          '<br>' + esc('A warning, not a block: the size is yours to send' +
+                       (live ? ' with your trading PIN' : '') + ', or to change ' +
+                       'below. Your bots never raise a size: they skip the ticket.') +
+          '</div>';
       }
 
       /* CONCENTRATION. The per-ticket ceiling is judged on this ticket; this
@@ -2673,6 +2707,11 @@
           'eToro\'s cash check would refuse this ticket — the reason is at the top.') +
           '</div>';
       }
+      if (raisedNote) {
+        sideNotes += '<div class="sz-warn sz-warn--book" data-role="smallestsizenotice">' + esc(
+          'Size raised above the risk budget — what it risks is at the top.') +
+          '</div>';
+      }
       var host = document.createElement('div');
       host.className = 'sv-dialog sz-dialog' + ((funding || live) ? ' sv-dialog--danger' : '');
       host.setAttribute('data-sv-overlay', 'dialog');
@@ -2835,8 +2874,11 @@
                       esc(money(use)) + ')</span>');
           }
           if (!qtyTouched && stopMoved()) {
-            bits.push('<span>SIZE FOLLOWS THE STOP — the risk budget is held at <b>' +
-                      esc(money(budget)) + '</b></span>');
+            bits.push(smallestHolds()
+              ? '<span>SIZE HELD AT THE SMALLEST SIZE — <b>' + esc(units(smallestQty)) +
+                '</b> unit' + (smallestQty === 1 ? '' : 's') + '; the risk follows the stop</span>'
+              : '<span>SIZE FOLLOWS THE STOP — the risk budget is held at <b>' +
+                esc(money(budget)) + '</b></span>');
           }
           if (sizeWhy) bits.push('<span class="sz-why">' + esc(sizeWhy) + '</span>');
           out.innerHTML = bits.join('');
@@ -3095,7 +3137,11 @@
           SV.overlay.alert({
             title: 'Position open',
             message: res.side + ' ' + units(res.qty) + ' ' + res.symbol + ' @ ' + res.entry +
-              (res.sized_by === 'operator' ? '  (your size — ' + money(res.risk_dollars) + ' at risk)' : '') +
+              (res.sized_by === 'operator' ? '  (your size — ' + money(res.risk_dollars) + ' at risk)'
+                /* the smallest size the venue takes (2026-11-06) */
+                : res.sized_by === 'smallest_size'
+                ? '  (the smallest size the venue takes — ' + money(res.risk_dollars) + ' at risk)'
+                : '') +
               /* Name back exactly what the operator moved. Claiming the
                  platform's defaults on a ticket they adjusted — or the
                  reverse — is how a stop nobody chose ends up trusted. */
