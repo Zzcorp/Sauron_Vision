@@ -1570,11 +1570,12 @@ class EtoroTrader:
 
     def _before(self, where: str) -> tuple:
         """THE BUDGET, BEFORE A REQUEST TO `where` (2026-11-01): (priority,
-        why, taken). The priority is the caller's scope (etoro_budget.at),
-        P1 outside any. P2 to P5 take their token here and may be refused:
-        etoro_budget.Refused is raised and NOTHING IS SENT. P0 and P1 take
-        nothing here (taken False): they are never refused nor delayed,
-        and are counted once sent (_after)."""
+        why, taken). The priority is the caller's scope
+        (etoro_budget.at_priority), P1 outside any. P2 to P5 take their
+        token here and may be refused: etoro_budget.Refused is raised and
+        NOTHING IS SENT. P0 and P1 take nothing here (taken False): they
+        are never refused nor delayed, and are counted once sent
+        (_after)."""
         p, why = etoro_budget.current(etoro_budget.P1)
         if p <= etoro_budget.P1:
             return p, why, False

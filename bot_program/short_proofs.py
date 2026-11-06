@@ -654,7 +654,7 @@ def run_once(*, now=None, dry_run=False, asset_class=None, leverage=None,
         # never refused once a step has begun; refusing() holds it before
         # (THE BUDGET, above). The close and its proofs are P0 by the
         # client's own scopes.
-        with etoro_budget.at(etoro_budget.P1, "demo short proofs"):
+        with etoro_budget.at_priority(etoro_budget.P1, "demo short proofs"):
             return _run(now, out, explicit=explicit, forced=forced,
                         asset_class=asset_class, leverage=leverage,
                         overnight=overnight, user=user, client=client)

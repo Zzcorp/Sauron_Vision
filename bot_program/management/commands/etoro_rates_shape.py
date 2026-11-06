@@ -108,7 +108,7 @@ class Command(BaseCommand):
         # leaves the marks, the proposals and the orders their tokens, and
         # a read the budget did not send says so in the budget's words.
         from bot_program.engine import etoro_budget
-        with etoro_budget.at(etoro_budget.P5, "etoro_rates_shape"):
+        with etoro_budget.at_priority(etoro_budget.P5, "etoro_rates_shape"):
             return self._measure(**opts)
 
     def _measure(self, **opts):

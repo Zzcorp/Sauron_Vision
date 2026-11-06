@@ -343,7 +343,7 @@ class Command(BaseCommand):
         # in the budget's words (_verdict), never as a verdict on the keys.
         # And paced at SMOKE_GAP_S, one request a second (_Pace).
         from bot_program.engine import etoro_budget
-        with etoro_budget.at(etoro_budget.P5, "etoro_smoke"):
+        with etoro_budget.at_priority(etoro_budget.P5, "etoro_smoke"):
             return self._smoke(*args, **opts)
 
     def _smoke(self, *args, **opts):

@@ -727,11 +727,16 @@ def closed_for(kh, world, symbol):
         return None
 
 
-def reset() -> None:
+def forget_all() -> None:
     """Forget this process's memory, its queued writes, the unproven mark
     and the measurement's proof (tests; the cache's entries go with
     cache.clear()). Waits for a drain in progress, so no write of a test
-    lands in the next."""
+    lands in the next.
+
+    NAMED forget_all, NEVER reset (2026-11-06, the rebase onto O2a), as
+    etoro_budget.forget_all is: O2a's order-path pin reads every callable
+    of bot_program/engine by name, and the Orcs' lock budget calls its
+    ContextVar's reset."""
     with _WRITES_LOCK:
         _WRITES.clear()
     with _FAILED_LOCK:

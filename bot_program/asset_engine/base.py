@@ -1419,7 +1419,7 @@ class AssetBot(ABC):
                 mark_unasked = ""
                 try:
                     from bot_program.engine import etoro_budget
-                    with etoro_budget.at(*self._mark_priority(trade)):
+                    with etoro_budget.at_priority(*self._mark_priority(trade)):
                         price = self._mark_price(trade, client)
                 except Exception as e:  # noqa: BLE001 — unreadable is None
                     if getattr(e, "budget_refused", False):
@@ -2698,8 +2698,8 @@ class AssetBot(ABC):
         import contextlib
 
         from bot_program.engine import etoro_budget
-        scope = (etoro_budget.at(priority, why) if priority is not None
-                 else contextlib.nullcontext())
+        scope = (etoro_budget.at_priority(priority, why)
+                 if priority is not None else contextlib.nullcontext())
         try:
             with scope:
                 if what == "resting":
@@ -3677,7 +3677,7 @@ class AssetBot(ABC):
         fresh = None
         try:
             from bot_program.engine import etoro_budget
-            with etoro_budget.at(*self._mark_priority(trade)):
+            with etoro_budget.at_priority(*self._mark_priority(trade)):
                 tk = client.ticker(trade.symbol)
             p = Decimal(str((tk or {}).get("lastPrice", "0") or "0"))
             from bot_program import mark_sanity
@@ -5131,7 +5131,7 @@ class AssetBot(ABC):
         # order is the wire too.
         from bot_program.engine import etoro_budget
         try:
-            with etoro_budget.at(etoro_budget.P4, "proposal"):
+            with etoro_budget.at_priority(etoro_budget.P4, "proposal"):
                 tk = self._proposal_tick(client, symbol)
         except Exception as e:
             if getattr(e, "budget_refused", False):
@@ -5427,8 +5427,9 @@ class AssetBot(ABC):
         # same row execute_entry reads at P1). Never refused: a refusal
         # would not defer the entry, it would round it as unmeasured.
         from bot_program.engine import etoro_budget
-        with etoro_budget.at(etoro_budget.P1,
-                             "proposal: the order's unit granularity"):
+        with etoro_budget.at_priority(etoro_budget.P1,
+                                      "proposal: the order's unit "
+                                      "granularity"):
             fractional = self._venue_fractional_units(client, symbol)
         # The horizon the desk grades a displaced candidate over. The
         # config's time stop is the honest bound; 0.0 means "off" and a
@@ -5807,8 +5808,8 @@ class AssetBot(ABC):
             if isinstance(held, dict) and held.get("shut_until") == tag:
                 return
             try:
-                with etoro_budget.at(etoro_budget.P4,
-                                     "proposal: the shut market's quote"):
+                with etoro_budget.at_priority(
+                        etoro_budget.P4, "proposal: the shut market's quote"):
                     tk = client.ticker(symbol)
             except Exception as e:  # noqa: BLE001 — asked at the next refusal
                 logger.info("[%s_bot] %s: the shut market's quote not read "
@@ -10214,7 +10215,8 @@ def prefetch_fleet_marks() -> dict:
                         continue      # the shut market's half hour serves it
                     symbols.append(t.symbol)
                 symbols = list(dict.fromkeys(symbols))
-                with etoro_budget.at(etoro_budget.P3, "marks, batched"):
+                with etoro_budget.at_priority(etoro_budget.P3,
+                                              "marks, batched"):
                     out.update(etoro_rates.prefetch(client, symbols))
             except Exception as e:  # noqa: BLE001
                 logger.warning("[asset_bot] the marks' batched prefetch for "

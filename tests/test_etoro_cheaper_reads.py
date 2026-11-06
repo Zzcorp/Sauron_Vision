@@ -256,7 +256,7 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
 
     def test_a_mark_rides_the_pool_with_the_read_timeouts(self):
         t = self._client()
-        with eb.at(eb.P3, "mark"):
+        with eb.at_priority(eb.P3, "mark"):
             tk = t.ticker("AAPL")
         self.assertEqual(float(tk["lastPrice"]), 100.0)
         pool = self._pool()
@@ -279,7 +279,7 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
         """The manage tick's marks (P3) and proposals (P4) take (4, 10): a
         failing connect holds the tick about 9 s with its retry, not 21."""
         t = self._client()
-        with eb.at(eb.P4, "proposal"):
+        with eb.at_priority(eb.P4, "proposal"):
             t.ticker("AAPL")
         pool = self._pool()
         self.assertEqual([w is pool for w, *_ in self.log], [True, True])
@@ -293,7 +293,7 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
         before still answers, so a slow connect never makes the sync miss
         its pass (2026-11-01, review)."""
         t = self._client()
-        with eb.at(eb.P2, "account sync"):
+        with eb.at_priority(eb.P2, "account sync"):
             t.account()
         (w, _m, _u, kw), = self.log
         self.assertIs(w, self._pool())
@@ -316,13 +316,13 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
         """The router builds a new client per call: the second reads on
         the first's connection. Another key has its own pool."""
         a, b = self._client(), self._client()
-        with eb.at(eb.P2, "account sync"):
+        with eb.at_priority(eb.P2, "account sync"):
             a.account()
             b.account()
         pool = self._pool()
         self.assertEqual([w for w, *_ in self.log], [pool, pool])
         other = self._client(user_key="another-k")
-        with eb.at(eb.P2, "account sync"):
+        with eb.at_priority(eb.P2, "account sync"):
             other.account()
         theirs = self._pool(eb.key_hash("another-k"))
         self.assertIsNot(theirs, pool)
@@ -337,7 +337,7 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
         touch the pooled session, nor do their lookups: a stale pooled
         socket failing after the send would make an order IN DOUBT."""
         t = self._client()
-        with eb.at(eb.P3, "mark"):
+        with eb.at_priority(eb.P3, "mark"):
             t.ticker("AAPL")
         pool = self._pool()
         t.market_order("AAPL", "BUY", 1.0, stop_loss=90.0, take_profit=110.0)
@@ -366,7 +366,7 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
         close sets P0 itself, so the /search a cold id costs rides the
         close's own session too."""
         t = self._client()
-        with eb.at(eb.P3, "mark"):
+        with eb.at_priority(eb.P3, "mark"):
             t.ticker("AAPL")
             n = len(self.log)
             t.close_position("556", "MSFT", 2.0)
@@ -382,7 +382,7 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
         client's own session, where a stale pooled socket cannot cost them
         the retry's wait."""
         t = self._client()
-        with eb.at(eb.P0, "close"):
+        with eb.at_priority(eb.P0, "close"):
             t.ticker("AAPL")
         t.ticker("AAPL")
         self.assertNotIn(KH, ec._POOL)
@@ -394,7 +394,7 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
     def test_the_eligibility_post_is_no_pooled_read(self):
         """A read, but a POST: only GETs ride the pool."""
         t = self._client()
-        with eb.at(eb.P2, "eligibility"):
+        with eb.at_priority(eb.P2, "eligibility"):
             t.eligibility("AAPL")
         pool = self._pool()
         (search_on, *_rest), = [c for c in self.log if c[1] == "GET"]
@@ -407,7 +407,7 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
     def test_a_stale_pooled_socket_is_retried_once_on_a_fresh_connection(
             self):
         t = self._client()
-        with eb.at(eb.P2, "account sync"):
+        with eb.at_priority(eb.P2, "account sync"):
             t.account()
         stale = self._pool()
         stale.fail = [requests.exceptions.ConnectionError(
@@ -415,7 +415,7 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
             "connection without response'))")]
         n = len(self.log)
         with mock.patch.object(t, "_note_health") as noted:
-            with eb.at(eb.P2, "account sync"):
+            with eb.at_priority(eb.P2, "account sync"):
                 info = t.account()
         self.assertEqual(info, AGG)
         sent = self.log[n:]
@@ -429,20 +429,20 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
         self.assertEqual(sent[1][3]["timeout"], 10.0)
         noted.assert_not_called()
         # the next read rides the fresh connection
-        with eb.at(eb.P2, "account sync"):
+        with eb.at_priority(eb.P2, "account sync"):
             t.account()
         self.assertIs(self.log[-1][0], fresh)
 
     def test_a_marks_retry_on_a_fresh_connection_keeps_the_short_connect(
             self):
         t = self._client()
-        with eb.at(eb.P3, "mark"):
+        with eb.at_priority(eb.P3, "mark"):
             t.ticker("AAPL")
         stale = self._pool()
         stale.fail = [requests.exceptions.ConnectionError("reset")]
         n = len(self.log)
         with mock.patch.object(t, "_note_health") as noted, \
-                eb.at(eb.P3, "mark"):
+                eb.at_priority(eb.P3, "mark"):
             self.assertEqual(float(t.ticker("AAPL")["lastPrice"]), 100.0)
         sent = self.log[n:]
         self.assertEqual([w is stale for w, *_ in sent], [True, False])
@@ -452,13 +452,13 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
 
     def test_a_fresh_retry_that_fails_too_is_todays_one_failure(self):
         t = self._client()
-        with eb.at(eb.P2, "account sync"):
+        with eb.at_priority(eb.P2, "account sync"):
             t.account()
         self._pool().fail = [requests.exceptions.ConnectionError("reset")]
         self.fail_next = [requests.exceptions.ConnectTimeout("no connect")]
         n = len(self.log)
         with mock.patch.object(t, "_note_health") as noted:
-            with eb.at(eb.P2, "account sync"):
+            with eb.at_priority(eb.P2, "account sync"):
                 with self.assertRaises(requests.exceptions.ConnectTimeout):
                     t.account()
         self.assertEqual(len(self.log) - n, 2)
@@ -469,7 +469,7 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
         t = self._client()
         self.routes.insert(0, ("GET", "/aggregate-portfolio",
                                [(503, {}), (200, AGG)]))
-        with eb.at(eb.P2, "account sync"):
+        with eb.at_priority(eb.P2, "account sync"):
             self.assertEqual(t.account(), AGG)
         pool = self._pool()
         self.assertEqual([w for w, *_ in self.log], [pool, pool])
@@ -479,7 +479,7 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
         t = self._client()
         clock = _Clock(1000.0)
         with mock.patch.object(ec, "_pool_mono", clock), \
-                eb.at(eb.P2, "account sync"):
+                eb.at_priority(eb.P2, "account sync"):
             t.account()
             first = self._pool()
             clock.t += ec.READ_POOL_IDLE_S - 1
@@ -495,12 +495,12 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
 
     def test_a_forked_child_never_uses_its_parents_sockets(self):
         t = self._client()
-        with eb.at(eb.P2, "account sync"):
+        with eb.at_priority(eb.P2, "account sync"):
             t.account()
         parent = self._pool()
         ec._pool_after_fork()
         self.assertEqual(ec._POOL, {})
-        with eb.at(eb.P2, "account sync"):
+        with eb.at_priority(eb.P2, "account sync"):
             t.account()
         self.assertIsNot(self._pool(), parent)
         self.assertFalse(parent.closed, "a child never closes its parent's "
@@ -508,7 +508,7 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
         # and a session another process built is never reused
         child = self._pool()
         with mock.patch("os.getpid", return_value=os.getpid() + 1), \
-                eb.at(eb.P2, "account sync"):
+                eb.at_priority(eb.P2, "account sync"):
             t.account()
         self.assertIsNot(self.log[-1][0], child)
         self.assertFalse(child.closed)
@@ -519,15 +519,15 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
         /status builds its client at 5 s, and its account reads (P2) keep
         that 5 s, today's."""
         t = self._client(timeout=5.0)
-        with eb.at(eb.P3, "mark"):
+        with eb.at_priority(eb.P3, "mark"):
             t.ticker("AAPL")
         self.assertEqual({kw["timeout"] for *_x, kw in self.log},
                          {(4.0, 5.0)})
-        with eb.at(eb.P2, "status read"):
+        with eb.at_priority(eb.P2, "status read"):
             t.account()
         self.assertEqual(self.log[-1][3]["timeout"], 5.0)
         self.assertIn("aggregate-portfolio", self.log[-1][2])
-        with eb.at(eb.P3, "mark"):
+        with eb.at_priority(eb.P3, "mark"):
             self._client(timeout=3.0).ticker("AAPL")
         self.assertEqual(self.log[-1][3]["timeout"], (3.0, 3.0))
 
@@ -558,7 +558,7 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
         t = self._client()
         fake = _Wire(self.routes, self.log)
         t._session = fake
-        with eb.at(eb.P3, "mark"):
+        with eb.at_priority(eb.P3, "mark"):
             t.ticker("AAPL")
         self.assertTrue(self.log)
         self.assertTrue(all(w is fake for w, *_ in self.log))
@@ -567,7 +567,7 @@ class TheReadPoolTests(_PoolOn, SimpleTestCase):
         other = self._client()
         n = len(self.log)
         with mock.patch.object(ec.EtoroTrader, "_sess", lambda self: fake), \
-                eb.at(eb.P2, "account sync"):
+                eb.at_priority(eb.P2, "account sync"):
             other.account()
         self.assertEqual([w for w, *_ in self.log[n:]], [fake])
         self.assertNotIn(KH, ec._POOL)
@@ -693,7 +693,7 @@ class TheSyncThroughASlowConnectTests(TestCase):
         make eToro sick and hold new real entries); the row is only
         clock-managed for that tick."""
         t = ec.EtoroTrader("api-k", USER_KEY, env="live")
-        with eb.at(eb.P3, "mark"):
+        with eb.at_priority(eb.P3, "mark"):
             with self.assertRaises(requests.exceptions.ConnectTimeout):
                 t.ticker("AAPL")
         self.assertEqual([tm for _m, _u, tm in self.attempts],
@@ -739,7 +739,8 @@ class ThePooledSessionFollowsNoRedirectTests(SimpleTestCase):
         pooled = ec.pooled_session(KH)
         pooled.mount("https://", venue)
         t = ec.EtoroTrader("api-k", USER_KEY, env="demo")
-        with eb.at(eb.P3, "mark"), mock.patch("time.sleep") as sleep, \
+        with eb.at_priority(eb.P3, "mark"), \
+                mock.patch("time.sleep") as sleep, \
                 self.assertLogs("bot_program.engine.etoro_client",
                                 level="ERROR"):
             with self.assertRaises(ec.RedirectRefused) as cm:
@@ -772,7 +773,7 @@ class ThePooledSessionFollowsNoRedirectTests(SimpleTestCase):
         t._sess()
         t._session.mount("https://", own)
         for p in (eb.P2, eb.P3, eb.P4, eb.P5):
-            with self.subTest(priority=p), eb.at(p, "read"):
+            with self.subTest(priority=p), eb.at_priority(p, "read"):
                 self.assertEqual(float(t.ticker("AAPL")["lastPrice"]), 100.0)
         self.assertEqual(on_the_pool.sent, [], "nothing rode the pool")
         self.assertEqual(len(own.to("GET", "/instruments/rates")), 4)
@@ -1093,8 +1094,8 @@ class OneBookPerPassTests(TestCase):
         # the control: a refusal is no failure, nothing was sent, and the
         # sweep is not asked again (its words are the walk's)
         from tests.test_etoro_budget import _fill
-        eb.reset()
-        self.addCleanup(eb.reset)
+        eb.forget_all()
+        self.addCleanup(eb.forget_all)
         with mock.patch.object(eb, "BUDGET", True):
             _fill(eb.key_hash(USER_KEY), eb.ACCOUNT,
                   eb.limit(eb.ACCOUNT, eb.P2))

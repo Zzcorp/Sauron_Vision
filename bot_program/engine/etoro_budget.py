@@ -17,8 +17,8 @@ FOUR FAMILIES, one window each per key and per minute (WINDOW_S):
   lookups     orders:lookup: fill polls, close proofs, the cancel's proof
 
 SIX PRIORITIES. Every request is taken at the priority its caller set with
-`at()` (a context manager, or `scoped()` as a decorator); a scope never
-lowers an outer one, and a request no caller classified counts at P1:
+`at_priority()` (a context manager, or `scoped()` as a decorator); a scope
+never lowers an outer one, and a request no caller classified counts at P1:
 
   P0  closes, stop and target moves, close proofs, order cancels, the
       pending-close drain, the kill switch, the CLOSE button
@@ -237,12 +237,20 @@ _SCOPE: contextvars.ContextVar = contextvars.ContextVar(
 
 
 @contextlib.contextmanager
-def at(priority: int, why: str = ""):
+def at_priority(priority: int, why: str = ""):
     """Every eToro request inside is taken at `priority` (and named `why`
     in the budget's lines) — unless an outer scope is more urgent: a scope
     never lowers one, so a mark read inside the kill switch stays P0 and a
     close sent inside the manage tick's P3 is P0 (the close sets its own).
-    Per thread and per context."""
+    Per thread and per context.
+
+    NAMED at_priority, NEVER at (2026-11-06, the rebase onto O2a): O2a's
+    order-path pin (tests/orcs/test_orc_o2a_shadow_pins, item a) forbids
+    O2 code any attribute named like a callable of bot_program/engine, so
+    a mutator added later is forbidden on arrival, and the Orcs' own rows
+    read their `at` (a journal line's time). A function `at` here made
+    every one of those reads an order-path reference. The scope is the
+    same; only its name moved."""
     p = int(priority)
     outer = _SCOPE.get()
     inner = outer if outer is not None and outer[0] <= p else (
@@ -255,11 +263,12 @@ def at(priority: int, why: str = ""):
 
 
 def scoped(priority: int, why: str = ""):
-    """`at(priority, why)` around a whole function, as a decorator."""
+    """`at_priority(priority, why)` around a whole function, as a
+    decorator."""
     def deco(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            with at(priority, why):
+            with at_priority(priority, why):
                 return fn(*args, **kwargs)
         return wrapper
     return deco
@@ -841,10 +850,15 @@ def busy(kh: str, priority: int = P5, now=None) -> "dict | None":
     return None
 
 
-def reset() -> None:
+def forget_all() -> None:
     """Forget this process's own memory, its queued counts and its pauses
     (tests; the window counters go with cache.clear()). Waits for a drain
-    in progress, so no count of a test lands in the next."""
+    in progress, so no count of a test lands in the next.
+
+    NAMED forget_all, NEVER reset (2026-11-06, the rebase onto O2a): a
+    callable of bot_program/engine named `reset` made the Orcs' lock
+    budget's ContextVar.reset an order-path reference for O2a's pin, as
+    at_priority's docstring says for `at`."""
     with _DRAIN:
         _SPENT.clear()
         _LATER.clear()
