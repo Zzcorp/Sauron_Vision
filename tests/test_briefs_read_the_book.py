@@ -275,8 +275,11 @@ class TheBriefReadsTheBookTests(_BookCase):
             SAURON, "Open positions: 6 (5 simulated · 1 real money)"])
         real = _lines(digest, "real_money")
         self.assertIn("Real-money positions on the platform: 1", real)
-        self.assertIn("• TSLA long · +4.17% · +10.00 USD · Real money (eToro)",
-                      real)
+        # No eToro holdings are stored: the figure is the mark's, and the
+        # line says so (2026-11-06, portfolio.services.venue_pnl)
+        self.assertTrue([ln for ln in real if ln.startswith(
+            "• TSLA long · +4.17% · +10.00 USD · estimate: test quote, ")
+            and ln.endswith(" · Real money (eToro)")], real)
         sim = _lines(digest, "simulated")
         self.assertFalse([ln for ln in sim if "TSLA" in ln], sim)
         # a simulated row never appears under Real money
@@ -291,8 +294,12 @@ class TheBriefReadsTheBookTests(_BookCase):
         digest = _morning(self.user)
         self.assertEqual(digest["summary"], [
             SAURON, "Open positions: 6 (6 simulated · 0 real money)"])
-        self.assertIn("• MSFT long · +5.00% · +20.00 USD · Simulated "
-                      "(eToro demo)", _lines(digest, "simulated"))
+        # an eToro demo row with no eToro holdings stored: the mark's
+        # figure, said to be an estimate (2026-11-06)
+        sim = _lines(digest, "simulated")
+        self.assertTrue([ln for ln in sim if ln.startswith(
+            "• MSFT long · +5.00% · +20.00 USD · estimate: test quote, ")
+            and ln.endswith(" · Simulated (eToro demo)")], sim)
         self.assertIn("No real-money position on the platform.",
                       _lines(digest, "real_money"))
 
