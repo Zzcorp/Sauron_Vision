@@ -47,13 +47,28 @@ render): "" when they pass, else the failing clause in words; anything
 else reads closed. The router adds its own two: real money, and a
 frontier quota left today.
 
+FABLE'S GATE (O2b's frontier, 2026-11-06, B.9; `fable_gate`, pure): its
+clauses in their order, each read only when every clause before it holds,
+the first that fails being the gate's verdict: real money; the band
+extreme; a frontier quota left today (OrcSetting frontier_per_day, 0 by
+default, less the user's r5 calls today: mind.frontier_left, never the day
+row); the frontier switch (orcs_frontier) ON; the pair (r5 and its r4
+blind twin, priced at the dossier's size cap) under the wake's class's
+ceiling and the deep tiers' share; the pair within the money the Orcs may
+hold in flight (scheduler.fable_money); the Fable render within its size
+cap. The caller (wake._fable_gate, at the render) reads them and hands the
+verdict on as `gate`, its quota left as `frontier_left`. The pair is about
+$3.57 at the cap, above the $3.00 the Orcs may hold in flight, so in O2
+the gate cannot open: an extreme wake routes r4, the clause in `why`.
+
 O2b's first commit (2026-11-06) records the route in shadow; its second
 lets the route's rung answer behind the router's switch (orcs_router, OFF
 as it ships: r0 answers every wake a model reads), which the scheduler
-reads, never this module. The caller hands the gate closed with no
-frontier quota (B.9 is a later commit's). The probes listed here are sent
-by bot_program/orcs/probes.py behind the probes' switch (orcs_probes, OFF
-as it ships; O2b's third commit), never by this module.
+reads, never this module. The probes listed here are sent by
+bot_program/orcs/probes.py behind the probes' switch (orcs_probes, OFF as
+it ships; O2b's third commit), never by this module; r5's twin is sent by
+mind.think beside its r5 wake, behind the frontier's switch (orcs_frontier,
+OFF as it ships; O2b's fourth commit).
 
 B.1's signature has neither `score` nor `raw_band`: B.11's boundary
 probe needs the score, and B.6's escalated the band with no floor.
@@ -86,6 +101,21 @@ GATE_CLOSED = "the Fable gate is closed"
 #: The router's own clauses of the gate (B.9).
 NOT_REAL = "Fable answers real money only"
 NO_QUOTA = "no frontier quota is left today"
+#: The rest of Fable's gate, in its order (B.9; O2b's frontier,
+#: 2026-11-06): the band; the switch; the pair's money, by its code
+#: (scheduler.class_money_code's triage, deep_share, inflight); the Fable
+#: render, after it is written (B.4b), or its absence.
+NOT_EXTREME = "the band is not extreme"
+FRONTIER_OFF = "the frontier switch (orcs_frontier) is off"
+PAIR_CLASS = "the pair does not fit under its class's ceiling"
+PAIR_DEEP = "the pair does not fit under the deep tiers' share"
+PAIR_INFLIGHT = "the pair is above the money the Orcs may hold in flight"
+PAIR_MONEY = {"triage": PAIR_CLASS, "deep_share": PAIR_DEEP,
+              "inflight": PAIR_INFLIGHT}
+FABLE_OVER = "its Fable dossier is over the size cap"
+NO_FABLE_DOSSIER = ("no Fable dossier is written while the router's switch "
+                    "(orcs_router) is off")
+NOT_FABLE_STORED = "its stored dossier was not written for Fable"
 #: The world's words when it is not plainly real money or paper.
 DEMO_AS_PAPER = "demo routes as paper"
 NO_WORLD_AS_PAPER = "a row that states no money world routes as paper"
@@ -134,6 +164,35 @@ def fable_clause(real, frontier_left, gate) -> str:
     if _count(frontier_left) <= 0:
         return NO_QUOTA
     return ""
+
+
+def fable_gate(*, real, band, quota, switch, money, render="") -> str:
+    """Fable's gate (B.9): the first clause that fails, in words; "" when
+    every clause holds. In this order, each read only when every clause
+    before it holds (`quota`, `switch`, `money` and `render` may be the
+    caller's callables, so nothing is read for a gate that already
+    failed): real money (`real`); the band extreme; a frontier quota left
+    today (`quota`, the count left); the frontier switch ON (`switch`);
+    the pair's money (`money`, class_money_code's code: "" when the pair
+    fits under its class's ceiling, the deep tiers' share and the money
+    the Orcs may hold in flight; another code is its words, an unknown one
+    reads closed); the Fable render within its cap (`render`: "" when it
+    is, else its clause). Pure: the reads are the caller's."""
+    def read(x):
+        return x() if callable(x) else x
+    if not real:
+        return NOT_REAL
+    if band != "extreme":
+        return NOT_EXTREME
+    if _count(read(quota)) <= 0:
+        return NO_QUOTA
+    if not read(switch):
+        return FRONTIER_OFF
+    code = read(money)
+    if code:
+        return PAIR_MONEY.get(str(code), GATE_CLOSED)
+    clause = read(render)
+    return clause if isinstance(clause, str) else GATE_CLOSED
 
 
 def table(band, real, clause) -> tuple:

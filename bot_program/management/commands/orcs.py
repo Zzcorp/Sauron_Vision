@@ -56,7 +56,13 @@ make: the rung, its family, the tokens of the exact text, the bound, the
 Orcs line's answer and the four gates. The rung is r0 by default, h0 with
 --rung h0, or from O2b (2026-11-06, B.15a) one of a wake's rungs r1-r4,
 answered as B.5 maps it (one effort per model until the smoke's PASS for
-its family: r1 as r0, r3 and r4 as r2), both rungs printed; never r5.
+its family: r1 as r0, r3 and r4 as r2), both rungs printed. `--rung r5`
+(O2b's frontier, 2026-11-06, B.15c, P35) goes only through Fable's gate,
+read on that wake: it prints the clause that fails and refuses --yes with
+it, nothing reserved or sent (in O2 the pair's bound is above the money
+the Orcs may hold in flight, so a clause always fails); and since r5
+answers only beside its blind twin, at a real-money extreme wake's own
+claim, the smoke sends no Fable call even when every clause holds.
 `--yes` is refused while any gate is OFF (the platform master, `orcs`,
 `orcs_minds`, the Orcs line above 0), and for a rung above r0 while the
 router's switch (`orcs_router`) is OFF, as a wake's would be. Otherwise it
@@ -120,7 +126,8 @@ class Command(BaseCommand):
         parser.add_argument("--rung", default=O2A_RUNG,
                             help="smoke: r0 (the default), h0, or a "
                                  "wake's rung r1-r4 (the router's switch "
-                                 "ON)")
+                                 "ON); r5 only through Fable's gate, "
+                                 "which refuses it in O2")
         parser.add_argument("--family", default="",
                             help="smoke-verdict: the model family the "
                                  "verdict is for")
@@ -403,6 +410,11 @@ class Command(BaseCommand):
         words = {**WAKE_CODE_WORDS, **TICKET_CODE_WORDS}
         orc = self._orc_of(opts["row"], "smoke --row")
         asked = str(opts["rung"] or "")
+        from bot_program.orcs.constants import FRONTIER_RUNG
+        if asked == FRONTIER_RUNG:
+            # B.15c, P35 (O2b's frontier, 2026-11-06): r5 only through
+            # Fable's gate
+            return self._smoke_fable(orc, opts)
         try:
             mind.ticket_caller(SMOKE, asked)
         except ValueError as e:
@@ -493,6 +505,51 @@ class Command(BaseCommand):
             settled = scheduler.settle_ticket(got["key"],
                                               {**reply, "ledger": found})
         self._smoke_answer(w, reply, ref, found, settled)
+
+    def _smoke_fable(self, orc, opts):
+        """B.15c, P35 (O2b's frontier, 2026-11-06): `--rung r5` goes only
+        through Fable's gate, its clauses read in their order on the Orc's
+        latest stored wake (router.fable_gate): real money, the band
+        extreme, a frontier quota left, the frontier's switch, the pair's
+        money (scheduler.fable_money: priced at the dossier's size cap, in
+        O2 above the money the Orcs may hold in flight), its stored
+        dossier written for Fable within its cap. Dry, it prints the
+        clause; --yes is refused with it, nothing reserved or sent. When
+        every clause holds, --yes is refused too: r5 answers only beside
+        its r4 blind twin, at a real-money extreme wake's own claim, and
+        the smoke sends one call, never a pair."""
+        from bot_program.orcs import mind, router, scheduler, switches
+        from bot_program.orcs.constants import FRONTIER_RUNG
+        w = self._smoke_wake(orc)
+        comps = w.components if isinstance(w.components, dict) else {}
+
+        def stored():
+            if str(comps.get("family") or "") != "fable":
+                return router.NOT_FABLE_STORED
+            return router.FABLE_OVER if comps.get("over_budget") else ""
+        clause = router.fable_gate(
+            real=scheduler.is_real(orc), band=str(w.band or ""),
+            quota=lambda: mind.frontier_left(orc.user_id),
+            switch=switches.frontier_on,
+            money=lambda: scheduler.fable_money(w.reasons), render=stored)
+        pair = mind.pair_price()
+        out = self.stdout.write
+        when = w.created_at.strftime("%Y-%m-%d %H:%M")
+        out(f"The smoke of Orc #{orc.root_trade_id} ({orc.symbol}): wake "
+            f"#{w.pk} of {when} UTC, rung {FRONTIER_RUNG} (Fable), which "
+            f"answers only beside its r4 blind twin: the pair is bounded at "
+            f"${pair['weigh']:.4f} at the dossier's size cap.")
+        out("Fable's gate: " + (f"closed, {clause}." if clause else
+                                "every clause holds."))
+        why = (f"{clause} (Fable's gate)" if clause else
+               "r5 answers only beside its r4 blind twin, at a real-money "
+               "extreme wake's own claim; the smoke sends no pair")
+        if not opts["yes"]:
+            out(f"DRY RUN: nothing reserved, nothing sent. --yes is refused "
+                f"for rung {FRONTIER_RUNG!r}: {why}.")
+            return
+        raise CommandError(f"--yes is refused for rung {FRONTIER_RUNG!r}: "
+                           f"{why}. Nothing was reserved or sent.")
 
     def _smoke_wake(self, orc):
         """The Orc's latest wake with a stored dossier: S by its hash and

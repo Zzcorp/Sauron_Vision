@@ -92,7 +92,8 @@ KNOWN_AGENT_KEYS = {name for _, rows in AGENT_GROUPS for name, _, _ in rows}
 # with the minds switch and the Orcs line on, every wake a model reads is
 # answered on r0 while the router's switch, orcs_router, is off, as it
 # ships, and on the rung the router chose once he turns it on with his
-# PIN, 2026-11-06), never resolve_agent, so an override row here would
+# PIN, 2026-11-06; Fable's r5 only through its gate, which cannot open in
+# O2), never resolve_agent, so an override row here would
 # persist and be read by nothing — exactly what KNOWN_AGENT_KEYS exists to
 # refuse. Their spend is the Orcs' budget line (ai_agents/spend.py), off
 # at 0 until the operator sets it; a model is asked only once he has also
@@ -184,6 +185,17 @@ def _orc_probes_on() -> bool:
     2026-11-06)."""
     from bot_program.orcs.switches import probes_on
     return probes_on()
+
+
+def _orc_frontier() -> dict:
+    """Fable's gate on the card (the Orcs' O2 spec B.9, §1.2.7; O2b's
+    frontier, 2026-11-06): the pair's bound at the dossier's size cap (r5
+    with its fallback and its r4 blind twin), the money the Orcs may hold
+    in flight, whether the pair fits under it (never in O2), the frontier's
+    switch and its quota (bot_program/orcs/probes.frontier_state). Shown
+    only: no router reads it. AI money, on a staff page."""
+    from bot_program.orcs import probes
+    return probes.frontier_state()
 
 
 def _orc_boundaries() -> list:
@@ -337,6 +349,9 @@ def ai_models_dashboard(request):
         # each boundary's validation state
         "orc_probes_on": _orc_probes_on(),
         "orc_boundaries": _orc_boundaries(),
+        # O2b's frontier (2026-11-06, B.9): Fable's gate, which cannot
+        # open in O2 (its pair is bounded above the in-flight floor)
+        "orc_frontier": _orc_frontier(),
         "orc_agent_keys": ORC_AGENT_KEYS,
         "prices_source": PRICING_SOURCE,
         "cache_source": CACHE_SOURCE,

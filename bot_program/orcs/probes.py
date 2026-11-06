@@ -35,6 +35,11 @@ and the weather's caps say on which days any is sent (weather.caps_for's
                  read from stored bars
   ladder, boundary_states  what the surfaces read (/orcs/seats/ for staff,
                  /ai-models/): shown only, read by no router
+  store_twin     B.10 (O2b's frontier, 2026-11-06): r5's blind twin, sent by
+                 mind.think beside its r5 wake (never from here): its answer
+                 judged by the same validator, blind, and kept only as a
+                 `twin` pair, real money's (the probe pairs' table); in O2
+                 the pair cannot run (frontier_state, for /ai-models/)
 
 A probe is stored ONLY in OrcTierGrade and the ledger: never a plan, an
 intent, a note, a card line, a PS5 note or a journal entry, and never
@@ -63,8 +68,10 @@ from bot_program.orcs.constants import (ACTIONS, CLASS_REAL, CODE_DAY_CAP,
                                         PROBE_KINDS, RANKS, REPLY_ANSWER,
                                         REPLY_BILLED, REPLY_UNBILLED,
                                         SEAT_WINDOW, THINK_RUN_S, TRIM_SHARE,
+                                        TWIN_CALLER, TWIN_RUNG,
                                         VALIDATED_BLOCKS, VENUE_DEMO,
-                                        VENUE_PAPER, WAKE_STATUS_DONE,
+                                        VENUE_LIVE, VENUE_PAPER,
+                                        WAKE_STATUS_DONE,
                                         WAKE_STATUS_PENDING,
                                         WAKE_STATUS_REFUSED)
 
@@ -325,11 +332,12 @@ def routed_side(wake) -> tuple:
     return side, Decimal(str(cost or 0))
 
 
-def _store(wake, probe, side, *, usage):
+def _store(wake, probe, side, *, usage, world=None):
     """The pair, stored (scheduler.store_pair: one OrcTierGrade row, its
     block counted and written under the line lock, database work only,
     N8; this module holds no lock). None when the pair is stored already
-    (one per wake and kind)."""
+    (one per wake and kind). `world`: the pair's money world, a probe's
+    paper or demo (world_of) unless given (the twin's: real money)."""
     from bot_program.orcs import scheduler
     routed, routed_cost = routed_side(wake)
     comps = wake.components if isinstance(wake.components, dict) else {}
@@ -337,7 +345,7 @@ def _store(wake, probe, side, *, usage):
                                              dict) else {}
     kind = probe["kind"]
     boundary = probe.get("boundary") if kind == "boundary" else None
-    world = world_of(wake.orc)
+    world = world or world_of(wake.orc)
     agree_action = bool(routed["action"]) and \
         routed["action"] == side.get("action")
     agree_level = agree_action and routed["level_id"] == side.get(
@@ -352,6 +360,49 @@ def _store(wake, probe, side, *, usage):
         "routed": routed, "probe": dict(side),
         "agree_action": agree_action, "agree_level": agree_level,
         "routed_cost_usd": routed_cost, "probe_cost_usd": cost})
+
+
+def store_twin(wake, twin, reply, *, now=None):
+    """B.10 (O2b's frontier, 2026-11-06): r5's blind twin, once both calls
+    came back and the wake's settle stored r5's answer, the Orc's: the
+    twin's answer judged by the same validator with no lock held, blind to
+    r5's (mind.judge_probe: as of the wake's own moment, on the plan
+    changes made before its claim), and the pair stored as kind `twin`,
+    boundary none, in real money's world (r5 answers real money only):
+    never a plan, an intent, a note, a card line, a PS5 note or a journal
+    entry. Only when the twin's call came back billed (an answer, or a
+    billed failure stored invalid). The pair or None."""
+    from bot_program.orcs import mind
+    from bot_program.orcs.models import OrcWake
+    if not isinstance(reply, dict) or reply.get("kind") not in (
+            REPLY_ANSWER, REPLY_BILLED):
+        return None
+    fresh = (OrcWake.objects.select_related("orc", "orc__seat")
+             .get(pk=wake.pk))
+    side = mind.judge_probe(fresh, reply, now=now or timezone.now())
+    usage = reply.get("usage") if isinstance(reply.get("usage"),
+                                             dict) else None
+    return _store(fresh, {"kind": TWIN_CALLER,
+                          "rung": str(twin.get("rung") or ""),
+                          "would_rung": TWIN_RUNG, "boundary": None},
+                  side, usage=usage, world=VENUE_LIVE)
+
+
+def frontier_state() -> dict:
+    """B.9 on /ai-models/ (O2b's frontier, 2026-11-06): whether Fable's
+    gate can open at all. {pair_usd: the pair's bound at the dossier's size
+    cap (mind.pair_price, about $3.57), floor_usd: the money the Orcs may
+    hold in flight (ORC_LIVE_FLOOR_USD, $3.00), fits: the pair fits under
+    it (never in O2), on: the frontier's switch, quota: OrcSetting
+    frontier_per_day}. Shown only: no router reads it. Reads, never a
+    call."""
+    from bot_program.orcs import mind, mind_gateway, switches, weather
+    pair = mind.pair_price()
+    floor = float(mind_gateway.live_floor())
+    return {"pair_usd": float(pair["weigh"]), "floor_usd": floor,
+            "fits": float(pair["weigh"]) <= floor + 1e-9,
+            "on": bool(switches.frontier_on()),
+            "quota": int(weather.frontier_per_day())}
 
 
 # ── the forward grade (B.12) ─────────────────────────────────────────────

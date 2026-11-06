@@ -1340,9 +1340,12 @@ Orcs' router (O2b)" below). Each rung's row counts today's calls (the
 Orcs line's ledger rows, by the rung that answered), today's
 would-counts (the wakes the router would send it) and today's probes;
 below the ladder each band boundary shows its probe pairs and whether it
-reads validated (see "The Orcs' probes (O2b)" below). No tier setting on
-this page ever moves the ladder or the route, and no override can be
-saved for an Orc agent name. The card also counts the day's Orc calls
+reads validated (see "The Orcs' probes (O2b)" below). It also says that
+Fable (r5) stays at 0 through O2: its pair with its r4 blind twin is
+bounded above the $3.00 the Orcs may hold in flight, so its gate cannot
+open, with the frontier switch and its quota (see "Fable's gate (O2b)"
+below). No tier setting on this page ever moves the ladder or the route,
+and no override can be saved for an Orc agent name. The card also counts the day's Orc calls
 from the ledger. The catalog table lists each model's cache-read price
 and the shortest prefix it will cache.
 
@@ -1618,8 +1621,9 @@ for the whole bound, sends ONE call on the Orcs line from the Orc's latest
 stored dossier (r0, or h0 with `--rung h0`; from O2b a wake's rung r1 to
 r4 with `--rung`, only while the router's switch `orcs_router` is ON too,
 answered at one effort per model until the smoke's PASS, both rungs
-printed, never with a fallback; never r5), prints the answer and its
-validation, and writes nothing to the Orc. `smoke-verdict` records what
+printed, never with a fallback; r5 only through Fable's gate, which in O2
+refuses it with the clause that fails, nothing reserved or sent), prints
+the answer and its validation, and writes nothing to the Orc. `smoke-verdict` records what
 `manage.py claude_smoke --yes` printed for one model family; it sends
 nothing. `tokens --s --yes` counts S at the provider's free token count
 (the API key only: no switch, no line) and records it:
@@ -2040,6 +2044,50 @@ with your trading PIN. The shell's `component on` refuses this key and
 points to /ops/, and the Django admin will not turn it on either. To stop
 them: turning `orcs_probes` OFF takes no PIN; the next probe is not sent,
 and one already in flight finishes and is booked.
+
+### Fable's gate (O2b)
+
+Fable (r5) stays at 0 through O2. The router sends an extreme wake to r5
+only when every clause of Fable's gate holds, read in this order, the
+first that fails written in the route on the wake's journal entry (and
+shown as "extreme: r4, ..."): real money; the band is extreme; a frontier
+quota is left today; the frontier switch is ON; the pair fits under the
+wake's class's ceiling and the deep tiers' share; the pair fits under the
+$3.00 the Orcs may hold in flight; and the dossier, written for Fable at
+1.35 times the tokens, is within its size cap (one that is not is written
+again for r4, which answers it). Otherwise r4 answers, as before.
+
+The pair is r5 with its r4 blind twin. The twin reads the same stored
+dossier on r4 (on r2, at Opus's one effort, until the smoke's PASS for
+Opus), blind to r5's answer, with no fallback, and is kept only as a
+`twin` pair in the probe pairs' table on /orcs/seats/; r5's answer is the
+Orc's, and r5 is sent only once its twin was. Both are reserved together
+at the wake's claim, priced at the dossier's size cap: r5's bound with its
+fallback, about $2.69, and the twin's, about $0.88 on r4 ($0.56 on r2):
+about $3.57 in all ($3.25 before Opus's PASS). That is above the $3.00 the
+Orcs may hold in flight, so the gate cannot open in O2, whatever the
+switch and the quota say: no r5 and no twin call is sent, and Fable adds
+$0.
+
+- The switch `orcs_frontier` ("Orc Frontier (Fable and its blind twin in
+  shadow)", System, OFF on arrival, left OFF by "all on") takes your
+  trading PIN at /ops/ to turn on; the shell's `component on` refuses it
+  and points to /ops/, and the Django admin will not turn it on either.
+  Turning it OFF takes no PIN: a wake already admitted on r5 is answered on
+  r4 at its claim, and a pair whose switch reads OFF at the send sends
+  nothing.
+- The quota is OrcSetting `frontier_per_day`, 0 by default: the r5 calls a
+  user may make a UTC day, across all classes, less those made today (and
+  those in flight). The day's weather row shows the setting's value; the
+  router never reads that row. It binds at once, with no restart (in O2
+  it opens nothing, the pair being above the floor):
+
+  ```bash
+  ./deploy/dc exec web python manage.py shell -c "from bot_program.orcs.models import OrcSetting; OrcSetting.objects.update_or_create(key='frontier_per_day', defaults={'value': 0})"
+  ```
+- `orcs smoke --row ROOT_ID --rung r5` goes through the same gate on the
+  Orc's latest stored wake and is refused with the clause that fails;
+  nothing is reserved or sent.
 
 ## Operating notes
 

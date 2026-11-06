@@ -83,7 +83,10 @@ O2_CODE = {
                  "router_on",
                  # O2b's probes (2026-11-06): the probes' switch, and a
                  # caller's own switch (N2) read beside the four gates
-                 "probes_on", "caller_code"),
+                 "probes_on", "caller_code",
+                 # O2b's frontier (2026-11-06): the frontier's switch, the
+                 # twin's own and r5's beside the wake's (B.15c)
+                 "frontier_on"),
     "dossier": ("cost_fraction", "decision_bars", "events_of", "vctx"),
     "dossier_position": ("event_words", "_decisions", "_ps3",
                          "_last_expectation", "_realized_loss",
@@ -102,7 +105,10 @@ O2_CODE = {
              "_gate_code", "_render_failed",
              # O2b's route in shadow (2026-11-06): the route's money world
              # (the budget's) and the route recorded on every render
-             "_route_world", "_route"),
+             "_route_world", "_route",
+             # O2b's frontier (2026-11-06): Fable's gate, its clauses read
+             # before the render (B.9)
+             "_fable_gate"),
     # O2a's light (2026-11-05): the words (A.4, A.62): a wake's status in
     # words, the card's intents and intellect, the plan on the line
     "notes": ("wake_status_t", "_intents", "intellect_after", "_has_plan",
@@ -110,6 +116,9 @@ O2_CODE = {
     # O2a's light (2026-11-05): /orc reads the minds once, and the Orc's
     # model calls today
     "surfaces": ("_minds", "_model_calls"),
+    # O2b's frontier (2026-11-06): the frontier quota, OrcSetting
+    # frontier_per_day, which the day row shows (B.8b)
+    "weather": ("frontier_per_day",),
     # O2a's queue (2026-11-05): the minds' worker, its ticket, its watchdog
     "tasks": ("_think_ticket", "orc_think", "orc_minds_watch",
               # O2b's probes (2026-11-06): the worker's probe pass, last
@@ -127,7 +136,10 @@ O2_CODE = {
                      "Command._smoke", "Command._smoke_wake",
                      "Command._smoke_answer", "Command._orc_of",
                      "Command._gates_words", "Command._smoke_verdict",
-                     "Command._tokens"),
+                     "Command._tokens",
+                     # O2b's frontier (2026-11-06): the smoke's r5, only
+                     # through Fable's gate (B.15c, P35)
+                     "Command._smoke_fable"),
 }
 
 #: Every definition (function, class, method) of the package and of the

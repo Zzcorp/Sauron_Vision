@@ -955,14 +955,18 @@ class WhenProbesRunTests(_Probed):
 class TheProbeRungsTests(_Probed):
     """B.15b, N4: CALLER_RUNGS["probe"] = h0, r0, r1, r3, r4, with r2
     admitted only as B.5's map of r3 and r4 (§1.0.9 "mapped"); any other
-    rung raises before anything is sent."""
+    rung raises before anything is sent. Changed on purpose (2026-11-06,
+    O2b's frontier, B.15c): MAPPED_RUNGS gains the twin's row, r2 only as
+    B.5's map of r4 (tests/orcs/test_orc_o2b_frontier.py); the probe's row
+    is unchanged."""
 
     def test_the_probes_rungs_and_r2_only_as_a_map(self):
         from bot_program.orcs import mind, mind_gateway
         self.assertEqual(mind_gateway.CALLER_RUNGS["probe"],
                          ("h0", "r0", "r1", "r3", "r4"))
         self.assertEqual(mind_gateway.MAPPED_RUNGS,
-                         {"probe": {"r2": ("r3", "r4")}})
+                         {"probe": {"r2": ("r3", "r4")},
+                          "twin": {"r2": ("r4",)}})
         for rung in ("h0", "r0", "r1", "r3", "r4"):
             mind_gateway.check_rung("probe", rung)
         for would in ("r3", "r4"):

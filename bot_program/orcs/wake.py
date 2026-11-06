@@ -54,12 +54,16 @@ dossier:
      weather.py); the route (O2b, 2026-11-06, the O2 spec B.1-B.4): the
      rung the pure router (router.py) chooses, recorded in shadow in
      components["route"] and the `wake` entry, on the budget's money
-     world, which render_queued hands on (scheduler.is_real); then ONE
-     dossier, stored block by block (dossier.py), for the reference
+     world, which render_queued hands on (scheduler.is_real), Fable's
+     gate read before it (O2b's frontier, B.9: its clauses in order, the
+     first that fails kept in the route's `fable` and its `why`); then
+     ONE dossier, stored block by block (dossier.py), for the reference
      family while the router's switch (orcs_router) is OFF, for the
-     family of the answering rung's model while it is ON (B.4), its
-     family kept in components["family"]; then the OrcWake's score and
-     hashes and its status:
+     family of the answering rung's model while it is ON (B.4: a Fable
+     route's at the 1.35 factor, written again for r4's family only when
+     it comes back over its size cap, B.4b), its family kept in
+     components["family"]; then the OrcWake's score and hashes and its
+     status:
      `quiet` under F6 (a code `reading` and Orc.latest_note); `skipped`
      with the code of a gate it reads OFF (minds_off, line_off...); else
      it stays `recorded` for admission. A journal `wake` entry, kept off
@@ -94,6 +98,7 @@ never counted as the worker's silence (P11), and never stopping the next.
 
 # O2c: drum deliveries add W12
 """
+import copy
 import hashlib
 import json
 import logging
@@ -904,7 +909,36 @@ def _route_world(world, real_money) -> str:
     return world if world in (VENUE_DEMO, VENUE_PAPER) else ""
 
 
-def render_wake(wake, *, real_money=None):
+def _fable_gate(orc, band, *, route_world, money, routed) -> tuple:
+    """B.9 (O2b's frontier, 2026-11-06): the clauses of Fable's gate read
+    before the render, in their order (router.fable_gate), each read only
+    when every clause before it holds: real money (`route_world`, the
+    budget's world); the band extreme; a frontier quota left today
+    (mind.frontier_left: OrcSetting frontier_per_day less the user's r5
+    calls today, never the day row); the frontier switch (orcs_frontier);
+    the pair, priced at the dossier's size cap, under its class's ceiling,
+    the deep share and the money the Orcs may hold in flight (`money`:
+    scheduler.fable_money, which render_queued hands on; unread reads
+    closed). The Fable render's own clause follows the render (B.4b); with
+    the router's switch OFF (`routed` False) no Fable dossier is written,
+    so the gate cannot hold. Returns (the first failing clause or "", the
+    quota left as it was read, 0 when unread). Reads only: no lock is
+    held (N8)."""
+    from bot_program.orcs import mind, router
+    from bot_program.orcs.switches import frontier_on
+    left = {"n": 0}
+
+    def quota():
+        left["n"] = mind.frontier_left(orc.user_id)
+        return left["n"]
+    clause = router.fable_gate(
+        real=route_world == VENUE_LIVE, band=band, quota=quota,
+        switch=frontier_on, money=money if callable(money) else "unread",
+        render="" if routed else router.NO_FABLE_DOSSIER)
+    return clause, left["n"]
+
+
+def render_wake(wake, *, real_money=None, fable_money=None):
     """Score, weather, route and dossier of one recorded wake, AS OF its
     moment (components["as_of"]), with the care's state and the price the
     tick saw. Writes the OrcWake's score, band, day class, components
@@ -925,7 +959,11 @@ def render_wake(wake, *, real_money=None):
     reads and hands on; None (unread) routes as paper, is_real's own rule.
     The effort map (mind.answering_map) and the router's switch
     (switches.router_on: the dossier's family, B.4) are read once here,
-    before the render's transaction, never under a lock (N8)."""
+    before the render's transaction, never under a lock (N8).
+    `fable_money` (O2b's frontier, 2026-11-06, B.9): the money clauses of
+    Fable's gate, which render_queued hands on to be read only once the
+    clauses before them hold (scheduler.fable_money); None reads them
+    closed."""
     from django.db import transaction
 
     from bot_program.orcs import dossier, mind
@@ -965,35 +1003,41 @@ def render_wake(wake, *, real_money=None):
         return _render(wake, orc, trade, tick, ctx, reasons, now=now,
                        real=real, vctx=vctx, gate=gate,
                        route_world=_route_world(world, real_money),
-                       effort=effort, routed=routed)
+                       effort=effort, routed=routed, fable_money=fable_money)
 
 
-def _route(band, raw_band, *, kind, day_class, score, world,
-           effort) -> dict:
+def _route(band, raw_band, *, kind, day_class, score, world, effort,
+           fable=None, frontier_left=0) -> dict:
     """The route of one wake, as components["route"] and the `wake`
     entry keep it (O2b, 2026-11-06, B.1-B.3, B.16c): router.route on the
     band with and without its floor, the budget's money world, the day and
-    the effort map, the Fable gate closed with no frontier quota (B.9 is a
-    later commit's). {rung (the answering rung after the effort map),
-    would_rung (the table's), why, version (ROUTING_VERSION), words (the
-    would-route words: tier words, never a model id or a cost),
-    escalated, probes (listed here; probes.py sends them behind the
-    probes' switch, orcs_probes), twin}. Recorded whatever the
-    router's switch says; admission writes the rung that answers
+    the effort map, with Fable's gate as the render read it (O2b's
+    frontier, B.9: `fable`, its first failing clause or "", None read
+    closed, and the frontier quota left). {rung (the answering rung after
+    the effort map), would_rung (the table's), why (the failing clause of
+    an extreme wake among them), version (ROUTING_VERSION), words (the
+    would-route words: tier words, never a model id or a cost), escalated,
+    probes (listed here; probes.py sends them behind the probes' switch,
+    orcs_probes), twin (r5 answers, beside its blind twin), fable (the
+    gate's verdict, "" when it holds)}. Recorded whatever the router's
+    switch says; admission writes the rung that answers
     (components["rung"]): r0 while the switch is OFF, this route's rung
     while it is ON (B.2b)."""
     from bot_program.orcs import mind, router
-    got = router.route(band, world, kind, day_class, 0, router.GATE_CLOSED,
+    fable = router.GATE_CLOSED if fable is None else str(fable)
+    got = router.route(band, world, kind, day_class, frontier_left, fable,
                        effort, score=score, raw_band=raw_band)
     return {"rung": got["rung"], "would_rung": got["would_rung"],
             "why": list(got["why"]), "version": got["routing_version"],
             "words": mind.rung_words(got["would_rung"], ROUTE_WOULD_T),
             "escalated": bool(got["escalated"]),
-            "probes": list(got["probes"]), "twin": bool(got["twin"])}
+            "probes": list(got["probes"]), "twin": bool(got["twin"]),
+            "fable": fable}
 
 
 def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx,
-            gate="", route_world="", effort=None, routed=False):
+            gate="", route_world="", effort=None, routed=False,
+            fable_money=None):
     """O1's per-wake render, in its own transaction: it takes the Orc's
     lock only at its final journal.append. Its status (A.3; O2a): `quiet`
     under F6; `skipped` with `gate`, the code of a gate read OFF; else
@@ -1013,7 +1057,14 @@ def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx,
     family of the answering rung's model (Sonnet's r0 and r1, Opus's r2
     to r4), so components.tokens, the bound and the stored S are that
     family's; OFF, for the reference family, as O2a. Either way the
-    family is kept in components["family"], which admission reads."""
+    family is kept in components["family"], which admission reads.
+
+    O2b's frontier (2026-11-06, B.4b, B.9): Fable's gate is read between
+    the band and the route (_fable_gate). A route that passes it is r5's,
+    rendered for the fable family at the 1.35 factor; only a Fable render
+    that comes back over its size cap is rendered again, for r4's family,
+    the route taken again with that clause (journaled in the route), and
+    block_hashes, the tokens and S are the final render's."""
     from bot_program.orcs import complexity, dossier, journal, weather
     price = tick.get("price")
     day = weather.current(orc.user, orc.asset_class, now, real=real)
@@ -1035,12 +1086,26 @@ def _render(wake, orc, trade, tick, ctx, reasons, *, now, real, vctx,
               "hold_until": _parse(seen.get("band_hold_until")), "now": now}
     band = complexity.band(sc, floor=floor, **memory)
     raw_band = complexity.band(sc, floor=None, **memory)
+    fable, left = _fable_gate(orc, band, route_world=route_world,
+                              money=fable_money, routed=routed)
     route = _route(band, raw_band, kind=kind, day_class=day.day_class,
-                   score=sc, world=route_world, effort=effort)
+                   score=sc, world=route_world, effort=effort, fable=fable,
+                   frontier_left=left)
     from bot_program.orcs import mind
     family = mind.rung_family(route["rung"]) if routed else ""
+    # B.4b: a Fable render may be written again for r4's family; what it
+    # marked in the context's integrity is undone first
+    marks = copy.deepcopy(ctx.get("integrity")) if route["twin"] else None
     rendered = (dossier.render(orc, trade, ctx, as_of=now, model=family)
                 if family else dossier.render(orc, trade, ctx, as_of=now))
+    if route["twin"] and rendered.get("over_budget"):
+        from bot_program.orcs import router
+        ctx["integrity"] = marks
+        route = _route(band, raw_band, kind=kind, day_class=day.day_class,
+                       score=sc, world=route_world, effort=effort,
+                       fable=router.FABLE_OVER, frontier_left=left)
+        family = mind.rung_family(route["rung"])
+        rendered = dossier.render(orc, trade, ctx, as_of=now, model=family)
     f5_on, f5_items = complexity.f5(ctx.get("integrity"))
     snapshot = _snapshot(orc, trade, ctx)
     fh = facts_hash(snapshot)
@@ -1144,7 +1209,10 @@ def render_queued(*, limit=RENDER_BATCH) -> tuple:
          survivor's band and route are the union's;
       2. render_wake, in O1's own per-wake transaction, handed the
          budget's money world (scheduler.is_real, read here with no lock
-         held) for its route (O2b, 2026-11-06);
+         held) for its route (O2b, 2026-11-06), and for a real-money wake
+         the money clauses of Fable's gate (scheduler.fable_money, read
+         by the render only when the clauses before them hold; O2b's
+         frontier, 2026-11-06);
       3. scheduler.admit: `pending`, or `skipped` with its code, the Orc's
          lock taken for the status write only (A.11).
 
@@ -1154,6 +1222,8 @@ def render_queued(*, limit=RENDER_BATCH) -> tuple:
     stopping the next. The scheduler is imported here only, so the tick's
     import path never loads it. Never raises. A RenderPass: (rendered,
     failed) and the count admitted."""
+    from functools import partial
+
     from bot_program.orcs import scheduler
     from bot_program.orcs.models import OrcWake
     try:
@@ -1172,7 +1242,14 @@ def render_queued(*, limit=RENDER_BATCH) -> tuple:
             if (w.components or {}).get("render") != RENDER_QUEUED:
                 continue
             scheduler.absorb(w)
-            render_wake(w, real_money=scheduler.is_real(w.orc))
+            real = scheduler.is_real(w.orc)
+            # B.9 (O2b's frontier, 2026-11-06): the money clauses of
+            # Fable's gate, read by the render only once the clauses
+            # before them hold (a real-money extreme wake with a quota
+            # left and the frontier's switch ON)
+            render_wake(w, real_money=real, fable_money=partial(
+                scheduler.fable_money, list(w.reasons or [])) if real
+                else None)
             done += 1
         except Exception as e:  # noqa: BLE001 — one wake never stops one
             failed += 1

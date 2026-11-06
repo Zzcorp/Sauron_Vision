@@ -63,6 +63,17 @@ is claimed: the worker (tasks.orc_think) and the watchdog
   pairs    B.12 (O2b's probes, 2026-11-06): store_pair writes one probe
            pair (OrcTierGrade), its block counted under the line lock;
            probes.py builds it with no lock held
+  Fable    B.9, B.10 (O2b's frontier, 2026-11-06): fable_money, the money
+           clauses of Fable's gate (the pair priced at the dossier's size
+           cap under the wake's class's ceiling, the deep share and the
+           core's floor), which the render pass reads; an r5 wake's claim
+           reads the frontier's switch again (OFF: r4 as B.5 maps it
+           answers, from the stored Fable dossier), and under the line lock
+           real money and the frontier quota left, then weighs the money
+           once for the whole pair and reserves both in its one
+           transaction: the wake's est_usd r5's bound, the twin's ticket
+           (caller twin, its `pair` the wake) its own. In O2 the pair is
+           above the core's $3.00 floor, so no r5 wake is ever admitted
 
 THE MONEY (N3): every check of the line reads its cap, what it booked
 today and the OTHER calls' money in flight and held, through mind.py
@@ -152,7 +163,8 @@ from bot_program.orcs.constants import (BREAKER_FAILS, BREAKER_PAUSE_MIN,
                                         CODE_ROUTINE_CAP, CODE_ROW_CLOSED,
                                         CODE_SPACING, CODE_TRIAGE,
                                         CODE_WALL_TIME, CODE_WORKER_SILENT,
-                                        COLD_MODEL_MIN, DEEP_TIERS, HIGH,
+                                        COLD_MODEL_MIN, DEEP_TIERS,
+                                        FRONTIER_RUNG, HIGH,
                                         HOLD_LEDGER_GAP, HOLD_ORPHAN,
                                         HOLD_TICKET, HOLD_UNBILLED,
                                         ITEM_BILLED, ITEM_CLOSED, ITEM_EXPIRED,
@@ -181,7 +193,8 @@ from bot_program.orcs.constants import (BREAKER_FAILS, BREAKER_PAUSE_MIN,
                                         TICKET_CLASS, TICKET_DAY_CAP,
                                         TICKET_ITEMS_KEEP_DAYS,
                                         TICKET_MAX_TOKENS, TICKET_RETRIES,
-                                        TRIAGE, TRIAGE_KEY, VENUE_LIVE,
+                                        TRIAGE, TRIAGE_KEY, TWIN_CALLER,
+                                        TWIN_RUNG, VENUE_LIVE,
                                         WAKE_CODE_WORDS,
                                         WAKE_STATUS_DONE, WAKE_STATUS_FAILED,
                                         WAKE_STATUS_MERGED,
@@ -463,6 +476,26 @@ def class_money_code(klass, *, bound, purse, tier="balanced",
     return ""
 
 
+def fable_money(reasons) -> str:
+    """B.9's money clauses (O2b's frontier, 2026-11-06), for a real-money
+    wake (the gate's first clause): Fable's pair priced at the dossier's
+    size cap (mind.pair_price: r5's bound with its fallback and its
+    twin's, about $3.57) under the wake's own class's ceiling, the deep
+    share and the core's floor, with the money in flight and held
+    (class_money_code, on the line as it stands). "" when the pair fits,
+    else its code: triage, deep_share or inflight. Priced at the cap, the
+    pair passes the $3.00 floor whatever the dossier, so in O2 it reads
+    `inflight` (§4 Q12). The render pass reads it (wake.render_queued,
+    only once the clauses before it hold); database reads only, no
+    lock."""
+    from bot_program.orcs import mind
+    urgent = is_urgent(reasons)
+    pair = mind.pair_price()
+    return class_money_code(triage_class(True, urgent), bound=pair["weigh"],
+                            purse=mind.purse(), tier=pair["tier"],
+                            deep_exempt=urgent)
+
+
 def spacing_code(orc, *, urgent, now) -> str:
     """A.15: a non-urgent wake needs MIN_WAKE_SPACING_MIN since the Orc's
     last CLAIMED model wake (last_wake_at, written at the claim)."""
@@ -601,9 +634,10 @@ def drop_hold(wake, now) -> dict:
 
 # ── the tickets (A.57; O2a's arm, 2026-11-05) ────────────────────────────
 # Every model call that is not a wake reserves through a ticket: from O2a,
-# `orcs smoke --row`; from O2b the probes (bot_program/orcs/probes.py);
-# later the twin, Captains, the Emperor, the Skeptic, post-mortems, the
-# council of war and questions. A ticket is
+# `orcs smoke --row`; from O2b the probes (bot_program/orcs/probes.py) and
+# r5's blind twin, whose ticket only its r5 wake's claim writes, never
+# reserve_ticket (_hold_twin); later Captains, the Emperor, the Skeptic,
+# post-mortems, the council of war and questions. A ticket is
 # an entry of OrcSetting "minds_inflight" {kind: "ticket", usd: its bound,
 # at, wall_s, caller, rung, item, orc, ref}, counted in every in-flight sum
 # of the line like a running wake's bound (mind_gateway.inflight_usd), and
@@ -1133,13 +1167,16 @@ def _to_pending(w, f, *, rung, price, now) -> None:
     tick's own key kept, the first send set once (inherited from a merged
     wake, or now) and never moved, the priority its rank, the rung (the
     answering rung, B.2b), its bound and whether it names the fallback
-    (B.14)."""
+    (B.14); an r5 wake's whole pair beside it (O2b's frontier,
+    2026-11-06)."""
     comps = dict(w.components or {})
     if w.dedupe_key != _pending_key(w.orc_id):
         comps.setdefault("record_key", w.dedupe_key)
     comps.update({"rung": rung, "bound": round(float(price["bound"]), 6),
                   "fallback": bool(price.get("fallback")),
                   "real": bool(f["real"]), "urgent": bool(f["urgent"])})
+    if price.get("twin"):
+        comps["pair"] = round(float(price["weigh"]), 6)
     w.components = comps
     w.dedupe_key = _pending_key(w.orc_id)
     if w.queued_at is None:
@@ -1182,14 +1219,15 @@ def admit(wake, rendered=None, *, now=None) -> dict:
     if gate:
         # a gate OFF answers first (A.11 step 2): the line's money is not
         # read for a wake no model will see (as the minds ship, every one)
-        price, purse, code = {"bound": 0.0}, {}, gate
+        price, purse, code = {"bound": 0.0, "weigh": 0.0}, {}, gate
     else:
         # B.2b (O2b, 2026-11-06): the answering rung, behind the router's
         # switch: r0 while it is OFF, as O2a
         rung = mind.admitted_rung(w, router_on=switches.router_on())
         price = mind.price(w, rung, real=f["real"])
         purse = mind.purse()
-        code = _check(w, orc, f, now=now, rung=rung, bound=price["bound"],
+        # `weigh`: the bound, or an r5 wake's whole pair (O2b's frontier)
+        code = _check(w, orc, f, now=now, rung=rung, bound=price["weigh"],
                       purse=purse, inflight_high=_running_high(
                           orc.pk, exclude=w.pk), tier=price["tier"])
     with transaction.atomic():
@@ -1202,7 +1240,7 @@ def admit(wake, rendered=None, *, now=None) -> dict:
         if code:
             fresh.save(update_fields=["components"])
             _by_code(locked, fresh, code, now=now,
-                     body=_code_body(code, bound=price["bound"], purse=purse,
+                     body=_code_body(code, bound=price["weigh"], purse=purse,
                                      rung=rung))
         else:
             _to_pending(fresh, f, rung=rung, price=price, now=now)
@@ -1221,26 +1259,67 @@ def _cold_running(model) -> bool:
                .values_list("components", flat=True))
 
 
-def _take(locked, w, f, price, *, rung, now) -> None:
+def _hold_twin(w, price, *, now) -> dict:
+    """B.10 (O2b's frontier, 2026-11-06): the blind twin's ticket beside its
+    r5 wake, written in the claim's own transaction under the line lock:
+    an entry of OrcSetting "minds_inflight" {kind ticket, usd: its bound,
+    caller twin, rung, item twin:<wake>, orc, pair: the wake, ref, at,
+    wall_s: the pair's, both sent one after the other}, counted in every
+    in-flight sum of the line, r5's own ask included (its `pair` is never
+    the `wake` a call excludes); released by its settle (mind.think), an
+    orphan past its wall time. Returns {key, rung, bound, ref}."""
+    import uuid
+
+    from bot_program.orcs import mind
+    twin = price["twin"]
+    key = f"t{uuid.uuid4().hex[:16]}"
+    ref = mind.source_ref(w, twin["rung"], caller=TWIN_CALLER)
+    usd = round(float(twin["bound"]), 6)
+    store = _inflight_row()
+    value = _pruned(store.value if isinstance(store.value, dict) else {},
+                    now)
+    value[key] = {"kind": HOLD_TICKET, "usd": usd, "caller": TWIN_CALLER,
+                  "rung": str(twin["rung"]),
+                  "item": f"{TWIN_CALLER}:{w.pk}", "orc": w.orc_id,
+                  "pair": w.pk, "ref": ref[:120], "at": now.isoformat(),
+                  "wall_s": int(price.get("wall_s") or 0)}
+    store.value = value
+    store.save(update_fields=["value"])
+    return {"key": key, "rung": str(twin["rung"]), "bound": usd, "ref": ref}
+
+
+def _take(locked, w, f, price, *, rung, now, frontier="") -> None:
     """A.18 on a pass: `running`, started_at, est_usd = the bound, the
     rung's model; whether its model was cold (A.16); the Orc's
     last_wake_at and its count counters (reset first on a new UTC day).
-    The caller holds the line lock and the Orc's lock."""
+    An r5 wake's twin's ticket beside it (_hold_twin; O2b's frontier,
+    2026-11-06), and `frontier`, the clause of Fable's gate that no longer
+    held at the claim when r4 answers a wake routed r5. The caller holds
+    the line lock and the Orc's lock."""
     from bot_program.orcs import journal
     from bot_program.orcs.models import OrcWake
     model = str(price["model"] or "")[:50]
     cold = not OrcWake.objects.filter(
         model=model, started_at__gte=now - timedelta(minutes=COLD_MODEL_MIN)
     ).exclude(pk=w.pk).exists()
+    # a wake admitted with its pair and answered on r4 keeps no pair
+    kept = {k: v for k, v in (w.components or {}).items()
+            if k not in ("twin", "pair")}
+    extra = {}
+    if rung == FRONTIER_RUNG and price.get("twin"):
+        extra = {"twin": _hold_twin(w, price, now=now),
+                 "pair": round(float(price["weigh"]), 6)}
+    elif frontier:
+        extra = {"frontier": str(frontier)}
     w.status = WAKE_STATUS_RUNNING
     w.started_at = now
     w.est_usd = Decimal(str(round(float(price["bound"]), 6)))
     w.model = model
-    w.components = {**(w.components or {}), "rung": rung,
+    w.components = {**kept, "rung": rung,
                     "bound": round(float(price["bound"]), 6),
                     "fallback": bool(price.get("fallback")),
                     "real": bool(f["real"]), "urgent": bool(f["urgent"]),
-                    "cold": cold}
+                    "cold": cold, **extra}
     w.save(update_fields=["status", "started_at", "est_usd", "model",
                           "components"])
     c = day_counters(locked, now)
@@ -1273,7 +1352,7 @@ def _claim_one(wid, orc_id, *, now, paused=False) -> tuple:
     (`paused`, as after `orcs` or the platform master came back ON) by
     `paused`, as the watchdog's next pass would; else the watchdog closes
     it (backlog behind a busy worker, worker_silent)."""
-    from bot_program.orcs import journal, mind, switches
+    from bot_program.orcs import journal, mind, router, switches
     from bot_program.orcs.models import OrcWake
     w0 = OrcWake.objects.get(pk=wid)
     # B.2b (O2b, 2026-11-06), read before the locks: the answering rung,
@@ -1281,8 +1360,21 @@ def _claim_one(wid, orc_id, *, now, paused=False) -> tuple:
     # the wake re-priced); the bound and the model, the catalog's
     # arithmetic, for either money world (the locks read the world)
     rung = mind.claim_rung(w0, router_on=switches.router_on())
-    prices = {real: mind.price(w0, rung, real=real) for real in (False,
-                                                                 True)}
+    frontier, alt = "", None
+    if rung == FRONTIER_RUNG:
+        # B.9, B.10 (O2b's frontier, 2026-11-06): r4 as B.5 maps it, priced
+        # too, reads the stored Fable dossier should a clause of the gate
+        # no longer hold; the frontier's switch read again (frictionless
+        # off), real money and the quota under the locks below
+        alt_rung = mind.answering_rung(TWIN_RUNG)
+        alt = (alt_rung, {real: mind.price(w0, alt_rung, real=real)
+                          for real in (False, True)})
+        if not switches.frontier_on():
+            frontier = router.FRONTIER_OFF
+            rung = alt_rung
+    prices = (alt[1] if frontier else
+              {real: mind.price(w0, rung, real=real) for real in (False,
+                                                                  True)})
     with transaction.atomic():
         line_lock()
         locked = journal.orc_lock(orc_id, skip_locked=True)
@@ -1295,6 +1387,15 @@ def _claim_one(wid, orc_id, *, now, paused=False) -> tuple:
                                   status=WAKE_STATUS_RUNNING).exists():
             return "wait", "a call of this Orc is in flight"
         f = _facts(w, locked)
+        if rung == FRONTIER_RUNG:
+            # B.9 under the line lock, which every r5 claim takes: real
+            # money, and a frontier quota left, the r5 calls in flight
+            # counted; else r4 as B.5 maps it answers
+            frontier = (router.NOT_REAL if not f["real"] else
+                        router.NO_QUOTA if mind.frontier_left(
+                            locked.user_id) <= 0 else "")
+            if frontier:
+                rung, prices = alt
         price = prices[bool(f["real"])]
         purse = mind.purse()
         if _past_stale(w.queued_at, now):
@@ -1302,21 +1403,22 @@ def _claim_one(wid, orc_id, *, now, paused=False) -> tuple:
             if not code:
                 return "wait", "past the stale clock: the watchdog closes it"
         else:
+            # `weigh`: the bound, or an r5 wake's whole pair, weighed once
             code = _check(w, locked, f, now=now, rung=rung,
-                          bound=price["bound"], purse=purse,
+                          bound=price["weigh"], purse=purse,
                           inflight_high=0.0, tier=price["tier"])
         if not code:
             _ok, code, _why = mind.ask_line(
-                rung_name=rung, bound_usd=price["bound"],
+                rung_name=rung, bound_usd=price["weigh"],
                 real_urgent=f["real"] and f["urgent"])
         if code:
             _by_code(locked, w, code, now=now,
-                     body=_code_body(code, bound=price["bound"],
+                     body=_code_body(code, bound=price["weigh"],
                                      purse=purse, rung=rung))
             return "code", code
         if not f["urgent"] and _cold_running(price["model"]):
             return "wait", "the first call on a cold model is running"
-        _take(locked, w, f, price, rung=rung, now=now)
+        _take(locked, w, f, price, rung=rung, now=now, frontier=frontier)
     return "claimed", w
 
 
@@ -1767,9 +1869,16 @@ def _wall_time(now) -> int:
     n = 0
     for w0 in list(OrcWake.objects.filter(status=WAKE_STATUS_RUNNING,
                                           started_at__isnull=False)):
-        rung = str((w0.components or {}).get("rung") or O2A_RUNG)
-        if now - w0.started_at <= timedelta(seconds=WALL_S.get(
-                rung, WALL_S[O2A_RUNG])):
+        comps = w0.components if isinstance(w0.components, dict) else {}
+        rung = str(comps.get("rung") or O2A_RUNG)
+        wall = WALL_S.get(rung, WALL_S[O2A_RUNG])
+        twin = comps.get("twin") if isinstance(comps.get("twin"),
+                                               dict) else {}
+        if twin.get("rung") in WALL_S:
+            # an r5 wake's pair (O2b's frontier, 2026-11-06): its twin is
+            # sent first, then r5, within the claim's one wall time
+            wall += WALL_S[twin["rung"]]
+        if now - w0.started_at <= timedelta(seconds=wall):
             continue
         with transaction.atomic():
             line_lock()

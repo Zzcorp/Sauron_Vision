@@ -497,6 +497,9 @@ CODE_AUTHORITY = "authority"
 CODE_ROW_CLOSED = "row_closed"
 CODE_DEAD = "dead"
 CODE_UNSENT = "unsent"
+#: O2b's frontier (2026-11-06, B.15c): r5, or its blind twin, closed at the
+#: send while the frontier switch (orcs_frontier) is OFF.
+CODE_FRONTIER_OFF = "frontier_off"
 #: A.7: a wake the render pass could not finish (its merge, its render or
 #: its admission raised): answered by code, never pending, never silence.
 CODE_RENDER_FAILED = "render_failed"
@@ -510,7 +513,7 @@ WAKE_CODES = (
     "routine_cap", "dollar_cap", "spacing", CODE_DEAD, CODE_ROW_CLOSED,
     "over_budget", "breaker", "render_failed", "paused", "backlog",
     CODE_AUTHORITY, "pre_o2", "wall_time", "worker_silent", CODE_UNSENT,
-    CODE_UNBILLED, CODE_BILLED_FAILURE)
+    CODE_UNBILLED, CODE_BILLED_FAILURE, CODE_FRONTIER_OFF)
 WAKE_CODE_WORDS = {
     CODE_PLATFORM_OFF: "the platform's master switch is off",
     CODE_MINDS_OFF: "the minds switch is off",
@@ -539,6 +542,7 @@ WAKE_CODE_WORDS = {
     CODE_UNSENT: "the request was refused before it was sent",
     CODE_UNBILLED: "the call failed with no bill",
     CODE_BILLED_FAILURE: "the call failed and was billed",
+    CODE_FRONTIER_OFF: "the frontier switch (orcs_frontier) is off",
 }
 
 #: A.21: each rung's explicit bound and its httpx stall timeout. No model
@@ -838,7 +842,9 @@ ROUTE_WOULD_T = "would route: {rung} ({tier} tier, {effort} effort)"
 #: N2: the router's switch (core/platform_control.py ORC_MIND_SWITCHES).
 ROUTER_SWITCH = "orcs_router"
 #: The rungs above r0, which only the router's switch opens to a wake and
-#: to `orcs smoke --rung` (B.15a). h0 is a probe's rung, r0 the default.
+#: to `orcs smoke --rung` (B.15a); r5 also only through Fable's gate (B.15c,
+#: O2b's frontier, 2026-11-06), which the smoke never passes. h0 is a
+#: probe's rung, r0 the default.
 ROUTED_RUNGS = ("r1", "r2", "r3", "r4", "r5")
 #: B.13: the tiers the deep share holds (ai_agents/spend.py: deep and
 #: frontier), mirrored by the scheduler on the money in flight and held;
@@ -867,7 +873,8 @@ PROBES_SWITCH = "orcs_probes"
 PROBE_CALLER = "probe"
 PROBE_REF_MARK = f":{PROBE_CALLER}:"
 #: OrcTierGrade.kind: an h0 probe, a boundary probe, and Fable's blind twin
-#: (B.10, O2b's last commit); the kinds a probe is sent as.
+#: (B.10: O2b's frontier, 2026-11-06, beside an r5 wake only); the kinds a
+#: probe is sent as.
 TIER_GRADE_KINDS = ("h0", "boundary", "twin")
 PROBE_KINDS = ("h0", "boundary")
 #: OrcTierGrade.boundary: the band boundaries a boundary probe crosses
@@ -899,3 +906,31 @@ CODE_PROBES_OFF = "probes_off"
 CODE_PROBE_ALLOWANCE = "probe_allowance"
 CODE_REAL_WAITS = "real_waits"
 CODE_PROBE_REAL = "real_money"
+
+# ── O2b: Fable's gate and its blind twin (2026-11-06, the O2 spec B.4b,
+# B.8b, B.9, B.10, B.15c, §4 Q12) ──────────────────────────────────────────
+# Behind `orcs_frontier`, OFF on arrival and turned on only with the trading
+# PIN (N2): with the router's switch ON, a real-money extreme wake may be
+# answered by r5 (Fable) beside its r4 blind twin when every clause of
+# Fable's gate holds (router.fable_gate), under a daily quota of 0 by
+# default. The pair is priced at the dossier's size cap, about $3.57 (r5's
+# bound with its fallback and its twin's), above the $3.00 the Orcs may hold
+# in flight (ORC_LIVE_FLOOR_USD): in O2 the gate cannot open, so no r5 and
+# no twin call is sent. Nothing here sends anything.
+
+#: N2: the frontier's switch (core/platform_control.py ORC_MIND_SWITCHES).
+FRONTIER_SWITCH = "orcs_frontier"
+#: Fable's rung, and the rung its blind twin is asked as (B.5 maps it: r2
+#: until Opus's PASS).
+FRONTIER_RUNG = "r5"
+TWIN_RUNG = "r4"
+#: §1.0.9: the twin's caller, and its source_ref's word:
+#: Orc:<pk>:Wake:<w>:twin:<rung> (its ticket's `pair` names the r5 wake).
+TWIN_CALLER = "twin"
+TWIN_REF_MARK = f":{TWIN_CALLER}:"
+#: B.8b (§4 Q12): the r5 calls a user may make a UTC day across all
+#: classes, OrcSetting "frontier_per_day" (0 by default: Fable is off by
+#: quota too), less the user's r5 calls today. The day row's frontier_quota
+#: shows it; nothing that routes reads the day row.
+FRONTIER_PER_DAY = 0
+FRONTIER_PER_DAY_KEY = "frontier_per_day"

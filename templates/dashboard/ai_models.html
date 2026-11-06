@@ -165,6 +165,20 @@
         a paper or demo wake a model read, a neighbouring rung reads the
         same dossier again, blind, on the probes' own allowance.{% else %}The
         probes' switch (orcs_probes) is off: no rung is probed.{% endif %}
+        {% if orc_frontier.fits %}Fable (r5) may answer a real-money extreme
+        wake beside its r4 blind twin when every clause of its gate holds:
+        the pair's bound at the dossier's size cap
+        (${{ orc_frontier.pair_usd|floatformat:2 }}) fits under the
+        ${{ orc_frontier.floor_usd|floatformat:2 }} the Orcs may hold in
+        flight.{% else %}Fable (r5) stays at 0 through O2: it answers a
+        real-money extreme wake only beside its r4 blind twin, and the
+        pair's bound at the dossier's size cap
+        (${{ orc_frontier.pair_usd|floatformat:2 }}) is above the
+        ${{ orc_frontier.floor_usd|floatformat:2 }} the Orcs may hold in
+        flight, so its gate cannot open.{% endif %} The frontier switch
+        (orcs_frontier) is {% if orc_frontier.on %}on{% else %}off{% endif %},
+        and its quota (frontier_per_day) is {{ orc_frontier.quota }} a day
+        for each user.
         Orc calls today, from the ledger: {{ orc_calls_today }}.
     </p>
     <div class="table-wrapper">

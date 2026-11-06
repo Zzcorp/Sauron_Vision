@@ -541,10 +541,13 @@ class TheGatesTests(MindFixture):
     def test_a_rung_outside_the_callers_list_raises_with_no_request(self):
         """N4, P35: CALLER_RUNGS = wake r0-r4, smoke h0 and r0-r4 (changed
         on purpose, 2026-11-06, O2b B.15a: O2a's were wake r0, smoke r0
-        and h0; r5 is the Fable gate's, C4's), and the probe h0, r0, r1,
-        r3 and r4 (changed on purpose, 2026-11-06, O2b's probes, B.15b:
-        r2 only as B.5's map of r3 and r4); any other rung raises before
-        anything is sent."""
+        and h0; r5 is the Fable gate's), the probe h0, r0, r1, r3 and r4
+        (changed on purpose, 2026-11-06, O2b's probes, B.15b: r2 only as
+        B.5's map of r3 and r4), and the twin r4 (changed on purpose,
+        2026-11-06, O2b's frontier, B.15c: r2 only as B.5's map of r4, and
+        only beside its r5 wake's held reservation); any other rung raises
+        before anything is sent, and so does r5 for a wake that carries no
+        pass of the Fable gate."""
         from bot_program.orcs import mind, mind_gateway
         w = self.rendered()
         request = mind.build_request(w, "r0")
@@ -555,10 +558,12 @@ class TheGatesTests(MindFixture):
         self.assertEqual(mind_gateway.CALLER_RUNGS,
                          {"wake": ("r0", "r1", "r2", "r3", "r4"),
                           "smoke": ("h0", "r0", "r1", "r2", "r3", "r4"),
-                          "probe": ("h0", "r0", "r1", "r3", "r4")})
+                          "probe": ("h0", "r0", "r1", "r3", "r4"),
+                          "twin": ("r4",)})
         refused = [("wake", r) for r in ("h0", "r5", "x9")]
         refused += [("smoke", r) for r in ("r5", "x9")]
         refused += [("probe", r) for r in ("r2", "r5", "x9")]
+        refused += [("twin", r) for r in ("r2", "r3", "r4", "r5", "x9")]
         refused += [("captain", "r0"), ("", "r0")]
         for caller, rung in refused:
             with self.subTest(caller=caller, rung=rung), \
