@@ -519,6 +519,16 @@ ORC_LADDER_V1 = (
      "note": "extreme, gate passes; real money only, under a quota"},
 )
 
+# The Orcs' server-side fallback (2026-11-06, the Orcs' O2 spec B.14): the
+# model a real-money wake on r2-r5 names in the list form of `fallbacks`
+# ([{"model": ORC_FALLBACK_V1, "max_tokens": 8000}]), which the server
+# re-runs a refused request on. Opus 5 takes the list form, the effort-only
+# message and the schema, so the list is a valid request to every model
+# it names. Paper and demo wakes, probes, the twin and every ticket send
+# none. bot_program/orcs/mind_gateway.py reads it here by name; its
+# reservation adds the fallback's own bound (A.21).
+ORC_FALLBACK_V1 = "claude-opus-5"
+
 
 def choices() -> list[tuple[str, str]]:
     """(id, label) pairs for form/select rendering."""

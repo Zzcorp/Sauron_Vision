@@ -21,6 +21,31 @@ with his PIN, the Orcs line above 0). Both arrive closed.
   ticket_*       A.57 (O2a's arm, 2026-11-05): a ticket's caller, the
                  estimate of the exact text it sends and its bound, for the
                  scheduler's tickets and `orcs smoke` (reads, never a call)
+  judge_probe    B.11 (O2b's probes, 2026-11-06): a probe's answer through
+                 the same validator, with no lock held, blind to the
+                 routed answer; probes_spent, the probes' booked spend
+                 today, for the scheduler's allowance (a read)
+  answering_map  B.5 (O2b, 2026-11-06): {rung: the rung that answers it},
+                 the effort map the router reads (router.py names no
+                 model): the gateway's ladder and the smoke's verdicts,
+                 read once per render, never under a lock
+  *_rung         B.2b (O2b's routed rung, 2026-11-06): the rung a wake is
+                 answered on, behind the router's switch: admitted_rung
+                 (admission: the route's answering rung while the switch is
+                 ON and the dossier was rendered for its family, else r0),
+                 claim_rung (each claim: the admitted rung through the
+                 effort map again while ON, r0 once OFF), answering_rung
+                 (B.5's map for one rung: the smoke), rung_family
+  the pair       B.8b-B.10 (O2b's frontier, 2026-11-06): pair_price, Fable's
+                 pair (r5 with its fallback and its r4 blind twin) priced at
+                 the dossier's size cap, about $3.57, above the $3.00 the
+                 Orcs may hold in flight, so in O2 the gate cannot open;
+                 frontier_left, the user's frontier quota left today
+                 (reads); and in think, an r5 wake's twin sent first, on the
+                 same stored blocks, blind, so r5 is sent only beside it,
+                 its answer kept only as a `twin` pair (probes.store_twin)
+  rung_words     a rung in tier words (A.62), or the router's choice in
+                 them ("would route: r2 (deep tier, medium effort)", B.16c)
   write_*        the outcome's writes, called by the settle inside its one
                  transaction: database writes only. A done answer writes
                  its decision (with the booking), its plan (a revision),
@@ -43,22 +68,26 @@ import re
 from datetime import timedelta
 from decimal import Decimal
 
-from bot_program.orcs.constants import (CODE_UNSENT, INTENT_KINDS,
+from bot_program.orcs.constants import (ACTIONS, CODE_UNBILLED,
+                                        CODE_UNSENT, DOSSIER_MAX_TOKENS,
+                                        FRONTIER_RUNG, INTENT_KINDS,
                                         REPLY_ANSWER, REPLY_BILLED,
                                         REPLY_CLOSED, REPLY_UNBILLED,
-                                        REPLY_UNSENT, RUNG_NONE, RUNG_T,
+                                        REPLY_UNSENT, RUNG_LIMITS, RUNG_NONE,
+                                        RUNG_T, TWIN_CALLER, TWIN_RUNG,
                                         INTENT_STATUS_QUEUED,
                                         INTENT_STATUS_RECORDED,
                                         INTENT_STATUS_REFUSED, INTENT_TTL_S,
                                         MINDS_SWITCH, MODE_REFUSED,
                                         MODE_SHADOW, O2A_RUNG,
-                                        OFFICER_REFUSE,
+                                        OFFICER_REFUSE, PROBE_CALLER,
                                         S_VERSION, SCHEMA_VERSION,
                                         SMOKE_VERDICT_KEY, STATE_CARE_OWNED,
                                         W11_ASK_KEY,
                                         WAKE_CODE_WORDS, WAKE_STATUS_DONE,
                                         WAKE_STATUS_FAILED, WAKE_STATUS_LATE,
                                         WAKE_STATUS_REFUSED,
+                                        WAKE_STATUS_RUNNING,
                                         WAKE_STATUS_SKIPPED)
 from bot_program.orcs.intents import CARD_INTENTS, STATUS_T, intent_words
 
@@ -72,7 +101,14 @@ ACTION_WORDS = {"hold": "hold", "revise_plan": "revise the plan"}
 
 
 def source_ref(wake, rung, caller=CALLER) -> str:
-    """`Orc:<pk>:Wake:<w>:<rung>` (§1.0.9): the Orcs line's own prefix."""
+    """`Orc:<pk>:Wake:<w>:<rung>` (§1.0.9): the Orcs line's own prefix. A
+    probe's names its wake and itself (B.11; O2b's probes, 2026-11-06):
+    `Orc:<pk>:Wake:<w>:probe:<rung>`, so the ledger counts it on its rung
+    and its own allowance finds it; so does r5's blind twin's (B.10; O2b's
+    frontier, 2026-11-06): `Orc:<pk>:Wake:<w>:twin:<rung>`, never an r5
+    call of the frontier quota."""
+    if caller in (PROBE_CALLER, TWIN_CALLER):
+        return f"Orc:{wake.orc_id}:Wake:{wake.pk}:{caller}:{rung}"
     word = "Wake" if caller == CALLER else str(caller).capitalize()
     return f"Orc:{wake.orc_id}:{word}:{wake.pk}:{rung}"
 
@@ -82,28 +118,61 @@ def source_ref(wake, rung, caller=CALLER) -> str:
 SENT = (REPLY_ANSWER, REPLY_BILLED, REPLY_UNBILLED)
 
 
-def rung_words(rung_name) -> str:
+def rung_words(rung_name, words=RUNG_T) -> str:
     """A rung in tier words for the card (A.62): "r0 · balanced tier, low
-    effort". No model id, no cost. Read through the gateway's catalog
-    read, never under a lock (think, before the settle)."""
+    effort"; with `words` constants.ROUTE_WOULD_T, the router's choice as
+    the Orc's page shows it (B.16c; O2b, 2026-11-06): "would route: r2
+    (deep tier, medium effort)". No model id, no cost. Read through the
+    gateway's catalog read (no query), never under a lock (think, before
+    the settle; the render, before its journal entry)."""
     from bot_program.orcs import mind_gateway
     try:
         step = mind_gateway.rung(rung_name)
     except (ValueError, KeyError):
         return RUNG_NONE
-    return RUNG_T.format(rung=step["rung"], tier=step["tier"],
-                         effort=step["effort"])
+    return words.format(rung=step["rung"], tier=step["tier"],
+                        effort=step["effort"])
+
+
+def answering_map() -> dict:
+    """B.5 (O2b, 2026-11-06): {rung: the rung that answers it}, the effort
+    map the router reads (router.py holds no model knowledge). Until the
+    smoke's PASS is recorded for a model's family (A.61), that model runs
+    at one effort, its first rung's on the ladder: Sonnet's rungs answer
+    as r0 (low effort), Opus's as r2 (medium), so r1 answers as r0 and r3
+    and r4 as r2. With the PASS each of its rungs answers as itself. The
+    gateway's ladder (the catalog, no query) and the smoke's verdicts (one
+    read) are read once per render, before its transaction: never under
+    a lock (N8). A rung the ladder does not hold is left out."""
+    from bot_program.orcs import mind_gateway
+    from bot_program.orcs.models import OrcSetting
+    verdicts = OrcSetting.get(SMOKE_VERDICT_KEY) or {}
+    steps = []
+    for name in sorted(RUNG_LIMITS):
+        try:
+            steps.append(mind_gateway.rung(name))
+        except (ValueError, KeyError):
+            continue
+    first = {}
+    for step in steps:
+        first.setdefault(step["family"], step["rung"])
+    return {step["rung"]: (step["rung"] if _passed(verdicts, step["family"])
+                           else first[step["family"]])
+            for step in steps}
 
 
 # ── the request (A.23) ───────────────────────────────────────────────────
 
-def smoke_pass(family) -> bool:
-    """The smoke's recorded verdict for `family` is a PASS (A.61)."""
-    from bot_program.orcs.models import OrcSetting
-    verdicts = OrcSetting.get(SMOKE_VERDICT_KEY) or {}
+def _passed(verdicts, family) -> bool:
     entry = verdicts.get(family) if isinstance(verdicts, dict) else None
     return isinstance(entry, dict) and str(entry.get("verdict") or "") \
         .lower() == "pass"
+
+
+def smoke_pass(family) -> bool:
+    """The smoke's recorded verdict for `family` is a PASS (A.61)."""
+    from bot_program.orcs.models import OrcSetting
+    return _passed(OrcSetting.get(SMOKE_VERDICT_KEY) or {}, family)
 
 
 def efforts(rung_name) -> dict:
@@ -161,29 +230,148 @@ def build_request(wake, rung_name) -> dict:
 # the gateway's READS it needs there, the ledger's sums, the settings and
 # the catalog's arithmetic. None of them sends anything.
 
-def price(wake, rung_name) -> dict:
-    """{bound, model, tier} of one call for `wake` on rung `rung_name`:
-    A.21's bound on the render's estimate of the exact text sent
-    (components["tokens"]), the rung's model and tier read from the
-    catalog by the rung's name."""
+def price(wake, rung_name, *, real=False) -> dict:
+    """{bound, model, tier, fallback, twin, weigh} of one call for `wake`
+    on rung `rung_name`: A.21's bound on the render's estimate of the exact
+    text sent (components["tokens"]), the rung's model and tier read from
+    the catalog by the rung's name. `real`: the wake is real money, so on
+    r2-r5 it names the fallback and its bound adds the fallback's own
+    (B.14; O2b, 2026-11-06). `weigh` is what every money check weighs: the
+    bound, with `twin` None. On r5 (O2b's frontier, 2026-11-06, B.9, B.10)
+    the pair's price instead (pair_price): r5's bound and its twin's, both
+    at the dossier's size cap, whatever the render's estimate."""
     from bot_program.orcs import mind_gateway
+    if rung_name == FRONTIER_RUNG:
+        return pair_price()
     step = mind_gateway.rung(rung_name)
     comps = wake.components if isinstance(wake.components, dict) else {}
-    return {"bound": float(mind_gateway.bound(rung_name, comps.get("tokens"))),
-            "model": step["model"], "tier": step["tier"]}
+    fallback = mind_gateway.sends_fallback(CALLER, rung_name, real)
+    bound = float(mind_gateway.bound(rung_name, comps.get("tokens"),
+                                     fallback=fallback))
+    return {"bound": bound, "model": step["model"], "tier": step["tier"],
+            "fallback": bool(fallback), "twin": None, "weigh": bound}
+
+
+def pair_price() -> dict:
+    """B.9, B.10 (O2b's frontier, 2026-11-06): Fable's pair, priced at the
+    dossier's size cap (DOSSIER_MAX_TOKENS, which `over_budget` caps the
+    Fable-family estimate at), so its bound never depends on the dossier:
+    {bound (r5's, with its fallback: real money only, about $2.69), model,
+    tier, fallback, twin {rung (r4 as B.5 maps it), bound (its own, no
+    fallback: about $0.88 on r4, $0.56 on r2), model}, weigh (the pair's
+    whole bound, about $3.57; $3.25 before Opus's PASS), wall_s (both sent
+    one after the other)}. Above the $3.00 the Orcs may hold in flight
+    (A.18's `inflight`), so in O2 the pair can never run (§4 Q12). The
+    catalog's arithmetic through the gateway (no query but the verdicts),
+    never a call."""
+    from bot_program.orcs import mind_gateway
+    step = mind_gateway.rung(FRONTIER_RUNG)
+    twin_rung = answering_rung(TWIN_RUNG)
+    twin = mind_gateway.rung(twin_rung)
+    r5 = float(mind_gateway.bound(FRONTIER_RUNG, DOSSIER_MAX_TOKENS,
+                                  fallback=True))
+    tb = float(mind_gateway.bound(twin_rung, DOSSIER_MAX_TOKENS))
+    return {"bound": r5, "model": step["model"], "tier": step["tier"],
+            "fallback": True,
+            "twin": {"rung": twin_rung, "bound": tb, "model": twin["model"]},
+            "weigh": r5 + tb,
+            "wall_s": int(step["wall_s"]) + int(twin["wall_s"])}
+
+
+def frontier_left(user_id) -> int:
+    """B.8b (O2b's frontier, 2026-11-06): the frontier quota left today for
+    one user, across all classes: OrcSetting "frontier_per_day" (0 by
+    default: weather.frontier_per_day) less the user's r5 calls today: the
+    Orcs line's ledger rows by the source_ref's rung (through the
+    gateway), and the user's r5 wakes in flight, not yet on it. Never
+    below 0. The router never reads the day row (OrcDayBaseline.
+    frontier_quota). Database reads only; none at all at a quota of 0."""
+    from bot_program.orcs import mind_gateway, weather
+    from bot_program.orcs.models import Orc, OrcWake
+    per_day = weather.frontier_per_day()
+    if per_day <= 0:
+        return 0
+    ids = list(Orc.objects.filter(user_id=user_id).values_list("pk",
+                                                               flat=True))
+    used = mind_gateway.frontier_calls(ids) + OrcWake.objects.filter(
+        orc_id__in=ids, status=WAKE_STATUS_RUNNING,
+        components__rung=FRONTIER_RUNG).count()
+    return max(0, per_day - used)
 
 
 def purse(*, exclude_wake=None) -> dict:
     """The Orcs line as admission and the claim weigh it (A.13, A.18): its
     cap, what it booked today, the OTHER calls' money in flight and held
     (every running wake's est_usd but `exclude_wake`'s, and the holds and
-    tickets of OrcSetting "minds_inflight"), and the floor the core line
-    holds back for the Orcs (ORC_LIVE_FLOOR_USD)."""
+    tickets of OrcSetting "minds_inflight"), the floor the core line
+    holds back for the Orcs (ORC_LIVE_FLOOR_USD), and the deep tiers'
+    share of the line (DEEP_TIER_SHARE: B.13, O2b, 2026-11-06)."""
     from bot_program.orcs import mind_gateway
     return {"cap": mind_gateway.line_cap(),
             "spent": mind_gateway.line_spent(),
             "inflight": mind_gateway.inflight_usd(exclude_wake=exclude_wake),
-            "floor": mind_gateway.live_floor()}
+            "floor": mind_gateway.live_floor(),
+            "deep_share": mind_gateway.deep_share()}
+
+
+# ── the answering rung (B.2b, B.4, B.5; O2b's routed rung, 2026-11-06) ──
+# The router's switch (`orcs_router`) decides which rung answers a wake a
+# model reads: OFF, r0 (O2A_RUNG), the router's choice only recorded; ON,
+# the rung the router chose, through the effort map. The scheduler reads
+# these before its locks and names no gateway (N8).
+
+def rung_family(rung_name) -> str:
+    """The model family of rung `rung_name` (the catalog's, through the
+    gateway's ladder): the family a routed wake's dossier is rendered for
+    (B.4). "" for a rung the ladder does not hold."""
+    from bot_program.orcs import mind_gateway
+    try:
+        return str(mind_gateway.rung(rung_name)["family"])
+    except (ValueError, KeyError):
+        return ""
+
+
+def answering_rung(rung_name) -> str:
+    """B.5 for one rung, read now: the rung that answers `rung_name` (one
+    effort per model until the smoke's PASS for its family). Tickets map
+    the same way (the smoke here)."""
+    return str(answering_map().get(rung_name, rung_name))
+
+
+def admitted_rung(wake, *, router_on) -> str:
+    """B.2b at admission: the rung written in components["rung"]. While
+    the router's switch is ON, the route's answering rung, when the wake
+    caller may use it (CALLER_RUNGS: r0-r4) and the stored dossier was
+    rendered for its model's family (the render read the switch first,
+    B.4); otherwise r0, as O2a. r5 (O2b's frontier, 2026-11-06) only when
+    the route passed Fable's gate (its twin named) on a Fable render."""
+    from bot_program.orcs import mind_gateway
+    if not router_on:
+        return O2A_RUNG
+    comps = wake.components if isinstance(wake.components, dict) else {}
+    route = comps.get("route") if isinstance(comps.get("route"), dict) else {}
+    rung = str(route.get("rung") or "")
+    family = str(comps.get("family") or "")
+    if rung == FRONTIER_RUNG:
+        return rung if route.get("twin") is True and \
+            rung_family(rung) == family else O2A_RUNG
+    if rung not in mind_gateway.CALLER_RUNGS[CALLER] or \
+            rung_family(rung) != family:
+        return O2A_RUNG
+    return rung
+
+
+def claim_rung(wake, *, router_on) -> str:
+    """B.2b at each claim (frictionless off): while the router's switch is
+    ON, the admitted rung (components["rung"]) through the effort map once
+    more, so a verdict recorded since the render binds now (the map keeps
+    a model's family, so the dossier still fits); once it is OFF, r0: the
+    wake is re-priced and answered on r0 from its stored dossier (Opus's
+    and Sonnet's texts are one size at the factor 1.0)."""
+    if not router_on:
+        return O2A_RUNG
+    comps = wake.components if isinstance(wake.components, dict) else {}
+    return answering_rung(str(comps.get("rung") or O2A_RUNG))
 
 
 def ask_line(*, rung_name, bound_usd, exclude_wake=None,
@@ -200,14 +388,23 @@ def ask_line(*, rung_name, bound_usd, exclude_wake=None,
 # ── the tickets, as the scheduler and the commands weigh them (A.57; O2a's
 # arm, 2026-11-05): the gateway's reads, never a call ────────────────────
 
-def ticket_caller(caller, rung_name) -> None:
+def ticket_caller(caller, rung_name, *, would=None) -> None:
     """A.57: a ticket is for a caller of §1.0.9 that is not the wake
-    (mind_gateway.CALLER_RUNGS), on one of that caller's rungs: else
-    ValueError, before anything is held or sent (N4)."""
+    (mind_gateway.CALLER_RUNGS), on one of that caller's rungs, or one it
+    reaches only as B.5's map of `would` (a probe's r2: O2b's probes,
+    2026-11-06): else ValueError, before anything is held or sent (N4)."""
     from bot_program.orcs import mind_gateway
     if caller == CALLER:
         raise ValueError("a wake is claimed, never ticketed")
-    mind_gateway.check_rung(caller, rung_name)
+    mind_gateway.check_rung(caller, rung_name, would=would)
+
+
+def probes_spent() -> float:
+    """What the probes booked today on the Orcs line (the ledger's probe
+    rows, through the gateway): their own allowance weighs it (B.11; O2b's
+    probes, 2026-11-06). A read, never a call."""
+    from bot_program.orcs import mind_gateway
+    return mind_gateway.probes_spent()
 
 
 def ticket_price(rung_name, tokens) -> dict:
@@ -257,31 +454,120 @@ def _real_urgent(wake) -> bool:
     return bool(comps.get("real")) and bool(comps.get("urgent"))
 
 
+def _unsent(rung_name, error) -> dict:
+    """A reply for a call never sent (A.25): nothing billed, nothing held."""
+    return {"kind": REPLY_UNSENT, "sent": False, "code": CODE_UNSENT,
+            "why": "", "text": None, "usage": None,
+            "error": f"{type(error).__name__}: {error}"[:300],
+            "rung": rung_name, "model": "", "latency": 0.0,
+            "stop_reason": None}
+
+
+def _twin_call(wake, twin) -> dict:
+    """B.10 (O2b's frontier, 2026-11-06): the blind twin of an r5 wake, ONE
+    call through the gateway on r4 as B.5 maps it, on the wake's own
+    stored blocks (the same r5 reads), with no fallback (B.14), its bound
+    the ticket the claim reserved beside r5's (`twin`: its key, rung and
+    bound), agent orc, source_ref Orc:<pk>:Wake:<w>:twin:<rung>. A request
+    the gateway refuses before the send (the twin's ticket not held, a
+    rung it may not use) is an unsent reply."""
+    from bot_program.orcs import mind_gateway
+    rung = str(twin.get("rung") or "")
+    try:
+        return mind_gateway.call(
+            caller=TWIN_CALLER, rung_name=rung,
+            request=build_request(wake, rung),
+            source_ref=source_ref(wake, rung, caller=TWIN_CALLER),
+            bound_usd=float(twin.get("bound") or 0),
+            exclude_key=str(twin.get("key") or ""), would_rung=TWIN_RUNG)
+    except (ValueError, KeyError, TypeError) as e:
+        return _unsent(rung, e)
+
+
+def _settle_twin(wake, twin, reply, *, since):
+    """The twin's ticket settled whatever came back (A.57): the provider's
+    ledger row looked up first, with no lock held (N8), then
+    scheduler.settle_ticket. A call that may have been sent and never came
+    back (`reply` None: the gateway itself raised) keeps its bound held
+    until 00:00 UTC."""
+    from bot_program.orcs import mind_gateway, scheduler
+    if reply is None:
+        reply = {"kind": REPLY_UNBILLED, "sent": True, "usage": None,
+                 "code": CODE_UNBILLED}
+    key = str(twin.get("key") or "")
+    usage = reply.get("usage") if isinstance(reply.get("usage"),
+                                             dict) else None
+    ref = source_ref(wake, str(twin.get("rung") or ""), caller=TWIN_CALLER)
+    found = (mind_gateway.ledger_row(ref, since=since)
+             if usage is not None else None)
+    if key:
+        scheduler.settle_ticket(key, {**reply, "ledger": found})
+    return reply
+
+
 def think(wake, *, now=None) -> dict:
     """Read one CLAIMED (running) wake: build the request, call once
     through the gateway, judge the answer, settle. No lock is held but
-    the settle's own. Returns the settle's result."""
+    the settle's own. Returns the settle's result.
+
+    An r5 wake (O2b's frontier, 2026-11-06, B.10) is Fable's pair: its
+    blind twin first (_twin_call), on the same stored blocks, so r5 is
+    sent only beside it and only once its twin was sent, through Fable's
+    gate (the gateway's pass: the twin's ticket, found held); the twin's
+    ticket is settled, then r5's answer is judged and settled as the
+    Orc's, then the twin's is judged blind and kept only as a `twin` pair
+    (probes.store_twin)."""
     from django.utils import timezone
 
     from bot_program.orcs import mind_gateway, scheduler
     comps = wake.components if isinstance(wake.components, dict) else {}
+    # B.2b (O2b, 2026-11-06): the claim's rung, the answering rung
     rung_name = str(comps.get("rung") or O2A_RUNG)
+    real = bool(comps.get("real"))
     ref = source_ref(wake, rung_name)
+    pair = rung_name == FRONTIER_RUNG
+    twin = comps.get("twin") if pair and isinstance(comps.get("twin"),
+                                                    dict) else {}
+    twin_reply = {"kind": REPLY_UNSENT, "sent": False, "usage": None,
+                  "code": CODE_UNSENT}
+    started = timezone.now()
     try:
         request = build_request(wake, rung_name)
-    except (ValueError, KeyError, TypeError) as e:
-        reply = {"kind": REPLY_UNSENT, "sent": False, "code": CODE_UNSENT,
-                 "why": "", "text": None, "usage": None,
-                 "error": f"{type(e).__name__}: {e}"[:300],
-                 "rung": rung_name, "model": "", "latency": 0.0,
-                 "stop_reason": None}
-    else:
         bound_usd = float(wake.est_usd or 0) or mind_gateway.bound(
-            rung_name, comps.get("tokens"))
-        reply = mind_gateway.call(caller=CALLER, rung_name=rung_name,
-                                  request=request, source_ref=ref,
-                                  bound_usd=bound_usd, exclude_wake=wake.pk,
-                                  real_urgent=_real_urgent(wake))
+            rung_name, comps.get("tokens"), fallback=mind_gateway
+            .sends_fallback(CALLER, rung_name, real))
+        if pair and twin:
+            # B.10: the twin first; r5 only once it was sent (r5 never
+            # runs without r4), never with its answer (blind)
+            twin_reply = None
+            twin_reply = _twin_call(wake, twin)
+            if not twin_reply.get("sent"):
+                reply = {**_unsent(rung_name, ValueError("its twin was not "
+                                                          "sent")),
+                         "kind": twin_reply.get("kind") or REPLY_UNSENT,
+                         "code": str(twin_reply.get("code") or CODE_UNSENT),
+                         "why": str(twin_reply.get("why") or "")}
+            else:
+                reply = mind_gateway.call(
+                    caller=CALLER, rung_name=rung_name, request=request,
+                    source_ref=ref, bound_usd=bound_usd,
+                    exclude_wake=wake.pk, real_urgent=_real_urgent(wake),
+                    real_money=real, frontier_pass=str(twin.get("key") or ""))
+        else:
+            reply = mind_gateway.call(caller=CALLER, rung_name=rung_name,
+                                      request=request, source_ref=ref,
+                                      bound_usd=bound_usd,
+                                      exclude_wake=wake.pk,
+                                      real_urgent=_real_urgent(wake),
+                                      real_money=real)
+    except (ValueError, KeyError, TypeError) as e:
+        # nothing was sent: a block missing, or a rung the wake caller may
+        # not use (N4; r5 without its pair held), which the gateway refuses
+        # before any send
+        reply = _unsent(rung_name, e)
+    finally:
+        if pair and twin:
+            twin_reply = _settle_twin(wake, twin, twin_reply, since=started)
     now = now or timezone.now()
     outcome = judge(wake, reply, now=now)
     outcome["source_ref"] = ref
@@ -292,7 +578,15 @@ def think(wake, *, now=None) -> dict:
     # once, before the settle takes its locks
     outcome["ledger"] = (mind_gateway.ledger_row(ref, since=wake.started_at)
                          if isinstance(outcome.get("usage"), dict) else None)
-    return scheduler.settle(wake, outcome, now=now)
+    settled = scheduler.settle(wake, outcome, now=now)
+    if pair and twin:
+        try:
+            from bot_program.orcs import probes
+            probes.store_twin(wake, twin, twin_reply, now=now)
+        except Exception as e:  # noqa: BLE001 — the settle is booked
+            logger.warning("[orcs] wake %s: its twin's pair was not stored: "
+                           "%s", wake.pk, e)
+    return settled
 
 
 def _kept(answer, vctx) -> dict:
@@ -441,6 +735,66 @@ def judge(wake, reply, *, now) -> dict:
                              "bar": bars[-1] if bars else None}
     outcome["intent"] = intent
     return outcome
+
+
+def judge_probe(wake, reply, *, now) -> dict:
+    """B.11 (O2b's probes, 2026-11-06): a probe's answer through the same
+    validator as the wake's (V1-V14), with no lock held, BLIND to the
+    routed answer: as of the wake's own moment (its validation context,
+    the facts its dossier showed), on the Orc's plan as that context read
+    it (vctx's plan_version and plan_at, and the 24-hour plan changes made
+    before the wake's claim), so the routed answer's own plan change never
+    judges the probe. The officer is not asked: a pair compares answers,
+    and the officer's day counters already hold the routed answer's. One
+    side of the pair: {action, level_id (kept as _kept keeps it: an id
+    only when it names the wake's own menu), valid, rule, stop (a
+    tighten's would-stop, a price), at}; nothing of its note. A billed
+    failure, or an answer that cannot be judged, is invalid (V1). Never
+    raises."""
+    from django.utils.dateparse import parse_datetime
+
+    from bot_program.orcs import validator
+    from bot_program.orcs.models import Orc
+    side = {"action": "", "level_id": "", "valid": False, "rule": "V1",
+            "stop": None, "at": now.isoformat()}
+    if reply.get("kind") != REPLY_ANSWER:
+        return side
+    comps = wake.components if isinstance(wake.components, dict) else {}
+    vctx = comps.get("vctx") if isinstance(comps.get("vctx"), dict) else {}
+    try:
+        orc = Orc.objects.select_related("root_trade").get(pk=wake.orc_id)
+        trade = orc.root_trade
+        as_of = parse_datetime(str(comps.get("as_of") or "")) or now
+        facts = validator.facts_index(orc, as_of=as_of, vctx=vctx)
+        claimed = wake.started_at or as_of
+        before = []
+        for change in orc.plan_changes_24h or []:
+            at = (parse_datetime(str(change.get("at") or ""))
+                  if isinstance(change, dict) else None)
+            if at is not None and at < claimed:
+                before.append(change)
+        verdict = validator.validate(
+            reply.get("text"), stop_reason=reply.get("stop_reason"),
+            vctx=vctx, facts=facts, plan_changes=before,
+            plan_version=vctx.get("plan_version"),
+            plan_at=vctx.get("plan_at"), reasons=wake.reasons,
+            symbol=orc.symbol, side=orc.side, now=wake.finished_at or now,
+            marks=_marks(trade), precision=_precision(trade))
+    except Exception as e:  # noqa: BLE001 — an unjudged probe is invalid
+        logger.warning("[orcs] wake %s: a probe's answer could not be "
+                       "judged: %s", wake.pk, e)
+        return side
+    answer = verdict.get("answer") or {}
+    kept = _kept(answer, vctx) if answer else {}
+    action = str(kept.get("action") or "")
+    action = action if action in ACTIONS else ""
+    stop = verdict.get("would_stop") if action == "tighten" else None
+    side.update(action=action,
+                level_id=str(kept.get("level_id") or "") if answer else "",
+                valid=verdict.get("status") == WAKE_STATUS_DONE,
+                rule=str(verdict.get("rule") or ""),
+                stop=float(stop) if stop is not None else None)
+    return side
 
 
 def _words_of(verdict) -> str:

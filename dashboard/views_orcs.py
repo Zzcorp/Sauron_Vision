@@ -27,10 +27,26 @@ shadow" with the officer's would-verdict and its status, the refusals,
 and for staff the Orcs line beside the minds switch and the day's Orc
 calls from the ledger. The four gates are read once per page. Nothing
 here calls a model.
+
+THE ROUTE (O2b, 2026-11-06, the O2 spec B.16c). Beside the rung a model
+was sent, each wake's Rung column shows the rung a pure router chose for
+it, recorded in shadow ("would route: r2 (deep tier, medium effort)"),
+while that is another rung: r0 answers every wake a model reads while the
+router's switch (orcs_router) is OFF, and with it ON the rung sent may
+still differ (one effort per model until the smoke's PASS).
+
+THE LADDER (O2b's probes, 2026-11-06, the O2 spec B.16b). /orcs/seats/ (staff)
+adds the probe pairs' table (OrcTierGrade, read through probes.ladder):
+one row per kind, boundary and money world, each pair a wake read on its
+answering rung and, blind to that answer, a neighbouring rung on the same
+stored dossier. It fills up behind the probes' switch (orcs_probes, OFF
+as it ships) and is shown only: no router reads it. Its costs are AI
+spend, on this staff page only.
 """
 from __future__ import annotations
 
 import logging
+import re
 from datetime import timedelta
 from functools import wraps
 
@@ -48,6 +64,19 @@ NO_INTENTS = "No intents: this Orc has proposed none."
 SEATS_NOTE = ("Δ measures the Orc's shadow arm (its proposals applied in "
               "shadow, when it has any) against the care ghost; no seat holds "
               "any power.")
+#: The ladder table's note (O2b's probes, 2026-11-06, B.12, B.16b).
+LADDER_NOTE = ("Each pair is one wake read on its answering rung and, blind "
+               "to that answer, a neighbouring rung on the same stored "
+               "dossier (a probe: paper and demo only, behind "
+               "orcs_probes; or Fable's r4 twin beside an r5 wake: real "
+               "money only, behind orcs_frontier, which cannot open in "
+               "O2). Forward R prices both over the next final "
+               "decision-frame bar after the later answer, an invalid "
+               "answer as a hold. A block is 20 pairs per kind, boundary "
+               "and world; a group reads validated after two completed "
+               "blocks. Shown only: no router reads it. Costs are AI spend.")
+LADDER_EMPTY = ("No probe pair yet: the probes' switch (orcs_probes) is off, "
+                "or no paper or demo wake was probed.")
 #: The officer's would-verdict on a proposal, in words (A.37).
 OFFICER_T = {"allow": "the officer would allow it",
              "cut": "the officer would cut it",
@@ -68,6 +97,10 @@ NOT_FOUND = "No Orc by that number in your book."
 AUTHOR_STYLE = {"code": "fact", "care": "fact", "reconcile": "fact",
                 "morgul": "fact", "orc": "note", "captain": "note",
                 "operator": "yours"}
+#: The router's choice as code writes it (constants.ROUTE_WOULD_T through
+#: mind.rung_words): any other words are never shown.
+ROUTE_WORDS_RE = re.compile(r"^would route: [a-z]\d \([a-z]+ tier, [a-z]+ "
+                            r"effort\)$")
 
 
 def _r(x):
@@ -148,17 +181,37 @@ def _officer_t(officer) -> str:
     return words
 
 
+def _route_t(w, comps, sent) -> str:
+    """The router's choice for wake `w` in tier words (the O2 spec B.16c;
+    O2b, 2026-11-06), from components["route"]: "would route: r2 (deep
+    tier, medium effort)", while it is not the rung that was sent (r0
+    while the router's switch is OFF; with it ON, the rung B.5's map
+    answers it on). "" for a quiet wake (code reads it whatever the
+    route), a wake rendered before the router, or words that are not the
+    router's own tier words."""
+    route = comps.get("route") if isinstance(comps.get("route"),
+                                             dict) else {}
+    words = str(route.get("words") or "")
+    if w.status == "quiet" or not ROUTE_WORDS_RE.match(words) or \
+            str(route.get("would_rung") or "") == sent:
+        return ""
+    return words
+
+
 def _wake_rows(wakes) -> list:
-    """Each wake with its status in words (A.4) and the rung that was
-    sent it ("" when no model was: a code answer, quiet, merged)."""
+    """Each wake with its status in words (A.4), the rung that was sent
+    it ("" when no model was: a code answer, quiet, merged) and, beside
+    it, the router's choice while that is another rung (_route_t,
+    recorded in shadow)."""
     from bot_program.orcs.notes import wake_status_t
     out = []
     for w in wakes:
         comps = w.components if isinstance(w.components, dict) else {}
+        rung = (str(comps.get("rung") or "")
+                if w.started_at is not None else "")
         out.append({"w": w, "status_t": wake_status_t(w.status,
                                                       w.skipped_reason),
-                    "rung": (str(comps.get("rung") or "")
-                             if w.started_at is not None else "")})
+                    "rung": rung, "route_t": _route_t(w, comps, rung)})
     return out
 
 
@@ -395,6 +448,25 @@ def _mean(xs):
     return sum(xs) / len(xs) if xs else None
 
 
+def _pct(x) -> str:
+    return "—" if x is None else f"{100 * float(x):.0f}%"
+
+
+def _ladder_row(r) -> dict:
+    """One row of the ladder table in words (O2b's probes, 2026-11-06):
+    each side's figure routed first, probe second."""
+    return {"kind": r["kind"],
+            "boundary": "—" if r["boundary"] is None else r["boundary"],
+            "world": r["world"], "rungs": r["rungs"], "pairs": r["pairs"],
+            "blocks": r["blocks"],
+            "state": "validated" if r["validated"] else "unvalidated",
+            "valid": f"{_pct(r['valid_routed'])} / {_pct(r['valid_probe'])}",
+            "agree": f"{_pct(r['agree_action'])} / {_pct(r['agree_level'])}",
+            "fwd": f"{_r(r['fwd_routed'])} / {_r(r['fwd_probe'])} "
+                   f"({r['graded']})",
+            "cost": f"${r['cost_routed']:.4f} / ${r['cost_probe']:.4f}"}
+
+
 def _venue(g) -> str:
     seat = getattr(g.orc, "seat", None)
     return str(getattr(seat, "venue", "") or "—")
@@ -408,8 +480,10 @@ def orcs_seats(request):
     (tribunal.block_stats) and the capture means; and per army type, venue,
     class and bar source (§6.4: venues and bar sources are never pooled)
     the counted n, the mean Δ and its 80% bounds. Only the grades that
-    count for their seat enter a statistic. Two queries."""
-    from bot_program.orcs import ranks
+    count for their seat enter a statistic. And the ladder table (O2b's
+    probes, 2026-11-06, B.16b): the probe pairs by kind, boundary and
+    world (probes.ladder). Three queries."""
+    from bot_program.orcs import probes, ranks
     from bot_program.orcs.army import name_of
     from bot_program.orcs.models import OrcGrade, OrcSeat
     from bot_program.orcs.tribunal import block_stats
@@ -454,4 +528,6 @@ def orcs_seats(request):
     return render(request, "dashboard/orcs_seats.html", {
         "page_id": "orcs", "rows": rows, "army_rows": army_rows,
         "note": SEATS_NOTE,
+        "ladder": [_ladder_row(r) for r in probes.ladder()],
+        "ladder_note": LADDER_NOTE, "ladder_empty": LADDER_EMPTY,
     })

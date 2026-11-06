@@ -65,6 +65,36 @@
     <p class="orc-muted">Only the grades that count for their seat enter Counted, the mean and the bounds; venues and bar sources are never pooled. Against Line is measured once the types act on their own parameters; until then it is a dash.</p>
     {% else %}<p class="eye-empty">No idea is graded yet.</p>{% endif %}
 </div>
+
+<div class="card fade-in-up" style="margin-bottom:18px;">
+    {# O2b's probes (2026-11-06, the O2 spec B.12, B.16b): the probe pairs. #}
+    <div class="card-header"><span class="card-title">The ladder (probe pairs, by kind, boundary and world)</span></div>
+    {% if ladder %}
+    <div class="table-wrapper">
+    <table class="sv-perf-table sv-stack orc-table" id="orc-ladder">
+        <thead><tr><th>Kind</th><th>Boundary</th><th>World</th><th>Rungs (routed vs probe)</th><th class="num">Pairs</th><th class="num">Completed blocks</th><th>State</th><th class="num">Valid (routed / probe)</th><th class="num">Agree (action / level)</th><th class="num">Forward R (routed / probe, graded)</th><th class="num">Cost per pair (routed / probe)</th></tr></thead>
+        <tbody>
+        {% for l in ladder %}
+        <tr>
+            <td data-label="Kind">{{ l.kind }}</td>
+            <td data-label="Boundary">{{ l.boundary }}</td>
+            <td data-label="World">{{ l.world }}</td>
+            <td data-label="Rungs">{{ l.rungs }}</td>
+            <td data-label="Pairs" class="num">{{ l.pairs }}</td>
+            <td data-label="Completed blocks" class="num">{{ l.blocks }}</td>
+            <td data-label="State">{{ l.state }}</td>
+            <td data-label="Valid" class="num">{{ l.valid }}</td>
+            <td data-label="Agree" class="num">{{ l.agree }}</td>
+            <td data-label="Forward R" class="num">{{ l.fwd }}</td>
+            <td data-label="Cost per pair" class="num">{{ l.cost }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}<p class="eye-empty">{{ ladder_empty }}</p>{% endif %}
+    <p class="orc-muted">{{ ladder_note }}</p>
+</div>
 </div>
 
 <style>

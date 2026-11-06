@@ -121,6 +121,9 @@ LIVE_MONEY_SWITCHES = (
 #: commit that ships what it gates.
 ORC_MIND_SWITCHES = (
     "orcs_minds",                   # a model reads an Orc's wakes, in shadow
+    "orcs_router",                  # the routed rung (Opus among them) answers
+    "orcs_probes",                  # a neighbouring rung reads a paper wake
+    "orcs_frontier",                # Fable's gate (r5 beside its r4 twin)
 )
 
 #: Every switch whose ON takes the trading PIN, at every door
@@ -362,6 +365,45 @@ DEFAULT_COMPONENTS = [
     # 300.
     {"key": "orcs_minds", "name": "Orc Minds (models in shadow)",
      "description": "Off (default). With orcs on and the Orcs' budget line set (ORC_DAILY_BUDGET_USD above 0), a model reads an Orc's wakes in shadow, within its day caps, and writes plans and proposals that are graded. Nothing it decides sends an order or moves a stop. Turning it on takes the PIN.",
+     "category": "system"},
+    # THE ORCS' ROUTER (2026-11-06, the Orcs' O2 spec B.2b, N2): every
+    # rendered wake records the rung a pure router chooses from its band
+    # and money world. While this is OFF, r0 answers every wake a model
+    # reads and the choice is only recorded; ON, with the minds on, the
+    # rung the router chose answers (Opus on r2-r4), one effort per model
+    # until the smoke's PASS. OFF on arrival (no is_enabled key), exempt
+    # from "all on" and turned on only with the trading PIN at /ops/
+    # (ORC_MIND_SWITCHES); OFF takes no PIN, and the next claim answers on
+    # r0. Description measured below 300.
+    {"key": "orcs_router", "name": "Orc Router (routed rungs in shadow)",
+     "description": "Off (default). While off, every Orc wake a model reads is answered on r0 and the router's choice is only recorded. On, with the minds on, the rung the router chose answers, one effort per model until the smoke's PASS. Nothing it decides sends an order. Turning it on takes the PIN.",
+     "category": "system"},
+    # THE ORCS' PROBES (2026-11-06, the Orcs' O2 spec B.11, N2): beside a
+    # paper or demo wake a model read, a neighbouring rung (h0, or the rung
+    # across a band boundary) reads the same stored dossier again, blind to
+    # that answer, on the probes' own allowance (15% of the Orcs line by
+    # default) inside C - R; the pair is kept only in its table and the
+    # ledger, graded, never applied, and real money gets none. OFF on
+    # arrival (no is_enabled key), exempt from "all on" and turned on only
+    # with the trading PIN at /ops/ (ORC_MIND_SWITCHES); OFF takes no PIN,
+    # and the next probe is not sent. Description measured below 300.
+    {"key": "orcs_probes", "name": "Orc Probes (neighbouring rungs in shadow)",
+     "description": "Off (default). On, with the minds on: beside a paper or demo wake a model read, a neighbouring rung reads the same dossier again, blind, on its own allowance (15% of the Orcs line); graded in shadow, never applied. Real money gets none. Turning it on takes the PIN.",
+     "category": "system"},
+    # THE ORCS' FRONTIER (2026-11-06, the Orcs' O2 spec B.9, B.10, N2):
+    # with the router's switch ON, a real-money extreme wake may be
+    # answered by r5 (Fable) beside an r4 blind twin, when every clause of
+    # Fable's gate holds, under a daily quota (OrcSetting frontier_per_day,
+    # 0 by default). The pair is priced at the dossier's size cap, about
+    # $3.57, above the $3.00 the Orcs may hold in flight
+    # (ORC_LIVE_FLOOR_USD), so in O2 the gate cannot open whatever this
+    # says: no r5 and no twin call is sent. OFF on arrival (no is_enabled
+    # key), exempt from "all on" and turned on only with the trading PIN at
+    # /ops/ (ORC_MIND_SWITCHES); OFF takes no PIN, and the next claim
+    # answers on r4. Description measured below 300.
+    {"key": "orcs_frontier",
+     "name": "Orc Frontier (Fable and its blind twin in shadow)",
+     "description": "Off (default). On, with the router on: a real-money extreme wake may be answered by r5 beside an r4 blind twin, under a daily quota (0 by default). In O2 the pair cannot run: its bound is above what the Orcs may hold in flight. Turning it on takes the PIN.",
      "category": "system"},
     # THE WAR DRUMS (2026-10-22, O1c, spec §4.7, §10.7, §11): with `orcs`
     # ON the drums are published, routed and journaled whatever this says.
