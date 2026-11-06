@@ -181,6 +181,25 @@ log = logging.getLogger(__name__)
 BASE = "https://public-api.etoro.com"
 #: The rates endpoint: ONE id for ticker(), a comma list for tickers().
 RATES_URL = f"{BASE}/api/v1/market-data/instruments/rates"
+#: eToro's v2 rates read (2026-11-06, the feed spec's P-a.2; its E14, read
+#: through spec copies, unmeasured): up to 1000 ids, a `quoteType` of
+#: realtime or delayed, 206 when only some ids are found, 404 when none,
+#: rows under `results`, no conversion fields. Asked by the operator's
+#: measurement alone (manage.py etoro_rates_shape --v2); nothing in the
+#: engine reads it.
+RATES_V2_URL = f"{BASE}/api/v2/market-data/rates"
+
+
+def rates_url(url: str, iids) -> str:
+    """`url` with ?instrumentIds=<id>,<id>... spelled with LITERAL commas
+    (2026-11-06, the feed spec's P-a.1). An id list needs a literal comma,
+    eToro's own rule ([E13]: %2C is rejected; community clients report an
+    encoded list ignored or answered with a 500), and requests prepares
+    params={"instrumentIds": "1,2"} as instrumentIds=1%2C2: urlencode
+    quotes the comma. A query already in the URL is prepared as written
+    (requote_uri keeps a comma). The ids are whole numbers, so nothing
+    else in it needs quoting."""
+    return f"{url}?instrumentIds=" + ",".join(str(int(i)) for i in iids)
 
 #: Platform timeframe -> eToro candle interval enum.
 INTERVAL_MAP = {
@@ -1256,22 +1275,61 @@ def _status_of(polled) -> tuple:
 
 # ── the rates rows, one and many (2026-11-01) ─────────────────────────────
 
+def _rate_extras(p) -> dict:
+    """eToro's OWN fields of one rate row beside its price (2026-11-06,
+    the feed spec's P-a.3; its E12, read through spec copies): `date` (the
+    print's instant, as eToro writes it), `priceRateID` (a whole number in
+    v1) and conversionRateBid/Ask (the instrument's currency to USD, "used
+    for position value calculations"). The keys etoro_rates.EXTRA_KEYS,
+    each only when it reads: a date as non-empty text, a priceRateID as a
+    whole positive number (or its digits), a conversion as a positive
+    number, written as text as bid and ask are. ADDITIVE: no reader before
+    them reads them, and a row is never refused for one (one that does
+    not read is left out). Never raises."""
+    out = {}
+    try:
+        when = p.get("date")
+        if isinstance(when, str) and when.strip():
+            out["date"] = when.strip()[:40]
+        rid = p.get("priceRateID")
+        if isinstance(rid, str) and rid.strip().isdigit():
+            rid = int(rid.strip())
+        if isinstance(rid, int) and not isinstance(rid, bool) and rid > 0:
+            out["priceRateID"] = rid
+        for key in ("conversionRateBid", "conversionRateAsk"):
+            v = p.get(key)
+            if isinstance(v, bool) or v is None:
+                continue
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(f) and f > 0:
+                out[key] = str(f)
+    except Exception:  # noqa: BLE001 — an unread extra is no extra
+        return {}
+    return out
+
+
 def _rate_tick(p, symbol: str) -> dict:
     """ONE rate row as the ticker dict — the single read's and the batch's
     (2026-11-01: one rule for both, so a row read in a batch can never
     read differently from the same row asked alone). {lastPrice, symbol,
     bid, ask}, or the platform's "0" sentinel {lastPrice "0", symbol} when
     the believed keys are all 0/None. Raises ValueError or TypeError on a
-    value that is not a number, as ticker() always has."""
+    value that is not a number, as ticker() always has. Since 2026-11-06
+    (the feed spec's P-a.3) eToro's own date, priceRateID and conversion
+    ride beside them when the row carries them (_rate_extras), the "0"
+    sentinel's too."""
     bid = float(p.get("bid") or 0)
     ask = float(p.get("ask") or 0)
     last = float(p.get("lastExecution") or 0)
     if not last:
         last = (bid + ask) / 2 if bid and ask else (bid or ask)
     if not last:
-        return {"lastPrice": "0", "symbol": symbol}
+        return {"lastPrice": "0", "symbol": symbol, **_rate_extras(p)}
     return {"lastPrice": str(last), "symbol": symbol,
-            "bid": str(bid), "ask": str(ask)}
+            "bid": str(bid), "ask": str(ask), **_rate_extras(p)}
 
 
 #: The keys a rate row is believed to carry its OWN instrument id under.
@@ -2253,15 +2311,30 @@ class EtoroTrader:
                      else "bid/ask/lastExecution all empty")
         return tick
 
-    def _rates_get(self, iids, *, where: str):
+    def _rates_get(self, iids, *, where: str, url: str = RATES_URL,
+                   encoded_commas: bool = False):
         """The rates GET for `iids` (one, or a comma list), through _read at
-        the caller's priority: ticker()'s, tickers()' and rates_raw's one
-        request. (The shut-market cadence keeps no memo of a read since
-        2026-11-01, review: the answer, in the shared cache, is its
-        memory.)"""
-        return self._read("GET", RATES_URL,
-                          params={"instrumentIds": ",".join(
-                              str(int(i)) for i in iids)},
+        the caller's priority: ticker()'s, tickers()', rates_raw's and
+        rates_v2_raw's one request. (The shut-market cadence keeps no memo
+        of a read since 2026-11-01, review: the answer, in the shared
+        cache, is its memory.)
+
+        LITERAL COMMAS (2026-11-06, the feed spec's P-a.1): the query is
+        built here (rates_url), ?instrumentIds=1,2,3. It was handed to
+        requests as params=, which prepares instrumentIds=1%2C2%2C3, the
+        form eToro's own rule rejects: the batch would have asked in it,
+        and the operator's measurement would have measured that form, not
+        the batch's, and could have "proved" that batching fails. One id
+        carries no comma and reads as it always did. `encoded_commas` sends
+        the OLD form, params=, for that measurement alone
+        (etoro_rates_shape --encoded-commas: one GET whose answer is never
+        the batch's proof)."""
+        if encoded_commas:
+            return self._read("GET", url,
+                              params={"instrumentIds": ",".join(
+                                  str(int(i)) for i in iids)},
+                              headers=self._headers(), where=where)
+        return self._read("GET", rates_url(url, iids),
                           headers=self._headers(), where=where)
 
     def tickers(self, symbols) -> dict:
@@ -2393,7 +2466,8 @@ class EtoroTrader:
                         f"batched read carried"
                         + (f" ({detail[:60]})" if detail else "")))
 
-    def rates_raw(self, instrument_ids) -> tuple:
+    def rates_raw(self, instrument_ids, *, encoded_commas: bool = False,
+                  url: str = RATES_URL) -> tuple:
         """ONE batched rates GET for `instrument_ids` as given, answered
         RAW: (HTTP status, the JSON body or None). For the operator's
         measurement of the batch's shape (manage.py etoro_rates_shape):
@@ -2403,10 +2477,14 @@ class EtoroTrader:
         grants no 429 pause: a measurement never holds an entry. A 5xx or
         a transport failure is asked once more, as every read is
         (READ_RETRIES). At the caller's priority in the budget; raises
-        what _read raises (a refusal, a transport failure)."""
+        what _read raises (a refusal, a transport failure). Its ids ride
+        literal commas; `encoded_commas` asks in the old form (_rates_get,
+        2026-11-06), `url` another rates path (rates_v2_raw). The answer's
+        quota headers are in last_rate_headers, as every read's."""
         was, self._background = getattr(self, "_background", False), True
         try:
-            r = self._rates_get(instrument_ids, where="rates")
+            r = self._rates_get(instrument_ids, where="rates", url=url,
+                                encoded_commas=encoded_commas)
         finally:
             self._background = was
         try:
@@ -2414,6 +2492,16 @@ class EtoroTrader:
         except ValueError:
             body = None
         return int(getattr(r, "status_code", 0) or 0), body
+
+    def rates_v2_raw(self, instrument_ids) -> tuple:
+        """ONE v2 rates GET (RATES_V2_URL) for `instrument_ids`, answered
+        RAW as rates_raw answers: the operator's measurement of v2
+        (etoro_rates_shape --v2, 2026-11-06, the feed spec's P-a.2), a
+        background read with literal commas, nothing parsed, cached,
+        marked or proven. In the market family of the budget, as the v1
+        read (both rates endpoints share eToro's market-data quota, the
+        spec's E15)."""
+        return self.rates_raw(instrument_ids, url=RATES_V2_URL)
 
     @etoro_budget.scoped(etoro_budget.P5, "candles")
     def klines(self, symbol: str, interval: str = "15m",

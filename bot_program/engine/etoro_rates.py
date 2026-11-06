@@ -10,8 +10,10 @@ market-data quota per user key (engine/etoro_budget), and their 429s held
 the research entries (venue_health's SICK).
 
 THE BATCH. EtoroTrader.tickers(symbols) sends ONE GET with instrumentIds as
-a comma list, in chunks of at most BATCH_MAX_IDS (a guess, until eToro's
-limit is measured), and matches every row to its symbol by the row's OWN
+a comma list (LITERAL commas since 2026-11-06, etoro_client.rates_url:
+requests had encoded them as %2C, the form eToro's rule rejects), in
+chunks of at most BATCH_MAX_IDS (a guess, until eToro's limit is
+measured), and matches every row to its symbol by the row's OWN
 instrumentId, never by its position. Each symbol keeps the single read's
 three states: a row missing for it raises for it alone (RowMissing: its
 caller takes the single read, and no later batch of the pass carries it
@@ -166,6 +168,15 @@ FAILED_MEMO_S = 30
 #: How long a row a trusted batch left out is read alone, never batched
 #: again, this process (2026-11-01, review).
 MISSING_MEMO_S = 30
+
+#: eToro's own fields a rate answer carries beside its price, kept with it
+#: (2026-11-06, the feed spec's P-a.3): the print's date, its priceRateID
+#: and the conversion to USD both ways, read off the row by
+#: etoro_client._rate_extras. ADDITIVE: every reader of the cache before
+#: them reads lastPrice, bid and ask, and a cached answer carries them
+#: back as they were kept.
+EXTRA_KEYS = ("date", "priceRateID", "conversionRateBid",
+              "conversionRateAsk")
 
 PREFIX = "etoro_rates"
 UNPROVEN_KEY = f"{PREFIX}:batch_unproven"
@@ -384,6 +395,9 @@ def _value(tick, at) -> "dict | None":
     for side in ("bid", "ask"):
         if tick.get(side) is not None:
             out[side] = str(tick[side])
+    for key in EXTRA_KEYS:
+        if tick.get(key) is not None:
+            out[key] = tick[key]
     return out
 
 
@@ -421,9 +435,9 @@ def put(world, iid, tick, *, at=None) -> None:
 def get(world, iid, *, symbol, max_age_s, now=None) -> "dict | None":
     """The answer `world` holds for `iid`, no older than `max_age_s`, as a
     ticker dict that says it is cached ({lastPrice, symbol[, bid, ask],
-    "cached": True, "age_s", "read_at"}); None when none is, the switch is
-    off, or the cache cannot be read. A "0" answer stays "0". Never
-    raises."""
+    "cached": True, "age_s", "read_at"}, and eToro's own EXTRA_KEYS kept
+    with it, 2026-11-06); None when none is, the switch is off, or the
+    cache cannot be read. A "0" answer stays "0". Never raises."""
     if not CACHE or iid is None or not max_age_s or max_age_s <= 0:
         return None
     _drain_writes(WRITE_WAIT_S)
@@ -449,6 +463,9 @@ def get(world, iid, *, symbol, max_age_s, now=None) -> "dict | None":
     for side in ("bid", "ask"):
         if held.get(side) is not None:
             tick[side] = str(held[side])
+    for key in EXTRA_KEYS:
+        if held.get(key) is not None:
+            tick[key] = held[key]
     tick.update(cached=True, age_s=round(max(0.0, age), 1),
                 read_at=_iso(at))
     return tick

@@ -48,6 +48,7 @@ these tests turn them on.
 
 Run with:  python manage.py test tests.test_etoro_rates_batch
 """
+import json
 import threading
 import time
 from contextlib import contextmanager
@@ -56,11 +57,14 @@ from decimal import Decimal
 from io import StringIO
 from pathlib import Path
 from unittest import mock
+from urllib.parse import unquote
 
+import requests
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import SimpleTestCase, TestCase
 from django.utils.dateparse import parse_datetime
 
@@ -110,23 +114,45 @@ class _NotJson(_Resp):
         raise ValueError("Expecting value: line 1 column 1")
 
 
+class _Answer(_Resp):
+    """An answer with headers (the quota's, when a test gives them)."""
+
+    def __init__(self, status, payload=None, headers=None):
+        super().__init__(status, payload)
+        self.headers = dict(headers or {})
+
+
+def _asked(url, kw) -> str:
+    """The instrumentIds of one rates GET as the client handed it over:
+    the URL's own query, where the client spells the list with literal
+    commas since 2026-11-06 (the feed spec's P-a.1, etoro_client
+    .rates_url), else params= (the old form requests encodes, %2C, kept
+    for etoro_rates_shape --encoded-commas)."""
+    for part in url.partition("?")[2].split("&"):
+        key, _, value = part.partition("=")
+        if key == "instrumentIds":
+            return unquote(value)
+    return str((kw.get("params") or {}).get("instrumentIds") or "")
+
+
 class _Wire:
     """A fake eToro wire. /rates answers every asked id from `prices` (id
     -> last, or None for no row), one row each carrying its own id;
     `body`, a callable of the asked ids, answers instead when given;
     `alone_only` ids are answered only to a read of one id (a batch leaves
     them out); `status` may be a list, consumed in order, the last one
-    repeating. Every other request answers (200, {}), as
-    tests.test_etoro_client._FakeSession does."""
+    repeating; `headers` ride every rates answer. Every other request
+    answers (200, {}), as tests.test_etoro_client._FakeSession does."""
 
     def __init__(self, prices=None, *, body=None, status=200, alone_only=(),
-                 not_json=False):
+                 not_json=False, headers=None):
         self.prices = dict(prices or {})
         self.body = body
         self.status = (list(status) if isinstance(status, (list, tuple))
                        else [status])
         self.alone_only = set(alone_only)
         self.not_json = not_json
+        self.answer_headers = dict(headers or {})
         self.calls = []
         self.headers = {}
 
@@ -135,16 +161,16 @@ class _Wire:
         if self.not_json:
             return _NotJson(status, {})
         if self.body is not None:
-            return _Resp(status, self.body(ids))
+            return _Answer(status, self.body(ids), self.answer_headers)
         rows = [_row(i, self.prices[i]) for i in ids
                 if i in self.prices and self.prices[i] is not None
                 and not (len(ids) > 1 and i in self.alone_only)]
-        return _Resp(status, {"rates": rows})
+        return _Answer(status, {"rates": rows}, self.answer_headers)
 
     def get(self, url, **kw):
         self.calls.append(("GET", url, kw))
         if "/instruments/rates" in url:
-            raw = str((kw.get("params") or {}).get("instrumentIds") or "")
+            raw = _asked(url, kw)
             return self._rates([int(x) for x in raw.split(",") if x])
         return _Resp(200, {})
 
@@ -163,7 +189,7 @@ class _Wire:
 
     def rates(self) -> list:
         """The instrumentIds of every rates GET, in order."""
-        return [c[2]["params"]["instrumentIds"] for c in self.calls
+        return [_asked(c[1], c[2]) for c in self.calls
                 if "/instruments/rates" in c[1]]
 
     def sets(self) -> list:
@@ -2270,6 +2296,176 @@ class TheShapeCommandTests(_RatesOn, TestCase):
                 t = ec.EtoroTrader(self.API, self.KEY, env="demo")
                 self.assertEqual(t.rate_pause_s(), 0.0, "and grants no pause")
 
+    # ── the feed spec's P-a.2 (2026-11-06) ──────────────────────────────
+
+    def test_the_measurement_sends_literal_commas_on_the_wire(self):
+        """The URL requests PREPARED (a transport that sends nothing), not
+        the params handed to it: the measurement reads the form the batch
+        sends."""
+        cap = _Prepared(answer=lambda ids, url: (200, {"rates": [
+            _row(i, 1.0, key="instrumentID") for i in ids]}))
+        text = self._run(_prepared_session(cap))
+        self.assertEqual(cap.urls,
+                         [ec.RATES_URL + "?instrumentIds=18,100005"])
+        self.assertIn("literal commas", text)
+        self.assertIn("parser   trusted", text)
+        self.assertEqual((er.proven() or {}).get("world"), "demo")
+
+    def test_up_to_a_hundred_ids_in_one_get(self):
+        ids = list(range(1, 101))
+        w = _Wire(prices={i: float(i) for i in ids})
+        text = self._run(w, "--ids", ",".join(map(str, ids)))
+        self.assertEqual(w.rates(), [",".join(map(str, ids))],
+                         "one GET, a hundred ids")
+        self.assertIn("?instrumentIds=" + ",".join(map(str, ids)),
+                      w.calls[0][1])
+        self.assertIn("100 ids", text)
+        self.assertIn("row 100: instrumentId 100", text)
+        self.assertIn("parser   trusted", text)
+        for bad in (",".join(map(str, range(1, 102))), "18", "18,18",
+                    "18,-5", "18,x"):
+            with self.subTest(ids=bad), self.assertRaises(CommandError):
+                self._run(_Wire(), "--ids", bad)
+
+    def test_the_quota_headers_by_name_and_value_and_no_other(self):
+        """RateLimit-* and X-RateLimit-*: quota counters, not account
+        figures (the spec's M1). Any other header is not printed."""
+        w = _Wire(prices={18: 1.0, 100005: 2.0}, headers={
+            "RateLimit-Limit": "120", "RateLimit-Remaining": "118",
+            "RateLimit-Reset": "42", "RateLimit-Policy": "120;w=60",
+            "X-RateLimit-Remaining": "59",
+            "Set-Cookie": "session=SECRET-COOKIE"})
+        text = self._run(w)
+        for said in ("RateLimit-Limit 120", "RateLimit-Remaining 118",
+                     "RateLimit-Reset 42", "RateLimit-Policy 120;w=60",
+                     "X-RateLimit-Remaining 59"):
+            self.assertIn(said, text)
+        self.assertNotIn("SECRET-COOKIE", text)
+        self.assertNotIn("Set-Cookie", text)
+        bare = self._run(_Wire(prices={18: 1.0, 100005: 2.0}))
+        self.assertIn("no RateLimit-* or X-RateLimit-* header", bare)
+
+    def test_the_id_key_and_the_date_format_never_a_value(self):
+        w = _Wire(body=lambda ids: {"rates": [
+            {"instrumentID": i, "bid": 1.5, "ask": 1.6, "lastExecution": 1.55,
+             "date": "2026-11-06T10:00:00.1234567Z",
+             "priceRateID": 106439224591, "conversionRateBid": 1.0,
+             "conversionRateAsk": 1.0} for i in ids]})
+        text = self._run(w)
+        self.assertIn("id key   instrumentID, on every row", text)
+        self.assertIn("date     text, dddd-dd-ddTdd:dd:dd.dddddddZ (digits "
+                      "masked)", text)
+        self.assertIn("priceRateID number", text)
+        for value in ("2026-11-06T10", "106439224591", "1.55"):
+            self.assertNotIn(value, text)
+
+    def test_repeat_says_whether_date_and_rate_id_advance(self):
+        n = {"k": 0}
+
+        def body(ids):
+            n["k"] += 1
+            k = n["k"]
+            return {"rates": [
+                {"instrumentID": 18, "bid": 2400.5, "ask": 2400.9,
+                 "lastExecution": 2400.7, "date": f"2026-11-06T10:00:0{k}Z",
+                 "priceRateID": 1000 + k},
+                {"instrumentID": 100005, "bid": 80.1, "ask": 80.2,
+                 "lastExecution": 80.15, "date": "2026-11-06T09:59:00Z",
+                 "priceRateID": 77}]}
+        w = _Wire(body=body)
+        from bot_program.management.commands import etoro_rates_shape as cmd
+        with mock.patch.object(cmd, "_pause") as paused:
+            text = self._run(w, "--repeat", "3", "--gap", "2")
+        self.assertEqual(w.rates(), ["18,100005"] * 3, "three GETs")
+        self.assertEqual([c.args for c in paused.call_args_list],
+                         [(2.0,), (2.0,)])
+        self.assertIn("read 2/3: HTTP 200 · 2 rows", text)
+        self.assertIn("read 3/3: HTTP 200 · 2 rows", text)
+        self.assertIn("id 18: date advanced 2 · the same 0 · went back 0 · "
+                      "absent 0; priceRateID advanced 2 · the same 0 · "
+                      "went back 0 · absent 0 (of 2 pairs 2 s apart)", text)
+        self.assertIn("id 100005: date advanced 0 · the same 2", text)
+        for value in ("2400", "80.1", "80.15", "10:00:0", "1001"):
+            self.assertNotIn(value, text)
+        self.assertEqual((er.proven() or {}).get("world"), "demo",
+                         "the first trusted answer is the proof")
+
+    def test_repeat_stops_at_a_read_the_budget_does_not_send(self):
+        from bot_program.management.commands import etoro_rates_shape as cmd
+        w = _Wire(prices={18: 1.0, 100005: 2.0})
+        refused = eb.Refused(eb.MARKET, eb.P5, "floor",
+                             "eToro budget: market 30/60 (P5 candles)")
+        calls = {"n": 0}
+        real = ec.EtoroTrader.rates_raw
+
+        def second_refused(t, ids, **kw):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise refused
+            return real(t, ids, **kw)
+        with mock.patch.object(cmd, "_pause"), \
+                mock.patch.object(ec.EtoroTrader, "rates_raw",
+                                  second_refused):
+            text = self._run(w, "--repeat", "4")
+        self.assertEqual(len(w.rates()), 1)
+        self.assertIn("read 2/4: not asked", text)
+        self.assertNotIn("read 3/4", text)
+
+    def test_v2_reads_the_v2_path_once_status_and_quote_types(self):
+        class _V2(_Wire):
+            def get(self, url, **kw):
+                if "/api/v2/market-data/rates" in url:
+                    self.calls.append(("GET", url, kw))
+                    return _Answer(206, {"results": [
+                        {"instrumentId": 18, "bid": 2400.55, "ask": None,
+                         "date": None, "quoteType": "delayed"},
+                        {"instrumentId": 100005, "bid": 80.123,
+                         "ask": 80.456, "date": "2026-11-06T10:00:00Z",
+                         "quoteType": "realtime"}]},
+                        {"RateLimit-Remaining": "117"})
+                return super().get(url, **kw)
+        w = _V2()
+        text = self._run(w, "--v2")
+        self.assertEqual(len(w.calls), 1, "one GET")
+        self.assertTrue(w.calls[0][1].endswith(
+            "/api/v2/market-data/rates?instrumentIds=18,100005"),
+            w.calls[0][1])
+        self.assertIn("HTTP 206", text)
+        self.assertIn("quoteType delayed 1, realtime 1", text)
+        self.assertIn("row 1: instrumentId 18 · ask null, bid number, date "
+                      "null, instrumentId number, quoteType text", text)
+        self.assertIn("RateLimit-Remaining 117", text)
+        for price in ("2400", "80.1", "80.4"):
+            self.assertNotIn(price, text)
+        self.assertIsNone(er.proven(), "v2 is never the v1 batch's proof")
+        self.assertIsNone(er.unproven())
+
+    def test_encoded_commas_send_the_old_form_once_and_never_prove(self):
+        """One GET in the form requests gives params= (%2C), to record
+        what eToro answers to it: never the batch's proof, even an answer
+        the parser would trust."""
+        cap = _Prepared(answer=lambda ids, url: (200, {"rates": [
+            _row(18, 1.0, key="instrumentID"),
+            _row(100005, 2.0, key="instrumentID")]}))
+        text = self._run(_prepared_session(cap), "--encoded-commas")
+        self.assertEqual(cap.urls,
+                         [ec.RATES_URL + "?instrumentIds=18%2C100005"])
+        self.assertIn("the OLD form", text)
+        self.assertIn("never the batch's proof", text)
+        self.assertIsNone(er.proven())
+        self.assertIsNone(er.unproven())
+
+    def test_one_mode_a_run(self):
+        for args in (("--v2", "--encoded-commas"),
+                     ("--v2", "--repeat", "3"),
+                     ("--encoded-commas", "--repeat", "2"),
+                     ("--repeat", "21"), ("--repeat", "0"),
+                     ("--repeat", "3", "--gap", "0.5"),
+                     ("--repeat", "3", "--gap", "61"),
+                     ("--gap", "3")):
+            with self.subTest(args=args), self.assertRaises(CommandError):
+                self._run(_Wire(), *args)
+
     def test_it_goes_through_the_budget_at_p5(self):
         from tests.test_etoro_budget import _fill
         eb.forget_all()
@@ -2298,3 +2494,210 @@ class TheShapeCommandTests(_RatesOn, TestCase):
         self.assertIn("terminal", ops_commands.EXEMPT["etoro_rates_shape"])
         self.assertNotIn("etoro_rates_shape", ops_commands.runnable_names())
         self.assertIsNotNone(ops_commands.get("etoro_budget"))
+
+
+# ── the feed spec's asks to this branch (2026-11-06, P-a) ────────────────
+
+class _Prepared(requests.adapters.HTTPAdapter):
+    """A transport that sends nothing: it keeps the URL of every PREPARED
+    request, what requests puts on the wire after its own encoding, and
+    answers each with `answer(ids, url)` -> (status, body[, headers]), the
+    ids read off the prepared query split on LITERAL commas (an encoded
+    list reads as none); by default a rates row each, from `prices`."""
+
+    def __init__(self, prices=None, answer=None):
+        super().__init__()
+        self.prices = dict(prices or {})
+        self.answer = answer
+        self.urls = []
+
+    def send(self, request, **kw):
+        self.urls.append(request.url)
+        raw = ""
+        for part in request.url.partition("?")[2].split("&"):
+            key, _, value = part.partition("=")
+            if key == "instrumentIds":
+                raw = value
+        ids = [int(x) for x in raw.split(",") if x.isdigit()]
+        if self.answer is not None:
+            got = self.answer(ids, request.url)
+        else:
+            got = (200, {"rates": [_row(i, self.prices[i]) for i in ids
+                                   if i in self.prices]})
+        r = requests.Response()
+        r.status_code = got[0]
+        r._content = json.dumps(got[1]).encode("utf-8")
+        r.encoding = "utf-8"
+        r.headers["Content-Type"] = "application/json"
+        r.headers.update(got[2] if len(got) > 2 else {})
+        r.url, r.request = request.url, request
+        return r
+
+
+def _prepared_session(adapter):
+    """The client's own kind of session (it follows no redirect) with
+    `adapter` under it: every request is prepared by requests itself."""
+    s = ec.NoRedirectSession()
+    s.mount("https://", adapter)
+    return s
+
+
+class TheLiteralCommasTests(_RatesOn, SimpleTestCase):
+    """THE FEED SPEC'S P-a.1 (2026-11-06): an id list needs a LITERAL
+    comma, eToro's own rule (%2C is rejected [E13]), and requests prepares
+    params={"instrumentIds": "1,2,3"} as instrumentIds=1%2C2%2C3. The
+    client now builds the query itself. These read the URL requests
+    PREPARED, never the params dict."""
+
+    def test_requests_encodes_the_comma_of_a_params_dict(self):
+        """The reason, pinned: the form every rates GET took until
+        today."""
+        prepared = requests.Request(
+            "GET", ec.RATES_URL,
+            params={"instrumentIds": "11,22"}).prepare()
+        self.assertEqual(prepared.url,
+                         ec.RATES_URL + "?instrumentIds=11%2C22")
+
+    def test_the_batched_read_sends_literal_commas(self):
+        cap = _Prepared({11: 10.0, 22: 20.0, 33: 30.0})
+        got = _trader(_prepared_session(cap)).tickers(["AAA", "BBB", "CCC"])
+        self.assertEqual(cap.urls,
+                         [ec.RATES_URL + "?instrumentIds=11,22,33"])
+        self.assertNotIn("%2C", cap.urls[0])
+        self.assertEqual({s: got[s]["lastPrice"] for s in got},
+                         {"AAA": "10.0", "BBB": "20.0", "CCC": "30.0"})
+        self.assertIsNone(er.unproven())
+
+    def test_the_single_read_names_its_one_id(self):
+        cap = _Prepared({11: 10.0})
+        tick = _trader(_prepared_session(cap)).ticker("AAA")
+        self.assertEqual(cap.urls, [ec.RATES_URL + "?instrumentIds=11"])
+        self.assertEqual(tick["lastPrice"], "10.0")
+
+    def test_the_pooled_read_sends_literal_commas_too(self):
+        """A GET at P2 to P5 on a client whose transport is its own rides
+        the pooled Session (READ_POOL): the same URL."""
+        p = mock.patch.object(ec, "READ_POOL", True)
+        p.start()
+        self.addCleanup(p.stop)
+        ec._POOL.clear()
+        self.addCleanup(ec._POOL.clear)
+        t = ec.EtoroTrader("api-k", USER_KEY, env="live")
+        for s, i in IDS.items():
+            t._ids[s] = i
+            t._symbols[i] = s
+        cap = _Prepared({11: 10.0, 22: 20.0})
+        ec.pooled_session(t._bkey()).mount("https://", cap)
+        with eb.at_priority(eb.P3, "marks"):
+            got = t.tickers(["AAA", "BBB"])
+        self.assertEqual(cap.urls, [ec.RATES_URL + "?instrumentIds=11,22"])
+        self.assertEqual(got["BBB"]["lastPrice"], "20.0")
+        self.assertIsNone(t._session, "the pooled Session carried it")
+
+    def test_the_measurements_read_sends_literal_commas(self):
+        cap = _Prepared({18: 1.0, 100005: 2.0})
+        code, body = _trader(_prepared_session(cap)).rates_raw((18, 100005))
+        self.assertEqual(cap.urls,
+                         [ec.RATES_URL + "?instrumentIds=18,100005"])
+        self.assertEqual((code, len(body["rates"])), (200, 2))
+
+    def test_the_old_form_only_when_the_measurement_asks_for_it(self):
+        """etoro_rates_shape --encoded-commas: one GET in the old form, to
+        record what eToro answers to it."""
+        cap = _Prepared({18: 1.0, 100005: 2.0})
+        code, body = _trader(_prepared_session(cap)).rates_raw(
+            (18, 100005), encoded_commas=True)
+        self.assertEqual(cap.urls,
+                         [ec.RATES_URL + "?instrumentIds=18%2C100005"])
+        self.assertEqual((code, body), (200, {"rates": []}))
+
+    def test_the_v2_read_sends_literal_commas(self):
+        cap = _Prepared(answer=lambda ids, url: (206, {"results": []}))
+        code, body = _trader(_prepared_session(cap)).rates_v2_raw(
+            (18, 100005))
+        self.assertTrue(ec.RATES_V2_URL.endswith("/api/v2/market-data/rates"))
+        self.assertEqual(cap.urls,
+                         [ec.RATES_V2_URL + "?instrumentIds=18,100005"])
+        self.assertEqual((code, body), (206, {"results": []}))
+
+
+#: eToro's own fields beside a row's price (E12): the print's date, its
+#: priceRateID, the conversion to USD both ways.
+OWN = {"date": "2026-11-06T10:00:00.1234567Z", "priceRateID": 106439224591,
+       "conversionRateBid": 0.5871, "conversionRateAsk": 0.5873}
+
+
+def _own_rows(ids, last=11.0, **extra):
+    return {"rates": [dict(_row(i, last), **dict(OWN, **extra))
+                      for i in ids]}
+
+
+class TheRowsOwnFieldsTests(_RatesOn, SimpleTestCase):
+    """THE FEED SPEC'S P-a.3 (2026-11-06): eToro's date, priceRateID and
+    conversionRateBid/Ask ride each rate row into the ticker dict and the
+    shared cache's value. Additive keys: every reader before them reads
+    lastPrice, bid and ask, and a row is never refused for one."""
+
+    def test_a_batched_row_carries_them_beside_its_price(self):
+        w = _Wire(body=lambda ids: _own_rows(ids))
+        got = _trader(w).tickers(["AAA", "BBB"])
+        self.assertEqual(got["AAA"], {
+            "lastPrice": "11.0", "symbol": "AAA", "bid": "10.9",
+            "ask": "11.1", "date": "2026-11-06T10:00:00.1234567Z",
+            "priceRateID": 106439224591, "conversionRateBid": "0.5871",
+            "conversionRateAsk": "0.5873"})
+        self.assertIsNone(er.unproven())
+
+    def test_the_single_read_carries_them_too(self):
+        w = _Wire(body=lambda ids: _own_rows(ids,
+                                             priceRateID="106439224592"))
+        tick = _trader(w).ticker("AAA")
+        self.assertEqual(tick["lastPrice"], "11.0")
+        self.assertEqual(tick["date"], OWN["date"])
+        self.assertEqual(tick["priceRateID"], 106439224592,
+                         "a whole number, as v1 spells it")
+        self.assertEqual((tick["conversionRateBid"],
+                          tick["conversionRateAsk"]), ("0.5871", "0.5873"))
+
+    def test_the_cache_value_keeps_them_and_a_cached_answer_says_them(self):
+        w = _Wire(body=lambda ids: _own_rows(ids))
+        _trader(w).tickers(["AAA", "BBB"])
+        er.flush_writes()
+        held = cache.get(er._key("live", 11))
+        for key, value in (("date", OWN["date"]),
+                           ("priceRateID", 106439224591),
+                           ("conversionRateBid", "0.5871"),
+                           ("conversionRateAsk", "0.5873")):
+            self.assertEqual(held[key], value, key)
+        tick = er.get("live", 11, symbol="AAA", max_age_s=30)
+        self.assertTrue(tick["cached"])
+        self.assertEqual(tick["lastPrice"], "11.0")
+        self.assertEqual(tick["priceRateID"], 106439224591)
+        self.assertEqual(tick["conversionRateAsk"], "0.5873")
+
+    def test_a_row_without_them_reads_as_before(self):
+        w = _Wire(prices={11: 10.0, 22: 20.0})
+        got = _trader(w).tickers(["AAA", "BBB"])
+        self.assertEqual(got["AAA"], {"lastPrice": "10.0", "symbol": "AAA",
+                                      "bid": "9.9", "ask": "10.1"})
+        er.flush_writes()
+        self.assertEqual(set(cache.get(er._key("live", 11))),
+                         {"lastPrice", "at", "bid", "ask"})
+
+    def test_one_it_cannot_read_is_left_out_never_a_refusal(self):
+        w = _Wire(body=lambda ids: _own_rows(
+            ids, date=5, priceRateID=True, conversionRateBid="n/a",
+            conversionRateAsk=0))
+        got = _trader(w).tickers(["AAA", "BBB"])
+        self.assertEqual(got["AAA"], {"lastPrice": "11.0", "symbol": "AAA",
+                                      "bid": "10.9", "ask": "11.1"})
+        self.assertIsNone(er.unproven(), "the row is trusted as before")
+
+    def test_a_zero_row_keeps_its_date(self):
+        w = _Wire(body=lambda ids: {"rates": [
+            dict(_row(i, 0), date="2026-11-07T09:00:00Z", priceRateID=7)
+            for i in ids]})
+        got = _trader(w).tickers(["AAA", "BBB"])
+        self.assertEqual(got["AAA"], {
+            "lastPrice": "0", "symbol": "AAA",
+            "date": "2026-11-07T09:00:00Z", "priceRateID": 7})

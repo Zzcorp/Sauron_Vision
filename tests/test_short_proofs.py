@@ -136,7 +136,11 @@ class _Wire:
                                 "internalSymbolFull": spelled}]
                          if iid else [])
         if "/instruments/rates" in url:
-            px = RATES.get(int(params.get("instrumentIds")))
+            # the ids ride the URL's own query, literal commas, since
+            # 2026-11-06 (the feed spec's P-a.1, etoro_client.rates_url)
+            asked = (dict(parse_qsl(urlsplit(url).query)).get("instrumentIds")
+                     or params.get("instrumentIds"))
+            px = RATES.get(int(asked))
             return _Resp(200, {"rates": [{"bid": px, "ask": px,
                                           "lastExecution": px}]})
         if "/eligibility" in url:
