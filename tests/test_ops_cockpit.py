@@ -537,7 +537,12 @@ class BulkEnableExemptTests(_Fixture):
     #: The Orcs' mind switches (2026-11-05, the Orcs' O2 spec N2 and A.1):
     #: a seeded System row each, OFF, that lets a model spend AI money and
     #: moves no account money. "All on" holds them back like the live ones.
-    MINDS = ("orcs_minds",)
+    #: Grown on purpose (2026-11-06, O2b): the router's switch, whose ON
+    #: lets a routed rung (Opus among them) answer a wake; the probes'
+    #: switch, whose ON lets a neighbouring rung read a paper wake again;
+    #: and the frontier's, whose ON opens Fable's gate (r5 beside its r4
+    #: blind twin), a gate that cannot open in O2.
+    MINDS = ("orcs_minds", "orcs_router", "orcs_probes", "orcs_frontier")
 
     def setUp(self):
         super().setUp()
