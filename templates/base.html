@@ -1777,7 +1777,7 @@
       function scheduleHide() {
         if (hideTimer) clearTimeout(hideTimer);
         if (pinned(pop)) return;
-        hideTimer = setTimeout(function() { if (!pinned(pop)) hidePopup(wrap); }, 260);
+        hideTimer = setTimeout(function() { hidePopup(wrap); }, 260);
       }
       function cancelHide() {
         if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
@@ -5414,8 +5414,8 @@ window.svWheelMarquee = function (frame, track) {
   // travelling pointer while the feed rows two bands away took 2s.
   // One beat at a time: arming an item disarms the last one, whose leave
   // may never have come (a swap removed it from under the pointer).
+  // No hover preview while a popup is pinned (2026-11-06).
   function armPortal(item, sel, width, side){
-    /* No hover preview while a popup is pinned (2026-11-06). */
     if (window.svPin.current()) return;
     if (beatItem && beatItem !== item) disarmPortal(beatItem);
     if (item._svBeat) clearTimeout(item._svBeat);
@@ -5426,6 +5426,10 @@ window.svWheelMarquee = function (frame, track) {
       if (window.svPin.current()) return;
       showPortalPopup(item, sel, width, side);
     }, window.SV_HOVER_BEAT_MS || 450);
+  }
+  function disarmPortal(item){
+    if (item._svBeat) { clearTimeout(item._svBeat); item._svBeat = null; }
+    if (beatItem === item) beatItem = null;
   }
   /* A click or a tap pins the item's card at once (2026-11-06). */
   function pinPortal(item, sel, width, side){
@@ -5443,10 +5447,6 @@ window.svWheelMarquee = function (frame, track) {
     addPopX(pop, '.dh-pop-head', function(){ hidePortalPopup(pop); });
     item.setAttribute('aria-haspopup', 'dialog');
     item.setAttribute('aria-expanded', 'true');
-  }
-  function disarmPortal(item){
-    if (item._svBeat) { clearTimeout(item._svBeat); item._svBeat = null; }
-    if (beatItem === item) beatItem = null;
   }
 
   /* Hover is DELEGATED to each band's own frame, which no refresh replaces
