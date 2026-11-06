@@ -267,19 +267,25 @@ def complete_provenance(trade, keys=DESK_KEYS) -> bool:
     provenance, ONCE: under the Orc's row lock, only for an entry thesis,
     only while the Orc is still `born` with no fact past its birth lines,
     and never over a key already there. Writes the Orc table only; True
-    when it wrote. The caller fences it."""
+    when it wrote. The caller fences it. On the entry path, the Orc's lock
+    is waited for ORC_LOCK_MONEY_MS at most (the O2 spec N8, 2026-11-05):
+    one held elsewhere raises into that fence, and the thesis keeps the
+    keys it had."""
     from django.db import transaction
 
-    from bot_program.orcs.constants import STATE_BORN
+    from bot_program.orcs import journal
+    from bot_program.orcs.constants import ORC_LOCK_MONEY_MS, STATE_BORN
     from bot_program.orcs.models import Orc
     meta = trade.metadata if isinstance(trade.metadata, dict) else {}
     stamp = meta.get("orc")
     if not isinstance(stamp, dict) or not stamp.get("idea"):
         return False
-    with transaction.atomic():
-        orc = (Orc.objects.select_for_update()
-               .filter(pk=stamp["idea"], root_trade_id=trade.pk).first())
-        if orc is None or orc.state != STATE_BORN:
+    with journal.lock_budget(ORC_LOCK_MONEY_MS), transaction.atomic():
+        try:
+            orc = journal.orc_lock(stamp["idea"], root_trade_id=trade.pk)
+        except Orc.DoesNotExist:
+            return False
+        if orc.state != STATE_BORN:
             return False
         seen = dict(orc.seen or {})
         if seen.get("provenance_completed"):

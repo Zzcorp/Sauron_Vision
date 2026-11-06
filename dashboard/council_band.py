@@ -72,9 +72,10 @@ DISSENT_SHOWN = 2
 #: Seconds each data panel is kept.
 TTL = {"switches": 60, "phase": 300, "regime": 300, "sittings": 60,
        "snapshot": 300, "record": 600, "battles": 300, "war": 120,
-       "ai": 120, "mood": 300, "horizon": 3600, "traders": 600}
+       "ai": 120, "mood": 300, "horizon": 3600, "traders": 600,
+       "orcs": 300}
 #: The panels read for the viewer's own book; the rest are the platform's.
-USER_SCOPED = frozenset({"war", "mood", "traders"})
+USER_SCOPED = frozenset({"war", "mood", "traders", "orcs"})
 #: What each event wakes.
 WAKE = {"fill_open": {"sittings", "war"},
         "fill_close": {"phase", "sittings", "battles", "war", "mood",
@@ -323,7 +324,13 @@ MOOD_BOOK = ("Now, the real-money book (yours, world live: no demo, no SIM, "
 MOOD_GRADED_TITLE = ("What the argued trades returned under each mood (live, "
                      "graded, 180 days)")
 MOOD_GRADED_NOTE = "If the mood predicts nothing, these rows will not differ."
+#: Under THE TRADERS (O2a, 2026-11-05, the Orcs' O2 spec A.62): the
+#: living Orcs of the viewer's book while the orcs switch is on, none acting
+#: on a position; with no Orc alive, or the switch OFF, the words of before
+#: the Orcs (bot_program/orcs/notes.py registers all three).
 ORCS = "The Orcs are not in the field yet."
+ORCS_ONE = "One Orc watches in shadow; it acts on no position."
+ORCS_N = "{n} Orcs watch in shadow; none acts on a position."
 TRADERS_FOOT = "The mix moves shares only, never the risk per trade."
 TRADERS_UNKNOWN = "No regime recorded: every factor is neutral."
 TRADERS_KEY = ("Filled gold: measured on live fills · dashed: a prior, "
@@ -1385,12 +1392,34 @@ def _read_traders(user, now):
             "n_cells": int(mix.get("n_cells") or 0)}
 
 
+def _read_orcs(user, now):
+    """The living Orcs of the viewer's book (O2a): {n}, 0 while the orcs
+    switch is OFF, so the band reads as it did before the Orcs. A count,
+    never a model's words."""
+    from bot_program.orcs.constants import STATE_DEAD
+    from bot_program.orcs.models import Orc
+    from bot_program.orcs.switches import orcs_on
+    if user is None or not orcs_on():
+        return {"n": 0}
+    return {"n": Orc.objects.filter(user=user).exclude(
+        state=STATE_DEAD).count()}
+
+
+def _orcs_words(P) -> str:
+    """ORCS while no Orc lives (or the panel is unread), else their count
+    in shadow."""
+    n = int((P.get("orcs") or {}).get("n") or 0)
+    if n <= 0:
+        return ORCS
+    return ORCS_ONE if n == 1 else ORCS_N.format(n=n)
+
+
 READERS = {"switches": _read_switches, "phase": _read_phase,
            "regime": _read_regime, "sittings": _read_sittings,
            "snapshot": _read_snapshot, "record": _read_record,
            "battles": _read_battles, "war": _read_war, "ai": _read_ai,
            "mood": _read_mood, "horizon": _read_horizon,
-           "traders": _read_traders}
+           "traders": _read_traders, "orcs": _read_orcs}
 
 
 # ── one sitting, as the band draws it ─────────────────────────────────────
@@ -2383,7 +2412,7 @@ def _room_traders(P, now) -> dict:
     if t is None or t.get("unread"):
         return {"cards": [], "matrix": [], "line": "",
                 "unread": SENTENCE["traders"], "foot": TRADERS_FOOT,
-                "orcs": ORCS}
+                "orcs": _orcs_words(P)}
     cards = []
     for c in t["cards"]:
         f = c["factor"]
@@ -2407,7 +2436,7 @@ def _room_traders(P, now) -> dict:
                 f"{_ago(t['age_min'])}")
     return {"cards": cards, "matrix": t["matrix"], "line": line,
             "key": TRADERS_KEY if t["matrix"] else "",
-            "unread": "", "foot": TRADERS_FOOT, "orcs": ORCS,
+            "unread": "", "foot": TRADERS_FOOT, "orcs": _orcs_words(P),
             "regime": t["regime"]}
 
 

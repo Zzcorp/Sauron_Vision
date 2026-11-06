@@ -7,15 +7,20 @@ know these commands).
 
     /orc NUMBER       one Orc: its rank, state, R and stops (or, once its
                       row is closed, where it closed and the R booked),
-                      thesis, plan, latest note, last fact (never the
-                      operator's own words), next wake, the care beside
-                      it, its army
+                      thesis, plan, latest note, last fact (a line code
+                      wrote: never the operator's own words, never a
+                      model's, O2a), next wake, the care beside it, its
+                      army
     /orcs [CLASS]     every Orc on watch, one line each (20 at most)
 
 NUMBER is the Orc's number, its idea's root trade, or any of its legs.
-In O1 an Orc reasons about nothing, so the commands that would make one
-act answer in words and change nothing: "/orc N <question>" (O2 answers
-it), "/orc N stand down" and "/orcs off" (O4a gives them their write).
+No Orc acts on a position, so the commands that would make one act answer
+in words and change nothing: "/orc N <question>" (O2d answers it), "/orc
+N stand down" and "/orcs off" (O4a gives them their write). From O2a
+(2026-11-05) a model may read an Orc's wakes in shadow, behind the minds
+switch and the Orcs line: /orc says the Orc's model calls today (a count,
+never money) and its next wake in the words its minds' state makes true
+(read once per reply).
 
 Every reply carries R and prices only: never a balance, an amount, a
 quantity or an account figure. The operator's own thesis is shown as he
@@ -32,19 +37,21 @@ MARK_ORC = "\U0001F4DC"
 
 NO_NUMBER = "Give the Orc's number, as /orcs lists it: /orc <number>."
 NOT_FOUND = "No Orc numbered {n} in your book: /orcs lists them."
-QUESTION_LATER = ("Orcs do not answer questions yet: none calls a model. "
-                  "Ask Sauron instead: /q <question>.")
+QUESTION_LATER = ("Orcs do not answer questions yet. Ask Sauron instead: "
+                  "/q <question>.")
 STAND_DOWN_NONE = ("Nothing to stand down: {label} watches only ({level}); "
                    "the care holds your position.")
-ORCS_OFF_NONE = ("Nothing to switch off: no Orc acts on a position; each "
-                 "keeps a journal only, and the care holds every position.")
+ORCS_OFF_NONE = ("Nothing to switch off: no Orc acts on a position; the care "
+                 "holds every position.")
 ORCS_HEAD = "Orcs on watch: {n} ({real} real money · {sim} simulated)"
 ORCS_NONE = ("No Orc is on watch. Each open position gets one within 5 "
              "minutes.")
 UNKNOWN_CLASS = "No class named {word}. Classes: {names}."
-MODEL_CALLS = "Model calls today: 0"
-HELP_LINES = ("/orc NUMBER — one Orc: its thesis, journal and the care "
-              "beside it (no model)",
+#: The Orc's model calls on the UTC day (O2a, A.62): its own counter, a
+#: count, never money (scheduler.day_counters: 0 once the day moved).
+MODEL_CALLS = "Model calls today: {n}"
+HELP_LINES = ("/orc NUMBER — one Orc: its thesis, journal, plan in shadow "
+              "and the care beside it",
               "/orcs [CLASS] — every Orc on watch, one line each")
 
 _DIGITS = re.compile(r"[0-9]{1,18}")
@@ -216,22 +223,48 @@ def _closed_line(trade) -> str:
 
 
 def _grade_line(orc):
+    """The dead idea's grade in R. Its O arm is the position, or the
+    Orc's shadow arm once its proposals stepped it (the grade's arm:would
+    tag; O2a, 2026-11-05, A.58), as the grade's journal line says."""
+    from bot_program.orcs.grading import (ARM_POSITION_T, ARM_WOULD_T,
+                                          graded_would)
     from bot_program.orcs.notes import r_words
     g = getattr(orc, "grade", None)
     if g is None:
         return None
-    return (f"Graded: the position {r_words(g.orc_r_gross)}, the care ghost "
+    arm = ARM_WOULD_T if graded_would(g) else ARM_POSITION_T
+    return (f"Graded: {arm} {r_words(g.orc_r_gross)}, the care ghost "
             f"{r_words(g.ghost_r)}; Δ against the care "
             f"{r_words(g.delta_care)} (shadow: no Orc acted).")
 
 
+def _minds():
+    """The four gates, read once per reply (O2a, A.62); None unread."""
+    try:
+        from bot_program.orcs.switches import minds_on
+        return bool(minds_on())
+    except Exception:  # noqa: BLE001 — unread says the words true either way
+        return None
+
+
+def _model_calls(orc, now) -> int:
+    """The Orc's model calls on the UTC day (llm_wakes_today, 0 once the
+    day moved: the counters reset lazily at the next settle)."""
+    from django.utils import timezone
+
+    from bot_program.orcs.scheduler import day_counters
+    return int(day_counters(orc, now or timezone.now())["llm"])
+
+
 def orc_card(orc, *, tracks=(), now=None):
-    """The /orc reply for one Orc (no query: its seat, root row and grade
-    are selected, its arms given)."""
+    """The /orc reply for one Orc (no query of the Orc's own: its seat,
+    root row and grade are selected, its arms given; the minds' four gates
+    read once, O2a)."""
     from bot_program.orcs import notes, ranks
     from bot_program.telegram_eye import BULLET, Reply, _cap, ago
     trade = orc.root_trade
-    sl = notes.slot(orc, trade=trade, tracks=tracks, now=now)
+    sl = notes.slot(orc, trade=trade, tracks=tracks, now=now,
+                    minds=_minds())
     auth = sl["authority"]
     lane = "your ticket" if orc.manual else "bot idea"
     lineage = sl["lineage"]
@@ -265,7 +298,7 @@ def orc_card(orc, *, tracks=(), now=None):
         g = _grade_line(orc)
         if g:
             lines.append(g)
-    lines.append(MODEL_CALLS)
+    lines.append(MODEL_CALLS.format(n=_model_calls(orc, now)))
     lines.append(f"Page: {sl['page']}")
     title = f"{orc.label} — {orc.symbol} {_side(orc)}"
     return Reply(MARK_ORC, title, _cap(lines))

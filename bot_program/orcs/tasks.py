@@ -1,9 +1,11 @@
 """The Orcs' Celery tasks (spec §10.3). O1a: the census, every 5 minutes
 on the fast queue (config/celery.py), behind the `orcs` switch. O1b: the
 arms after the row (track_ghosts, every 15 minutes), the grades (hourly)
-and the faithfulness audit (weekly), on the SLOW queue until O2's worker
-and its `orcs` queue exist (routed by exact name, never a glob: a glob to
-`orcs` would strand them unconsumed). O1c (§5.2a, §7.5.3, §10.7): the day
+and the faithfulness audit (weekly), on the SLOW queue by exact name,
+never a glob (a glob to `orcs` would put them behind the minds' calls).
+O2a (2026-11-05, the O2 spec A.17): the minds' worker task orc_think, the
+one task the `orcs` queue carries (worker-orc consumes it), and its
+watchdog orc_minds_watch on `slow`. O1c (§5.2a, §7.5.3, §10.7): the day
 roll (MK0 per model family, the day's weather, the calendar's actuals),
 the session close (each closed session's MK block per model family) and
 the hourly read (IN-slow, the class's hourly terms, the level-break and
@@ -291,15 +293,24 @@ RENDER_LOCK_TTL_S = 110
 @guarded_task("orcs")
 def orc_render_wakes():
     """Every 2 minutes: the wakes the tick recorded, rendered as of their
-    moment (bot_program/orcs/wake.render_queued): the complexity score,
-    the band, the day's weather and the dossier's blocks. The tick writes
-    the wake and its reasons only, so a recorded wake costs the real-money
-    loop a handful of queries, never the dossier."""
+    moment (bot_program/orcs/wake.render_queued): the Orc's older pending
+    wake merged in (scheduler.absorb), then the complexity score, the band,
+    the day's weather and the dossier's blocks, then the admission to the
+    minds' queue (scheduler.admit), each step its own short transaction.
+    The tick writes the wake and its reasons only, so a recorded wake costs
+    the real-money loop a handful of queries, never the dossier."""
     if not cache.add(RENDER_LOCK, 1, RENDER_LOCK_TTL_S):
         return {"idle": "another render pass is running"}
     try:
         from bot_program.orcs import wake
-        done, failed = wake.render_queued()
+        out = wake.render_queued()
+        done, failed = out
+        # O2a (A.7, A.17): a pass that admitted any wake to the minds'
+        # queue sends one orc_think ticket; with a gate closed (as they
+        # ship) every wake is answered by code and the count is 0
+        admitted = int(getattr(out, "admitted", 0) or 0)
+        if admitted:
+            _think_ticket()
         if not done and not failed:
             return {"idle": "no recorded wake waits for its dossier"}
         if failed and not done:
@@ -307,6 +318,62 @@ def orc_render_wakes():
                     "reason": f"{failed} recorded wake(s) could not be "
                               f"rendered (marked failed; the log says why)"}
         return {"status": "success", "rendered": done,
-                "not_rendered": failed}
+                "not_rendered": failed, "admitted": admitted}
     finally:
         cache.delete(RENDER_LOCK)
+
+
+# ── O2a: the minds' worker and their watchdog (2026-11-05) ───────────────
+
+def _think_ticket() -> bool:
+    """One orc_think ticket on the `orcs` queue (A.17), after a render pass
+    that admitted a wake, so the worker need not wait for its beat. A lost
+    ticket costs the beat's 60 s, never a wake. True when it was sent."""
+    try:
+        orc_think.delay()
+        return True
+    except Exception as e:  # noqa: BLE001 — the beat claims it anyway
+        logger.warning("[orcs] the orc_think ticket was not sent: %s", e)
+        return False
+
+
+@shared_task
+@guarded_task("orcs")
+def orc_think():
+    """THE MINDS' WORKER (the O2 spec A.17-A.19), on the `orcs` queue that
+    worker-orc alone consumes, every 60 s and on a ticket from the render
+    pass. One run claims the best pending wake, reads it in shadow through
+    the gateway with no lock held, settles it, and again, for THINK_RUN_S
+    at most; each claim reads the four gates anew.
+
+    With the minds switch off, every pending wake is answered by code
+    (`minds_off`) and the pass is idle. The result names `thought` and
+    `by_code`, never a `skipped`, `parsed` or `attempted` key: the task
+    gate reads those as a health verdict. While a gate is closed (as they
+    ship), the render pass answers every wake by code, no wake is pending
+    and every pass is idle."""
+    from bot_program.orcs import scheduler, switches
+    from bot_program.orcs.constants import CODE_MINDS_OFF
+    if not switches.minds_switch_on():
+        closed = scheduler.close_pending(CODE_MINDS_OFF)
+        words = (f"; {closed} waiting wake(s) answered by code" if closed
+                 else "")
+        return {"idle": f"the minds switch is off{words}"}
+    out = scheduler.run()
+    if not out["thought"] and not out["by_code"]:
+        return {"idle": "no wake waits for a model"}
+    return {"status": "success", "thought": out["thought"],
+            "by_code": out["by_code"]}
+
+
+@shared_task
+@guarded_task("orcs")
+def orc_minds_watch():
+    """THE MINDS' WATCHDOG (the O2 spec A.54-A.56), every 5 minutes on the
+    SLOW queue, its own task (N8): never inside the census on `fast`, and
+    never on `orcs`, whose two slots long calls may hold. The stall alarm,
+    the stale and backlog closes, the wall time, the holds expired at
+    00:00 UTC, the breaker and the ledger gaps; its result names their
+    counts, never a `skipped`, `parsed` or `attempted` key."""
+    from bot_program.orcs import scheduler
+    return scheduler.watch()

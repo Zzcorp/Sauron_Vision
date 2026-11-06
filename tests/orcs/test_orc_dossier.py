@@ -337,7 +337,8 @@ class TheInstrumentAndPositionTests(_Dossier):
         self._build_day()
         out = self._render()
         ps = _json_of(self._block(out["ps"]).text)[1]
-        self.assertEqual(ps["ps3"], "no plan yet: the Orc writes one from O2")
+        # O2a (changed on purpose, 2026-11-05, A.47, A.62)
+        self.assertEqual(ps["ps3"], "no plan yet")
         self.assertIn("hold", ps["ps1"]["allowed_actions"])
         self.assertEqual(ps["ps1"]["level"], "L0 shadow")
         self.assertTrue(ps["ps1"]["army"])

@@ -171,10 +171,23 @@ class TheSlotTests(_Seen):
         self.assertEqual(set(sl["authority"]), {
             "level", "level_t", "commission", "commission_t", "stood_down",
             "care_owned_reason"})
+        # O2a (changed on purpose, 2026-11-05, A.62): the intents are the
+        # card's (none written yet), and the born state says no model
+        # answer has been accepted yet, true with the minds on and off and
+        # after a refused first answer (changed again on purpose,
+        # completing O2a, A.51)
         self.assertEqual(sl["intents"], [])
         self.assertEqual(sl["page"], f"/orcs/{self.row.pk}/")
         self.assertEqual(sl["state_t"],
-                         "Watching: a journal written by code, no model.")
+                         "Watching: a journal written by code; no model "
+                         "answer has been accepted yet.")
+        from bot_program.orcs.models import Orc
+        intents = [{"kind_t": "proposed in shadow: tighten to S1h-L1 "
+                              "(99.00)", "mode": "shadow",
+                    "status_t": "queued for the shadow arm"}]
+        Orc.objects.filter(pk=self.orc.pk).update(card={
+            **self.orc.card, "intents": intents})
+        self.assertEqual(self.slot()["intents"], intents)
         self.assertEqual(sl["plan_line"],
                          "No plan yet: Orcs write plans once they reason.")
         self.assertEqual(sl["lineage"]["rank_t"], "Snaga · n 0")
@@ -284,9 +297,11 @@ class TheSlotTests(_Seen):
             open=False, exit_r=-0.25)
         cmp_ = self.slot()["care_compare"]
         self.assertEqual((cmp_["orc_r"], cmp_["care_r"]), (-0.25, 0.5))
+        # O2a (changed on purpose, A.62): the O arm in mode `real` is the
+        # position, and none of the Orc's proposals was applied to it
         self.assertEqual(cmp_["t"], "The position -0.25R and the care ghost "
-                                    "+0.50R so far; the Orc has taken no "
-                                    "step.")
+                                    "+0.50R so far; none of the Orc's "
+                                    "proposals has been applied.")
 
     def test_next_wake_says_its_day_and_when_it_is_overdue(self):
         from datetime import datetime, timezone as dt_tz
@@ -296,22 +311,34 @@ class TheSlotTests(_Seen):
         friday = datetime(2026, 10, 23, 22, 5, tzinfo=dt_tz.utc)
         Orc.objects.filter(pk=self.orc.pk).update(next_wake_due=friday)
         self.orc.refresh_from_db()
+        # O2a (changed on purpose, A.62): O1's "no model" words while the
+        # caller read the minds off (minds=False); read on, or unread, the
+        # words true either way
         on_friday = notes.slot(self.orc, now=datetime(
-            2026, 10, 23, 20, 0, tzinfo=dt_tz.utc))
+            2026, 10, 23, 20, 0, tzinfo=dt_tz.utc), minds=False)
         self.assertEqual(on_friday["next_wake_t"],
                          "Next wake 22:05 UTC: detected and recorded only, "
                          "no model.")
+        self.assertEqual(notes.slot(self.orc, now=datetime(
+            2026, 10, 23, 20, 0, tzinfo=dt_tz.utc))["next_wake_t"],
+            "Next wake 22:05 UTC.")
         on_thursday = notes.slot(self.orc, now=datetime(
-            2026, 10, 22, 20, 0, tzinfo=dt_tz.utc))
+            2026, 10, 22, 20, 0, tzinfo=dt_tz.utc), minds=False)
         self.assertEqual(on_thursday["next_wake_t"],
                          "Next wake Fri 23 Oct 22:05 UTC: detected and "
                          "recorded only, no model.")
+        self.assertEqual(notes.slot(self.orc, now=datetime(
+            2026, 10, 22, 20, 0, tzinfo=dt_tz.utc), minds=True)[
+            "next_wake_t"], "Next wake Fri 23 Oct 22:05 UTC.")
         # the market shut: no tick ran it, and it is not "tonight"
         on_saturday = notes.slot(self.orc, now=datetime(
-            2026, 10, 24, 9, 0, tzinfo=dt_tz.utc))
+            2026, 10, 24, 9, 0, tzinfo=dt_tz.utc), minds=False)
         self.assertEqual(on_saturday["next_wake_t"],
                          "Next wake overdue since Fri 23 Oct 22:05 UTC: "
                          "detected and recorded only, no model.")
+        self.assertEqual(notes.slot(self.orc, now=datetime(
+            2026, 10, 24, 9, 0, tzinfo=dt_tz.utc), minds=True)[
+            "next_wake_t"], "Next wake overdue since Fri 23 Oct 22:05 UTC.")
         self.assertEqual(on_saturday["next_wake_at"], friday.isoformat())
 
     def test_care_compare_prices_both_arms_on_the_same_mark(self):
@@ -350,8 +377,9 @@ class TheSlotTests(_Seen):
                 self.assertLess(cmp_["care_r"], float(care_r_now))
             orc_r = notes.r_words(cmp_["orc_r"])
             self.assertEqual(cmp_["t"], f"The position {orc_r} and the care "
-                                        f"ghost {orc_r} so far; the Orc has "
-                                        f"taken no step.")
+                                        f"ghost {orc_r} so far; none of the "
+                                        f"Orc's proposals has been "
+                                        f"applied.")
 
     def test_an_adopted_row_reads_its_thesis_as_reconstructed(self):
         from bot_program.orcs import notes

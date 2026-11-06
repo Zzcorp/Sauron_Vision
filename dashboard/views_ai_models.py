@@ -87,12 +87,15 @@ AGENT_GROUPS = [
 KNOWN_AGENT_KEYS = {name for _, rows in AGENT_GROUPS for name, _, _ in rows}
 
 # The Orcs' agent names (spec §7.1 and §7.5.8, the union of both lists),
-# SHOWN on the page and never writable: the Orcs' router reads its own
-# pinned ladder (catalog.ORC_LADDER_V1, versioned from O2), never
-# resolve_agent, so an override row here would persist and be read by
-# nothing — exactly what KNOWN_AGENT_KEYS exists to refuse. Their spend
-# is the Orcs' budget line (ai_agents/spend.py). No Orc calls a model
-# before O2.
+# SHOWN on the page and never writable: the Orcs read their own pinned
+# ladder (catalog.ORC_LADDER_V1, through bot_program/orcs/mind_gateway.py:
+# with the minds switch and the Orcs line on, every wake a model reads is
+# answered on r0; no router before O2b), never resolve_agent, so an
+# override row here would persist and be read by nothing — exactly what
+# KNOWN_AGENT_KEYS exists to refuse. Their spend is the Orcs' budget line
+# (ai_agents/spend.py), off at 0 until the operator sets it; a model is
+# asked only once he has also turned the minds switch on with his PIN
+# (2026-11-05).
 ORC_AGENT_KEYS = (
     ("orc", "The Orc (one per open position)"),
     ("orc_confirm", "The Orc's confirm wake"),
@@ -103,6 +106,19 @@ ORC_AGENT_KEYS = (
     ("orc_skeptic", "The Skeptic's co-sign"),
     ("captain", "The Captain (one per asset class)"),
 )
+
+
+def _orc_calls_today() -> int:
+    """The Orcs line's ledger rows since 00:00 UTC (spend.orc_line_q, the
+    line's own membership): the day's Orc calls, whatever answered them."""
+    from django.utils import timezone
+
+    from ai_agents.models import AgentTask
+    from ai_agents.spend import orc_line_q
+    start = timezone.now().replace(hour=0, minute=0, second=0,
+                                   microsecond=0)
+    return AgentTask.objects.filter(created_at__gte=start).filter(
+        orc_line_q()).count()
 
 
 def agent_choice(name: str, tier: str) -> tuple:
@@ -227,8 +243,11 @@ def ai_models_dashboard(request):
         "budget_remaining": (None if remaining_today() == float("inf")
                               else round(remaining_today(), 4)),
         # The two lines and the total (PR O0a): the core line, the Orcs'
-        # line (off until O2) and the total stop.
+        # line (off at 0 until the operator sets it) and the total stop.
         "budget_lines": lines_summary(),
+        # The day's Orc calls, from the ledger (O2a, U-A1): a count of the
+        # rows on the Orcs line since 00:00 UTC, the line's own day
+        "orc_calls_today": _orc_calls_today(),
         "orc_ladder": [
             {**rung, "label": MODELS.get(rung["model"], {}).get(
                 "label", rung["model"])} for rung in ORC_LADDER_V1],

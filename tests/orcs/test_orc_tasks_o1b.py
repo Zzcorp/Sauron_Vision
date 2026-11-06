@@ -1,7 +1,8 @@
 """THE ARMS' AND GRADES' TASKS (bot_program/orcs/tasks.py, spec §10.3): on
-the slow queue by exact name (no worker serves `orcs` before O2), behind
-the switch, idle passes keep the census's component row, idempotent and
-catch-up safe; their beats sit in the day scheme in plain words.
+the slow queue by exact name (worker-orc serves `orcs` from O2a, for the
+minds' own calls alone: still no glob), behind the switch, idle passes
+keep the census's component row, idempotent and catch-up safe; their
+beats sit in the day scheme in plain words.
 
 Run with:  python manage.py test tests.orcs.test_orc_tasks_o1b
 """
@@ -33,7 +34,8 @@ class TheWiringTests(SimpleTestCase):
             self.assertEqual(route(name), {"queue": "slow"}, name)
             self.assertEqual(day.queue_of(name, routes), "slow")
         self.assertNotIn("bot_program.orcs.tasks.*", routes,
-                         "no glob: a queue no worker serves strands them")
+                         "no glob: the `orcs` queue is the minds' calls' "
+                         "own, and these would wait behind them")
         compose = open("deploy/docker-compose.yml").read()
         self.assertIn("-Q slow,ai", compose, "worker-slow consumes slow")
         self.assertIn("bot_program.orcs.tasks", app.conf.imports)

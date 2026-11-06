@@ -16,7 +16,9 @@ _TRANSIENT_MARKERS = ("overloaded", "internal_server_error",
 # TWO attempts, not more: several callers are synchronous staff views
 # ("Run now" buttons), and each retry re-runs a potentially minutes-long
 # full generation — one second chance covers the transient case without
-# tripling the worst-case request time.
+# tripling the worst-case request time. A caller may ask for fewer, never
+# more (complete()'s `max_attempts`, 2026-11-05): a cut attempt can still
+# be billed, and only the last attempt's usage is read.
 _MAX_ATTEMPTS = 2
 
 # Where a declined request re-runs. A model's safety classifiers can
@@ -348,7 +350,8 @@ class ClaudeProvider:
                  timeout_s: float = None,
                  task_budget: int = None,
                  speed: str = None,
-                 answer_tokens: int = None) -> tuple:
+                 answer_tokens: int = None,
+                 max_attempts: int = None) -> tuple:
         """
         Call Claude API and return (response_text, usage_dict).
 
@@ -413,6 +416,16 @@ class ClaudeProvider:
           then that plus THINKING_TOKENS on a thinking model
           (max_tokens_for), sized again for the refusal re-run's model.
           Not with `max_tokens`, which is the whole bound.
+        * `max_attempts` (2026-11-05; the Orcs' O2 spec A.21): how many
+          times the whole request may be sent, 1 to _MAX_ATTEMPTS; None
+          keeps _MAX_ATTEMPTS, so a caller that leaves it out sends
+          exactly what it sent before. An attempt cut by an error
+          mid-stream can still be billed, and only the last attempt's
+          usage is read, so a caller that reserved ONE call's bound passes
+          1: a transient error then ends the call, raised as the last of
+          the default's attempts would be. Never sent to the API; the
+          refusal re-run carries it. The SDK's own retries, which happen
+          before anything streams, are not these.
 
         READING THE ANSWER. The current models put their thinking blocks
         before the text, and a thinking block's `thinking` is "" with the
@@ -435,6 +448,11 @@ class ClaudeProvider:
 
         if line not in LINES:
             raise ValueError(f"unknown budget line {line!r} (one of {LINES})")
+        attempts = _MAX_ATTEMPTS if max_attempts is None else max_attempts
+        if isinstance(attempts, bool) or not isinstance(attempts, int) \
+                or not 1 <= attempts <= _MAX_ATTEMPTS:
+            raise ValueError(f"max_attempts is 1 to {_MAX_ATTEMPTS}, or None "
+                             f"for {_MAX_ATTEMPTS}; not {max_attempts!r}")
         request = build_request(
             model=model, system_prompt=system_prompt,
             user_message=user_message, effort=effort,
@@ -468,9 +486,13 @@ class ClaudeProvider:
         # Timed from before the first attempt to the final message: the
         # latency the ledger records is the caller's wall time, retries
         # included — what a deadline sees (spec §7.5.5).
+        #
+        # `attempts` is _MAX_ATTEMPTS unless the caller asked for fewer
+        # (max_attempts): at 1 the request is sent once, and an error
+        # mid-stream ends the call (2026-11-05).
         response = None
         started = _monotonic()
-        for attempt in range(1, _MAX_ATTEMPTS + 1):
+        for attempt in range(1, attempts + 1):
             try:
                 with api.stream(**call) as stream:
                     response = stream.get_final_message()
@@ -478,17 +500,19 @@ class ClaudeProvider:
             except Exception as e:  # noqa: BLE001 — matched on content below
                 msg = str(e)
                 transient = any(m in msg.lower() for m in _TRANSIENT_MARKERS)
-                if not transient or attempt == _MAX_ATTEMPTS:
+                if not transient or attempt == attempts:
                     if "overloaded" in msg.lower():
+                        bounced = (f"{attempts} attempts all bounced. "
+                                   if attempts > 1 else
+                                   "the call's one attempt bounced. ")
                         raise RuntimeError(
                             "Anthropic is overloaded right now — "
-                            f"{_MAX_ATTEMPTS} attempts all bounced. "
-                            "Try again in a minute.") from e
+                            f"{bounced}Try again in a minute.") from e
                     raise
                 wait = 2 * attempt  # 2s, then 4s
                 logger.warning("[claude] transient API error "
                                "(attempt %d/%d, retrying in %ds): %.160s",
-                               attempt, _MAX_ATTEMPTS, wait, msg)
+                               attempt, attempts, wait, msg)
                 time.sleep(wait)
         duration = round(_monotonic() - started, 3)
 
@@ -710,7 +734,8 @@ class ClaudeProvider:
                         max_tokens=max_tokens, fallbacks=fallbacks,
                         line=line, client_refusal_rerun=client_refusal_rerun,
                         timeout_s=timeout_s, task_budget=task_budget,
-                        speed=speed, answer_tokens=answer_tokens)
+                        speed=speed, answer_tokens=answer_tokens,
+                        max_attempts=max_attempts)
                 declined += f"; not re-run on {REFUSAL_FALLBACK_MODEL}: {held}"
             _raise_billed(declined)
         if not text:

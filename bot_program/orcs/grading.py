@@ -10,8 +10,16 @@ forward-only, once every arm has resolved.
   r_avail        the O arm's best closing-side R over [entry, the last arm's
                  exit]; capture_x = R_x / r_avail only from 0.5R
   delta_care     orc_r_gross - ghost_r: the unit of every seat test
-  net_edge_money (O - G) x R$ - the AI cost (0 in O1)
+  net_edge_money (O - G) x R$ - the AI cost (0 in O1; from O2a the
+                 idea's decision and error entries, in the Orc's currency)
   orc_r          orc_r_gross - the AI cost in R
+  the mind       (O2a, A.58) n_wakes, n_llm (done, refused, late),
+                 n_actions (simulated proposals), n_refused (refusal
+                 entries), the expectation hit rate, the flip-flop rate;
+                 tags s:, schema:, rung: and invalid:<rate>, so grades
+                 under different minds are never pooled, and arm:would
+                 when the O arm was the Orc's proposals in shadow (its
+                 would mode): every surface then names it so
   bar_source     "etoro" only when the menu at birth and every bar the arms
                  read were the venue's own; "platform" otherwise: never
                  pooled
@@ -44,6 +52,14 @@ from bot_program.orcs.constants import (ARM_CARE, ARM_ORC, ARM_PLAYBOOK,
 logger = logging.getLogger(__name__)
 
 FELL_WORDS = {FELL_WON: "Won.", FELL_HONOURABLE: "Honourable defeat."}
+#: The O arm in the grade's words (A.58): the position while the arm only
+#: recorded the row; the Orc's shadow arm once its proposals stepped it
+#: (its would mode, A.43). The grade keeps which as a tag (OrcGrade has no
+#: column for it), so the Orc page and Telegram say what its journal line
+#: says (2026-11-05, completing O2a).
+ARM_POSITION_T = "the position"
+ARM_WOULD_T = "the Orc's shadow arm"
+WOULD_TAG = "arm:would"
 
 
 def _f(x):
@@ -98,13 +114,113 @@ def _rr(x) -> str:
     return "—" if x is None else f"{x:+.2f}R"
 
 
-def grade_line(nums, verdict) -> str:
+def grade_line(nums, verdict, *, would=False) -> str:
+    """The grade in one line, in R (A.58): "Graded in shadow: ...". The O
+    arm is "the position" while it only recorded the row, and "the Orc's
+    shadow arm" once its proposals stepped it (its would mode)."""
     tail = (f"Fault: {verdict.causes[0]}." if verdict.fell == FELL_FAULT
             else FELL_WORDS.get(verdict.fell, "Not classed: no R."))
-    return (f"Graded (shadow, no Orc action): the position "
+    arm = ARM_WOULD_T if would else ARM_POSITION_T
+    return (f"Graded in shadow: {arm} "
             f"{_rr(nums['orc_r_gross'])}, the care ghost "
             f"{_rr(nums['ghost_r'])}, the playbook {_rr(nums['play_r'])}; "
             f"Δ against the care {_rr(nums['delta_care'])}. {tail}")
+
+
+def graded_would(g) -> bool:
+    """The grade `g` measured the Orc's shadow arm in would mode (its tag
+    WOULD_TAG): the surfaces then name the O arm ARM_WOULD_T."""
+    tags = getattr(g, "tags", None)
+    return isinstance(tags, (list, tuple)) and WOULD_TAG in tags
+
+
+def _usd_per(ccy):
+    """USD for one unit of `ccy`, from the freshest quote or 1h/4h bar of
+    its USD pair (direct, else inverse); 1.0 for USD; None unread. A read
+    of market data only: the order path's own helper is not reached."""
+    from datetime import timedelta
+
+    from market_data.models import LiveQuote, PriceData
+    ccy = str(ccy or "").upper()
+    if ccy in ("", "USD"):
+        return 1.0
+    now = timezone.now()
+
+    def quote(symbol):
+        q = LiveQuote.objects.filter(instrument__symbol=symbol).first()
+        if q is not None and q.last and (now - q.updated_at) <= timedelta(
+                minutes=15):
+            return float(q.last)
+        bar = (PriceData.objects
+               .filter(instrument__symbol=symbol, timeframe__in=("1h", "4h"),
+                       timestamp__gte=now - timedelta(hours=6))
+               .order_by("-timestamp").first())
+        return float(bar.close) if bar is not None else None
+    try:
+        direct = quote(f"{ccy}USD")
+        if direct and direct > 0:
+            return direct
+        inverse = quote(f"USD{ccy}")
+        if inverse and inverse > 0:
+            return 1.0 / inverse
+    except Exception:  # noqa: BLE001 — unread is no rate
+        return None
+    return None
+
+
+def mind_counts(orc) -> dict:
+    """A.58's counters of the idea's mind, from its wakes, intents and
+    journal: n_wakes, n_llm, n_actions, n_refused, the invalid-output
+    rate, the expectation hit rate, the flip-flop rate, the AI cost in USD
+    and the minds' versions."""
+    from bot_program.orcs.constants import MODEL_ANSWERED
+    from bot_program.orcs.models import OrcIntent, OrcJournal, OrcWake
+    wakes = list(OrcWake.objects.filter(orc=orc).values_list("status",
+                                                             flat=True))
+    n_llm = sum(1 for st in wakes if st in MODEL_ANSWERED)
+    refused_wakes = sum(1 for st in wakes if st == "refused")
+    entries = list(OrcJournal.objects.filter(
+        orc=orc, kind__in=("decision", "error", "refusal", "plan", "fact"))
+        .order_by("at", "id").only("kind", "body", "cost_usd"))
+    cost = sum((e.cost_usd or Decimal(0)) for e in entries
+               if e.kind in ("decision", "error"))
+    graded = [e.body.get("result") for e in entries if e.kind == "fact"
+              and isinstance(e.body, dict)
+              and e.body.get("fk") == "expectation"]
+    plans = [tuple(sorted((c.get("clause"), c.get("level_id"),
+                           c.get("price"))
+                          for c in ((e.body or {}).get("plan") or {})
+                          .get("clauses") or [] if isinstance(c, dict)))
+             for e in entries if e.kind == "plan"]
+    flips = sum(1 for i in range(2, len(plans)) if plans[i] == plans[i - 2])
+    versions = {"s": set(), "schema": set(), "rung": set()}
+    for e in entries:
+        if e.kind == "decision" and isinstance(e.body, dict):
+            for key, field in (("s", "s_version"),
+                               ("schema", "schema_version"),
+                               ("rung", "rung")):
+                if e.body.get(field):
+                    versions[key].add(str(e.body[field]))
+    return {"n_wakes": len(wakes), "n_llm": n_llm,
+            "n_actions": OrcIntent.objects.filter(
+                orc=orc, status="simulated").count(),
+            "n_refused": sum(1 for e in entries if e.kind == "refusal"),
+            "invalid": (refused_wakes / n_llm) if n_llm else None,
+            "expectation_hit_rate": ((graded.count("hit") / len(graded))
+                                     if graded else None),
+            "flipflop_rate": (flips / len(plans)) if plans else None,
+            "ai_cost_usd": Decimal(cost), "versions": versions}
+
+
+def mind_tags(counts) -> list:
+    """The grade's tags (A.58): s:, schema:, rung: of every decision, and
+    invalid:<rate> once a model answered."""
+    tags = []
+    for key in ("s", "schema", "rung"):
+        tags += [f"{key}:{v}" for v in sorted(counts["versions"][key])]
+    if counts.get("invalid") is not None:
+        tags.append(f"invalid:{counts['invalid']:.2f}")
+    return tags
 
 
 def _level_at_birth(orc) -> int:
@@ -140,11 +256,27 @@ def grade(orc, *, now=None):
     by = {t.arm: t for t in tracks}
     o = by.get(ARM_ORC)
     o_state = (o.state or {}) if o else {}
+    would = o_state.get("mode") == "would"
     row = AssetBotTrade.objects.filter(pk=orc.root_trade_id).first()
+    # A.58: the mind's counters and its AI cost, in the Orc's currency;
+    # with no rate the money figures stay unknown, never priced at 1
+    mind = mind_counts(orc)
+    tags = mind_tags(mind) + ([WOULD_TAG] if would else [])
+    ai_cost = float(mind["ai_cost_usd"])
+    if ai_cost:
+        per = _usd_per(orc.ccy)
+        if per:
+            ai_cost = ai_cost / per
+        else:
+            ai_cost = None
+            tags.append("ai_cost_unconverted")
     nums = numbers(exits={a: t.exit_r for a, t in by.items()},
                    r_money=orc.r_money,
                    pnl=getattr(row, "pnl", None),
-                   r_avail=o_state.get("best_m_r"))
+                   r_avail=o_state.get("best_m_r"),
+                   ai_cost=ai_cost or 0.0)
+    if ai_cost is None:
+        nums["orc_r"] = nums["net_edge_money"] = None
     first = _first_divergence(o_state)
     verdict = tribunal.classify(tribunal.IdeaFacts(
         orc_r_gross=nums["orc_r_gross"], ghost_r=nums["ghost_r"],
@@ -178,7 +310,8 @@ def grade(orc, *, now=None):
     try:
         with transaction.atomic():
             g, created = OrcGrade.objects.get_or_create(orc=orc, defaults={
-                "r_money": orc.r_money, "ai_cost_usd": Decimal(0),
+                "r_money": orc.r_money,
+                "ai_cost_usd": mind["ai_cost_usd"],
                 "orc_r": nums["orc_r"], "orc_r_gross": nums["orc_r_gross"],
                 "ghost_r": nums["ghost_r"], "play_r": nums["play_r"],
                 "actual_r": nums["actual_r"], "r_avail": nums["r_avail"],
@@ -196,12 +329,18 @@ def grade(orc, *, now=None):
                 "counts_for_seat": counts, "bar_source": source,
                 "hand_touched": bool(orc.hand_touched),
                 "exit_label": str(label)[:80],
-                "policy_r": nums["policy_r"], "tags": [],
+                "policy_r": nums["policy_r"], "tags": tags,
+                "n_wakes": mind["n_wakes"], "n_llm": mind["n_llm"],
+                "n_actions": mind["n_actions"],
+                "n_refused": mind["n_refused"],
+                "expectation_hit_rate": mind["expectation_hit_rate"],
+                "flipflop_rate": mind["flipflop_rate"],
                 "fell": verdict.fell, "sub_label": verdict.sub_label,
                 "army_type": str(orc.army_type or "")[:16],
                 "first_divergence": first[:8], "graded_at": now})
             if created:
-                journal.append(orc, "grade", grade_line(nums, verdict),
+                journal.append(orc, "grade", grade_line(
+                    nums, verdict, would=would),
                                body={**{k: v for k, v in nums.items()
                                         if k != "net_edge_money"},
                                      "fell": verdict.fell,

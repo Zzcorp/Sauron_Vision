@@ -109,7 +109,7 @@ class TheGradeTests(_Graded):
         self.assertEqual(OrcGrade.objects.filter(orc=orc).count(), 1)
         self.assertEqual(len(headlines(orc, kind="grade")), 1)
         self.assertEqual(headlines(orc, kind="grade")[0],
-                         "Graded (shadow, no Orc action): the position "
+                         "Graded in shadow: the position "
                          "+0.80R, the care ghost +1.10R, the playbook "
                          "+0.90R; Δ against the care -0.30R. Won.")
         self.assertEqual((g.fell, g.sub_label, g.bar_source,

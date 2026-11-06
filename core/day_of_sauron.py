@@ -148,6 +148,11 @@ STAGE_OF = {
     "orc-hourly": ("watch", "open positions' instruments read each hour"),
     "orc-render-wakes": ("watch", "what each open position noticed, written "
                                   "down"),
+    # The Orcs' minds (O2a): a model reads what an open position noticed,
+    # in shadow, only once switched on and given a budget; its watchdog.
+    "orc-think": ("think", "open positions read in shadow, when switched "
+                           "on"),
+    "orc-minds-watch": ("watch", "the shadow readings watched for stalls"),
     "orc-tape-mercenary": ("see", "short candles for quick strikes"),
     # ── TELL: the voices ────────────────────────────────────────────────
     "poll-telegram-eye": ("tell", "the Eye reads its Telegram group"),

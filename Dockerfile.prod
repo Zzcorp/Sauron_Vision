@@ -109,7 +109,7 @@ USER sauron
 EXPOSE 8000
 
 # NB: no image-level HEALTHCHECK. Every service is built from this image -
-# the two Celery workers, beat and the five streamers included - and none of
+# the Celery workers, beat and the five streamers included - and none of
 # those serve HTTP, so an HTTP probe here marks all of them `unhealthy`
 # forever and buries the one signal that matters. The web service declares
 # its own healthcheck in deploy/docker-compose.yml.

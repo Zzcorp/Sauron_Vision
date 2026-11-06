@@ -22,9 +22,11 @@ In O1 the playbook lists only what reduces or holds:
   P-LOCK / P-TRIM   a high-impact print within PRINT_WITHIN_H
   P-HOLD     the same, only when gaps.waiver_check clears
 
-THE SEAM: the risk-adding candidates (A-CONFIRM, R-RECLAIM, V-REVERSE,
-W-WIDEN) need the mandate's officer (orcs/mandate.py, O2) and arrive with
-it; none is ever listed here.
+THE RISK-ADDING CANDIDATES STAY UNLISTED THROUGH O2 (O2a, 2026-11-05).
+The officer (orcs/mandate.py) judges a model's add in would-mode, as if it
+bound, and never applies it; an add names candidate "none". A-CONFIRM is
+listed once the officer binds (O3), R-RECLAIM waits for the re-entry (O5),
+V-REVERSE and W-WIDEN for L4. None is ever listed here before then.
 """
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -37,7 +39,7 @@ from bot_program.orcs.constants import (KDRAW_ATR4H, MAX_LEVEL_DIST_ATR4H,
 #: simulate.STRUCTURE_FROM_R (backtester/proving/simulate.py:79), copied so
 #: this module stays pure; pinned equal by tests/orcs/test_orc_playbook.py.
 STRUCTURE_FROM_R = 0.5
-#: Never listed in O1 (the seam above).
+#: Never listed through O2 (above).
 RISK_ADDING = ("A-CONFIRM", "R-RECLAIM", "V-REVERSE", "W-WIDEN")
 
 

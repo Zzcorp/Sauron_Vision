@@ -16,9 +16,12 @@ stale input (the posture with crisis_mode OFF, a blind analyst, an unread
 calendar, an unmeasured correlation) is listed, prints its dash and never
 abstains.
 
-# O2: mandate.allowed_actions replaces allowed_actions_l0 (the seat, the
-# commission, the switches and the hazards of §3.1); O1 has no seat above
-# L0, so every action is shadow.
+The officer (bot_program/orcs/mandate.py, O2a 2026-11-05) replaced
+allowed_actions_l0 in dossier.context_for: its allowed_actions adds an add
+judged as if it bound, acts on the army type's flags and shrinks the list
+under F5 exactly as allowed_actions_l0 does. allowed_actions_l0 stays, the
+L0 reference its tests pin. Every seat is still L0, so every action is
+shadow.
 """
 from bot_program.orcs.constants import MARK_MAX_AGE_S
 

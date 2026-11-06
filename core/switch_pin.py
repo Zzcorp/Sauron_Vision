@@ -1,4 +1,18 @@
-"""Turning a live-money switch on takes the trading PIN, on every path.
+"""Turning a PIN switch on takes the trading PIN, on every path.
+
+The PIN switches (core.platform_control.PIN_SWITCHES) are two tuples,
+named by hand and kept apart:
+
+* LIVE_MONEY_SWITCHES: each moves real money. The Wall counts these
+  alone (core/wall_facts.py).
+* ORC_MIND_SWITCHES (2026-11-05, the Orcs' O2 spec N2, §4 Q0): each lets
+  a model spend AI money, or changes what a model reads, and moves no
+  account money. No model spends the operator's AI money until he types
+  his PIN.
+
+Below, "a PIN key" is either; every rule binds both. Each sentence says
+what its key does: "moves real money" for a live-money key, "lets a model
+spend AI money" for an Orc mind key, never the one for the other.
 
 The operator's ask (2026-10-23): "Go for the PIN on the switches." Every
 door that writes PlatformComponent.is_enabled reached every key in
@@ -11,7 +25,7 @@ switch did not, so a hijacked superuser session could do it in one POST.
 
 The rule, kept here and only here:
 
-* OFF -> ON of a live-money key takes the PIN of the user making the
+* OFF -> ON of a PIN key takes the PIN of the user making the
   request, through THE counted check every PIN door shares
   (core.trading_pin.check, as an ACT door): wrong answers at a switch, at
   the lock screen and at every other PIN door add up on one session
@@ -34,10 +48,14 @@ The rule, kept here and only here:
   the database; a PIN typed on its command line would sit in the shell
   history.
 * Turning OFF never asks. Stopping must never be harder than starting.
-* Every ON, every refused ON and every OFF of a live-money key lands on
-  the audit chain (bot_program.audit.record_switch) with who, the door
-  and when. Never the PIN, its length or its hash.
-* Non-live keys, and the "all on" exemptions, are as they were.
+* Every ON, every refused ON and every OFF of a PIN key lands on the
+  audit chain (bot_program.audit.record_switch) with who, the door and
+  when. Never the PIN, its length or its hash.
+* "All on" never reaches a PIN key: set_category excludes PIN_SWITCHES
+  by name beside BULK_ENABLE_EXEMPT, so an edit of the exempt set cannot
+  open that door, and a row made by hand (an Orc mind switch's seeded
+  row deleted and made again) is held back all the same.
+* Other keys, and the "all on" exemptions, are as they were.
 
 What stays out of reach of any PIN: the ORM, `manage.py shell`, dbshell
 and SQL. Whoever can run those holds the database.
@@ -71,7 +89,8 @@ from django.utils import timezone
 from bot_program.audit import (SWITCH_ARMED, SWITCH_DISARMED,
                                SWITCH_REFUSED, record_switch)
 from core.platform_control import (BULK_ENABLE_EXEMPT, DEFAULT_COMPONENTS,
-                                   LIVE_MONEY_SWITCHES, PlatformComponent)
+                                   ORC_MIND_SWITCHES, PIN_SWITCHES,
+                                   PlatformComponent)
 
 logger = logging.getLogger(__name__)
 
@@ -84,9 +103,10 @@ VIA_DJANGO_ADMIN = "django_admin"
 VIA_ALL_ON = "all_on"
 VIA_ALL_OFF = "all_off"
 
-#: What a page that cannot ask for the PIN says to do instead.
-OPS_POINTER = ("Live-money switches are turned on from /ops/ with your "
-               "trading PIN.")
+#: What a page that cannot ask for the PIN says to do instead: true of
+#: both kinds of PIN key (2026-11-05).
+OPS_POINTER = ("Switches that move real money or let a model spend AI "
+               "money are turned on from /ops/ with your trading PIN.")
 
 # The refusal codes (SwitchResult.refusal, and the audit row's "reason").
 # The PIN's own codes, the verdict and the login mark live in
@@ -114,12 +134,40 @@ class SwitchResult:
 
 
 def is_live(key: str) -> bool:
-    return key in LIVE_MONEY_SWITCHES
+    """True for a PIN key (PIN_SWITCHES): a live-money switch, or since
+    2026-11-05 an Orc mind switch. The name is the doors': a key that is
+    armed only with the PIN, and recorded on the chain. Whether it moves
+    real money is LIVE_MONEY_SWITCHES's to say, and `_does` says it."""
+    return key in PIN_SWITCHES
 
 
 def needs_pin(key: str, *, was_on: bool, want_on: bool) -> bool:
-    """True only for OFF -> ON of a live-money key. OFF is always free."""
+    """True only for OFF -> ON of a PIN key. OFF is always free."""
     return bool(want_on) and not bool(was_on) and is_live(key)
+
+
+def _does(key: str) -> str:
+    """What turning `key` on lets happen, in the words every sentence
+    uses. An Orc mind key spends AI money and moves no account money; any
+    other key a sentence names is a live-money key."""
+    return ("lets a model spend AI money" if key in ORC_MIND_SWITCHES
+            else "moves real money")
+
+
+def _do(keys) -> str:
+    """The same, for one door's list: "x moves real money", "x, y move
+    real money", "z lets a model spend AI money", or both joined."""
+    minds = [k for k in keys if k in ORC_MIND_SWITCHES]
+    money = [k for k in keys if k not in ORC_MIND_SWITCHES]
+    parts = []
+    if money:
+        parts.append(f"{', '.join(money)} "
+                     f"{'moves' if len(money) == 1 else 'move'} real money")
+    if minds:
+        parts.append(f"{', '.join(minds)} "
+                     f"{'lets' if len(minds) == 1 else 'let'} a model spend "
+                     f"AI money")
+    return " and ".join(parts)
 
 
 def _name_of(key: str) -> str:
@@ -141,27 +189,31 @@ def _who(request=None, user=None) -> str:
 
 # ── the sentences ───────────────────────────────────────────────────────
 def refusal_sentence(keys, *, via: str) -> str:
-    """The sentence a door that never takes a PIN answers with."""
+    """The sentence a door that never takes a PIN answers with. Each key
+    is named for what it does (2026-11-05): a list of live-money keys
+    reads as it always did."""
     keys = list(keys)
-    subject = ", ".join(keys)
     it = "it" if len(keys) == 1 else "them"
-    verb = "moves" if len(keys) == 1 else "move"
     door = {VIA_SHELL: "the shell never asks for one",
             VIA_DJANGO_ADMIN: "this admin page never asks for one",
             }.get(via, "this door never asks for one")
-    return (f"{subject} {verb} real money: turning {it} on takes your "
-            f"trading PIN, and {door}. Turn {it} on from /ops/ (Switches, "
-            f"System) with your PIN. Nothing was changed.")
+    return (f"{_do(keys)}: turning {it} on takes your trading PIN, and "
+            f"{door}. Turn {it} on from /ops/ (Switches, System) with your "
+            f"PIN. Nothing was changed.")
 
 
-def _pin_sentence(refusal: str, name: str, verdict: PinVerdict = None) -> str:
+def _pin_sentence(refusal: str, name: str, verdict: PinVerdict = None, *,
+                  key: str = "") -> str:
+    """A refused ON at a door that takes the PIN. `key` says what the
+    switch does in the two sentences that name it."""
+    does = _does(key)
     if refusal == PIN_MISSING:
-        return (f"{name} moves real money: turning it on takes your "
-                f"trading PIN. Nothing was changed.")
+        return (f"{name} {does}: turning it on takes your trading PIN. "
+                f"Nothing was changed.")
     if refusal == PIN_NOT_SET:
-        return (f"{name} moves real money and your account has no trading "
-                f"PIN yet: set one on your profile, then log out and log "
-                f"in again with it. Nothing was changed.")
+        return (f"{name} {does} and your account has no trading PIN yet: "
+                f"set one on your profile, then log out and log in again "
+                f"with it. Nothing was changed.")
     if refusal == LOGIN_AGAIN:
         return (f"Log in again first: this session did not log in with "
                 f"your current trading PIN, so it cannot turn {name} on. "
@@ -196,10 +248,10 @@ def set_switch(key: str, want_on: bool, *, via: str, request=None,
     """THE write for one switch, from every door that sets one.
 
     A missing row is not created. A row already in the asked state is
-    left alone, with no PIN asked. OFF -> ON of a live-money key takes
-    the PIN: from `request`'s user when there is a request, and never
-    without one (the shell, a programmatic call). Any refusal writes
-    nothing to the row.
+    left alone, with no PIN asked. OFF -> ON of a PIN key takes the PIN:
+    from `request`'s user when there is a request, and never without one
+    (the shell, a programmatic call). Any refusal writes nothing to the
+    row. Every flip of a PIN key, and every refusal, is on the chain.
     """
     want_on = bool(want_on)
     row = PlatformComponent.objects.filter(key=key).first()
@@ -237,7 +289,7 @@ def set_switch(key: str, want_on: bool, *, via: str, request=None,
             return SwitchResult(ok=False, changed=False, key=key, name=name,
                                 before=was_on, after=was_on,
                                 message=_pin_sentence(verdict.refusal, name,
-                                                      verdict),
+                                                      verdict, key=key),
                                 refusal=verdict.refusal,
                                 logged_out=verdict.logged_out)
 
@@ -268,23 +320,25 @@ def set_category(category: str, want_on: bool, *, via: str,
                  request=None) -> int:
     """THE write for a category's "all on" / "all off": the same query
     and the same count as before. ON never reaches a held switch
-    (BULK_ENABLE_EXEMPT), and the live-money keys are excluded a second
-    time by name, so an edit of the exempt set cannot open this door.
-    OFF records each live-money switch it turned off."""
+    (BULK_ENABLE_EXEMPT), and the PIN keys are excluded a second time by
+    name (PIN_SWITCHES: the live-money switches and, since 2026-11-05,
+    the Orcs' mind switches), so an edit of the exempt set cannot open
+    this door, and neither can a row made by hand before its key is in
+    that set. OFF records each PIN switch it turned off."""
     rows = PlatformComponent.objects.filter(category=category)
     now = timezone.now()
     if want_on:
         rows = (rows.exclude(key__in=BULK_ENABLE_EXEMPT)
-                .exclude(key__in=LIVE_MONEY_SWITCHES))
+                .exclude(key__in=PIN_SWITCHES))
         # updated_at is auto_now, which a queryset update skips: it is the
         # instant of the flip (alarm._resumed_at reads it).
         return rows.update(is_enabled=True, updated_at=now)
-    live_on = list(rows.filter(key__in=LIVE_MONEY_SWITCHES, is_enabled=True)
-                   .values_list("key", "name"))
+    pin_on = list(rows.filter(key__in=PIN_SWITCHES, is_enabled=True)
+                  .values_list("key", "name"))
     count = rows.update(is_enabled=False, updated_at=now)
     user = getattr(request, "user", None) if request is not None else None
     who = _who(request)
-    for key, name in live_on:
+    for key, name in pin_on:
         record_switch(SWITCH_DISARMED, key=key, name=name or key, via=via,
                       who=who, before=True, after=False, user=user)
     return count
@@ -303,8 +357,8 @@ def refuse_here(key: str, *, via: str, user=None) -> str:
 
 
 def record_disarm(key: str, *, via: str, user=None) -> None:
-    """A live-money switch turned off by a door that writes the row
-    itself (the Django admin's save)."""
+    """A PIN switch turned off by a door that writes the row itself (the
+    Django admin's save)."""
     if not is_live(key):
         return
     record_switch(SWITCH_DISARMED, key=key, name=_name_of(key), via=via,

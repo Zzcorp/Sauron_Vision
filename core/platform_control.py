@@ -109,6 +109,25 @@ LIVE_MONEY_SWITCHES = (
     "smart_money",                  # moves stops, sizes real-money entries
 )
 
+#: The Orcs' mind switches (2026-11-05, the Orcs' O2 spec N2, §4 Q0 and
+#: Q1). None moves account money, so none is in LIVE_MONEY_SWITCHES and
+#: the Wall's count of real-money switches does not move (core/
+#: wall_facts.py). But each lets a model spend AI money, or changes what a
+#: model reads, so turning one ON takes the trading PIN at /ops/ exactly
+#: as a live-money switch does, and the shell and the Django admin refuse
+#: it (core/switch_pin.py); turning one OFF never asks. Named here by
+#: hand, never derived, for the reason above: a switch that spends is held
+#: because somebody wrote it down. Each arrives OFF, with its row, in the
+#: commit that ships what it gates.
+ORC_MIND_SWITCHES = (
+    "orcs_minds",                   # a model reads an Orc's wakes, in shadow
+)
+
+#: Every switch whose ON takes the trading PIN, at every door
+#: (core/switch_pin.py): both tuples above, kept apart. The doors read this
+#: one; the Wall counts LIVE_MONEY_SWITCHES alone.
+PIN_SWITCHES = LIVE_MONEY_SWITCHES + ORC_MIND_SWITCHES
+
 #: Switches a category's "all on" button never turns on (2026-09-26,
 #: dashboard.views.admin_bulk_toggle): each is a separate decision, made by
 #: its own toggle (a live-money switch with the trading PIN, which the
@@ -121,10 +140,15 @@ LIVE_MONEY_SWITCHES = (
 #: (lore/policy.py SWITCHES, in the Agents group) are decisions of their
 #: own too: lore_staff after the first entries are reviewed,
 #: lore_background only after decision D1 (the briefing reaches readers
-#: who are not staff).
+#: who are not staff). Every PIN switch (PIN_SWITCHES, above) is also
+#: excluded by name where "all on" writes (core/switch_pin.set_category),
+#: so an edit of this set cannot open "all on" to one. The Orcs' mind
+#: switches (ORC_MIND_SWITCHES) are in this set with their seeded rows
+#: (2026-11-05, the Orcs' O2 spec A.1, §4 Q1): one tap never starts AI
+#: spend (tests/test_ops_cockpit.py wants every key here seeded).
 LORE_READER_SWITCHES = ("lore_staff", "lore_background")
 BULK_ENABLE_EXEMPT = frozenset({"morgul_brake", *LORE_READER_SWITCHES,
-                                *LIVE_MONEY_SWITCHES})
+                                *LIVE_MONEY_SWITCHES, *ORC_MIND_SWITCHES})
 
 
 # ── Default components to register ───────────────────────
@@ -322,6 +346,22 @@ DEFAULT_COMPONENTS = [
     # exempt from "all on": nothing it does moves money.
     {"key": "orcs", "name": "Orcs (journals, no model)",
      "description": "Off (default). On: each open position gets an Orc, a journal written by code: its birth, thesis and army type, the care's and the venue's stop moves, reviews, thesis checks and the close. No model, no order, no stop moved. manage.py orcs.",
+     "category": "system"},
+    # THE ORCS' MINDS (2026-11-05, the Orcs' O2 spec A.1, N2): a model
+    # reads an Orc's wakes in shadow, within its day caps, on the Orcs' own
+    # budget line, and writes plans and proposals that are graded, never
+    # applied. Code answers the other wakes (a quiet wake, a cap, the
+    # spacing, the triage), so the description no longer says A.1's "each
+    # Orc's wake" (changed on purpose, 2026-11-06). OFF on
+    # arrival (no is_enabled key), exempt from "all on" (BULK_ENABLE_EXEMPT)
+    # and turned on only with the trading PIN at /ops/ (ORC_MIND_SWITCHES,
+    # core/switch_pin.py); OFF takes no PIN. `orcs` above keeps its own
+    # words: "journals, no model" stays true of it alone (K-C1). A model is
+    # asked only while this, `orcs`, the platform master and the Orcs line
+    # (ORC_DAILY_BUDGET_USD above 0) are all on. Description measured below
+    # 300.
+    {"key": "orcs_minds", "name": "Orc Minds (models in shadow)",
+     "description": "Off (default). With orcs on and the Orcs' budget line set (ORC_DAILY_BUDGET_USD above 0), a model reads an Orc's wakes in shadow, within its day caps, and writes plans and proposals that are graded. Nothing it decides sends an order or moves a stop. Turning it on takes the PIN.",
      "category": "system"},
     # THE WAR DRUMS (2026-10-22, O1c, spec §4.7, §10.7, §11): with `orcs`
     # ON the drums are published, routed and journaled whatever this says.

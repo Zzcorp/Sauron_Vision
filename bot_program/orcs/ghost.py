@@ -15,7 +15,12 @@ a JSON state on its OrcTrack row.
                path, the best and worst closing-side R); after a HAND ACT
                (a hand close on the platform or in the broker's app, a hand
                levels edit, the kill switch) it carries on as a shadow from
-               the previous tick's record, as the care would (§6.4)
+               the previous tick's record, as the care would (§6.4). From
+               O2a (2026-11-05, the O2 spec A.42-A.45b), once a proposal
+               queued in shadow is applied at a tick (intents.py), a WOULD
+               arm: the care on its own state with the proposals' stop,
+               trims, exit and lock waivers, the real row staying the
+               care's
   chandelier3, staged
                the multi-ghost: simulate.EXIT_POLICIES on 4h venue bars
                (_locks, _engine_constants), locks moved at a bar's close and
@@ -76,6 +81,7 @@ from bot_program.orcs import pricing
 from bot_program.orcs.bars import BAR_FINAL_AFTER
 from bot_program.orcs.constants import (ARM_CARE, ARM_ORC, ARM_PLAYBOOK,
                                         DIVERGE_HOLD, DIVERGE_REDUCE,
+                                        EXPIRY_ARM_CLOSED, EXPIRY_ROW_CLOSED,
                                         GHOST_ARMS, KDRAW_FRACTION,
                                         LEG_DONE_STATUSES,
                                         MULTI_GHOST_POLICIES,
@@ -757,13 +763,20 @@ def _crossings(state, tick, *, extra_stop=None):
     return None
 
 
-def _care_step(state, env, *, extra_stop=None, extra_why="", seen=None):
+def _care_step(state, env, *, extra_stop=None, extra_why="", seen=None,
+               extra_kind="playbook", ctx=None):
     """One tick of a care-like arm, in the order the real tick runs it:
     the config's ceiling, the paper replay of resting levels, plan() with
     the care's own inputs, a scale-out, the mirror, the engine's knobs,
     then the tick's crossing of its stop or target. `seen` (a dict) gets
     the venue stop as it stood before the knobs: the real row's stop at
-    the Orc hook, which runs before them."""
+    the Orc hook, which runs before them.
+
+    O2a (2026-11-05, the O2 spec A.43): `extra_kind` labels an exit at
+    `extra_stop` ("playbook" by default; "orc" for the O arm's would-stop),
+    and `ctx` is the context plan() reads when it is not the tick's own: a
+    copy without the event a lock waiver names (the tick's own is never
+    written, A.45b)."""
     from bot_program.position_care import plan
     tick, now = env.tick, env.now
     side, cf = state["side"], state["cf"]
@@ -778,7 +791,7 @@ def _care_step(state, env, *, extra_stop=None, extra_why="", seen=None):
                                                  extra_stop))
         if hit:
             return hit
-    ctx = env.ctx
+    ctx = env.ctx if ctx is None else ctx
     if ctx is not None:
         state["ctx"] = {k: ctx.get(k) for k in CTX_KEYS}
         shadow = shadow_of(state, base_meta=env.meta, config=env.config)
@@ -809,8 +822,10 @@ def _care_step(state, env, *, extra_stop=None, extra_why="", seen=None):
             _bank(state, shadow, tick, now)
             state["scaled_out"] = True
     if extra_stop is not None and sign * (tick.p - extra_stop) <= 0:
-        return _exit("playbook", pricing.market_exit_px(tick, side, cf),
-                     now, extra_why or "the playbook's stop")
+        return _exit(extra_kind, pricing.market_exit_px(tick, side, cf),
+                     now, extra_why or (f"the {extra_kind}'s stop"
+                                        if extra_kind == "playbook"
+                                        else "its would-stop"))
     if not state.get("paper") and state.get("protected"):
         _mirror(state, tick.p, extra=extra_stop)
     if seen is not None:
@@ -986,11 +1001,23 @@ def _root_mark(state, tick) -> float:
 
 
 def _step_orc(state, env):
-    """The O arm: the real row, recorded. After a hand act, a shadow."""
-    m = _root_mark(state, env.tick)
+    """The O arm: the real row, recorded. After a hand act, a shadow.
+
+    THE WOULD MODE (the O2 spec A.42-A.43; O2a, 2026-11-05): a proposal the
+    settle queued is taken first (_take_intents: the tick's own price, the
+    Orc tables only); once one is applied the arm steps as a would arm
+    (_step_would), its own care on its own state, and the real row stays
+    the care's."""
+    tick = env.tick
+    m = _root_mark(state, tick)
+    out = _take_intents(state, env, tick)
+    if out:
+        return out
+    if state.get("mode") == "would":
+        return _step_would(state, env, tick, m)
     if state.get("mode") == "shadow":
         return _care_step(state, env)
-    row, tick, now = env.row, env.tick, env.now
+    row, now = env.row, env.now
     side = state["side"]
     sign = pricing.d(side)
     edit_at = _last_edit_at(env.meta)
@@ -1033,36 +1060,7 @@ def _step_orc(state, env):
             (stop is not None and sign * (tick.p - stop) <= 0)
             or (target is not None and sign * (tick.p - target) >= 0)):
         state["crossed"] = _tick_dict(tick)
-    ghost = env.care_state
-    if ghost is not None:
-        faith = dict(state.get("faith") or {})
-        faith["ticks"] = int(faith.get("ticks") or 0) + 1
-        # the hook sees the row before the engine's knobs move it
-        g_soft, g_venue = _f(ghost.get("soft_stop")), _f(
-            env.care_venue_at_hook if env.care_venue_at_hook is not None
-            else ghost.get("venue_stop"))
-        soft_off = not _same(g_soft, soft)
-        venue_off = not _same(g_venue, stop)
-        faith["soft_mismatch"] = int(faith.get("soft_mismatch") or 0) + \
-            int(soft_off)
-        faith["venue_mismatch"] = int(faith.get("venue_mismatch") or 0) + \
-            int(venue_off)
-        faith["differ"] = int(faith.get("differ") or 0) + int(
-            soft_off or venue_off)
-        if (soft_off or venue_off) and not faith.get("first"):
-            faith["first"] = {"at": _iso(now), "ghost": g_soft
-                              if soft_off else g_venue,
-                              "care": soft if soft_off else stop,
-                              "what": "soft" if soft_off else "venue"}
-        state["faith"] = faith
-        if not state.get("first_divergence"):
-            mine = _tighter(sign, soft, stop)
-            theirs = _tighter(sign, g_soft, g_venue)
-            if mine is not None and theirs is not None \
-                    and not _same(mine, theirs):
-                state["first_divergence"] = {
-                    "kind": DIVERGE_REDUCE if sign * (mine - theirs) > 0
-                    else DIVERGE_HOLD, "at": _iso(now)}
+    _faith(state, env, soft, stop)
     _basis_sample(state, env, m)
     state["last"] = {**_tick_dict(tick), "soft": soft, "venue_stop": stop,
                      "qty": _f(row.qty)}
@@ -1088,6 +1086,237 @@ def _basis_sample(state, env, m) -> None:
     from bot_program.orcs.constants import BASIS_SAMPLES
     state["basis"] = xs[-BASIS_SAMPLES * 3:]
     state["basis_at"] = _iso(env.now)
+
+
+def _faith(state, env, soft, stop) -> None:
+    """The faith block (§6.1), one tick of the O arm: the real row's soft
+    and venue stops, as the hook sees them (before the engine's knobs move
+    them), against the care ghost's; and while none is set, the first tick
+    the row's stop parts from the ghost's. Real mode and, since the real
+    row stays the care's, would mode alike (the O2 spec A.43, O2a
+    2026-11-05): counts_for_seat reads it."""
+    ghost = env.care_state
+    if ghost is None:
+        return
+    sign = pricing.d(state["side"])
+    now = env.now
+    faith = dict(state.get("faith") or {})
+    faith["ticks"] = int(faith.get("ticks") or 0) + 1
+    # the hook sees the row before the engine's knobs move it
+    g_soft, g_venue = _f(ghost.get("soft_stop")), _f(
+        env.care_venue_at_hook if env.care_venue_at_hook is not None
+        else ghost.get("venue_stop"))
+    soft_off = not _same(g_soft, soft)
+    venue_off = not _same(g_venue, stop)
+    faith["soft_mismatch"] = int(faith.get("soft_mismatch") or 0) + \
+        int(soft_off)
+    faith["venue_mismatch"] = int(faith.get("venue_mismatch") or 0) + \
+        int(venue_off)
+    faith["differ"] = int(faith.get("differ") or 0) + int(
+        soft_off or venue_off)
+    if (soft_off or venue_off) and not faith.get("first"):
+        faith["first"] = {"at": _iso(now), "ghost": g_soft
+                          if soft_off else g_venue,
+                          "care": soft if soft_off else stop,
+                          "what": "soft" if soft_off else "venue"}
+    state["faith"] = faith
+    if not state.get("first_divergence"):
+        mine = _tighter(sign, soft, stop)
+        theirs = _tighter(sign, g_soft, g_venue)
+        if mine is not None and theirs is not None \
+                and not _same(mine, theirs):
+            state["first_divergence"] = {
+                "kind": DIVERGE_REDUCE if sign * (mine - theirs) > 0
+                else DIVERGE_HOLD, "at": _iso(now)}
+
+
+# ── the O arm's would mode (the O2 spec A.42-A.45b; O2a, 2026-11-05) ────
+# A proposal a model made in shadow and the officer judged steps this arm
+# and nothing else. Every function below works on the arm's own JSON state
+# (the tick's working copy, saved by step_tick alone while the row is
+# open) and only READS the tick's objects: the row, its metadata, its
+# context and the bot are never written (A.45b), and the row's stop, its
+# metadata and the binding Orc columns are never touched (A.45).
+
+def _take_intents(state, env, tick):
+    """A.42: the queued intents at this tick (intents.take), on the O arm's
+    working state; the arm's exit when an applied exit closed it, else
+    None. A tick with nothing queued costs no query."""
+    if env.orc is None:
+        return None
+    from bot_program.orcs import intents
+    return intents.take(env.orc, state, env, tick)
+
+
+def _to_would(state, *, kind, intent, at, replay=None) -> None:
+    """A.43: the O arm enters would mode at its first applied proposal.
+    From `real` it holds no care-like state yet: it takes the previous
+    tick's record exactly as _to_shadow does (CARE_KEYS from last_care,
+    venue_stop from last_stop, target from last_target, qty_open from the
+    last record, its replay from the row's stamp), and never sets `hand`.
+    From `shadow` (after a hand act) it is care-like already. It also sets
+    first_divergence, once: reduce for a tighten, a trim or an exit, hold
+    for a lock waiver."""
+    if state.get("mode") == "real":
+        last_care = state.get("last_care") or {}
+        for key in CARE_KEYS:
+            state[key] = last_care.get(key)
+        state["venue_stop"] = _f(state.get("last_stop"))
+        state["target"] = _f(state.get("last_target"))
+        last = state.get("last") or {}
+        if _f(last.get("qty")):
+            state["qty_open"] = _f(last.get("qty"))
+        state["replay"] = dict(replay) if isinstance(replay, dict) else None
+        state["replay_own"] = True
+    state["mode"] = "would"
+    if not state.get("first_divergence"):
+        state["first_divergence"] = {
+            "kind": DIVERGE_HOLD if kind == "lock_waive" else DIVERGE_REDUCE,
+            "at": _iso(at), "intent": intent}
+
+
+def arm_effective(state):
+    """The O arm's effective stop, as the tick judges a tighten (A.42): in
+    mode `real`, the previous tick's record of the row (the care's soft
+    stop and the venue's), the state would mode starts from; in shadow or
+    would mode, the tighter of its own soft stop, venue stop and
+    would-stop."""
+    sign = pricing.d(state.get("side"))
+    if state.get("mode") == "real":
+        care = state.get("last_care") or {}
+        return _tighter(sign, care.get("soft_stop"), state.get("last_stop"))
+    return _tighter(sign, state.get("soft_stop"), state.get("venue_stop"),
+                    state.get("orc_stop"))
+
+
+def apply_intent(state, env, tick, *, kind, intent, would_stop=None,
+                 level_id="", share=None, event_id="", event_at=None):
+    """A.43, one applied proposal on the O arm's working state, after
+    _to_would: (applied, exit).
+
+      tighten     orc_stop = the tighter of its own and the would-stop (the
+                  level's own stop beyond the crowd, or the BE row's
+                  price: V7); orc_why its words
+      trim        _bank: the share at the tick's market exit price
+      exit        _exit("orc", pricing.market_exit_px of the tick), which
+                  closes the arm
+      lock_waive  state["waived"]: the arm's care then reads a copy of the
+                  tick's context without that event (_would_ctx)"""
+    _to_would(state, kind=kind, intent=intent, at=env.now,
+              replay=env.meta.get("paper_replay"))
+    if kind == "tighten":
+        sign = pricing.d(state.get("side"))
+        state["orc_stop"] = _tighter(sign, state.get("orc_stop"), would_stop)
+        state["orc_why"] = f"the Orc's proposal {level_id}".strip()
+        return True, None
+    if kind == "trim":
+        banked = _bank(state, shadow_of(state), tick, env.now,
+                       fraction=share, why="the Orc's trim (shadow)")
+        return bool(banked), None
+    if kind == "exit":
+        return True, _exit("orc", pricing.market_exit_px(
+            tick, state["side"], state["cf"]), env.now,
+            "the Orc's exit (shadow)")
+    if kind == "lock_waive":
+        state["waived"] = str(event_id or "")
+        state["waived_at"] = event_at
+        return True, None
+    return False, None
+
+
+def _same_moment(a, b) -> bool:
+    """Two moments (ISO texts or datetimes) within a minute of each other."""
+    a, b = _parse(a), _parse(b)
+    return a is not None and b is not None and abs(
+        (a - b).total_seconds()) <= 60
+
+
+def _would_ctx(state, env):
+    """A.43, A.45b: the tick's context as the would arm's care reads it: a
+    copy, dict(env.ctx), without the event its lock waiver names (the
+    care's event at the waived moment); None (the tick's own, read only)
+    when it waives no event of this tick."""
+    if not isinstance(env.ctx, dict) or not state.get("waived"):
+        return None
+    ev = env.ctx.get("event")
+    if not isinstance(ev, dict) or not _same_moment(ev.get("at"),
+                                                    state.get("waived_at")):
+        return None
+    ctx = dict(env.ctx)
+    ctx["event"] = None
+    return ctx
+
+
+def would_hand_line(how, at) -> str:
+    from bot_program.orcs.facts import _hhmm
+    return (f"The operator's hand acted ({HAND_WORDS.get(how, how)}) at "
+            f"{_hhmm(at)} UTC: the Orc arm keeps its proposals' path in "
+            f"shadow.")
+
+
+def _step_would(state, env, tick, m):
+    """A.43, one tick of the O arm in would mode. The real-row bookkeeping
+    stays as it was: the root mark (it ran already); a hand edit journaled
+    as the operator's fact, which sets hand_touched and never moves this
+    arm; the faith block against the care ghost (the real row is still the
+    care's); the hourly basis; the tick's record. Then the arm's own care
+    step, its would-stop an `orc` exit with the proposal's words, on a copy
+    of the tick's context when its lock waiver names this tick's event."""
+    care = env.meta.get("care") if isinstance(env.meta.get("care"),
+                                              dict) else {}
+    soft, stop = _f(care.get("soft_stop")), _f(env.row.stop_loss)
+    edit_at = _last_edit_at(env.meta)
+    if edit_at and edit_at != (state.get("hand_edit_at") or ""):
+        state["hand_edit_at"] = edit_at
+        env.facts.append((would_hand_line("edit", env.now),
+                          {"hand": "edit"}))
+    _faith(state, env, soft, stop)
+    _basis_sample(state, env, m)
+    state["last"] = {**_tick_dict(tick), "soft": soft, "venue_stop": stop,
+                     "qty": _f(env.row.qty)}
+    return _care_step(state, env, extra_stop=_f(state.get("orc_stop")),
+                      extra_why=str(state.get("orc_why") or ""),
+                      extra_kind="orc", ctx=_would_ctx(state, env))
+
+
+def _expire_arm_closed(orc, tracks, *, now) -> None:
+    """A.42: the O arm closed while the row is open: what is still queued
+    expires `arm_closed`. No query while nothing is queued."""
+    o = next((t for t in tracks if t.arm == ARM_ORC), None)
+    if o is None or o.open:
+        return
+    from bot_program.orcs import intents
+    if not intents.queued(orc):
+        return
+    try:
+        intents.expire_queued(orc, EXPIRY_ARM_CLOSED, now=now)
+    except Exception as e:  # noqa: BLE001 — the next tick tries again
+        logger.warning("[orcs] Orc %s: the queued intents not expired: %s",
+                       orc.pk, e)
+
+
+def _expire_after_close(orc, *, now) -> None:
+    """A.44: at the first walk after the close, the queued intents expire
+    `row_closed` (the tick no longer runs for a closed row, and
+    on_leg_closed never does this, N1.2). No query while nothing is
+    queued."""
+    from bot_program.orcs import intents
+    if not intents.queued(orc):
+        return
+    try:
+        intents.expire_queued(orc, EXPIRY_ROW_CLOSED, now=now)
+    except Exception as e:  # noqa: BLE001 — the next walk tries again
+        logger.warning("[orcs] Orc %s: the queued intents not expired: %s",
+                       orc.pk, e)
+
+
+def _tail_events(state, events) -> list:
+    """The tail's calendar for one arm: a would arm whose lock waiver names
+    an event walks without it after the close too (A.43)."""
+    if state.get("mode") != "would" or not state.get("waived_at"):
+        return events
+    return [ev for ev in events or ()
+            if not _same_moment(ev.get("at"), state.get("waived_at"))]
 
 
 # ── the multi-ghost ──────────────────────────────────────────────────────
@@ -1243,12 +1472,16 @@ def step_tick(orc, trade, *, bot, price, cared="", now=None,
     p = _f(price)
     if not p or p <= 0:
         return {}
-    open_ = [t for t in OrcTrack.objects.filter(orc_id=orc.pk) if t.open]
-    if not open_:
-        return {}
+    tracks = list(OrcTrack.objects.filter(orc_id=orc.pk))
+    open_ = [t for t in tracks if t.open]
     ctx = getattr(trade, "_care_tick", None)
     ctx = ctx if isinstance(ctx, dict) else None
     now = (ctx or {}).get("now") or now or timezone.now()
+    # O2a (A.42): the O arm closed while the row is open: what is still
+    # queued for it expires (no query while nothing is)
+    _expire_arm_closed(orc, tracks, now=now)
+    if not open_:
+        return {}
     env = _Env(orc, trade, bot, tick_of(bot, trade, p, now), ctx, now,
                getattr(bot, "_tick_broker_cache", None), cared, results)
     by_arm = {t.arm: t for t in open_}
@@ -1713,6 +1946,8 @@ def step_bars(orc, *, now=None) -> dict:
     row = AssetBotTrade.objects.filter(pk=orc.root_trade_id).first()
     if row is None or row.status not in LEG_DONE_STATUSES:
         return {"stepped": 0}
+    # O2a (A.44): the first walk after the close expires what is queued
+    _expire_after_close(orc, now=now)
     tracks = list(OrcTrack.objects.filter(orc=orc))
     if not any(t.open for t in tracks):
         return {"stepped": 0}
@@ -1835,7 +2070,8 @@ def step_bars(orc, *, now=None) -> dict:
 
                 def walk(arm=arm, t=t):
                     out = _tail_bar(states[arm], bar, base_meta=base_meta,
-                                    events=events, cap=cap)
+                                    events=_tail_events(states[arm], events),
+                                    cap=cap)
                     if out or arm != ARM_PLAYBOOK:
                         return out
                     out = _tail_x_thesis(states[arm], bar, orc=orc, row=row,

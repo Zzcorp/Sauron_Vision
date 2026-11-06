@@ -152,7 +152,8 @@ class DeploymentStackTests(TestCase):
     def test_migrations_run_once_and_others_wait(self):
         migrate = self.services["migrate"]
         self.assertIn("migrate --noinput", migrate["command"])
-        for name in ("web", "worker-fast", "worker-slow", "beat"):
+        for name in ("web", "worker-fast", "worker-slow", "worker-orc",
+                     "beat"):
             depends = self.services[name]["depends_on"]
             self.assertEqual(depends["migrate"]["condition"],
                              "service_completed_successfully", name)

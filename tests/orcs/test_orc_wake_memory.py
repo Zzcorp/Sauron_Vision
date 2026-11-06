@@ -376,8 +376,9 @@ class TheRenderOffTheTickTests(_Detect):
         self.assertEqual(w.components["as_of"], at.isoformat())
         self.assertEqual(w.components["care"]["r_now"], -0.6)
         self.assertIsNone(w.score)
-        self.assertEqual((w.status, w.skipped_reason),
-                         ("skipped", "no model before O2"))
+        # O2a (changed on purpose, 2026-11-05, the O2 spec A.3): the tick
+        # records `recorded`, with no reason; the render pass decides
+        self.assertEqual((w.status, w.skipped_reason), ("recorded", ""))
         self.assertEqual(wake.render_queued(), (1, 0))
         w = OrcWake.objects.get(pk=w.pk)
         self.assertEqual(w.components["render"], "done")

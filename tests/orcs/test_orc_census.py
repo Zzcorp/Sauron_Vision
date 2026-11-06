@@ -30,7 +30,11 @@ class TheScheduleTests(SimpleTestCase):
         self.assertEqual(routes["bot_program.orcs.tasks.orc_census"],
                          {"queue": "fast"})
         self.assertFalse([k for k in routes if k.startswith(
-            "bot_program.orcs") and "*" in k], "no orcs glob before O2")
+            "bot_program.orcs") and "*" in k],
+            "still no orcs glob: worker-orc serves `orcs` for the minds' "
+            "worker task alone (O2a)")
+        self.assertEqual(routes["bot_program.orcs.tasks.orc_think"],
+                         {"queue": "orcs"})
         self.assertIn("bot_program.orcs.tasks", app.conf.imports)
         from bot_program.orcs.tasks import orc_census
         self.assertEqual(orc_census.name, "bot_program.orcs.tasks.orc_census")
@@ -53,7 +57,8 @@ class TheScheduleTests(SimpleTestCase):
         from django.conf import settings
         text = open(os.path.join(settings.BASE_DIR, "deploy", "RUNBOOK.md"),
                     encoding="utf-8").read()
-        head = "## The Orcs (O1: journals, no model)"
+        # O2a (changed on purpose, 2026-11-05, U-R9): the minds in shadow
+        head = "## The Orcs (journals by code; minds in shadow from O2a)"
         self.assertIn(head, text)
         self.assertLess(text.index(head), text.index("## Operating notes"))
         section = text[text.index(head):text.index("## Operating notes")]

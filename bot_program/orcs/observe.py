@@ -14,12 +14,17 @@ the arms' step; O1c: the memory before the tick, the lock and thesis
 drums, and wake detection, which costs no query on a quiet tick and a
 handful when it records a wake: the score, the weather and the dossier
 are rendered off the tick, on the slow queue).
+
+THE ORC'S LOCK (the O2 spec N8, 2026-11-05): the steps take the Orc's lock
+within one lock budget of ORC_LOCK_MONEY_MS in all. An Orc held elsewhere
+costs the tick that much at most; its steps then fail, fenced, and the
+next tick catches up.
 """
 import copy
 import logging
 
-from bot_program.orcs import facts
-from bot_program.orcs.constants import STATE_DEAD
+from bot_program.orcs import facts, journal
+from bot_program.orcs.constants import ORC_LOCK_MONEY_MS, STATE_DEAD
 from bot_program.orcs.switches import orcs_on
 
 logger = logging.getLogger(__name__)
@@ -101,12 +106,13 @@ def after_care(bot, trade, price, cared="") -> None:
             return None
         if orc.state == STATE_DEAD and not cared:
             return None
-        for step in TICK_STEPS:
-            try:
-                step(bot, trade, price, cared, orc)
-            except Exception as e:  # noqa: BLE001 — one step never stops one
-                logger.warning("[orcs] Orc %s: %s failed: %s", orc.pk,
-                               getattr(step, "__name__", "a step"), e)
+        with journal.lock_budget(ORC_LOCK_MONEY_MS):
+            for step in TICK_STEPS:
+                try:
+                    step(bot, trade, price, cared, orc)
+                except Exception as e:  # noqa: BLE001 — one never stops one
+                    logger.warning("[orcs] Orc %s: %s failed: %s", orc.pk,
+                                   getattr(step, "__name__", "a step"), e)
     except Exception as e:  # noqa: BLE001 — the Orcs never stop the tick
         logger.warning("[orcs] #%s: not observed: %s",
                        getattr(trade, "pk", "?"), e)

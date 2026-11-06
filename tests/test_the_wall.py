@@ -1247,6 +1247,15 @@ class WallThirdEditionTests(TestCase):
         self.assertIn("Each open idea the platform looks after, options aside, gets one: every "
                       "real-money idea, and by default up to ten at once in simulation and demo "
                       "together.", ops)
+        # U-W3 (2026-11-05, the Orcs' O2 spec A.62): the minds, in shadow,
+        # behind a switch of their own and their budget line
+        self.assertIn("With a second switch on and their budget line set, a model reads "
+                      "each Orc's dossier in shadow; nothing it decides is applied.", ops)
+        from core.platform_control import DEFAULT_COMPONENTS, LIVE_MONEY_SWITCHES
+        minds = [c for c in DEFAULT_COMPONENTS if c["key"] == "orcs_minds"]
+        self.assertEqual(len(minds), 1, rewrite + " ('a second switch')")
+        self.assertNotIn("is_enabled", minds[0])
+        self.assertNotIn("orcs_minds", LIVE_MONEY_SWITCHES)
         for stale in ("journal per open trade", "Every real-money idea has one"):
             self.assertNotIn(stale, self.src, stale)
 

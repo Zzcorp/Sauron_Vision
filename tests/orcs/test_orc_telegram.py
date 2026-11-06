@@ -76,8 +76,10 @@ class TheOrcCommandTests(_OrcEye):
         self.assertIn("REAL MONEY · bot idea", t)
         self.assertIn("Rank: L0 · Snaga (watches and writes: shadow only) "
                       "· n 0", t)
-        self.assertIn("State: Watching: a journal written by code, no "
-                      "model.", t)
+        # O2a (changed on purpose, 2026-11-05, A.62; and again completing
+        # O2a: true after a refused first answer too, A.51)
+        self.assertIn("State: Watching: a journal written by code; no model "
+                      "answer has been accepted yet.", t)
         self.assertIn("R at the last tick +0.42R · best +0.90R", t)
         self.assertIn("Stops: eToro holds 2380.00 · the care&#x27;s soft "
                       "stop 2385.50 (breakeven)", t)
@@ -128,9 +130,9 @@ class TheOrcCommandTests(_OrcEye):
         with patch("brain.research_agent.begin_ask",
                    side_effect=AssertionError("a model")):
             verdict, texts = self.said(f"/orc {self.row.pk} why hold?")
-        self.assertIn("Orcs do not answer questions yet: none calls a "
-                      "model. Ask Sauron instead: /q &lt;question&gt;.",
-                      texts[0])
+        # O2a (changed on purpose, A.62): true with the minds on too
+        self.assertIn("Orcs do not answer questions yet. Ask Sauron "
+                      "instead: /q &lt;question&gt;.", texts[0])
         self.assertEqual(ResearchMessage.objects.count(), 0)
         self.assertEqual(OrcJournal.objects.count(), before)
 
@@ -174,9 +176,9 @@ class TheOrcsCommandTests(_OrcEye):
     def test_orcs_off_writes_nothing_and_turns_nothing_off(self):
         from core.platform_control import PlatformComponent
         verdict, texts = self.said("/orcs off")
+        # O2a (changed on purpose, A.62): no Orc acts, minds on or off
         self.assertIn("Nothing to switch off: no Orc acts on a position; "
-                      "each keeps a journal only, and the care holds every "
-                      "position.", texts[0])
+                      "the care holds every position.", texts[0])
         self.assertTrue(PlatformComponent.objects.get(key="orcs").is_enabled)
 
     def test_no_orc_on_watch(self):
@@ -213,8 +215,9 @@ class TheRulesTests(_OrcEye):
 
     def test_help_on_lists_the_two_commands(self):
         verdict, texts = self.said("/help")
-        self.assertIn("/orc NUMBER — one Orc: its thesis, journal and the "
-                      "care beside it (no model)", texts[0])
+        # O2a (changed on purpose, A.62)
+        self.assertIn("/orc NUMBER — one Orc: its thesis, journal, plan in "
+                      "shadow and the care beside it", texts[0])
         self.assertIn("/orcs [CLASS] — every Orc on watch, one line each",
                       texts[0])
 
@@ -240,6 +243,32 @@ class TheRulesTests(_OrcEye):
         self.assertIn("Position closed at 2390.00: booked -0.50R.", texts[0])
         for gone in ("holds", "Stops:", "R at the last tick", "risk "):
             self.assertNotIn(gone, texts[0])
+
+    def test_a_graded_shadow_arm_is_named_as_such(self):
+        """O2a (2026-11-05, A.58): once the Orc's proposals stepped its arm
+        (would mode, the grade's tag arm:would), the grade's O arm is the
+        Orc's shadow arm, never "the position"; the sentence is
+        registered."""
+        from bot_program.models import AssetBotTrade
+        from bot_program.orcs import notes
+        from bot_program.orcs.models import Orc, OrcGrade
+        now = timezone.now()
+        AssetBotTrade.objects.filter(pk=self.row.pk).update(
+            status="CLOSED", closed_at=now, exit_price=Decimal("2390"),
+            realized_r=-0.5)
+        Orc.objects.filter(pk=self.orc.pk).update(state="dead",
+                                                  died_at=now)
+        OrcGrade.objects.create(orc=self.orc, orc_r_gross=1.2, ghost_r=-0.3,
+                                delta_care=1.5,
+                                tags=["s:s1", "rung:r0", "arm:would"])
+        from html import unescape
+        verdict, texts = self.said(f"/orc {self.row.pk}")
+        text = unescape(texts[0])
+        said = ("Graded: the Orc's shadow arm +1.20R, the care ghost -0.30R; "
+                "Δ against the care +1.50R (shadow: no Orc acted).")
+        self.assertIn(said, text)
+        self.assertNotIn("Graded: the position", text)
+        self.assertTrue(notes.is_reserved(said), said)
 
     def test_a_closed_row_with_no_r_says_so(self):
         from bot_program.models import AssetBotTrade

@@ -14,13 +14,15 @@ setting it — so "run seed_components first" is never the answer.
 Turning `platform_master` off stops every automated task; the command
 says so when it does it.
 
-A live-money switch (core.platform_control.LIVE_MONEY_SWITCHES) is
-never turned ON from here (2026-10-23, core/switch_pin.py): turning one
-on takes the trading PIN, and this command neither prompts for one nor
-accepts one on its command line, where it would sit in the shell
-history. It refuses before any write, even when other keys in the same
-list could be set, and names /ops/, where the toggle takes the PIN.
-Turning one OFF stays free here, as everywhere.
+A PIN switch (core.platform_control.PIN_SWITCHES: a live-money switch,
+or since 2026-11-05 an Orc mind switch, which lets a model spend AI
+money) is never turned ON from here (2026-10-23, core/switch_pin.py):
+turning one on takes the trading PIN, and this command neither prompts
+for one nor accepts one on its command line, where it would sit in the
+shell history. It refuses before any write, even when other keys in the
+same list could be set, and even for a key with no row yet, and names
+/ops/, where the toggle takes the PIN. Turning one OFF stays free here,
+as everywhere.
 """
 import difflib
 
@@ -76,9 +78,10 @@ class Command(BaseCommand):
                                            seed_components)
         from core.switch_pin import (VIA_SHELL, needs_pin, refusal_sentence,
                                      refuse_here, set_switch)
-        # A live-money switch is not turned ON from the shell: checked for
-        # every key before any write, and before the registering below, so
-        # a refused list changes nothing at all.
+        # A PIN switch (real money, or a model's AI spend) is not turned ON
+        # from the shell: checked for every key before any write, and
+        # before the registering below, so a refused list changes nothing
+        # at all.
         blocked = [k for k in dict.fromkeys(keys)
                    if needs_pin(k, was_on=is_component_enabled(k),
                                 want_on=enabled)]

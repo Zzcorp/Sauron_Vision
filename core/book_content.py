@@ -590,7 +590,10 @@ CHAPTERS = [
                       "their own, in their own words. Beside it, code replays a few other ways of "
                       "managing the same idea and grades them against what "
                       "the care alone would have done, and builds the Orc's "
-                      "dossier. No model is called, and nothing an Orc writes "
+                      "dossier. With a second switch on and its budget line "
+                      "set, a model reads that dossier at its wakes, within "
+                      "the Orcs' caps, in shadow: it writes a plan and "
+                      "proposals that are graded, and nothing an Orc writes "
                       "sends an order or moves a stop.")},
             {"title": "The market's posture",
              "text": ("With its switch on, a stress score read every quarter "
@@ -1746,6 +1749,8 @@ LEXICON = [
     {"term": "Orc",
      "plain": ("With its switch on, the journal that follows one open idea, "
                "its legs together, from its birth to its close, written by "
-               "code in prices and R. It calls no model and sends no "
-               "order.")},
+               "code in prices and R. With a second switch on and its budget "
+               "line set, a model reads its dossier at its wakes, within the "
+               "Orcs' caps, in shadow: it writes a plan and proposals that "
+               "are graded, and sends no order.")},
 ]

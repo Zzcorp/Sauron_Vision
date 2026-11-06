@@ -151,7 +151,7 @@ asks for the password again.
 
 **Everything ships OFF, including the master switch.** This is deliberate — a
 freshly deployed trading platform should not start acting on its own — but it
-means that until you do this, beat fires every scheduled task, both workers
+means that until you do this, beat fires every scheduled task, the workers
 consume them, and every one returns `skipped`. The site looks completely
 healthy while doing nothing at all.
 
@@ -1289,8 +1289,10 @@ value is IGNORED, not applied. The list is paginated at 50.
 
 ## The AI budget lines and the provider smoke (/ai-models/)
 
-Since PR O0a the AI budget has two lines and one total. Nothing about
-today's spending changes until the Orcs arrive (O2):
+Since PR O0a the AI budget has two lines and one total. The Orcs' line
+ships at 0 and stays there until you set it; even set, no Orc calls a
+model until you also turn the minds switch on with your PIN (see "The
+Orcs' minds (O2a)" below):
 
 - **The total** is `AI_DAILY_BUDGET_USD`. Once the whole ledger's spend
   today reaches it, no call runs on either line. Since O0a this also stops
@@ -1300,7 +1302,9 @@ today's spending changes until the Orcs arrive (O2):
   its caller turns any error into "go, full size".
 - **The Orcs' line** is `ORC_DAILY_BUDGET_USD`, a cap. At `0` (the
   default) the line is off: no Orc call is allowed and nothing is held
-  back for them. It stays `0` until O2. The cap holds even with
+  back for them. It stays `0` until you set it in `.env` (then
+  `./deploy/dc up -d`); the minds switch `orcs_minds` is a second,
+  independent gate. The cap holds even with
   `AI_DAILY_BUDGET_USD=0` (no total): that lifts the total and the core
   line, never the Orcs' cap, and with the line off it still refuses
   every Orc call.
@@ -1323,11 +1327,13 @@ core line's spend and what is left of it) and adds a third:
 - line off: `Orcs line off (ORC_DAILY_BUDGET_USD=0) · total stop $T`;
 - line on: `AI $x of $y (= $T − Orcs spent − $3.00 floor) · Orcs $z of $C · total $t of $T`.
 
-The card "The Orcs (read-only)" shows the ladder the Orcs' router will pin
-(model and effort per rung). It is an unvalidated prior, read by the
-router from O2; no tier setting on this page ever moves it, and no
-override can be saved for an Orc agent name. The catalog table lists each
-model's cache-read price and the shortest prefix it will cache.
+The card "The Orcs (read-only)" shows the ladder the Orcs read (model and
+effort per rung). It is an unvalidated prior: once the minds switch and
+the Orcs line are on, every wake a model reads is answered on r0; a
+router comes with O2b. No tier setting on this page ever moves it, and no
+override can be saved for an Orc agent name. The card also counts the
+day's Orc calls from the ledger. The catalog table lists each model's
+cache-read price and the shortest prefix it will cache.
 
 **The provider smoke.** Two facts behind the Orcs' design need the real
 API: how many tokens their dossier is on each model's tokenizer, and
@@ -1375,7 +1381,7 @@ platform.
 
 ---
 
-## The Orcs (O1: journals, no model)
+## The Orcs (journals by code; minds in shadow from O2a)
 
 An Orc follows one open position from its birth to its close and keeps
 its journal. In O1 every line of that journal is written by code: the
@@ -1383,9 +1389,10 @@ birth (the entry and its stop, so what 1R means), the thesis (the entry's
 own record, or a reconstruction for a row that was open before the Orcs),
 the army type and why, the care's and the venue's stop moves, a hand
 levels edit, an event window, the reviewer's verdicts, the thesis checks,
-a pending close and the close itself. **No model is called, no order is
-sent and no stop is moved.** The Orcs write their own tables and one stamp
-on the trade row (`metadata["orc"]`), nothing else.
+a pending close and the close itself. **No order is sent and no stop is
+moved; a model reads an Orc's wake only in shadow, behind its own switch
+and budget line (O2a, below).** The Orcs write their own tables and one
+stamp on the trade row (`metadata["orc"]`), nothing else.
 
 **OFF on arrival.** The switch `orcs` (System) arrives OFF. While it is
 OFF the platform behaves exactly as before: no Orc is born, no journal
@@ -1423,13 +1430,24 @@ its fill), an options row, and a row on a config no tick manages (a
 config stopped by hand keeps its paper rows managed, and those get one).
 
 **Switching it OFF** stops new births, new journal lines and the census at
-the next tick; the Orcs already born keep what they wrote.
+the next tick; the Orcs already born keep what they wrote. With the minds
+on (O2a), switching `orcs`, `orcs_minds` or the platform master OFF takes
+no PIN and stops new model calls at the next claim. With `orcs_minds` OFF,
+the next `orc-think` beat (within a minute) answers every waiting wake by
+code (`minds_off`). With `orcs` or the platform master OFF, the minds'
+worker and watchdog stop with every other Orc task, so a waiting wake
+waits: when the switch comes back, one that waited under 30 minutes is
+still read, and one that waited longer is never sent on its old dossier
+(answered by code, `paused`, at the next claim when the Orcs were off for
+over 10 minutes; else closed by the watchdog's next pass as usual). A call
+already in flight finishes and is booked, or, with no bill, keeps its
+money held until 00:00 UTC.
 
 **The kill switch ends every idea** in its scope, whatever the orcs switch
 says: each Orc is marked dead with no re-entry window before the sweep
 closes its rows.
 
-### O1b: the arms and the grade (still no model)
+### O1b: the arms and the grade (O1: no model)
 
 Each Orc now carries five counterfactual arms in its own table, priced by
 one function from the same tick or venue bar: the **care ghost** (the
@@ -1477,8 +1495,10 @@ needs the care's best excursion: while the care is off it reads
   with an R, its arms were not seeded late, and the care ghost stayed
   faithful (its soft stop matched the care's on every tick the Orc arm
   recorded). A stretch with no tick is flagged on the grade, never
-  excluded. No seat reads it in O1. The grade is journaled; nothing is
-  sent.
+  excluded. From O2a it also counts the mind: the wakes a model read, the
+  proposals applied to the Orc's shadow arm, the refusals, the share of
+  invalid answers and the AI cost booked on the Orcs line. No seat reads
+  it. The grade is journaled; nothing is sent.
 - `orc-shadow-audit` Sundays 05:40 UTC: the care ghost of each idea that
   died in the last 7 days checked against the care's own exits, one
   journal line per idea, written once.
@@ -1509,18 +1529,21 @@ before reads 4h. OFF, the pass requests exactly what it did before.
 Morgul's duplicate check (G8) reads the idea of a row's Orc stamp: the
 legs of one idea are one position; there is no second leg before O5.
 
-### O1c: the dossier, the day's weather and the war drums (still no model)
+### O1c: the dossier, the day's weather and the war drums (O1: no model)
 
 Each Orc now notices when something happens to its position, and writes
-down what it would have seen. **Nothing is sent to a model, no order is
-sent and no stop is moved**; only the Orc tables are written.
+down what it would have seen. **No order is sent and no stop is
+moved**; only the Orc tables are written, and in O1 nothing is sent to a
+model (O2a's minds, below, read these wakes in shadow).
 
 **Wakes are detected and recorded.** Right after the care, the tick looks
 for a reason to think: the birth, a closed bar of the decision timeframe,
 the mark near an invalidation level, +1R, +2R, +3R, -0.5R and -0.75R first
 reached, half the best given back, the care moving or closing, the venue
 refusing a stop, a met predicate, a hand edit of the levels, a close or an
-entry in doubt, the metronome (every 4 hours while the market is open), a
+entry in doubt, the metronome (while the market is open, the Orc's army
+type's period after its last recorded wake: 4 hours for Line Orcs, every
+hour for Mercenaries, once a day for the Olog-hai), a
 high-impact print (3 hours and 1 hour before, 15 minutes after), a change
 of the daily-loss mode, open risk at 80% of its limit, a change of the
 posture, a close pending at the venue. The book is read in the Orc's own
@@ -1535,7 +1558,10 @@ query, a recorded wake a handful); every 2 minutes the slow queue
 (`orc-render-wakes`) renders each recorded wake as of its moment: its
 complexity score (0 to 100, with its band: routine, material, complex,
 extreme), the day's weather for its class (calm, eventful, stormy) and its
-dossier. Its status reads `skipped` ("no model before O2"), or `quiet`
+dossier. Its status then reads, in words on the Orc's page: answered by
+code (`skipped` with its code: `minds_off` while the minds switch is off,
+as it ships; a wake O1 rendered reads "no model before O2"), waiting for
+its model call (`pending`, only with the minds on, O2a below), or `quiet`
 when only a bar or the metronome woke it and nothing it watches moved: the
 Orc then writes a one-line reading ("Nothing new: +0.4R, care breakeven at
 1.0832, 4h structure unchanged"), which is also its latest note. A wake
@@ -1563,6 +1589,32 @@ again:
 ./deploy/dc exec web python manage.py orcs actuals --days 14 --record  # ... and record it
 ```
 
+From O2a, `orcs` (the status) also shows the minds: the `orcs_minds`
+switch, the Orcs budget line, the model calls today, the wakes waiting for
+a model, the money held for calls without a bill, the tickets in flight,
+the stall alarm, the breaker and the ledger gaps. `dossier` also prints S,
+the model's answer as kept with each V-rule's verdict, the officer's
+verdicts and the booking, for a wake a model read. A proposal of an answer
+never reaches the position: queued, it steps only the Orc's own shadow arm
+at the next tick, priced at that tick, or expires. Three subcommands
+prepare the minds without turning them on. `smoke --row` is dry without
+`--yes`; with it, and only while the four gates are ON (the platform
+master, `orcs`, `orcs_minds`, the Orcs line above 0), it reserves a ticket
+for the whole bound, sends ONE call on the Orcs line from the Orc's latest
+stored dossier (r0, or h0 with `--rung h0`), prints the answer and its
+validation, and writes nothing to the Orc. `smoke-verdict` records what
+`manage.py claude_smoke --yes` printed for one model family; it sends
+nothing. `tokens --s --yes` counts S at the provider's free token count
+(the API key only: no switch, no line) and records it:
+
+```bash
+./deploy/dc exec web python manage.py orcs smoke --row ROOT_ID              # dry: the one call it would make
+./deploy/dc exec web python manage.py orcs smoke --row ROOT_ID --yes        # one call (refused while a gate is OFF)
+./deploy/dc exec web python manage.py orcs smoke-verdict --family sonnet --pass
+./deploy/dc exec web python manage.py orcs smoke-verdict --family opus --fail effort cache
+./deploy/dc exec web python manage.py orcs tokens --s --yes                 # free, never booked; recorded
+```
+
 When the venue's mark is older than 120 s (or not the venue's), the
 decision frame's bars are stale, or the row cannot be read, the verdict is
 critical and the Orc's menu holds no exit, trim, waiver or add: hold, a
@@ -1585,7 +1637,14 @@ second time):
 - `orc-hourly` at :06: the instruments' blocks, the class's hourly terms,
   the level-break and sweep drums (read on final 4h bars only);
 - `orc-render-wakes` every 2 minutes: the recorded wakes' scores and
-  dossiers.
+  dossiers; from O2a each wake is first merged with the Orc's waiting one,
+  then admitted (`pending`, or answered by code).
+
+From O2a two more beats, both behind `orcs`: `orc-think` every 60 s on the
+`orcs` queue, which the `worker-orc` container alone consumes (two slots),
+and `orc-minds-watch` every 5 minutes on `slow` (the stall alarm, the
+stale wakes, the money held). With the minds switch OFF, as it ships,
+`orc-think` only closes what waits and nothing is claimed.
 
 With `orcs` ON the bar refresh also asks the keyless feed for the board's
 symbols that exist as instruments (US10Y does not: the 10-year yield is
@@ -1652,7 +1711,7 @@ pass with no Mercenary holding a position is a success that read nothing;
 an unmeasured headroom is a warning in words). To stop it:
 `component off orcs_tape`.
 
-### O1d: where the Orcs are seen (still no model)
+### O1d: where the Orcs are seen (O1: no model)
 
 Everything below is read by code from the Orc tables, only while the
 switch `orcs` is ON. No new switch, no new beat, no new queue and no tick
@@ -1686,27 +1745,33 @@ practice, Saxo simulation...). While
 `orcs` is OFF, `/orc` is ignored like any unknown command and a quoted
 "orc 12" goes to Sauron as a question, as before. `/orc 12 <question>`,
 `/orc 12 stand down` and `/orcs off` answer in words and change nothing:
-no Orc reasons or acts in this release.
+no Orc acts on a position, and none answers questions yet. From O2a `/orc`
+also says the Orc's model calls today (a count, never money).
 
 **On the platform:**
 
 - **The Horde.** Each seat with an Orc shows its label and "L0 · Snaga"
   at the card's foot; the dossier's THE ORC box shows its state, thesis,
   what invalidates it, the risk at the venue's stop, the care beside the
-  position, the complexity score of its last detected wake ("No model
-  (code only)"), the dossier's integrity, its journal, the drums it heard
+  position, the complexity score of its last detected wake and what
+  answered it ("No model (code only)" for a code answer, or the rung that
+  read it in shadow, "r0 · balanced tier, low effort"), the dossier's
+  integrity, its journal, the drums it heard
   and a link to its page. Each class band shows the day's weather. The
   answer's `v` is 2 while `orcs` is ON, 1 while OFF.
 - **The positions page.** One muted line under the symbol of an open row
   an Orc follows ("Orc #12 · L0 · Snaga, class · invalidates on a 4h close
   below … · no plan yet · "Nothing new: +0.4R…" 14:05 · risk 1.0R of
-  2R": the rank and the commission, the first invalidation, the plan, the
-  latest note and its time, the risk at the stop the venue holds); the
-  dwell card adds its plan, the comparison with the care and its last
-  three journal lines. The comparison prices the position and the care
-  ghost on the same tick, at the closing side of the spread, with what
-  each banked, so two arms that took the same steps read the same R. The
-  history tab is unchanged.
+  2R": the rank and the commission, the first invalidation, the plan
+  ("no plan yet", or "a plan in shadow" once a model wrote one, drawn by
+  code), the latest note and its time, the risk at the stop the venue
+  holds); the dwell card adds its plan, the comparison with the care and
+  its last three journal lines. The comparison prices the Orc's arm (the
+  position itself, or, once an Orc's proposals stepped it, its shadow
+  arm, so named) and the care ghost on the same tick, at the closing side
+  of the spread, with what each banked, so two arms that took the same
+  steps read the same R. None of the Orc's proposals is applied to the
+  position. The history tab is unchanged.
 - **The close dialog.** A row an Orc follows shows its note beside the
   early-close warning: its rank, state and plan, the thesis, the latest
   note and the last fact written by code (your own thesis is never shown
@@ -1714,12 +1779,16 @@ no Orc reasons or acts in this release.
   close-all are unchanged.
 - **`/orcs/`** lists your Orcs on watch, those that ended in the last 30
   days with their grade, and the seats they sit on. Staff also see the AI
-  spend lines there.
+  spend lines there: the Orcs line beside the minds switch, and the day's
+  Orc calls from the ledger.
 - **`/orcs/<number>/`** is one Orc: its thesis (the entry's, or the one
   reconstructed for a row that was open before the Orcs) and its
   predicates, your own thesis, the plan, the journal (facts written by
   code and notes drawn apart, your words marked as yours), the arms, the
-  detected wakes and the grade. A leg's number opens its idea.
+  detected wakes with their status in words and the rung a model read
+  them on, the proposals in shadow with the officer's would-verdict and
+  their status, the refusals, and the grade. A leg's number opens its
+  idea.
 - **Your thesis.** The form on an Orc's page keeps your thesis beside the
   entry's, in your words (600 characters at most). It is journaled as
   yours, never as a fact, and changes nothing the care does. It is
@@ -1728,8 +1797,9 @@ no Orc reasons or acts in this release.
   pooled: graded ideas, the mean Δ against the care with its 80% bounds,
   and the capture; then each army type by venue, class and bar source,
   with its n, mean Δ and 80% bounds. Only the grades that count for their
-  seat enter a statistic. In this release no Orc takes a step, so Δ
-  measures the care ghost against the care, and no seat holds any power.
+  seat enter a statistic. Δ measures the Orc's shadow arm (its proposals
+  applied in shadow, when it has any) against the care ghost; no seat
+  holds any power.
 
 The adoption line sent for a real-money row now opens that Orc's page.
 
@@ -1739,6 +1809,97 @@ To check, with `orcs` ON:
 ./deploy/dc exec web python manage.py orcs                  # the live Orcs, their numbers
 # then open /orcs/ and /orcs/<number>/, and send /orc <number> on Telegram
 ```
+
+### The Orcs' minds (O2a)
+
+From O2a a model may read each Orc's wakes, in shadow, on the Orcs' own
+budget line. It ships OFF behind two independent gates: the switch
+`orcs_minds` ("Orc Minds (models in shadow)", System, OFF on arrival,
+left OFF by "all on", turned on only with your trading PIN at /ops/) and
+the Orcs line (`ORC_DAILY_BUDGET_USD`, 0 = off). A model is asked only
+while both are on, with `orcs` and the platform master. **Nothing a model
+decides sends an order, moves a stop or changes a size**: its plan is
+drawn by code, and each proposal steps only the Orc's own shadow arm and
+is graded against the care ghost. Its note is filtered for money before
+anything shows it, and no account figure is sent to it.
+
+A wake's life: the tick records it (`recorded`); the render pass
+(`orc-render-wakes`) merges it with the Orc's waiting wake, writes its
+dossier and admits it: `quiet` (nothing new), answered by code (`skipped`
+with its code, for example `minds_off` while the minds switch is off, or a
+day cap, the triage, the spacing), or `pending`; `worker-orc` claims it
+inside the Orcs line, sends one call on r0, validates the answer and
+settles it: `done` (answered in shadow), `refused` (by the validator),
+`failed`, `late` (it came back after the position closed: kept, applied to
+nothing), `stale` (not answered in 30 minutes while the worker was
+silent: the care holds the idea) or `merged`. The Orc's page shows each
+status in words, with the rung that read it.
+
+To turn them on, in this order:
+
+1. Run the provider smoke (about $1, on the core line) and record what it
+   printed, one verdict per model family:
+
+   ```bash
+   ./deploy/dc exec web python manage.py claude_smoke --yes
+   ./deploy/dc exec web python manage.py orcs smoke-verdict --family sonnet --pass   # or --fail and what failed
+   ```
+
+2. Optionally count S, the Orcs' doctrine (the provider's free count,
+   never booked):
+
+   ```bash
+   ./deploy/dc exec web python manage.py orcs tokens --s --yes
+   ```
+
+3. Set the line in `.env`: `ORC_DAILY_BUDGET_USD=6` for the first week,
+   and raise `AI_DAILY_BUDGET_USD` by the line plus the $3 floor (24 with
+   the core's 15). Both are read when the containers start:
+
+   ```bash
+   ./deploy/dc up -d                       # not restart: up re-reads .env
+   ```
+
+4. Check that `worker-orc` consumes the `orcs` queue:
+
+   ```bash
+   ./deploy/dc exec worker-orc celery -A config inspect active_queues
+   ```
+
+5. On /ops/ (Switches, System), turn on "Orc Minds (models in shadow)"
+   with your trading PIN. The shell's `component on` refuses this key and
+   points to /ops/, and the Django admin will not turn it on either.
+6. Check: `./deploy/dc exec web python manage.py orcs status` (the minds
+   switch, the line, the model calls today, the wakes waiting, the money
+   held).
+
+What they may spend: at most `ORC_DAILY_BUDGET_USD` per UTC day ($6.00
+proposed for the first week: about $4.27 to $5.14 a day for 10 positions
+on r0 under the triage). Each call is reserved at its bound before it is
+sent (about $0.20 at most on r0) and booked at its real cost; inside the
+line each Orc spends at most $2.00 a day on real money and $0.50 on paper
+and demo, routine wakes 75% of that. While the line is on, the core line
+is the total less what the Orcs actually spent, less the $3.00 floor.
+
+To stop them: turning `orcs_minds`, `orcs` or the platform master OFF
+takes no PIN and stops new calls at the next claim.
+- `orcs_minds` OFF: the next `orc-think` beat answers every waiting wake
+  by code (`minds_off`).
+- `orcs` or the platform master OFF: the task gate stops the minds'
+  worker and watchdog with every other Orc task, so a waiting wake waits,
+  with no code. When the switch comes back, a wake that waited under 30
+  minutes is still read; one that waited longer is never sent on its old
+  dossier (answered by code, `paused`, at the next claim when the Orcs
+  were off for over 10 minutes; else closed by the watchdog's next pass
+  as usual).
+- A call already in flight finishes and is booked or, with no bill, keeps
+  its money held until 00:00 UTC; an answer that comes back while a gate
+  is OFF is kept as late (`minds_off`, `orcs_off`, `platform_off`) and
+  applied to nothing.
+
+Setting the line back to 0 (then `./deploy/dc up -d`) refuses every Orc
+call: the next claim answers each waiting wake by code (`line_off`).
+Nothing is notified.
 
 ## Operating notes
 

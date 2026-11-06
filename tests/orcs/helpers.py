@@ -189,9 +189,10 @@ def tracks_of(orc):
 
 def _wake_card(orc, *, score=58.0, band="complex", day="eventful",
                flag="ok", t=None):
-    """What O1c's render_wake leaves on the card (wake.py: a `wake` entry
-    kept off the card's lines, the card's intellect and integrity), its
-    agreed shape pinned here."""
+    """What render_wake leaves on the card with the minds off, as they
+    ship (wake.py: a `wake` entry kept off the card's lines ending in its
+    status words, the card's intellect with no model's rung, and its
+    integrity), its agreed shape pinned here (O2a, 2026-11-05)."""
     from bot_program.orcs import journal
     from bot_program.orcs.integrity import words
     verdict = {"flag": flag, "critical": [], "contradictions": [],
@@ -202,15 +203,16 @@ def _wake_card(orc, *, score=58.0, band="complex", day="eventful",
         verdict["contradictions"] = ["the venue mark and the quote differ"]
     journal.append(orc, "wake",
                    f"Wake detected: the metronome. Complexity {score:.0f} "
-                   f"({band}); the day is {day}. Recorded only: no model is "
-                   f"asked yet.",
+                   f"({band}); the day is {day}. Answered by code: the "
+                   f"minds switch is off.",
                    body={"score": score, "band": band, "day_class": day},
                    card=False, card_extra={
                        "intellect": {"score_v": round(score),
                                      "score_t": f"score {score:.0f} · {band}",
                                      "band": band, "day_class": day,
-                                     "rung_t": "no model (O1: code only)",
-                                     "status_t": "recorded only",
+                                     "rung_t": "No model (code only)",
+                                     "status_t": "answered by code: the "
+                                                 "minds switch is off",
                                      "escalated": False, "late": False,
                                      "at": "2026-10-22T14:05:00+00:00"},
                        "integrity": {"flag": flag,

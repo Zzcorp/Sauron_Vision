@@ -4,7 +4,9 @@
 
 {% block content %}
 {# One Orc (O1d, spec §9.2): its thesis, plan, journal, arms, wakes and #}
-{# grade, read by code. The one form is the operator's own thesis. #}
+{# grade, read by code. The one form is the operator's own thesis. From #}
+{# O2a (the O2 spec A.62): each wake's status and rung, the proposals in #}
+{# shadow with the officer's would-verdict, the refusals. #}
 <div class="orc-page">
 <div style="margin-bottom:12px;"><a href="{% url 'orcs_list' %}" class="orc-muted">← every Orc</a></div>
 {% if messages %}<ul class="orc-messages">{% for m in messages %}<li class="card">{{ m }}</li>{% endfor %}</ul>{% endif %}
@@ -59,8 +61,20 @@
 <div class="card fade-in-up" id="orc-plan" style="margin-bottom:18px;">
     <div class="card-header"><span class="card-title">Plan</span></div>
     <p>{{ slot.plan_line }}</p>
-    <h4 class="orc-h">Intents</h4>
-    <p class="orc-muted">{{ intents_none }}</p>
+    <h4 class="orc-h">Intents (in shadow: none is applied to the position)</h4>
+    {% if intents %}
+    <ul class="orc-list orc-intents">
+    {% for i in intents %}
+        <li><time datetime="{{ i.at|date:'c' }}" class="orc-muted">{{ i.at|date:"Y-m-d H:i" }}</time> {{ i.kind_t }} · {{ i.mode }} · {{ i.status_t }}{% if i.officer_t %} · {{ i.officer_t }}{% endif %}</li>
+    {% endfor %}
+    </ul>
+    {% else %}<p class="orc-muted">{{ intents_none }}</p>{% endif %}
+    {% if refusals %}
+    <h4 class="orc-h">Refusals</h4>
+    <ul class="orc-list">
+    {% for r in refusals %}<li><time datetime="{{ r.at|date:'c' }}" class="orc-muted">{{ r.at|date:"Y-m-d H:i" }}</time> {{ r.t }}</li>{% endfor %}
+    </ul>
+    {% endif %}
 </div>
 
 <div class="card fade-in-up" id="orc-journal" style="margin-bottom:18px;">
@@ -102,22 +116,23 @@
 </div>
 
 <div class="card fade-in-up" id="orc-wakes" style="margin-bottom:18px;">
-    <div class="card-header"><span class="card-title">Wakes detected (recorded only: no model is called)</span></div>
+    <div class="card-header"><span class="card-title">Wakes detected</span></div>
     {% if wakes %}
     <div class="table-wrapper">
     <table class="sv-perf-table sv-stack orc-table">
-        <thead><tr><th>At</th><th>Kind</th><th class="num">Score</th><th>Band</th><th>Day</th><th>Status</th></tr></thead>
+        <thead><tr><th>At</th><th>Kind</th><th class="num">Score</th><th>Band</th><th>Day</th><th>Status</th><th>Rung</th></tr></thead>
         <tbody>
-        {% for w in wakes %}
+        {% for row in wakes %}{% with w=row.w %}
         <tr>
             <td data-label="At" class="nowrap">{{ w.created_at|date:"Y-m-d H:i" }}</td>
             <td data-label="Kind">{{ w.kind|default:"—" }}</td>
             <td data-label="Score" class="num">{% if w.score is not None %}{{ w.score|floatformat:0 }}{% else %}—{% endif %}</td>
             <td data-label="Band">{{ w.band|default:"—" }}</td>
             <td data-label="Day">{{ w.day_class|default:"—" }}</td>
-            <td data-label="Status">{{ w.status }}</td>
+            <td data-label="Status">{{ row.status_t }}</td>
+            <td data-label="Rung">{{ row.rung|default:"—" }}</td>
         </tr>
-        {% endfor %}
+        {% endwith %}{% endfor %}
         </tbody>
     </table>
     </div>
@@ -127,7 +142,7 @@
 <div class="card fade-in-up" id="orc-grade" style="margin-bottom:18px;">
     <div class="card-header"><span class="card-title">Grade</span></div>
     {% if grade %}
-    <p>Graded (shadow, no Orc action): {{ grade_t }}.</p>
+    <p>Graded in shadow: {{ grade_t }}.</p>
     <p class="orc-muted">Bar source {{ grade.bar_source|default:"—" }} · {% if grade.counts_for_seat %}counts for its seat{% else %}does not count for its seat{% endif %}.</p>
     {% else %}<p class="orc-muted">Not graded yet: an idea is graded once it has ended and every arm has walked out.</p>{% endif %}
 </div>

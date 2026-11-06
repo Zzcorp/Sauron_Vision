@@ -4,9 +4,11 @@ like aragorn_models, so the app label is bot_program.
 O1 ships the tables its own commits write: the seat, the Orc, its legs,
 its journal, its tracks and grade, the setting, and the three tables of
 the dossier and the drums (O1c). OrcWake ships as a table only; O1c writes
-it. The tables only O2 writes (OrcIntent, OrcActionGrade, Captain,
-CaptainOrder and the 2026-10-09 additions marked O2) ship in O2's own
-migration (§10.7).
+it. The tables only O2 writes ship in O2's own migrations (§10.7): O2a's
+(2026-11-05, migration 0049) adds OrcIntent, the proposals in shadow, and
+OrcWake's first send (`queued_at`) with the claim's index; OrcActionGrade,
+Captain, CaptainOrder and the 2026-10-09 additions marked O2 come with the
+later O2 commits.
 
 No `choices=` on any status or kind column: the allowed values are tuples
 in bot_program/orcs/constants.py, so a later PR adds one without a
@@ -176,6 +178,9 @@ class OrcWake(models.Model):
     band = models.CharField(max_length=12, blank=True)
     day_class = models.CharField(max_length=12, blank=True)
     block_hashes = models.JSONField(default=list, blank=True)
+    #: O2a (2026-11-05): the first send, set once at admission and never
+    #: moved again, so a wake's stall is counted from it (the O2 spec P9)
+    queued_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [
@@ -184,7 +189,10 @@ class OrcWake(models.Model):
                                     name="orcwake_one_pending_per_key"),
         ]
         indexes = [models.Index(fields=["orc", "-created_at"],
-                                name="orcwake_orc_created")]
+                                name="orcwake_orc_created"),
+                   # O2a: the claim's order (rank, then first send)
+                   models.Index(fields=["status", "-priority", "queued_at"],
+                                name="orcwake_claim")]
 
 
 class OrcJournal(models.Model):
@@ -219,6 +227,64 @@ class OrcJournal(models.Model):
 
     def __str__(self):
         return f"{self.orc_id} {self.kind} {self.fact_id} {self.headline[:60]}"
+
+
+class OrcIntent(models.Model):
+    """One proposal of a model's answer that is not a hold (the O2 spec
+    §1.1.2 item 1; O2a, 2026-11-05), in shadow: judged by the officer as
+    if it bound, stepped on the Orc's own arm only, never sent anywhere.
+    R and prices only, no money column. `level` is the stored reference
+    of the level it names (copied by code from the wake's menu): every
+    later use reads it, never the id."""
+    orc = models.ForeignKey(Orc, on_delete=models.CASCADE,
+                            related_name="intents")
+    wake = models.ForeignKey(OrcWake, null=True, blank=True,
+                             on_delete=models.SET_NULL,
+                             related_name="intents")
+    #: the decision entry that carried it
+    decision = models.ForeignKey(OrcJournal, null=True, blank=True,
+                                 on_delete=models.SET_NULL,
+                                 related_name="intents")
+    kind = models.CharField(max_length=16)        # constants.INTENT_KINDS
+    candidate = models.CharField(max_length=16, blank=True)
+    #: for display only
+    level_id = models.CharField(max_length=24, blank=True)
+    level = models.JSONField(default=dict, blank=True)
+    #: the would-be stop: the level's own stop beyond the crowd, or the
+    #: break-even row's price
+    would_stop = models.DecimalField(max_digits=18, decimal_places=8,
+                                     null=True, blank=True)
+    #: a lock waiver's event code
+    event_id = models.CharField(max_length=16, blank=True)
+    #: a trim's share, or an add's risk share
+    share = models.FloatField(null=True, blank=True)
+    facts_cited = models.JSONField(default=list, blank=True)
+    mode = models.CharField(max_length=10)        # constants.INTENT_MODES
+    #: the refusing rule, or the expiry code (constants.INTENT_EXPIRY_CODES)
+    rule = models.CharField(max_length=16, blank=True)
+    #: the officer's would-verdict
+    officer = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=12)      # constants.INTENT_STATUSES
+    why = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    applied_at = models.DateTimeField(null=True, blank=True)
+    applied_price = models.DecimalField(max_digits=18, decimal_places=8,
+                                        null=True, blank=True)
+    applied_r = models.FloatField(null=True, blank=True)
+    #: O2c's wave stamp, blank until then
+    wave_id = models.CharField(max_length=40, blank=True)
+    rung = models.CharField(max_length=4)
+    s_version = models.CharField(max_length=8)
+    schema_version = models.CharField(max_length=8)
+
+    class Meta:
+        indexes = [models.Index(fields=["orc", "-created_at"],
+                                name="orcintent_orc_created"),
+                   models.Index(fields=["status"], name="orcintent_status")]
+
+    def __str__(self):
+        return f"{self.orc_id} {self.kind} {self.status} {self.level_id}"
 
 
 class OrcTrack(models.Model):

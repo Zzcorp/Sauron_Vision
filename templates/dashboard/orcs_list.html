@@ -1,10 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Orcs — Sauron Vision{% endblock %}
-{% block page_title %}ORCS · JOURNALS BY CODE{% endblock %}
+{% block page_title %}ORCS · IN SHADOW{% endblock %}
 
 {% block content %}
 {# THE ORCS (O1d, spec §9.2): one per open position, a journal written by #}
-{# code. Read only; nothing on this page calls a model or an order path. #}
+{# code; from O2a, a model may read its wakes in shadow, behind the minds #}
+{# switch and the Orcs line. Read only; nothing on this page calls a model #}
+{# or an order path. #}
 <div class="orc-page">
 
 <div class="card fade-in-up" style="margin-bottom:18px;">
@@ -84,7 +86,7 @@
 {% if is_staff and spend %}
 <div class="card fade-in-up orc-spend" style="margin-bottom:18px;">
     <div class="card-header"><span class="card-title">AI spend today (staff)</span></div>
-    <p>The Orcs' line: {% if spend.orcs_enabled %}${{ spend.orcs_spent|floatformat:2 }} of ${{ spend.orcs_cap|floatformat:2 }}{% else %}off (no Orc calls a model in this release){% endif %}.</p>
+    <p>{% if spend.orcs_enabled %}Orcs line: ${{ spend.orcs_spent|floatformat:2 }} of ${{ spend.orcs_cap|floatformat:2 }} today · minds switch {% if minds_switch %}on{% else %}off{% endif %} · {{ orc_calls }} call{{ orc_calls|pluralize }} today{% else %}Orcs line: off (ORC_DAILY_BUDGET_USD=0){% endif %}.</p>
     <p>The core line: ${{ spend.core_spent|floatformat:2 }} of ${{ spend.core_budget|floatformat:2 }} {{ spend.core_formula }}.</p>
     <p class="orc-muted">The platform's own spend, every agent included; the full lines are on <a href="{% url 'ai_models_dashboard' %}">AI models</a>.</p>
 </div>

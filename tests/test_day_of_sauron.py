@@ -288,7 +288,10 @@ class TheQueuesAreResolvedLikeCeleryTests(SimpleTestCase):
     def test_the_totals_count_every_queue(self):
         scheme = day.day_scheme()
         self.assertEqual(sum(scheme["queues"].values()), scheme["total"])
-        self.assertLessEqual(set(scheme["queues"]), {"fast", "default", "slow", "ai"})
+        # O2a (2026-11-05): the Orcs' minds have their own queue, `orcs`
+        self.assertLessEqual(set(scheme["queues"]),
+                             {"fast", "default", "slow", "ai", "orcs"})
+        self.assertIn("orcs", scheme["queues"])
         self.assertEqual(scheme["fastest"], "15 s")
 
 
