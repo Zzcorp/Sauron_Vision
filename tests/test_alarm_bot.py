@@ -509,7 +509,12 @@ class MoneyTripwireTests(_AlarmCase):
                       last_used_margin=Decimal("6000.50"),
                       last_margin_at=NOW, last_margin_world="live")
         _component("broker_account_sync")
-        cache.set(f"broker_sync:miss:etoro:{acct.pk}", 4, 3600)
+        # past the eToro walk's own threshold (fifteen since 2026-11-06,
+        # tasks.broker_miss_alert_after; 4 passed the old three), so its
+        # alarm is among the texts the tripwire reads
+        from bot_program.tasks import broker_miss_alert_after
+        cache.set(f"broker_sync:miss:etoro:{acct.pk}",
+                  broker_miss_alert_after("etoro") + 1, 3600)
         texts = []
         # A: a Morgul run with money in its facts, a blind critical guard
         # and the brake acting
@@ -1071,7 +1076,11 @@ class PauseTests(_AlarmCase):
         gone = _trade(cfg, "MSFT", paper=False, status="ERROR")
         acct = _etoro(user, demo=False)
         _component("broker_account_sync")
-        cache.set(f"broker_sync:miss:etoro:{acct.pk}", 5, 3600)
+        # past the eToro walk's own threshold (fifteen since 2026-11-06;
+        # 5 passed the old three): the pause is what keeps it unsaid
+        from bot_program.tasks import broker_miss_alert_after
+        cache.set(f"broker_sync:miss:etoro:{acct.pk}",
+                  broker_miss_alert_after("etoro") + 2, 3600)
         _component("platform_master", on=False)
         out, said = self.sentinel(faults=FAULTS_WITH_MONEY)
         self.assertEqual(out["problems"], 2)
@@ -1182,15 +1191,18 @@ class BrokerTests(_AlarmCase):
         _component("broker_account_sync")
 
     def test_a_live_account_past_the_miss_threshold_by_broker_and_number(self):
-        from bot_program.tasks import BROKER_MISS_ALERT_AFTER
+        # the eToro walk's own threshold since 2026-11-06: fifteen passes of
+        # its 60 s beat, fifteen minutes (tasks.broker_miss_alert_after);
+        # it was BROKER_MISS_ALERT_AFTER, three passes of its 300 s
+        from bot_program.tasks import broker_miss_alert_after
+        after = broker_miss_alert_after("etoro")
         user = _staff("gandalf_senior")
         acct = _etoro(user, demo=False)
-        cache.set(f"broker_sync:miss:etoro:{acct.pk}",
-                  BROKER_MISS_ALERT_AFTER, 3600)
+        cache.set(f"broker_sync:miss:etoro:{acct.pk}", after, 3600)
         out, said = self.sentinel()
         self.assertEqual(len(said), 1)
         self.assertIn(f"Sauron alarm — eToro account #{acct.pk} has not "
-                      f"answered {BROKER_MISS_ALERT_AFTER} syncs in a row",
+                      f"answered {after} syncs in a row",
                       said[0])
         self.assertIn("/brokers/", said[0])
         self.assertNotIn("gandalf_senior", said[0])
@@ -1203,8 +1215,13 @@ class BrokerTests(_AlarmCase):
         b = _staff("b")
         c = _staff("c")
         live = _etoro(a, demo=False)
+        # just below the eToro walk's own threshold (fifteen since
+        # 2026-11-06); its old three is below it too
+        from bot_program.tasks import broker_miss_alert_after
+        self.assertGreater(broker_miss_alert_after("etoro"),
+                           BROKER_MISS_ALERT_AFTER)
         cache.set(f"broker_sync:miss:etoro:{live.pk}",
-                  BROKER_MISS_ALERT_AFTER - 1, 3600)
+                  broker_miss_alert_after("etoro") - 1, 3600)
         demo = _etoro(b, demo=True)
         cache.set(f"broker_sync:miss:etoro:{demo.pk}", 9, 3600)
         paper = IBKRAccount.objects.create(user=c, port=7497)
@@ -1236,7 +1253,11 @@ class BrokerTests(_AlarmCase):
         says nothing about the broker now."""
         user = _staff()
         acct = _etoro(user, demo=False)
-        cache.set(f"broker_sync:miss:etoro:{acct.pk}", 9, 3600)
+        # past the eToro walk's own threshold (fifteen since 2026-11-06; 9
+        # passed the old three): the switch is what keeps it unsaid
+        from bot_program.tasks import broker_miss_alert_after
+        cache.set(f"broker_sync:miss:etoro:{acct.pk}",
+                  broker_miss_alert_after("etoro") + 6, 3600)
         _component("broker_account_sync", on=False)
         self.assertEqual(self.sentinel()[1], [])
 

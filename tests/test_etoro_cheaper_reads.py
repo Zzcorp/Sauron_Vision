@@ -970,7 +970,12 @@ class TheBeatsAreC2sTests(SimpleTestCase):
     interval and the reconcile's */5 crontab, as C2 set them (this class
     was TheBeatsAreOffsetTests); the tick keeps its 300 s interval. The
     budget meters what the beats ask (one book a reconcile pass, two
-    account GETs a sync pass)."""
+    account GETs a sync pass).
+    2026-11-06, THE FASTER REFRESH (the operator: "augmenter to the maximum
+    le taux de refresh des valeurs et de eToro surtout"): the sync is a
+    60 s interval, C2's shape at the operator's new cadence
+    (tests.test_faster_refresh, where the budget's room is pinned); the
+    reconcile keeps C2's */5 and the tick its 300 s."""
 
     def _beat(self, key):
         from config.celery import app
@@ -979,8 +984,9 @@ class TheBeatsAreC2sTests(SimpleTestCase):
     def test_the_tick_is_the_300_s_interval_it_was(self):
         self.assertEqual(self._beat("tick-asset-bots"), 300.0)
 
-    def test_the_sync_is_c2s_300_s_interval(self):
-        self.assertEqual(self._beat("sync-etoro-accounts"), 300.0)
+    def test_the_sync_is_a_60_s_interval(self):
+        # C2's 300 s interval until 2026-11-06, the faster refresh's 60 s
+        self.assertEqual(self._beat("sync-etoro-accounts"), 60.0)
 
     def test_the_reconcile_is_c2s_every_five_minutes(self):
         from celery.schedules import crontab
@@ -989,23 +995,27 @@ class TheBeatsAreC2sTests(SimpleTestCase):
         self.assertEqual(sorted(rec.minute), list(range(0, 60, 5)))
         self.assertEqual(len(rec.hour), 24)
 
-    def test_both_still_beat_every_five_minutes(self):
+    def test_both_beat_at_their_own_cadence(self):
+        # was test_both_still_beat_every_five_minutes (C2's 300 s and */5);
+        # the sync every 60 s since 2026-11-06
         from core.component_digest import _period_hours
         from core.day_of_sauron import schedule_words
         self.assertEqual(schedule_words(self._beat("sync-etoro-accounts"))[:3],
-                         ("5 min", 300.0, "interval"))
+                         ("60 s", 60.0, "interval"))
         self.assertEqual(
             schedule_words(self._beat("reconcile-asset-bot-trades"))[:3],
             ("every 5 min", 300.0, "cron"))
-        for key in ("sync-etoro-accounts", "reconcile-asset-bot-trades"):
+        for key, seconds in (("sync-etoro-accounts", 60),
+                             ("reconcile-asset-bot-trades", 300)):
             self.assertAlmostEqual(_period_hours(self._beat(key)),
-                                   300 / 3600, msg=key)
+                                   seconds / 3600, msg=key)
 
 
 class TheSchedulerKeepsC2sBeatsTests(TestCase):
     """The beat runs django_celery_beat's DatabaseScheduler: C2's two
     schedules survive its conversion (was TheSchedulerKeepsTheOffsetsTests,
-    two crontabs at minutes 1 and 3)."""
+    two crontabs at minutes 1 and 3), the sync at the faster refresh's
+    60 s since 2026-11-06."""
 
     def test_the_database_scheduler_keeps_both(self):
         from django_celery_beat.schedulers import ModelEntry
@@ -1014,7 +1024,7 @@ class TheSchedulerKeepsC2sBeatsTests(TestCase):
         model, field = ModelEntry.to_model_schedule(
             app.conf.beat_schedule["sync-etoro-accounts"]["schedule"])
         self.assertEqual(field, "interval")
-        self.assertEqual((model.every, model.period), (300, "seconds"))
+        self.assertEqual((model.every, model.period), (60, "seconds"))
         model, field = ModelEntry.to_model_schedule(
             app.conf.beat_schedule["reconcile-asset-bot-trades"]["schedule"])
         self.assertEqual(field, "crontab")

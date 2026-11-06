@@ -158,7 +158,7 @@ DEFAULT_COMPONENTS = [
 
     # Scrapers
     {"key": "scraper_live_quotes", "name": "Live Quotes Fetcher", "description": "Fetch real-time price quotes for watchlist (every 60s)", "category": "scraper"},
-    {"key": "scraper_forex", "name": "Forex Quotes", "description": "Forex marks — Alpha Vantage when a key is set, keyless yfinance for the rest (every 10 min)", "category": "scraper"},
+    {"key": "scraper_forex", "name": "Forex Quotes", "description": "Forex marks — Alpha Vantage when a key is set, keyless yfinance for the rest (every 5 min)", "category": "scraper"},
     {"key": "scraper_commodities", "name": "Commodity Quotes", "description": "Commodity prices from the catalogue via yfinance (every 5 min)", "category": "scraper"},
     {"key": "scraper_indices", "name": "Index Quotes", "description": "Index levels via yfinance — feeds the headband, no bot reads these (every 5 min)", "category": "scraper"},
     {"key": "scraper_news", "name": "Breaking News", "description": "Fetch news from APIs and RSS (every 3 min)", "category": "scraper"},
@@ -306,7 +306,7 @@ DEFAULT_COMPONENTS = [
     # account, every follower's capital IS this reading times its share, and
     # the entry path freezes a follower whose reading has gone stale.
     {"key": "broker_account_sync", "name": "Broker Account Sync (Saxo · eToro · IBKR)",
-     "description": "Caches equity and holdings for every keyed Saxo, eToro and IBKR account (eToro every 5 min, the others every 15) — the source of every 'as the broker sees it' cell. ONE switch for all THREE walks: unticking it stops Saxo and eToro too. Every following pool's capital is this reading times its share.",
+     "description": "Caches equity and holdings of every keyed Saxo, eToro and IBKR account (eToro every minute, the others every 15) and eToro's own quotes for the open real positions every 30 s. ONE switch for all THREE walks: unticking it stops them all. Each following pool's capital is this reading times its share.",
      "category": "pipeline"},
 
     # ── Share allocator ───────────────────────────────────────

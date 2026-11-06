@@ -83,7 +83,8 @@ def etoro_stored_equity(user, now=None) -> dict:
 
     The value is the account's total value (accountTotalValue, the
     reading net_liquidation answers), written by sync_etoro_accounts
-    every 300 s from its one aggregate read, and never by the re-read
+    every 60 s since 2026-11-06 (every 300 s from 2026-10-31) from its one
+    aggregate read, and never by the re-read
     after an order (tasks.refresh_etoro_cells writes the cells alone). The
     world is the cells' stamp of the same save (last_margin_world, the
     cash gate's own rule); an environment flip drops the equity

@@ -643,6 +643,32 @@ def _prune_equity_history(broker: str, account_pk: int, now) -> None:
         at__lt=now - timedelta(days=EQUITY_HISTORY_DAYS)).delete()
 
 
+#: THE eTORO WALK'S HISTORY KEEPS ITS FIVE MINUTES (2026-11-06): the walk
+#: beats every 60 s and writes its cells and its equity every pass, and a
+#: history row at most every ETORO_HISTORY_EVERY_S, the density of its old
+#: 300 s beat, less ETORO_HISTORY_SLACK_S so a beat that lands a few
+#: seconds early still writes the fifth pass's row. Five rows a beat would
+#: make every reader that walks the history five times longer: the 90-day
+#: high-water mark every real entry's posture reads
+#: (capital_truth.equity_high_water), the shock's 24 h (share_allocator).
+ETORO_HISTORY_EVERY_S = 300
+ETORO_HISTORY_SLACK_S = 30
+
+
+def _etoro_history_due(account_pk, now) -> bool:
+    """True when the eToro account's newest history row is at least
+    ETORO_HISTORY_EVERY_S old (less the slack), or none is stored. Raises
+    what the read raises (the caller's history try)."""
+    from .equity_models import BrokerEquityReading
+    newest = (BrokerEquityReading.objects
+              .filter(broker="etoro", account_pk=account_pk)
+              .order_by("-at").values_list("at", flat=True).first())
+    if newest is None:
+        return True
+    return ((now - newest).total_seconds()
+            >= ETORO_HISTORY_EVERY_S - ETORO_HISTORY_SLACK_S)
+
+
 def _follow_the_account(user, value, currency) -> None:
     """Retune every pool that OPTED IN to follow the broker's reading.
 
@@ -762,6 +788,20 @@ def _alert_over_allocation(user, reason: str) -> None:
 # alert that fires on every single blip is an alert the operator mutes.
 BROKER_MISS_ALERT_AFTER = 3
 BROKER_MISS_ALERT_COOLDOWN = 6 * 3600
+#: THE eTORO WALK COUNTS FIFTEEN (2026-11-06). It beats every 60 s since
+#: the operator's "augmenter to the maximum le taux de refresh", and three
+#: of its misses would be three minutes, a blip the alert was written to sit
+#: out (three passes were fifteen minutes at its 300 s beat). Fifteen passes
+#: keep the fifteen minutes, for the stall alert and the alarm alike
+#: (bot_program/alarm.read_brokers). IBKR and Saxo keep three (900 s).
+BROKER_MISS_ALERT_AFTER_BY_KIND = {"etoro": 15}
+
+
+def broker_miss_alert_after(kind) -> int:
+    """Consecutive missed syncs of `kind`'s walk ("etoro", "saxo", "ibkr")
+    before the stall alert and the alarm say so (2026-11-06)."""
+    return int(BROKER_MISS_ALERT_AFTER_BY_KIND.get(
+        str(kind or ""), BROKER_MISS_ALERT_AFTER))
 
 
 @shared_task
@@ -1118,11 +1158,18 @@ def sync_etoro_accounts():
         if reading is not None:
             from .equity_models import BrokerEquityReading
             try:
-                BrokerEquityReading.objects.get_or_create(
-                    broker="etoro", account_pk=acct.pk, at=now,
-                    defaults={"value": value, "currency": currency,
-                              "env": "paper" if acct.demo else "live"})
-                _prune_equity_history("etoro", acct.pk, now)
+                # ONE HISTORY ROW IN FIVE MINUTES (2026-11-06): the walk
+                # beats every 60 s, its cells and equity are written every
+                # pass, and the history keeps the 300 s beat's density, so
+                # the readers that walk it (the high-water mark over 90
+                # days on every real entry's posture, the shock's 24 h)
+                # read what they read before.
+                if _etoro_history_due(acct.pk, now):
+                    BrokerEquityReading.objects.get_or_create(
+                        broker="etoro", account_pk=acct.pk, at=now,
+                        defaults={"value": value, "currency": currency,
+                                  "env": "paper" if acct.demo else "live"})
+                    _prune_equity_history("etoro", acct.pk, now)
             except Exception as e:  # noqa: BLE001 — the cell is written; history must not fail the sync
                 logger.warning("broker sync: %s (etoro) history row failed: "
                                "%s", acct.label, e)
@@ -1370,10 +1417,26 @@ def refresh_etoro_cells(account_pk: int, why: str = "") -> dict:
     return out
 
 
+@shared_task
+def refresh_etoro_quotes() -> dict:
+    """eToro's own quotes for the open real positions, every 30 s
+    (2026-11-06, bot_program/etoro_quotes.py): bid, ask and last for the
+    instruments of the open real eToro rows, written to LiveQuote under the
+    source "etoro", at P3 in the eToro request budget.
+
+    Under the sync's own switches (platform_master, broker_account_sync),
+    asked inline as refresh_etoro_cells asks them rather than through
+    guarded_task: the component row is the sync's verdict, and a beat every
+    30 s must not overwrite it. Never raises."""
+    from .etoro_quotes import refresh
+    return refresh()
+
+
 def _note_broker_miss(acct, user, *, cells_only=False,
                       holdings_answered=False) -> None:
     """Count one missed sync of `acct`, log it, and on the third running
-    send the stall alert.
+    (the fifteenth on the eToro walk's 60 s beat, 2026-11-06: fifteen
+    minutes, as three passes were at 300 s) send the stall alert.
 
     `cells_only` (eToro, 2026-10-31, review): the account answered this
     pass but its cash and used margin did not. It counts as a miss like
@@ -1446,7 +1509,10 @@ def _note_broker_miss(acct, user, *, cells_only=False,
             else "no socket — a session, a key or a sign-in",
             misses, _WHERE.get(_kind, _WHERE["ibkr"]))
 
-    if misses < BROKER_MISS_ALERT_AFTER:
+    # fifteen for the eToro walk's 60 s beat, three for the others
+    # (BROKER_MISS_ALERT_AFTER_BY_KIND, 2026-11-06)
+    if misses < BROKER_MISS_ALERT_AFTER_BY_KIND.get(_kind,
+                                                    BROKER_MISS_ALERT_AFTER):
         return
     gate = f"broker_sync:alerted:{_broker_kind(acct)}:{acct.pk}"
     if cache.get(gate):
