@@ -1857,23 +1857,62 @@
     var m = document.cookie.match(/csrftoken=([^;]+)/);
     return m ? m[1] : '';
   }
-  /* A non-JSON response is a real state, not a "network error": a 404 is
-     a signal that expired between hover and click, a redirect-to-login is
-     an expired session, a 403 is CSRF. Decode to something actionable. */
-  function decode(r) {
+  /* A non-JSON response is a real state, not a "network error". What it
+     MEANS depends on whether the request could have run behind it
+     (2026-11-06, a live forex ticket: a LIVE order whose answer was lost
+     after the PIN read "Network error", and eToro had filled it).
+
+     Three answers come from in front of the view, so they, and only
+     they, say nothing was sent: a redirect (the login, the idle lock or
+     the investor gate answered), a 403 (CSRF: Django refused before the
+     view ran) and a 404 (no such signal or instrument: the view's first
+     line). A page with <html in it is not a login page: Django's 500
+     page carries it too, so only a redirect reads as an expired session
+     — or as the idle lock, when it lands on /locked/. These POSTs ask
+     for no JSON, so core/idle_lock answers them with that redirect,
+     never with its 423, and the remedy is the PIN, not a new login.
+
+     A preview only reads, so whatever else it gets back, nothing was sent
+     (decode). An EXECUTE is different: any other answer (a 5xx, a body
+     nobody can read) may come from behind a view that ran, so the order
+     may have gone and the ticket looks it up (decodeSent, `lost`). */
+  var LOCKED = 'The screen is locked — unlock it with your PIN first.';
+  function readAnswer(r, how) {
     return r.text().then(function (t) {
-      try { return JSON.parse(t); }
-      catch (e) {
-        var msg = r.status === 404
-          ? 'This signal is no longer active — it expired or its levels were hit.'
-          : r.status === 403
-            ? 'Not allowed — refresh the page and try again.'
-            : (r.redirected || t.indexOf('<html') !== -1)
-              ? 'Session expired — refresh the page and log in again.'
-              : 'HTTP ' + r.status;
-        return { error: msg };
+      var j = null;
+      try { j = JSON.parse(t); } catch (e) { j = null; }
+      var lost = how.sent
+        ? { lost: true, why: 'the platform answered HTTP ' + r.status + ' with no result' }
+        : null;
+      if (lost && r.status >= 500) return lost;
+      if (j && typeof j === 'object') {
+        /* the idle lock's 423, to a request that asks for JSON
+           (core/idle_lock._wants_json): in front of every view */
+        if (j.pin_locked) {
+          return { error: LOCKED + ' ' + how.nothing };
+        }
+        return j;
       }
+      if (r.redirected) {
+        if (String(r.url || '').indexOf('/locked/') !== -1) {
+          return { error: LOCKED + ' ' + how.nothing };
+        }
+        return { error: 'Session expired — refresh the page and log in again. ' + how.nothing };
+      }
+      if (r.status === 403) {
+        return { error: 'Not allowed — refresh the page and try again. ' + how.nothing };
+      }
+      if (r.status === 404) return { error: how.gone + ' ' + how.nothing };
+      return lost || { error: 'The platform answered HTTP ' + r.status + '. ' + how.nothing };
     });
+  }
+  /* Both doors answer 404: an inactive signal, or an inactive instrument. */
+  var GONE = 'This signal or instrument is no longer active — a signal expires, or ends when its levels are hit.';
+  function decode(r) {
+    return readAnswer(r, { sent: false, gone: GONE, nothing: 'Nothing was sent.' });
+  }
+  function decodeSent(r) {
+    return readAnswer(r, { sent: true, gone: GONE, nothing: 'Nothing was sent.' });
   }
   var inflight = false;   /* double-click / two-tab guard, client half */
 
@@ -3043,6 +3082,10 @@
                     onSuccess);
           return;
         }
+        /* One ref per send (2026-11-06): this order's name for the lookup
+           below when its answer is lost. A new multiplier (above) sends
+           nothing, so it makes none. */
+        var ref = ticketRef();
         var body = Object.assign({ close_ids: choice.close_ids }, extraBody || {});
         if (choice.leverage != null) body.leverage = choice.leverage;
         if (choice.qty !== null) body.qty = choice.qty;
@@ -3051,13 +3094,33 @@
         if (choice.pin) body.pin = choice.pin;
         if (choice.dup_seen) body.dup_seen = choice.dup_seen;
         if (choice.council) body.council_session = choice.council;
+        body.ticket_ref = ref;
         fetch(executeUrl, {
           method: 'POST', credentials: 'same-origin',
           headers: { 'X-CSRFToken': csrf(), 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
-        }).then(decode).then(function (res) {
+        }).then(decodeSent).then(function (res) {
+          /* A 5xx, or an answer that says neither ok nor error: the view
+             may have run, so the order may have gone. Looked up, never
+             told as "nothing happened". */
+          if (res.lost || (!res.ok && !res.error)) {
+            lostAnswer(ref, res.why || 'the platform answered without a result', onSuccess);
+            return;
+          }
           done();
           if (res.error) {
+            /* "The order MAY have reached the broker" (manual_trade: the
+               broker call raised before its answer arrived) is no refusal:
+               the order may be at eToro. Its own words, and the positions
+               asked again — never "Trade not taken". */
+            if (mayHaveReached(res.error)) {
+              positionsChanged(res);
+              SV.overlay.alert({
+                title: 'The order may have reached the broker',
+                message: res.error + ' ' + DONT_RESEND
+              });
+              return;
+            }
             /* If funding closes already happened, the operator must know —
                capital moved even though nothing opened. */
             var said = SV.overlay.alert({
@@ -3113,14 +3176,303 @@
                 ? ' — closed first: ' + res.closed.join(', ') : '')
           });
         }).catch(function (e) {
-          done();
-          SV.overlay.alert({ title: 'Network error', message: String(e) });
+          /* The order left this page and no answer came back: the line
+             dropped, or the answer was cut or could not be read. The
+             order MAY have gone, so it is looked up. The bare "Network
+             error" said here read as "nothing happened" after the PIN,
+             and the order had filled. */
+          lostAnswer(ref, String(e), onSuccess);
         });
       });
     }).catch(function (e) {
       done();
-      SV.overlay.alert({ title: 'Network error', message: String(e) });
+      /* Before any order: a preview only reads. */
+      SV.overlay.alert({
+        title: 'Could not reach the platform',
+        message: 'Nothing was sent — a preview only reads (' + String(e) +
+                 '). Try again when the connection is back.'
+      });
     });
+  }
+
+  /* ── A LOST ANSWER (2026-11-06) ──────────────────────────────────────
+     A live forex ticket: the order left after the PIN, eToro filled it, and
+     the page said "Network error". An answer lost after an order left is
+     not "nothing happened", so the page says the order MAY have gone, not
+     to send it again, and asks Sauron what became of it.
+
+     Each send carries a ref (ticketRef, in the execute body). The execute
+     views record it 'received' before the executor runs and 'booked' or
+     'refused' once it answers (dashboard/ticket_outcome.py), and
+     /api/take-trade/outcome/<ref>/ reads the caller's own record. The
+     page asks with growing gaps, stops at the first 'booked' or
+     'refused', and says what it found: 'received' at the end is an order
+     Sauron has and no result recorded for — still working, or stopped
+     after it may have reached the broker, which is never read as "the
+     broker has not answered" (eToro may have filled it before the view
+     died); 'unknown' is no record, which is never read as proof that
+     nothing was sent. An ask that fails, or hangs past
+     OUTCOME_ASK_MS, changes no words. Closing the answer ends the asking,
+     and the ticket's double-click guard is held until then. */
+  var OUTCOME_URL = '/api/take-trade/outcome/';
+  var OUTCOME_GAPS = [1000, 3000, 6000, 12000, 20000, 30000];
+  var OUTCOME_ASK_MS = 10000;
+  var OUTCOME_STATES = ['received', 'booked', 'refused', 'unknown'];
+  /* Every unsure outcome sends the operator to the eToro app first: an
+     order Sauron holds no row for (its view died after the broker took
+     it) is on eToro at once, and on Positions only once the account is
+     read again. */
+  var DONT_RESEND = 'Do not send it again: check the eToro app first ' +
+                    '(Sauron\'s Positions may not show it yet), then Positions.';
+
+  function ticketRef() {
+    var hex = '';
+    try {
+      var a = new Uint8Array(16);
+      window.crypto.getRandomValues(a);
+      for (var i = 0; i < a.length; i++) hex += (a[i] < 16 ? '0' : '') + a[i].toString(16);
+    } catch (e) { hex = ''; }
+    /* No crypto here: still one ref per send. It only names an order to
+       its owner's own lookup, and the server keys it by the user. */
+    while (hex.length < 32) hex += Math.floor(Math.random() * 16).toString(16);
+    return hex.slice(0, 32);
+  }
+
+  /* manual_trade's words when the broker call raised before its answer
+     arrived: the order may be at the broker, so they are no refusal. */
+  function mayHaveReached(text) {
+    return /MAY have reached the broker/i.test(String(text || ''));
+  }
+
+  /* The positions may have moved: the instrument chart hears the event,
+     the positions list and the counters have refreshes of their own. */
+  function positionsChanged(detail) {
+    try {
+      document.dispatchEvent(new CustomEvent('sv:position-changed',
+                                             { detail: detail || {} }));
+    } catch (e) { /* UI only */ }
+    try { if (window.svLiveRefresh) window.svLiveRefresh(); } catch (e) { /* UI only */ }
+    try { if (window.refreshPanelCounts) window.refreshPanelCounts(); } catch (e) { /* UI only */ }
+  }
+
+  /* One ask: the record, or null when the ask itself failed (dropped, a
+     locked tab's 423, a redirect to a login, a 5xx, no known state) or
+     had no answer after OUTCOME_ASK_MS. It always settles: on the
+     half-open line that lost the order's answer an ask can hang for good
+     (neither daphne nor Caddy cuts it), and one hung ask stalled the
+     asks on "asking again…" with no last words. A cut ask is aborted
+     where the browser can, and counts as an ask that failed. */
+  function askOutcome(ref, ctl) {
+    return new Promise(function (settle) {
+      var cut = setTimeout(function () {
+        cut = null;
+        if (ctl) { try { ctl.abort(); } catch (e) { /* already settled */ } }
+        settle(null);
+      }, OUTCOME_ASK_MS);
+      var done = function (o) {
+        if (cut) { clearTimeout(cut); cut = null; }
+        settle(o);
+      };
+      Promise.resolve().then(function () {
+        return fetch(OUTCOME_URL + encodeURIComponent(ref) + '/', {
+          method: 'GET', credentials: 'same-origin',
+          headers: { 'Accept': 'application/json' },
+          signal: ctl ? ctl.signal : undefined
+        });
+      }).then(function (r) {
+        if (!r.ok || r.redirected) return null;
+        return r.json().then(function (o) {
+          return (o && OUTCOME_STATES.indexOf(o.state) !== -1) ? o : null;
+        }, function () { return null; });
+      }).then(done, function () { done(null); });
+    });
+  }
+
+  /* The asks, until one answers 'booked' or 'refused' or the gaps run
+     out. report(known, final, asked): the strongest answer so far (a later
+     'unknown' never erases a 'received'), or null when no ask answered.
+     Returns stop(). */
+  function followOutcome(ref, report) {
+    var asked = 0, timer = null, ctl = null, stopped = false, known = null;
+    function next() {
+      if (stopped) return;
+      if (asked >= OUTCOME_GAPS.length) {
+        stopped = true;
+        report(known, true, asked);
+        return;
+      }
+      timer = setTimeout(function () {
+        timer = null;
+        ctl = (typeof AbortController === 'function') ? new AbortController() : null;
+        askOutcome(ref, ctl).then(function (o) {
+          if (stopped) return;
+          asked += 1;
+          if (o && !(o.state === 'unknown' && known && known.state === 'received')) known = o;
+          if (o && (o.state === 'booked' || o.state === 'refused')) {
+            stopped = true;
+            report(o, true, asked);
+            return;
+          }
+          report(known, false, asked);
+          next();
+        });
+      }, OUTCOME_GAPS[asked]);
+    }
+    next();
+    return function stop() {
+      stopped = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      if (ctl) { try { ctl.abort(); } catch (e) { /* already settled */ } }
+    };
+  }
+
+  /* The words for what is known. Never "nothing was sent" on no record
+     alone: the line may have dropped after the order reached Sauron. */
+  function outcomeWords(o, final) {
+    if (o && o.state === 'booked') {
+      return {
+        title: o.working ? 'The order went — the broker holds it, not filled yet'
+                         : 'The order went — position open',
+        message: o.side + ' ' + units(o.qty) + ' ' + o.symbol +
+          (o.working ? '' : ' @ ' + lvl(o.entry)) +
+          (o.venue === 'live' ? '  ·  LIVE — real funds' : '') +
+          (o.protection_note ? '  ·  ⚠ ' + o.protection_note : '') +
+          (o.readback_note ? '  ·  ⚠ ' + o.readback_note : '') +
+          (o.closed && o.closed.length ? ' — closed first: ' + o.closed.join(', ') : '') +
+          '  ·  This is the order you sent: do not send it again.'
+      };
+    }
+    if (o && o.state === 'refused') {
+      /* the record says it (in_doubt); its words are the fallback */
+      if (o.in_doubt || mayHaveReached(o.error)) {
+        return { title: 'The order may have reached the broker',
+                 message: o.error + ' ' + DONT_RESEND };
+      }
+      return {
+        title: 'The order was refused — nothing opened',
+        message: o.error + ' Nothing opened.' +
+          (o.closed && o.closed.length
+            ? '  ·  Already closed for funding: ' + o.closed.join(', ') : '')
+      };
+    }
+    if (!final) {
+      return {
+        title: 'Connection lost — the order may have gone',
+        message: 'The order left this page and its answer did not come back. Sauron ' +
+                 'is checking now whether the broker took it — do not send it again ' +
+                 'before the answer.'
+      };
+    }
+    if (o && o.state === 'received') {
+      /* No result was written: the view may still be working, or may
+         have died after the broker took the order (a 500 after the
+         send). Never "the broker has not answered": eToro may have
+         filled it already. */
+      return {
+        title: 'Sauron has the order — no final answer recorded',
+        message: 'Sauron received this order and has no result recorded for it: it ' +
+                 'may still be working, or it may have stopped after the order reached ' +
+                 'the broker. ' + DONT_RESEND
+      };
+    }
+    if (o && o.state === 'unknown') {
+      return {
+        title: 'Not confirmed — check before sending it again',
+        message: 'Sauron has no record of this order reaching it. If the line dropped ' +
+                 'before the order left this page, nothing was sent — but it may have ' +
+                 'gone. ' + DONT_RESEND
+      };
+    }
+    return {
+      title: 'Connection lost — the order may have gone',
+      message: 'The order left this page and its answer did not come back, and Sauron ' +
+               'could not be asked what became of it. It may have gone. ' + DONT_RESEND
+    };
+  }
+
+  /* The answer's own dialog, built the way the ticket is: SV.overlay.alert
+     renders its message once, and this one changes as the asks come
+     back. Its X and its button close it, and closing it ends the asking
+     and frees the ticket. Escape and a tap outside do not
+     (data-sv-persist): a stray tap on a phone must not end the asking
+     before the answer is in. */
+  function lostAnswer(ref, why, onSuccess) {
+    inflight = true;
+    positionsChanged({});
+    var host = null;
+    try {
+      host = document.createElement('div');
+      host.className = 'sv-dialog sv-dialog--danger';
+      host.setAttribute('data-sv-overlay', 'dialog');
+      host.setAttribute('data-sv-persist', '');
+      host.setAttribute('aria-labelledby', 'svOutcomeTitle');
+      host.innerHTML =
+        '<div class="sv-dialog-head">' +
+          '<span class="sv-dialog-title" id="svOutcomeTitle" data-role="outcome-title"></span>' +
+          '<button type="button" class="sv-dialog-x" data-sv-close aria-label="Close">&times;</button>' +
+        '</div>' +
+        '<div class="sv-dialog-body">' +
+          '<p class="sv-dialog-msg" data-role="outcome-msg" aria-live="polite" tabindex="-1"></p>' +
+          '<p class="sv-dialog-detail" data-role="outcome-step" aria-live="polite"></p>' +
+          '<p class="sv-dialog-detail" data-role="outcome-why"></p>' +
+        '</div>' +
+        '<div class="sv-dialog-foot">' +
+          '<button type="button" class="sv-dialog-btn sv-dialog-btn--go" data-role="outcome-ok">Close</button>' +
+        '</div>';
+      document.body.appendChild(host);
+      var titleEl = host.querySelector('[data-role="outcome-title"]');
+      var msgEl = host.querySelector('[data-role="outcome-msg"]');
+      var stepEl = host.querySelector('[data-role="outcome-step"]');
+      var okEl = host.querySelector('[data-role="outcome-ok"]');
+      host.querySelector('[data-role="outcome-why"]').textContent =
+        'On this page: ' + why + '.';
+      var paint = function (w, step) {
+        titleEl.textContent = w.title;
+        msgEl.textContent = w.message;
+        stepEl.textContent = step || '';
+        stepEl.hidden = !step;
+      };
+      paint(outcomeWords(null, false), 'Asking Sauron what became of it…');
+      var stop = null;
+      host.addEventListener('sv:close', function () {
+        if (stop) stop();
+        inflight = false;
+        setTimeout(function () {
+          if (host.parentNode) host.parentNode.removeChild(host);
+        }, 200);
+      });
+      okEl.addEventListener('click', function () { SV.overlay.close(host); });
+      /* Focus on the words, not the button: a stray Enter must not end
+         the asking before the answer is in. */
+      host.setAttribute('data-sv-focus', '[data-role="outcome-msg"]');
+      SV.overlay.open(host, null);
+      stop = followOutcome(ref, function (o, final, asked) {
+        if (!final) {
+          paint(outcomeWords(o, false),
+                (o && o.state === 'received'
+                  ? 'Sauron has the order; no result is recorded for it yet. '
+                  : 'No answer yet. ') +
+                'Asked ' + asked + ' of ' + OUTCOME_GAPS.length + ' times — asking again…');
+          return;
+        }
+        paint(outcomeWords(o, true), '');
+        okEl.textContent = 'OK';
+        host.setAttribute('data-outcome', o ? o.state : 'unanswered');
+        positionsChanged(o || {});
+        if (o && o.state === 'booked' && onSuccess) {
+          try { onSuccess(o); } catch (e) { /* UI only */ }
+        }
+      });
+    } catch (e) {
+      /* No dialog could be built: the words still reach the operator,
+         without the asking. */
+      if (host && host.parentNode) host.parentNode.removeChild(host);
+      inflight = false;
+      var w = outcomeWords(null, true);
+      try {
+        SV.overlay.alert({ title: w.title, message: w.message + '  ·  On this page: ' + why + '.' });
+      } catch (e2) { /* nothing left to say it with */ }
+    }
   }
   window.svTakeTrade = function (signalId) {
     tradeFlow('/signals/' + signalId + '/take-trade/preview/',
@@ -3150,20 +3502,26 @@
      rows, which sit INSIDE a category anchor, can cancel the navigation
      their own container would otherwise perform. */
   /* Same decoding, different 404: on this endpoint a 404 means the trade
-     is not this user's (or is already gone), not that a signal expired. */
+     is not this user's (or is already gone), not that a signal expired.
+     The close is sent like an order: an answer lost after it left may
+     hide a close that happened (decodeCloseSent, `lost`). */
+  var GONE_CLOSE = 'That position is no longer open, or is not yours to close.';
   function decodeClose(r) {
-    return r.text().then(function (t) {
-      try { return JSON.parse(t); }
-      catch (e) {
-        var msg = r.status === 404
-          ? 'That position is no longer open, or is not yours to close.'
-          : r.status === 403
-            ? 'Not allowed — refresh the page and try again.'
-            : (r.redirected || t.indexOf('<html') !== -1)
-              ? 'Session expired — refresh the page and log in again.'
-              : 'HTTP ' + r.status;
-        return { error: msg };
-      }
+    return readAnswer(r, { sent: false, gone: GONE_CLOSE, nothing: 'Nothing was closed.' });
+  }
+  function decodeCloseSent(r) {
+    return readAnswer(r, { sent: true, gone: GONE_CLOSE, nothing: 'Nothing was closed.' });
+  }
+  /* A close whose answer was lost after it left (2026-11-06): it may have
+     happened. No lookup: the positions list is the answer, so it is
+     asked again and the operator is sent to it before a second close. */
+  function closeMayHaveGone(why) {
+    positionsChanged({});
+    SV.overlay.alert({
+      title: 'Connection lost — the close may have gone',
+      message: 'The close left this page and its answer did not come back (' + why +
+               '). The position MAY already be closed — check Positions before ' +
+               'closing it again.'
     });
   }
   var closing = false;
@@ -3233,8 +3591,9 @@
           method: 'POST', credentials: 'same-origin',
           headers: { 'X-CSRFToken': csrf(), 'Content-Type': 'application/json' },
           body: JSON.stringify({ pin: (ok === true ? '' : ok) })
-        }).then(decodeClose).then(function (res) {
+        }).then(decodeCloseSent).then(function (res) {
           done();
+          if (res.lost) { closeMayHaveGone(res.why); return; }
           if (res.error) {
             SV.overlay.alert({
               title: res.still_open || res.pending ? 'STILL OPEN — not closed'
@@ -3258,12 +3617,17 @@
           });
         }).catch(function (e) {
           done();
-          SV.overlay.alert({ title: 'Network error', message: String(e) });
+          /* the close left and no answer came back: it may have happened */
+          closeMayHaveGone(String(e));
         });
       });
     }).catch(function (e) {
       done();
-      SV.overlay.alert({ title: 'Network error', message: String(e) });
+      /* before any close: the preview only reads */
+      SV.overlay.alert({
+        title: 'Could not reach the platform',
+        message: 'Nothing was closed (' + String(e) + ').'
+      });
     });
   }
   document.addEventListener('click', function (e) {

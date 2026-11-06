@@ -5006,6 +5006,14 @@ def take_trade_execute(request, signal_id):
     # lane; twice, counted once): a paper ticket never counts.
     pin_ok = _trading_pin_ok(request, {"pin": body["pin"]}, door=ACT,
                              act="take a live trade")
+    # THE TICKET'S RECORD (2026-11-06, dashboard/ticket_outcome): the
+    # send's ref is 'received' now, before the executor runs, and takes
+    # the answer below, so a page whose answer is lost can look it up.
+    # Best-effort and fenced: the executor's arguments and its answer are
+    # untouched. The user's id is read here, because a fifth wrong PIN
+    # signs the session out inside the executor.
+    from dashboard import ticket_outcome
+    note = ticket_outcome.received(request.user.pk, body["ticket_ref"])
     res = execute_take_trade(request.user, signal,
                              body["close_ids"],
                              qty=body["qty"],
@@ -5015,6 +5023,7 @@ def take_trade_execute(request, signal_id):
                              pin_ok=pin_ok,
                              dup_seen=body["dup_seen"])
     res = _ticket_pin_words(res, pin_ok)
+    note.result(res)
     # THE COUNCIL (2026-10-08): a sitting the owner asked about is linked
     # to the trade AFTER it was taken. It can only follow a trade, never
     # precede or refuse one, and the response is the execution's own.
@@ -5132,6 +5141,13 @@ def _parse_trade_body(request):
         return None, "dup_seen must be a list"
     parsed["dup_seen"] = (None if raw_seen is None else
                           [s for s in raw_seen if isinstance(s, str)][:50])
+
+    # THE TICKET'S OWN REF (2026-11-06): 32 lowercase hex characters the
+    # page made for this one send, so a page whose answer is lost can ask
+    # what became of the order (dashboard/ticket_outcome). Anything else
+    # is None — silent, never an error. Nothing in the execution reads it.
+    from dashboard.ticket_outcome import clean_ref
+    parsed["ticket_ref"] = clean_ref(body.get("ticket_ref"))
 
     return {"close_ids": close_ids,
             "side": str(body.get("side", "")).upper(),
@@ -5445,6 +5461,9 @@ def asset_trade_execute(request, symbol):
     from dashboard.views_close import _pin_ok as _trading_pin_ok
     pin_ok = _trading_pin_ok(request, {"pin": body["pin"]}, door=ACT,
                              act="take a live trade")
+    # THE TICKET'S RECORD (2026-11-06): as on the signal door above.
+    from dashboard import ticket_outcome
+    note = ticket_outcome.received(request.user.pk, body["ticket_ref"])
     res = execute_asset_trade(request.user, inst, body["side"],
                               body["close_ids"],
                               qty=body["qty"],
@@ -5454,6 +5473,7 @@ def asset_trade_execute(request, symbol):
                               pin_ok=pin_ok,
                               dup_seen=body["dup_seen"])
     res = _ticket_pin_words(res, pin_ok)
+    note.result(res)
     # THE COUNCIL (2026-10-08): linked after the trade, as above.
     if isinstance(res, dict) and res.get("ok") and body.get("council_session"):
         from dashboard.views_council import link_ticket_session
