@@ -35,13 +35,20 @@ import re
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
+from unittest import mock
 
 from django.conf import settings
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
 
 from tests.test_rail_every_signal import (
     HOST, _cards, _inst, _partial, _quote, _sig, _user)
+
+#: A cache of its own for the tests that read the rule facts through it
+#: (the rail bypasses its cache under the test runner otherwise).
+FACTS_CACHE = {"default": {
+    "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    "LOCATION": "sv-rail-rule-facts"}}
 
 
 def _snap(user):
@@ -421,6 +428,13 @@ class LeftTheRailTests(_Base):
         self.assertIn("The engine closed it: target reached (+2.00R).", html)
 
     def test_the_left_list_keeps_24_hours_and_counts_the_rest(self):
+        """(2026-11-06, the review) Every departure the engine still holds
+        is drawn in full, its ticket with it: a burst of departures must
+        not take the operator's last way to act on the oldest of them. Only
+        the engine's own closes, which no ticket can take, are drawn up to
+        GONE_ROWS; the rest of them are counted. This test drew 60 of 65
+        departures the engine still held, the cap the review found; it now
+        draws all 65 and caps 65 engine closes at 60 instead."""
         from signals.models import Signal
         Signal.objects.bulk_create([Signal(
             instrument=self.inst, signal_type="technical",
@@ -430,15 +444,121 @@ class LeftTheRailTests(_Base):
             is_active=True) for i in range(65)])
         Signal.objects.filter(rule_name__startswith="rl_aged_").update(
             created_at=timezone.now() - timedelta(hours=30))
+        Signal.objects.bulk_create([Signal(
+            instrument=self.inst, signal_type="technical",
+            direction="bullish", urgency="low", title="closed",
+            description="d", rule_name=f"rl_shut_{i}", score=0.6,
+            sub_scores={}, price_at_signal=Decimal("1.08"),
+            is_active=False, outcome="expired") for i in range(65)])
+        Signal.objects.filter(rule_name__startswith="rl_shut_").update(
+            created_at=timezone.now() - timedelta(hours=10),
+            expired_at=timezone.now() - timedelta(hours=2))
         _sig(self.inst, rule="rl_way_old", minutes_ago=60 * 60)
         snap = _snap(self.user)
-        self.assertEqual(snap["gone_n"], 65)
-        self.assertEqual(len(snap["gone"]), 60)
+        self.assertEqual(snap["gone_n"], 130)
+        self.assertEqual(len(snap["gone"]), 125)
         self.assertEqual(snap["older_n"], 1)
         self.assertIn(("AGED", 65), snap["gone_tags"])
+        self.assertIn(("CLOSED", 65), snap["gone_tags"])
         html = _partial(self.client)
-        self.assertIn("and 5 more in the last 24h", html)
-        self.assertEqual(html.count('class="sr-gone-row"'), 60)
+        self.assertIn("and 5 more engine closes in the last 24h", html)
+        self.assertEqual(html.count('class="sr-gone-row"'), 125)
+        self.assertEqual(html.count("window.svTakeTrade("), 65)
+
+    def test_every_departure_the_engine_holds_keeps_its_ticket(self):
+        """65 stops crossed at once: 65 rows, 65 tickets. The rows past the
+        first 60 used to have none, and /signals/ offers no ticket."""
+        ids = []
+        for i in range(65):
+            inst = _inst(f"RLTK{i:03d}", "forex")
+            _quote(inst, "1.07000")
+            ids.append(_sig(inst, rule=f"rl_tk_{i}").pk)
+        html = _partial(self.client)
+        rows = _gone_rows(html)
+        self.assertEqual(len(rows), 65)
+        missing = [i for i in ids if f"window.svTakeTrade({i})" not in html]
+        self.assertEqual(missing, [])
+        self.assertNotIn("more engine closes", html)
+
+    def test_your_pass_on_a_setup_matched_again_can_be_brought_back(self):
+        """A pass made more than a day ago on a reused composite the scanner
+        has matched again: it would be on the rail but for the pass, so
+        LEFT THE RAIL lists it, as of the re-match, with BRING BACK."""
+        from dashboard.models import RailDeparture
+        from signals.models_opportunity import OpportunityFlag, OpportunitySetup
+        s = _sig(self.inst, rule="rl_setup_again", signal_type="composite",
+                 minutes_ago=40 * 60)
+        setup = OpportunitySetup.objects.create(
+            name="rl_setup_again", conditions=[], asset_classes=[])
+        flag = OpportunityFlag.objects.create(
+            setup=setup, instrument=self.inst, signal=s, score=0.7)
+        matched = timezone.now() - timedelta(hours=2)
+        OpportunityFlag.objects.filter(pk=flag.pk).update(scanned_at=matched)
+        RailDeparture.objects.create(
+            signal=s, user=self.user, reason="passed",
+            words="You passed it at 08:00 UTC.",
+            departed_at=timezone.now() - timedelta(hours=30))
+        self.assertFalse(_on_rail(self.user, s))
+        g = _gone(self.user, s)
+        self.assertIsNotNone(g, "the pass can no longer be undone anywhere")
+        self.assertEqual(g.reason, "passed")
+        self.assertTrue(g.yours)
+        self.assertEqual(g.at, matched)
+        self.assertIn("You passed it", g.words)
+        self.assertIn("matched its setup again", g.words)
+        self.assertIn(f'data-sv-unpass="{s.pk}"', _partial(self.client))
+
+    def test_left_rows_cost_no_query_per_row(self):
+        """LEFT THE RAIL rows whose signal is neither on the rail nor a
+        recent close (a pass on an older signal) are batched like cards:
+        their quote and their position are read with everyone else's."""
+        from dashboard.models import RailDeparture
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        def make(n, tag):
+            for i in range(n):
+                inst = _inst(f"RLX{tag}{i:02d}", "forex")
+                _quote(inst, "1.08100")
+                s = _sig(inst, rule="rl_x_old", minutes_ago=60 * 60)
+                RailDeparture.objects.create(
+                    signal=s, user=self.user, reason="passed",
+                    words="You passed it at 08:00 UTC.",
+                    departed_at=timezone.now() - timedelta(hours=1))
+        make(2, "a")
+        with CaptureQueriesContext(connection) as two:
+            self.assertEqual(len(_snap(self.user)["gone"]), 2)
+        make(10, "b")
+        with CaptureQueriesContext(connection) as twelve:
+            self.assertEqual(len(_snap(self.user)["gone"]), 12)
+        self.assertEqual(len(two.captured_queries),
+                         len(twelve.captured_queries),
+                         "\n".join(q["sql"][:160] for q in
+                                   twelve.captured_queries))
+
+    def test_the_left_count_says_how_many_engine_closes_were_not_read(self):
+        """The engine closes of the last day are read up to a bound; past
+        it, the count and the words say how many more there were."""
+        from signals.models import Signal
+        Signal.objects.bulk_create([Signal(
+            instrument=self.inst, signal_type="technical",
+            direction="bullish", urgency="low", title="closed",
+            description="d", rule_name=f"rl_unread_{i}", score=0.6,
+            sub_scores={}, price_at_signal=Decimal("1.08"),
+            is_active=False, outcome="stopped_out", realized_r=-1.0)
+            for i in range(8)])
+        Signal.objects.filter(rule_name__startswith="rl_unread_").update(
+            created_at=timezone.now() - timedelta(hours=10),
+            expired_at=timezone.now() - timedelta(hours=1))
+        with mock.patch("dashboard.signal_rail.GONE_CLOSED_FETCH", 5):
+            snap = _snap(self.user)
+            html = _partial(self.client)
+        self.assertEqual(snap["closed_unread"], 3)
+        self.assertEqual(snap["gone_n"], 8)
+        self.assertEqual(snap["meta"]["gone"], 8)
+        self.assertIn("3 more engine closes of the last 24h were not read",
+                      html)
+        self.assertIn("3 more engine closes not read", snap["title"])
 
     def test_an_engine_close_after_a_departure_keeps_the_first_reason(self):
         from signals.models import Signal
@@ -527,6 +647,357 @@ class YourOwnChoiceTests(_Base):
         self.assertIn("BY HAND", card)
         self.assertNotIn("ADD TO POSITION", card)
         self.assertIn(f"One position per signal: #{trade.pk} is open.", card)
+
+
+class TheRuleFactsSpeakForTheirMomentTests(_Base):
+    """(2026-11-06, the review) The rule facts are cached 300 seconds
+    outside the test runner, and a departure is permanent: a fact read
+    before a signal reached the rail must never judge it. A pause lifted, a
+    record that recovered: a signal that arrives afterwards is read against
+    the rule as it is."""
+
+    def setUp(self):
+        super().setUp()
+        self.cached = mock.patch("dashboard.signal_rail._testing",
+                                 return_value=False)
+        self.cached.start()
+        self.addCleanup(self.cached.stop)
+
+    @override_settings(CACHES=FACTS_CACHE)
+    def test_a_cached_pause_never_retires_a_signal_born_after_it(self):
+        from django.core.cache import cache
+        from signals.models import RuleControl
+        cache.clear()
+        self.addCleanup(cache.clear)
+        _control("rl_cached_pause", status="paused", paused_days=7)
+        before = _sig(self.inst, rule="rl_cached_pause")
+        self.assertEqual(_gone(self.user, before).reason, "rule_paused")
+        RuleControl.objects.filter(rule_name="rl_cached_pause").update(
+            status="active", paused_until=None)
+        after = _sig(_inst("RLFXB"), rule="rl_cached_pause")
+        self.assertTrue(_on_rail(self.user, after),
+                        "a signal born after the unpause was retired by the "
+                        "cached pause")
+        self.assertIsNone(_departure(after))
+        # The one the pause met stays gone: a departure is permanent.
+        self.assertEqual(_gone(self.user, before).reason, "rule_paused")
+
+    @override_settings(CACHES=FACTS_CACHE)
+    def test_a_cached_record_never_judges_a_newer_signal(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.addCleanup(cache.clear)
+        _graded("rl_cached_loser", 20, -0.5)
+        first = _sig(self.inst, rule="rl_cached_loser")
+        self.assertEqual(_gone(self.user, first).reason, "rule_losing")
+        _graded("rl_cached_loser", 30, 1.5, outcome="hit_target")
+        later = _sig(_inst("RLFXB"), rule="rl_cached_loser")
+        self.assertTrue(_on_rail(self.user, later),
+                        "a signal born after the record recovered was retired "
+                        "by the cached record")
+
+    def test_the_facts_are_read_from_the_cache_in_one_call(self):
+        """One cache read for every rule on the rail, not one per rule."""
+
+        class Recorder:
+            def __init__(self):
+                self.store, self.calls = {}, []
+
+            def get(self, key, default=None, **kw):
+                self.calls.append(("get", key))
+                return self.store.get(key, default)
+
+            def get_many(self, keys, **kw):
+                keys = list(keys)
+                self.calls.append(("get_many", tuple(keys)))
+                return {k: self.store[k] for k in keys if k in self.store}
+
+            def set(self, key, value, timeout=None, **kw):
+                self.calls.append(("set", key))
+                self.store[key] = value
+
+            def set_many(self, data, timeout=None, **kw):
+                self.calls.append(("set_many", tuple(data)))
+                self.store.update(data)
+                return []
+
+        for i in range(4):
+            _sig(_inst(f"RLCG{i}"), rule=f"rl_cg_{i}", minutes_ago=30)
+        rec = Recorder()
+        with mock.patch("django.core.cache.cache", rec):
+            self.assertEqual(len(_snap(self.user)["cards"]), 4)
+            rec.calls.clear()
+            self.assertEqual(len(_snap(self.user)["cards"]), 4)
+        rule_calls = [c for c in rec.calls
+                      if any(str(k).startswith("sv:rail:rule:")
+                             for k in (c[1] if isinstance(c[1], tuple)
+                                       else (c[1],)))]
+        self.assertEqual([c[0] for c in rule_calls], ["get_many"], rec.calls)
+
+
+class TheVoteFollowsTheBotsClockTests(_Base):
+    """decide() counts a signal for max_signal_age_hours (24 by default)
+    from when it FIRED, and the hand ticket's backing does too; the
+    opportunity scanner reuses a composite signal and only re-flags it. A
+    re-match keeps the card on the rail — the setup holds — but never brings
+    its vote back."""
+
+    def _rematched(self, inst, rule, *, fired_h, matched_h=2, **kw):
+        from signals.models_opportunity import OpportunityFlag, OpportunitySetup
+        s = _sig(inst, rule=rule, signal_type="composite",
+                 minutes_ago=fired_h * 60, **kw)
+        setup = OpportunitySetup.objects.create(name=rule, conditions=[],
+                                                asset_classes=[])
+        flag = OpportunityFlag.objects.create(setup=setup, instrument=inst,
+                                              signal=s, score=0.7)
+        OpportunityFlag.objects.filter(pk=flag.pk).update(
+            scanned_at=timezone.now() - timedelta(hours=matched_h))
+        return s
+
+    def _card_html(self, s):
+        html = _partial(self.client)
+        return html.split(f'data-signal-id="{s.pk}"', 1)[1].split(
+            'class="sr-signal-wrap', 1)[0]
+
+    def test_a_rematched_composite_no_longer_votes_after_24_hours(self):
+        from bot_program.asset_engine import StockBot
+        from tests.test_evidence_honesty import _cfg as bot_cfg
+        inst = _inst("RLVOTEA", "stock")
+        _control("rl_setup_vote", stage="live_full")
+        s = self._rematched(inst, "rl_setup_vote", fired_h=30, score=0.85,
+                            entry="100", stop="95", target="110")
+        _quote(inst, "100")
+        snap = _snap(self.user)
+        card = next(c for c in snap["cards"] if c.pk == s.pk)
+        self.assertEqual(card.rail.stage_label, "TRADEABLE")
+        self.assertFalse(card.rail.votes, "the rail says the bots count a "
+                         "vote decide() no longer counts")
+        self.assertFalse(card.rail.live)
+        self.assertEqual(card.rail.vote_until,
+                         s.created_at + timedelta(hours=24))
+        self.assertEqual(snap["votes_n"], 0)
+        self.assertEqual(snap["live_n"], 0)
+        chunk = self._card_html(s)
+        self.assertIn('data-votes="0"', chunk)
+        self.assertIn('data-live="0"', chunk)
+        self.assertNotIn("the bots count its vote", chunk)
+        self.assertIn("stopped counting its vote", chunk)
+        self.assertIn("matched it again", chunk)
+        self.assertIn("24h after the scanner last matched its setup", chunk)
+        cfg = bot_cfg(self.user, asset_class="stock", name="RL vote clock",
+                      mode="paper", symbols=["RLVOTEA"],
+                      capital=Decimal("10000"), min_signals_for_entry=1)
+        self.assertEqual(StockBot(cfg).decide("RLVOTEA").direction, "HOLD")
+
+    def test_a_fresh_signal_votes_until_24_hours_after_it_fired(self):
+        _control("rl_fresh_vote", stage="live_full")
+        s = _sig(self.inst, rule="rl_fresh_vote", minutes_ago=60)
+        card = next(c for c in _snap(self.user)["cards"] if c.pk == s.pk)
+        self.assertTrue(card.rail.votes)
+        self.assertTrue(card.rail.live)
+        self.assertEqual(card.rail.vote_until,
+                         s.created_at + timedelta(hours=24))
+        chunk = self._card_html(s)
+        self.assertIn('data-votes="1"', chunk)
+        self.assertIn("a default bot counts its vote until", chunk)
+
+    def test_the_words_speak_for_a_default_bot(self):
+        """A bot's own max_signal_age_hours can differ (a scalp persona
+        counts 4 hours, a position persona 72): the words say "a default
+        bot", never "the bots"."""
+        aged = _sig(self.inst, rule="rl_words_age", minutes_ago=25 * 60)
+        self.assertIn("a default bot", _gone(self.user, aged).words)
+        self.assertNotIn("the bots count", _gone(self.user, aged).words)
+        chips = (Path(settings.BASE_DIR) / "templates" / "_partials"
+                 / "rail_sig_chips.html").read_text(encoding="utf-8")
+        votes = re.search(r'data-f-val="votes"[^>]*title="([^"]*)"', chips)
+        self.assertIsNotNone(votes)
+        self.assertIn("default bot", votes.group(1))
+
+
+class TheWordsStayTrueTests(_Base):
+    """The words of a departure are written once and read for a day: each
+    one says its moment, and a fact that can change after it — the rule's
+    pause, the operator's position — is said as it is now, beside them."""
+
+    def test_a_stop_departure_says_its_moment(self):
+        s = _sig(self.inst)
+        _quote(self.inst, "1.07400")
+        g = _gone(self.user, s)
+        self.assertRegex(g.words, r"^At \d\d:\d\d UTC the price")
+        self.assertIn("was at or through its stop", g.words)
+        self.assertNotIn("a ticket here is refused", g.words)
+        self.assertTrue(g.takeable)
+
+    def test_the_paused_words_are_true_for_a_scanner_setup(self):
+        """The opportunity scanner never reads the pause: it keeps writing
+        and re-matching a paused setup's signals. What a pause does stop is
+        the bots' vote and their entries."""
+        _control("rl_setup_paused", status="paused", paused_days=7)
+        comp = _sig(self.inst, rule="rl_setup_paused", signal_type="composite")
+        g = _gone(self.user, comp)
+        self.assertEqual(g.reason, "rule_paused")
+        self.assertNotIn("writes no new signal", g.words)
+        self.assertIn("the bots no longer count its vote or open an entry on it",
+                      g.words)
+        _control("rl_rule_paused", status="paused", paused_days=7)
+        tech = _sig(_inst("RLFXB"), rule="rl_rule_paused")
+        self.assertIn("the rule engine writes no new signal for it",
+                      _gone(self.user, tech).words)
+
+    def test_a_paused_row_says_the_rule_state_now(self):
+        from signals.models import RuleControl
+        _control("rl_unpaused", status="paused", paused_days=7)
+        s = _sig(self.inst, rule="rl_unpaused")
+        g = _gone(self.user, s)
+        self.assertRegex(g.words, r"^At \d\d:\d\d UTC its rule \(rl_unpaused\) "
+                                  r"was paused")
+        self.assertIn("Its rule is paused now.", g.words)
+        RuleControl.objects.filter(rule_name="rl_unpaused").update(
+            status="active", paused_until=None)
+        g = _gone(self.user, s)
+        self.assertEqual(g.reason, "rule_paused")
+        self.assertIn("Its rule is no longer paused.", g.words)
+        self.assertNotIn("is paused now", g.words)
+
+    def _hand_trade(self, s, status="OPEN"):
+        from bot_program.models import AssetBotTrade
+        cfg = _cfg(self.user, mode="paper", name="manual")
+        return AssetBotTrade.objects.create(
+            config=cfg, asset_class="forex", symbol=self.inst.symbol,
+            side="BUY", qty=Decimal("1"), entry_price=Decimal("1.08"),
+            stop_loss=Decimal("1.075"), take_profit=Decimal("1.09"),
+            status=status, paper=True, rule_name="manual_take",
+            metadata={"manual": True, "signal_id": s.pk})
+
+    def test_the_taken_words_follow_the_position(self):
+        from bot_program.models import AssetBotTrade
+        from dashboard.signal_rail import _hhmm
+        s = _sig(self.inst, minutes_ago=60)
+        trade = self._hand_trade(s)
+        AssetBotTrade.objects.filter(pk=trade.pk).update(
+            opened_at=timezone.now() - timedelta(minutes=50))
+        trade.refresh_from_db()
+        resp = self.client.post(
+            "/api/signal-rail/pass/", data=json.dumps({"signal_id": s.pk}),
+            content_type="application/json", HTTP_HOST=HOST)
+        self.assertEqual(resp.json()["reason"], "taken")
+        self.assertIn(f"You took it at {_hhmm(trade.opened_at)}",
+                      _departure(s, self.user).words)
+        g = _gone(self.user, s)
+        self.assertIn(f"position #{trade.pk} is open", g.words)
+        AssetBotTrade.objects.filter(pk=trade.pk).update(
+            status="CLOSED", closed_at=timezone.now())
+        g = _gone(self.user, s)
+        self.assertEqual(g.reason, "taken")
+        self.assertNotIn(f"position #{trade.pk} is open", g.words)
+        self.assertIn("you hold no position on it now", g.words)
+
+    def test_a_closing_position_is_said_closing(self):
+        """CLOSE_PENDING is still open at the broker, so the card keeps the
+        ticket back; but the server's one-position check reads OPEN only,
+        so the card must not say "is open"."""
+        s = _sig(self.inst)
+        trade = self._hand_trade(s, status="CLOSE_PENDING")
+        html = _partial(self.client)
+        card = html.split(f'data-signal-id="{s.pk}"', 1)[1].split(
+            'class="sr-signal-wrap', 1)[0]
+        self.assertNotIn(f"#{trade.pk} is open", card)
+        self.assertIn(f"#{trade.pk} is closing (close pending)", card)
+        self.assertNotIn(f"window.svTakeTrade({s.pk})", card)
+        _quote(self.inst, "1.07000")
+        g = _gone(self.user, s)
+        self.assertIn(f"position #{trade.pk} is closing", g.position_words)
+        self.assertFalse(g.takeable)
+
+    def test_rounded_numbers_never_contradict_their_line(self):
+        # Reward:risk 0.997 is under the ticket's 1.00 line: never "1.00".
+        chased = _sig(self.inst)
+        _quote(self.inst, "1.08251")
+        g = _gone(self.user, chased)
+        self.assertEqual(g.reason, "chased")
+        self.assertIn("reward:risk 0.99, under the ticket's 1.00 line", g.words)
+        # Half an hour past the 24 hours is never "24h old, past the 24h".
+        aged = _sig(_inst("RLFXB"), rule="rl_half", minutes_ago=24 * 60 + 30)
+        self.assertIn("24h 30m old", _gone(self.user, aged).words)
+        # Ten real-money closes at exactly 0R lost nothing.
+        _closes(_cfg(self.user), "rl_flat_live", 10, 0.0)
+        flat = _sig(_inst("RLFXC"), rule="rl_flat_live")
+        g = _gone(self.user, flat)
+        self.assertEqual(g.reason, "rule_losing_live")
+        self.assertNotIn("lost real money", g.words)
+        self.assertIn("made nothing with real money on forex", g.words)
+
+    def test_demotion_words_name_the_venues_and_the_day(self):
+        """The words are read for a day after they are written: the
+        demotion says its date, and the stages in the operator's words
+        beside the ladder's own names."""
+        from signals.models import PromotionEvent
+        _control("rl_demoted_y", stage="paper")
+        s = _sig(self.inst, rule="rl_demoted_y", minutes_ago=5 * 60)
+        ev = PromotionEvent.objects.create(
+            rule_name="rl_demoted_y", from_stage="live_small",
+            to_stage="paper", reason="auto_demote")
+        when = timezone.now() - timedelta(hours=2)
+        PromotionEvent.objects.filter(pk=ev.pk).update(created_at=when)
+        g = _gone(self.user, s)
+        self.assertEqual(g.reason, "rule_demoted")
+        self.assertIn("demoted from live_small to paper", g.words)
+        self.assertIn("live at quarter size to the paper venue", g.words)
+        from datetime import timezone as dt_timezone
+        self.assertIn(when.astimezone(dt_timezone.utc).strftime("%b %d"),
+                      g.words)
+
+    def test_the_held_chips_say_which_books(self):
+        """HELD counts every open position of the operator's — live, demo,
+        paper and the legacy book — and the chips say so."""
+        for name in ("rail_sig_chips.html", "rail_watch_chips.html"):
+            src = (Path(settings.BASE_DIR) / "templates" / "_partials"
+                   / name).read_text(encoding="utf-8")
+            title = re.search(r'data-f-val="held"[^>]*title="([^"]*)"', src)
+            with self.subTest(chips=name):
+                self.assertIsNotNone(title)
+                self.assertIn("live, demo, paper", title.group(1))
+
+
+class TheCountsAreWholeTests(_Base):
+    def test_signals_beyond_the_ceiling_are_not_called_left_earlier(self):
+        for i in range(5):
+            _sig(_inst(f"RLCE{i}"), rule=f"rl_ce_{i}", minutes_ago=10 + i)
+        with mock.patch("dashboard.signal_rail.RAIL_SAFETY_CEILING", 3):
+            snap = _snap(self.user)
+        self.assertTrue(snap["ceiling_hit"])
+        self.assertEqual(snap["n"], 3)
+        self.assertEqual(snap["older_n"], 0, snap["title"])
+        self.assertIn("showing the newest 3 of 5", snap["title"])
+
+    def test_an_unread_rail_says_so_and_counts_nothing(self):
+        """A snapshot that fails is an unknown, never a zero: the cell, its
+        sub-line and the rail head say "—", and no sentence says the rail
+        is empty."""
+        from tests.test_rail_every_signal import _page
+        _sig(self.inst)
+        with mock.patch("dashboard.signal_rail._build",
+                        side_effect=RuntimeError("db hiccup")):
+            page = _page(self.client)
+            swept = _page(self.client, HTTP_X_SV_SWEEP="1")
+            partial = _partial(self.client)
+
+        def text(html, pattern):
+            from html import unescape
+            m = re.search(pattern, html, re.S)
+            self.assertIsNotNone(m, pattern)
+            return unescape(re.sub(r"<[^>]+>", "", m.group(1))).strip()
+        for html in (page, swept):
+            self.assertEqual(text(html, r'data-sv-live="hb-signals" '
+                                        r'data-sv-live-key="hb-signals">(.*?)'
+                                        r'</span>\s*<span'), "—")
+            self.assertEqual(text(html, r'data-sv-live="hb-signals-sub">(.*?)'
+                                        r'</span>\s*<div'), "—")
+        self.assertEqual(text(page, r'id="railSigCount"[^>]*>(.*?)</span>'), "—")
+        self.assertIn("could not be read", partial)
+        self.assertNotIn("No signal on the rail", partial)
+        self.assertNotIn("Nothing left the rail", partial)
 
 
 class PrimedActedTests(_Base):

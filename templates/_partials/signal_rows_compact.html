@@ -18,5 +18,6 @@ window.svRailFocus, delegated to #hbSignalRows).
     <span class="ipr-age sv-age" data-sv-at="{{ sig.created_at|date:'c' }}">{{ sig.created_at|timesince }} ago</span>
 </div>
 {% empty %}
-<div class="ip-dd-empty">No signal on the rail{% if rail.gone_n %} · {{ rail.gone_n }} left in the last 24h{% endif %}</div>
+{% if rail.error %}<div class="ip-dd-empty">The rail could not be read; the signals are untouched. /signals/ lists every one.</div>
+{% else %}<div class="ip-dd-empty">No signal on the rail{% if rail.gone_n %} · {{ rail.gone_n }} left in the last 24h{% endif %}</div>{% endif %}
 {% endfor %}

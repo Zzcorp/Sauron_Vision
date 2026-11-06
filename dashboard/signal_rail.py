@@ -19,7 +19,8 @@ THE LIFECYCLE, first match wins:
    1  yours            your own PASS or take              (stored, by the pass view)
    2  recorded         a departure already written        (sticky: never slides back)
    3  superseded       a newer signal from its own rule on its instrument
-   4  aged             past the 24h the bots and the hand ticket count it
+   4  aged             24h past when it fired, or past when the scanner last
+                       matched a reused composite
    5  stop_crossed     a fresh mark at or through the stop
    6  target_reached   a fresh mark at or through the target
    7  chased           reward:risk from the mark under the ticket's 1.00,
@@ -31,9 +32,35 @@ THE LIFECYCLE, first match wins:
                        real-money closes in 180 days, expectancy at or under 0R
 
 Every departure but age is written once, with its reason in words, to
-dashboard.RailDeparture the first time the rail sees it. Age is a clock and
-is re-read on each render. The engine's own closes (target, stop, 7-day
-expiry) are read from the Signal row as they are.
+dashboard.RailDeparture the first time the rail sees it — words that say
+their moment ("At 14:32 UTC the price ... was through its stop"), because
+they are read for a day; a fact that can change after them (the rule's
+pause, the operator's own position) is said as it is NOW, beside them. Age
+is a clock and is re-read on each render. The engine's own closes (target,
+stop, 7-day expiry) are read from the Signal row as they are. The
+lifecycle is the rail's, not one operator's: a signal you passed is still
+judged, so an undo brings back only what the rail would show.
+
+THE VOTE (2026-11-06, the review). decide() counts a signal for
+max_signal_age_hours (24 by default) from when it FIRED, and so does the
+hand ticket's backing; the opportunity scanner reuses a composite row and
+only re-flags it. A re-match keeps the card on the rail — the setup holds
+— but never brings its vote back: `votes` and `live` end 24h after the
+signal fired, and the words speak for "a default bot" (a persona's own age
+limit can be 4 hours or 72).
+
+LEFT THE RAIL draws every departure the engine still holds, each with its
+ticket, so a burst of departures never takes the operator's last way to
+act on one; only the engine's own closes, which no ticket can take, are
+drawn up to GONE_ROWS and counted past it. A pass of yours on a setup the
+scanner has matched again since is listed too, as of the re-match, so it
+can always be brought back.
+
+THE RULE FACTS (the stage badge, the graded and the real-money records)
+are cached RULE_FACTS_TTL seconds and stamped with the moment they were
+read. A departure is permanent, so a fact never judges a signal that
+reached the rail after it was read: such a rule is read again now (a pause
+lifted, a record recovered).
 
 NOTHING HERE IS A SECOND IMPLEMENTATION. The 24 hours are
 manual_trade.SIGNAL_BACKING_HOURS (and decide()'s default
@@ -81,9 +108,12 @@ RAIL_WINDOW_HOURS = 2 * RAIL_FRESH_HOURS
 #: A guard against a runaway writer (a replay, a bulk insert), never a
 #: display limit: the rail says so in words when it binds.
 RAIL_SAFETY_CEILING = 500
-#: LEFT THE RAIL rows drawn in full; the counts cover all of them.
+#: The engine's own closes drawn in full in LEFT THE RAIL; every departure
+#: the engine still holds is drawn whatever their number (the candidates'
+#: ceiling bounds them), and the counts cover all of them.
 GONE_ROWS = 60
-#: Engine closes of the last 24h read for LEFT THE RAIL.
+#: Engine closes of the last 24h read for LEFT THE RAIL; past it, a count
+#: says how many more there were, in words.
 GONE_CLOSED_FETCH = 400
 #: Per-rule facts (stage badge, graded and real-money records).
 RULE_FACTS_TTL = 300
@@ -116,6 +146,12 @@ CLOSE_WORDS = {"hit_target": "target reached", "stopped_out": "stopped out",
 
 _DEMOTE_WORDS = {"auto_demote": "auto demotion",
                  "manual_demote": "manual demotion", "rollback": "rollback"}
+#: The ladder's stages in the operator's words (signals/rule_actuator
+#: stage_policy says the same of each).
+STAGE_WORDS = {"research": "watched, no orders", "paper": "the paper venue",
+               "live_small": "live at quarter size",
+               "live_full": "live at full size"}
+LIVE_STAGES = ("live_small", "live_full")
 
 
 @dataclass
@@ -128,8 +164,15 @@ class RailFacts:
     stage_label: str = ""
     stage_tone: str = ""
     stage_reason: str = ""
+    #: The rule may vote (decide()'s may_vote: a voting stage, not paused).
+    may_vote: bool = False
+    #: A default bot counts its vote now: may_vote, and fired in the last
+    #: 24 hours (decide() and the hand ticket count from created_at).
     votes: bool = False
     live: bool = False
+    vote_until: object = None
+    vote_words: str = ""
+    leaves_words: str = ""
     held: bool = False
     held_venue: str = ""
     rule_key: str = ""
@@ -199,14 +242,52 @@ def _hhmm(dt) -> str:
     return dt.astimezone(dt_timezone.utc).strftime("%H:%M UTC") if dt else "—"
 
 
+def _when(dt, now=None) -> str:
+    """'14:32 UTC' on the day of `now`, 'Nov 05 14:32 UTC' on another."""
+    if not dt:
+        return "—"
+    now = now or timezone.now()
+    d = dt.astimezone(dt_timezone.utc)
+    if d.date() == now.astimezone(dt_timezone.utc).date():
+        return d.strftime("%H:%M UTC")
+    return d.strftime("%b %d %H:%M UTC")
+
+
+def _on_day(dt) -> str:
+    """'on Nov 05 at 14:32 UTC' — for words written once and read later."""
+    if not dt:
+        return "at an unknown time"
+    d = dt.astimezone(dt_timezone.utc)
+    return d.strftime("on %b %d at %H:%M UTC")
+
+
 def _px(value, inst) -> str:
     from core.price_format import format_price
     return format_price(value, getattr(inst, "asset_class", ""),
                         getattr(inst, "symbol", ""))
 
 
-def _hours(seconds) -> str:
-    return f"{int(seconds // 3600)}h"
+def _age(seconds) -> str:
+    """'25h', '24h 30m', '45m' — whole minutes, so a signal half an hour
+    past the 24 hours never reads as on them; the first minute past reads
+    'just over 24h'."""
+    mins = max(0, int(seconds // 60))
+    h, m = divmod(mins, 60)
+    if h == RAIL_FRESH_HOURS and m == 0:
+        return f"just over {h}h"
+    if h == 0:
+        return f"{m}m"
+    return f"{h}h" + (f" {m}m" if m else "")
+
+
+def _shown_under(value, line) -> float:
+    """`value` at two decimals, never rounded up onto a line it is under
+    (promotion_pipeline.loser_numbers does the same for the floor): 0.997
+    under the ticket's 1.00 reads 0.99, not 1.00."""
+    shown = round(float(value), 2)
+    if float(value) < line <= shown:
+        shown = round(line - 0.01, 2)
+    return shown
 
 
 def _side_of(direction) -> str:
@@ -316,23 +397,44 @@ def _live_rows() -> dict:
     return {(r["rule_name"], r["asset_class"]): r for r in rows}
 
 
-def _rule_facts(rules) -> dict:
-    """{rule: {"badge", "stats", "loser", "live"}} — per distinct rule,
-    cached RULE_FACTS_TTL seconds outside the test runner."""
+def _rule_facts(rules, arrived=None) -> dict:
+    """{rule: {"name", "at", "badge", "stats", "loser", "live"}} — per
+    distinct rule, cached RULE_FACTS_TTL seconds outside the test runner,
+    read from the cache in one call.
+
+    A fact speaks for the moment it was read (`at`), and a departure is
+    permanent: `arrived` maps a rule to the latest moment one of its
+    candidates reached the rail (fired, or matched again by the scanner),
+    and a cached fact read before that moment is read again now — so a
+    pause lifted or a record recovered never retires a signal that arrived
+    after it (2026-11-06, the review)."""
     from django.core.cache import cache
     from dashboard.signal_surface import badges_for
     from signals.promotion_pipeline import measured_loser
 
     testing = _testing()
+    arrived = arrived or {}
+    keys = {r: f"sv:rail:rule:{rule_key(r)}" for r in rules}
+    hits = {}
+    if not testing and keys:
+        try:
+            hits = cache.get_many(list(keys.values())) or {}
+        except Exception as e:  # noqa: BLE001 — an unread cache is a miss
+            logger.debug("[rail] rule facts cache unread: %s", e)
     out, missing = {}, []
     for r in rules:
-        hit = None if testing else cache.get(f"sv:rail:rule:{rule_key(r)}")
-        if isinstance(hit, dict) and hit.get("name") == r:
+        hit = hits.get(keys[r])
+        came = arrived.get(r)
+        if (isinstance(hit, dict) and hit.get("name") == r
+                and hit.get("at") is not None
+                and (came is None or came < hit["at"])):
             out[r] = hit
         else:
             missing.append(r)
     if not missing:
         return out
+    # Stamped BEFORE the reads: every fact below is at least this fresh.
+    read_at = timezone.now()
     badges = badges_for(missing)
     try:
         stats = graded_records(missing)
@@ -344,18 +446,23 @@ def _rule_facts(rules) -> dict:
     except Exception as e:  # noqa: BLE001
         logger.warning("[rail] real-money records unread: %s", e)
         live = {}
+    fresh = {}
     for r in missing:
         st = stats.get(r) or {"n": 0, "expectancy": None, "hit_rate": None}
         try:
             loser = measured_loser(r, stats=st) if r else ""
         except Exception:  # noqa: BLE001
             loser = ""
-        fact = {"name": r, "badge": badges.get(r) or {}, "stats": st,
-                "loser": loser,
+        fact = {"name": r, "at": read_at, "badge": badges.get(r) or {},
+                "stats": st, "loser": loser,
                 "live": {cls: row for (rn, cls), row in live.items() if rn == r}}
         out[r] = fact
-        if not testing:
-            cache.set(f"sv:rail:rule:{rule_key(r)}", fact, RULE_FACTS_TTL)
+        fresh[keys[r]] = fact
+    if not testing and fresh:
+        try:
+            cache.set_many(fresh, RULE_FACTS_TTL)
+        except Exception as e:  # noqa: BLE001 — the render stands
+            logger.debug("[rail] rule facts not cached: %s", e)
     return out
 
 
@@ -394,32 +501,54 @@ def _affirmed(s, last_flag):
 
 
 def _aged_words(s, aff, now, last_flag) -> str:
+    """Why an active signal aged off the rail, as of `now` (never stored:
+    a clock). A default bot's age limit (decide()'s max_signal_age_hours) is
+    24 hours; a persona's own can differ, so the words never say "the
+    bots". A reused composite is let go 24h after the scanner last matched
+    it — its vote ended 24h after it fired, which says nothing more here."""
     age = (now - aff).total_seconds()
     if last_flag.get(s.pk) and aff > s.created_at:
-        return (f"The scanner last matched this setup {_hours(age)} ago, past "
-                f"the {RAIL_FRESH_HOURS}h in which the bots count its vote "
-                f"and a hand ticket counts it as backing.")
-    return (f"{_hours(age)} old, past the {RAIL_FRESH_HOURS}h in which the bots "
-            f"count its vote and a hand ticket counts it as backing.")
+        return (f"The scanner last matched this setup {_age(age)} ago: the "
+                f"rail keeps a signal {RAIL_FRESH_HOURS}h after the scanner "
+                f"last saw it.")
+    return (f"{_age(age)} old: past the {RAIL_FRESH_HOURS}h in which a "
+            f"default bot counts its vote and an instrument-view ticket "
+            f"counts it as backing.")
 
 
-def _price_verdict(s, mark, side):
-    """(reason, words) when a fresh mark says the plan is past, else None."""
+def _aged_at_words(s, aff, aged_at, last_flag) -> str:
+    """The same, for a signal the engine closed after it aged: said at the
+    moment it aged, never as an age."""
+    if last_flag.get(s.pk) and aff > s.created_at:
+        return (f"The scanner last matched this setup at {_hhmm(aff)}; the "
+                f"rail let it go {RAIL_FRESH_HOURS}h later, at "
+                f"{_hhmm(aged_at)}.")
+    return (f"It passed {RAIL_FRESH_HOURS}h old at {_hhmm(aged_at)}: a "
+            f"default bot no longer counted its vote, nor an instrument-view "
+            f"ticket as backing.")
+
+
+def _price_verdict(s, mark, side, now):
+    """(reason, words) when a fresh mark says the plan is past, else None.
+    The words are written once and read for a day, so they say their
+    moment: the price may come back, and the row's ticket is priced then."""
     entry, stop, target = _levels(s)
     inst = s.instrument
     order = _order_side(side)
     if order is None or mark is None:
         return None
+    at = _hhmm(now)
     if stop is not None and ((order == "BUY" and mark <= stop)
                              or (order == "SELL" and mark >= stop)):
         return ("stop_crossed",
-                f"Price {_px(mark, inst)} went through its stop "
-                f"{_px(stop, inst)}; a ticket here is refused (levels on the "
-                f"wrong side of the price).")
+                f"At {at} the price, {_px(mark, inst)}, was at or through its "
+                f"stop, {_px(stop, inst)}: a ticket at that price is refused "
+                f"(levels on the wrong side of the price).")
     if target is not None and ((order == "BUY" and mark >= target)
                                or (order == "SELL" and mark <= target)):
         return ("target_reached",
-                f"Price {_px(mark, inst)} reached its target {_px(target, inst)}.")
+                f"At {at} the price, {_px(mark, inst)}, reached its target, "
+                f"{_px(target, inst)}.")
     if None in (entry, stop, target):
         return None
     now_rr = reward_risk_advisory(order, mark, stop, target).get("ratio")
@@ -432,9 +561,10 @@ def _price_verdict(s, mark, side):
         risk = abs(mark - stop)
         reward = abs(target - mark)
         return ("chased",
-                f"Price ran {pct:.0f}% of the way to its target: from "
-                f"{_px(mark, inst)} it risks {_px(risk, inst)} to make "
-                f"{_px(reward, inst)}, reward:risk {now_rr:.2f}, under the "
+                f"At {at} the price had run {pct:.0f}% of the way to its "
+                f"target: from {_px(mark, inst)} it risked {_px(risk, inst)} "
+                f"to make {_px(reward, inst)}, reward:risk "
+                f"{_shown_under(now_rr, REWARD_RISK_WARN):.2f}, under the "
                 f"ticket's {REWARD_RISK_WARN:.2f} line (it was {born_rr:.2f} "
                 f"at the entry).")
     return None
@@ -455,16 +585,40 @@ def _is_demotion(ev) -> bool:
         return False
 
 
-def _verdict(s, ctx):
-    """(reason, words, departed_at, mark, store, yours) or None (stays)."""
-    mine = ctx["mine"].get(s.pk)
-    if mine is not None:
-        return (mine.reason, mine.words, mine.departed_at, _f(mine.mark),
-                False, True)
+@dataclass
+class Verdict:
+    """The rail's own verdict on a candidate: why it left, when, and
+    whether the departure is written (every one but age)."""
+    reason: str
+    words: str
+    at: object
+    mark: Optional[float] = None
+    store: bool = False
+
+
+def _paused_words(s, rule, now) -> str:
+    """What a pause does, and only that. The bots drop a paused rule's
+    vote (decide()'s may_vote) and refuse its entries (the entry path's
+    pause check); the RULE ENGINE writes no new signal for it — but the
+    opportunity scanner never reads the pause, and keeps writing and
+    re-matching a paused setup's composite signals."""
+    stops = "the bots no longer count its vote or open an entry on it"
+    if (s.signal_type or "") != "composite":
+        stops = "the rule engine writes no new signal for it, and " + stops
+    return f"At {_hhmm(now)} its rule ({rule}) was paused: {stops}."
+
+
+def _stage_words(stage) -> str:
+    return STAGE_WORDS.get(stage or "", stage or "an unknown stage")
+
+
+def _lifecycle(s, ctx):
+    """The rail's verdict on `s` (rules 2-11), the operator's own choice
+    left out — a pass is one operator's, the lifecycle is the rail's. None:
+    it stays."""
     rec = ctx["life"].get(s.pk)
     if rec is not None:
-        return (rec.reason, rec.words, rec.departed_at, _f(rec.mark),
-                False, False)
+        return Verdict(rec.reason, rec.words, rec.departed_at, _f(rec.mark))
     now = ctx["now"]
     side = _side_of(s.direction)
     if s.rule_name:
@@ -475,47 +629,50 @@ def _verdict(s, ctx):
             verb = ("Replaced" if new_side == side or new_side == "flat"
                     or side == "flat" else "Reversed")
             word = {"long": "LONG", "short": "SHORT"}.get(new_side, "signal")
-            return ("superseded",
-                    f"{verb} by a newer {word} from the same rule "
-                    f"({s.rule_name}) at {_hhmm(newer.created_at)}.",
-                    newer.created_at, None, True, False)
+            return Verdict("superseded",
+                           f"{verb} by a newer {word} from the same rule "
+                           f"({s.rule_name}) at {_hhmm(newer.created_at)}.",
+                           newer.created_at, None, True)
     aff = _affirmed(s, ctx["last_flag"])
     if (now - aff) > timedelta(hours=RAIL_FRESH_HOURS):
-        return ("aged", _aged_words(s, aff, now, ctx["last_flag"]),
-                aff + timedelta(hours=RAIL_FRESH_HOURS), None, False, False)
+        return Verdict("aged", _aged_words(s, aff, now, ctx["last_flag"]),
+                       aff + timedelta(hours=RAIL_FRESH_HOURS))
     mark, fresh = _fresh_mark(s.instrument, now)
     if fresh:
-        hit = _price_verdict(s, mark, side)
+        hit = _price_verdict(s, mark, side, now)
         if hit is not None:
-            return (hit[0], hit[1], now, mark, True, False)
+            return Verdict(hit[0], hit[1], now, mark, True)
     rf = ctx["rules"].get(s.rule_name or "") or {}
     badge = rf.get("badge") or {}
     rule = s.rule_name or ""
     if badge.get("label") == "PAUSED":
-        return ("rule_paused",
-                f"Its rule ({rule}) is paused: the engine writes no new "
-                f"signal for it and the bots no longer count its vote.",
-                now, None, True, False)
+        return Verdict("rule_paused", _paused_words(s, rule, now), now,
+                       None, True)
     ev = _demotion_after(s, ctx["demotions"])
     if ev is not None:
-        return ("rule_demoted",
-                f"Its rule ({rule}) was demoted from {ev.from_stage} to "
-                f"{ev.to_stage} at {_hhmm(ev.created_at)} "
-                f"({_DEMOTE_WORDS.get(ev.reason, ev.reason)}).",
-                ev.created_at, None, True, False)
+        return Verdict("rule_demoted",
+                       f"Its rule ({rule}) was demoted from {ev.from_stage} "
+                       f"to {ev.to_stage} ({_stage_words(ev.from_stage)} to "
+                       f"{_stage_words(ev.to_stage)}) {_on_day(ev.created_at)} "
+                       f"({_DEMOTE_WORDS.get(ev.reason, ev.reason)}).",
+                       ev.created_at, None, True)
     if rf.get("loser"):
-        return ("rule_losing",
-                "Its rule's graded record is a measured loser: " + rf["loser"],
-                now, None, True, False)
+        return Verdict("rule_losing",
+                       f"At {_hhmm(now)} its rule's graded record was a "
+                       f"measured loser: " + rf["loser"], now, None, True)
     cls = _pool_class(s.instrument.asset_class)
     row = (rf.get("live") or {}).get(cls)
     if (rule and row and int(row.get("n") or 0) >= LIVE_RECORD_MIN_N
             and float(row.get("expectancy") or 0) <= 0):
-        return ("rule_losing_live",
-                f"{rule} lost real money on {cls}: {int(row['n'])} closed "
-                f"real-money trades in {LIVE_RECORD_DAYS} days, expectancy "
-                f"{float(row['expectancy']):+.2f}R.",
-                now, None, True, False)
+        exp = float(row.get("expectancy") or 0)
+        # At or under 0R is not profitable; only under it lost money.
+        verb = ("had lost real money" if exp < 0
+                else "had made nothing with real money")
+        return Verdict("rule_losing_live",
+                       f"At {_hhmm(now)} {rule} {verb} on {cls}: "
+                       f"{int(row['n'])} closed real-money trades in "
+                       f"{LIVE_RECORD_DAYS} days, expectancy {exp:+.2f}R.",
+                       now, None, True)
     return None
 
 
@@ -527,12 +684,30 @@ def _close_words(s) -> str:
     return f"{what}{tail}" if what else "closed"
 
 
+def _vote_words(s, may_vote, votes, vote_until, aff, now) -> str:
+    if not may_vote:
+        return "no bot counts its vote"
+    if votes:
+        return f"a default bot counts its vote until {_when(vote_until, now)}"
+    stopped = (f"a default bot stopped counting its vote at "
+               f"{_when(vote_until, now)}, {RAIL_FRESH_HOURS}h after it fired")
+    if aff > s.created_at:
+        return (f"{stopped}; the scanner matched it again "
+                f"{_age((now - aff).total_seconds())} ago")
+    return stopped
+
+
 def _facts(s, ctx, now) -> RailFacts:
     inst = s.instrument
     rf = ctx["rules"].get(s.rule_name or "") or {}
     badge = rf.get("badge") or {}
     side = _side_of(s.direction)
-    votes = bool(badge.get("may_trade")) and badge.get("label") != "PAUSED"
+    # decide()'s may_vote, and its age bound: a default bot counts a
+    # signal for 24 hours from when it FIRED (created_at), whatever the
+    # scanner re-matched since (2026-11-06, the review).
+    may_vote = bool(badge.get("may_trade")) and badge.get("label") != "PAUSED"
+    vote_until = s.created_at + timedelta(hours=RAIL_FRESH_HOURS)
+    votes = may_vote and now <= vote_until
     stage = badge.get("stage") or ""
     held = ctx["held"].get((inst.symbol or "").upper(), "")
     mark, fresh = _fresh_mark(inst, now)
@@ -548,12 +723,24 @@ def _facts(s, ctx, now) -> RailFacts:
     aff = _affirmed(s, ctx["last_flag"])
     cls = inst.asset_class or ""
     pool = _pool_class(cls)
+    if aff > s.created_at:
+        leaves = (f"It leaves the rail {RAIL_FRESH_HOURS}h after the scanner "
+                  f"last matched its setup, unless the scanner matches it "
+                  f"again")
+    else:
+        leaves = (f"It leaves the rail {RAIL_FRESH_HOURS}h after it fired: "
+                  f"past that a default bot no longer counts its vote, nor "
+                  f"an instrument-view ticket as backing")
     return RailFacts(
         asset_class=cls, side=side, score_band=_score_band(s.score),
         stage=stage, stage_label=badge.get("label") or "",
         stage_tone=badge.get("tone") or "",
         stage_reason=badge.get("reason") or "",
-        votes=votes, live=votes and stage in ("live_small", "live_full"),
+        may_vote=may_vote, votes=votes,
+        live=votes and stage in LIVE_STAGES,
+        vote_until=vote_until,
+        vote_words=_vote_words(s, may_vote, votes, vote_until, aff, now),
+        leaves_words=leaves,
         held=bool(held), held_venue=held, rule_key=rule_key(s.rule_name),
         mark=mark, mark_fresh=fresh, progress_r=progress, rr_now=rr_now,
         affirmed_at=aff, leaves_at=aff + timedelta(hours=RAIL_FRESH_HOURS),
@@ -622,6 +809,8 @@ def _empty(error="") -> dict:
             "short_n": 0, "active_n": 0, "older_n": 0, "new24": 0,
             "classes": classes, "rules": [], "groups": [], "votes_n": 0, "live_n": 0,
             "held_n": 0, "ceiling_hit": False, "evaluated": 0, "total": 0,
+            "unevaluated": 0, "closed_unread": 0,
+            "closed_fetch": GONE_CLOSED_FETCH,
             "ceiling": RAIL_SAFETY_CEILING, "error": error, "meta": meta,
             "title": meta["title"]}
 
@@ -669,12 +858,23 @@ def _build(request) -> dict:
     ceiling_hit = len(candidates) > RAIL_SAFETY_CEILING
     candidates = candidates[:RAIL_SAFETY_CEILING]
     total = cand_qs.count() if ceiling_hit else len(candidates)
+    # Past the ceiling: not evaluated, so never counted as "left earlier".
+    unevaluated = max(0, total - len(candidates))
 
-    # 2. The engine's own closes of the last 24 hours.
-    closed = list(Signal.objects
-                  .filter(is_active=False, expired_at__gte=gone_start)
+    # 2. The engine's own closes of the last 24 hours, read up to a bound;
+    #    past it, one count says how many more there were.
+    closed_qs = Signal.objects.filter(is_active=False,
+                                      expired_at__gte=gone_start)
+    closed = list(closed_qs
                   .select_related("instrument", "instrument__live_quote")
-                  .order_by("-expired_at", "-pk")[:GONE_CLOSED_FETCH])
+                  .order_by("-expired_at", "-pk")[:GONE_CLOSED_FETCH + 1])
+    closed_unread = 0
+    if len(closed) > GONE_CLOSED_FETCH:
+        closed = closed[:GONE_CLOSED_FETCH]
+        last = closed[-1]
+        closed_unread = closed_qs.filter(
+            Q(expired_at__lt=last.expired_at)
+            | Q(expired_at=last.expired_at, pk__lt=last.pk)).count()
 
     ids = [s.pk for s in candidates] + [s.pk for s in closed]
     last_flag = dict(OpportunityFlag.objects.filter(signal_id__in=ids)
@@ -689,7 +889,8 @@ def _build(request) -> dict:
     rows = list(RailDeparture.objects
                 .filter(Q(signal_id__in=ids) | Q(departed_at__gte=gone_start))
                 .filter(who)
-                .select_related("signal", "signal__instrument"))
+                .select_related("signal", "signal__instrument",
+                                "signal__instrument__live_quote"))
     mine = {r.signal_id: r for r in rows if r.user_id is not None}
     life = {r.signal_id: r for r in rows if r.user_id is None}
 
@@ -697,7 +898,15 @@ def _build(request) -> dict:
     extra = {r.signal_id: r.signal for r in rows if r.signal_id not in id_set}
     rules = sorted({s.rule_name or "" for s in candidates + closed}
                    | {s.rule_name or "" for s in extra.values()})
-    rule_facts = _rule_facts(rules)
+    # When each rule's newest candidate reached the rail: a cached fact
+    # read before that moment is read again (_rule_facts).
+    arrived = {}
+    for s in candidates:
+        if s.rule_name:
+            came = _affirmed(s, last_flag)
+            if arrived.get(s.rule_name) is None or came > arrived[s.rule_name]:
+                arrived[s.rule_name] = came
+    rule_facts = _rule_facts(rules, arrived)
 
     demotions = {}
     if candidates:
@@ -725,23 +934,40 @@ def _build(request) -> dict:
            "last_flag": last_flag, "rules": rule_facts,
            "demotions": demotions, "held": held}
 
-    # 4. The verdicts.
+    # 4. The verdicts. The rail's own lifecycle judges every candidate, the
+    #    ones this operator passed included (the lifecycle is the rail's, a
+    #    pass is one operator's); your own pass or take is the first match.
     cards, gone, to_store = [], [], []
     for s in candidates:
-        v = _verdict(s, ctx)
-        if v is None:
-            s.rail = _facts(s, ctx, now)
-            cards.append(s)
-            continue
-        reason, words, at, mark, store, yours = v
-        if store:
+        v = _lifecycle(s, ctx)
+        if v is not None and v.store:
             to_store.append(RailDeparture(
-                signal=s, user=None, reason=reason, words=words[:300],
-                mark=(None if mark is None else round(mark, 8)),
-                departed_at=at))
-        if at >= gone_start:
-            gone.append(_gone_row(s, reason, words, at, yours, ctx, now,
-                                  active=True))
+                signal=s, user=None, reason=v.reason, words=v.words[:300],
+                mark=(None if v.mark is None else round(v.mark, 8)),
+                departed_at=v.at))
+        own = mine.get(s.pk)
+        if own is None:
+            if v is None:
+                s.rail = _facts(s, ctx, now)
+                cards.append(s)
+            elif v.at >= gone_start:
+                gone.append(_gone_row(s, v.reason, v.words, v.at, False, ctx,
+                                      now, active=True))
+            continue
+        at, words = own.departed_at, own.words
+        if at < gone_start:
+            if v is not None:
+                continue            # past on its own as well
+            # A setup the scanner matched again after your pass: it would be
+            # on the rail but for the pass, so it is listed — as of the
+            # re-match — and can always be brought back.
+            aff = _affirmed(s, last_flag)
+            did = "took" if own.reason == "taken" else "passed"
+            at = aff
+            words = (f"You {did} it {_on_day(own.departed_at)}; the scanner "
+                     f"matched its setup again at {_hhmm(aff)}.")
+        gone.append(_gone_row(s, own.reason, words, at, True, ctx, now,
+                              active=True))
 
     if to_store:
         try:
@@ -753,6 +979,12 @@ def _build(request) -> dict:
             logger.warning("[rail] departures not recorded: %s", e)
 
     seen = {g.signal_id for g in gone} | {s.pk for s in cards}
+    # The rest of LEFT THE RAIL — the engine's closes and the departures of
+    # signals no longer candidates — read their positions in one query,
+    # as the cards do (a row's position line, the taken words).
+    Signal.prime_acted([c for c in closed if c.pk not in seen]
+                       + [sig for sid, sig in extra.items()
+                          if sig is not None and sid not in seen])
     for c in closed:
         if c.pk in seen:
             continue
@@ -772,7 +1004,7 @@ def _build(request) -> dict:
             if c.expired_at and aged_at < c.expired_at:
                 if aged_at < gone_start:
                     continue
-                reason, words, at, yours = ("aged", _aged_words(
+                reason, words, at, yours = ("aged", _aged_at_words(
                     c, aff, aged_at, last_flag), aged_at, False)
                 closed_words = (f"closed by the engine at "
                                 f"{_hhmm(c.expired_at)}: {_close_words(c)}")
@@ -804,7 +1036,18 @@ def _build(request) -> dict:
     for g in gone:
         tags[g.tag] = tags.get(g.tag, 0) + 1
     gone_tags = sorted(tags.items(), key=lambda kv: (-kv[1], kv[0]))
-    shown = gone[:GONE_ROWS]
+    # Every departure the engine still holds is drawn, its ticket with it:
+    # a burst of departures must never take the operator's last way to act
+    # on one. The engine's own closes, which no ticket can take, are drawn
+    # up to GONE_ROWS and counted past it.
+    shown, closes_drawn = [], 0
+    for g in gone:
+        if g.engine_active:
+            shown.append(g)
+        elif closes_drawn < GONE_ROWS:
+            shown.append(g)
+            closes_drawn += 1
+    gone_n = len(gone) + closed_unread
     _contras(cards)
     _rank(cards)
 
@@ -815,7 +1058,7 @@ def _build(request) -> dict:
     n = len(cards)
     long_n = sum(1 for s in cards if s.rail.side == "long")
     short_n = sum(1 for s in cards if s.rail.side == "short")
-    older_n = max(0, active_n - n - gone_active)
+    older_n = max(0, active_n - n - gone_active - unevaluated)
     per_class = {}
     for s in cards:
         per_class[s.rail.asset_class] = per_class.get(s.rail.asset_class, 0) + 1
@@ -833,7 +1076,10 @@ def _build(request) -> dict:
     live_n = sum(1 for s in cards if s.rail.live)
     held_n = sum(1 for s in cards if s.rail.held)
     title = (f"{n} on the rail · {active_n} active in the engine · "
-             f"{len(gone)} left in the last 24h · {older_n} left earlier")
+             f"{gone_n} left in the last 24h · {older_n} left earlier")
+    if closed_unread:
+        title += (f" ({closed_unread} more engine closes not read: the "
+                  f"newest {GONE_CLOSED_FETCH} were)")
     if ceiling_hit:
         title += (f" · showing the newest {RAIL_SAFETY_CEILING} of {total} "
                   f"signals from the last {RAIL_WINDOW_HOURS}h")
@@ -863,40 +1109,65 @@ def _build(request) -> dict:
     } for s in cards]
 
     meta = {"ok": True, "n": n, "long": long_n, "short": short_n,
-            "active": active_n, "gone": len(gone), "older": older_n,
+            "active": active_n, "gone": gone_n, "older": older_n,
             "new24": new24,
             "classes": [[k, c] for k, _label, c in classes if c],
             "rules": [[name, key, cnt] for name, key, cnt in rule_list],
             "votes": votes_n, "live": live_n, "held": held_n,
             "ceiling": ceiling_hit, "title": title}
 
+    tags_words = " · ".join(f"{t.lower()} {c}" for t, c in gone_tags)
+    if closed_unread:
+        tags_words = " · ".join(filter(None, [
+            tags_words, f"{closed_unread} engine closes not read"]))
     return {
         "cards": cards, "rows": rows_out, "gone": shown,
-        "gone_n": len(gone), "gone_more": max(0, len(gone) - len(shown)),
+        "gone_n": gone_n, "gone_more": max(0, len(gone) - len(shown)),
         "gone_tags": gone_tags,
-        "gone_tags_words": " · ".join(f"{t.lower()} {c}" for t, c in gone_tags),
+        "gone_tags_words": tags_words,
         "n": n, "long_n": long_n, "short_n": short_n, "active_n": active_n,
         "older_n": older_n, "new24": new24, "classes": classes,
         "rules": rule_list, "groups": groups,
         "votes_n": votes_n, "live_n": live_n,
         "held_n": held_n, "ceiling_hit": ceiling_hit,
         "evaluated": len(candidates), "total": total,
+        "unevaluated": unevaluated, "closed_unread": closed_unread,
+        "closed_fetch": GONE_CLOSED_FETCH,
         "ceiling": RAIL_SAFETY_CEILING, "error": "", "meta": meta,
         "title": title,
     }
 
 
 def _gone_row(s, reason, words, at, yours, ctx, now, *, active) -> Gone:
+    """One LEFT THE RAIL row. The stored words say their moment; what can
+    change after them is said as it is now: your own position (TAKEN reads
+    the book, not the words written at the take) and a paused rule."""
     inst = s.instrument
     facts = _facts(s, ctx, now)
-    acted = getattr(s, "_acted_cache", None) if active else None
-    if active and not hasattr(s, "_acted_cache"):
-        acted = s.acted
+    # Primed with everyone else's (prime_acted); asked alone only if the
+    # batched read failed.
+    acted = s._acted_cache if hasattr(s, "_acted_cache") else s.acted
     own_hand = bool(acted and acted.get("by") == "manual" and acted.get("exact"))
+    closing = bool(acted) and acted.get("status") == "CLOSE_PENDING"
     position = ""
-    if acted:
+    if yours and reason == "taken":
+        if own_hand:
+            words = (f"You took it at {_hhmm(acted.get('opened_at'))}: "
+                     f"position #{acted.get('trade_id')} "
+                     + ("is closing (close pending)." if closing
+                        else "is open."))
+        else:
+            words = words.rstrip(".") + "; you hold no position on it now."
+    elif acted:
         who = "BY HAND" if acted.get("by") == "manual" else "BY BOT"
-        position = f"position #{acted.get('trade_id')} still open ({who})"
+        state = "is closing, close pending" if closing else "is still open"
+        position = f"position #{acted.get('trade_id')} {state} ({who})"
+    if reason == "rule_paused":
+        badge = ((ctx["rules"].get(s.rule_name or "") or {}).get("badge")
+                 or {})
+        words = (f"{words} Its rule is paused now."
+                 if badge.get("label") == "PAUSED"
+                 else f"{words} Its rule is no longer paused.")
     return Gone(
         signal_id=s.pk, symbol=inst.symbol, asset_class=inst.asset_class or "",
         side=facts.side, direction=s.direction, rule=s.rule_name or "",
@@ -911,10 +1182,13 @@ def _gone_row(s, reason, words, at, yours, ctx, now, *, active) -> Gone:
 def pass_words(signal, now=None) -> tuple:
     """(reason, words) for the operator's own departure of `signal`: TAKEN
     when the book shows their own exact hand position on it, PASSED
-    otherwise."""
+    otherwise. Written once, so said in the past: the take at the moment the
+    position opened, never "is open" (LEFT THE RAIL says that from the book,
+    as it is when the row is read)."""
     now = now or timezone.now()
     acted = signal.acted
     if acted and acted.get("by") == "manual" and acted.get("exact"):
-        return ("taken", f"You took it at {_hhmm(now)}: position "
-                         f"#{acted.get('trade_id')} is open.")
+        return ("taken", f"You took it at "
+                         f"{_hhmm(acted.get('opened_at') or now)} "
+                         f"(position #{acted.get('trade_id')}).")
     return ("passed", f"You passed it at {_hhmm(now)}.")

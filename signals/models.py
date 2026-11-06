@@ -190,6 +190,11 @@ class Signal(models.Model):
             "venue": "PAPER" if trade.paper else "LIVE",
             "rule": trade.rule_name or "",
             "trade_id": trade.pk,
+            # OPEN, or CLOSE_PENDING: still open at the broker while the bot
+            # wants it flat (2026-11-06) — the rail says "closing", and only
+            # an OPEN position is what the hand ticket's one-position-per-
+            # signal check refuses a second of.
+            "status": trade.status,
             "opened_at": trade.opened_at,
             "entry": float(trade.entry_price) if trade.entry_price else None,
             "stop": float(trade.stop_loss) if trade.stop_loss else None,

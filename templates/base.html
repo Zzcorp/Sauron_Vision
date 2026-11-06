@@ -1170,20 +1170,21 @@
                     that is NOT a live region: the rail refresh paints it from
                     the same fetch as the rail, and the 60s sweep never
                     writes it. The counts here are written by both the sweep
-                    and the rail refresh, from the same function.
+                    and the rail refresh, from the same function. A rail that
+                    could not be read is an unknown, "—", never a zero.
                     {% endcomment %}
-                    <span class="ip-count" data-sv-live="hb-signals" data-sv-live-key="hb-signals">{{ rail.n|default:"0" }}</span>
-                    <span class="ip-sub" data-sv-live="hb-signals-sub">{{ rail.long_n|default:"0" }} long · {{ rail.short_n|default:"0" }} short</span>
+                    <span class="ip-count" data-sv-live="hb-signals" data-sv-live-key="hb-signals">{% if rail.error %}<span class="sv-unknown" title="The rail could not be read: the signals are untouched">&mdash;</span>{% else %}{{ rail.n|default:"0" }}{% endif %}</span>
+                    <span class="ip-sub" data-sv-live="hb-signals-sub">{% if rail.error %}<span class="sv-unknown">&mdash;</span>{% else %}{{ rail.long_n|default:"0" }} long · {{ rail.short_n|default:"0" }} short{% endif %}</span>
                     <div class="ip-dropdown" id="hbSignalsDD" data-sv-fhost="signals" {% include "_partials/rail_host_attrs.html" with p=rail_prefs.sig kind="signals" %}>
                         <div class="ip-dd-head">SIGNALS ON THE RAIL</div>
                         {# The rail's own filters, on the same state (2026-11-06): outside every live region, so a sweep never writes them. #}
                         <div class="rail-facets rf-compact" data-f-kind="signals" role="toolbar" aria-label="Filter the signals">{% include "_partials/rail_sig_chips.html" with p=rail_prefs.sig full=False %}</div>
                         <div data-sv-live="hb-signals-detail">
                         <div class="ip-dd-grid" title="{{ rail.title }}">
-                            <div class="ip-dd-cell"><span class="dk">ON THE RAIL</span><span class="dv" data-sv-rail-n="n">{{ rail.n|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">ACTIVE (ENGINE)</span><span class="dv" data-sv-rail-n="active">{{ rail.active_n|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">LEFT 24H</span><span class="dv" data-sv-rail-n="gone">{{ rail.gone_n|default:"0" }}</span></div>
-                            <div class="ip-dd-cell"><span class="dk">NEW 24H</span><span class="dv" data-sv-rail-n="new24">{{ rail.new24|default:"0" }}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">ON THE RAIL</span><span class="dv" data-sv-rail-n="n">{% if rail.error %}&mdash;{% else %}{{ rail.n|default:"0" }}{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">ACTIVE (ENGINE)</span><span class="dv" data-sv-rail-n="active">{% if rail.error %}&mdash;{% else %}{{ rail.active_n|default:"0" }}{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">LEFT 24H</span><span class="dv" data-sv-rail-n="gone">{% if rail.error %}&mdash;{% else %}{{ rail.gone_n|default:"0" }}{% endif %}</span></div>
+                            <div class="ip-dd-cell"><span class="dk">NEW 24H</span><span class="dv" data-sv-rail-n="new24">{% if rail.error %}&mdash;{% else %}{{ rail.new24|default:"0" }}{% endif %}</span></div>
                         </div>
                         </div>
                         <div class="sv-sig-rows" id="hbSignalRows" data-sv-list="signals">
@@ -1513,7 +1514,7 @@
             <span class="rh-label">SIGNALS</span>
             <button type="button" class="rh-held" id="railHeld" hidden title="A refresh is waiting while you read a card. Click to show it now."></button>
             <button type="button" class="rh-gear" data-f-panel="railSigPanel" aria-controls="railSigPanel" aria-expanded="false" title="Filters and display">&#9881;</button>
-            <span class="rh-count" id="railSigCount" title="{{ rail.title }}">{{ rail.n|default:"0" }}</span>
+            <span class="rh-count" id="railSigCount" title="{{ rail.title }}">{% if rail.error %}&mdash;{% else %}{{ rail.n|default:"0" }}{% endif %}</span>
             <span class="rh-chev">▼</span>
         </div>
         {% comment %}
@@ -1529,7 +1530,7 @@
         <div class="rail-facets" id="railSigFacets" data-f-kind="signals" role="toolbar" aria-label="Filter the signals on the rail">{% include "_partials/rail_sig_chips.html" with p=rail_prefs.sig full=True %}</div>
         <div class="rail-fpanel" id="railSigPanel" data-f-kind="signals" hidden>
             <div class="rf-row"><span class="rf-k">MIN SCORE</span><button type="button" class="rf-opt" data-f-key="score" data-f-val="0" aria-pressed="{% if not rail_prefs.sig.score %}true{% else %}false{% endif %}">any</button><button type="button" class="rf-opt" data-f-key="score" data-f-val="5" aria-pressed="{% if rail_prefs.sig.score == 5 %}true{% else %}false{% endif %}">.5</button><button type="button" class="rf-opt" data-f-key="score" data-f-val="6" aria-pressed="{% if rail_prefs.sig.score == 6 %}true{% else %}false{% endif %}">.6</button><button type="button" class="rf-opt" data-f-key="score" data-f-val="7" aria-pressed="{% if rail_prefs.sig.score == 7 %}true{% else %}false{% endif %}">.7</button><button type="button" class="rf-opt" data-f-key="score" data-f-val="8" aria-pressed="{% if rail_prefs.sig.score == 8 %}true{% else %}false{% endif %}">.8</button><button type="button" class="rf-opt" data-f-key="score" data-f-val="9" aria-pressed="{% if rail_prefs.sig.score == 9 %}true{% else %}false{% endif %}">.9</button></div>
-            <div class="rf-row"><span class="rf-k">STAGE</span><button type="button" class="rf-opt" data-f-key="stage" data-f-val="all" aria-pressed="{% if rail_prefs.sig.stage == 'votes' or rail_prefs.sig.stage == 'live' %}false{% else %}true{% endif %}">all</button><button type="button" class="rf-opt" data-f-key="stage" data-f-val="votes" aria-pressed="{% if rail_prefs.sig.stage == 'votes' %}true{% else %}false{% endif %}" title="Only the signals whose rule the bots count">votes</button><button type="button" class="rf-opt" data-f-key="stage" data-f-val="live" aria-pressed="{% if rail_prefs.sig.stage == 'live' %}true{% else %}false{% endif %}" title="Only the rules at a live-venue stage">live</button></div>
+            <div class="rf-row"><span class="rf-k">STAGE</span><button type="button" class="rf-opt" data-f-key="stage" data-f-val="all" aria-pressed="{% if rail_prefs.sig.stage == 'votes' or rail_prefs.sig.stage == 'live' %}false{% else %}true{% endif %}">all</button><button type="button" class="rf-opt" data-f-key="stage" data-f-val="votes" aria-pressed="{% if rail_prefs.sig.stage == 'votes' %}true{% else %}false{% endif %}" title="Only the signals a default bot counts now: a voting stage, fired in the last 24 hours">votes</button><button type="button" class="rf-opt" data-f-key="stage" data-f-val="live" aria-pressed="{% if rail_prefs.sig.stage == 'live' %}true{% else %}false{% endif %}" title="Only the signals a default bot counts now at a live-venue stage">live</button></div>
             <div class="rf-row"><span class="rf-k">HELD</span><button type="button" class="rf-opt" data-f-key="held" data-f-val="all" aria-pressed="{% if rail_prefs.sig.held == 'held' or rail_prefs.sig.held == 'not' %}false{% else %}true{% endif %}">all</button><button type="button" class="rf-opt" data-f-key="held" data-f-val="held" aria-pressed="{% if rail_prefs.sig.held == 'held' %}true{% else %}false{% endif %}">held</button><button type="button" class="rf-opt" data-f-key="held" data-f-val="not" aria-pressed="{% if rail_prefs.sig.held == 'not' %}true{% else %}false{% endif %}">not held</button></div>
             <div class="rf-row"><span class="rf-k">SORT</span><button type="button" class="rf-opt" data-f-key="sort" data-f-val="new" aria-pressed="{% if rail_prefs.sig.sort == 'score' or rail_prefs.sig.sort == 'class' %}false{% else %}true{% endif %}">newest</button><button type="button" class="rf-opt" data-f-key="sort" data-f-val="score" aria-pressed="{% if rail_prefs.sig.sort == 'score' %}true{% else %}false{% endif %}">score</button><button type="button" class="rf-opt" data-f-key="sort" data-f-val="class" aria-pressed="{% if rail_prefs.sig.sort == 'class' %}true{% else %}false{% endif %}">class</button></div>
             <div class="rf-row"><span class="rf-k">GROUP BY CLASS</span><button type="button" class="rf-opt" data-f-key="group" data-f-val="0" aria-pressed="{% if rail_prefs.sig.group %}false{% else %}true{% endif %}">off</button><button type="button" class="rf-opt" data-f-key="group" data-f-val="1" aria-pressed="{% if rail_prefs.sig.group %}true{% else %}false{% endif %}">on</button></div>

@@ -47,15 +47,19 @@ first render passes rail_initial and renders those rows itself.
         {% if g.position_words %}<div class="sr-gone-pos">{{ g.position_words }}</div>{% endif %}
         {% if g.takeable or g.yours %}
         <div class="sr-gone-acts">
-            {% if g.takeable %}<button type="button" class="sr-gone-btn sr-gone-btn-ticket" title="Still active in the engine: the ticket is the one TAKE TRADE opens" onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTrade && window.svTakeTrade({{ g.signal_id }});">▶ TICKET</button>{% endif %}
+            {% if g.takeable %}<button type="button" class="sr-gone-btn sr-gone-btn-ticket" title="Still active in the engine: the ticket is the one TAKE TRADE opens, priced when you open it" onclick="event.preventDefault(); event.stopPropagation(); window.svTakeTrade && window.svTakeTrade({{ g.signal_id }});">▶ TICKET</button>{% endif %}
             {% if g.yours %}<button type="button" class="sr-gone-btn" data-sv-unpass="{{ g.signal_id }}" title="Put it back on your rail">↺ BRING BACK</button>{% endif %}
         </div>
         {% endif %}
     </div>
     {% empty %}
-    <div class="sr-gone-empty">Nothing left the rail in the last 24 hours.</div>
+    {% if not rail.error %}<div class="sr-gone-empty">Nothing left the rail in the last 24 hours.</div>{% endif %}
     {% endfor %}
-    {% if rail.gone_more %}<div class="sr-rail-note">and {{ rail.gone_more }} more in the last 24h. /signals/ lists every signal.</div>{% endif %}
+    {% comment %}Every departure the engine still holds is drawn above, its
+    ticket with it (2026-11-06, the review); only the engine's own closes are
+    drawn up to a bound, and these lines say how many more there were.{% endcomment %}
+    {% if rail.gone_more %}<div class="sr-rail-note">and {{ rail.gone_more }} more engine closes in the last 24h, drawn no further: the engine closed them, so no ticket is lost. /signals/ lists every signal.</div>{% endif %}
+    {% if rail.closed_unread %}<div class="sr-rail-note">{{ rail.closed_unread }} more engine closes of the last 24h were not read (the newest {{ rail.closed_fetch }} were). /signals/ lists every signal.</div>{% endif %}
 </section>
 {% if rail.ceiling_hit %}<div class="sr-rail-note sr-rail-ceiling">Showing the newest {{ rail.ceiling }} of {{ rail.total }} signals from the last 48h. /signals/ lists every one.</div>{% endif %}
 {% url 'signals_list' as signals_url %}
@@ -178,14 +182,17 @@ first render passes rail_initial and renders those rows itself.
                         <div><span class="sr-pop-k">mark</span><span class="sr-pop-v">{% px s.instrument.live_quote.last s.instrument.asset_class s.instrument.symbol %}</span></div>
                         <div><span class="sr-pop-k">age</span><span class="sr-pop-v">{{ s.created_at|timesince }}</span></div>
                         <div><span class="sr-pop-k">R:R now</span><span class="sr-pop-v">{% if s.rail.rr_now is not None %}{{ s.rail.rr_now|floatformat:2 }}{% else %}<span class="sv-unknown" title="No fresh quote, or no levels to weigh">&mdash;</span>{% endif %}</span></div>
-                        <div><span class="sr-pop-k">leaves</span><span class="sr-pop-v" title="Past this the bots no longer count its vote and a hand ticket no longer counts it as backing">{{ s.rail.leaves_at|timeuntil|truncatechars:10 }}</span></div>
+                        <div><span class="sr-pop-k">leaves</span><span class="sr-pop-v" title="{{ s.rail.leaves_words }}">{{ s.rail.leaves_at|timeuntil|truncatechars:10 }}</span></div>
                     </div>
                     {% comment %}Can anything act on it, and what is its
                     rule worth: the stage badge (signal_surface.stage_badge,
                     the entry path's own two functions), the floor's graded
-                    record and the real-money record on this class.{% endcomment %}
+                    record and the real-money record on this class. The vote
+                    ends 24 hours after the signal FIRED, as decide() counts
+                    it, whatever the scanner re-matched since; the words say
+                    "a default bot", whose age limit that is.{% endcomment %}
                     <div class="sr-pop-facts">
-                        <div class="sr-pop-fact"><span class="sr-pop-k">stage</span> {{ s.rail.stage_label|default:"—" }}{% if s.rail.votes %} · the bots count its vote{% else %} · no bot counts its vote{% endif %}</div>
+                        <div class="sr-pop-fact"><span class="sr-pop-k">stage</span> {{ s.rail.stage_label|default:"—" }} · {{ s.rail.vote_words }}</div>
                         <div class="sr-pop-fact"><span class="sr-pop-k">graded</span> {{ s.rail.record_words }}</div>
                         {% if s.rail.live_words %}<div class="sr-pop-fact"><span class="sr-pop-k">real money</span> {{ s.rail.live_words }}</div>{% endif %}
                         {% if s.rail.held %}<div class="sr-pop-fact"><span class="sr-pop-k">held</span> you hold {{ s.instrument.symbol }} ({{ s.rail.held_venue }})</div>{% endif %}
@@ -194,9 +201,13 @@ first render passes rail_initial and renders those rows itself.
                     decisions. TAKE TRADE only for directional signals: a
                     neutral verdict carries no side, and the server refuses
                     it too. Your own exact hand position on THIS signal is
-                    one position per signal: the server refuses a second
-                    (manual_trade's duplicate check), so the card says so
-                    rather than offering a ticket it would refuse.
+                    one position per signal: while it is OPEN the server
+                    refuses a second (manual_trade's duplicate check), so the
+                    card says so rather than offering a ticket it would
+                    refuse. While its close is pending the server would take
+                    a second, but the position is still open at the broker:
+                    the card keeps the ticket back, the safer side, and says
+                    the position is closing, never that it is open.
 
                     THE FOOT (2026-11-06): both action rows ride a sticky foot
                     (static/css/sv-rail.css), so TAKE TRADE and PASS stay in
@@ -207,7 +218,8 @@ first render passes rail_initial and renders those rows itself.
                     <div class="sr-pop-foot">
                     <div class="sr-pop-actions sr-pop-actions-react">
                         {% if s.acted and s.acted.by == "manual" and s.acted.exact %}
-                        <span class="sr-pop-one">One position per signal: #{{ s.acted.trade_id }} is open.</span>
+                        {% if s.acted.status == "CLOSE_PENDING" %}<span class="sr-pop-one">Position #{{ s.acted.trade_id }} is closing (close pending): a new ticket on this signal waits until it has closed.</span>
+                        {% else %}<span class="sr-pop-one">One position per signal: #{{ s.acted.trade_id }} is open.</span>{% endif %}
                         {% elif s.direction == "bullish" or s.direction == "bearish" %}
                         <button type="button"
                                 class="sr-pop-btn sr-pop-btn-act{% if s.acted %} sr-pop-btn-add{% endif %}"
@@ -235,10 +247,15 @@ first render passes rail_initial and renders those rows itself.
                 </div>
             </div>
             {% empty %}
+            {% comment %}An unread rail is an unknown, never an empty one: its
+            note above says so, and nothing here claims the rail is empty
+            (2026-11-06, the review).{% endcomment %}
+            {% if not rail.error %}
             <div class="sr-empty" style="padding:16px;text-align:center;color:var(--text-muted);font-size:11px;">
                 <div style="font-size:20px;margin-bottom:6px;opacity:0.3;">&#x25C8;</div>
                 No signal on the rail{% if rail.gone_n %} · {{ rail.gone_n }} left in the last 24h{% endif %}
             </div>
+            {% endif %}
             {% endfor %}
 </div>
 <div data-sv-rail-meta hidden>{{ rail.meta|json_script }}</div>
