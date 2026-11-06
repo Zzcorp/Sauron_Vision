@@ -28,6 +28,13 @@ instrument per UTC day once read; an unread row is asked again on every ask.
                                                  demo, and 2026-09-26 22:03 UTC,
                                                  real; order_status is in no tier)
     order_status, account, balance_usdt         (used, not a tier on their own)
+    tickers, rates_raw                          (used, not a tier: the batched
+                                                 rates read, 2026-11-01,
+                                                 engine/etoro_rates; its shape
+                                                 is UNMEASURED: the batch is
+                                                 sent from the first pass, and
+                                                 an answer it does not trust
+                                                 turns it off for a day)
 
 NOT declared, on purpose — see "What it refuses to claim" below.
 
@@ -153,8 +160,11 @@ spelling eToro refused and nobody has replaced sits in
 """
 from __future__ import annotations
 
+import http.cookiejar
 import logging
 import math
+import os
+import threading
 import time
 import uuid
 import zlib
@@ -163,9 +173,33 @@ from typing import Optional
 
 import requests
 
+from bot_program.engine import etoro_budget
+from bot_program.engine import etoro_rates
+
 log = logging.getLogger(__name__)
 
 BASE = "https://public-api.etoro.com"
+#: The rates endpoint: ONE id for ticker(), a comma list for tickers().
+RATES_URL = f"{BASE}/api/v1/market-data/instruments/rates"
+#: eToro's v2 rates read (2026-11-06, the feed spec's P-a.2; its E14, read
+#: through spec copies, unmeasured): up to 1000 ids, a `quoteType` of
+#: realtime or delayed, 206 when only some ids are found, 404 when none,
+#: rows under `results`, no conversion fields. Asked by the operator's
+#: measurement alone (manage.py etoro_rates_shape --v2); nothing in the
+#: engine reads it.
+RATES_V2_URL = f"{BASE}/api/v2/market-data/rates"
+
+
+def rates_url(url: str, iids) -> str:
+    """`url` with ?instrumentIds=<id>,<id>... spelled with LITERAL commas
+    (2026-11-06, the feed spec's P-a.1). An id list needs a literal comma,
+    eToro's own rule ([E13]: %2C is rejected; community clients report an
+    encoded list ignored or answered with a 500), and requests prepares
+    params={"instrumentIds": "1,2"} as instrumentIds=1%2C2: urlencode
+    quotes the comma. A query already in the URL is prepared as written
+    (requote_uri keeps a comma). The ids are whole numbers, so nothing
+    else in it needs quoting."""
+    return f"{url}?instrumentIds=" + ",".join(str(int(i)) for i in iids)
 
 #: Platform timeframe -> eToro candle interval enum.
 INTERVAL_MAP = {
@@ -394,6 +428,157 @@ LEVERAGE_MAX = 30
 READ_RETRIES = 1
 READ_RETRY_DELAY_S = 0.8
 
+#: THE READ POOL (2026-11-01, plan item 7). The router builds a new
+#: EtoroTrader, and with it a new requests.Session, on every
+#: client_for_symbol call (broker_router), so every read opened its own TCP
+#: and TLS connection: each candle of the bar refresh, each mark, each
+#: proposal's rates, each account read. A GET the budget may refuse — P2 to
+#: P5 (engine/etoro_budget): the account reads, the marks of rows whose stop
+#: rests at eToro, the proposals, the candles, the Orcs' tape, the smoke,
+#: the ramp — now rides ONE pooled Session per process and user key (its
+#: short hash, etoro_budget.key_hash; never the key), shared by every client
+#: of that key: the manage tick's marks and proposals at the shorter
+#: connect below (SHORT_CONNECT_AT), every other pooled GET at the client's
+#: own timeout. It carries no credential and keeps no cookie: each request
+#: sends its own client's headers, so the pool shares sockets and nothing
+#: else. It follows no redirect: a NoRedirectSession, as the client's own
+#: session is (_new_read_session; tests/test_etoro_no_redirect.py).
+#:
+#: EVERYTHING ELSE KEEPS THE CLIENT'S OWN SESSION AND TODAY'S TIMEOUT, as
+#: before the pool: every WRITE (the order POST, the close POST, the PATCH,
+#: the DELETE) — a stale pooled socket failing after the send would make an
+#: order IN DOUBT (EtoroOrderInDoubt, the 12 h quiet), never NOT SENT; the
+#: orders:lookup (the fill polls and the close proofs ride the write they
+#: read); ping; the eligibility POST (a read, but not a GET); and every read
+#: at P0 or P1 (the closes' and the drain's marks, the kill switch's, the
+#: last look before an order, the mark of a row eToro holds no stop for, a
+#: read no caller classified), which the budget never refuses nor delays: a
+#: stale pooled socket would cost them the retry's wait. A client method
+#: that writes sets P0 or P1 itself, the /search a cold id costs inside it
+#: included, so no request on a write's path reaches the pool.
+#:
+#: A STALE SOCKET: a pooled GET that raises a transport error drops its
+#: pooled Session, so today's one retry (READ_RETRIES) goes on a fresh
+#: connection: the same two attempts as before, never a third. A Session
+#: idle READ_POOL_IDLE_S is replaced before it is used again: a burst
+#: reuses its connection (the bar refresh asks a candle a second; the marks
+#: and the proposals go back to back), and a read after a quiet beat opens
+#: its own, as every read did before. A forked worker starts its own pool.
+#: Read at call time: tests/__init__.py turns it off for the suite, whose
+#: fake wires ride each client's own session.
+READ_POOL = True
+#: (connect, read) seconds of a pooled GET at SHORT_CONNECT_AT, each capped
+#: by the client's own timeout. The client's 10 s was both: a connect that
+#: failed cost 10 s and its retry 10 more, so a failing mark held the manage
+#: tick about 21 s; now about 9.
+#:
+#: WHAT IT COSTS, SAID (2026-11-01, review): a connect that takes 4 to 10 s
+#: now fails where it answered, after its one retry, as any failed read. The
+#: row is only clock-managed for that tick, its stop resting at eToro; the
+#: proposal is skipped, an entry deferred and never sent more often; and the
+#: failure is noted on the venue's health, so three inside 180 s
+#: (venue_health.SICK_BURST, BURST_WINDOW_S) make eToro sick and hold every
+#: new real entry 10 minutes past the last (VENUE_QUIET_MINUTES; closes and
+#: stop moves are never held). Protective, and the tick waits on these reads.
+READ_CONNECT_TIMEOUT_S = 4.0
+READ_TIMEOUT_S = 10.0
+#: The priorities whose pooled GETs take READ_CONNECT_TIMEOUT_S /
+#: READ_TIMEOUT_S: the marks of rows whose stop rests at eToro (P3) and the
+#: proposals (P4), the manage tick's own reads. Every other pooled GET keeps
+#: the client's own timeout, today's 10 s (Telegram /status: 5 s): the
+#: account reads (P2: the sync, the re-read, the reconcile, /status, the
+#: digests) and the candles, the tape, the smoke and the ramp (P5). Nothing
+#: in the tick waits on those, and a shorter connect failing there would
+#: cost what today's never did: a note toward SICK for each account read; a
+#: sync that misses its pass (no fresh cells nor equity; three misses are
+#: the stall alert, an hour without cells refuses every eToro order); and a
+#: live config's series written from the public feed with eToro muted for
+#: it six hours (market_data/bot_bars MUTE_VENUE_MEMO_S), where a live
+#: series stays eToro's.
+SHORT_CONNECT_AT = frozenset({etoro_budget.P3, etoro_budget.P4})
+#: A pooled Session idle this long is replaced before its next GET: under
+#: the usual server keep-alive (a minute or more) and NAT idle timeouts
+#: (minutes; neither measured at eToro), above the gaps inside a burst.
+READ_POOL_IDLE_S = 30.0
+
+#: key hash -> [the pooled Session, the pid that built it, the monotonic
+#: instant of its last use]. Never a key.
+_POOL: dict = {}
+_POOL_LOCK = threading.Lock()
+
+
+def _pool_mono() -> float:
+    """The pool's idle clock (a seam: tests move it)."""
+    return time.monotonic()
+
+
+def _new_read_session() -> requests.Session:
+    """A pooled read Session: no credential of its own (each request
+    carries its client's), a cookie policy that keeps none, and NO
+    REDIRECT FOLLOWED: a NoRedirectSession (below), as every eToro
+    request's session is (2026-11-01). Each pooled GET carries both keys
+    in its own headers, so one followed redirect would hand them to
+    whatever host it named; a 3xx is refused here as on the client's own
+    session, and _read reads it as a failed read."""
+    s = NoRedirectSession()
+    s.cookies.set_policy(http.cookiejar.DefaultCookiePolicy(
+        allowed_domains=[]))
+    return s
+
+
+def _close_quietly(sess) -> None:
+    try:
+        sess.close()
+    except Exception:  # noqa: BLE001 — a socket that will not close is gone
+        pass
+
+
+def pooled_session(kh: str) -> requests.Session:
+    """The pooled read Session of key hash `kh` in this process: built on
+    first use, rebuilt when it sat idle past READ_POOL_IDLE_S or was built
+    by another process (a fork). Thread-safe; never raises."""
+    now, pid = _pool_mono(), os.getpid()
+    old = None
+    with _POOL_LOCK:
+        held = _POOL.get(kh)
+        if held is not None and (held[1] != pid
+                                 or now - held[2] > READ_POOL_IDLE_S):
+            # another process's sockets are never closed here, only left
+            old = held[0] if held[1] == pid else None
+            held = None
+        if held is None:
+            held = _POOL[kh] = [_new_read_session(), pid, now]
+        held[2] = now
+        sess = held[0]
+    if old is not None:
+        _close_quietly(old)
+    return sess
+
+
+def drop_pooled_session(kh: str, sess) -> None:
+    """Forget `sess` as key hash `kh`'s pooled Session after a transport
+    failure on it, and close its idle sockets: the next pooled GET, the
+    retry first, opens a fresh connection. A Session another read has
+    already replaced is closed and the newer one kept."""
+    with _POOL_LOCK:
+        held = _POOL.get(kh)
+        if held is not None and held[0] is sess:
+            del _POOL[kh]
+    _close_quietly(sess)
+
+
+def _pool_after_fork() -> None:
+    """A forked child (a Celery or gunicorn worker) never uses its parent's
+    sockets: it starts its own pool, and its own lock (one held at the fork
+    would never be released here)."""
+    global _POOL_LOCK
+    _POOL.clear()
+    _POOL_LOCK = threading.Lock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_pool_after_fork)
+
 #: Header names that may carry eToro's quota (2026-10-07). Nothing in the
 #: tree has recorded one: the 429's headers and body are STILL UNMEASURED
 #: (deploy/ETORO_DEPARTURE.md:643). Kept off every answer _read receives so
@@ -419,16 +604,25 @@ def _rate_headers(r) -> dict:
 #: ask inside the same seconds meets it again. On 2026-10-06 eToro (live)
 #: went SICK at 23:38:34 UTC on seven /search 429s in one second, most
 #: likely asked by the bar refresh (a BACKGROUND read since PR50: never
-#: noted, never paused — see klines). After a trading-lane 429 this
-#: PROCESS grants itself ONE short pause per world: the ENTRY side
-#: (propose, execute, the last look) reads it through
-#: venue_health.pause_s and does not ask while it runs. The adapter itself
-#: never refuses a read for it: the manage tick's marks, closes, the kill
-#: switch, the reconcile, the TAKE TRADE lane and etoro_smoke go to the
-#: wire as before. ONE pause per episode: a world refused again within
+#: noted, never paused — see klines). After a trading-lane 429 ONE short
+#: pause is granted per world: the ENTRY side (propose, execute, the last
+#: look) reads it through venue_health.pause_s and does not ask while it
+#: runs. ONE pause per episode: a world refused again within
 #: RATE_PAUSE_STREAK_S of its last pause's END gets none, so a venue that
-#: keeps refusing is noted on every read and SICK stays reachable. Per
-#: process, keyed by world like _SEARCH_IDS; RATE_PAUSE is read at call
+#: keeps refusing is noted on every read and SICK stays reachable.
+#: SHARED SINCE 2026-11-01: the pause lived in this process's memory
+#: (_RATE_PAUSE, keyed by world), so the worker that met the 429 paused
+#: while the next one asked again. It now lives in the cache, Redis in
+#: production, keyed by the user key's hash and the world
+#: (etoro_budget.pause_*), so every process sees a 429 any process met;
+#: the cap, the fallback and the episode rule are unchanged. Its readers:
+#: the entry side as before, and the budget's P3 to P5 takes (the marks
+#: of rows whose stop rests at eToro, the proposals, the candles, the
+#: smoke and the ramp), which skip while it holds. P0 (closes, stop moves,
+#: proofs, cancels, the drain, the kill switch) never reads it; nor do P1
+#: (the orders, and the mark of a live row eToro holds no stop for) and
+#: P2. A P0 read's own 429 grants it off that read's path, through the
+#: budget's flusher (_on_429, 2026-11-02). RATE_PAUSE is read at call
 #: time (tests/__init__.py turns it off).
 RATE_PAUSE = True
 #: A GUESS, said as one: eToro's 429 body and headers are unmeasured
@@ -443,15 +637,17 @@ RATE_PAUSE_MAX_S = 120.0
 RATE_PAUSE_STREAK_S = 450.0
 #: The reads whose 429 grants the pause: trading-lane market data only.
 #: NOT the candles (a background read), the account, the portfolio or the
-#: eligibility.
-RATE_PAUSE_SITES = frozenset({"ticker", "search"})
-#: world -> _mono() at which the last pause granted ends.
-_RATE_PAUSE: dict = {}
+#: eligibility. "rates" (2026-11-01) is the batched rates read
+#: (EtoroTrader.tickers): the same trading-lane read as one ticker, for
+#: many ids in one request, so its 429 grants the same pause.
+RATE_PAUSE_SITES = frozenset({"ticker", "search", "rates"})
 
 
 def _mono() -> float:
-    """The pause's clock (a seam: tests move it without moving every other
-    caller of time.monotonic)."""
+    """The /search "no" memo's clock (a seam: tests move it without moving
+    every other caller of time.monotonic). The 429 pause, shared across
+    processes since 2026-11-01, runs on the wall clock instead
+    (etoro_budget._now)."""
     return time.monotonic()
 
 
@@ -475,12 +671,24 @@ def _retry_after_s(r) -> tuple:
         return None, None
 
 
-def _grant_rate_pause(world: str, wait) -> str:
-    """Grant `world` its pause unless one runs or the last one ended less
-    than RATE_PAUSE_STREAK_S ago; the words say which. Never raises."""
+def _grant_rate_pause(budget_key: str, world: str, wait, at=None) -> str:
+    """Grant (budget_key, world) its shared pause unless one runs or the
+    last one ended less than RATE_PAUSE_STREAK_S ago; the words say which.
+    `budget_key` is the user key's hash (etoro_budget.key_hash), never the
+    key. Two processes meeting one 429 grant one pause: the first write
+    wins (etoro_budget.pause_write, fresh) and the other reads it as
+    running. `at`, the 429's own instant (default now): a grant the
+    budget's flusher makes for a P0 read is dated at its 429 (2026-11-02).
+    Never raises."""
     try:
-        now = _mono()
-        end = _RATE_PAUSE.get(world)
+        now = etoro_budget._now() if at is None else float(at)
+        held = etoro_budget.pause_read(budget_key, world)
+        end = None
+        if held is not None:
+            try:
+                end = float(held.get("end"))
+            except (TypeError, ValueError):
+                end = None
         if end is not None and now < end:
             return f"pause running ({end - now:.0f}s left)"
         if end is not None and now - end <= RATE_PAUSE_STREAK_S:
@@ -489,7 +697,13 @@ def _grant_rate_pause(world: str, wait) -> str:
                                                            RATE_PAUSE_MAX_S)
         if s <= 0:
             return "Retry-After 0: not paused"
-        _RATE_PAUSE[world] = now + s
+        if not etoro_budget.pause_write(
+                budget_key, world, end=now + s, at=now,
+                keep_s=s + RATE_PAUSE_STREAK_S + 60, fresh=held is None):
+            left = etoro_budget.pause_left(budget_key, world, now)
+            if left > 0:
+                return f"pause running ({left:.0f}s left)"
+            return "not paused: the shared pause could not be stored"
         return f"paused {s:.0f}s"
     except Exception:  # noqa: BLE001
         return ""
@@ -795,11 +1009,13 @@ class EtoroOrderInDoubt(RuntimeError):
 # redirect to another host handed both keys to that host, and an order POST
 # answered 307 was sent again there. Only the demo proof client refused
 # redirects (2026-10-31, _DemoOnlyWire below). Now every request of every eToro
-# client goes through ONE session that follows none (NoRedirectSession),
-# on both worlds and for every method; the requests.* call that reaches
-# eToro outside this module passes allow_redirects=False itself
-# (dashboard/views_brokers.etoro_probe), and the legacy market-data adapter
-# stands on this session (market_data/adapters/etoro_adapter.EtoroClient).
+# client goes through a session that follows none (NoRedirectSession),
+# on both worlds and for every method — the client's own, or the pooled
+# read Session of its key (READ_POOL above), a NoRedirectSession too; the
+# requests.* call that reaches eToro outside this module passes
+# allow_redirects=False itself (dashboard/views_brokers.etoro_probe), and
+# the legacy market-data adapter stands on this session
+# (market_data/adapters/etoro_adapter.EtoroClient).
 # tests/test_etoro_no_redirect.py pins every site.
 #
 # A 3xx answer is a failure, logged with its status and the host it points
@@ -1057,6 +1273,173 @@ def _status_of(polled) -> tuple:
     return sid, words
 
 
+# ── the rates rows, one and many (2026-11-01) ─────────────────────────────
+
+def _rate_extras(p) -> dict:
+    """eToro's OWN fields of one rate row beside its price (2026-11-06,
+    the feed spec's P-a.3; its E12, read through spec copies): `date` (the
+    print's instant, as eToro writes it), `priceRateID` (a whole number in
+    v1) and conversionRateBid/Ask (the instrument's currency to USD, "used
+    for position value calculations"). The keys etoro_rates.EXTRA_KEYS,
+    each only when it reads: a date as non-empty text, a priceRateID as a
+    whole positive number (or its digits), a conversion as a positive
+    number, written as text as bid and ask are. ADDITIVE: no reader before
+    them reads them, and a row is never refused for one (one that does
+    not read is left out). Never raises."""
+    out = {}
+    try:
+        when = p.get("date")
+        if isinstance(when, str) and when.strip():
+            out["date"] = when.strip()[:40]
+        rid = p.get("priceRateID")
+        if isinstance(rid, str) and rid.strip().isdigit():
+            rid = int(rid.strip())
+        if isinstance(rid, int) and not isinstance(rid, bool) and rid > 0:
+            out["priceRateID"] = rid
+        for key in ("conversionRateBid", "conversionRateAsk"):
+            v = p.get(key)
+            if isinstance(v, bool) or v is None:
+                continue
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(f) and f > 0:
+                out[key] = str(f)
+    except Exception:  # noqa: BLE001 — an unread extra is no extra
+        return {}
+    return out
+
+
+def _rate_tick(p, symbol: str) -> dict:
+    """ONE rate row as the ticker dict — the single read's and the batch's
+    (2026-11-01: one rule for both, so a row read in a batch can never
+    read differently from the same row asked alone). {lastPrice, symbol,
+    bid, ask}, or the platform's "0" sentinel {lastPrice "0", symbol} when
+    the believed keys are all 0/None. Raises ValueError or TypeError on a
+    value that is not a number, as ticker() always has. Since 2026-11-06
+    (the feed spec's P-a.3) eToro's own date, priceRateID and conversion
+    ride beside them when the row carries them (_rate_extras), the "0"
+    sentinel's too."""
+    bid = float(p.get("bid") or 0)
+    ask = float(p.get("ask") or 0)
+    last = float(p.get("lastExecution") or 0)
+    if not last:
+        last = (bid + ask) / 2 if bid and ask else (bid or ask)
+    if not last:
+        return {"lastPrice": "0", "symbol": symbol, **_rate_extras(p)}
+    return {"lastPrice": str(last), "symbol": symbol,
+            "bid": str(bid), "ask": str(ask), **_rate_extras(p)}
+
+
+#: The keys a rate row is believed to carry its OWN instrument id under.
+#: The /search item and the candle group spell it instrumentId, the candle
+#: bar instrumentID (MEASURED 2026-09-23 on those reads); the rates row's
+#: own spelling is UNMEASURED — `manage.py etoro_rates_shape` measures it.
+#: The batch is sent from the first pass: the first answer whose row
+#: carries none of these turns it off for a day (etoro_rates.mark_unproven),
+#: and every symbol is read alone meanwhile.
+RATE_ROW_ID_KEYS = ("instrumentId", "instrumentID")
+RATE_ROW_PRICE_KEYS = frozenset({"bid", "ask", "lastExecution"})
+
+
+class _Untrusted(Exception):
+    """A batched rates answer this adapter does not trust: `why` in words,
+    `shape` its keys only (_rates_shape)."""
+
+    def __init__(self, why: str, shape: str):
+        super().__init__(why)
+        self.why, self.shape = why, shape
+
+
+def _rates_shape(data) -> str:
+    """The SHAPE of a rates answer, for the one line an untrusted answer
+    writes: its keys, the type and length of `rates`, each distinct row's
+    sorted keys. Never a value, so never a price, an id or an account
+    figure. Never raises."""
+    try:
+        if not isinstance(data, dict):
+            return f"a {type(data).__name__}, not an object"
+        top = sorted(str(k) for k in data)
+        rates = data.get("rates")
+        if not isinstance(rates, list):
+            return f"keys {top}; rates is {type(rates).__name__}"
+        rows = sorted({tuple(sorted(str(k) for k in r)) if isinstance(r, dict)
+                       else (f"<{type(r).__name__}>",) for r in rates})
+        return (f"keys {top}; rates: a list of {len(rates)}; row keys "
+                f"{[list(r) for r in rows]}")
+    except Exception:  # noqa: BLE001
+        return "unreadable"
+
+
+def _row_id(p) -> "int | None":
+    """The row's OWN instrument id, or None: absent, not a whole positive
+    number, or two spellings that disagree."""
+    found = set()
+    for k in RATE_ROW_ID_KEYS:
+        if k not in p:
+            continue
+        v = p[k]
+        if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+            return None
+        found.add(v)
+    return found.pop() if len(found) == 1 else None
+
+
+def _parse_rates_batch(data, asked) -> dict:
+    """{iid: ticker dict} off a batched rates answer for the ids `asked`,
+    each row matched by its OWN id, never by its position. An asked id
+    with no row is simply absent: its symbol raises alone (RowMissing) and
+    is read by itself. Raises _Untrusted for a shape the parser does not
+    know, a row that is not an object or carries no id of its own, an id
+    that was not asked, the same id twice, more rows than ids asked, a row
+    with none of bid/ask/lastExecution, a rate that is not a number — and,
+    since 2026-11-01 (review), NO ROW AT ALL for two ids or more: the
+    empty list ticker() reads as "no rate" for one id is no answer to a
+    comma list, and trusted it would cost every pass a batch and then
+    each row's single read, the batch never turning off. A row of zeros
+    is a row (a shut market's "0" sentinel), never this. The ticks carry
+    no symbol: the caller names them."""
+    asked = set(asked)
+    if not isinstance(data, dict) or "rates" not in data:
+        raise _Untrusted("a shape the parser does not know",
+                         _rates_shape(data))
+    rates = data.get("rates")
+    if rates is None:
+        rates = []
+    if not isinstance(rates, list):
+        raise _Untrusted("a shape the parser does not know",
+                         _rates_shape(data))
+    if not rates and len(asked) > 1:
+        raise _Untrusted(f"no row came back for any of the {len(asked)} "
+                         f"ids asked", _rates_shape(data))
+    if len(rates) > len(asked):
+        raise _Untrusted(f"{len(rates)} rows for {len(asked)} ids asked",
+                         _rates_shape(data))
+    out = {}
+    for p in rates:
+        if not isinstance(p, dict):
+            raise _Untrusted("a row that is not an object",
+                             _rates_shape(data))
+        iid = _row_id(p)
+        if iid is None:
+            raise _Untrusted("a row with no instrumentId of its own",
+                             _rates_shape(data))
+        if iid not in asked:
+            raise _Untrusted("an id that was not asked", _rates_shape(data))
+        if iid in out:
+            raise _Untrusted("the same id twice", _rates_shape(data))
+        if not (RATE_ROW_PRICE_KEYS & set(p)):
+            raise _Untrusted("a row with none of bid/ask/lastExecution",
+                             _rates_shape(data))
+        try:
+            out[iid] = _rate_tick(p, "")
+        except (TypeError, ValueError):
+            raise _Untrusted("a rate that is not a number",
+                             _rates_shape(data)) from None
+    return out
+
+
 class EtoroTrader:
     """eToro REST trading client."""
 
@@ -1068,6 +1451,15 @@ class EtoroTrader:
         self.demo = self.env != "live"
         self.timeout = timeout
         self._session: Optional[requests.Session] = None
+        # The session _sess() built itself, told apart from one handed in
+        # from outside (a shell's, a test's fake wire), which carries every
+        # request, reads included (_supplied, 2026-11-01).
+        self._own_session: Optional[requests.Session] = None
+        # A callable run before every READ this client sends (_read, ping),
+        # or None: etoro_smoke's one request a second (2026-11-01). A write
+        # and a lookup never read it, so nothing that closes, moves a stop
+        # or proves a close is ever delayed by it.
+        self.read_pace = None
         # symbol -> instrumentId, and the reverse for reading positions back.
         self._ids: dict = {}
         self._symbols: dict = {}
@@ -1087,20 +1479,74 @@ class EtoroTrader:
         # names the refused endpoint from the second.
         self.wire_reads = 0
         self.last_read = ""
+        # THE BUDGET'S NAME FOR THIS KEY (2026-11-01, etoro_budget): the
+        # user key's short hash keys the budget and the shared 429 pause;
+        # the key itself is never stored or logged there.
+        self._budget_key = etoro_budget.key_hash(user_key)
 
     # ── plumbing ───────────────────────────────────────────────────────────
 
     def _sess(self) -> requests.Session:
-        """The one session of this client, keys on its headers: a
+        """The client's OWN session, keys on its headers: a
         NoRedirectSession (2026-11-01), so no request of either world, by
-        any method, follows a redirect."""
+        any method, follows a redirect. Every write, every lookup, ping,
+        the eligibility POST and every read at P0 or P1 ride it, at today's
+        timeout (READ_POOL, 2026-11-01); the pooled GETs ride a
+        NoRedirectSession of their own (_new_read_session)."""
         if self._session is None:
             s = NoRedirectSession()
-            s.headers.update({"x-api-key": self.api_key,
-                              "x-user-key": self.user_key,
-                              "Content-Type": "application/json"})
+            s.headers.update(self._auth_headers())
             self._session = s
+            self._own_session = s
         return self._session
+
+    def _auth_headers(self) -> dict:
+        """The headers every request of this client carries: its own
+        session sets them, and a pooled GET sends them per request."""
+        return {"x-api-key": self.api_key, "x-user-key": self.user_key,
+                "Content-Type": "application/json"}
+
+    def _supplied(self) -> bool:
+        """True when a transport was handed to this client from outside —
+        an assigned `_session`, or `_sess` replaced (a shell's, a test's
+        fake wire): it then carries every request, reads included, at
+        today's timeout, as before the pool (2026-11-01)."""
+        s = getattr(self, "_session", None)
+        if s is not None and s is not getattr(self, "_own_session", None):
+            return True
+        return ("_sess" in vars(self)
+                or getattr(type(self), "_sess", None) is not _OWN_SESS)
+
+    def _pooled_read(self, method: str, priority: int) -> bool:
+        """Whether one read rides the pooled Session (READ_POOL): a GET, at
+        P2 to P5, on a client whose transport is its own."""
+        return (bool(READ_POOL) and str(method).upper() == "GET"
+                and int(priority) >= etoro_budget.P2
+                and not self._supplied())
+
+    def _read_timeout(self, priority):
+        """The timeout of one pooled GET at `priority`: at SHORT_CONNECT_AT
+        (the manage tick's marks and proposals, P3 and P4), (connect, read)
+        seconds READ_CONNECT_TIMEOUT_S and READ_TIMEOUT_S, neither longer
+        than the client's own timeout; at any other (P2, P5), the client's
+        own timeout, today's (2026-11-01, review)."""
+        if int(priority) not in SHORT_CONNECT_AT:
+            return self.timeout
+        try:
+            cap = float(self.timeout)
+        except (TypeError, ValueError):
+            cap = READ_TIMEOUT_S
+        return (min(READ_CONNECT_TIMEOUT_S, cap), min(READ_TIMEOUT_S, cap))
+
+    def _pace(self) -> None:
+        """This client's read pace, when one was set (read_pace). Never
+        raises."""
+        pace = getattr(self, "read_pace", None)
+        if callable(pace):
+            try:
+                pace()
+            except Exception as e:  # noqa: BLE001 — a pace never stops a read
+                log.debug("eToro read pace skipped (%s)", type(e).__name__)
 
     @staticmethod
     def _rid(client_order_id: Optional[str] = None) -> str:
@@ -1171,16 +1617,78 @@ class EtoroTrader:
                   reference or "(none)")
         return words
 
-    def _on_429(self, where: str, r) -> str:
+    def _bkey(self) -> str:
+        """The user key's hash, the budget's and the shared pause's name
+        for this client (etoro_budget.key_hash)."""
+        k = getattr(self, "_budget_key", None)
+        if not k:
+            k = self._budget_key = etoro_budget.key_hash(
+                getattr(self, "user_key", ""))
+        return k
+
+    def _before(self, where: str) -> tuple:
+        """THE BUDGET, BEFORE A REQUEST TO `where` (2026-11-01): (priority,
+        why, taken). The priority is the caller's scope
+        (etoro_budget.at_priority), P1 outside any. P2 to P5 take their
+        token here and may be refused: etoro_budget.Refused is raised and
+        NOTHING IS SENT. P0 and P1 take nothing here (taken False): they
+        are never refused nor delayed, and are counted once sent
+        (_after)."""
+        p, why = etoro_budget.current(etoro_budget.P1)
+        if p <= etoro_budget.P1:
+            return p, why, False
+        etoro_budget.take(self._bkey(), etoro_budget.family_of(where), p,
+                          world=self._world(), where=where, why=why,
+                          pause=RATE_PAUSE)
+        return p, why, True
+
+    def _after(self, where: str, priority=None, why=None) -> None:
+        """Count one request to `where` ALREADY SENT: every P0 and P1
+        request and every retry (etoro_budget.spend). The priority is the
+        caller's scope unless given. Never raises and never waits: the
+        spend only queues the count for the budget's flusher thread, so no
+        cache call stands between a request and its answer, or the next
+        request (2026-11-01, review)."""
+        try:
+            if priority is None:
+                priority, why = etoro_budget.current(etoro_budget.P1)
+            etoro_budget.spend(self._bkey(), etoro_budget.family_of(where),
+                               priority, where=where, why=why or "")
+        except Exception as e:  # noqa: BLE001
+            log.debug("eToro budget: %s not counted (%s)", where,
+                      type(e).__name__)
+
+    def _on_429(self, where: str, r, priority=None) -> str:
         """A 429 at `where`: grant the pause when `where` is a pause site
         AND this is not a background read, log the quota headers (the
         measurement RATE_PAUSE_FALLBACK_S waits for), and return the words
-        for the health note. Never raises."""
+        for the health note. The pause is the shared one of this key and
+        world (2026-11-01). Never raises.
+
+        OFF THE PATH AT P0 (2026-11-02, review): a read at `priority` P0 —
+        the kill switch's or the drain's mark, the /search a close's cold
+        id costs — leaves the grant to the budget's flusher
+        (etoro_budget.later), dated at this 429: the grant reads and writes
+        the cache, and on this thread it stood between that answer and the
+        next close, held as long as a stalled cache holds it. Every take
+        drains the queue first, so the marks, the proposals and the
+        candles of this process are judged on the pause; the entry side
+        reads it once the flusher, woken at once, has written it. Below P0
+        the grant stays on the read's path, as before: the next ask of
+        that very lane meets it."""
         try:
             wait, raw = _retry_after_s(r)
-            said = (_grant_rate_pause(self._world(), wait)
-                    if RATE_PAUSE and where in RATE_PAUSE_SITES
-                    and not getattr(self, "_background", False) else "")
+            pause = (RATE_PAUSE and where in RATE_PAUSE_SITES
+                     and not getattr(self, "_background", False))
+            if pause and priority is not None \
+                    and int(priority) <= etoro_budget.P0:
+                etoro_budget.later(_grant_rate_pause, self._bkey(),
+                                   self._world(), wait, etoro_budget._now())
+                said = "the pause is granted off this P0 read's path"
+            elif pause:
+                said = _grant_rate_pause(self._bkey(), self._world(), wait)
+            else:
+                said = ""
             log.info("eToro %s answered 429 (%s; %s) quota headers %s",
                      where, f"Retry-After {raw}" if raw else "no Retry-After",
                      said or "no pause", _rate_headers(r))
@@ -1191,16 +1699,15 @@ class EtoroTrader:
             return ""
 
     def rate_pause_s(self) -> float:
-        """Seconds left of this process's 429 pause for this world; 0.0
-        when RATE_PAUSE is off or none runs. ticker(), instrument_id()
-        and every write NEVER read it: the callers that may wait do
-        (bot_program/venue_health.pause_s)."""
+        """Seconds left of the shared 429 pause of this key and world
+        (2026-11-01: any process's 429, read from the cache); 0.0 when
+        RATE_PAUSE is off, none runs or the cache cannot be read. Every
+        write NEVER reads it, nor a read at P0 to P2: the callers that may
+        wait do (bot_program/venue_health.pause_s), and the budget's P3 to
+        P5 takes skip while it holds (etoro_budget.take)."""
         if not RATE_PAUSE:
             return 0.0
-        end = _RATE_PAUSE.get(self._world())
-        if end is None:
-            return 0.0
-        return max(0.0, float(end) - _mono())
+        return etoro_budget.pause_left(self._bkey(), self._world())
 
     def search_no(self, symbol: str) -> str:
         """eToro's kept "no" for `symbol` in this world (the words), or ""
@@ -1244,15 +1751,45 @@ class EtoroTrader:
         last answer's quota-looking headers (2026-10-07). A REDIRECT
         (2026-11-01) is never followed (NoRedirectSession): a failed read,
         noted on the venue's health with its code as a 5xx is, and raised
-        at once as RedirectRefused — never asked again."""
-        fn = getattr(self._sess(), method.lower())
+        at once as RedirectRefused — never asked again.
+
+        THE BUDGET (2026-11-01, etoro_budget): at the caller's priority, a
+        read at P2 to P5 takes its token before it is sent and is refused
+        (etoro_budget.Refused, nothing sent, no health note, no wire_reads)
+        when the family keeps its floor for the priorities above, or, at
+        P3 to P5, while the shared 429 pause holds. A read at P0 or P1, and
+        the one retry of any read, are counted once sent, never refused —
+        a redirected one included: it was sent.
+
+        THE CONNECTION (2026-11-01, READ_POOL): a GET at P2 to P5 rides the
+        pooled Session of this key, at _read_timeout(p) (the 4 s connect at
+        P3 and P4 alone, SHORT_CONNECT_AT; self.timeout at P2 and P5), with
+        this client's own headers; a transport failure on it drops that
+        Session, so the one retry goes on a fresh connection — never a third
+        attempt. A 5xx is retried on the same connection (it answered), and
+        a redirect is refused on it as on the client's own: the pooled
+        Session is a NoRedirectSession too (_new_read_session). Every other
+        read (a POST, a read at P0 or P1, a client handed its transport)
+        rides the client's own session at self.timeout, as before. The read
+        pace (read_pace) runs before each attempt."""
+        p, why, taken = self._before(where)
+        pooled = self._pooled_read(method, p)
+        fn = None if pooled else getattr(self._sess(), method.lower())
         last_exc = None
         self.last_read = where
         for attempt in range(1 + READ_RETRIES):
             r = None
             self.wire_reads = getattr(self, "wire_reads", 0) + 1
+            self._pace()
+            sess = pooled_session(self._bkey()) if pooled else None
             try:
-                r = fn(url, timeout=self.timeout, **kw)
+                if pooled:
+                    r = getattr(sess, method.lower())(
+                        url, timeout=self._read_timeout(p),
+                        **dict(kw, headers={**self._auth_headers(),
+                                            **(kw.get("headers") or {})}))
+                else:
+                    r = fn(url, timeout=self.timeout, **kw)
                 last_exc = None
             except RedirectRefused as e:
                 # A REDIRECT IS A FAILED READ, ASKED NO MORE (2026-11-01):
@@ -1262,11 +1799,18 @@ class EtoroTrader:
                 raise
             except TRANSPORT as e:
                 last_exc = e
+                if pooled:
+                    # A STALE POOLED SOCKET, or any transport failure on
+                    # the pool: the retry below opens a fresh connection.
+                    drop_pooled_session(self._bkey(), sess)
+            finally:
+                if attempt or not taken:
+                    self._after(where, p, why)
             if r is not None:
                 self.last_rate_headers = _rate_headers(r)
                 code = int(getattr(r, "status_code", 0) or 0)
                 if code == 429:
-                    said = self._on_429(where, r)
+                    said = self._on_429(where, r, p)
                     self._note_health(where, code=code, detail=said)
                     return r
                 if code < 500:
@@ -1619,13 +2163,48 @@ class EtoroTrader:
             return False
         return iid in self._symbols or iid in PINNED_SYMBOL
 
+    def _known_id(self, symbol) -> "int | None":
+        """The id of `symbol` this client can name WITHOUT the wire, or
+        None (2026-11-01, the batched rates): this instance's ids, the
+        pins, this process's /search memo, the shared one. A batch carries
+        only these, so it never costs a /search; a cold id is read by its
+        own request, as before. Never raises."""
+        try:
+            key = str(symbol or "").upper()
+            if key in self._ids:
+                return self._ids[key]
+            if key in VENUE_ID_PINS:
+                return VENUE_ID_PINS[key]
+            memo_key = (self._world(), key)
+            if SEARCH_MEMO:
+                hit = _SEARCH_IDS.get(memo_key)
+                if hit:
+                    return hit[1]
+            shared = _search_shared_get(memo_key, key,
+                                        VENUE_SPELLING.get(key, key),
+                                        then="read by its own request")
+            return shared[0] if shared is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
     # ── market data ────────────────────────────────────────────────────────
 
     def ping(self) -> bool:
+        """One aggregate-portfolio GET: True on 200, False for anything
+        else, a budget refusal included (2026-11-01: an account read, at
+        the caller's priority). On the client's own session at today's
+        timeout: it has no retry for a stale pooled socket to ride
+        (READ_POOL). Paced by read_pace when one is set."""
         try:
-            r = self._sess().get(self._v1_info("aggregate-portfolio"),
-                                 headers=self._headers(),
-                                 timeout=self.timeout)
+            p, why, taken = self._before("account")
+            self._pace()
+            try:
+                r = self._sess().get(self._v1_info("aggregate-portfolio"),
+                                     headers=self._headers(),
+                                     timeout=self.timeout)
+            finally:
+                if not taken:
+                    self._after("account", p, why)
             return r.status_code == 200
         except RedirectRefused as e:
             # a failed read, noted with its code (2026-11-01)
@@ -1655,11 +2234,16 @@ class EtoroTrader:
         public reference; this GET was not among the reads measured on
         2026-09-22. Record the measured keys here the day it meets a real
         key, as _V1_INFO_REAL_SEG records its status codes.
+
+        ALWAYS THE WIRE (2026-11-01): ticker() never reads the shared rates
+        cache, so the last look before an order, the order's own reads, the
+        kill switch and the CLOSE button price on a fresh answer. It WRITES
+        the cache (engine/etoro_rates: every answer, the "0" one too, for
+        the readers that may take one up to their own age). Its row is read
+        by _rate_tick, the batch's rule.
         """
         iid = self.instrument_id(symbol)
-        r = self._read("GET", f"{BASE}/api/v1/market-data/instruments/rates",
-                       params={"instrumentIds": str(iid)},
-                       headers=self._headers(), where="ticker")
+        r = self._rates_get([iid], where="ticker")
         r.raise_for_status()
         data = r.json()
         if not isinstance(data, dict) or "rates" not in data:
@@ -1703,12 +2287,9 @@ class EtoroTrader:
                 f"bid/ask/lastExecution — got {row}. Measure the row's keys "
                 f"before trusting a 0 here."
             )
-        bid = float(p.get("bid") or 0)
-        ask = float(p.get("ask") or 0)
-        last = float(p.get("lastExecution") or 0)
-        if not last:
-            last = (bid + ask) / 2 if bid and ask else (bid or ask)
-        if not last:
+        tick = _rate_tick(p, symbol)
+        etoro_rates.put(self._world(), iid, tick)
+        if tick["lastPrice"] == "0":
             # THE VENUE ANSWERED: nothing — an empty list, or a row whose
             # believed keys are all 0/None. lastPrice "0" is the platform's
             # no-price sentinel: ibkr_client, oanda_client, paper_trader and
@@ -1728,16 +2309,213 @@ class EtoroTrader:
                      "which every reader skips on", symbol, iid,
                      "empty rates list" if not rates
                      else "bid/ask/lastExecution all empty")
-            return {"lastPrice": "0", "symbol": symbol}
-        return {"lastPrice": str(last), "symbol": symbol,
-                "bid": str(bid), "ask": str(ask)}
+        return tick
 
+    def _rates_get(self, iids, *, where: str, url: str = RATES_URL,
+                   encoded_commas: bool = False):
+        """The rates GET for `iids` (one, or a comma list), through _read at
+        the caller's priority: ticker()'s, tickers()', rates_raw's and
+        rates_v2_raw's one request. (The shut-market cadence keeps no memo
+        of a read since 2026-11-01, review: the answer, in the shared
+        cache, is its memory.)
+
+        LITERAL COMMAS (2026-11-06, the feed spec's P-a.1): the query is
+        built here (rates_url), ?instrumentIds=1,2,3. It was handed to
+        requests as params=, which prepares instrumentIds=1%2C2%2C3, the
+        form eToro's own rule rejects: the batch would have asked in it,
+        and the operator's measurement would have measured that form, not
+        the batch's, and could have "proved" that batching fails. One id
+        carries no comma and reads as it always did. `encoded_commas` sends
+        the OLD form, params=, for that measurement alone
+        (etoro_rates_shape --encoded-commas: one GET whose answer is never
+        the batch's proof)."""
+        if encoded_commas:
+            return self._read("GET", url,
+                              params={"instrumentIds": ",".join(
+                                  str(int(i)) for i in iids)},
+                              headers=self._headers(), where=where)
+        return self._read("GET", rates_url(url, iids),
+                          headers=self._headers(), where=where)
+
+    def tickers(self, symbols) -> dict:
+        """THE BATCHED RATES READ (2026-11-01, engine/etoro_rates): {symbol:
+        answer} for every symbol asked, in ONE GET per BATCH_MAX_IDS ids,
+        instrumentIds as a comma list, at the caller's priority in the
+        budget (one token a request, never one an id).
+
+        Every row is matched to its symbol by the row's OWN instrumentId,
+        never by its position, and each symbol keeps ticker()'s three
+        states: the ticker dict ticker() would answer (a price, or the "0"
+        sentinel for a zero row), or the exception for that symbol ALONE —
+        RowMissing when a trusted answer carried no row for it (its caller
+        takes the single read), the id's own error, BatchUnproven while the
+        batch is unproven (nothing sent: the single read), BatchFailed when
+        its GET failed at the venue (a 429, a 5xx after its retry, a
+        transport failure: one request, noted once per instrument it
+        carried — _read the first, _note_batch_failure the rest, as the
+        reads alone were; 2026-11-02), or the budget's Refused (nothing
+        sent, no failure).
+
+        An answer it does not trust — a row with no instrumentId of its
+        own, more rows than ids asked, an id that was not asked, no row at
+        all for two ids or more, a 4xx, a body or a shape the parser does
+        not know (_parse_rates_batch) — is logged once with its keys only
+        and marks the batch unproven for a day (etoro_rates.mark_unproven):
+        this chunk and every later one answer BatchUnproven. Every trusted
+        row writes the shared cache. And until the operator's measurement
+        has read a trusted answer (etoro_rates.batch_waits, 2026-11-02)
+        nothing is sent in batch: every symbol answers BatchUnproven and
+        takes the single read. Never raises."""
+        out, by_id, order, seen = {}, {}, [], set()
+        for s in symbols or []:
+            key = str(s or "").upper()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            try:
+                iid = self.instrument_id(key)
+            except Exception as e:  # noqa: BLE001 — that symbol's own answer
+                out[key] = e
+                continue
+            if iid in by_id:
+                by_id[iid].append(key)
+                continue
+            by_id[iid] = [key]
+            order.append(iid)
+        world = self._world()
+
+        def _all(chunk, answer):
+            for i in chunk:
+                for k in by_id[i]:
+                    out[k] = answer
+        n = etoro_rates.BATCH_MAX_IDS
+        for start in range(0, len(order), n):
+            chunk = order[start:start + n]
+            if etoro_rates.batch_waits():
+                # THE BATCH WAITS FOR ITS MEASUREMENT (2026-11-02): nothing
+                # is sent in batch before the operator's measurement read a
+                # trusted answer (etoro_rates.prove)
+                _all(chunk, etoro_rates.BatchUnproven(
+                    "eToro's batched rates wait for the operator's "
+                    "measurement (manage.py etoro_rates_shape, the demo key "
+                    "by default) — read alone"))
+                continue
+            held = etoro_rates.unproven()
+            if held:
+                _all(chunk, etoro_rates.BatchUnproven(
+                    f"eToro's batched rates are unproven "
+                    f"({held.get('why') or 'an untrusted answer'}) — read "
+                    f"alone"))
+                continue
+            try:
+                r = self._rates_get(chunk, where="rates")
+            except Exception as e:  # noqa: BLE001
+                if getattr(e, "budget_refused", False):
+                    _all(chunk, e)
+                else:
+                    detail = f"{type(e).__name__}: {str(e)[:80]}"
+                    self._note_batch_failure(chunk, detail=detail)
+                    _all(chunk, etoro_rates.BatchFailed(detail, len(chunk)))
+                continue
+            code = int(getattr(r, "status_code", 0) or 0)
+            if code == 429 or code >= 500:
+                self._note_batch_failure(chunk, code=code)
+                _all(chunk, etoro_rates.BatchFailed(f"HTTP {code}",
+                                                    len(chunk)))
+                continue
+            try:
+                if not 200 <= code < 300:
+                    raise _Untrusted(f"HTTP {code} to a batched read",
+                                     f"HTTP {code}")
+                try:
+                    data = r.json()
+                except ValueError:
+                    raise _Untrusted("a body that is not JSON",
+                                     "not JSON") from None
+                rows = _parse_rates_batch(data, chunk)
+            except _Untrusted as u:
+                etoro_rates.mark_unproven(u.why, u.shape)
+                _all(chunk, etoro_rates.BatchUnproven(
+                    f"eToro's batched rates answered {u.why} — the batch "
+                    f"is unproven; read alone"))
+                continue
+            for i in chunk:
+                tick = rows.get(i)
+                for k in by_id[i]:
+                    if tick is None:
+                        out[k] = etoro_rates.RowMissing(
+                            f"eToro's batched rates carried no row for {k} "
+                            f"(id {i}) — read alone")
+                    else:
+                        out[k] = dict(tick, symbol=k)
+            etoro_rates.put_many(world, rows)
+        return out
+
+    def _note_batch_failure(self, chunk, *, code=None, detail="") -> None:
+        """A batched GET of `chunk` failed at the venue: _read noted it once,
+        and every further instrument it carried is noted here, as its read
+        alone would have been (2026-11-02, review): a failed batch of N
+        ids is N failures toward SICK, never one, so a failing venue holds
+        the new real entries as soon as N rows read alone made it. Not on
+        a background read (_note_health's own rule). Never raises."""
+        n = max(0, len(chunk or ()) - 1)
+        for _ in range(n):
+            self._note_health(
+                "rates", code=code,
+                detail=(f"one of {len(chunk)} instruments the failed "
+                        f"batched read carried"
+                        + (f" ({detail[:60]})" if detail else "")))
+
+    def rates_raw(self, instrument_ids, *, encoded_commas: bool = False,
+                  url: str = RATES_URL) -> tuple:
+        """ONE batched rates GET for `instrument_ids` as given, answered
+        RAW: (HTTP status, the JSON body or None). For the operator's
+        measurement of the batch's shape (manage.py etoro_rates_shape):
+        nothing here is parsed, cached or marked unproven, and — a
+        BACKGROUND read, as the candles are (2026-11-01, review) — a 429,
+        a 5xx or a transport failure is noted on no venue's health and
+        grants no 429 pause: a measurement never holds an entry. A 5xx or
+        a transport failure is asked once more, as every read is
+        (READ_RETRIES). At the caller's priority in the budget; raises
+        what _read raises (a refusal, a transport failure). Its ids ride
+        literal commas; `encoded_commas` asks in the old form (_rates_get,
+        2026-11-06), `url` another rates path (rates_v2_raw). The answer's
+        quota headers are in last_rate_headers, as every read's."""
+        was, self._background = getattr(self, "_background", False), True
+        try:
+            r = self._rates_get(instrument_ids, where="rates", url=url,
+                                encoded_commas=encoded_commas)
+        finally:
+            self._background = was
+        try:
+            body = r.json()
+        except ValueError:
+            body = None
+        return int(getattr(r, "status_code", 0) or 0), body
+
+    def rates_v2_raw(self, instrument_ids) -> tuple:
+        """ONE v2 rates GET (RATES_V2_URL) for `instrument_ids`, answered
+        RAW as rates_raw answers: the operator's measurement of v2
+        (etoro_rates_shape --v2, 2026-11-06, the feed spec's P-a.2), a
+        background read with literal commas, nothing parsed, cached,
+        marked or proven. In the market family of the budget, as the v1
+        read (both rates endpoints share eToro's market-data quota, the
+        spec's E15)."""
+        return self.rates_raw(instrument_ids, url=RATES_V2_URL)
+
+    @etoro_budget.scoped(etoro_budget.P5, "candles")
     def klines(self, symbol: str, interval: str = "15m",
                limit: int = 200) -> list[list]:
         """Binance-style 12-element rows: [openTime, o, h, l, c, v,
         closeTime, quoteVol, trades, takerBase, takerQuote, ignore].
         Oldest first, like every other adapter. The runner reads only
-        o/h/l/c/v; the tail is parity padding."""
+        o/h/l/c/v; the tail is parity padding.
+
+        THE BUDGET'S LOWEST PRIORITY (2026-11-01): the candles and the
+        /search a cold id costs are taken at P5 unless a caller set a
+        higher priority; a refused take raises etoro_budget.Refused before
+        anything is sent (the bar refresh then fills from the public
+        feed, mutes nothing and notes nothing)."""
         enum = INTERVAL_MAP.get(interval, "FifteenMinutes")
         span_ms = INTERVAL_SECONDS.get(interval, 900) * 1000
         n = max(1, min(int(limit), CANDLES_MAX))
@@ -1927,10 +2705,17 @@ class EtoroTrader:
         together or not at all. The post-order re-read
         (bot_program.etoro_cells) asks this too. `figures` (the P&L, the
         frozen cash, the balance) is the rest of the same payload, for
-        the pages (bot_program.etoro_used)."""
+        the pages (bot_program.etoro_used).
+
+        A BUDGET REFUSAL IS RAISED, NOT NONE (2026-11-01): None is "the
+        read failed", which the sync counts as a missed pass toward its
+        stall alert; a read the budget did not send (etoro_budget.Refused)
+        is a deferral, and the sync and the re-read file it as one."""
         try:
             info = self.account()
         except Exception as e:  # noqa: BLE001
+            if getattr(e, "budget_refused", False):
+                raise
             log.warning("eToro account_snapshot failed: %s", e)
             return None
         return {"reading": self._reading_of(info),
@@ -1946,10 +2731,17 @@ class EtoroTrader:
         `_totals`); their arithmetic (available + used + pnl = total) is
         the public reference's claim, unmeasured. Nothing on an entry path
         calls this — the gate reads the cells; the sync reads them with
-        the equity through account_snapshot (one GET, 2026-10-31)."""
+        the equity through account_snapshot (one GET, 2026-10-31).
+
+        A BUDGET REFUSAL IS RAISED, NOT NONE (2026-11-01, review), as in
+        account_snapshot: a read the budget did not send is a deferral,
+        never "the read failed" (the smoke said "the adapter swallowed the
+        failure"); every caller inside a P2 to P5 scope files it as one."""
         try:
             info = self.account()
         except Exception as e:  # noqa: BLE001
+            if getattr(e, "budget_refused", False):
+                raise
             log.warning("eToro margin_cells failed: %s", e)
             return None
         return self._cells_of(info)
@@ -1966,11 +2758,17 @@ class EtoroTrader:
         live broker as unmeasured, "this module cannot tell which" — so the
         gap is contained rather than corrected, and it is named here so the
         next reader meets it before they trust the number.
+
+        A read the budget did not send RAISES etoro_budget.Refused instead
+        (2026-11-01, review): a 0.0 would say an empty account of a read
+        nobody asked; the pool check catches it as "not measured".
         """
         try:
             return float(self._totals(self.account())
                          .get("accountAvailableCash") or 0)
         except Exception as e:  # noqa: BLE001
+            if getattr(e, "budget_refused", False):
+                raise
             log.warning("eToro balance fetch failed: %s", e)
             return 0.0
 
@@ -1988,10 +2786,17 @@ class EtoroTrader:
         empty account reads as unmeasured, which is this platform's
         convention and not eToro's peculiarity; changing it belongs in a
         change that moves every adapter at once.
+
+        A read the budget did not send RAISES etoro_budget.Refused
+        (2026-11-01, review), as account_snapshot does: None is "the read
+        failed", which the sync and the status report would say of a read
+        nobody asked.
         """
         try:
             info = self.account()
         except Exception as e:  # noqa: BLE001
+            if getattr(e, "budget_refused", False):
+                raise
             log.warning("eToro net_liquidation failed: %s", e)
             return None
         return self._reading_of(info)
@@ -2005,10 +2810,21 @@ class EtoroTrader:
                 or (data.get("clientPortfolio") or {}).get("positions")
                 or [])
 
-    def get_positions(self) -> list[dict]:
+    def portfolio_rows(self) -> list:
+        """eToro's raw /portfolio positions, ONE GET, unnamed (2026-11-01):
+        the read reconcile_asset makes once per pass per key and world, and
+        hands to each reader's get_positions(book=...) to name with that
+        reader's own warm. Raises what the read raises."""
+        return self._open_positions()
+
+    def get_positions(self, book=None) -> list[dict]:
         """Open positions — Phase-33 reconciliation shape. Raises on
         transport errors so reconcile counts the broker unavailable rather
         than assuming flat (the same rule as OANDA and IBKR).
+
+        `book` (2026-11-01): the raw rows portfolio_rows() already read in
+        this pass — named here, off this client's own map, and nothing is
+        sent; None reads the book now, as before.
 
         /portfolio LAGS (MEASURED 2026-09-23, `PORTFOLIO_LAG_S`): a filled
         position is ABSENT here ~2 s after the fill and a closed one STILL
@@ -2020,7 +2836,7 @@ class EtoroTrader:
         the camel spellings are read as a courtesy and have not been seen.
         """
         out = []
-        for p in self._open_positions():
+        for p in (self._open_positions() if book is None else book):
             qty = float(p.get("units") or 0)
             if qty == 0:
                 continue
@@ -2063,10 +2879,17 @@ class EtoroTrader:
         IBKRTrader's contract, for the portfolio views. Marks are not on
         the position row on eToro, so market_price is left 0 rather than
         invented; the aggregate endpoint has exposure per instrument if a
-        caller needs it."""
+        caller needs it.
+
+        A read the budget did not send RAISES etoro_budget.Refused
+        (2026-11-01, review): None counted the account unreachable in the
+        sync (a missed pass toward its "re-save the keys" alert) when the
+        aggregate had answered and the book was simply not asked."""
         try:
             positions = self._open_positions()
         except Exception as e:  # noqa: BLE001
+            if getattr(e, "budget_refused", False):
+                raise
             log.warning("eToro broker_portfolio failed: %s", e)
             return None
         out = []
@@ -2472,12 +3295,23 @@ class EtoroTrader:
         then 200 — a 500 is transient, and no failure here is noted on the
         venue's health, but a REDIRECT (2026-11-01): never followed, and
         noted with its code, as any read's is. Never raises.
+
+        THE BUDGET (2026-11-01): a lookup is counted once sent, at its
+        caller's priority — P0 for a close proof and a cancel, P1 for a
+        fill poll — so it is never refused nor delayed. A lookup a caller
+        put below P1 would take its token first; a refusal then reads as
+        could-not-ask (None, 0), nothing sent.
         """
         r = None
         try:
-            r = self._sess().get(self._v2_lookup(), params=params,
-                                 headers=self._headers(),
-                                 timeout=self.timeout)
+            p, why, taken = self._before("lookup")
+            try:
+                r = self._sess().get(self._v2_lookup(), params=params,
+                                     headers=self._headers(),
+                                     timeout=self.timeout)
+            finally:
+                if not taken:
+                    self._after("lookup", p, why)
             r.raise_for_status()
             return (r.json() or {}), int(getattr(r, "status_code", 0) or 0)
         except RedirectRefused as e:
@@ -2529,8 +3363,10 @@ class EtoroTrader:
                 return last
         return last
 
+    @etoro_budget.scoped(etoro_budget.P1, "fill lookup")
     def order_status(self, order_id: str) -> Optional[dict]:
         """The engine's working-entry vocabulary off ONE orders:lookup GET.
+        A fill lookup (2026-11-01): at least P1, never refused.
 
         MEASURED 2026-09-23 (demo): 11 WaitingForMarket -> working (the held
         order, positionExecutions []); 3 Filled -> filled with the units and
@@ -2601,11 +3437,13 @@ class EtoroTrader:
                 pass
         return out
 
+    @etoro_budget.scoped(etoro_budget.P0, "close proof")
     def position_state(self, order_id: str, *, until: Optional[str] = None,
                        attempts: int = CLOSE_PROOF_ATTEMPTS,
                        delay: float = CLOSE_PROOF_DELAY_S) -> Optional[str]:
         """"open" / "closed" — the venue's own word on the position an OPEN
         order created, read by that order's id — or None: could not ask.
+        A close proof (2026-11-01): P0, never refused, never paused.
 
         THE CLOSE PROOF (MEASURED 2026-09-23). The close order this venue
         answers with (orderType 19) is findable on no read path:
@@ -2650,9 +3488,15 @@ class EtoroTrader:
                 return last
         return last
 
+    @etoro_budget.scoped(etoro_budget.P1, "order")
     def market_order(self, symbol: str, side: str, quantity: float,
                      **kwargs) -> dict:
         """Open a position. side BUY -> `buy`, SELL -> `sellShort`.
+
+        P1 in the budget (2026-11-01), whatever the caller's scope: the
+        /search a cold id costs, the POST and its fill lookups are counted
+        once sent and never refused; the POST keeps its own fresh request
+        and timeout and is never retried.
 
         stop_loss / take_profit kwargs become stopLossRate / takeProfitRate,
         absolute prices held AT THE BROKER on fill. The fill itself is read
@@ -2750,11 +3594,16 @@ class EtoroTrader:
         # may try again; anything after the send is EtoroOrderInDoubt,
         # which the engine notes on the symbol and never resends blind.
         # Both are noted on the venue's health as an ORDER failure, which
-        # on its own holds new real entries for the quiet.
+        # on its own holds new real entries for the quiet. The budget
+        # counts the POST once it is sent (2026-11-01, P1): nothing stands
+        # between the order and the wire.
         try:
-            r = self._sess().post(self._v2_exec_orders(), json=body,
-                                  headers=self._headers(rid),
-                                  timeout=self.timeout)
+            try:
+                r = self._sess().post(self._v2_exec_orders(), json=body,
+                                      headers=self._headers(rid),
+                                      timeout=self.timeout)
+            finally:
+                self._after("order")
         except NEVER_SENT as e:
             self._note_health("order", detail=f"not sent: "
                                               f"{type(e).__name__}")
@@ -2947,16 +3796,21 @@ class EtoroTrader:
 
     # ── brackets ───────────────────────────────────────────────────────────
 
+    @etoro_budget.scoped(etoro_budget.P0, "stop or target move")
     def _patch_position(self, position_id: str, body: dict,
                         what: str) -> dict:
         """{"ok", "reason"} of one PATCH of the position's levels. A PATCH
         answered with a redirect (2026-11-01) is IN DOUBT, never a refusal:
         ok False with inDoubt True, because whether eToro moved the level
-        is unknown; the row keeps the level it had."""
+        is unknown; the row keeps the level it had. P0 in the budget
+        (2026-11-01): counted once sent, never refused, never paused."""
         try:
-            r = self._sess().patch(self._v2(f"positions/{position_id}"),
-                                   json=body, headers=self._headers(),
-                                   timeout=self.timeout)
+            try:
+                r = self._sess().patch(self._v2(f"positions/{position_id}"),
+                                       json=body, headers=self._headers(),
+                                       timeout=self.timeout)
+            finally:
+                self._after("patch")
             if r.status_code in (200, 202):
                 return {"ok": True, "reason": ""}
             return {"ok": False,
@@ -3000,8 +3854,11 @@ class EtoroTrader:
 
     # ── orders (D3b) ───────────────────────────────────────────────────────────────
 
+    @etoro_budget.scoped(etoro_budget.P0, "order cancel")
     def cancel_order(self, order_id: str) -> Optional[bool]:
         """Withdraw a held ENTRY order - LOOKUP FIRST, DELETE, PROVE.
+        P0 in the budget (2026-11-01): the lookups and the DELETE are
+        counted once sent, never refused, never paused.
 
         MEASURED 2026-09-23 20:29 UTC (demo, order 383459788, WaitingForMarket):
         DELETE /api/v3/trading/execution/demo/orders/<id> -> 202
@@ -3072,8 +3929,11 @@ class EtoroTrader:
             return False
         url = self._v3_exec_order(oid)          # both worlds measured
         try:
-            r = self._sess().delete(url, headers=self._headers(),
-                                    timeout=self.timeout)
+            try:
+                r = self._sess().delete(url, headers=self._headers(),
+                                        timeout=self.timeout)
+            finally:
+                self._after("cancel")
             code2 = int(getattr(r, "status_code", 0) or 0)
             if code2 not in (200, 202, 204):
                 log.error("eToro cancel_order refused (%s): %s", code2,
@@ -3111,10 +3971,16 @@ class EtoroTrader:
         """
         return True
 
+    @etoro_budget.scoped(etoro_budget.P0, "close")
     def close_position(self, position_id: str, symbol: str,
                        units: Optional[float] = None, *,
                        open_order_id: str = "") -> dict:
         """Submit a market close and, given the OPEN order's id, PROVE it.
+
+        P0 in the budget (2026-11-01), whatever the caller's scope: the
+        /search a cold id costs, the POST and its proof lookups are
+        counted once sent, never refused, never paused; what is sent and
+        when is unchanged.
 
         MEASURED 2026-09-23 (demo): the POST answers {orderForClose:
         {positionID, instrumentID, orderID (orderType 19), statusID 1, CID,
@@ -3194,6 +4060,9 @@ class EtoroTrader:
                     "inDoubt": True, "reference": rid,
                     "redirect": {"status": e.status, "host": e.host},
                     "raw": {}}
+        finally:
+            # counted once sent, a redirected close included (it was sent)
+            self._after("close")
         r.raise_for_status()
         data = r.json() or {}
         ofc = data.get("orderForClose") or {}
@@ -3214,6 +4083,14 @@ class EtoroTrader:
         else:
             out.pop("executedQty")
         return out
+
+
+#: The client's own _sess (2026-11-01): a class whose _sess was replaced (a
+#: test's fake wire, patched on the class) has a transport handed in from
+#: outside, and EtoroTrader._supplied reads it so. So does
+#: DemoOnlyEtoroTrader (below), whose _sess is its demo wire: none of its
+#: reads rides the pooled Session, and every one meets the wire's check.
+_OWN_SESS = EtoroTrader.__dict__["_sess"]
 
 
 # ── THE DEMO SEGMENT, AND NOTHING ELSE (2026-10-31) ──────────────────────

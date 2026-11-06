@@ -188,9 +188,12 @@ def fetch_live_quotes(self, watchlist_only=True):
             result = save_quote_to_db(inst.symbol)
             if result:
                 fetched += 1
-                # Push WebSocket update
+                # Push WebSocket update, naming the feed it carries
+                # (2026-11-06, the eToro feed spec's P-c.2: a switch back
+                # from eToro's quote shows on the tick)
                 from dashboard.consumers import push_quote_update
-                push_quote_update(inst.symbol, result.last, result.change_pct)
+                push_quote_update(inst.symbol, result.last, result.change_pct,
+                                  source=result.source)
         except Exception as e:
             logger.warning(f"Quote fetch failed for {inst.symbol}: {e}")
 

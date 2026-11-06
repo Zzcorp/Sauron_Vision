@@ -57,6 +57,9 @@ STAGE_OF = {
     # ── SEE: what comes in ──────────────────────────────────────────────
     "fetch-live-quotes-watchlist": ("see", "live quotes"),
     "fetch-forex-live": ("see", "forex quotes"),
+    # 2026-11-06: eToro's own bid, ask and last for the instruments of
+    # the open real positions (bot_program/etoro_quotes.py).
+    "refresh-etoro-quotes": ("see", "eToro's own quotes for the open real positions"),
     "fetch-commodity-live": ("see", "commodity quotes"),
     "fetch-index-live": ("see", "index quotes"),
     "fetch-crypto-prices": ("see", "crypto quotes"),

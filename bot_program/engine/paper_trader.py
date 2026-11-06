@@ -24,7 +24,7 @@ MARKET_HOURS_GATE = True
 
 #: THE FIRST QUARTER HOUR AFTER AN OPEN IS NOT A PAPER PRICE YET
 #: (2026-09-26). A poller writes whatever its source still shows on its
-#: first run after an open: the 10-minute forex poll and the 5-minute
+#: first run after an open: the 5-minute forex poll and the 5-minute
 #: commodity poll re-stamp the last pre-shut price under a fresh
 #: timestamp, and yfinance runs 15 minutes behind on most US listings, so
 #: at 13:31 UTC its "price" is the previous close. For this long after an

@@ -50,7 +50,7 @@ ROUTABLE_CLASSES = ("stock", "etf", "forex", "commodity", "crypto")
 
 #: Past this, a reading is old enough that the page says so. Not a limit —
 #: the IBKR and Saxo walks run every 900 s, so anything past two cycles has
-#: missed one (the eToro walk, every 300 s since 2026-10-31, six).
+#: missed one (the eToro walk, every 60 s since 2026-11-06, thirty-one).
 STALE_AFTER_S = 1900
 
 #: Each broker's account walk, by its beat entry (config/celery.py).

@@ -387,6 +387,23 @@ COMMANDS = [
         "category": "read",
     },
     {
+        "name": "etoro_budget",
+        "title": "eToro request budget",
+        "purpose": "The eToro request budget per key hash and family, for this minute and the one before: the takes by priority (P0 closes to P5 candles), the refusals with their reasons, the overruns of P0 and P1 (never refused) and whether the shared 429 pause holds for each world and until when; and the 30 s beat of eToro's own quotes, its last pass and its day, the writes a higher-ranked feed refused named. Read-only, asks no broker; no key and no account figure.",
+        "usage": [
+            "python manage.py etoro_budget",
+        ],
+        "mirrors": "",
+        "read_only": True,
+        "run_args": [],
+        "category": "read",
+        # Read-only and asks no broker, but the Run lane's set is pinned as
+        # a security decision (tests/test_ops_cockpit.py): a terminal
+        # command until that set is widened on purpose (2026-11-01).
+        "runnable": False,
+        "runnable_reason": "terminal only: the Run lane's set is pinned",
+    },
+    {
         "name": "legacy_positions",
         "title": "Legacy positions",
         "purpose": "Every open legacy portfolio position (the /setup/ eToro sync button, the /setup/ 'add position' form, the chat trader) by symbol, with its book, writer, age and the admin page that closes it by hand (no bot or reconcile closes one) — each one counts as a real-money holder in the duplicate rule.",
@@ -773,6 +790,13 @@ EXEMPT = {
     "seed_strategies": "one-off seeder (phase 31)",
     "build_icons": "build step, rasterizes the mark",
     "create_users": "first-install step — creates accounts, runbook §3",
+    # 2026-11-02: the operator's one measurement of eToro's batched rates
+    # shape (plan item 10). Listed on 2026-11-01, it put a command on /ops/
+    # and in the Wall's count beyond the eToro budget's own (etoro_budget,
+    # listed): a page shows what it showed. Its docstring says how to run it.
+    "etoro_rates_shape": "the operator's one eToro measurement (the batched "
+                         "rates' shape) — terminal only, it presents the "
+                         "eToro keys to an external service",
 }
 
 # The Django apps whose management commands the registry must account for.

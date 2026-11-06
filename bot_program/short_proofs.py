@@ -38,13 +38,25 @@ sitting itself, on a schedule, for every class whose short is not pinned:
   THE BUDGET    one key's quota serves both worlds, so the live lane goes
                 first (refusing): nothing is asked while eToro (either
                 world) is sick, after a 429 within YIELD_AFTER_429_S, in a
-                429 pause, or while a real position's close is pending.
+                429 pause, while the key's request budget is busy, or while
+                a real position's close is pending. The pause and the
+                budget are the key's SHARED ones (2026-11-02,
+                engine/etoro_budget): a 429 any process met, on either
+                world, and any family whose rolling minute holds what the
+                budget's lowest priority (P5) may take.
                 Within the runner, a position it holds is closed before
                 anything else is opened, and that run opens nothing
                 (closes first). One class at a time: while any demo
                 position is held (an overnight hold included), no step of
                 any class opens. MIN_GAP_S apart; a round trip costs about
-                fifteen requests, counted on the row.
+                fifteen requests, counted on the row and on the key's
+                budget, the live lane's, at P1 on purpose (2026-11-02):
+                counted, never refused. The runner yields BEFORE a step
+                (refusing), never inside one: a read the budget refused
+                between a demo order and its close would leave that
+                position half read, and the order, its fill reads, the
+                close and its proofs are P1 and P0 by the client's own
+                scopes whatever the runner's.
   IN DOUBT      an order or a close whose request did not come back, a
                 5xx or a redirect on the order or the close, an acceptance
                 (a 2xx) whose body nobody could read, a fill nobody could
@@ -342,14 +354,49 @@ def market_words(symbol, icls, now, *, closing=False) -> str:
     return ""
 
 
-def refusing() -> str:
+def budget_key(client=None, user=None) -> str:
+    """The key hash whose shared 429 pause and request budget the runner
+    spends (engine/etoro_budget.key_hash): `client`'s own, else that of
+    the keyed account of `user` (keyed_account) — the live lane's key, as
+    one key pair opens both worlds. "" when neither names a key. The key
+    itself is never kept. Never raises."""
+    try:
+        if client is not None:
+            fn = getattr(client, "_bkey", None)
+            kh = fn() if callable(fn) else ""
+            return kh if isinstance(kh, str) else ""
+        acct = keyed_account(user)
+        if acct is None:
+            return ""
+        from bot_program.engine import etoro_budget
+        _key, user_key = acct.get_credentials()
+        return etoro_budget.key_hash(user_key) if user_key else ""
+    except Exception:  # noqa: BLE001 — no key read, none named
+        return ""
+
+
+def refusing(client=None, *, user=None) -> str:
     """Why the runner must not ask eToro anything now, or "": the live
     lane goes first. One key's quota serves both worlds, so either
-    world's sickness, a 429 within YIELD_AFTER_429_S, a 429 pause, or a
-    real position's close still pending holds every step. Read on the wall
-    clock: these are the wire's state, not the run's."""
+    world's sickness, a 429 within YIELD_AFTER_429_S, a 429 pause, the
+    key's request budget busy, or a real position's close still pending
+    holds every step. Read on the wall clock: these are the wire's state,
+    not the run's.
+
+    THE KEY'S SHARED STATE (2026-11-02, engine/etoro_budget). The 429
+    pause left the process's memory for the cache, keyed by the user
+    key's hash and the world, so the pause read here is the one ANY
+    process met for the runner's key (budget_key: `client`'s, else the
+    keyed account's of `user`), on either world. And the budget: while
+    any family's count holds what its lowest priority (P5) may take
+    (etoro_budget.busy), the live lane is busy and nothing is asked; a
+    budget whose cache cannot be read holds every step too, as it holds
+    every take. With no key named, neither is read (nothing is asked
+    without a key)."""
     from bot_program import venue_health as vh
+    from bot_program.engine import etoro_budget as eb
     from bot_program.engine import etoro_client as ec
+    kh = budget_key(client, user)
     for world in ("live", "demo"):
         if vh.sick("etoro", world):
             return (f"eToro ({world}) is sick: the live lane's closes and "
@@ -358,11 +405,20 @@ def refusing() -> str:
             return (f"eToro ({world}) answered HTTP 429 within the last "
                     f"{YIELD_AFTER_429_S // 60} minutes")
         try:
-            end = ec._RATE_PAUSE.get(world)
-            if ec.RATE_PAUSE and end is not None and end > ec._mono():
+            if kh and ec.RATE_PAUSE and eb.pause_left(kh, world) > 0:
                 return f"eToro ({world}) is in its 429 pause"
         except Exception:  # noqa: BLE001 — an unread pause holds nothing
             pass
+    held = eb.busy(kh, eb.P5) if kh else None
+    if held:
+        if held.get("error"):
+            return (f"eToro's request budget is unreadable "
+                    f"({held['error']}): the live lane goes first, nothing "
+                    f"is asked")
+        return (f"eToro's request budget is busy: {held['family']} "
+                f"{held['n']}/{held['rate']} this minute, at the "
+                f"{held['limit']} its lowest priority may take — the live "
+                f"lane goes first, nothing is asked")
     try:
         from bot_program.asset_models import AssetBotTrade
         if AssetBotTrade.objects.filter(status="CLOSE_PENDING",
@@ -579,7 +635,7 @@ def run_once(*, now=None, dry_run=False, asset_class=None, leverage=None,
                              leverage=leverage, overnight=overnight,
                              forced=forced),
                    stopped=stop_words(stop) if stop is not None else "",
-                   refusing=refusing(), switch=switch_on(),
+                   refusing=refusing(client, user=user), switch=switch_on(),
                    keyed=keyed_account(user) is not None)
         return out
     if not switch_on():
@@ -592,10 +648,16 @@ def run_once(*, now=None, dry_run=False, asset_class=None, leverage=None,
     if not _lock():
         out["reason"] = "another pass of the demo proofs holds its lock"
         return out
+    from bot_program.engine import etoro_budget
     try:
-        return _run(now, out, explicit=explicit, forced=forced,
-                    asset_class=asset_class, leverage=leverage,
-                    overnight=overnight, user=user, client=client)
+        # ON THE KEY'S BUDGET AT P1, NAMED (2026-11-02): counted once sent,
+        # never refused once a step has begun; refusing() holds it before
+        # (THE BUDGET, above). The close and its proofs are P0 by the
+        # client's own scopes.
+        with etoro_budget.at_priority(etoro_budget.P1, "demo short proofs"):
+            return _run(now, out, explicit=explicit, forced=forced,
+                        asset_class=asset_class, leverage=leverage,
+                        overnight=overnight, user=user, client=client)
     finally:
         _unlock()
 
@@ -614,9 +676,10 @@ def _run(now, out, *, explicit, forced, asset_class, leverage, overnight,
         return _in_doubt(stale, "stopped between its order and eToro's "
                                 "answer: whether eToro holds a position is "
                                 "unknown", now)
-    # THE LIVE LANE FIRST: a sick venue, a 429, a real close pending hold
-    # every step, the runner's own demo close too (demo money waits)
-    why = refusing()
+    # THE LIVE LANE FIRST: a sick venue, a 429, the key's budget busy, a
+    # real close pending hold every step, the runner's own demo close too
+    # (demo money waits)
+    why = refusing(client, user=user)
     if why:
         out["reason"] = why
         return out
